@@ -13,6 +13,9 @@ import { typedValidationSummary } from "./finish-contract.js";
 import {
 	type CheckCommandShape,
 	checkCommandShape,
+	checkFailureAttributable,
+	checkRunsOutside,
+	checkWritesTree,
 	commandArgumentSegments,
 	detectValidationCommand,
 	extractCommandDeleteTargets,
@@ -175,6 +178,10 @@ interface PendingEffects {
 	validationName: string | null;
 	/** False when a bash call's exit status is only its last command's, so it settles nothing about the check. */
 	checkStatusAttributable: boolean;
+	/** False when a stage piped after the check can fail a green check ({@link checkFailureAttributable}). */
+	checkFailureAttributable: boolean;
+	/** The check ran outside the run's cwd ({@link checkRunsOutside}), so its pass is not this workspace's. */
+	checkOutsideCwd: boolean;
 	mutationRevision: number;
 	verificationCommand: string | null;
 	opaque: boolean;
@@ -396,6 +403,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			const verificationCommand = validationCommandOf(toolName, args, "grounding");
 			const opaque = toolWritesOpaquely(toolName);
 			const command = toolName === ToolNames.Bash ? commandOf(args) : null;
+			const shellCommand = command ?? verifyCommandOf(toolName, args, base);
 			// A listing names no check and runs none, so it is not a checking call (bt-19).
 			if ((toolName === ToolNames.Verify && !isVerifyListing(args)) || verificationCommand !== null)
 				checkingCalls.set(toolCallId, null);
@@ -414,12 +422,20 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 						? `${base === cwd ? "" : `cwd=${base}: `}${observedValidationCommand(commandOf(args) ?? "")}`
 						: null,
 				checkStatusAttributable: toolName !== ToolNames.Bash || shellExitSpeaksForCommand(commandOf(args) ?? ""),
+				checkFailureAttributable: command === null || checkFailureAttributable(command),
+				checkOutsideCwd: command !== null && checkRunsOutside(command, base, cwd),
 				mutationRevision,
 				verificationCommand,
 				opaque,
 				inspection: command !== null && isReadOnlyInspectionCommand(command, gitHelpers),
-				checkShape: command === null ? null : checkCommandShape(command, gitHelpers),
-				shellCommand: command ?? verifyCommandOf(toolName, args, base),
+				// A verify check whose argv rewrites the tree (`npm run format`) is a change, as in bash (x3-3).
+				checkShape:
+					command !== null
+						? checkCommandShape(command, gitHelpers)
+						: shellCommand !== null && checkWritesTree(shellCommand.split(" "))
+							? "mixed"
+							: null,
+				shellCommand,
 				outcome: null,
 			});
 		},
@@ -458,7 +474,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			// A verify call is a check, as a recognized validation command is: even a bare listing changes no tree. Its
 			// argv is one simple command (a catalog refuses shell executables, a task gate takes bare words). A bash
 			// check that shares its call with steps that may change the tree is still a mutation, and it judged the
-			// final tree only when every such step ran first (x1-1).
+			// final tree only when every such step ran first (x1-1). A check that rewrites the tree, bash or verify, is a
+			// change too, so no earlier pass stands on code it reformatted (x3-3).
 			const checkChangedTree = effects.checkShape === "after-change" || effects.checkShape === "mixed";
 			const opaqueMutation =
 				effects.opaque &&
@@ -477,9 +494,11 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			// Only a check that ran can fail. A call the engine answered without
 			// reaching its tool settles with no outcome, so it records nothing.
 			// `pytest; echo done` ran the check, but its status is echo's, so the outcome stays unknown either way.
+			// `pytest | head` exits 0 only when pytest did, but its red may be head's SIGPIPE (x3-2). A pass in another
+			// directory judged another tree, so it settles nothing here and a standing red stays (x3-5).
 			const settled = failed
-				? effects.outcome === "error"
-				: effects.outcome !== "blocked" && checkedRevision === mutationRevision;
+				? effects.outcome === "error" && effects.checkFailureAttributable
+				: effects.outcome !== "blocked" && checkedRevision === mutationRevision && !effects.checkOutsideCwd;
 			if (effects.validationName !== null && effects.checkStatusAttributable && settled) {
 				validationOutcomes.set(effects.validationName, !failed);
 				checkOutcomes.set(effects.validationName, !failed);
@@ -506,7 +525,12 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				if (recordWasComplete) options.onWriteRecordDowngraded?.({ ...downgrade });
 			}
 			for (const target of effects.paths) mutatedPaths.add(target);
-			if (effects.validationCommand !== null && effects.checkStatusAttributable && checkedRevision === mutationRevision)
+			if (
+				effects.validationCommand !== null &&
+				effects.checkStatusAttributable &&
+				checkedRevision === mutationRevision &&
+				!effects.checkOutsideCwd
+			)
 				validationCommands.add(effects.validationCommand);
 			if (effects.verificationCommand !== null)
 				(effects.checkStatusAttributable ? verificationCommands : unattributableVerificationCommands).add(

@@ -2,7 +2,7 @@ import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
-import { isVerificationScriptName } from "../../core/verification-scripts.js";
+import { isVerificationScriptName, isWriteCapableScriptName } from "../../core/verification-scripts.js";
 import { isSameOrDescendant } from "./path-policy.js";
 
 export type ProtectedArtifactSource = "validation" | "middleware" | "user" | "session";
@@ -259,8 +259,10 @@ export function detectValidationCommand(
 
 /**
  * The name an observed check's outcome is filed under: the command with trailing output plumbing (`2>&1`, `| tail`,
- * `| head`) removed, so `make test 2>&1 | tail -5` and `make test` settle each other. Under `pipefail` that plumbing
- * never changes the exit status. Tools and arguments stay distinct, so `pytest` never settles `pytest -q` (bt-27).
+ * `| head`) removed, so `make test 2>&1 | tail -5` and `make test` settle each other. Under `pipefail` a pipeline exits
+ * 0 only when the check did, so a green settles the name however it was piped; `head` can turn a green into a red
+ * (SIGPIPE), so a red behind it lands nowhere ({@link checkFailureAttributable}). Tools and arguments stay distinct, so
+ * `pytest` never settles `pytest -q` (bt-27).
  */
 export function observedValidationCommand(command: string): string {
 	let current = command.trim();
@@ -1240,7 +1242,165 @@ const READ_ONLY_INSPECTION_REFUSALS: ReadonlyMap<string, ReadonlyArray<string>> 
 	["which", []],
 	["echo", []],
 	["printf", []],
+	["cut", []],
+	["tr", []],
 ]);
+
+/**
+ * Stdout filters whose arguments decide whether they only read (x3-4): `sed` with no in-place edit, script file, or
+ * `w`/`e`/`r` command, `awk` with no `system`, pipe, redirect, include or program file, `sort` with no output file or
+ * compress program, `uniq` with no output operand. Whatever these cannot parse stays a change.
+ */
+const READ_ONLY_FILTERS: ReadonlyMap<string, (args: ReadonlyArray<string>) => boolean> = new Map([
+	["sed", sedOnlyReads],
+	["awk", awkOnlyReads],
+	[
+		"sort",
+		(args: ReadonlyArray<string>) =>
+			!args.some(
+				(arg) =>
+					arg === "--output" ||
+					arg.startsWith("--output=") ||
+					arg.startsWith("--compress-program") ||
+					(/^-[^-]/u.test(arg) && arg.includes("o")),
+			),
+	],
+	["uniq", uniqOnlyReads],
+]);
+
+const SED_READ_FLAGS: ReadonlySet<string> = new Set([
+	"--quiet",
+	"--silent",
+	"--regexp-extended",
+	"--posix",
+	"--separate",
+	"--unbuffered",
+	"--null-data",
+	"--debug",
+	"--sandbox",
+]);
+
+function sedOnlyReads(args: ReadonlyArray<string>): boolean {
+	const scripts: string[] = [];
+	let first: string | undefined;
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		if (arg === "--") {
+			first ??= args[index + 1];
+			break;
+		}
+		if (/^-[nErsuz]*e$/u.test(arg) || arg === "--expression") {
+			scripts.push(args[index + 1] ?? "");
+			index += 1;
+		} else if (arg.startsWith("--expression=")) scripts.push(arg.slice("--expression=".length));
+		else if (arg === "-l" || arg === "--line-length") index += 1;
+		else if (arg.startsWith("-") && arg !== "-") {
+			if (!/^-[nErsuz]+$/u.test(arg) && !SED_READ_FLAGS.has(arg) && !arg.startsWith("--line-length=")) return false;
+		} else first ??= arg;
+	}
+	if (scripts.length === 0) {
+		if (first === undefined) return false;
+		scripts.push(first);
+	}
+	return scripts.every(sedScriptOnlyReads);
+}
+
+/**
+ * A sed script made only of commands that print, edit the pattern space or branch. `w`, `W`, `e`, `r`, `R`, an `s`
+ * flagged `w` or `e`, and anything this cannot parse answer false.
+ */
+function sedScriptOnlyReads(script: string): boolean {
+	let index = 0;
+	const at = () => script[index] ?? "";
+	const skip = (pattern: RegExp) => {
+		while (index < script.length && pattern.test(at())) index += 1;
+	};
+	const closes = (delimiter: string): boolean => {
+		while (index < script.length) {
+			const char = at();
+			index += char === "\\" ? 2 : 1;
+			if (char === delimiter) return true;
+		}
+		return false;
+	};
+	const address = (): boolean => {
+		const char = at();
+		if (/[0-9]/u.test(char)) skip(/[0-9~]/u);
+		else if (char === "$") index += 1;
+		else if (char === "/" || char === "\\") {
+			const delimiter = char === "/" ? "/" : (script[index + 1] ?? "");
+			index += char === "/" ? 1 : 2;
+			if (delimiter === "" || !closes(delimiter)) return false;
+			skip(/[IM]/u);
+		}
+		return true;
+	};
+	while (index < script.length) {
+		skip(/[\s;]/u);
+		if (index >= script.length) break;
+		if (!address()) return false;
+		if (at() === ",") {
+			index += 1;
+			if (at() === "+" || at() === "~") index += 1;
+			if (!address()) return false;
+		}
+		skip(/[\s!]/u);
+		const command = at();
+		index += 1;
+		if ("{}pPdDnNgGhHxzF=".includes(command) && command !== "") continue;
+		if (command === "q" || command === "Q" || command === "l") skip(/[ \t0-9]/u);
+		else if (command === "s" || command === "y") {
+			const delimiter = at();
+			if (delimiter === "" || delimiter === "\\" || delimiter === "\n") return false;
+			index += 1;
+			if (!closes(delimiter) || !closes(delimiter)) return false;
+			// `w` and `e` stop here and parse next as a command, which refuses them.
+			if (command === "s") skip(/[gpiImM0-9]/u);
+		} else if (command === "b" || command === "t" || command === "T" || command === ":" || command === "#")
+			while (index < script.length && at() !== "\n" && (command === "#" || at() !== ";")) index += 1;
+		else return false;
+	}
+	return true;
+}
+
+function awkOnlyReads(args: ReadonlyArray<string>): boolean {
+	const programs: string[] = [];
+	let first: string | undefined;
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		if (arg === "--") {
+			first ??= args[index + 1];
+			break;
+		}
+		if (arg === "-F" || arg === "-v" || arg === "--field-separator" || arg === "--assign") index += 1;
+		else if (/^-[Fv]./u.test(arg) || arg.startsWith("--field-separator=") || arg.startsWith("--assign=")) continue;
+		else if (arg === "-e" || arg === "--source") {
+			programs.push(args[index + 1] ?? "");
+			index += 1;
+		} else if (arg.startsWith("--source=")) programs.push(arg.slice("--source=".length));
+		else if (arg.startsWith("-") && arg !== "-") return false;
+		else first ??= arg;
+	}
+	if (programs.length === 0) {
+		if (first === undefined) return false;
+		programs.push(first);
+	}
+	// A comparison spelled `>` reads as a redirect here, which only costs a pass.
+	return programs.every((program) => !/system|[|>@]/u.test(program));
+}
+
+function uniqOnlyReads(args: ReadonlyArray<string>): boolean {
+	let operands = 0;
+	let options = true;
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		if (options && arg === "--") options = false;
+		else if (options && ["-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars"].includes(arg)) index += 1;
+		else if (options && arg.startsWith("-") && arg !== "-") continue;
+		else operands += 1;
+	}
+	return operands < 2;
+}
 
 const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
 	"status",
@@ -1285,6 +1445,8 @@ function readOnlyInspectionStep(argv: ReadonlyArray<string>, gitHelpersConfigure
 		if (!gitHelpersConfigured) return true;
 		return (subcommand === "log" || subcommand === "show") && GIT_HELPER_OPT_OUTS.every((flag) => rest.includes(flag));
 	}
+	const filter = READ_ONLY_FILTERS.get(executable);
+	if (filter !== undefined) return filter(args);
 	const refused = READ_ONLY_INSPECTION_REFUSALS.get(executable);
 	if (refused === undefined) return false;
 	return !args.some((arg) => refused.some((option) => arg === option || arg.startsWith(`${option}=`)));
@@ -1313,17 +1475,33 @@ export function isReadOnlyInspectionCommand(command: string, gitHelpersConfigure
 
 /**
  * How a shell command that runs a recognized check stands against the tree it leaves (x1-1). `pure`: every step is
- * that check, read-only inspection, `cd` or output plumbing, so the command changed no tree. `after-change`: every
- * step that may change the tree runs before every check, the last of them hands over through `&&`, and nothing but
- * `&&` and `|` joins the steps, so the check judged the changed tree (`npm ci && npm test`). `mixed`: anything else
- * (`git apply x.patch; npm test`, `npm test && node codemod.mjs`), whose check cannot speak for the tree the command
- * left. Null when no step is a recognized check.
+ * that check, read-only inspection, shell setup (`cd`, `source`, `.`, `export`, `set`, a bare assignment) or output
+ * plumbing, so the command changed no tree. `after-change`: every step that may change the tree runs before every
+ * check, the last of them hands over through `&&`, and nothing but `&&` and `|` joins the steps, so the check judged
+ * the changed tree (`npm ci && npm test`). `mixed`: anything else (`git apply x.patch; npm test`, `npm test && node
+ * codemod.mjs`), whose check cannot speak for the tree the command left. A check that rewrites the tree
+ * ({@link checkWritesTree}) is a change as well, so its own outcome never lands as a pass. Null when no step is a
+ * recognized check.
  */
 export type CheckCommandShape = "pure" | "after-change" | "mixed";
 
-export function checkCommandShape(command: string, gitHelpersConfigured: boolean): CheckCommandShape | null {
-	const tokens = scanShellLike(command);
-	const steps: Array<{ check: boolean; changes: boolean; joinedBy: string | null }> = [];
+/**
+ * Shell setup that changes the shell, not the tree (x3-1). `source` and `.` run a script, but the one sourced before a
+ * check is an environment activation by convention; reading it as a change would let `source .venv/bin/activate &&
+ * pytest tests/one.py` clear a standing red.
+ */
+const SHELL_SETUP_STEPS: ReadonlySet<string> = new Set(["cd", "source", ".", "export", "set"]);
+
+interface ShellStep {
+	tokens: ShellToken[];
+	argv: string[];
+	index: number | null;
+	/** The separator joining this step to the next; `""` where two separators meet, null for the last step. */
+	joinedBy: string | null;
+}
+
+function shellSteps(tokens: ReadonlyArray<ShellToken>): ShellStep[] {
+	const steps: ShellStep[] = [];
 	let current: ShellToken[] = [];
 	let separator: string | null = null;
 	const endStep = () => {
@@ -1332,13 +1510,7 @@ export function checkCommandShape(command: string, gitHelpersConfigured: boolean
 		if (previous !== undefined) previous.joinedBy = separator;
 		separator = null;
 		const argv = shellCommandArguments(current);
-		const index = commandTokenIndex(argv);
-		const writes: string[] = [];
-		collectRedirectTargets(current, writes);
-		const check = index !== null && validationMatch(basenameToken(argv[index]), argv.slice(index + 1)) !== null;
-		const readOnly =
-			index === null || check || argv[index] === "cd" || readOnlyInspectionStep(argv.slice(index), gitHelpersConfigured);
-		steps.push({ check, changes: !readOnly || writes.some(isInterestingWriteTarget), joinedBy: null });
+		steps.push({ tokens: current, argv, index: commandTokenIndex(argv), joinedBy: null });
 		current = [];
 	};
 	for (const token of tokens) {
@@ -1351,6 +1523,29 @@ export function checkCommandShape(command: string, gitHelpersConfigured: boolean
 		current.push(token);
 	}
 	endStep();
+	return steps;
+}
+
+function isCheckStep(step: ShellStep): boolean {
+	return (
+		step.index !== null && validationMatch(basenameToken(step.argv[step.index]), step.argv.slice(step.index + 1)) !== null
+	);
+}
+
+export function checkCommandShape(command: string, gitHelpersConfigured: boolean): CheckCommandShape | null {
+	const tokens = scanShellLike(command);
+	const steps = shellSteps(tokens).map((step) => {
+		const writes: string[] = [];
+		collectRedirectTargets(step.tokens, writes);
+		const check = isCheckStep(step);
+		const argv = step.index === null ? [] : step.argv.slice(step.index);
+		const readOnly =
+			step.index === null ||
+			(check && !checkWritesTree(argv)) ||
+			SHELL_SETUP_STEPS.has(argv[0] ?? "") ||
+			readOnlyInspectionStep(argv, gitHelpersConfigured);
+		return { check, changes: !readOnly || writes.some(isInterestingWriteTarget), joinedBy: step.joinedBy };
+	});
 	if (!steps.some((step) => step.check)) return null;
 	const opaque =
 		tokens.some((token) => token.substitutions !== undefined || token.hiddenContent === true || token.unterminated) ||
@@ -1364,6 +1559,82 @@ export function checkCommandShape(command: string, gitHelpersConfigured: boolean
 		steps.every((step) => step.joinedBy === null || step.joinedBy === "&&" || step.joinedBy === "|") &&
 		!steps.slice(0, lastChange + 1).some((step) => step.check);
 	return handsOver ? "after-change" : "mixed";
+}
+
+/** Flags that turn a linter or formatter into a writer of the files it checks. */
+const TREE_WRITING_FLAGS: ReadonlySet<string> = new Set(["--fix", "--write"]);
+/** Formatters whose `-w` writes the files back; elsewhere `-w` names a workspace or a warning filter. */
+const W_FLAG_WRITERS: ReadonlySet<string> = new Set(["prettier", "gofmt", "goimports"]);
+
+/**
+ * Whether a check command may rewrite the tree it checks (x3-3): a package script, make or just target named as a
+ * writer ({@link isWriteCapableScriptName}), `--fix` or `--write`, or a formatter's `-w`. A heuristic on names and
+ * flags: a writer spelled otherwise reads as a check, and a read-only script named `format` reads as a change, which
+ * only clears passes the run must then earn again.
+ */
+export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
+	const index = commandTokenIndex(argv);
+	if (index === null) return false;
+	const executable = basenameToken(argv[index]);
+	const args = argv.slice(index + 1);
+	if (args.some((arg) => TREE_WRITING_FLAGS.has(arg) || arg.startsWith("--fix="))) return true;
+	if (W_FLAG_WRITERS.has(executable) && args.includes("-w")) return true;
+	if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
+		const script = args[0] === "run" ? args[1] : args[0];
+		return script !== undefined && isWriteCapableScriptName(script);
+	}
+	if (executable === "make" || executable === "just")
+		return args.some((arg) => !arg.startsWith("-") && !arg.includes("=") && isWriteCapableScriptName(arg));
+	return false;
+}
+
+/** Pipeline stages that read their input to its end and exit 0, so the pipeline's status is the stage feeding them. */
+function drainsInput(step: ShellStep): boolean {
+	if (step.index === null) return false;
+	const [executable, ...args] = step.argv.slice(step.index);
+	if (executable === "cat") return true;
+	return (
+		executable === "tail" &&
+		!args.some((arg) => /^-[^-]*[fF]/u.test(arg) || arg.startsWith("--follow") || arg === "--retry")
+	);
+}
+
+/**
+ * Whether a red exit of a command running a recognized check is the check's own red (x3-2). Under `pipefail` a stage
+ * after the check fails a green check: `head` closes the pipe so the check dies of SIGPIPE or EPIPE, and `grep`
+ * exits 1 when a clean run prints no match. So a check piped onward into anything but `tail` or `cat`, which read to
+ * the end and exit 0, settles no failure. Its clean exit still speaks for it, since every stage then exited 0.
+ */
+export function checkFailureAttributable(command: string): boolean {
+	const steps = shellSteps(scanShellLike(command));
+	return steps.every((step, position) => {
+		if (!isCheckStep(step)) return true;
+		for (let next = position; ; next += 1) {
+			const joinedBy = steps[next]?.joinedBy;
+			if (joinedBy !== "|") return joinedBy !== "";
+			const stage = steps[next + 1];
+			if (stage === undefined || !drainsInput(stage)) return false;
+		}
+	});
+}
+
+/**
+ * Whether a recognized check in the command runs outside `root` (x3-5). Its directory starts at `base` and follows
+ * each `cd` before it; a `cd` this cannot resolve (home, `-`, a variable) leaves the directory unknown, which counts
+ * as outside, so a sibling checkout's green never stands for this workspace.
+ */
+export function checkRunsOutside(command: string, base: string, root: string): boolean {
+	let directory: string | null = base;
+	for (const step of shellSteps(scanShellLike(command))) {
+		if (isCheckStep(step)) {
+			if (directory === null || !isSameOrDescendant(directory, root)) return true;
+			continue;
+		}
+		const target = cdTarget(step.argv);
+		if (target !== null)
+			directory = directory === null || /^~|[$`]/u.test(target) ? null : path.resolve(directory, target);
+	}
+	return false;
 }
 
 /**

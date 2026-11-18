@@ -737,32 +737,90 @@ it("a check judges only the tree it ran on, sealed per verify call or from a too
 	strictEqual(seal("edit pass", "run_tests"), "unverified");
 });
 
-it("a check sharing its bash call with a change judges the final tree only when every change ran first (x1-1)", () => {
-	const seal = (command: string, failed = false) => {
+it("a check sharing its bash call with a change judges the final tree only when every change ran first (x1-1, x3)", () => {
+	// After an edit, each call runs in order: a string is a bash command (red when it starts with `!`), an object a verify call.
+	const seal = (...calls: Array<string | Record<string, unknown>>) => {
 		const recorder = createRunEffectsRecorder(process.cwd());
-		for (const [id, tool, args, red] of [
-			["fix", "edit", { path: "src/a.ts" }, false],
-			["test", "bash", { command: "npm test" }, false],
-			["mixed", "bash", { command }, failed],
-		] as const) {
-			recorder.start(id, tool, args);
-			recorder.checkOutcome(id, red ? "error" : "ok");
-			recorder.finish(id, red);
+		for (const [index, call] of [{ path: "src/a.ts" }, ...calls].entries()) {
+			const red = typeof call === "string" && call.startsWith("!");
+			const [tool, args] =
+				typeof call === "string"
+					? ["bash", { command: red ? call.slice(1) : call }]
+					: [index === 0 ? "edit" : "verify", call];
+			recorder.start(`call-${index}`, tool, args);
+			recorder.checkOutcome(`call-${index}`, red ? "error" : "ok");
+			recorder.finish(`call-${index}`, red);
 		}
 		const effects = recorder.snapshot();
 		const typedValidations = typedValidationFactsFromObservedEffects(effects);
-		return [[...effects.validationCommands], deriveRunVerification({ toolStats: [], typedValidations }).state];
+		// The reds still standing where the result contract judges claims, verify calls included.
+		const reds = [...effects.checkOutcomes].filter(([, passed]) => !passed).map(([name]) => name);
+		return [[...effects.validationCommands], deriveRunVerification({ toolStats: [], typedValidations }).state, reds];
 	};
-	const stale = [[], "unverified"];
+	const stale = [[], "unverified", []];
+	const green = [["npm test"], "verified", []];
 	// The earlier pass judged a tree the call then changed, whether the check ran before or after the change.
-	deepStrictEqual(seal("git apply fix.patch; npm test", true), stale);
-	deepStrictEqual(seal("npm test && node codemod.mjs"), stale);
-	deepStrictEqual(seal("pytest; git stash pop"), stale);
-	deepStrictEqual(seal("npm ci | npm test"), stale);
-	deepStrictEqual(seal("npm test > log.txt"), stale);
+	deepStrictEqual(seal("npm test", "!git apply fix.patch; npm test"), stale);
+	deepStrictEqual(seal("npm test", "npm test && node codemod.mjs"), stale);
+	deepStrictEqual(seal("npm test", "pytest; git stash pop"), stale);
+	deepStrictEqual(seal("npm test", "npm ci | npm test"), stale);
+	deepStrictEqual(seal("npm test", "npm test > log.txt"), stale);
+	// A check that rewrites the tree is a change, in bash or verify (x3-3).
+	deepStrictEqual(seal("npm test", "npm run lint:fix"), stale);
+	deepStrictEqual(seal("npm test && npm run format"), stale);
+	deepStrictEqual(seal("npm test", { check: "format" }), stale);
+	deepStrictEqual(seal("!npm test", { check: "format" }), stale);
 	// Every change ran before the check through `&&`, or the call held only checks, cd and plumbing.
-	deepStrictEqual(seal("npm ci && npm test"), [["npm test"], "verified"]);
-	deepStrictEqual(seal("cd pkg && npm test 2>&1 | tail -5"), [["npm test"], "verified"]);
+	deepStrictEqual(seal("npm test", "npm ci && npm test"), green);
+	deepStrictEqual(seal("npm test", "cd pkg && npm test 2>&1 | tail -5"), green);
+	// A read-only stdout filter is plumbing too (x3-4).
+	deepStrictEqual(seal("npm test", "npm test 2>&1 | sed -n 1,80p"), green);
+	// Shell setup changes no tree, so a standing red stands beside a narrower green (x3-1).
+	for (const setup of ["source .venv/bin/activate", "export CI=1"])
+		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [["npm test"], "unverified", ["npm test"]]);
+	// A red behind head or grep may be that filter's own, so it settles nothing; behind tail it is the check's (x3-2).
+	deepStrictEqual(seal("npm test", "!npm test 2>&1 | head -30"), green);
+	deepStrictEqual(seal("npm test", "!npm test 2>&1 | grep FAIL"), green);
+	deepStrictEqual(seal("npm test", "!npm test 2>&1 | tail -5"), [["npm test"], "unverified", ["npm test"]]);
+	// A check run in another directory is not this workspace's check (x3-5).
+	deepStrictEqual(seal("cd /elsewhere && npm test"), stale);
+	deepStrictEqual(seal("cd pkg/.. && npm test"), green);
+	// Its pass settles no outcome, so a red in the workspace still fails a green claim.
+	for (const outside of [{ command: "cd /elsewhere && pytest" }, { command: "pytest", cwd: "/elsewhere" }]) {
+		const recorder = createRunEffectsRecorder(process.cwd());
+		const calls = [
+			["edit", { path: "src/a.py" }, false],
+			["bash", { command: "pytest" }, true],
+			["bash", outside, false],
+		] as const;
+		for (const [index, [tool, args, red]] of calls.entries()) {
+			recorder.start(`call-${index}`, tool, args);
+			recorder.checkOutcome(`call-${index}`, red ? "error" : "ok");
+			recorder.finish(`call-${index}`, red);
+		}
+		const effects = recorder.snapshot();
+		deepStrictEqual(
+			[...effects.validationOutcomes, ...effects.checkOutcomes],
+			[
+				["pytest", false],
+				["pytest", false],
+			],
+		);
+		const typedValidations = typedValidationFactsFromObservedEffects(effects);
+		strictEqual(deriveRunVerification({ toolStats: [], typedValidations }).state, "unverified");
+		const claim = validateResultContract({
+			contract: { kind: "mutation-report" },
+			output: JSON.stringify({
+				mutatedPaths: ["src/a.py"],
+				validations: [{ name: "pytest", passed: true, evidence: "exit 0" }],
+			}),
+			cwd: process.cwd(),
+			networkAllowed: false,
+			filesystem: { readFile: () => "" },
+			observedRunEffects: effects,
+		});
+		strictEqual(claim.quality, "fail");
+	}
 });
 
 it("read-only inspection refuses helpers that write the tree or run another program (x1-3)", () => {
@@ -771,9 +829,13 @@ it("read-only inspection refuses helpers that write the tree or run another prog
 		"rg --hostname-bin=./x.sh foo",
 		"git diff --ext-diff",
 		"git show --textconv",
+		"sed -i s/a/b/ a.ts",
+		"sed 's/a/b/w out' a.ts",
+		"awk '{system(\"sh\")}' a.ts",
+		"sort -o out a.ts",
 	])
 		strictEqual(isReadOnlyInspectionCommand(command, false), false, command);
-	for (const command of ["git status", "git diff", "git log -p"])
+	for (const command of ["git status", "git diff", "git log -p", "sed -n 1,80p a.ts", "awk '{print $1}' a.ts"])
 		strictEqual(isReadOnlyInspectionCommand(command, false), true, command);
 	// Where git config names a helper program, only log and show with both helpers switched off still count.
 	for (const command of ["git status", "git diff --no-ext-diff --no-textconv", "git log -p"])
