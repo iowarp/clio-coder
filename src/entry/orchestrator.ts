@@ -517,8 +517,6 @@ function readFlowSessionEntries(sessionId: string): ReadonlyArray<unknown> {
  * *shape*, not session *length*.
  */
 const FINISH_CONTRACT_TAIL_ENTRIES = DEFAULT_RECENT_ENTRY_LIMIT * 2;
-/** ask_user answers the safety judge keeps per session as operator words; older ones age out. */
-const OPERATOR_ANSWER_MEMORY = 32;
 
 function readRecentSessionEntriesForContract(sessionId: string): SessionEntry[] {
 	return collectSessionEntries(
@@ -1709,16 +1707,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	bus.subscribe("call.settled", (payload, context) => {
 		if (context?.agent.role === "main") autonomyWindow.tokens(settledCallTokens(payload.usage));
 	});
-	// What the operator answered on ask_user rounds, per session: at contained yolo an
-	// answer that names an outward step is the operator's word for it, as a typed message is.
-	const operatorAnswersBySession = new Map<string, string[]>();
-	const recordOperatorAnswers = (answers: ReadonlyArray<{ question: string; answer: string }>): void => {
-		const id = session?.current()?.id;
-		if (id === undefined || answers.length === 0) return;
-		const kept = operatorAnswersBySession.get(id) ?? [];
-		for (const { question, answer } of answers) kept.push(`Asked "${question}", the operator answered: ${answer}`);
-		operatorAnswersBySession.set(id, kept.slice(-OPERATOR_ANSWER_MEMORY));
-	};
 	// The safety judge reviews what autonomy default would park for the operator
 	// against the operator's own messages. Its round goes through System One's
 	// one-shot port and request admission, built further down; nothing calls the
@@ -1732,7 +1720,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}),
 		session: () => session,
 		safety,
-		operatorAnswers: (sessionId) => operatorAnswersBySession.get(sessionId) ?? [],
 		// Past either threshold every later review would refuse in silence, so contained yolo ends the run (D4).
 		// A main-session escalation fires inside the review of the block that crossed the line; the window halts once the
 		// registry records that block, still inside the call. A worker's block has no such record and halts at once.
@@ -1826,11 +1813,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		autonomy: resolveAdmissionAutonomy,
 		unattendedAsks: unattendedYolo,
 		operatorAttends: () => options.headless === undefined,
-		// An operator's own answer speaks for them: the judge reads it, and a yolo window reopens.
-		onOperatorAnswered: (answers) => {
-			recordOperatorAnswers(answers);
-			operatorReturned();
-		},
+		// An operator's own answer reopens a yolo window; the judge reads it from the ledger.
+		onOperatorAnswered: () => operatorReturned(),
 		onUnattendedRefusal: (call, decision, kind, rule) =>
 			autonomyWindow.openDecision(describeOpenDecision(call, decision, kind, rule)),
 		// Only this registry carries the operator's own scope (#419): its yolo,

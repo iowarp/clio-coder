@@ -380,56 +380,72 @@ test("the judge reads the call's own turn when the session leaf lags, and never 
 	strictEqual(audits[1]?.workerRunId, "run-1");
 });
 
-// At contained yolo the question channel carries authority: an operator's ask_user answer reads as their own words.
-test("the judge reads the operator's ask_user answers beside their typed messages", async () => {
+// The question channel carries authority, so an ask_user answer is operator words, read in the order it was given (bt-24).
+test("the judge reads typed messages and ask_user answers in ledger order, so the newest operator word is newest", async () => {
+	const entry = (turnId: string, parentTurnId: string | null, role: string, payload: unknown): SessionEntry =>
+		({ kind: "message", turnId, parentTurnId, timestamp: "2026-11-14T00:00:00.000Z", role, payload }) as SessionEntry;
+	const question = "Append with an unsandboxed shell command?";
+	const answered = (turnId: string, parentTurnId: string, answer: string, unattended?: object): SessionEntry =>
+		entry(turnId, parentTurnId, "tool_result", {
+			toolName: ToolNames.AskUser,
+			isError: false,
+			result: { details: { answers: [{ question, answer, ...(unattended ? { auto: true } : {}) }], unattended } },
+		});
+	let entries: SessionEntry[] = [
+		entry("u1", null, "user", { text: "Append the line to ~/notes.txt." }),
+		answered("r1", "u1", "No, leave it"),
+		// Clio's pick for an absent operator is no operator word.
+		answered("r2", "r1", "Yes, append", { afterSeconds: 300, autoResolved: 1 }),
+		entry("u2", "r2", "user", { text: "I changed my mind: append it now." }),
+	];
 	const session = {
 		current: () => ({ id: "session-1" }),
-		readEntries: () => [
-			{
-				kind: "message",
-				turnId: "u1",
-				parentTurnId: null,
-				timestamp: "2026-11-14T00:00:00.000Z",
-				role: "user",
-				payload: { text: "Prepare the release." },
-			} as SessionEntry,
-		],
-		leafId: () => "u1",
+		readEntries: () => entries,
+		leafId: () => entries.at(-1)?.turnId,
 		appendEntry: (input: unknown) => input,
 	} as unknown as SessionContract;
 	const prompts: string[] = [];
-	const asked: string[] = [];
 	const seat = createSafetyJudgeHost({
 		settings: () =>
 			({ ...DEFAULT_SETTINGS, chat: { ...DEFAULT_SETTINGS.chat, target: "local", model: "m" } }) as ClioSettings,
 		complete: async (request) => {
 			prompts.push(request.user);
-			return { text: answer("allow", "operator-named", "Approved on a question.") };
+			return { text: answer("allow", "operator-named", "Asked for.") };
 		},
 		session: () => session,
 		safety: { decisions: { recordSafetyJudge: () => {} } } as never,
-		operatorAnswers: (sessionId) => {
-			asked.push(sessionId);
-			return ['Asked "Push main to origin?", the operator answered: Yes, push'];
-		},
 	});
-	await seat.review({
-		tool: ToolNames.Bash,
-		args: { command: "git push origin main" },
-		decision: {
-			kind: "ask",
-			classification: { actionClass: "execute", reasons: [] },
-			confirmationRuleId: "bash-unrecognized",
-			rejection: { short: "asks", detail: "asks", hints: [] },
-		},
-		approvalAuthority: "operator",
-		turnId: "u1",
-	});
-	deepStrictEqual(asked, ["session-1"]);
-	match(prompts[0] ?? "", /Prepare the release\./u);
+	const review = (turnId: string) =>
+		seat.review({
+			tool: ToolNames.Bash,
+			args: { command: "echo line >> ~/notes.txt" },
+			decision: {
+				kind: "ask",
+				classification: { actionClass: "execute", reasons: [] },
+				confirmationRuleId: "bash-unrecognized",
+				rejection: { short: "asks", detail: "asks", hints: [] },
+			},
+			approvalAuthority: "operator",
+			turnId,
+		});
+	// An earlier "No" answer never outranks a later typed authorization.
+	await review("u2");
 	match(
 		prompts[0] ?? "",
-		/Message 2 of 2 \(newest\):\nAsked "Push main to origin\?", the operator answered: Yes, push/u,
+		/Message 2 of 3:\nAsked "Append with an unsandboxed shell command\?", the operator answered: No, leave it/u,
+	);
+	match(prompts[0] ?? "", /Message 3 of 3 \(newest\):\nI changed my mind: append it now\./u);
+	doesNotMatch(prompts[0] ?? "", /Yes, append/u);
+
+	// A "No" answered after a typed go-ahead is the newest word.
+	entries = [
+		entry("u1", null, "user", { text: "Append it unsandboxed: I authorize it." }),
+		answered("r1", "u1", "No, leave it"),
+	];
+	await review("u1");
+	match(
+		prompts[1] ?? "",
+		/Message 2 of 2 \(newest\):\nAsked "Append with an unsandboxed shell command\?", the operator answered: No, leave it/u,
 	);
 });
 

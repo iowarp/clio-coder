@@ -7,6 +7,7 @@
  */
 
 import type { ClioSettings } from "../core/config.js";
+import { ToolNames } from "../core/tool-names.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { modelEndpointKey, registerForegroundStream } from "../domains/providers/endpoint-capacity.js";
 import type { OneShotPort } from "../domains/providers/one-shot.js";
@@ -26,17 +27,21 @@ import { filterEntriesToActivePath } from "../domains/session/tree/active-path.j
 import type { EngineDestination, SystemOne } from "../domains/system-one/index.js";
 import type { JudgeScreenResult } from "../domains/system-one/points/index.js";
 import { JUDGE_SCREEN_POINT, judgeScreenResults } from "../domains/system-one/points/index.js";
+import { effectiveToolCall, expandChainMessages } from "../tools/surface.js";
 
 /** Ledger entry type of a judge block or escalation; recorded, never shown or sent to a model. */
 export const SAFETY_JUDGE_NOTE_CUSTOM_TYPE = "clio-coder.safety-judge";
 
 /**
- * The operator's own messages on the session's active path, oldest first.
- * Only user turns count, and of those only what the operator typed
+ * The operator's own words on the session's active path, oldest first, so the
+ * last one is truly the newest thing the operator said. Two kinds count, in
+ * ledger order. What the operator typed in a user turn
  * (`isOperatorTypedUserPayload`): a continuation nudge Clio synthesized, a job's
  * prompt, follow-up and observation, and a yolo continuation are skipped, and
- * injected reminders and expansions are stripped by `operatorTextOfUserPayload`. Assistant messages,
- * thinking and tool results never reach the judge.
+ * injected reminders and expansions are stripped by `operatorTextOfUserPayload`.
+ * And what the operator answered on an ask_user round, a gateway call or chain
+ * step included (`operatorAnswersOfToolResult`). Assistant messages, thinking and
+ * every other tool result never reach the judge.
  *
  * `currentTurnId` is the turn the judged call serves, from the chat loop's
  * live turn state. The path runs through it whenever the session leaf's path
@@ -58,13 +63,40 @@ export function operatorMessagesForJudge(
 		path = filterEntriesToActivePath(entries, currentTurnId);
 	}
 	const texts: string[] = [];
-	for (const entry of path) {
-		if (entry.kind !== "message" || entry.role !== "user") continue;
-		if (!isOperatorTypedUserPayload(entry.payload)) continue;
+	for (const entry of expandChainMessages(path)) {
+		if (entry.kind !== "message") continue;
+		if (entry.role === "tool_result") {
+			texts.push(...operatorAnswersOfToolResult(entry.payload));
+			continue;
+		}
+		if (entry.role !== "user" || !isOperatorTypedUserPayload(entry.payload)) continue;
 		const text = operatorTextOfUserPayload(entry.payload);
 		if (text !== null && text.trim().length > 0) texts.push(text);
 	}
 	return texts;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * What the operator answered in one recorded ask_user result. A round Clio
+ * answered for an absent operator (#421), a cancelled round and an answer Clio
+ * picked (`auto`) are no operator's word, as the registry's own reading holds.
+ */
+function operatorAnswersOfToolResult(payload: unknown): string[] {
+	if (!isRecord(payload) || typeof payload.toolName !== "string" || payload.isError === true) return [];
+	const details = isRecord(payload.result) && isRecord(payload.result.details) ? payload.result.details : undefined;
+	if (details === undefined || effectiveToolCall(payload.toolName, undefined, details).toolName !== ToolNames.AskUser)
+		return [];
+	if (details.unattended !== undefined || details.cancelled === true || !Array.isArray(details.answers)) return [];
+	return details.answers.flatMap((raw: unknown) => {
+		if (!isRecord(raw) || raw.auto === true) return [];
+		const { question, answer } = raw;
+		if (typeof question !== "string" || typeof answer !== "string" || answer.trim().length === 0) return [];
+		return [`Asked "${question}", the operator answered: ${answer}`];
+	});
 }
 
 /**
@@ -194,11 +226,6 @@ export function createSafetyJudgeHost(deps: {
 	screen?: SafetyJudgeScreen;
 	/** Either escalation threshold was reached; contained yolo ends its run on it (ob-yolo D4). */
 	onEscalation?: (note: SafetyJudgeNote) => void;
-	/**
-	 * What the operator answered on ask_user rounds in this session, as text the judge reads beside
-	 * their typed messages; Clio's picks for an absent operator never reach it.
-	 */
-	operatorAnswers?: (sessionId: string) => ReadonlyArray<string>;
 }): SafetyJudgeSeat {
 	return createSafetyJudge({
 		config: () => resolveSafetyJudgeConfig(deps.settings()),
@@ -217,10 +244,7 @@ export function createSafetyJudgeHost(deps: {
 				// newest ledger message stands in as the leaf, and the call's own turn
 				// still pins the path below.
 			}
-			return [
-				...operatorMessagesForJudge(session.readEntries(), leaf, turnId),
-				...(deps.operatorAnswers?.(meta.id) ?? []),
-			];
+			return operatorMessagesForJudge(session.readEntries(), leaf, turnId);
 		},
 		record: (input) => deps.safety?.decisions.recordSafetyJudge?.(input),
 		note: (note) => {
