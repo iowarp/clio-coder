@@ -2022,6 +2022,9 @@ function settledExcerptLimit(rows: ReadonlyArray<string>, text: string, limit: n
 
 // Capitalized like the folded marker it replaces and the footer's phase label, so a turn never shows both forms.
 const THINKING_LEAD = "Thinking · ";
+/** A cut excerpt hides the row that opened with the lead, so its hint row carries the lead instead (bt-11 i). */
+const THINKING_HINT_PREFIX = () => `${REASON_RAIL()}${clioTheme().fg("annotation", THINKING_LEAD)}`;
+const THINKING_HINT_PREFIX_WIDTH = PROSE_GUTTER_WIDTH + visibleWidth(THINKING_LEAD);
 
 /** Wrap first, then keep the same tail both while streaming and after settlement. */
 function renderThinkingRail(
@@ -2067,8 +2070,8 @@ function renderProseThinkingRail(
 		open ? limit : settledExcerptLimit(kept, text, limit),
 		width,
 		true,
-		REASON_RAIL(),
-		PROSE_GUTTER_WIDTH,
+		THINKING_HINT_PREFIX(),
+		THINKING_HINT_PREFIX_WIDTH,
 	);
 }
 
@@ -2177,8 +2180,8 @@ function streamThinkingRail(
 		limit,
 		width,
 		true,
-		REASON_RAIL(),
-		PROSE_GUTTER_WIDTH,
+		THINKING_HINT_PREFIX(),
+		THINKING_HINT_PREFIX_WIDTH,
 		() => `${total - (limit - 1)} rows`,
 	);
 }
