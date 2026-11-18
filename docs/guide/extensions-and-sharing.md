@@ -258,7 +258,7 @@ dormant policy; the loop guard, continuation logic and step-checkpoint builder
 then consume the active form. The tier and `promptCaching` facts come from the
 resolved chat route, including a worker's own model facts when an extension
 hook sees it. A prompt-template `when`, a `variants` body, an extension hook's
-`event.model.tier`, and observation aging are separate consumers of the same
+`event.model.tier`, and the superseded stage are separate consumers of the same
 resolved facts; selecting one does not change the others.
 
 On a route whose model tier is `small`, or that does not cache prompts
