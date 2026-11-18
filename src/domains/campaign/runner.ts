@@ -127,8 +127,7 @@ export function validateCampaignInput(input: Pick<CampaignInput, "fixture" | "ou
 		throw new CampaignInputError(`--out ${out} already holds files; name an absent or empty directory`);
 }
 
-/** An entry's directory under `--out`: its position from 01 and its label in path-safe characters. */
-export function campaignEntryDirName(index: number, label: string): string {
+function entryDirName(index: number, label: string): string {
 	return `${String(index + 1).padStart(2, "0")}-${label.replace(/[^A-Za-z0-9._-]+/gu, "-")}`;
 }
 
@@ -208,7 +207,7 @@ async function probeDesk(
 }
 
 async function runEntry(input: CampaignInput, entry: RosterEntry, index: number): Promise<CampaignEntryResult> {
-	const dir = join(input.out, campaignEntryDirName(index, entry.label));
+	const dir = join(input.out, entryDirName(index, entry.label));
 	const project = join(dir, "project");
 	const roots = entryRoots(join(dir, "home"), input.operatorConfig, input.operatorComponents);
 	const result: CampaignEntryResult = {

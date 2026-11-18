@@ -6,7 +6,6 @@ import {
 	CampaignInputError,
 	type CampaignProbe,
 	type CampaignResult,
-	campaignEntryDirName,
 	loadRoster,
 	runCampaign,
 	validateCampaignInput,
@@ -19,8 +18,7 @@ import { installStopSignals } from "./stop-signals.js";
 
 const HELP = `Usage:
   clio-coder campaign run --fixture <dir> --roster <roster.yaml> --answers <answers.yaml> --prompt <text> --out <dir>
-                          [--timeout <seconds>] [--probe <extension>:<command>] [--autonomy default|yolo]
-                          [--dry-run] [--json]
+                          [--timeout <seconds>] [--probe <extension>:<command>] [--autonomy default|yolo] [--json]
 
 Runs one seeded project across a roster of models and reports, per entry: how
 the run ended, the extension gates it reached, extension refusals, loop-guard
@@ -62,9 +60,7 @@ options:
   --timeout <seconds>      each entry's run --timeout (default: none)
   --probe <ext>:<command>  extension command recorded as the desk's final status
   --autonomy default|yolo  every entry's autonomy (default: default); yolo is contained
-  --dry-run                validate everything and print the plan, per entry its directory, label, target, model
-                           and thinking and whether the target is configured; nothing is started or written
-  --json                   print the whole campaign, or the dry run's plan, as JSON
+  --json                   print the whole campaign as JSON
 
 Exit codes: 0 when every entry was run (whatever each one's status), 1 when the
 campaign itself failed, 2 on a usage error, and the signal's code when stopped.`;
@@ -85,19 +81,14 @@ const VALUE_FLAGS = new Set([
 interface Parsed {
 	values: Map<string, string>;
 	json: boolean;
-	dryRun: boolean;
 }
 
 function parse(args: ReadonlyArray<string>): Parsed {
-	const parsed: Parsed = { values: new Map(), json: false, dryRun: false };
+	const parsed: Parsed = { values: new Map(), json: false };
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i] as string;
 		if (arg === "--json") {
 			parsed.json = true;
-			continue;
-		}
-		if (arg === "--dry-run") {
-			parsed.dryRun = true;
 			continue;
 		}
 		if (VALUE_FLAGS.has(arg)) {
@@ -184,26 +175,6 @@ function renderCampaign(result: CampaignResult): string {
 	return `${formatColumns(rows)}${notes.length > 0 ? `\n${notes.join("\n")}\n` : ""}\nentries and logs under ${result.out}\n`;
 }
 
-interface CampaignPlanEntry {
-	dir: string;
-	label: string;
-	target: string;
-	model: string;
-	thinking: string | null;
-	targetConfigured: boolean;
-}
-
-function renderPlan(out: string, entries: ReadonlyArray<CampaignPlanEntry>): string {
-	const rows = [
-		["DIR", "LABEL", "TARGET", "MODEL", "THINKING"],
-		...entries.map((entry) => [entry.dir, entry.label, entry.target, entry.model, entry.thinking ?? "-"]),
-	];
-	const notes = entries
-		.filter((entry) => !entry.targetConfigured)
-		.map((entry) => `${entry.label}: target ${entry.target} is not configured; this entry would fail`);
-	return `${formatColumns(rows)}${notes.length > 0 ? `\n${notes.join("\n")}\n` : ""}\ndry run: ${entries.length} entr${entries.length === 1 ? "y" : "ies"} would run under ${out}; nothing was started or written\n`;
-}
-
 async function runCommand(args: ReadonlyArray<string>): Promise<number> {
 	const parsed = parse(args);
 	const fixture = resolve(required(parsed, "--fixture"));
@@ -229,24 +200,9 @@ async function runCommand(args: ReadonlyArray<string>): Promise<number> {
 		const refusal = containedYoloRefusal("campaign");
 		if (refusal !== null) throw new UsageError(refusal);
 	}
-	const { settings } = readLayeredSettings(fixture);
-	if (parsed.dryRun) {
-		const configured = new Set(settings.targets.map((target) => target.id));
-		const entries: CampaignPlanEntry[] = roster.entries.map((item, index) => ({
-			dir: campaignEntryDirName(index, item.label),
-			label: item.label,
-			target: item.target,
-			model: item.model,
-			thinking: item.thinking,
-			targetConfigured: configured.has(item.target),
-		}));
-		process.stdout.write(
-			parsed.json ? `${JSON.stringify({ dryRun: true, out, autonomy, entries }, null, 2)}\n` : renderPlan(out, entries),
-		);
-		return 0;
-	}
 	const entry = process.argv[1];
 	if (entry === undefined) throw new Error("cannot locate the clio-coder entry point to start entries");
+	const { settings } = readLayeredSettings(fixture);
 	// Each entry leads its own process group, so a signal to this one reaches it only through the abort.
 	const controller = new AbortController();
 	const stops = installStopSignals(controller);
