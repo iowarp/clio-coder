@@ -294,10 +294,11 @@ describe("surface capture", () => {
 		const line = `${"n".repeat(67)}\n`;
 		for (const file of Object.values(turns).flat())
 			writeFileSync(path.join(project, file), line.repeat(Math.ceil((22 * 1024) / line.length)));
-		// The first run evicts under a short protected tail; the second, without the working set, checkpoints.
+		// The first run evicts by age under a one-step protected tail, since a 32768 window cuts no protected read
+		// (drv-f1x); the second, without the working set, checkpoints.
 		const settingsFile = path.join(scratch.configDir, "settings.yaml");
 		const settings = [
-			(yaml: string) => yaml.replace("    protectLastSteps: 8", "    protectLastSteps: 3"),
+			(yaml: string) => yaml.replace("    protectLastSteps: 8", "    protectLastSteps: 1"),
 			(yaml: string) => yaml.replace(/(\n {2}workingSet:\n(?: {4}.*\n)*?) {4}enabled: true\n/, "$1    enabled: false\n"),
 		];
 		for (const [index, prompt] of Object.keys(turns).entries()) {
