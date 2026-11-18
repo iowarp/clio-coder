@@ -1177,13 +1177,13 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				NODE_DISABLE_COMPILE_CACHE: "1",
 			});
 			strictEqual(indexed.code, 0, indexed.stdout + indexed.stderr);
-			const result = JSON.parse(indexed.stdout) as { indexedSourceFiles: number; codewikiPath: string };
+			const result = JSON.parse(indexed.stdout) as { indexedSourceFiles: number; codemapPath: string };
 			strictEqual(result.indexedSourceFiles, 1);
 			ok(
 				[...lazyChunks].some((path) => coveredFiles(coverage).has(path)),
 				"real indexing must evaluate the lazy chunk",
 			);
-			const codewiki = JSON.parse(readFileSync(result.codewikiPath, "utf8")) as {
+			const codewiki = JSON.parse(readFileSync(result.codemapPath, "utf8")) as {
 				symbols: Array<{ name: string }>;
 			};
 			ok(codewiki.symbols.some((symbol) => symbol.name === "installedLazySymbol"));
