@@ -1768,8 +1768,8 @@ function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | u
 	return `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(token, presentation.label)}`;
 }
 
-/** What a run is doing, or how it ended, in one clause the row may clip. */
-function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): TableCell {
+/** What a run is doing, or how it ended, in one clause the row may clip. `room` picks an approval wait's form. */
+function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number, room?: number): TableCell {
 	if (row.plan !== undefined) {
 		return { text: planProgressText(row.plan, true), ...(row.plan.state === "failed" ? { tone: "error" as const } : {}) };
 	}
@@ -1782,7 +1782,9 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 			if (row.status === "cancelling") return { text: "waiting for it to exit", tone: "warning" };
 			const progress = row.progress;
 			if (progress) {
-				if (progress.awaitingApproval === true) return { text: approvalWaitWords(progress), tone: "warning" };
+				if (progress.awaitingApproval === true) {
+					return { text: approvalWaitWords(progress, room === undefined ? {} : { room }), tone: "warning" };
+				}
 				if (progress.currentAction) return { text: theme.base("body", actionPhrase(progress.currentAction, "running")) };
 				const words = sanitizeCallTargetText(workerActivityWords(progress, { history: row.routeFirstOutput ?? null }));
 				const tail =
@@ -1982,10 +1984,23 @@ export function runTableRows(
 		return sum + Math.min(natural, column.max ?? Number.POSITIVE_INFINITY);
 	}, 0);
 	const activityRoom = width - used - gap * fixed.length;
-	const columns: TableColumn[] = [
-		...fixed,
-		{ label: "activity", priority: 8, min: 12, max: Math.max(16, activityRoom) },
-	];
+	// An approval wait is what its run is blocked on, so it takes the room beside the status and the name and the
+	// table drops its quietest columns, with its note, rather than cutting the owner and time left to `appro…` (bt-11 l).
+	const agentWidth = Math.min(
+		agentColumn?.max ?? Number.POSITIVE_INFINITY,
+		Math.max(0, ...rows.map((cells) => visibleWidth(cellText(cells[agentIndex])))),
+	);
+	const waitRoom = width - lead - agentWidth - gap;
+	let activityMax = Math.max(16, activityRoom);
+	items.forEach((item, index) => {
+		const cells = rows[index];
+		if (item.kind !== "run" || item.row.plan !== undefined || cells === undefined) return;
+		if (item.row.progress?.awaitingApproval !== true || isTerminalStatus(item.row.status)) return;
+		const cell = runActivityCell(theme, item.row, now, Math.max(activityRoom, waitRoom));
+		cells[cells.length - 1] = cell;
+		activityMax = Math.max(activityMax, visibleWidth(cell.text));
+	});
+	const columns: TableColumn[] = [...fixed, { label: "activity", priority: 8, min: 12, max: activityMax }];
 	return tableRows(theme, { columns, rows }, width);
 }
 

@@ -40,7 +40,9 @@ import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer
 import {
 	createDispatchBoardView,
 	type DispatchBoardRow,
+	dispatchBoardItems,
 	isDispatchBoardRowSteerable,
+	runTableRows,
 } from "../../src/interactive/dispatch-board.js";
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
 import { besideCardDetail, railDetail } from "../../src/interactive/footer/live-work.js";
@@ -1484,6 +1486,20 @@ test("the rail beside a worker's ask states its expiry, and a short rail keeps t
 	match(facts(100) ?? "", /^coder running · approval held by session session-p · denied in 1:59/u);
 	strictEqual((facts(100) ?? "").includes("your approval"), false);
 	match(facts(20) ?? "", /^coder running/u);
+	// /fleet at 64 columns picks the form its activity column holds instead of cutting the long one to `appro…`.
+	const fleetRow = {
+		runId: "run-p",
+		agentId: "coder",
+		status: "running",
+		elapsedMs: 20_000,
+		usage: { kind: "pending" },
+		progress,
+	} as unknown as DispatchBoardRow;
+	const table = runTableRows(dispatchBoardItems([fleetRow]), 64, { now: 0 })
+		.map(stripTerminalSequences)
+		.join("\n");
+	match(table, /running · held by session session-p/u, table);
+	doesNotMatch(table, /appro…/u);
 });
 
 test("the rail names who is working beside the main turn and what a card is not holding up", () => {
