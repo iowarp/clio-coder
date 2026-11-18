@@ -261,7 +261,8 @@ test("a thinking change is recorded in the session it took effect in", async () 
 	assert.ok(target);
 	settings.chat.target = target.id;
 	settings.chat.model = target.defaultModel ?? "gpt-4o";
-	settings.chat.thinkingLevel = "off";
+	// The default route supports only off, so the settings default is clamped before the first row (bt-37).
+	settings.chat.thinkingLevel = "low";
 	const appended: Array<Record<string, unknown>> = [];
 	let current: SessionMeta | null = null;
 	let turns = 0;
@@ -309,7 +310,9 @@ test("a thinking change is recorded in the session it took effect in", async () 
 		appended.filter((row) => row.kind === "thinkingLevelChange").map((row) => row.thinkingLevel);
 	try {
 		await loop.submit("first");
+		await loop.submit("again");
 		assert.deepEqual(thinkingRows(), ["off"]);
+		assert.equal(appended.find((row) => row.kind === "thinkingLevelChange")?.requestedThinkingLevel, "low");
 		settings.chat.thinkingLevel = "high";
 		await loop.submit("second");
 		assert.deepEqual(thinkingRows(), ["off", "high"]);

@@ -129,7 +129,8 @@ export interface TurnPersistence {
 	appendInRunContinuation(): void;
 	appendRetryStatus(status: RetryStatusPayload): void;
 	appendModelChangeEntry(target: ChatLoopTarget): void;
-	appendThinkingLevelChangeEntry(thinkingLevel: string, effectiveEffort?: string): void;
+	/** `effectiveLevel` is the level the route clamps `thinkingLevel` to; a session's first row records it (bt-37). */
+	appendThinkingLevelChangeEntry(thinkingLevel: string, effectiveEffort?: string, effectiveLevel?: string): void;
 }
 
 export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistence {
@@ -318,6 +319,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				deps.getSettings().chat.thinkingLevel ?? "off",
 				state.runtime?.runtimeResolution.modelRuntime.thinking.effort ??
 					state.runtime?.runtimeResolution.effectiveThinkingLevel,
+				state.runtime?.runtimeResolution.effectiveThinkingLevel,
 			);
 			const userTurn = appendTurn(deps.session, {
 				kind: "user",
@@ -452,6 +454,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				agentRuntime.runtimeResolution.requestedThinkingLevel,
 				agentRuntime.runtimeResolution.modelRuntime.thinking.effort ??
 					agentRuntime.runtimeResolution.effectiveThinkingLevel,
+				agentRuntime.runtimeResolution.effectiveThinkingLevel,
 			);
 			const payload: Record<string, unknown> = images ? { content: [{ type: "text", text }, ...images] } : { text };
 			if (operatorText !== undefined && operatorText !== text) payload.operatorText = operatorText;
@@ -541,7 +544,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		 * domains/session/resumed-route.ts). Same best-effort contract as
 		 * appendModelChangeEntry.
 		 */
-		appendThinkingLevelChangeEntry(thinkingLevel, effectiveEffort): void {
+		appendThinkingLevelChangeEntry(thinkingLevel, effectiveEffort, effectiveLevel): void {
 			const model = state.runtime?.agent.state.model;
 			if (effectiveEffort !== undefined && model?.api === "openai-codex-responses") {
 				const map = model.thinkingLevelMap as Record<string, string | null> | undefined;
@@ -549,7 +552,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			}
 			if (!deps.session?.current()) return;
 			try {
-				appendSessionThinkingLevel(deps.session, thinkingLevel, effectiveEffort, state.lastTurnId);
+				appendSessionThinkingLevel(deps.session, thinkingLevel, effectiveEffort, state.lastTurnId, effectiveLevel);
 			} catch {
 				// Same as appendModelChangeEntry: a lost marker only means resume
 				// falls back to its recorded level or configured default.
