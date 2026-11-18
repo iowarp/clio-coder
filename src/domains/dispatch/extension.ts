@@ -708,6 +708,8 @@ interface ActiveRun {
 	awaitingOperator?: boolean;
 	/** Budget admission exempted the route (unpriced or zero-rate), so the session cost-ceiling stop leaves it running. */
 	budgetExempt?: boolean;
+	/** Set when every command the worker spawns runs in its OS sandbox or is refused (`workerRunShellConfined`). */
+	shellConfined?: true;
 	meter: RunTokenMeter;
 	finalPromise: Promise<RunResult>;
 }
@@ -9162,6 +9164,10 @@ export function createDispatchBundle(
 			...(hostRun === undefined ? {} : { hostRun }),
 			heartbeatAt,
 			heartbeatStatus: "alive",
+			// `required` refuses a command it cannot sandbox, and so does a worker whose backend this host saw work.
+			...(spec.sandbox !== undefined && (spec.sandbox.mode === "required" || spec.sandbox.backendExpected === true)
+				? { shellConfined: true as const }
+				: {}),
 			meter: tokenMeter,
 			finalPromise,
 		};
@@ -12265,6 +12271,7 @@ export function createDispatchBundle(
 			return !listDetachedBatches().some((batch) => batch.runs.some((entry) => entry.assignmentId === assignmentId));
 		},
 		holdWorkerPermission: (requestId) => workerApprovalWindows.hold(requestId),
+		workerRunShellConfined: (runId) => currentAssignmentRun(runId)?.shellConfined === true,
 		restartWorkerPermission: (requestId) => workerApprovalWindows.restart(requestId),
 		grants: {
 			list(filter = {}) {

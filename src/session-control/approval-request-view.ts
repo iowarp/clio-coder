@@ -85,4 +85,11 @@ export interface ApprovalRequestView {
 	};
 	/** What an unanswered worker ask becomes, so the card can say so before it happens. */
 	workerFallback?: "deny" | "fail";
+	/**
+	 * The approved call still runs inside an OS sandbox: a contained main-session
+	 * shell call, or a shell call of a worker whose every command runs in its
+	 * sandbox or is refused. An approval never widens either sandbox, so the card
+	 * must not read as if it let the call write outside the writable roots.
+	 */
+	sandboxed?: true;
 }
