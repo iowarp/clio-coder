@@ -84,6 +84,10 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- On an on/off thinking route, the Shift+Tab toast, the composer rail and the /thinking picker now use one word ("on") for a state; a level the route changes is shown with its note (bt-11 item 5).
+- A refused `/compact <instructions>` on a short or empty session now says the instructions were not used (bt-11 item 7).
+- ACP `session/delete` on an open session now says to close it first (session/close or the client's close action) (bt-12 item 6).
+- The chat-loop context-window refusal now names chat.maxOutputTokens or --max-context-tokens when one of them is the cause (bt-13).
 - A yolo floor block's headline names the floor rule that fired (e.g. `bash blocked: yolo-floor-raw-text`) instead of the classifier's action class (bt-12 item 1).
 - `python3 -B -m unittest` and `python -m pytest` with harmless interpreter flags (-B, -u, -I, -X dev, -W error::DeprecationWarning) are recognised as test runners; flags that run code still ask (bt-12 item 7).
 - Streaming and final redaction hide a quoted `sig: '…'` value with no other secret word in the text, and hold an open quoted value whose name sits on the previous line (Astra r10-chat).
