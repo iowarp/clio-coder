@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
+import { mapExitCode } from "../../src/cli/run.js";
 import {
 	parseVerifierResult,
 	resultContractShape,
@@ -17,6 +18,7 @@ import {
 	type VerifyCallOutcome,
 	verifyCallStart,
 } from "../../src/domains/dispatch/run-findings.js";
+import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { clearTaskGates, configureTaskGates } from "../../src/tools/verify/task-gates.js";
@@ -631,6 +633,22 @@ it("an observed red judges only the tree it ran on, and respelled runs of one ch
 	// With no observed edit, a reported baseline excuses only its own observed red.
 	strictEqual(seal([["base", "pytest", true]], [{ ...red, name: "pytest" }, green]).quality, "unmeasured");
 	strictEqual(seal([["base", "pytest -q", true]], [{ ...red, name: "pytest" }, green]).quality, "fail");
+	// x1-5: a sealed fail exits 1, so `run --agent coder ... && git push` stops; a baseline red stays 0.
+	const exitCode = (quality: string) =>
+		mapExitCode({ exitCode: 0, quality: { resultContract: { quality } } } as unknown as RunResult);
+	strictEqual(
+		exitCode(
+			seal(
+				[
+					["fix", "edit"],
+					["final", "pytest", true],
+				],
+				[{ ...red, name: "pytest" }],
+			).quality,
+		),
+		1,
+	);
+	strictEqual(exitCode(seal([["base", "pytest", true]], [{ ...red, name: "pytest" }, green]).quality), 0);
 });
 
 it("a check judges only the tree it ran on, sealed per verify call or from a tool's aggregate (bt-27c)", () => {

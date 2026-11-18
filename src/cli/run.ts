@@ -1021,8 +1021,11 @@ const PASS_THROUGH_EXIT_CODES: ReadonlySet<number> = new Set([
 	SESSION_COST_CEILING_EXIT_CODE,
 ]);
 
-function mapExitCode(r: RunResult): number {
+export function mapExitCode(r: RunResult): number {
 	// A verifier that reported a failed verdict makes `run --agent verifier ... && deploy` stop, though its run succeeded.
 	if (r.exitCode === 0 && verifierVerdict(r)?.verdict === "fail") return 1;
+	// So does a check the run saw fail after its last edit, which seals quality `fail` (bt-27); a baseline red from
+	// before any edit seals no failure (x1-5).
+	if (r.exitCode === 0 && r.quality.resultContract?.quality === "fail") return 1;
 	return PASS_THROUGH_EXIT_CODES.has(r.exitCode) ? r.exitCode : 1;
 }
