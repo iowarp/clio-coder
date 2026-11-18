@@ -31,6 +31,11 @@ for (const [message, text, key] of [
 		"finish.unverified",
 	],
 	[
+		`${FINISH_CONTRACT_ADVISORY_MESSAGE} Declared checks: unit.fast. Ran after the edit: src/clean.py, run.sh.`,
+		"Clio changed files and ran src/clean.py and 1 more afterwards, but no recognized check covered the change; run verify unit.fast",
+		"finish.unverified",
+	],
+	[
 		`${FINISH_CONTRACT_ADVISORY_MESSAGE} Run checks: run-acceptance.`,
 		"Clio changed files but ran no check on them afterwards; the run's --verify check (run-acceptance) still runs after the turn",
 		"finish.unverified",

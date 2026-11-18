@@ -18,6 +18,8 @@ import {
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
 	scanShellLike,
+	shellCommandWords,
+	splitSegments,
 	toolMutationPaths,
 } from "./protected-artifacts.js";
 import type { Rigor } from "./rigor.js";
@@ -33,6 +35,13 @@ export const FINISH_CONTRACT_DECLARED_CHECKS_PREFIX = " Declared checks: ";
 
 /** Appended for checks the caller declared for this run only (`run --verify`), which `verify` does not know. */
 export const FINISH_CONTRACT_RUN_CHECKS_PREFIX = " Run checks: ";
+
+/**
+ * Appended for changed files a successful command ran after their last edit,
+ * such as `python3 src/clean.py`. Running a file is not a check, so the change
+ * stays unverified, but the footer must not say nothing ran.
+ */
+export const FINISH_CONTRACT_RAN_CHANGED_PREFIX = " Ran after the edit: ";
 
 export const FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE =
 	"[Clio Coder] finish-contract advisory: checks passed; behavior coverage unverified. Passing receipts establish the recorded checks, not every changed behavior. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
@@ -342,10 +351,11 @@ function assessMutationFinishContract(input: FinishContractInput): FinishContrac
 		const ids = [...new Set(declared.filter((check) => check.session === session).map((check) => check.id))];
 		return ids.length > 0 ? `${prefix}${ids.join(", ")}.` : "";
 	};
+	const ran = changedFilesRunAfterEdit(window, mutatedPaths, input.workspaceRoot);
 	return {
 		kind: "engage",
 		reason: "unvalidated_mutation",
-		message: `${FINISH_CONTRACT_ADVISORY_MESSAGE}${named(FINISH_CONTRACT_DECLARED_CHECKS_PREFIX, false)}${named(FINISH_CONTRACT_RUN_CHECKS_PREFIX, true)}`,
+		message: `${FINISH_CONTRACT_ADVISORY_MESSAGE}${named(FINISH_CONTRACT_DECLARED_CHECKS_PREFIX, false)}${named(FINISH_CONTRACT_RUN_CHECKS_PREFIX, true)}${ran.length > 0 ? `${FINISH_CONTRACT_RAN_CHANGED_PREFIX}${ran.join(", ")}.` : ""}`,
 		evidence: [],
 		mutatedPaths,
 	};
@@ -963,6 +973,97 @@ function bashExecutionDeclaredEvidence(
 		check: check.id,
 		...(turnId !== null ? { turnId } : {}),
 	}));
+}
+
+/**
+ * The changed files a successful command ran after their last edit: the
+ * script of an interpreter (`python3 -B src/clean.py`) or a command word with a
+ * path (`./run.sh`). A call that both edits and runs a file does not count, so
+ * the run is known to postdate the edit.
+ */
+function changedFilesRunAfterEdit(
+	window: ReadonlyArray<unknown>,
+	mutatedPaths: ReadonlyArray<string>,
+	workspaceRoot: string | undefined,
+): string[] {
+	const root = resolve(workspaceRoot ?? ".");
+	const lastEdit = new Map<string, number>();
+	const lastRun = new Map<string, number>();
+	const edits = new Map<string, string[]>();
+	const runs = new Map<string, string[]>();
+	const mark = (marks: Map<string, number>, paths: ReadonlyArray<string>, index: number) => {
+		for (const path of paths) marks.set(resolve(root, path), index);
+	};
+	for (const [index, entry] of capabilityEntries(window).entries()) {
+		const bashMutation = bashExecutionMutationPaths(entry);
+		if (bashMutation !== null) {
+			const record = asRecord(entry);
+			mark(lastEdit, bashMutation.paths, index);
+			mark(lastRun, executedFiles(String(record?.command), record?.cwd, root), index);
+			continue;
+		}
+		const call = mutatingToolCall(entry);
+		if (call !== null) edits.set(call.toolCallId, call.paths);
+		const record = asRecord(entry);
+		const payload = record?.kind === "message" && record.role === "tool_call" ? asRecord(record.payload) : null;
+		if (payload !== null && stringFromFirst(payload, ["name", "toolName", "tool"]) === ToolNames.Bash) {
+			const args = asRecord(payload.args ?? payload.arguments ?? payload.input);
+			const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
+			if (typeof args?.command === "string" && toolCallId !== null)
+				runs.set(toolCallId, executedFiles(args.command, args.cwd, root));
+			continue;
+		}
+		const resultId = successfulToolResultId(entry);
+		if (resultId === null) continue;
+		mark(lastEdit, edits.get(resultId) ?? [], index);
+		mark(lastRun, runs.get(resultId) ?? [], index);
+	}
+	return mutatedPaths.filter((path) => {
+		const key = resolve(root, path);
+		return (lastRun.get(key) ?? -1) > (lastEdit.get(key) ?? Number.POSITIVE_INFINITY);
+	});
+}
+
+const SCRIPT_INTERPRETERS =
+	/^(?:python[0-9.]*|pypy[0-9.]*|node|bash|sh|zsh|dash|ruby|perl|php|Rscript|deno|bun|tsx|ts-node|lua|julia)$/u;
+/** Interpreter options that run inline code or a module rather than a script file. */
+const INLINE_CODE_FLAGS = new Set(["-c", "-e", "-m", "-p", "--eval", "--print"]);
+const RUN_PREFIX_WORDS = new Set(["command", "env", "exec", "nice", "nohup", "time"]);
+
+/** The files a shell command executes by name, resolved against its cwd and any literal `cd` before them. */
+function executedFiles(command: string, cwd: unknown, root: string): string[] {
+	let directory = resolve(root, typeof cwd === "string" ? cwd : ".");
+	const files: string[] = [];
+	for (const segment of splitSegments(scanShellLike(command))) {
+		const words = shellCommandWords(segment)
+			.filter((token) => !token.substitutions?.length && !token.homeRelative && !/[$`]/u.test(token.value))
+			.map((token) => token.value);
+		let at = 0;
+		while (at < words.length) {
+			const word = words[at] as string;
+			if (SHELL_ASSIGNMENT.test(word) || RUN_PREFIX_WORDS.has(word)) at += 1;
+			else if (word === "timeout") at += 2;
+			else break;
+		}
+		const head = words[at];
+		if (head === undefined) continue;
+		if (head === "cd") {
+			if (words[at + 1] !== undefined) directory = resolve(directory, words[at + 1] as string);
+			continue;
+		}
+		let script: string | undefined;
+		if (SCRIPT_INTERPRETERS.test(head.slice(head.lastIndexOf("/") + 1))) {
+			for (let index = at + 1; index < words.length; index += 1) {
+				const word = words[index] as string;
+				if (INLINE_CODE_FLAGS.has(word)) break;
+				if (word.startsWith("-") || (index === at + 1 && word === "run")) continue;
+				script = word;
+				break;
+			}
+		} else if (head.includes("/")) script = head;
+		if (script !== undefined) files.push(resolve(directory, script));
+	}
+	return files;
 }
 
 /** Where in the window each successful mutation settled, keyed by the call that made it. */

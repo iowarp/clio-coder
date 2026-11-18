@@ -28,6 +28,7 @@ import {
 	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_DECLARED_CHECKS_PREFIX,
 	FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE,
+	FINISH_CONTRACT_RAN_CHANGED_PREFIX,
 	FINISH_CONTRACT_RUN_CHECKS_PREFIX,
 } from "../domains/safety/finish-contract.js";
 import type { SessionContract } from "../domains/session/contract.js";
@@ -265,6 +266,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			};
 			const declared = named(FINISH_CONTRACT_DECLARED_CHECKS_PREFIX);
 			const runChecks = named(FINISH_CONTRACT_RUN_CHECKS_PREFIX);
+			const ran = named(FINISH_CONTRACT_RAN_CHANGED_PREFIX);
 			const hint =
 				declared.length > 0
 					? `; run verify ${declared[0]}${declared.length > 1 ? ` (or ${declared.slice(1).join(", ")})` : ""}`
@@ -273,7 +275,9 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 						: "";
 			deps.emitFooterNotice(
 				"warning",
-				`Clio changed files but ran no check on them afterwards${hint}`,
+				ran.length > 0
+					? `Clio changed files and ran ${ran[0]}${ran.length > 1 ? ` and ${ran.length - 1} more` : ""} afterwards, but no recognized check covered the change${hint}`
+					: `Clio changed files but ran no check on them afterwards${hint}`,
 				"finish.unverified",
 			);
 			return;
