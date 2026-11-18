@@ -105,6 +105,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- `git --no-pager diff`, `git -P log`, `git -c color.ui=never status`, `git ls-files`, `rev-list`, `describe`, `cat-file -p`, `ls-tree`, `git grep` and `git blame` read as inspection and no longer clear a green check, while `-C`, `--paginate` and helper-naming `-c` keys stay refused (x6-2).
+- `pnpm lint`, `yarn lint`, `pnpm typecheck`, `pnpm --filter web test`, `pnpm -r test` and `yarn workspace web test` count as checks; a selected workspace keeps its selectors in its identity, and `pnpm test -u` or `pnpm --filter web lint:fix` still count as changes (x6-4).
+- A runtime loader (`--import`, `--require`, `--loader`) on `node --test` is refused in either order, and when passed to a package script, so those runs no longer credit a pass (x6-5).
 - `clio-coder evidence` now reads a main-agent run's quality from its sealed typed checks, so a green verify on the final tree reads pass, not unmeasured (bt-27 c27d).
 - A run that no review judged no longer carries the `independent-review` tag, which contradicted its "not independently reviewed" trust line (bt-27 c27d).
 - A System One typed-wire call (TypeSafe Jev and the other decide() wires) now records cache read and cache write as a known zero, and `telemetry tokens` no longer blanks a session's cached/fresh when one call lacks a cache-read count: cached and fresh sum the calls with a split, the total stays exact, and the rest is named "N without split" (optional `unsplitCalls` in the --json report and campaign metrics) (bt-42).
