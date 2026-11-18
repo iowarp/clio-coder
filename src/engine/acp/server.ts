@@ -1518,6 +1518,15 @@ function assistantText(message: unknown): string {
 	return contentText(message.content);
 }
 
+/** Text blocks joined as their deltas stream and a load replays them: no separator, so a `message_end` tail lines up (x8-3). */
+function assistantStreamedText(message: unknown): string {
+	if (!isRecord(message) || message.role !== "assistant" || !Array.isArray(message.content))
+		return assistantText(message);
+	return message.content
+		.map((block) => (isRecord(block) && block.type === "text" && typeof block.text === "string" ? block.text : ""))
+		.join("");
+}
+
 function assistantThinking(message: unknown): string {
 	if (!isRecord(message) || message.role !== "assistant" || !Array.isArray(message.content)) return "";
 	return message.content
@@ -2093,7 +2102,7 @@ function handleChatEvent(
 			active.sentThinkingChars = thinking.length;
 			sendSafeChunks(transport, sessionId, active, "agent_thought_chunk", active.thinkingCredentials.push(tail));
 		}
-		const text = assistantText(message);
+		const text = assistantStreamedText(message);
 		if (text.length > active.messageAssistantChars) {
 			const tail = text.slice(active.messageAssistantChars);
 			active.sentAssistantChars += tail.length;
