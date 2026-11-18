@@ -297,7 +297,7 @@ describe("surface capture", () => {
 		// The first run evicts under a short protected tail; the second, without the working set, checkpoints.
 		const settingsFile = path.join(scratch.configDir, "settings.yaml");
 		const settings = [
-			(yaml: string) => yaml.replace("    protectLastSteps: 8", "    protectLastSteps: 2"),
+			(yaml: string) => yaml.replace("    protectLastSteps: 8", "    protectLastSteps: 3"),
 			(yaml: string) => yaml.replace(/(\n {2}workingSet:\n(?: {4}.*\n)*?) {4}enabled: true\n/, "$1    enabled: false\n"),
 		];
 		for (const [index, prompt] of Object.keys(turns).entries()) {
@@ -449,4 +449,122 @@ describe("surface capture", () => {
 			strictEqual(reopenedSystem, liveSystem, "the reopen's next request keeps the live system prompt");
 		});
 	}
+
+	it("acp: a resumed session's S1 and S3 report the figure the next request carries (bt-47 D1)", {
+		timeout: 300_000,
+	}, async (t) => {
+		const files = ["a.txt", "b.txt", "c.txt", "d.txt"];
+		const reasoning = "The next note in the operator's order comes next; one read, in full. ".repeat(30);
+		// A request without tools is the summary call; the first turn reads the notes one call at a time.
+		const server = await startCaptureServer((request) => {
+			if (!Array.isArray(request.body.tools)) return { text: syntheticCompactionSummary("read the notes") };
+			const elements = wireElements(request);
+			const opened = elements.findLastIndex((element) => element.startsWith("user:"));
+			const first = elements[opened]?.includes("read the notes") === true;
+			const next = first ? files[elements.slice(opened + 1).filter((e) => e.startsWith("result:")).length] : undefined;
+			return next
+				? { reasoning, calls: [{ id: `call_${next}`, name: "read", arguments: { path: next } }] }
+				: { reasoning, text: "done" };
+		});
+		const scratch = headlessScratch("cf-d1-");
+		t.after(async () => {
+			await server.close();
+			scratch.cleanup();
+		});
+		seedOpenAICompatToolOrchestrator(scratch.configDir, server.url, "yolo");
+		const settingsFile = path.join(scratch.configDir, "settings.yaml");
+		writeFileSync(
+			settingsFile,
+			readFileSync(settingsFile, "utf8")
+				// A reasoning route, so the resumed request replays the kept turns' reasoning_content as bt3's did.
+				.replace(
+					"      vision: true\n      contextWindow: 32768",
+					"      vision: true\n      reasoning: true\n      contextWindow: 262144",
+				)
+				.replace("    protectLastSteps: 8", "    protectLastSteps: 3")
+				.replace(
+					"    wireModels:\n      - mock-model",
+					"    cache:\n      retention: none\n    wireModels:\n      - mock-model",
+				),
+		);
+		const project = path.join(scratch.root, "project");
+		mkdirSync(project);
+		const line = `${"n".repeat(67)}\n`;
+		for (const [index, file] of files.entries())
+			writeFileSync(path.join(project, file), line.repeat(Math.ceil(((index < 2 ? 8 : 28) * 1024) / line.length)));
+		const env = Object.fromEntries(
+			Object.entries(scratch.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+		);
+		const cli = tappedCli(path.join(scratch.root, "session-capture.jsonl"));
+		let sessionId = "";
+		let used: number[] = [];
+		let ledgerUsed = -1;
+		for (const reopen of [false, true]) {
+			// The live process reads on a large window; the reopen serves the 32k window bt3 resumed on.
+			if (reopen)
+				writeFileSync(
+					settingsFile,
+					readFileSync(settingsFile, "utf8").replace("contextWindow: 262144", "contextWindow: 32768"),
+				);
+			const acp = createStdioTransport(
+				process.execPath,
+				[...cli.node, cli.cli, "--no-context-files", "--no-skills", "acp"],
+				{
+					cwd: project,
+					env,
+				},
+			);
+			t.signal.addEventListener("abort", () => void acp.forceTerminate(), { once: true });
+			used = [];
+			acp.onNotification("session/update", (params) => {
+				const update = (params as { update?: { sessionUpdate?: string; used?: number } }).update;
+				if (update?.sessionUpdate === "usage_update" && typeof update.used === "number") used.push(update.used);
+			});
+			try {
+				await acp.request("initialize", { protocolVersion: 1 });
+				if (!reopen)
+					({ sessionId } = await acp.request<{ sessionId: string }>("session/new", { cwd: project, mcpServers: [] }));
+				else await acp.request("session/load", { sessionId, cwd: project, mcpServers: [] });
+				const turn = await acp.request<{ stopReason: string }>("session/prompt", {
+					sessionId,
+					prompt: [{ type: "text", text: reopen ? "say done" : "read the notes" }],
+				});
+				strictEqual(turn.stopReason, "end_turn");
+				await new Promise((resolve) => setImmediate(resolve));
+				ledgerUsed = (await acp.request<{ usedTokens: number }>(ACP_CONTEXT_LEDGER_METHOD, { sessionId })).usedTokens;
+			} finally {
+				await acp.forceTerminate();
+			}
+		}
+		const sessionsRoot = path.join(scratch.stateDir, "sessions");
+		const [cwdHash = ""] = readdirSync(sessionsRoot);
+		const rows = readFileSync(path.join(sessionsRoot, cwdHash, sessionId, "current.jsonl"), "utf8")
+			.trim()
+			.split("\n")
+			.map((entry) => JSON.parse(entry) as Record<string, unknown>);
+		const folds = rows.filter((row) => row.kind === "contextEviction" || row.kind === "compactionSummary");
+		const main = server.requests.filter((request) => Array.isArray(request.body.tools));
+		const next = main.at(-1) as CapturedRequest;
+		const chars = JSON.stringify(next.body.messages).length + JSON.stringify(next.body.tools).length;
+		// The live process folds nothing on its large window; the reopen's first submit runs S1, then S3.
+		deepStrictEqual(
+			folds.map((row) => row.kind),
+			["contextEviction", "compactionSummary"],
+		);
+		const [eviction, summary] = folds as Array<{ tokensBefore: number; tokensAfter: number }>;
+		ok(eviction && summary);
+		// bt3 drv-m2d: S3 before (17422) sat below S1 after (25869) because S3 priced the seeded fallback prompt.
+		strictEqual(summary.tokensBefore, eviction.tokensAfter, "S3 starts from the request S1 left");
+		// bt3: the usage_update after the eviction read 18020 against the eviction's 25855.
+		ok(used.includes(eviction.tokensAfter), `a usage_update reads the eviction's after ${eviction.tokensAfter}: ${used}`);
+		strictEqual(used.at(-1), ledgerUsed, "usage_update and /context read one figure");
+		// bt3: the card read 11.3K against a 20450-token request. The card and the view price the request the reopen
+		// sent, within chars/4 over its JSON body.
+		const sent = Math.ceil(chars / 4);
+		for (const [label, figure] of [
+			["S3 after", summary.tokensAfter],
+			["/context", ledgerUsed],
+		] as const)
+			ok(Math.abs(figure - sent) <= sent * 0.05, `${label} ${figure} prices the next request (${sent})`);
+	});
 });

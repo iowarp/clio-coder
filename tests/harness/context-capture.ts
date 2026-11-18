@@ -61,15 +61,15 @@ export interface ScriptedCall {
 /**
  * One reply: plain text, tool calls (with leading text on chat completions only), a reasoning-only reply cut by the
  * output cap (chat completions only), an HTTP error with that status and message, or a connection dropped before any
- * response.
+ * response. `reasoning` streams as `reasoning_content` ahead of the reply, on chat completions only.
  */
 export type CaptureReply =
-	| { text: string }
-	| { calls: ScriptedCall[]; text?: string }
+	| { text: string; reasoning?: string }
+	| { calls: ScriptedCall[]; text?: string; reasoning?: string }
 	| { thinkingOnlyLength: string }
 	| { status: number; error: string }
 	| { drop: true };
-type StreamReply = { text: string } | { calls: ScriptedCall[]; text?: string };
+type StreamReply = { text: string; reasoning?: string } | { calls: ScriptedCall[]; text?: string; reasoning?: string };
 
 export type CaptureScript = (request: CapturedRequest, index: number) => CaptureReply;
 
@@ -101,9 +101,12 @@ function completionsFrames(reply: StreamReply | { thinkingOnlyLength: string }, 
 			chunk({ role: "assistant", reasoning_content: reply.thinkingOnlyLength }),
 			{ ...chunk({}, "length"), usage: USAGE },
 		];
+	const reasoning =
+		reply.reasoning === undefined ? [] : [chunk({ role: "assistant", reasoning_content: reply.reasoning })];
 	if (!("calls" in reply))
-		return [chunk({ role: "assistant", content: reply.text }), { ...chunk({}, "stop"), usage: USAGE }];
+		return [...reasoning, chunk({ role: "assistant", content: reply.text }), { ...chunk({}, "stop"), usage: USAGE }];
 	return [
+		...reasoning,
 		chunk({
 			role: "assistant",
 			...(reply.text === undefined ? {} : { content: reply.text }),
@@ -239,8 +242,11 @@ export async function startCaptureServer(script: CaptureScript): Promise<Capture
 			return;
 		}
 		const model = typeof body.model === "string" ? body.model : "capture";
-		if ("thinkingOnlyLength" in reply && family !== "openai-completions")
-			throw new Error("capture: a reasoning-only reply is scripted for chat completions only");
+		if (
+			("thinkingOnlyLength" in reply || ("reasoning" in reply && reply.reasoning !== undefined)) &&
+			family !== "openai-completions"
+		)
+			throw new Error("capture: a reasoning reply is scripted for chat completions only");
 		const frames =
 			family === "openai-completions"
 				? completionsFrames(reply, model)
