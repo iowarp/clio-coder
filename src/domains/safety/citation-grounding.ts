@@ -228,8 +228,8 @@ function buildCitationGroundingMessage(unbacked: ReadonlyArray<LineCitation>): s
 		`${CITATION_CHECK_PREFIX} ${named}${rest > 0 ? ` and ${rest} more` : ""} cite line numbers no tool printed; ` +
 		"those files were read without line numbers, so the ranges were counted or recalled. Before answering, " +
 		"re-read each cited region with read line_numbers=true (grep the symbol first to find its offset) and correct " +
-		"the ranges, or cite the symbol name without a line number. Keep the rest of the answer as it is; this check " +
-		"asks for no new analysis."
+		"the ranges, or cite the symbol name without a line number. Then write the full answer again with the corrected " +
+		"citations, not only the corrections; this check asks for no new analysis."
 	);
 }
 
