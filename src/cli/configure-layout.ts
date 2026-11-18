@@ -49,7 +49,7 @@ export const CONFIGURE_CATEGORY_CHOICES: readonly CategoryChoice[] = [
 	{
 		category: "cloud-api",
 		label: "A provider account or API",
-		summary: "Anthropic, OpenAI, Google, OpenRouter, Groq, Mistral, Bedrock, ALCF, or a compatible API",
+		summary: "Anthropic, OpenAI, Google, OpenRouter, Groq, Mistral, ALCF, or a compatible API",
 		aliases: ["cloud", "api"],
 	},
 	{

@@ -26,6 +26,9 @@ const bedrockRuntime: RuntimeDescriptor = {
 	tier: "cloud",
 	apiFamily: "bedrock-converse-stream",
 	auth: "aws-sdk",
+	// Hidden from configure and its listings (maintainer, 2026-11-17: no Bedrock users, not a priority).
+	// An existing target naming `bedrock` still resolves and runs.
+	hidden: true,
 	defaultCapabilities,
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null) {
 		return synthesizeBedrockModel({ target, wireModelId, kb, defaultCapabilities });

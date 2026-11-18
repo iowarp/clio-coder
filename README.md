@@ -301,7 +301,7 @@ targets, models and thinking levels, and `/model` switches the conversation.
 | Local and self-hosted | Ollama, LM Studio, llama.cpp, vLLM, SGLang, Lemonade |
 | Gateways | LiteLLM, any OpenAI-compatible or Anthropic-compatible API |
 | Institutional | Argonne ALCF Sophia and Metis through Globus |
-| Cloud APIs | OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, DeepSeek, Amazon Bedrock, Inception |
+| Cloud APIs | OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, DeepSeek, Inception |
 | Subscriptions | ChatGPT (`openai-codex`), Claude (`anthropic-max`), GitHub Copilot (`copilot-sdk`) |
 | Other coding agents, as workers | Claude Code, Codex, OpenCode, Pi, Antigravity |
 

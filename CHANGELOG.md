@@ -35,6 +35,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - C3: dispatch and collect results are compact by default: each run keeps its facts, its trust or verdict line, its evidence notices and a 2000-byte answer excerpt that names `monitor(mode="record", run_id=...)`, which now leads with the whole answer. Setting `max_output_bytes` returns the full form.
 - C4: an extension tool's interview result records the checkpoint ids it put to the author in its details, kept on the session ledger even when the interview is cancelled.
 - Docs: the extension, prompt template, settings, tool and CLI guides and the extension-authoring skill (0.1.3) document the 0.8.4 features (WTF-P 0.8.3 A1, B1 to B6, C1 to C5), `ignorable` and `turnPolicy.when` included. `docs/architecture/context-engine.md` gains an Observation aging section (C3).
+- Amazon Bedrock is hidden from `clio-coder configure` and its provider listings. A target that already names the `bedrock` runtime still resolves and runs.
 
 ### Fixed
 
