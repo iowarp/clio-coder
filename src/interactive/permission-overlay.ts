@@ -259,6 +259,7 @@ function permissionDecisionPresentation(view: ApprovalRequestView): DecisionPres
 					: { kind: "autonomy", level: view.axis.level },
 			origin: view.origin,
 			...(view.exposure !== undefined ? { exposure: view.exposure } : {}),
+			...(view.sandboxed === true ? { sandboxed: true as const } : {}),
 		}),
 	);
 }
@@ -346,6 +347,9 @@ function permissionChoices(
 ): Parameters<typeof choiceRows>[1] {
 	const stopWords = "ends the turn";
 	const draftNote = hasDraft ? ` · clear your draft with Backspace first` : "";
+	// Approving answers the ask and leaves the sandbox as it is: a write outside its roots fails all the same.
+	const runs =
+		view.sandboxed === true ? "runs this one call in the sandbox; outside writes still fail" : "runs this one call";
 	if (presentation.tier === "worker") {
 		// An approval is never remembered, only a denial (`deniedEscalations` in the
 		// worker runtime, F8). The stop key does not reach the worker's process
@@ -355,7 +359,7 @@ function permissionChoices(
 			{
 				key: "Enter",
 				verb: "allow",
-				consequence: `runs this one call; an identical call asks again${draftNote}`,
+				consequence: `${runs}; an identical call asks again${draftNote}`,
 			},
 			{ key: "Esc", verb: "deny", consequence: "skips it; an identical call in this run is refused without asking" },
 			{
@@ -399,7 +403,7 @@ function permissionChoices(
 		];
 	}
 	return [
-		{ key: "Enter", verb: "allow", consequence: `runs this one call${draftNote}` },
+		{ key: "Enter", verb: "allow", consequence: `${runs}${draftNote}` },
 		{ key: "Esc", verb: "deny", consequence: "skips it" },
 		{ key: permissionKeyLabel(PERMISSION_STOP_KEY), verb: "stop", consequence: stopWords, tone: "error" },
 	];

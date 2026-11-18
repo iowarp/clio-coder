@@ -1247,6 +1247,56 @@ test("a worker card with a parent-owned window offers the hold, then says it is 
 	match(owned, /ends the main turn, which also stops this worker/u);
 });
 
+test("an approved worker shell call is not promised outside its sandbox: the card says writes there still fail", () => {
+	const bus = createTelemetryHub();
+	const views: ApprovalRequestView[] = [];
+	let state: OverlayState = "closed";
+	const lifecycle = createOverlayPermissionLifecycle({
+		bus,
+		dispatch: { workerRunShellConfined: (runId) => runId === "confined" },
+		getAutonomy: () => "default",
+		getOverlayState: () => state,
+		openPermissionOverlay: (view) => {
+			views.push(view);
+			state = "permission-confirm";
+			return true;
+		},
+		closeOverlay: () => {
+			state = "closed";
+			lifecycle.onPermissionOverlayClosed();
+		},
+		appendNotice: () => {},
+		applyApprovalState: () => {},
+		requestRender: () => {},
+		stopActiveTurn: () => {},
+	});
+	const ask = (requestId: string, runId: string, tool: string): string => {
+		bus.emit("approval.requested", {
+			tool,
+			actionClass: "system_modify",
+			requestId,
+			requestedBy: runId,
+			origin: `worker:${runId}`,
+			agentId: "coder",
+			target: "touch ../outside-a.txt",
+			timeoutMs: 120_000,
+			fallback: "deny",
+			escalation: true,
+		});
+		lifecycle.cancel();
+		const view = views.at(-1);
+		if (view === undefined) throw new Error("no card opened");
+		return createPermissionOverlayBody(view)
+			.render(200)
+			.map((row) => stripTerminalSequences(row).trim())
+			.join(" ");
+	};
+	match(ask("a", "confined", "bash"), /\[Enter\] allow\s+runs this one call in the sandbox; outside writes still fail/u);
+	doesNotMatch(ask("b", "direct", "bash"), /sandbox/u, "a worker whose commands may run directly is promised nothing");
+	doesNotMatch(ask("c", "confined", "write"), /sandbox/u, "a native write is not spawned through the sandbox");
+	lifecycle.dispose();
+});
+
 test("a key on a worker card holds that ask, restarts the ones queued behind it, and the expiry says it was held", () => {
 	const bus = createTelemetryHub();
 	const holds: string[] = [];
