@@ -487,7 +487,6 @@ import type { RunCallUsage, RunUsageFacts } from "./run-call-usage.js";
 import { createRunCallUsage, unobservedRunUsageFacts } from "./run-call-usage.js";
 import { defaultRunEventJournal } from "./run-event-journal.js";
 import { attachRunEventJournalBridge, type RunEventJournalBridge } from "./run-event-journal-bridge.js";
-import { readRunLiveSpend, writeRunLiveSpend } from "./run-feed.js";
 import type { VerifyCallOutcome, VerifyCallStart } from "./run-findings.js";
 import {
 	createRunResultQuality,
@@ -883,9 +882,9 @@ export interface DispatchBundleOptions {
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
 /**
- * The least time between two writes of live workers' spend files. Spend lives there, not in runs.json, so a streaming
- * worker never rewrites the ledger; heartbeat status changes persist the ledger at this pace too, settlement at once.
- * Budget gates read the in-memory meters, so only another process's view of live spend lags.
+ * The least time between two persists a live worker's spend alone asks for. Each one rewrites the whole ledger, so a
+ * streaming worker paid that every heartbeat; lifecycle changes and settlement still persist at once, and budget
+ * gates read the in-memory meters, so only another process's view of live spend lags.
  */
 const LIVE_USAGE_PERSIST_INTERVAL_MS = 10_000;
 const DEFAULT_RESILIENCE_COOLDOWN_MS = 15_000;
@@ -5639,13 +5638,8 @@ export function createDispatchBundle(
 	 * reconciler from killing a dead worker.
 	 */
 	let liveLedgerWrite: Promise<void> | null = null;
-	let liveLedgerDirty = false;
-	let liveLedgerPersistedAt = Number.NEGATIVE_INFINITY;
-	let liveSpendWrite: Promise<void> | null = null;
-	let liveSpendPersistedAt = Number.NEGATIVE_INFINITY;
-	/** The spend each live run's file was last asked to hold; a run absent here holds its row's. */
-	const liveSpendSeen = new Map<string, RunUsageFacts>();
-	const liveSpendDirty = new Set<string>();
+	let liveUsageDirty = false;
+	let liveUsagePersistedAt = Number.NEGATIVE_INFINITY;
 
 	function checkActiveHeartbeats(): void {
 		if (!ledger) return;
@@ -5657,13 +5651,13 @@ export function createDispatchBundle(
 			// Finalizers keep active entries while persisting their sealed receipt.
 			if (!row || row.endedAt !== null) continue;
 			const spend = meterSpend(run.meter);
-			if (!isDeepStrictEqual(liveSpendSeen.get(run.runId) ?? row.spend, spend)) {
-				liveSpendSeen.set(run.runId, spend);
-				liveSpendDirty.add(run.runId);
+			const spendSums = meterSums(run.meter);
+			if (!isDeepStrictEqual(row.spend, spend) || !isDeepStrictEqual(row.spendSums, spendSums)) {
+				ledger.update(run.runId, { spend, spendSums });
+				liveUsageDirty = true;
 			}
 			if (run.awaitingOperator === true) {
 				// The orchestrator is the live party; keep the row fresh and unclassified.
-				if (row.status !== "running") liveLedgerDirty = true;
 				ledger.update(run.runId, {
 					status: "running",
 					pid: process.pid,
@@ -5694,7 +5688,6 @@ export function createDispatchBundle(
 				status: heartbeatRunStatus(status),
 				heartbeatAt: heartbeatIso(run.heartbeatAt),
 			};
-			if (row.status !== patch.status) liveLedgerDirty = true;
 			ledger.update(run.runId, patch);
 			// Node staleness display feeds off the freshest worker heartbeat.
 			if (status === "alive" && run.node !== null && run.node.kind === "ssh") {
@@ -5711,60 +5704,25 @@ export function createDispatchBundle(
 				// child may have exited between classification and reap attempt
 			}
 		}
-		for (const runId of liveSpendSeen.keys()) if (!active.has(runId)) liveSpendSeen.delete(runId);
 		// Coalesce all changed runs into one write per interval, with no growing queue.
 		// Retry on a later tick after a write failure or an update during a write.
 		if (
-			liveSpendDirty.size > 0 &&
-			liveSpendWrite === null &&
-			tickMonotonic - liveSpendPersistedAt >= LIVE_USAGE_PERSIST_INTERVAL_MS
-		) {
-			liveSpendPersistedAt = tickMonotonic;
-			const writes = [...liveSpendDirty].flatMap((runId) => {
-				const run = active.get(runId);
-				const row = ledger?.peek(runId);
-				if (run === undefined || !row || row.endedAt !== null) return [];
-				const live = { spend: meterSpend(run.meter), spendSums: meterSums(run.meter), heartbeatAt: row.heartbeatAt };
-				return [
-					writeRunLiveSpend(runId, live).catch((error: unknown) => {
-						liveSpendDirty.add(runId);
-						reportDispatchDiagnostic("persist live run usage", error);
-					}),
-				];
-			});
-			liveSpendDirty.clear();
-			liveSpendWrite = Promise.all(writes)
-				.then(() => {})
-				.finally(() => {
-					liveSpendWrite = null;
-				});
-		}
-		if (
-			liveLedgerDirty &&
+			liveUsageDirty &&
 			liveLedgerWrite === null &&
-			tickMonotonic - liveLedgerPersistedAt >= LIVE_USAGE_PERSIST_INTERVAL_MS
+			tickMonotonic - liveUsagePersistedAt >= LIVE_USAGE_PERSIST_INTERVAL_MS
 		) {
-			liveLedgerDirty = false;
-			liveLedgerPersistedAt = tickMonotonic;
+			liveUsageDirty = false;
+			liveUsagePersistedAt = tickMonotonic;
 			liveLedgerWrite = ledger
 				.persist()
 				.catch((error: unknown) => {
-					liveLedgerDirty = true;
-					reportDispatchDiagnostic("persist live run status", error);
+					liveUsageDirty = true;
+					reportDispatchDiagnostic("persist live run usage", error);
 				})
 				.finally(() => {
 					liveLedgerWrite = null;
 				});
 		}
-	}
-
-	/** A live row's spend where it is kept now: this process's meter, else its spend file, else the row's own. */
-	function withLiveSpend(row: RunEnvelope): RunEnvelope {
-		if (row.endedAt !== null) return row;
-		const run = active.get(row.id);
-		const live =
-			run !== undefined ? { spend: meterSpend(run.meter), spendSums: meterSums(run.meter) } : readRunLiveSpend(row.id);
-		return live === null ? row : { ...row, spend: live.spend, spendSums: live.spendSums };
 	}
 
 	/**
@@ -12221,11 +12179,10 @@ export function createDispatchBundle(
 			};
 		},
 		listRuns(status, where) {
-			const rows = requireLedger().list({
+			return requireLedger().list({
 				...(status ? { status } : {}),
 				...(where ? { where } : {}),
 			});
-			return Object.freeze(rows.map(withLiveSpend));
 		},
 		subscribeChanges(listener) {
 			const unsubscribes = [
@@ -12247,8 +12204,8 @@ export function createDispatchBundle(
 			};
 		},
 		getRun(runId) {
-			const row = ledger?.get(runId) ?? null;
-			return row === null ? null : withLiveSpend(row);
+			if (!ledger) return null;
+			return ledger.get(runId);
 		},
 		observedRunWrites(runId) {
 			// A run this process never finalized, or finalized long enough ago to
