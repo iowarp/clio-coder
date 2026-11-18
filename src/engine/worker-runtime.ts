@@ -1594,11 +1594,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						tracking.start(currentModel.api, attempt.options?.transport);
 						const lockedRound = synthesisToolLock || helperTerminalPhase;
 						const { reasoning: _reasoning, thinkingBudgets: _thinkingBudgets, ...thinkingOffOptions } = attempt.options ?? {};
-
+						// Codex renders the reasoning effort ahead of the whole input, so a locked round there keeps
+						// the run's level; dropping it made the round miss every cached token.
 						const source = boundWorkerResponse(
 							currentModel,
 							attemptContext,
-							lockedRound && !codexToolChanges ? thinkingOffOptions : attempt.options,
+							lockedRound && currentModel.api !== "openai-codex-responses" ? thinkingOffOptions : attempt.options,
 							{
 								locked: lockedRound,
 								responseSeconds: workerSettings.safety.limits.workerResponseSeconds,
