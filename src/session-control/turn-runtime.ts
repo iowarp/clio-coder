@@ -993,6 +993,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						layoutVersion: PROMPT_MANIFEST_VERSION,
 						tokenEstimate: Math.max(0, Math.round(compiled.tokenEstimate)),
 						sections: compiled.sections.length,
+						...(compile ? { compiledAt: compile.at } : {}),
 						...(localRuntime.agent.state.thinkingLevel
 							? { thinkingLevel: String(localRuntime.agent.state.thinkingLevel) }
 							: {}),

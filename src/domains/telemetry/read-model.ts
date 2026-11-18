@@ -3886,9 +3886,12 @@ export function promptCompiles(
 		const structure = resolve(record.data.structure);
 		if (!structure?.compile) return [];
 		seen.add(record.data.structure.id);
+		// Objects written by earlier builds still hash their compile time.
+		const legacyAt = (structure.compile as { at?: unknown }).at;
 		return [
 			{
 				...structure.compile,
+				at: record.data.compiledAt ?? (typeof legacyAt === "string" ? legacyAt : record.t),
 				sections: structure.sections,
 				fragments: structure.fragments.map((fragment) => {
 					if (fragment.relPath === undefined) throw new Error("prompt fragment path is unavailable");
