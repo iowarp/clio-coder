@@ -1033,6 +1033,9 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 		["golangci-lint run ./...", "check"],
 		["staticcheck ./...", "check"],
 		["golangci-lint run --fix ./...", "mutation"],
+		// A writer behind `pnpm|yarn <bin>` writes as it does behind `exec` (x10-4).
+		["pnpm prettier -w .", "mutation"],
+		["pnpm tsc", "mutation"],
 		// Neither a known check, reader nor writer: it neither settles nor clears.
 		["node codemod.mjs", "unknown"],
 		["python script.py", "unknown"],

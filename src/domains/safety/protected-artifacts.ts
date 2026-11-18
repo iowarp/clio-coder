@@ -1761,6 +1761,11 @@ function writerStep(executable: string, args: ReadonlyArray<string>): boolean {
 		if (args[0] === "dlx" && typeof args[1] === "string" && !args[1].startsWith("-"))
 			return writerStep(basenameToken(args[1]), args.slice(2));
 		if (args[0] !== undefined && PACKAGE_WRITES.has(args[0])) return true;
+		// `pnpm prettier -w .` runs the writer `pnpm exec prettier -w .` does (x10-4); anything else falls through, so a
+		// write-capable script name (`pnpm format`) still writes.
+		const bin = packageBinInvocation(executable, args);
+		if (bin !== null && !readOnlyCheckMatch(bin.executable, bin.args) && writerStep(bin.executable, bin.args))
+			return true;
 	}
 	if (TOOLCHAIN_WRITES.get(executable)?.has(args[0] ?? "") === true) return true;
 	if (isPythonExecutable(executable)) {
@@ -3190,13 +3195,24 @@ function packageExecInvocation(
 	return bin === undefined || bin.startsWith("-") ? null : { executable: basenameToken(bin), args: args.slice(at + 1) };
 }
 
-/** The binary `pnpm <bin>` or `yarn <bin>` runs when the first word is no builtin of theirs (`pnpm vitest run`). */
+/** Package-manager commands that run a package script, never a binary. */
+const SCRIPT_RUNNING_COMMANDS: ReadonlySet<string> = new Set(["run", "test", "start"]);
+
+/**
+ * The binary `pnpm <bin>` or `yarn <bin>` runs when the first word is no builtin of theirs (`pnpm vitest run`) and
+ * none of the commands that run a package script (`run`, `test`, `start`).
+ */
 function packageBinInvocation(
 	executable: string,
 	args: ReadonlyArray<string>,
 ): { executable: string; args: ReadonlyArray<string> } | null {
 	const bin = args[0];
-	if (bin === undefined || bin.startsWith("-") || PACKAGE_MANAGER_BUILTINS.get(executable)?.has(bin) !== false)
+	if (
+		bin === undefined ||
+		bin.startsWith("-") ||
+		SCRIPT_RUNNING_COMMANDS.has(bin) ||
+		PACKAGE_MANAGER_BUILTINS.get(executable)?.has(bin) !== false
+	)
 		return null;
 	return { executable: basenameToken(bin), args: args.slice(1) };
 }
