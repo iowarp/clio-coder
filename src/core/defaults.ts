@@ -197,8 +197,7 @@ export interface DurableCompactionSettings {
  * src/domains/context/working-set/defaults.ts.
  *
  *   - enabled: master switch. Off skips eviction and goes straight to summary
- *     compaction (the legacy destructive mask is only reachable through
- *     CLIO_CODER_LEGACY_MASK=1).
+ *     compaction.
  *   - policy: candidate selection rule set.
  *   - target: used/window ratio an applied event batches down to.
  *   - protectLastTurns: recent user turns whose observations are never evicted.

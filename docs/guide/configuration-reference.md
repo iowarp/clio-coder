@@ -389,7 +389,7 @@ Inside `fleet.nodes`, the key `clioEntry` is renamed `clioCoderEntry`. A file th
 | `identity` | Accepted and ignored. |
 | `background.thinkingLevel` | Proactive memory always resolves thinking off. |
 | `theme` | The only registered theme was not read by runtime rendering. |
-| `compaction.excludeLastTurns` and `context.compaction.excludeLastTurns` | Only the temporary legacy mask used it. Use `context.workingSet.protectLastTurns`. |
+| `compaction.excludeLastTurns` and `context.compaction.excludeLastTurns` | Only the retired legacy mask used it. Use `context.workingSet.protectLastTurns`. |
 | `delegation.agents[].permissionTimeoutMs` and `integrations.externalAgents.entries[].permissionTimeoutMs` | A delegated agent's permission ask is decided at once and never waits for the operator. `integrations.externalAgents.defaults.permissionTimeoutMs` still bounds CLIO Coder's own ACP server. |
 | `delegation.agents[].labels` and `integrations.externalAgents.entries[].labels` | Nothing read or displayed external agent labels. |
 | `fleet.decisionProfiles` | System One replaced decision profiles. Name an engine with `systemOne.use`. An empty `{}` is accepted silently. |

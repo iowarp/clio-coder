@@ -5,7 +5,7 @@
  * recent window" the same way, so the arithmetic lives here once.
  *
  * Two horizons, and the window is the narrower of them. The turn horizon is
- * the same cutoff `maskStaleObservations` used before this layer existed:
+ * the same cutoff the retired destructive mask stage used:
  * walk back `protectLastTurns` turn starts. The step horizon walks back
  * `protectLastSteps` assistant messages. Real ledgers put most of a session
  * inside one to four user turns, each with dozens of tool results, so a
