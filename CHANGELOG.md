@@ -39,6 +39,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- P2M-5: memory intervention and guardian are imported from the memory domain directly; the middleware compatibility shims and barrel re-exports are gone.
 - A2: one loop block no longer disables tools for the rest of the turn. The interactive turn locks after three blocks or after the same call is blocked twice, and the other calls of the model response that held the turn's first block still run.
 - B2: an extension hook's `require_tool` naming one of the package's own tools is refused unless the manifest promotes that tool, and the refusal names the `runtime.promote` entry to add. A requirement naming a builtin, an MCP tool or another package's tool behaves as before.
 - C3: dispatch and collect results are compact by default: each run keeps its facts, its trust or verdict line, its evidence notices and a 2000-byte answer excerpt that names `monitor(mode="record", run_id=...)`, which now leads with the whole answer. Setting `max_output_bytes` returns the full form.
@@ -83,6 +84,13 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A yolo floor block's headline names the floor rule that fired (e.g. `bash blocked: yolo-floor-raw-text`) instead of the classifier's action class (bt-12 item 1).
+- `python3 -B -m unittest` and `python -m pytest` with harmless interpreter flags (-B, -u, -I, -X dev, -W error::DeprecationWarning) are recognised as test runners; flags that run code still ask (bt-12 item 7).
+- Streaming and final redaction hide a quoted `sig: '…'` value with no other secret word in the text, and hold an open quoted value whose name sits on the previous line (Astra r10-chat).
+- The turn receipt, the footer's last-turn line and `usage report` now count input as the whole prompt, with cached reads beside it, as `telemetry tokens` does. A 17K prompt no longer reads `in 8` (bt-12 #2, bt-11 #8).
+- Dispatch receipts and the turn summary record `differingResponseModelId` only when the response model really differs from the requested one (bt-12 #5).
+- `/context` labels the compaction ceiling "cleanup ceiling" and hides it when it is at or above a known window, where it bounds nothing (bt-12 #8).
+- `telemetry tokens` notes when calls ran on copilot-sdk, which reports no uncached input, so their fresh input is cache write (bt-12 #12).
 - D3-1: a reproduce reference is sealed at admission, so a run that rewrites its reference fails. D3-5: a reproduce tolerance key that no run reports fails instead of passing unchecked.
 - bt-10: a session resumed with `run --session`, ACP `session/load` or `/resume` compiles the same system prompt as its last turn, so the provider prompt cache survives. Path-scoped project rules ride the turn reminder, the frozen memory section is restored from the ledger, and a new `system_prompt_changed` cold reason names any remaining drift. The copilot-sdk route is not covered yet.
 - bt-13: `--max-context-tokens` below about 41K no longer refuses every request. With no configured output budget the reserved output is at most half the window, auto-compaction counts the same reserve as the admission check, and a refusal names `chat.maxOutputTokens` or `--max-context-tokens` when one of them is the cause.
