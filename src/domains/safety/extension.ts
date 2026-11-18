@@ -1,7 +1,7 @@
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { clearSessionAuthoredFiles } from "../../core/session-authored-files.js";
 import { classify as classifyCall } from "./action-classifier.js";
-import type { SafetyContract, SafetyDecision } from "./contract.js";
+import { type SafetyContract, toSafetyDecision } from "./contract.js";
 import {
 	type CompletionEvaluationInput,
 	completionContext,
@@ -60,39 +60,18 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 		},
 		evaluate(call, posture, scope) {
 			const policy = activePolicyEngine().evaluate(call, posture, scope);
-			const classification = policy.classification;
-
 			if (policy.kind === "block") {
 				context.bus.emit("safety.blocked", {
 					tool: call.tool,
-					actionClass: classification.actionClass,
+					actionClass: policy.classification.actionClass,
 					ruleId: policy.ruleId,
 					posture,
 					rejection: policy.rejection,
 					policySource: policy.policySource,
 					reasonCode: policy.reasonCode,
 				});
-				const decision: SafetyDecision = {
-					kind: "block",
-					classification,
-					rejection: policy.rejection ?? fallbackRejection(policy),
-					policy,
-				};
-				if (policy.match) (decision as { match?: typeof policy.match }).match = policy.match;
-				return decision;
 			}
-			if (policy.kind === "ask") {
-				const decision: SafetyDecision = {
-					kind: "ask",
-					classification,
-					rejection: policy.rejection ?? fallbackRejection(policy),
-					policy,
-				};
-				if (policy.match) (decision as { match?: typeof policy.match }).match = policy.match;
-				return decision;
-			}
-
-			return { kind: "allow", classification, policy };
+			return toSafetyDecision(policy);
 		},
 		observeLoop(key, now) {
 			const [next, verdict] = observeLoop(loopState, key, now ?? Date.now());
@@ -122,12 +101,4 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 	};
 
 	return { extension, contract };
-}
-
-function fallbackRejection(policy: { tool: string; actionClass: string; reasons: ReadonlyArray<string> }) {
-	return {
-		short: `${policy.tool} blocked: ${policy.actionClass}`,
-		detail: policy.reasons.join("\n"),
-		hints: [],
-	};
 }

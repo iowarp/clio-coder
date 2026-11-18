@@ -18,7 +18,7 @@ import {
 import { classify as classifyAction } from "../domains/safety/action-classifier.js";
 import type { AdmissionGitContext } from "../domains/safety/admission.js";
 import { DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
-import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
+import { type SafetyContract, toSafetyDecision } from "../domains/safety/contract.js";
 import type { ToolDecisionInput } from "../domains/safety/decision-events.js";
 import { recordToolDecision as emitToolDecision } from "../domains/safety/decision-events.js";
 import type { WorkerFlowPolicyInput } from "../domains/safety/information-flow.js";
@@ -118,29 +118,7 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 				return { kind: "block", classification, rejection, policy };
 			}
 			// A permit that inherited the operator's yolo is judged the true yolo way (#407).
-			const policy = policyEngine.evaluate(call, posture, scope);
-			const classification = policy.classification;
-			if (policy.kind === "block") {
-				const decision: SafetyDecision = {
-					kind: "block",
-					classification,
-					rejection: policy.rejection ?? fallbackRejection(policy),
-					policy,
-				};
-				if (policy.match) (decision as { match?: typeof policy.match }).match = policy.match;
-				return decision;
-			}
-			if (policy.kind === "ask") {
-				const decision: SafetyDecision = {
-					kind: "ask",
-					classification,
-					rejection: policy.rejection ?? fallbackRejection(policy),
-					policy,
-				};
-				if (policy.match) (decision as { match?: typeof policy.match }).match = policy.match;
-				return decision;
-			}
-			return { kind: "allow", classification, policy };
+			return toSafetyDecision(policyEngine.evaluate(call, posture, scope));
 		},
 		observeLoop(key, now) {
 			const [next, verdict] = observeLoopState(loopState, key, now ?? Date.now());
@@ -168,14 +146,6 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 			allowsObservationPath: (path) => policyEngine.readablePath(path),
 		},
 		decisions: { recordToolCall: recordToolDecision },
-	};
-}
-
-function fallbackRejection(policy: { tool: string; actionClass: string; reasons: ReadonlyArray<string> }) {
-	return {
-		short: `${policy.tool} blocked: ${policy.actionClass}`,
-		detail: policy.reasons.join("\n"),
-		hints: [],
 	};
 }
 

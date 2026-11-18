@@ -1367,7 +1367,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const operatorOnly = out.kind === "ask" && out.ruleId !== undefined && OPERATOR_ONLY_ASKS.has(out.ruleId);
 		// An operator's approval of this exact call already answered the deferred ask.
 		if (deferred !== null && base.posture !== CONFIRMED_POSTURE && !operatorOnly) {
-			out = askDecision(base, deferred);
+			out = gateDecision("ask", base, deferred);
 		} else if (deferred !== null) {
 			out = { ...out, reasons: [...out.reasons, ...deferred.reasons] };
 		}
@@ -1429,7 +1429,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		// (e.g. a write outside cwd). No-op unless the run carries writeRoots.
 		const writeRootReason = evaluateWriteRoots(writeRoots, writeRootCwd, call);
 		if (writeRootReason !== null) {
-			return blockDecision(base, {
+			return gateDecision("block", base, {
 				ruleId: "write-root",
 				reasonCode: "write-root",
 				reasons: [writeRootReason],
@@ -1443,7 +1443,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		// scripts) and dispatch (which spawns a worker not bound to these roots)
 		// are blocked outright: they can mutate the filesystem outside the roots.
 		if (writeRoots.length > 0 && isWriteConfinementEscape(call, classification.actionClass, writeRootsOsConfined)) {
-			return blockDecision(base, {
+			return gateDecision("block", base, {
 				ruleId: "write-root",
 				reasonCode: "write-root",
 				reasons: [
@@ -1453,7 +1453,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			});
 		}
 		if (resolvedCheckCwd instanceof Error) {
-			return blockDecision(base, {
+			return gateDecision("block", base, {
 				ruleId: "verify-cwd-invalid",
 				reasonCode: "verify-cwd-invalid",
 				reasons: [resolvedCheckCwd.message],
@@ -1486,7 +1486,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			};
 			if (hit?.match.ruleId !== undefined) blockInput.ruleId = hit.match.ruleId;
 			if (hit?.match !== undefined) blockInput.match = hit.match;
-			return blockDecision(base, blockInput);
+			return gateDecision("block", base, blockInput);
 		}
 
 		// A delete is judged by where it lands, at every autonomy level, after the
@@ -1510,7 +1510,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				match,
 				policySource: "damage-control:base",
 			};
-			if (resort === undefined) return blockDecision(base, input);
+			if (resort === undefined) return gateDecision("block", base, input);
 			deferred =
 				deferred === null
 					? { ...input, reasons: [...input.reasons, DEFAULT_RESORTED_REASON] }
@@ -1567,7 +1567,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			};
 			if (projectPolicy.hash !== null) blockInput.policyHash = projectPolicy.hash;
 			if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
-			return blockDecision(base, blockInput);
+			return gateDecision("block", base, blockInput);
 		}
 
 		// Editing active instructions is an operator privilege at every autonomy
@@ -1604,7 +1604,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				if (projectPolicy.hash !== null) blockInput.policyHash = projectPolicy.hash;
 				if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
 			}
-			return blockDecision(base, blockInput);
+			return gateDecision("block", base, blockInput);
 		}
 		// The contained shell cannot write the repository's hooks, config or git
 		// dir pointers, so under the operator's default a typed write asks for
@@ -1617,7 +1617,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				reasons: [gitControlFileReason(gitControl)],
 				policySource: "builtin-classifier" as const,
 			};
-			return settle(posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input));
+			return settle(posture === "confirmed" ? allowDecision(base, input) : gateDecision("ask", base, input));
 		}
 		const outsideReplacement = outsideExistingTypedMutationTarget(call, cwd, classification, posture);
 		if (outsideReplacement !== null) {
@@ -1629,7 +1629,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				],
 				policySource: "builtin-classifier" as const,
 			};
-			return settle(posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input));
+			return settle(posture === "confirmed" ? allowDecision(base, input) : gateDecision("ask", base, input));
 		}
 		// Project settings carry persistent fleet routing. A model edit is file
 		// level, so it cannot be told apart from a routing change: every mutation
@@ -1643,7 +1643,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				],
 				policySource: "builtin-classifier" as const,
 			};
-			return settle(posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input));
+			return settle(posture === "confirmed" ? allowDecision(base, input) : gateDecision("ask", base, input));
 		}
 
 		// A contained call runs in the main-session sandbox, which bounds what
@@ -1655,7 +1655,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			scanShellLikeDeep(scannedCommand).some((token) => token.hiddenContent)
 		) {
 			return settle(
-				askDecision(base, {
+				gateDecision("ask", base, {
 					ruleId: "bash-hidden-quoting",
 					reasonCode: "bash-hidden-quoting",
 					reasons: ["ambiguous ANSI-C escapes or locale quoting require one-shot operator confirmation"],
@@ -1684,7 +1684,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				],
 				policySource: "builtin-classifier" as const,
 			};
-			return settle(posture === "confirmed" || posture === "yolo" ? allowDecision(base, input) : askDecision(base, input));
+			return settle(
+				posture === "confirmed" || posture === "yolo" ? allowDecision(base, input) : gateDecision("ask", base, input),
+			);
 		}
 
 		// The authored ask rail (sd-01 M3) decides only among calls that
@@ -1692,7 +1694,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		// matched command; an unconfirmed one parks it for confirmation.
 		if (askHit !== null && posture !== "confirmed") {
 			return settle(
-				askDecision(base, {
+				gateDecision("ask", base, {
 					ruleId: askHit.match.ruleId,
 					reasonCode: `damage-control:${askHit.match.ruleId}`,
 					reasons: [...classification.reasons, askHit.match.reason, "damage-control rule requires confirmation"],
@@ -1753,7 +1755,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			return settle(
 				posture === "confirmed" || posture === "yolo" || resort?.contained === true
 					? allowDecision(base, input)
-					: askDecision(base, input),
+					: gateDecision("ask", base, input),
 			);
 		}
 
@@ -1780,9 +1782,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// A typed verifier still runs through the same command safety scan.
 			// Unrecognized checks are left to the autonomy mapping: default asks,
 			// while yolo admits them headlessly.
-			if (bash.kind === "block") return blockDecision(base, bash);
+			if (bash.kind === "block") return gateDecision("block", base, bash);
 			const scanned = call.projection === "mcp-server" ? mcpExecutePolicy(bash) : bash;
-			if (scanned.kind === "ask") return settle(askDecision(base, scanned));
+			if (scanned.kind === "ask") return settle(gateDecision("ask", base, scanned));
 			return settle(allowDecision(base, scanned));
 		}
 
@@ -1868,14 +1870,14 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const { callCwd, judgedCommand } = commandUnderJudgment(call);
 		const base = baseDecision(call, classify(call), callCwd, posture, judgedCommand);
 		const floor = floorBlock(call, callCwd, judgedCommand);
-		if (floor !== null) return blockDecision(base, floor);
+		if (floor !== null) return gateDecision("block", base, floor);
 		const held: string[] = [];
 		const required = yoloRequiredSandbox(rawCall, call, base.classification, judgedCommand, scope, () => ({
 			...outwardPlaces(scope, callCwd),
 			held,
 		}));
 		if (required === "refused" || required === "unsandboxed") {
-			return blockDecision(base, {
+			return gateDecision("block", base, {
 				ruleId: YOLO_SANDBOX_REQUIRED_RULE_ID,
 				reasonCode: YOLO_SANDBOX_REQUIRED_RULE_ID,
 				reasons: [
@@ -1892,7 +1894,11 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		if (normal.kind === "allow" || holdsAtYolo(normal)) return normal;
 		const operator = operatorRuleBlock(call, callCwd, judgedCommand);
 		if (operator !== null)
-			return blockDecision({ ...base, classification: normal.classification, actionClass: normal.actionClass }, operator);
+			return gateDecision(
+				"block",
+				{ ...base, classification: normal.classification, actionClass: normal.actionClass },
+				operator,
+			);
 		const { rejection: _rejection, match: _match, ...rest } = normal;
 		return {
 			...rest,
@@ -1922,7 +1928,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const classification = classify(call);
 		const { callCwd, judgedCommand } = commandUnderJudgment(call);
 		const floor = floorBlock(call, callCwd, judgedCommand);
-		if (floor !== null) return blockDecision(baseDecision(call, classification, callCwd, posture, judgedCommand), floor);
+		if (floor !== null)
+			return gateDecision("block", baseDecision(call, classification, callCwd, posture, judgedCommand), floor);
 		const leavesSandbox = scope.sandbox && call.args?.unsandboxed === true && runsProjectCommand(call, judgedCommand);
 		return evaluateCall(rawCall, posture, {
 			scratchRoots: effectiveScratchRoots(scope.scratchRoots, cwd),
@@ -1999,7 +2006,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		}
 		if (bash.kind === "block") return named;
 		const { rejection: _rejection, ...rest } = named;
-		return blockDecision(rest, {
+		return gateDecision("block", rest, {
 			...rest,
 			ruleId: TASK_GATE_REFUSED_RULE_ID,
 			reasonCode: TASK_GATE_REFUSED_RULE_ID,
@@ -2015,7 +2022,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			if (!WRITE_ROOT_TOOLS.has(rawCall.tool)) refreshConfigSecrets();
 			const oversized = oversizedPathToken(rawCall.args);
 			if (oversized !== null) {
-				return blockDecision(baseDecision(rawCall, classify(rawCall), cwd, posture, commandArg(rawCall.args)), {
+				return gateDecision("block", baseDecision(rawCall, classify(rawCall), cwd, posture, commandArg(rawCall.args)), {
 					ruleId: OVERSIZED_PATH_RULE_ID,
 					reasonCode: OVERSIZED_PATH_RULE_ID,
 					reasons: [
@@ -2036,7 +2043,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				isOutboundWebTool(rawCall.tool) &&
 				urlCouldCarryLocalData(rawCall.args?.url)
 			) {
-				return askDecision(decision, {
+				return gateDecision("ask", decision, {
 					ruleId: SECRET_READ_THEN_FETCH_RULE_ID,
 					reasonCode: SECRET_READ_THEN_FETCH_RULE_ID,
 					reasons: [
@@ -3455,7 +3462,8 @@ function allowDecision(
 	return { ...base, ...input, kind: "allow" };
 }
 
-function askDecision(
+function gateDecision(
+	kind: "ask" | "block",
 	base: Pick<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command">,
 	input: Omit<SafetyPolicyDecision, "kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command">,
 ): SafetyPolicyDecision {
@@ -3467,22 +3475,7 @@ function askDecision(
 	if (base.posture !== undefined) rejectionInput.posture = base.posture;
 	if (input.ruleId !== undefined) rejectionInput.ruleId = input.ruleId;
 	const rejection = formatRejection(rejectionInput);
-	return { ...base, ...input, kind: "ask", rejection };
-}
-
-function blockDecision(
-	base: Pick<SafetyPolicyDecision, "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command">,
-	input: Omit<SafetyPolicyDecision, "kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command">,
-): SafetyPolicyDecision {
-	const rejectionInput: Parameters<typeof formatRejection>[0] = {
-		tool: base.tool,
-		actionClass: base.classification.actionClass,
-		reasons: input.reasons,
-	};
-	if (base.posture !== undefined) rejectionInput.posture = base.posture;
-	if (input.ruleId !== undefined) rejectionInput.ruleId = input.ruleId;
-	const rejection = formatRejection(rejectionInput);
-	return { ...base, ...input, kind: "block", rejection };
+	return { ...base, ...input, kind, rejection };
 }
 
 /** Why the floor reads a line as raw text. */
