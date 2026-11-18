@@ -8335,6 +8335,7 @@ export function createDispatchBundle(
 		// it validated. The sealed mutation-report contract is measured against
 		// this, so a reported path the run never touched cannot seal as fact.
 		const runEffects = createRunEffectsRecorder(lifecycle.cwd, {
+			scratchRoots: lifecycle.settings?.safety.scratchRoots ?? [],
 			onWriteRecordDowngraded(downgrade) {
 				const runId = runIdForPermissionAudit;
 				if (runId === null) return;

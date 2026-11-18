@@ -16,6 +16,7 @@ import {
 	type CheckCommandShape,
 	checkCommandShape,
 	checkFailureAttributable,
+	checkLogTargets,
 	checkRunsOutside,
 	checkWritesTree,
 	commandArgumentSegments,
@@ -27,6 +28,7 @@ import {
 	toolMutationPaths,
 	type ValidationCommandScope,
 } from "./protected-artifacts.js";
+import { effectiveScratchRoots } from "./scratch-roots.js";
 
 /**
  * What a run's own tool calls show it did to the workspace.
@@ -158,6 +160,8 @@ export interface RunEffectsRecorderOptions {
 	onWriteRecordDowngraded?(downgrade: WriteRecordDowngrade): void;
 	/** The environment the run's commands inherit, whose `GIT_CONFIG_*` entries join the git config read. */
 	env?: NodeJS.ProcessEnv;
+	/** `safety.scratchRoots` from the operator's settings: a check logged under one changes no tree (x5-4). */
+	scratchRoots?: ReadonlyArray<string>;
 }
 
 export interface RunEffectsRecorder {
@@ -367,11 +371,11 @@ export function readCall(
 	args: Record<string, unknown> | undefined,
 	cwd: string,
 	gitHelpers: boolean,
-	outputTarget: (base: string) => (target: string) => boolean,
+	outputTarget: CheckOutputReader,
 ): CallReading {
 	const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
 	const command = toolName === ToolNames.Bash ? commandOf(args) : null;
-	const isOutput = outputTarget(base);
+	const isOutput = outputTarget(base, command === null ? undefined : checkLogTargets(command));
 	const shell = command === null ? null : readShellCheck(command, base, cwd, gitHelpers, isOutput);
 	const shellCommand = command ?? verifyCommandOf(toolName, args, base);
 	const paths = mutationTargets(toolName, args).map((target) => path.resolve(base, target));
@@ -483,37 +487,69 @@ export function gitRunsConfiguredHelpers(cwd: string, env: NodeJS.ProcessEnv = p
 	);
 }
 
+/** Reads where a check's output lands; `logs` are the call's check log targets ({@link checkLogTargets}). */
+export interface CheckOutputReader {
+	(base: string, logs?: ReadonlySet<string>): (target: string) => boolean;
+	/** Paths a call changed: a later check log written there overwrites the run's own work, so it stays a change. */
+	changed(paths: Iterable<string>): void;
+}
+
 /**
- * Where a check's output lands (x4-2): a `*.log`, outside the workspace, under the temp dir, or git-ignored. A tracked
- * source path stays a change, and a target this cannot resolve is one too. Shared by the recorder and the task board's
- * replay, so a check logged through `tee` keeps its outcome on both (x4-1).
+ * Where a check's output lands (x4-2): a `*.log`, outside the workspace, under the temp dir or a scratch root, or
+ * git-ignored. `$TMPDIR`, `$HOME` and `~` expand from the run's env first (x5-4). A check log the call's check
+ * pipeline writes (`npm test > out.txt`) to a path git does not track and the run did not change is output too.
+ * A tracked source path stays a change, and a target this cannot resolve is one too. Shared by the recorder and the
+ * task board's replay, so a check logged through `tee` keeps its outcome on both (x4-1).
  */
 export function checkOutputReader(
 	cwd: string,
 	env: NodeJS.ProcessEnv = process.env,
-): (base: string) => (target: string) => boolean {
-	const ignored = new Map<string, boolean>();
-	const gitIgnores = (target: string): boolean => {
-		let answer = ignored.get(target);
-		if (answer === undefined) {
+	configuredScratchRoots: ReadonlyArray<string> = [],
+): CheckOutputReader {
+	const gitAnswers = new Map<string, boolean>();
+	const git = (args: string[], target: string, answer: (status: number | null) => boolean): boolean => {
+		const key = `${args[0]}\0${target}`;
+		let known = gitAnswers.get(key);
+		if (known === undefined) {
 			try {
-				execFileSync("git", ["check-ignore", "-q", "--", target], { cwd, env, stdio: "ignore", timeout: 5000 });
-				answer = true;
-			} catch {
-				answer = false;
+				execFileSync("git", [...args, "--", target], { cwd, env, stdio: "ignore", timeout: 5000 });
+				known = answer(0);
+			} catch (error) {
+				const status = (error as { status?: unknown }).status;
+				known = answer(typeof status === "number" ? status : null);
 			}
-			ignored.set(target, answer);
+			gitAnswers.set(key, known);
 		}
-		return answer;
+		return known;
 	};
-	return (base) => (target) => {
+	const gitIgnores = (target: string) => git(["check-ignore", "-q"], target, (status) => status === 0);
+	// Exit 1 names a path git does not track; anything else (no repository, no git) proves nothing.
+	const untracked = (target: string) => git(["ls-files", "--error-unmatch"], target, (status) => status === 1);
+	let scratch: string[] | undefined;
+	const changedByRun = new Set<string>();
+	const expand = (target: string): string | null => {
+		const expanded = target
+			.replace(/^~(?=\/|$)/u, "$HOME")
+			.replace(/\$\{(TMPDIR|HOME)\}|\$(TMPDIR|HOME)(?![A-Za-z0-9_])/gu, (_, braced, bare) => env[braced ?? bare] || "\0");
+		return /^~|[$`\0]/u.test(expanded) ? null : expanded;
+	};
+	const reader = (base: string, logs?: ReadonlySet<string>) => (target: string) => {
 		if (/\.log$/u.test(target)) return true;
-		if (/^~|[$`]/u.test(target)) return false;
-		const resolved = path.resolve(base, target);
+		const expanded = expand(target);
+		if (expanded === null) return false;
+		const resolved = path.resolve(base, expanded);
 		if (!isSameOrDescendant(resolved, cwd)) return true;
 		if (isSameOrDescendant(resolved, tmpdir()) && !isSameOrDescendant(cwd, tmpdir())) return true;
-		return gitIgnores(resolved);
+		scratch ??= effectiveScratchRoots(configuredScratchRoots, cwd);
+		if (scratch.some((root) => isSameOrDescendant(resolved, root) && !isSameOrDescendant(cwd, root))) return true;
+		if (gitIgnores(resolved)) return true;
+		return logs?.has(target) === true && !changedByRun.has(resolved) && untracked(resolved);
 	};
+	return Object.assign(reader, {
+		changed(paths: Iterable<string>) {
+			for (const target of paths) changedByRun.add(target);
+		},
+	});
 }
 
 /**
@@ -524,7 +560,7 @@ export function checkOutputReader(
 export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorderOptions = {}): RunEffectsRecorder {
 	const pending = new Map<string, PendingEffects>();
 	const gitHelpers = gitRunsConfiguredHelpers(cwd, options.env);
-	const outputTarget = checkOutputReader(cwd, options.env);
+	const outputTarget = checkOutputReader(cwd, options.env, options.scratchRoots);
 	const mutatedPaths = new Set<string>();
 	const failedMutationPaths = new Set<string>();
 	const validationCommands = new Set<string>();
@@ -624,6 +660,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				effects.mutationRevision === mutationRevision,
 			);
 			if (mutation) {
+				outputTarget.changed(reading.changedPaths);
 				mutationRevision += 1;
 				validationOutcomes.clear();
 				checkOutcomes.clear();

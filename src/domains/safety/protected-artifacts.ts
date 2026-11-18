@@ -1611,6 +1611,29 @@ export function checkCommandShape(
 	return handsOver ? "after-change" : "mixed";
 }
 
+/**
+ * The targets only a check pipeline's own output stream writes (x5-4): a `tee` stage after the check and the last
+ * stage's redirects, so `npm test 2>&1 | tee out.txt` and `npm test > out.txt 2>&1` name `out.txt`. Whether such a
+ * target is output and not a change is the caller's call.
+ */
+export function checkLogTargets(command: string): ReadonlySet<string> {
+	const logs = new Set<string>();
+	let checked = false;
+	for (const step of shellSteps(scanShellLike(command))) {
+		checked ||= isCheckStep(step);
+		const argv = step.index === null ? [] : step.argv.slice(step.index);
+		if (checked && basenameToken(argv[0]) === "tee") for (const target of pathArgs(argv, 0)) logs.add(target);
+		if (step.joinedBy === "|") continue;
+		if (checked) {
+			const writes: string[] = [];
+			collectRedirectTargets(step.tokens, writes);
+			for (const target of writes) logs.add(target);
+		}
+		checked = false;
+	}
+	return logs;
+}
+
 /** Flags that turn a linter or formatter into a writer of the files it checks. */
 const TREE_WRITING_FLAGS: ReadonlySet<string> = new Set(["--fix", "--write"]);
 /** Formatters whose `-w` writes the files back; elsewhere `-w` names a workspace or a warning filter. */

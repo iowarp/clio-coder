@@ -764,7 +764,7 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	deepStrictEqual(seal("npm test", "npm test && node codemod.mjs"), stale);
 	deepStrictEqual(seal("npm test", "pytest; git stash pop"), stale);
 	deepStrictEqual(seal("npm test", "npm ci | npm test"), stale);
-	deepStrictEqual(seal("npm test", "npm test > log.txt"), stale);
+	deepStrictEqual(seal("npm test", "npm test > package.json"), stale);
 	// A check that rewrites the tree is a change, in bash or verify (x3-3).
 	deepStrictEqual(seal("npm test", "npm run lint:fix"), stale);
 	deepStrictEqual(seal("npm test && npm run format"), stale);
@@ -783,7 +783,15 @@ it("a check sharing its bash call with a change judges the final tree only when 
 		"unverified",
 		["pytest"],
 	]);
+	// A home or scratch log, or an untracked one only the check's own pipeline writes, is output too (x5-4).
+	deepStrictEqual(seal("npm run lint", "npm test 2>&1 | tee ~/t.txt", "npm test > test-output.txt 2>&1"), [
+		["npm run lint", "npm test"],
+		"verified",
+		[],
+	]);
+	// A file the run itself changed, or one a step other than the check writes, stays a change.
 	deepStrictEqual(seal("npm test", "npm test | tee src/a.ts"), stale);
+	deepStrictEqual(seal("npm test", "npm test && cat package.json > notes.txt"), stale);
 	// Shell setup changes no tree, so a standing red stands beside a narrower green (x3-1).
 	for (const setup of ["source .venv/bin/activate", "export CI=1"])
 		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [["npm test"], "unverified", ["npm test"]]);
