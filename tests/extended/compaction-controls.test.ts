@@ -261,6 +261,7 @@ describe("production compaction controls", () => {
 			settings,
 			auth,
 			response,
+			respond,
 			providers,
 			statuses,
 			runtime,
@@ -1107,10 +1108,18 @@ describe("production compaction controls", () => {
 		strictEqual(await compactAt(179_000, undefined), 1);
 	});
 
-	it("lands an automatic summary well below the trigger at a 40K window, so summaries are spaced (bt-18)", async (t) => {
+	it("lands each automatic summary near the same target below the trigger at a 40K window (bt-18)", async (t) => {
 		const f = fixture(false, false, true);
 		f.settings.context.workingSet.enabled = false;
-		f.response.text = syntheticCompactionSummary("carried state ".repeat(400));
+		faux.setResponses(Array.from({ length: 40 }, () => f.respond));
+		// A cumulative summarizer: each checkpoint carries every note the previous context held and adds one.
+		const note = `noted step ${"carried detail ".repeat(30)}`;
+		f.response.beforeReturn = () => {
+			const user = f.calls.at(-1)?.user ?? "";
+			const previous = user.slice(user.indexOf("<previous-context>"), user.indexOf("</previous-context>"));
+			const carried = user.includes("<previous-context>") ? previous.split("noted step").length - 1 : 0;
+			f.response.text = syntheticCompactionSummary(`${"carried state ".repeat(200)}\n${note.repeat(carried + 1)}`);
+		};
 		// A reasoning chat route reserves 26,214 summary tokens, so on a 40K window the trigger sits near 13.8K,
 		// and an 8K static prefix leaves about 5.5K of history below it (the bt-18 run).
 		const runtime = {
@@ -1134,7 +1143,8 @@ describe("production compaction controls", () => {
 		} as unknown as AgentRuntime;
 		let leaf: string | null = null;
 		const summarized: number[] = [];
-		for (let turn = 1; turn <= 16; turn++) {
+		const cycles: Array<{ turn: number; summary: number; suffix: number; tokensAfter: number; headroom: number }> = [];
+		for (let turn = 1; turn <= 30; turn++) {
 			// Each `clio-coder run` turn is a fresh process, so no in-memory rearm band carries over.
 			const state = createTurnState("off");
 			state.runtime = runtime;
@@ -1151,7 +1161,21 @@ describe("production compaction controls", () => {
 			});
 			context.refreshAgentMessagesFromSession(runtime);
 			const prompt = `turn ${turn}: continue the change`;
-			if (await context.runAutoCompact(runtime, false, undefined, undefined, prompt)) summarized.push(turn);
+			if (await context.runAutoCompact(runtime, false, undefined, undefined, prompt)) {
+				summarized.push(turn);
+				const [checkpoint, ...suffix] = runtime.agent.state.messages
+					.filter((message) => message.role !== "system")
+					.map((message) => estimateAgentContextBreakdown({ systemPrompt: "", messages: [message] }).messageTokens);
+				const entry = [...f.entries()].reverse().find((candidate) => candidate.kind === "compactionSummary");
+				const tokensAfter = entry?.kind === "compactionSummary" ? (entry.tokensAfter ?? 0) : 0;
+				cycles.push({
+					turn,
+					summary: checkpoint ?? 0,
+					suffix: suffix.reduce((sum, tokens) => sum + tokens, 0),
+					tokensAfter,
+					headroom: 0,
+				});
+			}
 			const user = appendEntry(f.state, { kind: "message", role: "user", parentTurnId: leaf, payload: { text: prompt } });
 			leaf = user.turnId;
 			for (let step = 1; step <= 4; step++)
@@ -1163,17 +1187,33 @@ describe("production compaction controls", () => {
 				}).turnId;
 			f.pinLeaf(leaf);
 		}
-		// Before bt-18 this run summarized on turns 9, 10, 13 and 16, and the first cut stayed 3,361 tokens above the trigger.
-		t.diagnostic(JSON.stringify({ summarized }));
-		ok(summarized.length > 0 && summarized.length <= 3, `summarized on turns ${summarized.join(", ")}`);
-		for (let index = 1; index < summarized.length; index++)
-			ok((summarized[index] ?? 0) - (summarized[index - 1] ?? 0) >= 4, `summarized on turns ${summarized.join(", ")}`);
 		const settled = (await f.journalOutcomes()).map((row) => row.data as { outcome: string; headroomTokens?: number });
 		deepStrictEqual(
 			settled.map((row) => row.outcome),
 			summarized.map(() => "committed"),
 		);
-		for (const row of settled) ok((row.headroomTokens ?? 0) > 0, JSON.stringify(row));
+		for (const [index, row] of settled.entries()) {
+			const cycle = cycles[index];
+			if (cycle) cycle.headroom = row.headroomTokens ?? 0;
+		}
+		for (const cycle of cycles) t.diagnostic(JSON.stringify(cycle));
+		// Before bt-18 this run summarized on turns 9, 10, 13 and 16, and the first cut stayed 3,361 tokens above the
+		// trigger. Later each split-turn checkpoint carried the previous one twice and the suffix ignored its size, so
+		// headroom fell every cycle (2038, 1577, 655, -1189) until the cut landed above the trigger.
+		ok(summarized.length >= 4, `summarized on turns ${summarized.join(", ")}`);
+		for (let index = 1; index < summarized.length; index++)
+			ok((summarized[index] ?? 0) - (summarized[index - 1] ?? 0) >= 3, `summarized on turns ${summarized.join(", ")}`);
+		const first = cycles[0];
+		const last = cycles.at(-1);
+		ok(first && last && last.headroom >= first.headroom - 300, JSON.stringify(cycles));
+		for (const cycle of cycles) {
+			// The design target keeps 60% of the history space below the trigger. The tolerance covers a cut that
+			// snaps to a message boundary plus one cycle of checkpoint growth.
+			const trigger = cycle.tokensAfter + cycle.headroom;
+			const fixed = cycle.tokensAfter - cycle.summary - cycle.suffix;
+			const target = fixed + 0.6 * (trigger - fixed);
+			ok(cycle.headroom > 0 && cycle.tokensAfter <= target + 0.1 * (trigger - fixed), JSON.stringify({ target, cycles }));
+		}
 	});
 
 	it("holds a checkpoint inside the rearm band without creating a context operation (#422)", async () => {

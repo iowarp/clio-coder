@@ -132,7 +132,7 @@ import {
 } from "../domains/session/compaction/compact.js";
 import { DEFAULT_KEEP_RECENT_TOKENS } from "../domains/session/compaction/defaults.js";
 import { summaryOutputReserve } from "../domains/session/compaction/summary-output.js";
-import { createTokenEstimator } from "../domains/session/compaction/tokens.js";
+import { createTokenEstimator, estimateTokens } from "../domains/session/compaction/tokens.js";
 import {
 	type CaptureContextSnapshotInput,
 	type ContextSnapshot,
@@ -2218,9 +2218,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const fixedTokens = staticTokens + estimate.breakdown.pendingUserTokens + calibration;
 			const belowTrigger = Math.min(inputTarget, route.triggerTokens(estimate.tokens)) - fixedTokens;
 			const historyBudget = belowTrigger > 0 ? belowTrigger : inputTarget - fixedTokens;
+			// A cumulative checkpoint grows each cycle, so a fixed 30% suffix let the cut creep toward the trigger. The
+			// suffix gives back what the current checkpoint takes past its 30%, down to 10%, to hold the cut near 60%.
+			const checkpoint = [...activeEntries()].reverse().find((entry) => entry.kind === "compactionSummary");
+			const checkpointShare = checkpoint && historyBudget > 0 ? estimateTokens(checkpoint) / historyBudget : 0.3;
+			const suffixShare = Math.min(0.3, Math.max(0.1, 0.6 - checkpointShare));
 			budget = {
 				...budget,
-				keepRecentTokens: Math.min(DEFAULT_KEEP_RECENT_TOKENS, Math.max(1, Math.floor(historyBudget * 0.3))),
+				keepRecentTokens: Math.min(DEFAULT_KEEP_RECENT_TOKENS, Math.max(1, Math.floor(historyBudget * suffixShare))),
 				...(requiredFit ? { requireFit: true } : {}),
 				...(activeAutoTurnId ? { preserveUserTurnId: activeAutoTurnId } : {}),
 			};

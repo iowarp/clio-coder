@@ -523,7 +523,7 @@ describe("compaction working-set provider boundary", () => {
 		strictEqual(recalled.result.body, "EVICTED_TOOL_BODY");
 	});
 
-	it("carries the latest canonical checkpoint and projected retained suffix into both split prompts", async () => {
+	it("carries the latest canonical checkpoint and projected retained suffix into the history prompt once (bt-18)", async () => {
 		const entries = chain([
 			...evictedHistory().slice(0, 4),
 			{
@@ -545,11 +545,13 @@ describe("compaction working-set provider boundary", () => {
 		strictEqual(result.firstKeptTurnId, "tail");
 		strictEqual(calls.length, 2);
 		strictEqual(result.usage?.apiCalls, 2);
-		for (const call of calls) {
-			match(call.text, /CANONICAL_CONSTRAINT/);
-			match(call.text, /\[evicted ref=r1/);
-			doesNotMatch(call.text, /EVICTED_THINKING|EVICTED_TOOL_BODY|CONSTRAINT_42/);
-		}
+		const [history, split] = calls;
+		match(history?.text ?? "", /CANONICAL_CONSTRAINT/);
+		match(history?.text ?? "", /\[evicted ref=r1/);
+		// The split-turn prompt carrying it too wrote the prior checkpoint twice, so every checkpoint grew by a copy.
+		doesNotMatch(split?.text ?? "", /CANONICAL_CONSTRAINT|<previous-context>\\n/);
+		match(split?.text ?? "", /Continue current turn/);
+		for (const call of calls) doesNotMatch(call.text, /EVICTED_THINKING|EVICTED_TOOL_BODY|CONSTRAINT_42/);
 	});
 
 	it("keeps recalled originals evicted and includes only the explicit recall at the tail", async () => {
