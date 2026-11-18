@@ -385,7 +385,7 @@ import { createDispatchBackgroundRegistry } from "../tools/dispatch-background.j
 import { dispatchSchemaCompositionFor } from "../tools/dispatch-schema.js";
 import { createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
 import { acpHostReadOnlySource, createRegistry } from "../tools/registry.js";
-import { sweepExpiredToolOffloads } from "../tools/result-shaping.js";
+import { startToolOffloadSweep } from "../tools/result-shaping.js";
 
 export interface BootResult {
 	exitCode: number;
@@ -686,13 +686,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			: undefined,
 	);
 	/**
-	 * The boot timer's phases as process.booted, once, when the surface first answers: the numbers
-	 * CLIO_CODER_TRACE_BOOT prints are the ones the process journal keeps (#434).
+	 * The boot timer's phases as process.booted, once, when the surface first answers: the numbers CLIO_CODER_TRACE_BOOT
+	 * prints are the ones the process journal keeps (#434). The spilled tool output sweep starts then, off the boot path.
 	 */
 	let bootRecorded = false;
 	const recordBoot = (interactivity?: BootInteractivity): void => {
 		if (bootRecorded) return;
 		bootRecorded = true;
+		termination.onTerminate(startToolOffloadSweep());
 		const tenth = (ms: number) => Math.max(0, Math.round(ms * 10) / 10);
 		const snapshot = timer.snapshot();
 		telemetryHub().emit("process.booted", {
@@ -765,7 +766,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}
 		}
 	}
-	sweepExpiredToolOffloads();
 	timer.mark("install check");
 
 	// A hard-killed coordinator leaves compete groups and task worktrees behind.
