@@ -145,6 +145,19 @@ for (const scenario of [
 		facts: [false, true],
 	},
 	{
+		// x1-4: the `run --verify` verdict seals as the run's host verdict and outranks the agent's own pass.
+		name: "a failed acceptance check outranks the agent's passing check on the sealed record",
+		events: [
+			...hostChecks([{ check: "test", outcome: "ok" }]),
+			assistant("stop", [{ type: "text", text: "Host test passed." }]),
+		],
+		code: 0,
+		outcome: "succeeded",
+		calls: 1,
+		verification: "unverified",
+		acceptance: "exit 3",
+	},
+	{
 		name: "native read cannot certify recovery of denied execution",
 		events: blockedThenRead("execute"),
 		code: 1,
@@ -344,6 +357,15 @@ for (const scenario of [
 					mode: mode === "text" ? "text" : "json",
 					jsonEvents: mode === "full" ? "full" : "terminal",
 					shutdown,
+					...("acceptance" in scenario
+						? {
+								verify: {
+									checks: [{ id: "run-acceptance", command: scenario.acceptance }],
+									timeoutMs: 10_000,
+									credited: () => new Set<string>(),
+								},
+							}
+						: {}),
 				});
 				if (shuttingDown) await drain?.();
 				if (mode !== "text") {
@@ -362,6 +384,11 @@ for (const scenario of [
 				ok(envelope);
 
 				strictEqual(envelope.exitCode, scenario.code);
+				if ("verification" in scenario) strictEqual(journal.runs[0]?.settled.verification.state, scenario.verification);
+				if ("acceptance" in scenario) {
+					const host = journal.runs[0]?.settled.hostVerification;
+					deepStrictEqual([host?.status, host?.checks, host?.failed], ["rejected", 1, 1]);
+				}
 
 				strictEqual(
 					envelope.status,
