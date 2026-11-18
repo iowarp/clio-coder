@@ -109,17 +109,30 @@ function soloView(key: string, state: EvictedState): WorkingSetView {
  * priced here is a few bytes shorter than the one recorded.
  */
 export function tokensFreedByEviction(
-	estimateTokens: (entry: SessionEntry) => number,
+	input: Pick<PolicyInput, "estimateTokens" | "aged">,
 	entry: SessionEntry,
 	candidate: EvictionCandidate,
 	callPaths: CallPaths = NO_CALL_PATHS,
 	alias?: string,
 ): number {
+	if (isAgedResult(entry, input.aged)) return 0;
 	const marker = markerFor(entry, candidate, callPaths, alias);
 	if (marker === null) return 0;
 	const key = refKey(candidate.ref);
 	const projected = projectWorkingSet([entry], soloView(key, pendingState(candidate, marker, "")))[0] ?? entry;
-	return Math.max(0, estimateTokens(entry) - estimateTokens(projected));
+	return Math.max(0, input.estimateTokens(entry) - input.estimateTokens(projected));
+}
+
+/**
+ * A result observation aging already stubs in the request: its body is not in
+ * the window the pressure figure measures, so crediting it would over-credit
+ * the anchor by the body less the stub (D1-1). Zero priced, every policy moves
+ * on to a unit whose eviction actually shrinks the request.
+ */
+function isAgedResult(entry: SessionEntry, aged: ReadonlySet<string> | undefined): boolean {
+	if (aged === undefined || aged.size === 0 || entry.kind !== "message" || entry.role !== "tool_result") return false;
+	const toolCallId = toolResultPayload(entry.payload).obj.toolCallId;
+	return typeof toolCallId === "string" && aged.has(toolCallId);
 }
 
 /** sha256 of a tool result's body text, hex: `readBodyHash` in the read tool computes the same bytes. */
@@ -156,7 +169,7 @@ export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): Evic
 		// A marker at least as long as the body it replaces is a cold turn bought
 		// for nothing, whatever the policy's reason. Refused here so no policy can
 		// record an eviction that freed nothing.
-		const tokensFreed = tokensFreedByEviction(input.estimateTokens, entry, candidate, callPaths, alias);
+		const tokensFreed = tokensFreedByEviction(input, entry, candidate, callPaths, alias);
 		if (tokensFreed <= 0) continue;
 		claimed.add(key);
 		if (alias !== undefined) aliasSequence += 1;

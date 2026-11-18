@@ -1998,6 +1998,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						const policy = resolveWorkingSetPolicy(settings.context.workingSet.policy);
 						policyId = policy.id;
 						visibleEntries = selectVisibleEntries(entries, state.lastTurnId ?? undefined);
+						// Results the next request carries as aging stubs: the pressure figure and the anchor hold only
+						// the stub, so crediting their ledger bodies would end the plan short of the target (D1-1).
+						const aged = new Set(agedHistory(agentRuntime, observeHistory(agentRuntime))?.saved.map(({ id }) => id));
 						const estimator = createTokenEstimator(
 							visibleEntries,
 							createReplayMessageConverter(entries, {
@@ -2027,6 +2030,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								...(requiredFit ? { forced: true } : {}),
 							},
 							estimateTokens: estimator.estimateEntry,
+							aged,
 						});
 					} catch (error) {
 						middleware.fireCompactionHook("working_set_evict", "pressure", estimate.tokens);
