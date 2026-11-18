@@ -543,7 +543,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 							kind: "park",
 							cause: "unnamed-escape",
 							gateReason: citedOperator
-								? "Clio's safety judge allowed this sandbox escape as operator-named, but no operator message mentions the sandbox; unsandboxed: true runs only when an operator message names the escape or the operator approves it."
+								? "Clio's safety judge allowed this sandbox escape as operator-named, but no operator message uses the word sandbox or unconfined, which an escape needs to run on the judge's word; unsandboxed: true runs only when an operator message names the escape or the operator approves it."
 								: `Clio's safety judge allowed this sandbox escape under rule ${parsed.rule}, but unsandboxed: true runs only when an operator message names the escape or the operator approves it.`,
 							build,
 							latencyMs,

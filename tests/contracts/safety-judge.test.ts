@@ -11,12 +11,14 @@ import { STORE_REPLACES_ARG } from "../../src/core/store-paths.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import type { SafetyJudgementInput } from "../../src/domains/safety/decision-events.js";
+import type { SafetyPolicyDecision } from "../../src/domains/safety/policy-engine.js";
 import {
 	createSafetyJudge,
 	operatorOnlyAsk,
 	type SafetyJudgeCompletion,
 	type SafetyJudgeConfig,
 } from "../../src/domains/safety/safety-judge.js";
+import { SANDBOX_ESCAPE_REASON, SANDBOX_ESCAPE_RULE_ID } from "../../src/domains/safety/sandbox-escape.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -133,6 +135,32 @@ test("a write to an outside path the operator spelled reaches the judge as an op
 		prompts[0]?.system ?? "",
 		/a report or output file the operator asked for, is not shared or system configuration/u,
 	);
+});
+
+test("an escape the judge calls operator-named after the operator said outside the workspace parks with the word it needs", async () => {
+	const judge = createSafetyJudge({
+		config: () => CONFIG,
+		complete: async () => ({ text: answer("allow", "operator-named", "The operator authorized it.") }),
+		operatorMessages: () => ["I changed my mind: please append it now; I authorize writing outside the workspace."],
+		session: () => "session-1",
+		consequences: () => [],
+		record: () => {},
+	});
+	const outcome = await judge.review({
+		tool: ToolNames.Bash,
+		args: { command: "echo done >> ~/notes.txt", unsandboxed: true },
+		decision: {
+			kind: "ask",
+			classification: { actionClass: "execute", reasons: [SANDBOX_ESCAPE_REASON] },
+			rejection: { short: "asks", detail: SANDBOX_ESCAPE_REASON, hints: [] },
+			policy: { ruleId: SANDBOX_ESCAPE_RULE_ID, reasons: [SANDBOX_ESCAPE_REASON] } as unknown as SafetyPolicyDecision,
+		},
+		approvalAuthority: "operator",
+	});
+	strictEqual(outcome.kind, "park");
+	const reason = outcome.kind === "park" ? outcome.gateReason : "";
+	match(reason, /no operator message uses the word sandbox or unconfined/u);
+	doesNotMatch(reason, /mentions the sandbox/u);
 });
 
 test("a project script's text reaches the judge only inside the data tag, redacted, and a cut body says so", async () => {
