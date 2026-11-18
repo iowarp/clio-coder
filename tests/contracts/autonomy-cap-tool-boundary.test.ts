@@ -13,9 +13,11 @@ import {
 } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
+import { loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { whyStopped } from "../../src/domains/telemetry/read-model.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
@@ -128,6 +130,7 @@ it("a cap halt during a tool call lets the call finish and sends no further mode
 		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
+		readSessionEntries: () => session.readEntries(),
 		toolRegistry: registry,
 		bus: context.bus,
 		createAgent: (options) =>
@@ -160,7 +163,8 @@ it("a cap halt during a tool call lets the call finish and sends no further mode
 			"the turn closes with the cap's notice",
 		);
 		// The cap is the harness's own stop, named on the turn's settlement (bt-26 N2d). It landed at the tool
-		// boundary after the call ended, so no stage of that call reads as cut (bt-26 N2f).
+		// boundary after the call ended, so no stage of that call reads as cut (bt-26 N2f), and why-stopped says
+		// so from that call's toolUse though the turn itself settles aborted (bt-26 N2g).
 		await journals.flush();
 		const sessionId = session.current()?.id;
 		ok(sessionId);
@@ -168,8 +172,12 @@ it("a cap halt during a tool call lets the call finish and sends no further mode
 		const turns = journal.records.flatMap(({ record }) => (record.k === "turn.settled" ? [record.data] : []));
 		deepStrictEqual(
 			turns.map((turn) => [turn.stopReason, turn.terminal.cause, turn.terminal.stage]),
-			[["toolUse", "autonomy_stop", null]],
+			[["aborted", "autonomy_stop", null]],
 		);
+		const source = loadSessionTelemetrySource(clioStateDir(), sessionId);
+		ok(source);
+		const findings = whyStopped(source).findings;
+		ok(findings.includes("The last turn stopped (aborted) on autonomy_stop at the tool boundary."), findings.join("\n"));
 	} finally {
 		loop.dispose();
 		await loop.whenSettled();

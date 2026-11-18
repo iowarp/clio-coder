@@ -3728,13 +3728,18 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 	else if (terminal) {
 		const reached = terminal.terminal.stage;
 		// A call that produced output was cut off mid-stream, not at a gate; older journals wrote that as firstToken.
-		// A stop with no stage after a reply that asked for tools landed at that round's tool boundary (bt-26 N2f).
+		// A stop with no stage after a reply that asked for tools landed at that round's tool boundary (bt-26 N2f). The
+		// turn itself settles aborted under a harness stop, so the final call's own stop reason decides (bt-26 N2g).
+		const finalCallId = terminal.terminal.callIds.at(-1);
+		const finalCall = analysis.attempts
+			.filter((attempt) => attempt.started.callId === finalCallId && attempt.settled)
+			.at(-1)?.settled;
 		const stage =
 			reached === "streaming" || reached === "firstToken"
 				? " while streaming"
 				: reached
 					? ` at ${reached}`
-					: terminal.stopReason === "toolUse"
+					: terminal.stopReason === "toolUse" || (terminal.terminal.cause && finalCall?.stop.reason === "toolUse")
 						? " at the tool boundary"
 						: "";
 		const retries =
