@@ -388,6 +388,7 @@ test("Stop fences deferred preparation and compaction before model calls or late
 						firstKeptEntryIndex: 0,
 						firstKeptTurnId: null,
 						messagesSummarized: 1,
+						conversationMessagesSummarized: 1,
 						isSplitTurn: false,
 					});
 					await submitting;

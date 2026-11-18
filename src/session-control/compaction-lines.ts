@@ -1,5 +1,8 @@
 export interface CompactionSummaryLineInput {
-	/** How many entries the summarization prompt consumed. */
+	/**
+	 * How many provider messages the summary replaced, the unit a context snapshot's `messageRange` counts. Not the
+	 * ledger entry count, which also holds tool-call rows and bookkeeping.
+	 */
 	messagesSummarized: number;
 	/** Final length in characters of the generated summary text. */
 	summaryChars: number;

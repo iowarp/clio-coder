@@ -194,6 +194,37 @@ describe("compaction working-set provider boundary", () => {
 		);
 	});
 
+	it("counts what it summarized in provider messages, the unit a context snapshot counts (bt-12 #11)", async () => {
+		const entries = chain([
+			message("u1", "user", { text: "Trace the exchange." }),
+			message("a1", "assistant", {
+				content: [
+					{ type: "text", text: "Reading it." },
+					{ type: "toolCall", id: "x", name: "read", arguments: { path: "x.c" } },
+				],
+			}),
+			message("x-call", "tool_call", { toolCallId: "x", name: "read", args: { path: "x.c" } }),
+			message("x-result", "tool_result", {
+				toolCallId: "x",
+				toolName: "read",
+				result: { content: [{ type: "text", text: "X_BODY" }] },
+			}),
+			{ kind: "custom", turnId: "bookkeeping", parentTurnId: null, timestamp, customType: "promptRecompiled", data: {} },
+			message("a2", "assistant", { text: "Earlier evidence ".repeat(1000) }),
+			message("u2", "user", { text: "Now fix it." }),
+			message("a3", "assistant", { text: "Fixing." }),
+		]);
+		const result = await compact({
+			entries,
+			model: model(),
+			keepRecentTokens: entries.slice(-2).reduce((sum, entry) => sum + estimateTokens(entry), 0) + 1,
+		});
+		const summarized = entries.slice(0, result.firstKeptEntryIndex);
+		strictEqual(result.messagesSummarized, summarized.length, "the ledger field still counts entries");
+		strictEqual(result.conversationMessagesSummarized, buildModelReplayAgentMessagesFromTurns(summarized).length);
+		ok(result.conversationMessagesSummarized < result.messagesSummarized, JSON.stringify(result));
+	});
+
 	it("drops verbatim instructions from a completed turn when a newer user turn is retained", async () => {
 		const newUser = message("new-user", "user", { text: "Review the screenshot." });
 		const tail = message("new-tail", "assistant", { text: "Inspecting the screenshot." });
