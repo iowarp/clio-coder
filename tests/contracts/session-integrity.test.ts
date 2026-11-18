@@ -354,6 +354,40 @@ describe("session integrity", () => {
 		}
 	});
 
+	it("reads the skill_retired and refused_prompt_bound evictions in a version 7 ledger", async () => {
+		const current = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
+		current.create({ cwd: scratch.dir });
+		const candidate = createSession({ cwd: scratch.dir });
+		const paths = sessionPaths(candidate.meta);
+		await candidate.writer.close();
+		appendSessionFileEntry(paths.current, entry("v7-user"));
+		const item = (reason: string) => ({ ref: { entry: "v7-user" }, reason, tokensFreed: 1, marker: "" });
+		appendSessionFileEntry(paths.current, {
+			kind: "contextEviction",
+			turnId: "v7-evict",
+			parentTurnId: "v7-user",
+			timestamp: at,
+			policyId: "replay",
+			trigger: "superseded",
+			evicted: [item("skill_retired"), item("refused_prompt_bound")],
+			tokensBefore: 2,
+			tokensAfter: 0,
+			pressureBefore: null,
+			snapshotIdBefore: null,
+		});
+		try {
+			current.switchBranch(candidate.meta.id);
+			strictEqual(current.current()?.sessionFormatVersion, 7);
+			const read = readSessionFileEntries(paths.current).filter(isSessionEntry);
+			deepStrictEqual(
+				read.flatMap((value) => (value.kind === "contextEviction" ? value.evicted.map((one) => one.reason) : [])),
+				["skill_retired", "refused_prompt_bound"],
+			);
+		} finally {
+			await current.close();
+		}
+	});
+
 	for (const operation of ["append", "replace", "off-current"] as const) {
 		for (const mode of ["short", "zero", "throw"] as const) {
 			it(`${operation} handles ${mode} byte writes without losing a later record`, async () => {

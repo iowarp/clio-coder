@@ -9,6 +9,7 @@ import { providerHistory } from "../engine/agent.js";
 import { withLockedSynthesisDirective } from "../engine/loop-guard.js";
 import { createRequestStructures } from "../engine/request-structure.js";
 import type { EngineModel } from "../engine/types.js";
+import { codexEffortGeneration, codexEffortUpdates } from "./codex-effort.js";
 import { type ContinuityReplayContext, renderModelReplay } from "./model-session-replay.js";
 
 /**
@@ -22,6 +23,8 @@ export type AttemptReceipt = NonNullable<CallSettled["cache"]["receipt"]>;
 /** What admission read off the ledger for one request: its cursor, owner, and the fold records it renders. */
 export interface RequestCursor extends FoldCursor {
 	owner?: FoldOwner;
+	/** The clock the request's continuity was rendered at, when a ledger render installed its history. */
+	continuityAtMs?: number;
 	records: string[];
 }
 
@@ -63,6 +66,7 @@ export function requestCursorOf(
 		...(owner.sessionId !== undefined
 			? { owner: { sessionId: owner.sessionId, ...(owner.fork ? { fork: owner.fork } : {}) } }
 			: {}),
+		...(owner.nowMs !== undefined ? { continuityAtMs: owner.nowMs } : {}),
 		records: viewRecords(entries, cursor),
 	};
 }
@@ -139,7 +143,15 @@ function renderedElements(
 ): { elements: string[]; checkpoints: string[] } {
 	const render = renderModelReplay(entries, {
 		cursor: receipt.cursor,
-		...(receipt.owner ? { continuity: receipt.owner } : {}),
+		// A note's expiry reads the clock: render at the time live rendered it, not at the time of the verify.
+		...(receipt.owner || receipt.continuityAtMs !== undefined
+			? {
+					continuity: {
+						...receipt.owner,
+						...(receipt.continuityAtMs !== undefined ? { nowMs: receipt.continuityAtMs } : {}),
+					},
+				}
+			: {}),
 	});
 	const converted = render.messages.filter((message) => LLM_ROLES.has(message.role)) as Message[];
 	const history = providerHistory(converted, receipt.route.images);
@@ -158,6 +170,28 @@ function sameList(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
 	return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
+/**
+ * The Codex effort history the receipt's cursor implies, derived the way the live sync derives it. Null when the
+ * ledger does not name an effort the derivation needs: live then read the model's level map, which is not recorded.
+ */
+function derivedCodexEffort(
+	entries: ReadonlyArray<SessionEntry>,
+	cursor: AttemptReceipt["cursor"],
+): NonNullable<AttemptReceipt["codex"]> | null {
+	const path = activePath(cursorEntries(entries, cursor.hwm), cursor.leaf ?? undefined);
+	const generation = codexEffortGeneration(path);
+	const baseline = generation.find((entry) => entry.kind === "thinkingLevelChange" && entry.configurationInitial);
+	const initialEffort = baseline?.kind === "thinkingLevelChange" ? baseline.effectiveEffort : undefined;
+	if (initialEffort === undefined) return null;
+	const changes = generation.filter((entry) => entry.kind === "thinkingLevelChange" && !entry.configurationInitial);
+	if (changes.some((entry) => entry.kind === "thinkingLevelChange" && entry.effectiveEffort === undefined)) return null;
+	const users = new Set(
+		generation.filter((entry) => entry.kind === "message" && entry.role === "user").map((entry) => entry.turnId),
+	);
+	const updates = codexEffortUpdates(generation, initialEffort, users, (entry) => entry.effectiveEffort ?? "");
+	return { initialEffort, updates };
+}
+
 function verifyReceipt(
 	entries: ReadonlyArray<SessionEntry>,
 	receipt: AttemptReceipt,
@@ -174,6 +208,15 @@ function verifyReceipt(
 		return unverifiable("native checkpoint unavailable");
 	if (!sameList(viewRecords(entries, receipt.cursor), receipt.records))
 		return { status: "mismatch", reason: "fold records differ" };
+	if (receipt.codex) {
+		const codex = derivedCodexEffort(entries, receipt.cursor);
+		if (codex === null) return unverifiable("codex effort not on the ledger");
+		const flat = (value: NonNullable<AttemptReceipt["codex"]>) => [
+			value.initialEffort,
+			...value.updates.map((update) => `${update.position}=${update.effort}`),
+		];
+		if (!sameList(flat(codex), flat(receipt.codex))) return { status: "mismatch", reason: "codex effort differs" };
+	}
 	if (sameList(rendered.elements, sent)) return { status: "verified" };
 	let index = 0;
 	while (index < sent.length && rendered.elements[index] === sent[index]) index += 1;

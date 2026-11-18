@@ -887,6 +887,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 										?.supportsMidConvoSystemMessages === true,
 							},
 							...request.receipt,
+							...(request.cursor.continuityAtMs !== undefined ? { continuityAtMs: request.cursor.continuityAtMs } : {}),
 							records: request.cursor.records,
 							checkpoints: carriedCheckpoints(request.context),
 						}
