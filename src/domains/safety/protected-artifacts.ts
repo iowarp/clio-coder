@@ -1866,20 +1866,23 @@ function writesSnapshots(arg: string): boolean {
 
 /**
  * `isOutput` says a redirect or `tee` target is a log the check's output lands in, not part of the tree (x4-2), so
- * `npm test 2>&1 | tee test.log` stays pure; it is asked only of commands that run a check.
+ * `npm test 2>&1 | tee test.log` stays pure; it is asked only of commands that run a check. `declaredSteps` are the
+ * indices of steps that run a declared check (x7-5), which count as check steps.
  */
 export function checkCommandShape(
 	command: string,
 	gitHelpersConfigured: boolean,
 	isOutput: (target: string) => boolean = () => false,
+	declaredSteps: ReadonlySet<number> = new Set(),
 ): CheckCommandShape | null {
 	const tokens = scanShellLike(command);
 	const parsed = shellSteps(tokens);
-	if (!parsed.some(isCheckStep)) return null;
-	const steps = parsed.map((step) => {
+	const isCheck = (step: ShellStep, index: number) => isCheckStep(step) || declaredSteps.has(index);
+	if (!parsed.some(isCheck)) return null;
+	const steps = parsed.map((step, index) => {
 		const writes: string[] = [];
 		collectRedirectTargets(step.tokens, writes);
-		const check = isCheckStep(step);
+		const check = isCheck(step, index);
 		const argv = step.index === null ? [] : step.argv.slice(step.index);
 		const readOnly =
 			step.index === null ||

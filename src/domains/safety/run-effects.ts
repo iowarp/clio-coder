@@ -14,6 +14,7 @@ import {
 	settleCheckCall,
 	validationCommandOf,
 } from "./check-classifier.js";
+import { declaredVerifierCommands, type SessionVerifier } from "./finish-contract.js";
 import { isSameOrDescendant } from "./path-policy.js";
 import { observedValidationCommand } from "./protected-artifacts.js";
 import { effectiveScratchRoots } from "./scratch-roots.js";
@@ -157,6 +158,11 @@ export interface RunEffectsRecorderOptions {
 	env?: NodeJS.ProcessEnv;
 	/** `safety.scratchRoots` from the operator's settings: a check logged under one changes no tree (x5-4). */
 	scratchRoots?: ReadonlyArray<string>;
+	/**
+	 * Checks declared for this run only (`run --verify`). With the project catalog's, read when the recorder is made, a
+	 * shell run of one is a check, as the finish contract credits it (x7-5).
+	 */
+	sessionVerifiers?: ReadonlyArray<SessionVerifier>;
 }
 
 export interface RunEffectsRecorder {
@@ -321,6 +327,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	const pending = new Map<string, PendingEffects>();
 	const gitHelpers = gitRunsConfiguredHelpers(cwd, options.env);
 	const outputTarget = checkOutputReader(cwd, options.env, options.scratchRoots);
+	const declaredChecks = declaredVerifierCommands(cwd, options.sessionVerifiers);
 	const mutatedPaths = new Set<string>();
 	const failedMutationPaths = new Set<string>();
 	const validationCommands = new Set<string>();
@@ -354,7 +361,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				latestProofCalls.set(proofCheck, toolCallId);
 			}
 			inFlight.set(toolCallId, { tool: toolName, revision: mutationRevision, outcome: null });
-			const reading = classifyCall(toolName, args, { cwd, gitHelpers, outputTarget });
+			const reading = classifyCall(toolName, args, { cwd, gitHelpers, outputTarget, declaredChecks });
 			const { base, shell } = reading;
 			// The classifier alone says whether the call ran a check; the vocabularies only name it.
 			const validationCommand = reading.verdict === "check" ? receiptValidationCommand(toolName, args, base) : null;

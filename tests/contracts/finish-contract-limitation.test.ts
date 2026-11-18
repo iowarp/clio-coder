@@ -13,6 +13,7 @@ import {
 	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
 } from "../../src/domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
+import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { builtin } from "../../src/tools/builtin-tool-catalog.js";
 import { limitationTool } from "../../src/tools/limitation.js";
 import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
@@ -415,6 +416,17 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		strictEqual(passed.reason, "validation_evidence");
 		deepStrictEqual(passed.verificationScope?.passedChecks, ["calc"]);
 		strictEqual(assess("cd . && ./acceptance.sh  --strict && echo done && ls").reason, "validation_evidence");
+		// The recorder reads a declared run through the same classifier, so the receipt files what the gate credits (x7-5).
+		const filed = (command: string, verifiers = sessionVerifiers) => {
+			const recorder = createRunEffectsRecorder(root, { sessionVerifiers: verifiers });
+			recorder.start("sh-1", ToolNames.Bash, { command });
+			recorder.checkOutcome("sh-1", "ok");
+			recorder.finish("sh-1", false);
+			return [...recorder.snapshot().validationOutcomes.keys()];
+		};
+		deepStrictEqual(filed("./acceptance.sh --strict && echo done"), ["./acceptance.sh --strict && echo done"]);
+		deepStrictEqual(filed("./acceptance.sh --strict && echo done", []), []);
+		deepStrictEqual(filed(`python3 -c 'import calc; assert calc.add(2, 3) == 5' && echo OK`, []).length, 1);
 		for (const unproven of [
 			assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5'`, true),
 			assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5'`, false, true),
@@ -458,7 +470,8 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		deepStrictEqual(passedChecks("./acceptance.sh && ./second.sh"), ["run-acceptance", "run-second"]);
 		deepStrictEqual(passedChecks("true && pwd"), ["run-pwd"]);
 		deepStrictEqual(passedChecks("cp before.ts src/thing.ts && ./acceptance.sh"), ["run-acceptance"]);
-		deepStrictEqual(passedChecks("./acceptance.sh && cp before.ts src/thing.ts && ./second.sh"), ["run-second"]);
+		// A check before the call's own change makes it mixed, so the shared classifier settles neither (x7-5).
+		deepStrictEqual(passedChecks("./acceptance.sh && cp before.ts src/thing.ts && ./second.sh"), []);
 		for (const command of [
 			"exit 0 && false",
 			"exec true && false",

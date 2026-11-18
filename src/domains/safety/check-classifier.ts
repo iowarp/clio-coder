@@ -4,7 +4,7 @@ import { shellExitSpeaksForCommand } from "../../tools/shell-exit-scope.js";
 import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/resolve.js";
 import { isVerifyListing } from "../../tools/verify/surface.js";
 import { classify } from "./action-classifier.js";
-import { typedValidationSummary } from "./finish-contract.js";
+import { type DeclaredVerifierCommand, declaredCheckRuns, typedValidationSummary } from "./finish-contract.js";
 import {
 	type CheckCommandShape,
 	type CommandVerdict,
@@ -30,8 +30,8 @@ import {
  * check, cleared one, or neither: the run-effects recorder, the task board's replay over session entries, and through
  * them the sealed receipt, its typed evidence and the headless `observed:` line (x5-1, x5-2).
  *
- * - `check`: a recognized check, bash (the validation vocabulary or the closed read-only check set), `verify`, or a
- *   typed validation tool. It settles its outcome when fresh, inside the workspace and attributable; one whose own
+ * - `check`: a recognized check, bash (the validation vocabulary, the closed read-only check set, or a check the
+ *   project catalog or the session declares, run whole in its cwd (x7-5)), `verify`, or a typed validation tool. It settles its outcome when fresh, inside the workspace and attributable; one whose own
  *   shape writes the tree (after-change, mixed, `-u`, `--fix`) is also a change.
  * - `inspection`: only reads. Settles nothing and clears nothing.
  * - `mutation`: provably or plausibly writes: an edit, write or artifact path, a redirect or `tee` to a tree path, a
@@ -63,6 +63,8 @@ export interface ClassifierContext {
 	gitHelpers?: boolean;
 	/** Where a check's log may land; absent, no target is one, so every write in a check call is a change. */
 	outputTarget?: CheckOutputReader;
+	/** Checks the project catalog or the session declares (`declaredVerifierCommands`); a bash run of one is a check. */
+	declaredChecks?: ReadonlyArray<DeclaredVerifierCommand>;
 }
 
 const NO_OUTPUT_TARGET: CheckOutputReader = Object.assign(() => () => false, {
@@ -221,7 +223,8 @@ export function validationCommandOf(
 
 /**
  * The verdict alone, for a consumer that needs no other facet of the reading (the registry, the finish contract). It
- * is {@link classifyCall}'s verdict, computed without the facets only a recorder or replay reads (x6-7).
+ * is {@link classifyCall}'s verdict, computed without the facets only a recorder or replay reads (x6-7), and without
+ * the declared checks, so a declared run that the vocabulary does not name reads here as it would undeclared.
  */
 export function callVerdict(
 	toolName: string,
@@ -297,19 +300,23 @@ export function classifyCall(
 	args: Record<string, unknown> | undefined,
 	context: ClassifierContext,
 ): CallClassification {
-	const { cwd, gitHelpers = false, outputTarget = NO_OUTPUT_TARGET } = context;
+	const { cwd, gitHelpers = false, outputTarget = NO_OUTPUT_TARGET, declaredChecks = [] } = context;
 	const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
 	const command = toolName === ToolNames.Bash ? commandOf(args) : null;
 	const shellCommand = command ?? verifyCommandOf(toolName, args, base);
 	const targets = mutationTargets(toolName, args);
 	const paths = targets.map((target) => path.resolve(base, target));
-	const verdict = callVerdict(toolName, args, gitHelpers);
+	// The steps that run a declared check are check steps, so the call is a check whose shape places them (x7-5).
+	const declaredSteps = new Set(
+		command === null ? [] : declaredCheckRuns(command, base, declaredChecks).flatMap((run) => run.steps),
+	);
+	const verdict = declaredSteps.size > 0 ? "check" : callVerdict(toolName, args, gitHelpers);
 	// A bash command has a shape exactly when it runs a check, so only a check reads where its output lands.
 	const isOutput = command !== null && verdict === "check" ? outputTarget(base, checkLogTargets(command)) : () => false;
 	const shape =
 		command !== null
 			? verdict === "check"
-				? checkCommandShape(command, gitHelpers, isOutput)
+				? checkCommandShape(command, gitHelpers, isOutput, declaredSteps)
 				: null
 			: // A verify check whose argv rewrites the tree (`npm run format`) is a change, as in bash (x3-3).
 				verdict === "check" && shellCommand !== null && checkWritesTree(shellCommand.split(" "))
