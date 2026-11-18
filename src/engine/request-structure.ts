@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Api, Context, Message, Model, SystemMessage } from "@earendil-works/pi-ai";
 import { getSystemMessageText, normalizeContext, resolveTranscript, toToolDeclaration } from "@earendil-works/pi-ai";
 import type { CacheRequestStructure } from "../core/cache-telemetry.js";
+import { providerCheckpointFromMessage } from "../core/provider-checkpoint-handle.js";
 import { matchesTrace, traceValue } from "../core/value-trace.js";
 
 const digest = (value: unknown): string =>
@@ -24,7 +25,11 @@ function wireFields(message: Message | SystemMessage): Record<string, unknown> {
 		};
 	}
 	const fields = message as Partial<Record<string, unknown>>;
+	// A native checkpoint handle reaches the wire as the provider's opaque state, so a different handle is a different
+	// element. Only a message that carries one gains the field, so every other digest is unchanged (F14).
+	const checkpoint = providerCheckpointFromMessage(message)?.digest;
 	return {
+		...(checkpoint ? { checkpoint } : {}),
 		role: message.role,
 		content: message.content,
 		toolCallId: fields.toolCallId,

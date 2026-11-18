@@ -127,7 +127,7 @@ const withoutSystem = (request: CapturedRequest): string[] =>
 	wireElements(request).filter((element) => !element.startsWith("system:"));
 
 describe("W12 (F14 -> CF-9): native checkpoint handles in the entry digest", () => {
-	it("two different native handles hash to different entry digests", { todo: "F14 -> CF-9" }, () => {
+	it("two different native handles hash to different entry digests", () => {
 		const model = engineModels.getModel("openai-codex", "gpt-6-luna");
 		ok(model);
 		const withHandle = (digest: string) => ({
