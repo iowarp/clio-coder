@@ -2,13 +2,13 @@ import { deepStrictEqual, ok } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { turnOriginMetadata } from "../../src/core/turn-origin.js";
 import { parseExtensionManifest } from "../../src/domains/extensions/discovery.js";
 import type { ExtensionHookEvent } from "../../src/domains/extensions/public-api-v2.js";
 import { createExtensionRuntimeHookBridge } from "../../src/domains/extensions/runtime-hook-bridge.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
+import type { AgentMessage } from "../../src/engine/types.js";
 import {
 	buildExtensionPromptGate,
 	buildExtensionRuntimeHookRegistrations,
@@ -17,7 +17,8 @@ import { createTurnMiddleware } from "../../src/session-control/turn-middleware.
 import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-test("prompt_submit and turn_start hooks are told who started the turn", async (t) => {
+test("turn hooks are told who started the turn and name it by the id its turn_start and turn_end share", async (t) => {
+	// bt-4: turn_start carried turnId "" and turn_end the final assistant entry, so no hook could tell turns apart.
 	const env = await isolateClioEnv("clio-coder-turn-origin-");
 	t.after(() => env.restore());
 	const source = path.join(env.dir, "source");
@@ -37,6 +38,7 @@ test("prompt_submit and turn_start hooks are told who started the turn", async (
 				hooks: [
 					{ on: "prompt_submit", timeoutMs: 1000, onTimeout: "pass", onError: "pass" },
 					{ on: "turn_start", timeoutMs: 1000, onTimeout: "pass", onError: "pass" },
+					{ on: "turn_end", timeoutMs: 1000, onTimeout: "pass", onError: "pass" },
 				],
 			},
 		}),
@@ -54,15 +56,43 @@ test("prompt_submit and turn_start hooks are told who started the turn", async (
 	});
 	const packages = listInstalledExtensions(workspace, { all: true });
 	const options = { generation: 1, recordReceipt: () => {} };
+	const operator = { origin: "operator" as const, template: "desk:advance" };
 	const origin = { origin: "continuation" as const, continuation: { index: 1, cap: 3 }, template: "desk:advance" };
 	await buildExtensionPromptGate(packages, bridge, options).run("[Clio Coder] continue", true, origin);
-	const middleware = createMiddlewareBundle({
-		registrations: buildExtensionRuntimeHookRegistrations(packages, bridge, options),
-	}).contract;
-	await middleware.runAwaitedHook?.({ hook: "turn_start", turnId: "t1", metadata: turnOriginMetadata(origin) });
+	const state = createTurnState("off");
+	const turns = createTurnMiddleware({
+		state,
+		middleware: createMiddlewareBundle({
+			registrations: buildExtensionRuntimeHookRegistrations(packages, bridge, options),
+		}).contract,
+		middlewareToolChoice: createMiddlewareToolChoiceControl(),
+		emitNotice: () => {},
+		emitFooterNotice: () => {},
+	});
+	const runtime = {
+		wireModelId: "faux",
+		runtimeResolution: {},
+		agent: { state: { tools: [], messages: [] } },
+	} as unknown as AgentRuntime;
+	const reply = { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" } as AgentMessage;
+	// Each turn as the chat loop runs it: turn_start before its user row is filed under the reserved id, turn_end after.
+	for (const [turnOrigin, userTurnId] of [
+		[operator, "user-1"],
+		[origin, "user-2"],
+	] as const) {
+		state.currentTurnOrigin = turnOrigin;
+		state.activeUserTurnId = null;
+		ok((await turns.awaitTurnStart(runtime, "advance", 0, userTurnId)) === null);
+		state.activeUserTurnId = userTurnId;
+		state.lastTurnId = `assistant-of-${userTurnId}`;
+		await turns.fireTurnEnd(runtime, [reply]);
+	}
 	deepStrictEqual(events, [
 		{ point: "prompt_submit", ...origin },
-		{ point: "turn_start", turnId: "t1", ...origin },
+		{ point: "turn_start", turnId: "user-1", ...operator },
+		{ point: "turn_end", turnId: "user-1", outcome: "completed", ...operator },
+		{ point: "turn_start", turnId: "user-2", ...origin },
+		{ point: "turn_end", turnId: "user-2", outcome: "completed", ...origin },
 	]);
 });
 
