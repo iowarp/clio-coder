@@ -218,6 +218,8 @@ export interface ChatPanelTurnUsage {
 	ending?: TurnEnding;
 	/** Epoch ms the turn ended: live, when it settled; replayed, its terminal ledger entry's timestamp. */
 	endedAtMs?: number;
+	/** Replayed from the session, so a forked session's copied turn reads the calls its parent journaled. */
+	replayed?: true;
 }
 
 /**
@@ -538,6 +540,8 @@ type ThinkingSegment = {
 	startedAtMs?: number;
 	/** The stretch was streamed live and its target's history did not keep the text, so only the fact can be shown. */
 	notRetained?: true;
+	/** The provider redacted the reasoning and sent only an opaque payload, so only the fact can be shown. */
+	hiddenByProvider?: true;
 };
 type ThinkingRender = {
 	source: string;
@@ -760,10 +764,16 @@ function extractAssistantThinking(message: unknown): string {
 	return message.content
 		.filter(
 			(item): item is { type: "thinking"; thinking: string } =>
-				item?.type === "thinking" && typeof item.thinking === "string",
+				item?.type === "thinking" && typeof item.thinking === "string" && item.redacted !== true,
 		)
 		.map((item) => item.thinking)
 		.join("");
+}
+
+/** Whether the provider redacted some of the message's reasoning; its text is a placeholder, never the reasoning. */
+function assistantThinkingRedacted(message: unknown): boolean {
+	const content = (message as { content?: unknown } | null)?.content;
+	return Array.isArray(content) && content.some((item) => item?.type === "thinking" && item.redacted === true);
 }
 
 /**
@@ -838,7 +848,7 @@ function hasVisibleOutput(entry: Extract<TranscriptEntry, { role: "assistant" }>
 		if (seg.kind === "text" && seg.text.trim().length > 0) return true;
 		if (seg.kind === "error" && seg.text.trim().length > 0) return true;
 		// A round that only reasoned still drew rows, and the receipt closes the turn beneath them.
-		if (seg.kind === "thinking" && (seg.text.trim().length > 0 || seg.notRetained === true)) return true;
+		if (seg.kind === "thinking" && (seg.text.trim().length > 0 || seg.notRetained || seg.hiddenByProvider)) return true;
 	}
 	return false;
 }
@@ -1938,6 +1948,8 @@ function renderUserLines(
 const THINKING_HIDDEN_LABEL = "Thinking · /view";
 /** Replayed reasoning the target's history dropped: `/view` has nothing to open, so the row offers nothing. */
 const THINKING_NOT_RETAINED_LABEL = "Thinking · streamed live, not kept";
+/** Reasoning the provider redacted: it sent no text, so `/view` has nothing to open either. */
+const THINKING_PROVIDER_HIDDEN_LABEL = "Thinking · hidden by provider";
 function dimLine(text: string, width: number): string {
 	return `${SECONDARY()}${truncateToWidth(text, Math.max(1, width), GLYPH.ellipsis, false)}${RESET}`;
 }
@@ -2276,15 +2288,22 @@ function renderTurnUsageLine(
 		const amounts =
 			[stated?.tokens ?? null, stated?.cached != null ? `cached ${stated.cached}` : null].filter(Boolean).join(" · ") ||
 			null;
-		// Shown in this order; kept by rank, where a bare call count yields to the amounts it qualifies.
+		// Shown in this order; kept by rank, where a bare call count yields to the amounts it qualifies. Amounts too wide
+		// for the row leave a `…` in their place, so a narrow row never passes its call count off as the whole spend.
 		const ordered = [callsFact, coverageNote, amounts];
 		const rank = retries === null && moved === null ? [2, 1, 0] : [0, 1, 2];
 		const kept = new Set<number>();
-		for (const index of rank) {
-			const fact = ordered[index];
-			if (fact == null) continue;
+		const fits = (index: number) => {
 			const trial = ordered.filter((_, at) => at === index || kept.has(at)) as string[];
-			if (visibleWidth(joinFacts([...rowFacts, ...trial, ...endedFact])) <= room) kept.add(index);
+			return visibleWidth(joinFacts([...rowFacts, ...trial, ...endedFact])) <= room;
+		};
+		for (const index of rank) {
+			if (ordered[index] == null) continue;
+			if (fits(index)) kept.add(index);
+			else if (index === 2) {
+				ordered[2] = GLYPH.ellipsis;
+				if (fits(2)) kept.add(2);
+			}
 		}
 		rowFacts.push(...(ordered.filter((fact, at) => fact != null && kept.has(at)) as string[]));
 		return [`${glyph}${dimLine(releaseSpaces(joinFacts([...rowFacts, ...endedFact])), room)}`, ...noAnswer];
@@ -2781,11 +2800,12 @@ function renderEntryLines(
 		segmentsWalked += 1;
 		if (headable && !segmentSettled(seg)) headable = false;
 		if (seg.kind === "thinking") {
-			if (seg.notRetained === true) {
+			if (seg.notRetained || seg.hiddenByProvider) {
 				flushReasoning("words");
+				const label = seg.hiddenByProvider ? THINKING_PROVIDER_HIDDEN_LABEL : THINKING_NOT_RETAINED_LABEL;
 				blocks.push({
 					kind: "thinking",
-					lines: [`${REASON_RAIL()}${dimLine(THINKING_NOT_RETAINED_LABEL, Math.max(1, width - PROSE_GUTTER_WIDTH))}`],
+					lines: [`${REASON_RAIL()}${dimLine(label, Math.max(1, width - PROSE_GUTTER_WIDTH))}`],
 				});
 				continue;
 			}
@@ -3239,7 +3259,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			return;
 		}
 		// The answer closes the run, so the moved turn's answering call is the run's last.
-		const spend = turnSpend(view, usage.turnId, usage.movedTo === undefined ? undefined : usage.callIds?.at(-1));
+		const spend = turnSpend(
+			view,
+			usage.turnId,
+			usage.movedTo === undefined ? undefined : usage.callIds?.at(-1),
+			usage.replayed === true ? "lineage" : "session",
+		);
 		if (spend === null) return;
 		if (JSON.stringify(spend) !== JSON.stringify(usage.spend)) {
 			invalidateEntryCache(entry);
@@ -3546,6 +3571,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					...(callIds.length > 0 ? { callIds } : {}),
 					...(elapsedMs === undefined ? {} : { elapsedMs }),
 					...(endedAtMs === undefined ? {} : { endedAtMs }),
+					...(replayed !== undefined ? { replayed: true as const } : {}),
 					...(humanWaitMs > 0 ? { humanWaitMs } : {}),
 					...(coldReasons.length > 0 ? { coldReasons: [...coldReasons] } : {}),
 					...(runRetries > 0 ? { retries: runRetries } : {}),
@@ -4788,7 +4814,15 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const reports = !willRetry && reportsCall(event.message);
 				const notRetained =
 					(event.message as { clioCoderReasoningNotRetained?: unknown }).clioCoderReasoningNotRetained === true;
-				if (text.length === 0 && thinking.length === 0 && !notRetained && terminalError.length === 0 && !reports) {
+				const hiddenByProvider = thinking.length === 0 && assistantThinkingRedacted(event.message);
+				if (
+					text.length === 0 &&
+					thinking.length === 0 &&
+					!notRetained &&
+					!hiddenByProvider &&
+					terminalError.length === 0 &&
+					!reports
+				) {
 					if (completedStreamedArgs) markDirty();
 					return;
 				}
@@ -4809,7 +4843,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// produced, rather than a marker dangling after the answer.
 				const messageCompleted = messageStopCompleted((event.message as { stopReason?: unknown }).stopReason);
 				closeOpenThinking(assistant, messageCompleted);
-				if (thinking.length > 0 || notRetained) {
+				if (thinking.length > 0 || notRetained || hiddenByProvider) {
 					const messageStart = Math.min(assistant.messageStartSegmentIndex ?? 0, assistant.segments.length);
 					const streamedThisMessage = assistant.segments
 						.slice(messageStart)
@@ -4821,7 +4855,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 							text: messageCompleted ? thinking : holdCutOffText(thinking),
 							at: stamp(),
 							finalized: true,
-							...(thinking.length === 0 ? { notRetained: true as const } : {}),
+							...(hiddenByProvider
+								? { hiddenByProvider: true as const }
+								: thinking.length === 0
+									? { notRetained: true as const }
+									: {}),
 						});
 					}
 				}

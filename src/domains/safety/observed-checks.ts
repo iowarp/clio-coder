@@ -1,17 +1,9 @@
 import path from "node:path";
 import { isRefusalToolResultError } from "../../tools/result-disposition.js";
 import type { ObservedCheck } from "../session/task-board.js";
+import { type CallClassification, type CheckOutputReader, classifyCall, settleCheckCall } from "./check-classifier.js";
 import { capabilityEntries, dispatchRunRecordEvidence, validationCheckId } from "./finish-contract.js";
-import {
-	type CallReading,
-	type CheckOutputReader,
-	checkOutputReader,
-	gitRunsConfiguredHelpers,
-	observedCheckName,
-	readCall,
-	settleCheckCall,
-	validationCommandOf,
-} from "./run-effects.js";
+import { checkOutputReader, gitRunsConfiguredHelpers } from "./run-effects.js";
 
 /**
  * The checks standing behind one task, folded from the session path. A note can
@@ -34,8 +26,7 @@ import {
 interface TrackedCall {
 	name: string | null;
 	check?: string;
-	reading: CallReading;
-	runsCheck: boolean;
+	reading: CallClassification;
 	/** False when a bash call's exit status is only a later command's. */
 	statusAttributable: boolean;
 	/** The count of changes already settled when the call started. */
@@ -61,19 +52,15 @@ function trackCall(
 	outputTarget: CheckOutputReader,
 	revision: number,
 ): TrackedCall {
-	const canonical = validationCommandOf(tool, args, "grounding");
-	const reading = readCall(tool, args, root, gitHelpers, outputTarget);
-	const command = reading.shell === null ? null : reading.shellCommand;
-	const name = canonical === null ? null : command === null ? canonical : observedCheckName(command, reading.base, root);
+	const reading = classifyCall(tool, args, { cwd: root, gitHelpers, outputTarget });
 	const check =
-		canonical !== null && reading.base === root && reading.shell?.outsideCwd !== true
-			? validationCheckId(canonical)
+		reading.check !== null && reading.base === root && reading.shell?.outsideCwd !== true
+			? validationCheckId(reading.check)
 			: undefined;
 	return {
-		name,
+		name: reading.name,
 		...(check ? { check } : {}),
 		reading,
-		runsCheck: tool === "verify" || canonical !== null,
 		statusAttributable: reading.shell?.statusAttributable ?? true,
 		revision,
 		dispatch: tool === "dispatch",
@@ -152,13 +139,7 @@ export function standingChecksFrom(
 	const standing = new Map<string, ObservedCheck>();
 	let revision = 0;
 	const settle = (call: TrackedCall, failed: boolean, at: string): void => {
-		const settlement = settleCheckCall(
-			call.reading,
-			call.runsCheck,
-			failed,
-			failed ? "error" : "ok",
-			call.revision === revision,
-		);
+		const settlement = settleCheckCall(call.reading, failed, failed ? "error" : "ok", call.revision === revision);
 		if (settlement.mutation) {
 			outputTarget.changed(call.reading.changedPaths);
 			revision += 1;

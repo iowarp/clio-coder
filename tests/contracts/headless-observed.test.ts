@@ -46,6 +46,24 @@ test("the observed line omits a run with no tool calls and names a write with no
 		formatHeadlessObservedLine({ toolCalls: 2, refused: 1, writes: 1, checks: [] }),
 		"clio-coder run: observed: 2 tool calls, 1 refused · 1 write · no check observed after the last write",
 	);
+	// An unclassified call after the last check is named beside the standing check, which it leaves in place.
+	const after = observeHeadlessRun({
+		entries: [...edit, ...failingCheck],
+		start: 0,
+		effects: {
+			validationOutcomes: new Map([["pytest", false]]),
+			checkOutcomes: new Map([["pytest", false]]),
+			unclassifiedAfterLastCheck: ["node codemod.mjs"],
+		},
+		toolCalls: 3,
+		refused: 0,
+		writes: 1,
+	});
+	strictEqual(after.unclassifiedAfterLastCheck, 1);
+	match(
+		formatHeadlessObservedLine(after) ?? "",
+		/ · check failed: pytest · 1 unclassified command ran after the last check$/,
+	);
 });
 
 test("a run whose verify call found no check in the workspace is observed as no checks declared", () => {
@@ -225,6 +243,19 @@ test("observed checks follow the receipt's rules on the task board and the headl
 	deepStrictEqual(standing(bash("npm test 2>&1 | tee /tmp/t.log")), [["npm test", true, "test"]]);
 	deepStrictEqual(standing(bash("npm test"), bash("npm test | tee src/a.py")), []);
 	deepStrictEqual(standing(bash("make test -C ../other")), []);
+	// The recorder's check vocabulary: a read-only check retires nothing, a writer retires every pass and lands none (x5-1).
+	deepStrictEqual(standing(bash("npm test"), bash("npx tsc --noEmit")), [
+		["npm test", true, "test"],
+		["npx tsc --noEmit", true, undefined],
+	]);
+	for (const change of [`node -e "fs.writeFileSync('src/a.ts', '')"`, "tsc", "npx jest -u"])
+		deepStrictEqual(standing(bash("npm test"), bash(change)), [], change);
+	// A runner flag after `--` files a check; a runtime loader refuses one, which settles and retires nothing (x5-2).
+	deepStrictEqual(standing(bash("npm test", 1), bash("npm test -- -t parses")), [
+		["npm test", false, "test"],
+		["npm test -- -t parses", true, undefined],
+	]);
+	deepStrictEqual(standing(bash("npm test"), bash("npm test -- --import ./x.mjs")), [["npm test", true, "test"]]);
 	const env = await isolateClioEnv("headless-observed-");
 	try {
 		const text = await headlessRun("text", [

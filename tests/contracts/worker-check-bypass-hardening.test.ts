@@ -164,7 +164,12 @@ describe("unattended test runners refuse option arguments after --", () => {
 			"bun run test:unit -- --config=./pwn.json",
 		]) {
 			strictEqual(admit({ tool: ToolNames.Bash, args: { command } }), "ask", command);
-			strictEqual(detectValidationCommand(command).kind, "none", command);
+			// Only a runtime loader refuses the check itself; a runner's own option files it under its full command (x5-2).
+			strictEqual(
+				detectValidationCommand(command).kind,
+				/--prefix|--config/u.test(command) ? "validation" : "none",
+				command,
+			);
 		}
 		strictEqual(admit({ tool: ToolNames.Verify, args: { check: "test", args: ["--import=./pwn.mjs"] } }), "ask");
 		strictEqual(detectValidationCommand("npm test -- tests/x.test.ts").kind, "validation");

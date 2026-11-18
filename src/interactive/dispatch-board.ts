@@ -51,8 +51,7 @@ import {
 	councilSynthesisLines,
 	exactWorkerAnswerObject,
 	liveWorkerAnswerText,
-	mutationReportLines,
-	type PresentedContractAnswer,
+	presentSettledWorkerAnswer,
 	presentWorkerContractAnswer,
 } from "./renderers/worker-answer.js";
 import type { ClioTheme, ClioToken } from "./theme/index.js";
@@ -604,21 +603,6 @@ export function renderDispatchActivity(row: DispatchBoardRow, width: number): st
 }
 
 /**
- * A coder's sealed mutation report in its transcript card's words, admitted as that card admits it: by the sealed
- * record, not a presented contract kind. The board cannot tell where the proposed commit landed.
- */
-function sealedMutationReport(
-	progress: WorkerProgressSnapshot,
-	trust: DispatchBoardRow["trust"],
-	complete: boolean,
-): PresentedContractAnswer | null {
-	if (!progress.settled || !complete || trust?.axes.artifactIntegrity !== "verified") return null;
-	const value = exactWorkerAnswerObject(progress.tailText);
-	const lines = value === null ? null : mutationReportLines(value, null);
-	return lines === null ? null : { lines };
-}
-
-/**
  * The `answer` block: the newest rows of the worker's bounded prose on a rail,
  * then what is not shown and where to read it. Wrapping happens before the row
  * cap, so the block is at most {@link WORKER_PROGRESS_CARD_ROWS} rows tall
@@ -637,9 +621,14 @@ function progressAnswerLines(
 	const gutter = CARD_KV_KEY_WIDTH + 1;
 	const railWidth = Math.max(1, contentWidth - gutter - 2);
 	const complete = progress.droppedLines === 0 && progress.droppedBytes === 0;
-	const presented =
-		presentWorkerContractAnswer(progress.tailText, run.resultContract, complete, progress.settled) ??
-		sealedMutationReport(progress, run.trust, complete);
+	const presented = progress.settled
+		? presentSettledWorkerAnswer(
+				progress.tailText,
+				run.resultContract,
+				run.trust?.axes.artifactIntegrity === "verified",
+				complete,
+			)
+		: null;
 	const source = presented
 		? [...(presented.footer ? [presented.footer] : []), ...presented.lines]
 		: liveWorkerAnswerText(progress.tailText, progress.completed === true).split("\n");
@@ -1182,12 +1171,14 @@ function dispatchCardBody(
 		);
 	}
 	if (row.writeRecordDowngrade) {
+		// The provider's call id (`toolu_…`) matches nothing the TUI lists, so the card names the call by its tool and run.
 		const warning = describeWriteBoundaryAttributionDowngrade({
 			...row.writeRecordDowngrade,
+			toolCallId: null,
 			runId: row.runId,
 			stepId: row.phase?.stepId ?? null,
 		});
-		// The call id and rule are for the inspector; the fold says only that the changed-files list may be short.
+		// The rule is for the expanded card; the fold says only that the changed-files list may be short.
 		const brief = `changed-files list may be incomplete: ${sanitizeCallTargetText(row.writeRecordDowngrade.tool)} can write paths it does not name`;
 		bodyLines.push(
 			...cardWrappedValueLines(

@@ -4,30 +4,19 @@ import path from "node:path";
 import type { ObservedProof } from "../../core/hoare.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { isRefusalToolResultError } from "../../tools/result-disposition.js";
-import { shellExitSpeaksForCommand } from "../../tools/shell-exit-scope.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { captureProofSnapshot, readObservedProof } from "../../tools/verify/proof.js";
 import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/resolve.js";
-import { isVerifyListing } from "../../tools/verify/surface.js";
-import { classify } from "./action-classifier.js";
-import { typedValidationSummary } from "./finish-contract.js";
-import { isSameOrDescendant } from "./path-policy.js";
 import {
-	type CheckCommandShape,
-	checkCommandShape,
-	checkFailureAttributable,
-	checkLogTargets,
-	checkRunsOutside,
-	checkWritesTree,
-	commandArgumentSegments,
-	detectValidationCommand,
-	extractCommandDeleteTargets,
-	extractCommandWriteTargets,
-	isReadOnlyInspectionCommand,
-	observedValidationCommand,
-	toolMutationPaths,
-	type ValidationCommandScope,
-} from "./protected-artifacts.js";
+	type CallClassification,
+	type CheckOutputReader,
+	classifyCall,
+	observedCheckName,
+	settleCheckCall,
+	validationCommandOf,
+} from "./check-classifier.js";
+import { isSameOrDescendant } from "./path-policy.js";
+import { observedValidationCommand } from "./protected-artifacts.js";
 import { effectiveScratchRoots } from "./scratch-roots.js";
 
 /**
@@ -132,6 +121,13 @@ export interface RunEffects {
 	 * spaces), in run order. A verify call that resolves to no argv, such as a bare listing, records nothing.
 	 */
 	executedShellCommands?: ReadonlyArray<string>;
+	/**
+	 * Calls the check classifier could not read (`check-classifier.ts`, verdict `unknown`) that ran after the run's
+	 * latest settled check outcome, in run order: a bash call's command, any other call's tool name. They neither
+	 * settled nor cleared an outcome, so a receipt discloses them beside its verdict without changing it. Empty until
+	 * an outcome settles.
+	 */
+	unclassifiedAfterLastCheck?: ReadonlyArray<string>;
 }
 
 export interface WriteRecordDowngrade {
@@ -179,7 +175,7 @@ interface PendingEffects {
 	proofCheck: string | null;
 	tool: string;
 	toolCallId: string;
-	reading: CallReading;
+	reading: CallClassification;
 	validationCommand: string | null;
 	validationName: string | null;
 	/** False when a bash call's exit status is only its last command's, so it settles nothing about the check. */
@@ -188,245 +184,6 @@ interface PendingEffects {
 	verificationCommand: string | null;
 	/** The tool's own outcome, when the call reached it. Stays null when the engine answered instead. */
 	outcome: "ok" | "error" | "blocked" | null;
-}
-
-/**
- * What a bash command's own text says about the check it runs, read once at the call's start. The live recorder and
- * the task board's replay over session entries both read a command through this, so neither can credit a pass the
- * other refuses (x4-1). `base` is the directory the command started in, `cwd` the run's workspace.
- */
-export interface ShellCheckReading {
-	/** False when the call's exit status is only a later command's ({@link shellExitSpeaksForCommand}). */
-	statusAttributable: boolean;
-	/** False when a stage piped after the check can fail a green check ({@link checkFailureAttributable}). */
-	failureAttributable: boolean;
-	/** The check ran outside `cwd` ({@link checkRunsOutside}), so its pass is not this workspace's. */
-	outsideCwd: boolean;
-	/** Only read-only inspection ({@link isReadOnlyInspectionCommand}), so it changed no tree. */
-	inspection: boolean;
-	/** Where its check stands against its own changes ({@link checkCommandShape}); null when it runs none. */
-	shape: CheckCommandShape | null;
-}
-
-function readShellCheck(
-	command: string,
-	base: string,
-	cwd: string,
-	gitHelpers: boolean,
-	isOutput: (target: string) => boolean,
-): ShellCheckReading {
-	return {
-		statusAttributable: shellExitSpeaksForCommand(command),
-		failureAttributable: checkFailureAttributable(command),
-		outsideCwd: checkRunsOutside(command, base, cwd),
-		inspection: isReadOnlyInspectionCommand(command, gitHelpers),
-		shape: checkCommandShape(command, gitHelpers, isOutput),
-	};
-}
-
-/** The name a bash check's outcome is filed under: its full observed command, prefixed with its directory off `cwd`. */
-export function observedCheckName(command: string, base: string, cwd: string): string {
-	return `${base === cwd ? "" : `cwd=${base}: `}${observedValidationCommand(command)}`;
-}
-
-export interface CheckCallSettlement {
-	/** The call counts as a workspace change, so no earlier pass stands on the tree it left. */
-	mutation: boolean;
-	/** Its check ran after its own change, so it judged the tree that change left. */
-	checkedAfterOwnMutation: boolean;
-	/** Its check judged the tree as it now stands. */
-	fresh: boolean;
-	/** Its outcome settles its check: a red that is the check's own, or a fresh green in this workspace. */
-	settled: boolean;
-}
-
-/**
- * How one finished call bears on the outcomes standing before it, shared by the recorder and the task board's replay
- * (x4-1). `startedOnCurrentTree` says no other call's change landed while it ran. A refused call never reached its
- * tool, so it changed nothing and settles nothing. A failed call that really ran may have partly written.
- */
-export function settleCheckCall(
-	reading: CallReading,
-	runsCheck: boolean,
-	failed: boolean,
-	outcome: "ok" | "error" | "blocked" | null,
-	startedOnCurrentTree: boolean,
-): CheckCallSettlement {
-	const refused = failed && outcome !== "error" && outcome !== "ok";
-	// A verify call is a check, as a recognized validation command is: even a bare listing changes no tree. Its
-	// argv is one simple command (a catalog refuses shell executables, a task gate takes bare words). A bash
-	// check that shares its call with steps that may change the tree is still a mutation, and it judged the
-	// final tree only when every such step ran first (x1-1). A check that rewrites the tree, bash or verify, is a
-	// change too, so no earlier pass stands on code it reformatted (x3-3).
-	const checkChangedTree = reading.shape === "after-change" || reading.shape === "mixed";
-	const opaqueMutation = reading.opaque && reading.shell?.inspection !== true && (checkChangedTree || !runsCheck);
-	const mutation = !refused && (reading.changedPaths.length > 0 || opaqueMutation);
-	const checkedAfterOwnMutation = mutation && reading.shape !== "mixed" && reading.shape !== "pure";
-	const fresh = startedOnCurrentTree && (!mutation || checkedAfterOwnMutation);
-	// Only a check that ran can fail. A call the engine answered without
-	// reaching its tool settles with no outcome, so it records nothing.
-	// `pytest | head` exits 0 only when pytest did, but its red may be head's SIGPIPE (x3-2). A pass in another
-	// directory judged another tree, so it settles nothing here and a standing red stays (x3-5).
-	const settled = failed
-		? outcome === "error" && reading.shell?.failureAttributable !== false
-		: outcome !== "blocked" && fresh && reading.shell?.outsideCwd !== true;
-	return { mutation, checkedAfterOwnMutation, fresh, settled };
-}
-
-/**
- * Action classes whose successful calls write only paths their own arguments
- * name. `read` covers the observe, retrieve, interact, and orchestrate-bookkeeping
- * tools, none of which touch a source-workspace file: `git` is a closed
- * status/diff/log surface, and `tasks`, `ledger`, and `context` write Clio's own
- * state. `write` covers `write`, `edit`, and `artifact`, whose target
- * `toolMutationPaths` resolves from the call itself, including the artifact
- * tool's default path.
- */
-const ENUMERABLE_ACTION_CLASSES: ReadonlySet<string> = new Set(["read", "write"]);
-
-/**
- * Whether a successful call to this tool can mutate a path its own recorded
- * arguments do not name.
- *
- * Asked of the classifier rather than of a hand-written list, because
- * `src/tools/policy.ts` asserts at bootstrap that every registered tool's
- * `baseActionClass` equals what this classifier returns and what the plane
- * table declares. A tool added to the execute or orchestrate-dispatch plane is
- * therefore opaque the day it is registered, with no list to remember to update.
- *
- * The classifier is asked about the tool name alone. Bash's argument scan can
- * escalate a single call to `system_modify` or `git_destructive`, and those are
- * still bash; the question here is what the tool can do, not what one call was
- * caught doing. An unregistered name (a dynamic or MCP tool) classifies as
- * `unknown` and is opaque, which is the fail-closed answer for a tool whose
- * arguments this process has no schema for.
- */
-function toolWritesOpaquely(toolName: string): boolean {
-	return !ENUMERABLE_ACTION_CLASSES.has(classify({ tool: toolName }).actionClass);
-}
-
-/**
- * Git subcommands that move or remove named path operands. The shared
- * write-target extractor classifies bare `mv`/`rm`, not their git spellings,
- * and it stays that way: widening it would change what the finish-contract gate
- * treats as a mutating turn. Grounding wants the wider set, because a path this
- * misses can only produce a false conformance failure.
- */
-const GIT_PATH_MUTATIONS: ReadonlySet<string> = new Set(["mv", "rm"]);
-
-function gitPathOperands(command: string): string[] {
-	const targets: string[] = [];
-	for (const segment of commandArgumentSegments(command)) {
-		if (segment[0] !== "git") continue;
-		const subcommand = segment[1];
-		if (subcommand === undefined || !GIT_PATH_MUTATIONS.has(subcommand)) continue;
-		for (const token of segment.slice(2)) {
-			if (token.startsWith("-")) continue;
-			targets.push(token);
-		}
-	}
-	return targets;
-}
-
-/** The command a verify call runs, resolved as the tool resolves it (task gates included); null when it runs none. */
-function verifyCommandOf(toolName: string, args: Record<string, unknown> | undefined, base: string): string | null {
-	if (toolName !== ToolNames.Verify || args === undefined) return null;
-	try {
-		return verifyResolutionArgv(resolveVerifyCall(base, args), args, base)?.join(" ") ?? null;
-	} catch {
-		return null;
-	}
-}
-
-function commandOf(args: Record<string, unknown> | undefined): string | null {
-	const command = args?.command;
-	return typeof command === "string" && command.length > 0 ? command : null;
-}
-
-export function mutationTargets(toolName: string, args: Record<string, unknown> | undefined): string[] {
-	if (toolName !== ToolNames.Bash) return toolMutationPaths(toolName, args);
-	const command = commandOf(args);
-	if (command === null) return [];
-	return [...extractCommandWriteTargets(command), ...extractCommandDeleteTargets(command), ...gitPathOperands(command)];
-}
-
-/** One call as the outcome fold reads it at its start, by the recorder and by the task board's replay alike (x4-1). */
-export interface CallReading {
-	/** Where the call ran: the run's cwd, re-based by a bash call's own cwd argument. */
-	base: string;
-	/** Absolute paths the call's arguments aim a mutation at. */
-	paths: string[];
-	/** `paths` less the logs a check's output was written to, which change no tree the check judged (x4-2). */
-	changedPaths: string[];
-	/** The bash command text, or a verify call's resolved argv joined by spaces; null otherwise. */
-	shellCommand: string | null;
-	/** A bash command read for its check; null for any other call. */
-	shell: ShellCheckReading | null;
-	opaque: boolean;
-	shape: CheckCommandShape | null;
-}
-
-export function readCall(
-	toolName: string,
-	args: Record<string, unknown> | undefined,
-	cwd: string,
-	gitHelpers: boolean,
-	outputTarget: CheckOutputReader,
-): CallReading {
-	const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
-	const command = toolName === ToolNames.Bash ? commandOf(args) : null;
-	const isOutput = outputTarget(base, command === null ? undefined : checkLogTargets(command));
-	const shell = command === null ? null : readShellCheck(command, base, cwd, gitHelpers, isOutput);
-	const shellCommand = command ?? verifyCommandOf(toolName, args, base);
-	const paths = mutationTargets(toolName, args).map((target) => path.resolve(base, target));
-	const outputs =
-		command !== null && shell !== null && shell.shape !== null
-			? new Set(
-					extractCommandWriteTargets(command)
-						.filter(isOutput)
-						.map((target) => path.resolve(base, target)),
-				)
-			: new Set<string>();
-	return {
-		base,
-		paths,
-		changedPaths: paths.filter((target) => !outputs.has(target)),
-		shellCommand,
-		shell,
-		opaque: toolWritesOpaquely(toolName),
-		// A verify check whose argv rewrites the tree (`npm run format`) is a change, as in bash (x3-3).
-		shape:
-			shell !== null ? shell.shape : shellCommand !== null && checkWritesTree(shellCommand.split(" ")) ? "mixed" : null,
-	};
-}
-
-/**
- * The canonical identity of a call's check under one scope. A typed
- * verification tool carries the same identity under both scopes: the scope only
- * widens which bash spellings are recognized as a check at all.
- */
-export function validationCommandOf(
-	toolName: string,
-	args: Record<string, unknown> | undefined,
-	scope: ValidationCommandScope,
-): string | null {
-	if (toolName === ToolNames.Bash) {
-		const command = commandOf(args);
-		if (command === null) return null;
-		const detected = detectValidationCommand(command, scope);
-		if (detected.kind !== "validation") return null;
-		// A scoped unittest run must not stand in for the full suite, so the first positional target names the check.
-		if (detected.matched === "python -m unittest") {
-			const target = /\s-m\s+unittest((?:\s+\S+)*)/u
-				.exec(command)?.[1]
-				?.trim()
-				.split(/\s+/u)
-				.find((token) => token.length > 0 && !token.startsWith("-") && !/^[0-9]*[<>|&]/u.test(token));
-			return target ? `${detected.matched} ${target}` : detected.matched;
-		}
-		return detected.matched;
-	}
-	return typedValidationSummary(toolName, { args: args ?? {} });
 }
 
 /**
@@ -488,11 +245,7 @@ export function gitRunsConfiguredHelpers(cwd: string, env: NodeJS.ProcessEnv = p
 }
 
 /** Reads where a check's output lands; `logs` are the call's check log targets ({@link checkLogTargets}). */
-export interface CheckOutputReader {
-	(base: string, logs?: ReadonlySet<string>): (target: string) => boolean;
-	/** Paths a call changed: a later check log written there overwrites the run's own work, so it stays a change. */
-	changed(paths: Iterable<string>): void;
-}
+export type { CheckOutputReader };
 
 /**
  * Where a check's output lands (x4-2): a `*.log`, outside the workspace, under the temp dir or a scratch root, or
@@ -577,6 +330,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	const checkingCalls = new Map<string, "ok" | "error" | "blocked" | null>();
 	const writeRecordDowngrades = new Map<string, WriteRecordDowngrade>();
 	const executedShellCommands: string[] = [];
+	// Null until an outcome settles: before the first check there is no "after the last check".
+	let unclassifiedAfterLastCheck: string[] | null = null;
 	const proofs = new Map<string, ObservedProof>();
 	const latestProofCalls = new Map<string, string>();
 	return {
@@ -590,14 +345,14 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				latestProofCalls.set(proofCheck, toolCallId);
 			}
 			inFlight.set(toolCallId, { tool: toolName, revision: mutationRevision, outcome: null });
-			const reading = readCall(toolName, args, cwd, gitHelpers, outputTarget);
+			const reading = classifyCall(toolName, args, { cwd, gitHelpers, outputTarget });
 			const { base, shell } = reading;
-			const validationCommand = receiptValidationCommand(toolName, args, base);
+			// The classifier alone says whether the call ran a check; the vocabularies only name it.
+			const validationCommand = reading.verdict === "check" ? receiptValidationCommand(toolName, args, base) : null;
 			const verificationCommand = validationCommandOf(toolName, args, "grounding");
 			const command = shell === null ? null : reading.shellCommand;
 			// A listing names no check and runs none, so it is not a checking call (bt-19).
-			if ((toolName === ToolNames.Verify && !isVerifyListing(args)) || verificationCommand !== null)
-				checkingCalls.set(toolCallId, null);
+			if (reading.verdict === "check") checkingCalls.set(toolCallId, null);
 			// An opaque call is tracked even when it exposed no path and no
 			// command, because the fact that it ran at all is the finding.
 			const chain = toolName === "gateway" && args?.op === "chain";
@@ -654,7 +409,6 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			const { reading } = effects;
 			const { mutation, checkedAfterOwnMutation, fresh, settled } = settleCheckCall(
 				reading,
-				effects.tool === ToolNames.Verify || effects.validationCommand !== null,
 				failed,
 				effects.outcome,
 				effects.mutationRevision === mutationRevision,
@@ -668,6 +422,10 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			}
 			settleRan(checkedAfterOwnMutation);
 			// `pytest; echo done` ran the check, but its status is echo's, so the outcome stays unknown either way.
+			const recorded =
+				settled &&
+				((effects.validationName !== null && effects.checkStatusAttributable) ||
+					(effects.proofCheck !== null && effects.proofCheck.length > 0));
 			if (effects.validationName !== null && effects.checkStatusAttributable && settled) {
 				validationOutcomes.set(effects.validationName, !failed);
 				checkOutcomes.set(effects.validationName, !failed);
@@ -676,6 +434,14 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				checkOutcomes.set(effects.proofCheck, !failed);
 				if (reading.shellCommand !== null) checkOutcomes.set(observedValidationCommand(reading.shellCommand), !failed);
 			}
+			// An unknown call that ran neither settles nor clears, so a receipt can only say it ran after the last check.
+			if (recorded) unclassifiedAfterLastCheck = [];
+			else if (
+				reading.verdict === "unknown" &&
+				unclassifiedAfterLastCheck !== null &&
+				(failed ? effects.outcome === "error" : effects.outcome !== "blocked")
+			)
+				unclassifiedAfterLastCheck.push(reading.shell === null ? effects.tool : (reading.shellCommand ?? effects.tool));
 			if (failed) {
 				for (const target of reading.paths) failedMutationPaths.add(target);
 				return;
@@ -762,6 +528,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				writeRecordComplete: writeRecordDowngrades.size === 0,
 				writeRecordDowngrades: [...writeRecordDowngrades.values()].map((entry) => ({ ...entry })),
 				executedShellCommands: [...executedShellCommands],
+				unclassifiedAfterLastCheck: [...(unclassifiedAfterLastCheck ?? [])],
 			};
 		},
 		checkFreshness() {

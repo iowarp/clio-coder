@@ -351,6 +351,19 @@ test("reasoning a target's history dropped replays as streamed and not kept, wit
 	const rendered = screen(panel);
 	match(rendered, /streamed live, not kept/u);
 	doesNotMatch(rendered, /Thinking · \/view/u);
+	// Reasoning the provider redacted says so, and offers no placeholder to open (bt-11 i22-think).
+	const redacted = createChatPanel();
+	redacted.appendUser("question");
+	const hidden = {
+		...message,
+		content: [{ type: "thinking", thinking: "[Reasoning redacted]", redacted: true }, ...message.content],
+		clioCoderReasoningNotRetained: undefined,
+	};
+	redacted.applyEvent({ type: "message_start", message: hidden } as never);
+	redacted.applyEvent({ type: "message_end", message: hidden } as never);
+	redacted.applyEvent({ type: "agent_end", messages: [hidden] } as never);
+	match(screen(redacted), /│ Thinking · hidden by provider\n/u);
+	doesNotMatch(screen(redacted), /Reasoning redacted|Thinking · \/view/u);
 });
 
 test("a replayed receipt splits work from the operator wait the live run recorded", () => {

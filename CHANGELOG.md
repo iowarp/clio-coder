@@ -105,6 +105,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- The run-effects recorder, task board, finish contract, receipts and headless observed line now read every call through one check classifier (check, inspection, mutation or unknown), so they agree on what ran a check; an unknown command neither settles nor clears a recorded outcome (x5-1).
+- A runner flag after `--` (`npm test -- --runInBand`) is a check; a loader flag (`--import`, `--require`) is unknown and settles nothing. Unknown calls after the last check are disclosed as unclassifiedAfterLastCheck without changing the verdict (x5-2).
 - A turn whose last call streamed before it stopped now settles with stage "streaming", not "firstToken", and a harness stop (shutdown, run --timeout, repetition guard, operator cancel, route move) persists failure stage "harness" with its own cause instead of a transport abort (bt-26 N2a).
 - why-stopped words harness-initiated stops as "Stopped on <cause>" instead of "Failed on <cause>"; provider and transport failures still read "Failed on" (bt-26 N2b).
 - A headless or ACP run that ends while an extension reload is still staging no longer prints "Extension reload failed"; the closed runtime drops the reload silently (cw-6).

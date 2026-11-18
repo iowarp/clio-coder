@@ -53,6 +53,7 @@ import {
 	renderFleetPlanCard,
 } from "./dispatch-board.js";
 import type { FleetPlanRuns, FleetPlanRunView } from "./fleet-plan-runs.js";
+import { recordedRunAnswerLines } from "./fleet-run-history.js";
 import { progressNoticeKeys } from "./footer/notifications.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
@@ -585,6 +586,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				readSessionEntries: deps.readSessionEntries,
 				readTranscript: deps.readTranscript,
 				formatModelId: abbreviateModelId,
+				presentAgentOutput: (runId, text) => recordedRunAnswerLines(runId, text, deps.stateDir),
 				...(deps.queueNavigator
 					? {
 							queuedMessageIds: () => new Set(deps.queueNavigator?.chat.queueEntries().map((entry) => entry.id)),
