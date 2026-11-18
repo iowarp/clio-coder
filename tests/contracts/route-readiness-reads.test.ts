@@ -139,6 +139,30 @@ describe("contracts/route readiness reads", () => {
 		deepStrictEqual(drain(), [], "a rejected gate artifact is not re-read either");
 	});
 
+	it("warmup folds only the bounded runs, newest first, and never opens one past the 30-day bound (Astra r5-4)", async () => {
+		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-readiness-warm-"));
+		await ledger(stateDir, [sealed("run-old", true), sealed("run-mid", true), sealed("run-new", true)]);
+		const day = 24 * 60 * 60;
+		const now = Date.now() / 1000;
+		for (const [runId, age] of [
+			["run-old", 40 * day],
+			["run-mid", 2 * day],
+			["run-new", day],
+		] as const)
+			fs.utimesSync(telemetryRunDirectory(stateDir, runId), now - age, now - age);
+		const { reads, restore } = countLedgerReads(stateDir);
+		after(restore);
+		const fold = createRouteHistoryFold({ stateDir });
+		await fold.warm?.(() => false);
+		const bundle = (runId: string) => join(telemetryRunDirectory(stateDir, runId), "bundle.json");
+		deepStrictEqual(reads.splice(0), [bundle("run-new"), bundle("run-mid")]);
+		deepStrictEqual(
+			fold.read().runs.map((run) => run.runId),
+			["run-new", "run-mid"],
+		);
+		deepStrictEqual(reads, [], "the read finds every bounded run warmed");
+	});
+
 	it("route history folds each sealed run.settled under its executed route", async () => {
 		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-readiness-history-"));
 		await ledger(stateDir, [sealed("run-a", true)]);

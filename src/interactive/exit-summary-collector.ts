@@ -17,8 +17,8 @@ import { COUNCIL_SEALED_REPORT_AGENT_ID } from "../session-control/council.js";
 import type { WorkerRunResultFacts } from "../session-control/worker-stream.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 import {
-	SENT_DISPOSITIONS,
 	sentCallCount,
+	sentCallTime,
 	sessionVerifiedOutcomes,
 	usageCoverage,
 	usageEstimatedCalls,
@@ -217,16 +217,10 @@ export function exitSpend(
 	if (!view) return { kind: "unavailable" };
 	const session = view.session();
 	const sessionTokens = tokenFacts(view);
-	const visit = view.calls({ from: visitFrom, dispositions: [...SENT_DISPOSITIONS] });
 	// `settle` runs from each attempt's start, retries included, so it holds the silent wait for the first token that
-	// `modelTime` (first token to settle) leaves out. It also holds any admission hold Clio put on the request.
-	const callTime =
-		visit.matched > 0
-			? view.attempts(
-					visit.calls.map((call) => call.attemptId),
-					"settle",
-				)
-			: null;
+	// `modelTime` (first token to settle) leaves out. It also holds any admission hold Clio put on the request. Workers'
+	// calls are in it as they are in `visitCalls`; parallel calls add up, so it is model-call time, not wall time.
+	const callTime = sentCallTime(view, visitFrom);
 	return {
 		kind: "ready",
 		// The total's own gap counts a call that reported in and out but no cache read as a call with no usage data, so
@@ -237,8 +231,8 @@ export function exitSpend(
 		totals: { tokens: session.totals.tokens, usd: session.totals.usd },
 		visitCalls: sentCallCount(view, { from: visitFrom }),
 		byRole: session.byRole.map((row) => `${row.role} ${row.calls.display}`).join(" · "),
-		callTime: callTime === null ? null : usageLineFigure(callTime),
-		callTimeCoverage: usageCoverage(usageGap(callTime), "timing data"),
+		callTime: callTime === null ? null : usageLineFigure(callTime.time),
+		callTimeCoverage: usageCoverage(usageGap(callTime?.time) + (callTime?.untimed ?? 0), "timing data"),
 		models: view.cost("model").groups.map((group) => ({
 			key: group.key,
 			calls: group.calls.display,

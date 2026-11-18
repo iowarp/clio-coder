@@ -160,7 +160,7 @@ export interface TelemetryView {
 	quantity(ref: FactRef): Quantity | null;
 	/** Several operator turns read as one number, such as the turns one ACP prompt ran (#434 §11.3). */
 	turns(turnIds: readonly string[], metric: FactMetric): TurnsSum;
-	/** Some of the session's own attempts read as one, such as one agent segment's calls (#434). */
+	/** Some of the session's attempts, its own or its referenced runs', read as one, such as one agent segment's calls (#434). */
 	attempts(attemptIds: readonly string[], metric: FactMetric): TurnsSum;
 }
 

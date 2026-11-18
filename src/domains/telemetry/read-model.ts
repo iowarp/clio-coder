@@ -1744,15 +1744,28 @@ export function turnsSum(source: SessionSource, turnIds: readonly string[], metr
 }
 
 /**
- * Some of a session's own attempts read as one, such as the calls one agent segment of a headless run made. An id the
- * journal does not hold yet is one unknown contribution, so the sum is partial rather than short (#434).
+ * Some of a session's attempts read as one, such as the calls one agent segment of a headless run made, or a visit's
+ * calls with its workers'. An id resolves among the session's own attempts, then its referenced runs'; a run that gave
+ * one adds its own read gap. An id no journal holds yet is one unknown contribution, so the sum is partial rather than
+ * short (#434).
  */
 export function attemptsTotal(source: SessionSource, attemptIds: readonly string[], metric: FactMetric): TurnsSum {
 	const analysis = analyze(source);
 	const wanted = new Set(attemptIds);
 	const attempts = analysis.attempts.filter((attempt) => wanted.has(attempt.started.attemptId));
-	const missing = wanted.size - new Set(attempts.map((attempt) => attempt.started.attemptId)).size;
-	const fact = withGap(attemptsSum(attempts, metric), missing + (wanted.size > 0 ? analysis.gap : 0));
+	const found = new Set(attempts.map((attempt) => attempt.started.attemptId));
+	let runsGap = 0;
+	for (const run of analysis.runs.values()) {
+		const before = attempts.length;
+		for (const attempt of run.attempts)
+			if (wanted.has(attempt.started.attemptId) && !found.has(attempt.started.attemptId)) {
+				found.add(attempt.started.attemptId);
+				attempts.push(attempt);
+			}
+		if (attempts.length > before) runsGap += runGap(run);
+	}
+	const missing = wanted.size - found.size;
+	const fact = withGap(attemptsSum(attempts, metric), missing + runsGap + (wanted.size > 0 ? analysis.gap : 0));
 	const part: Part = { attempts, gap: 0 };
 	const free = allFree([part]);
 	const freeRule = free ? partsFreeRule([part]) : undefined;
