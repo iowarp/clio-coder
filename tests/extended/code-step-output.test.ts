@@ -1,6 +1,6 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, it } from "node:test";
@@ -15,6 +15,7 @@ import {
 	workspaceChangeSnapshot,
 	writeCommitBaseline,
 } from "../../src/domains/dispatch/code-step.js";
+import { resolveTestFileChecks } from "../../src/tools/verify/test-files.js";
 
 const roots: string[] = [];
 
@@ -174,6 +175,35 @@ it("fails the check when a newly reported test fails outside the declared suite"
 	const fallback = await runCodeStep({ ...input, mutatedPaths: ["repro.test.unknown"] });
 	strictEqual(fallback.report.passed, true);
 	match(fallback.report.outputExcerpt, /no recognizable project runner.*declared check only/u);
+});
+
+it("targets a changed jest or vitest file so an empty selection fails, whatever the script's --passWithNoTests", () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-changed-test-js-"));
+	roots.push(root);
+	mkdirSync(join(root, "integration"));
+	writeFileSync(join(root, "integration", "api.test.js"), "test('api', () => {});\n");
+	writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { test: "jest --passWithNoTests" } }));
+	deepStrictEqual(resolveTestFileChecks(root, ["integration/api.test.js"]).checks[0]?.argv, [
+		"npm",
+		"run",
+		"test",
+		"--",
+		"--runTestsByPath",
+		"--passWithNoTests=false",
+		"./integration/api.test.js",
+	]);
+	// Vitest refuses the flag twice, so its script runs directly without its own --passWithNoTests.
+	mkdirSync(join(root, "node_modules", ".bin"), { recursive: true });
+	const vitest = join(root, "node_modules", ".bin", "vitest");
+	writeFileSync(vitest, "#!/bin/sh\n");
+	chmodSync(vitest, 0o755);
+	writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { test: "vitest run --passWithNoTests" } }));
+	deepStrictEqual(resolveTestFileChecks(root, ["integration/api.test.js"]).checks[0]?.argv, [
+		vitest,
+		"run",
+		"--passWithNoTests=false",
+		"./integration/api.test.js",
+	]);
 });
 
 it("fails the check without a repair when a changed test's known runner needs provisioning", async () => {

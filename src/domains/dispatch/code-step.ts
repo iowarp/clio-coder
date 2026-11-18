@@ -760,10 +760,14 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 		const testClock = process.hrtime.bigint();
 		const result = await spawnCommand({ ...input, command: testCommand }, testCwd, test.argv);
 		const testDurationMs = Number((process.hrtime.bigint() - testClock) / 1_000_000n);
+		// Jest and vitest print this when a targeted run selected nothing, which they fail without --passWithNoTests.
+		const empty = /\bNo test(?:s| files) found, exiting with code [1-9]/u.test(result.captured.toString("utf8"))
+			? "; the runner selected no tests, so the changed test did not run"
+			: "";
 		checks.push({
 			name: testCommand.id,
 			passed: result.exitCode === 0,
-			evidence: `\`${test.argv.join(" ")}\` exit ${result.exitCode} in ${testDurationMs}ms${test.detail === undefined ? "" : `; ${test.detail}`}`,
+			evidence: `\`${test.argv.join(" ")}\` exit ${result.exitCode} in ${testDurationMs}ms${empty}${test.detail === undefined ? "" : `; ${test.detail}`}`,
 		});
 		commandRuns.push({ argv: [...test.argv], cwd: testCwd, exitCode: result.exitCode, durationMs: testDurationMs });
 		const captured = Buffer.concat([

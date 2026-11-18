@@ -46,8 +46,10 @@ type OptionArity = 0 | 1 | "variadic";
 // Options that can drop an explicitly named file or its tests while the run still passes; the targeted run strips
 // them. Scope options stay: jest --runTestsByPath runs a named path regardless of --testPathPattern(s), and a path
 // outside jest --selectProjects/--ignoreProjects/--testPathIgnorePatterns or vitest --project/--root/--dir/--exclude
-// makes the runner exit 1 with "no tests found". --passWithNoTests stays: it only changes the result for a file the
-// runner would not run at all, which the pre-fix append reported the same way.
+// makes the runner exit 1 with "no tests found". A targeted run never passes on an empty selection: jest and vitest
+// get --passWithNoTests=false, which overrides the script's flag and the config's in jest (yargs keeps the last value)
+// and the config's in vitest. Vitest refuses the flag twice, so a direct argv drops the script's own and a vitest
+// package script that sets it runs its parsed runner directly.
 const NODE_SELECTORS: Record<string, OptionArity> = {
 	"--test-name-pattern": 1,
 	"--test-skip-pattern": 1,
@@ -66,6 +68,8 @@ const JEST_SELECTORS: Record<string, OptionArity> = {
 	"--onlyFailures": 0,
 	"--findRelatedTests": "variadic",
 };
+const PASS_WITH_NO_TESTS: Record<string, OptionArity> = { "--passWithNoTests": 0 };
+const NO_TESTS_FAIL = "--passWithNoTests=false";
 const VITEST_SELECTORS: Record<string, OptionArity> = {
 	"-t": 1,
 	"--testNamePattern": 1,
@@ -595,27 +599,39 @@ function javascriptRunnerArgv(
 	const last = segments.at(-1);
 	const unwrapped = last === undefined ? null : unwrapRunner(last.argv);
 	const runner = unwrapped === null ? null : javascriptRunner(unwrapped.argv);
+	// npm can only append, and vitest refuses a second --passWithNoTests, so that script runs its runner directly.
+	const ownPass =
+		runner === "vitest" &&
+		unwrapped !== null &&
+		withoutSelectors(unwrapped.argv, PASS_WITH_NO_TESTS, true).removed.length > 0;
+	const direct = ownPass ? [...filters, "--passWithNoTests"] : filters;
 	const handled =
 		parsed &&
 		unwrapped !== null &&
 		runner !== null &&
-		(filters.length === 0 || segments.length === 1) &&
+		(direct.length === 0 || segments.length === 1) &&
 		!(nodeOnly && runner !== "node");
 	if (!handled) {
-		const shown = filters.length > 0 ? filters.join(", ") : rawSelector;
+		const shown = direct.length > 0 ? direct.join(", ") : rawSelector;
 		if (shown !== undefined) {
 			return shapeRefusal(shown);
 		}
 		return nodeOnly ? { ignored: true } : null;
 	}
-	const { kept } = withoutSelectors(unwrapped.argv, selectorsFor(runner), runner !== "node");
+	const selectors = runner === "node" ? NODE_SELECTORS : { ...selectorsFor(runner), ...PASS_WITH_NO_TESTS };
+	const { kept } = withoutSelectors(unwrapped.argv, selectors, runner !== "node");
 	const file = `./${path.relative(cwd, absolute).split(path.sep).join("/")}`;
-	const flags = runner === "jest" ? ["--runTestsByPath"] : runner === "vitest" && !kept.includes("run") ? ["--run"] : [];
+	const flags =
+		runner === "jest"
+			? ["--runTestsByPath", NO_TESTS_FAIL]
+			: runner === "vitest"
+				? [...(kept.includes("run") ? [] : ["--run"]), NO_TESTS_FAIL]
+				: [];
 	const separator = kept.indexOf("--");
 	const insertAt = separator < 0 ? kept.length : separator;
 	const targeted = [...kept.slice(0, insertAt), ...flags, ...kept.slice(insertAt), file];
 	if (!packageScript) return { argv: [...unwrapped.prefix, ...unwrapped.locator, ...targeted] };
-	if (filters.length === 0) {
+	if (direct.length === 0) {
 		const args = [...flags, file];
 		// The check is already resolved; rediscovering from root would contain the read at the package root.
 		const resolved = verifyResolutionArgv(
@@ -632,7 +648,7 @@ function javascriptRunnerArgv(
 		const binary = localBinary(workspaceRoot, cwd, unwrapped.prefix[0] ?? "");
 		if (binary === null) {
 			return {
-				refusal: `${label} filters tests with ${filters.join(", ")}, and its wrapper binary "${unwrapped.prefix[0]}" is not installed under node_modules/.bin`,
+				refusal: `${label} filters tests with ${direct.join(", ")}, and its wrapper binary "${unwrapped.prefix[0]}" is not installed under node_modules/.bin`,
 			};
 		}
 		wrapper.push(binary, ...unwrapped.prefix.slice(1));
@@ -644,7 +660,7 @@ function javascriptRunnerArgv(
 	else if (unwrapped.locator.length > 0) executable = [...unwrapped.locator, targeted[0] ?? ""];
 	else {
 		return {
-			refusal: `${label} filters tests with ${filters.join(", ")}, and its runner binary "${targeted[0]}" is not installed under node_modules/.bin (Yarn Plug'n'Play or a missing install)`,
+			refusal: `${label} filters tests with ${direct.join(", ")}, and its runner binary "${targeted[0]}" is not installed under node_modules/.bin (Yarn Plug'n'Play or a missing install)`,
 		};
 	}
 	const environment = last !== undefined && last.assignments.length > 0 ? ["env", ...last.assignments] : [];
