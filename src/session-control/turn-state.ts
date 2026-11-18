@@ -283,6 +283,8 @@ export interface ChatTurnState {
 	repetitionAbortReason: string | null;
 	/** The operator turn that already spent its one repetition nudge. */
 	repetitionRepromptTurnId: string | null;
+	/** The operator turn that already spent its one recovery from a thinking-only length stop (`thinking-length-recovery.ts`). */
+	thinkingLengthRecoveryTurnId: string | null;
 	/** Reason the stall watchdog aborted a silent stream. Set just before `agent.abort()` and consumed by `reclassifyStallAbort` once the run settles, which is what separates a watchdog abort from an operator Esc. */
 	streamStallReason: string | null;
 	/** A route pick the waiting request is moving to. Pinned at the pick, so a later pick changes the next turn only. */
@@ -434,6 +436,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		toolProseAbortReason: null,
 		repetitionAbortReason: null,
 		repetitionRepromptTurnId: null,
+		thinkingLengthRecoveryTurnId: null,
 		streamStallReason: null,
 		routeMove: null,
 		routeMoveSeat: false,

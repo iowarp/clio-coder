@@ -53,7 +53,18 @@ const capabilities = {
 	contextWindow: 131072,
 	maxTokens: 4096,
 };
-type WireMode = "partial" | "thinking" | "empty" | "success" | "failure" | "tool" | "guard" | "repeat" | "loop";
+type WireMode =
+	| "partial"
+	| "thinking"
+	| "empty"
+	| "success"
+	| "failure"
+	| "tool"
+	| "guard"
+	| "repeat"
+	| "loop"
+	| "overthink"
+	| "overthink-always";
 const LOOP =
 	"I should check the outline record first. The outline has seven sections. Let me read it again to be sure. ";
 
@@ -86,7 +97,20 @@ function transport(mode: WireMode) {
 							`data: ${JSON.stringify({ id: "fixture-completion", object: "chat.completion.chunk", model: model.id, choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
 						),
 					);
-				if (mode === "success" || (mode === "tool" && calls === 1) || (mode === "repeat" && calls > 1)) {
+				if (mode === "overthink-always" || (mode === "overthink" && calls === 1)) {
+					// The output cap runs out mid-deliberation: reasoning, then a length stop with no answer or call.
+					send({ role: "assistant", reasoning_content: THOUGHT });
+					send({}, "length");
+					controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+					controller.close();
+					return;
+				}
+				if (
+					mode === "success" ||
+					mode === "overthink" ||
+					(mode === "tool" && calls === 1) ||
+					(mode === "repeat" && calls > 1)
+				) {
 					send(
 						mode === "tool"
 							? {
@@ -237,7 +261,7 @@ function fixture(
 	settings.chat.prewarm = false;
 	settings.chat.target = target.id;
 	settings.chat.model = model.id;
-	settings.chat.thinkingLevel = "off";
+	settings.chat.thinkingLevel = initialMode === "overthink" || initialMode === "overthink-always" ? "low" : "off";
 	settings.targets = [{ ...target, defaultModel: model.id }];
 	if (visionCapable && settings.targets[0]) settings.targets[0].capabilities = { vision: true };
 	const runtime: RuntimeDescriptor = {
@@ -1050,6 +1074,56 @@ it("a looping stream is stopped and re-prompted once with a nudge, without resen
 		ok(f.events.some((event) => event.type === "notice" && event.key === "turn.repetition-reprompt"));
 		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
 	} finally {
+		await f.close();
+	}
+});
+
+it("a reply cut off while thinking is dropped and re-run once, one thinking step lower, with a reminder", {
+	timeout: 15_000,
+}, async () => {
+	const f = fixture("overthink");
+	try {
+		await f.loop.submit("Advance the paper.");
+		await f.loop.whenSettled();
+		const bodies = f.wire().requestBodies();
+		strictEqual(bodies.length, 2);
+		const [first, second] = bodies.map((body) => JSON.parse(body) as Record<string, unknown>);
+		deepStrictEqual(first?.chat_template_kwargs, { enable_thinking: true });
+		deepStrictEqual(second?.chat_template_kwargs, { enable_thinking: false });
+		const resent = JSON.stringify(second?.messages);
+		doesNotMatch(resent, new RegExp(THOUGHT, "u"));
+		match(resent, /hit the output limit while still thinking/u);
+		ok(f.events.some((event) => event.type === "notice" && event.key === "turn.thinking-length-recovery"));
+		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
+	} finally {
+		await f.close();
+	}
+});
+
+it("a second reply cut off while thinking fails the headless run naming the cause and the fix", {
+	timeout: 15_000,
+}, async () => {
+	const f = fixture("overthink-always");
+	const stderr: string[] = [];
+	const write = process.stderr.write;
+	process.stderr.write = ((chunk: string | Uint8Array) => {
+		stderr.push(String(chunk));
+		return true;
+	}) as typeof process.stderr.write;
+	try {
+		const code = await runHeadlessMainAgent(f.loop, {
+			prompt: "Advance the paper.",
+			mode: "text",
+			shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
+		});
+		process.stderr.write = write;
+		strictEqual(code, 1);
+		strictEqual(f.wire().calls(), 2);
+		const envelope = [...(readRunJournal(join(env.dir, "state"))?.envelopes.values() ?? [])][0];
+		match(envelope?.outcomeDetail ?? "", /whole output budget thinking.*Lower --thinking or raise the output cap/u);
+		strictEqual(stderr.join("").match(/whole output budget thinking/gu)?.length, 1);
+	} finally {
+		process.stderr.write = write;
 		await f.close();
 	}
 });

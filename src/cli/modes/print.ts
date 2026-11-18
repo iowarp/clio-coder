@@ -65,8 +65,10 @@ import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
 import type { ChatLoop, ChatLoopEvent } from "../../session-control/chat-loop.js";
 import {
 	classifyTurnEnding,
+	isThinkingOnlyLengthStop,
 	messageCallSpends,
 	proseBeforeWrittenCalls,
+	THINKING_LENGTH_STOP_REASON,
 	turnCallsNotRunSentence,
 	turnNoAnswerSentence,
 } from "../../session-control/chat-loop-messages.js";
@@ -220,6 +222,8 @@ interface HeadlessMainAgentResult {
 	admissionRefused: boolean;
 	/** The harness stopped the last reply (a repetition or tool-prose guard), so its error names no route (bt-26). */
 	harnessStopped: boolean;
+	/** The latest assistant stop is a length stop that produced only thinking; the chat loop already spent its one recovery. */
+	thinkingOnlyLength: boolean;
 	/**
 	 * The answer a citation check sent back for corrected line ranges. The
 	 * reply to that check can hold only the corrections, so the printed answer
@@ -444,6 +448,7 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 		sawTerminatingToolResult: false,
 		admissionRefused: false,
 		harnessStopped: (message as { harnessStopped?: unknown }).harnessStopped === true,
+		thinkingOnlyLength: isThinkingOnlyLengthStop(message),
 	};
 	const error = assistantError(message);
 	if (error) return { ...current, text: "", error };
@@ -954,6 +959,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		callsNotRun: null,
 		admissionRefused: false,
 		harnessStopped: false,
+		thinkingOnlyLength: false,
 		citationCheckedAnswer: null,
 	};
 	const runStats: HeadlessMainAgentRunStats = {
@@ -1369,10 +1375,12 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		// The provider returned normally, but generation exhausted its budget.
 		// Earlier chatter and partial prose cannot turn that terminal cause into
 		// success. A later assistant message or terminating tool supersedes it.
-		const failureMessage =
-			"clio-coder run: output token limit reached (stopReason=length); generation incomplete. Consider resuming with a narrower task, lower reasoning effort, or a larger output budget.";
+		const failureMessage = result.thinkingOnlyLength
+			? `clio-coder run: ${THINKING_LENGTH_STOP_REASON}`
+			: "clio-coder run: output token limit reached (stopReason=length); generation incomplete. Consider resuming with a narrower task, lower reasoning effort, or a larger output budget.";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
-		stderrMessage = failureMessage;
+		// Text mode printed the chat loop's notice for a thinking-only stop as it arrived.
+		stderrMessage = mode === "text" && result.thinkingOnlyLength ? null : failureMessage;
 		if (mode === "text" && result.text.length > 0) stdoutMessage = settledAnswer(result.text);
 	} else if (result.noAnswer !== null) {
 		// Earlier chatter or a line of markup is not the answer the caller asked for, whatever it reads like.
