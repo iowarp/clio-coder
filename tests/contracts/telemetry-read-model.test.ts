@@ -43,6 +43,7 @@ import {
 	explain,
 	repoCostReport,
 	repoOwner,
+	runCostReport,
 	runningSelectionsForTesting,
 	sessionOperatorMetrics,
 	sessionTelemetry,
@@ -50,6 +51,7 @@ import {
 	turnsSum,
 	usageReport,
 	whyStopped,
+	withSettledCalls,
 } from "../../src/domains/telemetry/read-model.js";
 import { createLiveTelemetryModel } from "../../src/domains/telemetry/telemetry-live.js";
 import {
@@ -120,6 +122,33 @@ test("model and target rows split a worker's actual routes, including token fiel
 		strictEqual(alpha.cacheShare.display, "75.0%");
 		for (const quantity of quantitiesOf(report))
 			deepStrictEqual(explain(quantity.ref, { session: recorded }, now)?.value, quantity, quantity.ref);
+	}
+	// A main run's calls carry its session's context; its run journal names them only in run.settled (bt-45 E).
+	const main = [
+		...telemetryCall(source.sessionId, { usage: { input: 100, output: 20 }, usd: 0.1 }),
+		...telemetryCall(source.sessionId, { model: "two", usage: { input: 200, output: 30 }, usd: 0.2 }),
+	];
+	const callIds = main.flatMap((record) => (record.k === "call.started" ? [record.data.callId] : []));
+	const settledRun = {
+		...main[1],
+		id: "rec_main-run-settled",
+		k: "run.settled",
+		ctx: { sessionId: source.sessionId, runId: "main-run", agent: { role: "main", id: source.sessionId } },
+		data: { callIds },
+	} as unknown as TelemetryRecord;
+	const mainRun = withSettledCalls({ ...source.journal, records: [settledRun] }, { ...source.journal, records: main });
+	for (const by of ["model", "role"] as const) {
+		const report = runCostReport("main-run", mainRun, by, now);
+		deepStrictEqual(
+			report.groups.map((row) => [row.key, row.tokens.display]),
+			by === "model"
+				? [
+						["fixture/fixture-model", "120"],
+						["fixture/two", "230"],
+					]
+				: [["main", "350"]],
+		);
+		strictEqual(report.total.tokens.display, "350");
 	}
 	const unpriced = telemetryCall("unknown-cache", { usage: { input: null, cacheRead: 100 }, usd: null });
 	const unknown = costReport(
