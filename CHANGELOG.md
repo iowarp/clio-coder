@@ -104,6 +104,11 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- x4-2: A check logged through `tee` or a redirect into a log, temp, outside or git-ignored file keeps its outcome, so its green seals and an earlier red stands.
+- x4-3: `sort` long-option abbreviations of --output or --compress-program and `sed` scripts with bracket expressions count as writes, not read-only filters.
+- x4-4: A check whose own directory flag or test path leaves the workspace (`--prefix ../x`, `make -C ../x`, `pytest ../x`) settles no pass.
+- x4-5: An inverted pipeline (`!`) or a quoted or clustered pipefail toggle makes the shell exit status speak for no check.
+- x4-7: A `cd` inside a subshell or between pushd and popd ends at its close, so a check after `(cd ../lib && make) &&` settles.
 - `cd`, `source`, `export` or `set` before a check no longer clears a standing red as if the tree changed (x3-1).
 - A red check piped into `head`, `grep` or another stage that can mask its exit no longer settles a failure (x3-2).
 - A check that rewrites the tree (`--fix`, `--write`, a format or fix script) counts as a change, and its green is not credited (x3-3).

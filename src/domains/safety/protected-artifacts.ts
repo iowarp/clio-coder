@@ -259,7 +259,7 @@ export function detectValidationCommand(
 
 /**
  * The name an observed check's outcome is filed under: the command with trailing output plumbing (`2>&1`, `| tail`,
- * `| head`) removed, so `make test 2>&1 | tail -5` and `make test` settle each other. Under `pipefail` a pipeline exits
+ * `| head`, `| tee log`, `> log`) removed, so `make test 2>&1 | tail -5` and `make test` settle each other. Under `pipefail` a pipeline exits
  * 0 only when the check did, so a green settles the name however it was piped; `head` can turn a green into a red
  * (SIGPIPE), so a red behind it lands nowhere ({@link checkFailureAttributable}). Tools and arguments stay distinct, so
  * `pytest` never settles `pytest -q` (bt-27).
@@ -268,8 +268,9 @@ export function observedValidationCommand(command: string): string {
 	let current = command.trim();
 	for (;;) {
 		const next = current
-			.replace(/\s*\|&?\s*(?:tail|head)(?:\s+[^|;&<>]*)?$/u, "")
+			.replace(/\s*\|&?\s*(?:tail|head|tee)(?:\s+[^|;&<>]*)?$/u, "")
 			.replace(/\s+2>&1$/u, "")
+			.replace(/\s+(?:[0-9]?>>?|&>>?)\s*[^\s|;&<>"']+$/u, "")
 			.trim();
 		if (next === current) return current;
 		current = next;
@@ -1256,14 +1257,13 @@ const READ_ONLY_FILTERS: ReadonlyMap<string, (args: ReadonlyArray<string>) => bo
 	["awk", awkOnlyReads],
 	[
 		"sort",
+		// GNU sort takes any unambiguous prefix of a long option, so `--out=x` is `--output=x` (x4-3).
 		(args: ReadonlyArray<string>) =>
-			!args.some(
-				(arg) =>
-					arg === "--output" ||
-					arg.startsWith("--output=") ||
-					arg.startsWith("--compress-program") ||
-					(/^-[^-]/u.test(arg) && arg.includes("o")),
-			),
+			!args.some((arg) => {
+				const long = /^--([^=]+)/u.exec(arg)?.[1];
+				if (long !== undefined) return "output".startsWith(long) || "compress-program".startsWith(long);
+				return /^-[^-]/u.test(arg) && arg.includes("o");
+			}),
 	],
 	["uniq", uniqOnlyReads],
 ]);
@@ -1307,9 +1307,11 @@ function sedOnlyReads(args: ReadonlyArray<string>): boolean {
 
 /**
  * A sed script made only of commands that print, edit the pattern space or branch. `w`, `W`, `e`, `r`, `R`, an `s`
- * flagged `w` or `e`, and anything this cannot parse answer false.
+ * flagged `w` or `e`, and anything this cannot parse answer false. A bracket expression may hold the delimiter
+ * (`s/[/]/x/w out`), which the delimiter scan below does not model, so any `[` answers false (x4-3).
  */
 function sedScriptOnlyReads(script: string): boolean {
+	if (script.includes("[")) return false;
 	let index = 0;
 	const at = () => script[index] ?? "";
 	const skip = (pattern: RegExp) => {
@@ -1490,7 +1492,7 @@ export type CheckCommandShape = "pure" | "after-change" | "mixed";
  * check is an environment activation by convention; reading it as a change would let `source .venv/bin/activate &&
  * pytest tests/one.py` clear a standing red.
  */
-const SHELL_SETUP_STEPS: ReadonlySet<string> = new Set(["cd", "source", ".", "export", "set"]);
+const SHELL_SETUP_STEPS: ReadonlySet<string> = new Set(["cd", "pushd", "popd", "source", ".", "export", "set"]);
 
 interface ShellStep {
 	tokens: ShellToken[];
@@ -1498,24 +1500,37 @@ interface ShellStep {
 	index: number | null;
 	/** The separator joining this step to the next; `""` where two separators meet, null for the last step. */
 	joinedBy: string | null;
+	/** Subshells `(` opened right before this step, and closed `)` right after it. */
+	opens: number;
+	closes: number;
 }
 
 function shellSteps(tokens: ReadonlyArray<ShellToken>): ShellStep[] {
 	const steps: ShellStep[] = [];
 	let current: ShellToken[] = [];
 	let separator: string | null = null;
+	let opens = 0;
 	const endStep = () => {
 		if (current.length === 0) return;
 		const previous = steps.at(-1);
 		if (previous !== undefined) previous.joinedBy = separator;
 		separator = null;
 		const argv = shellCommandArguments(current);
-		steps.push({ tokens: current, argv, index: commandTokenIndex(argv), joinedBy: null });
+		steps.push({ tokens: current, argv, index: commandTokenIndex(argv), joinedBy: null, opens, closes: 0 });
+		opens = 0;
 		current = [];
 	};
 	for (const token of tokens) {
 		if (token.operator && COMMAND_SEPARATORS.has(token.value)) {
 			endStep();
+			// A subshell's status is its last command's, so `(cd lib && make) && npm test` joins `make` to the check by `&&`.
+			if (token.value === "(") opens += 1;
+			else if (token.value === ")") {
+				const last = steps.at(-1);
+				if (opens > 0) opens -= 1;
+				else if (last !== undefined) last.closes += 1;
+			}
+			if (token.value === "(" || token.value === ")") continue;
 			// Two separators in a row (`) ;`) join no simple pair, so neither can hand a change to a check.
 			separator = separator === null && steps.length > 0 ? token.value : "";
 			continue;
@@ -1532,9 +1547,19 @@ function isCheckStep(step: ShellStep): boolean {
 	);
 }
 
-export function checkCommandShape(command: string, gitHelpersConfigured: boolean): CheckCommandShape | null {
+/**
+ * `isOutput` says a redirect or `tee` target is a log the check's output lands in, not part of the tree (x4-2), so
+ * `npm test 2>&1 | tee test.log` stays pure; it is asked only of commands that run a check.
+ */
+export function checkCommandShape(
+	command: string,
+	gitHelpersConfigured: boolean,
+	isOutput: (target: string) => boolean = () => false,
+): CheckCommandShape | null {
 	const tokens = scanShellLike(command);
-	const steps = shellSteps(tokens).map((step) => {
+	const parsed = shellSteps(tokens);
+	if (!parsed.some(isCheckStep)) return null;
+	const steps = parsed.map((step) => {
 		const writes: string[] = [];
 		collectRedirectTargets(step.tokens, writes);
 		const check = isCheckStep(step);
@@ -1543,10 +1568,11 @@ export function checkCommandShape(command: string, gitHelpersConfigured: boolean
 			step.index === null ||
 			(check && !checkWritesTree(argv)) ||
 			SHELL_SETUP_STEPS.has(argv[0] ?? "") ||
+			(basenameToken(argv[0]) === "tee" && pathArgs(argv, 0).every(isOutput)) ||
 			readOnlyInspectionStep(argv, gitHelpersConfigured);
-		return { check, changes: !readOnly || writes.some(isInterestingWriteTarget), joinedBy: step.joinedBy };
+		const changes = !readOnly || writes.some((target) => isInterestingWriteTarget(target) && !isOutput(target));
+		return { check, changes, joinedBy: step.joinedBy };
 	});
-	if (!steps.some((step) => step.check)) return null;
 	const opaque =
 		tokens.some((token) => token.substitutions !== undefined || token.hiddenContent === true || token.unterminated) ||
 		hasUnparsedShellScript(command);
@@ -1592,7 +1618,7 @@ export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
 function drainsInput(step: ShellStep): boolean {
 	if (step.index === null) return false;
 	const [executable, ...args] = step.argv.slice(step.index);
-	if (executable === "cat") return true;
+	if (executable === "cat" || executable === "tee") return true;
 	return (
 		executable === "tail" &&
 		!args.some((arg) => /^-[^-]*[fF]/u.test(arg) || arg.startsWith("--follow") || arg === "--retry")
@@ -1602,7 +1628,7 @@ function drainsInput(step: ShellStep): boolean {
 /**
  * Whether a red exit of a command running a recognized check is the check's own red (x3-2). Under `pipefail` a stage
  * after the check fails a green check: `head` closes the pipe so the check dies of SIGPIPE or EPIPE, and `grep`
- * exits 1 when a clean run prints no match. So a check piped onward into anything but `tail` or `cat`, which read to
+ * exits 1 when a clean run prints no match. So a check piped onward into anything but `tail`, `cat` or `tee`, which read to
  * the end and exit 0, settles no failure. Its clean exit still speaks for it, since every stage then exited 0.
  */
 export function checkFailureAttributable(command: string): boolean {
@@ -1619,22 +1645,96 @@ export function checkFailureAttributable(command: string): boolean {
 }
 
 /**
+ * Whether a step of the command bends a pipeline's exit status away from its commands' own (x4-5): a `!` that inverts
+ * a pipeline, a `set` that switches an option off with `+o` (`set +o "pipefail"`), or a `shopt -u` naming pipefail or
+ * an expansion. Quoting is read the way the shell reads it, so a quoted option name still counts.
+ */
+export function shellStatusMasked(command: string): boolean {
+	return shellSteps(scanShellLike(command)).some((step) => {
+		if (step.argv.slice(0, step.index ?? step.argv.length).includes("!")) return true;
+		if (step.index === null) return false;
+		const [executable, ...args] = step.argv.slice(step.index);
+		if (executable === "set") return args.some((arg) => /^\+[A-Za-z]*o/u.test(arg));
+		if (executable !== "shopt") return false;
+		return args.some((arg) => /^-[A-Za-z]*u/u.test(arg)) && args.some((arg) => arg === "pipefail" || /[$`]/u.test(arg));
+	});
+}
+
+/**
  * Whether a recognized check in the command runs outside `root` (x3-5). Its directory starts at `base` and follows
- * each `cd` before it; a `cd` this cannot resolve (home, `-`, a variable) leaves the directory unknown, which counts
- * as outside, so a sibling checkout's green never stands for this workspace.
+ * each `cd` and `pushd` before it, back out of a subshell at its `)` and back along the stack at a `popd` (x4-7). A
+ * directory this cannot resolve (home, `-`, a variable, an unbalanced `)` or `popd`) is unknown, which counts as
+ * outside, so a sibling checkout's green never stands for this workspace.
  */
 export function checkRunsOutside(command: string, base: string, root: string): boolean {
 	let directory: string | null = base;
+	let pushed: Array<string | null> = [];
+	const subshells: Array<{ directory: string | null; pushed: Array<string | null> }> = [];
 	for (const step of shellSteps(scanShellLike(command))) {
+		for (let open = 0; open < step.opens; open += 1) subshells.push({ directory, pushed: [...pushed] });
+		const executable = step.index === null ? "" : basenameToken(step.argv[step.index]);
+		const target = cdTarget(step.argv);
 		if (isCheckStep(step)) {
 			if (directory === null || !isSameOrDescendant(directory, root)) return true;
-			continue;
+			if (checkReachesOutside(step.argv.slice(step.index ?? 0), directory, root)) return true;
+		} else if (executable === "popd")
+			directory = step.argv.length > (step.index ?? 0) + 1 ? null : (pushed.pop() ?? null);
+		else if (target !== null) {
+			if (executable === "pushd") pushed.push(directory);
+			directory = directory === null || /^[~+]|[$`]/u.test(target) ? null : path.resolve(directory, target);
 		}
-		const target = cdTarget(step.argv);
-		if (target !== null)
-			directory = directory === null || /^~|[$`]/u.test(target) ? null : path.resolve(directory, target);
+		for (let close = 0; close < step.closes; close += 1) {
+			const outer = subshells.pop();
+			directory = outer?.directory ?? null;
+			pushed = outer?.pushed ?? [];
+		}
 	}
 	return false;
+}
+
+/** A check's own options that run it in, or read its project from, another directory; `--manifest-path` names a file. */
+const CHECK_DIRECTORY_OPTIONS: ReadonlySet<string> = new Set([
+	"--prefix",
+	"-C",
+	"--dir",
+	"--cwd",
+	"--directory",
+	"--working-directory",
+	"--manifest-path",
+	"--test-dir",
+	"--rootdir",
+	"--rootDir",
+	"--root",
+]);
+
+/** Runners whose positional operands are the paths they collect tests from. */
+const PATH_OPERAND_RUNNERS: ReadonlySet<string> = new Set(["pytest", "py.test", "jest", "vitest", "mocha", "go"]);
+
+/**
+ * Whether a check step's own directory options (`npm test --prefix ../x`, `make -C ../x`, `cargo test --manifest-path
+ * ../x/Cargo.toml`) or a test runner's path operands (`pytest ../x`) reach outside `root` from `directory` (x4-4). The
+ * test is root containment, so `npm test --prefix packages/a` stays this workspace's check. An operand this cannot
+ * resolve (home, a variable) counts as outside.
+ */
+function checkReachesOutside(argv: ReadonlyArray<string>, directory: string, root: string): boolean {
+	const [executable, ...args] = argv;
+	const module = args.indexOf("-m");
+	const operands = PATH_OPERAND_RUNNERS.has(basenameToken(executable)) || (module >= 0 && args[module + 1] === "pytest");
+	const targets: string[] = [];
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		const equals = arg.indexOf("=");
+		const option = equals > 0 ? arg.slice(0, equals) : arg;
+		let target: string | undefined;
+		if (CHECK_DIRECTORY_OPTIONS.has(option)) {
+			target = equals > 0 ? arg.slice(equals + 1) : args[index + 1];
+			if (equals < 0) index += 1;
+			if (option === "--manifest-path" && target !== undefined) target = path.dirname(target);
+		} else if (/^-C[^-]/u.test(arg)) target = arg.slice(2);
+		else if (operands && !arg.startsWith("-") && equals < 0) target = arg.split("::")[0];
+		if (target !== undefined) targets.push(target);
+	}
+	return targets.some((target) => /^~|[$`]/u.test(target) || !isSameOrDescendant(path.resolve(directory, target), root));
 }
 
 /**

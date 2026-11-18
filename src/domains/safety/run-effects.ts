@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ObservedProof } from "../../core/hoare.js";
 import { ToolNames } from "../../core/tool-names.js";
@@ -10,6 +11,7 @@ import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/reso
 import { isVerifyListing } from "../../tools/verify/surface.js";
 import { classify } from "./action-classifier.js";
 import { typedValidationSummary } from "./finish-contract.js";
+import { isSameOrDescendant } from "./path-policy.js";
 import {
 	type CheckCommandShape,
 	checkCommandShape,
@@ -202,13 +204,19 @@ export interface ShellCheckReading {
 	shape: CheckCommandShape | null;
 }
 
-function readShellCheck(command: string, base: string, cwd: string, gitHelpers: boolean): ShellCheckReading {
+function readShellCheck(
+	command: string,
+	base: string,
+	cwd: string,
+	gitHelpers: boolean,
+	isOutput: (target: string) => boolean,
+): ShellCheckReading {
 	return {
 		statusAttributable: shellExitSpeaksForCommand(command),
 		failureAttributable: checkFailureAttributable(command),
 		outsideCwd: checkRunsOutside(command, base, cwd),
 		inspection: isReadOnlyInspectionCommand(command, gitHelpers),
-		shape: checkCommandShape(command, gitHelpers),
+		shape: checkCommandShape(command, gitHelpers, isOutput),
 	};
 }
 
@@ -248,7 +256,7 @@ export function settleCheckCall(
 	// change too, so no earlier pass stands on code it reformatted (x3-3).
 	const checkChangedTree = reading.shape === "after-change" || reading.shape === "mixed";
 	const opaqueMutation = reading.opaque && reading.shell?.inspection !== true && (checkChangedTree || !runsCheck);
-	const mutation = !refused && (reading.paths.length > 0 || opaqueMutation);
+	const mutation = !refused && (reading.changedPaths.length > 0 || opaqueMutation);
 	const checkedAfterOwnMutation = mutation && reading.shape !== "mixed" && reading.shape !== "pure";
 	const fresh = startedOnCurrentTree && (!mutation || checkedAfterOwnMutation);
 	// Only a check that ran can fail. A call the engine answered without
@@ -344,6 +352,8 @@ export interface CallReading {
 	base: string;
 	/** Absolute paths the call's arguments aim a mutation at. */
 	paths: string[];
+	/** `paths` less the logs a check's output was written to, which change no tree the check judged (x4-2). */
+	changedPaths: string[];
 	/** The bash command text, or a verify call's resolved argv joined by spaces; null otherwise. */
 	shellCommand: string | null;
 	/** A bash command read for its check; null for any other call. */
@@ -357,14 +367,26 @@ export function readCall(
 	args: Record<string, unknown> | undefined,
 	cwd: string,
 	gitHelpers: boolean,
+	outputTarget: (base: string) => (target: string) => boolean,
 ): CallReading {
 	const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
 	const command = toolName === ToolNames.Bash ? commandOf(args) : null;
-	const shell = command === null ? null : readShellCheck(command, base, cwd, gitHelpers);
+	const isOutput = outputTarget(base);
+	const shell = command === null ? null : readShellCheck(command, base, cwd, gitHelpers, isOutput);
 	const shellCommand = command ?? verifyCommandOf(toolName, args, base);
+	const paths = mutationTargets(toolName, args).map((target) => path.resolve(base, target));
+	const outputs =
+		command !== null && shell !== null && shell.shape !== null
+			? new Set(
+					extractCommandWriteTargets(command)
+						.filter(isOutput)
+						.map((target) => path.resolve(base, target)),
+				)
+			: new Set<string>();
 	return {
 		base,
-		paths: mutationTargets(toolName, args).map((target) => path.resolve(base, target)),
+		paths,
+		changedPaths: paths.filter((target) => !outputs.has(target)),
 		shellCommand,
 		shell,
 		opaque: toolWritesOpaquely(toolName),
@@ -462,6 +484,39 @@ export function gitRunsConfiguredHelpers(cwd: string, env: NodeJS.ProcessEnv = p
 }
 
 /**
+ * Where a check's output lands (x4-2): a `*.log`, outside the workspace, under the temp dir, or git-ignored. A tracked
+ * source path stays a change, and a target this cannot resolve is one too. Shared by the recorder and the task board's
+ * replay, so a check logged through `tee` keeps its outcome on both (x4-1).
+ */
+export function checkOutputReader(
+	cwd: string,
+	env: NodeJS.ProcessEnv = process.env,
+): (base: string) => (target: string) => boolean {
+	const ignored = new Map<string, boolean>();
+	const gitIgnores = (target: string): boolean => {
+		let answer = ignored.get(target);
+		if (answer === undefined) {
+			try {
+				execFileSync("git", ["check-ignore", "-q", "--", target], { cwd, env, stdio: "ignore", timeout: 5000 });
+				answer = true;
+			} catch {
+				answer = false;
+			}
+			ignored.set(target, answer);
+		}
+		return answer;
+	};
+	return (base) => (target) => {
+		if (/\.log$/u.test(target)) return true;
+		if (/^~|[$`]/u.test(target)) return false;
+		const resolved = path.resolve(base, target);
+		if (!isSameOrDescendant(resolved, cwd)) return true;
+		if (isSameOrDescendant(resolved, tmpdir()) && !isSameOrDescendant(cwd, tmpdir())) return true;
+		return gitIgnores(resolved);
+	};
+}
+
+/**
  * Fold a run's tool calls into its observed effects. A call's effects land only
  * when its result comes back clean: a blocked write and a red command are not
  * evidence that the workspace changed or that a check passed.
@@ -469,6 +524,7 @@ export function gitRunsConfiguredHelpers(cwd: string, env: NodeJS.ProcessEnv = p
 export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorderOptions = {}): RunEffectsRecorder {
 	const pending = new Map<string, PendingEffects>();
 	const gitHelpers = gitRunsConfiguredHelpers(cwd, options.env);
+	const outputTarget = checkOutputReader(cwd, options.env);
 	const mutatedPaths = new Set<string>();
 	const failedMutationPaths = new Set<string>();
 	const validationCommands = new Set<string>();
@@ -498,7 +554,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				latestProofCalls.set(proofCheck, toolCallId);
 			}
 			inFlight.set(toolCallId, { tool: toolName, revision: mutationRevision, outcome: null });
-			const reading = readCall(toolName, args, cwd, gitHelpers);
+			const reading = readCall(toolName, args, cwd, gitHelpers, outputTarget);
 			const { base, shell } = reading;
 			const validationCommand = receiptValidationCommand(toolName, args, base);
 			const verificationCommand = validationCommandOf(toolName, args, "grounding");

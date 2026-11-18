@@ -4,6 +4,7 @@ import type { ObservedCheck } from "../session/task-board.js";
 import { capabilityEntries, dispatchRunRecordEvidence, validationCheckId } from "./finish-contract.js";
 import {
 	type CallReading,
+	checkOutputReader,
 	gitRunsConfiguredHelpers,
 	observedCheckName,
 	readCall,
@@ -56,10 +57,11 @@ function trackCall(
 	args: Record<string, unknown> | undefined,
 	root: string,
 	gitHelpers: boolean,
+	outputTarget: (base: string) => (target: string) => boolean,
 	revision: number,
 ): TrackedCall {
 	const canonical = validationCommandOf(tool, args, "grounding");
-	const reading = readCall(tool, args, root, gitHelpers);
+	const reading = readCall(tool, args, root, gitHelpers, outputTarget);
 	const command = reading.shell === null ? null : reading.shellCommand;
 	const name = canonical === null ? null : command === null ? canonical : observedCheckName(command, reading.base, root);
 	const check =
@@ -142,6 +144,7 @@ export function standingChecksFrom(
 ): ReadonlyArray<ObservedCheck> {
 	const root = path.resolve(workspaceRoot);
 	const gitHelpers = gitRunsConfiguredHelpers(root);
+	const outputTarget = checkOutputReader(root);
 	const calls = new Map<string, TrackedCall>();
 	const standing = new Map<string, ObservedCheck>();
 	let revision = 0;
@@ -172,7 +175,7 @@ export function standingChecksFrom(
 			const command = text(item.command);
 			if (command === null || item.cancelled === true || typeof item.exitCode !== "number") continue;
 			const args = { command, ...(text(item.cwd) ? { cwd: item.cwd } : {}) };
-			settle(trackCall("bash", args, root, gitHelpers, revision), item.exitCode !== 0, at);
+			settle(trackCall("bash", args, root, gitHelpers, outputTarget, revision), item.exitCode !== 0, at);
 			continue;
 		}
 		if (item?.kind !== "message") continue;
@@ -182,7 +185,8 @@ export function standingChecksFrom(
 		if (id === null) continue;
 		if (item.role === "tool_call") {
 			const tool = text(payload.name) ?? text(payload.toolName) ?? text(payload.tool);
-			if (tool !== null) calls.set(id, trackCall(tool, record(payload.args) ?? undefined, root, gitHelpers, revision));
+			if (tool !== null)
+				calls.set(id, trackCall(tool, record(payload.args) ?? undefined, root, gitHelpers, outputTarget, revision));
 			continue;
 		}
 		if (item.role !== "tool_result") continue;

@@ -213,6 +213,12 @@ test("observed checks follow the receipt's rules on the task board and the headl
 		["npm test", false, "test"],
 	]);
 	deepStrictEqual(standing(bash("npm ci && npm test")), [["npm ci && npm test", true, "test"]]);
+	// The replay reads 7b's rules through the same readers: an inverted status settles nothing, a log is output.
+	deepStrictEqual(standing(bash("! npm test")), []);
+	deepStrictEqual(standing(bash("npm test", 1), bash("! npm test")), [["npm test", false, "test"]]);
+	deepStrictEqual(standing(bash("npm test 2>&1 | tee /tmp/t.log")), [["npm test", true, "test"]]);
+	deepStrictEqual(standing(bash("npm test"), bash("npm test | tee src/a.ts")), []);
+	deepStrictEqual(standing(bash("make test -C ../other")), []);
 	const env = await isolateClioEnv("headless-observed-");
 	try {
 		const text = await headlessRun("text", [
