@@ -1551,9 +1551,15 @@ function assistantTextTail(message: unknown, streamed: number): string {
 	return tail;
 }
 
-/** The text blocks of one message, a blank line between them as the live stream sends them (bt-acp-tail). */
-function separatedTextBlocks(blocks: ReadonlyArray<string>): string[] {
-	return blocks.filter((text) => text.length > 0).map((text, index) => (index === 0 ? text : `\n\n${text}`));
+/**
+ * The text blocks of one message, a blank line between them as the live stream sends them (bt-acp-tail). `afterText`
+ * says an earlier message of the same turn already sent text, so the first block opens on a blank line too, as
+ * `sendAssistantText` parts two live messages (bt-session-res J9).
+ */
+function separatedTextBlocks(blocks: ReadonlyArray<string>, afterText = false): string[] {
+	return blocks
+		.filter((text) => text.length > 0)
+		.map((text, index) => (index === 0 && !afterText ? text : `\n\n${text}`));
 }
 
 function eventContentIndex(event: AcpEventRecord): number | undefined {
@@ -2417,6 +2423,8 @@ interface AcpReplayTurn {
 	/** The newest recorded assistant model and the route the ledger had when it ran. */
 	model?: string;
 	target?: string;
+	/** An assistant message of this turn sent text, so the next one opens on a blank line as live does. */
+	sentAssistantText?: boolean;
 }
 
 interface PreparedAcpReplay {
@@ -2622,7 +2630,9 @@ function prepareAcpReplay(
 			// Stored text ends where the live stream did, and a message that stopped short can end inside a URL (#446).
 			const completed = messageStopCompleted(payload?.stopReason);
 			replayMessageChunks(current.frames, "agent_thought_chunk", blocks.thinking, completed);
-			replayMessageChunks(current.frames, "agent_message_chunk", separatedTextBlocks(blocks.text), completed);
+			const text = separatedTextBlocks(blocks.text, current.sentAssistantText === true);
+			replayMessageChunks(current.frames, "agent_message_chunk", text, completed);
+			if (text.length > 0) current.sentAssistantText = true;
 			continue;
 		}
 		if (entry.role === "tool_call") {

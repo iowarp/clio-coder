@@ -487,6 +487,48 @@ test("ACP replay parts one message's text blocks on a blank line, as the live st
 	}
 });
 
+test("ACP replay parts two assistant messages of one turn on one blank line, as the live stream does", async () => {
+	// bt-session-res J9: live sent "files.\n\nDone:", replay sent "files." and "Done:" with nothing between them.
+	const timestamp = "2026-09-25T12:00:00.000Z";
+	const message = (turnId: string, parentTurnId: string, payload: unknown): SessionEntry => ({
+		kind: "message",
+		role: "assistant",
+		turnId,
+		parentTurnId,
+		timestamp,
+		payload,
+	});
+	const peer = fixture([
+		{ kind: "message", role: "user", turnId: "u1", parentTurnId: null, timestamp, payload: "list files" },
+		message("a1", "u1", { content: [{ type: "text", text: "Plan: read the files." }], stopReason: "toolUse" }),
+		message("a2", "a1", { content: [{ type: "thinking", thinking: "no text here" }], stopReason: "toolUse" }),
+		message("a3", "a2", {
+			content: [
+				{ type: "text", text: "Done:" },
+				{ type: "text", text: "two files." },
+			],
+			stopReason: "stop",
+		}),
+		{ kind: "message", role: "user", turnId: "u2", parentTurnId: "a3", timestamp, payload: "again" },
+		message("a4", "u2", { content: [{ type: "text", text: "Same." }], stopReason: "stop" }),
+	]);
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
+		const byTurn = new Map<number, string>();
+		for (const params of peer.updates) {
+			const update = params.update as { sessionUpdate?: string; content?: { text: string } };
+			if (update.sessionUpdate !== "agent_message_chunk") continue;
+			const turn = (params._meta as Record<string, { turn?: number }> | undefined)?.["clio-coder/replay"]?.turn ?? 0;
+			byTurn.set(turn, (byTurn.get(turn) ?? "") + (update.content?.text ?? ""));
+		}
+		// One separator between messages, the block separator unchanged, and none carried into the next turn.
+		deepStrictEqual([...byTurn.values()], ["Plan: read the files.\n\nDone:\n\ntwo files.", "Same."]);
+	} finally {
+		await peer.stop();
+	}
+});
+
 test("ACP load streams the complete active history beyond the former 64 turn limit", async () => {
 	const timestamp = "2026-09-25T12:00:00.000Z";
 	const entries: SessionEntry[] = [];
