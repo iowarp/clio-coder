@@ -80,6 +80,22 @@ describe("reproduce judgement", () => {
 		]);
 	});
 
+	it("fails a per-key tolerance naming a metric neither side reports", () => {
+		const payload = parseReproducePayload('{"x":1}', "out");
+		ok(!(payload instanceof Error));
+		const report = judgeReproduce({
+			spec: { inputs: [], compare: { mode: "twice" }, tolerance: { absolute: 0, keys: { energy: { relative: 1e-9 } } } },
+			actual: payload,
+			expected: payload,
+			expectedIsReference: false,
+			conditions,
+			runs: [],
+		});
+		strictEqual(report.passed, false);
+		deepStrictEqual(report.failedMetrics, ["energy"]);
+		strictEqual(report.metrics[0]?.detail, "energy: failed missing; declared but reported by neither side");
+	});
+
 	it("refuses a ragged array instead of flattening it", () => {
 		ok(parseReproducePayload('{"m":[[1,2],[3]]}', "out") instanceof Error);
 	});

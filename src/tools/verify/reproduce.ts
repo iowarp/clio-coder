@@ -445,7 +445,9 @@ function sameShape(left: ReadonlyArray<number>, right: ReadonlyArray<number>): b
  * side is judged for agreement within the tolerance, and their nested shapes
  * must match each other. Every declared units entry must be reported, exactly,
  * by every payload that carries the metric, and every declared shape must
- * match. Units a reference file does not report are not required of it.
+ * match. Units a reference file does not report are not required of it. A
+ * metric named only by a per-key tolerance is judged too, so one neither side
+ * reports fails as missing instead of passing unchecked.
  */
 export function judgeReproduce(input: {
 	spec: DeclaredReproduce;
@@ -467,6 +469,7 @@ export function judgeReproduce(input: {
 			...Object.keys(expected),
 			...Object.keys(spec.units ?? {}),
 			...Object.keys(spec.shapes ?? {}),
+			...Object.keys(spec.tolerance.keys ?? {}),
 		]),
 	].sort();
 	const expectedLabel = input.expectedIsReference ? "reference" : "run 2";
