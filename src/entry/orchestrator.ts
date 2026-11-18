@@ -1122,15 +1122,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (!session) {
 			headlessResumeFailure = "session continuation requires the session domain, which is not loaded";
 		} else if (requestedResume.kind === "id") {
-			const ids = session.history().map((meta) => meta.id);
-			const matches = ids.filter((id) => id.startsWith(requestedResume.id));
-			if (ids.includes(requestedResume.id) || matches.length === 0) {
-				resolvedResumeId = requestedResume.id;
-			} else if (matches.length === 1) {
-				resolvedResumeId = matches[0];
-			} else {
-				headlessResumeFailure = `session prefix ${requestedResume.id} is ambiguous; matches: ${matches.join(", ")}`;
-			}
+			const resolved = session.resolveId(requestedResume.id);
+			if (typeof resolved === "string") resolvedResumeId = resolved;
+			else
+				headlessResumeFailure = `session prefix ${requestedResume.id} is ambiguous; matches: ${resolved.ambiguous.join(", ")}`;
 		} else {
 			const latest = session.history().find((meta) => meta.hasModelTurn !== false);
 			if (latest === undefined)

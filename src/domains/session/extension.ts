@@ -10,7 +10,7 @@ import { cwdHash } from "../../engine/session.js";
 import { performCheckpoint } from "./checkpoint.js";
 import type { DeleteSessionOptions, SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
 import type { LabelEntry, SessionEntry, SessionInfoEntry } from "./entries.js";
-import { listSessionsForCwd } from "./history.js";
+import { listSessionsForCwd, resolveSessionIdForCwd } from "./history.js";
 import {
 	appendEntry,
 	appendTurn,
@@ -434,6 +434,9 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		history(): ReadonlyArray<SessionMeta> {
 			const cwd = state?.meta.cwd ?? process.cwd();
 			return listSessionsForCwd(cwd);
+		},
+		resolveId(idOrPrefix) {
+			return resolveSessionIdForCwd(state?.meta.cwd ?? process.cwd(), idOrPrefix);
 		},
 		async close() {
 			await closeCurrent();

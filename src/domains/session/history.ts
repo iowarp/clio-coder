@@ -51,6 +51,37 @@ export function listSessionsForCwd(cwd: string): SessionMeta[] {
 }
 
 /**
+ * Resolves a session id, or a unique prefix of one, among the sessions recorded for `cwd`. It reads each meta.json and
+ * never a ledger, so a named resume stays flat as other conversations grow (Astra r8-1). An exact id wins over any
+ * prefix, and no match returns the input unchanged for the resume to refuse. Only an ambiguous prefix pays for
+ * {@link listSessionsForCwd}, which lists the candidates in the picker's last-activity order.
+ */
+export function resolveSessionIdForCwd(cwd: string, idOrPrefix: string): string | { ambiguous: string[] } {
+	const dir = join(clioStateDir(), "sessions", cwdHash(cwd));
+	if (!existsSync(dir)) return idOrPrefix;
+	const matches: string[] = [];
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		if (!entry.isDirectory()) continue;
+		const metaPath = join(dir, entry.name, "meta.json");
+		let id: unknown;
+		try {
+			if (!statSync(metaPath).isFile()) continue;
+			id = (JSON.parse(readFileSync(metaPath, "utf8")) as Partial<SessionMeta> | null)?.id;
+		} catch {
+			// A missing or malformed meta.json is not a recorded session, as in listSessionsForCwd.
+			continue;
+		}
+		if (typeof id !== "string") continue;
+		if (id === idOrPrefix) return id;
+		if (id.startsWith(idOrPrefix)) matches.push(id);
+	}
+	if (matches.length === 0) return idOrPrefix;
+	if (matches.length === 1) return matches[0] as string;
+	const candidates = new Set(matches);
+	return { ambiguous: listSessionsForCwd(cwd).flatMap((meta) => (candidates.has(meta.id) ? [meta.id] : [])) };
+}
+
+/**
  * Sessions in `cwd` held open by a process other than this one (#420). Reads only
  * each meta.json, never a ledger, because the interactive boot notice runs this on
  * the event loop right after first paint.

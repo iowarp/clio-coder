@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
-import { listSessionsForCwd } from "../../src/domains/session/history.js";
+import { listSessionsForCwd, resolveSessionIdForCwd } from "../../src/domains/session/history.js";
 import type { SessionEntry, SessionMeta } from "../../src/domains/session/index.js";
 import { resolveSessionTarget, suggestSessionName } from "../../src/domains/session/names.js";
-import { sessionPaths } from "../../src/engine/session.js";
+import { cwdHash, sessionPaths } from "../../src/engine/session.js";
 import type { OverlayHandle, TUI } from "../../src/engine/tui.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
@@ -160,6 +162,33 @@ test("resume names resolve exactly while ID lookups keep precedence", () => {
 	assert.deepEqual(resolveSessionTarget(sessions, "abc"), { miss: "abc matches 2 sessions" });
 	assert.deepEqual(resolveSessionTarget(sessions, "duplicate"), { miss: "duplicate matches 2 sessions" });
 	assert.deepEqual(resolveSessionTarget(sessions, "exper"), { miss: "no session matches exper" });
+});
+
+test("a named resume resolves ids and prefixes from metadata and orders an ambiguous prefix by activity", async (t) => {
+	const env = await isolateClioEnv("session-resolve-id-");
+	t.after(() => env.restore());
+	const cwd = join(env.dir, "project");
+	const write = (id: string, at: string, ledger: boolean) => {
+		const dir = join(clioStateDir(), "sessions", cwdHash(cwd), id);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "meta.json"), JSON.stringify({ id, cwd, createdAt: at, endedAt: at }));
+		// A directory where the ledger belongs throws on any read, so these lookups prove no ledger is parsed.
+		if (!ledger) mkdirSync(join(dir, "current.jsonl"));
+		else
+			writeFileSync(
+				join(dir, "current.jsonl"),
+				`${JSON.stringify({ type: "session", version: 6, id, timestamp: at, cwd })}\n${JSON.stringify({ ...entries[0], timestamp: at })}\n`,
+			);
+	};
+	write("def-newer", "2026-11-01T12:00:00Z", true);
+	write("def-older", "2026-11-01T09:00:00Z", true);
+	assert.deepEqual(resolveSessionIdForCwd(cwd, "def"), { ambiguous: ["def-newer", "def-older"] });
+	write("abc", "2026-11-01T10:00:00Z", false);
+	write("abc-one", "2026-11-01T11:00:00Z", false);
+	write("ghi-only", "2026-11-01T08:00:00Z", false);
+	assert.equal(resolveSessionIdForCwd(cwd, "abc"), "abc", "an exact id wins over the ids it prefixes");
+	assert.equal(resolveSessionIdForCwd(cwd, "ghi"), "ghi-only");
+	assert.equal(resolveSessionIdForCwd(cwd, "zzz"), "zzz", "no match passes the input on for the resume to refuse");
 });
 
 test("resume uses a unique saved name directly and opens a filtered picker for duplicate names", async (t) => {
