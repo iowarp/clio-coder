@@ -90,9 +90,12 @@ export interface RunEffects {
 	 * `git diff` has asserted nothing about correctness. `verificationCommands`
 	 * only decides whether a receipt prints `unmatched validation: ...`, where a
 	 * miss and a false match both cost one line of noise, so it can afford the
-	 * wider set.
+	 * wider set. A bash check whose exit status is a later command's (`make test; echo EXIT=$?`) lands in
+	 * `unattributableVerificationCommands` instead: it ran, but nothing observed says it passed (bt-9).
 	 */
 	verificationCommands: ReadonlySet<string>;
+	/** Checks read as `verificationCommands` reads them, from bash calls whose exit status was not the check's. */
+	unattributableVerificationCommands: ReadonlySet<string>;
 	/**
 	 * False once the run made a successful call to a tool that can mutate a path
 	 * its own arguments do not name. After such a call `mutatedPaths` is a lower
@@ -362,6 +365,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	const verifyCallsRanAt = new Map<string, number>();
 	const passedVerifyRuns = new Map<string, { check: string; command: string; revision: number }>();
 	const verificationCommands = new Set<string>();
+	const unattributableVerificationCommands = new Set<string>();
 	const checkingCalls = new Map<string, "ok" | "error" | "blocked" | null>();
 	const writeRecordDowngrades = new Map<string, WriteRecordDowngrade>();
 	const executedShellCommands: string[] = [];
@@ -491,7 +495,10 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			for (const target of effects.paths) mutatedPaths.add(target);
 			if (effects.validationCommand !== null && effects.checkStatusAttributable && checkedRevision === mutationRevision)
 				validationCommands.add(effects.validationCommand);
-			if (effects.verificationCommand !== null) verificationCommands.add(effects.verificationCommand);
+			if (effects.verificationCommand !== null)
+				(effects.checkStatusAttributable ? verificationCommands : unattributableVerificationCommands).add(
+					effects.verificationCommand,
+				);
 			if (effects.tool === ToolNames.Verify) {
 				verificationCommands.add("tool:verify");
 				// The check ran its resolved command, so that command grounds as the same text run through bash would.
@@ -544,6 +551,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				mutationObserved: mutationRevision > 0,
 				checksAllBlocked: checkingCalls.size > 0 && [...checkingCalls.values()].every((outcome) => outcome === "blocked"),
 				verificationCommands: new Set(verificationCommands),
+				unattributableVerificationCommands: new Set(unattributableVerificationCommands),
 				writeRecordComplete: writeRecordDowngrades.size === 0,
 				writeRecordDowngrades: [...writeRecordDowngrades.values()].map((entry) => ({ ...entry })),
 				executedShellCommands: [...executedShellCommands],

@@ -227,7 +227,7 @@ function admissionLabels(run: FinishedRun): string[] {
 		labels.push(
 			`validations=claimed:${grounding.claimed} grounded:${grounding.grounded}${
 				grounding.ungrounded.length > 0
-					? ` ${grounding.basis === "no-command-executed" ? "unverifiable" : "unmatched"}:${grounding.ungrounded
+					? ` ${grounding.basis === "no-command-executed" ? "unverifiable" : grounding.basis === "unattributable-status" ? "unattributable" : "unmatched"}:${grounding.ungrounded
 							.map((name) => JSON.stringify(name))
 							.join(",")}`
 					: ""
@@ -529,7 +529,9 @@ export function workerTextNonEvidenceNotices(
 				? `non-evidence: this run reported ${named} as passing review judgments and executed no command. They are its reading of the source, not checks that ran; do not report them as verified.`
 				: grounding.basis === "no-command-executed"
 					? `non-evidence: this run reported ${named} as passing and executed no command at all. Re-run the check yourself before repeating the claim.`
-					: `non-evidence: this run reported ${named} as passing through a command the harness cannot identify as that check. Re-run it before repeating the claim.`,
+					: grounding.basis === "unattributable-status"
+						? `non-evidence: this run reported ${named} as passing, but the command that ran it reported a later command's exit status, not the check's. Re-run the check yourself before repeating the claim.`
+						: `non-evidence: this run reported ${named} as passing through a command the harness cannot identify as that check. Re-run it before repeating the claim.`,
 		);
 	}
 	if (facts.capabilityMismatch !== null) {
