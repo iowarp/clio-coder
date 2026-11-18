@@ -1267,6 +1267,8 @@ it("calls the output limit cut off count as no call and no tool error and read a
 			const rendered = panel.render(120).map(stripTerminalSequences).join("\n");
 			const rows = rendered.split("\n").filter((line) => /not run/u.test(line));
 			strictEqual(rows.length, 3, `${surface}:\n${rendered}`);
+			// The notice and these rows state the limit; no red stopped row repeats it (bt-session-res J4).
+			doesNotMatch(rendered, /\[stopped: length\]/u, `${surface}:\n${rendered}`);
 			for (const row of rows) {
 				match(row, new RegExp(`${GLYPH.warn} output limit`, "u"), surface);
 				ok(!row.includes(GLYPH.error), `${surface}: ${row}`);

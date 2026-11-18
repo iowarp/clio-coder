@@ -1,5 +1,6 @@
 import { performance } from "node:perf_hooks";
 import { assistantMessageNeverSent, assistantModelLabel } from "../core/assistant-model.js";
+import { outputLimitCutOffToolCallIds } from "../core/assistant-output.js";
 import { AssistantProseProjection, sanitizeAssistantProse } from "../core/assistant-prose.js";
 import type { OutputStyle } from "../core/defaults.js";
 import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
@@ -812,6 +813,8 @@ function extractAssistantTerminalError(message: unknown): string {
 	const stopReason = (message as { stopReason?: unknown }).stopReason;
 	if (stopReason !== "error" && stopReason !== "aborted" && stopReason !== "length") return "";
 	if (stopReason === "length") {
+		// A cut with calls in it is stated once, by the output-limit notice and its "not run" rows (bt-39 a).
+		if (outputLimitCutOffToolCallIds(message).length > 0) return "";
 		return "[stopped: length] Model target hit its generation/output limit before a complete response. This is not a safety denial. Continue with a shorter answer or lower thinking; use /context compact if the context meter is also near full.";
 	}
 	const raw = (message as { errorMessage?: unknown }).errorMessage;
