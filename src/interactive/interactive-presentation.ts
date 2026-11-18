@@ -529,7 +529,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const dispatchBoardStore = factories.createDispatchBoardStore(
 		deps.telemetry,
 		() => readDurableFleetPlans(getCwd(), deps.getSettings?.().fleet.worktrees.root),
-		() => readDurableWorkerRuns(getCwd(), deps.getSettings?.().fleet.worktrees.root),
+		() => readDurableWorkerRuns(getCwd(), deps.getSettings?.().fleet.worktrees.root, requestRender),
 		recordedRunUsage,
 	);
 	const contextActivityStore = factories.createContextActivityStore(deps.bus, () => deps.chat.getSessionId());

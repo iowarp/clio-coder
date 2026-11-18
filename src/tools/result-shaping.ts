@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { readdir, rm, rmdir, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { INSTRUCTION_SHAPED_NOTE } from "../core/untrusted-content.js";
 import { clioStateDir } from "../core/xdg.js";
@@ -137,37 +138,64 @@ export interface ToolOffloadSweepResult {
 	skipped: number;
 }
 
-/** Remove regular offload files older than the boot retention cap. */
-export function sweepExpiredToolOffloads(now = Date.now()): ToolOffloadSweepResult {
+/** A loop turn that never keeps the process alive: an exiting process simply abandons the sweep. */
+function unrefTurn(): Promise<void> {
+	return new Promise((resolve) => setImmediate(resolve).unref());
+}
+
+/**
+ * Remove regular offload files older than the retention cap. Every listing, stat and removal is an asynchronous fs
+ * call with a loop turn after it, so a state directory of 10,000 spills never holds input for the scan. A stop
+ * request ends the sweep at the next file; an unfinished sweep runs again on the next launch.
+ */
+export async function sweepExpiredToolOffloads(
+	now = Date.now(),
+	stopped: () => boolean = () => false,
+): Promise<ToolOffloadSweepResult> {
 	const root = join(clioStateDir(), "scratch");
 	const cutoff = now - TOOL_OFFLOAD_MAX_AGE_MS;
 	let removed = 0;
 	let skipped = 0;
+	const tolerate = (error: unknown): void => {
+		if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") skipped += 1;
+	};
 	try {
-		for (const session of readdirSync(root, { withFileTypes: true })) {
+		for (const session of await readdir(root, { withFileTypes: true })) {
+			if (stopped()) break;
 			if (!session.isDirectory()) continue;
 			const sessionDir = join(root, session.name);
-			for (const entry of readdirSync(sessionDir, { withFileTypes: true })) {
+			for (const entry of await readdir(sessionDir, { withFileTypes: true })) {
+				await unrefTurn();
+				if (stopped()) return { removed, skipped };
 				if (!entry.isFile()) continue;
 				const path = join(sessionDir, entry.name);
 				try {
-					if (statSync(path).mtimeMs >= cutoff) continue;
-					rmSync(path, { force: true });
+					if ((await stat(path)).mtimeMs >= cutoff) continue;
+					await rm(path, { force: true });
 					removed += 1;
 				} catch (error) {
-					if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") skipped += 1;
+					tolerate(error);
 				}
 			}
 			try {
-				if (readdirSync(sessionDir).length === 0) rmdirSync(sessionDir);
+				if ((await readdir(sessionDir)).length === 0) await rmdir(sessionDir);
 			} catch (error) {
-				if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") skipped += 1;
+				tolerate(error);
 			}
 		}
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") skipped += 1;
+		tolerate(error);
 	}
 	return { removed, skipped };
+}
+
+/** Start the retention sweep once the session takes turns. Errors are swallowed; the returned hook stops it. */
+export function startToolOffloadSweep(): () => void {
+	let stopped = false;
+	sweepExpiredToolOffloads(Date.now(), () => stopped).catch(() => {});
+	return () => {
+		stopped = true;
+	};
 }
 
 /**

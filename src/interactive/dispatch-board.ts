@@ -2828,7 +2828,8 @@ function boardOrder(rows: ReadonlyArray<DispatchBoardRow>): DispatchBoardRow[] {
 export function createDispatchBoardStore(
 	projection: Pick<TelemetryContract, "snapshot" | "subscribe" | "reconcileRuns" | "setFleetPhase" | "read">,
 	readDurablePlans?: () => ReadonlyArray<FleetPlanRunView>,
-	readDurableRuns?: () => ReadonlyArray<DispatchBoardRow>,
+	/** The earlier runs loaded so far; read on every call until `complete`, then held. */
+	readDurableRuns?: () => { rows: ReadonlyArray<DispatchBoardRow>; complete: boolean },
 	/** A settled run's usage from its own record, for a run this session's journal never referenced, such as a plan step. */
 	readRecordedUsage?: (runId: string) => DispatchRunUsage,
 ): {
@@ -2849,20 +2850,24 @@ export function createDispatchBoardStore(
 	const unsubscribe = projection.subscribe((snapshot) => {
 		current = snapshot;
 	});
-	// Settled workers from before this process, read once like the durable plans; a run this process folds outranks it.
+	// Settled workers from before this process, held once complete like the durable plans; until then a paint shows
+	// what has loaded. A run this process folds outranks its earlier row.
 	let earlierRuns: ReadonlyArray<DispatchBoardRow> | null = null;
 	const historyRows = (): ReadonlyArray<DispatchBoardRow> => {
-		if (earlierRuns === null) {
+		let loaded = earlierRuns;
+		if (loaded === null) {
 			try {
-				earlierRuns = readDurableRuns?.() ?? [];
+				const read = readDurableRuns?.() ?? { rows: [], complete: true };
+				loaded = read.rows;
+				if (read.complete) earlierRuns = loaded;
 			} catch {
 				// An unreadable ledger costs the history, never the board.
-				earlierRuns = [];
+				earlierRuns = loaded = [];
 			}
 		}
 		const live = new Set(current.runs.map((run) => run.runId));
 		const view = projection.read?.live() ?? null;
-		return earlierRuns
+		return loaded
 			.filter((row) => !live.has(row.runId))
 			.map((row) => {
 				const telemetry = view?.run(row.runId) ?? null;

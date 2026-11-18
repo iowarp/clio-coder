@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { openLedger } from "../../src/domains/dispatch/state.js";
-import { primeDurableWorkerRuns, readDurableWorkerRuns } from "../../src/interactive/fleet-run-history.js";
+import { readDurableWorkerRuns } from "../../src/interactive/fleet-run-history.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 async function settledRun(cwd: string, agentId: string): Promise<void> {
@@ -25,7 +25,7 @@ async function settledRun(cwd: string, agentId: string): Promise<void> {
 
 const ids = (rows: ReadonlyArray<{ runId: string }>): string[] => rows.map((row) => row.runId);
 
-test("primed worker history is read a loop turn per run and taken once by the matching read", async () => {
+test("worker history loads a run per loop turn after the read that asks, and is taken once complete", async () => {
 	const home = await isolateClioEnv("clio-fleet-run-history-prime-");
 	try {
 		const project = join(home.dir, "project");
@@ -33,49 +33,63 @@ test("primed worker history is read a loop turn per run and taken once by the ma
 		mkdirSync(project);
 		mkdirSync(other);
 		for (const agent of ["a", "b", "c"]) await settledRun(project, agent);
-		const fresh = readDurableWorkerRuns(project);
-		strictEqual(fresh.length, 3);
 
+		// The first read reads nothing on the caller's turn; each later turn reads one run, newest first.
 		let turns = 0;
-		await primeDurableWorkerRuns(project, undefined, async () => {
-			turns += 1;
-		});
-		strictEqual(turns, 3);
-		// A run settled after priming is not in the primed rows, which shows the read took them instead of the ledger.
+		let release: () => void = () => {};
+		const turn = () =>
+			new Promise<void>((resolve) => {
+				turns += 1;
+				release = resolve;
+			});
+		let arrived = 0;
+		deepStrictEqual(
+			readDurableWorkerRuns(project, undefined, () => (arrived += 1), turn),
+			{
+				rows: [],
+				complete: false,
+			},
+		);
+		release();
+		await new Promise((resolve) => setImmediate(resolve));
+		strictEqual(readDurableWorkerRuns(project).rows.length, 0); // the ledger listing took this turn
+		release();
+		await new Promise((resolve) => setImmediate(resolve));
+		const partial = readDurableWorkerRuns(project);
+		deepStrictEqual([partial.rows.length, partial.complete], [1, false]);
+		const newest = ids(partial.rows)[0];
+		for (let i = 0; i < 2; i += 1) {
+			release();
+			await new Promise((resolve) => setImmediate(resolve));
+		}
+		strictEqual(turns, 4);
+		strictEqual(arrived, 1);
+		const loaded = readDurableWorkerRuns(project);
+		deepStrictEqual([loaded.rows.length, loaded.complete, ids(loaded.rows)[0]], [3, true, newest]);
+
+		// Taken once: the next read starts a fresh load that sees a run settled since.
 		await settledRun(project, "d");
-		deepStrictEqual(ids(readDurableWorkerRuns(project)), ids(fresh));
-		strictEqual(readDurableWorkerRuns(project).length, 4);
+		strictEqual(readDurableWorkerRuns(project, undefined, undefined, async () => {}).complete, false);
+		await new Promise((resolve) => setImmediate(resolve));
+		strictEqual(readDurableWorkerRuns(project).rows.length, 4);
 
-		// A read for another project or worktree root never takes rows primed for this one, and discards them.
-		await primeDurableWorkerRuns(project, undefined, async () => {});
-		strictEqual(readDurableWorkerRuns(other).length, 0);
-		await primeDurableWorkerRuns(project, undefined, async () => {});
-		strictEqual(readDurableWorkerRuns(project, join(home.dir, "worktrees")).length, 4);
-		await settledRun(project, "e");
-		strictEqual(readDurableWorkerRuns(project).length, 5);
-
-		// A stop during priming reads no further run and leaves nothing primed.
-		const stop = new AbortController();
-		let stoppedTurns = 0;
-		await primeDurableWorkerRuns(
+		// A read for another project or worktree root abandons a load for this one.
+		const arrivals: string[] = [];
+		readDurableWorkerRuns(
 			project,
 			undefined,
-			async () => {
-				stoppedTurns += 1;
-				stop.abort();
-			},
-			stop.signal,
+			() => arrivals.push("project"),
+			async () => {},
 		);
-		strictEqual(stoppedTurns, 1);
-		await settledRun(project, "f");
-		strictEqual(readDurableWorkerRuns(project).length, 6);
-
-		// An already stopped boot primes nothing even when there is nothing to read.
-		const stopped = new AbortController();
-		stopped.abort();
-		await primeDurableWorkerRuns(other, undefined, async () => {}, stopped.signal);
-		await settledRun(other, "g");
-		strictEqual(readDurableWorkerRuns(other).length, 1);
+		readDurableWorkerRuns(
+			other,
+			undefined,
+			() => arrivals.push("other"),
+			async () => {},
+		);
+		await new Promise((resolve) => setImmediate(resolve));
+		deepStrictEqual(arrivals, ["other"]);
+		deepStrictEqual(readDurableWorkerRuns(other), { rows: [], complete: true });
 	} finally {
 		home.restore();
 	}

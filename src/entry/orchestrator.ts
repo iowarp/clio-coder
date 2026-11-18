@@ -385,7 +385,7 @@ import { createDispatchBackgroundRegistry } from "../tools/dispatch-background.j
 import { dispatchSchemaCompositionFor } from "../tools/dispatch-schema.js";
 import { createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
 import { acpHostReadOnlySource, createRegistry } from "../tools/registry.js";
-import { sweepExpiredToolOffloads } from "../tools/result-shaping.js";
+import { startToolOffloadSweep } from "../tools/result-shaping.js";
 
 export interface BootResult {
 	exitCode: number;
@@ -686,13 +686,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			: undefined,
 	);
 	/**
-	 * The boot timer's phases as process.booted, once, when the surface first answers: the numbers
-	 * CLIO_CODER_TRACE_BOOT prints are the ones the process journal keeps (#434).
+	 * The boot timer's phases as process.booted, once, when the surface first answers: the numbers CLIO_CODER_TRACE_BOOT
+	 * prints are the ones the process journal keeps (#434). The spilled tool output sweep starts then, off the boot path.
 	 */
 	let bootRecorded = false;
 	const recordBoot = (interactivity?: BootInteractivity): void => {
 		if (bootRecorded) return;
 		bootRecorded = true;
+		termination.onTerminate(startToolOffloadSweep());
 		const tenth = (ms: number) => Math.max(0, Math.round(ms * 10) / 10);
 		const snapshot = timer.snapshot();
 		telemetryHub().emit("process.booted", {
@@ -765,7 +766,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}
 		}
 	}
-	sweepExpiredToolOffloads();
 	timer.mark("install check");
 
 	// A hard-killed coordinator leaves compete groups and task worktrees behind.
@@ -1615,17 +1615,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	extensionReload.applyBoot();
 	middlewareRegistrar.registerHook(protectedArtifactsGuard);
 	bootHookNotices = false;
-	if (lease) {
-		// The fleet board's history reads each earlier worker run's journal. Read it a run per loop turn while Stage 0
-		// takes keys, here, before the chat loop starts producers whose notices reach only the built application.
-		const [{ primeDurableWorkerRuns }, { nextTurn }] = await Promise.all([
-			import("../interactive/index.js"),
-			import("./stage1-preload.js"),
-		]);
-		const worktreeRoot = (config?.get() ?? readSettings()).fleet.worktrees.root;
-		await primeDurableWorkerRuns(process.cwd(), worktreeRoot, nextTurn, lease.abortSignal);
-	}
-	// A lease closed during priming stops boot here, before anything builds against it.
+	// The interactive graph loads while Stage 0 takes keys, before the chat loop starts producers whose notices reach
+	// only the built application, so the import that starts the application finds it loaded. Fleet history loads later.
+	if (lease) await import("../interactive/index.js");
+	// A lease closed during that load stops boot here, before anything builds against it.
 	await bootPhaseBoundary?.();
 	// Autonomy is hot-reloaded for interactive and headless admissions. ACP
 	// server prompts use the snapshot captured at session/new.
