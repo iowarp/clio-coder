@@ -372,7 +372,6 @@ function componentSubtotal(components: readonly FactSum[]): FactSum {
 	return result;
 }
 
-/** Parts are disjoint reported contributions, not inferred calls; a whole-scope snapshot replaces them (#434). */
 /**
  * A run whose calls another journal holds, such as a headless main-agent run's in its session (bt-31): its scope holds
  * none of the calls its run.settled names, so that settlement, the producer's fold of those calls, is the run's reported
@@ -406,6 +405,7 @@ function settledUsage(rows: readonly TelemetryRecord[], base: ReturnType<typeof 
 	};
 }
 
+/** Parts are disjoint reported contributions, not inferred calls; a whole-scope snapshot replaces them (#434). */
 export function foldRunJournal(records: Iterable<TelemetryRecord>, options: FoldOptions = {}) {
 	const rows = [...records];
 	const whole = rows.filter((row) => row.k !== "run.usage_reported" || row.data.partId === undefined);
