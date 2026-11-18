@@ -21,6 +21,16 @@ export function prepareVerifyArguments(args: Record<string, unknown>): Record<st
 	return next;
 }
 
+/**
+ * A call that names no check only lists the declared checks. It runs nothing, so it is never validation evidence; the
+ * resolver and every reader of verify outcomes decide a listing through this one predicate.
+ */
+export function isVerifyListing(args: unknown): boolean {
+	if (args === null || typeof args !== "object" || Array.isArray(args)) return false;
+	const check = (args as Record<string, unknown>).check;
+	return typeof check !== "string" || check.trim().length === 0;
+}
+
 export const verifyToolSurface: ToolSurface = {
 	name: ToolNames.Verify,
 	description:

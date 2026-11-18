@@ -885,6 +885,7 @@ export const RunSettledSchema = Type.Object(
 					"read-only-agent",
 					"no-validation-tool",
 					"acp-external-unobserved",
+					"host-verification",
 					"result-unavailable",
 				]),
 			},

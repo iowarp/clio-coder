@@ -459,13 +459,15 @@ import type { RunCallUsage, RunUsageFacts } from "./run-call-usage.js";
 import { createRunCallUsage, unobservedRunUsageFacts } from "./run-call-usage.js";
 import { defaultRunEventJournal } from "./run-event-journal.js";
 import { attachRunEventJournalBridge, type RunEventJournalBridge } from "./run-event-journal-bridge.js";
-import type { VerifyCallOutcome } from "./run-findings.js";
+import type { VerifyCallOutcome, VerifyCallStart } from "./run-findings.js";
 import {
 	createRunResultQuality,
 	deriveRunVerification,
+	settledVerifyCall,
 	typedValidationFactsFromObservedEffects,
 	typedValidationFactsFromVerifyCalls,
-	verifyCheckIdentity,
+	verificationWithHostVerdict,
+	verifyCallStart,
 } from "./run-findings.js";
 import { detectRunIdentity } from "./run-identity.js";
 import { finishRunResult, settleUnfinishedRun } from "./run-settlement.js";
@@ -1235,8 +1237,8 @@ function recordWorkerRunEffect(recorder: RunEffectsRecorder, event: Record<strin
 }
 
 interface VerifyCallLog {
-	/** Check identity of each started `verify` call, by engine call id, until its finish arrives. */
-	pending: Map<string, string | null>;
+	/** What each started `verify` call named, by engine call id, until its finish arrives. */
+	pending: Map<string, VerifyCallStart>;
 	calls: VerifyCallOutcome[];
 }
 
@@ -1252,16 +1254,18 @@ function recordWorkerVerifyCall(log: VerifyCallLog, event: Record<string, unknow
 		const toolCallId = readStringOrNull(event.toolCallId);
 		const call = effectiveToolCall(String(event.toolName), event.args);
 		if (toolCallId === null || call.toolName !== ToolNames.Verify) return;
-		log.pending.set(toolCallId, verifyCheckIdentity(call.args));
+		log.pending.set(toolCallId, verifyCallStart(call.args));
 		return;
 	}
 	if (event.type === "tool_execution_end") {
 		for (const child of gatewayChainReceipts(String(event.toolName), event.result)) {
 			if (child.capability === ToolNames.Verify)
-				log.calls.push({
-					check: verifyCheckIdentity(child.args),
-					outcome: child.admission.unresolved === true ? "unresolved" : child.admission.outcome,
-				});
+				log.calls.push(
+					settledVerifyCall(
+						verifyCallStart(child.args),
+						child.admission.unresolved === true ? "unresolved" : child.admission.outcome,
+					),
+				);
 		}
 		return;
 	}
@@ -1272,18 +1276,19 @@ function recordWorkerVerifyCall(log: VerifyCallLog, event: Record<string, unknow
 		!(event.payload.tool === ToolNames.Gateway && toolCallId !== null && log.pending.has(toolCallId))
 	)
 		return;
-	const check = toolCallId === null ? null : (log.pending.get(toolCallId) ?? null);
+	const start = toolCallId === null ? undefined : log.pending.get(toolCallId);
 	if (toolCallId !== null) log.pending.delete(toolCallId);
 	const outcome = event.payload.outcome;
-	log.calls.push({
-		check,
-		outcome:
+	log.calls.push(
+		settledVerifyCall(
+			start,
 			outcome === "error" && event.payload.unresolved === true
 				? "unresolved"
 				: outcome === "ok" || outcome === "error" || outcome === "blocked"
 					? outcome
 					: null,
-	});
+		),
+	);
 }
 
 /**
@@ -1694,12 +1699,13 @@ const WORKER_VERIFICATION_SECTION_MAX_CHARS = 600;
  * "executed something the canonical validation detector does not enumerate",
  * and only the first is grounds for taking a sealed quality label away.
  */
-function countCheckingCalls(stats: Map<string, ToolCallStat>): number {
+function countCheckingCalls(stats: Map<string, ToolCallStat>, verifyCalls: ReadonlyArray<VerifyCallOutcome>): number {
 	let total = 0;
 	for (const stat of stats.values()) {
 		if (stat.tool === ToolNames.Bash || stat.tool === ToolNames.Verify) total += stat.ok;
 	}
-	return total;
+	// A verify call that only listed the checks could not have run one (bt-19).
+	return total - verifyCalls.filter((call) => call.listing === true && call.outcome === "ok").length;
 }
 
 /** Top-level entries named in the workspace message, and its total body cap. */
@@ -9538,7 +9544,7 @@ export function createDispatchBundle(
 					// stays where a match opens a gate, in the result contract's
 					// measured judgement above.
 					executedCommands: observedRunEffects.verificationCommands,
-					executedCheckingCalls: countCheckingCalls(toolStats),
+					executedCheckingCalls: countCheckingCalls(toolStats, verifyCalls.calls),
 					readOnly: lifecycle.readOnly,
 					// The worker derived the same gates from the same task text.
 					...(appliedResultContract?.kind === "verifier-report" ? { taskGates: extractTaskGates(req.task).gates } : {}),
@@ -9665,7 +9671,7 @@ export function createDispatchBundle(
 								output: capturedOutput?.state === "final" ? capturedOutput.text : null,
 								branch: req.taskWorktree.branch,
 								task: req.task,
-								executedCheckingCalls: countCheckingCalls(toolStats),
+								executedCheckingCalls: countCheckingCalls(toolStats, verifyCalls.calls),
 								...(observedRunEffects.executedShellCommands !== undefined
 									? { executedShellCommands: observedRunEffects.executedShellCommands }
 									: {}),
@@ -9950,7 +9956,10 @@ export function createDispatchBundle(
 						};
 					}
 				}
-				if (hostVerification !== undefined) receiptDraft.hostVerification = hostVerification;
+				if (hostVerification !== undefined) {
+					receiptDraft.hostVerification = hostVerification;
+					receiptDraft.verification = verificationWithHostVerdict(receiptDraft.verification, hostVerification);
+				}
 				if (remoteReturn && worktreeReceipt) {
 					// The remote commit's byproducts stay on the node, so the local commit never saw them.
 					const remoteLeft = remoteImport?.leftUncommitted;

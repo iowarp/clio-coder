@@ -135,7 +135,11 @@ export function internalHelperResultSchema(contract: ResultContract): Record<str
 			return {
 				...object({
 					mutatedPaths: strings,
-					validations: list(object({ name: text, passed: { type: "boolean" }, evidence: text })),
+					validations: list({
+						...object({ name: text, passed: { type: "boolean" }, evidence: text }),
+						// Optional: a deliberate red run before the change, which quality does not judge.
+						properties: { name: text, passed: { type: "boolean" }, evidence: text, baseline: { type: "boolean" } },
+					}),
 					observations: strings,
 					declaredChecks: strings,
 					summary: { type: ["string", "null"] },
@@ -760,6 +764,11 @@ export interface CodeReportCheck {
 	passed: boolean;
 	evidence: string;
 	ran?: boolean;
+	/**
+	 * Mutation reports only: a deliberate run before the change (a red TDD baseline). It is reported evidence, but
+	 * quality judges the checks run after the change, so a baseline failure is not a failure of the work.
+	 */
+	baseline?: boolean;
 }
 
 export interface CodeReportResult {
@@ -1111,11 +1120,15 @@ function parseChecks(value: unknown, codeReport = false): CodeReportCheck[] | nu
 		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return null;
 		const check = entry as Record<string, unknown>;
 		if (
-			!hasOnlyKeys(check, codeReport ? ["name", "passed", "evidence", "ran"] : ["name", "passed", "evidence"]) ||
+			!hasOnlyKeys(
+				check,
+				codeReport ? ["name", "passed", "evidence", "ran"] : ["name", "passed", "evidence", "baseline"],
+			) ||
 			!string(check.name) ||
 			typeof check.passed !== "boolean" ||
 			!string(check.evidence) ||
-			(check.ran !== undefined && typeof check.ran !== "boolean")
+			(check.ran !== undefined && typeof check.ran !== "boolean") ||
+			(check.baseline !== undefined && typeof check.baseline !== "boolean")
 		) {
 			return null;
 		}
@@ -1124,6 +1137,7 @@ function parseChecks(value: unknown, codeReport = false): CodeReportCheck[] | nu
 			passed: check.passed,
 			evidence: check.evidence,
 			...(typeof check.ran === "boolean" ? { ran: check.ran } : {}),
+			...(check.baseline === true ? { baseline: true } : {}),
 		});
 	}
 	return checks;
@@ -1704,7 +1718,11 @@ export function mutationReportChecks(contract: ResultContract, output: string | 
 		validationPassed:
 			Array.isArray(validations) &&
 			validations.some(
-				(entry) => entry !== null && typeof entry === "object" && (entry as Record<string, unknown>).passed === true,
+				(entry) =>
+					entry !== null &&
+					typeof entry === "object" &&
+					(entry as Record<string, unknown>).passed === true &&
+					(entry as Record<string, unknown>).baseline !== true,
 			),
 	};
 }
@@ -1717,7 +1735,7 @@ export function mutationReportFailures(contract: ResultContract | null, output: 
 	return parsed.value.validations.flatMap((entry: unknown) => {
 		if (entry === null || typeof entry !== "object") return [];
 		const check = entry as Record<string, unknown>;
-		return check.passed === false && string(check.name) ? [check.name as string] : [];
+		return check.passed === false && check.baseline !== true && string(check.name) ? [check.name as string] : [];
 	});
 }
 
@@ -1915,7 +1933,7 @@ const MUTATION_VALIDATION_EXAMPLE = '{"name":"npm test","passed":true,"evidence"
  * says which one happened and shows the entry that would have passed.
  */
 function mutationValidationsReason(): string {
-	return `Mutation result must carry executed validation results: every validations entry is shaped like ${MUTATION_VALIDATION_EXAMPLE}, with a string name, a boolean passed, a string evidence, and no other keys. Use validations:[] when no check executed. Put source reads and edit observations in observations, and checks not run in declaredChecks; neither carries passed.`;
+	return `Mutation result must carry executed validation results: every validations entry is shaped like ${MUTATION_VALIDATION_EXAMPLE}, with a string name, a boolean passed, a string evidence, an optional "baseline":true on a deliberate run before the change, and no other keys. Use validations:[] when no check executed. Put source reads and edit observations in observations, and checks not run in declaredChecks; neither carries passed.`;
 }
 
 /**
@@ -1979,9 +1997,11 @@ function validateMutation(contract: ResultContract, input: ResultContractValidat
 	}
 	const authorship = validateAuthorship(value, resultSummaryMaxBytes(contract));
 	if (authorship !== null) return failure(contract, "unmeasured", authorship);
-	const validations =
+	const reported =
 		Array.isArray(value.validations) && value.validations.length === 0 ? [] : parseChecks(value.validations);
-	if (validations === null) return failure(contract, "unmeasured", mutationValidationsReason());
+	if (reported === null) return failure(contract, "unmeasured", mutationValidationsReason());
+	// A baseline ran before the change, so quality judges only the checks run on the changed tree (bt-17).
+	const validations = reported.filter((check) => check.baseline !== true);
 	// Settle a historical failure only with a matching observed final pass.
 	// Missing evidence keeps old, potentially nonchronological reports conservative.
 	const reportedFailure =
@@ -2226,7 +2246,7 @@ export function resultContractShape(contract: ResultContract): string {
 		case "world-knowledge-report":
 			return '{"discovery":"performed|caller-supplied-only|unavailable","facts":[{"claim":"...","evidence":"...","sources":["URL or document id"]}],"synthesis":["comparison or advisory conclusion"],"uncertainties":["..."],"followUpVerification":["..."]}';
 		case "mutation-report":
-			return `{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"observations":["optional source or edit observations"],"declaredChecks":["optional checks not run; state why host execution is needed"],"commitMessage":"optional: the commit message for this change","summary":"the requested explanation or deliverable, or a specific limitation; otherwise optional"}. summary allows at most ${resultSummaryMaxBytes(contract)} UTF-8 bytes and commitMessage at most ${RESULT_COMMIT_MESSAGE_MAX_BYTES} UTF-8 bytes. Preserve the requested explanation and citations in summary when repairing the report; if they cannot fit or be grounded, state that specific limitation. Report only actual mutations. validations contains executed checks only; reads and edits are observations, never passed validations. Use validations:[] whenever no check executed, including a successful write without execution authority; this is unmeasured, not tests passed. observations and declaredChecks are optional arrays of strings with no passed status. Checks that were denied or unavailable belong in declaredChecks. Host checks are separate evidence from this worker's result.`;
+			return `{"mutatedPaths":["src/file.ts"],"validations":[{"name":"npm test","passed":true,"evidence":"exit 0"}],"observations":["optional source or edit observations"],"declaredChecks":["optional checks not run; state why host execution is needed"],"commitMessage":"optional: the commit message for this change","summary":"the requested explanation or deliverable, or a specific limitation; otherwise optional"}. summary allows at most ${resultSummaryMaxBytes(contract)} UTF-8 bytes and commitMessage at most ${RESULT_COMMIT_MESSAGE_MAX_BYTES} UTF-8 bytes. Preserve the requested explanation and citations in summary when repairing the report; if they cannot fit or be grounded, state that specific limitation. Report only actual mutations. validations contains executed checks only; reads and edits are observations, never passed validations. Use validations:[] whenever no check executed, including a successful write without execution authority; this is unmeasured, not tests passed. Mark a deliberate run before the change, such as a red test-first baseline, with "baseline":true; quality judges only the checks run after the change. observations and declaredChecks are optional arrays of strings with no passed status. Checks that were denied or unavailable belong in declaredChecks. Host checks are separate evidence from this worker's result.`;
 		case "provenance-report":
 			return '{"confirmedFacts":["..."],"missingEvidence":["..."],"nextInspections":["..."]}';
 		case "delegation-plan":

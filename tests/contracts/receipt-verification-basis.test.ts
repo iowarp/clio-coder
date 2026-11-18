@@ -1,8 +1,8 @@
 import { deepStrictEqual } from "node:assert/strict";
 import { test } from "node:test";
 
-import { deriveRunVerification } from "../../src/domains/dispatch/run-findings.js";
-import type { ToolCallStat } from "../../src/domains/dispatch/types.js";
+import { deriveRunVerification, verificationWithHostVerdict } from "../../src/domains/dispatch/run-findings.js";
+import type { RunHostVerificationCheck, ToolCallStat } from "../../src/domains/dispatch/types.js";
 
 // BT-012. A worker ran `verify` and it failed, and the receipt still said
 // `basis: "no-validation-tool"` beside its own
@@ -75,4 +75,46 @@ test("an observed failed validation outranks the ACP unobserved basis", () => {
 		deriveRunVerification({ toolStats: [stat("verify", { ok: 0, errors: 1 })] }, { acpDelegation: true }),
 		{ state: "unverified", basis: "validation-tool" },
 	);
+});
+
+// bt-17: a worker whose own check the record could not attribute (a bash run that
+// needed approval) read `unverified, no-validation-tool` beside a host verdict of
+// `verified`. The host's verdict on the finished tree is the record's verification.
+test("the host verdict outranks the worker's own evidence, and reused or unrun checks do not", () => {
+	const check = (exitCode: number, extra: Partial<RunHostVerificationCheck> = {}): RunHostVerificationCheck => ({
+		check: "python-unittest",
+		argv: ["python3", "-m", "unittest"],
+		cwd: "/repo",
+		exitCode,
+		durationMs: 1,
+		memo: false,
+		outputTail: "",
+		...extra,
+	});
+	const worker = deriveRunVerification({ toolStats: [stat("bash", { ok: 1, errors: 0 })] });
+	deepStrictEqual(worker, { state: "unverified", basis: "no-validation-tool" });
+	deepStrictEqual(verificationWithHostVerdict(worker, { status: "verified", checks: [check(0)] }), {
+		state: "verified",
+		basis: "host-verification",
+	});
+	const passedByWorker = { state: "verified", basis: "validation-tool" } as const;
+	deepStrictEqual(verificationWithHostVerdict(passedByWorker, { status: "rejected", checks: [check(1)] }), {
+		state: "unverified",
+		basis: "host-verification",
+	});
+	const failedOnBase = check(1, { baseComparison: { status: "failed" } });
+	deepStrictEqual(
+		verificationWithHostVerdict(passedByWorker, { status: "rejected", checks: [failedOnBase] }),
+		passedByWorker,
+	);
+	deepStrictEqual(
+		verificationWithHostVerdict(worker, { status: "verified", checks: [check(0, { memo: true })] }),
+		worker,
+	);
+	deepStrictEqual(
+		verificationWithHostVerdict(worker, { status: "verified", checks: [check(0, { notRun: "nothing-changed" })] }),
+		worker,
+	);
+	const readOnly = { state: "not_applicable", basis: "read-only-agent" } as const;
+	deepStrictEqual(verificationWithHostVerdict(readOnly, { status: "verified", checks: [check(0)] }), readOnly);
 });

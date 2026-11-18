@@ -98,9 +98,13 @@ function verification(value: Sealed["verification"]): CheckRow {
 					? "A read-only agent changes nothing, so there is nothing to verify."
 					: basis === "acp-external-unobserved"
 						? "An external agent did the work where CLIO Coder could not observe its checks."
-						: basis === "result-unavailable"
-							? "No sealed record could be read for this run."
-							: `Recorded basis: ${basis ?? "none"}.`;
+						: basis === "host-verification"
+							? state === "verified"
+								? "The host ran the declared checks after the worker finished, and they passed."
+								: "The host ran the declared checks after the worker finished, and they did not pass."
+							: basis === "result-unavailable"
+								? "No sealed record could be read for this run."
+								: `Recorded basis: ${basis ?? "none"}.`;
 	const [tone, word]: [StatusTone, string] =
 		state === "verified"
 			? ["success", "Verified"]

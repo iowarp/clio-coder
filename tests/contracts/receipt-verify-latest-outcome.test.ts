@@ -231,4 +231,16 @@ describe("typed validation follows each check's latest run (BT-017)", () => {
 		deepStrictEqual(verdicts(receipt), [false]);
 		deepStrictEqual(receipt.verification, { state: "unverified", basis: "validation-tool" });
 	});
+
+	// bt-19: `verify {check:""}` only lists the declared checks, so it ran nothing and seals no validation.
+	it("a run whose only verify call lists the checks is not verified", async () => {
+		for (const viaGateway of [undefined, "chain"] as const) {
+			const receipt = await sealedReceipt([
+				{ args: { check: "" }, outcome: "ok", ...(viaGateway ? { viaGateway } : {}) },
+				{ args: {}, outcome: "ok", ...(viaGateway ? { viaGateway } : {}) },
+			]);
+			deepStrictEqual(receipt.quality.typedValidations, []);
+			deepStrictEqual(receipt.verification, { state: "unverified", basis: "no-validation-tool" });
+		}
+	});
 });
