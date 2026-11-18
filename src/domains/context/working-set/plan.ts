@@ -23,9 +23,8 @@ import type {
 	WorkingSetPolicyId,
 	WorkingSetView,
 } from "./contract.js";
-import { planEviction, tokensFreedByEviction } from "./engine.js";
+import { planEviction } from "./engine.js";
 import { callPathsByToolCallId } from "./path-index.js";
-import { isRecord, isRefusedVerdict, toolResultPayload, toolResultText } from "./payload.js";
 import { dropUnpricedHead } from "./policies/cache-price.js";
 import {
 	SUPERSEDED_FLOOR_BYTES,
@@ -83,64 +82,6 @@ export function planSelection(
 ): EvictionPlan | null {
 	// The internal stage ids are not shipped policy ids; compose.ts names its composed ids the same way.
 	return planEviction({ id: policyId as WorkingSetPolicyId, select: () => candidates }, input);
-}
-
-/** Tools whose result is an observation the model can take again, narrower, after a cut. */
-const OVERFLOW_CUT_TOOLS = new Set(["read", "grep", "find", "ls", "code_nav", "web_read", "web_fetch"]);
-
-/**
- * The overflow-only cut (ContextFold A4 addendum): when a must-fit request still does not fit after S1, the
- * successful read results S1's protection kept leave until `excess` tokens are freed (priced as `planEviction`
- * records them). Reads the model has seen (before the last assistant message) go first, largest first. Reads of
- * the latest step go only after every seen one, largest first, and only while the request (`input.pressure.tokens`)
- * still exceeds `room`, as the worker's fit does: below that they make no room (A2b). Each is journaled as
- * `step_overflow`: a seen read's marker says not to read it again, an unseen one's says to read a narrower slice.
- * Errors and refused calls stay: they are decisions, not observations the model can take again. So does a read
- * whose body alone (chars/3.5, Pi's basis) exceeds `room`: no cut makes that request fit, and the turn ends naming
- * it. Null when nothing qualifies.
- */
-export function planOverflowCut(
-	policyId: string,
-	input: PolicyInput,
-	excess: number,
-	room: number,
-): EvictionPlan | null {
-	if (excess <= 0) return null;
-	const { view } = input;
-	const callPaths = callPathsByToolCallId(input.entries);
-	const priced: Array<{ candidate: EvictionCandidate; tokens: number; index: number }> = [];
-	let lastAssistant = input.entries.length - 1;
-	while (lastAssistant >= 0) {
-		const entry = input.entries[lastAssistant];
-		if (entry?.kind === "message" && entry.role === "assistant") break;
-		lastAssistant -= 1;
-	}
-	input.entries.forEach((entry, index) => {
-		if (entry.kind !== "message" || entry.role !== "tool_result" || view.evicted.has(entry.turnId)) return;
-		if (isRecord(entry.payload) && (entry.payload.isError === true || entry.payload.error === true)) return;
-		if (isRecord(entry.payload) && isRefusedVerdict(entry.payload)) return;
-		const payload = toolResultPayload(entry.payload);
-		if (!OVERFLOW_CUT_TOOLS.has(payload.toolName)) return;
-		if (Math.ceil(toolResultText(payload.result).length / 3.5) > room) return;
-		const candidate: EvictionCandidate = {
-			ref: { entry: entry.turnId },
-			reason: "step_overflow",
-			...(index < lastAssistant ? { seen: true } : {}),
-		};
-		const tokens = tokensFreedByEviction(input, entry, candidate, callPaths);
-		if (tokens > 0) priced.push({ candidate, tokens, index });
-	});
-	const unseen = (item: { candidate: EvictionCandidate }) => (item.candidate.seen === true ? 0 : 1);
-	priced.sort((a, b) => unseen(a) - unseen(b) || b.tokens - a.tokens || a.index - b.index);
-	const picked: EvictionCandidate[] = [];
-	const unseenExcess = Math.min(excess, input.pressure.tokens - room);
-	let freed = 0;
-	for (const { candidate, tokens } of priced) {
-		if (freed >= (candidate.seen === true ? excess : unseenExcess)) break;
-		picked.push(candidate);
-		freed += tokens;
-	}
-	return picked.length === 0 ? null : planSelection(policyId, picked, input);
 }
 
 export function planFold(input: FoldPlanInput): FoldPlan {

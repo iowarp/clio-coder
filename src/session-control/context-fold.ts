@@ -13,13 +13,13 @@ import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import type { ContextActivityStatus, ContextFoldPayload, ContextPrunedPayload } from "../core/telemetry/live-events.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import type { FoldCheckpoint } from "../domains/context/fold/contract.js";
-import { evictionPressure, isSmallFoldWindow } from "../domains/context/fold/pressure.js";
+import { evictionPressure } from "../domains/context/fold/pressure.js";
 import { createFoldPriceBook } from "../domains/context/fold/price.js";
 import type { EvictionPlan, PolicyInput } from "../domains/context/working-set/contract.js";
 import { buildEvictionFields } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { isTurnStart, protectionCutoffIndex } from "../domains/context/working-set/horizon.js";
-import { type FoldPlan, planFold, planOverflowCut, planSelection } from "../domains/context/working-set/plan.js";
+import { type FoldPlan, planFold, planSelection } from "../domains/context/working-set/plan.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
 import {
 	type ClassifyCall,
@@ -498,63 +498,6 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		`[context engine] superseded: ${lead}; ~${planned.tokensBefore} -> ~${planned.tokensAfter} tokens, recall by ref with context(scope="recall")`;
 
 	/**
-	 * The A4 addendum's cut, overflow only: S1 is committed (or had nothing to take) and the A4 count still does not
-	 * fit, so the successful reads S1's protection kept leave, largest first, down to S1's own target, journaled as
-	 * `step_overflow`. Measured after S1, not predicted, because S1's priced savings and Pi's count part ways.
-	 *
-	 * Never under the A1/A3/A5 boundary: there the cut ran out of seen reads, took the fresh one, and the model
-	 * re-read it in slices without answering (bt-47 drv-f1x). The requireFit summary runs instead, and what it cannot
-	 * clear ends the turn once through the oversized-read stop (maintainer ruling).
-	 */
-	const runOverflowCut = (input: EvictionStageInput, policyId: string, fitTokens: () => number): boolean => {
-		const { agentRuntime, session, settings, estimate, verdict, beforeSnapshotId, decision } = input;
-		if (isSmallFoldWindow(agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow)) return false;
-		const tokens = fitTokens();
-		const reserve = resolveFitOutputReserve(agentRuntime, tokens);
-		if (requestFits(tokens, reserve, estimate.contextWindow)) return false;
-		const share = Math.max(0, 1 - reserve / estimate.contextWindow);
-		const target = Math.min(input.workingSetTarget, share);
-		const policyInput = selectionInput(deps.readSessionEntries?.() ?? [], session, settings, {
-			tokens,
-			contextWindow: input.compactionWindow,
-			threshold: Math.min(input.compactionThreshold, share),
-			target,
-			forced: true,
-		});
-		const goal = Math.floor(target * estimate.contextWindow);
-		const cut = planOverflowCut(policyId, policyInput, tokens - goal, estimate.contextWindow - reserve);
-		if (cut === null) return false;
-		deps.middleware.fireCompactionHook("working_set_evict", "pressure", estimate.tokens);
-		port.emitCompactionActivity("started", "compacting context (working-set eviction)");
-		const reads = cut.items.length === 1 ? "read" : "reads";
-		commitEviction({
-			agentRuntime,
-			decision,
-			session,
-			planned: cut,
-			superseded: false,
-			stages: (recordId) => [
-				{
-					stage: "working_set",
-					outcome: "committed",
-					reason: "step_overflow",
-					...(recordId !== undefined ? { recordId } : {}),
-				},
-			],
-			pressureBefore: verdict.pressure,
-			beforeSnapshotId,
-			compactionThreshold: input.compactionThreshold,
-			trigger: input.trigger,
-			originSession: input.originSession,
-			pendingUserText: input.pendingUserText,
-			handoff: input.handoff,
-			route: undefined,
-			notice: `[context engine] working set: ${cut.items.length} protected ${reads} cut to fit the window; ~${cut.tokensBefore} -> ~${cut.tokensAfter} tokens, read a narrower slice or recall by ref with context(scope="recall")`,
-		});
-		return true;
-	};
-
-	/**
 	 * S0 and S1 as one record (SPEC §2.4), then a re-check of pressure (or fit) on the rebuilt request. S0 alone
 	 * commits below the trigger once its floor is met; S1 runs only when the checkpoint reached it.
 	 */
@@ -632,12 +575,6 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		const structuralSkip = () => evictionSkipMessage(visibleEntries, workingSet, policyId);
 		if (!planned) {
 			if (!structural) return { acted: false, committed: false, fit: false, skipNotice };
-			if (requiredFit && runOverflowCut(input, policyId, fitTokens)) {
-				const fitAfter = fitTokens();
-				const fit = requestFits(fitAfter, resolveFitOutputReserve(agentRuntime, fitAfter), estimate.contextWindow);
-				if (fit) port.armOverflowInputPin();
-				return { acted: true, committed: true, fit, skipNotice };
-			}
 			decision.stage({ stage: "working_set", outcome: "none", reason: "no_candidates" });
 			return { acted: false, committed: false, fit: false, skipNotice: structuralSkip() };
 		}
@@ -681,7 +618,6 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		const after = port.liveContextEstimate(agentRuntime, pendingUserText);
 		let fit: boolean;
 		if (requiredFit) {
-			if (structural) runOverflowCut(input, policyId, fitTokens);
 			const fitAfter = fitTokens();
 			fit = requestFits(fitAfter, resolveFitOutputReserve(agentRuntime, fitAfter), after.contextWindow);
 			if (fit) port.armOverflowInputPin();
