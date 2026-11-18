@@ -717,6 +717,11 @@ interface ActivePrompt {
 	messageAssistantChars: number;
 	/** An assistant message ended after text went out, so the next message's text opens on a blank line (bt-41). */
 	textBreakPending: boolean;
+	/**
+	 * Lines a slash command run inside this prompt already sent as reply notices. Its result repeats what its host
+	 * heard, so those lines are not sent a second time (bt-session-res J10). Null outside such a command.
+	 */
+	commandNoticeLines?: string[] | null;
 	/** The content index of the current message's last streamed text block; a new one opens on a blank line. */
 	messageTextBlock?: number | undefined;
 	/** Thinking sent for the current assistant message, reset at its boundaries like `messageAssistantChars`. */
@@ -1551,6 +1556,26 @@ function assistantTextTail(message: unknown, streamed: number): string {
 	return tail;
 }
 
+/** A notice's lines as a command result holds them: no carriage returns, no trailing blanks, no empty lines. */
+function commandResultLines(text: string): string[] {
+	return text
+		.replace(/\r/gu, "")
+		.split("\n")
+		.map((line) => line.trimEnd())
+		.filter((line) => line.length > 0);
+}
+
+/** A command result's lines less the ones already sent, each sent line cancelling one copy. */
+function withoutSentLines(lines: ReadonlyArray<string>, sent: ReadonlyArray<string>): string[] {
+	const pending = [...sent];
+	return lines.filter((line) => {
+		const index = pending.indexOf(line);
+		if (index < 0) return true;
+		pending.splice(index, 1);
+		return false;
+	});
+}
+
 /**
  * The text blocks of one message, a blank line between them as the live stream sends them (bt-acp-tail). `afterText`
  * says an earlier message of the same turn already sent text, so the first block opens on a blank line too, as
@@ -2017,13 +2042,15 @@ function handleChatEvent(
 				});
 				return;
 			}
+			const shown = safeStoredString(event.text, ACP_MAX_CHUNK_BYTES - 2);
+			if (active.commandNoticeLines) active.commandNoticeLines.push(...commandResultLines(shown));
 			sendUpdate(
 				transport,
 				sessionId,
 				active,
 				{
 					sessionUpdate: "agent_message_chunk",
-					content: textContent(`${safeStoredString(event.text, ACP_MAX_CHUNK_BYTES - 2)}\n`),
+					content: textContent(`${shown}\n`),
 				},
 				{
 					...ORCHESTRATOR_UPDATE_META,
@@ -8063,19 +8090,28 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					argv = words.tokens;
 				}
 				if (options.commands !== undefined) assertCommandWithinCeiling(options.commands, command, argv);
-				const result = await options.commands?.invoke({
-					command,
-					argv,
-					askConsent: reportConsentAsk(options.transport, session.id),
-				});
-				if (options.commands?.injectsUserTurn(command, argv)) await options.chat.whenSettled?.();
-				if (result !== undefined)
+				const noticed: string[] = [];
+				active.commandNoticeLines = noticed;
+				let result: Awaited<ReturnType<NonNullable<typeof options.commands>["invoke"]>> | undefined;
+				try {
+					result = await options.commands?.invoke({
+						command,
+						argv,
+						askConsent: reportConsentAsk(options.transport, session.id),
+					});
+					if (options.commands?.injectsUserTurn(command, argv)) await options.chat.whenSettled?.();
+				} finally {
+					active.commandNoticeLines = null;
+				}
+				// A notice the command raised already went out as reply text; the result does not say it again.
+				const unsent = result === undefined ? [] : withoutSentLines(result.lines, noticed);
+				if (unsent.length > 0)
 					sendTextChunks(
 						options.transport,
 						session.id,
 						active,
 						"agent_message_chunk",
-						`${active.sentAssistantChars > 0 ? "\n\n" : ""}${result.lines.join("\n")}`,
+						`${active.sentAssistantChars > 0 ? "\n\n" : ""}${unsent.join("\n")}`,
 					);
 				if (result?.level === "error" && options.commands?.injectsUserTurn(command, argv)) {
 					active.errored = true;

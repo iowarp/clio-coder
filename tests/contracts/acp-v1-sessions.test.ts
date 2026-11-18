@@ -1118,6 +1118,45 @@ test("ACP advertises only slash commands executable from a prompt", async () => 
 	}
 });
 
+test("a slash command's failure line crosses a prompt once, as reply text, not again as its result", async () => {
+	// bt-session-res J10: `/context compact` failed and the line went out as a notice chunk and again as the result.
+	const failure =
+		"[/context compact] failed; context unchanged at 9.6K tokens. The summary call failed: Connection error.: bad port. /context compact tries again; /model picks another route to summarize on.";
+	let emit: (event: unknown) => void = () => {};
+	const commands: AcpCommandControl = {
+		catalog: () => ({
+			version: 1,
+			commands: [{ name: "context", summary: "Context", usage: "/context compact", group: "help", args: {} }],
+		}),
+		invoke: () => {
+			// The host hears the chat loop's notice and answers with it, as the orchestrator's runCompact does.
+			emit({ type: "notice", surface: "transcript", level: "error", text: failure });
+			return { level: "error", lines: [failure, "Run /doctor if it keeps failing."] };
+		},
+		injectsUserTurn: () => false,
+		capability: {},
+	};
+	const peer = fixture([], undefined, commands);
+	emit = peer.emit;
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const opened = (await peer.call("session/new", { cwd: peer.cwd, mcpServers: [] })) as { sessionId: string };
+		await peer.call("session/prompt", {
+			sessionId: opened.sessionId,
+			prompt: [{ type: "text", text: "/context compact" }],
+		});
+		const reply = peer.updates
+			.filter((params) => (params.update as { sessionUpdate?: string }).sessionUpdate === "agent_message_chunk")
+			.map((params) => (params.update as { content: { text: string } }).content.text)
+			.join("");
+		strictEqual(reply.split(failure).length - 1, 1, reply);
+		// A result line no notice carried still answers.
+		ok(reply.includes("Run /doctor if it keeps failing."), reply);
+	} finally {
+		await peer.stop();
+	}
+});
+
 test("ACP slash command input errors keep the invalid-params code", async () => {
 	const commands: AcpCommandControl = {
 		catalog: () => ({
