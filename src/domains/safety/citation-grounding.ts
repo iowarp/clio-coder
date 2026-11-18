@@ -134,7 +134,7 @@ const RANGE_SOURCE = String.raw`(\d+)(?:\s*[-–—]\s*(\d+))?`;
 // then column) and a path mention followed later by `line 12` / `lines 12-30`,
 // which binds to the nearest path written before it.
 const CITATION_SCAN = new RegExp(
-	String.raw`(?<![\w/.@+-])(${PATH_SOURCE})(?::(\d+)(?:[-–—](\d+))?)?|\b[Ll]ines?\s+${RANGE_SOURCE}\b`,
+	String.raw`(?<![\w/.@+-])(${PATH_SOURCE})(?::(\d+)(?:[-–—](\d+))?)?|\b[Ll]ines?\s+${RANGE_SOURCE}\b(?![.,]\d)`,
 	"gu",
 );
 

@@ -70,7 +70,7 @@ test("a line a bash grep -n printed for a file it named grounds the citation (bt
 		});
 		const turnEnd = (text: string, userTurnId: string) =>
 			registration.evaluate({ hook: "turn_end", sessionId: "s1", text, metadata: { stopReason: "stop", userTurnId } });
-		assert.deepEqual(turnEnd("The failure is E4127 at logs/build.log, line 41238.", "u1"), []);
+		assert.deepEqual(turnEnd("The failure is E4127 at logs/build.log, line 41238, per spec line 3.37.", "u1"), []);
 		const nudge = turnEnd("The failure is E4127 at logs/build.log, line 41240.", "u2");
 		// A model told to keep the answer as it is replied with "citations confirmed" alone (bt-29).
 		assert.match(String((nudge[0] as { message?: unknown } | undefined)?.message), /full answer again/u);
