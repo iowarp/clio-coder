@@ -1,8 +1,10 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { join } from "node:path";
 import { test } from "node:test";
 import { formatHeadlessObservedLine, observeHeadlessRun } from "../../src/cli/modes/headless-observed.js";
 import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { standingChecksFrom } from "../../src/domains/safety/observed-checks.js";
+import { readRunJournal } from "../harness/run-journal.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const root = process.cwd();
@@ -56,10 +58,11 @@ test("a run whose verify call found no check in the workspace is observed as no 
 			payload: { toolCallId: "v1", outcome: "ok", isError: false, result: { details: { noChecksDeclared: true } } },
 		},
 	];
+	const effects = { validationOutcomes: new Map(), checkOutcomes: new Map() };
 	const observed = observeHeadlessRun({
 		entries: [...edit, ...noChecks],
 		start: 0,
-		workspaceRoot: root,
+		effects,
 		toolCalls: 2,
 		refused: 0,
 		writes: 1,
@@ -73,7 +76,7 @@ test("a run whose verify call found no check in the workspace is observed as no 
 		observeHeadlessRun({
 			entries: [...noChecks, ...edit],
 			start: 2,
-			workspaceRoot: root,
+			effects,
 			toolCalls: 1,
 			refused: 0,
 			writes: 1,
@@ -84,13 +87,14 @@ test("a run whose verify call found no check in the workspace is observed as no 
 
 type StubCall = readonly [string, string, string, string, Record<string, unknown>?];
 const WROTE_THEN_FAILED_CHECK: ReadonlyArray<StubCall> = [
-	["e1", "edit", "write", "ok"],
-	["b1", "bash", "execute", "error"],
+	["e1", "edit", "write", "ok", { path: "src/a.py", edits: [] }],
+	["b1", "bash", "execute", "error", { command: "python3 -B -m unittest discover -v" }],
 ];
 
 async function headlessRun(
 	mode: "text" | "json",
 	calls: ReadonlyArray<StubCall> = WROTE_THEN_FAILED_CHECK,
+	snapshot: object | null = null,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
 	const entries: object[] = [{ kind: "message", role: "user", payload: {} }];
 	let handler: (event: unknown) => void = () => {};
@@ -110,14 +114,22 @@ async function headlessRun(
 			handler({ type: "agent_start" });
 			for (const [id, tool, actionClass, outcome, args] of calls) {
 				handler({ type: "tool_execution_start", toolCallId: id, toolName: tool, args: args ?? {} });
-				handler({ type: "tool_execution_end", toolCallId: id, toolName: tool, actionClass, outcome, result: {} });
+				handler({
+					type: "tool_execution_end",
+					toolCallId: id,
+					toolName: tool,
+					actionClass,
+					outcome,
+					isError: outcome !== "ok",
+					result: {},
+				});
 			}
 			entries.push(...edit, ...failingCheck);
 			handler({ type: "message_end", message: answer });
 			handler({ type: "agent_end", messages: [answer] });
 		},
 		whenSettled: async () => {},
-		lastRunSnapshot: () => null,
+		lastRunSnapshot: () => snapshot,
 		isStreaming: () => false,
 	};
 	const chat = new Proxy(stub, { get: (target, key) => (key in target ? target[key as string] : undefined) });
@@ -126,6 +138,9 @@ async function headlessRun(
 	const write = process.stdout.write;
 	const writeError = process.stderr.write;
 	process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+		// The test runner reports to its parent over stdout in binary frames; a run that seals a receipt is slow enough
+		// to interleave them.
+		if (typeof chunk !== "string") return write.call(process.stdout, chunk, ...(rest as []));
 		out.push(String(chunk));
 		for (const argument of rest) if (typeof argument === "function") argument();
 		return true;
@@ -178,16 +193,80 @@ test("a headless run that wrote and then ran a failing check says so on stderr a
 	}
 });
 
-test("a scoped unittest pass does not replace a full-suite unittest failure", () => {
-	const scoped = [call("b3", "bash", { command: "python3 -m unittest test_stats -v 2>&1" }), result("b3", 0)];
-	const checks = standingChecksFrom([...edit, ...failingCheck, ...scoped], 0, root);
-	deepStrictEqual(
-		checks.map((check) => [check.name, check.passed]),
-		[
-			["python -m unittest discover", false],
-			["python -m unittest test_stats", true],
-		],
-	);
+test("observed checks follow the receipt's rules on the task board and the headless line (x4-1)", async () => {
+	let id = 0;
+	const bash = (command: string, exitCode = 0): object[] => {
+		id += 1;
+		return [call(`p${id}`, "bash", { command }), result(`p${id}`, exitCode)];
+	};
+	const standing = (...steps: object[][]) =>
+		standingChecksFrom([...edit, ...steps.flat()], 0, root).map((check) => [check.name, check.passed, check.check]);
+	deepStrictEqual(standing(bash("make test; echo EXIT=$?")), []);
+	deepStrictEqual(standing(bash("npm test && git apply fix.patch")), []);
+	deepStrictEqual(standing(bash("npm test"), bash("npm run format")), []);
+	deepStrictEqual(standing(bash("cd ../other && npm test")), []);
+	deepStrictEqual(standing(bash("pytest", 1), bash("pytest tests/one.py")), [
+		["pytest", false, undefined],
+		["pytest tests/one.py", true, undefined],
+	]);
+	deepStrictEqual(standing(failingCheck, bash("python3 -m unittest test_stats -v 2>&1")), [
+		["python3 -B -m unittest discover -v", false, undefined],
+		["python3 -m unittest test_stats -v", true, undefined],
+	]);
+	// A narrower green under the same check id never answers that id's acceptance row.
+	deepStrictEqual(standing(bash("npm test -- tests/one.test.js"), bash("npm test", 1)), [
+		["npm test -- tests/one.test.js", true, undefined],
+		["npm test", false, "test"],
+	]);
+	deepStrictEqual(standing(bash("npm ci && npm test")), [["npm ci && npm test", true, "test"]]);
+	// The replay reads 7b's rules through the same readers: an inverted status settles nothing, a log is output.
+	deepStrictEqual(standing(bash("! npm test")), []);
+	deepStrictEqual(standing(bash("npm test", 1), bash("! npm test")), [["npm test", false, "test"]]);
+	deepStrictEqual(standing(bash("npm test 2>&1 | tee /tmp/t.log")), [["npm test", true, "test"]]);
+	deepStrictEqual(standing(bash("npm test"), bash("npm test | tee src/a.ts")), []);
+	deepStrictEqual(standing(bash("make test -C ../other")), []);
+	const env = await isolateClioEnv("headless-observed-");
+	try {
+		const text = await headlessRun("text", [
+			["e1", "edit", "write", "ok", { path: "src/a.py", edits: [] }],
+			["b1", "bash", "execute", "ok", { command: "make test; echo EXIT=$?" }],
+		]);
+		match(text.stderr, /1 write · no check observed after the last write/u);
+	} finally {
+		env.restore();
+	}
+});
+
+test("a headless receipt counts a bash check that ran after the last write as a typed validation (x4-6)", async () => {
+	const env = await isolateClioEnv("headless-observed-");
+	try {
+		const run = await headlessRun(
+			"text",
+			[
+				["e1", "edit", "write", "ok", { path: "src/a.py", edits: [] }],
+				["b1", "bash", "execute", "ok", { command: "npm test" }],
+			],
+			{
+				targetId: "fixture",
+				runtimeId: "openai-compat",
+				runtimeKind: "http",
+				wireModelId: "fixture-model",
+				promptSignature: null,
+				toolSignature: null,
+				cwd: env.dir,
+			},
+		);
+		strictEqual(run.code, 0, run.stderr);
+		const settled = readRunJournal(join(env.dir, "state"))?.runs[0]?.settled;
+		ok(settled, run.stderr);
+		deepStrictEqual(settled.verification, { state: "verified", basis: "validation-tool" });
+		deepStrictEqual(
+			settled.quality?.typedValidations.map((fact) => [fact.sourceId, fact.passed]),
+			[["command:npm test", true]],
+		);
+	} finally {
+		env.restore();
+	}
 });
 
 test("a bash write that succeeded is a workspace change, so a later refused command does not make the run a no-op", async () => {

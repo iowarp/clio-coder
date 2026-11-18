@@ -22,6 +22,7 @@ import {
 	createRunResultQuality,
 	deriveRunVerification,
 	settledVerifyCall,
+	typedValidationFactsFromObservedEffects,
 	typedValidationFactsFromVerifyCalls,
 	type VerifyCallOutcome,
 	type VerifyCallStart,
@@ -889,7 +890,10 @@ async function recordHeadlessMainAgentRun(input: {
 	};
 	const toolStats = sortedToolStats(input.stats.toolStats);
 	const checkFreshness = input.stats.runEffects.checkFreshness();
-	const typedValidations = typedValidationFactsFromVerifyCalls(toolStats, input.stats.verifyCalls, checkFreshness);
+	const typedValidations = [
+		...typedValidationFactsFromVerifyCalls(toolStats, input.stats.verifyCalls, checkFreshness),
+		...typedValidationFactsFromObservedEffects(input.stats.runEffects.snapshot()),
+	];
 	const hostVerification = acceptanceHostVerification(input.acceptance ?? [], snapshot.cwd);
 	const verification = deriveRunVerification({ toolStats, typedValidations }, { checkFreshness });
 	const draft: RunResultDraft = {
@@ -1387,7 +1391,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			? observeHeadlessRun({
 					entries: options.readEntries(),
 					start: entriesBefore,
-					workspaceRoot: process.cwd(),
+					effects: runStats.runEffects.snapshot(),
 					toolCalls: countToolStats(runStats.toolStats),
 					refused: toolTotals(runStats.toolStats).blocked,
 					writes: runStats.mutatingSucceeded,
