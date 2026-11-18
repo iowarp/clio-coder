@@ -1299,6 +1299,60 @@ export function isReadOnlyInspectionCommand(command: string): boolean {
 }
 
 /**
+ * How a shell command that runs a recognized check stands against the tree it leaves (x1-1). `pure`: every step is
+ * that check, read-only inspection, `cd` or output plumbing, so the command changed no tree. `after-change`: every
+ * step that may change the tree runs before every check, the last of them hands over through `&&`, and nothing but
+ * `&&` and `|` joins the steps, so the check judged the changed tree (`npm ci && npm test`). `mixed`: anything else
+ * (`git apply x.patch; npm test`, `npm test && node codemod.mjs`), whose check cannot speak for the tree the command
+ * left. Null when no step is a recognized check.
+ */
+export type CheckCommandShape = "pure" | "after-change" | "mixed";
+
+export function checkCommandShape(command: string): CheckCommandShape | null {
+	const tokens = scanShellLike(command);
+	const steps: Array<{ check: boolean; changes: boolean; joinedBy: string | null }> = [];
+	let current: ShellToken[] = [];
+	let separator: string | null = null;
+	const endStep = () => {
+		if (current.length === 0) return;
+		const previous = steps.at(-1);
+		if (previous !== undefined) previous.joinedBy = separator;
+		separator = null;
+		const argv = shellCommandArguments(current);
+		const index = commandTokenIndex(argv);
+		const writes: string[] = [];
+		collectRedirectTargets(current, writes);
+		const check = index !== null && validationMatch(basenameToken(argv[index]), argv.slice(index + 1)) !== null;
+		const readOnly = index === null || check || argv[index] === "cd" || readOnlyInspectionStep(argv.slice(index));
+		steps.push({ check, changes: !readOnly || writes.some(isInterestingWriteTarget), joinedBy: null });
+		current = [];
+	};
+	for (const token of tokens) {
+		if (token.operator && COMMAND_SEPARATORS.has(token.value)) {
+			endStep();
+			// Two separators in a row (`) ;`) join no simple pair, so neither can hand a change to a check.
+			separator = separator === null && steps.length > 0 ? token.value : "";
+			continue;
+		}
+		current.push(token);
+	}
+	endStep();
+	if (!steps.some((step) => step.check)) return null;
+	const opaque =
+		tokens.some((token) => token.substitutions !== undefined || token.hiddenContent === true || token.unterminated) ||
+		hasUnparsedShellScript(command);
+	if (opaque) return "mixed";
+	let lastChange = steps.length - 1;
+	while (lastChange >= 0 && steps[lastChange]?.changes !== true) lastChange -= 1;
+	if (lastChange === -1) return "pure";
+	const handsOver =
+		steps[lastChange]?.joinedBy === "&&" &&
+		steps.every((step) => step.joinedBy === null || step.joinedBy === "&&" || step.joinedBy === "|") &&
+		!steps.slice(0, lastChange + 1).some((step) => step.check);
+	return handsOver ? "after-change" : "mixed";
+}
+
+/**
  * Roots of the `find -delete` calls in a command whose expression filters
  * what goes. The operator's yolo judges such a root by what lies under it, so
  * the authority rails treat it as a write there rather than a delete of the

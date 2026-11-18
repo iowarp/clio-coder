@@ -675,6 +675,34 @@ it("a check judges only the tree it ran on, sealed per verify call or from a too
 	strictEqual(seal("pass edit", "run_tests"), "unverified");
 });
 
+it("a check sharing its bash call with a change judges the final tree only when every change ran first (x1-1)", () => {
+	const seal = (command: string, failed = false) => {
+		const recorder = createRunEffectsRecorder(process.cwd());
+		for (const [id, tool, args, red] of [
+			["fix", "edit", { path: "src/a.ts" }, false],
+			["test", "bash", { command: "npm test" }, false],
+			["mixed", "bash", { command }, failed],
+		] as const) {
+			recorder.start(id, tool, args);
+			recorder.checkOutcome(id, red ? "error" : "ok");
+			recorder.finish(id, red);
+		}
+		const effects = recorder.snapshot();
+		const typedValidations = typedValidationFactsFromObservedEffects(effects);
+		return [[...effects.validationCommands], deriveRunVerification({ toolStats: [], typedValidations }).state];
+	};
+	const stale = [[], "unverified"];
+	// The earlier pass judged a tree the call then changed, whether the check ran before or after the change.
+	deepStrictEqual(seal("git apply fix.patch; npm test", true), stale);
+	deepStrictEqual(seal("npm test && node codemod.mjs"), stale);
+	deepStrictEqual(seal("pytest; git stash pop"), stale);
+	deepStrictEqual(seal("npm ci | npm test"), stale);
+	deepStrictEqual(seal("npm test > log.txt"), stale);
+	// Every change ran before the check through `&&`, or the call held only checks, cd and plumbing.
+	deepStrictEqual(seal("npm ci && npm test"), [["npm test"], "verified"]);
+	deepStrictEqual(seal("cd pkg && npm test 2>&1 | tail -5"), [["npm test"], "verified"]);
+});
+
 it("the review gate reads a verifier report that closes prose containing braces, and nothing weaker", () => {
 	const report = '{"verdict":"pass","checks":[{"name":"make test","passed":true,"evidence":"exit 0"}]}';
 	const prose = "calc.c has int sub(int a) { return a; } as planned.";
