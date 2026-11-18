@@ -43,7 +43,7 @@ export interface PreparedBranchEntries {
 
 function truncate(text: string, max: number): string {
 	if (text.length <= max) return text;
-	return `${text.slice(0, max)}\n\n[... ${text.length - max} more characters truncated]`;
+	return `${text.slice(0, max)}\n\n[... ${text.length - max} more characters not shown here; the assistant read this result in full]`;
 }
 
 /** Keeps a message's head and tail around an omission marker; the ledger keeps the raw turn. */
