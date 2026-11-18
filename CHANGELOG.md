@@ -96,6 +96,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A red check observed before the run's last edit no longer seals a finished run `unverified` with quality `fail`. A later pass of the same check counts even when the two runs piped output differently (`2>&1`, `| tail`, `| head`), and a reported baseline excuses its own observed red only when no edit was observed (bt-27).
 - On small context windows the compaction summary request now states the room the checkpoint may use, so repeated cuts hold near 60% of history instead of creeping toward the trigger as the cumulative checkpoint grows (bt-18).
 - The gateway accepts an empty `parameters` object on a call and names the exact `args` rewrite for a non-empty one (bt-23).
 - A gateway chain whose `steps` sit inside `args` is refused with the top-level shape instead of a generic error (bt-23).
