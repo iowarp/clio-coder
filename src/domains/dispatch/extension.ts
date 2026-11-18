@@ -355,7 +355,12 @@ import {
 } from "./event-pump.js";
 import type { ExecutionHandoff } from "./execution-handoff.js";
 import { abbreviateHandoffText } from "./execution-handoff.js";
-import { dispatchResultContract, routeCorrelationFactsForRun, withAttemptRole } from "./execution-role.js";
+import {
+	dispatchResultContract,
+	readOnlyDropsPlanContract,
+	routeCorrelationFactsForRun,
+	withAttemptRole,
+} from "./execution-role.js";
 import {
 	affectsTargetBreaker,
 	classifyFailure,
@@ -1628,7 +1633,7 @@ function boundSkillPurpose(description: string | undefined): string {
 	return stop > 40 ? cut.slice(0, stop + 1) : `${cut.trimEnd()}…`;
 }
 
-function renderBoundSkillBlock(recipe: AgentRecipe): string {
+function renderBoundSkillBlock(recipe: AgentRecipe, planDropped: boolean): string {
 	const skills = recipe.skills ?? [];
 	if (skills.length === 0) return "";
 	// A T3 coder loaded fix-issue (6.5 KB, resent on every later request) for a
@@ -1642,7 +1647,7 @@ function renderBoundSkillBlock(recipe: AgentRecipe): string {
 			return `- \`${skill}\`${purpose.length > 0 ? `: ${purpose}` : ""}`;
 		}),
 		'Load one with `context` (scope="skills", name=<skill>) only when the assigned task is the workflow it describes, then follow it. A skill adds know-how, never tool authority. If one fails to load, continue the assigned task and report the missing skill.',
-		...(recipe.resultContract?.kind === "architect-plan"
+		...(recipe.resultContract?.kind === "architect-plan" && !planDropped
 			? [
 					"For a narrative design, do not load sprint-plan. Load it only to slice an existing plan into an executable sprint.",
 					'For both design and sprint tasks, deliver the required plan with artifact(kind="plan") and no path argument. The result contract reserves the already admitted artifact tool under skill allow-lists; explicit denials and safety gates still apply. In this role, put sprint-plan\'s sprint content in that plan artifact rather than using write for SPRINT.md. Artifact delivery ends the run.',
@@ -1661,9 +1666,27 @@ function canonicalContextAttached(runtime: Pick<RuntimeDescriptor, "kind">, tool
 	return runtime.kind !== "subprocess" && tools.includes(ToolNames.Context);
 }
 
+/** A recipe line that sends the run's result to the `artifact` tool. */
+const ARTIFACT_DIRECTIVE = /`artifact`|\bartifact\(kind=/u;
+
+/**
+ * A read-only run that dropped its plan contract is offered no artifact tool, so the recipe's lines that send the plan
+ * there would contradict its read-only section. They go, and the plan comes back as the reply.
+ */
+function withoutArtifactDirectives(body: string): string {
+	const kept = body.split("\n").filter((line) => !ARTIFACT_DIRECTIVE.test(line));
+	return [
+		...kept,
+		"This run is read-only, so deliver the plan in your final reply rather than as an artifact or file.",
+	].join("\n");
+}
+
 function workerPersonaBody(req: DispatchRequest, recipe: AgentRecipe | null, contextAttached: boolean): string {
-	const base = req.systemPrompt && req.systemPrompt.length > 0 ? req.systemPrompt : (recipe?.body ?? "");
-	const skillBlock = recipe && req.noSkills !== true && contextAttached ? renderBoundSkillBlock(recipe) : "";
+	const planDropped = recipe !== null && readOnlyDropsPlanContract(req, recipe);
+	const own = req.systemPrompt && req.systemPrompt.length > 0 ? req.systemPrompt : null;
+	const base = own ?? (planDropped ? withoutArtifactDirectives(recipe?.body ?? "") : (recipe?.body ?? ""));
+	const skillBlock =
+		recipe && req.noSkills !== true && contextAttached ? renderBoundSkillBlock(recipe, planDropped) : "";
 	return [base, skillBlock].filter((part) => part.trim().length > 0).join("\n\n");
 }
 
@@ -2999,14 +3022,40 @@ function effectiveToolNames(
  * that matches no Clio tool subtracts nothing, which is correct: this list
  * only ever removes, so an unmatched entry is inert rather than an error.
  */
-function deniedToolNames(req: DispatchRequest): ReadonlySet<string> {
-	if (!req.denyTools || req.denyTools.length === 0) return new Set();
-	return new Set(
-		req.denyTools.map((tool) => {
+function deniedToolNames(req: DispatchRequest, recipe: AgentRecipe): ReadonlySet<string> {
+	const denied = new Set(
+		(req.denyTools ?? []).map((tool) => {
 			const name = tool.trim();
 			return isMcpToolName(name) ? name : name.toLowerCase();
 		}),
 	);
+	// A read-only run that dropped its plan contract has no artifact to write.
+	if (readOnlyDropsPlanContract(req, recipe)) denied.add(ToolNames.Artifact);
+	return denied;
+}
+
+/**
+ * The spec a run is admitted under. A read-only run that dropped its plan contract is offered no artifact tool, so the
+ * recipe's artifact requirement is waived and its artifact-write class narrows to read-only, the class of every tool it
+ * keeps. Any other run is admitted under the recipe's own spec.
+ */
+function admittedRunSpec(
+	req: DispatchRequest,
+	recipe: AgentRecipe,
+	spec: ReturnType<typeof normalizeAgentSpec>,
+): ReturnType<typeof normalizeAgentSpec> {
+	if (spec.capabilityClass !== "artifact-write" || !readOnlyDropsPlanContract(req, recipe)) return spec;
+	type Requirement = ReturnType<typeof normalizeAgentSpec>["toolRequirements"]["required"][number];
+	const required = spec.toolRequirements.required.flatMap((requirement): Requirement[] => {
+		if (typeof requirement === "string") return requirement === ToolNames.Artifact ? [] : [requirement];
+		const anyOf = requirement.anyOf.filter((tool) => tool !== ToolNames.Artifact);
+		return anyOf.length > 0 ? [{ ...requirement, anyOf }] : [];
+	});
+	return {
+		...spec,
+		capabilityClass: "read-only",
+		toolRequirements: { ...spec.toolRequirements, required },
+	};
 }
 
 function assertPostRuntimeToolCompatibility(
@@ -6253,7 +6302,7 @@ export function createDispatchBundle(
 				admission.allowedTools,
 				target,
 				writeConfined,
-				deniedToolNames(req),
+				deniedToolNames(req, recipe),
 				req.cwd ?? process.cwd(),
 				admission.mcp,
 			),
@@ -6267,9 +6316,10 @@ export function createDispatchBundle(
 					"[dispatch scope] Narrow write roots have no OS sandbox enforcing them, so bash and verify are withheld and the worker cannot run checks. Enable safety.sandbox (auto or required) with a usable local bubblewrap backend to keep these tools while enforcing the write roots.",
 			});
 		}
+		const runSpec = admittedRunSpec(req, recipe, spec);
 		assertPostRuntimeToolCompatibility(
 			req.agentId,
-			spec,
+			runSpec,
 			effectiveTools,
 			target,
 			writeConfined,
@@ -6292,7 +6342,7 @@ export function createDispatchBundle(
 		const permit = resolveDispatchPermit(
 			req,
 			recipe,
-			spec,
+			runSpec,
 			effectiveTools,
 			readOnly,
 			pathScope,
@@ -10899,15 +10949,16 @@ export function createDispatchBundle(
 				admission.allowedTools,
 				target,
 				writeConfined,
-				deniedToolNames(req),
+				deniedToolNames(req, recipe),
 				req.cwd ?? process.cwd(),
 				admission.mcp,
 			),
 			req,
 		);
+		const runSpec = admittedRunSpec(req, recipe, agentSpec);
 		assertPostRuntimeToolCompatibility(
 			req.agentId,
-			agentSpec,
+			runSpec,
 			effectiveTools,
 			target,
 			writeConfined,
@@ -10922,7 +10973,7 @@ export function createDispatchBundle(
 		const previewPermit = resolveDispatchPermit(
 			req,
 			recipe,
-			agentSpec,
+			runSpec,
 			effectiveTools,
 			req.readOnly === true ||
 				agentSpec.capabilityClass === "read-only" ||

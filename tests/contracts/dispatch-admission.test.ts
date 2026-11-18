@@ -49,6 +49,7 @@ import {
 import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
 import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { dispatchRequestsFromArgs } from "../../src/tools/dispatch-arguments.js";
 import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT, describeDispatchPlan } from "../../src/tools/dispatch-plan.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -989,6 +990,61 @@ describe("dispatch admission boundary", () => {
 		} finally {
 			await undeclared.bundle.extension.stop?.();
 		}
+	});
+
+	it("a task that forbids writing files seats the architect without its plan recipe, artifact tool or artifact-write permit", async (t) => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-coder-architect-read-only-"));
+		t.after(() => rmSync(cwd, { recursive: true, force: true }));
+		const specs: WorkerSpec[] = [];
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
+			spawnWorker: (spec): SpawnedWorker => {
+				specs.push(spec);
+				return {
+					pid: null,
+					promise: Promise.resolve({ exitCode: 0, signal: null }),
+					heartbeatAt: { current: Date.now(), monotonic: 0 },
+					events: (async function* () {
+						yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content: "done" } };
+					})(),
+					abort() {},
+				};
+			},
+		});
+		const auto = { approvedAuthorities: ["read-only" as const], authorityBasis: "yolo-policy" as const };
+		const request = (task: string) => {
+			const parsed = dispatchRequestsFromArgs({ agent: "architect", tasks: [task] }, { auto });
+			if (!parsed.ok || parsed.requests[0] === undefined) throw new Error(JSON.stringify(parsed));
+			return { ...parsed.requests[0], cwd };
+		};
+		await bundle.extension.start();
+		try {
+			for (const task of [
+				"Design the cache split. Do not write any files.",
+				"Design the cache split and write the plan.",
+			]) {
+				const handle = await bundle.contract.dispatch(request(task));
+				await handle.finalPromise.catch(() => undefined);
+			}
+		} finally {
+			await bundle.extension.stop?.();
+		}
+		const [readOnly, planned] = specs;
+		ok(readOnly && planned);
+		strictEqual(readOnly.readOnly, true);
+		strictEqual(readOnly.resultContract, undefined);
+		ok(readOnly.systemPrompt.includes("# Read-only run"));
+		ok(!readOnly.systemPrompt.includes("Write the plan with `artifact`"), "no plan recipe line");
+		ok(!readOnly.systemPrompt.includes("Artifact delivery ends the run"), "no bound-skill artifact line");
+		ok(!readOnly.allowedTools.includes("artifact"), readOnly.allowedTools.join(", "));
+		strictEqual(readOnly.permit.ceiling.capabilityClass, "read-only");
+		ok(!readOnly.systemPrompt.includes("Permit: artifact-write"));
+		// A task that asks for the plan keeps the recipe, the tool and the permit.
+		strictEqual(planned.resultContract?.kind, "architect-plan");
+		ok(planned.systemPrompt.includes("Write the plan with `artifact`"));
+		ok(planned.systemPrompt.includes("Artifact delivery ends the run"));
+		ok(planned.allowedTools.includes("artifact"));
+		strictEqual(planned.permit.ceiling.capabilityClass, "artifact-write");
+		ok(planned.systemPrompt.includes("Permit: artifact-write"));
 	});
 
 	it("rejects an ACP read-only dispatch before any worker starts, clio-coder-policy governance included", async () => {
