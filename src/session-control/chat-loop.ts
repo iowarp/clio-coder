@@ -2636,6 +2636,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		triageTimer.unref?.();
 	};
 
+	/** Every surface that queues a steer or follow-up (TUI, headless steer channel, ACP) starts the same round. */
+	const queuedForTriage = (entry: QueuedChatMessage | null): boolean => {
+		if (entry === null) return false;
+		scheduleTriage();
+		return true;
+	};
+
 	type TriageModel = Omit<SideCallAuth, "apiKey"> & {
 		model: EngineModel;
 		target: AgentRuntime["runtimeResolution"]["target"];
@@ -2819,9 +2826,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const api: ChatLoop = {
 		operatorMemory,
-		steer: (text) => queues.steer(text) !== null,
+		steer: (text) => queuedForTriage(queues.steer(text)),
 		queueFollowUp: (text, display, origin) =>
-			queues.queueFollowUp(text, display, origin === undefined ? undefined : { origin }) !== null,
+			queuedForTriage(queues.queueFollowUp(text, display, origin === undefined ? undefined : { origin })),
 		queueEntries: () => queues.entries(),
 		removeQueuedEntry: (id, reason) => queues.removeEntry(id, reason),
 		moveQueuedEntry: (id, delta) => queues.moveEntry(id, delta),
@@ -3002,7 +3009,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 										referencedPaths,
 										...(continuedMessage ? { continues: continuedMessage } : {}),
 									});
-						if (entry !== null) scheduleTriage();
+						queuedForTriage(entry);
 						return;
 					}
 					emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
