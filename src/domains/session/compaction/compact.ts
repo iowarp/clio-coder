@@ -44,10 +44,9 @@ import { type ContinuityProjectionInput, resolveContinuityProjection } from "../
 import { streamSimple } from "../../../engine/ai.js";
 import type { EngineModel, ProviderCheckpointHandle, ProviderCompactionResult, Usage } from "../../../engine/types.js";
 import { effectiveToolCall, expandChainMessages } from "../../../tools/surface.js";
-import type { WorkingSetView } from "../../context/working-set/contract.js";
 import { foldWorkingSet } from "../../context/working-set/fold.js";
 import { projectWorkingSet } from "../../context/working-set/project.js";
-import { recallableRefListing } from "../../context/working-set/recall.js";
+import { recallableRefs } from "../../context/working-set/recall.js";
 import { estimateAgentContextTokens, extractReasoningTokens } from "../context-accounting.js";
 import type { CompactionSummaryEntry } from "../entries.js";
 import {
@@ -884,33 +883,6 @@ function extractFileOps(entries: ReadonlyArray<SessionEntry>): FileOperations {
 	return fileOps;
 }
 
-function formatRecallableRefs(
-	entries: ReadonlyArray<SessionEntry>,
-	firstKeptEntryIndex: number,
-	view: WorkingSetView,
-): string {
-	const entryIndexes = new Map<string, number>();
-	for (let index = 0; index < entries.length; index += 1) {
-		const entry = entries[index];
-		if (entry) entryIndexes.set(entry.turnId, index);
-	}
-	const evictedBeforeCut = new Map(
-		[...view.evicted].filter(([ref]) => (entryIndexes.get(ref) ?? Number.POSITIVE_INFINITY) < firstKeptEntryIndex),
-	);
-	const listing = recallableRefListing(entries, { ...view, evicted: evictedBeforeCut });
-	if (
-		listing.refs.length === 0 &&
-		!entries.slice(0, firstKeptEntryIndex).some((entry) => entry.kind === "message" && entry.role === "tool_result")
-	)
-		return "";
-	const rows = [...listing.refs];
-	if (listing.remaining > 0) rows.push(`and ${listing.remaining} more`);
-	rows.push(
-		'Preview only. Persisted original tool results removed by this summary are also recallable. Discover all active-path results with context(scope="recall", limit=8, offset=0), omitting ref; query filters path/tool/ref terms. Follow nextOffset, then recall the selected ref.',
-	);
-	return `\n\n<recallable-refs>\n${rows.join("\n")}\n</recallable-refs>`;
-}
-
 /**
  * The skill context a checkpoint written now carries, held to the one the
  * latest checkpoint in `entries` already carries, and the index the cut must
@@ -1005,14 +977,14 @@ function carriedUserContext(
 	return !latestOperator || latestOperator.turnId === prior.userContext.turnId ? prior.userContext : undefined;
 }
 
-const CHECKPOINT_BUILT_BLOCK = /\n*<(operator-notes|recallable-refs)\b[^>]*>[\s\S]*?<\/\1\s*>\n*/giu;
+const CHECKPOINT_BUILT_BLOCK = /\n*<operator-notes\b[^>]*>[\s\S]*?<\/operator-notes\s*>\n*/giu;
 
 /**
  * A checkpoint the host writes without a model call. Its summary is the
  * latest summarized checkpoint's body (its goal and decisions, without the
  * blocks this one rebuilds, held to the summary's token room by dropping its
  * start), then `lead`, then the
- * operator notes, file facts and recallable tool-result refs the entries
+ * operator notes and file facts with recall refs the entries
  * carry, exactly as a native checkpoint appends them, so a later summary and
  * `context(scope="recall")` still reach what the cut removed from replay. An
  * earlier step checkpoint is not carried: its body is that same summarized
@@ -1040,7 +1012,7 @@ export function hostCheckpoint(
 		}
 		userContext = carriedUserContext(entries, prior);
 	}
-	const summary = `${carried.length > 0 ? `${carried}\n\n---\n\n` : ""}${lead}${formatOperatorNotes(extractOperatorNotes(entries))}${formatExactFacts(extractFileOps(entries), entries, cwd)}${formatRecallableRefs(entries, entries.length, foldWorkingSet(entries))}`;
+	const summary = `${carried.length > 0 ? `${carried}\n\n---\n\n` : ""}${lead}${formatOperatorNotes(extractOperatorNotes(entries))}${formatExactFacts(extractFileOps(entries), entries, cwd, recallableRefs(entries, foldWorkingSet(entries), { keptFrom: entries.length }))}`;
 	return { summary, ...(userContext !== undefined ? { userContext } : {}) };
 }
 
@@ -1365,12 +1337,11 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			const text = latestUser?.kind === "message" ? operatorMessageText(latestUser) : null;
 			const userContext =
 				!input.pendingOperatorTurn && latestUser && text ? { turnId: latestUser.turnId, text } : undefined;
-			const workingSet = foldWorkingSet(input.entries);
 			return {
 				providerCheckpoint: prepared.handle,
 				publishProviderCheckpoint: prepared.publish,
 				checkpointParentTurnId: cutCursor,
-				summary: `Native Codex checkpoint; original history is retained for recall.${formatOperatorNotes(extractOperatorNotes(input.entries, input.instructions))}${formatExactFacts(extractFileOps(input.entries), input.entries, input.cwd)}${formatRecallableRefs(input.entries, input.entries.length, workingSet)}`,
+				summary: `Native Codex checkpoint; original history is retained for recall.${formatOperatorNotes(extractOperatorNotes(input.entries, input.instructions))}${formatExactFacts(extractFileOps(input.entries), input.entries, input.cwd, recallableRefs(input.entries, foldWorkingSet(input.entries), { keptFrom: input.entries.length }))}`,
 				firstKeptEntryIndex: input.entries.length,
 				firstKeptTurnId: null,
 				tokensBefore: calculateContextTokens(input.entries, getLastAssistantUsage(input.entries), input.continuityNote),
@@ -1549,11 +1520,8 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		.filter((note, index, all) => all.indexOf(note) === index)
 		.slice(-OPERATOR_NOTE_MAX_COUNT);
 	// Clio's own blocks follow the model's text; they are built before the calls so the checkpoint's room counts them.
-	const trailer = `${formatOperatorNotes(operatorNotes)}${formatExactFacts(fileOps, compactedEntries, input.cwd)}${formatRecallableRefs(
-		input.entries,
-		cut.firstKeptEntryIndex,
-		workingSet,
-	)}`;
+	const hidden = recallableRefs(input.entries, workingSet, { keptFrom: cut.firstKeptEntryIndex });
+	const trailer = `${formatOperatorNotes(operatorNotes)}${formatExactFacts(fileOps, compactedEntries, input.cwd, hidden)}`;
 	const systemPrompt = input.systemPrompt ?? COMPACTION_SYSTEM_PROMPT;
 	if (!Number.isFinite(reserveTokens) || reserveTokens <= 0) {
 		throw new Error("compaction requires a positive finite reserve token budget");

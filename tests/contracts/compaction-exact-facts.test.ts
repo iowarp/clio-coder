@@ -98,7 +98,9 @@ describe("compaction exact facts", () => {
 		const blocks = [...result.summary.matchAll(/<exact-facts source="clio">\n([\s\S]*?)\n<\/exact-facts>/g)];
 		strictEqual(blocks.length, 1);
 		const block = blocks[0]?.[1] ?? "";
-		match(block, new RegExp(`^read src/a\\.ts lines=40 sha256=${short(`${helpers(40)}\n`)}$`, "m"));
+		match(block, new RegExp(`^read src/a\\.ts lines=40 sha256=${short(`${helpers(40)}\n`)} ref=r-call_read$`, "m"));
+		match(block, /^Measured by Clio[^\n]*ref below to context\(scope="recall"\)[^\n]*\n/);
+		match(block, /^refs:\nr-call_grep grep src\/a\.ts\nr-call_test bash\nresults:$/m);
 		match(block, /^grep `\^export function` src\/a\.ts: 40 matches call=call_grep$/m);
 		match(block, /^bash `node check\.mjs`: exit=1, 57 passed, 3 failed, 2 skipped, 62 total call=call_test$/m);
 		doesNotMatch(result.summary, /lines=39|<read-files>/);
@@ -149,7 +151,10 @@ describe("compaction exact facts", () => {
 			message("u3", "user", { text: "Continue" }),
 		]);
 		const second = await compact({ entries, model: model(), keepRecentTokens: 10, cwd });
-		match(second.summary, new RegExp(`^modified src/a\\.ts lines=41 sha256=${short(`${helpers(41)}\n`)}$`, "m"));
+		match(
+			second.summary,
+			new RegExp(`^modified src/a\\.ts lines=41 sha256=${short(`${helpers(41)}\n`)} ref=r-call_read$`, "m"),
+		);
 		match(second.summary, /^bash `node check\.mjs`: exit=1, 57 passed, 3 failed, 2 skipped, 62 total call=call_test$/m);
 		strictEqual(second.summary.match(/call=call_test/g)?.length, 1);
 	});
@@ -178,7 +183,7 @@ describe("compaction exact facts", () => {
 		});
 		ok(result.providerCheckpoint);
 		match(result.summary, /^Native Codex checkpoint/);
-		match(result.summary, /^read src\/a\.ts lines=40 sha256=[0-9a-f]{12}$/m);
+		match(result.summary, /^read src\/a\.ts lines=40 sha256=[0-9a-f]{12} ref=r-call_read$/m);
 		match(result.summary, /exit=1, 57 passed/);
 	});
 

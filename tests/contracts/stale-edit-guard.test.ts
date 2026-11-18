@@ -25,7 +25,7 @@ const checkpoint: SessionEntry = {
 	parentTurnId: null,
 	timestamp,
 	summary:
-		'## Goal\nEdit helpers\n\n<exact-facts source="clio">\nMeasured by Clio.\nread src/a.ts lines=40 sha256=0123456789ab\nresults:\n</exact-facts>',
+		'## Goal\nEdit helpers\n\n<exact-facts source="clio">\nMeasured by Clio.\nread src/a.ts lines=40 sha256=0123456789ab\nresults:\n</exact-facts>\n\n<recallable-refs>\nr1 (read src/a.ts) [evicted; 2026-01-01]\n</recallable-refs>',
 	firstKeptTurnId: "u2",
 	tokensBefore: 1000,
 	messagesSummarized: 3,
@@ -47,6 +47,8 @@ const blocked = (entries: SessionEntry[], args?: Record<string, unknown>) => {
 describe("stale-file edit guard", () => {
 	it("refuses an edit of a file the checkpoint summarized until it is read again", () => {
 		match(blocked([...beforeCut, checkpoint, ...afterCut]), /^re-read src\/a\.ts before editing it/);
+		const withRef = { ...checkpoint, summary: checkpoint.summary.replace("456789ab", "456789ab ref=r-call_old") };
+		match(blocked([...beforeCut, withRef, ...afterCut]), /^re-read src\/a\.ts before editing it/);
 		match(blocked([...beforeCut, checkpoint, ...afterCut], { path: "/work/./src/a.ts", edits: [] }), /re-read/);
 		const reread = [...beforeCut, checkpoint, ...afterCut, ...toolTurn("call_new", "read", { path: "src/a.ts" })];
 		deepStrictEqual(verdict(reread), []);

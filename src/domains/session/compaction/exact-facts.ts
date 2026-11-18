@@ -18,6 +18,7 @@ import { isAbsolute, resolve } from "node:path";
 import { expandPath } from "../../../tools/path-utils.js";
 import { shellExitSpeaksForCommand } from "../../../tools/shell-exit-scope.js";
 import { effectiveToolCall, expandChainMessages } from "../../../tools/surface.js";
+import type { recallableRefs } from "../../context/working-set/recall.js";
 import type { SessionEntry } from "../entries.js";
 
 export interface FileOperations {
@@ -37,8 +38,9 @@ const HASH_CHARS = 12;
 const BLOCK = /\n*<exact-facts\b[^>]*>\n([\s\S]*?)\n<\/exact-facts>\n*/giu;
 const ECHOED_BLOCK = /\n*<exact-facts\b[^>]*>[\s\S]*?(?:<\/exact-facts\s*>|$)\n*/giu;
 const FILE_LINE =
-	/^(read|modified) (.+?)(?: lines=\d+ sha256=[0-9a-f]+| bytes=\d+| missing| unreadable| not-a-file)?$/u;
+	/^(read|modified) (.+?)(?: lines=\d+ sha256=[0-9a-f]+| bytes=\d+| missing| unreadable| not-a-file)?(?: ref=\S+)?$/u;
 const RESULTS_HEADING = "results:";
+const REFS_HEADING = "refs:";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -54,7 +56,7 @@ export function recordPriorFileOperations(summary: string, record: (operation: s
 	}
 	for (const [, body] of summary.matchAll(BLOCK)) {
 		for (const line of (body ?? "").split("\n")) {
-			if (line === RESULTS_HEADING) break;
+			if (line === RESULTS_HEADING || line === REFS_HEADING) break;
 			const match = FILE_LINE.exec(line);
 			if (match?.[1] && match[2]) record(match[1] === "read" ? "read" : "edit", match[2]);
 		}
@@ -221,29 +223,39 @@ function collectResults(entries: ReadonlyArray<SessionEntry>): string[] {
 /**
  * The `<exact-facts>` block for a checkpoint over `entries`: every file
  * `fileOps` names, modified first, measured against `cwd` when it is known,
- * and the newest numeric tool results. Empty when there is nothing to state.
+ * each with the recall ref of its newest hidden read, the newest other hidden
+ * results' refs, and the newest numeric tool results. Empty when there is nothing to state.
  */
 export function formatExactFacts(
 	fileOps: FileOperations,
 	entries: ReadonlyArray<SessionEntry>,
 	cwd: string | undefined,
+	hidden: ReturnType<typeof recallableRefs>,
 ): string {
+	const reads = new Map(
+		hidden.flatMap((row) => (row.toolName === "read" && row.path ? [[row.path.trim(), row.ref]] : [])),
+	);
 	const modified = [...fileOps.modified].sort();
 	const readOnly = [...fileOps.read].filter((filePath) => !fileOps.modified.has(filePath)).sort();
 	const files = [
 		...modified.map((filePath) => ["modified", filePath] as const),
 		...readOnly.map((filePath) => ["read", filePath] as const),
-	].map(
-		([operation, filePath], index) =>
-			`${operation} ${filePath}${index < MEASURED_FILES_MAX ? measureFile(filePath, cwd) : ""}`,
-	);
+	].map(([operation, filePath], index) => {
+		const ref = reads.has(filePath) ? ` ref=${reads.get(filePath)}` : "";
+		return `${operation} ${filePath}${index < MEASURED_FILES_MAX ? measureFile(filePath, cwd) : ""}${ref}`;
+	});
+	const refs = hidden
+		.filter((row) => row.toolName !== "read")
+		.slice(-RESULTS_MAX)
+		.map((row) => oneLine(`${row.ref} ${row.toolName} ${row.path ?? ""}`, 240));
 	const results = collectResults(entries);
-	if (files.length === 0 && results.length === 0) return "";
+	if (files.length === 0 && refs.length === 0 && results.length === 0) return "";
 	// No re-read advice here: a live 20k-window run took it as an order and re-read whole
 	// files until each read forced another compaction. The edit guard asks at the edit.
 	const lines = [
-		"Measured by Clio at this checkpoint, not by the summarizer; where the summary disagrees, these values hold.",
+		`Measured by Clio at this checkpoint, not by the summarizer; where the summary disagrees, these values hold.${hidden.length > 0 ? ' Values the summary did not keep are recallable by passing a ref below to context(scope="recall"); without ref it lists every one.' : ""}`,
 		...files,
+		...(refs.length > 0 ? [REFS_HEADING, ...refs] : []),
 		...(results.length > 0 ? [RESULTS_HEADING, ...results] : []),
 	];
 	return `\n\n<exact-facts source="clio">\n${lines.join("\n")}\n</exact-facts>`;
