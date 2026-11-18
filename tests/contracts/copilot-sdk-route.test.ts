@@ -52,6 +52,8 @@ import {
 import { disposeCopilotConversations } from "../../src/engine/copilot/stream.js";
 import { getEngineEnvApiKey } from "../../src/engine/env-api-keys.js";
 import { getEngineOAuthProvider } from "../../src/engine/oauth.js";
+import type { ToolSpec } from "../../src/tools/registry.js";
+import { shapeToolResult } from "../../src/tools/result-shaping.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -149,6 +151,20 @@ class FakeSession {
 			return null;
 		}
 	}
+	/**
+	 * As the 1.0.26 runtime's large-output processing does: a result over largeOutput.maxSizeBytes (51200 by
+	 * default) is written through sessionFs under sessionStatePath/temp, and the model is told only that path.
+	 */
+	async spill(result) {
+		const text = result?.textResultForLlm ?? "";
+		const limit = this.config.largeOutput?.maxSizeBytes ?? 51200;
+		if (!result || this.config.largeOutput?.enabled === false || result.skipLargeOutputProcessing || Buffer.byteLength(text) <= limit) return result;
+		const dir = this.client.options.sessionFs.sessionStatePath + "/temp";
+		const path = dir + "/1794981105931-copilot-tool-output-5306d68577d544eb824b1cd819c4ccde.txt";
+		await this.fs.mkdir(dir, true);
+		await this.fs.writeFile(path, text);
+		return { ...result, textResultForLlm: "Output too large to read at once (" + Buffer.byteLength(text) + " B). Saved to: " + path };
+	}
 	async run(prompt) {
 		if (prompt.includes("over budget")) {
 			this.emit("session.error", { errorType: "query", message: "Execution failed: Request exceeds the model's prompt budget after reserving output (228300 tokens; limit 200000)" });
@@ -208,7 +224,7 @@ class FakeSession {
 		if (prompt.includes("op:metrics-fail-once")) this.metricsFailOnce = true;
 		if (prompt.includes("op:slow-metrics")) this.metricsDelayOnce = 1500;
 		if (prompt.includes("use tool")) {
-			const result = await this.callTool("call_1");
+			const result = await this.spill(await this.callTool("call_1"));
 			if (!result) return;
 			state.toolResults.push({ ...result, injectedBefore: [...(this.injected ?? [])] });
 			this.injected = [];
@@ -1000,6 +1016,26 @@ test("Clio's loop runs the tool; Copilot continues the same session and reports 
 		source: "provider",
 	});
 	strictEqual(firstSettled.pricing.usd.kind, "unknown", "a seat call never renders a dollar price");
+});
+
+test("a result over the runtime's spill size reaches the model as Clio's own offload, readable at its path (bt-38)", async () => {
+	disposeCopilotConversations("spill-session");
+	const full = "gateway chain row\n".repeat(3_800);
+	const gateway = { name: "gateway", description: "gateway", parameters: {} } as unknown as ToolSpec;
+	const shaped = shapeToolResult(gateway, { kind: "ok", output: full }, { sessionId: "spill-session" });
+	ok(shaped.kind === "ok" && Buffer.byteLength(shaped.output) > 51_200);
+	const context: Context = { systemPrompt: "You are Clio.", tools: [readTool], messages: [user("please use tool")] };
+	const first = await step(context, "spill-session");
+	await step(
+		{ ...context, messages: [...context.messages, first, toolResult("call_1", shaped.output)] },
+		"spill-session",
+	);
+	const sent = fake().toolResults.at(-1)?.textResultForLlm ?? "";
+	strictEqual(sent.includes("copilot-tool-output"), false, sent.slice(-300));
+	const named = /full: (\S+) \(/.exec(sent)?.[1];
+	ok(named, sent.slice(-300));
+	strictEqual(readFileSync(named, "utf8"), full);
+	disposeCopilotConversations("spill-session");
 });
 
 test("a call to a tool Copilot was never given reseeds the next call instead of waiting on Copilot's own run", async () => {
