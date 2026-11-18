@@ -14,7 +14,7 @@ import { assessQualityPolicy, loadQualityPolicy, type QualityFinding } from "../
 import { validateTrustStatus } from "../evidence/trust-status.js";
 import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
 import { callVerdict } from "./check-classifier.js";
-import { standingPassCalls } from "./observed-checks.js";
+import { runCheckFacts } from "./observed-checks.js";
 import {
 	detectValidationCommand,
 	extractCommandDeleteTargets,
@@ -47,6 +47,10 @@ export const FINISH_CONTRACT_RAN_CHANGED_PREFIX = " Ran after the edit: ";
 
 export const FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE =
 	"[Clio Coder] finish-contract advisory: checks passed; behavior coverage unverified. Passing receipts establish the recorded checks, not every changed behavior. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
+
+/** Checks passed, but a check's last outcome since the last change is red, as the receipt seals it (bt-44). */
+export const FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE =
+	"[Clio Coder] finish-contract advisory: a check failed after the last change; behavior coverage unverified. Its red outcome stands in the receipt beside any passing check. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
 
 export const FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE =
 	"[Clio Coder] finish-contract advisory: validation evidence recorded; behavior coverage unverified. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
@@ -228,12 +232,50 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 		verificationScope,
 		...(assessment.kind === "ok" && hasEvidence
 			? {
-					advisory: hasPassedChecks
-						? FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE
-						: FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE,
+					advisory: !hasPassedChecks
+						? FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE
+						: checkFailedSinceLastChange(input)
+							? FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE
+							: FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
 				}
 			: {}),
 	};
+}
+
+/**
+ * Whether a check's last outcome since the run's last change is red, read by the shared classifier's replay as the
+ * run-effects recorder seals it, so the notice never says checks passed beside a red the receipt keeps (bt-44).
+ */
+function checkFailedSinceLastChange(input: FinishContractInput): boolean {
+	if (input.workspaceRoot === undefined) return false;
+	const window = recentEntries(
+		input.sessionEntries ?? [],
+		input.assistantTurnId ?? null,
+		input.recentEntryLimit ?? DEFAULT_RECENT_ENTRY_LIMIT,
+		input.windowStartTurnId,
+	);
+	// Only a failed result can seal a red, so an all-green window skips the replay's reads.
+	if (!capabilityEntries(window).some(failedResult)) return false;
+	const declared = declaredVerifierCommands(input.workspaceRoot, input.sessionVerifiers);
+	return runCheckFacts(window, input.workspaceRoot, declared).failing.length > 0;
+}
+
+function failedResult(entry: unknown): boolean {
+	const record = asRecord(entry);
+	if (record?.kind === "bashExecution") return typeof record.exitCode === "number" && record.exitCode !== 0;
+	if (record?.kind !== "message" || record.role !== "tool_result") return false;
+	const payload = asRecord(record.payload);
+	const result = asRecord(payload?.result);
+	const details = asRecord(result?.details);
+	return (
+		payload?.isError === true ||
+		payload?.error === true ||
+		result?.kind === "error" ||
+		details?.kind === "error" ||
+		(typeof details?.exitCode === "number" && details.exitCode !== 0) ||
+		asRecord(details?.chainAdmission)?.outcome === "error" ||
+		payload?.outcome === "error"
+	);
 }
 
 function assessMutationFinishContract(input: FinishContractInput): FinishContractAssessment {
@@ -814,7 +856,7 @@ function collectValidationEvidence(
 	// change retired it, read by the same fold the task board and the recorder's change sequence use (x7-5).
 	const standing =
 		declared.length > 0 && workspaceRoot !== undefined
-			? standingPassCalls(recent, workspaceRoot, declared)
+			? runCheckFacts(recent, workspaceRoot, declared).passCalls
 			: new Set<string>();
 
 	for (const [index, entry] of entries.entries()) {

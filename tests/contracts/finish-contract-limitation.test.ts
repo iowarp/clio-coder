@@ -11,6 +11,7 @@ import {
 	assessFinishContract,
 	FINISH_CONTRACT_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
+	FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE,
 } from "../../src/domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
@@ -233,7 +234,7 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		);
 	});
 
-	it("reports unknown behavior coverage for unrelated or partial passing checks, irrespective of final prose", () => {
+	it("reports unknown behavior coverage for unrelated or partial passing checks, irrespective of final prose", (t) => {
 		for (const command of ["npm run lint", "node --test unrelated.test.mjs", "node --test thing.test.mjs"]) {
 			const assessment = assessFinishContract({
 				sessionEntries: [
@@ -251,6 +252,34 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 			ok(assessment.kind === "ok");
 			strictEqual(assessment.advisory, FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE);
 		}
+		// A red the receipt seals after the last change never reads as "checks passed"; a later pass replaces it (bt-44).
+		const root = mkdtempSync(join(tmpdir(), "finish-red-"));
+		t.after(() => rmSync(root, { recursive: true, force: true }));
+		const tsc = (id: string, exitCode: number) => [
+			toolCall(id, ToolNames.Bash, { command: "npx tsc --noEmit" }),
+			{
+				kind: "message",
+				role: "tool_result",
+				turnId: id,
+				payload: { toolName: ToolNames.Bash, toolCallId: id, isError: exitCode !== 0, result: { details: { exitCode } } },
+			},
+		];
+		const advisory = (...checks: unknown[][]) => {
+			const assessment = assessFinishContract({
+				sessionEntries: [
+					...mutationWindow(),
+					toolCall("bash-1", ToolNames.Bash, { command: "npm run lint" }),
+					toolResult("bash-1", ToolNames.Bash, false),
+					...checks.flat(),
+					assistantMessage("assistant-1", "Done."),
+				],
+				assistantTurnId: "assistant-1",
+				workspaceRoot: root,
+			});
+			return assessment.kind === "ok" ? assessment.advisory : undefined;
+		};
+		strictEqual(advisory(tsc("tsc-1", 2)), FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE);
+		strictEqual(advisory(tsc("tsc-1", 2), tsc("tsc-2", 0)), FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE);
 	});
 
 	it("retains explicitly requested check scope and limitations without turning unknown coverage into a gate", async () => {

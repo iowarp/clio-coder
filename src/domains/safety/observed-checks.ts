@@ -239,17 +239,28 @@ export function standingChecksFrom(
 	return foldStanding(entries.slice(start), workspaceRoot, scratchRoots, declared, cache).checks;
 }
 
-/**
- * The calls whose passing check still stands at the end of `entries`, by the same fold: a model call by its id, an
- * operator's `!` run as `#<index>` into `capabilityEntries(entries)`. The finish contract credits a declared check
- * only through it, so the gate and the receipt read one change sequence (x7-5).
- */
-export function standingPassCalls(
+/** What the same fold says of a finished stretch of work, for the finish contract. */
+export interface RunCheckFacts {
+	/**
+	 * The calls whose passing check still stands: a model call by its id, an operator's `!` run as `#<index>` into
+	 * `capabilityEntries(entries)`. A declared check is credited only through it, so the gate and the receipt read one
+	 * change sequence (x7-5).
+	 */
+	passCalls: ReadonlySet<string>;
+	/**
+	 * Checks whose last outcome since the last change is red, as the run-effects recorder seals them: a change retires
+	 * every outcome and a later run of the same check replaces it (bt-44).
+	 */
+	failing: ReadonlyArray<string>;
+}
+
+export function runCheckFacts(
 	entries: ReadonlyArray<unknown>,
 	workspaceRoot: string,
 	declared: ReadonlyArray<DeclaredVerifierCommand>,
-): ReadonlySet<string> {
-	return foldStanding(entries, workspaceRoot, [], declared).passCalls;
+): RunCheckFacts {
+	const { passCalls, sealed } = foldStanding(entries, workspaceRoot, [], declared);
+	return { passCalls, failing: [...sealed].flatMap(([name, passed]) => (passed ? [] : [name])) };
 }
 
 function foldStanding(
@@ -258,7 +269,7 @@ function foldStanding(
 	scratchRoots: ReadonlyArray<string>,
 	declared: ReadonlyArray<DeclaredVerifierCommand>,
 	cache?: RunReplayCache,
-): { checks: ObservedCheck[]; passCalls: Set<string> } {
+): { checks: ObservedCheck[]; passCalls: Set<string>; sealed: Map<string, boolean> } {
 	const root = path.resolve(workspaceRoot);
 	const gitHelpers = cache?.gitHelpers ?? gitRunsConfiguredHelpers(root);
 	const outputTarget = checkOutputReader(root, process.env, scratchRoots, cache?.gitAnswers);
@@ -266,6 +277,7 @@ function foldStanding(
 	const calls = new Map<string, TrackedCall>();
 	const standing = new Map<string, ObservedCheck>();
 	const standingCalls = new Map<string, string>();
+	const sealed = new Map<string, boolean>();
 	let revision = 0;
 	const settle = (call: TrackedCall, failed: boolean, at: string, key: string): void => {
 		const settlement = settleCheckCall(call.reading, failed, failed ? "error" : "ok", call.revision === revision);
@@ -273,8 +285,10 @@ function foldStanding(
 			outputTarget.changed(call.reading.changedPaths);
 			revision += 1;
 			for (const [name, item] of standing) if (item.passed) standing.delete(name);
+			sealed.clear();
 		}
 		if (call.name === null || !call.statusAttributable || !settlement.settled) return;
+		sealed.set(call.name, !failed);
 		standingCalls.set(call.name, key);
 		standing.set(call.name, {
 			name: call.name,
@@ -335,5 +349,5 @@ function foldStanding(
 			return key === undefined ? [] : [key];
 		}),
 	);
-	return { checks, passCalls };
+	return { checks, passCalls, sealed };
 }
