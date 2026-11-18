@@ -1195,7 +1195,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 	/**
 	 * The route's compaction budget and trigger. The summary's output shares the window with the context it reads,
-	 * so every trigger check counts its reserve; the reserve is resolved on first use and then held.
+	 * so every trigger check counts its reserve; the reserve is resolved on first use and then held. On a known
+	 * window the trigger also counts the turn's own output reserve, the one admission checks, so it fires before
+	 * the next request would be refused (bt-13).
 	 */
 	const routeCompaction = (agentRuntime: AgentRuntime, settings: Readonly<ClioSettings>) => {
 		const cfg = settings.context.compaction;
@@ -1209,11 +1211,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		let reserve: number | undefined;
 		const summaryReserve = (): number =>
 			(reserve ??= summaryOutputReserve(model, { summaryOnChatRoute: summaryOnChatRoute(agentRuntime, cfg?.model) }));
+		const triggerReserve = (tokens: number): number =>
+			agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow > 0
+				? Math.max(summaryReserve(), resolveTurnOutputReserve(agentRuntime, tokens))
+				: summaryReserve();
 		return {
 			economic,
-			summaryReserve,
+			triggerReserve,
 			shouldCompact: (tokens: number) =>
-				shouldCompact(tokens, economic.threshold, economic.triggerWindow, summaryReserve()),
+				shouldCompact(tokens, economic.threshold, economic.triggerWindow, triggerReserve(tokens)),
 		};
 	};
 
@@ -3522,13 +3528,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					),
 				);
 			const compactionCeilingTokens = economic.ceilingTokens;
-			// The trigger counts the summary reserve the threshold's headroom does not cover, so the
+			// The trigger counts the reserve the threshold's headroom does not cover, so the
 			// ledger names the fraction it actually fires at (F-C2).
 			const ledgerThreshold =
 				compactionThreshold === null
 					? null
 					: route
-						? effectiveCompactionThreshold(economic.threshold, economic.triggerWindow, route.summaryReserve())
+						? effectiveCompactionThreshold(
+								economic.threshold,
+								economic.triggerWindow,
+								route.triggerReserve(economic.threshold * economic.triggerWindow),
+							)
 						: economic.threshold;
 			const provider = routed?.targetId ?? settings.chat?.target ?? null;
 			const model = routed?.wireModelId ?? settings.chat?.model ?? null;

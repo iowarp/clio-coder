@@ -413,6 +413,18 @@ describe("contracts/metering integrity", () => {
 		strictEqual(resolveReservedOutputTokens(4_096), 4_096);
 		strictEqual(resolveReservedOutputTokens(null), 32_768);
 	});
+
+	it("bounds the default reserve by a capped window on a transport that does not clamp at the wire (bt-13)", () => {
+		setGlobalDefaultMaxOutputTokens(0);
+		const request = { api: "copilot-sdk", contextWindow: 40_000, inputTokens: 8_429 };
+		const reserved = resolveReservedOutputTokens(128_000, request);
+		ok(reserved <= request.contextWindow - request.inputTokens, `reserve ${reserved}`);
+		strictEqual(reserved, 20_000);
+		// An explicit operator budget is held, so admission refuses it by name.
+		setGlobalDefaultMaxOutputTokens(32_768);
+		strictEqual(resolveReservedOutputTokens(128_000, request), 32_768);
+		setGlobalDefaultMaxOutputTokens(0);
+	});
 });
 
 describe("canonical monetary presentation (#434)", () => {

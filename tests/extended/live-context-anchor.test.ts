@@ -74,6 +74,7 @@ describe("live measured context anchor", () => {
 			runtimeId: "openai-compat",
 			wireModelId: "qwen",
 			runtimeResolution: {
+				capabilityDecisions: { maxTokens: 8192 },
 				contextWindowDetails: {
 					desiredContextWindow: 32768,
 					effectiveContextWindow: 32768,

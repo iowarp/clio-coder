@@ -19,16 +19,20 @@
  * refused, and the two figures are unrelated.
  */
 
-import { recommendedOutputTokens, resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
+import { runOverrides } from "../core/run-overrides.js";
+import {
+	configuredMaxOutputTokens,
+	recommendedOutputTokens,
+	resolveReservedOutputTokens,
+} from "../engine/apis/output-budget.js";
 import type { AgentRuntime } from "./turn-state.js";
 
-export function resolveTurnOutputReserve(
-	agentRuntime: {
-		runtimeResolution: AgentRuntime["runtimeResolution"];
-		agent: { state: { model: AgentRuntime["agent"]["state"]["model"] } };
-	},
-	inputTokens: number,
-): number {
+type ReserveRuntime = {
+	runtimeResolution: AgentRuntime["runtimeResolution"];
+	agent: { state: { model: AgentRuntime["agent"]["state"]["model"] } };
+};
+
+export function resolveTurnOutputReserve(agentRuntime: ReserveRuntime, inputTokens: number): number {
 	// A runtime resolution always carries capability decisions in production. The
 	// optional read is for a partially built runtime: an absent cap is the
 	// resolver's own "no advertised limit" case, which falls back to the
@@ -46,4 +50,30 @@ export function resolveTurnOutputReserve(
 			agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
 		),
 	);
+}
+
+/**
+ * What the operator can change when a turn does not fit its window (bt-13).
+ * A configured chat.maxOutputTokens above half the window, or a window this run
+ * capped with --max-context-tokens, is named; otherwise the prompt itself is too
+ * large for the window.
+ */
+export function turnAdmissionRemedy(agentRuntime: ReserveRuntime, inputTokens: number): string {
+	const details = agentRuntime.runtimeResolution.contextWindowDetails;
+	const window = details.effectiveContextWindow;
+	const remedies: string[] = [];
+	const configured = configuredMaxOutputTokens();
+	const reserve = resolveTurnOutputReserve(agentRuntime, inputTokens);
+	if (configured !== null && reserve > Math.floor(window / 2)) {
+		remedies.push(`chat.maxOutputTokens reserves ${reserve} of the ${window}-token window; lower it.`);
+	}
+	const cap = runOverrides().maxContextTokens;
+	if (
+		cap !== undefined &&
+		cap === window &&
+		(details.desiredContextWindow === 0 || cap < details.desiredContextWindow)
+	) {
+		remedies.push(`This run caps the window at ${cap} tokens; raise --max-context-tokens.`);
+	}
+	return remedies.length > 0 ? remedies.join(" ") : "Trim the prompt or reduce active tools.";
 }
