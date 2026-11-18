@@ -509,10 +509,11 @@ function projectEvidence(row: unknown): unknown {
 }
 
 /**
- * A session ledger entry as the verified-outcome count needs it, or null for an entry it never reads. Only a tool
- * result and a task ledger snapshot survive, each reduced to typed fields: tool name, error flag, check verdicts and
- * payload digests, run ids, task ids and statuses. Message text, tool arguments, result output and task wording are
- * never copied.
+ * A session ledger entry as the verified-outcome count needs it, or null for one that is not a record. A tool result
+ * and a task ledger snapshot keep their typed fields: tool name, error flag, check verdicts and payload digests, run ids,
+ * task ids and statuses. Every other entry keeps only its kind, role, turn ids and time, so a fork's cut finds the
+ * assistant turn it branched at by the same position `/usage` reads (bt-fork-verified). Message text, tool arguments,
+ * result output and task wording are never copied.
  */
 export function outcomeLedgerProjection(entry: unknown): unknown {
 	if (!isRecord(entry)) return null;
@@ -540,5 +541,5 @@ export function outcomeLedgerProjection(entry: unknown): unknown {
 				: [],
 		};
 	}
-	return null;
+	return typeof entry.role === "string" ? { ...base, role: entry.role } : base;
 }
