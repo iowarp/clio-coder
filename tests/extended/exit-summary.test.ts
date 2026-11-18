@@ -112,6 +112,38 @@ test("the activity row names its visit scope and a worker whose writes went unre
 	collector.dispose();
 });
 
+test("the exit card reads a settled worker's receipt that no card handed over, as /usage's Changes does (bt-11 e)", () => {
+	const bus = createTelemetryHub();
+	const receipts: Record<string, { changedPaths: string[] }> = { "run-a": { changedPaths: ["textutil/slug.py"] } };
+	const reads: string[] = [];
+	const collector = createExitSummaryCollector({
+		bus,
+		telemetry: { subscribe: () => () => {} } as unknown as TelemetryContract,
+		dispatch: { observedRunWrites: () => null },
+		session: { current: () => ({ id: "fork-1", hasModelTurn: true }) } as unknown as Pick<SessionContract, "current">,
+		getTurns: () => 1,
+		getToolCounts: () => new Map(),
+		getModel: () => null,
+		readRunResult: (runId) => {
+			reads.push(runId);
+			return (receipts[runId] ?? null) as never;
+		},
+	});
+	// A /fork while the runs worked replaced their cards, so no card hands their receipts over when they settle.
+	for (const runId of ["run-a", "run-b"]) {
+		bus.emit("run.started", { runId, agentId: "coder", targetId: "local", wireModelId: "m" } as never);
+		bus.emit("run.completed", { runId, agentId: "coder", outcome: "completed" } as never);
+	}
+	receipts["run-b"] = { changedPaths: [] };
+	match(
+		renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n"),
+		/^This visit, workers included: 0 turns · 1 file changed · 2 workers$/mu,
+	);
+	collector.snapshot();
+	deepStrictEqual(reads, ["run-a", "run-b"]);
+	collector.dispose();
+});
+
 test("a /resume mid-visit keeps the visit's turns, files and workers on the exit card (bt-11)", () => {
 	const bus = createTelemetryHub();
 	let current = { id: "session-1", hasModelTurn: true };

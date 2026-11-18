@@ -629,6 +629,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		...(deps.readSessionEntries ? { readSessionEntries: deps.readSessionEntries } : {}),
 		...(deps.gitHookChanges !== undefined ? { gitHookChanges: deps.gitHookChanges } : {}),
 		...(deps.autonomy !== undefined ? { autonomy: deps.autonomy } : {}),
+		readRunResult: (runId) => readWorkerRunResultFacts(runId, deps.stateDir),
 		getModel: () => {
 			const settings = deps.getSettings?.();
 			return settings?.chat.target && settings.chat.model
