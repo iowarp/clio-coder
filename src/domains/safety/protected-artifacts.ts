@@ -1242,7 +1242,165 @@ const READ_ONLY_INSPECTION_REFUSALS: ReadonlyMap<string, ReadonlyArray<string>> 
 	["which", []],
 	["echo", []],
 	["printf", []],
+	["cut", []],
+	["tr", []],
 ]);
+
+/**
+ * Stdout filters whose arguments decide whether they only read (x3-4): `sed` with no in-place edit, script file, or
+ * `w`/`e`/`r` command, `awk` with no `system`, pipe, redirect, include or program file, `sort` with no output file or
+ * compress program, `uniq` with no output operand. Whatever these cannot parse stays a change.
+ */
+const READ_ONLY_FILTERS: ReadonlyMap<string, (args: ReadonlyArray<string>) => boolean> = new Map([
+	["sed", sedOnlyReads],
+	["awk", awkOnlyReads],
+	[
+		"sort",
+		(args: ReadonlyArray<string>) =>
+			!args.some(
+				(arg) =>
+					arg === "--output" ||
+					arg.startsWith("--output=") ||
+					arg.startsWith("--compress-program") ||
+					(/^-[^-]/u.test(arg) && arg.includes("o")),
+			),
+	],
+	["uniq", uniqOnlyReads],
+]);
+
+const SED_READ_FLAGS: ReadonlySet<string> = new Set([
+	"--quiet",
+	"--silent",
+	"--regexp-extended",
+	"--posix",
+	"--separate",
+	"--unbuffered",
+	"--null-data",
+	"--debug",
+	"--sandbox",
+]);
+
+function sedOnlyReads(args: ReadonlyArray<string>): boolean {
+	const scripts: string[] = [];
+	let first: string | undefined;
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		if (arg === "--") {
+			first ??= args[index + 1];
+			break;
+		}
+		if (/^-[nErsuz]*e$/u.test(arg) || arg === "--expression") {
+			scripts.push(args[index + 1] ?? "");
+			index += 1;
+		} else if (arg.startsWith("--expression=")) scripts.push(arg.slice("--expression=".length));
+		else if (arg === "-l" || arg === "--line-length") index += 1;
+		else if (arg.startsWith("-") && arg !== "-") {
+			if (!/^-[nErsuz]+$/u.test(arg) && !SED_READ_FLAGS.has(arg) && !arg.startsWith("--line-length=")) return false;
+		} else first ??= arg;
+	}
+	if (scripts.length === 0) {
+		if (first === undefined) return false;
+		scripts.push(first);
+	}
+	return scripts.every(sedScriptOnlyReads);
+}
+
+/**
+ * A sed script made only of commands that print, edit the pattern space or branch. `w`, `W`, `e`, `r`, `R`, an `s`
+ * flagged `w` or `e`, and anything this cannot parse answer false.
+ */
+function sedScriptOnlyReads(script: string): boolean {
+	let index = 0;
+	const at = () => script[index] ?? "";
+	const skip = (pattern: RegExp) => {
+		while (index < script.length && pattern.test(at())) index += 1;
+	};
+	const closes = (delimiter: string): boolean => {
+		while (index < script.length) {
+			const char = at();
+			index += char === "\\" ? 2 : 1;
+			if (char === delimiter) return true;
+		}
+		return false;
+	};
+	const address = (): boolean => {
+		const char = at();
+		if (/[0-9]/u.test(char)) skip(/[0-9~]/u);
+		else if (char === "$") index += 1;
+		else if (char === "/" || char === "\\") {
+			const delimiter = char === "/" ? "/" : (script[index + 1] ?? "");
+			index += char === "/" ? 1 : 2;
+			if (delimiter === "" || !closes(delimiter)) return false;
+			skip(/[IM]/u);
+		}
+		return true;
+	};
+	while (index < script.length) {
+		skip(/[\s;]/u);
+		if (index >= script.length) break;
+		if (!address()) return false;
+		if (at() === ",") {
+			index += 1;
+			if (at() === "+" || at() === "~") index += 1;
+			if (!address()) return false;
+		}
+		skip(/[\s!]/u);
+		const command = at();
+		index += 1;
+		if ("{}pPdDnNgGhHxzF=".includes(command) && command !== "") continue;
+		if (command === "q" || command === "Q" || command === "l") skip(/[ \t0-9]/u);
+		else if (command === "s" || command === "y") {
+			const delimiter = at();
+			if (delimiter === "" || delimiter === "\\" || delimiter === "\n") return false;
+			index += 1;
+			if (!closes(delimiter) || !closes(delimiter)) return false;
+			// `w` and `e` stop here and parse next as a command, which refuses them.
+			if (command === "s") skip(/[gpiImM0-9]/u);
+		} else if (command === "b" || command === "t" || command === "T" || command === ":" || command === "#")
+			while (index < script.length && at() !== "\n" && (command === "#" || at() !== ";")) index += 1;
+		else return false;
+	}
+	return true;
+}
+
+function awkOnlyReads(args: ReadonlyArray<string>): boolean {
+	const programs: string[] = [];
+	let first: string | undefined;
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		if (arg === "--") {
+			first ??= args[index + 1];
+			break;
+		}
+		if (arg === "-F" || arg === "-v" || arg === "--field-separator" || arg === "--assign") index += 1;
+		else if (/^-[Fv]./u.test(arg) || arg.startsWith("--field-separator=") || arg.startsWith("--assign=")) continue;
+		else if (arg === "-e" || arg === "--source") {
+			programs.push(args[index + 1] ?? "");
+			index += 1;
+		} else if (arg.startsWith("--source=")) programs.push(arg.slice("--source=".length));
+		else if (arg.startsWith("-") && arg !== "-") return false;
+		else first ??= arg;
+	}
+	if (programs.length === 0) {
+		if (first === undefined) return false;
+		programs.push(first);
+	}
+	// A comparison spelled `>` reads as a redirect here, which only costs a pass.
+	return programs.every((program) => !/system|[|>@]/u.test(program));
+}
+
+function uniqOnlyReads(args: ReadonlyArray<string>): boolean {
+	let operands = 0;
+	let options = true;
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		if (options && arg === "--") options = false;
+		else if (options && ["-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars"].includes(arg)) index += 1;
+		else if (options && arg.startsWith("-") && arg !== "-") continue;
+		else operands += 1;
+	}
+	return operands < 2;
+}
 
 const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
 	"status",
@@ -1287,6 +1445,8 @@ function readOnlyInspectionStep(argv: ReadonlyArray<string>, gitHelpersConfigure
 		if (!gitHelpersConfigured) return true;
 		return (subcommand === "log" || subcommand === "show") && GIT_HELPER_OPT_OUTS.every((flag) => rest.includes(flag));
 	}
+	const filter = READ_ONLY_FILTERS.get(executable);
+	if (filter !== undefined) return filter(args);
 	const refused = READ_ONLY_INSPECTION_REFUSALS.get(executable);
 	if (refused === undefined) return false;
 	return !args.some((arg) => refused.some((option) => arg === option || arg.startsWith(`${option}=`)));

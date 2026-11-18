@@ -739,6 +739,8 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	// Every change ran before the check through `&&`, or the call held only checks, cd and plumbing.
 	deepStrictEqual(seal("npm test", "npm ci && npm test"), green);
 	deepStrictEqual(seal("npm test", "cd pkg && npm test 2>&1 | tail -5"), green);
+	// A read-only stdout filter is plumbing too (x3-4).
+	deepStrictEqual(seal("npm test", "npm test 2>&1 | sed -n 1,80p"), green);
 	// Shell setup changes no tree, so a standing red stands beside a narrower green (x3-1).
 	for (const setup of ["source .venv/bin/activate", "export CI=1"])
 		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [["npm test"], "unverified"]);
@@ -754,9 +756,13 @@ it("read-only inspection refuses helpers that write the tree or run another prog
 		"rg --hostname-bin=./x.sh foo",
 		"git diff --ext-diff",
 		"git show --textconv",
+		"sed -i s/a/b/ a.ts",
+		"sed 's/a/b/w out' a.ts",
+		"awk '{system(\"sh\")}' a.ts",
+		"sort -o out a.ts",
 	])
 		strictEqual(isReadOnlyInspectionCommand(command, false), false, command);
-	for (const command of ["git status", "git diff", "git log -p"])
+	for (const command of ["git status", "git diff", "git log -p", "sed -n 1,80p a.ts", "awk '{print $1}' a.ts"])
 		strictEqual(isReadOnlyInspectionCommand(command, false), true, command);
 	// Where git config names a helper program, only log and show with both helpers switched off still count.
 	for (const command of ["git status", "git diff --no-ext-diff --no-textconv", "git log -p"])
