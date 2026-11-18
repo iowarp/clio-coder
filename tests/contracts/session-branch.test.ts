@@ -10,6 +10,7 @@ import type { TUI } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import type { OverlaySessionLifecycleDeps } from "../../src/interactive/overlay-session-lifecycle.js";
 import { createOverlaySessionLifecycle } from "../../src/interactive/overlay-session-lifecycle.js";
+import { buildMessagePickerRows } from "../../src/interactive/overlays/message-picker.js";
 import type { SlashCommandContext } from "../../src/session-control/slash-commands.js";
 import { dispatchSlashCommand, parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -128,6 +129,24 @@ describe("/fork session isolation", () => {
 			ok(session.readEntries().some((entry) => entry.turnId === "child-a"));
 		});
 	}
+
+	it("lists one fork row per prompt, forking after that turn's last reply (bt-11 #3)", () => {
+		session.create({ cwd: scratch.dir });
+		append("u1", null, "user", { text: "Fix the bug" });
+		append("a1", "u1", "assistant");
+		session.append({ id: "r1", parentId: "a1", kind: "tool_result", payload: { text: "ok" } });
+		append("a1-final", "r1", "assistant");
+		append("u2", "a1-final", "user", { text: "Explain" });
+		append("a2", "u2", "assistant");
+		append("a2-final", "a2", "assistant");
+		deepStrictEqual(
+			buildMessagePickerRows(session.readEntries()).map((row) => [row.turnId, row.asked]),
+			[
+				["a2-final", "Explain"],
+				["a1-final", "Fix the bug"],
+			],
+		);
+	});
 
 	it("settles the running turn into its parent before forking", async () => {
 		const parent = session.create({ cwd: scratch.dir });
