@@ -2403,7 +2403,7 @@ function renderToolSegmentLines(
 	const call = {
 		toolCallId: seg.id,
 		toolName: seg.name,
-		args: shownArgs(seg),
+		args: formingPreviewArgs(seg, width, detail, terminalRows),
 		actionClass: seg.actionClass,
 		cardAttached: seg.cardAttached,
 		elapsedMs: seg.startedAtMs === undefined ? undefined : Math.max(0, rawDurationMs(seg.startedAtMs, nowMs)),
@@ -2476,6 +2476,36 @@ function changeSettledCall(seg: ToolSegment): void {
 /** Arguments still forming can stop anywhere inside a URL, so they show only what cannot become its userinfo (#446). */
 function shownArgs(seg: ToolSegment): unknown {
 	return seg.argsComplete ? seg.args : holdUnresolvedStrings(seg.args);
+}
+
+/** Room past the invocation rows' character budget, so redaction and sanitizing near the cut never reach the rows shown. */
+const FORMING_ARG_SLACK_CHARS = 4096;
+/** Tools whose forming payload renders as a streamed tail (`LiveToolView`), not as the head of an argument. */
+const TAIL_PAYLOAD_TOOLS: ReadonlySet<string> = new Set([ToolNames.Write, ToolNames.Edit]);
+
+/**
+ * The arguments a forming row paints from. Its preview shows the head of each argument, at most the invocation rows
+ * at four characters a cell (`renderToolArguments`), so a long string is cut well past that, exactly as if the stream
+ * had stopped there, and the cut is held like any stream end (#446). Redacting and laying out a 130 KB heredoc on
+ * every frame cost 25-30 ms; a frame now costs the rows it shows (x6-7b). Settled arguments are never cut.
+ */
+function formingPreviewArgs(seg: ToolSegment, width: number, detail: TranscriptDetailPolicy, terminalRows: number) {
+	if (seg.argsComplete || TAIL_PAYLOAD_TOOLS.has(seg.name)) return shownArgs(seg);
+	const cap = 4 * Math.max(1, width) * previewBudget(detail.invocationRows, terminalRows) + FORMING_ARG_SLACK_CHARS;
+	return holdUnresolvedStrings(headOfStrings(seg.args, cap));
+}
+
+function headOfStrings(value: unknown, cap: number, depth = 0): unknown {
+	if (typeof value === "string") {
+		if (value.length <= cap) return value;
+		const code = value.charCodeAt(cap - 1);
+		return value.slice(0, code >= 0xd800 && code <= 0xdbff ? cap - 1 : cap);
+	}
+	if (depth > 8 || value === null || typeof value !== "object") return value;
+	if (Array.isArray(value)) return value.map((item) => headOfStrings(item, cap, depth + 1));
+	const out: Record<string, unknown> = {};
+	for (const [key, item] of Object.entries(value)) out[key] = headOfStrings(item, cap, depth + 1);
+	return out;
 }
 
 /** A settled tool segment as the renderers read a finished call. */

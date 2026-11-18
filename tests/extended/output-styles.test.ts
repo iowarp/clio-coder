@@ -172,6 +172,61 @@ test("streamed tool arguments show preparation before execution and clear on ans
 	}
 });
 
+// x6-7b: every delta re-rendered the whole forming command, so a 130 KB heredoc cost ~30 ms a frame.
+test("a forming bash call renders in time independent of its argument size and settles unchanged", () => {
+	const heredoc = (rows: number) =>
+		`cat > data.csv <<'EOF'\n${Array.from({ length: rows }, (_, i) => `${i},sensor-${i % 97},${(i * 0.37).toFixed(3)},ok,${"x".repeat(48)}`).join("\n")}\nEOF`;
+	const small = heredoc(100);
+	const large = heredoc(3600);
+	ok(small.length < 9_000 && large.length > 250_000);
+	const width = 120;
+	const panelFor = (command: string) => {
+		const panel = createChatPanel({ getOutputStyle: () => "detailed", getTerminalRows: () => 48, now: () => 1000 });
+		const step = (type: string) =>
+			panel.applyEvent({
+				type: "message_update",
+				assistantMessageEvent: {
+					type,
+					contentIndex: 0,
+					partial: { content: [{ type: "toolCall", id: "h", name: "bash", arguments: { command } }] },
+				},
+			} as never);
+		step("toolcall_start");
+		return { panel, step };
+	};
+	const medianRenderMs = (command: string) => {
+		const { panel, step } = panelFor(command);
+		const samples: number[] = [];
+		for (let i = 0; i < 9; i++) {
+			step("toolcall_delta");
+			const started = performance.now();
+			panel.render(width);
+			samples.push(performance.now() - started);
+		}
+		return samples.sort((a, b) => a - b)[4] ?? 0;
+	};
+	medianRenderMs(small);
+	const ratio = medianRenderMs(large) / Math.max(medianRenderMs(small), 0.5);
+	ok(ratio < 4, `a ${large.length}-char forming command rendered ${ratio.toFixed(1)}x slower than a small one`);
+	const { panel, step } = panelFor(large);
+	step("toolcall_delta");
+	const formingRows = plain(panel.render(width));
+	match(formingRows, /cat > data\.csv <<'EOF'/u);
+	match(formingRows, /more arguments/u);
+	doesNotMatch(formingRows, /^3599,/mu);
+	step("toolcall_end");
+	const ended = createChatPanel({ getOutputStyle: () => "detailed", getTerminalRows: () => 48, now: () => 1000 });
+	ended.applyEvent({
+		type: "message_update",
+		assistantMessageEvent: {
+			type: "toolcall_end",
+			contentIndex: 0,
+			partial: { content: [{ type: "toolCall", id: "h", name: "bash", arguments: { command: large } }] },
+		},
+	} as never);
+	deepStrictEqual(panel.render(width), ended.render(width));
+});
+
 test("legacy preferences normalize without changing other settings or the input", () => {
 	for (const [legacy, expected] of [
 		["minimal", "compact"],
