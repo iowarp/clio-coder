@@ -25,9 +25,15 @@ function records(value: unknown): Record<string, unknown>[] {
 		: [];
 }
 
-function failedChecks(value: unknown): string[] {
+/**
+ * Failed checks as lines. `ran` selects a code-report's executed failures (true) or its checks that never started
+ * (false), counting a check sealed without `ran` as not started; omitted, it selects every failure.
+ */
+function failedChecks(value: unknown, ran?: boolean): string[] {
 	return records(value).flatMap((check) =>
-		check.passed === false && typeof check.name === "string"
+		check.passed === false &&
+		typeof check.name === "string" &&
+		(ran === undefined || (ran ? check.ran === true : check.ran !== true))
 			? [`${check.name}: ${typeof check.evidence === "string" ? check.evidence : "did not pass"}`]
 			: [],
 	);
@@ -58,6 +64,12 @@ export function verifierVerdict(receipt: RunResult): { verdict: string; failedCh
 	return { verdict: report.data.verdict, failedChecks: failedChecks(report.data.checks) };
 }
 
+/** Code-step checks that ran and failed, which print under Failed checks rather than as unverified. */
+function executedCodeFailures(receipt: RunResult): string[] {
+	const report = sealedReport(receipt);
+	return report?.kind === "code-report" ? failedChecks(report.data.checks, true) : [];
+}
+
 /** DF-6: project only contract fields from the sealed result, never infer limits from narration. */
 function sealedResultLimitations(receipt: RunResult): string[] {
 	const report = sealedReport(receipt);
@@ -67,7 +79,8 @@ function sealedResultLimitations(receipt: RunResult): string[] {
 		case "mutation-report":
 			return [...strings(data.declaredChecks), ...failedChecks(data.validations)];
 		case "code-report":
-			return failedChecks(data.checks);
+			// A check that ran and failed is a failure, not a gap; a report sealed before `ran` keeps every failure here.
+			return failedChecks(data.checks, false);
 		case "scout-report":
 			return [
 				...strings([data.degradedReason]),
@@ -176,10 +189,9 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 	const answer = cutOff ? holdCutOffText(whole) : whole;
 	const limitations = sealedResultLimitations(receipt);
 	const verifier = verifierVerdict(receipt);
+	const executed = [...(verifier?.failedChecks ?? []), ...executedCodeFailures(receipt)];
 	const failedBlock =
-		verifier !== null && verifier.failedChecks.length > 0
-			? `\nFailed checks:\n${verifier.failedChecks.map((item) => `- ${limitationLine(item)}`).join("\n")}\n`
-			: "";
+		executed.length > 0 ? `\nFailed checks:\n${executed.map((item) => `- ${limitationLine(item)}`).join("\n")}\n` : "";
 	const block =
 		limitations.length > 0
 			? `\nNot verified:\n${limitations.map((item) => `- ${limitationLine(item)}`).join("\n")}\n`
@@ -196,7 +208,7 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 	const caveat = found?.kind === "no-tools" ? null : found;
 	const finishedWith = caveat === null ? "" : `\nFinished with a caveat: ${caveat.words}\n`;
 	return redactUrlCredentials(
-		`${answer.length > 0 ? `${answer}\n` : ""}${failedBlock}${block}${failed}${finishedWith}${formatResultLine(receipt, limitations.length, verifier)}\n`,
+		`${answer.length > 0 ? `${answer}\n` : ""}${failedBlock}${block}${failed}${finishedWith}${formatResultLine(receipt, limitations.length, verifier, executed.length)}\n`,
 	);
 }
 
@@ -221,6 +233,7 @@ function formatResultLine(
 	r: RunResult,
 	notVerified: number,
 	verifier: { verdict: string; failedChecks: string[] } | null,
+	failedCount: number,
 ): string {
 	const reasoningFact = r.spend.usage.reasoning;
 	const reasoning =
@@ -228,7 +241,7 @@ function formatResultLine(
 	const failure = r.failureMessage ? ` error=${r.failureMessage}` : "";
 	const verification =
 		(verifier !== null ? ` verdict=${verifier.verdict}` : "") +
-		(verifier !== null && verifier.failedChecks.length > 0 ? ` failed_checks=${verifier.failedChecks.length}` : "") +
+		(failedCount > 0 ? ` failed_checks=${failedCount}` : "") +
 		(notVerified > 0 ? ` verification=unverified not_verified=${notVerified}` : "");
 	const responseModelIdObservation = runResponseModelIdObservationLabel(r);
 	const gatewayRouting = runGatewayRoutingLabel(r);

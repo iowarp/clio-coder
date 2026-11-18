@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, it } from "node:test";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { mainSandboxPolicy } from "../../src/core/sandbox/main-session.js";
+import { parseCodeReport } from "../../src/domains/agents/result-contract.js";
 import {
 	CODE_STEP_CAPTURE_MAX_BYTES,
 	CODE_STEP_EXCERPT_MAX_BYTES,
@@ -231,6 +232,9 @@ it("fails the check without a repair when a changed test's known runner needs pr
 	strictEqual(outcome.report.checks[1]?.name, "changed tests (python-pytest)");
 	match(outcome.report.checks[1]?.evidence ?? "", /tests\/test_api\.py was not run.*\.venv is missing.*uv sync/u);
 	strictEqual(outcome.unrepairable, true);
+	// The sealed report validates with the check's execution state.
+	strictEqual(parseCodeReport(outcome.output)?.checks[1]?.ran, false);
+	strictEqual(parseCodeReport(outcome.output)?.checks[0]?.ran, true);
 });
 
 it("commits neither a file that only stopped being ignored nor a rewrite behind a staged deletion", async () => {

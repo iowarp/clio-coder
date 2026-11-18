@@ -315,6 +315,39 @@ test("mutation workers gain typed handoff eligibility while artifact helpers ret
 	}
 });
 
+test("headless human output lists a code check that ran and failed as failed, not unverified", () => {
+	const unknown = { kind: "unknown", reason: "not-observed" };
+	const data = {
+		passed: false,
+		exitCode: 1,
+		checks: [
+			{ name: "test", passed: false, evidence: "`npm test` exit 1 in 40ms", ran: true },
+			{ name: "changed tests", passed: false, evidence: "Changed test a.test.js was not run", ran: false },
+			{ name: "legacy", passed: false, evidence: "sealed before ran" },
+		],
+		artifactPaths: [],
+		outputExcerpt: "",
+	};
+	const human = formatDispatchHumanOutput("", {
+		runId: "r",
+		agentId: "a",
+		exitCode: 1,
+		targetId: "t",
+		wireModelId: "m",
+		startedAt: "2026-01-01T00:00:00Z",
+		endedAt: "2026-01-01T00:00:01Z",
+		spend: { totalTokens: unknown, usage: { reasoning: unknown } },
+		quality: {},
+		output: { state: "final", truncated: false, text: JSON.stringify(data), structured: { kind: "code-report", data } },
+	} as never);
+	ok(human.includes("Failed checks:\n- test: `npm test` exit 1 in 40ms\n"), human);
+	ok(
+		human.includes("Not verified:\n- changed tests: Changed test a.test.js was not run\n- legacy: sealed before ran\n"),
+		human,
+	);
+	ok(human.includes(" failed_checks=1 verification=unverified not_verified=2 "), human);
+});
+
 test("headless human output exposes a sealed coder limitation between narration and receipt", async (t) => {
 	const env = await isolateClioEnv("clio-sealed-limits-");
 	const limitation = "Full diff inspection was not possible; only the current state was verified.";
