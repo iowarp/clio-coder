@@ -90,6 +90,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Tool containment checks (run-script, store put, artifact, grep paths, task worktree overlay, stray writes and tmpfs parent, dispatch worktree cwd, offload reads, cd display, context-map own files) now treat a child named `..x` as inside its root, sharing `relativePathEscapes`.
 - Automatic compaction on small context windows no longer re-summarizes nearly every turn: the kept suffix now fits below the trigger, and the summary rearm band survives across headless `run` processes (bt-18).
 - `fleet view` and `evidence inspect` now use the same trust reader and agree on completion evidence (bt-20).
 - `extensions list` shows the runtime tools of api-2 extensions (bt-20).
