@@ -72,6 +72,20 @@ function blockedThenRead(actionClass: "execute" | "write"): ChatLoopEvent[] {
 			decision: "blocked",
 			result: { content: [{ type: "text", text: "denied" }], details: {} },
 		} as ChatLoopEvent,
+		// The loop guard withholding a repeated read is no safety refusal (bt-15 T3).
+		{
+			type: "tool_execution_end",
+			toolName: "read",
+			toolCallId: "repeat",
+			isError: true,
+			outcome: "blocked",
+			actionClass: "read",
+			decision: "blocked",
+			reasonCode: "guard_block",
+			ruleId: "guard.loop",
+			redundantRepeat: true,
+			result: { content: [{ type: "text", text: "loop detected" }], details: {} },
+		} as ChatLoopEvent,
 		{
 			type: "tool_execution_end",
 			toolName: "read",
@@ -163,6 +177,7 @@ for (const scenario of [
 		code: 1,
 		outcome: "failed",
 		calls: 1,
+		decisions: { allowed: 0, blocked: 1, guardBlocked: 1, permissionRequested: 0 },
 	},
 	{
 		name: "unrelated read cannot recover denied edit",
@@ -451,6 +466,14 @@ for (const scenario of [
 						strictEqual(end.exitCode, 1);
 						strictEqual(end.error, envelope.outcomeDetail);
 					}
+				}
+				if ("decisions" in scenario && mode === "terminal") {
+					const end = stdout
+						.split("\n")
+						.filter(Boolean)
+						.map((line) => JSON.parse(line))
+						.find((event) => event.type === "turn_end");
+					deepStrictEqual(end.safety.decisions, scenario.decisions);
 				}
 				if (errored) strictEqual(envelope.spend.pricing.usd.kind, "unknown");
 				else strictEqual(factKnownValue(envelope.spend.pricing.usd), scenario.calls * 0.25);
