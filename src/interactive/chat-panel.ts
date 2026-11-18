@@ -53,6 +53,7 @@ import {
 import { coldReasonList } from "../session-control/cold-reasons.js";
 import type { WorkerEntryState } from "../session-control/worker-stream.js";
 import { routeFirstOutput } from "./footer/silence-note.js";
+import { wallClockLocal } from "./format-time.js";
 import { keepRows, keptPieceRows, keptRows, type RowPiece } from "./kept-rows.js";
 import { editPreviewDiff } from "./mutation-preview.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
@@ -215,6 +216,8 @@ export interface ChatPanelTurnUsage {
 	humanWaitMs?: number;
 	/** How a normally stopped run closed when it wrote no answer. */
 	ending?: TurnEnding;
+	/** Epoch ms the turn ended: live, when it settled; replayed, its terminal ledger entry's timestamp. */
+	endedAtMs?: number;
 }
 
 /**
@@ -226,6 +229,8 @@ export interface ReplayedRunFacts {
 	coldReasons?: ReadonlyArray<string>;
 	/** Of `elapsedMs`, what the live run recorded waiting on the operator. */
 	humanWaitMs?: number;
+	/** Epoch ms of the run's terminal ledger entry; absent when the ledger recorded no usable time. */
+	endedAtMs?: number;
 }
 
 /** What one Markdown layout of the open reply cost and how long the reply was then. */
@@ -2038,8 +2043,12 @@ function renderTurnUsageLine(
 	usage: ChatPanelTurnUsage,
 	width: number,
 	receipt: TranscriptDetailPolicy["receipt"],
+	nowMs: number,
 ): string[] {
 	const outcome = usage.outcome ?? "Done";
+	// When the turn ended closes every receipt, after the outcome and duration a reader scans for first.
+	const ended = usage.endedAtMs === undefined ? null : wallClockLocal(usage.endedAtMs, nowMs);
+	const endedFact = ended === null ? [] : [ended];
 	const glyph = receiptGlyph(outcome);
 	const room = Math.max(1, width - PROSE_GUTTER_WIDTH);
 	const quiet =
@@ -2062,14 +2071,15 @@ function renderTurnUsageLine(
 		// A written call that did not run is news in every style too, and Brief has no receipt row to carry it otherwise.
 		if (usage.ending?.kind === "call_not_run")
 			return [
-				`${glyph}${dimLine(joinFacts([`${outcome}${receiptDuration(usage)}`, writtenCallsFact(usage.ending.writtenTools)]), room)}`,
+				`${glyph}${dimLine(joinFacts([`${outcome}${receiptDuration(usage)}`, writtenCallsFact(usage.ending.writtenTools), ...endedFact]), room)}`,
 			];
-		if (noAnswer.length > 0) return [`${glyph}${dimLine(`${outcome}${receiptDuration(usage)}`, room)}`, ...noAnswer];
+		if (noAnswer.length > 0)
+			return [`${glyph}${dimLine(joinFacts([`${outcome}${receiptDuration(usage)}`, ...endedFact]), room)}`, ...noAnswer];
 		// Brief keeps no receipt, but a turn still has to end visibly: its outcome glyph and how long it took.
 		// Done is the glyph alone; the warn glyph covers several outcomes, so any other one keeps its word.
 		const took = receiptDuration(usage).replace(/^ · /u, "");
 		const end = outcome === "Done" && took !== "" ? took : `${outcome}${receiptDuration(usage)}`;
-		return [`${glyph}${dimLine(end, room)}`];
+		return [`${glyph}${dimLine(joinFacts([end, ...endedFact]), room)}`];
 	}
 	const spend = usage.spend;
 	// A wait the provider asked for spends no retry, so the receipt keeps it apart: a count of them approached no limit.
@@ -2114,9 +2124,9 @@ function renderTurnUsageLine(
 			// A route that reports no cache would end every row on the same unknown; Detailed and /usage keep that.
 			stated?.cached != null ? `cached ${stated.cached}` : null,
 		]) {
-			if (fact !== null && visibleWidth(joinFacts([...rowFacts, fact])) <= room) rowFacts.push(fact);
+			if (fact !== null && visibleWidth(joinFacts([...rowFacts, fact, ...endedFact])) <= room) rowFacts.push(fact);
 		}
-		return [`${glyph}${dimLine(releaseSpaces(joinFacts(rowFacts)), room)}`, ...noAnswer];
+		return [`${glyph}${dimLine(releaseSpaces(joinFacts([...rowFacts, ...endedFact])), room)}`, ...noAnswer];
 	}
 	const settled = `${outcome}${quiet === null ? "" : ` · ${quiet}`}${retries === null ? "" : ` · ${retries}`}${moved === null ? "" : ` · ${moved}`}${receiptDuration(usage)}`;
 	// Detailed states what the turn spent, one fact per field, as the read model
@@ -2144,6 +2154,7 @@ function renderTurnUsageLine(
 	}
 	// How many calls had no usage data closes the line once, after the figures it qualifies (F4).
 	if (spend?.coverage) facts.push(spend.coverage);
+	facts.push(...endedFact);
 	return [
 		...hangProseLines(wrapTextWithAnsi(`${SECONDARY()}${joinFacts(facts)}${RESET}`, room).map(releaseSpaces), glyph),
 		...noAnswer,
@@ -2762,7 +2773,7 @@ function renderEntryLines(
 		lastMarker.lines = [renderSettledThinkingMarker(reasoningFromTurnUsage(entry.turnUsage), width)];
 	}
 	if (entry.turnUsage && !entry.pending) {
-		blocks.push({ kind: "receipt", lines: renderTurnUsageLine(entry.turnUsage, width, detail.receipt) });
+		blocks.push({ kind: "receipt", lines: renderTurnUsageLine(entry.turnUsage, width, detail.receipt, nowMs) });
 	}
 	let joined: JoinedRows | undefined;
 	if (entry.pending) {
@@ -3331,6 +3342,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						: runStartedAt === undefined
 							? undefined
 							: Math.max(0, now() - runStartedAt);
+				const endedAtMs = replayed !== undefined ? replayed.endedAtMs : now();
 				const coldReasons = replayed !== undefined ? (replayed.coldReasons ?? []) : runColdReasons;
 				const callIds = runCallIds(messages);
 				// Workers a turn detached keep running past its end, so the turn ended but the work is not done. A replay
@@ -3345,6 +3357,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					...(turnId === undefined ? {} : { turnId }),
 					...(callIds.length > 0 ? { callIds } : {}),
 					...(elapsedMs === undefined ? {} : { elapsedMs }),
+					...(endedAtMs === undefined ? {} : { endedAtMs }),
 					...(humanWaitMs > 0 ? { humanWaitMs } : {}),
 					...(coldReasons.length > 0 ? { coldReasons: [...coldReasons] } : {}),
 					...(runRetries > 0 ? { retries: runRetries } : {}),
