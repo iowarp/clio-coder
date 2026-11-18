@@ -24,10 +24,11 @@ import { isMemoryConsumptionReceipt } from "../memory/observations.js";
  */
 
 import { createHash } from "node:crypto";
+import { isModelTier, type ModelTier } from "../../core/model-tier.js";
 import { isProviderCheckpointHandle } from "../../core/provider-checkpoint-handle.js";
 import { isSkillActivation, type PendingSkillToolPolicy, type SkillActivation } from "../../core/skill-activation.js";
 import type { ClioTurnRecord } from "../../engine/session.js";
-import type { ProviderCheckpointHandle } from "../../engine/types.js";
+import type { AgentMessage, ProviderCheckpointHandle } from "../../engine/types.js";
 import { AUTONOMY_EXPOSURES, type AutonomyExposure } from "../safety/autonomy.js";
 import type {
 	ContinuityCheckpointPayload,
@@ -137,6 +138,131 @@ export const BUDGET_BLOCK_ENTRY = "budgetBlock";
  * in the follow-up call leaves that row as the turn's last word and replay reads Done.
  */
 export const IN_RUN_CONTINUATION_ENTRY = "inRunContinuation";
+
+/**
+ * A message the host put into the model's history itself: a reminder tail, a
+ * pinned block, a memory restoration or a recovery exchange (format 7). The
+ * record holds the exact elements, so a rebuild, a reopen and a fork place the
+ * same bytes where the live request carried them. `place.after` names the
+ * newest rendered row on the path when the insert was made; `place.before` is
+ * used only by a restoration installed at submit, ahead of its user row.
+ * `replaces` lists rows render omits because the record stands for them.
+ */
+export const HOST_INSERT_CUSTOM_TYPE = "clio-coder.host-insert";
+
+export const HOST_INSERT_SOURCES = [
+	"reminder",
+	"continuation",
+	"required-tool",
+	"pinned",
+	"memory-restoration",
+	"repetition-recovery",
+	"thinking-length-recovery",
+	"synthesis-recovery",
+] as const;
+export type HostInsertSource = (typeof HOST_INSERT_SOURCES)[number];
+
+export type HostInsertPlace = { before: string } | { after: string };
+
+/** What a restoration install was offered under, so a retry can tell its own install from another. */
+export interface HostInsertRestoration {
+	installId: string;
+	sessionId: string;
+	branchAnchorTurnId: string | null;
+	commitId: string;
+	generation: number;
+	citedEntryIds: string[];
+}
+
+export interface HostInsertRecord {
+	version: 1;
+	id: string;
+	source: HostInsertSource;
+	elements: AgentMessage[];
+	place: HostInsertPlace;
+	replaces?: string[];
+	reissueOf?: string;
+	restoration?: HostInsertRestoration;
+}
+
+export interface HostInsertRetraction {
+	version: 1;
+	id: string;
+	retract: true;
+}
+
+export type HostInsertData = HostInsertRecord | HostInsertRetraction;
+
+const HOST_INSERT_ROLES = ["user", "assistant", "toolResult"] as const;
+
+function isHostInsertElement(value: unknown): boolean {
+	return (
+		isRecord(value) &&
+		isOneOf(value.role, HOST_INSERT_ROLES) &&
+		(typeof value.content === "string" || Array.isArray(value.content))
+	);
+}
+
+function isHostInsertRestoration(value: unknown): value is HostInsertRestoration {
+	return (
+		isRecord(value) &&
+		isString(value.installId) &&
+		isString(value.sessionId) &&
+		(value.branchAnchorTurnId === null || isString(value.branchAnchorTurnId)) &&
+		isString(value.commitId) &&
+		isNumber(value.generation) &&
+		isStringArray(value.citedEntryIds)
+	);
+}
+
+function isHostInsertData(value: unknown): value is HostInsertData {
+	if (!isRecord(value) || value.version !== 1 || !isString(value.id)) return false;
+	if (value.retract === true) return true;
+	const place = value.place;
+	return (
+		isOneOf(value.source, HOST_INSERT_SOURCES) &&
+		Array.isArray(value.elements) &&
+		value.elements.length > 0 &&
+		value.elements.every(isHostInsertElement) &&
+		isRecord(place) &&
+		(isString(place.before) || isString(place.after)) &&
+		(value.replaces === undefined || isStringArray(value.replaces)) &&
+		isOptionalString(value.reissueOf) &&
+		(value.restoration === undefined || isHostInsertRestoration(value.restoration))
+	);
+}
+
+/**
+ * The step chain's durable state (format 7): what leads the next step turn, or
+ * that the chain was dropped. Never rendered; the step checkpoint reads it.
+ */
+export const STEP_CHAIN_CUSTOM_TYPE = "clio-coder.step-chain";
+
+export type StepChainData =
+	| {
+			version: 1;
+			sessionId: string;
+			template: string;
+			stepTool: string;
+			body: string;
+			bodyTurnId: string;
+			finalText: string;
+			settledLeaf: string;
+	  }
+	| { version: 1; sessionId: string; cleared: true };
+
+function isStepChainData(value: unknown): value is StepChainData {
+	if (!isRecord(value) || value.version !== 1 || !isString(value.sessionId)) return false;
+	if (value.cleared === true) return true;
+	return (
+		isString(value.template) &&
+		isString(value.stepTool) &&
+		isString(value.body) &&
+		isString(value.bodyTurnId) &&
+		isString(value.finalText) &&
+		isString(value.settledLeaf)
+	);
+}
 
 export interface BudgetBlockData {
 	level: "at" | "over";
@@ -612,10 +738,11 @@ export const EVICTION_REASONS = [
 	"thinking_turn_closed",
 	"age_horizon",
 	"operator",
+	"step_overflow",
 ] as const;
 export type EvictionReason = (typeof EVICTION_REASONS)[number];
 
-export const EVICTION_TRIGGERS = ["pressure", "operator"] as const;
+export const EVICTION_TRIGGERS = ["pressure", "operator", "superseded"] as const;
 export type EvictionTrigger = (typeof EVICTION_TRIGGERS)[number];
 
 /**
@@ -673,6 +800,23 @@ export interface ContextEvictionEntry extends BaseSessionEntry {
 	/** Used/window ratio that fired the event; null for operator-triggered events. */
 	pressureBefore: number | null;
 	snapshotIdBefore: string | null;
+	/** The route the stage ran under (format 7). Render never reads it. */
+	route?: EvictionRoute;
+	/** What the commit left behind when a live anchor existed (format 7). */
+	anchor?: EvictionAnchor;
+}
+
+export interface EvictionRoute {
+	tier: ModelTier;
+	promptCaching: boolean;
+}
+
+export interface EvictionAnchor {
+	/** Every history element at the record's position, after the carry. */
+	tokens: number;
+	sys: number;
+	tools: number;
+	route: { targetId: string; runtimeId: string; wireModelId: string; modelKey: string };
 }
 
 export interface ContextRecallEntry extends BaseSessionEntry {
@@ -927,6 +1071,25 @@ function isEvictedItem(value: unknown): value is EvictedItem {
 	);
 }
 
+function isEvictionRoute(value: unknown): value is EvictionRoute {
+	return isRecord(value) && isModelTier(value.tier) && typeof value.promptCaching === "boolean";
+}
+
+function isEvictionAnchor(value: unknown): value is EvictionAnchor {
+	const route = isRecord(value) ? value.route : undefined;
+	return (
+		isRecord(value) &&
+		isNumber(value.tokens) &&
+		isNumber(value.sys) &&
+		isNumber(value.tools) &&
+		isRecord(route) &&
+		isString(route.targetId) &&
+		isString(route.runtimeId) &&
+		isString(route.wireModelId) &&
+		isString(route.modelKey)
+	);
+}
+
 export function isSessionEntry(value: unknown): value is SessionEntry {
 	if (!value || typeof value !== "object") return false;
 	const v = value as Record<string, unknown>;
@@ -952,7 +1115,10 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 				(v.customType !== SKILL_CONTEXT_STATE || isSkillContextState(v.data)) &&
 				// A reserved control subtype is strictly validated, because opaque
 				// custom data must never become resume authority by claiming the name.
-				(v.customType !== HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE || isHandoffRecoveryRequestData(v.data))
+				(v.customType !== HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE || isHandoffRecoveryRequestData(v.data)) &&
+				// Rendered host text: a record that only claims the name never reaches a request.
+				(v.customType !== HOST_INSERT_CUSTOM_TYPE || isHostInsertData(v.data)) &&
+				(v.customType !== STEP_CHAIN_CUSTOM_TYPE || isStepChainData(v.data))
 			);
 		case "modelChange":
 			return isString(v.provider) && isString(v.modelId) && isOptionalString(v.target);
@@ -1050,7 +1216,9 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 				isNumber(v.tokensBefore) &&
 				isNumber(v.tokensAfter) &&
 				(v.pressureBefore === null || isNumber(v.pressureBefore)) &&
-				(v.snapshotIdBefore === null || isString(v.snapshotIdBefore))
+				(v.snapshotIdBefore === null || isString(v.snapshotIdBefore)) &&
+				(v.route === undefined || isEvictionRoute(v.route)) &&
+				(v.anchor === undefined || isEvictionAnchor(v.anchor))
 			);
 		case "contextRecall":
 			return (

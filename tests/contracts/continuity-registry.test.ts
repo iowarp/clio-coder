@@ -181,7 +181,7 @@ function readyLedger(): SessionEntry[] {
 
 describe("format v5 registration", () => {
 	it("stamps version 5 and lists both continuity kinds", () => {
-		strictEqual(CURRENT_SESSION_FORMAT_VERSION, 6);
+		strictEqual(CURRENT_SESSION_FORMAT_VERSION, 7);
 		ok(SESSION_ENTRY_KINDS.includes("handoffTransaction"));
 		ok(SESSION_ENTRY_KINDS.includes("continuityCommit"));
 	});
