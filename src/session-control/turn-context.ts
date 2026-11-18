@@ -535,18 +535,7 @@ type LiveBudgetAccounting = Pick<
 	| "outputReserveTokens"
 >;
 
-/**
- * Content identity of a message list.
- *
- * The one serialization used for both jobs that need to know whether the same
- * message objects still hold the same bytes: validating a provider anchor's
- * attested prefix, and fingerprinting the live request. Token counts cannot do
- * either, because `estimateAgentMessageTokens` prices by character count and a
- * same-length replacement leaves every figure identical.
- */
-function messageListDigest(messages: ReadonlyArray<AgentMessage>): string {
-	return createHash("sha256").update(JSON.stringify(messages)).digest("hex");
-}
+const sha256Json = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 // #423: five idle minutes warrants a reminder, without claiming a provider cache lifetime.
 const CACHE_REUSE_IDLE_NOTICE_MS = 5 * 60 * 1000;
@@ -602,6 +591,8 @@ function recordContextSnapshot(sessionId: string, snapshot: ContextSnapshot): vo
 
 export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const { state, middleware } = deps;
+	const activeEntries = () =>
+		filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
 	const compactionTrigger = new AutoCompactionTrigger<CompactResult | null>();
 	let compactionController: AbortController | null = null;
 	let disposed = false;
@@ -831,7 +822,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		if (!cacheCallBaselineLoaded) {
 			cacheCallBaselineLoaded = true;
 			// #423: a fresh process resumes only the active branch's last persisted call.
-			const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+			const entries = activeEntries();
 			for (let index = entries.length - 1; index >= 0; index -= 1) {
 				const entry = entries[index];
 				if (!entry) continue;
@@ -1202,6 +1193,30 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		return onChatRoute;
 	};
 
+	/**
+	 * The route's compaction budget and trigger. The summary's output shares the window with the context it reads,
+	 * so every trigger check counts its reserve; the reserve is resolved on first use and then held.
+	 */
+	const routeCompaction = (agentRuntime: AgentRuntime, settings: Readonly<ClioSettings>) => {
+		const cfg = settings.context.compaction;
+		const model = agentRuntime.agent.state.model;
+		const economic = compactionBudget(
+			agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
+			cfg?.threshold ?? DEFAULT_COMPACTION_THRESHOLD,
+			cfg?.maxTokens,
+			model,
+		);
+		let reserve: number | undefined;
+		const summaryReserve = (): number =>
+			(reserve ??= summaryOutputReserve(model, { summaryOnChatRoute: summaryOnChatRoute(agentRuntime, cfg?.model) }));
+		return {
+			economic,
+			summaryReserve,
+			shouldCompact: (tokens: number) =>
+				shouldCompact(tokens, economic.threshold, economic.triggerWindow, summaryReserve()),
+		};
+	};
+
 	const liveContextEstimate = (
 		agentRuntime: AgentRuntime,
 		pendingUserText?: string,
@@ -1262,7 +1277,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		};
 	};
 
-	const sha256Json = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 	/** The system prompt rarely changes between publications; hash it again only when it does. */
 	const systemPromptDigest = (prompt: string | null): string => {
 		if (promptDigest?.prompt !== prompt) promptDigest = { prompt, digest: sha256Json(prompt) };
@@ -1548,17 +1562,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		tokensRemoved: number,
 	): void => {
 		if (!reconciledAnchor || historyTokens === null) return;
-		const anchoredMessages = [
-			...agentRuntime.agent.state.messages.filter((message) => message.role !== "system" || isHostPolicyMessage(message)),
-		];
+		const history = observeHistory(agentRuntime);
 		reconciledAnchor = {
 			...reconciledAnchor,
 			tokens: Math.max(0, historyTokens - Math.max(0, tokensRemoved)),
-			anchoredMessages,
+			anchoredMessages: history.messages,
 			// Re-anchoring on the projected list is the point of this carry, so its
 			// content identity is retaken here. Keeping the old digest would fail
 			// the next validation and discard the attestation this preserves.
-			contentDigest: messageListDigest(anchoredMessages),
+			contentDigest: history.digest(),
 		};
 	};
 
@@ -1574,9 +1586,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		});
 		setEngineProviderCheckpointObserver(runtime.agent, (handle, inputTokens) => {
 			if (origin !== deps.session?.current()?.id) return;
-			const entries = withProviderCheckpointMeasurements(
-				filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined),
-			);
+			const entries = withProviderCheckpointMeasurements(activeEntries());
 			const checkpoint = entries.find(
 				(entry) => entry.kind === "compactionSummary" && entry.providerCheckpoint?.digest === handle.digest,
 			);
@@ -1613,7 +1623,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			return map?.[level] ?? (level === "off" ? "none" : level);
 		};
 		const currentEffort = effortFor(runtime.runtimeResolution.effectiveThinkingLevel);
-		const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+		const entries = activeEntries();
 		let start = 0;
 		for (let index = 0; index < entries.length; index += 1) {
 			const entry = entries[index];
@@ -1777,7 +1787,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const useRequestBudget = !force || requiredFit || handoff !== undefined || providerFallbackReason !== undefined;
 		const activeAutoTurnId = useRequestBudget ? state.activeUserTurnId : null;
 		const skillContextState = mainSkillContextState(
-			filterEntriesToActivePath(deps.readSessionEntries(), state.lastTurnId ?? undefined),
+			activeEntries(),
 			pendingSkillPolicy ?? state.currentPendingSkillPolicy ?? state.activeSkillSurface,
 		);
 		const settings = deps.getSettings();
@@ -1795,28 +1805,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			autoCompactFailures = 0;
 			summaryRearm = null;
 		}
-		const economic = compactionBudget(
-			agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
-			cfg?.threshold ?? DEFAULT_COMPACTION_THRESHOLD,
-			cfg?.maxTokens,
-			agentRuntime.agent.state.model,
-		);
+		// The re-checks after a free stage use the same reserve, so a stage that stops short of it does not re-arm.
+		const route = routeCompaction(agentRuntime, settings);
+		const economic = route.economic;
 		const compactionThreshold = economic.threshold;
 		const compactionWindow = economic.triggerWindow;
-		// The summary's output shares the window with the context it reads, so every
-		// trigger check here counts it; the re-checks after a free stage use the same
-		// reserve so a stage that stops short of it does not re-arm on the next turn.
-		const summaryReserve = summaryOutputReserve(agentRuntime.agent.state.model, {
-			summaryOnChatRoute: summaryOnChatRoute(agentRuntime, cfg?.model),
-		});
 		const workingSetTarget = settings.context.workingSet.target * economic.fractionScale;
 		const pressureEstimate = force && !requiredFit ? null : liveContextEstimate(agentRuntime, pendingUserText);
-		if (
-			pressureEstimate &&
-			!requiredFit &&
-			!shouldCompact(pressureEstimate.tokens, compactionThreshold, compactionWindow, summaryReserve).shouldCompact
-		)
-			return false;
+		if (pressureEstimate && !requiredFit && !route.shouldCompact(pressureEstimate.tokens).shouldCompact) return false;
 		// Paused or inside the rearm band, the paid summary waits; the free pre-summary stages below still run.
 		const summaryHeld = (tokens: number): boolean =>
 			!force &&
@@ -1854,32 +1850,28 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// remain unchanged. Tools can grow the same user turn into a useful cut.
 		const attemptKey =
 			!force && activeAutoTurnId
-				? createHash("sha256")
-						.update(
-							JSON.stringify({
-								turn: activeAutoTurnId,
-								leaf: state.lastTurnId,
-								entries: deps
-									.readSessionEntries()
-									.filter((entry) => entry.kind !== "custom" || entry.customType !== CONTEXT_OPERATION_CUSTOM_TYPE),
-								context: {
-									systemPrompt: engineInitialSystemPrompt(agentRuntime.agent),
-									messages: agentRuntime.agent.state.messages.filter(
-										(message) => message.role !== "system" || isHostPolicyMessage(message),
-									),
-									tools: agentRuntime.agent.state.tools,
-									model: agentRuntime.agent.state.model,
-									thinkingLevel: agentRuntime.agent.state.thinkingLevel,
-								},
-								pendingUserText,
-								skillContextState,
-								estimate: pressureEstimate,
-								compaction: cfg,
-								workingSet: settings.context.workingSet,
-								output: settings.chat.maxOutputTokens,
-							}),
-						)
-						.digest("hex")
+				? sha256Json({
+						turn: activeAutoTurnId,
+						leaf: state.lastTurnId,
+						entries: deps
+							.readSessionEntries()
+							.filter((entry) => entry.kind !== "custom" || entry.customType !== CONTEXT_OPERATION_CUSTOM_TYPE),
+						context: {
+							systemPrompt: engineInitialSystemPrompt(agentRuntime.agent),
+							messages: agentRuntime.agent.state.messages.filter(
+								(message) => message.role !== "system" || isHostPolicyMessage(message),
+							),
+							tools: agentRuntime.agent.state.tools,
+							model: agentRuntime.agent.state.model,
+							thinkingLevel: agentRuntime.agent.state.thinkingLevel,
+						},
+						pendingUserText,
+						skillContextState,
+						estimate: pressureEstimate,
+						compaction: cfg,
+						workingSet: settings.context.workingSet,
+						output: settings.chat.maxOutputTokens,
+					})
 				: null;
 		if (attemptKey && emptyAutoCompactContextKey === attemptKey) return false;
 		let preSummaryStageActed = false;
@@ -1943,7 +1935,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		if (pressureEstimate) {
 			const estimate = pressureEstimate;
-			const verdict = shouldCompact(estimate.tokens, compactionThreshold, compactionWindow, summaryReserve);
+			const verdict = route.shouldCompact(estimate.tokens);
 
 			if (deps.session?.current()) {
 				const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
@@ -2068,7 +2060,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							if (
 								requiredFit
 									? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
-									: !shouldCompact(after.tokens, compactionThreshold, compactionWindow, summaryReserve).shouldCompact
+									: !route.shouldCompact(after.tokens).shouldCompact
 							)
 								return true;
 						} catch (error) {
@@ -2478,7 +2470,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const runStepCheckpoint: TurnContext["runStepCheckpoint"] = (agentRuntime, lead, pendingSkillPolicy) => {
 		if (reductionInFlight !== null || !deps.readSessionEntries || !deps.session?.current()) return false;
 		const sessionId = deps.session.current()?.id;
-		const active = filterEntriesToActivePath(deps.readSessionEntries(), state.lastTurnId ?? undefined);
+		const active = activeEntries();
 		const visible = compactionCut(active).visible;
 		const messagesSummarized = visible.filter((entry) => entry.kind === "message").length;
 		const cutCursor = [...active].reverse().find((entry) => entry.kind === "message")?.turnId;
@@ -2566,7 +2558,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const notifyMemoryCommit: TurnContext["notifyMemoryCommit"] = (commitId, kind, outcome) => {
 		const scope = bindMemoryScope();
 		if (scope) {
-			const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+			const entries = activeEntries();
 			const summary = entries.find(
 				(entry) =>
 					entry.kind === "compactionSummary" &&
@@ -2584,7 +2576,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const installMemoryRestoration: TurnContext["installMemoryRestoration"] = (runtime, pendingText) => {
 		const bridge = deps.memoryCommitBridge;
 		if (!bridge || !bindMemoryScope()) return false;
-		const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+		const entries = activeEntries();
 		const latest = [...entries]
 			.reverse()
 			.find((entry) => entry.kind === "continuityCommit" || entry.kind === "compactionSummary");
@@ -2648,7 +2640,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const origin = deps.session?.current()?.id;
 		const navigation = navigationEpoch;
 		const signal = deps.turnSignal?.();
-		const active = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+		const active = activeEntries();
 		const checkpoint = [...active].reverse().find((entry) => entry.kind === "compactionSummary");
 		if (checkpoint?.kind !== "compactionSummary" || !checkpoint.providerCheckpoint) {
 			refreshAgentMessagesFromSession(runtime);
@@ -2702,7 +2694,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const scope = bindMemoryScope();
 			const observations = deps.memoryCommitBridge?.observations;
 			if (scope && observations) {
-				const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+				const entries = activeEntries();
 				// Only committed receipts matter here; the source units are memory's to build when it needs them.
 				const commits = entries.flatMap((entry) =>
 					entry.kind === "compactionSummary" &&
@@ -2818,15 +2810,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const promptTokens = (usage.input || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
 			const runtime = state.runtime;
 			const history = runtime ? observeHistory(runtime) : undefined;
-			if (promptTokens > 0 && runtime) {
+			if (promptTokens > 0 && runtime && history) {
 				const breakdown = estimateAgentContextBreakdown({ ...runtime.agent.state, messages: [] });
-				const anchoredMessages = [...(history?.messages ?? [])];
 				// The output of this call is part of the next call's prompt for the
 				// same messages, which is why it is folded in here.
 				reconciledAnchor = {
 					tokens: promptTokens + (usage.output || 0),
-					anchoredMessages,
-					contentDigest: history?.digest() ?? messageListDigest(anchoredMessages),
+					anchoredMessages: history.messages,
+					contentDigest: history.digest(),
 					runtime,
 					model: runtime.agent.state.model,
 					modelKey: anchorModelKey(runtime),
@@ -2846,10 +2837,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 			// Reconcile in memory on every API call so the live meters
 			// track usage; persistence waits for the run to settle.
-			if (runtime) {
-				const messages = runtime.agent.state.messages.filter(
-					(message) => message.role !== "system" || isHostPolicyMessage(message),
-				);
+			if (runtime && history) {
+				const messages = history.messages;
 				// The just-completed response is output, not part of its own prompt.
 				const promptMessages = messages.at(-1)?.role === "assistant" ? messages.slice(0, -1) : messages;
 				currentContextSnapshot = captureRuntimeContextSnapshot(
@@ -2904,7 +2893,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				originSession === deps.session?.current()?.id;
 			if (!current()) return null;
 			// A route switch materializes portable context only when it is first needed (#423).
-			const active = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+			const active = activeEntries();
 			const checkpoint = [...active].reverse().find((entry) => entry.kind === "compactionSummary");
 			if (
 				!skipProviderFallback &&
@@ -2930,7 +2919,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const settings = deps.getSettings();
 			const autonomy = deps.getAutonomy?.() ?? settings.safety.autonomy ?? "default";
 			const sessionId = deps.session?.current()?.id ?? "";
-			const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+			const entries = activeEntries();
 			const checkpointId = postureCheckpoint(entries);
 			// #423: a posture update is a later system message, which Pi folds into the leading instructions for a
 			// model without this compat flag (collapseSystemMessages), so it would rewrite the prefix anyway; such a
@@ -2944,16 +2933,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				(agentRuntime.agent.state.model?.api === "copilot-sdk" ||
 					(agentRuntime.agent.state.model?.compat as { supportsMidConvoSystemMessages?: boolean } | undefined)
 						?.supportsMidConvoSystemMessages === true);
-			const routeKey = createHash("sha256")
-				.update(
-					JSON.stringify([
-						agentRuntime.targetId,
-						agentRuntime.runtimeId,
-						agentRuntime.wireModelId,
-						attachedToolSchemasFromState(agentRuntime.agent.state.tools),
-					]),
-				)
-				.digest("hex");
+			const routeKey = sha256Json([
+				agentRuntime.targetId,
+				agentRuntime.runtimeId,
+				agentRuntime.wireModelId,
+				attachedToolSchemasFromState(agentRuntime.agent.state.tools),
+			]);
 			if (
 				postureGeneration &&
 				(postureGeneration.checkpointId !== checkpointId || postureGeneration.routeKey !== routeKey)
@@ -3435,22 +3420,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const before = liveContextEstimate(agentRuntime, undefined, undefined, history);
 			const beforeView =
 				agentRuntime === state.runtime ? refreshLiveBudget(undefined, history, before) : refreshLiveBudget();
-			const settings = deps.getSettings();
-			const economic = compactionBudget(
-				before.contextWindow,
-				settings.context.compaction?.threshold ?? DEFAULT_COMPACTION_THRESHOLD,
-				settings.context.compaction?.maxTokens,
-				agentRuntime.agent.state.model,
-			);
 			const knownWindow = before.contextWindow > 0;
-			const verdict = shouldCompact(
-				before.tokens,
-				economic.threshold,
-				economic.triggerWindow,
-				summaryOutputReserve(agentRuntime.agent.state.model, {
-					summaryOnChatRoute: summaryOnChatRoute(agentRuntime, settings.context.compaction?.model),
-				}),
-			);
+			const verdict = routeCompaction(agentRuntime, deps.getSettings()).shouldCompact(before.tokens);
 			let compacted = false;
 			// Eviction rebuilds the messages before the summary call, so a failed summary can still leave them changed.
 			const messagesBefore = agentRuntime.agent.state.messages;
@@ -3536,33 +3507,28 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				: windowWithoutRuntime();
 			const compactionThreshold = window.contextWindow > 0 ? (settings.context.compaction?.threshold ?? null) : null;
 			const compactionAuto = settings.context.compaction?.auto !== false;
-			const economic = compactionBudget(
-				window.contextWindow,
-				compactionThreshold ?? DEFAULT_COMPACTION_THRESHOLD,
-				settings.context.compaction.maxTokens,
-				routed?.agent.state.model ??
+			const route = routed ? routeCompaction(routed, settings) : null;
+			const economic =
+				route?.economic ??
+				compactionBudget(
+					window.contextWindow,
+					compactionThreshold ?? DEFAULT_COMPACTION_THRESHOLD,
+					settings.context.compaction.maxTokens,
 					getCatalogModelForRuntime(
-						routed?.runtimeId ??
-							(state.runtime ? undefined : currentContextSnapshot?.runtimeId) ??
+						(state.runtime ? undefined : currentContextSnapshot?.runtimeId) ??
 							settings.targets.find((target) => target.id === settings.chat.target)?.runtime ??
 							"",
-						routed?.wireModelId ?? settings.chat.model ?? "",
+						settings.chat.model ?? "",
 					),
-			);
+				);
 			const compactionCeilingTokens = economic.ceilingTokens;
 			// The trigger counts the summary reserve the threshold's headroom does not cover, so the
 			// ledger names the fraction it actually fires at (F-C2).
 			const ledgerThreshold =
 				compactionThreshold === null
 					? null
-					: routed
-						? effectiveCompactionThreshold(
-								economic.threshold,
-								economic.triggerWindow,
-								summaryOutputReserve(routed.agent.state.model, {
-									summaryOnChatRoute: summaryOnChatRoute(routed, settings.context.compaction?.model),
-								}),
-							)
+					: route
+						? effectiveCompactionThreshold(economic.threshold, economic.triggerWindow, route.summaryReserve())
 						: economic.threshold;
 			const provider = routed?.targetId ?? settings.chat?.target ?? null;
 			const model = routed?.wireModelId ?? settings.chat?.model ?? null;
@@ -3701,8 +3667,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				const source = extractTurnText(original.payload);
 				if (source.startsWith(prefix) && source.length === prefix.length + Number(marker[1])) truncated.push(text);
 			}
-			const replayTruncationHash =
-				truncated.length > 0 ? createHash("sha256").update(JSON.stringify(truncated)).digest("hex") : undefined;
+			const replayTruncationHash = truncated.length > 0 ? sha256Json(truncated) : undefined;
 			const now = Date.now();
 			// #423: on Codex the wire effort is the generation's initial effort for every call; a /thinking change
 			// travels as a configuration_update item and keeps the cache (measured 2026-10-30), so it is no break cause.
