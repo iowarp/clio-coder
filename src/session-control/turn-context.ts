@@ -31,7 +31,7 @@ import {
 } from "../engine/agent.js";
 import { providerCheckpointCompatibility } from "../engine/ai.js";
 import { prepareInPrefixSummary } from "../engine/in-prefix-summary.js";
-import { createContextFold } from "./context-fold.js";
+import { createContextFold, type FoldDecision, foldCheckpointFor } from "./context-fold.js";
 import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
 import type { MessageListDigests } from "./message-list-digest.js";
@@ -1875,14 +1875,32 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		}
 		const pressureEstimate = force && !requiredFit ? null : liveContextEstimate(agentRuntime, pendingUserText);
 		if (pressureEstimate && !requiredFit && !route.shouldCompact(pressureEstimate.tokens).shouldCompact) return false;
+		// Past the trigger, or forced: every stage this checkpoint reaches from here goes into its `context.fold` event.
+		const decision = contextFold.beginDecision({
+			checkpoint: foldCheckpointFor(triggerOverride ?? (force ? "force" : "auto"), pendingUserText),
+			agentRuntime,
+			sessionId: originSession,
+		});
+		foldDecision = decision;
+		if (pressureEstimate) decision.measure(pressureEstimate.tokens);
 		// Paused or inside the rearm band, the paid summary waits; the free pre-summary stages below still run.
-		const summaryHeld = (tokens: number): boolean =>
-			!force &&
-			(autoCompactFailures >= AUTO_COMPACT_FAILURE_LIMIT ||
-				(triggerOverride !== "overflow" && summaryRearm !== null && tokens < summaryRearm.tokensAfter + summaryRearm.band));
+		const summaryHoldReason = (tokens: number): "paused" | "rearm_band" | null =>
+			force
+				? null
+				: autoCompactFailures >= AUTO_COMPACT_FAILURE_LIMIT
+					? "paused"
+					: triggerOverride !== "overflow" && summaryRearm !== null && tokens < summaryRearm.tokensAfter + summaryRearm.band
+						? "rearm_band"
+						: null;
 		const preSummaryStageAvailable =
 			pressureEstimate !== null && Boolean(deps.session?.current()) && settings.context.workingSet.enabled;
-		if (!force && !preSummaryStageAvailable && summaryHeld(pressureEstimate?.tokens ?? 0)) return false;
+		if (!force && !preSummaryStageAvailable) {
+			const hold = summaryHoldReason(pressureEstimate?.tokens ?? 0);
+			if (hold !== null) {
+				decision.stage({ stage: "llm_summary", outcome: "held", reason: hold });
+				return false;
+			}
+		}
 		// The hysteresis band. A checkpoint runs before every request, so without
 		// it a policy with unconditional rungs fires an event per step and
 		// cold-starts the prefix cache each time. Inside the band the automatic
@@ -1906,7 +1924,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				// Safe to ignore here: the eviction stage repeats this read inside the
 				// operation and surfaces the same error with its activity.
 			}
-			if (held) return false;
+			if (held) {
+				decision.stage({ stage: "working_set", outcome: "held", reason: "rearm_band" });
+				return false;
+			}
 		}
 		// Empty cuts are reusable only while their source and provider context
 		// remain unchanged. Tools can grow the same user turn into a useful cut.
@@ -2003,6 +2024,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (session?.current()) {
 				const stage = contextFold.runEvictionStage({
 					agentRuntime,
+					decision,
 					session,
 					settings,
 					estimate,
@@ -2024,7 +2046,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 		}
 
-		if (summaryHeld(liveContextEstimate(agentRuntime, pendingUserText).tokens)) {
+		const heldTokens = liveContextEstimate(agentRuntime, pendingUserText).tokens;
+		decision.measure(heldTokens);
+		const hold = summaryHoldReason(heldTokens);
+		if (hold !== null) {
+			decision.stage({ stage: "llm_summary", outcome: "held", reason: hold });
 			if (!preSummaryStageActed) {
 				compactionConclusion =
 					autoCompactFailures >= AUTO_COMPACT_FAILURE_LIMIT
@@ -2037,6 +2063,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			return preSummaryStageActed;
 		}
 		if (!deps.autoCompact) {
+			decision.stage({ stage: "llm_summary", outcome: "none", reason: "unavailable" });
 			rememberEmptyAutomaticAttempt();
 			return false;
 		}
@@ -2055,6 +2082,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// useful ahead of it.
 		if (evictionSkipNotice) deps.emitNotice(evictionSkipNotice);
 		let result: CompactResult | null = null;
+		let summaryRecordId: string | undefined;
 		// Compare full runtime estimates on both sides. The current snapshot and
 		// result.tokensBefore may instead carry provider-calibrated history usage.
 		const snapshotMetadata =
@@ -2137,6 +2165,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				after: liveContextEstimate(agentRuntime, pendingUserText).tokens,
 				basis: "runtime-estimate",
 			};
+			decision.measure(compactionTokens.after);
 		};
 		const countAutomaticFailure = (): void => {
 			if (!force && ++autoCompactFailures === AUTO_COMPACT_FAILURE_LIMIT)
@@ -2187,6 +2216,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						...(summarySignal ? { signal: summarySignal } : {}),
 						...(automaticSummary && noGainSummaryDigest !== null ? { skipSummaryDigest: noGainSummaryDigest } : {}),
 						checkpointTokenFigures: (entry) => {
+							// The figures are taken just before the append, so the last entry asked about is the one written.
+							summaryRecordId = entry.turnId;
 							const messages = buildModelReplayAgentMessagesFromTurns(
 								[...(deps.readSessionEntries?.() ?? []), { ...entry, timestamp: new Date().toISOString() }],
 								{
@@ -2228,12 +2259,34 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				);
 			});
 		} catch (error) {
+			decision.stage({ stage: "llm_summary", outcome: "failed", reason: "error" });
 			if (!summaryLifecycleStarted) startSummaryLifecycle();
 			emitCompactionActivity("failed", compactionFailureMessage(error));
 			summarySignal?.throwIfAborted();
 			countAutomaticFailure();
 			throw error;
 		}
+		if (result?.noGain) decision.stage({ stage: "llm_summary", outcome: "none", reason: "no_gain" });
+		else if (!result || result.summary.length === 0)
+			decision.stage({
+				stage: "llm_summary",
+				outcome: "none",
+				reason:
+					result?.emptyReason === "repeat-no-gain"
+						? "repeat_no_gain"
+						: result?.emptyReason === "protected-skill"
+							? "protected_skill"
+							: result?.emptyReason === "protected-recent"
+								? "protected_recent"
+								: "nothing_to_summarize",
+			});
+		else
+			decision.stage({
+				stage: "llm_summary",
+				outcome: "committed",
+				reason: "summarized",
+				...(summaryRecordId !== undefined ? { recordId: summaryRecordId } : {}),
+			});
 		if (
 			originSession !== deps.session?.current()?.id ||
 			originNavigation !== navigationEpoch ||
@@ -2297,6 +2350,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			trigger,
 			originSession,
 		});
+		decision.measure(tokensAfter);
 		// The reducer reports selected ledger rows, not just message rows.
 		compactionFacts.push({ kind: "summarized", unit: "entries", count: result.messagesSummarized });
 		compactionTokens = { before: tokensBefore, after: tokensAfter, basis: "runtime-estimate" };
@@ -2319,6 +2373,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	};
 
 	let reductionInFlight: Promise<boolean> | null = null;
+	/** The running reduction's fold decision, closed once the reduction settles. */
+	let foldDecision: FoldDecision | null = null;
 	let lastCompactionCardSettled = false;
 	const runAutoCompact: TurnContext["runAutoCompact"] = (...args) => {
 		if (reductionInFlight) {
@@ -2330,6 +2386,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const operationArgs: Parameters<TurnContext["runAutoCompact"]> = [...args];
 		operationArgs[6] = args[6] ? AbortSignal.any([args[6], controller.signal]) : controller.signal;
 		lastCompactionCardSettled = false;
+		foldDecision = null;
 		const operation = performAutoCompact(...operationArgs)
 			.then(
 				(changed) => {
@@ -2366,6 +2423,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				},
 			)
 			.finally(() => {
+				foldDecision?.close();
+				foldDecision = null;
 				compactionOperation = null;
 				compactionLifecycleStarted = false;
 				if (compactionController === controller) compactionController = null;
@@ -2436,18 +2495,28 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				continuity,
 			}),
 		).tokens;
+		const decision = contextFold.beginDecision({ checkpoint: "step", agentRuntime, sessionId });
+		decision.measure(tokensBefore);
 		try {
 			deps.session.appendEntry(entry);
 			deps.session.flushAppends?.();
 		} catch (error) {
+			decision.stage({ stage: "step_checkpoint", outcome: "failed", reason: "error" });
 			deps.bus?.emit("compaction.ended", { trigger: "step", at: Date.now(), outcome: "failed" });
+			decision.close();
 			throw error;
 		}
-		// The entry carries no memory receipt, so nothing waits on a durable session checkpoint before memory hears of it.
-		if (deps.memoryCommitBridge) notifyMemoryCommit(entry.turnId, "summary", "summarized");
-		contextFold.publishStepCheckpoint({ agentRuntime, before, threshold, tokensBefore, sessionId });
-		// Ended last: its subscriber restarts the cache comparison for the new context generation.
-		deps.bus?.emit("compaction.ended", { trigger: "step", at: Date.now(), outcome: "completed" });
+		decision.stage({ stage: "step_checkpoint", outcome: "committed", reason: "step_boundary", recordId: entry.turnId });
+		try {
+			// The entry carries no memory receipt, so nothing waits on a durable session checkpoint before memory hears of it.
+			if (deps.memoryCommitBridge) notifyMemoryCommit(entry.turnId, "summary", "summarized");
+			const published = contextFold.publishStepCheckpoint({ agentRuntime, before, threshold, tokensBefore, sessionId });
+			decision.measure(published.tokensAfter);
+			// Ended last: its subscriber restarts the cache comparison for the new context generation.
+			deps.bus?.emit("compaction.ended", { trigger: "step", at: Date.now(), outcome: "completed" });
+		} finally {
+			decision.close();
+		}
 		refreshLiveBudget();
 		return true;
 	};

@@ -11,6 +11,7 @@ import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type {
 	CompactionPayload,
 	ContextActivityPayload,
+	ContextFoldPayload,
 	ContextPrunedPayload,
 } from "../../src/core/telemetry/live-events.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -56,7 +57,7 @@ import {
 } from "../../src/interactive/renderers/compaction-summary.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
-import { createTurnContext } from "../../src/session-control/turn-context.js";
+import { createTurnContext, type TurnContextDeps } from "../../src/session-control/turn-context.js";
 import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
 import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
@@ -980,7 +981,11 @@ describe("production compaction controls", () => {
 	});
 
 	/** An automatic-path turn context over the fixture's six long user turns. */
-	function automaticContext(f: ReturnType<typeof fixture>, autoCompact: typeof f.run = f.run) {
+	function automaticContext(
+		f: ReturnType<typeof fixture>,
+		autoCompact: typeof f.run = f.run,
+		overrides: Partial<TurnContextDeps> = {},
+	) {
 		const state = createTurnState("off");
 		const runtime = {
 			targetId: "chat-target",
@@ -1019,10 +1024,11 @@ describe("production compaction controls", () => {
 			autoCompact,
 			middleware: { fireCompactionHook: () => {} } as unknown as TurnMiddleware,
 			emitNotice: () => {},
+			...overrides,
 		});
 		context.refreshAgentMessagesFromSession(runtime);
 		f.settings.context.compaction.threshold = 0.01;
-		return { state, runtime, context, activity };
+		return { state, runtime, context, activity, bus };
 	}
 
 	it("does not resend an automatic summary request that already ended without gain (#422)", async () => {
@@ -1288,6 +1294,49 @@ describe("production compaction controls", () => {
 			f.entries().some((entry) => entry.kind === "custom" && entry.customType === CONTEXT_OPERATION_CUSTOM_TYPE),
 			false,
 		);
+	});
+
+	it("names each eviction and summary record in one context.fold stage entry, and writes none under the trigger", async () => {
+		const f = fixture();
+		f.settings.context.workingSet.enabled = true;
+		const oldest = f.entries()[0];
+		ok(oldest);
+		const { runtime, context, bus } = automaticContext(f, f.run, {
+			planEviction: () => ({
+				policyId: "age-horizon",
+				tokensBefore: 36_000,
+				tokensAfter: 30_000,
+				items: [{ ref: { entry: oldest.turnId }, reason: "age_horizon", tokensFreed: 6000, marker: "[evicted]" }],
+			}),
+		});
+		const folds: ContextFoldPayload[] = [];
+		bus.subscribe("context.fold", (event) => {
+			folds.push(event);
+		});
+		strictEqual(await context.runAutoCompact(runtime, false), true);
+		strictEqual(folds.length, 1);
+		const fold = folds[0];
+		ok(fold);
+		strictEqual(fold.checkpoint, "tool_batch");
+		const records = f.entries().filter((entry) => entry.kind === "contextEviction" || entry.kind === "compactionSummary");
+		deepStrictEqual(
+			records.map((entry) => entry.kind),
+			["contextEviction", "compactionSummary"],
+		);
+		for (const record of records)
+			strictEqual(fold.stages.filter((stage) => stage.recordId === record.turnId).length, 1, record.kind);
+		deepStrictEqual(
+			fold.stages.map(({ stage, outcome }) => [stage, outcome]),
+			[
+				["working_set", "committed"],
+				["llm_summary", "committed"],
+			],
+		);
+		strictEqual(fold.cause, "compaction");
+		ok(fold.tokensAfter < fold.tokensBefore);
+		f.settings.context.compaction.threshold = 0.99;
+		strictEqual(await context.runAutoCompact(runtime, false), false);
+		strictEqual(folds.length, 1, "a checkpoint under the trigger writes no event");
 	});
 
 	it("routes a configured dedicated summary model through the production callback", async () => {

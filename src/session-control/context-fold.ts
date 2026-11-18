@@ -10,8 +10,9 @@
 import type { ClioSettings } from "../core/config.js";
 import type { ContextOperationFact } from "../core/context-operation.js";
 import { sessionTelemetryContext } from "../core/telemetry/context.js";
-import type { ContextActivityStatus, ContextPrunedPayload } from "../core/telemetry/live-events.js";
+import type { ContextActivityStatus, ContextFoldPayload, ContextPrunedPayload } from "../core/telemetry/live-events.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
+import type { FoldCheckpoint } from "../domains/context/fold/contract.js";
 import { createFoldPriceBook } from "../domains/context/fold/price.js";
 import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
@@ -75,8 +76,48 @@ export interface ContextFoldPort {
 	logPromptCompileIfPending(): void;
 }
 
+/** One stage's entry in a `context.fold` decision. */
+export type FoldStageEntry = ContextFoldPayload["stages"][number];
+
+/** What one fold checkpoint decided, written as one `context.fold` event when it closes. */
+export interface FoldDecision {
+	/** One stage's outcome; a commit names the ledger record it wrote. */
+	stage(entry: FoldStageEntry): void;
+	/** A context size the checkpoint measured: the first is its before figure, the latest its after figure. */
+	measure(tokens: number): void;
+	/** Writes the event when a stage was recorded; a checkpoint that reached no stage writes nothing. */
+	close(): void;
+}
+
+export interface FoldDecisionInput {
+	checkpoint: FoldCheckpoint;
+	agentRuntime: AgentRuntime;
+	sessionId: string | undefined;
+}
+
+/**
+ * Where a reduction ran, read from how it was asked for: overflow recovery, a
+ * request about to carry a pending prompt, an operator command, or the guard
+ * between tool batches.
+ */
+export function foldCheckpointFor(trigger: CompactionTrigger, pendingUserText: string | undefined): FoldCheckpoint {
+	if (trigger === "overflow") return "overflow";
+	if (pendingUserText !== undefined) return "submit";
+	if (trigger === "force") return "operator";
+	return trigger === "step" ? "step" : "tool_batch";
+}
+
+/** The expected cold-cache reason each committing stage notes. */
+const COMMIT_CAUSE: Partial<Record<FoldStageEntry["stage"], NonNullable<ContextFoldPayload["cause"]>>> = {
+	working_set: "working_set_evict",
+	llm_summary: "compaction",
+	step_checkpoint: "step_checkpoint",
+};
+
 export interface EvictionStageInput {
 	agentRuntime: AgentRuntime;
+	/** The checkpoint's decision, which this stage reports its outcome to. */
+	decision: FoldDecision;
 	session: SessionContract;
 	settings: Readonly<ClioSettings>;
 	estimate: LiveContextEstimate;
@@ -123,6 +164,7 @@ export interface StepPublicationInput {
 }
 
 export interface ContextFold {
+	beginDecision(input: FoldDecisionInput): FoldDecision;
 	refreshAgentMessagesFromSession(agentRuntime: AgentRuntime): ReadonlyArray<SessionEntry>;
 	runEvictionStage(input: EvictionStageInput): EvictionStageResult;
 	publishSummaryCheckpoint(input: SummaryPublicationInput): Promise<{ tokensBefore: number; tokensAfter: number }>;
@@ -174,11 +216,53 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		return refreshedEntries;
 	};
 
+	const beginDecision = (input: FoldDecisionInput): FoldDecision => {
+		const { modelTier, promptCaching } = input.agentRuntime.runtimeResolution;
+		const route: ContextFoldPayload["route"] = {
+			...(modelTier !== undefined ? { modelTier } : {}),
+			...(promptCaching !== undefined ? { promptCaching } : {}),
+		};
+		const stages: FoldStageEntry[] = [];
+		let tokensBefore: number | null = null;
+		let tokensAfter = 0;
+		let closed = false;
+		return {
+			stage: (entry) => {
+				stages.push(entry);
+			},
+			measure: (tokens) => {
+				const figure = Math.max(0, Math.round(tokens));
+				tokensBefore ??= figure;
+				tokensAfter = figure;
+			},
+			close: () => {
+				if (closed || stages.length === 0) return;
+				closed = true;
+				const cause = stages.filter((entry) => entry.outcome === "committed").at(-1)?.stage;
+				const coldReason = cause === undefined ? undefined : COMMIT_CAUSE[cause];
+				deps.bus?.emit(
+					"context.fold",
+					{
+						checkpoint: input.checkpoint,
+						route,
+						stages,
+						tokensBefore: tokensBefore ?? tokensAfter,
+						tokensAfter,
+						...(coldReason !== undefined ? { cause: coldReason } : {}),
+					} satisfies ContextFoldPayload,
+					sessionTelemetryContext(input.sessionId),
+				);
+			},
+		};
+	};
+
 	/** S1: plan and commit one working-set eviction, then re-check pressure (or fit) on the rebuilt request. */
 	const runEvictionStage = (input: EvictionStageInput): EvictionStageResult => {
 		const { agentRuntime, session, settings, estimate, verdict, beforeSnapshotId, requiredFit } = input;
 		const { compactionWindow, compactionThreshold, workingSetTarget, trigger, originSession, pendingUserText } = input;
-		if (!settings.context.workingSet.enabled)
+		const { decision } = input;
+		if (!settings.context.workingSet.enabled) {
+			decision.stage({ stage: "working_set", outcome: "none", reason: "disabled" });
 			return {
 				acted: false,
 				fit: false,
@@ -190,6 +274,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 					policyId: settings.context.workingSet.policy,
 				}),
 			};
+		}
 		let planned: ReturnType<typeof planEviction>;
 		let visibleEntries: ReadonlyArray<SessionEntry> = [];
 		let policyId = settings.context.workingSet.policy;
@@ -234,17 +319,21 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 				aged,
 			});
 		} catch (error) {
+			decision.stage({ stage: "working_set", outcome: "failed", reason: "error" });
 			deps.middleware.fireCompactionHook("working_set_evict", "pressure", estimate.tokens);
 			port.emitCompactionActivity("started", "compacting context (working-set eviction)");
 			port.emitCompactionActivity("failed", port.compactionFailureMessage(error));
 			throw error;
 		}
-		if (!planned)
+		if (!planned) {
+			decision.stage({ stage: "working_set", outcome: "none", reason: "no_candidates" });
 			return {
 				acted: false,
 				fit: false,
 				skipNotice: evictionSkipMessage(visibleEntries, settings.context.workingSet, policyId),
 			};
+		}
+		let committed = false;
 		deps.middleware.fireCompactionHook("working_set_evict", "pressure", estimate.tokens);
 		port.emitCompactionActivity("started", "compacting context (working-set eviction)");
 		try {
@@ -259,6 +348,15 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 				// cursor is the leaf the next message will extend.
 				parentTurnId: state.lastTurnId,
 			});
+			// Read without assuming the append returned its entry, as the commit above does: only the memory notice needs it.
+			const recordId = (evictionEntry as SessionEntry | undefined)?.turnId;
+			decision.stage({
+				stage: "working_set",
+				outcome: "committed",
+				reason: "evicted",
+				...(recordId !== undefined ? { recordId } : {}),
+			});
+			committed = true;
 			if (session.flushAppends) {
 				session.flushAppends();
 				if (!input.handoff) port.notifyMemoryCommit(evictionEntry.turnId, "summary", "evicted");
@@ -314,12 +412,14 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			// projection carry exists to preserve.
 			port.refreshLiveBudget(pendingUserText);
 			const after = port.liveContextEstimate(agentRuntime, pendingUserText);
+			decision.measure(after.tokens);
 			port.recordCompactionTokens({ before: estimate.tokens, after: after.tokens, basis: "runtime-estimate" });
 			const fit = requiredFit
 				? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
 				: !input.shouldCompact(after.tokens).shouldCompact;
 			return { acted: true, fit, skipNotice: null };
 		} catch (error) {
+			if (!committed) decision.stage({ stage: "working_set", outcome: "failed", reason: "error" });
 			port.emitCompactionActivity("failed", port.compactionFailureMessage(error));
 			throw error;
 		}
@@ -401,5 +501,11 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		return { tokensAfter };
 	};
 
-	return { refreshAgentMessagesFromSession, runEvictionStage, publishSummaryCheckpoint, publishStepCheckpoint };
+	return {
+		beginDecision,
+		refreshAgentMessagesFromSession,
+		runEvictionStage,
+		publishSummaryCheckpoint,
+		publishStepCheckpoint,
+	};
 }
