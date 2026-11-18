@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { resetXdgCache } from "../../core/xdg.js";
 import { isSessionJsonlHeader, readSessionFileEntries } from "../../engine/session.js";
+import { OPERATOR_COMPONENTS_ENV } from "../lifecycle/components.js";
 import { collectSessionEntries } from "../session/compaction/session-entries.js";
 import type { SessionEntry } from "../session/entries.js";
 import { payloadObject } from "../session/message-projection.js";
@@ -113,22 +114,28 @@ export function foldCampaignMetrics(
 	};
 }
 
-/** The Clio roots one entry's run used: the operator's config, and data, state and cache under the entry's home. */
+/**
+ * The Clio roots one entry's run used: the operator's config, and data, state and cache under the entry's home.
+ * `components` is the operator's installed components directory, which the entry resolves runtime SDKs from and
+ * never writes.
+ */
 export interface EntryRoots {
 	home: string;
 	config: string;
 	data: string;
 	state: string;
 	cache: string;
+	components: string;
 }
 
-export function entryRoots(home: string, operatorConfig: string): EntryRoots {
+export function entryRoots(home: string, operatorConfig: string, operatorComponents: string): EntryRoots {
 	return {
 		home,
 		config: operatorConfig,
 		data: join(home, "data"),
 		state: join(home, "state"),
 		cache: join(home, "cache"),
+		components: operatorComponents,
 	};
 }
 
@@ -143,6 +150,7 @@ export function entryRootEnv(roots: EntryRoots): Record<string, string> {
 		CLIO_CODER_DATA_DIR: roots.data,
 		CLIO_CODER_STATE_DIR: roots.state,
 		CLIO_CODER_CACHE_DIR: roots.cache,
+		[OPERATOR_COMPONENTS_ENV]: roots.components,
 	};
 }
 

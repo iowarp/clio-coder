@@ -3,8 +3,14 @@ import { createRequire } from "node:module";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { withStateFileLock } from "../../core/state-file-lock.js";
-import { clioDataDir, resolveClioDirs } from "../../core/xdg.js";
+import { clioDataDir } from "../../core/xdg.js";
 import { findExecutableOnPath } from "../toolchain/resolve.js";
+import {
+	componentInstallDir,
+	componentSearchDirs,
+	operatorComponentDir,
+	usesOperatorComponents,
+} from "./components.js";
 import { inspectInstallation } from "./install-method.js";
 
 export const CLAUDE_AGENT_SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
@@ -24,8 +30,10 @@ function preparedPrefix(): string | undefined {
 	return prefix;
 }
 
+const COMPONENT_ID = "claude-agent-sdk";
+
 export function claudeSdkComponentDir(): string {
-	return join(resolveClioDirs().data, "components", "claude-agent-sdk", CLAUDE_AGENT_SDK_VERSION);
+	return componentInstallDir(COMPONENT_ID, CLAUDE_AGENT_SDK_VERSION);
 }
 
 function resolveInPrefix(prefix: string): string | null {
@@ -34,12 +42,17 @@ function resolveInPrefix(prefix: string): string | null {
 	return createRequire(join(prefix, "package.json")).resolve(CLAUDE_AGENT_SDK_PACKAGE);
 }
 
-/** Explicit prepared prefix, current per-user component, then a legacy package-local/development install. */
+/**
+ * Explicit prepared prefix, current per-user component (this process's, then the operator's), then a legacy
+ * package-local/development install.
+ */
 export function resolveClaudeAgentSdkEntry(): string | null {
 	const prepared = preparedPrefix();
 	if (prepared) return resolveInPrefix(prepared);
-	const component = resolveInPrefix(claudeSdkComponentDir());
-	if (component) return component;
+	for (const prefix of componentSearchDirs(COMPONENT_ID, CLAUDE_AGENT_SDK_VERSION)) {
+		const component = resolveInPrefix(prefix);
+		if (component) return component;
+	}
 	const require = createRequire(join(inspectInstallation().root, "package.json"));
 	try {
 		return require.resolve(CLAUDE_AGENT_SDK_PACKAGE);
@@ -62,7 +75,7 @@ export class ClaudeAgentSdkUnavailableError extends Error {
 		super(
 			prepared
 				? `No ${CLAUDE_AGENT_SDK_PACKAGE} in prepared prefix ${prepared}. Ask its administrator to provision node_modules/${CLAUDE_AGENT_SDK_PACKAGE}, or unset CLIO_CODER_CLAUDE_SDK_DIR and run: ${CLAUDE_AGENT_SDK_INSTALL_COMMAND}`
-				: `The Claude SDK runtime needs ${CLAUDE_AGENT_SDK_PACKAGE}@${CLAUDE_AGENT_SDK_VERSION}. Run: ${CLAUDE_AGENT_SDK_INSTALL_COMMAND}. This installs a separate component at ${claudeSdkComponentDir()}; it does not change Clio's installation.`,
+				: `The Claude SDK runtime needs ${CLAUDE_AGENT_SDK_PACKAGE}@${CLAUDE_AGENT_SDK_VERSION}. Run: ${CLAUDE_AGENT_SDK_INSTALL_COMMAND}. This installs a separate component at ${operatorComponentDir(COMPONENT_ID, CLAUDE_AGENT_SDK_VERSION)}; it does not change Clio's installation.`,
 		);
 		this.name = "ClaudeAgentSdkUnavailableError";
 	}
@@ -167,7 +180,8 @@ export async function ensureClaudeAgentSdk(options: ClaudeSdkInstallOptions = {}
 	options.signal?.throwIfAborted();
 	if (resolveClaudeAgentSdkEntry()) return;
 	const confirm = options.confirm;
-	if (!confirm || preparedPrefix()) throw new ClaudeAgentSdkUnavailableError();
+	// Neither a prepared prefix nor the operator's components are this process's to install into.
+	if (!confirm || preparedPrefix() || usesOperatorComponents()) throw new ClaudeAgentSdkUnavailableError();
 	const target = claudeSdkComponentDir();
 	let attempt = attempts.get(target);
 	if (!attempt) {

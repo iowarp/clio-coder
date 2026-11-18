@@ -3,8 +3,14 @@ import { createRequire } from "node:module";
 import { delimiter, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { withStateFileLock } from "../../core/state-file-lock.js";
-import { clioDataDir, resolveClioDirs } from "../../core/xdg.js";
+import { clioDataDir } from "../../core/xdg.js";
 import { claudeSdkNpmCommand } from "./claude-sdk-install.js";
+import {
+	componentInstallDir,
+	componentSearchDirs,
+	operatorComponentDir,
+	usesOperatorComponents,
+} from "./components.js";
 import { inspectInstallation } from "./install-method.js";
 
 /**
@@ -21,8 +27,10 @@ export interface CopilotSdkInstallOptions {
 	signal?: AbortSignal;
 }
 
+const COMPONENT_ID = "copilot-sdk";
+
 function copilotSdkComponentDir(): string {
-	return join(resolveClioDirs().data, "components", "copilot-sdk", COPILOT_SDK_VERSION);
+	return componentInstallDir(COMPONENT_ID, COPILOT_SDK_VERSION);
 }
 
 function resolveInPrefix(prefix: string): string | null {
@@ -30,10 +38,12 @@ function resolveInPrefix(prefix: string): string | null {
 	return createRequire(join(prefix, "package.json")).resolve(COPILOT_SDK_PACKAGE);
 }
 
-/** The per-user component, then a package-local or development install. */
+/** The per-user component (this process's, then the operator's), then a package-local or development install. */
 export function resolveCopilotSdkEntry(): string | null {
-	const component = resolveInPrefix(copilotSdkComponentDir());
-	if (component) return component;
+	for (const prefix of componentSearchDirs(COMPONENT_ID, COPILOT_SDK_VERSION)) {
+		const component = resolveInPrefix(prefix);
+		if (component) return component;
+	}
 	const require = createRequire(join(inspectInstallation().root, "package.json"));
 	try {
 		return require.resolve(COPILOT_SDK_PACKAGE);
@@ -52,7 +62,7 @@ export class CopilotSdkUnavailableError extends Error {
 
 	constructor() {
 		super(
-			`The copilot-sdk runtime needs ${COPILOT_SDK_PACKAGE}@${COPILOT_SDK_VERSION}. Run: ${COPILOT_SDK_INSTALL_COMMAND}. This installs a separate component at ${copilotSdkComponentDir()}; it does not change Clio's installation.`,
+			`The copilot-sdk runtime needs ${COPILOT_SDK_PACKAGE}@${COPILOT_SDK_VERSION}. Run: ${COPILOT_SDK_INSTALL_COMMAND}. This installs a separate component at ${operatorComponentDir(COMPONENT_ID, COPILOT_SDK_VERSION)}; it does not change Clio's installation.`,
 		);
 		this.name = "CopilotSdkUnavailableError";
 	}
@@ -132,7 +142,8 @@ export async function ensureCopilotSdk(options: CopilotSdkInstallOptions = {}): 
 	options.signal?.throwIfAborted();
 	if (resolveCopilotSdkEntry()) return;
 	const confirm = options.confirm;
-	if (!confirm) throw new CopilotSdkUnavailableError();
+	// A process reading the operator's components never installs one of its own; the operator installs it once.
+	if (!confirm || usesOperatorComponents()) throw new CopilotSdkUnavailableError();
 	const target = copilotSdkComponentDir();
 	let attempt = attempts.get(target);
 	if (!attempt) {
