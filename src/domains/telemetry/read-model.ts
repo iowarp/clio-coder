@@ -46,6 +46,7 @@ import {
 	renderDurationSum,
 	renderFact,
 	renderPricingSum,
+	renderShareSum,
 	renderTextFact,
 	renderUsdFact,
 	renderUsdLimit,
@@ -122,16 +123,24 @@ export interface SessionSource {
 	accountQuota?: readonly TelemetryRecord[];
 }
 /** The account window a cold or live session reads, bounded by its own journal lifecycle (#434). */
-export function sessionAccountQuotaWindow(records: readonly TelemetryRecord[]): { from: number; to: number } | null {
-	let from = Number.POSITIVE_INFINITY;
-	let last: TelemetryRecord | undefined;
-	for (const record of records) {
+export function sessionAccountQuotaWindow(
+	records: readonly TelemetryRecord[],
+	scan: QuotaWindowScan = { scanned: 0, from: Number.POSITIVE_INFINITY, last: undefined },
+): { from: number; to: number } | null {
+	for (; scan.scanned < records.length; scan.scanned += 1) {
+		const record = records[scan.scanned] as TelemetryRecord;
 		const at = Date.parse(record.t);
-		if (Number.isFinite(at) && at < from) from = at;
-		if (!last || record.t >= last.t) last = record;
+		if (Number.isFinite(at) && at < scan.from) scan.from = at;
+		if (!scan.last || record.t >= scan.last.t) scan.last = record;
 	}
-	if (!Number.isFinite(from)) return null;
-	return { from, to: last?.k === "session.closed" ? Date.parse(last.t) : Number.POSITIVE_INFINITY };
+	if (!Number.isFinite(scan.from)) return null;
+	return { from: scan.from, to: scan.last?.k === "session.closed" ? Date.parse(scan.last.t) : Number.POSITIVE_INFINITY };
+}
+/** How far a window read has scanned a journal that only grows by appending, so the next read resumes there. */
+export interface QuotaWindowScan {
+	scanned: number;
+	from: number;
+	last: TelemetryRecord | undefined;
 }
 
 /** Several sessions read as one scope: a repository's sessions over a window, already windowed by the loader (#434). */
@@ -251,6 +260,11 @@ interface Analysis {
 	 * left folds cold to the same sums.
 	 */
 	selections: Map<string, SelectionState>;
+	/** Engine floors and cache breaks, kept as calls land so a live re-projection never rescans the session. */
+	cache: CacheState;
+	/** Attempts per role, and the main loop's latest settled sent call, for the same reason. */
+	roles: Map<Attempt["agent"]["role"], number>;
+	latestMain: Attempt | null;
 	growth: Growth;
 }
 
@@ -271,6 +285,8 @@ interface Growth {
 	/** A gap other than policy was folded. */
 	gapRecord: boolean;
 	head: readonly TelemetryRecord[];
+	/** The earliest and latest record times in `head`, and its latest lifecycle record. */
+	span: { first: string | null; last: string | null; lifecycle: LifecycleRecord | null };
 	tail: { records: Set<string>; attempts: Set<string>; runs: Set<string> };
 	/** A lineage's parent source; null for a session's own analysis. */
 	parent: SessionSource | null;
@@ -486,10 +502,14 @@ function buildAnalysis(
 		references: new Map(),
 		gapRecord: false,
 		head,
+		span: { first: null, last: null, lifecycle: null },
 		tail: { records: new Set(), attempts: new Set(), runs: new Set() },
 		parent,
 	};
-	for (const record of head) grow(growth, record);
+	for (const record of head) {
+		grow(growth, record);
+		noteSpan(growth.span, record);
+	}
 	for (const segment of tail)
 		for (const record of segment) {
 			grow(growth, record);
@@ -509,10 +529,67 @@ function buildAnalysis(
 		gap: 0,
 		runs: new Map(),
 		selections: new Map([["", selectionState(attempts, () => true)]]),
+		cache: cacheState(attempts),
+		roles: new Map(),
+		latestMain: null,
 		growth,
 	};
+	for (const attempt of attempts) noteAttempt(analysis, undefined, attempt);
 	settleRuns(analysis, runSources, gap);
 	return analysis;
+}
+
+/** Move the per-role counts and the main loop's latest call by one attempt changing. */
+function noteAttempt(analysis: Analysis, before: Attempt | undefined, after: Attempt | undefined): void {
+	const roles = analysis.roles;
+	if (before) {
+		const count = (roles.get(before.agent.role) ?? 0) - 1;
+		if (count > 0) roles.set(before.agent.role, count);
+		else roles.delete(before.agent.role);
+	}
+	if (after) roles.set(after.agent.role, (roles.get(after.agent.role) ?? 0) + 1);
+	const latest = analysis.latestMain;
+	if (before && before === latest) {
+		analysis.latestMain = null;
+		// A late tool record replaces the latest call with itself; only a call that stopped qualifying rescans.
+		const kept =
+			after?.agent.role === "main" &&
+			invoked(after) &&
+			after.settledAt !== null &&
+			after.settledAt >= (before.settledAt ?? "");
+		if (!kept) for (const attempt of analysis.attempts) if (attempt !== before) noteLatestMain(analysis, attempt);
+	}
+	if (after) noteLatestMain(analysis, after);
+}
+
+/** The latest settled main call, and of calls settled together the last in the read model's order. */
+function noteLatestMain(analysis: Analysis, attempt: Attempt): void {
+	const latest = analysis.latestMain;
+	if (attempt.agent.role !== "main" || !invoked(attempt) || attempt.settledAt === null) return;
+	if (
+		!latest ||
+		attempt.settledAt > (latest.settledAt ?? "") ||
+		(attempt.settledAt === latest.settledAt && byStart(attempt, latest) >= 0)
+	)
+		analysis.latestMain = attempt;
+}
+
+type LifecycleRecord = Extract<TelemetryRecord, { k: "session.opened" | "session.resumed" | "session.closed" }>;
+
+function noteSpan(span: Growth["span"], record: TelemetryRecord): void {
+	if (span.first === null || record.t < span.first) span.first = record.t;
+	if (span.last === null || record.t > span.last) span.last = record.t;
+	if (
+		(record.k === "session.opened" || record.k === "session.resumed" || record.k === "session.closed") &&
+		(!span.lifecycle || record.t >= span.lifecycle.t)
+	)
+		span.lifecycle = record;
+}
+
+function latestLifecycleRecord(records: readonly TelemetryRecord[]): LifecycleRecord | null {
+	const span: Growth["span"] = { first: null, last: null, lifecycle: null };
+	for (const record of records) noteSpan(span, record);
+	return span.lifecycle;
 }
 
 /**
@@ -540,8 +617,11 @@ function extendAnalysis(
 			return false;
 	}
 	const touched = new Set<string>();
-	for (let index = folded; index < head.length; index += 1)
-		for (const attemptId of grow(growth, head[index] as TelemetryRecord)) touched.add(attemptId);
+	for (let index = folded; index < head.length; index += 1) {
+		const record = head[index] as TelemetryRecord;
+		for (const attemptId of grow(growth, record)) touched.add(attemptId);
+		noteSpan(growth.span, record);
+	}
 	growth.head = head;
 	// A new call can move its route's engine floor, and with it which earlier calls a cold group holds.
 	if (touched.size > 0)
@@ -553,6 +633,8 @@ function extendAnalysis(
 		if (after) analysis.byAttempt.set(attemptId, after);
 		else analysis.byAttempt.delete(attemptId);
 		for (const selection of analysis.selections.values()) updateSelection(selection, before, after);
+		noteCache(analysis.cache, before, after);
+		noteAttempt(analysis, before, after);
 	}
 	settleRuns(analysis, runSources, gap);
 	return true;
@@ -752,6 +834,8 @@ interface SelectionState {
 	readonly byId: Attempt[];
 	readonly calls: Fold<CallTotals>;
 	readonly facts: Map<FactMetric, Fold<FactSum>>;
+	/** The cached share's parts, folded once a reader asks for them. */
+	share: Fold<ShareParts> | null;
 	/** Members per call id, for the distinct call count. */
 	readonly callIds: Map<string, number>;
 	/** Invoked members whose token total is unknown. */
@@ -792,6 +876,7 @@ function selectionState(members: Attempt[], matches: (attempt: Attempt) => boole
 			copy: copyTotals,
 		},
 		facts: new Map(),
+		share: null,
 		callIds: new Map(),
 		missing: 0,
 		pricedBy: noPricing(),
@@ -810,6 +895,7 @@ function updateSelection(selection: SelectionState, before: Attempt | undefined,
 	if (joining) tallyMember(selection, joining, 1);
 	const started = edit(selection.members, byStart, leaving, joining);
 	for (const fold of selection.facts.values()) advance(fold, started, joining, selection.members);
+	if (selection.share) advance(selection.share, started, joining, selection.members);
 	advance(selection.calls, edit(selection.byId, byAttemptId, leaving, joining), joining, selection.byId);
 	selection.totals = null;
 }
@@ -835,6 +921,20 @@ function selectionFacts(selection: SelectionState, metric: FactMetric): FactSum 
 	return fold.value;
 }
 
+function selectionShare(selection: SelectionState): ShareParts {
+	if (!selection.share) {
+		selection.share = {
+			value: emptyShare(),
+			previous: null,
+			empty: emptyShare,
+			add: addShare,
+			copy: (parts) => ({ ...parts }),
+		};
+		refold(selection.share, selection.members);
+	}
+	return selection.share.value;
+}
+
 /**
  * Group selections kept running besides the whole set. Every turn's receipt reads its own `turn` group, so an
  * unbounded cache grew per turn and every new attempt walked all of them.
@@ -853,7 +953,10 @@ function selectionOf(analysis: Analysis, group: { by: FactGroup; key: string } |
 		return selection;
 	}
 	const matches = (attempt: Attempt) => (group ? attemptInGroup(attempt, group) : true);
-	selection = selectionState(group ? groupAttempts(analysis.attempts, group) : analysis.attempts, matches);
+	selection = selectionState(
+		group ? groupAttempts(analysis.attempts, group, analysis.cache) : analysis.attempts,
+		matches,
+	);
 	selections.set(key, selection);
 	if (selections.size > SELECTION_CACHE_LIMIT + 1)
 		for (const oldest of selections.keys())
@@ -936,9 +1039,13 @@ function divergence(attempt: Attempt): Fact<string | null> {
 const COLD_SELECTION = "cold\u0000";
 
 /** A group's attempts; a cold group holds breaks only, so a call that hit its route's engine floor is in none. */
-function groupAttempts(attempts: readonly Attempt[], group: { by: FactGroup; key: string }): Attempt[] {
+function groupAttempts(
+	attempts: readonly Attempt[],
+	group: { by: FactGroup; key: string },
+	cache?: CacheState,
+): Attempt[] {
 	if (group.by !== "cold") return attempts.filter((attempt) => attemptInGroup(attempt, group));
-	return cacheBreaks(attempts).filter((attempt) => coldKeys(attempt).includes(group.key));
+	return cacheBreaks(cache ?? cacheState(attempts)).filter((attempt) => coldKeys(attempt).includes(group.key));
 }
 
 function attemptInGroup(attempt: Attempt, group: { by: FactGroup; key: string }): boolean {
@@ -1195,7 +1302,8 @@ const RULES: Record<FactMetric, string> = {
 	toolErrors: "sealed evidence tool errors",
 	harnessShare: "100 × harnessTime / (harnessTime + networkTime + modelTime + toolTime), main-loop calls only",
 	callShare: "100 × group calls / whole-scope calls; unknown when model groups overlap",
-	cacheShare: "100 × cache-read tokens / prompt tokens; unknown without complete measured token fields",
+	cacheShare:
+		"100 × cache-read tokens / prompt tokens of the sent calls; ≥ while a call's read went unreported, ~ when a read was derived from the uncached prefill",
 	calls: "count(distinct callId); a run contributes its API calls",
 	attempts: "count(attempts)",
 	neverSent: "count(attempts where disposition=never_sent)",
@@ -1501,6 +1609,7 @@ function display(
 	}
 	if (family === "usd") return renderUsdSum(fact, free, freeRule);
 	if (family === "duration") return renderDurationSum(fact);
+	if (family === "percent") return renderShareSum(fact);
 	return renderCountSum(fact);
 }
 
@@ -1608,7 +1717,14 @@ function measure(view: View, ref: ParsedFactRef): Measurement | null {
 		};
 	}
 
-	if (ref.metric === "harnessShare" || ref.metric === "callShare" || ref.metric === "cacheShare") {
+	if (ref.metric === "cacheShare") {
+		const selection = select(view, ref);
+		if (!selection) return null;
+		const fact = shareFact(selectedShare(selection));
+		return { quantity: { fact, display: display(ref.metric, fact, false), ref: factRef(ref) }, selection };
+	}
+
+	if (ref.metric === "harnessShare" || ref.metric === "callShare") {
 		const base = ref.metric === "harnessShare" ? { ...ref, group: { by: "role" as const, key: "main" } } : ref;
 		const selection = select(view, base);
 		if (!selection) return null;
@@ -1629,10 +1745,6 @@ function measure(view: View, ref: ParsedFactRef): Measurement | null {
 				const total = values.reduce<number>((sum, part) => sum + (part ?? 0), 0);
 				if (total > 0) value = (100 * (values[0] ?? 0)) / total;
 			}
-		} else if (ref.metric === "cacheShare") {
-			const cached = exact(read("cacheRead"));
-			const prompt = exact(read("prompt"));
-			if (cached !== null && prompt !== null && prompt > 0 && cached <= prompt) value = (100 * cached) / prompt;
 		} else {
 			const numerator = exact(read("calls"));
 			const wholeRef = { ...ref, metric: "calls" as const };
@@ -1867,28 +1979,69 @@ function runRow(view: View, run: Run): RunRowV1 {
 	};
 }
 
+/**
+ * A cheap stamp of what a session's projection reads: its own, its runs' and its ancestors' journal lengths, its quota
+ * readings and its ledger. A reader comparing stamps skips building and comparing a projection nothing changed.
+ */
+export function sessionRevision(source: SessionSource): string {
+	const parts: unknown[] = [
+		source.accountQuota?.length ?? 0,
+		source.ledger?.endedAt,
+		source.ledger?.owner?.pid,
+		source.ledger?.owner?.birthToken,
+	];
+	for (let node: SessionSource | null = source, depth = 0; node && depth < 128; depth += 1) {
+		const journal = node.journal;
+		parts.push(node.sessionId, journal.records.length, journal.skipped, journal.damaged, journal.seeding === true);
+		for (const [runId, run] of node.runs)
+			parts.push(runId, run.records.length, run.skipped, run.damaged, run.seeding === true);
+		node = node.parent?.source ?? null;
+	}
+	return parts.join(":");
+}
+
+/**
+ * The last session DTO each analysis projected, with what it read beyond the analysis. A later source that only
+ * carried new quota readings, which the session DTO never reads, reuses it with a fresh header and liveness.
+ */
+const projections = new WeakMap<Analysis, { inputs: readonly unknown[]; dto: SessionTelemetryV1 }>();
+
+const projectionInputs = (source: SessionSource): readonly unknown[] => [
+	source.journal,
+	source.ledger,
+	source.parent?.sessionId,
+	source.parent?.turnId,
+	source.parent?.at,
+	source.parent?.source,
+	...source.runs.values(),
+];
+
 export function sessionTelemetry(source: SessionSource, options: ReadOptions = {}): SessionTelemetryV1 {
-	const view: View = { session: source };
 	const analysis = analyze(source);
+	const inputs = projectionInputs(source);
+	const projected = projections.get(analysis);
+	if (
+		projected &&
+		projected.inputs.length === inputs.length &&
+		projected.inputs.every((input, index) => input === inputs[index])
+	) {
+		const { dto } = projected;
+		const lifetime = { ...dto.lifetime, ...lifecycle(source, options, analysis.growth.span.lifecycle) };
+		return { ...dto, ...header(options), lifetime };
+	}
+	const dto = projectSession(source, analysis, options);
+	projections.set(analysis, { inputs, dto });
+	return dto;
+}
+
+function projectSession(source: SessionSource, analysis: Analysis, options: ReadOptions): SessionTelemetryV1 {
+	const view: View = { session: source };
 	const id = source.sessionId;
 	const ownSelection = select(view, own(id, "usd"));
-	let firstAt: string | null = null;
-	let lastAt: string | null = null;
-	for (const record of source.journal.records) {
-		if (firstAt === null || record.t < firstAt) firstAt = record.t;
-		if (lastAt === null || record.t > lastAt) lastAt = record.t;
-	}
-	const roles = new Set(analysis.attempts.map((attempt) => attempt.agent.role));
+	const { first: firstAt, last: lastAt, lifecycle: latestLifecycle } = analysis.growth.span;
+	const roles = new Set(analysis.roles.keys());
 	if (analysis.runs.size > 0) roles.add("worker");
-	let latest: Attempt | null = null;
-	for (const attempt of analysis.attempts)
-		if (
-			attempt.agent.role === "main" &&
-			invoked(attempt) &&
-			attempt.settledAt !== null &&
-			(!latest || attempt.settledAt >= (latest.settledAt ?? ""))
-		)
-			latest = attempt;
+	const latest = analysis.latestMain;
 	const session = (metric: FactMetric, extra: Partial<ParsedFactRef> = {}) =>
 		quantity(view, { scope: "session", owner: id, metric, ...extra });
 	const mainLoop = (metric: FactMetric) => quantity(view, own(id, metric, { group: { by: "role", key: "main" } }));
@@ -1898,7 +2051,7 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 		sessionId: id,
 		modes: [...new Set(source.journal.modes)],
 		journal: journalCoverage(source.journal, analysis.fold),
-		lifetime: { firstRecordAt: firstAt, lastRecordAt: lastAt, ...lifecycle(source, options) },
+		lifetime: { firstRecordAt: firstAt, lastRecordAt: lastAt, ...lifecycle(source, options, latestLifecycle) },
 		lineage: source.parent
 			? {
 					parent: { sessionId: source.parent.sessionId, turnId: source.parent.turnId, at: source.parent.at },
@@ -1934,8 +2087,8 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 						cacheRead: quantity(view, own(id, "cacheRead", { attemptId: latest.started.attemptId })),
 						cacheWrite: quantity(view, own(id, "cacheWrite", { attemptId: latest.started.attemptId })),
 						input: quantity(view, own(id, "input", { attemptId: latest.started.attemptId })),
-						...cacheShares(analysis.attempts),
-						...replayMismatch(view, id, cacheBreaks(analysis.attempts)),
+						...cacheShares(view, analysis, id),
+						...replayMismatch(view, id, cacheBreaks(analysis.cache)),
 					}
 				: null,
 			used: quantity(view, { scope: "context", owner: id, metric: "contextUsed" }),
@@ -1983,14 +2136,8 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 function lifecycle(
 	source: SessionSource,
 	options: ReadOptions,
+	latest: LifecycleRecord | null = latestLifecycleRecord(source.journal.records),
 ): Pick<SessionTelemetryV1["lifetime"], "state" | "closed"> {
-	let latest: Extract<TelemetryRecord, { k: "session.opened" | "session.resumed" | "session.closed" }> | null = null;
-	for (const record of source.journal.records)
-		if (
-			(record.k === "session.opened" || record.k === "session.resumed" || record.k === "session.closed") &&
-			(!latest || record.t >= latest.t)
-		)
-			latest = record;
 	if (latest?.k === "session.closed") return { state: "closed", closed: { at: latest.t, reason: latest.data.reason } };
 	const ledger = source.ledger;
 	// Every reopen clears endedAt on disk before the reopened process writes, so a set endedAt is a close. Facts dated
@@ -2326,13 +2473,15 @@ export function cacheReport(source: SessionSource, options: ReadOptions = {}): C
 	const view: View = { session: source };
 	const analysis = analyze(source);
 	const id = source.sessionId;
-	const floors = engineFloors(analysis.attempts);
+	// A cold state lists the floors in the order their routes first read the cache, as a report always has.
+	const cache = cacheState(analysis.attempts);
+	const floors = engineFloors(cache);
 	const floorCalls = engineFloorCalls(analysis.attempts, floors);
 	const verdicts = { hot: 0, partial: 0, cold: 0, small: 0, unknown: 0 };
 	for (const attempt of analysis.attempts)
 		if (invoked(attempt) && attempt.settled)
 			verdicts[floorCalls.has(attempt) ? "hot" : attempt.settled.cache.verdict] += 1;
-	const breaks = cacheBreaks(analysis.attempts, floorCalls);
+	const breaks = cacheBreaks(cache);
 	const causes = [...new Set(breaks.flatMap(coldKeys))].sort();
 	const floorRows = [...floors].flatMap(([route, granularity]) => {
 		const calls = [...floorCalls.keys()].filter((attempt) => routeOf(attempt) === route);
@@ -2366,7 +2515,7 @@ export function cacheReport(source: SessionSource, options: ReadOptions = {}): C
 				rePrefilled: q("rePrefilled"),
 				uncachedPrefill: q("uncachedPrefill"),
 				breakUsd: q("breakUsd"),
-				share: cacheShare([attempt]),
+				share: q("cacheShare"),
 			};
 		}),
 		byCause: causes.map((cause) => ({
@@ -2375,7 +2524,7 @@ export function cacheReport(source: SessionSource, options: ReadOptions = {}): C
 			rePrefilled: quantity(view, own(id, "rePrefilled", { group: { by: "cold", key: cause } })),
 			breakUsd: quantity(view, own(id, "breakUsd", { group: { by: "cold", key: cause } })),
 		})),
-		...cacheShares(analysis.attempts),
+		...cacheShares(view, analysis, id),
 		...replayMismatch(view, id, breaks),
 		engineFloor: floorRows,
 	};
@@ -2400,29 +2549,92 @@ function promptParts(attempt: Attempt): { read: number; write: number; input: nu
 	return uncached === null || uncached > input ? null : { read: input - uncached, write, input: uncached };
 }
 
-/** C-05: the cached share of the prompts these calls sent, over the calls that reported their read. */
-function cacheShare(attempts: readonly Attempt[]): { fact: Fact<number>; display: string } {
-	let read = 0;
-	let total = 0;
-	for (const attempt of attempts) {
-		const parts = promptParts(attempt);
-		if (!parts) continue;
-		read += parts.read;
-		total += parts.read + parts.write + parts.input;
+/** A cached share's tokens and the sent calls behind them: read, derived from the uncached prefill, or unreported. */
+interface ShareParts {
+	read: number;
+	total: number;
+	measured: number;
+	derived: number;
+	unknown: number;
+}
+const emptyShare = (): ShareParts => ({ read: 0, total: 0, measured: 0, derived: 0, unknown: 0 });
+/**
+ * An unreported read adds the call's known prompt tokens and no read, so the share stays a lower bound: a read it
+ * missed can only raise it.
+ */
+function addShare(share: ShareParts, attempt: Attempt): void {
+	if (!invoked(attempt)) return;
+	const parts = promptParts(attempt);
+	if (parts) {
+		share.read += parts.read;
+		share.total += parts.read + parts.write + parts.input;
+		if (knownCount(attempt.settled?.usage?.cacheRead) === null) share.derived += 1;
+		else share.measured += 1;
+		return;
 	}
-	const fact: Fact<number> =
-		total > 0 ? { kind: "measured", value: (100 * read) / total, source: "local-count" } : unobserved;
-	return { fact, display: renderFact(fact, "percent") };
+	const usage = attempt.settled?.usage;
+	const input = usage ? knownCount(usage.input) : null;
+	if (usage && input !== null) share.total += input + (knownCount(usage.cacheWrite) ?? 0);
+	share.unknown += 1;
+}
+function mergeShare(share: ShareParts, add: ShareParts): void {
+	share.read += add.read;
+	share.total += add.total;
+	share.measured += add.measured;
+	share.derived += add.derived;
+	share.unknown += add.unknown;
+}
+
+function shareOf(attempts: readonly Attempt[]): ShareParts {
+	const share = emptyShare();
+	for (const attempt of attempts) addShare(share, attempt);
+	return share;
+}
+
+/** A selection's share; a run that kept no calls, or none at all, is one call whose read is unknown. */
+function selectedShare(selection: Selection): ShareParts {
+	if (selection.attempt) return shareOf([selection.attempt]);
+	const share = emptyShare();
+	for (const part of selection.parts) {
+		if (part.selection) mergeShare(share, selectionShare(part.selection));
+		else if (part.run) {
+			if (part.run.source.present && part.run.fold.source === "calls") mergeShare(share, shareOf(part.run.attempts));
+			else share.unknown += 1;
+		} else mergeShare(share, shareOf(part.attempts ?? []));
+		share.unknown += part.gap;
+	}
+	return share;
+}
+
+/**
+ * C-05: the cached share of the prompts the calls sent. It reads `~` when a read was derived from the server's
+ * uncached prefill and `≥` while some call's read went unreported, never a bare measured figure for either (R1, R3).
+ */
+function shareFact(share: ShareParts): Fact<number> | FactSum {
+	if (share.total <= 0) return share.unknown > 0 ? unknownSum(share.unknown) : unobserved;
+	const percent = (100 * share.read) / share.total;
+	const derived = share.derived > 0;
+	return {
+		measured: derived ? 0 : percent,
+		estimated: derived ? percent : 0,
+		unknownCount: share.unknown,
+		absentCount: 0,
+		coverage: { measured: share.measured, estimated: share.derived, unknown: share.unknown },
+	};
 }
 
 /** The session's cached share and its last turn's, read by `telemetry cache`, the exit summary and ACP alike. */
-function cacheShares(attempts: readonly Attempt[]) {
-	const lastTurn = [...attempts].reverse().find((attempt) => invoked(attempt) && attempt.ctx?.turnId)?.ctx?.turnId;
+function cacheShares(view: View, analysis: Analysis, id: string) {
+	let lastTurn: string | undefined;
+	for (let index = analysis.attempts.length - 1; index >= 0 && lastTurn === undefined; index -= 1) {
+		const attempt = analysis.attempts[index] as Attempt;
+		if (invoked(attempt) && attempt.ctx?.turnId) lastTurn = attempt.ctx.turnId;
+	}
 	return {
-		share: cacheShare(attempts),
-		lastTurnShare: cacheShare(
-			lastTurn === undefined ? [] : attempts.filter((attempt) => attempt.ctx?.turnId === lastTurn),
-		),
+		share: quantity(view, own(id, "cacheShare")),
+		...(lastTurn === undefined
+			? {}
+			: { lastTurnShare: quantity(view, own(id, "cacheShare", { group: { by: "turn", key: lastTurn } })) }),
 	};
 }
 
@@ -2449,34 +2661,73 @@ const routeOf = (attempt: Attempt) => modelKey(attempt.settled?.target ?? attemp
  */
 const ENGINE_FLOOR_MIN_CALLS = 3;
 const ENGINE_FLOOR_MIN_TOKENS = 256;
-function engineFloors(attempts: readonly Attempt[]): Map<string, number> {
-	const reads = new Map<string, number[]>();
-	for (const attempt of attempts) {
-		const read = promptParts(attempt)?.read ?? 0;
-		if (read <= 0 || !Number.isSafeInteger(read)) continue;
+/**
+ * What the engine floors and cache breaks need of a session's calls, moved by each call that lands so a live read
+ * never rescans the session: copying every route's reads on each call made a long session quadratic.
+ */
+interface CacheState {
+	/** Per route, its cached reads counted by the exponent of the largest power of two dividing each. */
+	readonly reads: Map<string, number[]>;
+	/** The calls `isBreak` holds for, in the read model's order; a route's engine floor clears some of them. */
+	readonly candidates: Attempt[];
+	/** The candidates past the floors last read, and the candidates that moved since. */
+	breaks: { floors: string; attempts: Attempt[]; pending: [Attempt | undefined, Attempt | undefined][] } | null;
+}
+
+function cacheState(attempts: readonly Attempt[]): CacheState {
+	const state: CacheState = { reads: new Map(), candidates: [], breaks: null };
+	for (const attempt of attempts) noteCache(state, undefined, attempt);
+	return state;
+}
+
+function noteCache(state: CacheState, before: Attempt | undefined, after: Attempt | undefined): void {
+	for (const [attempt, sign] of [
+		[before, -1],
+		[after, 1],
+	] as const) {
+		const read = attempt ? (promptParts(attempt)?.read ?? 0) : 0;
+		if (!attempt || read <= 0 || !Number.isSafeInteger(read)) continue;
 		const route = routeOf(attempt);
-		reads.set(route, [...(reads.get(route) ?? []), read]);
+		const slots = state.reads.get(route) ?? [];
+		const exponent = lowestExponent(read);
+		slots[exponent] = (slots[exponent] ?? 0) + sign;
+		state.reads.set(route, slots);
 	}
+	const leaving = before && isBreak(before) ? before : undefined;
+	const joining = after && isBreak(after) ? after : undefined;
+	if (!leaving && !joining) return;
+	edit(state.candidates, byStart, leaving, joining);
+	const breaks = state.breaks;
+	if (!breaks) return;
+	breaks.pending.push([leaving, joining]);
+	if (breaks.pending.length > state.candidates.length) state.breaks = null;
+}
+
+function engineFloors(state: CacheState): Map<string, number> {
 	const floors = new Map<string, number>();
-	for (const [route, values] of reads) {
-		if (values.length < ENGINE_FLOOR_MIN_CALLS) continue;
-		const granularity = Math.min(...values.map(lowestBit));
-		if (granularity >= ENGINE_FLOOR_MIN_TOKENS) floors.set(route, granularity);
+	for (const [route, slots] of state.reads) {
+		let calls = 0;
+		let lowest = -1;
+		for (let exponent = 0; exponent < slots.length; exponent += 1) {
+			const count = slots[exponent] ?? 0;
+			calls += count;
+			if (count > 0 && lowest < 0) lowest = exponent;
+		}
+		const granularity = 2 ** lowest;
+		if (lowest >= 0 && calls >= ENGINE_FLOOR_MIN_CALLS && granularity >= ENGINE_FLOOR_MIN_TOKENS)
+			floors.set(route, granularity);
 	}
 	return floors;
 }
-/** The largest power of two dividing a positive integer. */
-const lowestBit = (value: number): number => {
-	let bit = 1;
-	while (value % (bit * 2) === 0) bit *= 2;
-	return bit;
+/** The exponent of the largest power of two dividing a positive integer. */
+const lowestExponent = (value: number): number => {
+	let exponent = 0;
+	while (value % 2 ** (exponent + 1) === 0) exponent += 1;
+	return exponent;
 };
 
 /** Each call that hit its route's engine floor, with that floor. */
-function engineFloorCalls(
-	attempts: readonly Attempt[],
-	floors: ReadonlyMap<string, number> = engineFloors(attempts),
-): Map<Attempt, number> {
+function engineFloorCalls(attempts: readonly Attempt[], floors: ReadonlyMap<string, number>): Map<Attempt, number> {
 	const calls = new Map<Attempt, number>();
 	for (const attempt of attempts) {
 		const granularity = floorGranularity(attempt, floors);
@@ -2485,12 +2736,25 @@ function engineFloorCalls(
 	return calls;
 }
 
-/** The cache breaks `telemetry cache`, the exit summary and the session DTO all count: an engine-floor call is hot. */
-function cacheBreaks(
-	attempts: readonly Attempt[],
-	floorCalls: ReadonlyMap<Attempt, number> = engineFloorCalls(attempts),
-) {
-	return attempts.filter((attempt) => isBreak(attempt) && !floorCalls.has(attempt));
+/**
+ * The cache breaks `telemetry cache`, the exit summary and the session DTO all count: an engine-floor call is hot.
+ * While the floors hold, only the candidates that moved since the last read are filtered again. Callers must not keep
+ * the list past the next batch.
+ */
+function cacheBreaks(state: CacheState): readonly Attempt[] {
+	const floors = engineFloors(state);
+	const key = [...floors].join(";");
+	const memo = state.breaks;
+	if (memo?.floors === key) {
+		const kept = (attempt: Attempt | undefined) =>
+			attempt && floorGranularity(attempt, floors) === null ? attempt : undefined;
+		for (const [leaving, joining] of memo.pending) edit(memo.attempts, byStart, kept(leaving), kept(joining));
+		memo.pending = [];
+		return memo.attempts;
+	}
+	const attempts = state.candidates.filter((attempt) => floorGranularity(attempt, floors) === null);
+	state.breaks = { floors: key, attempts, pending: [] };
+	return attempts;
 }
 
 /** A partial call that read whole blocks and fell short by under two of them hit the engine's floor, not a break. */

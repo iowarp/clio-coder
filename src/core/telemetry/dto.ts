@@ -319,8 +319,6 @@ const roleRow = Type.Object(
 );
 const totals = Type.Object({ tokens: QuantitySchema, usd: QuantitySchema }, closed);
 
-/** A cached share of prompt tokens, as a percent fact and its display. */
-const CacheShareSchema = Type.Object({ fact: factSchema(nonNegative), display: Type.String() }, closed);
 /**
  * Cache breaks a resumed session's replayed transcript caused (cause `replay_mismatch`): how many, the tokens they
  * prefilled again, and the first entry where the latest replay departed from what was sent before.
@@ -391,8 +389,8 @@ export const SessionTelemetrySchema = Type.Object(
 							cacheRead: QuantitySchema,
 							cacheWrite: QuantitySchema,
 							input: QuantitySchema,
-							share: Type.Optional(CacheShareSchema),
-							lastTurnShare: Type.Optional(CacheShareSchema),
+							share: Type.Optional(QuantitySchema),
+							lastTurnShare: Type.Optional(QuantitySchema),
 							replayMismatch: Type.Optional(ReplayMismatchSchema),
 						},
 						closed,
@@ -612,7 +610,7 @@ const cacheBreak = Type.Object(
 		rePrefilled: QuantitySchema,
 		uncachedPrefill: QuantitySchema,
 		breakUsd: QuantitySchema,
-		share: Type.Optional(CacheShareSchema),
+		share: Type.Optional(QuantitySchema),
 	},
 	closed,
 );
@@ -635,9 +633,12 @@ export const CacheReportSchema = Type.Object(
 		byCause: Type.Array(
 			Type.Object({ cause: text, breaks: count, rePrefilled: QuantitySchema, breakUsd: QuantitySchema }, closed),
 		),
-		/** Cached share over the session's calls that reported their cache read, and over its last turn's. */
-		share: Type.Optional(CacheShareSchema),
-		lastTurnShare: Type.Optional(CacheShareSchema),
+		/**
+		 * Cached share of the session's sent prompts and of its last turn's: `~` when a read was derived from the uncached
+		 * prefill, `≥` while a call's read went unreported.
+		 */
+		share: Type.Optional(QuantitySchema),
+		lastTurnShare: Type.Optional(QuantitySchema),
 		replayMismatch: Type.Optional(ReplayMismatchSchema),
 		/**
 		 * Routes whose engine resumes a prefix only at fixed block boundaries, learned from the session's own cached

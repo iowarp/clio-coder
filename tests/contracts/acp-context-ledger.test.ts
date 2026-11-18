@@ -249,10 +249,11 @@ test("a long turn streams usage_update per model response with the meter rising 
 		totals: { usd: { display: string }; tokens: { display: string } };
 		context: { cache: { share?: { display: string }; lastTurnShare?: { display: string } } | null };
 	};
-	// The cache block carries the cached share `telemetry cache` reports: the session's, then its last turn's.
+	// The cache block carries the cached share `telemetry cache` reports: the session's, a bound past the memory call
+	// that reported no usage, then its last turn's.
 	assert.deepEqual(
 		[session.context.cache?.share?.display, session.context.cache?.lastTurnShare?.display],
-		["31.6%", "33.3%"],
+		["≥31.6% (1 call unknown)", "33.3%"],
 	);
 	assert.equal(session.totals.usd.display, "~$2.50 +?");
 	assert.ok(session.totals.tokens.display.includes("910"));
