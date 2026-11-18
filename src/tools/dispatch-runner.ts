@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { parseJsonObjectPayload } from "../core/json-payload.js";
 import { workerMcpNoNetworkNotice } from "../core/sandbox/worker-policy.js";
 import { evaluateSkillToolSurface } from "../core/skill-activation.js";
@@ -12,7 +13,7 @@ import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsTool } from "../core/turn-constraints.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { CouncilReport, CouncilReportMember } from "../domains/agents/result-contract.js";
-import type { BriefingPart, BuiltBriefing } from "../domains/context/index.js";
+import type { BriefingNotice, BriefingPart, BuiltBriefing } from "../domains/context/index.js";
 import { buildBriefing } from "../domains/context/index.js";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
 import {
@@ -2240,12 +2241,26 @@ function competeResult(
 }
 
 const COUNCIL_BRIEFING_MAX_BYTES = 8 * 1024;
-/**
- * A council seat or judge holds read-only tools and no `monitor`, so nothing it can call reaches a peer's run output:
- * the notice says what was omitted and points nowhere.
- */
+/** The notice for an excerpt whose whole answer the recipient cannot reach: it says what was omitted. */
 const councilBriefingNotice = (omitted: number, total: number): string =>
 	`\n[clio: ${omitted} of ${total} bytes omitted from this excerpt]\n`;
+/**
+ * A seat's excerpt notice. The council profile's `read` reaches run scopes (readScopeExemptRoots), so when the peer's
+ * result object exists the notice names it; otherwise it states only what was omitted.
+ */
+function councilExcerptNotice(receipt: RunResult): BriefingNotice {
+	let path: string | null = null;
+	try {
+		const candidate = runResultPath(receipt);
+		if (existsSync(candidate)) path = candidate;
+	} catch {
+		// A receipt the settlement cannot read has no result object to name.
+	}
+	return path === null
+		? councilBriefingNotice
+		: (omitted, total) =>
+				`\n[clio: ${omitted} of ${total} bytes omitted from this excerpt; read output.text in ${path} for the whole answer]\n`;
+}
 
 /**
  * The verdict a council answer casts, lower-cased.
@@ -2360,6 +2375,7 @@ async function runCouncil(
 								kind: "evidence",
 								lead: `[${peer.label}] `,
 								body: normalizedAssistantText(previous.summary),
+								notice: councilExcerptNotice(previous.receipt),
 							});
 						}
 					}
@@ -2463,16 +2479,21 @@ async function runCouncil(
 		const finalRuns = [...prior.values()];
 		// The task travels in the judge's own task field, so only the seats' answers count against the cap.
 		const judgeBriefing = boundedCouncilBriefing(
-			finalReports.map(
-				(member): BriefingPart =>
-					member.failed === undefined
-						? { kind: "evidence", lead: `[${member.label}] `, body: member.answer }
-						: {
-								kind: "evidence",
-								lead: `[${member.label}] failed; no final answer contributed. Reason: `,
-								body: member.failed.reason,
-							},
-			),
+			finalReports.map((member): BriefingPart => {
+				const receipt = runs.find((run) => run.receipt.runId === member.runId)?.receipt;
+				return member.failed === undefined
+					? {
+							kind: "evidence",
+							lead: `[${member.label}] `,
+							body: member.answer,
+							...(receipt === undefined ? {} : { notice: councilExcerptNotice(receipt) }),
+						}
+					: {
+							kind: "evidence",
+							lead: `[${member.label}] failed; no final answer contributed. Reason: `,
+							body: member.failed.reason,
+						};
+			}),
 		);
 		const judgeRequest: DispatchRequest = {
 			agentId: councilJudgeAgentId(council.judge?.agent, base.agentId),
