@@ -18,7 +18,7 @@ clio-coder evidence list
 | Command | Behavior |
 | --- | --- |
 | `inspect <runId>` | Prints the run id, the seal verdict, when the run was assessed, its outcome and exit code, tool-call and blocked-tool counts, token and cost totals, first-pass success, tags, one `trust:` summary and its axis line, one `gate <decisionId>:` line per verdict, a `provenance:` block when the seal verifies, and every finding with its severity, tag and sentence. Exit 1 when the run has no settled record, or when its seal was checked and rejected (the record is still printed). |
-| `inspect <runId> --json` | Prints a fixed record: `version`, `generatedAt`, `runId`, `assessed`, `integrity` (`verified`, `unsealed` or `failed`), the verdict tier, and every axis by its canonical state. It carries no task text, paths or finding prose. |
+| `inspect <runId> --json` | Prints a fixed record: `version`, `generatedAt`, `runId`, `assessed`, `integrity` (`verified`, `unsealed` or `failed`), the verdict tier, every axis by its canonical state and the quality verdict with its failed-validation count. It then adds what the text form prints, from the same read: `trustSummary` and `evidence`, the run's evidence record with the seal reason, outcome, totals, quality with failed validation names and baselines, tags, gate verdicts, provenance and findings with their prose. |
 | `list` | Prints `N runs`, then one row per run scope on this host, newest settlement first: run id, outcome (or `unsettled`), state (`assessed`, `unassessed`, `unsealed` or `failed`) and tags. |
 
 Exit codes are 0 on success, 1 for a runtime failure, and 2 for a usage error or an invalid run id (usage text goes to stderr). A run with no settled record prints the reason and a remedy on separate lines:

@@ -119,6 +119,8 @@ function renderEvidence(evidence: RunEvidence): void {
 	if (evidence.quality !== null) {
 		write(`quality: ${evidence.quality.verdict}`);
 		for (const name of evidence.quality.failedValidations) write(`  failed validation: ${name}`);
+		for (const baseline of evidence.quality.baselines)
+			write(`  baseline before the change (not judged): ${baseline.name} ${baseline.passed ? "passed" : "failed"}`);
 	}
 	write(`tags: ${formatList(evidence.tags)}`);
 	// The compact projection answers the trust questions; the canonical axis line beneath it is the drill-down, in the

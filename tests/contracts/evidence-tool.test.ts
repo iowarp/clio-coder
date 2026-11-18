@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { materializePendingGateDecision, stagePendingGateDecision } from "../../src/domains/dispatch/gate-decisions.js";
 import type { RunResultDraft } from "../../src/domains/dispatch/types.js";
-import { evidenceDetailSnapshot } from "../../src/domains/evidence/detail.js";
-import { inspectRunEvidence, TRUST_STATUS_AXES } from "../../src/domains/evidence/index.js";
+import { evidenceDetailSnapshot, evidenceInspectRecord } from "../../src/domains/evidence/detail.js";
+import { formatTrustSummary, inspectRunEvidence, TRUST_STATUS_AXES } from "../../src/domains/evidence/index.js";
 import { EVIDENCE_INVENTORY_MAX_ARTIFACTS } from "../../src/domains/evidence/inventory.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { telemetryJournalPath, telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
@@ -134,11 +134,18 @@ describe("evidence tool", () => {
 		strictEqual(detail.integrity, "verified");
 		deepStrictEqual(Object.keys(detail.axes), [...TRUST_STATUS_AXES]);
 		ok(inspected.findings.some((finding) => finding.tag === "proxy-validation"));
+		// bt-20 P-A: `evidence inspect --json` keeps the snapshot fields and adds the record the text form prints.
+		const { trustSummary, evidence: record, ...snapshot } = await evidenceInspectRecord("fixture", () => 0);
+		deepStrictEqual(snapshot, await evidenceDetailSnapshot("fixture", () => 0));
+		deepStrictEqual(JSON.parse(JSON.stringify(record)), inspected);
+		strictEqual(trustSummary, formatTrustSummary(run.trust));
 	});
 
 	it("states the stored result-contract quality and the validations the result reported as failed", async () => {
 		const validations = [
 			{ name: "unit tests before implementation", passed: false, evidence: "red" },
+			// bt-17: a red baseline is shown as a baseline, never as a failed validation.
+			{ name: "red baseline", passed: false, evidence: "red", baseline: true },
 			{ name: "unit tests", passed: true, evidence: "green" },
 		];
 		await fixture(false, undefined, {
@@ -162,7 +169,11 @@ describe("evidence tool", () => {
 			},
 		});
 		const run = await inspectRunEvidence(clioStateDir(), "fixture");
-		deepStrictEqual(run.quality, { verdict: "fail", failedValidations: ["unit tests before implementation"] });
+		deepStrictEqual(run.quality, {
+			verdict: "fail",
+			failedValidations: ["unit tests before implementation"],
+			baselines: [{ name: "red baseline", passed: false }],
+		});
 		deepStrictEqual((await evidenceDetailSnapshot("fixture")).quality, { verdict: "fail", failedValidations: 1 });
 	});
 

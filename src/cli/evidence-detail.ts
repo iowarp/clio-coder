@@ -1,7 +1,7 @@
-import { evidenceDetailSnapshot } from "../domains/evidence/detail.js";
+import { evidenceInspectRecord } from "../domains/evidence/detail.js";
 
 /**
- * `clio-coder evidence inspect <id> --json`.
+ * `clio-coder evidence inspect <id> --json`: the fixed snapshot plus the run evidence the text form prints.
  *
  * The id is the only argument, and the caller supplies it. A GUI host is bound
  * by its own allowlist rather than by this command, because an operator typing
@@ -9,6 +9,6 @@ import { evidenceDetailSnapshot } from "../domains/evidence/detail.js";
  * different act from a browser frame naming it.
  */
 export async function runEvidenceDetail(runId: string): Promise<number> {
-	process.stdout.write(`${JSON.stringify(await evidenceDetailSnapshot(runId), null, 2)}\n`);
+	process.stdout.write(`${JSON.stringify(await evidenceInspectRecord(runId), null, 2)}\n`);
 	return 0;
 }

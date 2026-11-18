@@ -7,12 +7,16 @@
  *
  * The identifier is validated for shape by the run-record reader; a GUI host that echoes operator-supplied ids owes
  * its own served-id window on top of that, because shape alone does not prove the id was ever served.
+ *
+ * `evidence inspect <runId> --json` prints this snapshot with the run evidence the text output renders, read once
+ * ({@link evidenceInspectRecord}), so the JSON form never carries less than the operator record (bt-20 P-A).
  */
 
 import { clioStateDir } from "../../core/xdg.js";
 import { inspectRunEvidence } from "./run-evidence.js";
-import { type TrustVerdict, trustVerdict } from "./trust-projection.js";
+import { formatTrustSummary, type TrustVerdict, trustVerdict } from "./trust-projection.js";
 import { TRUST_STATUS_AXES, type TrustStatusAxis } from "./trust-status.js";
+import type { RunEvidence } from "./types.js";
 
 export interface EvidenceDetailSnapshot {
 	readonly version: 1;
@@ -28,12 +32,30 @@ export interface EvidenceDetailSnapshot {
 	readonly quality: { readonly verdict: "pass" | "fail" | "unmeasured"; readonly failedValidations: number } | null;
 }
 
+/** The snapshot fields, then the run evidence the text output renders and its one-line trust summary. */
+export interface EvidenceInspectRecord extends EvidenceDetailSnapshot {
+	readonly trustSummary: string;
+	readonly evidence: RunEvidence;
+}
+
 export async function evidenceDetailSnapshot(
 	runId: string,
 	now: () => number = Date.now,
 	stateDir: string = clioStateDir(),
 ): Promise<EvidenceDetailSnapshot> {
+	return detailSnapshot(await inspectRunEvidence(stateDir, runId), now);
+}
+
+export async function evidenceInspectRecord(
+	runId: string,
+	now: () => number = Date.now,
+	stateDir: string = clioStateDir(),
+): Promise<EvidenceInspectRecord> {
 	const run = await inspectRunEvidence(stateDir, runId);
+	return { ...detailSnapshot(run, now), trustSummary: formatTrustSummary(run.trust), evidence: run };
+}
+
+function detailSnapshot(run: RunEvidence, now: () => number): EvidenceDetailSnapshot {
 	return {
 		version: 1,
 		generatedAt: new Date(now()).toISOString(),

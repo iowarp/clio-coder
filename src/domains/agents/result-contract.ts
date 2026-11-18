@@ -1722,9 +1722,18 @@ export function mutationReportChecks(contract: ResultContract, output: string | 
 					entry !== null &&
 					typeof entry === "object" &&
 					(entry as Record<string, unknown>).passed === true &&
-					(entry as Record<string, unknown>).baseline !== true,
+					!isBaselineValidation(entry),
 			),
 	};
+}
+
+/**
+ * Whether a reported validation entry is a baseline, a deliberate run before the change. Quality judges only the
+ * checks run on the changed tree, so every reader of a report's validations applies this one rule: a baseline may be
+ * shown as a baseline, never counted as a pass or a failure of the work (bt-17).
+ */
+export function isBaselineValidation(entry: unknown): boolean {
+	return entry !== null && typeof entry === "object" && (entry as Record<string, unknown>).baseline === true;
 }
 
 /** Named failures in the worker's mutation report, without inferring unreported checks. */
@@ -1735,7 +1744,7 @@ export function mutationReportFailures(contract: ResultContract | null, output: 
 	return parsed.value.validations.flatMap((entry: unknown) => {
 		if (entry === null || typeof entry !== "object") return [];
 		const check = entry as Record<string, unknown>;
-		return check.passed === false && check.baseline !== true && string(check.name) ? [check.name as string] : [];
+		return check.passed === false && !isBaselineValidation(check) && string(check.name) ? [check.name as string] : [];
 	});
 }
 
@@ -2001,7 +2010,7 @@ function validateMutation(contract: ResultContract, input: ResultContractValidat
 		Array.isArray(value.validations) && value.validations.length === 0 ? [] : parseChecks(value.validations);
 	if (reported === null) return failure(contract, "unmeasured", mutationValidationsReason());
 	// A baseline ran before the change, so quality judges only the checks run on the changed tree (bt-17).
-	const validations = reported.filter((check) => check.baseline !== true);
+	const validations = reported.filter((check) => !isBaselineValidation(check));
 	// Settle a historical failure only with a matching observed final pass.
 	// Missing evidence keeps old, potentially nonchronological reports conservative.
 	const reportedFailure =
