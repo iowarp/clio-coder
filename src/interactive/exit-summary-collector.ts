@@ -348,6 +348,11 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 	const workersWithoutWriteRecord = new Set<string>();
 	const workersWithReceiptPaths = new Set<string>();
 	const failures = new Map<string, number>();
+	/**
+	 * Tool calls the visit's parked sessions made. The footer's tally is one session's, so after /fork or /resume the
+	 * card read `Tools: bash 0 · verify 0` beside turns and files that kept counting (bt-11).
+	 */
+	const priorTools = new Map<string, number>();
 	/** A settled run's entry names its run, so its words are read from the run's record when the snapshot is taken. */
 	const timeline: Array<{ elapsedMs: number; text: string; runId?: string }> = [];
 	let timelineOmitted = 0;
@@ -441,6 +446,8 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			reopenedSessionId = null;
 			priorTurns += Math.max(0, (deps.getTurns() ?? 0) - baseTurns);
 			baseTurns = deps.getTurns() ?? 0;
+			// The footer's tally restarts with the next session, so the visit keeps the parked one's here.
+			for (const [tool, count] of deps.getToolCounts()) priorTools.set(tool, (priorTools.get(tool) ?? 0) + count);
 		}),
 		deps.bus.subscribe("context.pruned", () => {
 			compactions += 1;
@@ -600,7 +607,8 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			} catch {
 				// The guard reads the filesystem; an unreadable tree leaves the line out rather than the summary.
 			}
-			const tools = new Map(deps.getToolCounts());
+			const tools = new Map(priorTools);
+			for (const [tool, count] of deps.getToolCounts()) tools.set(tool, (tools.get(tool) ?? 0) + count);
 			for (const stats of workerTools.values()) {
 				for (const { tool, count } of stats) tools.set(tool, (tools.get(tool) ?? 0) + count);
 			}
@@ -620,8 +628,10 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				turns: priorTurns + Math.max(0, (deps.getTurns() ?? 0) - baseTurns),
 				models: [...models.values()],
 				spend,
-				tools: [...new Set([...tools.keys(), ...failures.keys()])]
-					.map((tool) => ({ tool, count: tools.get(tool) ?? 0, failures: failures.get(tool) ?? 0 }))
+				// A tool no call ran (a worker's refused calls settle as zero) is not a row.
+				tools: [...tools]
+					.filter(([, count]) => count > 0)
+					.map(([tool, count]) => ({ tool, count, failures: failures.get(tool) ?? 0 }))
 					.sort((a, b) => a.tool.localeCompare(b.tool)),
 				files: [...files.keys()].sort(),
 				fileChanges: [...files].map(([path, count]) => ({ path, count })).sort((a, b) => a.path.localeCompare(b.path)),

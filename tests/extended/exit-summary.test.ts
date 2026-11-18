@@ -116,32 +116,42 @@ test("a /resume mid-visit keeps the visit's turns, files and workers on the exit
 	const bus = createTelemetryHub();
 	let current = { id: "session-1", hasModelTurn: true };
 	let turns = 0;
+	const footerTools = new Map<string, number>();
 	const collector = createExitSummaryCollector({
 		bus,
 		telemetry: { subscribe: () => () => {} } as unknown as TelemetryContract,
 		dispatch: { observedRunWrites: () => null },
 		session: { current: () => current } as unknown as Pick<SessionContract, "current">,
 		getTurns: () => turns,
-		getToolCounts: () => new Map(),
+		getToolCounts: () => footerTools,
 		getModel: () => null,
 	});
 	turns = 3;
+	footerTools.set("bash", 2);
 	bus.emit("run.started", { runId: "run-a", agentId: "coder", targetId: "local", wireModelId: "m" } as never);
 	bus.emit("run.completed", { runId: "run-a", agentId: "coder", outcome: "completed" } as never);
-	collector.observeRunResult("run-a", { changedPaths: ["a.txt", "b.txt"] } as never);
+	collector.observeRunResult("run-a", {
+		changedPaths: ["a.txt", "b.txt"],
+		toolCounts: [
+			{ tool: "read", count: 4 },
+			{ tool: "verify", count: 0 },
+		],
+	} as never);
 	// /resume parks the current session, reattaches the chosen one and adopts its transcript.
 	bus.emit("session.parked", { sessionId: "session-1", reason: "resume_other", at: 0 });
 	current = { id: "session-2", hasModelTurn: true };
 	turns = 7;
 	bus.emit("session.reattached", { sessionId: "session-2", via: "resume" } as never);
+	footerTools.clear();
 	collector.sessionChanged();
 	turns = 8;
+	footerTools.set("bash", 1);
 	const snapshot = collector.snapshot();
 	strictEqual(snapshot?.sessionId, "session-2");
-	match(
-		renderExitSummary(snapshot, "standard", 160, false).join("\n"),
-		/^This visit, workers included: 4 turns · 2 files changed · 1 worker · 2 sessions$/mu,
-	);
+	const card = renderExitSummary(snapshot, "standard", 160, false).join("\n");
+	match(card, /^This visit, workers included: 4 turns · 2 files changed · 1 worker · 2 sessions$/mu);
+	// The parked session's calls stay in the tally, and a tool no call ran is no `verify 0` row.
+	match(card, /^Tools: bash 3 · read 4$/mu);
 	collector.dispose();
 });
 
