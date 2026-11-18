@@ -104,6 +104,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- The safety judge now names the session's workspace and scratch roots by path, including the one $TMPDIR names, so a lane can delete its own scratch under $TMPDIR. Escapes through .. or symlinks are still judged by their resolved target (cw-5).
 - System One typed-wire asks now open a journal call with the wire's token usage, so telemetry tokens, cost and usage count them (bt-33).
 - consult refuses an ask with no evidence or with filter keys at the top level before spending a call, and expands globs in question paths (bt-35).
 - Steers and follow-ups from the headless steer channel and ACP now start steering triage like TUI steers (bt-36).
