@@ -244,6 +244,7 @@ export interface TurnContextDeps {
 					| "providerFallbackReason"
 					| "providerReplayFallback"
 					| "keepRecentTokens"
+					| "retainedTargetTokens"
 					| "requireFit"
 					| "preserveUserTurnId"
 					| "pendingOperatorTurn"
@@ -2184,6 +2185,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					| "livePrefix"
 					| "providerFallbackReason"
 					| "keepRecentTokens"
+					| "retainedTargetTokens"
 					| "requireFit"
 					| "preserveUserTurnId"
 					| "pendingOperatorTurn"
@@ -2219,12 +2221,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const historyBudget = belowTrigger > 0 ? belowTrigger : inputTarget - fixedTokens;
 			// A cumulative checkpoint grows each cycle, so a fixed 30% suffix let the cut creep toward the trigger. The
 			// suffix gives back what the current checkpoint takes past its 30%, down to 10%, to hold the cut near 60%.
+			// It cannot drop below the newest tool batch, so the summary request also names the room 60% leaves it.
 			const checkpoint = findLastEntry(activeEntries(), (entry) => entry.kind === "compactionSummary");
 			const checkpointShare = checkpoint && historyBudget > 0 ? estimateTokens(checkpoint) / historyBudget : 0.3;
 			const suffixShare = Math.min(0.3, Math.max(0.1, 0.6 - checkpointShare));
 			budget = {
 				...budget,
 				keepRecentTokens: Math.min(DEFAULT_KEEP_RECENT_TOKENS, Math.max(1, Math.floor(historyBudget * suffixShare))),
+				retainedTargetTokens: Math.floor(historyBudget * 0.6),
 				...(requiredFit ? { requireFit: true } : {}),
 				...(activeAutoTurnId ? { preserveUserTurnId: activeAutoTurnId } : {}),
 			};

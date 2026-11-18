@@ -83,16 +83,26 @@ function buildOperatorInstructions(instructions?: string): string {
 	return `\n\n<operator-instructions>\n${focus}\n</operator-instructions>\nThe operator wrote these instructions for this checkpoint. They override the default scope above: keep every fact, value and decision they name in the checkpoint, even when the conversation does not show it.`;
 }
 
+/**
+ * The room a checkpoint has in a small window, stated so a cumulative summary stops outgrowing the history space it
+ * shares with the retained suffix (bt-18). Absent when the summary's own output room is the tighter bound.
+ */
+function buildCheckpointRoom(roomTokens?: number): string {
+	if (roomTokens === undefined) return "";
+	return `\n\nThis checkpoint has room for about ${Math.floor((roomTokens * 2) / 3)} words (${roomTokens} tokens) in a small context window. Stay within it: keep every literal, constraint and open task, and shorten finished work and narration first.`;
+}
+
 export function buildUserText(
 	conversationText: string,
 	instructions?: string,
 	previousContextText = "",
 	activeRequest?: string,
+	roomTokens?: number,
 ): string {
 	const activeRequestPrefix = activeRequest?.trim()
 		? `<active-request>\n${activeRequest}\n</active-request>\nThis is the operator's active request in the split turn. The ## Goal section must state this request, even when the earlier conversation has no goal or a different goal.\n\n`
 		: "";
-	return `${buildPreviousContextPrefix(previousContextText)}${activeRequestPrefix}<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_USER_PROMPT_TEMPLATE}${buildOperatorInstructions(instructions)}`;
+	return `${buildPreviousContextPrefix(previousContextText)}${activeRequestPrefix}<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_USER_PROMPT_TEMPLATE}${buildCheckpointRoom(roomTokens)}${buildOperatorInstructions(instructions)}`;
 }
 
 /** The checkpoint format and literal rules, shared by the portable template and the live-prefix request. */
@@ -111,6 +121,7 @@ export function buildLivePrefixUserText(input: {
 	/** The operator's request of a turn the cut splits. */
 	activeRequest?: string;
 	instructions?: string;
+	roomTokens?: number;
 }): string {
 	const scope = input.retainedFrom
 		? `Everything above the message that opens as quoted below will be replaced by the checkpoint you write now. That message and everything after it stay in the context verbatim, so the checkpoint covers only what comes before it.\n<retained-from>\n${input.retainedFrom}\n</retained-from>`
@@ -118,13 +129,14 @@ export function buildLivePrefixUserText(input: {
 	const active = input.activeRequest?.trim()
 		? `\n\nThe cut falls inside the operator's active turn. Its request:\n<active-request>\n${input.activeRequest}\n</active-request>\nThe ## Goal section must state this request. Record the tool calls already made in this turn, their results, file paths, commands, errors and decisions in Progress and Critical Context.`
 		: "";
-	return `<compaction-request>\nThis message comes from Clio's context engine, not from the operator. Stop the task here: do not call tools, do not answer or continue the conversation, and reply with the checkpoint only.\n\n${scope}${active}\n\nA summary that an earlier compaction placed in the conversation is canonical. Carry forward every still-relevant constraint, decision, active skill, unresolved task, exact identifier and file-state detail from it.\n</compaction-request>\n\nCreate a structured context checkpoint another LLM will use to continue the work.\n\n${CHECKPOINT_FORMAT}${buildOperatorInstructions(input.instructions)}`;
+	return `<compaction-request>\nThis message comes from Clio's context engine, not from the operator. Stop the task here: do not call tools, do not answer or continue the conversation, and reply with the checkpoint only.\n\n${scope}${active}\n\nA summary that an earlier compaction placed in the conversation is canonical. Carry forward every still-relevant constraint, decision, active skill, unresolved task, exact identifier and file-state detail from it.\n</compaction-request>\n\nCreate a structured context checkpoint another LLM will use to continue the work.\n\n${CHECKPOINT_FORMAT}${buildCheckpointRoom(input.roomTokens)}${buildOperatorInstructions(input.instructions)}`;
 }
 
 export function buildTurnPrefixUserText(
 	conversationText: string,
 	instructions?: string,
 	previousContextText = "",
+	roomTokens?: number,
 ): string {
-	return `${buildPreviousContextPrefix(previousContextText)}<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE}${buildOperatorInstructions(instructions)}`;
+	return `${buildPreviousContextPrefix(previousContextText)}<conversation>\n${conversationText}\n</conversation>\n\n${COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE}${buildCheckpointRoom(roomTokens)}${buildOperatorInstructions(instructions)}`;
 }

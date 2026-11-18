@@ -195,6 +195,11 @@ export interface CompactInput extends SideCallAuth {
 	/** Override the built-in keep-recent default (DEFAULT_KEEP_RECENT_TOKENS). */
 	keepRecentTokens?: number;
 	/**
+	 * History the cut aims to leave: the checkpoint plus the retained suffix. The summary request states the room
+	 * this leaves the checkpoint when that room is below the summary's own output room.
+	 */
+	retainedTargetTokens?: number;
+	/**
 	 * The pending request does not fit without a reduction, so it is refused
 	 * unless this pass shrinks the context. A retained suffix smaller than the
 	 * checkpoint-rewrite threshold then still justifies the rewrite; the no-gain
@@ -344,6 +349,8 @@ function conversationMessages(slice: ReadonlyArray<SessionEntry>): number {
 
 /** Floor for the per-message cap applied when a span only fits with user and assistant text clipped. */
 const MESSAGE_MIN_CHARS = 2000;
+/** The least room a checkpoint is asked to fit, so a large kept suffix never squeezes the summary to nothing. */
+const CHECKPOINT_ROOM_FLOOR = 1024;
 
 const isUserMessage = (entry: SessionEntry | undefined): boolean => entry?.kind === "message" && entry.role === "user";
 
@@ -1414,6 +1421,38 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		return emptyResult(cut === rawCut ? "protected-recent" : "protected-skill");
 	}
 
+	// The instructions also ride verbatim as an operator note, so they survive
+	// a summarizer that ignores them and carry into later checkpoints (DF-7).
+	const compactInstructions = input.instructions?.trim();
+	// Notes pinned with "remember ... for this session" stand for the whole session, wherever their entry sits;
+	// one the operator undid or retracted leaves the block even when an earlier checkpoint carried it.
+	const pinned = standingOperatorNotes(input.entries);
+	const unpinned = new Set(
+		input.entries.flatMap((entry) => {
+			if (entry.kind !== "custom" || entry.customType !== OPERATOR_NOTE_ENTRY) return [];
+			const data = entry.data as { id?: unknown; text?: unknown } | undefined;
+			return typeof data?.text === "string" && !pinned.some((note) => note.id === data.id) ? [data.text.trim()] : [];
+		}),
+	);
+	const operatorNotes = [
+		...extractOperatorNotes(
+			[
+				...priorCompactionContextEntries(entries, prevCompactionIndex),
+				...entries.slice(boundaryStart, cut.firstKeptEntryIndex),
+			],
+			compactInstructions ? `/compact: ${compactInstructions}` : undefined,
+			// "Remember that X" is kept as typed, so an undone pin's text inside it drops the sentence too.
+		).filter((note) => ![...unpinned].some((text) => note.includes(text))),
+		...pinned.map((note) => note.text.trim()),
+	]
+		.filter((note, index, all) => all.indexOf(note) === index)
+		.slice(-OPERATOR_NOTE_MAX_COUNT);
+	// Clio's own blocks follow the model's text; they are built before the calls so the checkpoint's room counts them.
+	const trailer = `${formatOperatorNotes(operatorNotes)}${formatExactFacts(fileOps, compactedEntries, input.cwd)}${formatRecallableRefs(
+		input.entries,
+		cut.firstKeptEntryIndex,
+		workingSet,
+	)}`;
 	const systemPrompt = input.systemPrompt ?? COMPACTION_SYSTEM_PROMPT;
 	if (!Number.isFinite(reserveTokens) || reserveTokens <= 0) {
 		throw new Error("compaction requires a positive finite reserve token budget");
@@ -1421,6 +1460,26 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	// A fixed cap let reasoning consume it and the summary was never saved (pi
 	// upstream #9512); summaryOutputBudget sizes it per route.
 	const { maxTokens, summaryRoom } = summaryOutputBudget(input.model, reserveTokens);
+	// A cumulative checkpoint told nothing of its room outgrew a small window's history space a little more each cycle,
+	// while the retained suffix could shrink no further than the newest tool batch, so each cut landed closer to the
+	// trigger (bt-18). The request names what the target leaves once the kept suffix and Clio's blocks are counted.
+	const checkpointRoom = (() => {
+		if (input.retainedTargetTokens === undefined) return undefined;
+		const kept = entries.slice(cut.firstKeptEntryIndex).reduce((tokens, entry) => tokens + estimateTokens(entry), 0);
+		const room = Math.max(
+			CHECKPOINT_ROOM_FLOOR,
+			Math.floor(input.retainedTargetTokens / 3),
+			input.retainedTargetTokens - kept - ceilChars(trailer.length),
+		);
+		return room < summaryRoom ? room : undefined;
+	})();
+	// A split turn's summary is the smaller part of the checkpoint, so it gets a third of the room.
+	const historyRoom =
+		checkpointRoom === undefined || turnPrefix.length === 0 ? checkpointRoom : Math.ceil((checkpointRoom * 2) / 3);
+	const prefixRoom =
+		checkpointRoom === undefined || (pre.length === 0 && !summarizePriorSuffix)
+			? checkpointRoom
+			: checkpointRoom - (historyRoom ?? 0);
 	let memoryOffer: MemoryCompactionOffer | null = null;
 	// Recorded only once a portable request carrying the offer is sent, so a
 	// request skipped as a repeat or replaced by a cheaper live prefix leaves no
@@ -1476,8 +1535,8 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	): string => {
 		const build = (text: string) =>
 			split
-				? buildTurnPrefixUserText(text, input.instructions, previous)
-				: buildUserText(text, input.instructions, previous, activeRequest);
+				? buildTurnPrefixUserText(text, input.instructions, previous, prefixRoom)
+				: buildUserText(text, input.instructions, previous, activeRequest, historyRoom);
 		const ordinary = serializeWithinBudget(slice, build);
 		const raw = build(ordinary);
 		if (memoryOffer !== null || input.offerMemory === undefined) return raw;
@@ -1540,6 +1599,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			...(retainedFrom !== undefined ? { retainedFrom } : {}),
 			...(activeRequest !== undefined ? { activeRequest } : {}),
 			...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
+			...(checkpointRoom !== undefined ? { roomTokens: checkpointRoom } : {}),
 		});
 		const portable = [historyText, prefixText].reduce(
 			(tokens, text) =>
@@ -1663,32 +1723,6 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		if (text !== null) userContext = { turnId: activeUser.turnId, text };
 	}
 
-	// The instructions also ride verbatim as an operator note, so they survive
-	// a summarizer that ignores them and carry into later checkpoints (DF-7).
-	const compactInstructions = input.instructions?.trim();
-	// Notes pinned with "remember ... for this session" stand for the whole session, wherever their entry sits;
-	// one the operator undid or retracted leaves the block even when an earlier checkpoint carried it.
-	const pinned = standingOperatorNotes(input.entries);
-	const unpinned = new Set(
-		input.entries.flatMap((entry) => {
-			if (entry.kind !== "custom" || entry.customType !== OPERATOR_NOTE_ENTRY) return [];
-			const data = entry.data as { id?: unknown; text?: unknown } | undefined;
-			return typeof data?.text === "string" && !pinned.some((note) => note.id === data.id) ? [data.text.trim()] : [];
-		}),
-	);
-	const operatorNotes = [
-		...extractOperatorNotes(
-			[
-				...priorCompactionContextEntries(entries, prevCompactionIndex),
-				...entries.slice(boundaryStart, cut.firstKeptEntryIndex),
-			],
-			compactInstructions ? `/compact: ${compactInstructions}` : undefined,
-			// "Remember that X" is kept as typed, so an undone pin's text inside it drops the sentence too.
-		).filter((note) => ![...unpinned].some((text) => note.includes(text))),
-		...pinned.map((note) => note.text.trim()),
-	]
-		.filter((note, index, all) => all.indexOf(note) === index)
-		.slice(-OPERATOR_NOTE_MAX_COUNT);
 	const summary = `${stripEchoedExactFacts(
 		summaryParts
 			.join("\n\n---\n\n")
@@ -1701,11 +1735,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 				/\n*^[^\S\n]*<operator-notes\b[^>\n]*>[^\S\n]*(?:\n[\s\S]*?<\/operator-notes\s*>|(?:\n[\s\S]*)?(?![\s\S]))\n*/gimu,
 				"\n\n",
 			),
-	).trim()}${formatOperatorNotes(operatorNotes)}${formatExactFacts(fileOps, compactedEntries, input.cwd)}${formatRecallableRefs(
-		input.entries,
-		cut.firstKeptEntryIndex,
-		workingSet,
-	)}`.trim();
+	).trim()}${trailer}`.trim();
 
 	return {
 		summary,
