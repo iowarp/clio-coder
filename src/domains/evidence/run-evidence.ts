@@ -14,6 +14,7 @@ import { readRunRecordAsync } from "../telemetry/run-record.js";
 import { compareCodepoints } from "./ordering.js";
 import type { RunProvenanceView } from "./provenance.js";
 import { type GateReview, readRunGateIndex, readRunTrust } from "./run-trust.js";
+import { settledQualityFails, settledQualityValidates } from "./trust-status.js";
 import type { EvidenceDecision, EvidenceFinding, EvidenceTag, RunEvidence } from "./types.js";
 
 /**
@@ -116,7 +117,9 @@ const VALIDATION_NAME_MAX_CHARS = 200;
 /**
  * The quality verdict the run settled, the validation names its result object reports as failed, and its baselines. All
  * are read as stored; nothing here judges the result again. A baseline ran before the change, so it is listed apart and
- * never as a failure, by the rule the result contract judged quality with.
+ * never as a failure, by the rule the result contract judged quality with. A run no result contract judged, such as a
+ * main-agent run, reads its sealed typed checks by the rule its trust status reads them with, so a green verify on the
+ * final tree is a pass rather than unmeasured (bt-27).
  */
 function storedQuality(record: RunTelemetryV1 | null): RunEvidence["quality"] {
 	const quality = record?.settled?.quality ?? null;
@@ -135,7 +138,15 @@ function storedQuality(record: RunTelemetryV1 | null): RunEvidence["quality"] {
 			if (isBaselineValidation(entry)) baselines.push({ name: shown, passed });
 			else if (!passed) failedValidations.push(shown);
 		}
-	return { verdict: contract === null ? "unmeasured" : contract.quality, failedValidations, baselines };
+	const verdict =
+		contract !== null
+			? contract.quality
+			: settledQualityFails(quality)
+				? "fail"
+				: settledQualityValidates(quality)
+					? "pass"
+					: "unmeasured";
+	return { verdict, failedValidations, baselines };
 }
 
 /** One run's evidence read from its run scope beneath the state root, with the review gates decided about it. */

@@ -91,8 +91,9 @@ export interface RunEvidence {
 	/** Claims of validation the run made without a matching command, from its settled record. */
 	ungroundedClaims: number;
 	/**
-	 * The result contract's stored quality verdict and the validations the result reported as failed, by name. Null
-	 * unless the seal verifies and the run settled a quality block.
+	 * The result contract's stored quality verdict, or for a run no contract judged its sealed typed checks' verdict,
+	 * and the validations the result reported as failed, by name. Null unless the seal verifies and the run settled a
+	 * quality block.
 	 */
 	quality: {
 		verdict: "pass" | "fail" | "unmeasured";

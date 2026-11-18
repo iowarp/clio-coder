@@ -160,7 +160,7 @@ function runFindings(settled: RunSettled, trust: CanonicalTrustStatus): Finding[
 			"external-bypass",
 			"run used external peer permissions outside Clio policy; Clio safety blocks were not enforced",
 		);
-	const review = reviewFinding(trust.independentReview.state, succeeded);
+	const review = reviewFinding(trust.independentReview.state);
 	if (review !== null) out.push(review);
 	if (trust.contextProvenance.state === "invalid")
 		add("warn", "context-provenance", "context provenance record is contradictory");

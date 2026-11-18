@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { formatHeadlessObservedLine, observeHeadlessRun } from "../../src/cli/modes/headless-observed.js";
 import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
+import { inspectRunEvidence } from "../../src/domains/evidence/run-evidence.js";
+import { formatTrustSummary } from "../../src/domains/evidence/trust-projection.js";
 import { standingChecksFrom } from "../../src/domains/safety/observed-checks.js";
 import { readRunJournal } from "../harness/run-journal.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -342,6 +344,40 @@ test("a bash write that succeeded is a workspace change, so a later refused comm
 			["r1", "read", "read", "ok", { path: "../outside/out.txt" }],
 		]);
 		strictEqual(text.code, 0, text.stderr);
+	} finally {
+		env.restore();
+	}
+});
+
+test("a headless run whose check is a green verify after the dispatch that wrote seals quality pass (bt-27 c27d)", async () => {
+	const env = await isolateClioEnv("headless-observed-");
+	try {
+		const run = await headlessRun(
+			"text",
+			[
+				["d1", "dispatch", "dispatch", "ok", { agent: "coder", task: "implement slugify" }],
+				["v1", "verify", "execute", "ok", { check: "python-unittest" }],
+				["b1", "bash", "execute", "ok", { command: "python3 -B - <<'PY'\nprint(1)\nPY" }],
+			],
+			{
+				targetId: "fixture",
+				runtimeId: "openai-compat",
+				runtimeKind: "http",
+				wireModelId: "fixture-model",
+				promptSignature: null,
+				toolSignature: null,
+				cwd: env.dir,
+			},
+		);
+		strictEqual(run.code, 0, run.stderr);
+		const stateDir = join(env.dir, "state");
+		const runId = readRunJournal(stateDir)?.runs[0]?.row.runId;
+		ok(runId, run.stderr);
+		const evidence = await inspectRunEvidence(stateDir, runId);
+		strictEqual(evidence.quality?.verdict, "pass");
+		// No validation gap, and no review tag on a run no review judged: its trust line says it was not reviewed.
+		deepStrictEqual(evidence.tags, []);
+		match(formatTrustSummary(evidence.trust), /validation observed passing: verify python-unittest/u);
 	} finally {
 		env.restore();
 	}
