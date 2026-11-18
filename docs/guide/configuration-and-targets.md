@@ -720,7 +720,7 @@ not runtime compatibility ([bedrock.ts](../../src/domains/providers/runtimes/clo
 [support.ts](../../src/domains/providers/support.ts) and
 [runtime-descriptor.ts](../../src/domains/providers/types/runtime-descriptor.ts)).
 
-`inception` declares no reasoning support. The older Mercury models get `reasoning_effort: "instant"` pinned on every chat request, because their reasoning is not observable over the API and any higher effort returns an empty completion. `mercury-3` takes no pin. Thinking controls supplied by callers are still removed for it.
+`inception` declares no reasoning support, so `off` is the only thinking level. Every Mercury chat request carries `reasoning_effort: "instant"`, the minimum effort the API accepts. On the older models any higher effort returns an empty completion; on `mercury-3`, omitting the field makes the backend reason at its default, and that reasoning counts as output tokens but is stripped from the reply. Thinking controls supplied by callers are still removed.
 
 ## Auth
 
