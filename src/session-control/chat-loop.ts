@@ -4614,10 +4614,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					usage.tokens !== null && usage.contextWindow > 0
 						? `${formatFooterTokens(usage.tokens)} of ${formatFooterTokens(usage.contextWindow)} tokens used`
 						: used;
+				// Nothing was summarized, so instructions given for the summary went unused, and the operator should know (bt-11).
+				const unused = instructions?.trim() ? ". Your compaction instructions were not used" : "";
 				emitNotice(
 					hasMessages
-						? `[/context compact] too short to compact (${budget}); no older history can be summarized yet`
-						: "[/context compact] session is empty; start a conversation first",
+						? `[/context compact] too short to compact (${budget}); no older history can be summarized yet${unused}`
+						: `[/context compact] session is empty; start a conversation first${unused}`,
 				);
 			}
 		},

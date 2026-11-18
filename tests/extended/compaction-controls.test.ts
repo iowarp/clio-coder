@@ -516,8 +516,10 @@ describe("production compaction controls", () => {
 			loop.resetForSession(f.entries().at(-1)?.turnId ?? null, buildModelReplayAgentMessagesFromTurns(f.entries()));
 			await loop.compact();
 			match(notices.join("\n"), /too short to compact \(.* of .* tokens used\)/u);
-			doesNotMatch(notices.join("\n"), /session is empty/u);
+			doesNotMatch(notices.join("\n"), /session is empty|instructions were not used/u);
 			strictEqual(f.calls.length, 0);
+			await loop.compact("keep the API decisions");
+			match(notices.at(-1) ?? "", /too short to compact .*\. Your compaction instructions were not used$/u);
 		} finally {
 			loop.dispose();
 		}
