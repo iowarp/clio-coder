@@ -108,6 +108,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- ACP `message_end` no longer repeats the last characters of an assistant message that carries more than one text block; its tail now lines up with the streamed text (x8-3).
 - A fork no longer shows or answers the approval of a worker its parent dispatched. It prints a notice naming the owner and how to answer, and the card returns on `/resume` of that session (bt-11 f).
 - A fork's worker card shows elapsed time for a worker its parent dispatched, instead of "—" (bt-11 g).
 - The exit card's Tools row counts only the current session's own tool calls, not those of a session visited earlier in the process (bt-11 h).
