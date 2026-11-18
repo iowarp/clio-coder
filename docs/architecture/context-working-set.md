@@ -164,6 +164,8 @@ Exact recall by ref works for persisted tool results hidden by eviction or summa
 
 `resolveRecall(entries, view, ref, activeLeafTurnId)` resolves against the active path and compaction cut, returning the persisted tool-result body with the same field precedence as projection. It rejects malformed refs, unknown or other-branch refs, currently visible results, assistant thinking, and legacy destructively compacted bodies. It cannot recover bytes already removed from older logs.
 
+A main-session recall that would not fit under the fit line, counting the live input estimate, the bodies already recalled in the same batch and the fit output reserve against the window, returns `not recalled: no room in the context window now; recall one ref at a time after using this one` and appends no `contextRecall`, so a batch of recalls cannot push the request past the window (workers and routes with no known window are not bounded; `recallRoom` in [context/index.ts](../../src/tools/context/index.ts)).
+
 Errors distinguish malformed refs, off-branch refs, visible results, unavailable bodies and a path with no evicted read.
 
 Recoverable recall error messages end with the refs that can be recalled on the active path (tool results only, up to eight, then a count). `invalid_ref` reports only the malformed value. CLIO Coder deliberately lists valid refs instead of guessing a nearest ref, because similar time-ordered identifiers can name unrelated results.
