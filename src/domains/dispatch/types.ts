@@ -394,8 +394,9 @@ export interface RunValidationGrounding {
 	 * ran nothing that could have produced one, so the quality label does not
 	 * rest on it. `unmatched-command` means it ran commands the canonical
 	 * detector does not enumerate, which is reported and nothing more.
+	 * `grounded` means every claim matched an executed command.
 	 */
-	basis: "no-command-executed" | "unmatched-command";
+	basis: "grounded" | "no-command-executed" | "unmatched-command";
 }
 
 /**
