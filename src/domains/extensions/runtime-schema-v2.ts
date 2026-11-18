@@ -196,6 +196,26 @@ function parseEvents(
 	return tickMs === undefined ? { events } : { events, tickMs };
 }
 
+/**
+ * Whether a failed hook's `block` policy refuses anything at `point`: the
+ * prompt, a call not yet run, or the result of one that ran. A turn point has
+ * nothing to refuse, so the turn proceeds whatever the policy says.
+ */
+export function blockPolicyHolds(point: ExtensionHookPoint): boolean {
+	return point !== "turn_start" && point !== "turn_end";
+}
+
+/** One warning per hook whose declared `block` policy the host cannot apply at its point. */
+export function unheldBlockPolicies(hooks: readonly ExtensionHookDeclaration[]): string[] {
+	return hooks.flatMap((hook, index) => {
+		const keys = (["onTimeout", "onError"] as const).filter((key) => hook[key] === "block");
+		if (keys.length === 0 || blockPolicyHolds(hook.on)) return [];
+		return [
+			`runtime.hooks[${index}] declares ${keys.join(" and ")}: block at ${hook.on}, which a failed hook cannot stop; the host reports the failure and the turn proceeds`,
+		];
+	});
+}
+
 function parseHooks(value: unknown, policy: ManifestKeyPolicy): ExtensionHookDeclaration[] {
 	return list(value, "runtime.hooks", RUNTIME_V2_LIMITS.hooks).map((item, index) => {
 		const path = `runtime.hooks[${index}]`;
@@ -548,15 +568,47 @@ export function hookPowers(hook: ExtensionHookDeclaration, access: readonly stri
 	return [];
 }
 
-function hookCovered(approved: readonly ExtensionHookDeclaration[], hook: ExtensionHookDeclaration): boolean {
-	return approved.some(
-		(prior) =>
-			prior.on === hook.on &&
-			(prior.tools === undefined || hook.tools?.every((tool) => prior.tools?.includes(tool) === true) === true) &&
-			(prior.onTimeout === "block" || hook.onTimeout === "pass") &&
-			(prior.onError === "block" || hook.onError === "pass") &&
-			hook.timeoutMs <= prior.timeoutMs,
+function hookCovers(prior: ExtensionHookDeclaration, hook: ExtensionHookDeclaration): boolean {
+	return (
+		prior.on === hook.on &&
+		(prior.tools === undefined || hook.tools?.every((tool) => prior.tools?.includes(tool) === true) === true) &&
+		(prior.onTimeout === "block" || hook.onTimeout === "pass") &&
+		(prior.onError === "block" || hook.onError === "pass") &&
+		hook.timeoutMs <= prior.timeoutMs
 	);
+}
+
+/** How much a hook asks for: tool scope, then blocking failure policies, then its deadline. */
+function hookReach(hook: ExtensionHookDeclaration): number[] {
+	const blocks = Number(hook.onTimeout === "block") + Number(hook.onError === "block");
+	return [hook.tools?.length ?? Number.POSITIVE_INFINITY, blocks, hook.timeoutMs];
+}
+
+function compareReach(left: ExtensionHookDeclaration, right: ExtensionHookDeclaration): number {
+	const [a, b] = [hookReach(left), hookReach(right)];
+	const at = a.findIndex((value, index) => value !== b[index]);
+	return at === -1 ? 0 : (a[at] ?? 0) < (b[at] ?? 0) ? -1 : 1;
+}
+
+/**
+ * Every hook runs, so one approved declaration covers one candidate. The most
+ * demanding candidate claims first and takes the narrowest approved hook that
+ * covers it, which leaves broad ones for what only they cover; a reordered or
+ * narrowed manifest therefore finds no growth.
+ */
+function uncoveredHooks(
+	approved: readonly ExtensionHookDeclaration[],
+	next: readonly ExtensionHookDeclaration[],
+): ExtensionHookDeclaration[] {
+	const free = [...approved].sort(compareReach);
+	const unmatched = new Set<number>();
+	const order = next.map((hook, index) => ({ hook, index })).sort((left, right) => compareReach(right.hook, left.hook));
+	for (const { hook, index } of order) {
+		const at = free.findIndex((prior) => hookCovers(prior, hook));
+		if (at === -1) unmatched.add(index);
+		else free.splice(at, 1);
+	}
+	return next.filter((_, index) => unmatched.has(index));
 }
 
 /**
@@ -582,8 +634,7 @@ export function envelopeGrowth(approved: ExtensionCapabilityEnvelope, next: Exte
 	else if (next.tickMs !== undefined && approved.tickMs !== undefined && next.tickMs < approved.tickMs)
 		growth.push(`a faster timer (${next.tickMs / 1000}s, approved ${approved.tickMs / 1000}s)`);
 	push("new watched paths", added(approved.watch, next.watch));
-	for (const hook of next.hooks) {
-		if (hookCovered(approved.hooks, hook)) continue;
+	for (const hook of uncoveredHooks(approved.hooks, next.hooks)) {
 		const scope = hook.tools ? ` on ${hook.tools.join(", ")}` : "";
 		const powers = hookPowers(hook, next.access);
 		growth.push(`hook ${hook.on}${scope} (${[`${hook.timeoutMs} ms`, ...powers].join("; ")})`);
@@ -591,9 +642,9 @@ export function envelopeGrowth(approved: ExtensionCapabilityEnvelope, next: Exte
 	for (const tool of next.tools) {
 		const prior = approved.tools.find((entry) => entry.name === tool.name);
 		if (!prior) growth.push(`new tool: ${tool.name} (${tool.actionClass})`);
-		// A read tool skips the approval an execute tool gets, so that direction is the wider one.
-		else if (prior.actionClass === "execute" && tool.actionClass === "read")
-			growth.push(`tool ${tool.name} now claims to be read-only`);
+		// Each class meets a different admission rule, so no direction of a change is narrower in every policy.
+		else if (prior.actionClass !== tool.actionClass)
+			growth.push(`tool ${tool.name} is now ${tool.actionClass} (approved ${prior.actionClass})`);
 	}
 	// Every request then carries these schemas, so the operator's token budget is what grows.
 	push("attaches tool schemas to every request", added(approved.promote ?? [], next.promote ?? []));

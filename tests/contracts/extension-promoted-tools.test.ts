@@ -79,6 +79,23 @@ test("runtime.promote names declared tools and is capped by count and by schema 
 	);
 });
 
+test("a reload that reclassifies an approved tool asks again and names both classes", () => {
+	// Astra r6-2: only execute to read used to count, so execute to write reloaded without a consent ask.
+	const writer = (actionClass: string) =>
+		capabilityEnvelope(
+			parseExtensionRuntimeV2({
+				api: 2,
+				entrypoint: "extension.mjs",
+				tools: [{ ...tool("gate"), actionClass }],
+				permissions: { fs: { write: ["out"] } },
+			}),
+		);
+	notEqual(envelopeDigest(writer("execute")), envelopeDigest(writer("write")));
+	deepStrictEqual(envelopeGrowth(writer("execute"), writer("write")), ["tool gate is now write (approved execute)"]);
+	deepStrictEqual(envelopeGrowth(writer("write"), writer("execute")), ["tool gate is now execute (approved write)"]);
+	deepStrictEqual(envelopeGrowth(capabilityEnvelope(runtime({})), capabilityEnvelope(runtime({}))), []);
+});
+
 test("a hook requires its own tool only when the manifest promotes it", () => {
 	const declaration = runtime({ promote: ["next_step"] });
 	const require = (toolName: string) =>
@@ -362,4 +379,22 @@ test("a requirement for a promoted tool reaches the session's turn and never a d
 	]);
 	// The worker runs in its own process with none of the session's runtime tools, so it is never asked for one.
 	deepStrictEqual(await worker(input), []);
+});
+
+test("one approved hook covers one reloaded hook, and the narrowest cover is taken first", () => {
+	// Astra r6-5: every copy of one approved declaration matched it, so sixteen serial copies reloaded without an ask.
+	const hooks = (...entries: Array<Record<string, unknown>>) => capabilityEnvelope(runtime({ hooks: entries }));
+	const turn = { on: "turn_start" };
+	deepStrictEqual(envelopeGrowth(hooks(turn), hooks(turn, turn, turn)), [
+		"hook turn_start (250 ms)",
+		"hook turn_start (250 ms)",
+	]);
+	const broad = { on: "before_tool", timeoutMs: 1000 };
+	const narrow = { on: "before_tool", tools: ["gate"] };
+	const approved = hooks(broad, narrow, turn);
+	deepStrictEqual(envelopeGrowth(approved, hooks(turn, narrow, broad)), []);
+	deepStrictEqual(envelopeGrowth(approved, hooks(narrow, { on: "before_tool", tools: ["status"] }, turn)), []);
+	deepStrictEqual(envelopeGrowth(approved, hooks(narrow, narrow, narrow)), [
+		"hook before_tool on gate (250 ms; can refuse the call)",
+	]);
 });
