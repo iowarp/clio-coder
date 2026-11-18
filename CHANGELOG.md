@@ -55,6 +55,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - Astra r10-6: `/export` shows an "exporting" notice at once and writes the file asynchronously; rendering a long session still holds input briefly.
 - P1-8: turn context shares one compaction budget and trigger helper, one JSON digest and one active-path read; prompt bytes, ledger records and telemetry are unchanged.
 - P1-6: tool registry refusals go through one block builder (rejection text and policy key order unchanged), and a call's success and error paths share one flow-withhold and after_tool step.
+- P1-4: the chat loop drops seven unwired dependency seams and the duplicate `admitRuntimeFlow` gate; /btw, /draft, /handoff, triage and pre-warm admit information flow through `admitFlow` directly.
+- P1-5: worker receipt accounting moves from the chat loop into `session-control/worker-receipts.ts`, and the cancel-before-admission and submit-settle paths share one turn-outcome write.
 - P2D-2: the dispatch barrel re-exports only the names callers import through it, and ten single-file helpers are no longer exported.
 - P2D-3: the dispatch event pump and the assignment event stream share one bounded drop-oldest tee.
 - P2D-6: reservation tests exercise the async release and lock-held transfer that production uses; the test-only twins and unused path helpers are gone.
