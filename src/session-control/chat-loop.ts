@@ -3346,8 +3346,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				middleware.fireTurnStart(agentRuntime, text, pendingSkillRequests.length, options.requestContinuation === true);
 				if (options.requestContinuation !== true) {
 					markPreparationStep("turn-start");
-					await middleware.awaitTurnStart(agentRuntime, text, pendingSkillRequests.length);
+					const refusal = await middleware.awaitTurnStart(agentRuntime, text, pendingSkillRequests.length);
 					if (!admissionCurrent()) return;
+					// A blocking turn_start hook that failed refuses the turn before its first model request.
+					if (refusal !== null) {
+						emitAdmissionNotice(refusal, "turn-blocked", "warning");
+						return;
+					}
 				}
 				// The turn's scope is host-framed text in its own user message, kept
 				// verbatim in history, never a recompile of the system prompt (#422).
