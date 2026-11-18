@@ -115,10 +115,6 @@ function lockPathForRoot(root: string): string {
 	return join(clioStateDir(), "fleet-locks", `${digest}.json`);
 }
 
-export function fleetWorkspaceLockPath(workspaceRoot: string): string {
-	return lockPathForRoot(canonicalRoot(workspaceRoot));
-}
-
 function validRecord(value: unknown): value is FleetWorkspaceLockRecord {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const record = value as Partial<FleetWorkspaceLockRecord>;

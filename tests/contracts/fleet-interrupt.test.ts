@@ -1,11 +1,12 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Writable } from "node:stream";
 import { test } from "node:test";
 import { runFleetWithShutdown } from "../../src/cli/fleet-lifecycle.js";
 import { createFleetReporter } from "../../src/cli/fleet-reporting.js";
 import type { Hook } from "../../src/core/termination.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
 import {
 	fleetEventJournalPath,
@@ -13,9 +14,14 @@ import {
 	readFleetEventJournal,
 } from "../../src/domains/dispatch/fleet-event-journal.js";
 import { executeFleetRun } from "../../src/domains/dispatch/fleet-run.js";
-import { fleetWorkspaceLockPath } from "../../src/domains/dispatch/fleet-workspace-lock.js";
 import { readFleetRun } from "../../src/domains/dispatch/state.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+
+/** Fleet workspace lock records left in the isolated state directory. */
+function fleetLockRecords(): string[] {
+	const dir = join(clioStateDir(), "fleet-locks");
+	return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith(".json")) : [];
+}
 
 for (const mode of ["SIGINT", "SIGTERM", "SIGHUP", "forced", "deadline", "closed-stdout", "closed-stderr"]) {
 	test(`fleet ${mode} shutdown seals the journal and releases the lock`, async () => {
@@ -104,7 +110,7 @@ for (const mode of ["SIGINT", "SIGTERM", "SIGHUP", "forced", "deadline", "closed
 								const seal = readFleetEventJournal(rootId)?.lines.at(-1);
 								ok(seal?.type === "fleet_sealed" && seal.outcome === "aborted" && seal.forced === true);
 								ok(readFleetRun(rootId)?.endedAt);
-								strictEqual(existsSync(fleetWorkspaceLockPath(root)), false);
+								deepStrictEqual(fleetLockRecords(), []);
 							}
 						},
 					}),
@@ -117,7 +123,7 @@ for (const mode of ["SIGINT", "SIGTERM", "SIGHUP", "forced", "deadline", "closed
 						sealed.manifestDigest,
 						fleetManifestDigest(readFileSync(join(dirname(fleetEventJournalPath(rootId)), `${rootId}.json`), "utf8")),
 					);
-					strictEqual(existsSync(fleetWorkspaceLockPath(root)), false);
+					deepStrictEqual(fleetLockRecords(), []);
 					lifecycle.push("cleanup finished");
 				},
 				0,
@@ -228,7 +234,7 @@ test("fleet interruption aborts pending step admission and closes dispatch befor
 					ok(readFleetRun("fleet-admission-interrupt")?.endedAt);
 					const seal = readFleetEventJournal("fleet-admission-interrupt")?.lines.at(-1);
 					ok(seal?.type === "fleet_sealed" && seal.outcome === "aborted");
-					strictEqual(existsSync(fleetWorkspaceLockPath(scratch.dir)), false);
+					deepStrictEqual(fleetLockRecords(), []);
 				},
 				0,
 				{

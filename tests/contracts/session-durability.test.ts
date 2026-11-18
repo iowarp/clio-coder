@@ -3,9 +3,9 @@ import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { clioStateDir } from "../../src/core/xdg.js";
 
 import { recoverAbandonedRuns } from "../../src/domains/dispatch/orphan-recovery.js";
-import { runEventJournalRoot } from "../../src/domains/dispatch/run-event-journal.js";
 import { openRunTelemetry, settleOrphanedRunJournal } from "../../src/domains/dispatch/run-telemetry.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import {
@@ -20,6 +20,7 @@ import {
 	stagePendingProtectedArtifact,
 } from "../../src/domains/session/protected-artifact-journal.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { telemetryRunsDirectory } from "../../src/domains/telemetry/paths.js";
 import {
 	createSession,
 	readSessionFileEntries,
@@ -260,7 +261,7 @@ describe("session durability boundary", () => {
 		});
 		ledger.update(run.id, { status: "running", pid: 999_999, heartbeatAt: run.startedAt });
 		await ledger.persist();
-		const directory = join(runEventJournalRoot(), run.id);
+		const directory = join(telemetryRunsDirectory(clioStateDir()), run.id);
 		const journal = await openRunTelemetry(
 			{ sessionId: null, runId: run.id, agent: { role: "worker", id: run.id } },
 			directory,
