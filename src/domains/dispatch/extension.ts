@@ -429,7 +429,7 @@ import {
 	resultContractWasDue,
 	runStatusForOutcome,
 } from "./outcome.js";
-import { sessionAncestorIds } from "./ownership.js";
+import { dispatchOwnership, owningSessionPhrase, sessionAncestorIds } from "./ownership.js";
 import { canonicalWriteRoots } from "./parallel-writers.js";
 import {
 	type DispatchPathScope,
@@ -12186,7 +12186,16 @@ export function createDispatchBundle(
 				throw new Error(`steer: run '${runId}' no longer accepts input; the worker has exited or its stdin is closed`);
 			}
 		},
+		workerPermissionRefusal(runId, requestId) {
+			const ownerSessionId =
+				grantBroker.get(requestId)?.ownerSessionId ?? currentAssignmentRun(runId)?.req.ownerSessionId ?? null;
+			const owner = contract.owner?.();
+			if (ownerSessionId === null || owner === undefined || ownerSessionId === owner.sessionId) return null;
+			return `run '${runId}' belongs to ${owningSessionPhrase(dispatchOwnership(owner), ownerSessionId)}; only the session that dispatched it can answer its approvals, steer it or cancel it. /resume ${ownerSessionId} to answer it`;
+		},
 		resolveWorkerPermission(runId, requestId, decision) {
+			const refusal = contract.workerPermissionRefusal?.(runId, requestId) ?? null;
+			if (refusal !== null) throw new Error(`resolveWorkerPermission: ${refusal}`);
 			// A brokered request is decided against its record: the operator's
 			// answer is bound to the attempt and argument digest the worker parked.
 			const brokered = grantBroker.get(requestId);

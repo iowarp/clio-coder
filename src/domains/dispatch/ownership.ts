@@ -105,6 +105,17 @@ export interface DispatchOwnership {
 }
 
 /**
+ * The session a refused control action names: a fork reads its ancestors' runs, so a bare "another session" reads as
+ * this one, and naming the owner says where to act.
+ */
+export function owningSessionPhrase(ownership: DispatchOwnership, sessionId: string | null): string {
+	if (sessionId === null) return "another session";
+	return ownership.inherits({ sessionId })
+		? `session ${sessionId}, which this session was forked from`
+		: `session ${sessionId}`;
+}
+
+/**
  * The owner a caller holding a dispatch contract acts as. The contract's own
  * owner wins because it is what stamped the runs; the invocation's session id
  * only fills in for a contract that has none.

@@ -1344,6 +1344,70 @@ test("a key on a worker card holds that ask, restarts the ones queued behind it,
 	lifecycle.dispose();
 });
 
+test("a fork never answers its parent's worker ask; the card returns when the parent is current again", () => {
+	const bus = createTelemetryHub();
+	const notices: string[] = [];
+	const opened: string[] = [];
+	const answered: string[] = [];
+	let current = "session-f";
+	let state: OverlayState = "closed";
+	const lifecycle = createOverlayPermissionLifecycle({
+		bus,
+		dispatch: {
+			workerPermissionRefusal: (runId) =>
+				current === "session-p"
+					? null
+					: `run '${runId}' belongs to session session-p, which this session was forked from; /resume session-p to answer it`,
+			resolveWorkerPermission: (_runId, requestId, decision) => {
+				answered.push(`${requestId}:${decision}`);
+			},
+		},
+		getAutonomy: () => "default",
+		getOverlayState: () => state,
+		openPermissionOverlay: (view) => {
+			if (state === "permission-confirm") return false;
+			state = "permission-confirm";
+			opened.push(view.tool);
+			return true;
+		},
+		closeOverlay: () => {
+			if (state !== "permission-confirm") return;
+			state = "closed";
+			lifecycle.onPermissionOverlayClosed();
+		},
+		appendNotice: (_level, text) => {
+			notices.push(text);
+		},
+		applyApprovalState: () => {},
+		requestRender: () => {},
+		stopActiveTurn: () => {},
+	});
+	bus.emit("approval.requested", {
+		tool: "bash",
+		actionClass: "execute",
+		requestId: "ask-p",
+		requestedBy: "run-p",
+		origin: "worker:run-p",
+		agentId: "coder",
+		timeoutMs: 120_000,
+		fallback: "deny",
+		escalation: true,
+	});
+	deepStrictEqual(opened, [], "the fork's card never offers the parent's ask");
+	strictEqual(notices.length, 1);
+	match(notices[0] ?? "", /coder's bash call needs approval, but run 'run-p' belongs to session session-p, which/u);
+	match(notices[0] ?? "", /\/resume session-p to answer it\. Unanswered, it is denied when its window ends\./u);
+	lifecycle.cancel();
+	deepStrictEqual(answered, [], "no key in the fork reaches the parent's worker");
+
+	current = "session-p";
+	bus.emit("session.reattached", { sessionId: "session-p", via: "resume", at: 0 } as never);
+	deepStrictEqual(opened, ["bash"], "the parent, current again, gets the card");
+	lifecycle.confirm();
+	deepStrictEqual(answered, ["ask-p:approve"]);
+	lifecycle.dispose();
+});
+
 test("the rail beside a worker's ask states its expiry, and a short rail keeps the time before the words", () => {
 	const progress = {
 		phase: "tool",
