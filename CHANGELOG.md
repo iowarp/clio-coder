@@ -101,6 +101,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A worker that hits its refusal limit now gets one reply, with tools refused, to report its work; dispatch judges that report, long refusal reasons keep their remedy, and the failure names untracked files the run left behind (bt-28).
+- The prompt structure id stays the same when an unchanged prompt is recompiled, so telemetry no longer records a new structure per compile (bt-10).
 - The exit summary's Verified row says "session tokens per outcome"; "tokens each" read as a per-worker figure (bt-11).
 - A finished worker's dock row keeps its refused calls and seal state whole when narrow, dropping the contract first (bt-11).
 - After `/fork` or `/resume` the exit summary's Tools row keeps the visit's calls and lists no zero-count tool (bt-11).
