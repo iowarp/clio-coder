@@ -13,6 +13,7 @@ import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import type { ContextActivityStatus, ContextFoldPayload, ContextPrunedPayload } from "../core/telemetry/live-events.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import type { FoldCheckpoint } from "../domains/context/fold/contract.js";
+import { evictionPressure } from "../domains/context/fold/pressure.js";
 import { createFoldPriceBook } from "../domains/context/fold/price.js";
 import type { EvictionPlan, PolicyInput } from "../domains/context/working-set/contract.js";
 import { buildEvictionFields } from "../domains/context/working-set/engine.js";
@@ -160,6 +161,8 @@ export interface EvictionStageInput {
 	superseded: boolean;
 	/** The loop guard's call identity and read test, for S0. */
 	classify: ClassifyCall;
+	/** The fraction of the window at which the automatic trigger fires, counting the reserve for `tokens`. */
+	triggerFraction(tokens: number): number;
 }
 
 export interface LegacyAdoptionInput {
@@ -498,11 +501,19 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			if (policy !== null) policyId = policy.id;
 			const fitShare = () =>
 				Math.max(0, 1 - resolveTurnOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow);
+			// S1's figures (ContextFold A3); S0's selection reads neither, so its floor and gate are unchanged.
+			const pressure = evictionPressure({
+				automatic: trigger === "auto" && !requiredFit,
+				window: agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
+				threshold: compactionThreshold,
+				target: workingSetTarget,
+				triggerFraction: () => input.triggerFraction(estimate.tokens),
+			});
 			const policyInput = selectionInput(entries, session, settings, {
 				tokens: port.liveContextEstimate(agentRuntime, pendingUserText).tokens,
 				contextWindow: compactionWindow,
-				threshold: requiredFit ? Math.min(compactionThreshold, fitShare()) : compactionThreshold,
-				target: requiredFit ? Math.min(workingSetTarget, fitShare()) : workingSetTarget,
+				threshold: requiredFit ? Math.min(compactionThreshold, fitShare()) : pressure.threshold,
+				target: requiredFit ? Math.min(workingSetTarget, fitShare()) : pressure.target,
 				...(requiredFit ? { forced: true } : {}),
 			});
 			visibleEntries = policyInput.entries;

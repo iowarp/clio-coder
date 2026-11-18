@@ -1194,9 +1194,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				summaryReserve,
 				turnReserve: () => resolveTurnOutputReserve(agentRuntime, tokens),
 			});
+		/** The fraction of the trigger window at which the automatic trigger fires, counting the reserve for `tokens`. */
+		const triggerFraction = (tokens: number): number =>
+			effectiveCompactionThreshold(economic.threshold, economic.triggerWindow, triggerReserve(tokens));
 		return {
 			economic,
 			triggerReserve,
+			triggerFraction,
 			shouldCompact: (tokens: number) =>
 				economicPressure({
 					tokens,
@@ -1205,11 +1209,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					reserve: triggerReserve(tokens),
 				}),
 			/** The context size at which the automatic trigger fires, counting the reserve for `tokens`. */
-			triggerTokens: (tokens: number) =>
-				Math.floor(
-					effectiveCompactionThreshold(economic.threshold, economic.triggerWindow, triggerReserve(tokens)) *
-						economic.triggerWindow,
-				),
+			triggerTokens: (tokens: number) => Math.floor(triggerFraction(tokens) * economic.triggerWindow),
 		};
 	};
 
@@ -1901,6 +1901,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				structural: false,
 				superseded: true,
 				classify: classifyCall,
+				triggerFraction: route.triggerFraction,
 			});
 			if (!stage.committed) supersededAttemptKey = key;
 			return settle();
@@ -2077,6 +2078,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					structural: true,
 					superseded: supersededApplies,
 					classify: classifyCall,
+					triggerFraction: route.triggerFraction,
 				});
 				if (stage.acted) preSummaryStageActed = true;
 				else if (stage.committed) compactionConclusion = "superseded tool results evicted";

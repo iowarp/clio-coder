@@ -66,7 +66,12 @@ function autonomyReader(stateDir: string, sessionId: string): (ref: ObjectRef) =
  * The session's verified outcomes, counted by the outcome reader `/usage` uses over the ledger's typed projection.
  * Null when the ledger cannot be read, so the share counts the session as unknown rather than as none.
  */
-function verifiedOutcomes(stateDir: string, ledgerPath: string, runIds: Iterable<string>): VerifiedOutcomeCount | null {
+function verifiedOutcomes(
+	stateDir: string,
+	ledgerPath: string,
+	runIds: Iterable<string>,
+	forkedAt: string | null,
+): VerifiedOutcomeCount | null {
 	let text: string;
 	try {
 		text = readStateFileSync(stateDir, ledgerPath).toString("utf8");
@@ -95,7 +100,7 @@ function verifiedOutcomes(stateDir: string, ledgerPath: string, runIds: Iterable
 			// An unreadable run is not a verified one.
 		}
 	}
-	return countVerifiedOutcomes(expandChainMessages(entries), verified);
+	return countVerifiedOutcomes(expandChainMessages(entries), verified, forkedAt);
 }
 
 function projectCwd(stateDir: string, bucketDir: string, sessionIds: readonly string[]): string | null {
@@ -126,7 +131,14 @@ function readProjectInsights(stateDir: string, bucket: string): ProjectInsights 
 			[...source.runs.values()].map((run) => run.records),
 			autonomyReader(stateDir, source.sessionId),
 		);
-		const outcomes = verifiedOutcomes(stateDir, join(bucketDir, source.sessionId, "current.jsonl"), source.runs.keys());
+		// A fork's ledger copied its parent's entries; its own start is the `session.forked` row its journal opens with.
+		const forked = source.journal.records.find((record) => record.k === "session.forked");
+		const outcomes = verifiedOutcomes(
+			stateDir,
+			join(bucketDir, source.sessionId, "current.jsonl"),
+			source.runs.keys(),
+			source.parent === null ? null : (forked?.t ?? null),
+		);
 		signals.verifiedChecks = outcomes?.checks ?? 0;
 		rows.push({
 			sessionId: source.sessionId,

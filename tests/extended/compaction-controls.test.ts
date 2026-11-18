@@ -15,6 +15,7 @@ import type {
 	ContextPrunedPayload,
 } from "../../src/core/telemetry/live-events.js";
 import { clioStateDir } from "../../src/core/xdg.js";
+import { planEviction } from "../../src/domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { resolveRecall } from "../../src/domains/context/working-set/recall.js";
 import type { MemoryConsumptionReceipt } from "../../src/domains/memory/contract.js";
@@ -1501,6 +1502,101 @@ describe("production compaction controls", () => {
 		}
 	});
 
+	it("evicts older steps in S1 before any summary on a 28K automatic pass, cached or not, and leaves /compact and overflow as they were (bt-47 D6, cf1h-D5, ContextFold A3)", async () => {
+		// One running turn of twelve reads, so the four oldest sit outside protectLastSteps. About 18K tokens: past the
+		// 14,000 trigger, under the 22,400 gate S1 had before A3, so S1 found nothing and the summary paid for every pass.
+		const rows: Array<{ label: string; force: boolean; trigger?: "force" | "overflow"; cached?: boolean }> = [
+			{ label: "automatic", force: false },
+			{ label: "automatic, cached route", force: false, cached: true },
+			{ label: "/compact", force: true, trigger: "force" },
+			{ label: "overflow", force: true, trigger: "overflow" },
+		];
+		for (const row of rows) {
+			const f = fixture(false, false);
+			let leaf = appendEntry(f.state, {
+				kind: "message",
+				role: "user",
+				parentTurnId: null,
+				payload: { text: "active: read the modules" },
+			}).turnId;
+			const active = leaf;
+			for (let i = 0; i < 12; i++) {
+				const read = { path: `src/m${i}.ts` };
+				const id = `call-${i}`;
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "assistant",
+					parentTurnId: leaf,
+					payload: { text: "", content: [{ type: "toolCall", id, name: "read", arguments: read }] },
+				}).turnId;
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "tool_call",
+					parentTurnId: leaf,
+					payload: { toolCallId: id, name: "read", args: read },
+				}).turnId;
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "tool_result",
+					parentTurnId: leaf,
+					payload: {
+						toolCallId: id,
+						toolName: "read",
+						isError: false,
+						result: { content: [{ type: "text", text: `${i} ${"y".repeat(6000)}` }] },
+					},
+				}).turnId;
+			}
+			f.pinLeaf(leaf);
+			const pressures: Array<{ threshold: number; target: number; forced?: boolean }> = [];
+			const { state, runtime, context, bus } = automaticContext(f, f.run, {
+				planEviction: (policy, input) => {
+					pressures.push({
+						threshold: input.pressure.threshold,
+						target: input.pressure.target,
+						...(input.pressure.forced ? { forced: true } : {}),
+					});
+					return planEviction(policy, input);
+				},
+			});
+			state.activeUserTurnId = active;
+			f.settings.context.compaction.threshold = 0.8;
+			// A reasoning route on a 28K window: A1 puts its trigger at 14,000.
+			runtime.runtimeResolution.contextWindowDetails.effectiveContextWindow = 28_000;
+			runtime.agent.state.model = {
+				...runtime.agent.state.model,
+				contextWindow: 28_000,
+				maxTokens: 128_000,
+				reasoning: true,
+			};
+			if (row.cached) Object.assign(runtime.runtimeResolution, { promptCaching: true });
+			const folds: ContextFoldPayload[] = [];
+			bus.subscribe("context.fold", (event) => {
+				folds.push(event);
+			});
+			const pruned: ContextPrunedPayload[] = [];
+			bus.subscribe("context.pruned", (event) => {
+				pruned.push(event);
+			});
+			await context.runAutoCompact(runtime, row.force, undefined, row.trigger);
+			const stages = folds.flatMap((fold) => fold.stages.map(({ stage, outcome }) => [stage, outcome]));
+			if (!row.force) {
+				deepStrictEqual(pressures, [{ threshold: 0.5, target: 0.375 }], row.label);
+				deepStrictEqual(stages, [["working_set", "committed"]], `${row.label}: S1 alone, no aging, no summary`);
+				strictEqual(f.calls.length, 0, row.label);
+				strictEqual(pruned.length, 1, row.label);
+				strictEqual(folds[0]?.route.promptCaching, row.cached, row.label);
+				continue;
+			}
+			// /compact runs no S1; overflow fits the request against the 8,192-token turn reserve, both as before A3.
+			deepStrictEqual(
+				pressures,
+				row.trigger === "force" ? [] : [{ threshold: 1 - 8_192 / 28_000, target: 0.6, forced: true }],
+				row.label,
+			);
+		}
+	});
+
 	it("routes a configured dedicated summary model through the production callback", async () => {
 		const f = fixture(false, true, true);
 		f.settings.context.compaction.model = "summary-target/summary";
@@ -2264,30 +2360,50 @@ describe("compaction trigger output reservation", () => {
 		strictEqual(effectiveCompactionThreshold(0.9, 0, 26_214), 0.9);
 	});
 
-	it("bounds a reasoning route's summary reserve at half a known window (bt-47 cf1j-b, ContextFold A1)", async () => {
+	it("bounds a reasoning route's summary reserve at half a known window, and S1 follows the trigger under 52,428 (bt-47 cf1j-b, D6, ContextFold A1, A3)", async () => {
 		const { effectiveCompactionThreshold } = await import("../../src/domains/session/compaction/auto.js");
-		const { foldTriggerReserve } = await import("../../src/domains/context/fold/pressure.js");
+		const { evictionPressure, foldTriggerReserve } = await import("../../src/domains/context/fold/pressure.js");
 		const { summaryOutputReserve } = await import("../../src/domains/session/compaction/summary-output.js");
 		// A reasoning chat route with no observed summary share reserves ceil(0.8 x 16,384 / 0.5) = 26,214; the turn
-		// reserve sits below it. Old trigger: min(0.8, 1 - 26,214 / window) x window.
+		// reserve sits below it. Old trigger: min(0.8, 1 - 26,214 / window) x window. S1 kept the raw 0.8 gate and 0.6
+		// target on every window; under 52,428 its automatic pass now takes the trigger and 0.75 x the trigger (A3).
 		const model = { provider: "a1-table", baseUrl: "http://a1.invalid", id: "a1", maxTokens: 128_000, reasoning: true };
-		const table: Array<[window: number, trigger: number]> = [
-			[28_000, 14_000], // was 1,786
-			[32_768, 16_384], // was 6,554
-			[64_000, 64_000 - 26_214],
-			[128_000, 128_000 - 26_214],
-			[200_000, 0.8 * 200_000],
+		// A non-reasoning route with a 4,096 output limit reserves 8,192 (the turn's), at most 0.2W on a 50K window, so
+		// its trigger fraction is the threshold and S1 keeps today's inputs though the window is under 52,428.
+		const small = { ...model, id: "a3-small", maxTokens: 4_096, reasoning: false };
+		const table: Array<[window: number, trigger: number, s1Threshold: number, s1Target: number, route?: typeof model]> = [
+			[28_000, 14_000, 14_000, 10_500], // trigger was 1,786; S1 was 22,400 and 16,800
+			[32_768, 16_384, 16_384, 12_288], // trigger was 6,554; S1 was 26,214.4 and 19,660.8
+			[40_000, 20_000, 20_000, 15_000], // trigger was 13,786; S1 was 32,000 and 24,000
+			[50_000, 0.8 * 50_000, 0.8 * 50_000, 0.6 * 50_000, small],
+			[64_000, 64_000 - 26_214, 0.8 * 64_000, 0.6 * 64_000],
+			[128_000, 128_000 - 26_214, 0.8 * 128_000, 0.6 * 128_000],
+			[200_000, 0.8 * 200_000, 0.8 * 200_000, 0.6 * 200_000],
 		];
-		for (const [window, expected] of table) {
+		for (const [window, expected, s1Threshold, s1Target, route = model] of table) {
 			const reserve = foldTriggerReserve({
 				window,
-				summaryReserve: () => summaryOutputReserve(model, { summaryOnChatRoute: true }),
+				summaryReserve: () => summaryOutputReserve(route, { summaryOnChatRoute: true }),
 				turnReserve: () => 8_192,
 			});
-			const trigger = effectiveCompactionThreshold(0.8, window, reserve) * window;
+			const fraction = effectiveCompactionThreshold(0.8, window, reserve);
+			const trigger = fraction * window;
 			// Within 1e-6 tokens absolute: the fraction round-trips through a float.
 			ok(Math.abs(trigger - expected) < 1e-6, `${window}: ${trigger}`);
+			const s1 = (automatic: boolean) =>
+				evictionPressure({ automatic, window, threshold: 0.8, target: 0.6, triggerFraction: () => fraction });
+			const auto = s1(true);
+			ok(Math.abs(auto.threshold * window - s1Threshold) < 1e-6, `${window} S1 threshold: ${auto.threshold * window}`);
+			ok(Math.abs(auto.target * window - s1Target) < 1e-6, `${window} S1 target: ${auto.target * window}`);
+			if (window >= 52_428 || route === small)
+				deepStrictEqual(auto, { threshold: 0.8, target: 0.6 }, `${window}: S1 inputs as today`);
+			deepStrictEqual(s1(false), { threshold: 0.8, target: 0.6 }, `${window}: a forced pass keeps S1's inputs`);
 		}
+		deepStrictEqual(
+			evictionPressure({ automatic: true, window: 0, threshold: 0.8, target: 0.6, triggerFraction: () => 0.5 }),
+			{ threshold: 0.8, target: 0.6 },
+			"an unknown window keeps S1's inputs",
+		);
 		strictEqual(
 			foldTriggerReserve({ window: 0, summaryReserve: () => 26_214, turnReserve: () => 8_192 }),
 			26_214,

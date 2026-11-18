@@ -53,6 +53,10 @@ export const FailureCause = vocabulary([
 	"triage_stop",
 	"autonomy_stop",
 	"repetition",
+	"generation_guard",
+	"turn_timeout",
+	"output_cap",
+	"loop_guard",
 	"shutdown",
 	"internal",
 ]);

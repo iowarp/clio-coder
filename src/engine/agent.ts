@@ -64,6 +64,12 @@ export type EngineAgentOptions = Omit<AgentOptions, "streamFn"> & {
 	streamFn?: EngineStreamFn;
 	/** Native Pi transcript hook for production request adapters. */
 	transcriptStreamFn?: StreamFn;
+	/**
+	 * The delegate rewrites the transcript and sends through the engine registry, whose guard bounds tool arguments
+	 * against the request it actually sends. An agent-level guard would price the transcript before that rewrite: a
+	 * worker past its window before eviction got a 32-byte ceiling and lost its next tool call (cf1h-D3).
+	 */
+	delegateGuardsToolArguments?: boolean;
 	/** Called immediately before each native stream delegate invocation. */
 	onStreamInvocation?: () => void;
 	/** One fail-closed decision per assistant batch, before any valid sibling's per-call guard. */
@@ -225,6 +231,7 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 	const {
 		streamFn,
 		transcriptStreamFn = engineStreamSimple,
+		delegateGuardsToolArguments = false,
 		onStreamInvocation,
 		beforeToolBatch,
 		beforeStreamRequest,
@@ -249,7 +256,7 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 		const open = async () =>
 			routeUnattachedToolCalls(
 				filterAssistantProseStream(
-					await (streamFn || transcriptStreamFn !== engineStreamSimple
+					await ((streamFn || transcriptStreamFn !== engineStreamSimple) && !delegateGuardsToolArguments
 						? guardToolArgumentStream(model, context, streamOptions, delegate)
 						: delegate(streamOptions)),
 					model,

@@ -535,6 +535,47 @@ interface CompletedRun {
 	summary: EventSummary;
 	/** Reviewer/judge output staged before its receipt settlement boundary. */
 	pendingGate?: PendingGateDecisionHandle;
+	/** Earlier attempts of this assignment that failed before the recovery whose receipt this is, oldest first. */
+	failedAttempts?: ReadonlyArray<FailedAttempt>;
+}
+
+interface FailedAttempt {
+	runId: string;
+	attempt: number;
+	outcome: string;
+	outcomeCode: string | null;
+	detail: string | null;
+}
+
+/**
+ * A recovery attempt's success settles the assignment, but the attempts it replaced stay on the parent's record:
+ * each is read back from its own run along the receipt's retry lineage (cf1h-D3).
+ */
+function earlierFailedAttempts(deps: DispatchToolDeps, start: RunEnvelope["lineage"]): FailedAttempt[] {
+	const failed: FailedAttempt[] = [];
+	let lineage = start;
+	while (lineage !== undefined && lineage.attempt > 0 && lineage.parentRunId !== null) {
+		const prior = deps.dispatch.getRun(lineage.parentRunId);
+		const attempt = prior?.lineage?.attempt ?? lineage.attempt - 1;
+		if (prior === null || attempt >= lineage.attempt) break;
+		if (prior.outcome !== "succeeded")
+			failed.unshift({
+				runId: prior.id,
+				attempt,
+				outcome: prior.outcome ?? prior.status,
+				outcomeCode: prior.outcomeCode ?? null,
+				detail: prior.outcomeDetail ?? null,
+			});
+		lineage = prior.lineage;
+	}
+	return failed;
+}
+
+function recoveredAttemptLines(run: CompletedRun): string[] {
+	return (run.failedAttempts ?? []).map((prior) => {
+		const detail = prior.detail && prior.detail.length > 240 ? `${prior.detail.slice(0, 239)}…` : prior.detail;
+		return `recovered ${run.receipt.runId} after attempt ${prior.attempt} ${prior.runId} ${prior.outcome}: ${prior.outcomeCode ?? "no outcome code"}${detail ? ` (${detail})` : ""}`;
+	});
 }
 
 /**
@@ -549,6 +590,7 @@ function completeRun(
 	request?: DispatchRequest,
 ): CompletedRun {
 	const envelope = deps.dispatch.getRun(receipt.runId);
+	const failedAttempts = earlierFailedAttempts(deps, envelope?.lineage ?? receipt.lineage);
 	const capabilityClass = deps.getAgentSpecs().find((spec) => spec.id === receipt.agentId)?.capabilityClass;
 	const gateRole = receipt.gate?.role;
 	const readOnly =
@@ -564,6 +606,7 @@ function completeRun(
 		...(envelope?.recording !== undefined ? { recording: envelope.recording } : {}),
 		summary,
 		...(pendingGate !== undefined ? { pendingGate } : {}),
+		...(failedAttempts.length > 0 ? { failedAttempts } : {}),
 	};
 }
 
@@ -667,6 +710,7 @@ export function formatDispatchOutput(
 	form: DispatchResultForm = "compact",
 ): string {
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
+	const recovered = runs.filter((run) => (run.failedAttempts?.length ?? 0) > 0);
 	const shareBytes = Math.max(1024, Math.floor(maxOutputBytes / Math.max(1, runs.length)));
 	const perRunOutputBytes = form === "compact" ? Math.min(shareBytes, COMPACT_ANSWER_BYTES) : shareBytes;
 	// Integrity failures and the spot-check reminder lead the summary: the
@@ -694,8 +738,9 @@ export function formatDispatchOutput(
 		return state === "absent" || state === "unknown" || state === "ungrounded";
 	});
 	const lines = [
-		`dispatch (${mode}) total=${runs.length} failed=${failed.length}`,
+		`dispatch (${mode}) total=${runs.length} failed=${failed.length}${recovered.length > 0 ? ` recovered=${recovered.length}` : ""}`,
 		`runs=${runs.map((run) => run.receipt.runId).join(", ")}`,
+		...recovered.flatMap(recoveredAttemptLines),
 		`batch observed_tool_calls=${batch.observedToolCalls} cost=${batch.cost}${batch.unobservableToolRuns > 0 ? ` unobservable_tool_runs=${batch.unobservableToolRuns}` : ""}`,
 		...hostActions,
 		...(needsSpotCheck ? [SPOT_CHECK_GUIDANCE] : []),
@@ -784,6 +829,9 @@ function dispatchDetails(
 	board: string | null = null,
 ): ToolResultDetails {
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
+	const failedAttempts = runs.flatMap((run) =>
+		(run.failedAttempts ?? []).map((prior) => ({ ...prior, recoveredBy: run.receipt.runId })),
+	);
 	const batch = dispatchBatchSummary(runs);
 	const carried = mergeFlowRestrictions(
 		flowRestrictionsOfRuns(runs.map((run) => run.receipt.safety?.flowRestrictions)),
@@ -820,6 +868,9 @@ function dispatchDetails(
 		...(carried !== null ? { [FLOW_RESTRICTIONS_DETAIL]: carried } : {}),
 		runCount: runs.length,
 		failedCount: failed.length,
+		...(failedAttempts.length > 0
+			? { recoveredCount: new Set(failedAttempts.map((entry) => entry.recoveredBy)).size, failedAttempts }
+			: {}),
 		batchSummary: batch,
 		// Same text the output carries, under a stable key, so a surface that
 		// renders details can show the board without re-reading the store.

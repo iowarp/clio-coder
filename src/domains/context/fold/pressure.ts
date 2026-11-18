@@ -48,6 +48,35 @@ export function foldTriggerReserve(input: FoldTriggerReserveInput): number {
 	return Math.max(Math.min(input.summaryReserve(), Math.floor(input.window / 2)), input.turnReserve());
 }
 
+/** Twice a reasoning route's default 26,214 summary reserve: below this known window A1 bounds the trigger's share. */
+const SMALL_WINDOW_TOKENS = 52_428;
+
+export interface EvictionPressureInput {
+	/** The automatic checkpoint; `/compact`, overflow recovery and the worker guard are not. */
+	automatic: boolean;
+	/** The route's real context window; zero or less when it reports none. */
+	window: number;
+	/** The configured threshold, as the route's compaction budget clamps it. */
+	threshold: number;
+	/** The working-set target fraction. */
+	target: number;
+	/** The fraction the automatic trigger fires at, counting its reserve; read only when it applies. */
+	triggerFraction: () => number;
+}
+
+/**
+ * S1's threshold and target. On a known window under 52,428 tokens the automatic trigger sits below S1's own gate,
+ * so the age rung never acted and every pass paid for a summary; there S1 takes the trigger's fraction, and its
+ * target scales by the same ratio, as notice and prepare do (0.75 x the trigger at the defaults). Every other case
+ * keeps the raw figures (bt-47 tui-cf1 D6, cf1h-D5, ContextFold A3).
+ */
+export function evictionPressure(input: EvictionPressureInput): { threshold: number; target: number } {
+	if (!input.automatic || !(input.window > 0) || input.window >= SMALL_WINDOW_TOKENS || !(input.threshold > 0))
+		return { threshold: input.threshold, target: input.target };
+	const threshold = input.triggerFraction();
+	return { threshold, target: input.target * (threshold / input.threshold) };
+}
+
 /**
  * Whether one finalized attempt fits the real window: input plus reserved
  * output at most the window, so exactly at the window fits. An unknown window
