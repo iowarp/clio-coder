@@ -112,6 +112,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A dispatch that puts a target id in `node` (for example `node:'openai-codex'`) is told the value is a target id that belongs in `target`, with `node` omitted (bt-45 c16-A).
+- The exit summary's Workers line shows refused worker calls (`· 1 call refused`) in the same words as the collected block (bt-11 s).
+- The dispatch scope notice for `../` briefing paths is one plain sentence naming the paths that were not granted, plus any read from the workspace root (bt-11 u).
 - A `verify` naming an undeclared check ran nothing, so it no longer fails a worker's result quality after the declared check passes (bt-45 c16-C).
 - A worker past its window before eviction no longer loses a tool call to a 32-byte argument ceiling; a worker call cut off by its turn timeout, output cap or tool-argument bound settles with that cause instead of `transport_dropped`; `why stopped` names the stop of each worker run the last turn dispatched; and a dispatch that recovered on a retry reports `recovered=N` and the failed attempt (bt-47 cf1h-D3).
 - The worker context guard evicts older reads before a read the model has not yet seen; such a read leaves last, largest first, and is journaled as `unseen_overflow` (ContextFold A2, bt-47 cf1h-D1).
