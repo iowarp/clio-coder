@@ -1107,6 +1107,75 @@ describe("production compaction controls", () => {
 		strictEqual(await compactAt(179_000, undefined), 1);
 	});
 
+	it("lands an automatic summary well below the trigger at a 40K window, so summaries are spaced (bt-18)", async (t) => {
+		const f = fixture(false, false, true);
+		f.settings.context.workingSet.enabled = false;
+		f.response.text = syntheticCompactionSummary("carried state ".repeat(400));
+		// A reasoning chat route reserves 26,214 summary tokens, so on a 40K window the trigger sits near 13.8K,
+		// and an 8K static prefix leaves about 5.5K of history below it (the bt-18 run).
+		const runtime = {
+			targetId: "chat-target",
+			runtimeId: "fixture",
+			wireModelId: "chat",
+			runtimeResolution: {
+				pricedBy: "free",
+				capabilityDecisions: { maxTokens: 32_000 },
+				contextWindowDetails: { effectiveContextWindow: 40_000 },
+			},
+			agent: {
+				state: {
+					systemPrompt: "Follow the operating contract. ".repeat(1050),
+					tools: [],
+					messages: [],
+					thinkingLevel: "off",
+					model: { ...faux.getModel("chat"), contextWindow: 40_000, maxTokens: 32_000, reasoning: true },
+				},
+			},
+		} as unknown as AgentRuntime;
+		let leaf: string | null = null;
+		const summarized: number[] = [];
+		for (let turn = 1; turn <= 16; turn++) {
+			// Each `clio-coder run` turn is a fresh process, so no in-memory rearm band carries over.
+			const state = createTurnState("off");
+			state.runtime = runtime;
+			state.lastTurnId = leaf;
+			const context = createTurnContext({
+				state,
+				session: f.session,
+				getSettings: () => f.settings,
+				providers: f.providers,
+				readSessionEntries: f.entries,
+				autoCompact: f.run,
+				middleware: { fireCompactionHook: () => {} } as unknown as TurnMiddleware,
+				emitNotice: () => {},
+			});
+			context.refreshAgentMessagesFromSession(runtime);
+			const prompt = `turn ${turn}: continue the change`;
+			if (await context.runAutoCompact(runtime, false, undefined, undefined, prompt)) summarized.push(turn);
+			const user = appendEntry(f.state, { kind: "message", role: "user", parentTurnId: leaf, payload: { text: prompt } });
+			leaf = user.turnId;
+			for (let step = 1; step <= 4; step++)
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "assistant",
+					parentTurnId: leaf,
+					payload: { text: `turn ${turn} step ${step} ${"edited and verified ".repeat(55)}` },
+				}).turnId;
+			f.pinLeaf(leaf);
+		}
+		// Before bt-18 this run summarized on turns 9, 10, 13 and 16, and the first cut stayed 3,361 tokens above the trigger.
+		t.diagnostic(JSON.stringify({ summarized }));
+		ok(summarized.length > 0 && summarized.length <= 3, `summarized on turns ${summarized.join(", ")}`);
+		for (let index = 1; index < summarized.length; index++)
+			ok((summarized[index] ?? 0) - (summarized[index - 1] ?? 0) >= 4, `summarized on turns ${summarized.join(", ")}`);
+		const settled = (await f.journalOutcomes()).map((row) => row.data as { outcome: string; headroomTokens?: number });
+		deepStrictEqual(
+			settled.map((row) => row.outcome),
+			summarized.map(() => "committed"),
+		);
+		for (const row of settled) ok((row.headroomTokens ?? 0) > 0, JSON.stringify(row));
+	});
+
 	it("holds a checkpoint inside the rearm band without creating a context operation (#422)", async () => {
 		const f = fixture();
 		let attempts = 0;

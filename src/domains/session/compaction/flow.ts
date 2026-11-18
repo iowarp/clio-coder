@@ -441,10 +441,12 @@ export async function runCompactionFlow(
 		// figures are available, applying only the current replay's reduction (#422).
 		entry.tokensBefore = Math.max(result.tokensBefore, replayBefore);
 		entry.tokensAfter = entry.tokensBefore + replayAfter - replayBefore;
+		let headroomTokens: number | undefined;
 		if (budget?.checkpointTokenFigures) {
 			const figures = budget.checkpointTokenFigures(entry);
 			entry.tokensBefore = figures.tokensBefore;
 			entry.tokensAfter = figures.tokensAfter;
+			headroomTokens = figures.headroomTokens;
 		}
 		if (budget?.checkpointForSummary) {
 			entry.continuity = budget.checkpointForSummary(entry.turnId, entry.tokensBefore, entry.tokensAfter ?? 0);
@@ -497,6 +499,7 @@ export async function runCompactionFlow(
 		}
 		session.flushAppends?.();
 		closure.outcome = "committed";
+		if (headroomTokens !== undefined) closure.headroomTokens = Math.round(headroomTokens);
 		return result;
 	} finally {
 		if (lease && callIds.size > 0)

@@ -796,6 +796,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// After a committed summary, automatic summaries wait until the context grows past what it left by a band, so a
 	// floor near the threshold does not pay one summary per tool batch for a few hundred tokens. Forced runs ignore it.
 	let summaryRearm: { tokensAfter: number; band: number } | null = null;
+	// A fresh process (each headless `run` turn) seeds the band once per session from the ledger's latest checkpoint,
+	// or every turn re-paid a summary a few hundred tokens past the last one (bt-18).
+	let summaryRearmSeededFor: string | null = null;
 	// The summarizer request of the last automatic attempt whose checkpoint
 	// would not reduce context. The attempt key above changes with every tool
 	// batch, while a cut held behind a protected turn sends the same request
@@ -1246,6 +1249,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			triggerReserve,
 			shouldCompact: (tokens: number) =>
 				shouldCompact(tokens, economic.threshold, economic.triggerWindow, triggerReserve(tokens)),
+			/** The context size at which the automatic trigger fires, counting the reserve for `tokens`. */
+			triggerTokens: (tokens: number) =>
+				Math.floor(
+					effectiveCompactionThreshold(economic.threshold, economic.triggerWindow, triggerReserve(tokens)) *
+						economic.triggerWindow,
+				),
 		};
 	};
 
@@ -1843,6 +1852,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const compactionThreshold = economic.threshold;
 		const compactionWindow = economic.triggerWindow;
 		const workingSetTarget = settings.context.workingSet.target * economic.fractionScale;
+		const rearmBand = (summaryChars: number): number =>
+			Math.max(0.08 * compactionWindow, 2 * Math.ceil(summaryChars / 4));
+		if (originSession !== undefined && summaryRearmSeededFor !== originSession) {
+			summaryRearmSeededFor = originSession;
+			const checkpoint = [...activeEntries()].reverse().find((entry) => entry.kind === "compactionSummary");
+			if (summaryRearm === null && checkpoint?.kind === "compactionSummary" && checkpoint.tokensAfter !== undefined)
+				summaryRearm = { tokensAfter: checkpoint.tokensAfter, band: rearmBand(checkpoint.summary.length) };
+		}
 		const pressureEstimate = force && !requiredFit ? null : liveContextEstimate(agentRuntime, pendingUserText);
 		if (pressureEstimate && !requiredFit && !route.shouldCompact(pressureEstimate.tokens).shouldCompact) return false;
 		// Paused or inside the rearm band, the paid summary waits; the free pre-summary stages below still run.
@@ -2192,13 +2209,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				0,
 				estimate.tokens - staticTokens - estimate.breakdown.messageTokens - estimate.breakdown.pendingUserTokens,
 			);
-			// Split available history space between the recent suffix and the
-			// checkpoint (including verbatim active instructions). The cut remains
-			// structural, so the unchanged continuation guard verifies the result.
-			const historyBudget = inputTarget - staticTokens - estimate.breakdown.pendingUserTokens - calibration;
+			// History space is measured below the automatic trigger, not the request-fit target: a reasoning route's
+			// summary reserve can put the trigger far below that target, and a suffix sized against the target then
+			// kept nearly all history, so each summary landed just under the trigger and the next turn re-fired it
+			// (bt-18). The suffix keeps 30% of that space and the checkpoint takes about as much, so the cut lands
+			// near 60% and leaves 40% for growth before the next summary. Without room below the trigger the
+			// request-fit target still sizes the cut. The cut remains structural, so the continuation guard verifies it.
+			const fixedTokens = staticTokens + estimate.breakdown.pendingUserTokens + calibration;
+			const belowTrigger = Math.min(inputTarget, route.triggerTokens(estimate.tokens)) - fixedTokens;
+			const historyBudget = belowTrigger > 0 ? belowTrigger : inputTarget - fixedTokens;
 			budget = {
 				...budget,
-				keepRecentTokens: Math.min(DEFAULT_KEEP_RECENT_TOKENS, Math.max(1, Math.floor(historyBudget / 2))),
+				keepRecentTokens: Math.min(DEFAULT_KEEP_RECENT_TOKENS, Math.max(1, Math.floor(historyBudget * 0.3))),
 				...(requiredFit ? { requireFit: true } : {}),
 				...(activeAutoTurnId ? { preserveUserTurnId: activeAutoTurnId } : {}),
 			};
@@ -2271,9 +2293,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 									continuity: continuityContextFromSession(deps.session),
 								},
 							);
+							const tokensAfter = liveContextEstimate(agentRuntime, pendingUserText, messages).tokens;
 							return {
 								tokensBefore: footerTokensBefore,
-								tokensAfter: liveContextEstimate(agentRuntime, pendingUserText, messages).tokens,
+								tokensAfter,
+								headroomTokens: route.triggerTokens(tokensAfter) - tokensAfter,
 							};
 						},
 						beforeSummaryCall: async (hold) => {
@@ -2409,10 +2433,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		emitCompactionActivity("completed", "context compaction complete");
 		autoCompactFailures = 0;
 		noGainSummaryDigest = null;
-		summaryRearm = {
-			tokensAfter,
-			band: Math.max(0.08 * compactionWindow, 2 * Math.ceil(result.summary.length / 4)),
-		};
+		summaryRearm = { tokensAfter, band: rearmBand(result.summary.length) };
 
 		deps.emitNotice(
 			renderCompactionSummaryLine({
@@ -3924,6 +3945,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			emptyAutoCompactContextKey = null;
 			autoCompactFailures = 0;
 			summaryRearm = null;
+			summaryRearmSeededFor = null;
 			noGainSummaryDigest = null;
 			noUsefulCutBasisKey = null;
 			reconciledAnchor = null;
