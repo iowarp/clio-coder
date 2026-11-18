@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { isRefusalToolResultError } from "../../tools/result-disposition.js";
 import type { ObservedCheck } from "../session/task-board.js";
@@ -44,15 +45,56 @@ function text(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+/**
+ * What the replays within one run share (x6-7): the git helper answer, git's ignore and tracking answers, and each
+ * call's reading by its id. `key` names the run and every input a reading depends on, so nothing outlives the run.
+ */
+interface RunReplayCache {
+	key: string;
+	gitHelpers: boolean;
+	gitAnswers: Map<string, boolean>;
+	readings: Map<string, { fingerprint: string; reading: CallClassification }>;
+}
+
+interface Replay {
+	root: string;
+	gitHelpers: boolean;
+	outputTarget: CheckOutputReader;
+	readings?: RunReplayCache["readings"];
+}
+
+/** A call's reading, kept by its id unless it asked where output lands, which depends on this replay's own changes. */
+function readCall(
+	tool: string,
+	args: Record<string, unknown> | undefined,
+	replay: Replay,
+	id: string | null,
+): CallClassification {
+	const fingerprint = `${tool}\0${JSON.stringify(args ?? null)}`;
+	const known = id === null ? undefined : replay.readings?.get(id);
+	if (known?.fingerprint === fingerprint) return known.reading;
+	let asked = false;
+	const outputTarget: CheckOutputReader = Object.assign(
+		(base: string, logs?: ReadonlySet<string>) => {
+			asked = true;
+			return replay.outputTarget(base, logs);
+		},
+		{ changed: (paths: Iterable<string>) => replay.outputTarget.changed(paths) },
+	);
+	const reading = classifyCall(tool, args, { cwd: replay.root, gitHelpers: replay.gitHelpers, outputTarget });
+	if (!asked && id !== null) replay.readings?.set(id, { fingerprint, reading });
+	return reading;
+}
+
 function trackCall(
 	tool: string,
 	args: Record<string, unknown> | undefined,
-	root: string,
-	gitHelpers: boolean,
-	outputTarget: CheckOutputReader,
+	replay: Replay,
 	revision: number,
+	id: string | null = null,
 ): TrackedCall {
-	const reading = classifyCall(tool, args, { cwd: root, gitHelpers, outputTarget });
+	const { root } = replay;
+	const reading = readCall(tool, args, replay, id);
 	const check =
 		reading.check !== null && reading.base === root && reading.shell?.outsideCwd !== true
 			? validationCheckId(reading.check)
@@ -120,9 +162,46 @@ export function standingChecks(
 	workspaceRoot: string,
 	scratchRoots: ReadonlyArray<string> = [],
 ): ReadonlyArray<ObservedCheck> {
+	return standingChecksWith(entries, boardId, taskId, workspaceRoot, scratchRoots);
+}
+
+function standingChecksWith(
+	entries: ReadonlyArray<unknown>,
+	boardId: string,
+	taskId: string,
+	workspaceRoot: string,
+	scratchRoots: ReadonlyArray<string>,
+	cache?: RunReplayCache,
+): ReadonlyArray<ObservedCheck> {
 	const start = workWindowStart(entries, boardId, taskId);
 	if (start === -1) return [];
-	return standingChecksFrom(entries, start, workspaceRoot, scratchRoots);
+	return standingChecksFrom(entries, start, workspaceRoot, scratchRoots, cache);
+}
+
+/** The turn of the session path's last user message, which opens the run now in progress; null before any. */
+function currentRun(entries: ReadonlyArray<unknown>): string | null {
+	for (let index = entries.length - 1; index >= 0; index -= 1) {
+		const item = record(entries[index]);
+		if (item?.kind === "message" && item.role === "user") return text(item.turnId);
+	}
+	return null;
+}
+
+/**
+ * {@link standingChecks} for a board that replays on every `done` and `block`: the replays of one run share its git
+ * lookups and each call's reading (x6-7), and a new run, workspace, scratch root or temp dir starts afresh.
+ */
+export function createStandingChecks(): typeof standingChecks {
+	let cache: RunReplayCache | undefined;
+	return (entries, boardId, taskId, workspaceRoot, scratchRoots = []) => {
+		const run = currentRun(entries);
+		const root = path.resolve(workspaceRoot);
+		const key = JSON.stringify([run, root, scratchRoots, tmpdir(), process.env.HOME, process.env.TMPDIR]);
+		if (run === null) cache = undefined;
+		else if (cache?.key !== key)
+			cache = { key, gitHelpers: gitRunsConfiguredHelpers(root), gitAnswers: new Map(), readings: new Map() };
+		return standingChecksWith(entries, boardId, taskId, workspaceRoot, scratchRoots, cache);
+	};
 }
 
 /** The same fold over any stretch of the session path, from `start` on; `scratchRoots` is `safety.scratchRoots`. */
@@ -131,10 +210,12 @@ export function standingChecksFrom(
 	start: number,
 	workspaceRoot: string,
 	scratchRoots: ReadonlyArray<string> = [],
+	cache?: RunReplayCache,
 ): ReadonlyArray<ObservedCheck> {
 	const root = path.resolve(workspaceRoot);
-	const gitHelpers = gitRunsConfiguredHelpers(root);
-	const outputTarget = checkOutputReader(root, process.env, scratchRoots);
+	const gitHelpers = cache?.gitHelpers ?? gitRunsConfiguredHelpers(root);
+	const outputTarget = checkOutputReader(root, process.env, scratchRoots, cache?.gitAnswers);
+	const replay: Replay = { root, gitHelpers, outputTarget, ...(cache ? { readings: cache.readings } : {}) };
 	const calls = new Map<string, TrackedCall>();
 	const standing = new Map<string, ObservedCheck>();
 	let revision = 0;
@@ -160,7 +241,7 @@ export function standingChecksFrom(
 			const command = text(item.command);
 			if (command === null || item.cancelled === true || typeof item.exitCode !== "number") continue;
 			const args = { command, ...(text(item.cwd) ? { cwd: item.cwd } : {}) };
-			settle(trackCall("bash", args, root, gitHelpers, outputTarget, revision), item.exitCode !== 0, at);
+			settle(trackCall("bash", args, replay, revision), item.exitCode !== 0, at);
 			continue;
 		}
 		if (item?.kind !== "message") continue;
@@ -170,8 +251,7 @@ export function standingChecksFrom(
 		if (id === null) continue;
 		if (item.role === "tool_call") {
 			const tool = text(payload.name) ?? text(payload.toolName) ?? text(payload.tool);
-			if (tool !== null)
-				calls.set(id, trackCall(tool, record(payload.args) ?? undefined, root, gitHelpers, outputTarget, revision));
+			if (tool !== null) calls.set(id, trackCall(tool, record(payload.args) ?? undefined, replay, revision, id));
 			continue;
 		}
 		if (item.role !== "tool_result") continue;
