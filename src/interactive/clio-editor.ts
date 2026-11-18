@@ -365,7 +365,9 @@ export class ClioEditor extends Editor {
 	/**
 	 * Whether the open list has a selected row. A list that opened by itself for
 	 * an argument nobody must give starts unarmed, so Enter cannot insert
-	 * `/context compact` or `/doctor deep` that the operator never chose (E-08).
+	 * `/context compact` or `/doctor deep` that the operator never chose (E-08). A list of
+	 * commands found only by their descriptions starts unarmed too, so an unknown `/tools`
+	 * is sent as typed and named as unknown instead of becoming `/skill`.
 	 */
 	private suggestionArmed = true;
 	/** The next list to show was asked for by an auto-open site, not by a key the operator aimed at the list. */
@@ -563,7 +565,11 @@ export class ClioEditor extends Editor {
 		if (list !== this.armingList) {
 			this.armingList = list;
 			const items = (list as { items?: ReadonlyArray<SlashCompletionItem> }).items ?? [];
-			this.suggestionArmed = !(this.autoOpenPending && items.length > 0 && items.every((item) => item.required === false));
+			const unchosen =
+				items.length > 0 &&
+				(items.every((item) => item.describedOnly === true) ||
+					(this.autoOpenPending && items.every((item) => item.required === false)));
+			this.suggestionArmed = !unchosen;
 			this.autoOpenPending = false;
 		}
 		return this.suggestionArmed;

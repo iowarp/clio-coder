@@ -86,6 +86,11 @@ export interface SlashCompletionItem extends AutocompleteItem {
 	required?: boolean;
 	/** A command row whose bare invocation does something, so Enter on it runs it. */
 	runsBare?: boolean;
+	/**
+	 * A command row found only by a word in its description: the operator typed no part of its name. A list of
+	 * these opens unselected, so Enter sends `/tools` as typed instead of turning it into `/skill`.
+	 */
+	describedOnly?: boolean;
 	submenu?: { parent: string; back: true };
 	/** Cursor adjustment after insertion; quoted directories keep it before the closing quote. */
 	cursorOffset?: number;
@@ -764,6 +769,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			};
 			if (description) item.description = `${description}${group}`;
 			if (remainingGrammar) item.remainingGrammar = remainingGrammar;
+			if (match.class === "description") item.describedOnly = true;
 		}
 		const unavailable = this.unavailable(ref.name);
 		if (unavailable) {
