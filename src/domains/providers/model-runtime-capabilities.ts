@@ -46,11 +46,6 @@ export interface ResolvedThinkingCapability extends AppliedThinking {
 	effectiveLevel: ThinkingLevel;
 	supportedLevels: ReadonlyArray<ThinkingLevel>;
 	display: string;
-	/**
-	 * `display` with the requested level shown when the control cannot carry it, for example
-	 * `low → on` on a model that only switches thinking on or off.
-	 */
-	requestedDisplay: string;
 	budgetEnforcement: ThinkingBudgetEnforcement;
 }
 
@@ -528,11 +523,6 @@ function resolveMechanism(
 	return inferThinkingMechanism(undefined, hints);
 }
 
-function requestedDisplayFor(mechanism: ThinkingMechanism, configured: ThinkingLevel, display: string): string {
-	// The configured level is what the operator asked for; show it beside what the control does.
-	return mechanism === "on-off" && configured !== "off" ? `${configured} → ${display}` : display;
-}
-
 function resolveThinkingCapability(
 	input: ResolveRuntimeCapabilitiesInput,
 	quirks: LocalModelQuirks | undefined,
@@ -611,14 +601,12 @@ function resolveThinkingCapability(
 		);
 	}
 
-	const display = thinkingLevelDisplayWord(applied.mechanism, effectiveLevel);
 	return {
 		...applied,
 		configuredLevel,
 		effectiveLevel,
 		supportedLevels,
-		display,
-		requestedDisplay: requestedDisplayFor(applied.mechanism, configuredLevel, display),
+		display: thinkingLevelDisplayWord(applied.mechanism, effectiveLevel),
 		budgetEnforcement,
 	};
 }

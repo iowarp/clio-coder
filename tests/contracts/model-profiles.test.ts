@@ -200,7 +200,6 @@ it("resolves a model from its profile only where the server is silent, and never
 	strictEqual(silent.target.maxOutputTokensField.value, null);
 	strictEqual(silent.target.capabilities.tools, true);
 	strictEqual(silent.target.modelRuntime.thinking.mechanism, "on-off");
-	strictEqual(silent.target.modelRuntime.thinking.requestedDisplay, "low → on");
 	strictEqual(silent.target.modelRuntime.thinking.display, "on");
 
 	const reported = resolveRuntimeTarget(
@@ -218,7 +217,6 @@ it("resolves a model from its profile only where the server is silent, and never
 	strictEqual(reported.target.contextWindowDetails.modelMaximum.value, 1_048_576);
 	strictEqual(reported.target.capabilities.tools, false);
 	deepStrictEqual([...reported.target.modelRuntime.thinking.supportedLevels], ["off", "low"]);
-	strictEqual(reported.target.modelRuntime.thinking.requestedDisplay, "medium → on");
 
 	const noReasoning = resolveRuntimeTarget(
 		nemotronProviders({ probeModelCapabilities: { [NEMOTRON]: { reasoning: false } }, probeModelId: NEMOTRON }),
