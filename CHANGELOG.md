@@ -109,6 +109,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A passing check the model ran through the shell now files its typed receipt fact from the shared classifier verdict, under its declared check ids and label, so declared scripts such as `./acceptance.sh` count toward verification (bt-46 S1).
+- Line continuations inside a here-document body no longer join across its terminator, so the check after the heredoc keeps its own name and scope (bt-46 S2).
+- Here-document bodies are data in the check-step verdict: a scratch script that only spells a check neither counts as running it nor retires a standing pass, and the finish gate no longer credits it (bt-46 S3).
 - Elapsed clocks (worker cards, run_script progress, /view wall time) carry a rounded second into the minute and never read `2m60s` (bt-11 j).
 - A fork words a parent session's held worker approval as held by that session ("approval held by session <id>") and keeps "coder running" in the rail, instead of "waiting for your approval" (bt-11 l).
 - When a fork collects a detached batch, the dispatching session is told once, in its next turn, that the batch was collected and how each run ended, so it no longer says the work is still in the background (bt-11 m).
