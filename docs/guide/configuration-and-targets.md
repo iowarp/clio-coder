@@ -414,12 +414,12 @@ Each model gets a tier, `small`, `standard` or `frontier`, that says how much sc
 Turn policy and context also consume the resolved tier without changing that
 prefix. A template's `turnPolicy.when` admits the matching `small`, `standard`
 or `frontier` token at the start of each turn
-([turn-constraints.ts](../../src/core/turn-constraints.ts)); observation aging
-also runs on `small` routes and on routes that do not cache prompts
-([observation-aging.ts](../../src/session-control/observation-aging.ts)).
+([turn-constraints.ts](../../src/core/turn-constraints.ts)); the superseded
+stage runs on routes that do not cache prompts, whatever their tier
+([superseded stage](../architecture/context-engine.md#superseded-stage-s0)).
 The separate `uncached` token tests the route's `promptCaching: false` fact.
-Consequently a model switch can activate step turns and aging on the next turn
-while leaving the template bytes and system-prompt shape alone.
+Consequently a model switch can activate step turns and the superseded stage on
+the next turn while leaving the template bytes and system-prompt shape alone.
 
 `models.<id>.tier` sets the tier for one model, keyed by the wire model id; `models` takes no other field. In `/settings` the map is under **Model tiers**.
 

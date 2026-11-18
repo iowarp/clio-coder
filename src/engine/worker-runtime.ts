@@ -22,10 +22,11 @@ import { createWorkerObservationStore } from "../domains/context/worker/recall.j
 import { compactionBudget, resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { confirmationRuleOf } from "../domains/safety/decision-events.js";
 import type { WorkerFlowPolicyInput } from "../domains/safety/information-flow.js";
+import { estimateAgentMessageTokens } from "../domains/session/context-accounting.js";
 import { abortReasonCause } from "../domains/telemetry/call-facts.js";
 import { seededWorkerMessages, seedRecallLineage } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
-import { requestOutputReserve } from "./apis/output-budget.js";
+import { anchorContextAtInputTokens, requestOutputReserve } from "./apis/output-budget.js";
 import { resolvedRequestContext } from "./context.js";
 import { disableCopilotConversationResume } from "./copilot/session-fs.js";
 import { retryStreamOnceOnAuthRejection } from "./oauth-retry-stream.js";
@@ -1440,8 +1441,18 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					? { requiredResult: input.resultContract ? resultContractShape(input.resultContract) : undefined }
 					: undefined;
 			const window = input.runtimeResolution?.capabilities.contextWindow ?? currentModel.contextWindow;
+			const reminded = withResultContractReminders(currentContext.messages, contractReminder);
 			const pressure = {
 				messages: currentContext.messages,
+				overheadTokens: reminded.reduce(
+					(sum, message, index) =>
+						message === currentContext.messages[index]
+							? sum
+							: sum +
+								estimateAgentMessageTokens(message as AgentMessage) -
+								estimateAgentMessageTokens(currentContext.messages[index] as AgentMessage),
+					0,
+				),
 				// Priced with the tail directive the round will carry; only the estimate sees it here.
 				systemPrompt:
 					synthesisDirective === undefined
@@ -1503,7 +1514,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// A refreshed credential replaces the one Pi resolved for this round; the
 			// next round resolves its own through getApiKey (#427).
 			let roundApiKey: string | undefined;
-			const request = (history: AgentMessage[]) => {
+			// `inputTokens` is the count the guard admitted `history` at; admission and the clamp size it from that.
+			const request = (history: AgentMessage[], inputTokens: number) => {
 				const projected = withResultContractReminders(history, contractReminder);
 				const middlewareChoice = middlewareToolChoice.current();
 				// Codex retains the work phase's parallel setting for WS deltas;
@@ -1609,12 +1621,16 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						});
 						// Every attempt of a locked round carries the same tail directive, as does the "auto" form of a
 						// middleware text lock; the system prompt and earlier messages keep their bytes.
-						const attemptContext =
+						// The guard projected this history without invalidating the usage Pi anchors on, so the
+						// provider-bound copy is re-anchored at the guard's count (A2c).
+						const attemptContext = anchorContextAtInputTokens(
 							synthesisDirective !== undefined
 								? withLockedSynthesisDirective(attempt.context, synthesisDirective.requiredResult)
 								: middlewareChoice.kind === "none" && attempt.options?.toolChoice === "auto"
 									? withLockedSynthesisDirective(attempt.context)
-									: attempt.context;
+									: attempt.context,
+							inputTokens,
+						);
 						const fetchImpl = attempt.options?.fetch ?? ((url, init) => globalThis.fetch(url, init));
 						const tracking = trackCallFetch(fetchImpl);
 						callTracking = tracking;
@@ -1622,13 +1638,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						roundProviderHttpStatus = null;
 						tracking.start(currentModel.api, attempt.options?.transport);
 						const lockedRound = synthesisToolLock || helperTerminalPhase;
-						const { reasoning: _reasoning, thinkingBudgets: _thinkingBudgets, ...thinkingOffOptions } = attempt.options ?? {};
+						const attemptOptions = { ...attempt.options, clioInputTokens: inputTokens };
+						const { reasoning: _reasoning, thinkingBudgets: _thinkingBudgets, ...thinkingOffOptions } = attemptOptions;
 						// Codex renders the reasoning effort ahead of the whole input, so a locked round there keeps
 						// the run's level; dropping it made the round miss every cached token.
 						const source = boundWorkerResponse(
 							currentModel,
 							attemptContext,
-							lockedRound && currentModel.api !== "openai-codex-responses" ? thinkingOffOptions : attempt.options,
+							lockedRound && currentModel.api !== "openai-codex-responses" ? thinkingOffOptions : attemptOptions,
 							{
 								locked: lockedRound,
 								responseSeconds: workerSettings.safety.limits.workerResponseSeconds,
@@ -1682,14 +1699,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// A token the server rejects as expired earns one locked refresh and one
 			// retry of the same request, as the main turn does; a failed refresh ends
 			// the round with the login remedy (#427).
+			const admitted = contextGuard.inputTokens;
 			const authRetried = retryStreamOnceOnAuthRejection(
-				request(messages),
+				request(messages, admitted),
 				(error) => isProviderAuthRejection(error.errorMessage, roundProviderHttpStatus ?? undefined),
 				async () => {
 					const apiKey = await refreshWorkerOAuthKey();
 					if (apiKey === null) return null;
 					roundApiKey = apiKey;
-					return request(messages);
+					return request(messages, admitted);
 				},
 			);
 			// A server that refuses the contract's schema before answering gets the
@@ -1704,7 +1722,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							async () => {
 								contractResponseFormat = undefined;
 								requestOptions = optionsWith(workerResponseFormat);
-								return request(messages);
+								return request(messages, admitted);
 							},
 						);
 			// The server is the authority on its own limit. An unreported window, a
@@ -1713,7 +1731,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// one reversible eviction and one retry; a second overflow is final.
 			return retryStreamOnceOnOverflow(first, () => {
 				const projected = contextGuard.recover(pressure);
-				return projected ? request(projected) : null;
+				return projected ? request(projected, contextGuard.inputTokens) : null;
 			});
 		},
 		initialState: {

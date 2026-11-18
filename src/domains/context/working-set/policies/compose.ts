@@ -77,6 +77,8 @@ export interface ComposedPolicyOptions {
 export interface ComposedWorkingSetPolicy extends WorkingSetPolicy {
 	/** Effective churn pin, exposed so replay reports the same rule selection uses. */
 	readonly pinRecalledTwice: boolean;
+	/** The selection before head pricing, so the fold prices S0's and S1's union once (SPEC §2.4). */
+	selectCandidates(input: PolicyInput): ReadonlyArray<EvictionCandidate>;
 }
 
 interface EarnedReason {
@@ -127,11 +129,12 @@ export function composePolicy(
 		return rung;
 	});
 	const pinsChurn = rungIds.includes("recalled_twice");
-	return {
+	const policy: ComposedWorkingSetPolicy = {
 		// The live enum is the shipped ids; a composed id only ever reaches the replay harness.
 		id: id as WorkingSetPolicyId,
 		pinRecalledTwice: options.profile?.pinRecalledTwice ?? pinsChurn,
-		select(raw: PolicyInput): ReadonlyArray<EvictionCandidate> {
+		select: (input) => dropUnpricedHead(policy.selectCandidates(input), input, callPathsByToolCallId(input.entries)),
+		selectCandidates(raw: PolicyInput): ReadonlyArray<EvictionCandidate> {
 			const profile = options.profile ?? resolveWorkingSetProfile(raw.settings);
 			const input: PolicyInput = { ...raw, settings: settingsUnderProfile(raw.settings, profile) };
 			const { entries, view } = input;
@@ -192,9 +195,10 @@ export function composePolicy(
 			const newestFirst = [...index.observations].reverse();
 			const rungInput = { input, index, cutoffIndex, newestFirst, ageOrder: profile.ageOrder };
 			for (const rung of rungs) rung.run(rungInput, emit);
-			return dropUnpricedHead(candidates, input, callPaths);
+			return candidates;
 		},
 	};
+	return policy;
 }
 
 function withoutTail(ids: ReadonlyArray<RungId>): { head: RungId[]; tail: RungId[] } {

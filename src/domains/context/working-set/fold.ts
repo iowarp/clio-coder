@@ -63,7 +63,9 @@ export function foldWorkingSet(entries: ReadonlyArray<SessionEntry>, activeLeafT
 			evictionEvents += 1;
 			lastPolicyId = entry.policyId;
 			lastEvictionTurnId = entry.turnId;
-			lastEvictionTokensAfter = entry.basis === "request-context" ? entry.tokensAfter : null;
+			// S0 runs below the trigger and moves no band: only a pressure or operator event re-bases the rearm.
+			if (entry.trigger !== "superseded")
+				lastEvictionTokensAfter = entry.basis === "request-context" ? entry.tokensAfter : null;
 			for (const item of entry.evicted) {
 				itemsEvicted += 1;
 				evicted.set(refKey(item.ref), {

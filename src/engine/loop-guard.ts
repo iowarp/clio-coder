@@ -178,7 +178,7 @@ function callIdentity(tool: string, args: Record<string, unknown> | undefined): 
 /**
  * The repeat identity of a call as the model wrote it: a gateway `op=call` is
  * judged as the capability it runs, the same unwrapping the hook applies, so
- * observation aging and the loop guard agree on what counts as the same call.
+ * the superseded stage and the loop guard agree on what counts as the same call.
  */
 export function effectiveCallIdentity(toolName: string, args: unknown): string {
 	const unwrapped = effectiveToolCall(toolName, args);
@@ -271,7 +271,7 @@ export interface DeclaredToolEffect {
  * an extension tool declared read-only or idempotent. A gateway call is judged
  * as the capability it runs. Anything else, such as a desk's `next_step`, may
  * answer the same arguments with a new state, so its later result is not a
- * fresh copy of the earlier one; observation aging never stubs it.
+ * fresh copy of the earlier one; the superseded stage never evicts it.
  */
 export function callRepeatsAsRead(
 	toolName: string,

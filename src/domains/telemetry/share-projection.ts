@@ -576,6 +576,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	"context.fold": {
 		...keep("checkpoint", "route", "tokensBefore", "tokensAfter", "cause"),
 		stages: { ...keep("stage", "outcome", "reason"), recordId: "id" },
+		legacy: { ...keep("outcome", "results", "priorState"), earliest: "id" },
 	},
 	// An endpoint key is the provider URL, which can name a private host.
 	"memory.step_completed": { endpointKey: "endpoint", targetId: "model-id" },

@@ -73,11 +73,7 @@ import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { engineMainStreamSimple } from "../engine/api-registry.js";
 import { setGlobalDefaultMaxOutputTokens } from "../engine/apis/index.js";
 import type { CacheKeepaliveReply, CacheKeepaliveRequest } from "../engine/cache-keepalive.js";
-import {
-	type DeclaredToolEffect,
-	sanitizeLockedSynthesisMessage,
-	withLockedSynthesisDirective,
-} from "../engine/loop-guard.js";
+import { sanitizeLockedSynthesisMessage, withLockedSynthesisDirective } from "../engine/loop-guard.js";
 import {
 	applyToolRounds,
 	type ControlledRequest,
@@ -112,7 +108,6 @@ import {
 	toolResultSummary,
 } from "./chat-loop-messages.js";
 import type { HostInserts } from "./host-inserts.js";
-import { createObservationAging } from "./observation-aging.js";
 import {
 	assessRepetition,
 	assessToolCallFlood,
@@ -307,8 +302,6 @@ export interface TurnRuntimeDeps {
 	hostInserts?: HostInserts | undefined;
 	/** Capabilities behind the attached gateway, for the streaming tool-prose cutoff. */
 	gatewayCapabilityNames?: (() => ReadonlyArray<string>) | undefined;
-	/** The read-only and idempotent flags a registered extension tool declared, for observation aging's gate. */
-	declaredToolEffect?: ((tool: string) => DeclaredToolEffect | undefined) | undefined;
 	getSettings: () => Readonly<ClioSettings>;
 	providers: ProvidersContract;
 	knownTargets: () => ReadonlySet<string>;
@@ -408,13 +401,6 @@ export interface TurnRuntime {
 
 export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	const { state, context, persistence, middleware, middlewareToolChoice } = deps;
-	/** What this session's requests stubbed; a rebuilt agent keeps it, and the ledger carries it across a reopen. */
-	const observationAging = createObservationAging(
-		(tool) => deps.declaredToolEffect?.(tool),
-		context.observationAgingLedger,
-	);
-	// The window checks price the same aged request; only `transformContext` below commits a batch.
-	context.bindObservationAging(observationAging);
 
 	/**
 	 * Authoritative admission outcome per call, keyed by the engine's
@@ -823,12 +809,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					context: Parameters<typeof requestStructure>[1];
 					compiled: Parameters<typeof requestStructure>[2];
 					coldReasons: ExpectedColdReason[];
-					agedBytes: number;
 			  }
 			| undefined;
-		// Observation aging (WTF-P 0.8.3 C3): the bytes a batch saved that no sent request has journaled yet. What the
-		// session's requests stubbed lives in `observationAging`, which outlives this agent.
-		let unjournaledAgedBytes = 0;
 		let admittedHwm: string | null = null;
 		/**
 		 * Cache physics against the previous request on the same key. Every attempt the provider saw advances the
@@ -852,7 +834,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				]),
 			];
 			if (!sent) carriedColdReasons = [...new Set([...carriedColdReasons, ...reasons])];
-			if (!sent) unjournaledAgedBytes += request?.agedBytes ?? 0;
 			if (recovery === "auth_reset")
 				carriedColdReasons = [...new Set([...carriedColdReasons, "transport_reset" as const])];
 			const generation = context.cacheGeneration?.() ?? 0;
@@ -903,7 +884,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					...physics.cache,
 					...(timed ? { uncachedPrefillTokens: timed.input } : {}),
 					expectedColdReasons: sent ? reasons : [],
-					...(sent && request?.agedBytes ? { observationAgingBytes: request.agedBytes } : {}),
 					verdict,
 					...(journaled ? { structure: journaled } : {}),
 				},
@@ -1191,10 +1171,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								context: sent,
 								compiled: context.compiledSessionPrompt?.() ?? null,
 								coldReasons: [...new Set([...carriedColdReasons, ...(context.takeCallColdReasons?.() ?? [])])],
-								agedBytes: unjournaledAgedBytes,
 							};
 							carriedColdReasons = [];
-							unjournaledAgedBytes = 0;
 							// Research capture: the prefix exactly as this attempt sends it, hashed (#423, #434).
 							attempt.withContext(() => {
 								if (!telemetryCaptures("prompt.prefix_captured")) return;
@@ -1260,19 +1238,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			steeringMode: "all",
 			followUpMode: "all",
 			...(gatewaySessionId ? { sessionId: gatewaySessionId } : {}),
-			// Every outgoing request passes here, so a stubbed result stays stubbed in each one; the ledger is untouched.
-			transformContext: async (messages) => {
-				const aged = observationAging.project(messages, localRuntime.runtimeResolution, deps.sessionId?.());
-				if (aged.batch !== null) {
-					unjournaledAgedBytes += aged.batch.bytesSaved;
-					context.noteColdReason("observation_aging");
-					const word = aged.batch.results === 1 ? "result" : "results";
-					deps.emitNotice(
-						`[context engine] observation aging: ${aged.batch.results} superseded tool ${word} stubbed in the request, ${aged.batch.bytesSaved} bytes saved; the session ledger keeps them`,
-					);
-				}
-				return aged.messages;
-			},
 			beforeToolBatch: ({ assistantMessage }) => {
 				const calls = assistantMessage.content.filter((block) => block.type === "toolCall");
 				if (

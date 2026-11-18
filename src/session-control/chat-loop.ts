@@ -1951,7 +1951,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		interactiveGuidance: deps.interactiveGuidance === true,
 		state,
 		gatewayCapabilityNames: () => deps.toolRegistry?.listGateway().map((spec) => spec.name) ?? [],
-		declaredToolEffect: (tool) => deps.toolRegistry?.get(tool as import("../core/tool-names.js").ToolName)?.metadata,
 		getSettings: deps.getSettings,
 		providers: deps.providers,
 		knownTargets: deps.knownTargets,
