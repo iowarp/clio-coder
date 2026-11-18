@@ -44,6 +44,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- Repetitive test files are consolidated into tables with shared harnesses: loop-guard and template-budget scenarios, one fake ACP transport, both quota providers' error paths, and the damage-control shell segments; constant pins that behaviour already covers are removed (P4-2, P4-5, P4-6, P4-9, P4-10; 214 to 167 tests).
 - The slowest test files run faster with the same coverage: state-file-lock no longer waits on a leaked namespace peer, cli-leaf-help keeps one --help row per router, dispatch-admission judges an empty scratch cwd, upgrade-command runs its plan checks in process, and run-timeout waits out one stalled run instead of two (P4-3, P4-4, P4-7, P4-8).
 - Tests pin gated prompt sections in one condition matrix, and the worker prompt goldens compile from the shipped recipes, so a recipe edit fails its golden (P4-1).
 - Launch no longer prints "terminal panes are not installed"; `/panes`, `/files` and Alt+E name `clio-coder panes install`, and doctor still warns (bt-11).
