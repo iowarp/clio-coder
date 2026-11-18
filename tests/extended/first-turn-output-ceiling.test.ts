@@ -1,6 +1,7 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { withRunOverrides } from "../../src/core/run-overrides.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
@@ -81,6 +82,7 @@ for (const api of ["openai-completions", "ollama-native"]) {
 			} as unknown as ProvidersContract;
 			const submitted: string[] = [];
 			const refusals: string[] = [];
+			const refusalTexts: string[] = [];
 			let compactCalls = 0;
 			const systemPrompt = "p".repeat(oversizedInput ? 131073 * 4 : 11889 * 4);
 			const loop = createChatLoop({
@@ -110,7 +112,9 @@ for (const api of ["openai-completions", "ollama-native"]) {
 				},
 			});
 			loop.onEvent((event) => {
-				if (event.type === "notice" && event.admission) refusals.push(event.admission.reason);
+				if (event.type !== "notice" || !event.admission) return;
+				refusals.push(event.admission.reason);
+				refusalTexts.push(event.text);
 			});
 			try {
 				// No session is supplied: this is the operator's first "hi".
@@ -120,6 +124,9 @@ for (const api of ["openai-completions", "ollama-native"]) {
 				if (oversizedInput && !unknownWindow) {
 					deepStrictEqual(submitted, []);
 					ok(refusals.includes("context-window-exceeded"));
+					// A refusal the run's own window cap causes names the flag to raise (bt-13).
+					await withRunOverrides({ maxContextTokens: 65_536 }, () => loop.submit("hi"));
+					match(refusalTexts.at(-1) ?? "", /caps the window at 65536 tokens; raise --max-context-tokens\.$/u);
 				} else {
 					deepStrictEqual(submitted, ["hi"]);
 					strictEqual(compactCalls, 0);
