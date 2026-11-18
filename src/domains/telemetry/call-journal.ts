@@ -36,7 +36,7 @@ import {
 } from "../../core/telemetry/segment.js";
 import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
 import { canonicalJson } from "../prompts/hash.js";
-import { storeTelemetryObject } from "./objects.js";
+import { createTelemetryPreimages, storeTelemetryObject } from "./objects.js";
 import {
 	TELEMETRY_JOURNAL_FILE,
 	telemetryBundlePath,
@@ -726,6 +726,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				})();
 				return finishing;
 			};
+			const preimages = createTelemetryPreimages();
 			const journal: CallJournal = {
 				seal() {
 					if (closed) return Promise.resolve(false);
@@ -738,7 +739,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 							await rm(bundlePath, { force: true });
 							sealCurrent = false;
 						}
-						return storeTelemetryObject(options.directory, subject, value);
+						return storeTelemetryObject(options.directory, subject, value, preimages);
 					});
 				},
 				admits(kind) {
