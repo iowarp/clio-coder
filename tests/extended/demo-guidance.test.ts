@@ -1,4 +1,4 @@
-import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, notStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { extractGlobalFlags } from "../../src/cli/argv.js";
 import { validateSettings } from "../../src/core/config.js";
@@ -36,10 +36,8 @@ test("only an explicit interactive prompt input adds guidance; disabling restore
 	};
 	const normal = compile(table, base);
 	const demo = compile(table, { ...base, sessionInputs: { ...base.sessionInputs, demo: true } });
-	match(demo.systemPrompt, /## Demo guidance/);
-	match(demo.systemPrompt, /do not end answers with feature tips, upsells/);
-	match(demo.systemPrompt, /interface\.demo/);
-	doesNotMatch(normal.systemPrompt, /## Demo guidance/);
+	// Which input renders the guidance is pinned in tests/contracts/prompt-section-matrix.test.ts.
+	notStrictEqual(demo.systemPrompt, normal.systemPrompt);
 	strictEqual(
 		compile(table, { ...base, sessionInputs: { ...base.sessionInputs, demo: false } }).systemPrompt,
 		normal.systemPrompt,

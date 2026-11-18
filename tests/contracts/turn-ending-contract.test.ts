@@ -8,9 +8,7 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
 import { createPlanCloseRegistration } from "../../src/domains/middleware/plan-close.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../../src/domains/middleware/types.js";
-import { compile } from "../../src/domains/prompts/compiler.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
-import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
@@ -18,80 +16,7 @@ import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
-describe("turn-ending contract in the session prompt", () => {
-	const systemPrompt = (inputs: { headless?: boolean; operatorInterviews?: boolean }, safety = "safety.default") =>
-		compile(loadFragments(), {
-			identity: "identity.clio",
-			operatingContract: "operating.contract",
-			safety,
-			sessionInputs: {
-				coordinatorCapabilities: [ToolNames.AskUser, ToolNames.Read],
-				provider: "local",
-				model: "stable-model",
-				providerSupportsTools: true,
-				toolNames: [ToolNames.AskUser, ToolNames.Read],
-				...inputs,
-			},
-		}).systemPrompt;
-	const identityHalf = "It ends a turn in one of two states.";
-
-	it("teaches both states and the ask_user endings where an operator can answer", () => {
-		const prompt = systemPrompt({ operatorInterviews: true });
-		ok(prompt.includes("## Ending a turn"), prompt);
-		ok(prompt.includes("Every turn ends in one of two states:"), prompt);
-		ok(
-			prompt.includes('A requested plan always ends with ask_user "Carry out this plan?", even with no question.'),
-			prompt,
-		);
-		ok(prompt.includes("options carrying open choices: [Proceed with a per-user file (Recommended)"), prompt);
-		ok(prompt.includes("An explicit, specific operator instruction is its own consent"), prompt);
-		ok(prompt.includes(identityHalf), prompt);
-	});
-
-	// Yolo drops approval cards, not the operator: it ends turns as default does and asks where asking is the work.
-	it("keeps both turn-ending states under yolo, with no approval cards and the yolo asking rule", () => {
-		const prompt = systemPrompt({ operatorInterviews: true }, "safety.yolo");
-		ok(prompt.includes("Every turn ends in one of two states:"), prompt);
-		ok(prompt.includes('A requested plan always ends with ask_user "Carry out this plan?"'), prompt);
-		ok(prompt.includes("The operator can still answer: use `ask_user` for a decision only they can make"), prompt);
-		ok(prompt.includes("An unanswered round takes its recommended option"), prompt);
-		ok(!prompt.includes("away by contract"), prompt);
-		ok(!prompt.includes("Nobody will answer a question"), prompt);
-		ok(!prompt.includes("Under yolo every turn ends Done"), prompt);
-		ok(!prompt.includes("let their approval cards gate them"), prompt);
-	});
-
-	it("leaves the asking rule out of a yolo session with no ask_user, as a headless run has none", () => {
-		const prompt = compile(loadFragments(), {
-			identity: "identity.clio",
-			operatingContract: "operating.contract",
-			safety: "safety.yolo",
-			sessionInputs: {
-				coordinatorCapabilities: [ToolNames.Read],
-				provider: "local",
-				model: "stable-model",
-				providerSupportsTools: true,
-				toolNames: [ToolNames.Read],
-				headless: true,
-			},
-		}).systemPrompt;
-		ok(!prompt.includes("The operator can still answer"), prompt);
-		ok(prompt.includes("Settle every other open choice with the reasonable default"), prompt);
-	});
-
-	it("keeps only the no-offer half in headless and ACP prompts", () => {
-		for (const inputs of [{ headless: true, operatorInterviews: true }, {}]) {
-			const prompt = systemPrompt(inputs);
-			ok(!prompt.includes("## Ending a turn"), prompt);
-			ok(!prompt.includes('ask_user "'), prompt);
-			ok(prompt.includes(identityHalf), prompt);
-			ok(prompt.includes("with no closing offer, courtesy question or menu of next steps"), prompt);
-			// The greeting rule needs an operator to greet; headless runs leave it out.
-			strictEqual(prompt.includes("stops\nthere, without a question"), inputs.headless !== true);
-		}
-	});
-});
-
+// Which turn-ending sections each surface renders is pinned in prompt-section-matrix.test.ts.
 it("sends a plan that owes an interview back to ask_user instead of to a close it cannot make yet", () => {
 	const rule = createPlanCloseRegistration({ canAsk: () => true });
 	const start = rule.evaluate({

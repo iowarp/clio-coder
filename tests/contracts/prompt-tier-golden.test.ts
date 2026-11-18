@@ -17,10 +17,12 @@ import {
 import { type FragmentTable, loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 
 /**
- * The six prompt tiers (attended and headless at default and yolo, the coder
- * and scout workers) compiled from inputs captured off live sessions. The
- * expected text was produced by the compiler before fragment preconditions
- * existed; a change that moves a byte of any tier fails here.
+ * The prompt tiers (attended and headless at default and yolo, the coder and
+ * scout workers) compiled from inputs captured off live sessions, plus an ACP
+ * session with no sandbox and semantic search on, so that wording gated on
+ * those conditions is pinned too. A change that moves a byte of any tier fails
+ * here; tests/contracts/prompt-section-matrix.test.ts pins which sections each
+ * condition renders.
  * `CLIO_PROMPT_GOLDEN=update` rewrites the expected files. A worker persona
  * is read from its shipped recipe, so an edit to coder.md or scout.md moves
  * the golden; the fixture keeps only the bound-skill block dispatch appends.
@@ -70,10 +72,10 @@ describe("prompt tiers", () => {
 		}
 	});
 
-	it("has the six tiers", () => {
+	it("has the seven tiers", () => {
 		strictEqual(
 			tiers.join(","),
-			"attended-default,attended-yolo,headless-default,headless-yolo,worker-coder,worker-scout",
+			"acp-unsandboxed,attended-default,attended-yolo,headless-default,headless-yolo,worker-coder,worker-scout",
 		);
 	});
 
