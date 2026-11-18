@@ -44,6 +44,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- The finish assessment replays the shared check fold once per turn end instead of up to twice (x8-6).
 - Standard keeps one row of the reasoning before an action instead of a bare Thinking marker (bt-11 b).
 - Each bash command is scanned once per classification and only checks compute their extra facets; the registry and finish contract ask for the verdict alone; task-board replays within one run share git lookups and per-call readings (x6-7).
 - Tool guard blocks are listed under `safety.guardBlockedAttempts` (receipts, turn_end/run_end, run.settled), no longer under `safety.blockedAttempts`, matching `decisions.guardBlocked`. Receipts and journals written earlier keep guard blocks in `blockedAttempts` (bt-15 c12b).
@@ -108,6 +109,14 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Worker and contained main-session approval cards now say that an approved shell call still runs inside the OS sandbox, where writes outside its writable roots fail; approval never widened the sandbox (bt-11 k).
+- why-stopped names the tool boundary when a harness stop (autonomy cap, cancel) lands after a call that asked for tools (bt-26 N2g).
+- A turn steered mid-run settles with every model call it opened and its cause, so a headless `--timeout` after a steer reports `shutdown` (bt-26 N2h).
+- The sealed run's tools row no longer counts an ask refused by a `--timeout` abort as blocked; decisions already counted it as a permission request (bt-15 c14a).
+- The finish contract credits a passing check (bash, `verify`, operator `!`, or declared) only while no later edit has retired it, so edit-test-edit no longer finishes "checks passed" and the high-rigor acceptance gate no longer passes on a stale check, for the main agent and dispatched workers. Any shell or `!` check pass the shared check fold still holds is credited under its observed name, so a green `cargo clippy`, `mypy .`, `go vet` or `ruff check` after the last edit satisfies the gate (x8-1).
+- Read-only checks from other ecosystems now settle a recorded outcome instead of reading as unknown: `cargo check`/`clippy`, `go vet`/`build`, `gofmt -l`, `mypy`, `pyright`, `ruff check`, `prettier --check`, `biome check`, `dotnet test`, `rspec`, `phpunit`, `deno`, `playwright`, `cypress`, `tox`, `nox`, `make test`/`check`/`lint`, and runs behind `poetry`, `pipenv`, `hatch`, `pdm`, `rye` or `bundle exec`. Their `--fix` and `--write` forms stay writers (x8-2).
+- A write into a scratch root or temp dir inside the workspace now retires standing check passes (x8-4).
+- A check call that also copies or creates files only outside the workspace (`npm test && cp coverage/lcov.info /tmp/`) no longer retires earlier passes (x8-5).
 - ACP `message_end` no longer repeats the last characters of an assistant message that carries more than one text block; its tail now lines up with the streamed text (x8-3).
 - A fork no longer shows or answers the approval of a worker its parent dispatched. It prints a notice naming the owner and how to answer, and the card returns on `/resume` of that session (bt-11 f).
 - A fork's worker card shows elapsed time for a worker its parent dispatched, instead of "—" (bt-11 g).

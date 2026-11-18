@@ -1131,6 +1131,7 @@ export const RunEvidenceSchema = Type.Object(
 								state: vocabulary(["verified", "unverified", "not_applicable", "unknown"]),
 								basis: vocabulary([
 									"validation-tool",
+									"host-observed-command",
 									"read-only-agent",
 									"no-validation-tool",
 									"acp-external-unobserved",

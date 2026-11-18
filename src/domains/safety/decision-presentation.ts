@@ -49,6 +49,8 @@ export interface TrustedDecisionFacts {
 	authorityEffect: DecisionAuthorityEffect;
 	tool?: string;
 	actionClass?: ActionClass;
+	/** The approved call still runs inside an OS sandbox, which the approval does not widen. */
+	sandboxed?: true;
 }
 
 export interface DecisionPresentationAction {
@@ -120,6 +122,7 @@ export function decisionFactsForPermission(input: {
 	axis: Exclude<DecisionAxis, { kind: "answer" }>;
 	origin: DecisionOrigin;
 	exposure?: AutonomyExposure;
+	sandboxed?: true;
 }): TrustedDecisionFacts {
 	const exposure = input.exposure ?? "local";
 	const consequence = actionConsequence(input.actionClass);
@@ -133,6 +136,7 @@ export function decisionFactsForPermission(input: {
 		authorityEffect: "grants-once",
 		tool: input.tool,
 		actionClass: input.actionClass,
+		...(input.sandboxed === true ? { sandboxed: true as const } : {}),
 	};
 }
 
@@ -231,6 +235,12 @@ function requestedByCopy(facts: TrustedDecisionFacts): string {
 	return `${requester} through autonomy level (${facts.axis.level})`;
 }
 
+/**
+ * What an approval of a sandboxed call leaves in place: the OS sandbox it runs
+ * in. Approving answers the ask; it does not widen the sandbox's writable roots.
+ */
+const SANDBOX_STILL_APPLIES = "The call still runs inside the OS sandbox, so a write outside its writable roots fails.";
+
 function authorizationCopy(facts: TrustedDecisionFacts): string {
 	if (facts.authorityEffect === "records-answer") {
 		return facts.exposure === "outward"
@@ -240,8 +250,9 @@ function authorizationCopy(facts: TrustedDecisionFacts): string {
 	const tool = facts.tool ?? "the presented tool";
 	// The class reads as what it does (`runs a command`), the way the card's identity row says it.
 	const effect = actionClassWords(facts.actionClass ?? "unknown");
+	const contained = facts.sandboxed === true ? ` ${SANDBOX_STILL_APPLIES}` : "";
 	if (facts.origin.kind === "worker") {
-		return `Approval allows this one call to ${tool}, which ${effect}. An identical call in this worker run asks again. Each call still passes the safety net. The autonomy level does not change.`;
+		return `Approval allows this one call to ${tool}, which ${effect}. An identical call in this worker run asks again. Each call still passes the safety net.${contained} The autonomy level does not change.`;
 	}
 	if (isSessionCodeConsent(facts)) {
 		return `Approval runs this call to ${tool}, which ${effect}, and lets test runners run without asking for the rest of this session. It does not change the autonomy level.`;
@@ -249,7 +260,7 @@ function authorizationCopy(facts: TrustedDecisionFacts): string {
 	if (tool === "ask_user" && facts.exposure === "outward") {
 		return "Approval opens this one outward-decision interview. It does not publish or send anything by itself.";
 	}
-	return `Approval allows this one call to ${tool}, which ${effect}. It does not change the autonomy level.`;
+	return `Approval allows this one call to ${tool}, which ${effect}.${contained} It does not change the autonomy level.`;
 }
 
 function consequenceCopy(facts: TrustedDecisionFacts, tier: DecisionTier): string {

@@ -592,13 +592,14 @@ it("shares Git enumeration, declaration reads and input hashing across checks in
 			strictEqual(reads.mock.calls.filter((call) => String(call.arguments[0]) === join(root, "src/solver.ts")).length, 1);
 			// Discovery reads package.json through a nonblocking descriptor, so it
 			// counts as one nonblocking open; the declaration fingerprint reads it by path.
+			// The shared check fold resolves each verify call once, in its single replay (x8-1, x8-6).
 			const nonblocking = (call: { arguments: unknown[] }) =>
 				typeof call.arguments[1] === "number" && (call.arguments[1] & fs.constants.O_NONBLOCK) !== 0;
 			strictEqual(
 				opens.mock.calls.filter((call) => String(call.arguments[0]) === join(root, "package.json") && nonblocking(call))
 					.length + reads.mock.calls.filter((call) => String(call.arguments[0]) === join(root, "package.json")).length,
-				2,
-				"one discovery read and one declaration fingerprint",
+				2 + checks.length,
+				"one discovery read, one declaration fingerprint and one resolution per replayed verify call",
 			);
 			strictEqual(
 				commands.mock.calls.filter((call) => Array.isArray(call.arguments[1]) && call.arguments[1].includes("ls-files"))

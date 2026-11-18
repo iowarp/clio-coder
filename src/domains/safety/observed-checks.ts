@@ -243,10 +243,10 @@ export function standingChecksFrom(
 export interface RunCheckFacts {
 	/**
 	 * The calls whose passing check still stands: a model call by its id, an operator's `!` run as `#<index>` into
-	 * `capabilityEntries(entries)`. A declared check is credited only through it, so the gate and the receipt read one
-	 * change sequence (x7-5).
+	 * `capabilityEntries(entries)`, each with the check it settled. A declared check is credited only through it, so the
+	 * gate and the receipt read one change sequence (x7-5).
 	 */
-	passCalls: ReadonlySet<string>;
+	passCalls: ReadonlyMap<string, ObservedCheck>;
 	/**
 	 * Checks whose last outcome since the last change is red, as the run-effects recorder seals them: a change retires
 	 * every outcome and a later run of the same check replaces it (bt-44).
@@ -269,7 +269,7 @@ function foldStanding(
 	scratchRoots: ReadonlyArray<string>,
 	declared: ReadonlyArray<DeclaredVerifierCommand>,
 	cache?: RunReplayCache,
-): { checks: ObservedCheck[]; passCalls: Set<string>; sealed: Map<string, boolean> } {
+): { checks: ObservedCheck[]; passCalls: Map<string, ObservedCheck>; sealed: Map<string, boolean> } {
 	const root = path.resolve(workspaceRoot);
 	const gitHelpers = cache?.gitHelpers ?? gitRunsConfiguredHelpers(root);
 	const outputTarget = checkOutputReader(root, process.env, scratchRoots, cache?.gitAnswers);
@@ -343,10 +343,10 @@ function foldStanding(
 			? { name: item.name, passed: item.passed, observedAt: item.observedAt }
 			: item,
 	);
-	const passCalls = new Set(
-		[...standing.values()].flatMap((item) => {
+	const passCalls = new Map(
+		checks.flatMap((item) => {
 			const key = item.passed ? standingCalls.get(item.name) : undefined;
-			return key === undefined ? [] : [key];
+			return key === undefined ? [] : [[key, item] as const];
 		}),
 	);
 	return { checks, passCalls, sealed };

@@ -207,8 +207,9 @@ reconcile the project-local `.clio-coder/user-tasks.json` inbox while `pick` and
 linked `done` update its durable correlation. These CLIO Coder-owned bookkeeping
 effects retain read class without granting source-workspace mutation authority.
 
-Registration is conditional on wiring: `context` gains its workspace scope only
-when a session contract is bound, `dispatch`/`monitor`/`steer` register only
+Registration is conditional on wiring: `context` answers its workspace scope
+from the bound session contract, or in a worker from a fresh probe of the
+worker's own cwd that is never saved into the dispatching session, `dispatch`/`monitor`/`steer` register only
 with a dispatch contract, `ask_user` registers only when an interactive handler
 exists, `configure_clio` registers with apply on an interactive session and
 preview-only on a headless main session, `restart_session` registers on an interactive session only when the working directory is CLIO Coder's own source tree and the session runs from that build, `report` registers only on the main session's registry when its report host is bound, `ledger` registers for a worker that bound its

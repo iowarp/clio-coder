@@ -12,9 +12,10 @@ import {
 } from "../../tools/verify/catalog.js";
 import { assessQualityPolicy, loadQualityPolicy, type QualityFinding } from "../../tools/verify/quality-policy.js";
 import { validateTrustStatus } from "../evidence/trust-status.js";
+import type { ObservedCheck } from "../session/task-board.js";
 import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
 import { callVerdict } from "./check-classifier.js";
-import { runCheckFacts } from "./observed-checks.js";
+import { type RunCheckFacts, runCheckFacts } from "./observed-checks.js";
 import {
 	detectValidationCommand,
 	extractCommandDeleteTargets,
@@ -196,7 +197,8 @@ interface MutationCandidate {
  * wording alone and a real limitation is never missed for its phrasing.
  */
 export function assessFinishContract(input: FinishContractInput): FinishContractAssessment {
-	const assessment = assessMutationFinishContract(input);
+	const scope = assessmentScope(input);
+	const assessment = assessMutationFinishContract(input, scope);
 	if (
 		assessment.mutatedPaths.length === 0 ||
 		assessment.reason === "deletion_only" ||
@@ -234,7 +236,7 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 			? {
 					advisory: !hasPassedChecks
 						? FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE
-						: checkFailedSinceLastChange(input)
+						: checkFailedSinceLastChange(input, scope)
 							? FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE
 							: FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
 				}
@@ -242,22 +244,60 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 	};
 }
 
-/**
- * Whether a check's last outcome since the run's last change is red, read by the shared classifier's replay as the
- * run-effects recorder seals it, so the notice never says checks passed beside a red the receipt keeps (bt-44).
- */
-function checkFailedSinceLastChange(input: FinishContractInput): boolean {
-	if (input.workspaceRoot === undefined) return false;
+/** The window one assessment reads, with its declared checks and the shared fold over it, each read at most once. */
+interface AssessmentScope {
+	window: ReadonlyArray<unknown>;
+	declared(): ReadonlyArray<DeclaredVerifierCommand>;
+	/** The shared classifier's replay of the window, run once per assessment for every consumer (x8-6). */
+	facts(): RunCheckFacts;
+}
+
+function assessmentScope(input: FinishContractInput): AssessmentScope {
 	const window = recentEntries(
 		input.sessionEntries ?? [],
 		input.assistantTurnId ?? null,
 		input.recentEntryLimit ?? DEFAULT_RECENT_ENTRY_LIMIT,
 		input.windowStartTurnId,
 	);
+	let declared: DeclaredVerifierCommand[] | undefined;
+	let facts: RunCheckFacts | undefined;
+	const scope: AssessmentScope = {
+		window,
+		declared: () => {
+			declared ??= declaredVerifierCommands(input.workspaceRoot, input.sessionVerifiers);
+			return declared;
+		},
+		facts: () => {
+			const root = resolve(input.workspaceRoot ?? ".");
+			facts ??= runCheckFacts(window, root, [...scope.declared(), ...acceptanceScriptChecks(input, root)]);
+			return facts;
+		},
+	};
+	return scope;
+}
+
+/**
+ * The package scripts only the operator's acceptance admits as checks (`npm run custom`), declared to the fold so
+ * their freshness is read with every other check's.
+ */
+function acceptanceScriptChecks(input: FinishContractInput, root: string): DeclaredVerifierCommand[] {
+	return (input.activeAcceptance?.verification ?? []).flatMap(({ check }) => {
+		const words = ["npm", "run", check];
+		if (!/^[a-z0-9][a-z0-9._:-]*$/u.test(check) || callVerdict(ToolNames.Bash, { command: words.join(" ") }) === "check")
+			return [];
+		return [{ id: check, segments: [words], cwd: root, session: true }];
+	});
+}
+
+/**
+ * Whether a check's last outcome since the run's last change is red, read by the shared classifier's replay as the
+ * run-effects recorder seals it, so the notice never says checks passed beside a red the receipt keeps (bt-44).
+ */
+function checkFailedSinceLastChange(input: FinishContractInput, scope: AssessmentScope): boolean {
+	if (input.workspaceRoot === undefined) return false;
 	// Only a failed result can seal a red, so an all-green window skips the replay's reads.
-	if (!capabilityEntries(window).some(failedResult)) return false;
-	const declared = declaredVerifierCommands(input.workspaceRoot, input.sessionVerifiers);
-	return runCheckFacts(window, input.workspaceRoot, declared).failing.length > 0;
+	if (!capabilityEntries(scope.window).some(failedResult)) return false;
+	return scope.facts().failing.length > 0;
 }
 
 function failedResult(entry: unknown): boolean {
@@ -278,15 +318,10 @@ function failedResult(entry: unknown): boolean {
 	);
 }
 
-function assessMutationFinishContract(input: FinishContractInput): FinishContractAssessment {
+function assessMutationFinishContract(input: FinishContractInput, scope: AssessmentScope): FinishContractAssessment {
 	const sessionEntries = input.sessionEntries ?? [];
 	const assistantTurnId = input.assistantTurnId ?? null;
-	const window = recentEntries(
-		sessionEntries,
-		assistantTurnId,
-		input.recentEntryLimit ?? DEFAULT_RECENT_ENTRY_LIMIT,
-		input.windowStartTurnId,
-	);
+	const { window } = scope;
 
 	const { paths: touchedPaths, written } = mutatingReceipts(window);
 	if (touchedPaths.length === 0) {
@@ -306,8 +341,14 @@ function assessMutationFinishContract(input: FinishContractInput): FinishContrac
 	}
 
 	const acceptanceChecks = new Set(input.activeAcceptance?.verification.map((item) => item.check) ?? []);
-	const declared = declaredVerifierCommands(input.workspaceRoot, input.sessionVerifiers);
-	const evidence = collectValidationEvidence(window, acceptanceChecks, input.workspaceRoot, declared);
+	const declared = scope.declared();
+	const evidence = collectValidationEvidence(
+		window,
+		acceptanceChecks,
+		input.workspaceRoot,
+		declared,
+		scope.facts().passCalls,
+	);
 	const limitations = collectLimitationEvidence(window);
 	let quality: QualityFinding[] = [];
 	if (input.workspaceRoot) {
@@ -833,10 +874,11 @@ function pushPath(paths: string[], seen: Set<string>, path: string): void {
 }
 
 /**
- * Receipt-based validation evidence over the recent window. Kept verbatim from
- * the pre-redesign engine minus the requested-inspection path: validation
- * commands (`detectValidationCommand`), verify check runs, passed dispatch
- * receipts, and protected-artifact records.
+ * Receipt-based validation evidence over the recent window: shell and operator
+ * `!` checks the shared fold settled, verify check runs, passed dispatch
+ * receipts, and protected-artifact records. The finish vocabulary
+ * (`detectValidationCommand`) only labels a shell check and admits its package
+ * execution; it never decides whether one is credited.
  * Inspection was removed because inspecting the repo is never a mutation, so it
  * can no longer be on the path to engaging the contract.
  */
@@ -844,20 +886,19 @@ function collectValidationEvidence(
 	recent: ReadonlyArray<unknown>,
 	acceptanceChecks: ReadonlySet<string>,
 	workspaceRoot: string | undefined,
-	declared: ReadonlyArray<DeclaredVerifierCommand> = [],
+	declared: ReadonlyArray<DeclaredVerifierCommand>,
+	standing: ReadonlyMap<string, ObservedCheck>,
 ): FinishContractEvidence[] {
 	const evidence: FinishContractEvidence[] = [];
 	const toolCalls = new Map<string, ToolCallEvidenceCandidate>();
 	const declaredRuns = new Map<string, ToolCallEvidenceCandidate[]>();
 	const dispatchCalls = new Map<string, ToolCallEvidenceCandidate>();
+	const shellCalls = new Map<string, string | null>();
 	const seen = new Set<string>();
 	const entries = capabilityEntries(recent);
-	// A declared check run through the shell counts only where the shared classifier settled its pass and no later
-	// change retired it, read by the same fold the task board and the recorder's change sequence use (x7-5).
-	const standing =
-		declared.length > 0 && workspaceRoot !== undefined
-			? runCheckFacts(recent, workspaceRoot, declared).passCalls
-			: new Set<string>();
+	// A check run through the shell, `verify` or an operator's `!` counts only where the shared classifier settled its
+	// pass and no later change retired it, read by the same fold the task board and the recorder's change sequence use
+	// (x7-5, x8-1). `standing` keys a call by its id and a `!` run by `#<index>` into these same entries.
 
 	for (const [index, entry] of entries.entries()) {
 		const protectedArtifact = protectedArtifactEvidence(entry);
@@ -877,6 +918,11 @@ function collectValidationEvidence(
 			continue;
 		}
 		if (declaredCallId !== undefined) continue;
+		const shellCallId = bashCallId(entry);
+		if (shellCallId !== null) {
+			shellCalls.set(shellCallId, turnIdOf(entry));
+			continue;
+		}
 
 		const typedValidationCall = validationToolCall(entry);
 		if (typedValidationCall !== null) {
@@ -898,22 +944,26 @@ function collectValidationEvidence(
 				pushEvidence(evidence, seen, dispatchRunRecord);
 				continue;
 			}
+			const pass = standing.get(resultId);
+			if (pass === undefined) continue;
 			const candidate = toolCalls.get(resultId);
-			if (candidate !== undefined) {
-				pushEvidence(evidence, seen, validationEvidence(candidate, entry));
-			}
-			if (standing.has(resultId)) {
-				for (const declaredCandidate of declaredRuns.get(resultId) ?? [])
-					pushEvidence(evidence, seen, validationEvidence(declaredCandidate, entry));
-			}
+			if (candidate !== undefined) pushEvidence(evidence, seen, validationEvidence(candidate, entry));
+			for (const declaredCandidate of declaredRuns.get(resultId) ?? [])
+				pushEvidence(evidence, seen, validationEvidence(declaredCandidate, entry));
+			if (shellCalls.has(resultId))
+				pushEvidence(evidence, seen, observedCheckEvidence(pass, shellCalls.get(resultId) ?? null));
 			continue;
 		}
 
+		const pass = standing.get(`#${index}`);
+		if (pass === undefined) continue;
 		const bashExecution = bashExecutionEvidence(entry, acceptanceChecks, workspaceRoot);
+		const declaredExecutions = bashExecutionDeclaredEvidence(entry, workspaceRoot, declared);
 		if (bashExecution !== null) pushEvidence(evidence, seen, bashExecution);
-		if (standing.has(`#${index}`)) {
-			for (const declaredExecution of bashExecutionDeclaredEvidence(entry, workspaceRoot, declared))
-				pushEvidence(evidence, seen, declaredExecution);
+		for (const declaredExecution of declaredExecutions) pushEvidence(evidence, seen, declaredExecution);
+		if (bashExecution === null && declaredExecutions.length === 0) {
+			const marker = asRecord(entry)?.excludeFromContext === true ? " [not sent to model]" : "";
+			pushEvidence(evidence, seen, observedCheckEvidence(pass, turnIdOf(entry), marker));
 		}
 	}
 
@@ -975,6 +1025,28 @@ function bashValidationCall(
 	const turnId = turnIdOf(entry);
 	if (turnId !== null) candidate.turnId = turnId;
 	return candidate;
+}
+
+/** A model `bash` call's id, for a check the shared fold settles that the finish vocabulary does not name. */
+function bashCallId(entry: unknown): string | null {
+	const record = asRecord(entry);
+	if (record?.kind !== "message" || record.role !== "tool_call") return null;
+	const payload = asRecord(record.payload);
+	if (payload === null || stringFromFirst(payload, ["name", "toolName", "tool"]) !== "bash") return null;
+	return stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
+}
+
+/**
+ * A pass the shared classifier settled and no later change retired, credited under the name the fold filed it by
+ * (`cargo clippy`, `mypy .`) when the finish vocabulary has no label for it, so the gate and the receipt agree (x8-1).
+ */
+function observedCheckEvidence(pass: ObservedCheck, turnId: string | null, marker = ""): FinishContractEvidence {
+	return {
+		kind: "validation_command",
+		summary: `validation command passed: ${pass.name}${marker}`,
+		...(pass.check ? { check: pass.check } : {}),
+		...(turnId !== null ? { turnId } : {}),
+	};
 }
 
 /** A model `bash` call's runs of declared checks, each credited when the call's result succeeds. */

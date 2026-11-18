@@ -294,5 +294,7 @@ export function mainApprovalRequestView(
 		...(mutation !== null ? { mutation } : {}),
 		...(queueDepth !== undefined && queueDepth > 1 ? { queueDepth } : {}),
 		...(task !== undefined ? { task } : {}),
+		// A contained call stays contained once approved; only `unsandboxed: true` leaves, under its own ask.
+		...(decision.policy?.shellSandbox !== undefined ? { sandboxed: true as const } : {}),
 	};
 }

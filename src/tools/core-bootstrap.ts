@@ -15,6 +15,7 @@ import type { SessionContract } from "../domains/session/contract.js";
 import type { DecisionBoardStore } from "../domains/session/decision-board.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { createTaskBoardStore, type TaskBoardStore } from "../domains/session/task-board.js";
+import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { ImageContent } from "../engine/types.js";
 import type { AgentLedgerPort } from "../worker/protocol.js";
@@ -64,6 +65,8 @@ export interface CoreToolBootstrapDeps {
 	/** Live source of each active and saved route; absent where no saved layers exist. */
 	getRouteProvenance?: () => RouteProvenance;
 	workerRecall?: WorkerRecall;
+	/** A worker's run-scoped workspace probe for context(scope=workspace); absent in session registries. */
+	workerWorkspace?: () => WorkspaceSnapshot;
 	session?: SessionContract;
 	/** Full ledger of the current session; context(scope=recall) folds it. Absent in worker registries. */
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
@@ -270,6 +273,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(deps.getRouteProvenance ? { getRouteProvenance: deps.getRouteProvenance } : {}),
 		...(deps.workerRecall ? { workerRecall: deps.workerRecall } : {}),
+		...(deps.workerWorkspace ? { workerWorkspace: deps.workerWorkspace } : {}),
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
 		...(deps.getSkillLoaderOptions ? { getSkillLoaderOptions: deps.getSkillLoaderOptions } : {}),
 		...(deps.skillMarketplace !== undefined ? { skillMarketplace: deps.skillMarketplace } : {}),

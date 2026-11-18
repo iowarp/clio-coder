@@ -12,6 +12,7 @@ import { renderMarker } from "../../src/domains/context/working-set/marker.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import type { AgentMessage } from "../../src/engine/types.js";
+import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { createDispatchAdmissionController } from "../../src/tools/dispatch-admission.js";
@@ -547,6 +548,22 @@ test("worker recall keeps its own aliases above every parent alias and recalls t
 		ok("error" in store.recall({ ref: "../../parent/session" }));
 		writeFileSync(files[0] as string, "{}");
 		match(JSON.stringify(store.recall({ ref: "r3" })), /digest mismatch/);
+	} finally {
+		env.restore();
+	}
+});
+
+test("a worker's context(scope=workspace) probes its own cwd instead of requiring a parent session (bt-45 G)", async () => {
+	const env = await isolateClioEnv("clio-coder-worker-workspace-");
+	try {
+		const worker = createWorkerToolRegistry(undefined, createWorkerSafety({ cwd: env.dir }));
+		const verdict = await worker.invoke({ tool: "context", args: { scope: "workspace" } });
+		ok(verdict.kind === "ok" && verdict.result.kind === "ok", JSON.stringify(verdict));
+		equal(JSON.parse(verdict.result.output).cwd, process.cwd());
+		match(
+			JSON.stringify(await createContextTool({}).run({ scope: "workspace" }, {})),
+			/scope=\\"skills\\" still answers/,
+		);
 	} finally {
 		env.restore();
 	}

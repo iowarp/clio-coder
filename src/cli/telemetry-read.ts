@@ -17,6 +17,7 @@ import { AgentRole, Disposition } from "../core/telemetry/enums.js";
 import { renderCount, unreportedCacheReadWords } from "../core/telemetry/render.js";
 import { clioStateDir } from "../core/xdg.js";
 import {
+	loadRunCallsTelemetrySource,
 	loadRunScopeFiles,
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
@@ -484,7 +485,7 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 			}
 			const explained =
 				ref.scope === "run"
-					? explain(target as string, { runId: ref.owner, run: loadRunTelemetrySource(stateDir, ref.owner) })
+					? explain(target as string, { runId: ref.owner, run: loadRunCallsTelemetrySource(stateDir, ref.owner) })
 					: isRepoRef(ref)
 						? await explainRepoRef(stateDir, target as string, ref.owner)
 						: (() => {
@@ -502,7 +503,8 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 			runId !== undefined &&
 			(args.command === "inspect" || args.command === "cost" || args.command === "calls")
 		) {
-			const run = loadRunTelemetrySource(stateDir, runId);
+			const run =
+				args.command === "inspect" ? loadRunTelemetrySource(stateDir, runId) : loadRunCallsTelemetrySource(stateDir, runId);
 			if (!run.present) {
 				printError(`no run journal for ${runId}`);
 				return 1;
@@ -560,7 +562,7 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 				printError("calls needs a session, or --run <run-id>");
 				return 2;
 			}
-			const run = loadRunTelemetrySource(stateDir, runId);
+			const run = loadRunCallsTelemetrySource(stateDir, runId);
 			if (!run.present) {
 				printError(`no run journal for ${runId}`);
 				return 1;

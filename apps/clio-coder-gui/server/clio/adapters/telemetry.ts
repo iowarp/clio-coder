@@ -5,6 +5,7 @@ import { clioStateDir } from "../../../../../src/core/xdg.js";
 import type { RunListCursor } from "../../../../../src/domains/session/index.js";
 import {
 	listRunTelemetrySources,
+	loadRunCallsTelemetrySource,
 	loadRunScopeFiles,
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
@@ -67,7 +68,7 @@ export async function readTelemetry(input: TelemetryRequest): Promise<unknown> {
 		const explained = repo
 			? await explainRepoRef(state, input.ref, ref.owner)
 			: ref.scope === "run"
-				? explain(input.ref, { runId: ref.owner, run: loadRunTelemetrySource(state, ref.owner) })
+				? explain(input.ref, { runId: ref.owner, run: loadRunCallsTelemetrySource(state, ref.owner) })
 				: resolveSession(state, ref.owner, false, (session) => explain(input.ref, { session }));
 		if (!explained) throw new AppProblem("not_found", "Nothing in the journals resolves that telemetry reference.");
 		return explained;
@@ -84,8 +85,9 @@ export async function readTelemetry(input: TelemetryRequest): Promise<unknown> {
 		// A run that never had a directory is not found; one whose journal is missing or torn is unknown coverage.
 		if (!runTelemetryDirectoryExists(state, input.runId))
 			throw new AppProblem("not_found", "No run journal holds that id.");
+		if (input.kind === "run-cost")
+			return runCostReport(input.runId, loadRunCallsTelemetrySource(state, input.runId), "model");
 		const source = loadRunTelemetrySource(state, input.runId);
-		if (input.kind === "run-cost") return runCostReport(input.runId, source, "model");
 		return input.kind === "run"
 			? runTelemetry(input.runId, source, {}, loadRunScopeFiles(state, input.runId))
 			: runTimeline(input.runId, source);

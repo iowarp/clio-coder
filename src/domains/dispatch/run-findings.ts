@@ -350,6 +350,13 @@ function hasPassingValidation(
 	});
 }
 
+/** Facts only shell checks the host observed answer as those commands, never as the `verify` tool (bt-45 F). */
+function typedFactsBasis(facts: ReadonlyArray<RunResultTypedValidationFact>): RunResultVerification["basis"] {
+	return facts.every((fact) => fact.sourceId.startsWith(OBSERVED_COMMAND_PREFIX))
+		? "host-observed-command"
+		: "validation-tool";
+}
+
 /**
  * Derive the receipt's descriptive evidence-confidence marker without
  * changing execution semantics. ACP agents may validate externally, so lack
@@ -365,12 +372,10 @@ export function deriveRunVerification(
 	if (context.capabilityClass === "read-only") {
 		return { state: "not_applicable", basis: "read-only-agent" };
 	}
-	if (draft.typedValidations?.some((fact) => !fact.passed)) {
-		return { state: "unverified", basis: "validation-tool" };
-	}
-	if (draft.typedValidations?.some((fact) => fact.passed)) {
-		return { state: "verified", basis: "validation-tool" };
-	}
+	const failed = draft.typedValidations?.filter((fact) => !fact.passed) ?? [];
+	if (failed.length > 0) return { state: "unverified", basis: typedFactsBasis(failed) };
+	const passed = draft.typedValidations?.filter((fact) => fact.passed) ?? [];
+	if (passed.length > 0) return { state: "verified", basis: typedFactsBasis(passed) };
 	if (hasPassingValidation(draft.toolStats, draft.typedValidations, context.checkFreshness)) {
 		return { state: "verified", basis: "validation-tool" };
 	}

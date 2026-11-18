@@ -1,5 +1,6 @@
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { PermissionRequestedPayload } from "../core/telemetry/live-events.js";
+import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import { sanitizeCallTargetText, WORKER_CALL_TARGET_MAX_CHARS } from "../domains/safety/call-target.js";
@@ -36,6 +37,9 @@ export interface ToolRiskSubject {
 	readonly target: string;
 	readonly requestId?: string;
 }
+
+/** Worker tools whose effect runs as a child the worker's exec seams spawn under its OS sandbox. */
+const WORKER_SANDBOXED_TOOLS: ReadonlySet<string> = new Set([ToolNames.Bash, ToolNames.RunScript, ToolNames.Verify]);
 
 type PermissionToolRegistry = Pick<
 	ToolRegistry,
@@ -87,6 +91,7 @@ export interface OverlayPermissionLifecycleDeps {
 		| "holdWorkerPermission"
 		| "restartWorkerPermission"
 		| "workerRunEndsWithTurn"
+		| "workerRunShellConfined"
 	>;
 	getAutonomy(): string;
 	/** The operator's request a main-agent card names on its `task` row, read from the session ledger. */
@@ -252,6 +257,7 @@ function workerApprovalRequestView(
 	entry: WorkerEscalationEntry,
 	queueDepth: number,
 	endsWithTurn: boolean,
+	shellConfined = false,
 ): ApprovalRequestView {
 	return {
 		requestId: entry.requestId,
@@ -265,6 +271,8 @@ function workerApprovalRequestView(
 		...(entry.grant !== undefined ? { workerGrant: entry.grant } : {}),
 		workerFallback: entry.fallback,
 		...(queueDepth > 1 ? { queueDepth } : {}),
+		// A worker's approved command still spawns through its sandbox; the grant does not lift it.
+		...(shellConfined && WORKER_SANDBOXED_TOOLS.has(entry.tool) ? { sandboxed: true as const } : {}),
 	};
 }
 
@@ -452,7 +460,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	const openWorker = (entry: WorkerEscalationEntry): boolean => {
 		// The entry is still at the head of the queue here, so the queue's length counts it.
 		const endsWithTurn = deps.dispatch.workerRunEndsWithTurn?.(entry.runId) === true;
-		const view = workerApprovalRequestView(entry, workerQueue.length, endsWithTurn);
+		const shellConfined = deps.dispatch.workerRunShellConfined?.(entry.runId) === true;
+		const view = workerApprovalRequestView(entry, workerQueue.length, endsWithTurn, shellConfined);
 		const { requestId } = entry;
 		if (
 			!deps.openPermissionOverlay(

@@ -286,6 +286,11 @@ export function settleFinishedRun(
 ): RunSettlement {
 	const usage = input.usage ?? unobservedRunUsageFacts();
 	const host = receipt.hostVerification;
+	// An ask refused without an answer, as a --timeout abort denies one, is a permission request the way `decisions`
+	// counts it, not a blocked call. The tools row has no field for it, so it stays in `calls` only (bt-15 c14a).
+	const asked = new Map<string, number>();
+	for (const attempt of receipt.safety?.permissionRequestedAttempts ?? [])
+		asked.set(attempt.tool, (asked.get(attempt.tool) ?? 0) + 1);
 	return redactedSettlement({
 		facts: {
 			version: 1,
@@ -320,7 +325,7 @@ export function settleFinishedRun(
 				calls: stat.count,
 				ok: stat.ok,
 				errors: stat.errors,
-				blocked: stat.blocked,
+				blocked: Math.max(0, stat.blocked - (asked.get(stat.tool) ?? 0)),
 			})),
 			skills: (receipt.skillActivations ?? [])
 				.slice(0, 256)
