@@ -8,7 +8,7 @@ import {
 	resultContractAuthorship,
 	type StructuredHelperResult,
 } from "../domains/agents/result-contract.js";
-import { hostCheckBaseNote } from "../domains/dispatch/host-verification-note.js";
+import { hostCheckBaseNote, hostCheckNotRunNote } from "../domains/dispatch/host-verification-note.js";
 import { settleFinishedRun } from "../domains/dispatch/run-settlement.js";
 import type { RunResult, RunResultDraft } from "../domains/dispatch/types.js";
 import { formatTrustAxes, formatTrustSummary } from "../domains/evidence/trust-projection.js";
@@ -334,6 +334,8 @@ export function runEvidenceLabels(run: FinishedRun, integrity: RunIntegrity): st
 								: host?.strategy === "batch-settled"
 									? "executed after the worker batch"
 									: "executed after the worker";
+							if (check.notRun !== undefined)
+								return `${JSON.stringify(check.check)} (did not run: ${hostCheckNotRunNote(check.notRun)})`;
 							return `${JSON.stringify(check.check)} (${source}; exit ${check.exitCode}${check.exitCode !== 0 ? `; ${hostCheckBaseNote(check)}` : ""})`;
 						})
 						.join(", ")}.`,

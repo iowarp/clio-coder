@@ -12,6 +12,7 @@ import { displayToolCall } from "../../tools/gateway-display.js";
 import { expandChainMessages } from "../../tools/surface.js";
 import type { DispatchContract } from "../dispatch/contract.js";
 import { plainOutcomeLabel } from "../dispatch/failure-headline.js";
+import { hostCheckNotRunNote } from "../dispatch/host-verification-note.js";
 import type { DispatchOwnership } from "../dispatch/ownership.js";
 import { dispatchOwnership } from "../dispatch/ownership.js";
 import type { RunEnvelope } from "../dispatch/types.js";
@@ -631,7 +632,7 @@ function renderRunChecks(run: SettledRunView): string[] {
 		...(checks.length > 0
 			? checks.map(
 					(check) =>
-						`- ${check.exitCode === 0 ? "Passed" : "Failed"}: ${check.check} (exit ${check.exitCode})${check.memo ? "; reused result" : ""}`,
+						`- ${check.notRun !== undefined ? `Did not run: ${check.check} (${hostCheckNotRunNote(check.notRun)})` : `${check.exitCode === 0 ? "Passed" : "Failed"}: ${check.check} (exit ${check.exitCode})`}${check.memo ? "; reused result" : ""}`,
 				)
 			: ["No host-run checks recorded."]),
 		...(failedOnBase > 0 ? [`${failedOnBase} failing check(s) also failed on the task base.`] : []),

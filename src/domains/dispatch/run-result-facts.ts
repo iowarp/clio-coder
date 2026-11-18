@@ -21,6 +21,7 @@ import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
 import { TELEMETRY_FOLD_VERSION } from "../telemetry/folds.js";
 import { readRunRecord } from "../telemetry/index.js";
 import { TOOL_GUARD_REASON_CODE } from "./failure-headline.js";
+import { hostCheckNotRunNote } from "./host-verification-note.js";
 import { readRunFeed } from "./run-feed.js";
 import { OBSERVED_COMMAND_PREFIX } from "./run-findings.js";
 import { landedMergeText } from "./workspace-mutation.js";
@@ -240,9 +241,11 @@ function validationFailureOf(
 	const settled = record.settled;
 	const result = record.result?.state === "resolved" ? record.result.value : null;
 	if (entry.authority.id === "host-verification") {
-		const failed = (result?.hostVerification?.checks ?? []).filter((check) => check.exitCode !== 0);
+		const failed = (result?.hostVerification?.checks ?? []).filter(
+			(check) => check.exitCode !== 0 || check.notRun !== undefined,
+		);
 		if (failed.length > 0)
-			return `Clio's own check failed: ${failed.map((check) => `${check.check} exited ${check.exitCode ?? "without a code"}`).join(", ")}`;
+			return `Clio's own check failed: ${failed.map((check) => (check.notRun !== undefined ? `${check.check} did not run: ${hostCheckNotRunNote(check.notRun)}` : `${check.check} exited ${check.exitCode ?? "without a code"}`)).join(", ")}`;
 		const reason = result?.hostVerification?.reason;
 		return reason ? `Clio's own check failed: ${firstSentence(reason)}` : "Clio's own check failed";
 	}
@@ -433,6 +436,7 @@ function sealedChecks(run: SettledRun): Sealed {
 					checks: (result?.hostVerification?.checks ?? []).map((check) => ({
 						check: clip(check.check),
 						exitCode: check.exitCode,
+						...(check.notRun !== undefined ? { notRun: check.notRun } : {}),
 						durationMs: check.durationMs,
 						memo: check.memo,
 						outputTail: clip(check.outputTail, 16_384),

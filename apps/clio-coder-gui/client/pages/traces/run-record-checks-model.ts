@@ -165,6 +165,13 @@ const HOST_REASONS: Record<string, string> = {
 	worker_not_successful: "The worker did not succeed, so the declared checks did not run.",
 };
 
+/** Why a host check never started; mirrors `hostCheckNotRunNote` in the dispatch domain. */
+const NOT_RUN_REASONS: Record<string, string> = {
+	refused: "refused before launch",
+	unconfigured: "the check is not configured",
+	"spawn-failed": "its process could not start",
+};
+
 function hostChecks(value: Sealed["hostVerification"]): CheckRow {
 	if (!value)
 		return {
@@ -182,15 +189,21 @@ function hostChecks(value: Sealed["hostVerification"]): CheckRow {
 		(Array.isArray(value.checks) ? value.checks : []).map((entry): Omit<CheckItem, "id"> => {
 			const check = record(entry);
 			const exit = typeof check?.exitCode === "number" ? check.exitCode : null;
+			// A check that never started carries an exit code that reports no run.
+			const notRun = string(check?.notRun);
 			const duration = count(check?.durationMs);
 			const evidence = string(check?.evidenceRunId);
 			const tail = string(check?.outputTail);
 			return {
 				name: string(check?.check) ?? "Unnamed check",
-				tone: exit === 0 ? "success" : exit === null ? "unverified" : "fail",
-				word: exit === 0 ? "Passed" : exit === null ? "Not recorded" : "Failed",
+				tone: notRun ? "warn" : exit === 0 ? "success" : exit === null ? "unverified" : "fail",
+				word: notRun ? "Did not run" : exit === 0 ? "Passed" : exit === null ? "Not recorded" : "Failed",
 				facts: [
-					exit === null ? "exit not recorded" : `exit ${exit}`,
+					notRun
+						? `did not run: ${NOT_RUN_REASONS[notRun] ?? notRun}`
+						: exit === null
+							? "exit not recorded"
+							: `exit ${exit}`,
 					duration === null ? "" : `${duration} ms`,
 					check?.memo === true ? "reused result" : "",
 					evidence ? `evidence from run ${evidence}` : "",
