@@ -158,6 +158,9 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 	let reopenedAt = 0;
 	let omitted = 0;
 	let pendingJudge: string | null = null;
+	// A halt latched mid-turn, journaled once the stop it raised lands: a cap stop lets the round's started tool
+	// calls finish, so the record counts them as the run's report does (bt-26 N2f).
+	let unjournaled: AutonomyHalt | null = null;
 	let closed = false;
 	const decisions: OpenDecision[] = [];
 	const emit: AutonomyEmit = (name, payload, sessionId) => {
@@ -165,6 +168,7 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 	};
 	const confinement = (): "contained" | "unconfined" => deps.confinement?.() ?? "contained";
 	const ended = (reason: EventPayload<"autonomy.ended">["reason"], sessionId: string | null): void => {
+		journalHalt();
 		if (!entered) return;
 		entered = false;
 		emit("autonomy.ended", { reason, ...usage(), openDecisions: seq }, sessionId);
@@ -177,6 +181,7 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 		turnStart = turnStart === null ? null : now();
 		halt = null;
 		pendingJudge = null;
+		unjournaled = null;
 	};
 	const follow = (): void => {
 		if (deps.session === undefined) return;
@@ -193,19 +198,21 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 		tokens,
 		activeMs: Math.round(activeMs + (turnStart === null ? 0 : Math.max(0, now() - turnStart))),
 	});
+	function journalHalt(): void {
+		const next = unjournaled;
+		if (next === null) return;
+		unjournaled = null;
+		emit(
+			"autonomy.cap_reached",
+			{ kind: next.kind, ...(next.limit !== undefined ? { limit: next.limit } : {}), ...usage(), openDecisions: seq },
+			session,
+		);
+	}
 	const latch = (next: AutonomyHalt): void => {
 		if (halt !== null) return;
 		halt = next;
-		emit(
-			"autonomy.cap_reached",
-			{
-				kind: next.kind,
-				...(next.limit !== undefined ? { limit: next.limit } : {}),
-				...next.usage,
-				openDecisions: seq,
-			},
-			session,
-		);
+		unjournaled = next;
+		if (turnStart === null) journalHalt();
 		deps.onHalt(next);
 	};
 	const check = (caps: AutonomousCaps): void => {
@@ -267,6 +274,7 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 			if (turnStart === null) return;
 			if (deps.caps() !== null) activeMs += Math.max(0, now() - turnStart);
 			turnStart = null;
+			journalHalt();
 		},
 		haltFor(kind, detail, afterBlock = false) {
 			if (counting() === null || halt !== null) return;
@@ -279,6 +287,7 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 		},
 		reopen() {
 			follow();
+			journalHalt();
 			const cleared = halt;
 			clear();
 			reopenedAt = seq;

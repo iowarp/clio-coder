@@ -656,7 +656,8 @@ export const TurnSettledSchema = Type.Object(
 			{
 				cause: Type.Union([FailureCause, Type.Null()]),
 				// The last stage the turn's final call reached: `streaming` once it produced output. `firstToken` is the
-				// value journals before bt-26 N2a wrote for that; nothing writes it now.
+				// value journals before bt-26 N2a wrote for that; nothing writes it now. Null when a stop with a cause
+				// landed after that call ended, as a cap does at the tool boundary (bt-26 N2f).
 				stage: Type.Union([vocabulary(["transform", "auth", "admission", "send", "firstToken", "streaming"]), Type.Null()]),
 				retries: count,
 				/**
@@ -866,11 +867,13 @@ export const RunSettledSchema = Type.Object(
 		upstream: Type.Object({ responseModelIds: nullable(text), gatewayRoutes: nullable(text) }, closed),
 		/**
 		 * Tool calls safety refused, by tool, class and rule; the call's arguments and reason prose are not kept. Records
-		 * written before `guardBlockedAttempts` existed list a tool guard's blocks here too.
+		 * written before `guardBlockedAttempts` and `permissionRequestedAttempts` existed list those calls here too.
 		 */
 		blockedAttempts: Type.Array(SettledBlockedAttemptSchema, { maxItems: 64 }),
 		/** Tool calls a tool guard held back, in the same shape; absent when none was and in older journals. */
 		guardBlockedAttempts: Type.Optional(Type.Array(SettledBlockedAttemptSchema, { maxItems: 64 })),
+		/** Asks the run refused without an answer, in the same shape; absent when none was and in older journals. */
+		permissionRequestedAttempts: Type.Optional(Type.Array(SettledBlockedAttemptSchema, { maxItems: 64 })),
 		/** Permission escalations the run asked for and how they ended; null when none was asked. */
 		escalations: nullable(Type.Object({ requested: count, approved: count, denied: count, timedOut: count }, closed)),
 		/** Information-flow restrictions the run's context carried, which its consumers must keep (`flow-restrictions.ts`). */

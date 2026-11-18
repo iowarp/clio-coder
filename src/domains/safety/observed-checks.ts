@@ -3,7 +3,14 @@ import path from "node:path";
 import { isRefusalToolResultError } from "../../tools/result-disposition.js";
 import type { ObservedCheck } from "../session/task-board.js";
 import { type CallClassification, type CheckOutputReader, classifyCall, settleCheckCall } from "./check-classifier.js";
-import { capabilityEntries, dispatchRunRecordEvidence, validationCheckId } from "./finish-contract.js";
+import {
+	capabilityEntries,
+	type DeclaredVerifierCommand,
+	declaredVerifierCommands,
+	dispatchRunRecordEvidence,
+	type SessionVerifier,
+	validationCheckId,
+} from "./finish-contract.js";
 import { checkOutputReader, gitRunsConfiguredHelpers } from "./run-effects.js";
 
 /**
@@ -18,6 +25,8 @@ import { checkOutputReader, gitRunsConfiguredHelpers } from "./run-effects.js";
  * with a change, a status that is a later command's, a red a later pipe stage can
  * cause, and a pass outside the workspace settle nothing, and a bash check is
  * filed under its full command, so a narrower pass never answers a wider red.
+ *
+ * A check the project catalog or the session declares (`run --verify`) is read as one by the same classifier (x7-5).
  *
  * Only the task's own stretch of work counts: from when it became active, or for
  * a task closed without a start, from the board's last change. A check run for
@@ -60,6 +69,7 @@ interface Replay {
 	root: string;
 	gitHelpers: boolean;
 	outputTarget: CheckOutputReader;
+	declared: ReadonlyArray<DeclaredVerifierCommand>;
 	readings?: RunReplayCache["readings"];
 }
 
@@ -79,9 +89,17 @@ function readCall(
 			asked = true;
 			return replay.outputTarget(base, logs);
 		},
-		{ changed: (paths: Iterable<string>) => replay.outputTarget.changed(paths) },
+		{
+			changed: (paths: Iterable<string>) => replay.outputTarget.changed(paths),
+			outside: (base: string) => replay.outputTarget.outside(base),
+		},
 	);
-	const reading = classifyCall(tool, args, { cwd: replay.root, gitHelpers: replay.gitHelpers, outputTarget });
+	const reading = classifyCall(tool, args, {
+		cwd: replay.root,
+		gitHelpers: replay.gitHelpers,
+		outputTarget,
+		declaredChecks: replay.declared,
+	});
 	if (!asked && id !== null) replay.readings?.set(id, { fingerprint, reading });
 	return reading;
 }
@@ -161,8 +179,10 @@ export function standingChecks(
 	taskId: string,
 	workspaceRoot: string,
 	scratchRoots: ReadonlyArray<string> = [],
+	sessionVerifiers: ReadonlyArray<SessionVerifier> = [],
 ): ReadonlyArray<ObservedCheck> {
-	return standingChecksWith(entries, boardId, taskId, workspaceRoot, scratchRoots);
+	const declared = declaredVerifierCommands(workspaceRoot, sessionVerifiers);
+	return standingChecksWith(entries, boardId, taskId, workspaceRoot, scratchRoots, declared);
 }
 
 function standingChecksWith(
@@ -171,11 +191,12 @@ function standingChecksWith(
 	taskId: string,
 	workspaceRoot: string,
 	scratchRoots: ReadonlyArray<string>,
+	declared: ReadonlyArray<DeclaredVerifierCommand>,
 	cache?: RunReplayCache,
 ): ReadonlyArray<ObservedCheck> {
 	const start = workWindowStart(entries, boardId, taskId);
 	if (start === -1) return [];
-	return standingChecksFrom(entries, start, workspaceRoot, scratchRoots, cache);
+	return standingChecksFrom(entries, start, workspaceRoot, scratchRoots, cache, declared);
 }
 
 /** The turn of the session path's last user message, which opens the run now in progress; null before any. */
@@ -189,18 +210,20 @@ function currentRun(entries: ReadonlyArray<unknown>): string | null {
 
 /**
  * {@link standingChecks} for a board that replays on every `done` and `block`: the replays of one run share its git
- * lookups and each call's reading (x6-7), and a new run, workspace, scratch root or temp dir starts afresh.
+ * lookups and each call's reading (x6-7), and a new run, workspace, scratch root, temp dir or declared check starts
+ * afresh.
  */
 export function createStandingChecks(): typeof standingChecks {
 	let cache: RunReplayCache | undefined;
-	return (entries, boardId, taskId, workspaceRoot, scratchRoots = []) => {
+	return (entries, boardId, taskId, workspaceRoot, scratchRoots = [], sessionVerifiers = []) => {
 		const run = currentRun(entries);
 		const root = path.resolve(workspaceRoot);
-		const key = JSON.stringify([run, root, scratchRoots, tmpdir(), process.env.HOME, process.env.TMPDIR]);
+		const declared = declaredVerifierCommands(root, sessionVerifiers);
+		const key = JSON.stringify([run, root, scratchRoots, tmpdir(), process.env.HOME, process.env.TMPDIR, declared]);
 		if (run === null) cache = undefined;
 		else if (cache?.key !== key)
 			cache = { key, gitHelpers: gitRunsConfiguredHelpers(root), gitAnswers: new Map(), readings: new Map() };
-		return standingChecksWith(entries, boardId, taskId, workspaceRoot, scratchRoots, cache);
+		return standingChecksWith(entries, boardId, taskId, workspaceRoot, scratchRoots, declared, cache);
 	};
 }
 
@@ -211,22 +234,62 @@ export function standingChecksFrom(
 	workspaceRoot: string,
 	scratchRoots: ReadonlyArray<string> = [],
 	cache?: RunReplayCache,
+	declared: ReadonlyArray<DeclaredVerifierCommand> = declaredVerifierCommands(workspaceRoot, []),
 ): ReadonlyArray<ObservedCheck> {
+	return foldStanding(entries.slice(start), workspaceRoot, scratchRoots, declared, cache).checks;
+}
+
+/** What the same fold says of a finished stretch of work, for the finish contract. */
+export interface RunCheckFacts {
+	/**
+	 * The calls whose passing check still stands: a model call by its id, an operator's `!` run as `#<index>` into
+	 * `capabilityEntries(entries)`. A declared check is credited only through it, so the gate and the receipt read one
+	 * change sequence (x7-5).
+	 */
+	passCalls: ReadonlySet<string>;
+	/**
+	 * Checks whose last outcome since the last change is red, as the run-effects recorder seals them: a change retires
+	 * every outcome and a later run of the same check replaces it (bt-44).
+	 */
+	failing: ReadonlyArray<string>;
+}
+
+export function runCheckFacts(
+	entries: ReadonlyArray<unknown>,
+	workspaceRoot: string,
+	declared: ReadonlyArray<DeclaredVerifierCommand>,
+): RunCheckFacts {
+	const { passCalls, sealed } = foldStanding(entries, workspaceRoot, [], declared);
+	return { passCalls, failing: [...sealed].flatMap(([name, passed]) => (passed ? [] : [name])) };
+}
+
+function foldStanding(
+	entries: ReadonlyArray<unknown>,
+	workspaceRoot: string,
+	scratchRoots: ReadonlyArray<string>,
+	declared: ReadonlyArray<DeclaredVerifierCommand>,
+	cache?: RunReplayCache,
+): { checks: ObservedCheck[]; passCalls: Set<string>; sealed: Map<string, boolean> } {
 	const root = path.resolve(workspaceRoot);
 	const gitHelpers = cache?.gitHelpers ?? gitRunsConfiguredHelpers(root);
 	const outputTarget = checkOutputReader(root, process.env, scratchRoots, cache?.gitAnswers);
-	const replay: Replay = { root, gitHelpers, outputTarget, ...(cache ? { readings: cache.readings } : {}) };
+	const replay: Replay = { root, gitHelpers, outputTarget, declared, ...(cache ? { readings: cache.readings } : {}) };
 	const calls = new Map<string, TrackedCall>();
 	const standing = new Map<string, ObservedCheck>();
+	const standingCalls = new Map<string, string>();
+	const sealed = new Map<string, boolean>();
 	let revision = 0;
-	const settle = (call: TrackedCall, failed: boolean, at: string): void => {
+	const settle = (call: TrackedCall, failed: boolean, at: string, key: string): void => {
 		const settlement = settleCheckCall(call.reading, failed, failed ? "error" : "ok", call.revision === revision);
 		if (settlement.mutation) {
 			outputTarget.changed(call.reading.changedPaths);
 			revision += 1;
 			for (const [name, item] of standing) if (item.passed) standing.delete(name);
+			sealed.clear();
 		}
 		if (call.name === null || !call.statusAttributable || !settlement.settled) return;
+		sealed.set(call.name, !failed);
+		standingCalls.set(call.name, key);
 		standing.set(call.name, {
 			name: call.name,
 			...(call.check ? { check: call.check } : {}),
@@ -234,14 +297,14 @@ export function standingChecksFrom(
 			observedAt: at,
 		});
 	};
-	for (const entry of capabilityEntries(entries.slice(start))) {
+	for (const [index, entry] of capabilityEntries(entries).entries()) {
 		const item = record(entry);
 		const at = text(item?.timestamp) ?? "";
 		if (item?.kind === "bashExecution") {
 			const command = text(item.command);
 			if (command === null || item.cancelled === true || typeof item.exitCode !== "number") continue;
 			const args = { command, ...(text(item.cwd) ? { cwd: item.cwd } : {}) };
-			settle(trackCall("bash", args, replay, revision), item.exitCode !== 0, at);
+			settle(trackCall("bash", args, replay, revision), item.exitCode !== 0, at, `#${index}`);
 			continue;
 		}
 		if (item?.kind !== "message") continue;
@@ -260,21 +323,31 @@ export function standingChecksFrom(
 		calls.delete(id);
 		const outcome = resultStanding(payload);
 		if (outcome === "refused") continue;
-		settle(call, outcome === "failed", at);
+		settle(call, outcome === "failed", at, id);
 		if (call.dispatch && outcome === "passed") {
 			const summary = dispatchRunRecordEvidence(
 				{ ...item, payload: { ...payload, toolName: "dispatch" } },
 				undefined,
 			)?.summary;
 			const run = summary?.replace(/^dispatch run record passed: /u, "");
-			if (run) standing.set(run, { name: run, passed: true, observedAt: at });
+			if (run) {
+				standingCalls.delete(run);
+				standing.set(run, { name: run, passed: true, observedAt: at });
+			}
 		}
 	}
 	// Commands filed apart can still run one check id: a red among them answers for it, never a narrower green.
 	const red = new Set([...standing.values()].flatMap((item) => (!item.passed && item.check ? [item.check] : [])));
-	return [...standing.values()].map((item) =>
+	const checks = [...standing.values()].map((item) =>
 		item.passed && item.check !== undefined && red.has(item.check)
 			? { name: item.name, passed: item.passed, observedAt: item.observedAt }
 			: item,
 	);
+	const passCalls = new Set(
+		[...standing.values()].flatMap((item) => {
+			const key = item.passed ? standingCalls.get(item.name) : undefined;
+			return key === undefined ? [] : [key];
+		}),
+	);
+	return { checks, passCalls, sealed };
 }

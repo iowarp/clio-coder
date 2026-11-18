@@ -119,9 +119,12 @@ export interface TurnConstraints {
 	readonly delegatedTools?: readonly string[];
 	readonly skills?: "allowed" | "disabled";
 	/**
-	 * Enforced read-only ceiling: admission denies every call that is not a
-	 * read inside the workspace, exactly as a read-only dispatch does. Unlike
-	 * `mode`, which only shapes the workflow, no approval clears it.
+	 * Enforced read-only ceiling, as a read-only dispatch has: admission admits
+	 * reads inside the workspace, shell commands only when they run contained
+	 * in the read-only sandbox (where a write fails), and dispatch, whose workers
+	 * inherit read-only. It refuses everything else, including any call that
+	 * would ask. Unlike `mode`, which only shapes the workflow, no approval
+	 * clears it.
 	 */
 	readonly readOnly?: true;
 	/**

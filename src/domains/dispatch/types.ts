@@ -634,11 +634,12 @@ export interface RunResultSafetySummary {
 	 * `blocked`. A call that required permission and was denied
 	 * non-interactively is counted under `permissionRequested`, not `blocked`, so
 	 * scripts can tell "approval would have been needed" apart from a policy
-	 * block (see docs/architecture/safety-model.md). Such a call still appears in
-	 * `blockedAttempts` because its outcome was blocked, so `decisions.blocked`
-	 * is not a proxy for the number of blocked attempts; use `blockedAttempts`
-	 * or the `toolStats`/`toolActivity` blocked counts for that. A guard block
-	 * is listed under `guardBlockedAttempts`, not `blockedAttempts`.
+	 * block (see docs/architecture/safety-model.md). Each list names the calls
+	 * one counter counts: a blocked call the counter takes as a permission
+	 * request is listed under `permissionRequestedAttempts`, and a guard block
+	 * under `guardBlockedAttempts`, not under `blockedAttempts`. Receipts
+	 * written before those lists existed keep such calls in `blockedAttempts`.
+	 * The `toolStats`/`toolActivity` blocked counts cover every blocked call.
 	 */
 	decisions: {
 		allowed: number;
@@ -659,8 +660,8 @@ export interface RunResultSafetySummary {
 		escalationTimedOut?: number;
 	};
 	/**
-	 * Every call whose outcome was blocked, except the ones a tool guard held back. Receipts written before
-	 * `guardBlockedAttempts` existed list guard blocks here too.
+	 * Every call whose outcome was blocked, except the ones a tool guard held back and the refused asks. Receipts
+	 * written before `guardBlockedAttempts` and `permissionRequestedAttempts` existed list those here too.
 	 */
 	blockedAttempts: SafetyBlockedAttempt[];
 	/**
@@ -668,6 +669,12 @@ export interface RunResultSafetySummary {
 	 * without one keeps its exact shape. The main agent keeps the first `BLOCKED_ATTEMPTS_LIMIT`; the count stays exact.
 	 */
 	guardBlockedAttempts?: SafetyBlockedAttempt[];
+	/**
+	 * The blocked calls `decisions.permissionRequested` counts: asks this run refused because nobody could answer
+	 * them, or because the run was aborted before anyone did. Present only when one was, so other runs keep their
+	 * exact shape. The main agent keeps the first `BLOCKED_ATTEMPTS_LIMIT`.
+	 */
+	permissionRequestedAttempts?: SafetyBlockedAttempt[];
 	/**
 	 * Worker asks this attempt routed to the main agent's grant broker (Phase
 	 * D), one entry per request, oldest first. Present only when the run
