@@ -81,6 +81,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- bt-11: the context meter no longer jumps after `/fork` or reads high after `/resume` (tool schemas were counted twice once the live anchor was dropped). `/fork` names the new and original session ids, and `/resume` says which session it opened.
+- bt-11: the exit summary's visit row names its scope ("This visit", workers included when they ran) and flags workers whose file writes were not recorded. An empty Verified row says command checks are not counted.
 - bt-6: under yolo, a step-mode template whose model runs one step and then summarizes now continues to the next step. It stops at a turn without a step call, a `pipelineDone` result, or the continuation cap (at most 4 step turns per operator prompt, the refusal path included).
 - bt-12: the high-rigor finish gate no longer re-prompts a step-template turn for validation; the summary reports the change as unverified instead.
 - bt-3: `campaign run` entries resolve the copilot-sdk and claude-sdk components the operator installed (read-only, never installing into an entry's throwaway home), and a missing one names the operator's directory, so Copilot and Claude SDK routes run in a campaign.
