@@ -101,6 +101,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A check that passed before the run's last edit no longer marks the run verified or its mutation report quality pass, and read-only shell inspection (`git diff`, `git status`, `cat`, `grep`, ...) no longer counts as a workspace change, so it neither clears a real red check nor stales a final pass; the latter fixes a regression from bt-27 (bt-27b).
 - A worker that hits its refusal limit now gets one reply, with tools refused, to report its work; dispatch judges that report, long refusal reasons keep their remedy, and the failure names untracked files the run left behind (bt-28).
 - The prompt structure id stays the same when an unchanged prompt is recompiled, so telemetry no longer records a new structure per compile (bt-10).
 - The exit summary's Verified row says "session tokens per outcome"; "tokens each" read as a per-worker figure (bt-11).
