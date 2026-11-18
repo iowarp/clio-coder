@@ -44,6 +44,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- Launch no longer prints "terminal panes are not installed"; `/panes`, `/files` and Alt+E name `clio-coder panes install`, and doctor still warns (bt-11).
+- Alt+W opens or shows the workers dock without moving the keyboard out of CLIO Coder (bt-11).
 - The workers board builds cards only for live runs and the newest 24 finished runs, and folds a finished run's telemetry once per journal change, so a long run history no longer makes each poll slower than the poll period (P3).
 - Live worker spend persists to runs.json at most every 10 s, and a persist skips re-reading runs.json when this process wrote it last (P3).
 - The active session path is memoized per ledger snapshot and leaf and extended on append, so turn context, the chat loop and the safety judge no longer rebuild it from the whole ledger on every call (P3).
@@ -96,6 +98,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- The exit summary's Verified row says "session tokens per outcome"; "tokens each" read as a per-worker figure (bt-11).
+- A finished worker's dock row keeps its refused calls and seal state whole when narrow, dropping the contract first (bt-11).
+- After `/fork` or `/resume` the exit summary's Tools row keeps the visit's calls and lists no zero-count tool (bt-11).
 - A run stopped by the repetition guard now fails on the guard's reason instead of blaming the model route with "Request was aborted", and its turn settles with cause `repetition` (bt-26).
 - A model call that hits the output cap while still thinking is retried once with a reminder and one thinking level lower; a second such stop ends the turn naming the cause and the fix (bt-25).
 - A red check observed before the run's last edit no longer seals a finished run `unverified` with quality `fail`. A later pass of the same check counts even when the two runs piped output differently (`2>&1`, `| tail`, `| head`), and a reported baseline excuses its own observed red only when no edit was observed (bt-27).
