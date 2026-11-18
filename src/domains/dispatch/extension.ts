@@ -12,6 +12,7 @@ import {
 } from "../../core/telemetry/pricing.js";
 import { renderUsdEstimate, renderUsdLimit } from "../../core/telemetry/render.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
+import { readSessionMeta } from "../../engine/session.js";
 import type { ToolRoundRecord } from "../../engine/types.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
 import { WORKER_EXTENSION_HOOKS_MAX, WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
@@ -427,6 +428,7 @@ import {
 	resultContractWasDue,
 	runStatusForOutcome,
 } from "./outcome.js";
+import { sessionAncestorIds } from "./ownership.js";
 import { canonicalWriteRoots } from "./parallel-writers.js";
 import {
 	type DispatchPathScope,
@@ -768,6 +770,12 @@ export interface DispatchBundleOptions {
 	 * project instead.
 	 */
 	getSessionId?: () => string | null;
+	/**
+	 * The live session's `parentSessionId`, set when it was forked. The rest of
+	 * the chain is read from each ancestor's meta.json, so a fork inherits the
+	 * uncollected batches and the runs of every session it descends from.
+	 */
+	getSessionParentId?: () => string | null;
 	getSessionOrigin?: () => TelemetrySessionOrigin | null;
 	/** Interactive sessions park paid routes until their session ceiling is raised. */
 	budgetWaitForRaise?: boolean;
@@ -11922,6 +11930,23 @@ export function createDispatchBundle(
 		return failed(`request ${input.requestId} ${settled.state} before the operator answered`, settled);
 	}
 
+	// A fork's lineage never changes once stamped, so each complete chain is read
+	// from disk once; owner() runs on every turn end and wake poll.
+	const ancestorChains = new Map<string, string[]>();
+	const ownerAncestors = (sessionId: string): string[] => {
+		const parentSessionId = options?.getSessionParentId?.() ?? null;
+		if (parentSessionId === null) return [];
+		const key = `${sessionId}\0${parentSessionId}`;
+		const cached = ancestorChains.get(key);
+		if (cached !== undefined) return cached;
+		const chain = sessionAncestorIds(
+			sessionId,
+			parentSessionId,
+			(id) => (readSessionMeta(id) as { parentSessionId?: string | null }).parentSessionId,
+		);
+		ancestorChains.set(key, chain);
+		return chain;
+	};
 	const contract: DispatchContract = {
 		awaitStartupRecovery,
 		warmRouteHistory() {
@@ -11963,10 +11988,13 @@ export function createDispatchBundle(
 		owner: () => {
 			// Only a configured absolute root adds a location ownership cannot derive.
 			const worktreeRoot = getEffectiveSettings()?.fleet?.worktrees?.root;
+			const sessionId = options?.getSessionId?.() ?? null;
+			const ancestorSessionIds = sessionId === null ? [] : ownerAncestors(sessionId);
 			return {
-				sessionId: options?.getSessionId?.() ?? null,
+				sessionId,
 				cwd: process.cwd(),
 				...(worktreeRoot !== undefined && isAbsolute(worktreeRoot) ? { worktreeRoot } : {}),
+				...(ancestorSessionIds.length > 0 ? { ancestorSessionIds } : {}),
 			};
 		},
 		listRuns(status, where) {

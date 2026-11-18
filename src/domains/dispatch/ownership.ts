@@ -17,6 +17,13 @@
  *         recovering its gate decisions.
  *   sees  reading a row: status, receipt, evidence, the /view overlay. A
  *         sibling session in the same project may read its runs.
+ *
+ * A fork carries its ancestors' history, so it inherits what they dispatched
+ * for reading and collecting: it may read an ancestor's runs, and it may be
+ * nudged about and collect an ancestor's batch while that batch is still
+ * uncollected. The first collector wins through the durable collected mark.
+ * Cancelling, steering, and anything else that touches a live run stays with
+ * the exact session that dispatched it.
  */
 
 import { isAbsolute, relative, resolve, sep } from "node:path";
@@ -36,6 +43,36 @@ export interface DispatchOwner {
 	 * tmpfs locations count.
 	 */
 	readonly worktreeRoot?: WorktreeRootSetting;
+	/** Sessions this one was forked from, nearest first, via `parentSessionId`. */
+	readonly ancestorSessionIds?: ReadonlyArray<string>;
+}
+
+/** Bound on the `parentSessionId` chain a dispatch owner follows. */
+export const MAX_SESSION_ANCESTORS = 32;
+
+/**
+ * The ancestor chain from `parentSessionId` up, nearest first, read through
+ * `parentOf`. Stops at a root, a cycle, the bound, or an ancestor whose
+ * metadata cannot be read (a deleted session ends its line).
+ */
+export function sessionAncestorIds(
+	sessionId: string,
+	parentSessionId: string | null | undefined,
+	parentOf: (sessionId: string) => string | null | undefined,
+): string[] {
+	const ids: string[] = [];
+	const seen = new Set([sessionId]);
+	let next = parentSessionId ?? null;
+	while (next !== null && next.length > 0 && !seen.has(next) && ids.length < MAX_SESSION_ANCESTORS) {
+		ids.push(next);
+		seen.add(next);
+		try {
+			next = parentOf(next) ?? null;
+		} catch {
+			break;
+		}
+	}
+	return ids;
 }
 
 export interface OwnedRunFields {
@@ -48,13 +85,23 @@ export interface OwnedBatchFields {
 	readonly cwd?: string;
 }
 
+export interface CollectableBatchFields extends OwnedBatchFields {
+	readonly collectedAt: string | null;
+}
+
 export interface DispatchOwnership {
 	readonly owner: DispatchOwner;
 	/** True when `cwd` is the owner's workspace or inside it. */
 	inProject(cwd: string | undefined): boolean;
 	ownsRun(run: OwnedRunFields): boolean;
+	/** Owns the run, or an ancestor session dispatched it: status, collect, and continue reads. */
+	readsRun(run: OwnedRunFields): boolean;
 	seesRun(run: OwnedRunFields): boolean;
 	ownsBatch(batch: OwnedBatchFields): boolean;
+	/** Owns the batch, or an ancestor session dispatched it and nobody has collected it yet. */
+	collectsBatch(batch: CollectableBatchFields): boolean;
+	/** True when an ancestor session, not this one, dispatched the row. */
+	inherits(row: { readonly sessionId: string | null }): boolean;
 }
 
 /**
@@ -119,14 +166,22 @@ export function dispatchOwnership(owner: DispatchOwner): DispatchOwnership {
 	};
 	const ownsRun = (run: OwnedRunFields): boolean =>
 		run.sessionId !== null && run.sessionId !== undefined ? run.sessionId === owner.sessionId : inProject(run.cwd);
+	const ancestors = new Set(owner.ancestorSessionIds ?? []);
+	const inherits = (row: { readonly sessionId: string | null }): boolean =>
+		row.sessionId !== null && row.sessionId !== undefined && ancestors.has(row.sessionId);
+	const readsRun = (run: OwnedRunFields): boolean => ownsRun(run) || inherits(run);
+	const ownsBatch = (batch: OwnedBatchFields): boolean =>
+		batch.sessionId !== null && batch.sessionId !== undefined
+			? batch.sessionId === owner.sessionId
+			: inProject(batch.cwd);
 	return {
 		owner,
 		inProject,
 		ownsRun,
-		seesRun: (run) => ownsRun(run) || inProject(run.cwd),
-		ownsBatch: (batch) =>
-			batch.sessionId !== null && batch.sessionId !== undefined
-				? batch.sessionId === owner.sessionId
-				: inProject(batch.cwd),
+		readsRun,
+		seesRun: (run) => readsRun(run) || inProject(run.cwd),
+		ownsBatch,
+		collectsBatch: (batch) => ownsBatch(batch) || (batch.collectedAt === null && inherits(batch)),
+		inherits,
 	};
 }

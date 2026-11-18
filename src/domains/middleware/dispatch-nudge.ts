@@ -360,10 +360,11 @@ function incrementTerminalOutcome(counts: DetachedTerminalOutcomeCounts, outcome
 }
 
 /**
- * Open (uncollected) detached batches this session owns, with terminal-run
- * progress, computed from the durable batch store and the run ledger. A ledger
- * row pruned from the bounded ring counts as terminal: it can never complete,
- * so the batch must stay collectible instead of pending forever.
+ * Open (uncollected) detached batches this session owns or inherited from a
+ * session it was forked from, with terminal-run progress, computed from the
+ * durable batch store and the run ledger. A ledger row pruned from the bounded
+ * ring counts as terminal: it can never complete, so the batch must stay
+ * collectible instead of pending forever.
  *
  * The batch store is machine-wide. Without the ownership filter a batch
  * another project dispatched, or one a crashed session left behind, turned
@@ -382,7 +383,7 @@ export function openDetachedBatchViews(
 		return [];
 	}
 	const ownership = dispatchOwnership(dispatchOwnerOf(dispatch));
-	const owned = records.filter((record) => ownership.ownsBatch(record));
+	const owned = records.filter((record) => ownership.collectsBatch(record));
 	return owned.map((record) => {
 		let terminal = 0;
 		const terminalOutcomes: DetachedTerminalOutcomeCounts = {};
