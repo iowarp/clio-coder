@@ -44,6 +44,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- The active session path is memoized per ledger snapshot and leaf and extended on append, so turn context, the chat loop and the safety judge no longer rebuild it from the whole ledger on every call (P3).
+- The stale-edit guard indexes only appended entries per edit, about 19 ms to 0.4 ms per edit at 10K session entries (P3).
 - A dispatched run in the current checkout no longer blocks the event loop to measure its checkout delta. Spawn and settle snapshots run asynchronously, re-read only files whose stat moved (up to 1 MiB; a larger file is identified by its stat), and runs spawned together share one baseline, so a wide fan-out on a dirty checkout no longer freezes the TUI (P3).
 - `context index --json` drops `codewikiPath`, which always repeated `codemapPath`; read `codemapPath` (bt-20).
 - A safety judge block now tells the model to ask the operator for the action, and that the judge hands a call to the operator itself only after repeated blocks (bt-21).
