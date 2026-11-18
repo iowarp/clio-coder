@@ -135,6 +135,25 @@ it("bounds UTF-8 previews and retains the locator and capture-loss distinction",
 	strictEqual(data[1].output.capturedBytes, 100000);
 });
 
+it("tells the judge to report the limit of a clipped capture it has no result path to read", () => {
+	const lost = run(1, "ü".repeat(6_000));
+	lost.receipt.output.truncated = true;
+	lost.receipt.output.bytes = 250_000;
+	lost.resultPath = null;
+	const task = renderCompeteJudgeTask("Compare answers", candidates, [], [lost, run(2, "Other answer")]);
+	const record = records(task)[0];
+	strictEqual(record.resultPath, null);
+	strictEqual(record.output.previewTruncated, true);
+	strictEqual(record.output.captureTruncated, true);
+	strictEqual(record.output.capturedBytes, 250_000);
+	ok(Buffer.byteLength(record.output.text) <= 8192 && !record.output.text.includes("�"));
+	match(
+		task,
+		/If resultPath is null or reading is denied, unavailable, or still clipped by tool limits, report that limitation; do not claim full retrieval\./u,
+	);
+	match(task, /If captureTruncated is true, even that result lacks part of the original answer\./u);
+});
+
 it("reports absent results, absent outputs, and partial answers truthfully", () => {
 	const absent = {
 		...run(1, ""),

@@ -543,6 +543,33 @@ export const ContextFoldSchema = Type.Object(
 	},
 	closed,
 );
+/**
+ * One fleet briefing the byte cap shortened (ContextFold CF-10): the council seat or judge run it went to, the cap,
+ * the bytes sent, and each part it clipped by kind and position with that part's bytes before and after.
+ */
+export const ContextBriefingClippedSchema = Type.Object(
+	{
+		runId: ExistingId,
+		role: vocabulary(["member", "synthesis"]),
+		group: ExistingId,
+		round: count,
+		capBytes: count,
+		bytes: count,
+		parts: Type.Array(
+			Type.Object(
+				{
+					kind: vocabulary(["framing", "task", "evidence"]),
+					index: count,
+					bytesBefore: count,
+					bytesAfter: count,
+				},
+				closed,
+			),
+			{ minItems: 1, maxItems: 16 },
+		),
+	},
+	closed,
+);
 /** One working-set unit readmitted to context, by its unit ref (#434). */
 export const ContextRecalledSchema = Type.Object(
 	{

@@ -509,6 +509,11 @@ export const EVENTS = {
 	"context.pruned": journal(S.ContextPrunedSchema, { tier: "operational", cc: "structural", scope: "session" }),
 	"context.fold": journal(S.ContextFoldSchema, { tier: "operational", cc: "structural", scope: "session" }),
 	"context.recalled": journal(S.ContextRecalledSchema, { tier: "operational", cc: "structural", scope: "session" }),
+	"context.briefing_clipped": journal(S.ContextBriefingClippedSchema, {
+		tier: "operational",
+		cc: "structural",
+		scope: "session",
+	}),
 	"memory.step_completed": journal(S.MemoryStepCompletedSchema, { tier: "operational", cc: "structural" }),
 	"memory.step_decided": journal(S.MemoryStepDecidedSchema, { tier: "accountability", cc: "structural" }),
 	"memory.observation_recorded": journal(S.MemoryObservationRecordedSchema, {
