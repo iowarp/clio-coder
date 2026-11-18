@@ -160,6 +160,7 @@ import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tool
 import { effectiveToolCall } from "../tools/surface.js";
 import type { ApprovalRequestView } from "./approval-request-view.js";
 import {
+	classifyTurnEnding,
 	createAskUserToolPolicy,
 	createPendingSkillToolPolicy,
 	detectOverflowFromState,
@@ -168,7 +169,6 @@ import {
 	extractText,
 	isOperatorCancelReason,
 	isThinkingOnlyLengthStop,
-	classifyTurnEnding,
 	nameMissingCredentialRemedy,
 	notConfiguredNotice,
 	noticeMessage,

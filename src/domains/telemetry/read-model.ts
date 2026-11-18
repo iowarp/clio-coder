@@ -27,8 +27,8 @@ import type {
 	WhyStoppedV1,
 } from "../../core/telemetry/dto.js";
 import { factRef, parseFactRef, TELEMETRY_DTO_VERSION } from "../../core/telemetry/dto.js";
-import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { TurnNoAnswerCause } from "../../core/telemetry/enums.js";
+import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EventPayload, JournalEventName } from "../../core/telemetry/events.js";
 import type { Fact, FactSum } from "../../core/telemetry/fact.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
@@ -3812,8 +3812,8 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 				: noAnswer !== undefined
 					? `The last turn failed without an answer (${terminal.stopReason}, ${noAnswer}): ${NO_ANSWER_FINDINGS[noAnswer]}${retries}.`
 					: normalEnd
-					? `The last turn ended normally (${terminal.stopReason})${retries}.`
-					: `The last turn stopped (${terminal.stopReason})${stage}${retries}.`,
+						? `The last turn ended normally (${terminal.stopReason})${retries}.`
+						: `The last turn stopped (${terminal.stopReason})${stage}${retries}.`,
 		);
 		// A worker that turn dispatched settles in its own run journal, so its stop is named here too (cf1h-D3).
 		const lastTurnId = last?.record.ctx.turnId;
@@ -3890,9 +3890,7 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 					stage: last.record.data.terminal.stage,
 					retries: last.record.data.terminal.retries,
 					callIds: last.record.data.terminal.callIds as CallRowV1["callId"][],
-					...(last.record.data.terminal.noAnswer !== undefined
-						? { noAnswer: last.record.data.terminal.noAnswer }
-						: {}),
+					...(last.record.data.terminal.noAnswer !== undefined ? { noAnswer: last.record.data.terminal.noAnswer } : {}),
 				}
 			: null,
 		lastCalls,
