@@ -31,6 +31,7 @@ import {
 } from "../engine/agent.js";
 import { providerCheckpointCompatibility } from "../engine/ai.js";
 import { prepareInPrefixSummary } from "../engine/in-prefix-summary.js";
+import { createContextFold } from "./context-fold.js";
 import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
 import type { MessageListDigests } from "./message-list-digest.js";
@@ -77,7 +78,6 @@ import type {
 	CompactionPayload,
 	ContextActivityPhase,
 	ContextActivityStatus,
-	ContextPrunedPayload,
 	ContextRecalledPayload,
 	ContextWarningPayload,
 	MemoryStepCompletedPayload,
@@ -98,13 +98,11 @@ import {
 } from "../domains/context/budget/live-view.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { economicPressure, foldTriggerReserve } from "../domains/context/fold/pressure.js";
-import { createFoldPriceBook } from "../domains/context/fold/price.js";
 import { withinRearmBand } from "../domains/context/working-set/checkpoint.js";
-import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
+import type { planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
-import { isTurnStart, protectionCutoffIndex } from "../domains/context/working-set/horizon.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
-import { compactionCut, selectVisibleEntries } from "../domains/context/working-set/visible.js";
+import { compactionCut } from "../domains/context/working-set/visible.js";
 import { type PinnedContextBlock, pinnedContextDelta } from "../domains/extensions/pinned-context.js";
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
 import {
@@ -198,11 +196,11 @@ import {
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { coldCacheNoticeText } from "./cold-reasons.js";
-import { footerTokens, renderCompactionSummaryLine, renderEvictionSkipLine } from "./compaction-lines.js";
+import { footerTokens, renderCompactionSummaryLine } from "./compaction-lines.js";
 import { buildModelReplayAgentMessagesFromTurns, continuityContextFromSession } from "./model-session-replay.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
-import { createReplayMessageConverter, extractTurnText } from "./session-replay-messages.js";
+import { extractTurnText } from "./session-replay-messages.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
 import type { AgentRuntime, TurnContextState } from "./turn-state.js";
 
@@ -494,31 +492,6 @@ export interface TurnContext {
 	resetForSession(branchAnchorTurnId?: string | null): void;
 	navigationRevision(): number;
 	dispose(): void;
-}
-
-/**
- * Why the working-set stage declined, said in the terms the operator can act
- * on. The two cases are worth separating: a session whose every turn is inside
- * `protectLastTurns` was never offered a candidate, while a longer one was
- * offered candidates the policy refused. The first is the shape smoke pass 2
- * found (G1), and the setting it names is the one that changes it.
- */
-function evictionSkipMessage(
-	visibleEntries: ReadonlyArray<SessionEntry>,
-	workingSet: Readonly<{ protectLastTurns: number; protectLastSteps: number; policy: string }>,
-	policyId: string,
-): string {
-	const turns = visibleEntries.filter(isTurnStart).length;
-	// The window is the narrower of the turn and step horizons, so only the
-	// cutoff itself says whether the policy was offered anything at all.
-	const allProtected = protectionCutoffIndex(visibleEntries, workingSet) === 0;
-	return renderEvictionSkipLine({
-		reason: allProtected ? "all-protected" : "nothing-evictable",
-		turns,
-		protectLastTurns: workingSet.protectLastTurns,
-		protectLastSteps: workingSet.protectLastSteps,
-		policyId,
-	});
 }
 
 /**
@@ -1751,23 +1724,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		thinkingUsesConfigurationUpdate = updates.at(-1)?.position === state.activeUserTurnId;
 	};
 
-	const refreshAgentMessagesFromSession = (agentRuntime: AgentRuntime): ReadonlyArray<SessionEntry> => {
-		const refreshedEntries = deps.readSessionEntries?.() ?? [];
-		replaceEngineMessages(
-			agentRuntime.agent,
-			buildModelReplayAgentMessagesFromTurns(refreshedEntries, {
-				...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
-				// The post-compaction rebuild is where an accepted note has to
-				// survive: wiring continuity only into /fork would lose it on the
-				// very refresh the reduction triggers.
-				continuity: continuityContextFromSession(deps.session),
-			}),
-		);
-		state.replayedContextMessages = [];
-		syncCodexConfiguration(agentRuntime);
-		return refreshedEntries;
-	};
-
 	let compactionOperation: ReturnType<typeof createContextOperation> | null = null;
 	let compactionLifecycleStarted = false;
 	let compactionLifecycleTrigger: CompactionTrigger = "auto";
@@ -1804,6 +1760,49 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	};
 	const compactionFailureMessage = (error: unknown): string =>
 		`compaction failed: ${error instanceof Error ? error.message : String(error)}`;
+
+	// Each hook reads its target when the fold calls it, so ones declared further down this closure resolve.
+	const contextFold = createContextFold({
+		deps,
+		state,
+		syncCodexConfiguration: (runtime) => syncCodexConfiguration(runtime),
+		observeHistory: (runtime) => observeHistory(runtime),
+		agedHistory: (runtime, observed) => agedHistory(runtime, observed),
+		liveContextEstimate: (runtime, pendingUserText) => liveContextEstimate(runtime, pendingUserText),
+		reconciledHistoryTokens: (runtime) => reconciledHistoryTokens(runtime),
+		carryReconciledAnchorThroughProjection: (runtime, historyTokens, tokensRemoved) =>
+			carryReconciledAnchorThroughProjection(runtime, historyTokens, tokensRemoved),
+		dropReconciledAnchor: () => {
+			reconciledAnchor = null;
+		},
+		captureRuntimeContextSnapshot: (runtime, turnId, threshold, extra) =>
+			captureRuntimeContextSnapshot(runtime, turnId, threshold, extra),
+		setCurrentSnapshot: (snapshot) => {
+			currentContextSnapshot = snapshot;
+		},
+		persistContextSnapshot: (snapshot) => persistContextSnapshot(snapshot),
+		noteCompactionEvent: (event) => {
+			lastCompactionEvent = event;
+		},
+		notifyMemoryCommit: (commitId, kind, outcome) => notifyMemoryCommit(commitId, kind, outcome),
+		resetCacheCallBaseline: () => resetCacheCallBaseline(),
+		noteColdReason: (reason) => noteColdReason(reason),
+		refreshLiveBudget: (pendingUserText) => {
+			refreshLiveBudget(pendingUserText);
+		},
+		emitCompactionActivity: (status, message) => emitCompactionActivity(status, message),
+		compactionFailureMessage,
+		recordCompactionFact: (fact) => {
+			compactionFacts.push(fact);
+		},
+		recordCompactionTokens: (tokens) => {
+			compactionTokens = tokens;
+		},
+		hasPostureGeneration: () => Boolean(postureGeneration),
+		ensureSessionPrompt: (runtime) => controller.ensureSessionPrompt(runtime),
+		logPromptCompileIfPending: () => controller.logPromptCompileIfPending(),
+	});
+	const refreshAgentMessagesFromSession = contextFold.refreshAgentMessagesFromSession;
 
 	/**
 	 * Two-mechanism context protection. When pressure crosses the single
@@ -1999,153 +1998,29 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		if (pressureEstimate) {
 			const estimate = pressureEstimate;
 			const verdict = route.shouldCompact(estimate.tokens);
+			const session = deps.session;
 
-			if (deps.session?.current()) {
-				const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
-				if (settings.context.workingSet.enabled) {
-					let planned: ReturnType<typeof planEviction>;
-					let visibleEntries: ReadonlyArray<SessionEntry> = [];
-					let policyId = settings.context.workingSet.policy;
-					try {
-						const entries = deps.readSessionEntries() ?? [];
-						const view = foldWorkingSet(entries, state.lastTurnId ?? undefined);
-						const policy = resolveWorkingSetPolicy(settings.context.workingSet.policy);
-						policyId = policy.id;
-						visibleEntries = selectVisibleEntries(entries, state.lastTurnId ?? undefined);
-						// Results the next request carries as aging stubs: the pressure figure and the anchor hold only
-						// the stub, so crediting their ledger bodies would end the plan short of the target (D1-1).
-						const aged = new Set(agedHistory(agentRuntime, observeHistory(agentRuntime))?.saved.map(({ id }) => id));
-						const prices = createFoldPriceBook(
-							visibleEntries,
-							createReplayMessageConverter(entries, {
-								...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
-							}),
-						);
-						planned = (deps.planEviction ?? planEviction)(policy, {
-							entries: visibleEntries,
-							view,
-							cwd: deps.session.current()?.cwd ?? null,
-							settings: settings.context.workingSet,
-							pressure: {
-								tokens: liveContextEstimate(agentRuntime, pendingUserText).tokens,
-								contextWindow: compactionWindow,
-								threshold: requiredFit
-									? Math.min(
-											compactionThreshold,
-											Math.max(0, 1 - resolveTurnOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow),
-										)
-									: compactionThreshold,
-								target: requiredFit
-									? Math.min(
-											workingSetTarget,
-											Math.max(0, 1 - resolveTurnOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow),
-										)
-									: workingSetTarget,
-								...(requiredFit ? { forced: true } : {}),
-							},
-							estimateTokens: prices.tokens,
-							aged,
-						});
-					} catch (error) {
-						middleware.fireCompactionHook("working_set_evict", "pressure", estimate.tokens);
-						emitCompactionActivity("started", "compacting context (working-set eviction)");
-						emitCompactionActivity("failed", compactionFailureMessage(error));
-						throw error;
-					}
-					if (planned) {
-						preSummaryStageActed = true;
-						middleware.fireCompactionHook("working_set_evict", "pressure", estimate.tokens);
-						emitCompactionActivity("started", "compacting context (working-set eviction)");
-						try {
-							const historyTokens = reconciledHistoryTokens(agentRuntime);
-							const evictionEntry = deps.session.appendEntry({
-								...buildEvictionFields(planned, {
-									trigger: "pressure",
-									pressureBefore: verdict.pressure,
-									snapshotIdBefore: beforeSnapshotId,
-								}),
-								// appendEntry does not infer this anchor; the interactive
-								// cursor is the leaf the next message will extend.
-								parentTurnId: state.lastTurnId,
-							});
-							if (deps.session.flushAppends) {
-								deps.session.flushAppends();
-								if (!handoff) notifyMemoryCommit(evictionEntry.turnId, "summary", "evicted");
-							}
-							resetCacheCallBaseline();
-							noteColdReason("working_set_evict");
-							refreshAgentMessagesFromSession(agentRuntime);
-							carryReconciledAnchorThroughProjection(agentRuntime, historyTokens, planned.tokensBefore - planned.tokensAfter);
-
-							const postEvictionSnapshot = captureRuntimeContextSnapshot(
-								agentRuntime,
-								state.activeUserTurnId || "compaction",
-								compactionThreshold,
-							);
-							currentContextSnapshot = postEvictionSnapshot;
-							persistContextSnapshot(postEvictionSnapshot);
-
-							// All event surfaces quote the request anchor less the priced
-							// bodies; the live re-check below remains authoritative (#422).
-							lastCompactionEvent = {
-								stage: "working_set",
-								tokensBefore: planned.tokensBefore,
-								tokensAfter: planned.tokensAfter,
-								trigger,
-							};
-							deps.bus?.emit(
-								"context.pruned",
-								{
-									stage: "working_set",
-									pressure: verdict.pressure,
-									tokensBefore: planned.tokensBefore,
-									tokensAfter: planned.tokensAfter,
-									trigger,
-									snapshotIdBefore: beforeSnapshotId,
-									snapshotIdAfter: postEvictionSnapshot.snapshotId,
-									policyId: planned.policyId,
-									evictedItems: planned.items.length,
-									at: Date.now(),
-								} satisfies ContextPrunedPayload,
-								sessionTelemetryContext(originSession),
-							);
-							compactionFacts.push({ kind: "omitted", unit: "observations", count: planned.items.length });
-							const itemsWord = planned.items.length === 1 ? "item" : "items";
-							emitCompactionActivity("completed", `${planned.items.length} working-set ${itemsWord} evicted`);
-							deps.emitNotice(
-								`[context engine] working set: ${planned.items.length} ${itemsWord} evicted by ${planned.policyId}; ~${planned.tokensBefore} -> ~${planned.tokensAfter} tokens, recall by ref with context(scope="recall")`,
-							);
-
-							// Published only after the carried anchor and the post-eviction
-							// capture are both in place: `liveContextEstimate` clears an
-							// anchor whose message prefix no longer matches, so pricing the
-							// rebuilt list any earlier would discard the attestation the
-							// projection carry exists to preserve.
-							refreshLiveBudget(pendingUserText);
-							const after = liveContextEstimate(agentRuntime, pendingUserText);
-							compactionTokens = { before: estimate.tokens, after: after.tokens, basis: "runtime-estimate" };
-							if (
-								requiredFit
-									? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
-									: !route.shouldCompact(after.tokens).shouldCompact
-							)
-								return true;
-						} catch (error) {
-							emitCompactionActivity("failed", compactionFailureMessage(error));
-							throw error;
-						}
-					} else {
-						evictionSkipNotice = evictionSkipMessage(visibleEntries, settings.context.workingSet, policyId);
-					}
-				} else {
-					evictionSkipNotice = renderEvictionSkipLine({
-						reason: "disabled",
-						turns: 0,
-						protectLastTurns: settings.context.workingSet.protectLastTurns,
-						protectLastSteps: settings.context.workingSet.protectLastSteps,
-						policyId: settings.context.workingSet.policy,
-					});
-				}
+			if (session?.current()) {
+				const stage = contextFold.runEvictionStage({
+					agentRuntime,
+					session,
+					settings,
+					estimate,
+					verdict,
+					beforeSnapshotId: currentContextSnapshot?.snapshotId ?? null,
+					requiredFit,
+					compactionWindow,
+					compactionThreshold,
+					workingSetTarget,
+					trigger,
+					originSession,
+					pendingUserText,
+					handoff,
+					shouldCompact: route.shouldCompact,
+				});
+				if (stage.acted) preSummaryStageActed = true;
+				if (stage.fit) return true;
+				evictionSkipNotice = stage.skipNotice;
 			}
 		}
 
@@ -2412,47 +2287,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (summary) notifyMemoryCommit(summary.turnId, "summary", "summarized");
 		}
 
-		resetCacheCallBaseline();
-		refreshAgentMessagesFromSession(agentRuntime);
-		if (postureGeneration) {
-			await controller.ensureSessionPrompt(agentRuntime);
-			controller.logPromptCompileIfPending();
-		}
-		// A summary replaces the conversation the attestation described, so no
-		// arithmetic carries it forward; the next call re-anchors it.
-		reconciledAnchor = null;
-
-		const postCompactSnapshot = captureRuntimeContextSnapshot(
+		const { tokensBefore, tokensAfter } = await contextFold.publishSummaryCheckpoint({
 			agentRuntime,
-			state.activeUserTurnId || "compaction",
 			compactionThreshold,
 			snapshotMetadata,
-		);
-		currentContextSnapshot = postCompactSnapshot;
-		persistContextSnapshot(preCompactSnapshot);
-		persistContextSnapshot(postCompactSnapshot);
-
-		const tokensBefore = footerTokensBefore;
-		const tokensAfter = liveContextEstimate(agentRuntime, pendingUserText).tokens;
-		lastCompactionEvent = {
-			stage: "llm_summary",
-			tokensBefore,
-			tokensAfter,
+			preCompactSnapshot,
+			footerTokensBefore,
+			pendingUserText,
 			trigger,
-		};
-		deps.bus?.emit(
-			"context.pruned",
-			{
-				stage: "llm_summary",
-				tokensBefore,
-				tokensAfter,
-				trigger,
-				snapshotIdBefore: preCompactSnapshot.snapshotId,
-				snapshotIdAfter: postCompactSnapshot.snapshotId,
-				at: Date.now(),
-			} satisfies ContextPrunedPayload,
-			sessionTelemetryContext(originSession),
-		);
+			originSession,
+		});
 		// The reducer reports selected ledger rows, not just message rows.
 		compactionFacts.push({ kind: "summarized", unit: "entries", count: result.messagesSummarized });
 		compactionTokens = { before: tokensBefore, after: tokensAfter, basis: "runtime-estimate" };
@@ -2601,27 +2445,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		}
 		// The entry carries no memory receipt, so nothing waits on a durable session checkpoint before memory hears of it.
 		if (deps.memoryCommitBridge) notifyMemoryCommit(entry.turnId, "summary", "summarized");
-		refreshAgentMessagesFromSession(agentRuntime);
-		reconciledAnchor = null;
-		const after = captureRuntimeContextSnapshot(agentRuntime, state.activeUserTurnId || "compaction", threshold);
-		currentContextSnapshot = after;
-		persistContextSnapshot(before);
-		persistContextSnapshot(after);
-		const tokensAfter = liveContextEstimate(agentRuntime).tokens;
-		lastCompactionEvent = { stage: "step_checkpoint", tokensBefore, tokensAfter, trigger: "step" };
-		deps.bus?.emit(
-			"context.pruned",
-			{
-				stage: "step_checkpoint",
-				tokensBefore,
-				tokensAfter,
-				trigger: "step",
-				snapshotIdBefore: before.snapshotId,
-				snapshotIdAfter: after.snapshotId,
-				at: Date.now(),
-			} satisfies ContextPrunedPayload,
-			sessionTelemetryContext(sessionId),
-		);
+		contextFold.publishStepCheckpoint({ agentRuntime, before, threshold, tokensBefore, sessionId });
 		// Ended last: its subscriber restarts the cache comparison for the new context generation.
 		deps.bus?.emit("compaction.ended", { trigger: "step", at: Date.now(), outcome: "completed" });
 		refreshLiveBudget();
