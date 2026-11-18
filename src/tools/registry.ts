@@ -82,6 +82,7 @@ import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js"
 import type { ToolPresentationPolicy } from "./presentation.js";
 import { type ToolResultDigest, type ToolResultDisposition, toolResultContextText } from "./result-disposition.js";
 import { DEFAULT_TOOL_RESULT_MAX_BYTES, shapeToolResult, toolResultDigestFor } from "./result-shaping.js";
+import { shellExitSpeaksForCommand } from "./shell-exit-scope.js";
 import { effectiveToolCall, type ToolPlacement, toolSpecPlacement } from "./surface.js";
 import { pathToolLanding } from "./tool-landing.js";
 
@@ -3555,7 +3556,8 @@ function buildToolHookInput(
 	const validationCommand = detectedValidationCommand(call);
 	if (validationCommand !== null) {
 		metadata.validationCommand = validationCommand;
-		if (result?.kind === "ok") metadata.validationExitCode = 0;
+		// After `pytest; echo done` the status is echo's: the check is named, its outcome stays unknown.
+		if (result?.kind === "ok" && shellExitSpeaksForCommand(commandArg(call.args) ?? "")) metadata.validationExitCode = 0;
 	}
 	if (call.tool !== spec.name) metadata.requestedToolName = call.tool;
 	if (result !== undefined) {

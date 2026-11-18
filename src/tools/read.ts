@@ -883,6 +883,11 @@ export const readTool: ToolSpec = {
 		const reservation = isSessionOffloadPath(filePath, options?.sessionId)
 			? reserveObservation(readMaxBytes())
 			: reserveObservation(readMaxBytes(), options);
+		// Charge the cap in the same synchronous step as the reservation: the stat
+		// below awaits, and parallel siblings reserving meanwhile must see this
+		// spend. Finalize reconciles it to the bytes returned; the finally block
+		// refunds every early return and error. An exhausted slice charges nothing.
+		commitObservationReservation(reservation);
 		let handle: FileHandle | null = null;
 		let file: ReadFileIdentity | null = null;
 		try {
@@ -904,10 +909,6 @@ export const readTool: ToolSpec = {
 				});
 				return { ...exhausted, details: { ...(exhausted.details ?? {}), file } };
 			}
-			// Every path below awaits descriptor reads, so charge the cap up
-			// front for concurrent OBSERVE siblings; finalize reconciles it to
-			// the bytes returned and the finally block refunds an error path.
-			commitObservationReservation(reservation);
 			handle = packed ?? (await open(filePath, "r"));
 			// The descriptor's own identity is what every read below describes.
 			const opened = await handle.stat();

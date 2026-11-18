@@ -12,9 +12,11 @@ import { readWikiMeta } from "../../domains/context/wiki/meta.js";
 import { wikiCompletenessFromMeta, wikiStaleness } from "../../domains/context/wiki/staleness.js";
 import { compileGlobRegex } from "../ignore-policy.js";
 import {
+	commitObservationReservation,
 	finalizeObservation,
 	OBSERVE_SELF_CAPS,
 	observationBudgetExhausted,
+	releaseObservation,
 	reserveObservation,
 } from "../observation.js";
 import type { ToolResult, ToolSpec } from "../registry.js";
@@ -834,83 +836,91 @@ export const codeNavTool: ToolSpec = {
 				hint: "Use a lower limit or continue in a follow-up turn.",
 			});
 		}
-		let grammarNote: string | undefined;
-		const close = (nav: NavPayload | ToolResult): ToolResult => {
-			if ("kind" in nav) return nav;
-			const next = source === "clio" && nav.next !== undefined ? `source=clio ${nav.next}` : nav.next;
-			const paged = next === nav.next ? nav.payload : { ...nav.payload, next };
-			const payload = grammarNote !== undefined ? { ...paged, grammarNote } : paged;
-			return finalizeObservation({
-				tool: ToolNames.CodeNav,
-				unit: "results",
-				format: "json",
-				output: renderJson(payload),
-				shownCount: nav.shownCount,
-				totalCount: nav.totalCount,
-				truncated: nav.shownCount < nav.totalCount,
-				...(next !== undefined ? { next } : {}),
-				reservation,
-				...(options ? { options } : {}),
-			});
-		};
-		if (!MODES.includes(mode))
+		// The index load below awaits, so charge the cap now: parallel siblings
+		// reserving meanwhile must see this spend. Finalize reconciles it to the
+		// bytes returned and the finally block refunds every error return.
+		commitObservationReservation(reservation);
+		try {
+			let grammarNote: string | undefined;
+			const close = (nav: NavPayload | ToolResult): ToolResult => {
+				if ("kind" in nav) return nav;
+				const next = source === "clio" && nav.next !== undefined ? `source=clio ${nav.next}` : nav.next;
+				const paged = next === nav.next ? nav.payload : { ...nav.payload, next };
+				const payload = grammarNote !== undefined ? { ...paged, grammarNote } : paged;
+				return finalizeObservation({
+					tool: ToolNames.CodeNav,
+					unit: "results",
+					format: "json",
+					output: renderJson(payload),
+					shownCount: nav.shownCount,
+					totalCount: nav.totalCount,
+					truncated: nav.shownCount < nav.totalCount,
+					...(next !== undefined ? { next } : {}),
+					reservation,
+					...(options ? { options } : {}),
+				});
+			};
+			if (!MODES.includes(mode))
+				return {
+					kind: "error",
+					message: `code_nav: mode must be symbol, path, entries, outline, deps, dependents, wiki, or project; got '${mode}'`,
+				};
+			if (mode === "wiki") return close(runWiki(process.cwd(), query));
+			const loaded = await loadNavSource(source);
+			if (mode === "project") {
+				const { readProjectStatus } = await import("../../domains/context/project-status.js");
+				return close({
+					payload: await readProjectStatus(
+						process.cwd(),
+						loaded.ok && loaded.loaded.fingerprint
+							? { codewiki: loaded.loaded.codewiki, fingerprint: loaded.loaded.fingerprint }
+							: undefined,
+						loaded.ok ? undefined : loaded.message,
+					),
+					shownCount: 1,
+					totalCount: 1,
+				});
+			}
+			if (!loaded.ok) return { kind: "error", message: loaded.message };
+			const index = navIndexFor(loaded.loaded.codewiki);
+			// Symbol and outline answers depend on how files were parsed; a symbol
+			// search spans every language in the index, an outline only its file's.
+			if (source === "workspace" && (mode === "symbol" || mode === "outline")) {
+				const outlined = mode === "outline" ? resolveFile(index, query) : null;
+				grammarNote = missingGrammarNote(
+					outlined === null ? loaded.loaded.codewiki.files : "error" in outlined ? [] : [outlined],
+				);
+			}
+			const sourcePrefix = source === "clio" ? "source=clio " : "";
+			if (mode === "symbol") {
+				if (query.length === 0) return { kind: "error", message: "code_nav: mode=symbol requires query" };
+				if (related) return close(runSymbolRelated(index, query, limit, reservation.callCapBytes, sourcePrefix));
+				return close(runSymbol(index, query, limit));
+			}
+			if (mode === "path") {
+				if (query.length === 0) return { kind: "error", message: "code_nav: mode=path requires query" };
+				return close(runPath(index, query, limit));
+			}
+			if (mode === "entries") return close(runEntries(index, limit, loaded.loaded.entryRoot));
+			if (mode === "outline") {
+				if (query.length === 0) return { kind: "error", message: "code_nav: mode=outline requires query path" };
+				if (related) return close(runOutlineRelated(index, query, limit, reservation.callCapBytes, sourcePrefix));
+				return close(runOutline(index, query, limit));
+			}
+			if (mode === "deps") {
+				if (query.length === 0) return { kind: "error", message: "code_nav: mode=deps requires query path" };
+				return close(runDeps(index, query, limit));
+			}
+			if (mode === "dependents") {
+				if (query.length === 0) return { kind: "error", message: "code_nav: mode=dependents requires query path" };
+				return close(runDependents(index, query, limit));
+			}
 			return {
 				kind: "error",
 				message: `code_nav: mode must be symbol, path, entries, outline, deps, dependents, wiki, or project; got '${mode}'`,
 			};
-		if (mode === "wiki") return close(runWiki(process.cwd(), query));
-		const loaded = await loadNavSource(source);
-		if (mode === "project") {
-			const { readProjectStatus } = await import("../../domains/context/project-status.js");
-			return close({
-				payload: await readProjectStatus(
-					process.cwd(),
-					loaded.ok && loaded.loaded.fingerprint
-						? { codewiki: loaded.loaded.codewiki, fingerprint: loaded.loaded.fingerprint }
-						: undefined,
-					loaded.ok ? undefined : loaded.message,
-				),
-				shownCount: 1,
-				totalCount: 1,
-			});
+		} finally {
+			releaseObservation(reservation);
 		}
-		if (!loaded.ok) return { kind: "error", message: loaded.message };
-		const index = navIndexFor(loaded.loaded.codewiki);
-		// Symbol and outline answers depend on how files were parsed; a symbol
-		// search spans every language in the index, an outline only its file's.
-		if (source === "workspace" && (mode === "symbol" || mode === "outline")) {
-			const outlined = mode === "outline" ? resolveFile(index, query) : null;
-			grammarNote = missingGrammarNote(
-				outlined === null ? loaded.loaded.codewiki.files : "error" in outlined ? [] : [outlined],
-			);
-		}
-		const sourcePrefix = source === "clio" ? "source=clio " : "";
-		if (mode === "symbol") {
-			if (query.length === 0) return { kind: "error", message: "code_nav: mode=symbol requires query" };
-			if (related) return close(runSymbolRelated(index, query, limit, reservation.callCapBytes, sourcePrefix));
-			return close(runSymbol(index, query, limit));
-		}
-		if (mode === "path") {
-			if (query.length === 0) return { kind: "error", message: "code_nav: mode=path requires query" };
-			return close(runPath(index, query, limit));
-		}
-		if (mode === "entries") return close(runEntries(index, limit, loaded.loaded.entryRoot));
-		if (mode === "outline") {
-			if (query.length === 0) return { kind: "error", message: "code_nav: mode=outline requires query path" };
-			if (related) return close(runOutlineRelated(index, query, limit, reservation.callCapBytes, sourcePrefix));
-			return close(runOutline(index, query, limit));
-		}
-		if (mode === "deps") {
-			if (query.length === 0) return { kind: "error", message: "code_nav: mode=deps requires query path" };
-			return close(runDeps(index, query, limit));
-		}
-		if (mode === "dependents") {
-			if (query.length === 0) return { kind: "error", message: "code_nav: mode=dependents requires query path" };
-			return close(runDependents(index, query, limit));
-		}
-		return {
-			kind: "error",
-			message: `code_nav: mode must be symbol, path, entries, outline, deps, dependents, wiki, or project; got '${mode}'`,
-		};
 	},
 };
