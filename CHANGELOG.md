@@ -55,6 +55,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- Receipts: a pass retired by a later change now reads basis retired-by-change instead of no-validation-tool. Older journals keep their basis (c17-a).
 - Calls the output limit cuts off are stated once, read as not run, and count as no call and no tool error on any surface. (bt-39 a)
 - A test pins ACP compaction failure lines as reply text. (c2b-3)
 - A worker's account of failed attempts is followed by the feed's own attempt counts. (bt-23 #3)
@@ -132,6 +133,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Verification: after a passing check, a Python probe that imports the workspace's own module and writes nothing reads as unknown. A no-op step such as `exit 0;` reads as inspection. Neither retires the pass, so the run no longer settles unverified with no-validation-tool. A probe that writes still retires it (c17-a).
+- Receipts: a headless main run with no check of its own is credited with a dispatched worker's validated pass (basis dispatch-run-record, naming the run and agent), unless the main run changed the tree afterwards (c17-a).
 - Copilot route: host reminders that follow tool results, such as the result-contract reminder, now go in Copilot's immediate send before the next model request. They are never appended inside a tool result, which models read as an injection (D4).
 - Telemetry insights counts a fork's own verified outcomes after its own check, so the verified share moves with it. (c16-D, bt-fork-verified, drv-n3)
 - `telemetry why-stopped` names a dispatched worker's stop on the parent session, in text and in `--json` `workerStops`. (D3-b, drv-n2a)
