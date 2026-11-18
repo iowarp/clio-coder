@@ -1904,7 +1904,7 @@ function makeCheckMatch(args: ReadonlyArray<string>): boolean {
  * Read-only checks of other ecosystems by their subcommand (x8-2): cargo check, clippy and build, go vet and build
  * (without `-o`), `gofmt -l`, mypy, pyright, pylint, flake8, ruff check, `prettier --check`, the format checks
  * `black --check`, `isort --check-only`, `ruff format --check`, `cargo fmt --check` and `rustfmt --check` (x10-2),
- * biome check and lint,
+ * `golangci-lint run`, staticcheck (x10-3), biome check and lint,
  * dotnet test, rspec, phpunit, composer test, deno test, check and lint, playwright test, cypress run, tox, nox, hatch
  * test, rake test, `python manage.py test`, `php artisan test` and make's check targets. An option that writes what they read (`--fix`, `--write`, `-w`, a
  * snapshot update, mypy's `--install-types`, ruff's `--add-noqa`, biome's `--apply`) or a tox or nox environment named
@@ -1933,7 +1933,11 @@ function ecosystemCheckMatch(executable: string, args: ReadonlyArray<string>): b
 			break;
 		case "pylint":
 		case "flake8":
+		case "staticcheck":
 			matched = true;
+			break;
+		case "golangci-lint":
+			matched = subcommand === "run";
 			break;
 		case "pyright":
 			matched = !has(/^--(?:createstub|writebaseline)/u);
@@ -2928,7 +2932,9 @@ function validationMatch(
 	if (executable === "pytest") return "pytest";
 	if (isPythonExecutable(executable) && moduleArg(args) === "pytest") return "python -m pytest";
 	if (isPythonExecutable(executable) && moduleArg(args) === "unittest") return "python -m unittest";
-	if (executable === "cargo" && args[0] === "test") return "cargo test";
+	// nextest runs the same cargo tests, so it carries their label (x10-3).
+	if (executable === "cargo" && (args[0] === "test" || (args[0] === "nextest" && args[1] === "run")))
+		return "cargo test";
 	if (executable === "go" && args[0] === "test") return "go test";
 	if (executable === "ctest") return "ctest";
 	if (executable === "make" && args[0] === "test") return "make test";
