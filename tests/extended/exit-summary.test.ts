@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -193,6 +193,32 @@ test("a /resume mid-visit keeps the visit's turns, files and workers on the exit
 	collector.sessionChanged();
 	footerTools.set("bash", 1);
 	match(renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n"), /^Tools: bash 3 · read 4$/mu);
+	collector.dispose();
+});
+
+test("a fork's exit card counts only the compactions the fork ran, not its parent's (bt-47 D3)", () => {
+	const bus = createTelemetryHub();
+	let current = { id: "parent", hasModelTurn: true };
+	const collector = createExitSummaryCollector({
+		bus,
+		telemetry: { subscribe: () => () => {} } as unknown as TelemetryContract,
+		dispatch: {},
+		session: { current: () => current } as unknown as Pick<SessionContract, "current">,
+		getTurns: () => 0,
+		getToolCounts: () => new Map(),
+		getModel: () => null,
+	});
+	const pruned = { stage: "llm_summary", tokensBefore: 2, tokensAfter: 1, at: 0 } as never;
+	for (let i = 0; i < 3; i += 1) bus.emit("context.pruned", pruned, { sessionId: "parent" } as never);
+	strictEqual(collector.snapshot()?.compactions, 3);
+	bus.emit("session.parked", { sessionId: "parent", reason: "fork", at: 0 });
+	current = { id: "fork", hasModelTurn: true };
+	collector.sessionChanged();
+	strictEqual(collector.snapshot()?.compactions, 0);
+	doesNotMatch(renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n"), /Compactions/u);
+	// An event that names no session counts for the current one.
+	bus.emit("context.pruned", pruned);
+	match(renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n"), /^Compactions: 1$/mu);
 	collector.dispose();
 });
 
