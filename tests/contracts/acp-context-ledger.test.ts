@@ -271,6 +271,12 @@ test("the prompt response waits for the read model to fold the turn's last call,
 	const records: TelemetryRecord[] = [];
 	let bound: string | null = null;
 	let probes = 0;
+	// The test orders its batches on the frames the server sends, never on timers, so a stalled loop cannot reorder them.
+	const awaited: Array<{ match: (usage: Record<string, unknown>) => boolean; resolve: () => void }> = [];
+	const sent = (match: (usage: Record<string, unknown>) => boolean) =>
+		new Promise<void>((resolve) => awaited.push({ match, resolve }));
+	const ownCalls = (usage: Record<string, unknown>) =>
+		(usage.session as { own: { counts: { calls: { display: string } } } } | null)?.own.counts.calls.display;
 	// The server subscribes more than once; a fold the turn's waiter never hears ends only at its 2 s bound.
 	const listeners = new Set<Parameters<TelemetryReadModel["subscribe"]>[1]>();
 	const folded = () => {
@@ -288,7 +294,15 @@ test("the prompt response waits for the read model to fold the turn's last call,
 		closed: false,
 		request: async () => ({}) as never,
 		notify: (method, params) => {
-			if (method === "session/update") updates.push((params as { update: Record<string, unknown> }).update);
+			if (method !== "session/update") return;
+			const update = (params as { update: Record<string, unknown> }).update;
+			updates.push(update);
+			const usage = (update._meta as Record<string, Record<string, unknown>> | undefined)?.["clio-coder/usage"];
+			if (usage === undefined) return;
+			for (const waiter of awaited.filter((entry) => entry.match(usage))) {
+				awaited.splice(awaited.indexOf(waiter), 1);
+				waiter.resolve();
+			}
 		},
 		onNotification: () => () => {},
 		onRequest: (method, handler) => {
@@ -318,15 +332,16 @@ test("the prompt response waits for the read model to fold the turn's last call,
 				};
 			},
 		},
-		// The probe a write starts is still in flight when the turn settles; a batch folds while the response waits on it.
+		// The probe a write starts is still in flight when the turn settles; a batch folds while the response waits on it,
+		// after the turn's folded frame and before the probe lands.
 		workspace: async (cwd) => {
 			probes++;
 			if (probes > 1) {
-				setTimeout(() => {
-					records.push(...telemetryCall("late", { turnId: "turn-2", usage: { input: 7, output: 3 }, usd: 0.01 }));
-					folded();
-				}, 40);
-				await new Promise((resolve) => setTimeout(resolve, 80));
+				await sent((usage) => (usage.turn as { output: { display: string } } | null)?.output.display === "20");
+				const late = sent((usage) => ownCalls(usage) === "2");
+				records.push(...telemetryCall("late", { turnId: "turn-2", usage: { input: 7, output: 3 }, usd: 0.01 }));
+				folded();
+				await late;
 			}
 			return {
 				cwd,
@@ -358,11 +373,11 @@ test("the prompt response waits for the read model to fold the turn's last call,
 				onEvent({ type: "agent_start", turnId: "turn-1" });
 				onEvent({ type: "message_end", message });
 				onEvent({ type: "agent_end", turnId: "turn-1", messages: [message] });
-				// The writer's batch holding the call is durable only after the run ended.
-				setTimeout(() => {
+				// The writer's batch holding the call is durable only after the run ended, so the response is already waiting.
+				setImmediate(() => {
 					records.push(...call);
 					folded();
-				}, 20);
+				});
 			},
 			cancel: () => {},
 			onEvent: (handler) => {
@@ -392,10 +407,7 @@ test("the prompt response waits for the read model to fold the turn's last call,
 	assert.deepEqual(frames.filter((frame) => frame.turn !== null).at(-1)?.turn, reply.quantities);
 	// The batch that folded during the workspace wait reached a later session frame, not the response.
 	assert.equal(reply.session?.quantities.calls.display, "1");
-	assert.equal(
-		(frames.at(-1)?.session as { own: { counts: { calls: { display: string } } } } | undefined)?.own.counts.calls.display,
-		"2",
-	);
+	assert.equal(ownCalls(frames.at(-1) ?? {}), "2");
 	close();
 	await served;
 });
