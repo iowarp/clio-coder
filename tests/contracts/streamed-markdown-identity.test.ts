@@ -7,7 +7,8 @@ import { settledMarkdownHead } from "../../src/interactive/renderers/markdown-bl
 // same text rendered whole. Each text puts a cut next to a construct that could join blocks across it.
 const texts = {
 	list: "Steps:\n\n- a\n\n  b\n\n- c\n\n  d\n\nEnd.\n\nDone.\n",
-	fence: "Intro.\n\n```py\ndef f():\n\n    return 1\n```\n\nAfter.\n\nDone.\n",
+	// An indented opener with words after its language still streams as an open fence.
+	fence: 'Intro.\n\n  ```py title="a.py"\ndef f():\n\n    return 1\n  ```\n\nAfter.\n\nDone.\n',
 	math: "Before.\n\n$$\na + b\n\nc + d\n$$\n\nAfter $x$ here.\n\nDone.\n",
 	definition: "A [late] link.\n\nSecond.\n\nThird.\n\n[late]: u",
 	mermaid: "Here:\n\n```mermaid\nflowchart TD\nA[Start] --> B[Model]\nB --> C[End]\n```\n\nAfter.\n\nDone.\n",
