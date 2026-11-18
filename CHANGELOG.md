@@ -9,6 +9,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 ### Upgrade notes
 
 - **`CLIO_CODER_LEGACY_MASK` is gone.** Setting it no longer brings back the stale-observation mask; working-set eviction runs unless `context.workingSet.enabled` is `false`.
+- **Session format 7.** 0.8.4 writes format 7 session ledgers (host-inserted messages and step-chain records). A format 6 session opens and resumes unchanged; it is restamped to 7 when it is resumed, not when it is listed, and its ledger bytes stay the same. 0.8.3 refuses a session 0.8.4 has resumed (ContextFold CF-4).
 
 ### Added
 
@@ -42,6 +43,11 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - C5 (0.8.4 adoption): a prompt template's `turnPolicy` takes `when`, a list of `small`, `standard`, `frontier` and `uncached`. The step policy then applies only on a turn whose session chat route matches a token: its model tier, with a `models.<id>.tier` override honoured, or a route that does not cache prompts. On any other route the turn runs with no step refusal, text-only lock, step continuation, parallel step refusal or step checkpoint. The route is judged again at every turn the template starts, yolo step continuations included, so a model switch takes effect on the next turn. The turn scope reminder says whether the policy applies on the current route; the system prompt and tool schemas do not change. Without `when` the policy applies on every route, and a malformed `when` makes the template unavailable.
 - Turn receipts close with the local time the turn ended (`✓ Done · 1m4s · 18:42`), with the date when that was another day; a replayed session shows each turn's recorded end time.
 - ContextFold CF-1: a `context.fold` decision event records each fold checkpoint's stages (S1 working-set eviction, S2 step checkpoint, S3 summary) with their outcome and committed record id.
+- Host-authored messages pushed into a run are durable records, so a rebuild and a reopen send them once, where the live request held them (ContextFold CF-4, F6).
+- Recovery exchanges are durable records, so a reopened session sends the recovery the live retry sent (ContextFold CF-4, F13).
+- On routes without prompt caching, a superseded-results stage evicts superseded tool results as recallable `contextEviction` records (ContextFold CF-5, F2, F3, F4).
+- Each main attempt journals a receipt of what it sent, and each request names the first transcript element it changed (ContextFold CF-9, F14).
+- `clio-coder context working-set --verify <session>` checks every attempt against its receipt and reconciles fold decisions (ContextFold CF-9, F14).
 
 ### Changed
 
@@ -104,6 +110,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - P2D-6: reservation tests exercise the async release and lock-held transfer that production uses; the test-only twins and unused path helpers are gone.
 - A run now reads its own evidence from a submit-keyed log (ContextFold CF-3, F12). A compaction or recovery edit mid-submit no longer loses the step call or miscounts a machine turn's usage; retry eligibility after a reprompt or compact-and-retry run judges only that run; `agent_end.messages` and the json-stream `messageCount` no longer count in-run host inserts; a machine turn whose recovery ladder is exhausted reports the failure reason, not an earlier round's text (#445).
 - A small-tier route with prompt caching on, including the WTF-P `models.<id>.tier: small` opt-in, no longer ages observations; only routes without prompt caching do, until the maintainer turns on D5 (ContextFold, bt-47 cf1j-a).
+- Observation aging is retired. A format 6 session adopts its aging stubs once as a superseded record, or releases them on a route that caches prompts (ContextFold CF-5, F1, F5).
+- On a known context window under 52,428 tokens, working-set eviction acts at the automatic compaction trigger (target 0.75 x the trigger at the defaults) before any paid summary; before, its gate sat 6-12k tokens above the trigger, so a summary ran on every pass (ContextFold A3, cf-x5).
 
 ### Removed
 
@@ -419,6 +427,30 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - The worker context guard commits ContextFold records with `r<N>` aliases, the working-set target and rearm band, journals `context.fold` under the run, and refuses recall of parent aliases (ContextFold CF-7, F7).
 - Observation aging no longer runs on a route that caches prompts when a `--max-context-tokens` cap below 32k makes it small-tier; its gate is the ContextFold S0 gate, `promptCaching: false` only (bt-47 cf1j-a).
 - The working-set skip notice after a cut inside a turn says the visible context starts inside a turn and all of its steps are protected, not "all 0 turns are inside the protected window" (bt-47 cf1j-c).
+- The request no longer differs from the rendered ledger, and an unsent prewarm request records nothing (ContextFold CF-5, F1, F5).
+- Eviction records carry a measured anchor, so a reopened or resumed session rehydrates its live context estimate from it instead of falling back to chars/4 (ContextFold CF-6, F9).
+- `/context`, the footer and ACP `usage_update` read one published figure, and branch, fork and resume show the current path's figure and last compaction (ContextFold CF-6, bt-47 D2).
+- A session reopened over ACP or headless reports the context figure its next request carries, and on an unchanged route its next system prompt is byte-identical to the live one (ContextFold CF-6).
+- After a resume, automatic compaction prices the compiled session prompt the request carries, so a combined eviction and summary reports the figure the next request sends (ContextFold CF-6, bt-47 D1).
+- Every main request is admitted, clamped and reported on one count, so a request Clio admitted is no longer refused locally as exceeding the context window, and no retry summary is paid for it (ContextFold CF-6, bt-47 drv-m3a).
+- Checkpoints publish once by a ledger-confirmed id, an append that wrote before throwing is published instead of failed, and a step pipeline reopened mid-chain still leads the next step from its recorded chain (ContextFold CF-8, F8).
+- After a reopen, navigating away from a settled step turn and back runs the next step on full history, as live use does, and returning to a session left by a switch resumes its step chain as reopening it does (ContextFold CF-8, bt-47 m2b-D1).
+- The first step turn of a new session seeds the step chain, so step two starts from the compact state (ContextFold CF-8, bt-47 m2b-D2).
+- `/tree` draws a step checkpoint on the path it compacted instead of as a sibling "Compacted" branch (ContextFold CF-8).
+- A native checkpoint handle is part of its element's digest (ContextFold CF-9, F14, W12).
+- A worker under output backpressure keeps its fold decisions, and its output-cap failure names its limit from the pinned input count (ContextFold CF-9, F14).
+- A late `context working-set --verify` renders a handoff note at the clock its attempt rendered it, accepts the `skill_retired` and `refused_prompt_bound` eviction reasons, and re-derives the Codex effort history a receipt names (ContextFold CF-9, F14).
+- Council peer and judge briefings stay within their 8 KiB cap without dropping a peer: each peer keeps a labeled head and tail excerpt that states the bytes it omitted and names the peer's result object, and each clip is journaled as `context.briefing_clipped` in the session that convened the council (ContextFold CF-10, F10, bt-47 m2c-1).
+- A failed council seat shows its provider cause on one bounded line to members and the judge (ContextFold CF-10, bt-47 m2c-2, m2c-3).
+- A council judge and round-2 members declare the operator's scope instead of inferring it from host-written briefing text, so a failed seat's provider cause or a clipped answer's result path no longer gets them refused with `legacy_scope_path_absolute` (ContextFold CF-10, bt-47 drv-m3b).
+- A forked worker's own task follows a boundary that marks the parent's inherited requests, including a compaction summary's active request, as context only (ContextFold, bt-47 c2a-D7).
+- The automatic compaction trigger bounds a reasoning route's summary reserve at half a known window, so a 28K window triggers at 14,000 tokens instead of 1,786 (ContextFold A1, bt-47 cf1j-b).
+- Automatic compaction makes no summary call when the history outside the kept suffix and the active request is smaller than the summary room, journaling `none/no_gain` or `nothing_to_summarize`; `/compact` and overflow recovery still call (ContextFold A1, bt-47 cf1j-d).
+- After a resume, `context.fold` and the TUI compaction card report a working-set eviction's own before and after figures, as `context.pruned` does, instead of a structural re-estimate that claimed a false reduction (ContextFold, bt-47 D1).
+- On windows under 52,428 tokens with no `chat.maxOutputTokens`, fit, guard and admission reserve 8,192 output tokens instead of half the window, and a skipped summary no longer says "llm_summary runs instead" (ContextFold A5, bt-47 m2a-1, m2a-2, m2a-3).
+- On windows under 52,428 tokens, an automatic summary asks for at most 8,192 visible output tokens (or `chat.maxOutputTokens` if larger) and states its length budget, and small-window eviction aims at 75% of the history space above the system prompt and tools, so cumulative checkpoints stop crowding out the history (ContextFold bt-18).
+- On a reasoning route, that capped summary request keeps the reasoning share on top of its stated room, so a summary that runs past its budget no longer stops at the output limit and drops the checkpoint (ContextFold bt-18, bt-47 drv-m3c).
+- An overflow fold cuts protected successful reads largest first (journaled `step_overflow`, with a recall marker advising a narrower read) instead of paying a summary (ContextFold A4, bt-47 drv-cf3a, drv-m3a).
 
 ## 0.8.3 - 2026-11-16
 
