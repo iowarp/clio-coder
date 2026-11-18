@@ -886,6 +886,8 @@ export interface RunResultVerification {
 	state: ReceiptVerificationState;
 	basis:
 		| "validation-tool"
+		/** Only shell checks the host observed the worker run answered; no validation tool did. */
+		| "host-observed-command"
 		| "read-only-agent"
 		| "no-validation-tool"
 		| "acp-external-unobserved"
