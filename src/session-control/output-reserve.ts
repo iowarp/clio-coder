@@ -20,7 +20,12 @@
  */
 
 import { runOverrides } from "../core/run-overrides.js";
-import { configuredMaxOutputTokens, requestOutputReserve } from "../engine/apis/output-budget.js";
+import { fitOutputReserve } from "../domains/context/fold/pressure.js";
+import {
+	ADMISSIBLE_OUTPUT_RESERVE,
+	configuredMaxOutputTokens,
+	requestOutputReserve,
+} from "../engine/apis/output-budget.js";
 import type { AgentRuntime } from "./turn-state.js";
 
 type ReserveRuntime = {
@@ -40,6 +45,22 @@ export function resolveTurnOutputReserve(agentRuntime: ReserveRuntime, inputToke
 		agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
 		inputTokens,
 	);
+}
+
+/**
+ * The output reserve every physical fit check counts: the post-tool guard and its
+ * stop, the fold's fit checks, the live view and pre-stream admission. It is the
+ * turn reserve except on an uncapped window under 52,428 tokens, where it is the
+ * admissible reserve, so the fit line sits above the automatic trigger the turn
+ * reserve still drives (ContextFold A5).
+ */
+export function resolveFitOutputReserve(agentRuntime: ReserveRuntime, inputTokens: number): number {
+	return fitOutputReserve({
+		window: agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
+		turnReserve: resolveTurnOutputReserve(agentRuntime, inputTokens),
+		admissibleReserve: ADMISSIBLE_OUTPUT_RESERVE,
+		hardReserve: configuredMaxOutputTokens() !== null,
+	});
 }
 
 /**
