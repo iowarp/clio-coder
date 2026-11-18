@@ -108,6 +108,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Read-only checks from other ecosystems now settle a recorded outcome instead of reading as unknown: `cargo check`/`clippy`, `go vet`/`build`, `gofmt -l`, `mypy`, `pyright`, `ruff check`, `prettier --check`, `biome check`, `dotnet test`, `rspec`, `phpunit`, `deno`, `playwright`, `cypress`, `tox`, `nox`, `make test`/`check`/`lint`, and runs behind `poetry`, `pipenv`, `hatch`, `pdm`, `rye` or `bundle exec`. Their `--fix` and `--write` forms stay writers (x8-2).
+- A write into a scratch root or temp dir inside the workspace now retires standing check passes (x8-4).
+- A check call that also copies or creates files only outside the workspace (`npm test && cp coverage/lcov.info /tmp/`) no longer retires earlier passes (x8-5).
 - ACP `message_end` no longer repeats the last characters of an assistant message that carries more than one text block; its tail now lines up with the streamed text (x8-3).
 - A fork no longer shows or answers the approval of a worker its parent dispatched. It prints a notice naming the owner and how to answer, and the card returns on `/resume` of that session (bt-11 f).
 - A fork's worker card shows elapsed time for a worker its parent dispatched, instead of "—" (bt-11 g).
