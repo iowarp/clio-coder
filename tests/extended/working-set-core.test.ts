@@ -272,8 +272,6 @@ describe("failed command rerun", () => {
 			plan.items.map((item) => [item.ref.entry, item.reason]),
 			[["test1", "superseded_call"]],
 		);
-		// D1-1: a result the request already carries as an aging stub frees nothing the pressure figure holds.
-		strictEqual(planEviction(structuralV2Policy, { ...input, aged: new Set(["test1"]) }), null);
 	});
 
 	it("keeps a cheap stale unit whose eviction would re-write a long cached span, unless the fit is forced", () => {

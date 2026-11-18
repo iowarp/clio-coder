@@ -133,12 +133,6 @@ export interface PolicyInput {
 	pressure: PressureInput;
 	/** Replay-content estimator, using isolated provider measurements when available (#422). */
 	estimateTokens: (entry: SessionEntry) => number;
-	/**
-	 * Tool call ids the outgoing request already carries as observation-aging
-	 * stubs. The pressure figure holds only the stub, so evicting one frees
-	 * nothing it counts and `tokensFreedByEviction` prices it at zero (D1-1).
-	 */
-	aged?: ReadonlySet<string>;
 }
 
 /** A unit the policy wants out, with the typed reason. Ordered: apply in this order, stop when headroom is met. */
@@ -146,6 +140,8 @@ export interface EvictionCandidate {
 	ref: WorkingSetRef;
 	reason: EvictionReason;
 	by?: string;
+	/** A marker fixed by the stage instead of the rendered one: the stub a v6 session's request already carried. */
+	marker?: string;
 }
 
 export interface WorkingSetPolicy {

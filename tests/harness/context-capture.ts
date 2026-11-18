@@ -33,6 +33,7 @@ import {
 } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
+import type { createEngineAgent } from "../../src/engine/agent.js";
 import { type EngineRegisteredApiProvider, registerEngineApiProvider } from "../../src/engine/api-registry.js";
 import type { Model } from "../../src/engine/types.js";
 import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
@@ -464,6 +465,8 @@ export interface ChatHarnessOptions {
 	routeB?: RouteFacts;
 	/** The middleware tool-choice control the loop reads each round. */
 	middlewareToolChoice?: MiddlewareToolChoiceControl;
+	/** Builds each agent the loop asks for, so a case can hold the live agent. */
+	createAgent?: typeof createEngineAgent;
 }
 
 /**
@@ -553,6 +556,7 @@ export function chatHarness(options: ChatHarnessOptions) {
 		bus: context.bus,
 		...(options.pinnedContext ? { pinnedContext: options.pinnedContext } : {}),
 		...(options.middlewareToolChoice ? { middlewareToolChoice: options.middlewareToolChoice } : {}),
+		...(options.createAgent ? { createAgent: options.createAgent } : {}),
 		...(options.autoCompact
 			? {
 					autoCompact: createProductionAutoCompact(

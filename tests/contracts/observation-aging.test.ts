@@ -3,29 +3,19 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { Type } from "typebox";
-import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { ContextFoldPayload } from "../../src/core/telemetry/live-events.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { supersededStageApplies } from "../../src/domains/context/index.js";
+import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
+import { resolveRecall } from "../../src/domains/context/working-set/recall.js";
+import type { ContextEvictionEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import {
-	EMPTY_CAPABILITIES,
-	type ProvidersContract,
-	type RuntimeDescriptor,
-} from "../../src/domains/providers/index.js";
-import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
-import { createSessionBundle } from "../../src/domains/session/extension.js";
-import { createEngineAgent } from "../../src/engine/agent.js";
-import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
-import type { AgentMessage, Model } from "../../src/engine/types.js";
-import { type ChatLoopEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
-import {
-	ageObservations,
-	createObservationAging,
-	OBSERVATION_AGING_BATCH_BYTES,
-	type ObservationAgingRoute,
-	observationAgingApplies,
+	OBSERVATION_AGING_CUSTOM_TYPE,
+	observationAgingRecord,
+	observationAgingStub,
 } from "../../src/session-control/observation-aging.js";
-import { createRegistry } from "../../src/tools/registry.js";
-import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import type { ToolSpec } from "../../src/tools/registry.js";
+import { type CaptureServer, chatHarness, startCaptureServer, wireElements } from "../harness/context-capture.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 let env: IsolatedClioEnv;
@@ -42,114 +32,104 @@ afterEach(() => {
 	env.restore();
 });
 
-const call = (id: string, name: string, args: Record<string, unknown>): AgentMessage =>
-	({
-		role: "assistant",
+const RECORD = `record body\n${"r".repeat(40_000 - 12)}`;
+const SMALL = `small body\n${"s".repeat(12_000)}`;
+
+/** A `read` that returns the record for `record.md` and a small body for anything else. */
+const reader: ToolSpec = {
+	name: ToolNames.Read,
+	description: "Returns a fixed body for a path",
+	parameters: Type.Object({ path: Type.String() }),
+	baseActionClass: "read",
+	run: async (input) => ({
+		kind: "ok",
+		output: (input as { path?: string }).path === "record.md" ? RECORD : SMALL,
+	}),
+};
+
+/** Reads each path in turn, one call per request, then answers. */
+async function readsServer(paths: ReadonlyArray<string>): Promise<CaptureServer> {
+	return startCaptureServer((_request, index) =>
+		index < paths.length
+			? { calls: [{ id: `c${index + 1}`, name: ToolNames.Read, arguments: { path: paths[index] } }] }
+			: { text: "done" },
+	);
+}
+
+const AT = "2026-09-21T09:00:00.000Z";
+const RECORD_TOOL = "extension_wtfp__read_record";
+/** A desk read declared read-only: the loop guard reads its repeat as a read, and S1's rungs know no op for it. */
+const recordTool: ToolSpec = {
+	name: RECORD_TOOL as ToolSpec["name"],
+	description: "Reads a desk record",
+	parameters: Type.Object({ id: Type.String() }),
+	baseActionClass: "read",
+	metadata: {
+		objective: "read a record",
+		uiLabel: "wtfp/read_record",
+		readOnly: true,
+		resultSizePolicy: { kind: "bounded", maxBytes: 256 * 1024 },
+	},
+	run: async () => ({ kind: "ok", output: RECORD }),
+};
+function row(
+	turnId: string,
+	parentTurnId: string | null,
+	role: "user" | "assistant" | "tool_result",
+	payload: unknown,
+) {
+	return { kind: "message", turnId, parentTurnId, timestamp: AT, role, payload } as SessionEntry;
+}
+function callRow(turnId: string, parentTurnId: string, id: string, name: string, args: Record<string, unknown>) {
+	return row(turnId, parentTurnId, "assistant", {
 		content: [{ type: "toolCall", id, name, arguments: args }],
 		stopReason: "toolUse",
-		timestamp: 0,
-	}) as unknown as AgentMessage;
-const result = (id: string, name: string, text: string, isError = false): AgentMessage =>
-	({
-		role: "toolResult",
+	});
+}
+function resultRow(turnId: string, parentTurnId: string, id: string, name: string, text: string) {
+	return row(turnId, parentTurnId, "tool_result", {
 		toolCallId: id,
 		toolName: name,
-		content: [{ type: "text", text }],
-		isError,
-		timestamp: 0,
-	}) as unknown as AgentMessage;
-const text = (message: AgentMessage | undefined): string =>
-	((message as { content?: Array<{ text?: string }> } | undefined)?.content ?? []).map((block) => block.text).join("");
-const body = (bytes: number, tag: string): string => `${tag}\n${"r".repeat(bytes - tag.length - 1)}`;
-/** A desk read declared read-only, so a later identical call supersedes it (A1). */
-const RECORD_TOOL = "extension_wtfp__read_record";
-const declared = (tool: string) => (tool === RECORD_TOOL ? { readOnly: true } : undefined);
-
-it("superseded results wait below the threshold, stub in one batch past it, stay stubbed, and never reach a fresh result (WTF-P 0.8.3 C3)", () => {
-	const record = { path: "sections/intro.md" };
-	const small = 12_000;
-	const messages: AgentMessage[] = [
-		call("a", RECORD_TOOL, record),
-		result("a", RECORD_TOOL, body(small, "first")),
-		call("b", RECORD_TOOL, record),
-		result("b", RECORD_TOOL, body(small, "second")),
-		call("other", RECORD_TOOL, { path: "sections/methods.md" }),
-		result("other", RECORD_TOOL, body(small, "other")),
-		// A failed repeat supersedes nothing.
-		call("c", RECORD_TOOL, { path: "sections/methods.md" }),
-		result("c", RECORD_TOOL, "no such record", true),
+		result: { content: [{ type: "text", text }] },
+	});
+}
+/** An earlier turn: two identical file reads S1's rungs select, then two identical record reads S0 qualifies. */
+function seeded(): SessionEntry[] {
+	return [
+		row("u1", null, "user", { text: "read everything twice" }),
+		callRow("a1", "u1", "c1", ToolNames.Read, { path: "src/big.ts" }),
+		resultRow("r1", "a1", "c1", ToolNames.Read, RECORD),
+		callRow("a2", "r1", "c2", ToolNames.Read, { path: "src/big.ts" }),
+		resultRow("r2", "a2", "c2", ToolNames.Read, RECORD),
+		callRow("a3", "r2", "x1", RECORD_TOOL, { id: "intro" }),
+		resultRow("r3", "a3", "x1", RECORD_TOOL, RECORD),
+		callRow("a4", "r3", "x2", RECORD_TOOL, { id: "intro" }),
+		resultRow("r4", "a4", "x2", RECORD_TOOL, RECORD),
+		row("a5", "r4", "assistant", { content: [{ type: "text", text: "read" }] }),
 	];
-	// One superseded copy, 12 KB, waits: below the batch the request is the ledger's bytes.
-	const below = ageObservations(messages, new Set(), declared);
-	strictEqual(below.batch, null);
-	deepStrictEqual(below.messages, messages);
-	strictEqual(below.stubbed.size, 0);
+}
 
-	// A gateway call unwraps to the capability it runs, so it supersedes both direct reads; 24 KB waiting still
-	// crosses nothing, and the next copy of the same record brings it to 36 KB, past 32 KiB.
-	messages.push(
-		call("d", "gateway", { op: "call", capability: RECORD_TOOL, args: record }),
-		result("d", "gateway", body(small, "third")),
-	);
-	strictEqual(ageObservations(messages, new Set(), declared).batch, null);
-	messages.push(call("e", RECORD_TOOL, record), result("e", RECORD_TOOL, body(small, "fourth")));
-	const crossed = ageObservations(messages, new Set(), declared);
-	ok(crossed.batch, "three superseded copies reach the batch");
-	strictEqual(crossed.batch.results, 3);
-	ok(OBSERVATION_AGING_BATCH_BYTES <= 3 * small);
-	ok(crossed.batch.bytesSaved > 3 * small - 3 * 512, JSON.stringify(crossed.batch));
-	for (const index of [1, 3, 9]) {
-		const stub = text(crossed.messages[index]);
-		ok(stub.startsWith(`[observation aged] ${RECORD_TOOL} `), stub);
-		ok(stub.includes('{"path":"sections/intro.md"}') && stub.includes("already in context"), stub);
-	}
-	// The newest copy, the unrelated record and the failed call are never stubbed, and the input is untouched.
-	strictEqual(text(crossed.messages[11]), body(small, "fourth"));
-	strictEqual(text(crossed.messages[5]), body(small, "other"));
-	strictEqual(text(crossed.messages[7]), "no such record");
-	strictEqual(text(messages[1]), body(small, "first"));
+const evictions = (entries: ReadonlyArray<SessionEntry>): ContextEvictionEntry[] =>
+	entries.filter((entry): entry is ContextEvictionEntry => entry.kind === "contextEviction");
+const results = (elements: string[]): string[] => elements.filter((element) => element.startsWith("result:"));
+const noticeTexts = (events: ReadonlyArray<{ type: string }>): string[] =>
+	events.flatMap((event) => (event.type === "notice" ? [String((event as { text?: unknown }).text)] : []));
 
-	// A later request with a little more superseded keeps the batch stubbed byte for byte and forms no new batch.
-	messages.push(call("f", RECORD_TOOL, record), result("f", RECORD_TOOL, body(small, "fifth")));
-	const later = ageObservations(messages, crossed.stubbed, declared);
-	strictEqual(later.batch, null);
-	for (const index of [1, 3, 9]) strictEqual(text(later.messages[index]), text(crossed.messages[index]));
-	strictEqual(text(later.messages[11]), body(small, "fourth"), "a newly superseded copy waits for its own batch");
-	strictEqual(text(later.messages[13]), body(small, "fifth"));
-});
+/** A harness that keeps every `context.fold` and `context.pruned` it publishes. */
+function observed(harness: ReturnType<typeof chatHarness>) {
+	const folds: ContextFoldPayload[] = [];
+	const pruned: Array<{ stage: string; tokensBefore: number; tokensAfter: number }> = [];
+	harness.context.bus.subscribe("context.fold", (event) => {
+		folds.push(event as ContextFoldPayload);
+	});
+	harness.context.bus.subscribe("context.pruned", (event) => {
+		pruned.push(event as (typeof pruned)[number]);
+	});
+	return { folds, pruned };
+}
 
-it("a repeat that delivered less than the earlier read supersedes nothing (Astra r1-3)", () => {
-	const read = (id: string, output: string, shownCount: number, truncated: boolean): AgentMessage =>
-		({
-			...(result(id, "read", output) as object),
-			details: { observation: { tool: "read", unit: "lines", shownCount, shownBytes: output.length, truncated } },
-		}) as unknown as AgentMessage;
-	const args = { path: "big.ts" };
-	const whole = body(40_000, "whole");
-	const messages: AgentMessage[] = [
-		call("a", "read", args),
-		read("a", whole, 800, false),
-		// The pool is exhausted: an ok notice that shows nothing.
-		call("b", "read", args),
-		read("b", "[observation budget exhausted for this turn before read reading big.ts]", 0, true),
-		// A budget-clipped repeat shows fewer bytes than the first read did.
-		call("c", "read", args),
-		read("c", body(10_000, "clipped"), 200, true),
-	];
-	const kept = ageObservations(messages, new Set(), declared, 1);
-	strictEqual(kept.batch, null);
-	deepStrictEqual(kept.messages, messages);
-	// A complete repeat supersedes all three; the notice is shorter than a stub and stays.
-	messages.push(call("d", "read", args), read("d", whole, 800, false));
-	const aged = ageObservations(messages, new Set(), declared, 1);
-	strictEqual(aged.batch?.results, 2);
-	ok(text(aged.messages[1]).startsWith("[observation aged] read "));
-	ok(text(aged.messages[5]).startsWith("[observation aged] read "));
-	strictEqual(text(aged.messages[7]), whole);
-});
-
-it("the gate admits uncached routes only, as the S0 gate does; a cached route of any tier is untouched (bt-47 cf1j-a)", () => {
-	const table: ReadonlyArray<[ObservationAgingRoute, boolean]> = [
+it("the S0 gate admits uncached routes only, every tier alike (bt-47 cf1j-a)", () => {
+	const table: ReadonlyArray<[Parameters<typeof supersededStageApplies>[0], boolean]> = [
 		[{ modelTier: "small", promptCaching: true }, false],
 		[{ modelTier: "small", promptCaching: false }, true],
 		[{ modelTier: "standard", promptCaching: false }, true],
@@ -158,180 +138,239 @@ it("the gate admits uncached routes only, as the S0 gate does; a cached route of
 		[{ modelTier: "frontier", promptCaching: true }, false],
 		[{ modelTier: "standard" }, false],
 	];
-	for (const [route, admits] of table) {
-		strictEqual(observationAgingApplies(route), admits, JSON.stringify(route));
-		strictEqual(observationAgingApplies(route), supersededStageApplies(route), JSON.stringify(route));
-	}
-	const big = body(OBSERVATION_AGING_BATCH_BYTES + 1024, "big");
-	const messages = [
-		call("a", RECORD_TOOL, { id: 1 }),
-		result("a", RECORD_TOOL, big),
-		call("b", RECORD_TOOL, { id: 1 }),
-		result("b", RECORD_TOOL, big),
-	];
-	const aging = createObservationAging(declared);
-	const cached = aging.project(messages, { modelTier: "frontier", promptCaching: true }, "s");
-	strictEqual(cached.batch, null);
-	deepStrictEqual(cached.messages, messages);
-	strictEqual(aging.project(messages, { modelTier: "small", promptCaching: true }, "s").batch, null);
-	const small = aging.project(messages, { modelTier: "small", promptCaching: false }, "s");
-	strictEqual(small.batch?.results, 1);
-	ok(text(small.messages[1]).startsWith("[observation aged]"));
+	for (const [route, admits] of table) strictEqual(supersededStageApplies(route), admits, JSON.stringify(route));
 });
 
-const target = { id: "aging-fixture", runtime: "litellm", url: "http://fixture.invalid:4000" };
-const model = litellm.synthesizeModel(target, "aging-model", null) as Model<"openai-completions">;
-const RECORD = body(40_000, "record body");
-
-/** Two identical tool calls, then an answer; every request the provider would receive is kept. */
-function transport() {
-	const requests: AgentMessage[][] = [];
-	const fetch: typeof globalThis.fetch = async () => {
-		const call = requests.length;
-		const encoder = new TextEncoder();
-		const chunk = (delta: Record<string, unknown>, finish_reason: string | null = null) =>
-			encoder.encode(
-				`data: ${JSON.stringify({
-					id: "fixture",
-					object: "chat.completion.chunk",
-					model: model.id,
-					choices: [{ index: 0, delta, finish_reason }],
-					// A provider count anchors the live budget, as a real route's usage does.
-					...(finish_reason ? { usage: { prompt_tokens: 3000 + 10_000 * call, completion_tokens: 20 } } : {}),
-				})}\n\n`,
-			);
-		const tool = call <= 2;
-		const stream = new ReadableStream<Uint8Array>({
-			start(controller) {
-				controller.enqueue(
-					chunk(
-						tool
-							? {
-									role: "assistant",
-									tool_calls: [
-										{
-											index: 0,
-											id: `read-${call}`,
-											type: "function",
-											function: { name: "read", arguments: '{"path":"record.md"}' },
-										},
-									],
-								}
-							: { role: "assistant", content: "done" },
-					),
+for (const [label, route, superseded] of [
+	["a small cached route", { tier: "small", caching: true }, false],
+	["a standard cached route", { tier: "standard", caching: true }, false],
+	["an uncached route", { caching: false }, true],
+] as const) {
+	it(`${label} with a viable S1 batch and qualifying identical reads ${superseded ? "commits" : "holds no"} superseded item`, {
+		timeout: 30_000,
+	}, async (t) => {
+		const server = await startCaptureServer(() => ({ text: "answered" }));
+		t.after(() => server.close());
+		const options = { server, route: { ...route, window: 50_000 }, tools: [recordTool], autoCompact: true };
+		const seed = chatHarness(options);
+		let id: string;
+		try {
+			id = seed.session.create({ cwd: process.cwd() }).id;
+			for (const entry of seeded()) seed.session.appendEntry(entry as never);
+		} finally {
+			await seed.close();
+		}
+		const harness = chatHarness(options);
+		harness.settings.context.workingSet.protectLastTurns = 1;
+		harness.settings.context.workingSet.protectLastSteps = 1;
+		const { folds } = observed(harness);
+		try {
+			harness.reopen(id);
+			await harness.submit("go on");
+			const records = evictions(harness.session.readEntries() as SessionEntry[]);
+			ok(records.length > 0, "a record committed");
+			const items = records.flatMap((record) => record.evicted);
+			// Items, not triggers: r3 is the record read only S0 selects; S1's rungs know no op for the desk tool.
+			const s0 = items.filter((item) => item.ref.entry === "r3");
+			if (superseded) {
+				deepStrictEqual(
+					s0.map((item) => [item.reason, item.by]),
+					[["superseded_call", "r4"]],
 				);
-				controller.enqueue(chunk({}, tool ? "tool_calls" : "stop"));
-				controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-				controller.close();
-			},
-		});
-		return new Response(stream, { headers: { "content-type": "text/event-stream" } });
-	};
-	return { fetch, requests };
+			} else {
+				deepStrictEqual(s0, []);
+				deepStrictEqual(
+					items.filter((item) => item.reason === "superseded_call"),
+					[],
+				);
+				deepStrictEqual(
+					items.map((item) => [item.ref.entry, item.reason]),
+					[["r1", "superseded_read"]],
+					"S1 committed its own batch",
+				);
+			}
+			for (const record of records)
+				ok(
+					folds.some((fold) => fold.stages.some((stage) => stage.recordId === record.turnId)),
+					"every commit has a context.fold stage entry",
+				);
+		} finally {
+			await harness.close();
+		}
+	});
 }
 
-async function drive(retention: "none" | undefined): Promise<{
-	requests: AgentMessage[][];
-	events: ChatLoopEvent[];
-	ledger: string;
-	/** The published next-request input at each send, after the post-tool guard and admission. */
-	published: Array<number | null>;
-}> {
-	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.chat.prewarm = false;
-	settings.chat.target = target.id;
-	settings.chat.model = model.id;
-	settings.chat.thinkingLevel = "off";
-	settings.targets = [{ ...target, defaultModel: model.id, ...(retention ? { cache: { retention } } : {}) }];
-	const runtime: RuntimeDescriptor = {
-		...litellm,
-		auth: "none",
-		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: 131072, maxTokens: 4096 },
-		synthesizeModel: () => ({ ...model, input: ["text"], contextWindow: 131072, maxTokens: 4096 }),
-	};
-	const context = dispatchStubContext({ settings, runtime });
-	const session = createSessionBundle(context).contract;
-	const safety = context.getContract("safety");
-	ok(safety);
-	const registry = createRegistry({ safety, autonomy: () => "yolo" });
-	registry.register({
-		name: ToolNames.Read,
-		description: "Returns the same 40 KB record every time",
-		parameters: Type.Object({ path: Type.String() }),
-		baseActionClass: "read",
-		run: async () => ({ kind: "ok", output: RECORD }),
-	});
-	const wire = transport();
-	const events: ChatLoopEvent[] = [];
-	const published: Array<number | null> = [];
-	const loop = createChatLoop({
-		getSettings: () => settings,
-		providers: context.getContract("providers") as ProvidersContract,
-		knownTargets: () => new Set([target.id]),
-		session,
-		toolRegistry: registry,
-		bus: context.bus,
-		createAgent: (options) =>
-			createEngineAgent({
-				...options,
-				streamFn: (requestModel, requestContext, requestOptions) => {
-					wire.requests.push(structuredClone(requestContext.messages) as AgentMessage[]);
-					published.push(loop.contextUsage().tokens);
-					return openAICompletionsApiProvider.streamSimple(requestModel as Model<"openai-completions">, requestContext, {
-						...requestOptions,
-						apiKey: "fixture",
-						fetch: (...args) => wire.fetch(...args),
-					});
-				},
-			}),
-	});
-	loop.onEvent((event) => {
-		events.push(event);
-	});
+it("an uncached route commits a superseded read between tool batches; the ledger keeps the body and recall answers it", {
+	timeout: 30_000,
+}, async (t) => {
+	const server = await readsServer(["record.md", "record.md"]);
+	t.after(() => server.close());
+	const harness = chatHarness({ server, route: { caching: false }, tools: [reader] });
+	const { folds, pruned } = observed(harness);
 	try {
-		await loop.submit("Read the record twice.");
-		await loop.whenSettled();
-		return { requests: wire.requests, events, ledger: JSON.stringify(session.readEntries()), published };
+		await harness.submit("Read the record twice.");
+		strictEqual(server.requests.length, 3);
+		deepStrictEqual(results(wireElements(server.requests[1] as never)), [`result:${RECORD}`]);
+		const [marker, fresh] = results(wireElements(server.requests[2] as never));
+		ok(marker?.startsWith("result:[evicted ref=r1 reason=superseded_call by="), marker?.slice(0, 120));
+		strictEqual(fresh, `result:${RECORD}`, "the fresh copy reaches the model");
+		const entries = harness.session.readEntries() as SessionEntry[];
+		const [record, ...rest] = evictions(entries);
+		ok(record);
+		deepStrictEqual(rest, []);
+		strictEqual(record.policyId, "superseded-v1");
+		strictEqual(record.route?.promptCaching, false, "the record names the uncached route it was cut on");
+		strictEqual(JSON.stringify(entries).split(JSON.stringify(RECORD)).length - 1, 2, "the ledger keeps both bodies");
+		const fold = folds.find((candidate) => candidate.stages.some((stage) => stage.recordId === record.turnId));
+		ok(fold);
+		strictEqual(fold.cause, "observation_aging");
+		deepStrictEqual(fold.stages, [
+			{ stage: "superseded", outcome: "committed", reason: "evicted", recordId: record.turnId },
+		]);
+		const [s0Pruned] = pruned.filter((event) => event.stage === "superseded");
+		ok(s0Pruned);
+		deepStrictEqual(
+			[fold.tokensBefore, fold.tokensAfter],
+			[s0Pruned.tokensBefore, s0Pruned.tokensAfter],
+			"the fold states the record's own figures",
+		);
+		deepStrictEqual([record.tokensBefore, record.tokensAfter], [s0Pruned.tokensBefore, s0Pruned.tokensAfter]);
+		ok(noticeTexts(harness.events).some((text) => text.startsWith("[context engine] superseded: 1 result")));
+		const recalled = resolveRecall(entries, foldWorkingSet(entries), "r1");
+		ok(recalled.ok, JSON.stringify(recalled));
+		strictEqual(recalled.result.body, RECORD);
 	} finally {
-		loop.dispose();
-		await loop.whenSettled();
-		await session.close();
+		await harness.close();
+	}
+});
+
+it("a superseded set below the floor commits nothing, and the checkpoint records the hold", {
+	timeout: 30_000,
+}, async (t) => {
+	const server = await readsServer(["small.md", "small.md"]);
+	t.after(() => server.close());
+	const harness = chatHarness({ server, route: { caching: false }, tools: [reader] });
+	const { folds } = observed(harness);
+	try {
+		await harness.submit("Read the small file twice.");
+		deepStrictEqual(evictions(harness.session.readEntries() as SessionEntry[]), []);
+		deepStrictEqual(results(wireElements(server.requests[2] as never)), [`result:${SMALL}`, `result:${SMALL}`]);
+		const hold = folds.find((fold) =>
+			fold.stages.some(
+				(stage) => stage.stage === "superseded" && stage.outcome === "held" && stage.reason === "below_floor",
+			),
+		);
+		ok(hold, JSON.stringify(folds));
+		ok(hold.tokensBefore > 0, "the hold states the context it measured");
+		strictEqual(hold.tokensAfter, hold.tokensBefore, "a hold changes nothing");
+	} finally {
+		await harness.close();
+	}
+});
+
+/** A v6 ledger: two identical record reads, and the aging row that stubbed the first in the outgoing request. */
+function agedV6(): SessionEntry[] {
+	return [
+		row("u1", null, "user", { text: "read the record twice" }),
+		callRow("a1", "u1", "c1", ToolNames.Read, { path: "record.md" }),
+		resultRow("r1", "a1", "c1", ToolNames.Read, RECORD),
+		callRow("a2", "r1", "c2", ToolNames.Read, { path: "record.md" }),
+		resultRow("r2", "a2", "c2", ToolNames.Read, RECORD),
+		{
+			kind: "custom",
+			turnId: "g1",
+			parentTurnId: "r2",
+			timestamp: AT,
+			customType: OBSERVATION_AGING_CUSTOM_TYPE,
+			data: observationAgingRecord(["c1"]),
+			display: false,
+		} as SessionEntry,
+		row("a3", "g1", "assistant", { content: [{ type: "text", text: "read" }] }),
+	];
+}
+
+async function seededV6(server: CaptureServer): Promise<string> {
+	const seed = chatHarness({ server, route: { caching: false } });
+	try {
+		const id = seed.session.create({ cwd: process.cwd() }).id;
+		for (const entry of agedV6()) seed.session.appendEntry(entry as never);
+		return id;
+	} finally {
+		await seed.close();
 	}
 }
 
-const toolResults = (messages: AgentMessage[] | undefined): string[] =>
-	(messages ?? []).filter((message) => message.role === "toolResult").map(text);
+it("a v6 session on an uncached route adopts its aging stubs once, as one record whose markers are the stubs (§1.5)", {
+	timeout: 30_000,
+}, async (t) => {
+	const server = await startCaptureServer(() => ({ text: "answered" }));
+	t.after(() => server.close());
+	const id = await seededV6(server);
+	const stub = observationAgingStub(ToolNames.Read, { path: "record.md" }, Buffer.byteLength(RECORD, "utf8"));
 
-it("an uncached route's request stubs the superseded read while the ledger keeps it; a cached route sends it whole", {
-	timeout: 20_000,
-}, async () => {
-	const uncached = await drive("none");
-	strictEqual(uncached.requests.length, 3);
-	const [first, second] = toolResults(uncached.requests[2]);
-	ok(first?.startsWith('[observation aged] read {"path":"record.md"} returned 40000 bytes here'), first);
-	strictEqual(second, RECORD, "the fresh copy reaches the model");
-	deepStrictEqual(toolResults(uncached.requests[1]), [RECORD], "nothing is superseded before the repeat");
-	ok(
-		uncached.events.some(
-			(event) =>
-				event.type === "notice" &&
-				/observation aging: 1 superseded tool result stubbed in the request, \d+ bytes saved/u.test(
-					(event as { text?: string }).text ?? "",
-				),
-		),
-		"the batch is announced with the bytes it saved",
-	);
-	// The ledger holds both reads in full: aging changed only the outgoing copy.
-	strictEqual(uncached.ledger.split("record body").length - 1, 2);
-	ok(!uncached.ledger.includes("[observation aged]"));
-	ok(uncached.ledger.includes('"observation_aging"'), "the reply after the batch names its expected cold reason");
+	const harness = chatHarness({ server, route: { caching: false } });
+	const { folds } = observed(harness);
+	try {
+		harness.reopen(id);
+		await harness.submit("go on");
+		deepStrictEqual(results(wireElements(server.requests.at(-1) as never)), [`result:${stub}`, `result:${RECORD}`]);
+		const entries = harness.session.readEntries() as SessionEntry[];
+		const [record, ...rest] = evictions(entries);
+		ok(record);
+		deepStrictEqual(rest, [], "the adoption is the only record; S0 finds nothing further");
+		strictEqual(record.policyId, "superseded-legacy-v6");
+		deepStrictEqual(
+			record.evicted.map((item) => [item.ref.entry, item.reason, item.by, item.marker]),
+			[["r1", "superseded_call", "r2", stub]],
+		);
+		const adopted = folds.find((fold) => fold.legacy !== undefined);
+		ok(adopted);
+		deepStrictEqual(adopted.legacy, { outcome: "adopted", results: 1, earliest: "r1", priorState: "unknown" });
+		deepStrictEqual(adopted.stages[0], {
+			stage: "superseded",
+			outcome: "committed",
+			reason: "adopted",
+			recordId: record.turnId,
+		});
+		const alias = record.evicted[0]?.alias;
+		ok(alias);
+		const recalled = resolveRecall(entries, foldWorkingSet(entries), alias);
+		ok(recalled.ok, JSON.stringify(recalled));
+		strictEqual(recalled.result.body, RECORD);
+	} finally {
+		await harness.close();
+	}
 
-	const cached = await drive(undefined);
-	strictEqual(cached.requests.length, 3);
-	deepStrictEqual(toolResults(cached.requests[2]), [RECORD, RECORD]);
-	// Astra r1-5: the window checks price the request the provider receives. The aged route's third request is
-	// about one 40 KB read (10K tokens) smaller, and so is its published budget; the requests before it agree.
-	deepStrictEqual(uncached.published.slice(0, 2), cached.published.slice(0, 2));
-	const [agedTokens, wholeTokens] = [uncached.published[2] ?? 0, cached.published[2] ?? 0];
-	ok(wholeTokens - agedTokens > 9_000 && wholeTokens - agedTokens < 10_500, `${agedTokens} vs ${wholeTokens}`);
+	const again = chatHarness({ server, route: { caching: false } });
+	const later = observed(again);
+	try {
+		again.reopen(id);
+		await again.submit("and again");
+		strictEqual(evictions(again.session.readEntries() as SessionEntry[]).length, 1, "a second open adopts nothing");
+		ok(later.folds.every((fold) => fold.legacy === undefined));
+		deepStrictEqual(results(wireElements(server.requests.at(-1) as never)), [`result:${stub}`, `result:${RECORD}`]);
+	} finally {
+		await again.close();
+	}
+});
+
+it("a v6 session on a cached route releases its aging stubs and writes no record (§1.5)", {
+	timeout: 30_000,
+}, async (t) => {
+	const server = await startCaptureServer(() => ({ text: "answered" }));
+	t.after(() => server.close());
+	const id = await seededV6(server);
+	const harness = chatHarness({ server, route: { caching: true } });
+	const { folds } = observed(harness);
+	try {
+		harness.reopen(id);
+		await harness.submit("go on");
+		deepStrictEqual(evictions(harness.session.readEntries() as SessionEntry[]), []);
+		deepStrictEqual(results(wireElements(server.requests.at(-1) as never)), [`result:${RECORD}`, `result:${RECORD}`]);
+		const released = folds.find((fold) => fold.legacy !== undefined);
+		ok(released, JSON.stringify(folds));
+		deepStrictEqual(released.legacy, { outcome: "legacy_aging_released", results: 1, priorState: "unknown" });
+	} finally {
+		await harness.close();
+	}
 });

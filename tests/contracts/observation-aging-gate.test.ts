@@ -5,19 +5,21 @@ import { afterEach, beforeEach, it } from "node:test";
 import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ToolName } from "../../src/core/tool-names.js";
+import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
+import { SUPERSEDED_FLOOR_BYTES, selectSuperseded } from "../../src/domains/context/working-set/superseded.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
 	type RuntimeDescriptor,
 } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
-import type { DeclaredToolEffect } from "../../src/engine/loop-guard.js";
+import { callRepeatsAsRead, type DeclaredToolEffect, effectiveCallIdentity } from "../../src/engine/loop-guard.js";
 import type { AgentMessage, Model } from "../../src/engine/types.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
-import { ageObservations, OBSERVATION_AGING_BATCH_BYTES } from "../../src/session-control/observation-aging.js";
 import { createGatewayTool } from "../../src/tools/gateway/index.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -37,21 +39,31 @@ afterEach(() => {
 	env.restore();
 });
 
-const BIG = `big\n${"r".repeat(OBSERVATION_AGING_BATCH_BYTES + 1024)}`;
+const BIG = `big\n${"r".repeat(SUPERSEDED_FLOOR_BYTES + 1024)}`;
 const text = (message: AgentMessage | undefined): string =>
 	((message as { content?: Array<{ text?: string }> } | undefined)?.content ?? []).map((block) => block.text).join("");
 
-/** The same call twice with a result past the batch threshold each time. */
-function repeated(name: string, args: Record<string, unknown>): AgentMessage[] {
-	return ["a", "b"].flatMap((id) => [
+const AT = "2026-09-21T09:00:00.000Z";
+/** The same call twice, each answered with a result past the floor, as ledger rows. */
+function repeated(name: string, args: Record<string, unknown>): SessionEntry[] {
+	return ["a", "b"].flatMap((id, index) => [
 		{
+			kind: "message",
+			turnId: `call-${id}`,
+			parentTurnId: index === 0 ? null : "result-a",
+			timestamp: AT,
 			role: "assistant",
-			content: [{ type: "toolCall", id, name, arguments: args }],
-			stopReason: "toolUse",
-			timestamp: 0,
+			payload: { content: [{ type: "toolCall", id, name, arguments: args }], stopReason: "toolUse" },
 		},
-		{ role: "toolResult", toolCallId: id, toolName: name, content: [{ type: "text", text: BIG }], timestamp: 0 },
-	]) as unknown as AgentMessage[];
+		{
+			kind: "message",
+			turnId: `result-${id}`,
+			parentTurnId: `call-${id}`,
+			timestamp: AT,
+			role: "tool_result",
+			payload: { toolCallId: id, toolName: name, result: { content: [{ type: "text", text: BIG }] } },
+		},
+	]) as SessionEntry[];
 }
 
 const STEP = "extension_wtfp__next_step";
@@ -64,36 +76,46 @@ const EFFECTS: Record<string, DeclaredToolEffect> = {
 };
 const declared = (tool: string): DeclaredToolEffect | undefined => EFFECTS[tool];
 
-function aged(name: string, args: Record<string, unknown>): boolean {
-	const messages = repeated(name, args);
-	const out = ageObservations(messages, new Set(), declared);
-	return out.batch !== null && text(out.messages[1]).startsWith("[observation aged]");
+/** Whether S0 selects the earlier of two identical calls, classified by the loop guard as the session does. */
+function superseded(name: string, args: Record<string, unknown>): boolean {
+	const entries = repeated(name, args);
+	const selected = selectSuperseded({
+		entries,
+		sourceIds: entries.map((entry) => entry.turnId),
+		view: foldWorkingSet([]),
+		classify: (tool, callArgs) => ({
+			identity: effectiveCallIdentity(tool, callArgs),
+			read: callRepeatsAsRead(tool, callArgs, declared),
+		}),
+	});
+	if (selected.length === 0) return false;
+	deepStrictEqual(
+		selected.map((candidate) => [candidate.ref.entry, candidate.by]),
+		[["result-a", "result-b"]],
+	);
+	return true;
 }
 
-it("only a call A1 reads as making no change is stubbed past the threshold; a step tool never is (WTF-P 0.8.3 C3)", () => {
+it("only a call A1 reads as making no change is superseded; a step tool never is (WTF-P 0.8.3 C3)", () => {
 	// Extension tools: no annotations, or declared neither, answer the same arguments with a new state.
-	strictEqual(aged("extension_wtfp__unannotated", {}), false, "an extension tool with no annotations");
-	strictEqual(aged(STEP, {}), false, "a step tool declared neither read-only nor idempotent");
-	strictEqual(aged(READER, { path: "intro.md" }), true, "a read-only extension tool");
-	strictEqual(aged(RECORDER, { path: "intro.md" }), true, "an idempotent extension tool");
+	strictEqual(superseded("extension_wtfp__unannotated", {}), false, "an extension tool with no annotations");
+	strictEqual(superseded(STEP, {}), false, "a step tool declared neither read-only nor idempotent");
+	strictEqual(superseded(READER, { path: "intro.md" }), true, "a read-only extension tool");
+	strictEqual(superseded(RECORDER, { path: "intro.md" }), true, "an idempotent extension tool");
 	// A gateway call is judged as the capability it runs.
-	strictEqual(aged("gateway", { op: "call", capability: STEP, args: {} }), false);
-	strictEqual(aged("gateway", { op: "call", capability: READER, args: { path: "intro.md" } }), true);
-	// Builtins: read-class tools and plain-read bash age; a bash command that writes or runs a program does not.
-	strictEqual(aged("read", { path: "intro.md" }), true);
-	strictEqual(aged("grep", { pattern: "x" }), true);
-	strictEqual(aged("bash", { command: "cat intro.md | wc -l" }), true);
-	strictEqual(aged("bash", { command: "make build" }), false);
-	strictEqual(aged("bash", { command: "cat intro.md > copy.md" }), false);
-	// Typed git: an inspection ages, a commit does not.
-	strictEqual(aged("git", { op: "status" }), true);
-	strictEqual(aged("git", { op: "commit", message: "x" }), false);
+	strictEqual(superseded("gateway", { op: "call", capability: STEP, args: {} }), false);
+	strictEqual(superseded("gateway", { op: "call", capability: READER, args: { path: "intro.md" } }), true);
+	// Builtins: read-class tools and plain-read bash qualify; a bash command that writes or runs a program does not.
+	strictEqual(superseded("read", { path: "intro.md" }), true);
+	strictEqual(superseded("grep", { pattern: "x" }), true);
+	strictEqual(superseded("bash", { command: "cat intro.md | wc -l" }), true);
+	strictEqual(superseded("bash", { command: "make build" }), false);
+	strictEqual(superseded("bash", { command: "cat intro.md > copy.md" }), false);
+	// Typed git: an inspection qualifies, a commit does not.
+	strictEqual(superseded("git", { op: "status" }), true);
+	strictEqual(superseded("git", { op: "commit", message: "x" }), false);
 	// Any other builtin may return a new state for the same arguments.
-	strictEqual(aged("monitor", { mode: "collect" }), false);
-
-	// A refused step result keeps every byte, so the request is the ledger's.
-	const messages = repeated(STEP, {});
-	deepStrictEqual(ageObservations(messages, new Set(), declared).messages, messages);
+	strictEqual(superseded("monitor", { mode: "collect" }), false);
 });
 
 const target = { id: "aging-gate-fixture", runtime: "litellm", url: "http://fixture.invalid:4000" };
@@ -135,7 +157,7 @@ function transport(tool: string) {
 	return { fetch, requests };
 }
 
-/** One uncached-route turn that calls the extension tool twice, with the registry's declared effect. */
+/** One uncached-route turn that calls the extension tool twice; S0 reads the registry's declared effect. */
 async function drive(effect: DeclaredToolEffect): Promise<AgentMessage[][]> {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
@@ -179,6 +201,7 @@ async function drive(effect: DeclaredToolEffect): Promise<AgentMessage[][]> {
 		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
+		readSessionEntries: () => (session.current() ? session.readEntries() : []),
 		toolRegistry: registry,
 		bus: context.bus,
 		createAgent: (options) =>
@@ -219,7 +242,7 @@ it("the session reads a registered tool's declared effect: a step tool's earlier
 
 	const reader = await drive({ readOnly: true, idempotent: false });
 	strictEqual(reader.length, 3);
-	const [stub, fresh] = toolResults(reader[2]);
-	ok(stub?.startsWith(`[observation aged] ${STEP} {} returned`), stub?.slice(0, 200));
+	const [marker, fresh] = toolResults(reader[2]);
+	ok(marker?.startsWith("[evicted ref=r1 reason=superseded_call by="), marker?.slice(0, 200));
 	ok(fresh?.startsWith("step 2\n"));
 });
