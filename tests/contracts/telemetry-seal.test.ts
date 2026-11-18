@@ -76,7 +76,7 @@ test("a sealed session scope verifies from its own files and fails on one flippe
 	});
 });
 
-test("a run's verified seal is walked once, however many frames ask for it", async () => {
+test("a run's verified seal is walked once, and an open run's scope read once per view, however many frames ask", async () => {
 	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-seal-frames-"));
 	const directory = telemetrySessionDirectory(stateDir, "ses_frames");
 	const context: TelemetryContext = { sessionId: "ses_frames", agent: { role: "main", id: "ses_frames" } };
@@ -108,20 +108,21 @@ test("a run's verified seal is walked once, however many frames ask for it", asy
 		parent: null,
 	} as never;
 	const reads = { sealed: 0, running: 0 };
-	const view = telemetryView(
-		source,
-		(runId) => {
-			reads[runId as keyof typeof reads] += 1;
-			return runId === "sealed" ? sealed : unsealed;
-		},
-		new Map(),
-	);
+	const verified = new Map();
+	const scope = (runId: string) => {
+		reads[runId as keyof typeof reads] += 1;
+		return runId === "sealed" ? sealed : unsealed;
+	};
+	const view = telemetryView(source, scope, verified);
 	for (let frame = 0; frame < 3; frame += 1) {
 		strictEqual(view.run("sealed")?.seal?.status, "verified");
 		strictEqual(view.run("running")?.seal?.status, "unsealed");
 	}
-	deepStrictEqual(reads, { sealed: 1, running: 3 });
+	deepStrictEqual(reads, { sealed: 1, running: 1 });
 	strictEqual(view.run("absent"), null);
+	// A new view may hold new journal facts, so it reads the open run's scope again.
+	strictEqual(telemetryView(source, scope, verified).run("running")?.seal?.status, "unsealed");
+	deepStrictEqual(reads, { sealed: 1, running: 2 });
 });
 
 test("a verified run cache follows a reopened and resealed journal", async () => {

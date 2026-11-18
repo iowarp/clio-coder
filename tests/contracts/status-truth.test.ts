@@ -1738,6 +1738,21 @@ test("a long silence states its evidence age, what is usual and the limit, and n
 		silenceNoteForms({ ...(waiting as object), phase: "tool_running" } as never, at, DEFAULT_RETRY_SETTINGS, null),
 		null,
 	);
+	// The route's history folds every recorded call, so only a sentence that states it reads it.
+	const unread = () => {
+		throw new Error("history read for a sentence that does not state it");
+	};
+	silenceNoteForms(
+		{ ...(waiting as object), lastMeaningfulAt: at - 60_000 } as never,
+		at,
+		DEFAULT_RETRY_SETTINGS,
+		unread,
+	);
+	silenceNoteForms(streaming, at, DEFAULT_RETRY_SETTINGS, unread);
+	strictEqual(
+		silenceNoteForms(waiting, at, DEFAULT_RETRY_SETTINGS, () => ({ calls: 3, slowestMs: 8_000 }))?.[0],
+		first({ calls: 3, slowestMs: 8_000 }),
+	);
 });
 
 test("a tool's run is not model silence: the next call's wait never counts from the last call's first byte", () => {

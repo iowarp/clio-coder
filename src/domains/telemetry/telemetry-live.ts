@@ -50,7 +50,7 @@ import {
 	turnsSum,
 	whyStopped,
 } from "./read-model.js";
-import type { TelemetryScopeFiles } from "./seal.js";
+import type { SealVerdict, TelemetryScopeFiles } from "./seal.js";
 
 /**
  * The live telemetry read model (#434 §11). It never reads a journal on a render path and never folds per token:
@@ -108,6 +108,12 @@ export function telemetryView(
 	verifiedRuns: Map<string, VerifiedRun> = new Map(),
 ): LocalView {
 	let session: SessionTelemetryV1 | undefined;
+	// A run still open has no seal or result to verify, so this view reads its scope once and every frame after reuses
+	// it; the DTO is still built per call so its elapsed time advances while the journal is quiet.
+	const openScopes = new Map<
+		string,
+		{ source: JournalSource; files: TelemetryScopeFiles | null; seal: SealVerdict | null }
+	>();
 	return {
 		sessionId: source.sessionId,
 		seeding: source.journal.seeding === true,
@@ -124,9 +130,15 @@ export function telemetryView(
 			if (!run) return null;
 			const verified = verifiedRuns.get(runId);
 			if (verified?.source === run) return verified.telemetry;
-			const telemetry = runTelemetry(runId, run, {}, scope(runId));
+			const open = openScopes.get(runId);
+			if (open?.source === run) return runTelemetry(runId, run, {}, open.files, open.seal);
+			const files = scope(runId);
+			const telemetry = runTelemetry(runId, run, {}, files);
 			if (telemetry.seal?.status === "verified") verifiedRuns.set(runId, { source: run, telemetry });
 			else verifiedRuns.delete(runId);
+			const tip = run.records.at(-1)?.k;
+			if (telemetry.settled === null && tip !== "run.sealed" && tip !== "share.sealed")
+				openScopes.set(runId, { source: run, files, seal: telemetry.seal });
 			return telemetry;
 		},
 		runEnqueued: (runId) => runEnqueued(source, runId),
