@@ -2322,9 +2322,9 @@ function resultContractReminderForm(contract: ResultContract): string | null {
 }
 
 /**
- * One line naming the exact form of the final message, appended to each work
- * round's tool results so it is the most recent instruction whenever the model
- * decides to stop. A recipe that states its contract only at the end of a long
+ * One line naming the exact form of the final message, sent as a host
+ * reminder on the request tail after each work round's tool results so it is
+ * the most recent instruction whenever the model decides to stop. A recipe that states its contract only at the end of a long
  * system prompt loses it to a small model's recency: a 27B reviewer wrote a
  * correct review as Markdown three times, and passed once the same line moved
  * to the top of the recipe (WTF-P run mbh8qfocfm9p).
