@@ -109,6 +109,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- why-stopped names the tool boundary when a harness stop (autonomy cap, cancel) lands after a call that asked for tools (bt-26 N2g).
+- A turn steered mid-run settles with every model call it opened and its cause, so a headless `--timeout` after a steer reports `shutdown` (bt-26 N2h).
+- The sealed run's tools row no longer counts an ask refused by a `--timeout` abort as blocked; decisions already counted it as a permission request (bt-15 c14a).
 - The finish contract credits a passing check (bash, `verify`, operator `!`, or declared) only while no later edit has retired it, so edit-test-edit no longer finishes "checks passed" and the high-rigor acceptance gate no longer passes on a stale check, for the main agent and dispatched workers. Any shell or `!` check pass the shared check fold still holds is credited under its observed name, so a green `cargo clippy`, `mypy .`, `go vet` or `ruff check` after the last edit satisfies the gate (x8-1).
 - Read-only checks from other ecosystems now settle a recorded outcome instead of reading as unknown: `cargo check`/`clippy`, `go vet`/`build`, `gofmt -l`, `mypy`, `pyright`, `ruff check`, `prettier --check`, `biome check`, `dotnet test`, `rspec`, `phpunit`, `deno`, `playwright`, `cypress`, `tox`, `nox`, `make test`/`check`/`lint`, and runs behind `poetry`, `pipenv`, `hatch`, `pdm`, `rye` or `bundle exec`. Their `--fix` and `--write` forms stay writers (x8-2).
 - A write into a scratch root or temp dir inside the workspace now retires standing check passes (x8-4).
