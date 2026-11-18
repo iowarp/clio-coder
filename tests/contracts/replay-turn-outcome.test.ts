@@ -899,7 +899,7 @@ test("the TUI echoes an operator command and hands the host the same line to rec
 	]);
 });
 
-test("/export reports a workspace file by its relative path", () => {
+test("/export reports a workspace file by its relative path, after a notice that paints before the render", async () => {
 	const workspace = mkdtempSync(join(tmpdir(), "clio-export-notice-"));
 	const blocks: Array<(width: number) => string[]> = [];
 	const target = join(workspace, ".clio-coder", "exports", "session.html");
@@ -913,12 +913,17 @@ test("/export reports a workspace file by its relative path", () => {
 			requestRender() {},
 			now: () => new Date("2026-09-23T12:00:00Z"),
 		} as unknown as InteractiveSlashRuntimeDeps);
-		runtime.context.exportTranscript?.(target);
+		const pending = runtime.context.exportTranscript?.(target);
+		const shown = () =>
+			blocks
+				.flatMap((block) => block(100))
+				.map(stripTerminalSequences)
+				.join("\n");
+		assert.equal(existsSync(target), false);
+		assert.match(shown(), /\[\/export\] exporting session session/u);
+		await pending;
 		assert.equal(existsSync(target), true);
-		const notice = blocks
-			.flatMap((block) => block(100))
-			.map(stripTerminalSequences)
-			.join("\n");
+		const notice = shown();
 		assert.match(notice, /\[\/export\] wrote \d+ lines to \.clio-coder\/exports\/session\.html/u);
 		assert.doesNotMatch(notice, new RegExp(workspace));
 	} finally {
