@@ -488,6 +488,11 @@ describe("step turns start from a compact state on small or uncached routes", ()
 			return tracker;
 		};
 		ok(settled().begin(constraints, BODY, true, a)?.includes("Session A finished the paper."));
+		// m2b-D2: a new session is created at its first submit, after step one began; step one still seeds the chain.
+		const created = createStepStartTracker();
+		strictEqual(created.begin(constraints, BODY, false, { sessionId: null, leafTurnId: null }), null);
+		created.settle(constraints, "Step one in the new session.", true, a);
+		ok(created.begin(constraints, BODY, true, a)?.includes("Step one in the new session."));
 		// A resumed session B invoking the same template never takes A's summary as its checkpoint lead.
 		strictEqual(settled().begin(constraints, BODY, false, { sessionId: "session-b", leafTurnId: "a-leaf" }), null);
 		// A tree navigation inside A left the settled leaf.

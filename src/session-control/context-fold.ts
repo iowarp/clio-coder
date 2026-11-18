@@ -45,6 +45,7 @@ import type { ContinuityReductionHooks } from "./continuity-controller.js";
 import {
 	buildModelReplayAgentMessagesFromTurns,
 	continuityContextFromSession,
+	continuityRenderTime,
 	renderModelReplay,
 } from "./model-session-replay.js";
 import { legacyAgingOnPath } from "./observation-aging.js";
@@ -272,16 +273,15 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 
 	const refreshAgentMessagesFromSession = (agentRuntime: AgentRuntime): ReadonlyArray<SessionEntry> => {
 		const refreshedEntries = deps.readSessionEntries?.() ?? [];
-		replaceEngineMessages(
-			agentRuntime.agent,
-			buildModelReplayAgentMessagesFromTurns(refreshedEntries, {
-				...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
-				// The post-compaction rebuild is where an accepted note has to
-				// survive: wiring continuity only into /fork would lose it on the
-				// very refresh the reduction triggers.
-				continuity: continuityContextFromSession(deps.session),
-			}),
-		);
+		const messages = buildModelReplayAgentMessagesFromTurns(refreshedEntries, {
+			...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
+			// The post-compaction rebuild is where an accepted note has to
+			// survive: wiring continuity only into /fork would lose it on the
+			// very refresh the reduction triggers.
+			continuity: continuityContextFromSession(deps.session),
+		});
+		replaceEngineMessages(agentRuntime.agent, messages);
+		state.continuityAtMs = continuityRenderTime(messages) ?? null;
 		state.replayedContextMessages = [];
 		port.syncCodexConfiguration(agentRuntime);
 		return refreshedEntries;
@@ -531,6 +531,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 				threshold: compactionThreshold,
 				target: workingSetTarget,
 				triggerFraction: () => input.triggerFraction(estimate.tokens),
+				prefixTokens: estimate.breakdown.systemPromptTokens + estimate.breakdown.toolSchemaTokens,
 			});
 			const policyInput = selectionInput(entries, session, settings, {
 				tokens: port.liveContextEstimate(agentRuntime, pendingUserText).tokens,

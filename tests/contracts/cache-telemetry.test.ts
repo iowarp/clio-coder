@@ -8,6 +8,15 @@ import {
 } from "../../src/core/cache-telemetry.js";
 import type { CallSettled, CallUsage } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir } from "../../src/core/xdg.js";
+import type {
+	ContinuityCheckpointPayload,
+	HandoffEvent,
+	HandoffIdentity,
+	HandoffPolicy,
+} from "../../src/domains/session/continuity/contract.js";
+import { validateContinuityNote } from "../../src/domains/session/continuity/note.js";
+import { resolveContinuityProjection } from "../../src/domains/session/continuity/projection.js";
+import type { SessionEntryInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import {
 	cachePhysics,
@@ -20,7 +29,11 @@ import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
-import { type ReceiptJournalRecord, verifyAttemptReceipts } from "../../src/session-control/attempt-receipt.js";
+import {
+	type AttemptReceipt,
+	type ReceiptJournalRecord,
+	verifyAttemptReceipts,
+} from "../../src/session-control/attempt-receipt.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import { type CaptureScript, chatHarness, startCaptureServer, wireElements } from "../harness/context-capture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -340,6 +353,35 @@ test("the receipt verifier reports each attempt kind and reconciles fold decisio
 				: record,
 		);
 	const earlier = calls.slice(0, -1).map(() => "verified");
+	// Codex: an effort baseline and a change sit on the path just before the last user turn, which carries the update.
+	const third = [...entries].reverse().find((entry) => entry.kind === "message" && entry.role === "user");
+	ok(third);
+	const effort = (turnId: string, parentTurnId: string | null, level: string, initial: boolean): SessionEntry =>
+		({
+			kind: "thinkingLevelChange",
+			turnId,
+			parentTurnId,
+			timestamp: third.timestamp,
+			thinkingLevel: level,
+			effectiveEffort: level,
+			...(initial ? { configurationInitial: true } : {}),
+		}) as SessionEntry;
+	const efforted = entries.flatMap((entry) =>
+		entry === third
+			? [
+					effort("effort-base", third.parentTurnId, "high", true),
+					effort("effort-low", "effort-base", "low", false),
+					{ ...third, parentTurnId: "effort-low" },
+				]
+			: [entry],
+	);
+	const withCodex = (codex: NonNullable<AttemptReceipt["codex"]>) =>
+		rewritten((record) =>
+			record.k === "call.settled"
+				? { ...record, data: { ...last, cache: { ...last.cache, receipt: { ...last.cache.receipt, codex } } } }
+				: record,
+		);
+	const lowered = { initialEffort: "high", updates: [{ position: third.turnId, effort: "low" }] };
 	const table: ReadonlyArray<[string, Partial<Parameters<typeof verifyAttemptReceipts>[0]>, string[]]> = [
 		["every main attempt matches the receipt taken at its send", {}, [...earlier, "verified"]],
 		["a prewarm", { records: relabelled("prewarm") }, [...earlier, "not-verifiable (prewarm)"]],
@@ -366,6 +408,21 @@ test("the receipt verifier reports each attempt kind and reconciles fold decisio
 				),
 			},
 			[...earlier, "not-verifiable (native checkpoint unavailable)"],
+		],
+		[
+			"a Codex effort the ledger re-derives",
+			{ entries: efforted, records: withCodex(lowered) },
+			[...earlier, "verified"],
+		],
+		[
+			"a Codex effort the ledger does not imply",
+			{ entries: efforted, records: withCodex({ ...lowered, updates: [] }) },
+			[...earlier, "mismatch (codex effort differs)"],
+		],
+		[
+			"a Codex effort the ledger does not name",
+			{ records: withCodex(lowered) },
+			[...earlier, "not-verifiable (codex effort not on the ledger)"],
 		],
 		[
 			"a peer-owned call",
@@ -395,4 +452,110 @@ test("the receipt verifier reports each attempt kind and reconciles fold decisio
 	deepStrictEqual(decisions({}), { missing: [], duplicate: [], orphan: [] }, "reconciled by record id");
 	deepStrictEqual(decisions({ records: records.filter((record) => record !== fold) }).missing, [checkpoint.turnId]);
 	deepStrictEqual(decisions({ records: [...records, fold] }).duplicate, [checkpoint.turnId]);
+});
+
+test("a late verify renders a continuity note at the clock its attempt rendered it, not its own (ContextFold CF-9, F14)", {
+	timeout: 30_000,
+}, async () => {
+	const preparedAtMs = Date.now() - 1_000;
+	const deadline = preparedAtMs + 60_000;
+	const admitted = validateContinuityNote("A: finish the parser rewrite; the failing case is a nested fence");
+	ok(admitted.ok);
+	const at = new Date(preparedAtMs).toISOString();
+	const policy: HandoffPolicy = {
+		preparedAtMs,
+		automaticDeadlineAtMs: deadline,
+		maxAttempts: 2,
+		maxSummaryCallsPerAttempt: 2,
+		additionalSummaryRetriesPerCall: 0,
+		maxSummaryStreamInvocations: 4,
+		flushRetryLimit: 3,
+	};
+	// A ready handoff whose automatic window is still open when the attempt renders it.
+	const handoff = (sessionId: string): SessionEntryInput[] => {
+		const identity: HandoffIdentity = {
+			handoffId: "h",
+			preparedEntryId: "prep",
+			commitId: "commit",
+			commitEntryId: "commit-entry",
+			originSessionId: sessionId,
+			branchAnchorTurnId: "m2",
+			initiatingTurnId: "m1",
+			toolCallId: "tc",
+			sourceRevision: "lb-1-00000000000000ff",
+		};
+		const step = (entryId: string, prevEntryId: string | null, sequence: number, attempt: number, event: HandoffEvent) =>
+			({
+				kind: "handoffTransaction",
+				turnId: entryId,
+				parentTurnId: "m2",
+				timestamp: at,
+				schemaVersion: 1,
+				identity,
+				transition: { entryId, prevEntryId, sequence, attempt },
+				event,
+			}) as unknown as SessionEntryInput;
+		const transition = { entryId: "commit-entry", prevEntryId: "reduce", sequence: 2, attempt: 1 };
+		const continuity = {
+			schemaVersion: 1,
+			identity,
+			accepted: admitted.accepted,
+			policy,
+			commit: {
+				outcome: "summarized",
+				entry: { turnId: "commit-entry", parentTurnId: "m2", timestamp: at },
+				transition,
+				summaryRef: "summary",
+				tokensBefore: 30_000,
+				tokensAfter: 9_000,
+			},
+			state: { transition, event: { phase: "ready" }, activeResume: null, delivery: null },
+		} as unknown as ContinuityCheckpointPayload;
+		return [
+			step("prep", null, 0, 0, { phase: "prepared", accepted: admitted.accepted, policy }),
+			step("reduce", "prep", 1, 1, { phase: "reducing" }),
+			{
+				kind: "compactionSummary",
+				turnId: "summary",
+				parentTurnId: "m2",
+				timestamp: at,
+				summary: "earlier work summarized",
+				tokensBefore: 30_000,
+				firstKeptTurnId: "m2",
+				continuity,
+			} as unknown as SessionEntryInput,
+			{ kind: "continuityCommit", turnId: "commit-entry", parentTurnId: "m2", timestamp: at, continuity },
+		] as SessionEntryInput[];
+	};
+	const { entries, records } = await journaledSession(
+		() => ({ text: "answered" }),
+		async (harness) => {
+			const id = harness.session.current()?.id;
+			ok(id);
+			harness.session.append({ id: "m1", parentId: null, at, kind: "user", payload: { text: "first" } });
+			harness.session.append({ id: "m2", parentId: "m1", at, kind: "assistant", payload: { text: "second" } });
+			for (const entry of handoff(id)) harness.session.appendEntry(entry);
+			// A restore renders the ledger, the note's text with it, and installs that history.
+			harness.reopen(id);
+			await harness.submit("carry on");
+		},
+	);
+	const [sent] = settledCalls(records);
+	const renderedAt = sent?.cache.receipt?.continuityAtMs;
+	ok(renderedAt !== undefined && renderedAt >= preparedAtMs && renderedAt < deadline, "the receipt names its clock");
+	const realNow = Date.now;
+	Date.now = () => deadline + 1;
+	try {
+		const late = (input: Partial<Parameters<typeof verifyAttemptReceipts>[0]>) =>
+			verifyAttemptReceipts({ entries, records, ...input }).attempts.map((verdict) => verdict.status);
+		deepStrictEqual(late({}), ["verified"], "past the deadline, the attempt verifies at the clock it rendered at");
+		// The row is late: at the verify's own clock the fold has failed the window the attempt rendered as open.
+		const sessionId = sent?.cache.receipt?.owner?.sessionId;
+		ok(sessionId);
+		const action = (nowMs: number) => resolveContinuityProjection({ entries, sessionId, nowMs }).current?.action;
+		deepStrictEqual(action(Date.now()), { kind: "fail", reason: "deadline_exceeded" });
+		deepStrictEqual(action(renderedAt), { kind: "none" });
+	} finally {
+		Date.now = realNow;
+	}
 });

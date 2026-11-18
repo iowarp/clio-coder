@@ -9,6 +9,28 @@ export interface SummaryOutputBudget {
 	summaryRoom: number;
 }
 
+/**
+ * The reasoning share the trigger assumes on a reasoning route that has written no summary yet, so it keeps the
+ * summary room twice over rather than the route's whole output limit. The request itself may still ask for the limit.
+ */
+const DEFAULT_REASONING_SHARE = 0.5;
+
+/** The share of a summary call's output left for its text: past the observed reasoning share, or the default's. */
+function summaryTextShare(model: Pick<EngineModel, "provider" | "baseUrl" | "id" | "reasoning">): number {
+	return 1 - (summaryReasoningShare(model) ?? (model.reasoning ? DEFAULT_REASONING_SHARE : 0));
+}
+
+/**
+ * The output cap that leaves a summary `roomTokens` of text past the route's reasoning share, so a stated length
+ * budget is also the request's (bt-18 item 8).
+ */
+export function summaryOutputForRoom(
+	model: Pick<EngineModel, "provider" | "baseUrl" | "id" | "reasoning">,
+	roomTokens: number,
+): number {
+	return Math.ceil(roomTokens / summaryTextShare(model));
+}
+
 /** Tokens a checkpoint summary keeps in the next context: the reserve's room. */
 export function summaryRoomTokens(reserveTokens: number = DEFAULT_RESERVE_TOKENS): number {
 	return Math.max(1024, Math.floor(reserveTokens * 0.8));
@@ -20,15 +42,22 @@ export function summaryRoomTokens(reserveTokens: number = DEFAULT_RESERVE_TOKENS
  * overflow compaction with no way out. The summary text keeps the reserve's room
  * in the next context. A route that reasons spends output on reasoning first, so
  * the cap adds the reasoning share observed on that route, up to the model's
- * output limit; a reasoning route with nothing observed yet gets its whole limit.
+ * output limit; a reasoning route with nothing observed yet gets its whole limit. An `outputCap` bounds the cap
+ * further, and the room to what that cap leaves past reasoning: a chat-route summary on a small window keeps to the
+ * admissible reserve (bt-18).
  */
 export function summaryOutputBudget(
 	model: Pick<EngineModel, "provider" | "baseUrl" | "id" | "maxTokens" | "reasoning">,
 	reserveTokens: number = DEFAULT_RESERVE_TOKENS,
+	outputCap?: number,
 ): SummaryOutputBudget {
 	const outputLimit = Number.isFinite(model.maxTokens) && model.maxTokens >= 1 ? Math.floor(model.maxTokens) : undefined;
-	const summaryRoom = summaryRoomTokens(reserveTokens);
 	const reasoningShare = summaryReasoningShare(model);
+	const textShare = summaryTextShare(model);
+	const summaryRoom = Math.min(
+		summaryRoomTokens(reserveTokens),
+		outputCap === undefined ? Number.POSITIVE_INFINITY : summaryRoomTokens(outputCap * textShare),
+	);
 	const maxTokens =
 		outputLimit === undefined
 			? undefined
@@ -40,14 +69,11 @@ export function summaryOutputBudget(
 							: summaryRoom
 						: Math.ceil(summaryRoom / (1 - reasoningShare)),
 				);
-	return { maxTokens, summaryRoom };
+	return {
+		maxTokens: maxTokens === undefined || outputCap === undefined ? maxTokens : Math.min(maxTokens, outputCap),
+		summaryRoom,
+	};
 }
-
-/**
- * The reasoning share the trigger assumes on a reasoning route that has written no summary yet, so it keeps the
- * summary room twice over rather than the route's whole output limit. The request itself may still ask for the limit.
- */
-const DEFAULT_REASONING_SHARE = 0.5;
 
 /**
  * Tokens the automatic trigger keeps free beside the context for a compaction summary, so the summary still fits.

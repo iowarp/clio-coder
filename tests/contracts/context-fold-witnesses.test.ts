@@ -1,21 +1,34 @@
 import { deepStrictEqual, match, notDeepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Type } from "typebox";
 import type { DomainContext } from "../../src/core/domain-loader.js";
+import { withTelemetryContext } from "../../src/core/telemetry/context.js";
 import type { EventPayload } from "../../src/core/telemetry/events.js";
-import { telemetryHub } from "../../src/core/telemetry/hub.js";
+import { scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
 import { createWorkerContextGuard } from "../../src/domains/context/worker/pressure.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { selectSuperseded } from "../../src/domains/context/working-set/superseded.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
+import type { RunResultDraft } from "../../src/domains/dispatch/types.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import { resolveRuntimeTarget } from "../../src/domains/providers/runtime-resolution.js";
 import type { SessionContract, SessionEntryInput } from "../../src/domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
+import { openCallJournal, readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import {
+	freshShareSource,
+	planShare,
+	resolveShareScopes,
+	verifyShareArchive,
+	writeShare,
+} from "../../src/domains/telemetry/share.js";
 import { createEngineAgent, type EngineAgentHandle } from "../../src/engine/agent.js";
 import { callRepeatsAsRead, effectiveCallIdentity, lockedSynthesisFallbackText } from "../../src/engine/loop-guard.js";
 import { engineModels } from "../../src/engine/models.js";
@@ -39,6 +52,7 @@ import {
 import { recoveryAttemptHasOutput } from "../../src/session-control/turn-recovery.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
+import { runResultPath } from "../../src/tools/worker-evidence.js";
 import {
 	type CapturedRequest,
 	type CaptureReply,
@@ -47,6 +61,7 @@ import {
 	startCaptureServer,
 	wireElements,
 } from "../harness/context-capture.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 /**
@@ -297,6 +312,61 @@ describe("W7 (F8 -> CF-8): the step chain lives in the stream", () => {
 			const leaf5 = stepTurn("s5", leaf3, "continue", said("Stopped mid-step."));
 			dirty.settle(constraints, "Stopped mid-step.", false, at(leaf5), "s5-u");
 			strictEqual(createStepStartTracker(store).begin(constraints, "continue", true, at(leaf5)), null);
+
+			/** A live tracker that just settled step `id` after step three. */
+			const settledStep = (id: string) => {
+				const tracker = createStepStartTracker(store);
+				ok(tracker.begin(constraints, "continue", true, at(leaf3)));
+				const leaf = stepTurn(id, leaf3, "continue", said(`Step ${id} ran.`));
+				tracker.settle(constraints, `Step ${id} ran.`, true, at(leaf), `${id}-u`);
+				return { tracker, leaf };
+			};
+			/** What a reopen does first: replay the session onto its leaf. */
+			const reopen = (leaf: string) => {
+				const tracker = createStepStartTracker(store);
+				tracker.reset({ sessionId, leafTurnId: null }, leaf);
+				return tracker;
+			};
+			// m2b-D1: /tree away from a settled step leaf and back runs on full history, live and after a reopen alike.
+			const awayAndBack = (tracker: ReturnType<typeof createStepStartTracker>, leaf: string) => {
+				tracker.reset(at(leaf), leaf1);
+				tracker.reset(at(leaf1), leaf);
+				return tracker.begin(constraints, "continue", true, at(leaf));
+			};
+			const settled = settledStep("s6");
+			const reopenedLeaf = settledStep("s7").leaf;
+			deepStrictEqual(
+				[awayAndBack(settled.tracker, settled.leaf), awayAndBack(reopen(reopenedLeaf), reopenedLeaf)],
+				[null, null],
+			);
+
+			// A session switch writes nothing into the session left: returning resumes its chain, as a reopen does.
+			const switchedLeaf = settledStep("s8").leaf;
+			const switched = reopen(switchedLeaf);
+			// chat-loop resets after the switch: the session is already the new one, the leaf still the one left.
+			switched.reset({ sessionId: "other-session", leafTurnId: switchedLeaf }, "other-leaf");
+			switched.reset({ sessionId, leafTurnId: "other-leaf" }, switchedLeaf);
+			const resumed = switched.begin(constraints, "continue", true, at(switchedLeaf));
+			ok(resumed?.includes("Step s8 ran."));
+			strictEqual(reopen(switchedLeaf).begin(constraints, "continue", true, at(switchedLeaf)), resumed);
+
+			// /tree draws a step checkpoint on the path it compacted, not as a sibling of the next step's turn.
+			const checkpointId = "s9-checkpoint";
+			session.appendEntry({
+				kind: "compactionSummary",
+				turnId: checkpointId,
+				parentTurnId: reopenedLeaf,
+				summary: "Step checkpoint.",
+				tokensBefore: 100,
+				firstKeptTurnId: "",
+				messagesSummarized: 4,
+				isSplitTurn: false,
+				trigger: "step",
+			} as SessionEntryInput);
+			stepTurn("s9", reopenedLeaf, "continue", said("Step nine ran."));
+			const tree = session.tree();
+			deepStrictEqual(tree.nodesById[reopenedLeaf]?.children, [checkpointId]);
+			strictEqual(tree.nodesById["s9-u"]?.parentId, checkpointId);
 		} finally {
 			await session.close();
 		}
@@ -736,13 +806,23 @@ describe("W9 (F12 -> CF-3): a run judges its own evidence, not the projected arr
 describe("W10 (F10 -> CF-10): the council peer briefing", () => {
 	it("five seats, an oversized original briefing, multibyte answers and a failed seat: every peer is labeled", {
 		timeout: 30_000,
-	}, async () => {
+	}, async (t) => {
 		const labels = ["a", "b", "c", "d", "e"];
 		const seated: DispatchRequest[] = [];
-		const clipped: Array<EventPayload<"context.briefing_clipped">> = [];
-		const unsubscribe = telemetryHub().subscribe("context.briefing_clipped", (event) => {
-			clipped.push(event);
+		// The clips are read back from the session's own journal on disk, written through the real producer and sink:
+		// the dispatch tool runs under a gate host run whose journal opens only at its seal (bt-47 m2c-1).
+		const sessionId = "w10-session";
+		const root = await mkdtemp(path.join(tmpdir(), "w10-journal-"));
+		t.after(() => rm(root, { recursive: true, force: true }));
+		const directory = telemetrySessionDirectory(path.join(root, "state"), sessionId);
+		const writer = { clioCoderVersion: "0.0.0-test", piVersion: "test" };
+		const journal = await openCallJournal({
+			directory,
+			context: { sessionId, agent: { role: "main", id: sessionId } },
+			writer,
 		});
+		const PROVIDER_CAUSE =
+			"exit code 1; stderr: [worker] provider answered http 400\n400: Invalid model name passed in model=mini/zz";
 		let next = 0;
 		const tool = createDispatchTool({
 			dispatch: {
@@ -754,17 +834,24 @@ describe("W10 (F10 -> CF-10): the council peer briefing", () => {
 					// Seat c fails every round, so the judge as well as the second round sees a failed seat.
 					const failed = label === "c";
 					const answer = `${label} answers: ${"é".repeat(1_500)}`;
-					const events = (async function* () {
-						yield { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: answer }] } };
-					})();
 					const receipt = {
-						runId,
+						...fixtureReceiptDraft(fixtureEnvelope(runId)),
 						agentId: request.agentId,
 						exitCode: failed ? 1 : 0,
 						outcome: failed ? "failed" : "succeeded",
+						outcomeDetail: failed ? PROVIDER_CAUSE : null,
 						...(request.council ? { council: request.council } : {}),
 						...(request.gate ? { gate: request.gate } : {}),
-					};
+					} as RunResultDraft;
+					// A settled seat's result object sits in its run scope, where the council profile's read reaches it.
+					if (!failed) {
+						const resultPath = runResultPath(receipt);
+						mkdirSync(path.dirname(resultPath), { recursive: true });
+						writeFileSync(resultPath, JSON.stringify({ output: { text: answer } }));
+					}
+					const events = (async function* () {
+						yield { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: answer }] } };
+					})();
 					return { runId, events, finalPromise: Promise.resolve(receipt) };
 				},
 				abort() {},
@@ -774,19 +861,31 @@ describe("W10 (F10 -> CF-10): the council peer briefing", () => {
 			getAutonomy: () => "yolo",
 		});
 		try {
-			await tool.run(
-				{
-					mode: "council",
-					members: labels.map((label) => ({ label, target: "mini" })),
-					rounds: 2,
-					synthesis: "judge",
-					briefing: `Background: ${"context ".repeat(1_400)}`.slice(0, 11_500),
-					task: "Which module owns the clock?",
-				},
-				{} as never,
+			await withTelemetryContext({ sessionId, agent: { role: "main", id: sessionId } }, () =>
+				tool.run(
+					{
+						mode: "council",
+						members: labels.map((label) => ({ label, target: "mini" })),
+						rounds: 2,
+						synthesis: "judge",
+						briefing: `Background: ${"context ".repeat(1_400)}`.slice(0, 11_500),
+						task: "Which module owns the clock?",
+					},
+					{ sessionId, hostRun: { runId: "w10-host-run", lineage: { rootRunId: "w10-host-run", depth: 0 } } } as never,
+				),
 			);
 		} finally {
-			unsubscribe();
+			await journal.close();
+		}
+		const first = seated.filter((request) => request.council?.round === 1 && request.gate?.role === "member");
+		strictEqual(first.length, labels.length, "every seat sits a first round");
+		for (const request of first) {
+			const briefing = request.briefing ?? "";
+			ok(Buffer.byteLength(briefing, "utf8") <= 8 * 1024, "the round-1 briefing is within the cap");
+			match(
+				briefing,
+				/^\[council\] [\s\S]*\n\nBackground: context[\s\S]*\[clio: \d+ of \d+ bytes omitted from this excerpt\]/u,
+			);
 		}
 		const second = seated.filter((request) => request.council?.round === 2 && request.gate?.role === "member");
 		strictEqual(second.length, labels.length, "every seat sits a second round");
@@ -803,10 +902,12 @@ describe("W10 (F10 -> CF-10): the council peer briefing", () => {
 			const briefing = request.briefing ?? "";
 			ok(Buffer.byteLength(briefing, "utf8") <= COUNCIL_BRIEFING_CAP, `${recipient}'s briefing is within the cap`);
 			ok(!briefing.includes("\uFFFD"), `${recipient}'s briefing carries no replacement character`);
-			const failedStatus =
+			// Both paths give the failed seat its provider cause on one line.
+			const failedStatus = `${
 				request.gate?.role === "synthesis"
 					? "[c] failed; no final answer contributed."
-					: "[c] failed in prior round; no answer contributed.";
+					: "[c] failed in prior round; no answer contributed."
+			} Reason: outcome=failed: ${PROVIDER_CAUSE.replace("\n", " ")}`;
 			for (const peer of labels.filter((label) => label !== recipient)) {
 				strictEqual(briefing.split(`[${peer}]`).length, 2, `${recipient}'s briefing shows seat ${peer} exactly once`);
 				if (peer === "c") ok(briefing.includes(failedStatus), `${recipient}'s briefing gives seat c its failure status`);
@@ -815,6 +916,11 @@ describe("W10 (F10 -> CF-10): the council peer briefing", () => {
 					ok(
 						excerpt.startsWith(`[${peer}] ${peer} answers: ${"é".repeat(16)}`) && excerpt.endsWith("é".repeat(16)),
 						`${recipient}'s excerpt of seat ${peer} keeps whole é runs at its head and tail`,
+					);
+					const pointer = /; read output\.text in (\S+) for the whole answer\]/u.exec(excerpt);
+					ok(
+						pointer?.[1] !== undefined && existsSync(pointer[1]),
+						`${recipient}'s notice for ${peer} names a path that exists`,
 					);
 				}
 			}
@@ -826,11 +932,40 @@ describe("W10 (F10 -> CF-10): the council peer briefing", () => {
 			);
 		ok(!(judge[0]?.briefing ?? "").includes("[original briefing]"), "the judge carries the task outside its briefing");
 		match(judge[0]?.task ?? "", /Which module owns the clock\?/u);
+		const clipped = (await readCallJournal(directory)).records
+			.filter(({ record }) => record.k === "context.briefing_clipped")
+			.map(({ record }) => record.data as EventPayload<"context.briefing_clipped">);
 		deepStrictEqual(
-			clipped.map((event) => event.role).sort(),
-			[...second.map(() => "member"), "synthesis"].sort(),
-			"each clipped briefing is journaled",
+			clipped.map((event) => `${event.role}:${event.round}`).sort(),
+			[...first.map(() => "member:1"), ...second.map(() => "member:2"), "synthesis:2"].sort(),
+			"each clipped briefing is journaled in the session that convened the council",
 		);
+		// A report share of the live session keeps each clip's parts and hashes its run and group ids.
+		const { scopes, skipped } = resolveShareScopes(path.join(root, "state"), {
+			sessions: [sessionId],
+			runs: [],
+			repo: null,
+			since: null,
+			until: null,
+			live: "snapshot",
+		});
+		const report = planShare({ scopes, skipped, profile: "report", source: freshShareSource(), writer });
+		const archivePath = path.join(root, "report.tar.gz");
+		await writeShare(report, archivePath);
+		strictEqual(verifyShareArchive(await readFile(archivePath)).failure, null, "the report share verifies");
+		const shared = scanTelemetrySegment(report.scopes[0]?.journal ?? Buffer.alloc(0)).rows.flatMap((row) =>
+			row.kind === "record" && row.record.k === "context.briefing_clipped"
+				? [row.record.data as EventPayload<"context.briefing_clipped">]
+				: [],
+		);
+		strictEqual(shared.length, clipped.length, "every clip reaches the share");
+		for (const [index, event] of clipped.entries()) {
+			const copy = shared[index];
+			ok(copy, `clip ${index} is shared`);
+			deepStrictEqual(copy.parts, event.parts, "the share keeps the clip's parts");
+			ok(copy.runId.startsWith("anon_") && copy.runId !== event.runId, "the share hashes the clip's run id");
+			ok(copy.group.startsWith("anon_") && copy.group !== event.group, "the share hashes the clip's group");
+		}
 		for (const event of clipped) {
 			strictEqual(event.capBytes, COUNCIL_BRIEFING_CAP);
 			ok(event.bytes <= COUNCIL_BRIEFING_CAP && event.parts.length > 0);

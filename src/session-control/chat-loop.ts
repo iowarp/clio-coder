@@ -195,7 +195,7 @@ import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import { createHostInserts } from "./host-inserts.js";
 import { loopGuardContinuationDetail, TOOL_LOCK_RESET_DETAIL } from "./loop-guard-interrupt.js";
 import { createMessagePath } from "./message-path.js";
-import { continuityContextFromSession } from "./model-session-replay.js";
+import { continuityContextFromSession, continuityRenderTime } from "./model-session-replay.js";
 import type { NoticeSource } from "./notice-source.js";
 import {
 	createOperatorMemory,
@@ -2007,11 +2007,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		onModelRequestSent: (call) => messagePath.requestSent(call),
 		onModelCallSettled: (facts) => messagePath.callSettled(facts),
 		requestCursor: () =>
-			requestCursorOf(
-				deps.readSessionEntries?.() ?? [],
-				state.lastTurnId ?? null,
-				continuityContextFromSession(deps.session),
-			),
+			requestCursorOf(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? null, {
+				...continuityContextFromSession(deps.session),
+				...(state.continuityAtMs !== null ? { nowMs: state.continuityAtMs } : {}),
+			}),
 		...(deps.admitFlow !== undefined ? { admitFlow: deps.admitFlow } : {}),
 		emit: emitRuntimeEvent,
 		emitNotice,
@@ -4574,6 +4573,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			state.lastRunSnapshot = null;
 			// In place before the context resets, so it republishes on the history of the leaf arrived at.
 			state.replayedContextMessages = replayMessages ? [...replayMessages] : [];
+			state.continuityAtMs = continuityRenderTime(replayMessages) ?? null;
 			if (state.runtime) replaceEngineMessages(state.runtime.agent, [...state.replayedContextMessages]);
 			// The incoming leaf is the advisory branch identity for the new session.
 			// Ordinary appends advance `state.lastTurnId` from here without re-arming

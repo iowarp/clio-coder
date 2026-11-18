@@ -197,6 +197,7 @@ import {
 	toolNamesFromAgentState,
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
+import { codexEffortGeneration, codexEffortUpdates } from "./codex-effort.js";
 import { coldCacheNoticeText } from "./cold-reasons.js";
 import { footerTokens, renderCompactionSummaryLine } from "./compaction-lines.js";
 import type { HostInserts } from "./host-inserts.js";
@@ -205,7 +206,7 @@ import {
 	continuityContextFromSession,
 	renderModelReplay,
 } from "./model-session-replay.js";
-import { resolveFitOutputReserve, resolveTurnOutputReserve } from "./output-reserve.js";
+import { resolveFitOutputReserve, resolveSummaryOutputCap, resolveTurnOutputReserve } from "./output-reserve.js";
 import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
 import { extractTurnText } from "./session-replay-messages.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
@@ -258,6 +259,7 @@ export interface TurnContextDeps {
 					| "providerFallbackReason"
 					| "providerReplayFallback"
 					| "keepRecentTokens"
+					| "summaryOutputCap"
 					| "retainedTargetTokens"
 					| "requireFit"
 					| "preserveUserTurnId"
@@ -1776,13 +1778,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		};
 		const currentEffort = effortFor(runtime.runtimeResolution.effectiveThinkingLevel);
 		const entries = activeEntries();
-		let start = 0;
-		for (let index = 0; index < entries.length; index += 1) {
-			const entry = entries[index];
-			if (entry?.kind === "compactionSummary" || entry?.kind === "contextEviction" || entry?.kind === "modelChange")
-				start = index + 1;
-		}
-		const generation = entries.slice(start);
+		const generation = codexEffortGeneration(entries);
+		const start = entries.length - generation.length;
 		const baseline = generation.find((entry) => entry.kind === "thinkingLevelChange" && entry.configurationInitial);
 		let initialEffort = baseline?.kind === "thinkingLevelChange" ? baseline.effectiveEffort : undefined;
 		if (initialEffort === undefined) {
@@ -1829,20 +1826,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		}
 		// The admitted user is appended to Pi after commitMemoryTurn; message_end binds it (#423).
 		if (state.activeUserTurnId) available.add(state.activeUserTurnId);
-		const updates: Array<{ position: string; effort: string }> = [];
-		let desired = initialEffort;
-		let effective = initialEffort;
-		for (const entry of generation) {
-			if (entry.kind === "thinkingLevelChange" && !entry.configurationInitial) {
-				desired = entry.effectiveEffort ?? effortFor(entry.thinkingLevel);
-			}
-			if (entry.kind !== "message" || entry.role !== "user") continue;
-			if (!available.has(entry.turnId)) continue;
-			const position = entry.turnId;
-			if (desired === effective) continue;
-			updates.push({ position, effort: desired });
-			effective = desired;
-		}
+		const updates = codexEffortUpdates(
+			generation,
+			initialEffort,
+			available,
+			(entry) => entry.effectiveEffort ?? effortFor(entry.thinkingLevel),
+		);
 		const configuration: CodexConfiguration = { initialEffort, updates };
 		setEngineCodexConfiguration(runtime.agent, configuration);
 		thinkingUsesConfigurationUpdate = updates.at(-1)?.position === state.activeUserTurnId;
@@ -2314,6 +2303,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					| "livePrefix"
 					| "providerFallbackReason"
 					| "keepRecentTokens"
+					| "summaryOutputCap"
 					| "retainedTargetTokens"
 					| "requireFit"
 					| "preserveUserTurnId"
@@ -2328,6 +2318,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			| undefined = skillContextState !== undefined ? { skillContextState } : undefined;
 		if (pendingUserText !== undefined && state.activeUserTurnId === null && pendingUserIsOperator)
 			budget = { ...budget, pendingOperatorTurn: true };
+		// A summary written on this route shares its small window with the history it reads (bt-18).
+		const summaryCap = summaryOnChatRoute(agentRuntime, settings.context.compaction.model)
+			? resolveSummaryOutputCap(agentRuntime)
+			: undefined;
+		if (summaryCap !== undefined) budget = { ...budget, summaryOutputCap: summaryCap };
 		if (useRequestBudget) {
 			const estimate = liveContextEstimate(agentRuntime, pendingUserText);
 			const output = resolveFitOutputReserve(agentRuntime, estimate.tokens);
