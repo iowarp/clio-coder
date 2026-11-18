@@ -466,6 +466,7 @@ import {
 	settledVerifyCall,
 	typedValidationFactsFromObservedEffects,
 	typedValidationFactsFromVerifyCalls,
+	verificationWithHostVerdict,
 	verifyCallStart,
 } from "./run-findings.js";
 import { detectRunIdentity } from "./run-identity.js";
@@ -9955,7 +9956,10 @@ export function createDispatchBundle(
 						};
 					}
 				}
-				if (hostVerification !== undefined) receiptDraft.hostVerification = hostVerification;
+				if (hostVerification !== undefined) {
+					receiptDraft.hostVerification = hostVerification;
+					receiptDraft.verification = verificationWithHostVerdict(receiptDraft.verification, hostVerification);
+				}
 				if (remoteReturn && worktreeReceipt) {
 					// The remote commit's byproducts stay on the node, so the local commit never saw them.
 					const remoteLeft = remoteImport?.leftUncommitted;

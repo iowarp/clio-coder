@@ -858,6 +858,8 @@ export interface RunResultVerification {
 		| "read-only-agent"
 		| "no-validation-tool"
 		| "acp-external-unobserved"
+		/** The host ran the declared checks after the worker finished, and their verdict outranks the worker's own. */
+		| "host-verification"
 		/** No sealed receipt to read: it is missing, unreadable, or failed integrity. */
 		| "result-unavailable";
 }

@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { isVerifyListing } from "../../tools/verify/surface.js";
 import type { RunEffects } from "../safety/run-effects.js";
 import type {
+	RunHostVerification,
 	RunResultContractFact,
 	RunResultDraft,
 	RunResultQuality,
@@ -335,6 +336,27 @@ export function deriveRunVerification(
 		return { state: "unknown", basis: "acp-external-unobserved" };
 	}
 	return { state: "unverified", basis: "no-validation-tool" };
+}
+
+/**
+ * The run's verification once the host has judged it. The host ran the declared
+ * checks on the finished tree, so its verdict outranks the worker's own evidence,
+ * in the order the trust status reads them (src/domains/evidence/trust-status.ts):
+ * a pass counts only when a check executed for this run and none was reused from
+ * another run, and a failure only when some failing check did not also fail on the
+ * task base. Any other host verdict leaves the worker's evidence standing (bt-17).
+ */
+export function verificationWithHostVerdict(
+	verification: RunResultVerification,
+	host: RunHostVerification,
+): RunResultVerification {
+	if (verification.state === "not_applicable") return verification;
+	const executed = host.checks.some((check) => !check.memo && check.notRun === undefined);
+	const reused = host.checks.some((check) => check.memo);
+	if (host.status === "verified" && executed && !reused) return { state: "verified", basis: "host-verification" };
+	const changeFailed = host.checks.some((check) => check.exitCode !== 0 && check.baseComparison?.status !== "failed");
+	if (host.status === "rejected" && changeFailed) return { state: "unverified", basis: "host-verification" };
+	return verification;
 }
 
 /**
