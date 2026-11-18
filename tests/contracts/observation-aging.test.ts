@@ -5,6 +5,7 @@ import { afterEach, beforeEach, it } from "node:test";
 import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { supersededStageApplies } from "../../src/domains/context/index.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
@@ -20,6 +21,7 @@ import {
 	ageObservations,
 	createObservationAging,
 	OBSERVATION_AGING_BATCH_BYTES,
+	type ObservationAgingRoute,
 	observationAgingApplies,
 } from "../../src/session-control/observation-aging.js";
 import { createRegistry } from "../../src/tools/registry.js";
@@ -146,11 +148,20 @@ it("a repeat that delivered less than the earlier read supersedes nothing (Astra
 	strictEqual(text(aged.messages[7]), whole);
 });
 
-it("the gate admits small or uncached routes only; a cached frontier route is untouched", () => {
-	ok(observationAgingApplies({ modelTier: "small", promptCaching: true }));
-	ok(observationAgingApplies({ modelTier: "frontier", promptCaching: false }));
-	ok(!observationAgingApplies({ modelTier: "frontier", promptCaching: true }));
-	ok(!observationAgingApplies({ modelTier: "standard" }));
+it("the gate admits uncached routes only, as the S0 gate does; a cached route of any tier is untouched (bt-47 cf1j-a)", () => {
+	const table: ReadonlyArray<[ObservationAgingRoute, boolean]> = [
+		[{ modelTier: "small", promptCaching: true }, false],
+		[{ modelTier: "small", promptCaching: false }, true],
+		[{ modelTier: "standard", promptCaching: false }, true],
+		[{ modelTier: "standard", promptCaching: true }, false],
+		[{ modelTier: "frontier", promptCaching: false }, true],
+		[{ modelTier: "frontier", promptCaching: true }, false],
+		[{ modelTier: "standard" }, false],
+	];
+	for (const [route, admits] of table) {
+		strictEqual(observationAgingApplies(route), admits, JSON.stringify(route));
+		strictEqual(observationAgingApplies(route), supersededStageApplies(route), JSON.stringify(route));
+	}
 	const big = body(OBSERVATION_AGING_BATCH_BYTES + 1024, "big");
 	const messages = [
 		call("a", RECORD_TOOL, { id: 1 }),
@@ -162,7 +173,8 @@ it("the gate admits small or uncached routes only; a cached frontier route is un
 	const cached = aging.project(messages, { modelTier: "frontier", promptCaching: true }, "s");
 	strictEqual(cached.batch, null);
 	deepStrictEqual(cached.messages, messages);
-	const small = aging.project(messages, { modelTier: "small", promptCaching: true }, "s");
+	strictEqual(aging.project(messages, { modelTier: "small", promptCaching: true }, "s").batch, null);
+	const small = aging.project(messages, { modelTier: "small", promptCaching: false }, "s");
 	strictEqual(small.batch?.results, 1);
 	ok(text(small.messages[1]).startsWith("[observation aged]"));
 });

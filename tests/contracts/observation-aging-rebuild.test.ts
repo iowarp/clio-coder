@@ -57,7 +57,7 @@ it("a different session id starts the stubbed set over; the same one keeps it (W
 		},
 		{ role: "toolResult", toolCallId: id, toolName: "read", content: [{ type: "text", text: big }], timestamp: 0 },
 	]) as unknown as AgentMessage[];
-	const route = { modelTier: "small" as const };
+	const route = { promptCaching: false };
 	const aging = createObservationAging(declared);
 	strictEqual(aging.project(messages, route, "s1").batch?.results, 1);
 	const again = aging.project(messages, route, "s1");
