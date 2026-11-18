@@ -104,6 +104,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- `in` now means the uncached input everywhere: /usage, the exit card, the turn receipt and the footer show it beside the cache read, and whole-prompt figures (footer live chip, worker cards and table) are labelled `prompt` (bt-11).
+- A streaming edit's row no longer shows `+N -M` counts guessed from partial arguments; the applied row's diff is the only count (bt-11).
 - A check whose exit status a later command overwrote (`; echo`, `||`) no longer grounds a passed claim; grounding reports "unattributable-status" (bt-9).
 - A green claim against a red latest `verify` on the final tree now seals quality fail, as the bash equivalent does; verification stays unverified (bt-27).
 - code_nav names clio_docs in its remedy only when the run admits it, and a session's first thinking row records the route-supported level, not an unsupported selection (bt-37).
