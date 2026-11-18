@@ -124,6 +124,12 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Read-only inline python (`python -c`, heredoc) and jq no longer retire a standing check; a body that may write still reads as a change. (c17-a, verify3)
+- A bash check's pass is filed on the receipt under its full command. (x8-2)
+- A check after a known write on an earlier line or after `;` is credited. (bt-46 S2)
+- A heredoc-written script that a later step may run is read as code. (bt-low1 heredoc limit)
+- A check log that clobbers a file older than the run counts as a change. (bt-verify8b limit a)
+- The headless observed line names a standing dispatch run-record pass. (bt-verify7a limit)
 - A `<tool_call …>` opener with attributes is read as a written call. (c2b-2b/m2a-4)
 - An operator's cancel no longer names a failure route. (operator-cancel failureRoute)
 - A response that rewrites one file five times is stopped by the flood check. (bt-39 b)
