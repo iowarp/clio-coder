@@ -422,6 +422,8 @@ export interface AcpServerChat {
 	): TurnConstraints | undefined;
 	/** Replace provider context and the next persisted parent for a new or loaded session. */
 	resetForSession?(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void;
+	/** Resolves once the reset's next request is built and the context view republished from it (SPEC §0). */
+	nextRequestReady?(): Promise<void>;
 	/**
 	 * Mid-run guidance: queue `text` on the engine's steering queue, where the
 	 * inner loop drains it between tool batches. False means nothing was
@@ -5718,6 +5720,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			};
 			sessionCreated = true;
 			const ceilingEcho = applySessionCeiling(session);
+			// The first usage frame and the ledger read the view the next request would publish, not the saved snapshot.
+			await options.chat.nextRequestReady?.();
 			bindRestored(session, replay);
 			const loaded = {
 				...sessionConfig(session),

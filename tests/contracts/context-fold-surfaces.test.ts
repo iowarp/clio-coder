@@ -4,8 +4,8 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import type { Context } from "@earendil-works/pi-ai";
 import { createStdioTransport } from "../../src/engine/acp/transport.js";
-import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 import { ACP_CONTEXT_LEDGER_METHOD } from "../../src/engine/acp/types.js";
+import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 import {
 	type CapturedRequest,
 	contextElements,
@@ -333,7 +333,7 @@ describe("surface capture", () => {
 		ok(verify.stdout.includes("fold decisions: 0 missing, 0 duplicate, 0 orphan"), verify.stdout);
 	});
 
-	it("acp: usage_update and /context read one figure after an eviction and after a reopen", {
+	it("acp: usage_update and /context read one figure after an eviction and the same after a reopen in a fresh process", {
 		timeout: 300_000,
 	}, async (t) => {
 		const server = await startCaptureServer((_request, index) =>
@@ -411,5 +411,11 @@ describe("surface capture", () => {
 		// The capture server reports 10 input tokens per call; the view prices the retained 34 KiB read instead.
 		ok(live.used > (34 * 1024) / 4, `usage_update reads the view, not the provider's report: ${live.used}`);
 		strictEqual(reopened.used, reopened.ledger, "and after the reopen");
+		// A fresh process prices the request live would send, never the saved snapshot (SPEC §0). The resumed prompt
+		// names the route's source as the session ("Routes: chat session" for "chat user"), at most one token.
+		ok(
+			Math.abs(reopened.used - live.used) <= 1,
+			`the reopen reports the figure live held: ${reopened.used} vs ${live.used}`,
+		);
 	});
 });
