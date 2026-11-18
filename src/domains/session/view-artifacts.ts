@@ -126,6 +126,11 @@ export interface ArtifactProviderDeps {
 	 * budget; a surface without one keeps the full id. Absent means the full id.
 	 */
 	formatModelId?: ((modelId: string) => string) | undefined;
+	/**
+	 * A dispatch run's whole recorded answer in the words the Fleet Runs card shows, or null to keep it verbatim.
+	 * The terminal supplies it; a surface without one shows the answer as recorded.
+	 */
+	presentAgentOutput?: ((runId: string, text: string) => string[] | null) | undefined;
 }
 
 /**
@@ -952,6 +957,10 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 					}
 					const output = run?.result?.output;
 					const text = output?.text ?? dispatchResultForRun(entries, env.id);
+					const worded =
+						output?.text && output.state !== "partial" && !output.truncated
+							? (this.deps.presentAgentOutput?.(env.id, output.text) ?? null)
+							: null;
 					const lines = [
 						`Dispatch run ${env.id}`,
 						`agent: ${env.agentId}`,
@@ -974,7 +983,7 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 						...(run ? renderRunChanges(run) : ["Changed paths were not recorded."]),
 						"",
 						output?.state === "partial" ? "agent output (partial):" : "agent output:",
-						...(text ? text.split(/\r?\n/) : ["(no recorded agent output found)"]),
+						...(worded ?? (text ? text.split(/\r?\n/) : ["(no recorded agent output found)"])),
 						...(output?.truncated ? ["Stored result was truncated."] : []),
 					];
 					return { lines: splitLinesCapped(lines.join("\n"), path), format: "text" };

@@ -277,6 +277,23 @@ export function presentWorkerContractAnswer(
 }
 
 /**
+ * A settled run's answer in words, admitted as the Fleet Runs card admits it: a presented contract kind, else a
+ * coder's mutation report once the sealed record verifies. The reader cannot tell where a proposed commit landed.
+ */
+export function presentSettledWorkerAnswer(
+	text: string,
+	contract: { kind: string; conformance: string } | undefined,
+	sealVerified: boolean,
+	complete: boolean,
+): PresentedContractAnswer | null {
+	const presented = presentWorkerContractAnswer(text, contract, complete, true);
+	if (presented !== null || !complete || !sealVerified) return presented;
+	const value = exactWorkerAnswerObject(text);
+	const lines = value === null ? null : mutationReportLines(value, null);
+	return lines === null ? null : { lines };
+}
+
+/**
  * One member's answer as a line a person reads: a typed report's first claim or fact, else its first line of prose.
  * A council collects typed reports, so its raw text is JSON the operator was never meant to read.
  */
