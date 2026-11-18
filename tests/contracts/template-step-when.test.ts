@@ -44,12 +44,13 @@ interface Run {
 	continued: string[];
 	/** Loop-guard blocks and step-policy refusals the run raised. */
 	guardEvents: string[];
+	stepPipeline: ReturnType<NonNullable<ReturnType<typeof createChatLoop>["stepPipeline"]>> | null;
 	close(): Promise<void>;
 }
 
-/** A step tool with `stages` stages that says pipelineDone on the last, and how many step calls each turn makes. */
+/** A step tool with `stages` stages that says pipelineDone on the last, and how many step calls each turn (or every turn) makes. */
 interface Pipeline {
-	calls: number;
+	calls: number | number[];
 	stages?: number;
 }
 
@@ -191,11 +192,14 @@ async function drive(
 						} as unknown as AgentMessage);
 						await listener({ type: "agent_start" });
 						await listener({ type: "turn_start" });
-						// Later turns run no step, so the chain ends there, except the switched route's turn,
-						// which shows whether a second call is refused.
+						// Later turns run no step, which an open pipeline carries to the cap, except the switched
+						// route's turn, which shows whether a second call is refused.
 						const steps =
 							pipeline !== undefined
-								? Array.from({ length: pipeline.calls }, () => `stage-${turns.length}`)
+								? Array.from(
+										{ length: Array.isArray(pipeline.calls) ? (pipeline.calls[turns.length - 1] ?? 0) : pipeline.calls },
+										() => `stage-${turns.length}`,
+									)
 								: turns.length === 1 || (switchTo !== undefined && turns.length === 2)
 									? ["start", "intro-done"]
 									: [];
@@ -257,6 +261,7 @@ async function drive(
 		turns,
 		continued,
 		guardEvents,
+		stepPipeline: loop.stepPipeline?.() ?? null,
 		close: async () => {
 			loop?.dispose();
 			await loop?.whenSettled();
@@ -319,7 +324,7 @@ describe("template turnPolicy when", () => {
 	it("when: [small] on a small route locks after the step and continues into the next step turn", async () => {
 		const run = await drive({ model: "when-small-model", tier: "small" }, SMALL_ONLY);
 		try {
-			strictEqual(run.turns.length, 2);
+			strictEqual(run.turns.length, 1 + TURN_CONTINUATION_CAP);
 			deepStrictEqual(run.turns[0]?.verdicts, ["ok", "blocked"]);
 			strictEqual(run.turns[0]?.constraints?.turnPolicy?.stepTool, STEP);
 			ok(run.turns[0]?.text.includes("This step policy applies on this route (when: small)."), run.turns[0]?.text);
@@ -361,7 +366,7 @@ describe("template turnPolicy when", () => {
 		}
 	});
 
-	it("a yolo step turn that ran its step continues until pipelineDone, a turn without a step, or the cap (bt-6)", async () => {
+	it("a yolo step turn that ran its step continues until pipelineDone or the cap, and a first turn without a step ends it (bt-6)", async () => {
 		const policy = { mode: "step" as const, stepTool: STEP };
 		const route = { model: "step-compliant-model", tier: "frontier" as const };
 		const compliant = await drive(route, policy, undefined, { calls: 1, stages: 3 });
@@ -386,14 +391,41 @@ describe("template turnPolicy when", () => {
 		try {
 			strictEqual(endless.turns.length, 1 + TURN_CONTINUATION_CAP);
 			strictEqual(endless.continued.length, TURN_CONTINUATION_CAP);
+			deepStrictEqual(endless.stepPipeline, { stepTool: STEP, template: "wtfp:advance", done: false, stoppedBy: "cap" });
 		} finally {
 			await endless.close();
 		}
 	});
 
+	it("a yolo continuation that does the step's work without a step call keeps the pipeline going (bt-15)", async () => {
+		const run = await drive(
+			{ model: "step-split-model", tier: "frontier" },
+			{ mode: "step", stepTool: STEP },
+			undefined,
+			{
+				calls: [1, 0, 1],
+				stages: 2,
+			},
+		);
+		try {
+			deepStrictEqual(
+				run.turns.map((turn) => turn.verdicts),
+				[["ok"], [], ["ok"]],
+			);
+			strictEqual(run.continued.length, 2);
+			ok(run.turns[1]?.text.includes(`This is a new step turn: first call ${STEP}`), run.turns[1]?.text);
+			ok(run.turns[2]?.text.includes(`it made no ${STEP} call`), run.turns[2]?.text);
+			deepStrictEqual(run.stepPipeline, { stepTool: STEP, template: "wtfp:advance", done: true });
+		} finally {
+			await run.close();
+		}
+	});
+
 	it("absent when keeps the policy on every route and the reminder unchanged", () => {
 		const guidance = turnScopeGuidance({ turnPolicy: { mode: "step", stepTool: STEP } });
-		ok(guidance.includes(`Do not call ${STEP} again this turn`));
+		ok(
+			guidance.includes(`Each later turn, a continuation included, is a new turn that starts with the next ${STEP} call`),
+		);
 		ok(!guidance.includes("on this route"));
 	});
 });

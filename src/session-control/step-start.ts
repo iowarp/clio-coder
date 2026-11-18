@@ -146,6 +146,36 @@ export function stepTurnOutcome(messages: ReadonlyArray<unknown>, stepTool: stri
 	return ran ? { pipelineDone } : null;
 }
 
+/** What a settled step turn leaves the step chain; `carried` marks a turn that made no step call of an open pipeline. */
+export interface StepRun {
+	pipelineDone: boolean;
+	carried?: true;
+}
+
+/**
+ * The step pipeline a chain of step turns is running (bt-15). A step call opens
+ * it, and it stays open until a step result says `pipelineDone`. A continuation
+ * turn that does the step's work without a step call still belongs to the open
+ * pipeline, so a yolo chain continues under its cap instead of ending with steps
+ * left. An operator turn, or a turn without the policy, starts over.
+ */
+export function createStepPipeline(): {
+	settle(stepTool: string | undefined, ran: { pipelineDone: boolean } | null, continuation: boolean): StepRun | null;
+} {
+	let open: string | null = null;
+	return {
+		settle(stepTool, ran, continuation) {
+			if (stepTool === undefined || !continuation || open !== stepTool) open = null;
+			if (stepTool === undefined) return null;
+			if (ran !== null) {
+				open = ran.pipelineDone ? null : stepTool;
+				return ran;
+			}
+			return open === null ? null : { pipelineDone: false, carried: true };
+		},
+	};
+}
+
 /** The compact state a later step turn starts from, as the checkpoint summary's lead. */
 function stepCheckpointLead(template: string, stepTool: string, finalText: string, body: string | null): string {
 	const name = template.length > 0 ? `Prompt template "${template}"` : "This turn's template";

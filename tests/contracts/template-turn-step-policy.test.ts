@@ -118,7 +118,7 @@ describe("template turnPolicy step", () => {
 		const expansion = await expandSubmitText("/advance now", resources, env.dir);
 		const constraints = snapshotTurnConstraints(expansion.constraints);
 		deepStrictEqual(constraints?.turnPolicy, { mode: "step", stepTool: STEP, template: "advance" });
-		ok(turnScopeGuidance(constraints).includes(`Do not call ${STEP} again this turn`));
+		ok(turnScopeGuidance(constraints).includes(`Call ${STEP} at most once per turn`));
 		strictEqual(workerTurnConstraints(constraints as TurnConstraints).turnPolicy, undefined);
 		strictEqual((await expandSubmitText("/bare", resources, env.dir)).promptRefusal?.includes("cannot run"), true);
 	});

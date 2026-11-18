@@ -258,6 +258,25 @@ async function stepDrive(route: Drive): Promise<Run> {
 									stepTool: STEP,
 								});
 							reply = "Step one ran: drafted intro; after=intro-done.";
+						} else {
+							// The second step is the pipeline's last, so the chain ends after it.
+							state.messages.push(
+								{
+									role: "assistant",
+									content: [{ type: "toolCall", id: `call-${prompts}`, name: STEP, arguments: { after: "intro-done" } }],
+									stopReason: "toolUse",
+									timestamp: Date.now(),
+								} as unknown as AgentMessage,
+								{
+									role: "toolResult",
+									toolCallId: `call-${prompts}`,
+									toolName: STEP,
+									content: [{ type: "text", text: "step: draft methods; pipeline complete" }],
+									details: { pipelineDone: true },
+									isError: false,
+									timestamp: Date.now(),
+								} as unknown as AgentMessage,
+							);
 						}
 						const message = {
 							role: "assistant",

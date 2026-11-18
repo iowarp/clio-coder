@@ -218,7 +218,13 @@ import {
 	triageSnapshotMatches,
 	triageUserText,
 } from "./steering-triage.js";
-import { compactStepStartDue, createStepStartTracker, stepTurnOutcome } from "./step-start.js";
+import {
+	compactStepStartDue,
+	createStepPipeline,
+	createStepStartTracker,
+	type StepRun,
+	stepTurnOutcome,
+} from "./step-start.js";
 import type { LiveContextUsage, TurnContextDeps } from "./turn-context.js";
 import { createTurnContext } from "./turn-context.js";
 import { createTurnKeepalive } from "./turn-keepalive.js";
@@ -701,6 +707,8 @@ export interface ChatLoop {
 	getSessionId(): string | null;
 	captureWorkerContext?(): WorkerContextSnapshot | null;
 	lastRunSnapshot?(): ChatLoopRunSnapshot | null;
+	/** How the last step pipeline ended, or null when the last prompt ran none (bt-15). */
+	stepPipeline?(): StepPipelineEnd | null;
 	isStreaming(): boolean;
 	/** Tool calls the run has started and not yet finished. */
 	runningToolCalls(): number;
@@ -1079,6 +1087,32 @@ function reloadProtectedArtifactsForSession(
 	}
 }
 
+/**
+ * How the last step pipeline ended, for a headless caller: `done` when its step
+ * tool said `pipelineDone`; otherwise `stoppedBy` says whether the yolo
+ * continuation cap (`cap`) or the end of a turn nothing continued (`turn`:
+ * autonomy below yolo, a cancel, a failure) stopped it (bt-15).
+ */
+export interface StepPipelineEnd {
+	stepTool: string;
+	template?: string;
+	done: boolean;
+	stoppedBy?: "cap" | "turn";
+}
+
+function stepPipelineEnd(
+	policy: { stepTool: string; template?: string },
+	run: StepRun,
+	capSpent: boolean,
+): StepPipelineEnd {
+	return {
+		stepTool: policy.stepTool,
+		...(policy.template === undefined ? {} : { template: policy.template }),
+		done: run.pipelineDone,
+		...(run.pipelineDone ? {} : { stoppedBy: capSpent ? ("cap" as const) : ("turn" as const) }),
+	};
+}
+
 /** Why a settled turn gets another one at yolo; `step` marks a step continuation, which spends the cap (bt-6). */
 interface YoloContinuation {
 	cause: TurnContinuationCause;
@@ -1086,6 +1120,8 @@ interface YoloContinuation {
 	retryAfterMs?: number;
 	detail?: string;
 	step?: true;
+	/** What the continuation asks for, in place of "continue from where it stopped": a step continuation is a new step turn. */
+	next?: string;
 }
 
 const countsAgainstCap = (stop: YoloContinuation): boolean =>
@@ -1996,6 +2032,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let stepPolicyStop: { template?: string } | null = null;
 	/** Step turns after the first start from a compact state on small or uncached routes (WTF-P 0.8.3 C5). */
 	const stepStarts = createStepStartTracker();
+	const stepPipeline = createStepPipeline();
+	let lastStepPipeline: StepPipelineEnd | null = null;
 	const unsubscribeToolBudgetLock =
 		deps.bus?.subscribe("safety.tool_budget_exceeded", (payload) => {
 			state.toolBudgetLock = true;
@@ -2029,7 +2067,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		guardInterrupted = false,
 		guardFailure: { tool: string; failure: string } | null = null,
 		stepStop: { template?: string } | null = null,
-		stepRun: { pipelineDone: boolean } | null = null,
+		stepRun: StepRun | null = null,
 	): YoloContinuation | null => {
 		if ((deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) !== "yolo") return null;
 		const failed = state.continuation.stop;
@@ -2037,11 +2075,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (failed?.cause === "wait_past_budget") return null;
 		// A step turn continues whether it ended on its own summary or on the second-call refusal, and each step
 		// continuation counts against the cap, so a step tool that never says its pipeline is done cannot loop (bt-6).
+		// A turn that did a step's work without the step call continues too while the pipeline is open (bt-15), and
+		// either way the continuation is a new turn that opens with the next step call, as the scope reminder says.
 		const template = stepStop?.template ?? state.currentTurnConstraints?.turnPolicy?.template;
+		const named = template ? `prompt template ${template}` : "its template";
+		const stepTool = state.currentTurnConstraints?.turnPolicy?.stepTool ?? "the step tool";
 		const step = {
 			cause: "tool_budget" as const,
-			reason: `it ran one step of ${template ? `prompt template ${template}` : "its template"}, which runs one step per turn`,
+			reason:
+				stepRun?.carried === true
+					? `it made no ${stepTool} call, and the step pipeline of ${named} has not said it is done`
+					: `it ran one step of ${named}, which runs one step per turn`,
 			step: true as const,
+			next: `This is a new step turn: first call ${stepTool} with the after value the last finished step reached, run the step it returns, then end the turn with a compact state summary. If ${stepTool} already said the pipeline is complete, say so and stop.`,
 		};
 		// A failure stop outranks a budget crossing in the same turn, so a failing turn cannot escape the cap on one.
 		const stop: YoloContinuation | null =
@@ -2128,7 +2174,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (disposed || generation !== submitGeneration || state.activeUserTurnId !== null || state.streaming) return;
 		if (await queues.resubmitStranded()) return;
 		await api.submit(
-			`[Clio Coder] The previous turn stopped: ${stop.reason}. Its work and tool results are above. Continue from where it stopped, and if the work is already finished, say so and stop.${counted ? ` This is continuation ${attempt} of ${TURN_CONTINUATION_CAP}.` : ""}${stop.detail === undefined ? "" : `\n${stop.detail}`}`,
+			`[Clio Coder] The previous turn stopped: ${stop.reason}. ${stop.next ?? "Its work and tool results are above. Continue from where it stopped, and if the work is already finished, say so and stop."}${counted ? ` This is continuation ${attempt} of ${TURN_CONTINUATION_CAP}.` : ""}${stop.detail === undefined ? "" : `\n${stop.detail}`}`,
 			{
 				origin: `yolo continuation ${attempt}`,
 				yoloContinuation: true,
@@ -3924,9 +3970,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					const stepStop = stepPolicyStop;
 					stepPolicyStop = null;
 					const stepPolicy = state.currentTurnConstraints?.turnPolicy;
-					const stepRun = stepPolicy
-						? stepTurnOutcome(agentRuntime.agent.state.messages.slice(machineMessageStart), stepPolicy.stepTool)
-						: null;
+					const stepRun = stepPipeline.settle(
+						stepPolicy?.stepTool,
+						stepPolicy
+							? stepTurnOutcome(agentRuntime.agent.state.messages.slice(machineMessageStart), stepPolicy.stepTool)
+							: null,
+						options.yoloContinuation === true,
+					);
 					// Only a step turn that ended on its own text, or that its step policy ended, leaves a state summary
 					// the next step can start from. A failed turn, a loop-guard stop or a real budget crossing stopped
 					// mid-step, so its continuation keeps the full history (WTF-P 0.8.3 C5).
@@ -3948,6 +3998,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						options.machineTurn === undefined && !canceled && !interviewDismissed && (admissionCurrent() || guardStopped)
 							? yoloContinuationDue(guardStopped, guardFailure, stepStop, stepRun)
 							: null;
+					if (options.machineTurn === undefined && generation === submitGeneration && continuation === null) {
+						const capSpent = state.continuation.yoloContinuations >= TURN_CONTINUATION_CAP;
+						lastStepPipeline = stepPolicy && stepRun !== null ? stepPipelineEnd(stepPolicy, stepRun, capSpent) : null;
+						if (lastStepPipeline?.stoppedBy === "cap")
+							emitNotice(
+								`The step pipeline of ${lastStepPipeline.template ? `prompt template ${lastStepPipeline.template}` : "this template"} stopped at the continuation cap (${TURN_CONTINUATION_CAP}) before ${lastStepPipeline.stepTool} said it was done.`,
+								"warning",
+								"step.incomplete",
+							);
+					}
 					if (
 						!disposed &&
 						generation === submitGeneration &&
@@ -4095,6 +4155,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		lastRunSnapshot(): ChatLoopRunSnapshot | null {
 			return state.lastRunSnapshot ? structuredClone(state.lastRunSnapshot) : null;
+		},
+		stepPipeline(): StepPipelineEnd | null {
+			return lastStepPipeline === null ? null : { ...lastStepPipeline };
 		},
 
 		isStreaming(): boolean {
