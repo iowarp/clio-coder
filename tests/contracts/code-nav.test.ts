@@ -7,7 +7,7 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { executeCodewikiBuildOutcome } from "../../src/domains/context/codewiki/build-operation.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { loadCodewikiForTool } from "../../src/tools/codewiki/shared.js";
-import type { ToolRegistry, ToolResult } from "../../src/tools/registry.js";
+import type { ToolInvokeOptions, ToolRegistry, ToolResult } from "../../src/tools/registry.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 /**
@@ -47,8 +47,8 @@ describe("code_nav tool", () => {
 		scratch.restore();
 	});
 
-	async function call(args: Record<string, unknown>): Promise<ToolResult> {
-		const verdict = await registry.invoke({ tool: ToolNames.CodeNav, args });
+	async function call(args: Record<string, unknown>, options?: ToolInvokeOptions): Promise<ToolResult> {
+		const verdict = await registry.invoke({ tool: ToolNames.CodeNav, args }, options);
 		if (verdict.kind !== "ok") throw new Error(`code_nav was not admitted: ${JSON.stringify(verdict)}`);
 		return verdict.result;
 	}
@@ -176,5 +176,11 @@ describe("code_nav tool", () => {
 			match(result.message, /^code_nav: /);
 			match(result.message, expected, JSON.stringify(args));
 		}
+		// The remedy names clio_docs only where the run may call it (bt-37).
+		const unadmitted = await call(
+			{ source: "clio", mode: "wiki" },
+			{ allowedTools: [ToolNames.CodeNav, ToolNames.Gateway] },
+		);
+		match(unadmitted.kind === "error" ? unadmitted.message : "", /documentation is not available on this run$/);
 	});
 });

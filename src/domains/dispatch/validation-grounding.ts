@@ -60,9 +60,12 @@ export interface ValidationGrounding {
 	 * ran nothing that could have checked anything, which is the only basis that
 	 * takes a quality label away. `unmatched-command` means it ran something the
 	 * canonical detector does not enumerate, which is reported and nothing more.
+	 * `unattributable-status` means an unmatched claim names a command the run
+	 * ran, but the call's exit status was a later command's (`make test; echo
+	 * EXIT=$?`), so nothing observed says it passed; reported, never a downgrade.
 	 * `grounded` means every claim matched an executed command.
 	 */
-	basis: "grounded" | "no-command-executed" | "unmatched-command";
+	basis: "grounded" | "no-command-executed" | "unmatched-command" | "unattributable-status";
 }
 
 export interface ValidationGroundingInput {
@@ -73,6 +76,8 @@ export interface ValidationGroundingInput {
 	output: string | null;
 	/** Canonical validation commands the run ran to a clean exit. */
 	executedCommands: ReadonlySet<string>;
+	/** Commands that ran in a bash call whose exit status was not theirs; they ground no claim (bt-9). */
+	unattributableCommands?: ReadonlySet<string>;
 	/** Successful shell and typed-verification calls this run made, matched or not. */
 	executedCheckingCalls: number;
 	/** The gates a verifier's task declared; `verify <id>` ran the gate's command text. */
@@ -241,17 +246,28 @@ export function groundClaimedValidations(input: ValidationGroundingInput): Valid
 	if (claims.length === 0) return null;
 	const ungrounded: string[] = [];
 	let grounded = 0;
+	let unattributable = false;
 	const executed = withTypedCheckNames(input.executedCommands, input.taskGates ?? []);
 	for (const claim of claims) {
 		if (isExecuted(claim.name, executed) || groundedByVerifyRun(claim, input.verifyRuns ?? [])) grounded += 1;
-		else if (!ungrounded.includes(claim.name)) ungrounded.push(claim.name);
+		else {
+			if (!ungrounded.includes(claim.name)) ungrounded.push(claim.name);
+			if (input.unattributableCommands !== undefined && isExecuted(claim.name, input.unattributableCommands))
+				unattributable = true;
+		}
 	}
 	return {
 		claimed: claims.length,
 		grounded,
 		ungrounded: ungrounded.slice(0, UNGROUNDED_NAME_LIMIT),
 		basis:
-			ungrounded.length === 0 ? "grounded" : input.executedCheckingCalls > 0 ? "unmatched-command" : "no-command-executed",
+			ungrounded.length === 0
+				? "grounded"
+				: input.executedCheckingCalls === 0
+					? "no-command-executed"
+					: unattributable
+						? "unattributable-status"
+						: "unmatched-command",
 	};
 }
 
@@ -263,6 +279,8 @@ export function invalidatesQuality(grounding: ValidationGrounding): boolean {
 /** One line naming what the run claimed and never ran, for the sealed outcome. */
 export function describeUngroundedValidations(grounding: ValidationGrounding): string {
 	const named = grounding.ungrounded.map((name) => JSON.stringify(name)).join(", ");
+	if (grounding.basis === "unattributable-status")
+		return `unattributable validation: this run claimed ${named} passed; it ran the check, but the command's exit status was not the check's (${grounding.grounded}/${grounding.claimed} claims grounded)`;
 	return grounding.basis === "no-command-executed"
 		? `unverifiable validation: this run claimed ${named} passed and executed no command at all (${grounding.grounded}/${grounding.claimed} claims grounded)`
 		: `unmatched validation: this run claimed ${named} passed; it did run commands, but none the harness recognizes as that check (${grounding.grounded}/${grounding.claimed} claims grounded)`;

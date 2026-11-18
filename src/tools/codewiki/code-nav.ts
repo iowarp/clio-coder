@@ -803,10 +803,15 @@ export const codeNavTool: ToolSpec = {
 		const source: CodeNavSource = rawSource === "clio" ? "clio" : "workspace";
 		const mode = typeof args.mode === "string" ? args.mode : "";
 		if (source === "clio" && (mode === "wiki" || mode === "project")) {
+			// Name clio_docs only where this run may call it, so the remedy never costs a refused call (bt-37).
+			const admitted = [options?.allowedTools, options?.turnConstraints?.allowedTools].every(
+				(tools) => tools === undefined || tools.includes(ToolNames.ClioDocs),
+			);
 			return {
 				kind: "error",
-				message:
-					"code_nav: source=clio does not provide mode=wiki/project; use the clio_docs capability through gateway for Clio documentation",
+				message: admitted
+					? "code_nav: source=clio does not provide mode=wiki/project; use the clio_docs capability through gateway for Clio documentation"
+					: "code_nav: source=clio does not provide mode=wiki/project, and Clio documentation is not available on this run",
 			};
 		}
 

@@ -161,6 +161,8 @@ export interface ThinkingLevelChangeEntry extends BaseSessionEntry {
 	thinkingLevel: string;
 	effectiveEffort?: string;
 	configurationInitial?: boolean;
+	/** On a first row whose selection the route clamped: the selection, which `thinkingLevel` replaced (bt-37). */
+	requestedThinkingLevel?: string;
 }
 
 export interface FileEntryEntry extends BaseSessionEntry {
@@ -955,7 +957,12 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 		case "modelChange":
 			return isString(v.provider) && isString(v.modelId) && isOptionalString(v.target);
 		case "thinkingLevelChange":
-			return isString(v.thinkingLevel) && isOptionalString(v.effectiveEffort) && isOptionalBoolean(v.configurationInitial);
+			return (
+				isString(v.thinkingLevel) &&
+				isOptionalString(v.effectiveEffort) &&
+				isOptionalBoolean(v.configurationInitial) &&
+				isOptionalString(v.requestedThinkingLevel)
+			);
 		case "fileEntry":
 			return (
 				isString(v.path) && isOneOf(v.operation, FILE_OPERATIONS) && isOptionalNumber(v.bytes) && isOptionalString(v.hash)

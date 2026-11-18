@@ -223,7 +223,8 @@ it("editing reports distinguish lack of measured checks from execution success",
 			observedRunEffects: recorder.snapshot(),
 		});
 		strictEqual(result.conformance, "pass");
-		strictEqual(result.quality, "unmeasured");
+		// A red verify on the final tree is an observed failure, as a red bash check is (bt-27).
+		strictEqual(result.quality, (outcomes as ReadonlyArray<string | null>).includes("error") ? "fail" : "unmeasured");
 	}
 });
 
@@ -665,6 +666,36 @@ it("an observed red judges only the tree it ran on, and respelled runs of one ch
 	strictEqual(exitCode(seal([["base", "pytest", true]], [{ ...red, name: "pytest" }, green]).quality), 0);
 });
 
+it("a green claim against a red latest verify on the final tree seals fail, as the bash equivalent does (bt-27)", () => {
+	const seal = (steps: string) => {
+		const recorder = createRunEffectsRecorder(process.cwd());
+		for (const [index, step] of steps.split(" ").entries()) {
+			const id = `call-${index}`;
+			recorder.start(
+				id,
+				step === "edit" ? "edit" : "verify",
+				step === "edit" ? { path: "src/calc.c" } : { check: "test" },
+			);
+			recorder.checkOutcome(id, step === "red" ? "error" : "ok");
+			recorder.finish(id, step === "red");
+		}
+		return validateResultContract({
+			contract: { kind: "mutation-report" },
+			output: JSON.stringify({
+				mutatedPaths: ["src/calc.c"],
+				validations: [{ name: "test", passed: true, evidence: "exit 0" }],
+			}),
+			cwd: process.cwd(),
+			networkAllowed: false,
+			filesystem: { readFile: () => "" },
+			observedRunEffects: recorder.snapshot(),
+		}).quality;
+	};
+	strictEqual(seal("pass edit red"), "fail");
+	strictEqual(seal("red edit pass"), "pass");
+	strictEqual(seal("edit red pass"), "pass");
+});
+
 it("a check judges only the tree it ran on, sealed per verify call or from a tool's aggregate (bt-27c)", () => {
 	const seal = (steps: string, tool = "verify", aggregate = false) => {
 		const recorder = createRunEffectsRecorder(process.cwd());
@@ -722,10 +753,12 @@ it("a check sharing its bash call with a change judges the final tree only when 
 		}
 		const effects = recorder.snapshot();
 		const typedValidations = typedValidationFactsFromObservedEffects(effects);
-		return [[...effects.validationCommands], deriveRunVerification({ toolStats: [], typedValidations }).state];
+		// The reds still standing where the result contract judges claims, verify calls included.
+		const reds = [...effects.checkOutcomes].filter(([, passed]) => !passed).map(([name]) => name);
+		return [[...effects.validationCommands], deriveRunVerification({ toolStats: [], typedValidations }).state, reds];
 	};
-	const stale = [[], "unverified"];
-	const green = [["npm test"], "verified"];
+	const stale = [[], "unverified", []];
+	const green = [["npm test"], "verified", []];
 	// The earlier pass judged a tree the call then changed, whether the check ran before or after the change.
 	deepStrictEqual(seal("npm test", "!git apply fix.patch; npm test"), stale);
 	deepStrictEqual(seal("npm test", "npm test && node codemod.mjs"), stale);
@@ -736,6 +769,7 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	deepStrictEqual(seal("npm test", "npm run lint:fix"), stale);
 	deepStrictEqual(seal("npm test && npm run format"), stale);
 	deepStrictEqual(seal("npm test", { check: "format" }), stale);
+	deepStrictEqual(seal("!npm test", { check: "format" }), stale);
 	// Every change ran before the check through `&&`, or the call held only checks, cd and plumbing.
 	deepStrictEqual(seal("npm test", "npm ci && npm test"), green);
 	deepStrictEqual(seal("npm test", "cd pkg && npm test 2>&1 | tail -5"), green);
@@ -743,11 +777,11 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	deepStrictEqual(seal("npm test", "npm test 2>&1 | sed -n 1,80p"), green);
 	// Shell setup changes no tree, so a standing red stands beside a narrower green (x3-1).
 	for (const setup of ["source .venv/bin/activate", "export CI=1"])
-		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [["npm test"], "unverified"]);
+		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [["npm test"], "unverified", ["npm test"]]);
 	// A red behind head or grep may be that filter's own, so it settles nothing; behind tail it is the check's (x3-2).
 	deepStrictEqual(seal("npm test", "!npm test 2>&1 | head -30"), green);
 	deepStrictEqual(seal("npm test", "!npm test 2>&1 | grep FAIL"), green);
-	deepStrictEqual(seal("npm test", "!npm test 2>&1 | tail -5"), [["npm test"], "unverified"]);
+	deepStrictEqual(seal("npm test", "!npm test 2>&1 | tail -5"), [["npm test"], "unverified", ["npm test"]]);
 	// A check run in another directory is not this workspace's check (x3-5).
 	deepStrictEqual(seal("cd /elsewhere && npm test"), stale);
 	deepStrictEqual(seal("cd pkg/.. && npm test"), green);

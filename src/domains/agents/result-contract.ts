@@ -346,6 +346,8 @@ export interface ObservedRunEffects {
 	checksAllBlocked?: boolean;
 	/** Observed failures and final passes since the last mutation, keyed by `observedValidationCommand`. */
 	validationOutcomes?: ReadonlyMap<string, boolean>;
+	/** `validationOutcomes` joined by verify-call outcomes under check id and resolved command; read in its place. */
+	checkOutcomes?: ReadonlyMap<string, boolean>;
 	/** Whether the run made an observed workspace mutation; absent reads as unknown. */
 	mutationObserved?: boolean;
 }
@@ -2016,7 +2018,8 @@ function validateMutation(contract: ResultContract, input: ResultContractValidat
 	const validations = reported.filter((check) => !isBaselineValidation(check));
 	// Settle a historical failure only with a matching observed final pass.
 	// Missing evidence keeps old, potentially nonchronological reports conservative.
-	const outcomes = input.observedRunEffects?.validationOutcomes;
+	// Verify calls count as bash checks do: a green claim against a red latest verify is a failure (bt-27).
+	const outcomes = input.observedRunEffects?.checkOutcomes ?? input.observedRunEffects?.validationOutcomes;
 	// A reported baseline excuses its own observed red only while no mutation was observed: after one, every
 	// standing outcome judged the changed tree, and calling it a baseline cannot clear a real failure (bt-27).
 	const baselines = new Set(

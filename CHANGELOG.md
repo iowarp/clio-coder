@@ -104,6 +104,12 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A check whose exit status a later command overwrote (`; echo`, `||`) no longer grounds a passed claim; grounding reports "unattributable-status" (bt-9).
+- A green claim against a red latest `verify` on the final tree now seals quality fail, as the bash equivalent does; verification stays unverified (bt-27).
+- code_nav names clio_docs in its remedy only when the run admits it, and a session's first thinking row records the route-supported level, not an unsupported selection (bt-37).
+- The compaction notice says "(the cut fell inside a turn)" only when the kept suffix holds part of that turn (bt-18).
+- On the copilot-sdk route, a tool result over 50 KB is no longer re-spilled by the Copilot runtime to a virtual path Clio's read cannot open; Clio's own offload, at a real readable path, is the only cap, as on other routes (bt-38).
+- The safety judge now names the session's workspace and scratch roots by path, including the one $TMPDIR names, so a lane can delete its own scratch under $TMPDIR. Escapes through .. or symlinks are still judged by their resolved target (cw-5).
 - System One typed-wire asks now open a journal call with the wire's token usage, so telemetry tokens, cost and usage count them (bt-33).
 - consult refuses an ask with no evidence or with filter keys at the top level before spending a call, and expands globs in question paths (bt-35).
 - Steers and follow-ups from the headless steer channel and ACP now start steering triage like TUI steers (bt-36).

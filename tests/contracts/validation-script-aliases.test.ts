@@ -3,7 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
-import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
+import {
+	describeUngroundedValidations,
+	groundClaimedValidations,
+} from "../../src/domains/dispatch/validation-grounding.js";
 import { typedValidationSummary } from "../../src/domains/safety/finish-contract.js";
 import { detectValidationCommand } from "../../src/domains/safety/protected-artifacts.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
@@ -220,4 +223,24 @@ it("grounds a verify-only run's claim by its check id or resolved command, and n
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+it("a check whose exit status a later command overwrote grounds no claim and says why (bt-9)", () => {
+	const ground = (command: string) => {
+		const effects = createRunEffectsRecorder(process.cwd());
+		effects.start("bash-1", "bash", { command });
+		effects.finish("bash-1", false);
+		const snapshot = effects.snapshot();
+		return groundClaimedValidations({
+			contractKind: "mutation-report",
+			output: JSON.stringify({ validations: [{ name: "make test", passed: true }] }),
+			executedCommands: snapshot.verificationCommands,
+			unattributableCommands: snapshot.unattributableVerificationCommands,
+			executedCheckingCalls: 1,
+		});
+	};
+	const echoed = ground('make test; echo "EXIT=$?"');
+	deepStrictEqual([echoed?.grounded, echoed?.basis], [0, "unattributable-status"]);
+	ok(echoed && describeUngroundedValidations(echoed).includes("exit status was not the check's"));
+	strictEqual(ground("make clean && make test")?.basis, "grounded");
 });
