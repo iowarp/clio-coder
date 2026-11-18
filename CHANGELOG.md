@@ -91,6 +91,11 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- The exit summary and run receipts now count files a worker on an HTTP or SDK runtime changed in the current checkout (bt-11 #3).
+- The exit summary keeps the visit's turns, files, workers and time across /resume, /fork, /tree, /handoff and /new, and names how many sessions it spans (bt-11 #3).
+- The workers dock reads a finished run's record again until its seal is checked, so a verified run no longer shows "seal unchecked" (bt-11).
+- Hiding or showing the workers dock gives Clio back its full width instead of leaving it drawn at the split width (bt-11).
+- An unknown slash command such as /tools is sent as typed and named as unknown, instead of being completed into a command whose description mentions it (bt-11).
 - A Copilot target switched between the default and long_context tiers now reads the right context window from the cached model listing in a new process, with no wait for the 24 h cache expiry (bt-copilot cache-tier limit).
 - A worker's `verify` call that only lists the declared checks no longer seals a passed validation or a verified run (bt-19).
 - A dispatched run's verification takes the host's verdict on the finished tree, with basis `host-verification`, instead of reading `no-validation-tool` beside a host pass (bt-17).
