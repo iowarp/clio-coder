@@ -1278,12 +1278,14 @@ function recordWorkerVerifyCall(log: VerifyCallLog, event: Record<string, unknow
 		return;
 	}
 	if (event.type === "tool_execution_end") {
+		const toolCallId = readStringOrNull(event.toolCallId);
 		for (const child of gatewayChainReceipts(String(event.toolName), event.result)) {
 			if (child.capability === ToolNames.Verify)
 				log.calls.push(
 					settledVerifyCall(
 						verifyCallStart(child.args),
 						child.admission.unresolved === true ? "unresolved" : child.admission.outcome,
+						toolCallId === null ? null : `${toolCallId}:${child.id}`,
 					),
 				);
 		}
@@ -1307,6 +1309,7 @@ function recordWorkerVerifyCall(log: VerifyCallLog, event: Record<string, unknow
 				: outcome === "ok" || outcome === "error" || outcome === "blocked"
 					? outcome
 					: null,
+			toolCallId,
 		),
 	);
 }
@@ -9163,8 +9166,9 @@ export function createDispatchBundle(
 			const safetyMetadata = safety.policy?.metadata() ?? null;
 			const protectedArtifacts = protectedArtifactReceiptSummary(spec.protectedArtifactState);
 			const finalToolStats = snapshotToolStats(toolStats);
+			const checkFreshness = runEffects.checkFreshness();
 			const typedValidations = [
-				...typedValidationFactsFromVerifyCalls(finalToolStats, verifyCalls.calls),
+				...typedValidationFactsFromVerifyCalls(finalToolStats, verifyCalls.calls, checkFreshness),
 				...typedValidationFactsFromObservedEffects(runEffects.snapshot()),
 			];
 			const unfinished = snapshotUnfinishedTools(inFlightTools);
@@ -9245,7 +9249,7 @@ export function createDispatchBundle(
 				toolActivity,
 				verification: deriveRunVerification(
 					{ toolStats: finalToolStats, typedValidations },
-					{ capabilityClass: lifecycle.capabilityClass },
+					{ capabilityClass: lifecycle.capabilityClass, checkFreshness },
 				),
 				routingIntent: req.routingIntent ?? defaultRoutingIntent(req),
 				effectiveFailover: failoverModeFor(req),

@@ -11,12 +11,18 @@ import {
 import { mergeWithheldDetail, removedTestCases } from "../../src/domains/dispatch/merge-gate.js";
 import {
 	deriveRunVerification,
+	settledVerifyCall,
 	typedValidationFactsFromObservedEffects,
 	typedValidationFactsFromVerifyCalls,
+	type VerifyCallOutcome,
+	verifyCallStart,
 } from "../../src/domains/dispatch/run-findings.js";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { clearTaskGates, configureTaskGates } from "../../src/tools/verify/task-gates.js";
+
+/** A run with no workspace mutation, where every check ran on the final tree. */
+const unchanged = createRunEffectsRecorder(process.cwd()).checkFreshness();
 
 it("every reader of a verifier report agrees on a closing report, and a second report decides nothing", () => {
 	const report = '{"verdict":"pass","checks":[{"name":"make test","passed":true,"evidence":"exit 0"}]}';
@@ -47,8 +53,8 @@ it("every reader of a verifier report agrees on a closing report, and a second r
 it("blocked-only verify checks seal no typed validation, including unattributed finishes", () => {
 	const stats = [{ tool: "verify", count: 1, ok: 0, errors: 0, blocked: 1 }];
 	for (const check of ["test", null])
-		deepStrictEqual(typedValidationFactsFromVerifyCalls(stats, [{ check, outcome: "blocked" }]), []);
-	deepStrictEqual(typedValidationFactsFromVerifyCalls(stats, []), []);
+		deepStrictEqual(typedValidationFactsFromVerifyCalls(stats, [{ check, outcome: "blocked" }], unchanged), []);
+	deepStrictEqual(typedValidationFactsFromVerifyCalls(stats, [], unchanged), []);
 });
 it("read-only read claims do not require command evidence, but test claims still do", () => {
 	const input = {
@@ -167,7 +173,7 @@ it("anonymous verify successes are not failed by denied retries", () => {
 		],
 	]) {
 		deepStrictEqual(
-			typedValidationFactsFromVerifyCalls(stats, calls).map((fact) => fact.passed),
+			typedValidationFactsFromVerifyCalls(stats, calls, unchanged).map((fact) => fact.passed),
 			[true],
 		);
 	}
@@ -625,6 +631,48 @@ it("an observed red judges only the tree it ran on, and respelled runs of one ch
 	// With no observed edit, a reported baseline excuses only its own observed red.
 	strictEqual(seal([["base", "pytest", true]], [{ ...red, name: "pytest" }, green]).quality, "unmeasured");
 	strictEqual(seal([["base", "pytest -q", true]], [{ ...red, name: "pytest" }, green]).quality, "fail");
+});
+
+it("a check judges only the tree it ran on, sealed per verify call or from a tool's aggregate (bt-27c)", () => {
+	const seal = (steps: string, tool = "verify", aggregate = false) => {
+		const recorder = createRunEffectsRecorder(process.cwd());
+		const calls: VerifyCallOutcome[] = [];
+		const stat = { tool, count: 0, ok: 0, errors: 0, blocked: 0, totalDurationMs: 0 };
+		for (const [index, step] of steps.split(" ").entries()) {
+			const id = `call-${index}`;
+			const [name, args] =
+				step === "edit"
+					? ["edit", { path: "src/calc.c" }]
+					: step === "diff"
+						? ["bash", { command: "git diff" }]
+						: [tool, step === "list" ? {} : { check: "test" }];
+			const outcome = step === "red" ? "error" : "ok";
+			recorder.start(id, name, args);
+			recorder.checkOutcome(id, outcome);
+			recorder.finish(id, outcome === "error");
+			if (name !== tool) continue;
+			stat.count += 1;
+			stat[outcome === "ok" ? "ok" : "errors"] += 1;
+			calls.push(settledVerifyCall(verifyCallStart(args), outcome, id));
+		}
+		const checkFreshness = recorder.checkFreshness();
+		const typedValidations =
+			tool === "verify" ? typedValidationFactsFromVerifyCalls([stat], aggregate ? [] : calls, checkFreshness) : [];
+		return deriveRunVerification(
+			{ toolStats: [stat], ...(tool === "verify" ? { typedValidations } : {}) },
+			{ checkFreshness },
+		).state;
+	};
+	for (const aggregate of [false, true]) {
+		strictEqual(seal("pass edit", "verify", aggregate), "unverified");
+		strictEqual(seal("edit pass diff", "verify", aggregate), "verified");
+	}
+	strictEqual(seal("red edit pass"), "verified");
+	// A listing ran no check, so it changes no tree either.
+	strictEqual(seal("edit pass list"), "verified");
+	// An opaque validation tool's own run is not a later mutation of what it checked, but an edit after it is.
+	strictEqual(seal("edit pass", "run_tests"), "verified");
+	strictEqual(seal("pass edit", "run_tests"), "unverified");
 });
 
 it("the review gate reads a verifier report that closes prose containing braces, and nothing weaker", () => {

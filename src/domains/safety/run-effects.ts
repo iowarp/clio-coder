@@ -121,6 +121,19 @@ export interface WriteRecordDowngrade {
 	toolCallId: string;
 }
 
+/**
+ * Which checking calls judged the run's final tree: a call counts when it ran and no workspace mutation but its own
+ * landed after it started (bt-27c). A check that ran before a later edit says nothing about the tree the run left.
+ */
+export interface CheckFreshness {
+	/** False while no call counted as a workspace mutation, so every call ran on the final tree. */
+	mutationObserved: boolean;
+	/** `verify` call ids, a chain step as `<call id>:<step id>`, that ran on the final tree. */
+	verifyCalls: ReadonlySet<string>;
+	/** Tools whose latest executed call ran on the final tree. */
+	tools: ReadonlySet<string>;
+}
+
 export interface RunEffectsRecorderOptions {
 	/** Fires once, when the first successful opaque call opens the record. */
 	onWriteRecordDowngraded?(downgrade: WriteRecordDowngrade): void;
@@ -134,6 +147,7 @@ export interface RunEffectsRecorder {
 	finish(toolCallId: string, failed: boolean, result?: unknown): void;
 	checkOutcome(toolCallId: string, outcome: "ok" | "error" | "blocked"): void;
 	snapshot(): RunEffects;
+	checkFreshness(): CheckFreshness;
 }
 
 interface PendingEffects {
@@ -296,6 +310,10 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	const validationCommands = new Set<string>();
 	const validationOutcomes = new Map<string, boolean>();
 	let mutationRevision = 0;
+	// Every call in flight, with the revision it started on, so finish can tell whether it ran on the final tree.
+	const inFlight = new Map<string, { tool: string; revision: number; outcome: "ok" | "error" | "blocked" | null }>();
+	const toolsRanAt = new Map<string, number>();
+	const verifyCallsRanAt = new Map<string, number>();
 	const verificationCommands = new Set<string>();
 	const checkingCalls = new Map<string, "ok" | "error" | "blocked" | null>();
 	const writeRecordDowngrades = new Map<string, WriteRecordDowngrade>();
@@ -312,6 +330,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				proofs.delete(proofCheck);
 				latestProofCalls.set(proofCheck, toolCallId);
 			}
+			inFlight.set(toolCallId, { tool: toolName, revision: mutationRevision, outcome: null });
 			const paths = mutationTargets(toolName, args);
 			// A bash call may re-base its relative paths with its own cwd argument.
 			const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
@@ -347,7 +366,19 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 		finish(toolCallId, failed, result) {
 			const effects = pending.get(toolCallId);
 			pending.delete(toolCallId);
-			if (effects === undefined) return;
+			const call = inFlight.get(toolCallId);
+			inFlight.delete(toolCallId);
+			// A call that ran with no mutation but its own landing since it started judged the tree as it now stands.
+			const settleRan = (ownMutation: boolean) => {
+				if (call === undefined || (failed ? call.outcome !== "error" : call.outcome === "blocked")) return;
+				if (call.revision + (ownMutation ? 1 : 0) !== mutationRevision) return;
+				toolsRanAt.set(call.tool, mutationRevision);
+				if (call.tool === ToolNames.Verify) verifyCallsRanAt.set(toolCallId, mutationRevision);
+			};
+			if (effects === undefined) {
+				settleRan(false);
+				return;
+			}
 			if (
 				!failed &&
 				effects.proofCheck !== null &&
@@ -364,12 +395,16 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			// A refused call never reached its tool, so it changed nothing and leaves
 			// outcomes standing. A failed call that really ran may have partly written.
 			const refused = failed && effects.outcome !== "error" && effects.outcome !== "ok";
-			const opaqueMutation = effects.opaque && effects.validationCommand === null && !effects.inspection;
-			if (!refused && (effects.paths.length > 0 || opaqueMutation)) {
+			// A verify call is a check, as a recognized validation command is: even a bare listing changes no tree.
+			const opaqueMutation =
+				effects.opaque && effects.tool !== ToolNames.Verify && effects.validationCommand === null && !effects.inspection;
+			const mutation = !refused && (effects.paths.length > 0 || opaqueMutation);
+			if (mutation) {
 				mutationRevision += 1;
 				validationOutcomes.clear();
 				validationCommands.clear();
 			}
+			settleRan(mutation);
 			// Only a check that ran can fail. A call the engine answered without
 			// reaching its tool settles with no outcome, so it records nothing.
 			// `pytest; echo done` ran the check, but its status is echo's, so the outcome stays unknown either way.
@@ -421,6 +456,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 		checkOutcome(toolCallId, outcome) {
 			const effects = pending.get(toolCallId);
 			if (effects !== undefined) effects.outcome = outcome;
+			const call = inFlight.get(toolCallId);
+			if (call !== undefined) call.outcome = outcome;
 			if (checkingCalls.has(toolCallId)) checkingCalls.set(toolCallId, outcome);
 		},
 		snapshot() {
@@ -446,6 +483,15 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				writeRecordComplete: writeRecordDowngrades.size === 0,
 				writeRecordDowngrades: [...writeRecordDowngrades.values()].map((entry) => ({ ...entry })),
 				executedShellCommands: [...executedShellCommands],
+			};
+		},
+		checkFreshness() {
+			const current = (ranAt: ReadonlyMap<string, number>) =>
+				new Set([...ranAt].filter(([, revision]) => revision === mutationRevision).map(([key]) => key));
+			return {
+				mutationObserved: mutationRevision > 0,
+				verifyCalls: current(verifyCallsRanAt),
+				tools: current(toolsRanAt),
 			};
 		},
 	};
