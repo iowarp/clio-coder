@@ -112,10 +112,12 @@ import {
 } from "./chat-loop-messages.js";
 import { createObservationAging } from "./observation-aging.js";
 import {
+	assessDraftLoop,
 	assessRepetition,
 	assessToolCallFlood,
 	repetitionAbortReason,
 	shouldAssessRepetition,
+	thinkingOverrunReason,
 	toolCallFloodAbortReason,
 } from "./repetition-detector.js";
 import type { ModelRequestFacts, ModelRequestSlots } from "./status-types.js";
@@ -2064,8 +2066,20 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						if (thinking) repetitionCheck.thinking = streamed.length;
 						else repetitionCheck.text = streamed.length;
 						const repetition = assessRepetition(streamed);
-						if (repetition.kind === "repeating") {
-							state.repetitionAbortReason = repetitionAbortReason(repetition);
+						const drafting = thinking && repetition.kind === "ok" ? assessDraftLoop(streamed) : repetition;
+						// Reasoning only: no text or call yet, on a route whose server enforces no thinking budget (bt-25).
+						const blocks: ReadonlyArray<{ type?: unknown }> = Array.isArray(assistantEvent.partial?.content)
+							? assistantEvent.partial.content
+							: [];
+						const overrun =
+							thinking &&
+							localRuntime.runtimeResolution.modelRuntime.thinking.budgetEnforcement !== "enforced" &&
+							blocks.every((block) => block.type === "thinking")
+								? thinkingOverrunReason(streamed.length, localRuntime.agent.state.model.maxTokens)
+								: null;
+						const stop = drafting.kind === "repeating" ? repetitionAbortReason(drafting) : overrun;
+						if (stop !== null) {
+							state.repetitionAbortReason = stop;
 							deps.emitNotice(state.repetitionAbortReason, "warning");
 							localRuntime.agent.abort();
 						}

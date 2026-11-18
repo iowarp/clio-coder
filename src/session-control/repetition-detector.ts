@@ -57,6 +57,48 @@ export function assessRepetition(text: string): RepetitionAssessment {
 		: { kind: "ok" };
 }
 
+/**
+ * A deliberation loop the sentence check misses (bt-25): reasoning that keeps re-drafting the same code, where each
+ * repeated unit is a short line (`class Clock:` 28 times in 68K characters) and most lines still differ. Only long
+ * reasoning is judged, and only several distinct lines that each recur many times count, which a single draft or a
+ * table of varied rows never reaches.
+ */
+const DRAFT_MIN_CHARS = 24_000;
+const DRAFT_WINDOW_CHARS = 48_000;
+const DRAFT_MIN_LINE_CHARS = 12;
+const DRAFT_MIN_REPEATS = 10;
+const DRAFT_MIN_LINES = 3;
+
+export function assessDraftLoop(thinking: string): RepetitionAssessment {
+	if (thinking.length < DRAFT_MIN_CHARS) return { kind: "ok" };
+	const counts = new Map<string, number>();
+	for (const raw of thinking.slice(-DRAFT_WINDOW_CHARS).split("\n")) {
+		const line = raw.replace(/\s+/gu, " ").trim();
+		if (line.length >= DRAFT_MIN_LINE_CHARS) counts.set(line, (counts.get(line) ?? 0) + 1);
+	}
+	const looped = [...counts].filter(([, count]) => count >= DRAFT_MIN_REPEATS).sort((a, b) => b[1] - a[1]);
+	const [top] = looped;
+	return looped.length >= DRAFT_MIN_LINES && top !== undefined
+		? { kind: "repeating", unit: top[0], repeats: top[1] }
+		: { kind: "ok" };
+}
+
+/**
+ * Reasoning with no budget the server enforces can spend the whole output cap before an answer or a call (bt-25:
+ * 16384 tokens over 200 seconds, then a length stop). Past this share of the cap, a response that is still only
+ * reasoning is stopped and re-prompted once, as a repeating one is, instead of running into the cap.
+ */
+const THINKING_OVERRUN_SHARE = 0.75;
+const THINKING_OVERRUN_REASON_PREFIX = "[Clio Coder] stopped a model response whose reasoning";
+
+/** The stop reason once `thinkingChars` of reasoning (about four characters a token) reach the share of `outputCap`. */
+export function thinkingOverrunReason(thinkingChars: number, outputCap: number | undefined): string | null {
+	if (outputCap === undefined || !Number.isFinite(outputCap) || outputCap <= 0) return null;
+	const tokens = Math.round(thinkingChars / 4);
+	if (tokens < outputCap * THINKING_OVERRUN_SHARE) return null;
+	return `${THINKING_OVERRUN_REASON_PREFIX} reached about ${tokens} tokens of its ${outputCap}-token output limit with no answer or tool call yet.`;
+}
+
 export function repetitionAbortReason(assessment: Extract<RepetitionAssessment, { kind: "repeating" }>): string {
 	const unit = assessment.unit.length > 80 ? `${assessment.unit.slice(0, 79)}…` : assessment.unit;
 	return `[Clio Coder] stopped a model response that kept repeating itself ("${unit}" ${assessment.repeats} times in its last stretch).`;
@@ -162,8 +204,11 @@ export function repetitionRepromptMessages(
 					text: stoppedFor.startsWith(TOOL_CALL_FLOOD_REASON_PREFIX)
 						? "Your last response was stopped because it issued the same tool call again and again, so none of those calls ran. " +
 							"Do not repeat it. Make ONE tool call with complete arguments, read its result, then decide the next step."
-						: "Your last response was stopped because it kept repeating the same sentences without acting or answering. " +
-							"Do not repeat it. Make the next tool call the task needs, or answer now from what you already have.",
+						: stoppedFor.startsWith(THINKING_OVERRUN_REASON_PREFIX)
+							? "Your last response was stopped because its reasoning used most of the output limit without an answer or tool call, so it was discarded. " +
+								"Do not re-derive it. Make the next tool call the task needs, or answer now from what you already have."
+							: "Your last response was stopped because it kept repeating the same sentences without acting or answering. " +
+								"Do not repeat it. Make the next tool call the task needs, or answer now from what you already have.",
 				},
 			],
 			isError: true,
