@@ -45,6 +45,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- A live worker's spend is kept in `runs/<id>/spend.json`, and runs.json is written only at lifecycle and status transitions. (P3 #2)
 - A lone delete inside a scratch root is recorded as scratch-disposable and no longer needs or claims a workspace snapshot. (N3, conf11h)
 - The finish assessment replays the shared check fold once per turn end instead of up to twice (x8-6).
 - Standard keeps one row of the reasoning before an action instead of a bare Thinking marker (bt-11 b).
@@ -113,6 +114,11 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A Copilot target reads its own context tier's window from the cached listing, and the per-tier record survives the providers re-record. (bt-copilot limit)
+- A dispatch briefing that mentions a `~/` home path is admitted instead of refused as legacy_scope_path_absolute. (bt-11 r)
+- A fork's Verified row, /usage and telemetry insights cut copied parent outcomes by ledger position. (bt-fork-verified limit)
+- A JSON-encoded off-schema dispatch field (candidates, judge, members, review, routing, budget, per-task budget) is decoded when it is that field's valid value, instead of refused. (bt-dispatch-schema limit)
+- CLIO_CODER_PROVIDER_DUMP_PATH records each request Clio hands the Copilot runtime instead of `payloads: []`. (c2b-1)
 - A worker's result-contract reminder arrives as a host reminder after its tool results instead of inside them, so models no longer treat it as an injection. (D4, drv-cf3b)
 - A dispatched task that says not to write files runs read-only and no longer gets the architect plan contract. (D-C)
 - The [Tasks] reminder no longer fires when the request's own words forbid writing files. (bt-22b)
