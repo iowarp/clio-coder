@@ -1725,6 +1725,11 @@ const TOOLCHAIN_WRITES: ReadonlyMap<string, ReadonlySet<string>> = new Map([
 /** Formatters that rewrite what they read unless told only to check or diff. */
 const CHECKABLE_FORMATTERS: ReadonlySet<string> = new Set(["black", "isort", "rustfmt"]);
 
+/** isort's own spellings of check-only mode (x10-2). */
+function isortCheckFlag(arg: string): boolean {
+	return arg === "--check-only" || arg === "--check" || arg === "-c";
+}
+
 /** Interpreter flags that run a script given on the command line. */
 const INLINE_SCRIPT_FLAGS: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
 	["node", ["-e", "--eval", "-p", "--print"]],
@@ -1768,7 +1773,13 @@ function writerStep(executable: string, args: ReadonlyArray<string>): boolean {
 	}
 	const inline = INLINE_SCRIPT_FLAGS.get(executable);
 	if (inline?.some((flag) => args.some((arg) => arg === flag || arg.startsWith(`${flag}=`))) === true) return true;
-	const checksOnly = args.some((arg) => arg === "--check" || arg === "--diff" || arg.startsWith("--check="));
+	const checksOnly = args.some(
+		(arg) =>
+			arg === "--check" ||
+			arg === "--diff" ||
+			arg.startsWith("--check=") ||
+			(executable === "isort" && isortCheckFlag(arg)),
+	);
 	if (CHECKABLE_FORMATTERS.has(executable)) return !checksOnly;
 	if ((executable === "cargo" || executable === "go") && args[0] === "fmt") return !checksOnly;
 	if (executable === "ruff" && args[0] === "format") return !checksOnly;
@@ -1891,7 +1902,9 @@ function makeCheckMatch(args: ReadonlyArray<string>): boolean {
 
 /**
  * Read-only checks of other ecosystems by their subcommand (x8-2): cargo check, clippy and build, go vet and build
- * (without `-o`), `gofmt -l`, mypy, pyright, pylint, flake8, ruff check, `prettier --check`, biome check and lint,
+ * (without `-o`), `gofmt -l`, mypy, pyright, pylint, flake8, ruff check, `prettier --check`, the format checks
+ * `black --check`, `isort --check-only`, `ruff format --check`, `cargo fmt --check` and `rustfmt --check` (x10-2),
+ * biome check and lint,
  * dotnet test, rspec, phpunit, composer test, deno test, check and lint, playwright test, cypress run, tox, nox, hatch
  * test, rake test, `python manage.py test`, `php artisan test` and make's check targets. An option that writes what they read (`--fix`, `--write`, `-w`, a
  * snapshot update, mypy's `--install-types`, ruff's `--add-noqa`, biome's `--apply`) or a tox or nox environment named
@@ -1903,7 +1916,11 @@ function ecosystemCheckMatch(executable: string, args: ReadonlyArray<string>): b
 	let matched: boolean;
 	switch (executable) {
 		case "cargo":
-			matched = subcommand === "check" || subcommand === "clippy" || subcommand === "build";
+			matched =
+				subcommand === "check" ||
+				subcommand === "clippy" ||
+				subcommand === "build" ||
+				(subcommand === "fmt" && args.includes("--check"));
 			break;
 		case "go":
 			matched = subcommand === "vet" || (subcommand === "build" && !has(/^-o(?:=|$)/u));
@@ -1922,7 +1939,14 @@ function ecosystemCheckMatch(executable: string, args: ReadonlyArray<string>): b
 			matched = !has(/^--(?:createstub|writebaseline)/u);
 			break;
 		case "ruff":
-			matched = subcommand === "check" && !has(/^--add-noqa/u);
+			matched = (subcommand === "check" && !has(/^--add-noqa/u)) || (subcommand === "format" && args.includes("--check"));
+			break;
+		case "black":
+		case "rustfmt":
+			matched = args.includes("--check");
+			break;
+		case "isort":
+			matched = args.some(isortCheckFlag);
 			break;
 		case "prettier":
 			matched = has(/^(?:--check|-c|--list-different|-l)$/u);
