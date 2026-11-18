@@ -813,7 +813,9 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	const red = [[], "unverified", ["npm test"]];
 	for (const check of ["npx tsc --noEmit", "npx vitest run src/a.test.ts", "npx eslint src", "node --check a.js"])
 		deepStrictEqual(seal("npm test", check), [["npm test", check], "verified", []], check);
-	deepStrictEqual(seal("npm test", "npm run lint && npx tsc --noEmit"), [["npm test", "npm run lint"], "verified", []]);
+	// A bash pass is filed under its full command, the name the board and a red give it, not its vocabulary label (x8-2).
+	for (const check of ["pytest -q", "npm run lint && npx tsc --noEmit", "python3 -m pytest -q tests"])
+		deepStrictEqual(seal("npm test", check), [["npm test", check], "verified", []], check);
 	// A validated runner's own snapshot or golden update rewrites what it compares against (x7-2).
 	for (const change of [
 		`node -e "fs.writeFileSync('src/a.ts', '')"`,
@@ -831,24 +833,32 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	// A red from a check no receipt vocabulary names still settles under the classifier's name (x6-1).
 	for (const check of ["npx tsc --noEmit", "npx eslint ."])
 		deepStrictEqual(seal("npm test", `!${check}`), [["npm test"], "unverified", [check]], check);
-	deepStrictEqual(seal("!npm test", "npm test -- -t parses"), [["npm test"], "unverified", ["npm test"]]);
+	deepStrictEqual(seal("!npm test", "npm test -- -t parses"), [["npm test -- -t parses"], "unverified", ["npm test"]]);
 	// A line continuation separates nothing, so the continued check's red stands under its single-line name (x7-4).
 	deepStrictEqual(seal("!npm test \\\n  -- --reporter=dot"), [[], "unverified", ["npm test -- --reporter=dot"]]);
 	// A here-document body is data no continuation joins, so its quoted terminator still ends it in the check's name (S2).
 	const continued = "cat > /tmp/n.md <<'EOF'\nline one \\\nEOF\nnpm test";
 	strictEqual(classifyCall("bash", { command: continued }, { cwd: process.cwd() }).name, continued);
 	deepStrictEqual(seal("!npm test", "npm test -- --import ./x.mjs"), red);
-	deepStrictEqual(seal("npm test -- --run"), green);
+	deepStrictEqual(seal("npm test -- --run"), [["npm test -- --run"], "verified", []]);
 	// Every change ran before the check through `&&`, or the call held only checks, cd and plumbing.
-	deepStrictEqual(seal("npm test", "npm ci && npm test"), green);
-	deepStrictEqual(seal("npm test", "cd pkg && npm test 2>&1 | tail -5"), green);
+	deepStrictEqual(seal("npm test", "npm ci && npm test"), [["npm ci && npm test"], "verified", []]);
+	deepStrictEqual(seal("npm test", "cd pkg && npm test 2>&1 | tail -5"), [
+		["npm test", "cd pkg && npm test"],
+		"verified",
+		[],
+	]);
 	// A read-only stdout filter is plumbing too (x3-4).
-	deepStrictEqual(seal("npm test", "npm test 2>&1 | sed -n 1,80p"), green);
+	deepStrictEqual(seal("npm test", "npm test 2>&1 | sed -n 1,80p"), [
+		["npm test", "npm test 2>&1 | sed -n 1,80p"],
+		"verified",
+		[],
+	]);
 	// A log the check's output lands in is output, not a change, so its green verifies and a red behind it stands (x4-2).
 	deepStrictEqual(seal("npm test 2>&1 | tee /tmp/t.log"), green);
 	deepStrictEqual(seal("npm test > test.log 2>&1"), green);
 	deepStrictEqual(seal("!pytest", "!pytest 2>&1 | tee /tmp/pytest.log", "pytest tests/test_one.py"), [
-		["pytest"],
+		["pytest tests/test_one.py"],
 		"unverified",
 		["pytest"],
 	]);
@@ -874,7 +884,7 @@ it("a check sharing its bash call with a change judges the final tree only when 
 		deepStrictEqual(seal("npm test", change), stale, change);
 	// So does a check's own step that writes only targets it names outside the workspace (x8-5).
 	for (const check of ["npm test && cp coverage/lcov.info /tmp/", "mkdir -p /tmp/out && npm test"])
-		deepStrictEqual(seal("npm run lint", check), [["npm run lint", "npm test"], "verified", []], check);
+		deepStrictEqual(seal("npm run lint", check), [["npm run lint", check], "verified", []], check);
 	// A scratch root inside the workspace holds a check's log, but a write there changes the tree (x8-4).
 	const workspace = mkdtempSync(join(tmpdir(), "in-tree-scratch-"));
 	try {
@@ -894,14 +904,18 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	}
 	// Shell setup changes no tree, so a standing red stands beside a narrower green (x3-1).
 	for (const setup of ["source .venv/bin/activate", "export CI=1"])
-		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [["npm test"], "unverified", ["npm test"]]);
+		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [
+			[`${setup} && npm test -- unit.js`],
+			"unverified",
+			["npm test"],
+		]);
 	// A red behind head or grep may be that filter's own, so it settles nothing; behind tail it is the check's (x3-2).
 	deepStrictEqual(seal("npm test", "!npm test 2>&1 | head -30"), green);
 	deepStrictEqual(seal("npm test", "!npm test 2>&1 | grep FAIL"), green);
 	deepStrictEqual(seal("npm test", "!npm test 2>&1 | tail -5"), [["npm test"], "unverified", ["npm test"]]);
 	// A check run in another directory is not this workspace's check (x3-5).
 	deepStrictEqual(seal("cd /elsewhere && npm test"), stale);
-	deepStrictEqual(seal("cd pkg/.. && npm test"), green);
+	deepStrictEqual(seal("cd pkg/.. && npm test"), [["cd pkg/.. && npm test"], "verified", []]);
 	// A check's own directory option or test path operand can leave the workspace too; root containment decides (x4-4).
 	for (const outside of [
 		"npm test --prefix ../other",
@@ -911,11 +925,15 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	])
 		deepStrictEqual(seal(outside), stale, outside);
 	// A runner option's value is a test name, not a path, so its regex anchor reads inside and a green rerun clears a red.
-	deepStrictEqual(seal("!go test -run '^TestA$' ./pkg", "go test -run '^TestA$' ./pkg"), [["go test"], "verified", []]);
-	deepStrictEqual(seal("npm test --prefix packages/a"), green);
+	deepStrictEqual(seal("!go test -run '^TestA$' ./pkg", "go test -run '^TestA$' ./pkg"), [
+		["go test -run '^TestA$' ./pkg"],
+		"verified",
+		[],
+	]);
+	deepStrictEqual(seal("npm test --prefix packages/a"), [["npm test --prefix packages/a"], "verified", []]);
 	// A subshell or pushd cd ends at its `)` or popd, and `) &&` hands its status on, so a red there stands (x4-7).
-	deepStrictEqual(seal("(cd ../lib && make) && npm test"), green);
-	deepStrictEqual(seal("pushd ../lib && make && popd && npm test"), green);
+	for (const check of ["(cd ../lib && make) && npm test", "pushd ../lib && make && popd && npm test"])
+		deepStrictEqual(seal(check), [[check], "verified", []], check);
 	deepStrictEqual(seal("npm test", "!(cd ../lib && make) && npm test"), [
 		[],
 		"unverified",

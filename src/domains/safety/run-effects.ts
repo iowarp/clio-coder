@@ -57,7 +57,8 @@ export interface RunEffects {
 	failedMutationPaths: ReadonlySet<string>;
 	/**
 	 * The checks the run ran to a clean exit since its last workspace mutation, each named as the receipt files it: a
-	 * declared check under its id, else its vocabulary label, else the classifier's name (S1). A mutation clears
+	 * declared check under its id, else a bash check under its full command as the board files it, else its vocabulary
+	 * label, else the classifier's name (S1, x8-2). A mutation clears
 	 * them like `validationOutcomes`: a pass on the pre-change tree cannot verify the final one (bt-27b). The run's
 	 * earlier checks stay visible as execution evidence in `verificationCommands` and `executedShellCommands`.
 	 */
@@ -192,7 +193,8 @@ interface PendingEffects {
 /**
  * The names a receipt files a check call's pass under. The classifier's verdict alone says the call ran a check, as the
  * gate and the board read it, so every check names at least one (S1): each declared check it ran whole under its id,
- * then the vocabulary's label, else the classifier's own name for it.
+ * then the vocabulary's label, else the classifier's own name for it. A bash check's label is its full command, the
+ * name the board and a red file it under, so `pytest -q` is not `pytest` on the receipt alone (x8-2).
  */
 function receiptValidationCommands(
 	toolName: string,
@@ -200,7 +202,8 @@ function receiptValidationCommands(
 	reading: CallClassification,
 ): string[] {
 	if (reading.verdict !== "check") return [];
-	const label = receiptValidationLabel(toolName, args, reading.base);
+	const vocabulary = receiptValidationLabel(toolName, args, reading.base);
+	const label = vocabulary !== null && toolName === ToolNames.Bash && reading.name !== null ? reading.name : vocabulary;
 	const names = [...reading.declared, ...(label === null ? [] : [label])];
 	return names.length > 0 || reading.name === null ? names : [reading.name];
 }
