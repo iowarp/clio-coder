@@ -1,10 +1,6 @@
 import type { ModelTier } from "../../../core/model-tier.js";
 
-/**
- * ContextFold vocabulary (CF-1). A checkpoint runs the fold stages in order;
- * each stage commits a ledger record, holds, finds nothing, or fails. Later
- * lanes build on these names; this module defines them and wires nothing.
- */
+/** ContextFold vocabulary (CF-1): the cursor, owner, checkpoint and route facts a fold reads. */
 
 /**
  * Where a fold reads the ledger: `hwm` is the turn id of the last ledger row when
@@ -24,32 +20,8 @@ export interface FoldOwner {
 	fork?: { parentSessionId: string; parentTurnId: string };
 }
 
-/**
- * The fold stages in checkpoint order. A value reuses the `context.pruned` stage
- * name where one exists, so a decision and its pruning event name one stage.
- */
-export const FoldStage = {
-	/** S0: results a later identical read covered. */
-	superseded: "superseded",
-	/** S1: structural working-set eviction. */
-	structural: "working_set",
-	/** S2: the step-boundary checkpoint a step turn starts from. */
-	stepCheckpoint: "step_checkpoint",
-	/** S3: the summary checkpoint. */
-	summary: "llm_summary",
-	/** Physical fit: the request cannot be sent at the size the fold reached. */
-	stop: "stop",
-} as const;
-export type FoldStageId = (typeof FoldStage)[keyof typeof FoldStage];
-export const FOLD_STAGE_IDS: ReadonlyArray<FoldStageId> = Object.values(FoldStage);
-
-/** What one stage did at one checkpoint. */
-export type FoldStageOutcome = "committed" | "held" | "none" | "failed";
-export const FOLD_STAGE_OUTCOMES: ReadonlyArray<FoldStageOutcome> = ["committed", "held", "none", "failed"];
-
 /** Where a fold runs: submit, between tool batches, overflow recovery, an operator command, a step start. */
 export type FoldCheckpoint = "submit" | "tool_batch" | "overflow" | "operator" | "step";
-export const FOLD_CHECKPOINTS: ReadonlyArray<FoldCheckpoint> = ["submit", "tool_batch", "overflow", "operator", "step"];
 
 /** What the session route reports about itself, from its runtime resolution. */
 export interface FoldRouteFacts {

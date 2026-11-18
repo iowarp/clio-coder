@@ -27,8 +27,6 @@ import { HANDOFF_SEED_CUSTOM_TYPE, handoffSeedContextText, isHandoffSeedData } f
 /** Contract future alternate estimators must satisfy. */
 export interface TokenEstimator {
 	estimateEntry(entry: SessionEntry): number;
-	/** True when `estimateEntry` returns a provider-measured delta for this entry rather than its structural price. */
-	isMeasured?(entry: SessionEntry): boolean;
 	calculateContextTokens(entries: ReadonlyArray<SessionEntry>, lastUsage?: Usage): number;
 }
 
@@ -111,9 +109,6 @@ export function createTokenEstimator(
 	return {
 		estimateEntry(entry) {
 			return measuredCost(entry) ?? replayCost(entry);
-		},
-		isMeasured(entry) {
-			return measuredCost(entry) !== undefined;
 		},
 		calculateContextTokens,
 	};

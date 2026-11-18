@@ -93,7 +93,7 @@ import {
 } from "../domains/context/budget/live-view.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { supersededStageApplies } from "../domains/context/fold/contract.js";
-import { economicPressure, foldTriggerReserve } from "../domains/context/fold/pressure.js";
+import { foldTriggerReserve } from "../domains/context/fold/pressure.js";
 import { withinRearmBand } from "../domains/context/working-set/checkpoint.js";
 import type { planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
@@ -126,6 +126,7 @@ import {
 	AutoCompactionTrigger,
 	DEFAULT_COMPACTION_THRESHOLD,
 	effectiveCompactionThreshold,
+	shouldCompact,
 } from "../domains/session/compaction/auto.js";
 import {
 	type CompactInput,
@@ -1368,12 +1369,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			triggerReserve,
 			triggerFraction,
 			shouldCompact: (tokens: number) =>
-				economicPressure({
-					tokens,
-					threshold: economic.threshold,
-					triggerWindow: economic.triggerWindow,
-					reserve: triggerReserve(tokens),
-				}),
+				shouldCompact(tokens, economic.threshold, economic.triggerWindow, triggerReserve(tokens)),
 			/** The context size at which the automatic trigger fires, counting the reserve for `tokens`. */
 			triggerTokens: (tokens: number) => Math.floor(triggerFraction(tokens) * economic.triggerWindow),
 		};

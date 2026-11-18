@@ -14,7 +14,6 @@ import type { ContextActivityStatus, ContextFoldPayload, ContextPrunedPayload } 
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import type { FoldCheckpoint } from "../domains/context/fold/contract.js";
 import { evictionPressure } from "../domains/context/fold/pressure.js";
-import { createFoldPriceBook } from "../domains/context/fold/price.js";
 import type { EvictionPlan, PolicyInput } from "../domains/context/working-set/contract.js";
 import { buildEvictionFields } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
@@ -29,6 +28,7 @@ import {
 } from "../domains/context/working-set/superseded.js";
 import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
 import type { ContextCompactionVerdict } from "../domains/session/compaction/auto.js";
+import { createTokenEstimator } from "../domains/session/compaction/tokens.js";
 import type { ContextSnapshot } from "../domains/session/context-accounting.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type {
@@ -364,7 +364,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 	): PolicyInput => {
 		const leaf = state.lastTurnId ?? undefined;
 		const visibleEntries = selectVisibleEntries(entries, leaf);
-		const prices = createFoldPriceBook(
+		const estimator = createTokenEstimator(
 			visibleEntries,
 			createReplayMessageConverter(entries, { ...(leaf ? { activeLeafTurnId: leaf } : {}) }),
 		);
@@ -374,7 +374,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			cwd: session.current()?.cwd ?? null,
 			settings: settings.context.workingSet,
 			pressure,
-			estimateTokens: prices.tokens,
+			estimateTokens: (entry) => estimator.estimateEntry(entry),
 		};
 	};
 
