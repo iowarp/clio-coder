@@ -2,7 +2,7 @@ import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
-import { isVerificationScriptName } from "../../core/verification-scripts.js";
+import { isVerificationScriptName, isWriteCapableScriptName } from "../../core/verification-scripts.js";
 import { isSameOrDescendant } from "./path-policy.js";
 
 export type ProtectedArtifactSource = "validation" | "middleware" | "user" | "session";
@@ -1319,7 +1319,9 @@ export function isReadOnlyInspectionCommand(command: string, gitHelpersConfigure
  * plumbing, so the command changed no tree. `after-change`: every step that may change the tree runs before every
  * check, the last of them hands over through `&&`, and nothing but `&&` and `|` joins the steps, so the check judged
  * the changed tree (`npm ci && npm test`). `mixed`: anything else (`git apply x.patch; npm test`, `npm test && node
- * codemod.mjs`), whose check cannot speak for the tree the command left. Null when no step is a recognized check.
+ * codemod.mjs`), whose check cannot speak for the tree the command left. A check that rewrites the tree
+ * ({@link checkWritesTree}) is a change as well, so its own outcome never lands as a pass. Null when no step is a
+ * recognized check.
  */
 export type CheckCommandShape = "pure" | "after-change" | "mixed";
 
@@ -1379,7 +1381,7 @@ export function checkCommandShape(command: string, gitHelpersConfigured: boolean
 		const argv = step.index === null ? [] : step.argv.slice(step.index);
 		const readOnly =
 			step.index === null ||
-			check ||
+			(check && !checkWritesTree(argv)) ||
 			SHELL_SETUP_STEPS.has(argv[0] ?? "") ||
 			readOnlyInspectionStep(argv, gitHelpersConfigured);
 		return { check, changes: !readOnly || writes.some(isInterestingWriteTarget), joinedBy: step.joinedBy };
@@ -1397,6 +1399,33 @@ export function checkCommandShape(command: string, gitHelpersConfigured: boolean
 		steps.every((step) => step.joinedBy === null || step.joinedBy === "&&" || step.joinedBy === "|") &&
 		!steps.slice(0, lastChange + 1).some((step) => step.check);
 	return handsOver ? "after-change" : "mixed";
+}
+
+/** Flags that turn a linter or formatter into a writer of the files it checks. */
+const TREE_WRITING_FLAGS: ReadonlySet<string> = new Set(["--fix", "--write"]);
+/** Formatters whose `-w` writes the files back; elsewhere `-w` names a workspace or a warning filter. */
+const W_FLAG_WRITERS: ReadonlySet<string> = new Set(["prettier", "gofmt", "goimports"]);
+
+/**
+ * Whether a check command may rewrite the tree it checks (x3-3): a package script, make or just target named as a
+ * writer ({@link isWriteCapableScriptName}), `--fix` or `--write`, or a formatter's `-w`. A heuristic on names and
+ * flags: a writer spelled otherwise reads as a check, and a read-only script named `format` reads as a change, which
+ * only clears passes the run must then earn again.
+ */
+export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
+	const index = commandTokenIndex(argv);
+	if (index === null) return false;
+	const executable = basenameToken(argv[index]);
+	const args = argv.slice(index + 1);
+	if (args.some((arg) => TREE_WRITING_FLAGS.has(arg) || arg.startsWith("--fix="))) return true;
+	if (W_FLAG_WRITERS.has(executable) && args.includes("-w")) return true;
+	if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
+		const script = args[0] === "run" ? args[1] : args[0];
+		return script !== undefined && isWriteCapableScriptName(script);
+	}
+	if (executable === "make" || executable === "just")
+		return args.some((arg) => !arg.startsWith("-") && !arg.includes("=") && isWriteCapableScriptName(arg));
+	return false;
 }
 
 /** Pipeline stages that read their input to its end and exit 0, so the pipeline's status is the stage feeding them. */

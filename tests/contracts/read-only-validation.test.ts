@@ -732,6 +732,10 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	deepStrictEqual(seal("npm test", "pytest; git stash pop"), stale);
 	deepStrictEqual(seal("npm test", "npm ci | npm test"), stale);
 	deepStrictEqual(seal("npm test", "npm test > log.txt"), stale);
+	// A check that rewrites the tree is a change, in bash or verify (x3-3).
+	deepStrictEqual(seal("npm test", "npm run lint:fix"), stale);
+	deepStrictEqual(seal("npm test && npm run format"), stale);
+	deepStrictEqual(seal("npm test", { check: "format" }), stale);
 	// Every change ran before the check through `&&`, or the call held only checks, cd and plumbing.
 	deepStrictEqual(seal("npm test", "npm ci && npm test"), green);
 	deepStrictEqual(seal("npm test", "cd pkg && npm test 2>&1 | tail -5"), green);

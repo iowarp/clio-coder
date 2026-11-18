@@ -14,6 +14,7 @@ import {
 	type CheckCommandShape,
 	checkCommandShape,
 	checkFailureAttributable,
+	checkWritesTree,
 	commandArgumentSegments,
 	detectValidationCommand,
 	extractCommandDeleteTargets,
@@ -388,6 +389,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			const verificationCommand = validationCommandOf(toolName, args, "grounding");
 			const opaque = toolWritesOpaquely(toolName);
 			const command = toolName === ToolNames.Bash ? commandOf(args) : null;
+			const shellCommand = command ?? verifyCommandOf(toolName, args, base);
 			// A listing names no check and runs none, so it is not a checking call (bt-19).
 			if ((toolName === ToolNames.Verify && !isVerifyListing(args)) || verificationCommand !== null)
 				checkingCalls.set(toolCallId, null);
@@ -411,8 +413,14 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				verificationCommand,
 				opaque,
 				inspection: command !== null && isReadOnlyInspectionCommand(command, gitHelpers),
-				checkShape: command === null ? null : checkCommandShape(command, gitHelpers),
-				shellCommand: command ?? verifyCommandOf(toolName, args, base),
+				// A verify check whose argv rewrites the tree (`npm run format`) is a change, as in bash (x3-3).
+				checkShape:
+					command !== null
+						? checkCommandShape(command, gitHelpers)
+						: shellCommand !== null && checkWritesTree(shellCommand.split(" "))
+							? "mixed"
+							: null,
+				shellCommand,
 				outcome: null,
 			});
 		},
@@ -451,7 +459,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			// A verify call is a check, as a recognized validation command is: even a bare listing changes no tree. Its
 			// argv is one simple command (a catalog refuses shell executables, a task gate takes bare words). A bash
 			// check that shares its call with steps that may change the tree is still a mutation, and it judged the
-			// final tree only when every such step ran first (x1-1).
+			// final tree only when every such step ran first (x1-1). A check that rewrites the tree, bash or verify, is a
+			// change too, so no earlier pass stands on code it reformatted (x3-3).
 			const checkChangedTree = effects.checkShape === "after-change" || effects.checkShape === "mixed";
 			const opaqueMutation =
 				effects.opaque &&
