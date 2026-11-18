@@ -45,6 +45,7 @@ import type { HistoryReviewSlice, HistoryReviewSource } from "./history-review.j
 import type { MemoryInterventionRegistration, MemoryStepLaunchOutcome } from "./intervention.js";
 import { lessonEvidence } from "./lesson-evidence.js";
 import type { HistoryFiling } from "./lesson-feedback.js";
+import type { KeptLesson } from "./lesson-projection.js";
 import type { TaskMemoryTelemetrySink } from "./memory-events.js";
 import { taskMemoryBankDelta } from "./memory-events.js";
 import { provenRecipes, recipeAlreadyClaimed } from "./recipes.js";
@@ -119,7 +120,7 @@ export interface MemoryGuardianDeps {
 	settings(): { maxTokens: number; timeoutMs: number };
 	/** Current checkout a source-cited lesson's quote is verified against. */
 	workspaceRoot(): string;
-	getKeptLessons(): ReadonlyArray<{ id: string; text: string; evidenceRefs?: readonly string[] }>;
+	getKeptLessons(): readonly KeptLesson[];
 	/**
 	 * Lessons from one history excerpt, with the session that produced them.
 	 * The excerpt's cursor advances only after this settles as filed or saved
@@ -486,7 +487,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		}
 	}
 
-	function safeKeptLessons(): ReadonlyArray<{ id: string; text: string; evidenceRefs?: readonly string[] }> {
+	function safeKeptLessons(): readonly KeptLesson[] {
 		try {
 			return deps.getKeptLessons();
 		} catch {

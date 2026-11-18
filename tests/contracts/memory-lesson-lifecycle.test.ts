@@ -12,6 +12,7 @@ import type { CompletedLessonSource } from "../../src/domains/memory/history-rev
 import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
 import { lessonEvidence, readInsideRoot, repositoryRelativePath } from "../../src/domains/memory/lesson-evidence.js";
 import { MemoryLessonFeedback } from "../../src/domains/memory/lesson-feedback.js";
+import { projectKeptLesson } from "../../src/domains/memory/lesson-projection.js";
 import { rejectMemoryRecord } from "../../src/domains/memory/operations.js";
 import { MemoryRuntime } from "../../src/domains/memory/runtime.js";
 import { loadMemoryRecordsSync, memoryStorePath } from "../../src/domains/memory/store.js";
@@ -27,6 +28,21 @@ import { isolateClioEnv, makeScratchHome } from "../harness/scratch-env.js";
 import { writeSettledRun } from "../harness/settled-run.js";
 
 const COMMAND = "node scripts/check.mjs --mode native";
+
+/** An operator-approved repository lesson as the store projects one. */
+const keptLesson = (id: string, lesson: string) =>
+	projectKeptLesson({
+		id,
+		scope: "repo",
+		key: id,
+		lesson,
+		evidenceRefs: [],
+		appliesWhen: [],
+		avoidWhen: [],
+		confidence: 1,
+		createdAt: "2026-01-01T00:00:00.000Z",
+		approved: true,
+	});
 
 test("promote --from-handoff finds the source from any directory and refuses only what it should", async () => {
 	const env = await isolateClioEnv("memory-promote-flow-");
@@ -264,8 +280,8 @@ test("a lesson the task plainly asks about is offered once, only when the prompt
 	const memory = createMemoryInterventionRegistration({
 		bank: new TaskMemoryBank(),
 		getKeptLessons: () => [
-			{ id: "mem-port", text: port },
-			{ id: "mem-log", text: "Changelog entries for GUI-only changes go under a GUI subheading." },
+			keptLesson("mem-port", port),
+			keptLesson("mem-log", "Changelog entries for GUI-only changes go under a GUI subheading."),
 		],
 		onDurableLessonOutcomes: (outcome) => delivered.push(...outcome.delivered),
 	});
@@ -304,7 +320,7 @@ test("an approved command lesson surfaces once at the first non-documentation ed
 	const held: string[] = [];
 	const memory = createMemoryInterventionRegistration({
 		bank: new TaskMemoryBank(),
-		getKeptLessons: () => [{ id: "mem-recipe", text: `Validation requires \`${COMMAND}\`.` }],
+		getKeptLessons: () => [keptLesson("mem-recipe", `Validation requires \`${COMMAND}\`.`)],
 		onDurableLessonOutcomes: (outcome) => {
 			delivered.push(...outcome.delivered);
 			held.push(...outcome.held);
@@ -347,7 +363,7 @@ test("a failing variant of a remembered recipe gets the recipe on its failed res
 	const memory = createMemoryInterventionRegistration({
 		bank: new TaskMemoryBank(),
 		workspaceRoot: () => root,
-		getKeptLessons: () => [{ id: "mem-recipe", text: `Run scripts/check.mjs as \`${COMMAND}\`.` }],
+		getKeptLessons: () => [keptLesson("mem-recipe", `Run scripts/check.mjs as \`${COMMAND}\`.`)],
 		onDurableLessonOutcomes: (outcome) => delivered.push(...outcome.delivered),
 	});
 	const failed = (command: string, id: string) =>
@@ -384,7 +400,7 @@ test("a verification gap and a read of the lesson's own file each bring the reci
 		createMemoryInterventionRegistration({
 			bank: new TaskMemoryBank(),
 			workspaceRoot: () => root,
-			getKeptLessons: () => [{ id: "mem-recipe", text: `Run scripts/check.mjs as \`${COMMAND}\`.` }],
+			getKeptLessons: () => [keptLesson("mem-recipe", `Run scripts/check.mjs as \`${COMMAND}\`.`)],
 			telemetry: { record: (row) => triggers.push(...row.triggerReasons) },
 		});
 	const verify = make();

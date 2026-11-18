@@ -32,7 +32,7 @@ import {
 } from "./commit-state.js";
 import type { MemoryObservationCommands } from "./contract.js";
 import { lessonEvidence, readInsideRoot, recordObservedRead, repositoryRelativePath } from "./lesson-evidence.js";
-import { asKeptLesson, type KeptLesson, renderKeptLesson } from "./lesson-projection.js";
+import { type KeptLesson, renderKeptLesson } from "./lesson-projection.js";
 import {
 	type TaskMemoryBankDelta,
 	type TaskMemoryTelemetryDecision,
@@ -334,7 +334,7 @@ export interface MemoryInterventionDeps {
 	 * provenance. Action reminders select from all of them before any item limit;
 	 * the turn-end pass is shown a bounded subset so it does not rewrite them.
 	 */
-	getKeptLessons?: () => ReadonlyArray<{ id: string; text: string } & Partial<KeptLesson>>;
+	getKeptLessons?: () => readonly KeptLesson[];
 	/** Kept lessons the turn-end pass deleted because the turn showed them wrong. */
 	onKeptLessonsRetired?: (memoryIds: ReadonlyArray<string>) => void;
 	onScopeEnd?: (scope: { sessionId: string | undefined; lessons: ReadonlyArray<TaskMemoryEntry> }) => void;
@@ -1003,7 +1003,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	function keptLessons(): ReadonlyArray<KeptLesson> {
 		if (!settings().enabled) return [];
 		try {
-			return (deps.getKeptLessons?.() ?? []).map(asKeptLesson);
+			return deps.getKeptLessons?.() ?? [];
 		} catch {
 			// An unreadable store surfaces nothing; the session continues without it.
 			return [];
