@@ -91,6 +91,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- The safety judge reads the operator's typed messages and ask_user answers in the order given on the active session path, so an earlier interview "No" no longer overrides a later typed authorization (and a stale "Yes" no longer overrides a later "stop"); answers now follow /tree and survive resume (bt-24).
 - The tasks reminder names the gateway call when tasks is reachable only through gateway, and is skipped on answer, proposal and read-only turns (bt-22).
 - The tasks tool refuses unknown keys with the key to use, and every task error names its key (bt-22).
 - dispatch accepts worktree:false as the same as omitted (bt-23).
