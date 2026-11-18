@@ -825,7 +825,13 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	deepStrictEqual(seal("npm test", "npm test | tee src/a.ts"), stale);
 	deepStrictEqual(seal("npm test", "npm test && cat package.json > notes.txt"), stale);
 	// A write that lands only outside the workspace changes no tree; one inside it, an opaque writer or a move out does (x7-1).
-	for (const scratch of ["echo hi > /tmp/x.txt", "cat > /tmp/c.py <<'EOF'\nimport os\nEOF", "rm -rf /tmp/scratch"])
+	// A here-document body is data, so a check it spells neither runs nor retires a pass (S3).
+	for (const scratch of [
+		"echo hi > /tmp/x.txt",
+		"cat > /tmp/c.py <<'EOF'\nimport os\nEOF",
+		"rm -rf /tmp/scratch",
+		"cat > $TMPDIR/c.sh <<'EOF'\npytest\nEOF",
+	])
 		deepStrictEqual(seal("npm test", scratch), green, scratch);
 	for (const change of ["echo hi > notes.txt", "echo hi > /tmp/x && npm ci", "mv src/a.ts /tmp/a.ts"])
 		deepStrictEqual(seal("npm test", change), stale, change);

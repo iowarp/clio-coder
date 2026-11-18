@@ -244,7 +244,7 @@ export function detectValidationCommand(
 	command: string,
 	scope: ValidationCommandScope = "finish-contract",
 ): ValidationCommandDetection {
-	for (const tokens of splitSegments(scanShellLike(command))) {
+	for (const tokens of splitSegments(scanShellLike(command, true))) {
 		const segment = shellCommandArguments(tokens);
 		const commandIndex = commandTokenIndex(segment);
 		if (commandIndex === null) continue;
@@ -1787,7 +1787,7 @@ function stepVerdict(argv: ReadonlyArray<string>, gitHelpersConfigured: boolean)
  * there it reads as unknown.
  */
 export function shellCommandVerdict(command: string, gitHelpersConfigured: boolean, depth = 0): CommandVerdict {
-	const tokens = scanShellLike(command);
+	const tokens = scanShellLike(command, true);
 	const steps = shellSteps(tokens);
 	if (steps.length === 0) return "unknown";
 	if (steps.some(isCheckStep)) return "check";
@@ -1823,7 +1823,7 @@ const NAMED_TARGET_WRITERS: ReadonlySet<string> = new Set(["tee", "mkdir", "touc
  * shell or interpreter reads it, and either of those, git, a substitution or an inline script stays unenumerable.
  */
 export function shellWritesOnlyNamedTargets(command: string, gitHelpersConfigured: boolean): boolean {
-	const steps = shellSteps(scanShellLike(withoutHeredocBodies(command, true)));
+	const steps = shellSteps(scanShellLike(command, true));
 	if (steps.length === 0) return false;
 	return steps.every((step) => {
 		if (step.tokens.some((token) => token.substitutions?.length || token.hiddenContent || token.unterminated))
@@ -2044,7 +2044,7 @@ export function checkCommandShape(
 	declaredSteps: ReadonlySet<number> = new Set(),
 	stepWritesTree: (step: string) => boolean = () => true,
 ): CheckCommandShape | null {
-	const tokens = scanShellLike(command);
+	const tokens = scanShellLike(command, true);
 	const parsed = shellSteps(tokens);
 	const isCheck = (step: ShellStep, index: number) => isCheckStep(step) || declaredSteps.has(index);
 	if (!parsed.some(isCheck)) return null;
@@ -2086,7 +2086,7 @@ export function checkCommandShape(
 export function checkLogTargets(command: string): ReadonlySet<string> {
 	const logs = new Set<string>();
 	let checked = false;
-	for (const step of shellSteps(scanShellLike(command))) {
+	for (const step of shellSteps(scanShellLike(command, true))) {
 		checked ||= isCheckStep(step);
 		const argv = step.index === null ? [] : step.argv.slice(step.index);
 		if (checked && basenameToken(argv[0]) === "tee") for (const target of pathArgs(argv, 0)) logs.add(target);
@@ -2159,7 +2159,7 @@ function drainsInput(step: ShellStep): boolean {
  * the end and exit 0, settles no failure. Its clean exit still speaks for it, since every stage then exited 0.
  */
 export function checkFailureAttributable(command: string): boolean {
-	const steps = shellSteps(scanShellLike(command));
+	const steps = shellSteps(scanShellLike(command, true));
 	return steps.every((step, position) => {
 		if (!isCheckStep(step)) return true;
 		for (let next = position; ; next += 1) {
@@ -2177,7 +2177,7 @@ export function checkFailureAttributable(command: string): boolean {
  * an expansion. Quoting is read the way the shell reads it, so a quoted option name still counts.
  */
 export function shellStatusMasked(command: string): boolean {
-	return shellSteps(scanShellLike(command)).some((step) => {
+	return shellSteps(scanShellLike(command, true)).some((step) => {
 		if (step.argv.slice(0, step.index ?? step.argv.length).includes("!")) return true;
 		if (step.index === null) return false;
 		const [executable, ...args] = step.argv.slice(step.index);
@@ -2197,7 +2197,7 @@ export function checkRunsOutside(command: string, base: string, root: string): b
 	let directory: string | null = base;
 	let pushed: Array<string | null> = [];
 	const subshells: Array<{ directory: string | null; pushed: Array<string | null> }> = [];
-	for (const step of shellSteps(scanShellLike(command))) {
+	for (const step of shellSteps(scanShellLike(command, true))) {
 		for (let open = 0; open < step.opens; open += 1) subshells.push({ directory, pushed: [...pushed] });
 		const executable = step.index === null ? "" : basenameToken(step.argv[step.index]);
 		const target = cdTarget(step.argv);
