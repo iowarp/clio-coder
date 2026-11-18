@@ -5731,8 +5731,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					[ACP_SESSION_META_KEY]: {
 						createdAt: safeIso(meta.createdAt),
 						endedAt: meta.endedAt === null ? null : safeIso(meta.endedAt),
-						target: safeConfiguredIdentifier(meta.target, ACP_MAX_TARGET_ID_BYTES),
-						model: safeConfiguredIdentifier(meta.model, ACP_MAX_MODEL_ID_BYTES),
+						target: safeConfiguredIdentifier(meta.currentTarget ?? meta.target, ACP_MAX_TARGET_ID_BYTES),
+						model: safeConfiguredIdentifier(meta.currentModel ?? meta.model, ACP_MAX_MODEL_ID_BYTES),
 						...(meta.firstMessagePreview !== undefined
 							? { firstMessagePreview: safeStoredString(meta.firstMessagePreview, ACP_MAX_LABEL_BYTES) }
 							: {}),

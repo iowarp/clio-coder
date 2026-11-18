@@ -34,6 +34,13 @@ export type ClioSessionMetaExtension = {
 	messageCount?: number;
 	hasModelTurn?: boolean;
 	/**
+	 * The route the session runs on now, from its newest `modelChange` entry,
+	 * discovered at listing like `name`. Absent when it never switched; `target`
+	 * and `model` stay the session-start route the ledger's switches fold onto.
+	 */
+	currentTarget?: string;
+	currentModel?: string;
+	/**
 	 * Latest entry timestamp seen in current.jsonl, falling back to the
 	 * file's mtime. Lets the picker rank sessions by last-activity rather
 	 * than creation time so a long-running session moves up after each
