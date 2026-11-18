@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { clioStateDir } from "../../../core/xdg.js";
 import type { AgentMessage } from "../../../engine/types.js";
+import type { WorkerRecallLineage } from "./contract.js";
 import { workerObservationsDirectory } from "./observation-retention.js";
 import { contextHash } from "./snapshot.js";
 
@@ -13,29 +14,50 @@ export type WorkerRecall = (args: Record<string, unknown>) => WorkerRecallResult
 
 /**
  * The in-memory allowlist is the capability. A ref never grants arbitrary file or parent-ledger access. A dispatched
- * worker archives under its run id, so retention can key the archives on that run (D1-5).
+ * worker archives under its run id, so retention can key the archives on that run (D1-5). Refs are the run's own
+ * `r<N>` aliases; an alias at or under the seed's floor names parent history this run cannot recall.
  */
-export function createWorkerObservationStore(runId?: string): {
-	archive(ref: string, message: AgentMessage): string;
+export function createWorkerObservationStore(
+	runId?: string,
+	lineage: WorkerRecallLineage = { aliasFloor: 0, inheritedMarkers: [] },
+): {
+	archive(alias: string, message: AgentMessage): string;
+	archivePath(message: AgentMessage): string;
 	recall: WorkerRecall;
 } {
-	const records = new Map<string, { file: string; label: string }>();
+	const archivePath = (message: AgentMessage) =>
+		join(workerObservationsDirectory(clioStateDir(), runId), `${contextHash(message)}.json`);
+	const records = new Map<string, { file: string; digest: string; label: string }>();
+	const inherited = new Map(lineage.inheritedMarkers.map((marker) => [marker.alias, marker.ref]));
+	const parentAlias = (ref: string) =>
+		inherited.has(ref) || (/^r[1-9]\d*$/u.test(ref) && Number(ref.slice(1)) <= lineage.aliasFloor);
 	return {
-		archive(ref, message) {
-			if (contextHash(message) !== ref) throw new Error("worker context: observation digest mismatch");
-			const file = join(workerObservationsDirectory(clioStateDir(), runId), `${ref}.json`);
+		archivePath,
+		archive(alias, message) {
+			if (!/^r[1-9]\d*$/u.test(alias) || records.has(alias) || parentAlias(alias))
+				throw new Error(`worker context: ${alias} is not a fresh recall alias for this run`);
+			const digest = contextHash(message);
+			const file = archivePath(message);
 			safeResourceWrite(file, `${JSON.stringify(message)}\n`, { mode: 0o600 });
-			records.set(`worker:${ref}`, { file, label: message.role === "toolResult" ? message.toolName : message.role });
+			records.set(alias, { file, digest, label: message.role === "toolResult" ? message.toolName : message.role });
 			return file;
 		},
 		recall(args) {
 			if (args.ref !== undefined) {
 				const ref = typeof args.ref === "string" ? args.ref.trim() : "";
 				const record = records.get(ref);
-				if (!record) return { error: "ref is not an evicted observation from this worker run" };
+				if (!record) {
+					if (parentAlias(ref)) {
+						const entry = inherited.get(ref);
+						return {
+							error: `not_in_stream: ${ref} names parent history${entry === undefined ? "" : ` (parent entry ${entry})`}, which this worker run cannot recall; its marker is all the run holds of it`,
+						};
+					}
+					return { error: "ref is not an evicted observation from this worker run" };
+				}
 				try {
 					const body = readFileSync(record.file, "utf8");
-					if (`worker:${contextHash(JSON.parse(body))}` !== ref) return { error: "observation digest mismatch" };
+					if (contextHash(JSON.parse(body)) !== record.digest) return { error: "observation digest mismatch" };
 					return { body: `Historical observation ${ref}; this is not a new source read.\n${body}`, total: 1, shown: 1 };
 				} catch {
 					return { error: "persisted worker observation is unavailable or malformed" };

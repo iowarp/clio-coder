@@ -165,7 +165,7 @@ describe("W6 (F7 -> CF-7): the worker guard's target and band", () => {
 		};
 	}
 
-	it("a worker at threshold does not evict again on the next small round", { todo: "F7 -> CF-7" }, () => {
+	it("a worker at threshold does not evict again on the next small round", () => {
 		const archived: string[] = [];
 		const guard = createWorkerContextGuard((ref) => {
 			archived.push(ref);

@@ -14,6 +14,20 @@ export interface WorkerContextSource {
 	cwd: string;
 }
 
+/** A parent marker a seed carries: its recall alias and the parent entry it names. */
+export interface WorkerInheritedMarker {
+	alias: string;
+	ref: string;
+}
+
+/** The parent's recall aliases as the host's view held them at capture. */
+export interface WorkerContextRecallMarks {
+	/** The alias mark of the whole parent file through the capture cursor, across branches. */
+	aliasFloor: number;
+	/** Markers the active path renders; selection keeps those its messages still carry. */
+	markers: WorkerInheritedMarker[];
+}
+
 /** Host-only snapshot of model-visible messages, never the raw session archive. */
 export interface WorkerContextSnapshot {
 	version: 1;
@@ -21,6 +35,7 @@ export interface WorkerContextSnapshot {
 	messages: ReadonlyArray<AgentMessage>;
 	excludedTailMessages: number;
 	excludedInterruptedMessages: number;
+	recall?: WorkerContextRecallMarks;
 	contentHash: string;
 }
 
@@ -38,6 +53,16 @@ export interface WorkerContextProvenance {
 	excludedTailMessages: number;
 	excludedInterruptedMessages: number;
 	selectedRefs: string[];
+	/** The parent's alias mark at capture; the worker's first alias is the next one. */
+	recallAliasFloor?: number;
+	/** Parent markers that survived path selection and capture. */
+	inheritedMarkers?: WorkerInheritedMarker[];
+}
+
+/** The worker's reading of a seed's recall aliases. A scanned marker has no parent ref. */
+export interface WorkerRecallLineage {
+	aliasFloor: number;
+	inheritedMarkers: ReadonlyArray<{ alias: string; ref?: string }>;
 }
 
 /** Self-contained seed, usable on a remote native worker without parent filesystem access. */
