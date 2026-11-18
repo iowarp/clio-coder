@@ -6,16 +6,18 @@ import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { FINISH_CONTRACT_EVIDENCE_TAGS } from "../../src/domains/evidence/finish-contract-map.js";
 import { composeTrustStatus } from "../../src/domains/evidence/trust-status.js";
+import { classifyCall, settleCheckCall } from "../../src/domains/safety/check-classifier.js";
 import type { CompletionEvaluationInput } from "../../src/domains/safety/decision-events.js";
 import {
 	assessFinishContract,
+	declaredVerifierCommands,
 	FINISH_CONTRACT_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE,
 } from "../../src/domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
 import { runCheckFacts } from "../../src/domains/safety/observed-checks.js";
-import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
+import { checkOutputReader, createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { builtin } from "../../src/tools/builtin-tool-catalog.js";
 import { limitationTool } from "../../src/tools/limitation.js";
 import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
@@ -578,6 +580,65 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 			"./acceptance.sh && rm src/thing.ts",
 		]) {
 			strictEqual(assess(command).reason, "unvalidated_mutation", command);
+		}
+	});
+
+	it("reads a declared check through wrappers, pipes and logs as a check of the same spelling (x10-1)", (t) => {
+		const root = mkdtempSync(join(tmpdir(), "finish-declared-steps-"));
+		t.after(() => rmSync(root, { recursive: true, force: true }));
+		mkdirSync(join(root, ".clio-coder"));
+		const check = (id: string, command: string) =>
+			`  - id: ${id}\n    description: ${id}\n    command: [${command}]\n    cwd: .\n    timeoutMs: 600000\n    tags: []\n`;
+		writeFileSync(
+			join(root, ".clio-coder", "verifiers.yaml"),
+			`version: 2\nchecks:\n${check("ci", "make, ci")}${check("e2e", "./scripts/e2e.sh")}`,
+		);
+		const declaredChecks = declaredVerifierCommands(root, []);
+		const read = (command: string) => {
+			const call = classifyCall(
+				ToolNames.Bash,
+				{ command },
+				{ cwd: root, declaredChecks, outputTarget: checkOutputReader(root) },
+			);
+			const assessment = assessFinishContract({
+				sessionEntries: [
+					userMessage("user-1"),
+					...mutationWindow().slice(1),
+					toolCall("sh-1", ToolNames.Bash, { command }),
+					toolResult("sh-1", ToolNames.Bash, false),
+					assistantMessage("assistant-1", "Fixed."),
+				],
+				assistantTurnId: "assistant-1",
+				workspaceRoot: root,
+				activeAcceptance: { expectedOutputs: [], verification: [{ check: "ci", timeoutMs: 600000 }] },
+			});
+			return {
+				verdict: call.verdict,
+				declared: call.declared,
+				green: settleCheckCall(call, false, "ok", true).settled,
+				gate: assessment.kind,
+				ci: assessment.verificationScope?.acceptance[0]?.state,
+			};
+		};
+		for (const [command, id] of [
+			["make ci", "ci"],
+			["make ci 2>&1 | tail -50", "ci"],
+			["make ci | tee ci.log", "ci"],
+			["make ci > ci.log 2>&1", "ci"],
+			["timeout 600 make ci", "ci"],
+			["time ./scripts/e2e.sh", "e2e"],
+		] as const)
+			deepStrictEqual(
+				read(command),
+				{ verdict: "check", declared: [id], green: true, gate: "ok", ci: id === "ci" ? "passed" : "unverified" },
+				command,
+			);
+		// `| head` can fail a green run, so a red behind it stays unattributed, as for a vocabulary check.
+		const piped = classifyCall(ToolNames.Bash, { command: "make ci | head" }, { cwd: root, declaredChecks });
+		strictEqual(settleCheckCall(piped, true, "error", true).settled, false);
+		for (const command of ["make ci FOO=1", "make ci && touch x"]) {
+			const { green, gate, ci } = read(command);
+			deepStrictEqual({ green, gate, ci }, { green: false, gate: "engage", ci: "unverified" }, command);
 		}
 	});
 
