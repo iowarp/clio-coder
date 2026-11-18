@@ -13,6 +13,7 @@ import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import type { ContextActivityStatus, ContextFoldPayload, ContextPrunedPayload } from "../core/telemetry/live-events.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import type { FoldCheckpoint } from "../domains/context/fold/contract.js";
+import { evictionPressure } from "../domains/context/fold/pressure.js";
 import { createFoldPriceBook } from "../domains/context/fold/price.js";
 import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
@@ -141,6 +142,8 @@ export interface EvictionStageInput {
 	pendingUserText: string | undefined;
 	handoff: ContinuityReductionHooks | undefined;
 	shouldCompact(tokens: number): ContextCompactionVerdict;
+	/** The fraction of the window at which the automatic trigger fires, counting the reserve for `tokens`. */
+	triggerFraction(tokens: number): number;
 }
 
 export interface EvictionStageResult {
@@ -307,6 +310,13 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 					...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
 				}),
 			);
+			const pressure = evictionPressure({
+				automatic: trigger === "auto" && !requiredFit,
+				window: agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
+				threshold: compactionThreshold,
+				target: workingSetTarget,
+				triggerFraction: () => input.triggerFraction(estimate.tokens),
+			});
 			planned = (deps.planEviction ?? planEviction)(policy, {
 				entries: visibleEntries,
 				view,
@@ -320,13 +330,13 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 								compactionThreshold,
 								Math.max(0, 1 - resolveTurnOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow),
 							)
-						: compactionThreshold,
+						: pressure.threshold,
 					target: requiredFit
 						? Math.min(
 								workingSetTarget,
 								Math.max(0, 1 - resolveTurnOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow),
 							)
-						: workingSetTarget,
+						: pressure.target,
 					...(requiredFit ? { forced: true } : {}),
 				},
 				estimateTokens: prices.tokens,
