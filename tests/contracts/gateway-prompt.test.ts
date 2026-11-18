@@ -1,4 +1,4 @@
-import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { doesNotMatch, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { compile } from "../../src/domains/prompts/compiler.js";
@@ -41,51 +41,7 @@ describe("gateway in the session prompt", () => {
 	});
 	afterEach(() => env.restore());
 
-	for (const surface of [
-		{ name: "context and gateway", toolNames: [ToolNames.Context, ToolNames.Gateway], providerSupportsTools: true },
-		{ name: "context only", toolNames: [ToolNames.Context], providerSupportsTools: true },
-		{ name: "gateway only", toolNames: [ToolNames.Gateway], providerSupportsTools: true },
-		{ name: "no tools", toolNames: [], providerSupportsTools: true },
-		{
-			name: "a provider without tool calls",
-			toolNames: [ToolNames.Context, ToolNames.Gateway],
-			providerSupportsTools: false,
-		},
-	]) {
-		it(`gates documentation and skill catalog guidance for ${surface.name}`, () => {
-			const compiled = compile(loadFragments(), {
-				identity: "identity.clio",
-				operatingContract: "operating.contract",
-				safety: "safety.default",
-				sessionInputs: {
-					provider: "local",
-					model: "stable-model",
-					contextWindow: 32_768,
-					providerSupportsTools: surface.providerSupportsTools,
-					toolNames: surface.toolNames,
-					coordinatorCapabilities: [ToolNames.ClioDocs, ToolNames.ClioLibrary],
-				},
-			});
-			const hasGateway = surface.providerSupportsTools && surface.toolNames.includes(ToolNames.Gateway);
-			const hasContext = surface.providerSupportsTools && surface.toolNames.includes(ToolNames.Context);
-			strictEqual(compiled.systemPrompt.includes("carry the procedure under Guidance"), hasGateway);
-			ok(!compiled.fragmentManifest.some((fragment) => fragment.id === "identity.docs-routing"));
-			strictEqual(compiled.systemPrompt.includes('capability="clio_docs"'), hasGateway);
-			strictEqual(
-				compiled.sections.some((section) => section.id === "skills"),
-				hasContext,
-			);
-			strictEqual(compiled.systemPrompt.includes('args={scope:"skills",query:"<task>"}'), hasContext);
-			strictEqual(compiled.systemPrompt.includes("clio_library kind=playbook"), hasGateway);
-			if (hasContext) {
-				match(compiled.systemPrompt, /Load a matching ready skill through gateway/);
-				match(compiled.systemPrompt, /Install only when requested or approved/);
-				doesNotMatch(compiled.systemPrompt, /only the operator\s+activates or installs a skill/);
-			}
-			doesNotMatch(compiled.systemPrompt, /\bcontext\s*\(\s*scope\s*=\s*["'](?:docs|library)["']/);
-		});
-	}
-
+	// Which surfaces render the docs and skill catalog guidance is pinned in prompt-section-matrix.test.ts.
 	it("lists the direct surface, points tool usage at the gateway, and shrinks the attached schema bytes", async () => {
 		const bundle = makeDispatchBundle(dispatchStubContext());
 		await bundle.extension.start();

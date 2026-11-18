@@ -92,20 +92,7 @@ for (const level of AUTONOMY_LEVELS) {
 		assert.equal(reminder.includes('load it with context(scope="skills", name="<name>")'), enabled);
 	});
 
-	for (const [context, tools] of [
-		[false, true],
-		[true, false],
-	] as const) {
-		it(`omits skill activation guidance at ${level} with context=${context}, tools=${tools}`, () => {
-			const compiled = prompt(level, context, tools);
-			assert.ok(!compiled.sections.some((section) => section.id === "skills"));
-			assert.doesNotMatch(
-				compiled.systemPrompt,
-				/# Skills|Load a matching ready skill|only the operator activates skills/,
-			);
-		});
-	}
-
+	// Which surfaces omit the skills section is pinned in prompt-section-matrix.test.ts.
 	it(`recipe-bound worker admission remains narrowed at ${level}`, async (t) => {
 		const { context } = await fixture(t);
 		const policy = withModelSkillActivation(agentSkillToolPolicy(["declared-skill"]), modelMayActivateSkills());

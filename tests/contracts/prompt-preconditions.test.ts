@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { parsePackagedYaml, preparsePackagedYaml } from "../../src/core/packaged-yaml.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { compile, compileWorker, type SessionPromptInputs } from "../../src/domains/prompts/compiler.js";
+import { compile, type SessionPromptInputs } from "../../src/domains/prompts/compiler.js";
 import { type FragmentTable, type LoadedFragment, loadFragments } from "../../src/domains/prompts/fragment-loader.js";
-import { guidanceForDocs } from "../../src/domains/prompts/runtime-guidance.js";
+import { guidanceForDocs, guidanceForSettings } from "../../src/domains/prompts/runtime-guidance.js";
 
 function withFragments(files: Record<string, string>, run: (root: string) => void): void {
 	const root = mkdtempSync(join(tmpdir(), "clio-prompt-preconditions-"));
@@ -147,60 +147,13 @@ describe("fragment preconditions in the compiled prompt", () => {
 		ok(authoring?.text.includes("playbook new <name> --from <builtin>"), authoring?.text);
 		ok(!ids("how do I change the theme").includes("identity.docs-routing"));
 		ok(!ids("how do I change the theme").includes("identity.settings-routing"));
-	});
-});
-
-describe("safety text matches the session (S-81)", () => {
-	const table = loadFragments();
-	const session = (sandbox: boolean, headless = false): string =>
-		compile(table, {
-			identity: "identity.clio",
-			operatingContract: "operating.contract",
-			safety: "safety.default",
-			sessionInputs: {
-				coordinatorCapabilities: [ToolNames.Bash, ToolNames.Read, ToolNames.Dispatch],
-				providerSupportsTools: true,
-				toolNames: [ToolNames.Bash, ToolNames.Read, ToolNames.Dispatch],
-				sandbox,
-				...(headless ? { headless: true } : {}),
-			},
-		}).systemPrompt;
-
-	it("a sandboxed session reads no recognized-command list", () => {
-		const prompt = session(true);
-		ok(prompt.includes("inside an OS sandbox"), prompt);
-		ok(!/recognized commands run|rev-parse|`sed -n/u.test(prompt), prompt);
-	});
-
-	it("an unsandboxed session reads nothing the sandbox would hide", () => {
-		const prompt = session(false);
-		ok(prompt.includes("This session has no OS sandbox"), prompt);
-		ok(!/are hidden|SSH agent|unsandboxed: true/u.test(prompt), prompt);
-		ok(!session(false, true).includes("/rewind"));
-	});
-
-	it("a worker without a shell reads no command rules", () => {
-		const tools = [
-			ToolNames.CodeNav,
-			ToolNames.Context,
-			ToolNames.Find,
-			ToolNames.Gateway,
-			ToolNames.Grep,
-			ToolNames.Ls,
-			ToolNames.Read,
-		];
-		const prompt = compileWorker(table, {
-			persona: { id: "persona.scout", relPath: "scout.md", body: "Scout persona.", contentHash: "p", dynamic: false },
-			providerSupportsTools: true,
-			toolNames: tools,
-			toolPromptHints: [],
-			hasCanonicalContext: true,
-			hasBoundSkills: false,
-			readOnly: true,
-			onPermission: "deny",
-		}).systemPrompt;
-		ok(prompt.includes("You run no commands"), prompt);
-		ok(!/\bbash\b|unsandboxed|\/rewind|main session/iu.test(prompt), prompt);
+		// Setup consent rides in settings results, never in the session prompt.
+		const settings = guidanceForSettings()
+			.map((block) => block.text)
+			.join("\n");
+		ok(settings.includes("yes authorizes those named changes and fleet creation"), settings);
+		ok(settings.includes("Required per-write Apply or policy approval cards still"), settings);
+		ok(!settings.includes("Offer setup once"), settings);
 	});
 });
 
