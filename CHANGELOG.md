@@ -112,6 +112,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- The [Collected elsewhere] notice names a forked collection's refused tool calls in the worker card's words (e.g. "succeeded · 1 tool call · 1 call refused"), so the parent model no longer reports a run whose only action was refused as a clean success (bt-11 o).
 - A fork or splice `context` sent JSON-encoded by a grammar-constrained route (llama.cpp) is accepted by dispatch instead of refused as "expected object, got string" (bt-47 cf1h-D4).
 - A fork's Verified row on the exit card, `/usage` and `telemetry insights` counts only the verified outcomes the fork recorded itself, not the passes and done tasks it copied from its parent (bt-47 D3b).
 - A fork's exit card counts only the compactions the fork ran, not its parent's (bt-47 D3).
