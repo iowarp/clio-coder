@@ -33,6 +33,9 @@ describe("reminders gate on the turn's callable tools", () => {
 		// A step template's turn runs one step, not the enumerated list (bt-12 #4).
 		const step = turn(surface(ToolNames.Tasks));
 		deepStrictEqual(reminder.evaluate({ ...step, metadata: { ...step.metadata, turnStepPolicy: true } }), []);
+		// Nor does a turn the host scoped to an answer or to read-only work (bt-22).
+		deepStrictEqual(reminder.evaluate({ ...step, metadata: { ...step.metadata, turnMode: "answer" } }), []);
+		deepStrictEqual(reminder.evaluate({ ...step, metadata: { ...step.metadata, turnReadOnly: true } }), []);
 		// The skipped turn did not spend the session's one reminder.
 		const effects = reminder.evaluate(turn(surface(ToolNames.Tasks)));
 		strictEqual(effects.length, 1);
