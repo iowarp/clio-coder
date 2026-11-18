@@ -1667,7 +1667,7 @@ describe("production compaction controls", () => {
 		strictEqual(entry.trigger, "force");
 	});
 
-	it("summarizes inside the live prefix only when cheaper, falls back on a tool call, and leaves memory offers portable (T4)", async () => {
+	it("summarizes inside the live prefix only when cheaper, falls back on a tool call, and records a memory offer only on the portable route (T4)", async () => {
 		const model = faux.getModel("summary");
 		ok(model);
 		const usage = {
@@ -1759,21 +1759,29 @@ describe("production compaction controls", () => {
 		strictEqual(dear.tails.length, 0);
 		strictEqual(portableCalls, 2);
 
-		// An accepted memory offer stays on the portable route even when the live prefix is cheaper.
-		const offered = port(1, "text");
+		// A memory offer substitutes into the portable texts the live prefix is priced against. A cheaper live
+		// prefix still wins and leaves the offer unused; only the portable fallback sends and records it.
 		let used = 0;
-		await run(offered.livePrefix, {
-			offerMemory: () => ({
-				text: "memory observations",
-				receipt: {} as MemoryConsumptionReceipt,
-				isCurrent: () => true,
-				onUse: () => {
-					used++;
-				},
-			}),
+		const receipt = {} as MemoryConsumptionReceipt;
+		const offerMemory = () => ({
+			text: "memory observations",
+			receipt,
+			isCurrent: () => true,
+			onUse: () => {
+				used++;
+			},
 		});
-		strictEqual(offered.tails.length, 0);
+		const offered = port(1, "text");
+		const liveWithOffer = await run(offered.livePrefix, { offerMemory });
+		strictEqual(offered.tails.length, 1);
+		strictEqual(used, 0);
+		strictEqual(liveWithOffer.memoryReceipt, undefined);
+		strictEqual(portableCalls, 2);
+		const failing = port(1, "tool");
+		const fellBack = await run(failing.livePrefix, { offerMemory });
+		strictEqual(failing.tails.length, 1);
 		strictEqual(used, 1);
+		strictEqual(fellBack.memoryReceipt, receipt);
 		strictEqual(portableCalls, 3);
 
 		// A tail that leaves room for 1024 output tokens but not the real summary reservation
