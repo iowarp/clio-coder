@@ -16,7 +16,7 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 type Round = Array<{ name: string; arguments: string }> | { text: string };
 
 /** Drive a deny-posture worker against scripted model rounds; commands only ever park, never run. */
-async function runDenyWorker(rounds: Round[]) {
+async function runDenyWorker(rounds: Round[], helper = false) {
 	const env = await isolateClioEnv("clio-worker-refusal-");
 	const previousCwd = process.cwd();
 	process.chdir(env.dir);
@@ -25,8 +25,14 @@ async function runDenyWorker(rounds: Round[]) {
 	const events: Array<AgentEvent | ClioWorkerEvent> = [];
 	const toolResults: string[] = [];
 	let requests = 0;
+	let lastTools: unknown;
 	const server = createServer(async (req, res) => {
-		const body = JSON.parse(await readRequestBody(req)) as { messages?: Array<{ role: string; content?: unknown }> };
+		const body = JSON.parse(await readRequestBody(req)) as {
+			messages?: Array<{ role: string; content?: unknown }>;
+			tools?: Array<{ function?: { name?: string } }>;
+			tool_choice?: unknown;
+		};
+		lastTools = { tools: body.tools?.map((tool) => tool.function?.name), choice: body.tool_choice };
 		const last = body.messages?.at(-1);
 		if (last?.role === "tool") toolResults.push(JSON.stringify(last.content));
 		const round = rounds[requests] ?? rounds.at(-1) ?? { text: "done" };
@@ -65,6 +71,7 @@ async function runDenyWorker(rounds: Round[]) {
 				noSkills: true,
 				cwd: env.dir,
 				onPermission: "deny",
+				...(helper ? { helperResult: true, resultContract: { kind: "mutation-report" as const } } : {}),
 			},
 			(event) => events.push(event),
 		);
@@ -72,7 +79,8 @@ async function runDenyWorker(rounds: Round[]) {
 		const resolved = events.flatMap((event) =>
 			event.type === "clio_coder_permission_resolved" ? [event.payload.reason ?? ""] : [],
 		);
-		return { result, resolved, requests, toolResults };
+		const helperResults = events.flatMap((event) => (event.type === "clio_coder_helper_result" ? [event.payload] : []));
+		return { result, resolved, requests, toolResults, lastTools, helperResults };
 	} finally {
 		await closeServer(server);
 		process.chdir(previousCwd);
@@ -104,6 +112,20 @@ describe("worker execute refusals", () => {
 		strictEqual(reported.result.exitCode, WORKER_EXIT_PERMISSION_REQUIRED, "a report does not lift the cap");
 		strictEqual(reported.requests, 4);
 		ok(JSON.stringify(reported.result.messages.at(-1)).includes("Changed a.py; tests pass."));
+		// A helper-result worker reports through its result tool, the one tool that round exposes and names (x2-3).
+		const report = { mutatedPaths: [], validations: [], observations: ["./mark.sh was refused three times."] };
+		const helper = await runDenyWorker(
+			[[mark("one")], [mark("two")], [mark("three")], [{ name: "clio_submit_result", arguments: JSON.stringify(report) }]],
+			true,
+		);
+		strictEqual(helper.result.exitCode, WORKER_EXIT_PERMISSION_REQUIRED);
+		strictEqual(helper.requests, 4);
+		ok(
+			helper.toolResults[2]?.includes("Submit your final result now by calling clio_submit_result"),
+			helper.toolResults[2],
+		);
+		deepStrictEqual(helper.lastTools, { tools: ["clio_submit_result"], choice: "required" });
+		strictEqual(helper.helperResults.length, 1);
 		const final = stuck.resolved.at(-1) ?? "";
 		ok(final.startsWith("permission refusal limit reached"), final);
 		deepStrictEqual(

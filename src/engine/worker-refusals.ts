@@ -66,6 +66,13 @@ export function formatWorkerRefusal(refusal: WorkerRefusal): string {
 export const WORKER_REFUSAL_REPORT_DIRECTIVE =
 	"Tools are unavailable for the rest of this run. Reply now with your final report in the form your task asked for: what you changed, what you verified, and what the refused commands blocked. A tool call ends the run without a report.";
 
+/**
+ * The same last reply for a worker that reports through the helper result tool, which stays callable in it (x2-3).
+ */
+export function workerRefusalHelperDirective(resultTool: string): string {
+	return `Work tools are unavailable for the rest of this run. Submit your final result now by calling ${resultTool} alone with the complete result object: what you changed, what you verified, and what the refused commands blocked. Any other tool call ends the run without a result.`;
+}
+
 /** Every tool call in that last reply gets this instead of running. */
 export const WORKER_REFUSAL_REPORT_BLOCK =
 	"The permission refusal limit was reached, so no tool runs in this run; reply with your final report instead.";

@@ -4,6 +4,7 @@ import {
 	claimToolMarkupReprompt,
 	EMPTY_ANSWER_REPROMPT_NOTICE_KEY,
 	noAnswerReprompt,
+	rebaseToolMarkupReprompt,
 	TOOL_MARKUP_REPROMPT_CAP,
 	TOOL_MARKUP_REPROMPT_NOTICE_KEY,
 } from "../../src/session-control/chat-loop-messages.js";
@@ -23,6 +24,10 @@ test("written-out tool calls are capped only when back to back, and a real call 
 	strictEqual(claimToolMarkupReprompt(budget, "turn-1", 7), null);
 	// A new operator turn starts a fresh budget.
 	deepStrictEqual(claimToolMarkupReprompt(budget, "turn-2", 7), { turnId: "turn-2", count: 1, toolCallsAt: 7 });
+	// A continuation zeroes the per-run tool count; the rebased budget does not read that as a real call (x2-2).
+	const rebased = rebaseToolMarkupReprompt(budget);
+	strictEqual(claimToolMarkupReprompt(rebased, "turn-1", 0), null);
+	strictEqual(claimToolMarkupReprompt(rebased, "turn-1", 1)?.count, 1);
 });
 
 test("a reply with no answer and no call is re-prompted like a written-out call, and an answer is not", () => {

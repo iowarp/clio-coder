@@ -395,6 +395,16 @@ export function claimToolMarkupReprompt(
 	return { turnId, count: budget.count + 1, toolCallsAt: toolCalls };
 }
 
+/**
+ * The budget after a continuation zeroes the per-run tool count. The count it
+ * claimed at stays relative to that run, so the reset never reads as a real
+ * call and a model writing markup back to back keeps its spent re-prompts
+ * (x2-2).
+ */
+export function rebaseToolMarkupReprompt(budget: ToolMarkupRepromptBudget | null): ToolMarkupRepromptBudget | null {
+	return budget === null ? null : { ...budget, toolCallsAt: 0 };
+}
+
 /** A call that succeeded and was not a question to the operator, so it did work toward the request. */
 function ranRealTool(message: AgentMessage): boolean {
 	const result = message as { role?: unknown; isError?: unknown; toolName?: unknown };

@@ -957,17 +957,19 @@ export function checkpointSkillContext(
 }
 
 const CHECKPOINT_BUILT_BLOCK = /\n*<(operator-notes|recallable-refs)\b[^>]*>[\s\S]*?<\/\1\s*>\n*/giu;
-const CARRIED_SUMMARY_TRUNCATED = "\n[earlier checkpoint truncated]";
 
 /**
  * A checkpoint the host writes without a model call. Its summary is the
- * previous checkpoint's body (its goal and decisions, without the blocks this
- * one rebuilds, held to the summary's token room), then `lead`, then the
+ * latest summarized checkpoint's body (its goal and decisions, without the
+ * blocks this one rebuilds, held to the summary's token room by dropping its
+ * start), then `lead`, then the
  * operator notes, file facts and recallable tool-result refs the entries
  * carry, exactly as a native checkpoint appends them, so a later summary and
- * `context(scope="recall")` still reach what the cut removed from replay. The
- * previous checkpoint's preserved request carries while it is still the
- * latest operator turn, as in native compaction.
+ * `context(scope="recall")` still reach what the cut removed from replay. An
+ * earlier step checkpoint is not carried: its body is that same summarized
+ * checkpoint plus a lead the next lead supersedes, so a step chain holds one
+ * body and one lead (x2-1). The previous checkpoint's preserved request
+ * carries while it is still the latest operator turn, as in native compaction.
  */
 export function hostCheckpoint(
 	entries: ReadonlyArray<SessionEntry>,
@@ -978,10 +980,15 @@ export function hostCheckpoint(
 	let carried = "";
 	let userContext: PreservedUserContext | undefined;
 	if (prior?.kind === "compactionSummary") {
-		carried = stripEchoedExactFacts(prior.summary.replace(CHECKPOINT_BUILT_BLOCK, "\n\n")).trim();
+		const summarized = findLastEntry(entries, (entry) => entry.kind === "compactionSummary" && entry.trigger !== "step");
+		if (summarized?.kind === "compactionSummary")
+			carried = stripEchoedExactFacts(summarized.summary.replace(CHECKPOINT_BUILT_BLOCK, "\n\n")).trim();
 		const maxChars = summaryRoomTokens() * 4;
-		if (carried.length > maxChars)
-			carried = `${carried.slice(0, maxChars - CARRIED_SUMMARY_TRUNCATED.length)}${CARRIED_SUMMARY_TRUNCATED}`;
+		if (carried.length > maxChars) {
+			const marker = (dropped: number) => `[earlier checkpoint start truncated: ${dropped} characters dropped]\n`;
+			const kept = maxChars - marker(carried.length).length;
+			carried = `${marker(carried.length - kept)}${carried.slice(-kept)}`;
+		}
 		const latestOperator = findLastEntry(
 			entries,
 			(entry) =>
