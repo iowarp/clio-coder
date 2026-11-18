@@ -76,9 +76,17 @@ interface WireRequest {
 	body: string;
 }
 
-/** One read per scripted path, then an answer; each request's `max_tokens` and size are kept. */
-function transport(paths: ReadonlyArray<string>) {
+/**
+ * One read per scripted path, then an answer; each request's `max_tokens` and size are kept. With `obey` (the
+ * scripted files), the model first follows every cut marker that asks for a narrower read, as drv-f1's Haiku did,
+ * with a 40-line slice; `rereadConsumed` names each such read of a part an earlier request had carried in full.
+ */
+function transport(paths: ReadonlyArray<string>, { obey }: { obey?: Record<string, string> } = {}) {
 	const requests: WireRequest[] = [];
+	const called: string[] = [];
+	const consumed = new Set<string>();
+	const followed = new Set<string>();
+	const rereadConsumed: string[] = [];
 	let reads = 0;
 	const fetch: typeof globalThis.fetch = async (_url, init) => {
 		const raw = String(init?.body);
@@ -92,9 +100,20 @@ function transport(paths: ReadonlyArray<string>) {
 			model: model.id,
 			choices: [{ index: 0, delta, finish_reason }],
 		});
-		const next = paths[reads];
+		const advice = obey
+			? [...raw.matchAll(/\[evicted ref=(r\d+) [^\]]* path=(\S+) [^\]]*\] This read did not fit/g)].find(
+					(match) => !followed.has(match[1] as string),
+				)
+			: undefined;
+		const reread = advice?.[2];
+		if (advice !== undefined) followed.add(advice[1] as string);
+		if (reread !== undefined && consumed.has(reread)) rereadConsumed.push(reread);
+		for (const [name, text] of Object.entries(obey ?? {}))
+			if (raw.includes(JSON.stringify(text).slice(1, -1))) consumed.add(name);
+		const next = reread ?? paths[reads];
 		const tool = next !== undefined;
-		if (tool) reads += 1;
+		if (tool && reread === undefined) reads += 1;
+		if (tool) called.push(next);
 		// A provider tokenizer near 3.3 characters a token, as drv-cf3a's measured about 27.2k for this request.
 		const prompt = Math.ceil(raw.length / 3.3);
 		const stream = new ReadableStream<Uint8Array>({
@@ -117,9 +136,12 @@ function transport(paths: ReadonlyArray<string>) {
 										tool_calls: [
 											{
 												index: 0,
-												id: `call_${reads}`,
+												id: `call_${called.length}`,
 												type: "function",
-												function: { name: "read", arguments: JSON.stringify({ path: next }) },
+												function: {
+													name: "read",
+													arguments: JSON.stringify(reread === undefined ? { path: next } : { path: next, offset: 1, limit: 40 }),
+												},
 											},
 										],
 									}
@@ -143,7 +165,7 @@ function transport(paths: ReadonlyArray<string>) {
 		});
 		return new Response(stream, { headers: { "content-type": "text/event-stream" } });
 	};
-	return { fetch, requests };
+	return { fetch, requests, called, rereadConsumed };
 }
 
 function harness(
@@ -187,7 +209,11 @@ function harness(
 	registry.register({
 		name: ToolNames.Read,
 		description: "Reads a fixture file in full",
-		parameters: Type.Object({ path: Type.String() }),
+		parameters: Type.Object({
+			path: Type.String(),
+			offset: Type.Optional(Type.Number()),
+			limit: Type.Optional(Type.Number()),
+		}),
 		baseActionClass: "read",
 		// The production read's own ceiling, about 192 KB.
 		metadata: {
@@ -195,7 +221,18 @@ function harness(
 			uiLabel: "Read",
 			resultSizePolicy: { kind: "bounded", maxBytes: 196_608 },
 		},
-		run: async (args) => ({ kind: "ok", output: files[String(args.path)] ?? "missing" }),
+		run: async (args) => {
+			const text = files[String(args.path)] ?? "missing";
+			if (typeof args.offset !== "number") return { kind: "ok", output: text };
+			const start = args.offset - 1;
+			return {
+				kind: "ok",
+				output: text
+					.split("\n")
+					.slice(start, start + Number(args.limit))
+					.join("\n"),
+			};
+		},
 	});
 	const events: ChatLoopEvent[] = [];
 	const piCounts: number[] = [];
@@ -287,14 +324,17 @@ function assertAdmitted(
 	return pinned;
 }
 
-const MANUAL_MARKER =
-	/\[evicted ref=r\d+ reason=step_overflow tool=read path=bignotes\/manual\.md [^\]]*\] This read did not fit the model's context window\. Read only the part you need, with offset and limit\./;
+const SEEN_MARKER =
+	/\[evicted ref=r\d+ reason=step_overflow tool=read path=notes\/station-\d\.md [^\]]*\] You already read this; its body was dropped to fit the context window\./;
 
-/** The overflow fold cut manual.md as `step_overflow`, the request after it carried the marker, and no summary ran. */
-function assertManualCut(live: ReturnType<typeof harness>, wire: ReturnType<typeof transport>): void {
+/**
+ * The overflow fold cut seen station reads as `step_overflow` and kept the fresh manual (A2b), the request after it
+ * carried the manual in full and markers that do not ask for a re-read, and no summary ran.
+ */
+function assertSeenCut(live: ReturnType<typeof harness>, wire: ReturnType<typeof transport>): void {
 	strictEqual(live.summaries(), 0, "no summary call");
 	ok(!live.notices().some((text) => text.startsWith("Clio compacted")), "no summary notice");
-	ok(live.notices().some((text) => /working set: 1 protected read cut to fit the window/.test(text)));
+	ok(live.notices().some((text) => /working set: \d+ protected reads? cut to fit the window/.test(text)));
 	const manual = live.session
 		.readEntries()
 		.find(
@@ -308,12 +348,12 @@ function assertManualCut(live: ReturnType<typeof harness>, wire: ReturnType<type
 		.readEntries()
 		.flatMap((entry) => (entry.kind === "contextEviction" ? entry.evicted : []))
 		.filter((item) => item.reason === "step_overflow");
-	deepStrictEqual(
-		cut.map((item) => item.ref.entry),
-		[manual.turnId],
-		"the manual, and only it, is journaled step_overflow",
-	);
-	ok(MANUAL_MARKER.test(wire.requests.at(-1)?.body ?? ""), "the next request carries the recall marker");
+	ok(cut.length > 0, "a protected read is cut");
+	ok(!cut.some((item) => item.ref.entry === manual.turnId), "the fresh manual survives the cut");
+	for (const item of cut) ok(!item.marker.includes("offset and limit"), `${item.marker} asks for a re-read`);
+	const next = wire.requests.at(-1)?.body ?? "";
+	ok(SEEN_MARKER.test(next), "the next request carries the seen marker");
+	ok(next.includes(JSON.stringify(FILES["bignotes/manual.md"]).slice(1, -1)), "the next request carries the manual");
 }
 
 const refusals = (notices: ReadonlyArray<string>) =>
@@ -329,8 +369,8 @@ it("drv-cf3a D-A: an overflow fit admits the next request on the figure it fitte
 		await live.loop.whenSettled();
 		deepStrictEqual(refusals(live.notices()), [], "no refusal and no retry");
 		ok(live.notices().some((text) => /working set: \d+ items evicted/.test(text)));
-		// The A4 addendum on format 7: the fold cuts the protected manual itself, so no summary is paid.
-		assertManualCut(live, wire);
+		// The A4 addendum on format 7: the fold cuts protected reads itself, seen ones before the fresh manual (A2b).
+		assertSeenCut(live, wire);
 		strictEqual(wire.requests.length, READS.length + 1);
 		assertAdmitted(wire, live.piCounts, live.published);
 		const entries = live.session.readEntries();
@@ -357,7 +397,7 @@ it("drv-cf3a A4 addendum: the format 7 ledger reopens with the cut's marker and 
 	try {
 		await live.loop.submit(A1_ASK);
 		await live.loop.whenSettled();
-		assertManualCut(live, first);
+		assertSeenCut(live, first);
 		id = live.session.current()?.id;
 	} finally {
 		await live.close();
@@ -384,7 +424,7 @@ it("drv-cf3a A4 addendum: the format 7 ledger reopens with the cut's marker and 
 		const before = toolMessages(first.requests.at(-1)?.body ?? "{}");
 		const after = toolMessages(wire.requests[0]?.body ?? "{}");
 		deepStrictEqual(after, before, "the resumed request replays the observations the live one sent, marker and all");
-		ok(MANUAL_MARKER.test(wire.requests[0]?.body ?? ""));
+		ok(SEEN_MARKER.test(wire.requests[0]?.body ?? ""));
 	} finally {
 		await second.close();
 	}
@@ -660,8 +700,10 @@ it("drv-cf3a D-A: a protected read larger than the window ends the turn once, na
  */
 const M3A_SIZES = [8_102, 8_066, 8_010, 8_097, 8_006, 8_104, 8_109, 8_053, 8_084, 8_133, 8_086, 8_173];
 const M3A_PAD = 1_550;
+// The 12-read row is drv-f1's F1b shape, run by a model that follows each cut marker's advice as Haiku did.
 for (const count of [8, 12]) {
-	it(`drv-m3a: a ${count}-read turn at 28000 cuts protected reads instead of paying overflow summaries (bt-47)`, {
+	const obey = count === 12;
+	it(`drv-m3a: a ${count}-read turn at 28000 cuts protected reads${obey ? ", seen ones without a re-read" : " instead of paying overflow summaries"} (bt-47)`, {
 		timeout: 60_000,
 	}, async () => {
 		const files: Record<string, string> = {};
@@ -669,7 +711,7 @@ for (const count of [8, 12]) {
 			files[`docs/part${index + 1}.md`] = body(`Design note part ${index + 1}`, size);
 		});
 		const reads = Object.keys(files);
-		const wire = transport(reads);
+		const wire = transport(reads, obey ? { obey: files } : {});
 		const live = harness(wire, files, { window: 28_000, protectLastSteps: 8 });
 		try {
 			await live.loop.submit(
@@ -686,13 +728,30 @@ for (const count of [8, 12]) {
 					(event.message.errorMessage ?? "").startsWith(LOCAL_CONTEXT_OVERFLOW_PREFIX),
 			);
 			strictEqual(refusals.length, 0, "no local context-window refusal");
-			strictEqual(live.summaries(), 0, "no reactive-retry summary");
 			const cuts = live.notices().filter((text) => /protected reads? cut to fit the window/.test(text));
 			ok(cuts.length >= 3, `${cuts.length} overflow cuts`);
 			ok(!live.notices().some((text) => text.includes("post-tool context guard")), "no guard stop");
-			strictEqual(wire.requests.length, count + 1, "every read answered, then the answer");
+			// drv-f1: cuts told the model to re-read parts it had consumed, and it looped on narrower slices (A2b).
+			deepStrictEqual(wire.rereadConsumed, [], "no part the model consumed is read again");
+			deepStrictEqual([...new Set(wire.called)], reads, "every part read, in order");
+			strictEqual(wire.requests.length, wire.called.length + 1, "every read answered, then the answer");
 			const entries = live.session.readEntries();
-			strictEqual(entries.filter((entry) => entry.kind === "message" && entry.role === "tool_result").length, count);
+			if (!obey) {
+				strictEqual(live.summaries(), 0, "no reactive-retry summary");
+				strictEqual(entries.filter((entry) => entry.kind === "message" && entry.role === "tool_result").length, count);
+			}
+			// A seen read's marker never asks for it again; the latest read goes only after every seen one, and some cut keeps it.
+			let fresh: string | undefined;
+			let kept = 0;
+			for (const entry of entries) {
+				if (entry.kind === "message" && entry.role === "tool_result") fresh = entry.turnId;
+				if (entry.kind !== "contextEviction") continue;
+				const taken = entry.evicted.filter((item) => item.reason === "step_overflow");
+				for (const item of taken)
+					strictEqual(item.marker.includes("offset and limit"), item.ref.entry === fresh, item.marker);
+				if (taken.length > 0 && !taken.some((item) => item.ref.entry === fresh)) kept += 1;
+			}
+			ok(kept > 0, "a cut took seen reads and kept the latest one");
 			const answer = entries.at(-2);
 			strictEqual(answer?.kind === "message" ? (answer.payload as { text?: string }).text : undefined, "done");
 		} finally {
