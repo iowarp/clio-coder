@@ -186,7 +186,6 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 			"toolActivity",
 			"escalations",
 			"toolGovernance",
-			"verification",
 			"worktree",
 			"hostVerification",
 			"contextProvenance",
@@ -195,6 +194,8 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		agentId: "name",
 		callIds: "id",
 		frameType: "token",
+		// The detail names the dispatch runs whose record grounded the verdict: run ids and agent names.
+		verification: { ...keep("state", "basis"), detail: "withhold" },
 		identity: { host: "host", user: "user" },
 		node: { id: "host", kind: "keep" },
 		route: { runtimeKind: "keep", runtimeId: "runtime", targetId: "model-id", wireModelId: "model-id" },

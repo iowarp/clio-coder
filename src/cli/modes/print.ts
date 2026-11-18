@@ -20,6 +20,7 @@ import { mainAgentTerminalReason, runStatusForOutcome } from "../../domains/disp
 import { type RunCallUsage, runUsageFromCalls } from "../../domains/dispatch/run-call-usage.js";
 import {
 	createRunResultQuality,
+	creditStandingDispatchRuns,
 	deriveRunVerification,
 	settledVerifyCall,
 	typedValidationFactsFromObservedEffects,
@@ -57,6 +58,7 @@ import {
 	JUDGE_STREAK_REASON,
 } from "../../domains/safety/autonomy-window.js";
 import { CITATION_CHECK_PREFIX } from "../../domains/safety/citation-grounding.js";
+import { standingDispatchRuns } from "../../domains/safety/observed-checks.js";
 import { extractCommandWriteTargets } from "../../domains/safety/protected-artifacts.js";
 import { redactFinalUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
 import {
@@ -904,6 +906,8 @@ async function recordHeadlessMainAgentRun(input: {
 	costCap?: RunResultCostCap;
 	/** `run --verify` results; they seal as the run's host verdict. */
 	acceptance?: ReadonlyArray<RunJsonVerifyResult> | null;
+	/** Passing dispatch run records still standing at the end, as the observed line names them (bt-verify7a). */
+	dispatchRuns?: ReadonlyArray<string>;
 }): Promise<void> {
 	const snapshot = input.chat.lastRunSnapshot?.();
 	if (!snapshot) return;
@@ -958,7 +962,10 @@ async function recordHeadlessMainAgentRun(input: {
 	];
 	const unclassified = unclassifiedAfterLastCheck(input.stats.runEffects.snapshot());
 	const hostVerification = acceptanceHostVerification(input.acceptance ?? [], snapshot.cwd);
-	const verification = deriveRunVerification({ toolStats, typedValidations }, { checkFreshness });
+	const verification = creditStandingDispatchRuns(
+		deriveRunVerification({ toolStats, typedValidations }, { checkFreshness }),
+		input.dispatchRuns ?? [],
+	);
 	const draft: RunResultDraft = {
 		runId: envelope.id,
 		cwd: snapshot.cwd,
@@ -1130,6 +1137,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// phase instead of losing the whole run's usage. Whichever caller arrives
 	// first seals; the other awaits that same seal.
 	let sealed: Promise<void> | null = null;
+	let entriesBefore = 0;
 	const recordRun = (
 		terminal: HeadlessTerminalOutcome,
 		acceptance: ReadonlyArray<RunJsonVerifyResult> | null = null,
@@ -1139,6 +1147,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		sealed = (async () => {
 			// A read model that cannot answer leaves the message fold for the row; the run still settles (#434).
 			const calls = (await options.runUsage?.(startedAt).catch(() => null)) ?? null;
+			const dispatchRuns =
+				options.readEntries !== undefined
+					? standingDispatchRuns(options.readEntries(), entriesBefore, process.cwd(), options.scratchRoots ?? [])
+					: [];
 			await recordHeadlessMainAgentRun({
 				runId,
 				chat,
@@ -1150,6 +1162,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				calls,
 				...(options.costCap !== undefined ? { costCap: options.costCap } : {}),
 				acceptance,
+				dispatchRuns,
 			});
 		})().catch((error: unknown) => {
 			process.stderr.write(
@@ -1406,7 +1419,6 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			chat.steer(line);
 		});
 	}
-	let entriesBefore = 0;
 	try {
 		if (mode === "json" && jsonEvents === "terminal") writeTerminalTurnStart();
 		const submitOptions = {

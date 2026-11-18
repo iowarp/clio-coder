@@ -163,6 +163,7 @@ async function headlessRun(
 	mode: "text" | "json",
 	calls: ReadonlyArray<StubCall> = WROTE_THEN_FAILED_CHECK,
 	snapshot: object | null = null,
+	sessionEntries: ReadonlyArray<object> = [...edit, ...failingCheck],
 ): Promise<{ code: number; stdout: string; stderr: string }> {
 	const entries: object[] = [{ kind: "message", role: "user", payload: {} }];
 	let handler: (event: unknown) => void = () => {};
@@ -192,7 +193,7 @@ async function headlessRun(
 					result: {},
 				});
 			}
-			entries.push(...edit, ...failingCheck);
+			entries.push(...sessionEntries);
 			handler({ type: "message_end", message: answer });
 			handler({ type: "agent_end", messages: [answer] });
 		},
@@ -429,4 +430,54 @@ test("a headless run whose check is a green verify after the dispatch that wrote
 	} finally {
 		env.restore();
 	}
+});
+
+test("a main run with no check of its own credits a standing passing dispatch run record, until its own write (bt-c17a b)", async () => {
+	const dispatched = [
+		call("d1", "dispatch", { agent: "coder", task: "implement slugify" }),
+		{
+			kind: "message",
+			role: "tool_result",
+			timestamp: "t",
+			payload: {
+				toolCallId: "d1",
+				outcome: "ok",
+				isError: false,
+				result: { details: { exitCode: 0, runId: "r1", agentId: "coder" } },
+			},
+		},
+	];
+	const failedRun = structuredClone(dispatched);
+	(failedRun[1] as { payload: { result: { details: { exitCode: number } } } }).payload.result.details.exitCode = 1;
+	const snapshot = (dir: string) => ({
+		targetId: "fixture",
+		runtimeId: "openai-compat",
+		runtimeKind: "http",
+		wireModelId: "fixture-model",
+		promptSignature: null,
+		toolSignature: null,
+		cwd: dir,
+	});
+	const settle = async (calls: ReadonlyArray<StubCall>, entries: ReadonlyArray<object>) => {
+		const env = await isolateClioEnv("headless-observed-");
+		try {
+			const run = await headlessRun("text", calls, snapshot(env.dir), entries);
+			strictEqual(run.code, 0, run.stderr);
+			return readRunJournal(join(env.dir, "state"))?.runs[0]?.settled?.verification;
+		} finally {
+			env.restore();
+		}
+	};
+	const dispatch: StubCall = ["d1", "dispatch", "dispatch", "ok", { agent: "coder", task: "implement slugify" }];
+	const write: StubCall = ["e1", "edit", "write", "ok", { path: "src/a.py", edits: [] }];
+	deepStrictEqual(await settle([dispatch], dispatched), {
+		state: "verified",
+		basis: "dispatch-run-record",
+		detail: "run r1 agent coder",
+	});
+	deepStrictEqual(await settle([dispatch, write], [...dispatched, ...edit]), {
+		state: "unverified",
+		basis: "no-validation-tool",
+	});
+	deepStrictEqual(await settle([dispatch], failedRun), { state: "unverified", basis: "no-validation-tool" });
 });

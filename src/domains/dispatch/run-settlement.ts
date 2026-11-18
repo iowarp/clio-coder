@@ -373,7 +373,11 @@ export function settleFinishedRun(
 					}
 				: null,
 			toolGovernance: receipt.delegation?.toolGovernance ?? null,
-			verification: { state: receipt.verification.state, basis: receipt.verification.basis },
+			verification: {
+				state: receipt.verification.state,
+				basis: receipt.verification.basis,
+				...(receipt.verification.detail !== undefined ? { detail: receipt.verification.detail } : {}),
+			},
 			quality: {
 				typedValidations: receipt.quality.typedValidations.map((fact) => ({ ...fact })),
 				responseSchema: { ...receipt.quality.responseSchema },

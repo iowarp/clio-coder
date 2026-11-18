@@ -150,6 +150,8 @@ export interface CheckFreshness {
 	tools: ReadonlySet<string>;
 	/** Passing `verify` calls that ran on the final tree: the check id and the command it resolved to (bt-9). */
 	verifyRuns: ReadonlyArray<{ check: string; command: string }>;
+	/** True once a workspace mutation retired a pass the run had recorded, so some check did run and pass (bt-c17a c). */
+	passRetired?: boolean;
 }
 
 export interface RunEffectsRecorderOptions {
@@ -369,6 +371,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	const validationOutcomes = new Map<string, boolean>();
 	const checkOutcomes = new Map<string, boolean>();
 	let mutationRevision = 0;
+	let passRetired = false;
 	// Every call in flight, with the revision it started on, so finish can tell whether it ran on the final tree.
 	const inFlight = new Map<string, { tool: string; revision: number; outcome: "ok" | "error" | "blocked" | null }>();
 	const toolsRanAt = new Map<string, number>();
@@ -469,6 +472,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			);
 			if (mutation) {
 				outputTarget.changed(reading.changedPaths);
+				if (validationCommands.size > 0 || [...checkOutcomes.values()].some(Boolean)) passRetired = true;
 				mutationRevision += 1;
 				validationOutcomes.clear();
 				checkOutcomes.clear();
@@ -593,6 +597,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				new Set([...ranAt].filter(([, revision]) => revision === mutationRevision).map(([key]) => key));
 			return {
 				mutationObserved: mutationRevision > 0,
+				passRetired,
 				verifyCalls: current(verifyCallsRanAt),
 				tools: current(toolsRanAt),
 				verifyRuns: [...passedVerifyRuns.values()]

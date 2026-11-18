@@ -893,11 +893,20 @@ export interface RunResultVerification {
 		| "host-observed-command"
 		| "read-only-agent"
 		| "no-validation-tool"
+		/** A check ran and passed, then a later change to the tree retired it; no pass judged the final tree. */
+		| "retired-by-change"
+		/**
+		 * The run ran no standing check of its own, and a dispatched worker's sealed run record passed with no later change
+		 * by this run; `detail` names it as `run <id> agent <agent>`.
+		 */
+		| "dispatch-run-record"
 		| "acp-external-unobserved"
 		/** The host ran the declared checks after the worker finished, and their verdict outranks the worker's own. */
 		| "host-verification"
 		/** No sealed receipt to read: it is missing, unreadable, or failed integrity. */
 		| "result-unavailable";
+	/** What the basis rests on beyond its name: the credited worker runs for `dispatch-run-record`. */
+	detail?: string;
 }
 
 export interface RunHostVerificationCheck {
