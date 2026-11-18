@@ -1190,7 +1190,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			(reserve ??= summaryOutputReserve(model, { summaryOnChatRoute: summaryOnChatRoute(agentRuntime, cfg?.model) }));
 		const triggerReserve = (tokens: number): number =>
 			foldTriggerReserve({
-				knownWindow: agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow > 0,
+				window: agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
 				summaryReserve,
 				turnReserve: () => resolveTurnOutputReserve(agentRuntime, tokens),
 			});
@@ -2194,8 +2194,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// and the specific reason nothing was reduced (#422).
 		const settleWithoutSummary = (reason: string | null): void => {
 			if (reason !== null) compactionConclusion = preSummaryStageActed ? `${compactionConclusion}; ${reason}` : reason;
-			compactionTokens = {
-				before: compactionTokens?.before ?? footerTokensBefore,
+			// An eviction earlier in this pass reported its own figures, and a settle without a summary changed nothing after it.
+			compactionTokens ??= {
+				before: footerTokensBefore,
 				after: liveContextEstimate(agentRuntime, pendingUserText).tokens,
 				basis: "runtime-estimate",
 			};
@@ -2337,10 +2338,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// Remembered even when eviction acted in this pass: the summary request
 			// is what repeats, and eviction already changed what it would read.
 			if (automaticSummary && result.summaryDigest !== undefined) noGainSummaryDigest = result.summaryDigest;
-			deps.emitNotice("compaction would not reduce context; checkpoint discarded (usage recorded)");
-			// A paid call that changed nothing is a failure toward the pause.
-			countAutomaticFailure();
-			settleWithoutSummary("summary would not reduce context (usage recorded)");
+			// A span below the summary room was skipped before any call, so nothing was paid or discarded (bt-47 cf1j-d).
+			if (result.emptyReason === undefined) {
+				deps.emitNotice("compaction would not reduce context; checkpoint discarded (usage recorded)");
+				// A paid call that changed nothing is a failure toward the pause.
+				countAutomaticFailure();
+			}
+			settleWithoutSummary(
+				result.emptyReason === undefined
+					? "summary would not reduce context (usage recorded)"
+					: "history outside the kept turns is smaller than a summary; no call made",
+			);
 			rememberEmptyAutomaticAttempt();
 			return false;
 		}
@@ -2384,7 +2392,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			trigger,
 			originSession,
 		});
-		decision.measure(tokensAfter);
+		decision.committed({ tokensBefore, tokensAfter });
 		// The reducer reports selected ledger rows, not just message rows.
 		compactionFacts.push({ kind: "summarized", unit: "entries", count: result.messagesSummarized });
 		compactionTokens = { before: tokensBefore, after: tokensAfter, basis: "runtime-estimate" };
