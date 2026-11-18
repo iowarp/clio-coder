@@ -3,8 +3,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { readRunResultFacts, runEvidenceOf } from "../../src/domains/dispatch/run-result-facts.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
-import { telemetryRunDirectory } from "../../src/domains/telemetry/index.js";
+import { readRunRecord, telemetryRunDirectory } from "../../src/domains/telemetry/index.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
@@ -406,5 +407,35 @@ test("Scout escaped and literal keys preserve unsafe numeric tokens and admit ex
 			assert.ok(plain(renderWorkerEntryLines(entry, 120, { unbounded: true })).includes(token));
 			assert.equal(entry.text, raw);
 		}
+	}
+});
+
+test("a host check that never started keeps its not-run reason in sealed evidence and the failure line", async () => {
+	const stateDir = mkdtempSync(join(tmpdir(), "r3-not-run-"));
+	try {
+		const draft = fixtureReceiptDraft(fixtureEnvelope("nr1"));
+		const check = { check: "repro", argv: ["missing-bin"], cwd: "/r", durationMs: 0, memo: false, outputTail: "" };
+		draft.hostVerification = {
+			status: "rejected",
+			checks: [
+				{ ...check, exitCode: 1, notRun: "spawn-failed" },
+				{ ...check, check: "unit", exitCode: 0 },
+			],
+		};
+		await writeSettledRun(stateDir, draft);
+		const sealed = runEvidenceOf("nr1", readRunRecord(stateDir, "nr1")).sealed;
+		assert.deepEqual(
+			sealed?.hostVerification?.checks.map((entry) => [entry.check, entry.exitCode, entry.notRun]),
+			[
+				["repro", 1, "spawn-failed"],
+				["unit", 0, undefined],
+			],
+		);
+		assert.equal(
+			readRunResultFacts("nr1", stateDir)?.validationFailure,
+			"Clio's own check failed: repro did not run: its process could not start",
+		);
+	} finally {
+		rmSync(stateDir, { recursive: true, force: true });
 	}
 });

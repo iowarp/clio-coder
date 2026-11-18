@@ -1,5 +1,12 @@
 import type { RunHostVerificationCheck } from "./types.js";
 
+/** Why a host check never started, worded for a reader; its exit code then reports no run. */
+export function hostCheckNotRunNote(notRun: NonNullable<RunHostVerificationCheck["notRun"]>): string {
+	if (notRun === "refused") return "refused before launch";
+	if (notRun === "unconfigured") return "the check is not configured";
+	return "its process could not start";
+}
+
 export function hostCheckBaseNote(check: {
 	baseComparison?: RunHostVerificationCheck["baseComparison"] | null;
 }): string {

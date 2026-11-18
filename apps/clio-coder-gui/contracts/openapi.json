@@ -8578,7 +8578,7 @@
 											}
 										},
 										"evidence": {
-											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_01df877b"
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_ce0697f8"
 										},
 										"councils": {
 											"type": "object",
@@ -9141,7 +9141,7 @@
 														]
 													},
 													"evidence": {
-														"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_01df877b"
+														"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_ce0697f8"
 													},
 													"parentRunId": {
 														"anyOf": [
@@ -9336,7 +9336,7 @@
 											]
 										},
 										"evidence": {
-											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_01df877b"
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_ce0697f8"
 										},
 										"parentRunId": {
 											"anyOf": [
@@ -9430,7 +9430,7 @@
 									"required": ["evidence", "record"],
 									"properties": {
 										"evidence": {
-											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_01df877b"
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_ce0697f8"
 										},
 										"record": {
 											"anyOf": [
@@ -20705,7 +20705,7 @@
 														"$ref": "#/components/schemas/RunRowV1"
 													},
 													"evidence": {
-														"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_01df877b"
+														"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_ce0697f8"
 													}
 												},
 												"additionalProperties": false
@@ -20906,7 +20906,7 @@
 											"$ref": "#/components/schemas/RunRowV1"
 										},
 										"evidence": {
-											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_01df877b"
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_ce0697f8"
 										}
 									},
 									"additionalProperties": false
@@ -20980,7 +20980,7 @@
 									"required": ["evidence", "record"],
 									"properties": {
 										"evidence": {
-											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_01df877b"
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_ce0697f8"
 										},
 										"record": {
 											"anyOf": [
@@ -24693,6 +24693,12 @@
 				},
 				"maxItems": 64
 			},
+			"Array_88d70687": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_check_durationMs_evidenceRunId_4378b654"
+				}
+			},
 			"Array_8f8a4dec": {
 				"type": "array",
 				"items": {
@@ -24878,12 +24884,6 @@
 				"type": "array",
 				"items": {
 					"$ref": "#/components/schemas/Object_origin_path_present_1faa671d"
-				}
-			},
-			"Array_f07c1c28": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_check_durationMs_evidenceRunId_e65d9ddf"
 				}
 			},
 			"Array_f176b569": {
@@ -29459,7 +29459,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_check_durationMs_evidenceRunId_e65d9ddf": {
+			"Object_check_durationMs_evidenceRunId_4378b654": {
 				"type": "object",
 				"required": ["check", "exitCode", "durationMs", "memo", "outputTail", "evidenceRunId"],
 				"properties": {
@@ -29469,6 +29469,9 @@
 					},
 					"exitCode": {
 						"type": "integer"
+					},
+					"notRun": {
+						"enum": ["refused", "unconfigured", "spawn-failed"]
 					},
 					"durationMs": {
 						"type": "number",
@@ -29536,11 +29539,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_checks_reason_status_0032e68a": {
+			"Object_checks_reason_status_a73beb93": {
 				"type": "object",
 				"required": ["status", "reason", "strategy", "checks"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_beb0097e"
+					"$ref": "#/components/schemas/Shape_066f8e83"
 				},
 				"additionalProperties": false
 			},
@@ -30538,7 +30541,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_evidence_foldVersion_generatedAt_01df877b": {
+			"Object_evidence_foldVersion_generatedAt_ce0697f8": {
 				"type": "object",
 				"required": [
 					"v",
@@ -30553,11 +30556,11 @@
 					"evidence"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_52915b31"
+					"$ref": "#/components/schemas/Shape_6518a4b6"
 				},
 				"additionalProperties": false
 			},
-			"Object_exitCode_failureMessage_hostVerification_33f4dedc": {
+			"Object_exitCode_failureMessage_hostVerification_d898cedb": {
 				"type": "object",
 				"required": [
 					"outcome",
@@ -30572,7 +30575,7 @@
 					"validationGrounding"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_35544bbe"
+					"$ref": "#/components/schemas/Shape_58e3aa47"
 				},
 				"additionalProperties": false
 			},
@@ -32944,6 +32947,28 @@
 					"minimum": 0
 				}
 			},
+			"Shape_066f8e83": {
+				"status": {
+					"enum": ["verified", "rejected", "skipped", "not_implicated"]
+				},
+				"reason": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"strategy": {
+					"enum": ["single", "batch-settled"]
+				},
+				"checks": {
+					"$ref": "#/components/schemas/Array_88d70687"
+				}
+			},
 			"Shape_06b99b32": {
 				"coverage": {
 					"$ref": "#/components/schemas/Object_gaps_journals_unavailable_1f981b3f"
@@ -33344,62 +33369,6 @@
 					"$ref": "#/components/schemas/Object_display_fact_1897f681"
 				}
 			},
-			"Shape_35544bbe": {
-				"outcome": {
-					"type": "string",
-					"maxLength": 4096
-				},
-				"outcomeCode": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"exitCode": {
-					"anyOf": [
-						{
-							"type": "integer"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"failureMessage": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"verification": {
-					"$ref": "#/components/schemas/Union_be8c011a"
-				},
-				"typedValidations": {
-					"$ref": "#/components/schemas/Union_e5bede14"
-				},
-				"hostVerification": {
-					"$ref": "#/components/schemas/Union_4e8c2c68"
-				},
-				"resultContract": {
-					"$ref": "#/components/schemas/Union_e30716bb"
-				},
-				"responseSchema": {
-					"$ref": "#/components/schemas/Union_64fd39b7"
-				},
-				"validationGrounding": {
-					"$ref": "#/components/schemas/Union_374d0695"
-				}
-			},
 			"Shape_39fec1f7": {
 				"resource": {
 					"type": "string",
@@ -33671,44 +33640,6 @@
 					"$ref": "#/components/schemas/Union_c9b7ca4a"
 				}
 			},
-			"Shape_52915b31": {
-				"v": {
-					"type": "number",
-					"const": 1
-				},
-				"foldVersion": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"generatedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"kind": {
-					"type": "string",
-					"const": "run-evidence"
-				},
-				"runId": {
-					"type": "string",
-					"minLength": 1,
-					"maxLength": 512
-				},
-				"record": {
-					"enum": ["settled", "unsettled", "missing"]
-				},
-				"integrity": {
-					"$ref": "#/components/schemas/Object_detail_display_state_0afac497"
-				},
-				"trust": {
-					"$ref": "#/components/schemas/Object_artifactIntegrity_completionEvidence_contextProvenance_faf874aa"
-				},
-				"sealed": {
-					"$ref": "#/components/schemas/Union_fcb44cf2"
-				},
-				"evidence": {
-					"$ref": "#/components/schemas/Union_43aa76d8"
-				}
-			},
 			"Shape_55a7b810": {
 				"typedValidations": {
 					"$ref": "#/components/schemas/Array_7d9a8cde"
@@ -33925,6 +33856,62 @@
 							"type": "null"
 						}
 					]
+				}
+			},
+			"Shape_58e3aa47": {
+				"outcome": {
+					"type": "string",
+					"maxLength": 4096
+				},
+				"outcomeCode": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"exitCode": {
+					"anyOf": [
+						{
+							"type": "integer"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"failureMessage": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"verification": {
+					"$ref": "#/components/schemas/Union_be8c011a"
+				},
+				"typedValidations": {
+					"$ref": "#/components/schemas/Union_e5bede14"
+				},
+				"hostVerification": {
+					"$ref": "#/components/schemas/Union_2af6483d"
+				},
+				"resultContract": {
+					"$ref": "#/components/schemas/Union_e30716bb"
+				},
+				"responseSchema": {
+					"$ref": "#/components/schemas/Union_64fd39b7"
+				},
+				"validationGrounding": {
+					"$ref": "#/components/schemas/Union_374d0695"
 				}
 			},
 			"Shape_5a1e7f2e": {
@@ -34213,6 +34200,44 @@
 				},
 				"canStopTurn": {
 					"type": "boolean"
+				}
+			},
+			"Shape_6518a4b6": {
+				"v": {
+					"type": "number",
+					"const": 1
+				},
+				"foldVersion": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"generatedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"kind": {
+					"type": "string",
+					"const": "run-evidence"
+				},
+				"runId": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"record": {
+					"enum": ["settled", "unsettled", "missing"]
+				},
+				"integrity": {
+					"$ref": "#/components/schemas/Object_detail_display_state_0afac497"
+				},
+				"trust": {
+					"$ref": "#/components/schemas/Object_artifactIntegrity_completionEvidence_contextProvenance_faf874aa"
+				},
+				"sealed": {
+					"$ref": "#/components/schemas/Union_54a914e1"
+				},
+				"evidence": {
+					"$ref": "#/components/schemas/Union_43aa76d8"
 				}
 			},
 			"Shape_6538b83a": {
@@ -35363,28 +35388,6 @@
 				},
 				"complete": {
 					"type": "boolean"
-				}
-			},
-			"Shape_beb0097e": {
-				"status": {
-					"enum": ["verified", "rejected", "skipped", "not_implicated"]
-				},
-				"reason": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"strategy": {
-					"enum": ["single", "batch-settled"]
-				},
-				"checks": {
-					"$ref": "#/components/schemas/Array_f07c1c28"
 				}
 			},
 			"Shape_bf52458e": {
@@ -37813,6 +37816,16 @@
 					}
 				]
 			},
+			"Union_2af6483d": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_checks_reason_status_a73beb93"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_2b119901": {
 				"anyOf": [
 					{
@@ -38213,10 +38226,10 @@
 					}
 				]
 			},
-			"Union_4e8c2c68": {
+			"Union_54a914e1": {
 				"anyOf": [
 					{
-						"$ref": "#/components/schemas/Object_checks_reason_status_0032e68a"
+						"$ref": "#/components/schemas/Object_exitCode_failureMessage_hostVerification_d898cedb"
 					},
 					{
 						"type": "null"
@@ -39932,16 +39945,6 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Problem"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
-			"Union_fcb44cf2": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_exitCode_failureMessage_hostVerification_33f4dedc"
 					},
 					{
 						"type": "null"

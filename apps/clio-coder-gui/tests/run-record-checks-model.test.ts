@@ -187,7 +187,7 @@ test("a read-only scout keeps verification not applicable beside a quality pass"
 	assert.equal(rows.get("conformance")?.meaning.includes("scout report"), true);
 });
 
-test("host checks list each command with its exit, reuse and output", () => {
+test("host checks list each command with its exit or why it did not run, reuse and output", () => {
 	const rows = byKey({
 		...verifiedTool,
 		hostVerification: {
@@ -205,6 +205,16 @@ test("host checks list each command with its exit, reuse and output", () => {
 					outputTail: "1 failing",
 					evidenceRunId: "run-2",
 				},
+				{
+					check: "repro",
+					argv: ["missing-bin"],
+					cwd: "/r",
+					exitCode: 1,
+					notRun: "spawn-failed",
+					durationMs: 0,
+					memo: false,
+					outputTail: "",
+				},
 			],
 		},
 	});
@@ -217,9 +227,11 @@ test("host checks list each command with its exit, reuse and output", () => {
 		[
 			["typecheck", "Passed", ["exit 0", "812 ms", "reused result"], null],
 			["unit", "Failed", ["exit 1", "4100 ms", "evidence from run run-2"], "1 failing"],
+			["repro", "Did not run", ["did not run: its process could not start", "0 ms"], null],
 		],
 	);
-	assert.equal(new Set(host?.items.map((item) => item.id)).size, 2);
+	assert.equal(host?.items[2]?.tone, "warn");
+	assert.equal(new Set(host?.items.map((item) => item.id)).size, 3);
 });
 
 test("an enforced response schema reports its own pass or failure", () => {
