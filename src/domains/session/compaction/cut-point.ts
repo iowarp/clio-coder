@@ -43,13 +43,30 @@ export interface FindCutPointOptions {
  */
 function findTurnStartIndex(entries: ReadonlyArray<SessionEntry>, entryIndex: number, startIndex = 0): number {
 	for (let i = entryIndex; i >= startIndex; i--) {
-		const entry = entries[i];
-		if (!entry) continue;
-		if (entry.kind === "branchSummary") return i;
-		if (entry.kind === "bashExecution") return i;
-		if (entry.kind === "message" && entry.role === "user") return i;
+		if (isTurnStart(entries[i])) return i;
 	}
 	return -1;
+}
+
+function isTurnStart(entry: SessionEntry | undefined): boolean {
+	return (
+		entry?.kind === "branchSummary" ||
+		entry?.kind === "bashExecution" ||
+		(entry?.kind === "message" && entry.role === "user")
+	);
+}
+
+/**
+ * Whether the suffix kept from `cutIndex` holds a message of the turn the cut sits in. A cut on a bookkeeping row after
+ * that turn's last message keeps none of it, so the whole turn is summarized as history and nothing is split.
+ */
+function keepsTurnMessages(entries: ReadonlyArray<SessionEntry>, cutIndex: number, endIndex: number): boolean {
+	for (let i = cutIndex; i < endIndex; i++) {
+		const entry = entries[i];
+		if (isTurnStart(entry)) return false;
+		if (entry?.kind === "message") return true;
+	}
+	return false;
 }
 
 /** Entries we can cut at. Tool rows must stay with their assistant declaration. */
@@ -241,12 +258,15 @@ export function findCutPoint(
 		cutIndex--;
 	}
 
-	const cutEntry = entries[cutIndex];
-	const cutIsUserTurn = !!cutEntry && cutEntry.kind === "message" && cutEntry.role === "user";
-	const turnStartIndex = cutIsUserTurn ? -1 : findTurnStartIndex(entries, cutIndex, startIndex);
+	// A cut splits a turn only when the kept suffix starts after that turn's start and still holds one of its messages.
+	// A cut on a shell or branch row starts its own turn, and one on a row trailing a finished turn keeps none of it.
+	const turnStartIndex =
+		isTurnStart(entries[cutIndex]) || !keepsTurnMessages(entries, cutIndex, endIndex)
+			? -1
+			: findTurnStartIndex(entries, cutIndex, startIndex);
 	return {
 		firstKeptEntryIndex: cutIndex,
 		turnStartIndex,
-		isSplitTurn: !cutIsUserTurn && turnStartIndex !== -1,
+		isSplitTurn: turnStartIndex !== -1,
 	};
 }
