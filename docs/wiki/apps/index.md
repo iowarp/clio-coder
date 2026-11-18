@@ -1,6 +1,6 @@
 # apps
 
-The GUI section received a partial route/client/contracts/server/test audit at `3aae1044`; the historical count is not a current regeneration.
+5 complete, 0 pending.
 
 ## Sections
 

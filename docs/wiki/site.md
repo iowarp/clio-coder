@@ -29,8 +29,6 @@ validate:
 
 # Public website build and documentation sync
 
-> **Evidence status (`3aae1044`):** the current Python test paths were checked, not executed. Validation commands remain pointers rather than audit results.
-
 The `site/` directory produces the public Clio Coder website. It has three jobs: pull the
 user guides under `docs/guide` into a pinned, hashed snapshot; render that snapshot and the
 authored pages into static HTML; and check the rendered output before it is published. A

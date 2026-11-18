@@ -39,8 +39,6 @@ validate:
 
 # Graphical application test suite
 
-> **Audit status (`3aae1044`):** current test files were located for the families below. Presence establishes ownership only; passing assertions were not reverified.
-
 This directory holds the tests for the optional graphical application under `apps/clio-coder-gui`. Most files are focused unit tests of client view models (turn grouping, approval timing, markdown rendering, background launcher configuration). A smaller set exercises the server end to end. Those server tests start the server in a child process and talk to a scripted stand-in for the ACP agent, or, in one case, to the real built CLI. A reader needs this page to choose between the two harnesses, to understand the fixture's scenario switch, or to add a case that depends on the scripted agent.
 
 ## Layout

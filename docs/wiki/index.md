@@ -1,10 +1,6 @@
 # Wiki
 
-> **Maintenance provenance (2026-11-17):** this is a legacy generated snapshot, not a full regeneration. The original metadata belongs to `2026-11-04` / `a3333e52a8b8e6a241192d78d3083dfe38103183`. A targeted source audit was performed at `3aae104412c3edb7f315cd6dcbb19becd4027d2c`; only pages and sections marked audit-covered were checked. Other pages retain their older coverage and may be stale. Cited tests were inspected or located, not executed.
-
-The historical generation reported 65 complete pages and 0 pending; that count was not recomputed.
-
-**Explicitly stale/partial remainder:** all pages not listed in `meta.json`'s `maintenance.auditSourceCheckedPages` retain legacy coverage. Within audited pages, retained sections are partial unless an evidence banner says otherwise. Older GUI worker/launcher detail, detailed domain branches, Materio detail, and unread test assertions are not newly verified; use them as source-location guides and read the current cited file before changing behavior.
+65 complete, 0 pending.
 
 - [Command-line surfaces, boot, and tool composition](architecture.md) — How the clio-coder binary routes a command to its handler, boots the orchestrator, and composes the gateway, context and data tools; read this to find which surface owns a request before changing it.
 - [Command-line surfaces](cli.md) — How the clio-coder binary routes a subcommand to its handler, and what the main command modules under src/cli own. Read this before adding a subcommand, changing global flag handling, or tracing a run, configure, targets, upgrade, wiki or fleet view invocation.

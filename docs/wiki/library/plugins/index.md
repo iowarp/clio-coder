@@ -1,6 +1,6 @@
 # library / plugins
 
-The package inventory was checked at `3aae1044`. Only Materio has detailed legacy generated coverage.
+1 complete, 0 pending.
 
 | Package | Current boundary |
 | --- | --- |

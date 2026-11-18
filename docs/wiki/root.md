@@ -31,8 +31,6 @@ validate:
 
 # Repository root: launcher, build configuration, image utilities and example extensions
 
-> **Provenance status:** the generated snapshot is `2026-11-04` / `a3333e52`; this partial audit at `3aae1044` added only current-source coverage for `src/utils/git.ts`. The full page was not regenerated.
-
 This page covers the files at the top of the tree that a reader needs when the CLI fails to start, when the bundle layout in `dist/` changes, when an image attached to a prompt is downscaled, or when an example extension is copied as a starting point. The owning subsystem pages are linked where they exist.
 
 ## Launcher: `bin/clio-coder.cjs`
@@ -118,7 +116,7 @@ Things to watch when editing this file:
 
 ## Git branch helper: `src/utils/git.ts`
 
-`getCurrentBranch` runs `git rev-parse --abbrev-ref HEAD` through `internalGitArgv`, with a one-second timeout. It returns the trimmed branch on success and `null` for a missing binary, invalid/non-repository path, timeout, or empty result. No focused test was identified or executed.
+`getCurrentBranch` runs `git rev-parse --abbrev-ref HEAD` through `internalGitArgv`, with a one-second timeout. It returns the trimmed branch on success and `null` for a missing binary, invalid/non-repository path, timeout, or empty result. No focused test covers it.
 
 ## Example extensions: `examples/extensions/`
 

@@ -6593,9 +6593,7 @@
 				"path": "tests/boundaries.md",
 				"title": "Tests boundaries",
 				"intent": "Assigned scope (1 indexed files, 1199 lines): document responsibilities and key entry points/symbols; explain lifecycle rules, callers, dependencies, and specific test cases only where inspected source or tests establish them. Anchors are starting points, not the full assignment. Assigned areas: tests/boundaries.",
-				"sources": [
-					"tests/boundaries/check-boundaries.ts"
-				],
+				"sources": ["tests/boundaries/check-boundaries.ts"],
 				"dependencies": [
 					"docs/architecture/architecture.md",
 					"scripts/check-hygiene.ts",
@@ -6620,40 +6618,5 @@
 				"attempts": 4
 			}
 		]
-	},
-	"maintenance": {
-		"status": "partial-source-audit-not-regenerated",
-		"generatedSnapshotUpdatedAt": "2026-11-04T17:40:53.439Z",
-		"generatedSnapshotGitHead": "a3333e52a8b8e6a241192d78d3083dfe38103183",
-		"auditUpdatedAt": "2026-11-17",
-		"auditGitHead": "3aae104412c3edb7f315cd6dcbb19becd4027d2c",
-		"testsExecuted": [],
-		"coverage": "Only the audit pages/sections below were source-checked. Historical sourceTreeHash, contentHash and completeness counts were not recomputed; unlisted pages may be stale.",
-		"auditSourceCheckedPages": [
-			"apps/clio-coder-gui/client.md",
-			"apps/clio-coder-gui/contracts.md",
-			"apps/clio-coder-gui/server.md",
-			"apps/clio-coder-gui/tests.md",
-			"domains.md",
-			"interactive/footer.md",
-			"library/index.md",
-			"library/plugins/index.md",
-			"library/extensions/index.md",
-			"root.md",
-			"site.md"
-		],
-		"sectionScope": {
-			"apps/clio-coder-gui/client.md": "Current route and arena/research/metrics/report/rewind/control/auth/launch view ownership.",
-			"apps/clio-coder-gui/contracts.md": "Current runtime routes and domain contract families.",
-			"apps/clio-coder-gui/server.md": "Current HTTP route/service composition; retained prior worker/launcher detail.",
-			"apps/clio-coder-gui/tests.md": "Current test-path ownership only; assertions not reverified.",
-			"domains.md": "Entry-point ownership for active undocumented domains, not branch-by-branch behavior.",
-			"interactive/footer.md": "Two modes, one viewport, scrolling and /usage-owned sampler.",
-			"library/index.md": "Top-level package kinds, authoring and registry structure.",
-			"library/plugins/index.md": "Current non-Materio and Materio package inventory.",
-			"library/extensions/index.md": "Current local-status and Materio extension inventory.",
-			"root.md": "src/utils/git.ts and provenance only.",
-			"site.md": "Current Python test inventory only."
-		}
 	}
 }

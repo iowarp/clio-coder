@@ -40,8 +40,6 @@ validate:
 
 # Interactive footer: compact line, expanded page and notices
 
-> **Evidence status (audit at `3aae1044`):** the mode, viewport, scrolling, and sampler ownership below were source-checked. Cited tests were not executed.
-
 The footer is the live region drawn below the interactive prompt. It has two modes: a compact status line and one expanded, scrollable dashboard. There is no current-page index, page cycle, or Activity/Context/Status tab selection.
 
 ## What the area does

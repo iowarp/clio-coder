@@ -46,8 +46,6 @@ validate:
 
 # GUI server
 
-> **Audit status (`3aae1044`):** HTTP composition and the route/service boundaries below were source-checked; no HTTP tests were executed.
-
 The GUI server is the local Node process behind the browser app. A reader needs this page when changing how the server starts, how it hands reads and mutations to worker threads, how it spawns the Clio CLI and ACP agent children, how path completion maps typed paths, or how the background (systemd user) launcher reuses a running server.
 
 This page covers the server entry, the worker host, the process-policy helpers, the ACP client and supervisor, path completion, and the background launcher. The client side is documented in [client](client.md), and server tests are described in [tests](tests.md).

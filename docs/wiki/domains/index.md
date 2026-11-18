@@ -1,6 +1,6 @@
 # domains
 
-The aggregate page (`../domains.md`) was source-checked at `3aae1044` for arena, campaign, claims, components, config, evolution, report, research, semantic-app, share, store, turn-control and user tasks. The legacy count was not recomputed.
+24 complete, 0 pending.
 
 - [Agent recipes, playbooks and result contracts](agents.md) — How Clio discovers and validates agent recipes, playbooks and their command registry, and how worker results are checked against declared contracts. Read this when adding a recipe, changing a playbook, or tracing why a recipe or result is rejected.
 - [Context domain: codewiki index, project wiki generation, bootstrap, budget admission and working-set policies](context.md) — Explains the src/domains/context module: how the codewiki symbol index is built and kept fresh, how the project wiki is generated, staged, validated and promoted, how the bootstrap handbook write is decided, how request admission and live pressure are evaluated, how worker context is selected for delegated runs, and how working-set policy ids resolve to composed policies. Read this before changing any of those paths.

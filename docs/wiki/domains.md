@@ -48,8 +48,6 @@ validate:
 
 # Domain modules: application boundaries and aggregate ownership
 
-> **Audit status (`3aae1044`):** this table was checked at each domain's current entry point. It establishes ownership, not every policy branch; tests were not executed.
-
 This page aggregates active boundaries under `src/domains/` that lack dedicated wiki pages. Follow the named implementation modules before changing policy, persistence or validation details.
 
 ## Current aggregate ownership

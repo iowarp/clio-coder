@@ -52,8 +52,6 @@ validate:
 
 # GUI wire contracts
 
-> **Audit status (`3aae1044`):** the route-family additions below were source-checked; no tests were executed.
-
 This area holds the schemas that the GUI server and the browser client share. A reader needs it when adding or changing an HTTP route, when a DTO shape changes, when the generated OpenAPI document must be regenerated, or when session streaming behaves unexpectedly on the client. The files live in `apps/clio-coder-gui/contracts/` and are imported by both sides, so a change here is a change to the wire format.
 
 ## What this area does

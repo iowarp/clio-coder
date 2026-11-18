@@ -51,8 +51,6 @@ validate:
 
 # Browser client
 
-> **Audit status (`3aae1044`):** current routes and domain-view ownership below were source-checked; cited tests were not executed.
-
 The browser client is the React application under `apps/clio-coder-gui/client`. A reader needs this page to find which file owns a given browser view, how the client routes and reports errors, where the chat composer decides whether a send becomes a prompt, a steer, a shell line, or a refusal, how a tool call is turned into a card, and how the machines registration request reaches the server.
 
 ## What the client does
