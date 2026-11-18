@@ -23,8 +23,9 @@ import type {
 	WorkingSetPolicyId,
 	WorkingSetView,
 } from "./contract.js";
-import { planEviction } from "./engine.js";
+import { planEviction, tokensFreedByEviction } from "./engine.js";
 import { callPathsByToolCallId } from "./path-index.js";
+import { isRecord, isRefusedVerdict, toolResultPayload, toolResultText } from "./payload.js";
 import { dropUnpricedHead } from "./policies/cache-price.js";
 import {
 	SUPERSEDED_FLOOR_BYTES,
@@ -82,6 +83,49 @@ export function planSelection(
 ): EvictionPlan | null {
 	// The internal stage ids are not shipped policy ids; compose.ts names its composed ids the same way.
 	return planEviction({ id: policyId as WorkingSetPolicyId, select: () => candidates }, input);
+}
+
+/** Tools whose result is an observation the model can take again, narrower, after a cut. */
+const OVERFLOW_CUT_TOOLS = new Set(["read", "grep", "find", "ls", "code_nav", "web_read", "web_fetch"]);
+
+/**
+ * The overflow-only cut (ContextFold A4 addendum): when a must-fit request still does not fit after S1, the
+ * successful read results S1's protection kept leave, largest first, until `excess` tokens are freed (priced as
+ * `planEviction` records them). Each is journaled as `step_overflow`, whose marker tells the model to read a
+ * narrower slice. Errors and refused calls stay: they are decisions, not observations the model can take
+ * again. So does a read whose body alone (chars/3.5, Pi's basis) exceeds `room`: no cut makes that request
+ * fit, and the turn ends naming it. Null when nothing qualifies.
+ */
+export function planOverflowCut(
+	policyId: string,
+	input: PolicyInput,
+	excess: number,
+	room: number,
+): EvictionPlan | null {
+	if (excess <= 0) return null;
+	const { view } = input;
+	const callPaths = callPathsByToolCallId(input.entries);
+	const priced: Array<{ candidate: EvictionCandidate; tokens: number; index: number }> = [];
+	input.entries.forEach((entry, index) => {
+		if (entry.kind !== "message" || entry.role !== "tool_result" || view.evicted.has(entry.turnId)) return;
+		if (isRecord(entry.payload) && (entry.payload.isError === true || entry.payload.error === true)) return;
+		if (isRecord(entry.payload) && isRefusedVerdict(entry.payload)) return;
+		const payload = toolResultPayload(entry.payload);
+		if (!OVERFLOW_CUT_TOOLS.has(payload.toolName)) return;
+		if (Math.ceil(toolResultText(payload.result).length / 3.5) > room) return;
+		const candidate: EvictionCandidate = { ref: { entry: entry.turnId }, reason: "step_overflow" };
+		const tokens = tokensFreedByEviction(input, entry, candidate, callPaths);
+		if (tokens > 0) priced.push({ candidate, tokens, index });
+	});
+	priced.sort((a, b) => b.tokens - a.tokens || a.index - b.index);
+	const picked: EvictionCandidate[] = [];
+	let freed = 0;
+	for (const { candidate, tokens } of priced) {
+		if (freed >= excess) break;
+		picked.push(candidate);
+		freed += tokens;
+	}
+	return picked.length === 0 ? null : planSelection(policyId, picked, input);
 }
 
 export function planFold(input: FoldPlanInput): FoldPlan {

@@ -805,6 +805,9 @@ describe("production compaction controls", () => {
 		strictEqual(attempts, 3);
 		ok(f.entries().some((entry) => entry.kind === "compactionSummary"));
 		install(17);
+		// The overflow cut clears this request without a summary (ContextFold A4 addendum); this row pins the
+		// summarizer's abort and retry, so the working set stands aside.
+		f.settings.context.workingSet.enabled = false;
 		const before = context.liveContextEstimate(runtime);
 		ok(before.tokens + 8192 > 32768, "the grep growth no longer fits beside its output reserve");
 		ok(findCutPoint(f.entries(), 20000).firstKeptEntryIndex > 0);
