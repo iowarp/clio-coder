@@ -104,6 +104,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A bash call that runs a check alongside a change (`fix; npm test`, `npm test && codemod`) now counts as a mutation, so a pass from before the change no longer seals verified/pass; `npm ci && npm test` still counts its check (x1-1).
+- Read-only inspection no longer exempts `rg --hostname-bin` or `file`, and `git status`, `git diff`, `git log` and `git show` lose it when the repository's git config sets a `core.fsmonitor` hook, `diff.external` or a diff driver command or textconv, so a helper that writes the tree clears earlier passes (x1-3).
 - Step checkpoints carry the last summarized checkpoint once, with only the current step lead, and an oversized carry drops its oldest text instead of the newest (x2-1).
 - A continuation no longer refreshes the written-out tool call re-prompt budget of a model that ran tools earlier in the turn (x2-2).
 - A helper-result worker that reaches the permission refusal limit can still submit its result through the result tool in the report round (x2-3).
