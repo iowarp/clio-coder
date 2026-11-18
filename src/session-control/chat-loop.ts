@@ -1778,6 +1778,25 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
 	if (deps.turnOutcomeCollector === undefined) deps.middlewareRegistrar?.registerHook(outcomeCollector);
 
+	/**
+	 * A recovery exchange is a durable insert (F13): the record holds the exact pair, stands for the stopped reply
+	 * the live history drops and for the row the event path writes for the host-authored call, so a rebuild sends
+	 * what the recovery request sent. Pi pushes the pair itself, so this only writes.
+	 */
+	const recordRecovery = (
+		source: "repetition-recovery" | "thinking-length-recovery" | "synthesis-recovery",
+		messages: ReadonlyArray<AgentMessage>,
+		stopped?: AgentMessage,
+	): AgentMessage[] => {
+		const stoppedRow = stopped !== undefined ? persistence.rowIdOf(stopped) : undefined;
+		const replaces = [
+			...(stoppedRow !== undefined ? [stoppedRow] : []),
+			...messages.filter((message) => message.role === "assistant").map((message) => hostInserts.reserveRowId(message)),
+		];
+		hostInserts.record(source, messages, { replaces, ...(stoppedRow !== undefined ? { exclude: [stoppedRow] } : {}) });
+		return [...messages];
+	};
+
 	let terminalTurnFailure: TurnFailureRecord | undefined;
 	const currentTurnFailure = (): TurnFailureRecord | undefined => terminalTurnFailure;
 	let turnRetryAttempts = 0;
@@ -3756,13 +3775,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// with an unanswered synthetic tool call.
 						emitNotice("[Clio Coder] Recovering a final answer once; tools remain disabled.");
 						const model = agentRuntime.agent.state.model;
-						await agentRuntime.agent.prompt([
-							...lockedSynthesisRepromptMessages(1, {
-								provider: model.provider,
-								api: model.api,
-								model: model.id,
-							}),
-						]);
+						await agentRuntime.agent.prompt(
+							recordRecovery(
+								"synthesis-recovery",
+								lockedSynthesisRepromptMessages(1, {
+									provider: model.provider,
+									api: model.api,
+									model: model.id,
+								}),
+							),
+						);
 					}
 					// The repetition check stopped a looping stream. Once per operator
 					// turn the model gets the stopped reply replaced by a nudge and one
@@ -3776,17 +3798,22 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							state.repetitionAbortReason = null;
 							const last = agentRuntime.agent.state.messages.at(-1);
 							// The looping reply is in the ledger; replaying it would resend the loop.
-							if (last?.role === "assistant" && (last as { stopReason?: unknown }).stopReason === "aborted")
-								agentRuntime.agent.state.messages = agentRuntime.agent.state.messages.slice(0, -1);
+							const stopped =
+								last?.role === "assistant" && (last as { stopReason?: unknown }).stopReason === "aborted" ? last : undefined;
+							if (stopped) agentRuntime.agent.state.messages = agentRuntime.agent.state.messages.slice(0, -1);
 							emitNotice(
 								"[Clio Coder] Asking the model once to act or answer instead of repeating.",
 								"warning",
 								REPETITION_REPROMPT_NOTICE_KEY,
 							);
 							const model = agentRuntime.agent.state.model;
-							await agentRuntime.agent.prompt([
-								...repetitionRepromptMessages({ provider: model.provider, api: model.api, model: model.id }, stoppedFor),
-							]);
+							await agentRuntime.agent.prompt(
+								recordRecovery(
+									"repetition-recovery",
+									repetitionRepromptMessages({ provider: model.provider, api: model.api, model: model.id }, stoppedFor),
+									stopped,
+								),
+							);
 						}
 					}
 					// The output cap ran out while the model was still thinking. Once per
@@ -3802,6 +3829,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						if (turnId !== null && state.thinkingLengthRecoveryTurnId !== turnId) {
 							state.thinkingLengthRecoveryTurnId = turnId;
 							// The cut-off reply is in the ledger; replaying it would resend the deliberation.
+							const stopped = agentRuntime.agent.state.messages.at(-1);
 							agentRuntime.agent.state.messages = agentRuntime.agent.state.messages.slice(0, -1);
 							const priorLevel = agentRuntime.agent.state.thinkingLevel;
 							const recoveryLevel = lowerThinkingLevel(priorLevel, agentRuntime.runtimeResolution.modelRuntime.thinking);
@@ -3817,9 +3845,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							const model = agentRuntime.agent.state.model;
 							agentRuntime.agent.state.thinkingLevel = recoveryLevel;
 							try {
-								await agentRuntime.agent.prompt([
-									...thinkingLengthRecoveryMessages({ provider: model.provider, api: model.api, model: model.id }),
-								]);
+								await agentRuntime.agent.prompt(
+									recordRecovery(
+										"thinking-length-recovery",
+										thinkingLengthRecoveryMessages({ provider: model.provider, api: model.api, model: model.id }),
+										stopped,
+									),
+								);
 							} finally {
 								agentRuntime.agent.state.thinkingLevel = priorLevel;
 							}

@@ -10,6 +10,7 @@ import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/t
 import type { SessionContract, SessionEntryInput } from "../../src/domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
+import { lockedSynthesisFallbackText } from "../../src/engine/loop-guard.js";
 import { engineModels } from "../../src/engine/models.js";
 import { createRequestStructures } from "../../src/engine/request-structure.js";
 import { openSession } from "../../src/engine/session.js";
@@ -31,6 +32,7 @@ import { createDispatchTool } from "../../src/tools/dispatch.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import {
 	type CapturedRequest,
+	type CaptureReply,
 	type CaptureServer,
 	chatHarness,
 	startCaptureServer,
@@ -826,45 +828,103 @@ describe("W2 (F6 -> CF-4): the full element sequence with inserts", () => {
 });
 
 describe("W8 (F13 -> CF-4): recovery exchanges are records", () => {
-	it("a thinking-length recovery exchange is the same in the next request live and after a reopen", {
-		todo: "F13 -> CF-4",
-		timeout: 30_000,
-	}, async (t) => {
-		const server = await startCaptureServer((_request, index) =>
-			index === 0 ? { thinkingOnlyLength: "deliberating at length" } : { text: `answer ${index}` },
-		);
-		t.after(() => server.close());
-		const harness = chatHarness({ server });
-		let id: string;
-		try {
-			id = harness.session.create({ cwd: process.cwd() }).id;
-			await harness.submit("solve it");
-			const recovery = server.requests[1];
-			ok(recovery, "the cut-off reply was recovered once");
-			const elements = withoutSystem(recovery);
-			ok(elements.includes("user:solve it"), "the recovery request keeps the original user content");
-			ok(
-				elements.some((element) => element.startsWith("call:")) && elements.some((e) => e.startsWith("result:")),
-				"and carries the paired exchange",
+	const LOOP = "The same sentence keeps coming back to the start again and again. ".repeat(90);
+	/** Each call id a request carries with the result that answers it, in order. */
+	const pairs = (request: CapturedRequest): Array<[string, string | undefined]> => {
+		const messages = (request.body.messages as Array<Record<string, unknown>> | undefined) ?? [];
+		const out: Array<[string, string | undefined]> = [];
+		messages.forEach((entry, index) => {
+			for (const call of (entry.tool_calls as Array<{ id: string }> | undefined) ?? []) {
+				const answer = messages.slice(index + 1).find((later) => later.role === "tool" && later.tool_call_id === call.id);
+				out.push([call.id, answer?.tool_call_id as string | undefined]);
+			}
+		});
+		return out;
+	};
+	const cases: Array<{
+		name: string;
+		recovery: number;
+		tool: string;
+		reply: (index: number) => CaptureReply;
+		withTools?: true;
+		stopped?: string;
+	}> = [
+		{
+			name: "a thinking-length recovery exchange",
+			recovery: 1,
+			tool: "clio_thinking_length_reprompt",
+			reply: (index) => (index === 0 ? { thinkingOnlyLength: "deliberating at length" } : { text: `answer ${index}` }),
+		},
+		{
+			name: "a repetition recovery exchange",
+			recovery: 1,
+			tool: "clio_repetition_reprompt",
+			reply: (index) => (index === 0 ? { text: LOOP } : { text: `answer ${index}` }),
+			stopped: "keeps coming back to the start",
+		},
+		{
+			name: "a locked-synthesis recovery exchange",
+			recovery: 2,
+			tool: "clio_synthesis_reprompt",
+			withTools: true,
+			reply: (index) =>
+				index === 0
+					? { calls: [{ id: "p0", name: "probe", arguments: {} }] }
+					: index === 1
+						? { text: lockedSynthesisFallbackText() }
+						: { text: `answer ${index}` },
+		},
+	];
+	for (const row of cases) {
+		it(`${row.name} is the same in the next request live and after a reopen`, { timeout: 30_000 }, async (t) => {
+			const server = await startCaptureServer((_request, index) => row.reply(index));
+			t.after(() => server.close());
+			let bus: { emit(channel: string, payload: unknown): void } | undefined;
+			// The loop guard's lockout, raised while the turn's one tool runs.
+			const lockout = () => bus?.emit("safety.loop_blocked", { disposition: "lockout", tool: "probe" });
+			const harness = chatHarness({ server, ...(row.withTools ? { tools: [probeTool(lockout)] } : {}) });
+			bus = harness.context.bus as typeof bus;
+			let id: string;
+			try {
+				id = harness.session.create({ cwd: process.cwd() }).id;
+				await harness.submit("solve it");
+				const recovery = server.requests[row.recovery];
+				ok(recovery, "the cut-off reply was recovered once");
+				const elements = withoutSystem(recovery);
+				ok(elements.includes("user:solve it"), "the recovery request keeps the original user content");
+				ok(
+					elements.some((element) => element.startsWith("call:")) && elements.some((e) => e.startsWith("result:")),
+					"and carries the paired exchange",
+				);
+				strictEqual(elements.filter((element) => element.startsWith(`call:${row.tool}(`)).length, 1, "the recovery call");
+				for (const [call, result] of pairs(recovery)) strictEqual(result, call, "every call is answered by its id");
+				if (row.stopped) ok(!requestText(elements as never).includes(row.stopped), "the stopped reply is not resent");
+				await harness.submit("next");
+			} finally {
+				await harness.close();
+			}
+			const live = server.requests.at(-1);
+			ok(live);
+			const reopened = chatHarness({ server });
+			try {
+				reopened.reopen(id);
+				await reopened.submit("next");
+			} finally {
+				await reopened.close();
+			}
+			const resumed = server.requests.at(-1);
+			ok(resumed);
+			const expected = withoutSystem(live);
+			deepStrictEqual(withoutSystem(resumed).slice(0, expected.length), expected, "a reopen replays the exchange");
+			deepStrictEqual(pairs(resumed).slice(0, pairs(live).length), pairs(live), "with the same paired ids");
+			strictEqual(
+				withoutSystem(resumed).filter((element) => element.startsWith(`call:${row.tool}(`)).length,
+				1,
+				"and the recovery call once",
 			);
-			await harness.submit("next");
-		} finally {
-			await harness.close();
-		}
-		const live = server.requests.at(-1);
-		ok(live);
-		const reopened = chatHarness({ server });
-		try {
-			reopened.reopen(id);
-			await reopened.submit("next");
-		} finally {
-			await reopened.close();
-		}
-		const resumed = server.requests.at(-1);
-		ok(resumed);
-		const expected = withoutSystem(live);
-		deepStrictEqual(withoutSystem(resumed).slice(0, expected.length), expected, "a reopen replays the exchange");
-	});
+			ok(withoutSystem(resumed).includes("user:solve it"), "and the original user content");
+		});
+	}
 });
 
 describe("W13 (F15 -> CF-2): admission prices the attempt it sends", () => {
