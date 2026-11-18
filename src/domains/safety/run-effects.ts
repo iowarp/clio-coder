@@ -56,7 +56,8 @@ export interface RunEffects {
 	 */
 	failedMutationPaths: ReadonlySet<string>;
 	/**
-	 * Canonical validation commands the run ran to a clean exit since its last workspace mutation. A mutation clears
+	 * The checks the run ran to a clean exit since its last workspace mutation, each named as the receipt files it: a
+	 * declared check under its id, else its vocabulary label, else the classifier's name (S1). A mutation clears
 	 * them like `validationOutcomes`: a pass on the pre-change tree cannot verify the final one (bt-27b). The run's
 	 * earlier checks stay visible as execution evidence in `verificationCommands` and `executedShellCommands`.
 	 */
@@ -78,18 +79,16 @@ export interface RunEffects {
 	/** True only when every observed checking call has an authoritative blocked outcome. */
 	checksAllBlocked?: boolean;
 	/**
-	 * The same commands read under the wider `grounding` vocabulary, which adds
+	 * The run's commands read under the wider `grounding` vocabulary, which adds
 	 * read verification (`git diff`), ad-hoc checks (`node -e`) and the runners
 	 * the strict set omits (`npx vitest`, `tsc --noEmit`). A verify call adds the
-	 * command its check resolved to, read the same way. Always a superset of
-	 * `validationCommands`, because the grounding scope falls back to the strict
-	 * matcher first.
+	 * command its check resolved to, read the same way.
 	 *
 	 * The two sets exist because their readers pay different prices for a match.
 	 * `validationCommands` opens a gate: `result-contract.ts` reads
 	 * `validationCommands.size > 0` as the difference between a mutation report
-	 * sealing `pass` and sealing `unmeasured`, and a run whose only command was
-	 * `git diff` has asserted nothing about correctness. `verificationCommands`
+	 * sealing `pass` and sealing `unmeasured`, so only a call the classifier reads as a check enters it, and a run
+	 * whose only command was `git diff` has asserted nothing about correctness. `verificationCommands`
 	 * only decides whether a receipt prints `unmatched validation: ...`, where a
 	 * miss and a false match both cost one line of noise, so it can afford the
 	 * wider set. A bash check whose exit status is a later command's (`make test; echo EXIT=$?`) lands in
@@ -181,7 +180,7 @@ interface PendingEffects {
 	tool: string;
 	toolCallId: string;
 	reading: CallClassification;
-	validationCommand: string | null;
+	validationCommands: string[];
 	validationName: string | null;
 	mutationRevision: number;
 	verificationCommand: string | null;
@@ -190,12 +189,28 @@ interface PendingEffects {
 }
 
 /**
- * The command a receipt names for a validation call. The canonical identity reads a script-family verify id such as
+ * The names a receipt files a check call's pass under. The classifier's verdict alone says the call ran a check, as the
+ * gate and the board read it, so every check names at least one (S1): each declared check it ran whole under its id,
+ * then the vocabulary's label, else the classifier's own name for it.
+ */
+function receiptValidationCommands(
+	toolName: string,
+	args: Record<string, unknown> | undefined,
+	reading: CallClassification,
+): string[] {
+	if (reading.verdict !== "check") return [];
+	const label = receiptValidationLabel(toolName, args, reading.base);
+	const names = [...reading.declared, ...(label === null ? [] : [label])];
+	return names.length > 0 || reading.name === null ? names : [reading.name];
+}
+
+/**
+ * The vocabulary's label for a validation call. The canonical identity reads a script-family verify id such as
  * `test` as `npm run test`, but verify runs the project catalog's or the toolchain's check of that id first, so where
  * the workspace resolves it to anything but a package script the receipt names the argv that really ran. Grounding a
  * worker's claims keeps the canonical identity, which matches claims by check id.
  */
-function receiptValidationCommand(
+function receiptValidationLabel(
 	toolName: string,
 	args: Record<string, unknown> | undefined,
 	base: string,
@@ -365,9 +380,9 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			}
 			inFlight.set(toolCallId, { tool: toolName, revision: mutationRevision, outcome: null });
 			const reading = classifyCall(toolName, args, { cwd, gitHelpers, outputTarget, declaredChecks });
-			const { base, shell } = reading;
+			const { shell } = reading;
 			// The classifier alone says whether the call ran a check; the vocabularies only name it.
-			const validationCommand = reading.verdict === "check" ? receiptValidationCommand(toolName, args, base) : null;
+			const validationCommands = receiptValidationCommands(toolName, args, reading);
 			const verificationCommand = validationCommandOf(toolName, args, "grounding");
 			// Every bash check settles under the classifier's name, named by a vocabulary or not, as the board files it (x6-1).
 			const validationName = shell === null ? null : reading.name;
@@ -380,7 +395,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				!chain &&
 				!reading.opaque &&
 				reading.paths.length === 0 &&
-				validationCommand === null &&
+				validationCommands.length === 0 &&
 				validationName === null &&
 				verificationCommand === null
 			)
@@ -390,7 +405,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				tool: toolName,
 				toolCallId,
 				reading,
-				validationCommand,
+				validationCommands,
 				validationName,
 				mutationRevision,
 				verificationCommand,
@@ -488,8 +503,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				if (recordWasComplete) options.onWriteRecordDowngraded?.({ ...downgrade });
 			}
 			for (const target of reading.paths) mutatedPaths.add(target);
-			if (effects.validationCommand !== null && fresh && statusAttributable() && reading.shell?.outsideCwd !== true)
-				validationCommands.add(effects.validationCommand);
+			if (fresh && statusAttributable() && reading.shell?.outsideCwd !== true)
+				for (const command of effects.validationCommands) validationCommands.add(command);
 			if (effects.verificationCommand !== null)
 				(statusAttributable() ? verificationCommands : unattributableVerificationCommands).add(effects.verificationCommand);
 			if (effects.tool === ToolNames.Verify) {

@@ -291,13 +291,25 @@ export function approvalWaitWords(
 	// Without the waiter beside it, a bare `denied in 1:53` read as already denied, so a narrow deny form says how
 	// long is left to answer instead.
 	const open = `${left} to answer`;
-	const forms = [
-		[long, ...held, fails ? `run fails in ${left}` : denied],
-		[mid, ...held, fails ? `run fails in ${left}` : denied],
-		[short, ...held, fails ? `fails in ${left}` : denied],
-		[...held, fails ? `fails in ${left}` : open],
-		[fails ? `fails in ${left}` : open],
-	].map((parts) => parts.join(" · "));
+	// Only the dispatching session may answer, so a fork reads the worker as running and the ask as that session's;
+	// the rail drops facts from the end, so `running` leads and outlasts the rest.
+	const owner = window.owner;
+	const forms =
+		owner !== undefined
+			? [
+					["running", `approval held by session ${owner}`, fails ? `run fails in ${left}` : denied],
+					["running", `held by session ${owner}`, fails ? `fails in ${left}` : denied],
+					["running", `held by session ${owner}`],
+					["running", "held by its owner"],
+					["running"],
+				].map((parts) => parts.join(" · "))
+			: [
+					[long, ...held, fails ? `run fails in ${left}` : denied],
+					[mid, ...held, fails ? `run fails in ${left}` : denied],
+					[short, ...held, fails ? `fails in ${left}` : denied],
+					[...held, fails ? `fails in ${left}` : open],
+					[fails ? `fails in ${left}` : open],
+				].map((parts) => parts.join(" · "));
 	const room = options.room;
 	if (room === undefined) return forms[0] as string;
 	return forms.find((form) => form.length <= room) ?? (forms[forms.length - 1] as string);

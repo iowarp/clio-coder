@@ -45,10 +45,13 @@ export function renderUsdSetting(value: number): string {
 function renderDurationMs(value: number): string {
 	const ms = Math.max(0, value);
 	if (ms < 1000) return `${Math.round(ms)}ms`;
-	if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)}s`;
-	const minutes = Math.floor(ms / 60_000);
+	const fraction = (ms / 1000).toFixed(ms < 10_000 ? 2 : 1);
+	if (Number(fraction) < 60) return `${fraction}s`;
+	// Round to whole seconds before splitting, or 119.6s reads `1m60s` and the minute never carries.
+	const seconds = Math.round(ms / 1000);
+	const minutes = Math.floor(seconds / 60);
 	return minutes < 60
-		? `${minutes}m${String(Math.round((ms % 60_000) / 1000)).padStart(2, "0")}s`
+		? `${minutes}m${String(seconds % 60).padStart(2, "0")}s`
 		: `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}m`;
 }
 

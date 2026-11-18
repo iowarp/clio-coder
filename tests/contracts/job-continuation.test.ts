@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { type JobOwner, type JobRecord, TURN_CONTINUATION_CAP } from "../../src/core/job-types.js";
+import { renderFact } from "../../src/core/telemetry/render.js";
 import { createJobController } from "../../src/domains/scheduling/job-controller.js";
 import { JOB_MAIN_TIMEOUT_DEFAULT_MS } from "../../src/domains/scheduling/job-model.js";
 import type {
@@ -648,9 +649,10 @@ describe("job continuation at yolo (#445)", () => {
 		match(footer, /last poll exit 3/u);
 	});
 
-	it("rounds a job's footer countdown to whole seconds before splitting minutes from seconds", () => {
+	it("rounds a footer countdown and an elapsed clock to whole seconds before splitting minutes from seconds", () => {
 		strictEqual(formatCompactMs(10_799_600), "180m0s");
 		strictEqual(formatCompactMs(59_600), "1m0s");
+		strictEqual(renderFact({ kind: "measured", value: 119_600, source: "local-clock" }, "duration"), "2m00s");
 	});
 
 	it("passes only GH_TOKEN and GITHUB_TOKEN to a job command, and only at yolo", async () => {

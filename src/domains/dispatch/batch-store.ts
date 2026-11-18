@@ -48,6 +48,13 @@ export interface DetachedBatchRecord {
 	createdAt: string;
 	/** ISO timestamp when the batch's results were collected; null while open. */
 	collectedAt: string | null;
+	/** Session that first collected the batch, when the collector named one. */
+	collectedBy?: string;
+	/**
+	 * When the dispatching session learned that another session (a fork of it)
+	 * collected the batch, so it is told once rather than every turn.
+	 */
+	ownerToldAt?: string;
 	/**
 	 * The agent ledger these concurrent runs coordinated on, when the batch had
 	 * more than one. It is recorded here because collection can happen in a
@@ -121,8 +128,15 @@ export function getDetachedBatch(batchId: string): DetachedBatchRecord | null {
 	return readStore().find((batch) => batch.id === batchId) ?? null;
 }
 
-/** Idempotent: an already-collected batch keeps its original collection time. */
-export async function markDetachedBatchCollected(batchId: string): Promise<DetachedBatchRecord | null> {
+/**
+ * Idempotent: an already-collected batch keeps its original collection time
+ * and collector. A later collect by the dispatching session itself counts as
+ * that session having learned who collected it first.
+ */
+export async function markDetachedBatchCollected(
+	batchId: string,
+	collectorSessionId?: string | null,
+): Promise<DetachedBatchRecord | null> {
 	let updated: DetachedBatchRecord | null = null;
 	// The agent ledger closes on the first collection, which is where a detached
 	// batch's peers stop being concurrent. Only the collection that actually
@@ -136,11 +150,40 @@ export async function markDetachedBatchCollected(batchId: string): Promise<Detac
 		const current = batches[index];
 		if (!current) return;
 		const firstCollection = current.collectedAt === null;
-		updated = firstCollection ? { ...current, collectedAt: new Date().toISOString() } : current;
+		const collector = collectorSessionId ?? null;
+		if (firstCollection) {
+			updated = {
+				...current,
+				collectedAt: new Date().toISOString(),
+				...(collector !== null ? { collectedBy: collector } : {}),
+			};
+		} else if (
+			collector !== null &&
+			collector === current.sessionId &&
+			current.collectedBy !== undefined &&
+			current.collectedBy !== collector &&
+			current.ownerToldAt === undefined
+		) {
+			updated = { ...current, ownerToldAt: new Date().toISOString() };
+		} else {
+			updated = current;
+		}
 		if (firstCollection && current.ledgerId !== undefined) ledgerToClose = current.ledgerId;
 		batches[index] = updated;
 		writeStore(batches);
 	});
 	if (ledgerToClose !== null) await closeAgentLedger(ledgerToClose);
 	return updated;
+}
+
+/** Records that the dispatching session was told another session collected the batch. */
+export async function markDetachedBatchOwnerTold(batchId: string): Promise<void> {
+	await withStateFileLock(storePath(), () => {
+		const batches = readStore();
+		const index = batches.findIndex((batch) => batch.id === batchId);
+		const current = batches[index];
+		if (!current || current.ownerToldAt !== undefined) return;
+		batches[index] = { ...current, ownerToldAt: new Date().toISOString() };
+		writeStore(batches);
+	});
 }

@@ -411,6 +411,56 @@ export function finishedDetachedBatchIds(
 		.map((view) => view.id);
 }
 
+/** A batch this session dispatched that a fork of it collected first, which this session has not been told about. */
+export interface CollectedElsewhereView {
+	id: string;
+	collectedBy: string;
+	runs: ReadonlyArray<{ runId: string; agentId: string; outcome: string }>;
+}
+
+/**
+ * Batches this session dispatched that another session collected first. Only
+ * a fork of this session can (first collector wins), and collection silences
+ * this session's nudge, so without this the dispatching model goes on saying
+ * the runs are still in the background.
+ */
+export function batchesCollectedElsewhere(
+	dispatch: Pick<DispatchContract, "detached" | "getRun" | "owner" | "assignments">,
+	fallbackSessionId?: string | null,
+): CollectedElsewhereView[] {
+	const detached = dispatch.detached;
+	if (!detached) return [];
+	const sessionId = dispatchOwnerOf(dispatch, fallbackSessionId).sessionId;
+	if (sessionId === null) return [];
+	let records: ReturnType<typeof detached.list>;
+	try {
+		records = detached.list({ includeCollected: true });
+	} catch {
+		return [];
+	}
+	return records.flatMap((record) => {
+		const collectedBy = record.collectedBy;
+		if (record.sessionId !== sessionId || record.collectedAt === null || record.ownerToldAt !== undefined) return [];
+		if (collectedBy === undefined || collectedBy === sessionId) return [];
+		const runs = record.runs.map((run) => {
+			const assignment = dispatch.assignments?.getStored(run.assignmentId) ?? null;
+			const row = dispatch.getRun(assignment?.terminalRunId ?? run.runId);
+			const outcome = row === null ? "ledger row missing" : (row.outcome ?? row.status);
+			return { runId: row?.id ?? run.runId, agentId: run.agentId, outcome };
+		});
+		return [{ id: record.id, collectedBy, runs }];
+	});
+}
+
+export function collectedElsewhereLine(view: CollectedElsewhereView): string {
+	const runs = view.runs.map((run) => `run ${run.runId} (${run.agentId}) ${run.outcome}`).join(", ");
+	return (
+		`- batch ${view.id} was collected by session ${view.collectedBy}: ${runs || "no runs"}. ` +
+		`It is settled, not running in the background; its results went to that session. ` +
+		`monitor(mode="collect", batch_id="${view.id}") re-reads them here.`
+	);
+}
+
 function detachedBatchProgress(view: DetachedBatchNudgeView): string {
 	const terminalOutcomes = view.terminalOutcomes ?? {};
 	if (view.terminal === view.total && terminalOutcomes.succeeded === view.total) {

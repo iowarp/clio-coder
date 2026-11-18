@@ -623,10 +623,10 @@ export function createRunScriptProgressController(input: RunScriptProgressInput)
 
 function formatElapsed(ms: number): string {
 	if (ms < 1000) return `${Math.round(ms)}ms`;
-	const seconds = ms / 1000;
-	if (seconds < 60) return `${seconds.toFixed(1)}s`;
-	const minutes = Math.floor(seconds / 60);
-	return `${minutes}m${Math.round(seconds - minutes * 60)}s`;
+	const fraction = (ms / 1000).toFixed(1);
+	if (Number(fraction) < 60) return `${fraction}s`;
+	const seconds = Math.round(ms / 1000);
+	return `${Math.floor(seconds / 60)}m${seconds % 60}s`;
 }
 
 function classifyOutcome(result: {

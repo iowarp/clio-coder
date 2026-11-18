@@ -224,11 +224,10 @@ function formatOptionalString(value: string | null | undefined, fallback = "none
 function formatDurationMs(value: number): string {
 	if (!Number.isFinite(value) || value < 0) return "unknown";
 	if (value < 1000) return `${Math.round(value)}ms`;
-	const seconds = value / 1000;
-	if (seconds < 60) return `${seconds.toFixed(1)}s`;
-	const minutes = Math.floor(seconds / 60);
-	const remainder = Math.round(seconds % 60);
-	return `${minutes}m ${remainder}s`;
+	const fraction = (value / 1000).toFixed(1);
+	if (Number(fraction) < 60) return `${fraction}s`;
+	const seconds = Math.round(value / 1000);
+	return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 function readStringField(record: Record<string, unknown>, key: string): string | null {

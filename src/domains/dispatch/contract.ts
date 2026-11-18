@@ -402,7 +402,10 @@ export interface DetachedBatchesContract {
 	register(input: RegisterDetachedBatchInput): Promise<DetachedBatchRecord>;
 	get(batchId: string): DetachedBatchRecord | null;
 	list(opts?: { includeCollected?: boolean }): ReadonlyArray<DetachedBatchRecord>;
-	markCollected(batchId: string): Promise<DetachedBatchRecord | null>;
+	/** Marks the batch collected; the collector's session id is kept from the first collection. */
+	markCollected(batchId: string, collectorSessionId?: string | null): Promise<DetachedBatchRecord | null>;
+	/** Records that the dispatching session learned another session collected the batch. */
+	markOwnerTold?(batchId: string): Promise<void>;
 }
 
 /**
