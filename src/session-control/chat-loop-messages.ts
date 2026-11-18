@@ -365,10 +365,10 @@ export function noAnswerReprompt(
 	}
 }
 
-/** At most this many no-answer re-prompts (written-out calls or empty replies) in one operator turn. */
+/** At most this many no-answer re-prompts (written-out calls or empty replies) in a row, with no real call between. */
 export const TOOL_MARKUP_REPROMPT_CAP = 3;
 
-/** Which operator turn spent written-out-call re-prompts, how many, and the tool-call count at the last one. */
+/** Which operator turn spent written-out-call re-prompts, how many in a row, and the tool-call count at the last one. */
 export interface ToolMarkupRepromptBudget {
 	turnId: string;
 	count: number;
@@ -376,20 +376,22 @@ export interface ToolMarkupRepromptBudget {
 }
 
 /**
- * Claims one re-prompt for a tool call the model only wrote out. The first in
- * an operator turn is free; another is granted only when a real call started
- * since the last one, so a model that recovered and kept working is asked
- * again, while one that writes markup back to back ends the turn. Qwen-family
+ * Claims one re-prompt for a tool call the model only wrote out. The count is
+ * of consecutive no-answer replies: a real call started since the last
+ * re-prompt means the model recovered, so the count starts over, and only a
+ * model that writes markup back to back past the cap ends the turn. Qwen-family
  * models wrote calls into reasoning several times in one long turn (WTF-P
- * campaign, 2026-11-15), and one re-prompt per turn ended it at the second.
+ * campaign, 2026-11-15; bt-30), and a per-turn total ended long tasks with no
+ * answer however well they recovered.
  */
 export function claimToolMarkupReprompt(
 	budget: ToolMarkupRepromptBudget | null,
 	turnId: string,
 	toolCalls: number,
 ): ToolMarkupRepromptBudget | null {
-	if (budget === null || budget.turnId !== turnId) return { turnId, count: 1, toolCallsAt: toolCalls };
-	if (budget.count >= TOOL_MARKUP_REPROMPT_CAP || budget.toolCallsAt === toolCalls) return null;
+	if (budget === null || budget.turnId !== turnId || budget.toolCallsAt !== toolCalls)
+		return { turnId, count: 1, toolCallsAt: toolCalls };
+	if (budget.count >= TOOL_MARKUP_REPROMPT_CAP) return null;
 	return { turnId, count: budget.count + 1, toolCallsAt: toolCalls };
 }
 
