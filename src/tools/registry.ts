@@ -52,7 +52,7 @@ import { approvalAxisId } from "../domains/safety/approval-axis.js";
 import { type AutonomyExposure, type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
 import type { OpenDecisionKind } from "../domains/safety/autonomy-window.js";
 import { mainCallExposure } from "../domains/safety/call-consequence.js";
-import { classifyCall } from "../domains/safety/check-classifier.js";
+import { callVerdict } from "../domains/safety/check-classifier.js";
 import { GIT_CONTROL_FILE_RULE_ID } from "../domains/safety/containment.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
 import { confirmationRuleOf } from "../domains/safety/decision-events.js";
@@ -3562,7 +3562,7 @@ function detectedValidationCommand(call: ClassifierCall): string | null {
 	const command = commandArg(call.args);
 	if (command === null) return null;
 	// The call classifier alone says whether the command ran a check; the finish vocabulary only names it.
-	if (classifyCall(ToolNames.Bash, { command }, { cwd: process.cwd() }).verdict !== "check") return null;
+	if (callVerdict(ToolNames.Bash, { command }) !== "check") return null;
 	const detected = detectValidationCommand(command);
 	return detected.kind === "validation" ? detected.matched : null;
 }

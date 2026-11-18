@@ -212,6 +212,44 @@ export function validationCommandOf(
 	return typedValidationSummary(toolName, { args: args ?? {} });
 }
 
+/**
+ * The verdict alone, for a consumer that needs no other facet of the reading (the registry, the finish contract). It
+ * is {@link classifyCall}'s verdict, computed without the facets only a recorder or replay reads (x6-7).
+ */
+export function callVerdict(
+	toolName: string,
+	args: Record<string, unknown> | undefined,
+	gitHelpers = false,
+): CallVerdict {
+	if (toolName !== ToolNames.Bash) return toolVerdict(toolName, args, toolMutationPaths(toolName, args).length);
+	const command = commandOf(args);
+	return command === null ? "unknown" : shellCommandVerdict(command, gitHelpers);
+}
+
+/**
+ * A bash command's {@link ShellCheckReading}, each facet read from the command on first use: only a check, or a call a
+ * vocabulary names, ever asks, so a large write never pays for them (x6-7).
+ */
+function shellCheckReading(command: string, base: string, cwd: string): ShellCheckReading {
+	let statusAttributable: boolean | undefined;
+	let failureAttributable: boolean | undefined;
+	let outsideCwd: boolean | undefined;
+	return {
+		get statusAttributable() {
+			statusAttributable ??= shellExitSpeaksForCommand(command);
+			return statusAttributable;
+		},
+		get failureAttributable() {
+			failureAttributable ??= checkFailureAttributable(command);
+			return failureAttributable;
+		},
+		get outsideCwd() {
+			outsideCwd ??= checkRunsOutside(command, base, cwd);
+			return outsideCwd;
+		},
+	};
+}
+
 /** A tool other than bash: verify and typed validation check, named paths change, an unregistered tool is unknown. */
 function toolVerdict(toolName: string, args: Record<string, unknown> | undefined, paths: number): CallVerdict {
 	if (toolName === ToolNames.Verify) return isVerifyListing(args) ? "inspection" : "check";
@@ -233,18 +271,16 @@ export function classifyCall(
 	const { cwd, gitHelpers = false, outputTarget = NO_OUTPUT_TARGET } = context;
 	const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
 	const command = toolName === ToolNames.Bash ? commandOf(args) : null;
-	const isOutput = outputTarget(base, command === null ? undefined : checkLogTargets(command));
 	const shellCommand = command ?? verifyCommandOf(toolName, args, base);
 	const paths = mutationTargets(toolName, args).map((target) => path.resolve(base, target));
-	const verdict =
-		toolName === ToolNames.Bash
-			? command === null
-				? "unknown"
-				: shellCommandVerdict(command, gitHelpers)
-			: toolVerdict(toolName, args, paths.length);
+	const verdict = callVerdict(toolName, args, gitHelpers);
+	// A bash command has a shape exactly when it runs a check, so only a check reads where its output lands.
+	const isOutput = command !== null && verdict === "check" ? outputTarget(base, checkLogTargets(command)) : () => false;
 	const shape =
 		command !== null
-			? checkCommandShape(command, gitHelpers, isOutput)
+			? verdict === "check"
+				? checkCommandShape(command, gitHelpers, isOutput)
+				: null
 			: // A verify check whose argv rewrites the tree (`npm run format`) is a change, as in bash (x3-3).
 				verdict === "check" && shellCommand !== null && checkWritesTree(shellCommand.split(" "))
 				? "mixed"
@@ -268,14 +304,7 @@ export function classifyCall(
 		paths,
 		changedPaths,
 		shellCommand,
-		shell:
-			command === null
-				? null
-				: {
-						statusAttributable: shellExitSpeaksForCommand(command),
-						failureAttributable: checkFailureAttributable(command),
-						outsideCwd: checkRunsOutside(command, base, cwd),
-					},
+		shell: command === null ? null : shellCheckReading(command, base, cwd),
 		opaque: toolWritesOpaquely(toolName),
 		shape,
 		check,

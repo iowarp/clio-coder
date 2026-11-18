@@ -5,7 +5,7 @@ import { formatHeadlessObservedLine, observeHeadlessRun } from "../../src/cli/mo
 import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { inspectRunEvidence } from "../../src/domains/evidence/run-evidence.js";
 import { formatTrustSummary } from "../../src/domains/evidence/trust-projection.js";
-import { standingChecksFrom } from "../../src/domains/safety/observed-checks.js";
+import { createStandingChecks, standingChecks, standingChecksFrom } from "../../src/domains/safety/observed-checks.js";
 import { readRunJournal } from "../harness/run-journal.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -39,6 +39,34 @@ test("standingChecksFrom keeps a failing check after a write and lets a later pa
 	deepStrictEqual(
 		fixed.map((check) => [check.name, check.passed]),
 		[[failed[0]?.name, true]],
+	);
+});
+
+test("a board's replays within one run keep each call's reading only while it is the same in every window (x6-7)", () => {
+	const ledger = (t1: string, t2: string): object => ({
+		kind: "taskLedger",
+		boardId: "b",
+		subgoals: [
+			{ id: "t1", status: t1 },
+			{ id: "t2", status: t2 },
+		],
+	});
+	// t1's window holds the write to the log, t2's starts after it: the tee is a change for t1 and output for t2.
+	const entries = [
+		{ kind: "message", role: "user", turnId: "u1", payload: {} },
+		ledger("active", "pending"),
+		call("w1", "bash", { command: "echo x > x6-7-observed.txt" }),
+		result("w1", 0),
+		ledger("active", "active"),
+		call("c1", "bash", { command: "npm test 2>&1 | tee x6-7-observed.txt" }),
+		result("c1", 0),
+	];
+	const replay = createStandingChecks();
+	for (const task of ["t1", "t2", "t1"])
+		deepStrictEqual(replay(entries, "b", task, root), standingChecks(entries, "b", task, root), task);
+	deepStrictEqual(
+		standingChecks(entries, "b", "t2", root).map((check) => check.name),
+		["npm test"],
 	);
 });
 

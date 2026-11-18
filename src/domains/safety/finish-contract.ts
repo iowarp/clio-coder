@@ -13,7 +13,7 @@ import {
 import { assessQualityPolicy, loadQualityPolicy, type QualityFinding } from "../../tools/verify/quality-policy.js";
 import { validateTrustStatus } from "../evidence/trust-status.js";
 import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
-import { classifyCall } from "./check-classifier.js";
+import { callVerdict } from "./check-classifier.js";
 import {
 	detectValidationCommand,
 	extractCommandDeleteTargets,
@@ -1520,6 +1520,6 @@ function acceptanceValidationCommand(
 	const check = /^npm run ([a-z0-9][a-z0-9._:-]*)$/.exec(exact)?.[1];
 	if (check && checks.has(check)) return { kind: "validation", matched: exact };
 	// The call classifier alone says whether the command ran a check; the finish vocabulary only names it.
-	if (classifyCall(ToolNames.Bash, { command }, { cwd: process.cwd() }).verdict !== "check") return { kind: "none" };
+	if (callVerdict(ToolNames.Bash, { command }) !== "check") return { kind: "none" };
 	return detectValidationCommand(command);
 }
