@@ -163,6 +163,8 @@ export interface HeadlessMainAgentOptions {
 	verify?: HeadlessVerifyOptions;
 	/** The session's active path, so the run can say which checks it saw stand (`observed:` on stderr, `turn_end.observed`). */
 	readEntries?: () => ReadonlyArray<unknown>;
+	/** `safety.scratchRoots`: a check logged under one changes no tree (x5-4). */
+	scratchRoots?: ReadonlyArray<string>;
 	/**
 	 * The dispatch ledger. When present, the run waits for the workers it
 	 * dispatched before sealing and fails when one did not deliver (D3, D6b).
@@ -1034,7 +1036,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		pendingVerifyCalls: new Map(),
 		pendingShellWrites: new Set(),
 		verifyCalls: [],
-		runEffects: createRunEffectsRecorder(process.cwd()),
+		runEffects: createRunEffectsRecorder(process.cwd(), { scratchRoots: options.scratchRoots ?? [] }),
 		skillActivations: [],
 		calls: [],
 		seenAttempts: new Set(),
