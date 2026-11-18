@@ -425,6 +425,11 @@ export interface ExtensionToolResult {
 	summary?: string;
 	data?: unknown;
 	isError?: boolean;
+	/**
+	 * A `turnPolicy: step` template's step tool says its pipeline has no step left, so a yolo turn that ran this
+	 * step does not continue into another step turn. Honored only on a result that is not an error.
+	 */
+	pipelineDone?: boolean;
 	card?: View;
 	interview?: Interview;
 }

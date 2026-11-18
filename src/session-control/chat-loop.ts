@@ -218,7 +218,7 @@ import {
 	triageSnapshotMatches,
 	triageUserText,
 } from "./steering-triage.js";
-import { compactStepStartDue, createStepStartTracker } from "./step-start.js";
+import { compactStepStartDue, createStepStartTracker, stepTurnOutcome } from "./step-start.js";
 import type { LiveContextUsage, TurnContextDeps } from "./turn-context.js";
 import { createTurnContext } from "./turn-context.js";
 import { createTurnKeepalive } from "./turn-keepalive.js";
@@ -1078,6 +1078,18 @@ function reloadProtectedArtifactsForSession(
 		);
 	}
 }
+
+/** Why a settled turn gets another one at yolo; `step` marks a step continuation, which spends the cap (bt-6). */
+interface YoloContinuation {
+	cause: TurnContinuationCause;
+	reason: string;
+	retryAfterMs?: number;
+	detail?: string;
+	step?: true;
+}
+
+const countsAgainstCap = (stop: YoloContinuation): boolean =>
+	stop.step === true || continuationCountsAgainstCap(stop.cause);
 
 /** The latest assistant text in a transcript, or empty: what a mid-run steer is reacting to. */
 function lastAssistantText(messages: ReadonlyArray<AgentMessage>): string {
@@ -2017,30 +2029,37 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		guardInterrupted = false,
 		guardFailure: { tool: string; failure: string } | null = null,
 		stepStop: { template?: string } | null = null,
-	): { cause: TurnContinuationCause; reason: string; retryAfterMs?: number; detail?: string } | null => {
+		stepRun: { pipelineDone: boolean } | null = null,
+	): YoloContinuation | null => {
 		if ((deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) !== "yolo") return null;
 		const failed = state.continuation.stop;
 		// Continuing would send this provider a request before the time it named.
 		if (failed?.cause === "wait_past_budget") return null;
+		// A step turn continues whether it ended on its own summary or on the second-call refusal, and each step
+		// continuation counts against the cap, so a step tool that never says its pipeline is done cannot loop (bt-6).
+		const template = stepStop?.template ?? state.currentTurnConstraints?.turnPolicy?.template;
+		const step = {
+			cause: "tool_budget" as const,
+			reason: `it ran one step of ${template ? `prompt template ${template}` : "its template"}, which runs one step per turn`,
+			step: true as const,
+		};
 		// A failure stop outranks a budget crossing in the same turn, so a failing turn cannot escape the cap on one.
-		const stop =
+		const stop: YoloContinuation | null =
 			failed ??
 			(guardInterrupted
 				? { cause: "loop_guard" as const, reason: "the loop guard stopped it" }
 				: state.synthesisToolLock
 					? { cause: "loop_guard" as const, reason: "the loop guard locked its tools" }
 					: state.toolBudgetLock
-						? {
-								cause: "tool_budget" as const,
-								reason:
-									stepStop !== null
-										? `it ran one step of ${stepStop.template ? `prompt template ${stepStop.template}` : "its template"}, which runs one step per turn`
-										: "it reached the per-turn tool budget",
-							}
-						: null);
+						? stepStop !== null
+							? step
+							: { cause: "tool_budget" as const, reason: "it reached the per-turn tool budget" }
+						: stepRun !== null
+							? step
+							: null);
 		if (stop === null) return null;
-		if (continuationCountsAgainstCap(stop.cause) && state.continuation.yoloContinuations >= TURN_CONTINUATION_CAP)
-			return null;
+		if (stop.step === true && stepRun?.pipelineDone === true) return null;
+		if (countsAgainstCap(stop) && state.continuation.yoloContinuations >= TURN_CONTINUATION_CAP) return null;
 		// A turn whose tools were blocked turn-wide (the budget, its hard ceiling,
 		// or a synthesis lock) continues in a new turn that holds them again (F-C14).
 		const toolsWereLocked = failed === null && (state.toolBudgetLock || state.synthesisToolLock || guardInterrupted);
@@ -2079,12 +2098,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	/** Give a stopped turn another one, fresh budget included, with what stopped it in the prompt (#445). */
 	const continueStoppedTurn = async (
-		stop: { cause: TurnContinuationCause; reason: string; retryAfterMs?: number; detail?: string },
+		stop: YoloContinuation,
 		generation: number,
 		constraints: ChatSubmitOptions["constraints"],
 		lastToolCall: TurnToolCall | null,
 	): Promise<void> => {
-		const counted = continuationCountsAgainstCap(stop.cause);
+		const counted = countsAgainstCap(stop);
 		const attempt = counted ? state.continuation.countYoloContinuation() : state.continuation.yoloContinuations;
 		const context = deps.session?.current()?.id;
 		deps.bus?.emit(
@@ -3893,6 +3912,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					loopGuardFailure = null;
 					const stepStop = stepPolicyStop;
 					stepPolicyStop = null;
+					const stepPolicy = state.currentTurnConstraints?.turnPolicy;
+					const stepRun = stepPolicy
+						? stepTurnOutcome(agentRuntime.agent.state.messages.slice(machineMessageStart), stepPolicy.stepTool)
+						: null;
 					// Only a step turn that ended on its own text, or that its step policy ended, leaves a state summary
 					// the next step can start from. A failed turn, a loop-guard stop or a real budget crossing stopped
 					// mid-step, so its continuation keeps the full history (WTF-P 0.8.3 C5).
@@ -3912,7 +3935,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						);
 					const continuation =
 						options.machineTurn === undefined && !canceled && !interviewDismissed && (admissionCurrent() || guardStopped)
-							? yoloContinuationDue(guardStopped, guardFailure, stepStop)
+							? yoloContinuationDue(guardStopped, guardFailure, stepStop, stepRun)
 							: null;
 					if (
 						!disposed &&

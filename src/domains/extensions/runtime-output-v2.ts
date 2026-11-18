@@ -363,7 +363,7 @@ export function parseExtensionToolResult(
 	declaration: ExtensionRuntimeDeclarationV2,
 ): ExtensionToolResult {
 	bounded(value, "tool result", RUNTIME_V2_LIMITS.outputBytes);
-	const raw = record(value, "tool result", ["text", "summary", "data", "isError", "card", "interview"]);
+	const raw = record(value, "tool result", ["text", "summary", "data", "isError", "pipelineDone", "card", "interview"]);
 	if (typeof raw.text !== "string" || Buffer.byteLength(raw.text) > RUNTIME_V2_LIMITS.toolTextBytes)
 		throw new Error(`tool result text must be at most ${RUNTIME_V2_LIMITS.toolTextBytes} bytes`);
 	const result: ExtensionToolResult = { text: extensionPlainText(raw.text) };
@@ -380,6 +380,10 @@ export function parseExtensionToolResult(
 	if (raw.isError !== undefined) {
 		if (typeof raw.isError !== "boolean") throw new Error("tool result isError must be true or false");
 		result.isError = raw.isError;
+	}
+	if (raw.pipelineDone !== undefined) {
+		if (typeof raw.pipelineDone !== "boolean") throw new Error("tool result pipelineDone must be true or false");
+		result.pipelineDone = raw.pipelineDone;
 	}
 	if (raw.card !== undefined) {
 		needs(declaration, "card");
