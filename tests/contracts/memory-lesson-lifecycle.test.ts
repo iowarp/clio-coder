@@ -533,6 +533,34 @@ test("a closed session's interrupted retention runs beside a turn, and a preempt
 	}
 });
 
+test("a task with no command receipt or read excerpt settles its retention without a model call", async () => {
+	let calls = 0;
+	const closed = await closedSessionRuntime(
+		{
+			revision: "rev-edits",
+			refs: ["t1", "t2"],
+			text: "edit scripts/a.mjs\nedit scripts/b.mjs\nverify => passed",
+			succeededCommands: new Set(),
+			observedReads: new Map(),
+			commandRuns: [],
+		},
+		async () => {
+			calls += 1;
+			return SILENT;
+		},
+	);
+	try {
+		strictEqual(await closed.runtime.runIdleStep(true), "ran");
+		strictEqual(calls, 0, "nothing the task left could hold a lesson");
+		strictEqual(closed.marker()?.phase, "abstained");
+		strictEqual(closed.marker()?.reason, "no-grounding-evidence");
+		strictEqual(closed.marker()?.attempts, 0);
+		strictEqual(closed.runtime.pendingWork(true), false, "settled, so no later pass asks again");
+	} finally {
+		closed.cleanup();
+	}
+});
+
 test("a recipe the task's receipts prove is retained though the model keeps nothing", async () => {
 	const closed = await closedSessionRuntime(
 		{
