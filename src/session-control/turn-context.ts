@@ -97,6 +97,8 @@ import {
 	resolveLiveBudgetPolicy,
 } from "../domains/context/budget/live-view.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
+import { economicPressure, foldTriggerReserve } from "../domains/context/fold/pressure.js";
+import { createFoldPriceBook } from "../domains/context/fold/price.js";
 import { withinRearmBand } from "../domains/context/working-set/checkpoint.js";
 import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
@@ -128,7 +130,6 @@ import {
 	AutoCompactionTrigger,
 	DEFAULT_COMPACTION_THRESHOLD,
 	effectiveCompactionThreshold,
-	shouldCompact,
 } from "../domains/session/compaction/auto.js";
 import {
 	type CompactInput,
@@ -138,7 +139,7 @@ import {
 } from "../domains/session/compaction/compact.js";
 import { DEFAULT_KEEP_RECENT_TOKENS } from "../domains/session/compaction/defaults.js";
 import { summaryOutputReserve } from "../domains/session/compaction/summary-output.js";
-import { createTokenEstimator, estimateTokens } from "../domains/session/compaction/tokens.js";
+import { estimateTokens } from "../domains/session/compaction/tokens.js";
 import {
 	type CaptureContextSnapshotInput,
 	type ContextSnapshot,
@@ -1247,14 +1248,21 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const summaryReserve = (): number =>
 			(reserve ??= summaryOutputReserve(model, { summaryOnChatRoute: summaryOnChatRoute(agentRuntime, cfg?.model) }));
 		const triggerReserve = (tokens: number): number =>
-			agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow > 0
-				? Math.max(summaryReserve(), resolveTurnOutputReserve(agentRuntime, tokens))
-				: summaryReserve();
+			foldTriggerReserve({
+				knownWindow: agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow > 0,
+				summaryReserve,
+				turnReserve: () => resolveTurnOutputReserve(agentRuntime, tokens),
+			});
 		return {
 			economic,
 			triggerReserve,
 			shouldCompact: (tokens: number) =>
-				shouldCompact(tokens, economic.threshold, economic.triggerWindow, triggerReserve(tokens)),
+				economicPressure({
+					tokens,
+					threshold: economic.threshold,
+					triggerWindow: economic.triggerWindow,
+					reserve: triggerReserve(tokens),
+				}),
 			/** The context size at which the automatic trigger fires, counting the reserve for `tokens`. */
 			triggerTokens: (tokens: number) =>
 				Math.floor(
@@ -2007,7 +2015,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						// Results the next request carries as aging stubs: the pressure figure and the anchor hold only
 						// the stub, so crediting their ledger bodies would end the plan short of the target (D1-1).
 						const aged = new Set(agedHistory(agentRuntime, observeHistory(agentRuntime))?.saved.map(({ id }) => id));
-						const estimator = createTokenEstimator(
+						const prices = createFoldPriceBook(
 							visibleEntries,
 							createReplayMessageConverter(entries, {
 								...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
@@ -2035,7 +2043,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 									: workingSetTarget,
 								...(requiredFit ? { forced: true } : {}),
 							},
-							estimateTokens: estimator.estimateEntry,
+							estimateTokens: prices.tokens,
 							aged,
 						});
 					} catch (error) {
