@@ -1,0 +1,3821 @@
+{
+	"native": {
+		"receipt": {
+			"runId": "<run>",
+			"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+			"agentId": "scout",
+			"executionRole": "researcher",
+			"agentAudience": "shadow",
+			"requestOrigin": "internal",
+			"task": "Inspect the fixture.",
+			"budget": {
+				"version": 1,
+				"enforcement": {
+					"classification": "native-per-tool",
+					"perTool": "enforced",
+					"clioControls": ["tool-calls", "read-reserve", "synthesis", "attempt-cap"]
+				},
+				"policy": {
+					"recipeId": "scout",
+					"default": {
+						"toolCalls": 18,
+						"readReserve": 4,
+						"synthesis": true
+					},
+					"maximum": {
+						"toolCalls": 18,
+						"readReserve": 4
+					},
+					"exact": true
+				},
+				"request": null,
+				"effective": {
+					"mode": "enforced",
+					"toolCalls": 36,
+					"readReserve": 4,
+					"synthesis": true,
+					"hardCap": 300
+				},
+				"reasons": [
+					{
+						"code": "read-only-research-synthesis",
+						"detail": "native read-only research enters final synthesis after 36 observed tool calls"
+					}
+				]
+			},
+			"targetId": "default",
+			"wireModelId": "gpt-4o",
+			"runtimeId": "openai",
+			"runtimeKind": "http",
+			"outcome": "succeeded",
+			"outcomeCode": null,
+			"lineage": {
+				"parentRunId": null,
+				"rootRunId": "<run>",
+				"attempt": 0,
+				"depth": 0
+			},
+			"identity": {
+				"host": "zbook",
+				"user": "akougkas"
+			},
+			"node": {
+				"id": "local",
+				"kind": "local"
+			},
+			"projectContext": {
+				"tier": "none",
+				"chars": 419,
+				"contentHash": "<sha256>",
+				"sections": ["workspace-root"]
+			},
+			"rulesApplied": [],
+			"operatorProfileApplied": false,
+			"startedAt": "<ts>",
+			"endedAt": "<ts>",
+			"exitCode": 0,
+			"outcomeDetail": null,
+			"spend": {
+				"usage": {
+					"input": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheRead": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheWrite": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheWrite1h": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"output": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"reasoning": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					}
+				},
+				"totalTokens": {
+					"kind": "unknown",
+					"reason": "not-observed"
+				},
+				"apiCalls": {
+					"kind": "unknown",
+					"reason": "not-observed"
+				},
+				"pricing": {
+					"usd": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"pricedBy": "none"
+				}
+			},
+			"spendSums": {
+				"usage": {
+					"input": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheRead": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheWrite": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheWrite1h": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"output": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"reasoning": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					}
+				},
+				"totalTokens": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				},
+				"apiCalls": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				},
+				"usd": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				}
+			},
+			"upstreamResponses": [
+				{
+					"callIndex": 1,
+					"usage": {
+						"input": {
+							"kind": "measured",
+							"value": 40,
+							"source": "provider"
+						},
+						"output": {
+							"kind": "measured",
+							"value": 8,
+							"source": "provider"
+						},
+						"cacheRead": {
+							"kind": "measured",
+							"value": 0,
+							"source": "provider"
+						},
+						"cacheWrite": {
+							"kind": "measured",
+							"value": 0,
+							"source": "provider"
+						},
+						"cacheWrite1h": {
+							"kind": "unknown",
+							"reason": "provider-omitted"
+						},
+						"reasoning": {
+							"kind": "unknown",
+							"reason": "provider-omitted"
+						}
+					},
+					"usageScope": "call",
+					"requestedModelId": null,
+					"responseModelIdObservation": {
+						"state": "not-observed"
+					},
+					"differingResponseModelId": null,
+					"providerResponseId": null,
+					"stopReason": "stop"
+				}
+			],
+			"output": {
+				"state": "final",
+				"text": "{\"confirmedFacts\":[],\"missingEvidence\":[],\"nextInspections\":[]}",
+				"bytes": 63,
+				"truncated": false
+			},
+			"compiledPromptHash": "<sha256>",
+			"staticCompositionHash": "<sha256>",
+			"sessionShellHash": "<sha256>",
+			"dynamicHash": "<sha256>",
+			"promptSignature": "<sha256>",
+			"toolSignature": "<sha256>",
+			"clioCoderVersion": "<volatile>",
+			"piMonoVersion": "<volatile>",
+			"platform": "<volatile>",
+			"nodeVersion": "<volatile>",
+			"toolCalls": 3,
+			"toolStats": [
+				{
+					"tool": "grep",
+					"count": 1,
+					"ok": 0,
+					"errors": 0,
+					"blocked": 1,
+					"totalDurationMs": "<n>"
+				},
+				{
+					"tool": "read",
+					"count": 1,
+					"ok": 1,
+					"errors": 0,
+					"blocked": 0,
+					"totalDurationMs": "<n>",
+					"okWrites": 1
+				},
+				{
+					"tool": "write",
+					"count": 1,
+					"ok": 1,
+					"errors": 0,
+					"blocked": 0,
+					"totalDurationMs": "<n>",
+					"okWrites": 1
+				}
+			],
+			"toolActivity": {
+				"calls": 3,
+				"succeeded": 2,
+				"failed": 0,
+				"blocked": 1,
+				"mutatingSucceeded": false
+			},
+			"verification": {
+				"state": "not_applicable",
+				"basis": "read-only-agent"
+			},
+			"routingIntent": {
+				"posture": "balanced",
+				"maxCostUsd": null,
+				"deadlineMs": null,
+				"minimumQuality": null,
+				"requiredCapabilities": [],
+				"locality": "any",
+				"failover": "none"
+			},
+			"effectiveFailover": "automatic",
+			"quality": {
+				"version": 1,
+				"typedValidations": [],
+				"responseSchema": {
+					"sourceId": null,
+					"schemaDigest": null,
+					"runtimeEnforceable": false,
+					"enforcementPassed": null
+				},
+				"resultContract": {
+					"sourceId": "agent-result-contract:provenance-report:<sha256>",
+					"validatorDigest": "<sha256>",
+					"conformance": "pass",
+					"quality": "unmeasured"
+				}
+			},
+			"autonomy": "default",
+			"safety": {
+				"decisions": {
+					"allowed": 2,
+					"blocked": 1,
+					"permissionRequested": 0
+				},
+				"blockedAttempts": [
+					{
+						"tool": "grep",
+						"actionClass": "write",
+						"reason": "grep blocked"
+					}
+				],
+				"requestedActions": ["read"],
+				"readOnly": true,
+				"permit": {
+					"version": 1,
+					"digest": "<volatile>",
+					"capabilityClass": "read-only",
+					"git": "inspect",
+					"asks": "deny",
+					"approvalAuthority": "operator",
+					"ceiling": {
+						"tools": ["code_nav", "context", "data", "find", "gateway", "git", "grep", "ls", "read", "store"],
+						"readOnly": true,
+						"writeRoots": [],
+						"enforcement": {
+							"perCallMediation": true,
+							"toolNarrowing": "exact",
+							"scopeEnforcement": true,
+							"grantPauseResume": true,
+							"cancellation": true
+						}
+					}
+				},
+				"toolTelemetry": {
+					"coverage": "complete",
+					"ingestionErrors": 0,
+					"unfinished": [],
+					"workspaceMutationPossible": false
+				},
+				"runtimeLimitations": [],
+				"sandbox": {
+					"mode": "auto",
+					"backend": "bwrap",
+					"available": true,
+					"writableRoots": [],
+					"gitWritablePaths": [],
+					"network": false
+				}
+			},
+			"reproducibility": {
+				"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+				"safetyPolicy": {
+					"version": 1,
+					"rulePackHash": null,
+					"rulePackVersion": null,
+					"projectPolicyPath": null,
+					"projectPolicyHash": null,
+					"projectPolicyValid": null
+				}
+			},
+			"runtimeResolution": {
+				"targetId": "default",
+				"runtimeId": "openai",
+				"runtimeKind": "http",
+				"apiFamily": "openai-completions",
+				"auth": "api-key",
+				"authRequired": false,
+				"wireModelId": "gpt-4o",
+				"requestedThinkingLevel": "off",
+				"effectiveThinkingLevel": "off",
+				"capabilities": {
+					"chat": true,
+					"tools": true,
+					"reasoning": false,
+					"vision": false,
+					"streaming": true,
+					"contextWindow": 0,
+					"maxTokens": 16384
+				},
+				"contextWindowField": {
+					"value": null,
+					"source": "unknown",
+					"kind": "unknown",
+					"observedAt": null
+				},
+				"modelMaximumField": {
+					"value": 128000,
+					"source": "catalog",
+					"kind": "model-maximum",
+					"observedAt": null
+				},
+				"maxOutputTokensField": {
+					"value": 16384,
+					"source": "catalog",
+					"kind": "model-maximum",
+					"observedAt": null
+				},
+				"thinking": {
+					"mechanism": "none",
+					"class": "never",
+					"display": "off",
+					"supportedLevels": ["off"],
+					"budgetEnforcement": "none",
+					"noticeKind": "applied",
+					"notice": ""
+				},
+				"request": {
+					"budgetEnforcement": "none"
+				},
+				"response": {
+					"parser": "none",
+					"stripTokenizerSentinels": true
+				},
+				"diagnostics": [
+					{
+						"severity": "warning",
+						"code": "context-window-unverified",
+						"message": "This model's context window is unknown, so Clio compacts at its token budget instead. clio-coder configure can set the window."
+					}
+				],
+				"modelTier": "standard",
+				"promptCaching": true
+			},
+			"sessionId": null,
+			"terminalReason": "completed",
+			"routeDecision": {
+				"policyVersion": "route-policy/4",
+				"mode": "shadow",
+				"posture": "balanced",
+				"selected": {
+					"agentId": "scout",
+					"specFingerprint": "<sha256>",
+					"executionRole": "researcher",
+					"targetId": "default",
+					"modelId": "gpt-4o",
+					"runtimeId": "openai",
+					"nodeId": "local",
+					"thinkingLevel": "off",
+					"toolSignature": "<sha256>",
+					"promptCompositionHash": "<sha256>",
+					"endpointIdentityHash": "<sha256>",
+					"settingsFingerprint": "<sha256>"
+				},
+				"approvedFallbacks": [],
+				"hardConstraints": [
+					"manual-pins",
+					"approved-envelope",
+					"audience",
+					"authority",
+					"required-tools",
+					"required-skills",
+					"result-contract",
+					"response-schema-support",
+					"locality",
+					"authentication",
+					"network-policy",
+					"endpoint-reachability",
+					"model-context",
+					"resource-fit",
+					"capacity-lease-availability",
+					"budget",
+					"deadline",
+					"cooldown"
+				],
+				"candidateEvaluations": [
+					{
+						"candidate": {
+							"agentId": "scout",
+							"specFingerprint": "<sha256>",
+							"executionRole": "researcher",
+							"targetId": "default",
+							"modelId": "gpt-4o",
+							"runtimeId": "openai",
+							"nodeId": "local",
+							"thinkingLevel": "off",
+							"toolSignature": "<sha256>",
+							"promptCompositionHash": "<sha256>",
+							"endpointIdentityHash": "<sha256>",
+							"settingsFingerprint": "<sha256>"
+						},
+						"estimate": {
+							"qualityLabeledCount": 0,
+							"unmeasuredCount": 0,
+							"qualityCoverage": 0,
+							"qualityMean": 0.605,
+							"qualityLowerBound": 0,
+							"firstPassSuccessProbability": 0.57,
+							"expectedCostUsd": 1,
+							"costUpperBoundUsd": 1,
+							"expectedEndToEndMs": "<n>",
+							"p95EndToEndMs": "<n>",
+							"reliability": 0.535,
+							"cacheHitProbability": 0,
+							"queueWaitMs": "<n>",
+							"sampleCount": 0,
+							"confidence": 0
+						},
+						"activeReadiness": {
+							"ready": false,
+							"gaps": [
+								"hard-constraint-validity-below-one",
+								"insufficient-quality-labels",
+								"quality-lower-bound-below-posture-floor",
+								"reliability-below-posture-floor",
+								"route-facts-stale",
+								"decision-latency-above-budget"
+							],
+							"labelsNeeded": 6
+						},
+						"rejection": null,
+						"score": 0.35040000000000004,
+						"dominated": false
+					}
+				],
+				"reasonCodes": ["posture-floor-excluded-1", "posture-floors-unsatisfiable", "shadow-advisory-only"],
+				"decisionDurationMs": "<n>",
+				"confidence": 0,
+				"agentSelection": {
+					"request": "explicit",
+					"activation": "shadow",
+					"baselineAgentId": "scout",
+					"recommendedAgentId": "scout",
+					"evaluations": [
+						{
+							"agentId": "architect",
+							"specFingerprint": "<sha256>",
+							"executionRole": "builder",
+							"authority": "artifact-write",
+							"rejections": ["authority:artifact-write", "result-contract:architect-plan"],
+							"coldPrior": {
+								"qualityMean": 0.5,
+								"firstPassSuccessProbability": 0.5,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.5,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["latency-class:deep"]
+						},
+						{
+							"agentId": "coder",
+							"specFingerprint": "<sha256>",
+							"executionRole": "builder",
+							"authority": "workspace-edit",
+							"rejections": ["authority:workspace-edit", "result-contract:mutation-report"],
+							"coldPrior": {
+								"qualityMean": 0.5,
+								"firstPassSuccessProbability": 0.5,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.5,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["latency-class:balanced"]
+						},
+						{
+							"agentId": "context-bootstrap",
+							"specFingerprint": "<sha256>",
+							"executionRole": "researcher",
+							"authority": "read-only",
+							"rejections": ["audience:internal", "result-contract:context-handbook"],
+							"coldPrior": {
+								"qualityMean": 0.5,
+								"firstPassSuccessProbability": 0.5,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.5,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["latency-class:balanced"]
+						},
+						{
+							"agentId": "debugger",
+							"specFingerprint": "<sha256>",
+							"executionRole": "builder",
+							"authority": "verification",
+							"rejections": ["authority:verification", "result-contract:debugger-report"],
+							"coldPrior": {
+								"qualityMean": 0.5,
+								"firstPassSuccessProbability": 0.5,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.5,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["latency-class:balanced"]
+						},
+						{
+							"agentId": "documenter",
+							"specFingerprint": "<sha256>",
+							"executionRole": "builder",
+							"authority": "workspace-edit",
+							"rejections": ["authority:workspace-edit", "result-contract:mutation-report"],
+							"coldPrior": {
+								"qualityMean": 0.5,
+								"firstPassSuccessProbability": 0.5,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.5,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["latency-class:balanced"]
+						},
+						{
+							"agentId": "git-master",
+							"specFingerprint": "<sha256>",
+							"executionRole": "builder",
+							"authority": "workspace-edit",
+							"rejections": ["authority:workspace-edit", "result-contract:mutation-report"],
+							"coldPrior": {
+								"qualityMean": 0.5,
+								"firstPassSuccessProbability": 0.5,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.5,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["latency-class:balanced"]
+						},
+						{
+							"agentId": "oracle",
+							"specFingerprint": "<sha256>",
+							"executionRole": "researcher",
+							"authority": "read-only",
+							"rejections": ["result-contract:oracle-report"],
+							"coldPrior": {
+								"qualityMean": 0.5,
+								"firstPassSuccessProbability": 0.5,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.5,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["latency-class:deep"]
+						},
+						{
+							"agentId": "provenance",
+							"specFingerprint": "<sha256>",
+							"executionRole": "researcher",
+							"authority": "read-only",
+							"rejections": ["result-contract:provenance-report"],
+							"coldPrior": {
+								"qualityMean": 0.5,
+								"firstPassSuccessProbability": 0.5,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.5,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["latency-class:balanced"]
+						},
+						{
+							"agentId": "researcher",
+							"specFingerprint": "<sha256>",
+							"executionRole": "researcher",
+							"authority": "read-only",
+							"rejections": ["result-contract:research-report"],
+							"coldPrior": {
+								"qualityMean": 0.5,
+								"firstPassSuccessProbability": 0.5,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.5,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["latency-class:deep"]
+						},
+						{
+							"agentId": "scout",
+							"specFingerprint": "<sha256>",
+							"executionRole": "researcher",
+							"authority": "read-only",
+							"rejections": [],
+							"coldPrior": {
+								"qualityMean": 0.605,
+								"firstPassSuccessProbability": 0.57,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.535,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["latency-class:fast", "bounded-task-feature:code_read"]
+						},
+						{
+							"agentId": "tester",
+							"specFingerprint": "<sha256>",
+							"executionRole": "builder",
+							"authority": "workspace-edit",
+							"rejections": ["authority:workspace-edit", "result-contract:mutation-report"],
+							"coldPrior": {
+								"qualityMean": 0.5,
+								"firstPassSuccessProbability": 0.5,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.5,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["latency-class:balanced"]
+						},
+						{
+							"agentId": "verifier",
+							"specFingerprint": "<sha256>",
+							"executionRole": "verifier",
+							"authority": "verification",
+							"rejections": ["authority:verification", "result-contract:verifier-report"],
+							"coldPrior": {
+								"qualityMean": 0.5,
+								"firstPassSuccessProbability": 0.5,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.5,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["latency-class:fast"]
+						},
+						{
+							"agentId": "wiki-repair",
+							"specFingerprint": "<sha256>",
+							"executionRole": "builder",
+							"authority": "workspace-edit",
+							"rejections": ["authority:workspace-edit", "result-contract:artifact-report"],
+							"coldPrior": {
+								"qualityMean": 0.5,
+								"firstPassSuccessProbability": 0.5,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.5,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["latency-class:balanced"]
+						},
+						{
+							"agentId": "wiki-writer",
+							"specFingerprint": "<sha256>",
+							"executionRole": "builder",
+							"authority": "workspace-edit",
+							"rejections": ["authority:workspace-edit", "result-contract:artifact-report"],
+							"coldPrior": {
+								"qualityMean": 0.5,
+								"firstPassSuccessProbability": 0.5,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.5,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["latency-class:balanced"]
+						},
+						{
+							"agentId": "world-knowledge",
+							"specFingerprint": "<sha256>",
+							"executionRole": "researcher",
+							"authority": "read-only",
+							"rejections": ["result-contract:world-knowledge-report"],
+							"coldPrior": {
+								"qualityMean": 0.5,
+								"firstPassSuccessProbability": 0.5,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.5,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["latency-class:deep"]
+						}
+					],
+					"readiness": [
+						{
+							"agentId": "scout",
+							"specFingerprint": "<sha256>",
+							"executionRole": "researcher",
+							"ready": false,
+							"candidateCount": 1,
+							"readyCandidateCount": 0,
+							"routes": [
+								{
+									"candidate": {
+										"agentId": "scout",
+										"specFingerprint": "<sha256>",
+										"executionRole": "researcher",
+										"targetId": "default",
+										"modelId": "gpt-4o",
+										"runtimeId": "openai",
+										"nodeId": "local",
+										"thinkingLevel": "off",
+										"toolSignature": "<sha256>",
+										"promptCompositionHash": "<sha256>",
+										"endpointIdentityHash": "<sha256>",
+										"settingsFingerprint": "<sha256>"
+									},
+									"report": {
+										"ready": false,
+										"gaps": [
+											"hard-constraint-validity-below-one",
+											"insufficient-quality-labels",
+											"quality-lower-bound-below-posture-floor",
+											"reliability-below-posture-floor",
+											"route-facts-stale",
+											"decision-latency-above-budget"
+										],
+										"labelsNeeded": 6
+									}
+								}
+							]
+						}
+					],
+					"authorityBasis": null,
+					"authorityTransition": null
+				},
+				"decisionHash": "<sha256>",
+				"executedRoute": {
+					"agentId": "scout",
+					"specFingerprint": "<sha256>",
+					"executionRole": "researcher",
+					"targetId": "default",
+					"modelId": "gpt-4o",
+					"runtimeId": "openai",
+					"nodeId": "local",
+					"thinkingLevel": "off",
+					"toolSignature": "<sha256>",
+					"promptCompositionHash": "<sha256>",
+					"endpointIdentityHash": "<sha256>",
+					"settingsFingerprint": "<sha256>"
+				}
+			},
+			"digest": "<volatile>"
+		},
+		"ledger": {
+			"version": 1,
+			"id": "<run>",
+			"agentId": "scout",
+			"executionRole": "researcher",
+			"agentAudience": "shadow",
+			"requestOrigin": "internal",
+			"task": "Inspect the fixture.",
+			"projection": {
+				"version": 1,
+				"ledgerId": null,
+				"readRoots": [],
+				"writeRoots": [],
+				"scopeSource": "none"
+			},
+			"budget": {
+				"version": 1,
+				"enforcement": {
+					"classification": "native-per-tool",
+					"perTool": "enforced",
+					"clioControls": ["tool-calls", "read-reserve", "synthesis", "attempt-cap"]
+				},
+				"policy": {
+					"recipeId": "scout",
+					"default": {
+						"toolCalls": 18,
+						"readReserve": 4,
+						"synthesis": true
+					},
+					"maximum": {
+						"toolCalls": 18,
+						"readReserve": 4
+					},
+					"exact": true
+				},
+				"request": null,
+				"effective": {
+					"mode": "enforced",
+					"toolCalls": 36,
+					"readReserve": 4,
+					"synthesis": true,
+					"hardCap": 300
+				},
+				"reasons": [
+					{
+						"code": "read-only-research-synthesis",
+						"detail": "native read-only research enters final synthesis after 36 observed tool calls"
+					}
+				]
+			},
+			"targetId": "default",
+			"wireModelId": "gpt-4o",
+			"runtimeId": "openai",
+			"runtimeKind": "http",
+			"timing": {
+				"requestedAt": "<ts>",
+				"queuedAt": "<ts>",
+				"admittedAt": "<ts>",
+				"workerSpawnedAt": "<ts>",
+				"endedAt": "<ts>"
+			},
+			"startedAt": "<ts>",
+			"endedAt": "<ts>",
+			"status": "completed",
+			"exitCode": 0,
+			"pid": null,
+			"heartbeatAt": "<volatile>",
+			"sessionId": null,
+			"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+			"spend": {
+				"usage": {
+					"input": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheRead": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheWrite": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheWrite1h": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"output": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"reasoning": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					}
+				},
+				"totalTokens": {
+					"kind": "unknown",
+					"reason": "not-observed"
+				},
+				"apiCalls": {
+					"kind": "unknown",
+					"reason": "not-observed"
+				},
+				"pricing": {
+					"usd": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"pricedBy": "none"
+				}
+			},
+			"spendSums": {
+				"usage": {
+					"input": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheRead": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheWrite": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheWrite1h": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"output": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"reasoning": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					}
+				},
+				"totalTokens": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				},
+				"apiCalls": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				},
+				"usd": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				}
+			},
+			"sessionShellHash": "<sha256>",
+			"dynamicHash": "<sha256>",
+			"promptSignature": "<sha256>",
+			"toolSignature": "<sha256>",
+			"lineage": {
+				"parentRunId": null,
+				"rootRunId": "<run>",
+				"attempt": 0,
+				"depth": 0
+			},
+			"identity": {
+				"host": "zbook",
+				"user": "akougkas"
+			},
+			"node": {
+				"id": "local",
+				"kind": "local"
+			},
+			"outcome": "succeeded",
+			"outcomeCode": null,
+			"outcomeDetail": null
+		},
+		"events": [
+			{
+				"name": "run.enqueued",
+				"payload": {
+					"runId": "<run>",
+					"sessionId": null,
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"budget": {
+						"version": 1,
+						"enforcement": {
+							"classification": "native-per-tool",
+							"perTool": "enforced",
+							"clioControls": ["tool-calls", "read-reserve", "synthesis", "attempt-cap"]
+						},
+						"policy": {
+							"recipeId": "scout",
+							"default": {
+								"toolCalls": 18,
+								"readReserve": 4,
+								"synthesis": true
+							},
+							"maximum": {
+								"toolCalls": 18,
+								"readReserve": 4
+							},
+							"exact": true
+						},
+						"request": null,
+						"effective": {
+							"mode": "enforced",
+							"toolCalls": 36,
+							"readReserve": 4,
+							"synthesis": true,
+							"hardCap": 300
+						},
+						"reasons": [
+							{
+								"code": "read-only-research-synthesis",
+								"detail": "native read-only research enters final synthesis after 36 observed tool calls"
+							}
+						]
+					}
+				}
+			},
+			{
+				"name": "run.started",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"pid": null,
+					"sessionId": null,
+					"budget": {
+						"version": 1,
+						"enforcement": {
+							"classification": "native-per-tool",
+							"perTool": "enforced",
+							"clioControls": ["tool-calls", "read-reserve", "synthesis", "attempt-cap"]
+						},
+						"policy": {
+							"recipeId": "scout",
+							"default": {
+								"toolCalls": 18,
+								"readReserve": 4,
+								"synthesis": true
+							},
+							"maximum": {
+								"toolCalls": 18,
+								"readReserve": 4
+							},
+							"exact": true
+						},
+						"request": null,
+						"effective": {
+							"mode": "enforced",
+							"toolCalls": 36,
+							"readReserve": 4,
+							"synthesis": true,
+							"hardCap": 300
+						},
+						"reasons": [
+							{
+								"code": "read-only-research-synthesis",
+								"detail": "native read-only research enters final synthesis after 36 observed tool calls"
+							}
+						]
+					},
+					"assignmentId": "<run>",
+					"attempt": 0
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "route_warning",
+						"level": "warning",
+						"message": "This model's context window is unknown, so Clio compacts at its token budget instead. clio-coder configure can set the window."
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "clio_coder_tool_start",
+						"payload": {
+							"tool": "read"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "clio_coder_tool_finish",
+						"payload": {
+							"tool": "read",
+							"decision": "allowed",
+							"outcome": "ok",
+							"durationMs": "<volatile>",
+							"actionClass": "write",
+							"reason": "read allowed"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "clio_coder_tool_start",
+						"payload": {
+							"tool": "write"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "clio_coder_tool_finish",
+						"payload": {
+							"tool": "write",
+							"decision": "allowed",
+							"outcome": "ok",
+							"durationMs": "<volatile>",
+							"actionClass": "write",
+							"reason": "write allowed"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "clio_coder_tool_start",
+						"payload": {
+							"tool": "grep"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "clio_coder_tool_finish",
+						"payload": {
+							"tool": "grep",
+							"decision": "blocked",
+							"outcome": "blocked",
+							"durationMs": "<volatile>",
+							"actionClass": "write",
+							"reason": "grep blocked"
+						}
+					}
+				}
+			},
+			{
+				"name": "approval.requested",
+				"payload": {
+					"tool": "bash",
+					"actionClass": "execute",
+					"requestId": "req-1",
+					"origin": "worker:<run>",
+					"requestedBy": "<run>",
+					"rejection": {
+						"short": "bash needs approval",
+						"detail": "bash needs approval",
+						"hints": []
+					}
+				}
+			},
+			{
+				"name": "approval.resolved",
+				"payload": {
+					"status": "denied",
+					"tool": "bash",
+					"requestId": "req-1",
+					"origin": "worker:<run>",
+					"decidedBy": "policy:no-operator",
+					"actionClass": "execute",
+					"reason": "bash needs approval",
+					"requestedBy": "<run>"
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "clio_coder_permission_resolved",
+						"payload": {
+							"tool": "bash",
+							"requestId": "req-1",
+							"actionClass": "execute",
+							"reason": "bash needs approval"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "message_end",
+						"message": {
+							"role": "assistant",
+							"stopReason": "stop",
+							"content": [
+								{
+									"type": "text",
+									"text": "{\"confirmedFacts\":[],\"missingEvidence\":[],\"nextInspections\":[]}"
+								}
+							],
+							"usage": {
+								"input": 40,
+								"output": 8,
+								"cacheRead": 0,
+								"cacheWrite": 0,
+								"totalTokens": 48
+							}
+						}
+					}
+				}
+			},
+			{
+				"name": "run.completed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"outcome": "succeeded",
+					"outcomeCode": null,
+					"outcomeDetail": null,
+					"lineage": {
+						"parentRunId": null,
+						"rootRunId": "<run>",
+						"attempt": 0,
+						"depth": 0
+					},
+					"sessionId": null,
+					"spend": {
+						"usage": {
+							"input": {
+								"kind": "unknown",
+								"reason": "not-observed"
+							},
+							"cacheRead": {
+								"kind": "unknown",
+								"reason": "not-observed"
+							},
+							"cacheWrite": {
+								"kind": "unknown",
+								"reason": "not-observed"
+							},
+							"cacheWrite1h": {
+								"kind": "unknown",
+								"reason": "not-observed"
+							},
+							"output": {
+								"kind": "unknown",
+								"reason": "not-observed"
+							},
+							"reasoning": {
+								"kind": "unknown",
+								"reason": "not-observed"
+							}
+						},
+						"totalTokens": {
+							"kind": "unknown",
+							"reason": "not-observed"
+						},
+						"apiCalls": {
+							"kind": "unknown",
+							"reason": "not-observed"
+						},
+						"pricing": {
+							"usd": {
+								"kind": "unknown",
+								"reason": "not-observed"
+							},
+							"pricedBy": "none"
+						}
+					},
+					"durationMs": "<volatile>",
+					"exitCode": 0,
+					"toolActivity": {
+						"calls": 3,
+						"succeeded": 2,
+						"failed": 0,
+						"blocked": 1,
+						"mutatingSucceeded": false
+					}
+				}
+			}
+		]
+	},
+	"native-finalization-failure": {
+		"receipt": {
+			"rejected": "Error: golden finalization failure"
+		},
+		"ledger": {
+			"version": 1,
+			"id": "<run>",
+			"agentId": "scout",
+			"executionRole": "researcher",
+			"agentAudience": "shadow",
+			"requestOrigin": "internal",
+			"task": "Inspect the fixture.",
+			"projection": {
+				"version": 1,
+				"ledgerId": null,
+				"readRoots": [],
+				"writeRoots": [],
+				"scopeSource": "none"
+			},
+			"budget": {
+				"version": 1,
+				"enforcement": {
+					"classification": "native-per-tool",
+					"perTool": "enforced",
+					"clioControls": ["tool-calls", "read-reserve", "synthesis", "attempt-cap"]
+				},
+				"policy": {
+					"recipeId": "scout",
+					"default": {
+						"toolCalls": 18,
+						"readReserve": 4,
+						"synthesis": true
+					},
+					"maximum": {
+						"toolCalls": 18,
+						"readReserve": 4
+					},
+					"exact": true
+				},
+				"request": null,
+				"effective": {
+					"mode": "enforced",
+					"toolCalls": 36,
+					"readReserve": 4,
+					"synthesis": true,
+					"hardCap": 300
+				},
+				"reasons": [
+					{
+						"code": "read-only-research-synthesis",
+						"detail": "native read-only research enters final synthesis after 36 observed tool calls"
+					}
+				]
+			},
+			"targetId": "default",
+			"wireModelId": "gpt-4o",
+			"runtimeId": "openai",
+			"runtimeKind": "http",
+			"timing": {
+				"requestedAt": "<ts>",
+				"queuedAt": "<ts>",
+				"admittedAt": "<ts>",
+				"workerSpawnedAt": "<ts>"
+			},
+			"startedAt": "<ts>",
+			"endedAt": "<ts>",
+			"status": "failed",
+			"exitCode": 1,
+			"pid": null,
+			"heartbeatAt": "<volatile>",
+			"sessionId": null,
+			"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+			"spend": {
+				"usage": {
+					"input": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheRead": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheWrite": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheWrite1h": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"output": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"reasoning": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					}
+				},
+				"totalTokens": {
+					"kind": "unknown",
+					"reason": "not-observed"
+				},
+				"apiCalls": {
+					"kind": "unknown",
+					"reason": "not-observed"
+				},
+				"pricing": {
+					"usd": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"pricedBy": "none"
+				}
+			},
+			"spendSums": {
+				"usage": {
+					"input": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheRead": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheWrite": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheWrite1h": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"output": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"reasoning": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					}
+				},
+				"totalTokens": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				},
+				"apiCalls": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				},
+				"usd": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				}
+			},
+			"sessionShellHash": "<sha256>",
+			"dynamicHash": "<sha256>",
+			"promptSignature": "<sha256>",
+			"toolSignature": "<sha256>",
+			"lineage": {
+				"parentRunId": null,
+				"rootRunId": "<run>",
+				"attempt": 0,
+				"depth": 0
+			},
+			"identity": {
+				"host": "zbook",
+				"user": "akougkas"
+			},
+			"node": {
+				"id": "local",
+				"kind": "local"
+			},
+			"outcome": "failed",
+			"outcomeDetail": "finalization failure: golden finalization failure"
+		},
+		"events": [
+			{
+				"name": "run.enqueued",
+				"payload": {
+					"runId": "<run>",
+					"sessionId": null,
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"budget": {
+						"version": 1,
+						"enforcement": {
+							"classification": "native-per-tool",
+							"perTool": "enforced",
+							"clioControls": ["tool-calls", "read-reserve", "synthesis", "attempt-cap"]
+						},
+						"policy": {
+							"recipeId": "scout",
+							"default": {
+								"toolCalls": 18,
+								"readReserve": 4,
+								"synthesis": true
+							},
+							"maximum": {
+								"toolCalls": 18,
+								"readReserve": 4
+							},
+							"exact": true
+						},
+						"request": null,
+						"effective": {
+							"mode": "enforced",
+							"toolCalls": 36,
+							"readReserve": 4,
+							"synthesis": true,
+							"hardCap": 300
+						},
+						"reasons": [
+							{
+								"code": "read-only-research-synthesis",
+								"detail": "native read-only research enters final synthesis after 36 observed tool calls"
+							}
+						]
+					}
+				}
+			},
+			{
+				"name": "run.started",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"pid": null,
+					"sessionId": null,
+					"budget": {
+						"version": 1,
+						"enforcement": {
+							"classification": "native-per-tool",
+							"perTool": "enforced",
+							"clioControls": ["tool-calls", "read-reserve", "synthesis", "attempt-cap"]
+						},
+						"policy": {
+							"recipeId": "scout",
+							"default": {
+								"toolCalls": 18,
+								"readReserve": 4,
+								"synthesis": true
+							},
+							"maximum": {
+								"toolCalls": 18,
+								"readReserve": 4
+							},
+							"exact": true
+						},
+						"request": null,
+						"effective": {
+							"mode": "enforced",
+							"toolCalls": 36,
+							"readReserve": 4,
+							"synthesis": true,
+							"hardCap": 300
+						},
+						"reasons": [
+							{
+								"code": "read-only-research-synthesis",
+								"detail": "native read-only research enters final synthesis after 36 observed tool calls"
+							}
+						]
+					},
+					"assignmentId": "<run>",
+					"attempt": 0
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "route_warning",
+						"level": "warning",
+						"message": "This model's context window is unknown, so Clio compacts at its token budget instead. clio-coder configure can set the window."
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "clio_coder_tool_start",
+						"payload": {
+							"tool": "read"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "clio_coder_tool_finish",
+						"payload": {
+							"tool": "read",
+							"decision": "allowed",
+							"outcome": "ok",
+							"durationMs": "<volatile>",
+							"actionClass": "write",
+							"reason": "read allowed"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "clio_coder_tool_start",
+						"payload": {
+							"tool": "write"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "clio_coder_tool_finish",
+						"payload": {
+							"tool": "write",
+							"decision": "allowed",
+							"outcome": "ok",
+							"durationMs": "<volatile>",
+							"actionClass": "write",
+							"reason": "write allowed"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "clio_coder_tool_start",
+						"payload": {
+							"tool": "grep"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "clio_coder_tool_finish",
+						"payload": {
+							"tool": "grep",
+							"decision": "blocked",
+							"outcome": "blocked",
+							"durationMs": "<volatile>",
+							"actionClass": "write",
+							"reason": "grep blocked"
+						}
+					}
+				}
+			},
+			{
+				"name": "approval.requested",
+				"payload": {
+					"tool": "bash",
+					"actionClass": "execute",
+					"requestId": "req-1",
+					"origin": "worker:<run>",
+					"requestedBy": "<run>",
+					"rejection": {
+						"short": "bash needs approval",
+						"detail": "bash needs approval",
+						"hints": []
+					}
+				}
+			},
+			{
+				"name": "approval.resolved",
+				"payload": {
+					"status": "denied",
+					"tool": "bash",
+					"requestId": "req-1",
+					"origin": "worker:<run>",
+					"decidedBy": "policy:no-operator",
+					"actionClass": "execute",
+					"reason": "bash needs approval",
+					"requestedBy": "<run>"
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "clio_coder_permission_resolved",
+						"payload": {
+							"tool": "bash",
+							"requestId": "req-1",
+							"actionClass": "execute",
+							"reason": "bash needs approval"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"event": {
+						"type": "message_end",
+						"message": {
+							"role": "assistant",
+							"stopReason": "stop",
+							"content": [
+								{
+									"type": "text",
+									"text": "{\"confirmedFacts\":[],\"missingEvidence\":[],\"nextInspections\":[]}"
+								}
+							],
+							"usage": {
+								"input": 40,
+								"output": 8,
+								"cacheRead": 0,
+								"cacheWrite": 0,
+								"totalTokens": 48
+							}
+						}
+					}
+				}
+			},
+			{
+				"name": "run.failed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "scout",
+					"task": "Inspect the fixture.",
+					"agentAudience": "shadow",
+					"requestOrigin": "internal",
+					"targetId": "default",
+					"wireModelId": "gpt-4o",
+					"runtimeId": "openai",
+					"runtimeKind": "http",
+					"outcome": "failed",
+					"outcomeDetail": "finalization failure: golden finalization failure",
+					"reason": "failed",
+					"lineage": {
+						"parentRunId": null,
+						"rootRunId": "<run>",
+						"attempt": 0,
+						"depth": 0
+					},
+					"exitCode": 1
+				}
+			}
+		]
+	},
+	"acp": {
+		"receipt": {
+			"runId": "<run>",
+			"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+			"agentId": "golden-peer",
+			"executionRole": "researcher",
+			"requestOrigin": "internal",
+			"task": "Inspect the fixture.",
+			"targetId": "delegation:golden-peer",
+			"wireModelId": "golden-peer",
+			"runtimeId": "acp",
+			"runtimeKind": "acp-delegation",
+			"outcome": "succeeded",
+			"outcomeCode": null,
+			"outcomeDetail": null,
+			"lineage": {
+				"parentRunId": null,
+				"rootRunId": "<run>",
+				"attempt": 0,
+				"depth": 0
+			},
+			"identity": {
+				"host": "zbook",
+				"user": "akougkas"
+			},
+			"node": {
+				"id": "local",
+				"kind": "local"
+			},
+			"budget": {
+				"version": 1,
+				"enforcement": {
+					"classification": "external-one-shot",
+					"perTool": "unobserved-not-enforced",
+					"clioControls": ["single-launch", "wall-clock", "output-cap", "cancellation", "result-contract"]
+				},
+				"policy": {
+					"recipeId": "golden-peer",
+					"default": {
+						"toolCalls": 300,
+						"readReserve": 0,
+						"synthesis": true
+					},
+					"maximum": {
+						"toolCalls": 300,
+						"readReserve": 0
+					},
+					"exact": true
+				},
+				"request": null,
+				"effective": {
+					"mode": "advisory",
+					"toolCalls": 300,
+					"readReserve": 0,
+					"synthesis": true,
+					"hardCap": 300
+				},
+				"reasons": []
+			},
+			"projectContext": {
+				"tier": "none",
+				"chars": 419,
+				"contentHash": "<sha256>",
+				"sections": ["workspace-root"]
+			},
+			"rulesApplied": [],
+			"operatorProfileApplied": false,
+			"startedAt": "<ts>",
+			"endedAt": "<ts>",
+			"exitCode": 0,
+			"spend": {
+				"usage": {
+					"input": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheRead": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheWrite": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheWrite1h": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"output": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"reasoning": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					}
+				},
+				"totalTokens": {
+					"kind": "unknown",
+					"reason": "not-observed"
+				},
+				"apiCalls": {
+					"kind": "unknown",
+					"reason": "not-observed"
+				},
+				"pricing": {
+					"usd": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"pricedBy": "none"
+				}
+			},
+			"spendSums": {
+				"usage": {
+					"input": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheRead": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheWrite": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheWrite1h": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"output": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"reasoning": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					}
+				},
+				"totalTokens": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				},
+				"apiCalls": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				},
+				"usd": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				}
+			},
+			"upstreamResponses": [
+				{
+					"callIndex": 1,
+					"usage": {
+						"input": {
+							"kind": "measured",
+							"value": 40,
+							"source": "provider"
+						},
+						"output": {
+							"kind": "measured",
+							"value": 8,
+							"source": "provider"
+						},
+						"cacheRead": {
+							"kind": "measured",
+							"value": 0,
+							"source": "provider"
+						},
+						"cacheWrite": {
+							"kind": "measured",
+							"value": 0,
+							"source": "provider"
+						},
+						"cacheWrite1h": {
+							"kind": "unknown",
+							"reason": "provider-omitted"
+						},
+						"reasoning": {
+							"kind": "unknown",
+							"reason": "provider-omitted"
+						}
+					},
+					"usageScope": "call",
+					"requestedModelId": null,
+					"responseModelIdObservation": {
+						"state": "not-observed"
+					},
+					"differingResponseModelId": null,
+					"providerResponseId": null,
+					"stopReason": "stop"
+				}
+			],
+			"output": {
+				"state": "final",
+				"text": "{\"confirmedFacts\":[],\"missingEvidence\":[],\"nextInspections\":[]}",
+				"bytes": 63,
+				"truncated": false
+			},
+			"compiledPromptHash": "<sha256>",
+			"staticCompositionHash": null,
+			"sessionShellHash": null,
+			"dynamicHash": "<sha256>",
+			"promptSignature": "<sha256>",
+			"toolSignature": null,
+			"clioCoderVersion": "<volatile>",
+			"piMonoVersion": "<volatile>",
+			"platform": "<volatile>",
+			"nodeVersion": "<volatile>",
+			"toolCalls": 3,
+			"toolStats": [
+				{
+					"tool": "grep",
+					"count": 1,
+					"ok": 0,
+					"errors": 0,
+					"blocked": 1,
+					"totalDurationMs": "<n>"
+				},
+				{
+					"tool": "read",
+					"count": 1,
+					"ok": 1,
+					"errors": 0,
+					"blocked": 0,
+					"totalDurationMs": "<n>",
+					"okWrites": 1
+				},
+				{
+					"tool": "write",
+					"count": 1,
+					"ok": 1,
+					"errors": 0,
+					"blocked": 0,
+					"totalDurationMs": "<n>",
+					"okWrites": 1
+				}
+			],
+			"toolActivity": {
+				"calls": 3,
+				"succeeded": 2,
+				"failed": 0,
+				"blocked": 1,
+				"mutatingSucceeded": false
+			},
+			"verification": {
+				"state": "unknown",
+				"basis": "acp-external-unobserved"
+			},
+			"routingIntent": {
+				"posture": "balanced",
+				"maxCostUsd": null,
+				"deadlineMs": null,
+				"minimumQuality": null,
+				"requiredCapabilities": [],
+				"locality": "any",
+				"failover": "none"
+			},
+			"effectiveFailover": "automatic",
+			"quality": {
+				"version": 1,
+				"typedValidations": [],
+				"responseSchema": {
+					"sourceId": null,
+					"schemaDigest": null,
+					"runtimeEnforceable": false,
+					"enforcementPassed": null
+				},
+				"resultContract": null
+			},
+			"autonomy": "default",
+			"safety": {
+				"decisions": {
+					"allowed": 2,
+					"blocked": 1,
+					"permissionRequested": 0
+				},
+				"blockedAttempts": [
+					{
+						"tool": "grep",
+						"actionClass": "write",
+						"reason": "grep blocked"
+					}
+				],
+				"requestedActions": [],
+				"toolTelemetry": {
+					"coverage": "unavailable",
+					"ingestionErrors": 0,
+					"unfinished": [],
+					"workspaceMutationPossible": true
+				},
+				"runtimeLimitations": [
+					"external ACP agent executes its own unknown tool surface; Clio mediates permission requests and records decisions"
+				],
+				"permit": {
+					"version": 1,
+					"digest": "<volatile>",
+					"capabilityClass": "workspace-edit",
+					"git": "inspect",
+					"asks": "deny",
+					"approvalAuthority": "operator",
+					"ceiling": {
+						"tools": [],
+						"readOnly": false,
+						"writeRoots": [],
+						"enforcement": {
+							"perCallMediation": false,
+							"toolNarrowing": "none",
+							"scopeEnforcement": false,
+							"grantPauseResume": false,
+							"cancellation": true
+						}
+					},
+					"recordOnly": {
+						"mediation": "peer-asks-only",
+						"toolGovernance": "clio-coder-policy"
+					}
+				}
+			},
+			"reproducibility": {
+				"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+				"safetyPolicy": {
+					"version": 1,
+					"rulePackHash": null,
+					"rulePackVersion": null,
+					"projectPolicyPath": null,
+					"projectPolicyHash": null,
+					"projectPolicyValid": null
+				}
+			},
+			"delegation": {
+				"agentConfigId": "golden-peer",
+				"command": "/home/akougkas/.nvm/versions/node/v24.22.2/bin/node",
+				"args": ["-e", ""],
+				"acpSessionId": "golden-session",
+				"acpProtocolVersion": null,
+				"acpAgentName": null,
+				"acpAgentVersion": null,
+				"agentCapabilities": {},
+				"toolCallsRequested": 0,
+				"toolCallsApproved": 0,
+				"toolCallsDenied": 0,
+				"toolGovernance": "clio-coder-policy",
+				"toolCallLog": []
+			},
+			"sessionId": null,
+			"terminalReason": "completed",
+			"routeDecision": {
+				"policyVersion": "route-policy/4",
+				"mode": "fixed",
+				"posture": "manual",
+				"selected": {
+					"agentId": "golden-peer",
+					"specFingerprint": "acp:unobservable",
+					"executionRole": "researcher",
+					"targetId": "delegation:golden-peer",
+					"modelId": "golden-peer",
+					"runtimeId": "acp",
+					"nodeId": "local",
+					"toolSignature": "acp:unobservable",
+					"promptCompositionHash": "<sha256>",
+					"endpointIdentityHash": "<sha256>",
+					"settingsFingerprint": "<sha256>"
+				},
+				"approvedFallbacks": [],
+				"hardConstraints": ["fixed-executed-route"],
+				"candidateEvaluations": [
+					{
+						"candidate": {
+							"agentId": "golden-peer",
+							"specFingerprint": "acp:unobservable",
+							"executionRole": "researcher",
+							"targetId": "delegation:golden-peer",
+							"modelId": "golden-peer",
+							"runtimeId": "acp",
+							"nodeId": "local",
+							"toolSignature": "acp:unobservable",
+							"promptCompositionHash": "<sha256>",
+							"endpointIdentityHash": "<sha256>",
+							"settingsFingerprint": "<sha256>"
+						},
+						"estimate": {
+							"qualityLabeledCount": 0,
+							"unmeasuredCount": 0,
+							"qualityCoverage": 0,
+							"qualityMean": 0.5,
+							"qualityLowerBound": 0,
+							"firstPassSuccessProbability": 0.5,
+							"expectedCostUsd": 1,
+							"costUpperBoundUsd": 1,
+							"expectedEndToEndMs": "<n>",
+							"p95EndToEndMs": "<n>",
+							"reliability": 0.5,
+							"cacheHitProbability": 0,
+							"queueWaitMs": "<n>",
+							"sampleCount": 0,
+							"confidence": 0
+						},
+						"activeReadiness": {
+							"ready": false,
+							"gaps": [
+								"insufficient-quality-labels",
+								"cost-upper-bound-unknown",
+								"route-facts-stale",
+								"decision-latency-above-budget"
+							],
+							"labelsNeeded": 6
+						},
+						"rejection": null,
+						"score": 0.5,
+						"dominated": false
+					}
+				],
+				"reasonCodes": ["manual-posture-exact-route", "observer-failure-fixed-route"],
+				"decisionDurationMs": "<n>",
+				"confidence": 0,
+				"agentSelection": {
+					"request": "explicit",
+					"activation": "shadow",
+					"baselineAgentId": "golden-peer",
+					"recommendedAgentId": "golden-peer",
+					"evaluations": [
+						{
+							"agentId": "golden-peer",
+							"specFingerprint": "acp:unobservable",
+							"executionRole": "researcher",
+							"authority": "internal",
+							"rejections": [],
+							"coldPrior": {
+								"qualityMean": 0.5,
+								"firstPassSuccessProbability": 0.5,
+								"costUpperBoundUsd": 1,
+								"expectedEndToEndMs": "<n>",
+								"reliability": 0.5,
+								"queueWaitMs": "<n>"
+							},
+							"priorReasons": ["fixed-route"]
+						}
+					],
+					"readiness": [
+						{
+							"agentId": "golden-peer",
+							"specFingerprint": "acp:unobservable",
+							"executionRole": "researcher",
+							"ready": false,
+							"candidateCount": 1,
+							"readyCandidateCount": 0,
+							"routes": [
+								{
+									"candidate": {
+										"agentId": "golden-peer",
+										"specFingerprint": "acp:unobservable",
+										"executionRole": "researcher",
+										"targetId": "delegation:golden-peer",
+										"modelId": "golden-peer",
+										"runtimeId": "acp",
+										"nodeId": "local",
+										"toolSignature": "acp:unobservable",
+										"promptCompositionHash": "<sha256>",
+										"endpointIdentityHash": "<sha256>",
+										"settingsFingerprint": "<sha256>"
+									},
+									"report": {
+										"ready": false,
+										"gaps": [
+											"insufficient-quality-labels",
+											"cost-upper-bound-unknown",
+											"route-facts-stale",
+											"decision-latency-above-budget"
+										],
+										"labelsNeeded": 6
+									}
+								}
+							]
+						}
+					],
+					"authorityBasis": null,
+					"authorityTransition": null
+				},
+				"decisionHash": "<sha256>",
+				"executedRoute": {
+					"agentId": "golden-peer",
+					"specFingerprint": "acp:unobservable",
+					"executionRole": "researcher",
+					"targetId": "delegation:golden-peer",
+					"modelId": "golden-peer",
+					"runtimeId": "acp",
+					"nodeId": "local",
+					"toolSignature": "acp:unobservable",
+					"promptCompositionHash": "<sha256>",
+					"endpointIdentityHash": "<sha256>",
+					"settingsFingerprint": "<sha256>"
+				}
+			},
+			"digest": "<volatile>"
+		},
+		"ledger": {
+			"version": 1,
+			"id": "<run>",
+			"agentId": "golden-peer",
+			"executionRole": "researcher",
+			"requestOrigin": "internal",
+			"task": "Inspect the fixture.",
+			"projection": {
+				"version": 1,
+				"ledgerId": null,
+				"readRoots": [],
+				"writeRoots": [],
+				"scopeSource": "none"
+			},
+			"targetId": "delegation:golden-peer",
+			"wireModelId": "golden-peer",
+			"runtimeId": "acp",
+			"runtimeKind": "acp-delegation",
+			"timing": {
+				"requestedAt": "<ts>",
+				"queuedAt": "<ts>",
+				"admittedAt": "<ts>",
+				"workerSpawnedAt": "<ts>",
+				"endedAt": "<ts>"
+			},
+			"startedAt": "<ts>",
+			"endedAt": "<ts>",
+			"status": "completed",
+			"exitCode": 0,
+			"pid": null,
+			"heartbeatAt": "<volatile>",
+			"sessionId": null,
+			"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+			"spend": {
+				"usage": {
+					"input": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheRead": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheWrite": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheWrite1h": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"output": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"reasoning": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					}
+				},
+				"totalTokens": {
+					"kind": "unknown",
+					"reason": "not-observed"
+				},
+				"apiCalls": {
+					"kind": "unknown",
+					"reason": "not-observed"
+				},
+				"pricing": {
+					"usd": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"pricedBy": "none"
+				}
+			},
+			"spendSums": {
+				"usage": {
+					"input": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheRead": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheWrite": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheWrite1h": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"output": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"reasoning": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					}
+				},
+				"totalTokens": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				},
+				"apiCalls": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				},
+				"usd": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				}
+			},
+			"sessionShellHash": null,
+			"dynamicHash": "<sha256>",
+			"promptSignature": "<sha256>",
+			"toolSignature": null,
+			"budget": {
+				"version": 1,
+				"enforcement": {
+					"classification": "external-one-shot",
+					"perTool": "unobserved-not-enforced",
+					"clioControls": ["single-launch", "wall-clock", "output-cap", "cancellation", "result-contract"]
+				},
+				"policy": {
+					"recipeId": "golden-peer",
+					"default": {
+						"toolCalls": 300,
+						"readReserve": 0,
+						"synthesis": true
+					},
+					"maximum": {
+						"toolCalls": 300,
+						"readReserve": 0
+					},
+					"exact": true
+				},
+				"request": null,
+				"effective": {
+					"mode": "advisory",
+					"toolCalls": 300,
+					"readReserve": 0,
+					"synthesis": true,
+					"hardCap": 300
+				},
+				"reasons": []
+			},
+			"lineage": {
+				"parentRunId": null,
+				"rootRunId": "<run>",
+				"attempt": 0,
+				"depth": 0
+			},
+			"identity": {
+				"host": "zbook",
+				"user": "akougkas"
+			},
+			"node": {
+				"id": "local",
+				"kind": "local"
+			},
+			"outcome": "succeeded",
+			"outcomeCode": null,
+			"outcomeDetail": null
+		},
+		"events": [
+			{
+				"name": "run.enqueued",
+				"payload": {
+					"runId": "<run>",
+					"sessionId": null,
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation"
+				}
+			},
+			{
+				"name": "run.started",
+				"payload": {
+					"budget": {
+						"version": 1,
+						"enforcement": {
+							"classification": "external-one-shot",
+							"perTool": "unobserved-not-enforced",
+							"clioControls": ["single-launch", "wall-clock", "output-cap", "cancellation", "result-contract"]
+						},
+						"policy": {
+							"recipeId": "golden-peer",
+							"default": {
+								"toolCalls": 300,
+								"readReserve": 0,
+								"synthesis": true
+							},
+							"maximum": {
+								"toolCalls": 300,
+								"readReserve": 0
+							},
+							"exact": true
+						},
+						"request": null,
+						"effective": {
+							"mode": "advisory",
+							"toolCalls": 300,
+							"readReserve": 0,
+							"synthesis": true,
+							"hardCap": 300
+						},
+						"reasons": []
+					},
+					"runId": "<run>",
+					"sessionId": null,
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"pid": null,
+					"processCommand": "<volatile>",
+					"assignmentId": "<run>",
+					"attempt": 0
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "clio_coder_tool_start",
+						"payload": {
+							"tool": "read"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "clio_coder_tool_finish",
+						"payload": {
+							"tool": "read",
+							"decision": "allowed",
+							"outcome": "ok",
+							"durationMs": "<volatile>",
+							"actionClass": "write",
+							"reason": "read allowed"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "clio_coder_tool_start",
+						"payload": {
+							"tool": "write"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "clio_coder_tool_finish",
+						"payload": {
+							"tool": "write",
+							"decision": "allowed",
+							"outcome": "ok",
+							"durationMs": "<volatile>",
+							"actionClass": "write",
+							"reason": "write allowed"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "clio_coder_tool_start",
+						"payload": {
+							"tool": "grep"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "clio_coder_tool_finish",
+						"payload": {
+							"tool": "grep",
+							"decision": "blocked",
+							"outcome": "blocked",
+							"durationMs": "<volatile>",
+							"actionClass": "write",
+							"reason": "grep blocked"
+						}
+					}
+				}
+			},
+			{
+				"name": "approval.requested",
+				"payload": {
+					"tool": "bash",
+					"actionClass": "execute",
+					"requestId": "req-1",
+					"origin": "delegation:<run>",
+					"requestedBy": "<run>",
+					"rejection": {
+						"short": "bash needs approval",
+						"detail": "bash needs approval",
+						"hints": []
+					}
+				}
+			},
+			{
+				"name": "approval.resolved",
+				"payload": {
+					"status": "denied",
+					"tool": "bash",
+					"requestId": "req-1",
+					"origin": "delegation:<run>",
+					"decidedBy": "policy:no-operator",
+					"actionClass": "execute",
+					"reason": "bash needs approval",
+					"requestedBy": "<run>"
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "clio_coder_permission_resolved",
+						"payload": {
+							"tool": "bash",
+							"requestId": "req-1",
+							"actionClass": "execute",
+							"reason": "bash needs approval"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "message_end",
+						"message": {
+							"role": "assistant",
+							"stopReason": "stop",
+							"content": [
+								{
+									"type": "text",
+									"text": "{\"confirmedFacts\":[],\"missingEvidence\":[],\"nextInspections\":[]}"
+								}
+							],
+							"usage": {
+								"input": 40,
+								"output": 8,
+								"cacheRead": 0,
+								"cacheWrite": 0,
+								"totalTokens": 48
+							}
+						}
+					}
+				}
+			},
+			{
+				"name": "run.completed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"outcome": "succeeded",
+					"outcomeCode": null,
+					"outcomeDetail": null,
+					"lineage": {
+						"parentRunId": null,
+						"rootRunId": "<run>",
+						"attempt": 0,
+						"depth": 0
+					},
+					"sessionId": null,
+					"spend": {
+						"usage": {
+							"input": {
+								"kind": "unknown",
+								"reason": "not-observed"
+							},
+							"cacheRead": {
+								"kind": "unknown",
+								"reason": "not-observed"
+							},
+							"cacheWrite": {
+								"kind": "unknown",
+								"reason": "not-observed"
+							},
+							"cacheWrite1h": {
+								"kind": "unknown",
+								"reason": "not-observed"
+							},
+							"output": {
+								"kind": "unknown",
+								"reason": "not-observed"
+							},
+							"reasoning": {
+								"kind": "unknown",
+								"reason": "not-observed"
+							}
+						},
+						"totalTokens": {
+							"kind": "unknown",
+							"reason": "not-observed"
+						},
+						"apiCalls": {
+							"kind": "unknown",
+							"reason": "not-observed"
+						},
+						"pricing": {
+							"usd": {
+								"kind": "unknown",
+								"reason": "not-observed"
+							},
+							"pricedBy": "none"
+						}
+					},
+					"durationMs": "<volatile>",
+					"exitCode": 0,
+					"toolActivity": {
+						"calls": 3,
+						"succeeded": 2,
+						"failed": 0,
+						"blocked": 1,
+						"mutatingSucceeded": false
+					}
+				}
+			}
+		]
+	},
+	"acp-finalization-failure": {
+		"receipt": {
+			"rejected": "Error: golden finalization failure"
+		},
+		"ledger": {
+			"version": 1,
+			"id": "<run>",
+			"agentId": "golden-peer",
+			"executionRole": "researcher",
+			"requestOrigin": "internal",
+			"task": "Inspect the fixture.",
+			"projection": {
+				"version": 1,
+				"ledgerId": null,
+				"readRoots": [],
+				"writeRoots": [],
+				"scopeSource": "none"
+			},
+			"targetId": "delegation:golden-peer",
+			"wireModelId": "golden-peer",
+			"runtimeId": "acp",
+			"runtimeKind": "acp-delegation",
+			"timing": {
+				"requestedAt": "<ts>",
+				"queuedAt": "<ts>",
+				"admittedAt": "<ts>",
+				"workerSpawnedAt": "<ts>"
+			},
+			"startedAt": "<ts>",
+			"endedAt": "<ts>",
+			"status": "failed",
+			"exitCode": 1,
+			"pid": null,
+			"heartbeatAt": "<volatile>",
+			"sessionId": null,
+			"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+			"spend": {
+				"usage": {
+					"input": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheRead": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheWrite": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"cacheWrite1h": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"output": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"reasoning": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					}
+				},
+				"totalTokens": {
+					"kind": "unknown",
+					"reason": "not-observed"
+				},
+				"apiCalls": {
+					"kind": "unknown",
+					"reason": "not-observed"
+				},
+				"pricing": {
+					"usd": {
+						"kind": "unknown",
+						"reason": "not-observed"
+					},
+					"pricedBy": "none"
+				}
+			},
+			"spendSums": {
+				"usage": {
+					"input": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheRead": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheWrite": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"cacheWrite1h": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"output": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					},
+					"reasoning": {
+						"measured": 0,
+						"estimated": 0,
+						"unknownCount": 1,
+						"absentCount": 0,
+						"coverage": {
+							"measured": 0,
+							"estimated": 0,
+							"unknown": 1
+						}
+					}
+				},
+				"totalTokens": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				},
+				"apiCalls": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				},
+				"usd": {
+					"measured": 0,
+					"estimated": 0,
+					"unknownCount": 1,
+					"absentCount": 0,
+					"coverage": {
+						"measured": 0,
+						"estimated": 0,
+						"unknown": 1
+					}
+				}
+			},
+			"sessionShellHash": null,
+			"dynamicHash": "<sha256>",
+			"promptSignature": "<sha256>",
+			"toolSignature": null,
+			"budget": {
+				"version": 1,
+				"enforcement": {
+					"classification": "external-one-shot",
+					"perTool": "unobserved-not-enforced",
+					"clioControls": ["single-launch", "wall-clock", "output-cap", "cancellation", "result-contract"]
+				},
+				"policy": {
+					"recipeId": "golden-peer",
+					"default": {
+						"toolCalls": 300,
+						"readReserve": 0,
+						"synthesis": true
+					},
+					"maximum": {
+						"toolCalls": 300,
+						"readReserve": 0
+					},
+					"exact": true
+				},
+				"request": null,
+				"effective": {
+					"mode": "advisory",
+					"toolCalls": 300,
+					"readReserve": 0,
+					"synthesis": true,
+					"hardCap": 300
+				},
+				"reasons": []
+			},
+			"lineage": {
+				"parentRunId": null,
+				"rootRunId": "<run>",
+				"attempt": 0,
+				"depth": 0
+			},
+			"identity": {
+				"host": "zbook",
+				"user": "akougkas"
+			},
+			"node": {
+				"id": "local",
+				"kind": "local"
+			},
+			"outcome": "failed",
+			"outcomeDetail": "finalization failure: golden finalization failure"
+		},
+		"events": [
+			{
+				"name": "run.enqueued",
+				"payload": {
+					"runId": "<run>",
+					"sessionId": null,
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation"
+				}
+			},
+			{
+				"name": "run.started",
+				"payload": {
+					"budget": {
+						"version": 1,
+						"enforcement": {
+							"classification": "external-one-shot",
+							"perTool": "unobserved-not-enforced",
+							"clioControls": ["single-launch", "wall-clock", "output-cap", "cancellation", "result-contract"]
+						},
+						"policy": {
+							"recipeId": "golden-peer",
+							"default": {
+								"toolCalls": 300,
+								"readReserve": 0,
+								"synthesis": true
+							},
+							"maximum": {
+								"toolCalls": 300,
+								"readReserve": 0
+							},
+							"exact": true
+						},
+						"request": null,
+						"effective": {
+							"mode": "advisory",
+							"toolCalls": 300,
+							"readReserve": 0,
+							"synthesis": true,
+							"hardCap": 300
+						},
+						"reasons": []
+					},
+					"runId": "<run>",
+					"sessionId": null,
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"pid": null,
+					"processCommand": "<volatile>",
+					"assignmentId": "<run>",
+					"attempt": 0
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "clio_coder_tool_start",
+						"payload": {
+							"tool": "read"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "clio_coder_tool_finish",
+						"payload": {
+							"tool": "read",
+							"decision": "allowed",
+							"outcome": "ok",
+							"durationMs": "<volatile>",
+							"actionClass": "write",
+							"reason": "read allowed"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "clio_coder_tool_start",
+						"payload": {
+							"tool": "write"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "clio_coder_tool_finish",
+						"payload": {
+							"tool": "write",
+							"decision": "allowed",
+							"outcome": "ok",
+							"durationMs": "<volatile>",
+							"actionClass": "write",
+							"reason": "write allowed"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "clio_coder_tool_start",
+						"payload": {
+							"tool": "grep"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "clio_coder_tool_finish",
+						"payload": {
+							"tool": "grep",
+							"decision": "blocked",
+							"outcome": "blocked",
+							"durationMs": "<volatile>",
+							"actionClass": "write",
+							"reason": "grep blocked"
+						}
+					}
+				}
+			},
+			{
+				"name": "approval.requested",
+				"payload": {
+					"tool": "bash",
+					"actionClass": "execute",
+					"requestId": "req-1",
+					"origin": "delegation:<run>",
+					"requestedBy": "<run>",
+					"rejection": {
+						"short": "bash needs approval",
+						"detail": "bash needs approval",
+						"hints": []
+					}
+				}
+			},
+			{
+				"name": "approval.resolved",
+				"payload": {
+					"status": "denied",
+					"tool": "bash",
+					"requestId": "req-1",
+					"origin": "delegation:<run>",
+					"decidedBy": "policy:no-operator",
+					"actionClass": "execute",
+					"reason": "bash needs approval",
+					"requestedBy": "<run>"
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "clio_coder_permission_resolved",
+						"payload": {
+							"tool": "bash",
+							"requestId": "req-1",
+							"actionClass": "execute",
+							"reason": "bash needs approval"
+						}
+					}
+				}
+			},
+			{
+				"name": "run.progressed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"event": {
+						"type": "message_end",
+						"message": {
+							"role": "assistant",
+							"stopReason": "stop",
+							"content": [
+								{
+									"type": "text",
+									"text": "{\"confirmedFacts\":[],\"missingEvidence\":[],\"nextInspections\":[]}"
+								}
+							],
+							"usage": {
+								"input": 40,
+								"output": 8,
+								"cacheRead": 0,
+								"cacheWrite": 0,
+								"totalTokens": 48
+							}
+						}
+					}
+				}
+			},
+			{
+				"name": "run.failed",
+				"payload": {
+					"runId": "<run>",
+					"agentId": "golden-peer",
+					"task": "Inspect the fixture.",
+					"requestOrigin": "internal",
+					"targetId": "delegation:golden-peer",
+					"wireModelId": "golden-peer",
+					"runtimeId": "acp",
+					"runtimeKind": "acp-delegation",
+					"outcome": "failed",
+					"outcomeDetail": "finalization failure: golden finalization failure",
+					"reason": "failed",
+					"lineage": {
+						"parentRunId": null,
+						"rootRunId": "<run>",
+						"attempt": 0,
+						"depth": 0
+					},
+					"exitCode": 1
+				}
+			}
+		]
+	}
+}

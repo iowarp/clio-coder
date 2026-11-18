@@ -702,6 +702,20 @@ interface DispatchFinishContractSnapshot {
 	rigor: Rigor;
 }
 
+/** The run a finalizer settles, as its terminal events and target outcome name it. Only a native run has an audience. */
+interface FinalizingRun {
+	runId: string;
+	req: DispatchRequest;
+	agentAudience?: AgentAudience;
+	requestOrigin: DispatchRequestOrigin;
+	targetId: string;
+	wireModelId: string;
+	runtimeId: string;
+	runtimeKind: RunKind;
+	lineage: RunLineage;
+	hostRun: DispatchPreparationOptions["hostRun"] | undefined;
+}
+
 /** One resolved fleet placement: where the worker runs and how to launch it there. */
 /** The settings snapshot a dispatch resolves against; absent in minimal bundles. */
 type EffectiveSettings = Readonly<ReturnType<ConfigContract["get"]>> | undefined;
@@ -1021,6 +1035,85 @@ function upstreamResponse(
 		...(gatewayRouting !== null ? { gatewayRouting } : {}),
 		...callOutcome(message),
 	};
+}
+
+/** Folds a worker's per-call model report into the receipt's upstream rows. */
+function foldModelCallEvent(
+	event: { type?: string; payload?: unknown },
+	upstreamResponses: RunResultUpstreamResponse[],
+): void {
+	if (event.type !== "clio_coder_model_call" || !isRecord(event.payload)) return;
+	const payload = event.payload;
+	if (typeof payload.callIndex !== "number") return;
+	upstreamResponses.push(
+		upstreamResponse(
+			{ ...payload, ...(payload.responseModel ? { servedModel: payload.responseModel } : {}) },
+			payload.callIndex,
+			"call",
+		),
+	);
+}
+
+/**
+ * Folds an assistant reply into the run's tool rounds and upstream rows. Returns the provider's error text when the
+ * call ended in error, else null.
+ */
+function foldAssistantCall(
+	message: Record<string, unknown>,
+	meter: RunTokenMeter,
+	upstreamResponses: RunResultUpstreamResponse[],
+	fallbackModelId: string | null,
+): string | null {
+	const toolRounds = readToolRounds(message);
+	if (toolRounds.length > 0) {
+		meter.toolRounds ??= [];
+		meter.toolRounds.push(...toolRounds);
+	}
+	// A final ACP reply can omit usage, and an ACP delegation fault never has any. Only the metering and the
+	// per-call usage row are skipped then: counting such a message would inflate apiCalls and falsely flag token
+	// usage as missing, while its failure text and served-model observations remain real.
+	const u = isRecord(message.usage) ? message.usage : null;
+	const failure = readCallFailure(message.failure);
+	if (failure?.invoked === false || (u !== null && u.callInvoked === false)) {
+		// A message Clio wrote into the loop (a result-contract repair, a
+		// synthesis reprompt) never reached a provider and is not a call.
+	} else if (u !== null) {
+		upstreamResponses.push(
+			upstreamResponse(message, upstreamResponses.length + 1, u.clioSdkAggregate === true ? "run-aggregate" : "call"),
+		);
+	} else {
+		const row = usagelessUpstreamResponse(message, upstreamResponses.length + 1, fallbackModelId);
+		if (row !== null) upstreamResponses.push(row);
+	}
+	return message.stopReason === "error" ? readStringOrNull(message.errorMessage) : null;
+}
+
+/** Counts one finished tool call's safety decision, and records it as a blocked attempt when it was refused. */
+function foldToolDecision(
+	payload: {
+		decision?: unknown;
+		outcome?: unknown;
+		actionClass?: string;
+		ruleId?: string;
+		reasonCode?: string;
+		policySource?: string;
+		reason?: string;
+	},
+	tool: string,
+	counts: { allowed: number; blocked: number; permissionRequested: number },
+	blockedAttempts: SafetyBlockedAttempt[],
+): void {
+	if (payload.decision === "allowed") counts.allowed += 1;
+	else if (payload.decision === "blocked") counts.blocked += 1;
+	else if (payload.decision === "permission_requested") counts.permissionRequested += 1;
+	if (payload.outcome !== "blocked" && payload.decision !== "blocked") return;
+	const attempt: SafetyBlockedAttempt = { tool };
+	if (payload.actionClass !== undefined) attempt.actionClass = payload.actionClass;
+	if (payload.ruleId !== undefined) attempt.ruleId = payload.ruleId;
+	if (payload.reasonCode !== undefined) attempt.reasonCode = payload.reasonCode;
+	if (payload.policySource !== undefined) attempt.policySource = payload.policySource;
+	if (payload.reason !== undefined) attempt.reason = payload.reason;
+	blockedAttempts.push(attempt);
 }
 
 const CALL_STOP_REASONS: ReadonlySet<string> = new Set(["stop", "length", "toolUse", "error", "aborted"]);
@@ -6413,6 +6506,193 @@ export function createDispatchBundle(
 		};
 	}
 
+	/** Publishes a sealed run's terminal event: run.completed on success, run.failed with the outcome otherwise. */
+	function emitTerminalDispatchEvent(run: FinalizingRun, receipt: RunResult, outcome: RunOutcome): void {
+		const startMs = Date.parse(receipt.startedAt);
+		const endMs = Date.parse(receipt.endedAt);
+		const durationMs =
+			Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, rawDurationMs(startMs, endMs)) : 0;
+		const payload: DispatchCompletedPayload = {
+			runId: run.runId,
+			agentId: run.req.agentId,
+			task: run.req.task,
+			...(run.agentAudience !== undefined ? { agentAudience: run.agentAudience } : {}),
+			requestOrigin: run.requestOrigin,
+			targetId: run.targetId,
+			wireModelId: run.wireModelId,
+			runtimeId: run.runtimeId,
+			runtimeKind: run.runtimeKind,
+			outcome,
+			outcomeCode: receipt.outcomeCode ?? null,
+			outcomeDetail: receipt.outcomeDetail ?? null,
+			lineage: publishedLineage(run.lineage, run.hostRun),
+			sessionId: receipt.sessionId,
+			spend: receipt.spend,
+			durationMs,
+			exitCode: receipt.exitCode,
+			toolActivity: receipt.toolActivity ?? null,
+			...(receipt.hostVerification !== undefined ? { hostVerification: receipt.hostVerification.status } : {}),
+			...(receipt.skillActivations && receipt.skillActivations.length > 0
+				? { skillActivations: [...receipt.skillActivations] }
+				: {}),
+			...(receipt.safety?.flowRestrictions !== undefined ? { flowRestrictions: receipt.safety.flowRestrictions } : {}),
+		};
+		if (outcome === "succeeded") {
+			context.bus.emit("run.completed", payload);
+			return;
+		}
+		context.bus.emit("run.failed", { ...payload, reason: outcome });
+	}
+
+	/** Judges the worker's last turn against the finish contract and audits the verdict; null when it said nothing. */
+	function assessDispatchFinishContract(input: {
+		req: DispatchRequest;
+		runId: string;
+		cwd: string;
+		entries: unknown[];
+		assistantText: string;
+		assistantTurnId: string | null;
+	}): DispatchFinishContractSnapshot | null {
+		if (input.assistantText.trim().length === 0) return null;
+		const rigor = resolveRigor({ cwd: input.cwd, override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) });
+		const assessment = assessFinishContract({
+			sessionEntries: input.entries,
+			assistantTurnId: input.assistantTurnId,
+			workspaceRoot: input.cwd,
+			rigor,
+		});
+		try {
+			safety.decisions.recordCompletionContract?.({
+				...(input.req.ownerSessionId ? { sessionId: input.req.ownerSessionId } : {}),
+				runId: input.runId,
+				turnId: input.assistantTurnId,
+				decision: assessment.kind,
+				reason: assessment.reason,
+				rigor,
+				mutatedPaths: assessment.mutatedPaths,
+				evidenceKinds: Array.from(new Set(assessment.evidence.map((item) => item.kind))),
+				...(assessment.quality ? { quality: assessment.quality } : {}),
+				...(assessment.verificationScope ? { verificationScope: assessment.verificationScope } : {}),
+			});
+		} catch {
+			// Audit must not destabilize dispatch finalization.
+		}
+		return { assessment, rigor };
+	}
+
+	/**
+	 * Contains a finalization that threw (a worker promise rejection, a ledger or persist failure). Without it the
+	 * run row stays "running" forever, no receipt or terminal event exists, and the active entry leaks until restart.
+	 */
+	async function failFinalization(
+		run: FinalizingRun,
+		state: {
+			ledger: Ledger;
+			envelope: RunEnvelope;
+			runJournal: RunTelemetryJournal | undefined;
+			terminal: ResolvedTerminalReason | undefined;
+			timing: RunPhaseMarks;
+		},
+		error: unknown,
+	): Promise<void> {
+		const { ledger: ledgerRef, envelope } = state;
+		reportDispatchDiagnostic(`finalize run ${envelope.id}`, error);
+		// The journal still ends with how the worker loop ended, so no reader waits on this run (#425, #434).
+		const endedAt = new Date().toISOString();
+		state.timing.endedAt = endedAt;
+		const detail = `finalization failure: ${error instanceof Error ? error.message : String(error)}`;
+		state.runJournal
+			?.settle(
+				settleUnfinishedRun(ledgerRef.get(envelope.id) ?? envelope, {
+					terminal: state.terminal,
+					outcome: "failed",
+					detail,
+					endedAt,
+					processExitCode: null,
+				}),
+			)
+			.catch((settleError: unknown) => reportDispatchDiagnostic(`settle run ${envelope.id}`, settleError));
+		try {
+			ledgerRef.update(envelope.id, {
+				status: "failed",
+				outcome: "failed",
+				outcomeDetail: detail,
+				endedAt,
+				exitCode: 1,
+			});
+			await ledgerRef.persist();
+		} catch (ledgerError) {
+			reportDispatchDiagnostic(`persist failed row for run ${envelope.id}`, ledgerError);
+		}
+		active.delete(envelope.id);
+		settleAssignmentDurablyWithoutReceipt(run.lineage.rootRunId, envelope.id);
+		recordTargetOutcome(envelope.id, run.targetId, run.runtimeId, run.wireModelId, "failed", 1, "internal");
+		context.bus.emit("run.failed", {
+			runId: envelope.id,
+			agentId: run.req.agentId,
+			task: run.req.task,
+			...(run.agentAudience !== undefined ? { agentAudience: run.agentAudience } : {}),
+			requestOrigin: run.requestOrigin,
+			targetId: run.targetId,
+			wireModelId: run.wireModelId,
+			runtimeId: run.runtimeId,
+			runtimeKind: run.runtimeKind,
+			outcome: "failed" satisfies RunOutcome,
+			outcomeDetail: detail,
+			reason: "failed",
+			lineage: publishedLineage(run.lineage, run.hostRun),
+			exitCode: 1,
+		});
+	}
+
+	/** The receipt of a task worktree no apply pass settled; a snapshot that fails still names the branch. */
+	function snapshotUnappliedTaskWorktree(
+		worktree: NonNullable<DispatchRequest["taskWorktree"]>,
+		apply: NonNullable<DispatchRequest["apply"]>,
+	): NonNullable<RunResultDraft["worktree"]> {
+		try {
+			return snapshotTaskWorktree(worktree, apply);
+		} catch (snapshotError) {
+			reportDispatchDiagnostic(`snapshot failed task worktree ${worktree.runId}`, snapshotError);
+			return {
+				path: worktree.path,
+				branch: worktree.branch,
+				diffHash: null,
+				snapshot: "unavailable",
+				apply,
+				applied: false,
+			};
+		}
+	}
+
+	/**
+	 * Finishes an applied worktree's cleanup before its preservation paths are sealed, puts the worktree on the
+	 * receipt draft, and tells the operator's transcript that a merge landed. Returns the worktree as sealed.
+	 */
+	function sealTaskWorktreeReceipt(
+		req: DispatchRequest,
+		runId: string,
+		worktree: RunResultDraft["worktree"],
+		accounted: TaskWorktreePreview | undefined,
+		receiptDraft: RunResultDraft,
+	): RunResultDraft["worktree"] {
+		let sealed = worktree;
+		if (sealed?.applied === true && req.taskWorktree !== undefined) {
+			try {
+				// The merge is durable; finish cleanup before sealing its preservation paths.
+				const kept = cleanupAccountedTaskWorktree(req.taskWorktree, accounted);
+				if (kept !== null) sealed = receiptWithDrift(sealed, req.taskWorktree, kept);
+			} catch (cleanupError) {
+				reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
+			}
+		}
+		if (sealed !== undefined) receiptDraft.worktree = sealed;
+		// A merge needs no card at default autonomy, so the operator's transcript says it landed.
+		const mergedNotice = workerMergedNotice(req.agentId, req.taskWorktree?.runId ?? runId, sealed);
+		if (mergedNotice !== null) context.bus.emit("run.scope_notice_raised", mergedNotice);
+		return sealed;
+	}
+
 	async function dispatchAcpDelegation(
 		req: DispatchRequest,
 		settings: EffectiveSettings,
@@ -6655,49 +6935,10 @@ export function createDispatchBundle(
 					finishContractAssistantTurnId = finishEntry.assistantTurnId;
 				}
 			}
-			if (
-				event.type === "clio_coder_model_call" &&
-				isRecord(event.payload) &&
-				typeof event.payload.callIndex === "number"
-			) {
-				upstreamResponses.push(
-					upstreamResponse(
-						{ ...event.payload, ...(event.payload.responseModel ? { servedModel: event.payload.responseModel } : {}) },
-						event.payload.callIndex,
-						"call",
-					),
-				);
-			}
+			foldModelCallEvent(event, upstreamResponses);
 			if (event.type === "message_end" && event.message?.role === "assistant") {
-				const toolRounds = readToolRounds(event.message);
-				if (toolRounds.length > 0) {
-					tokenMeter.toolRounds ??= [];
-					tokenMeter.toolRounds.push(...toolRounds);
-				}
-				// A final ACP reply can omit usage, and an ACP delegation fault never has any. Only the metering and the
-				// per-call usage row are skipped then: counting such a message would inflate apiCalls and falsely flag token
-				// usage as missing, while its failure text and served-model observations remain real.
-				const u = isRecord(event.message.usage) ? event.message.usage : null;
-				const failure = readCallFailure(event.message.failure);
-				if (failure?.invoked === false || (u !== null && u.callInvoked === false)) {
-					// A message Clio wrote into the loop (a result-contract repair, a
-					// synthesis reprompt) never reached a provider and is not a call.
-				} else if (u !== null) {
-					upstreamResponses.push(
-						upstreamResponse(
-							event.message,
-							upstreamResponses.length + 1,
-							u.clioSdkAggregate === true ? "run-aggregate" : "call",
-						),
-					);
-				} else {
-					const row = usagelessUpstreamResponse(event.message, upstreamResponses.length + 1, null);
-					if (row !== null) upstreamResponses.push(row);
-				}
-				if (event.message.stopReason === "error") {
-					const message = readStringOrNull(event.message.errorMessage);
-					if (message !== null) failureMessage = message;
-				}
+				const errorMessage = foldAssistantCall(event.message, tokenMeter, upstreamResponses, null);
+				if (errorMessage !== null) failureMessage = errorMessage;
 			}
 			if (event.type === "clio_coder_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
 				const requestId =
@@ -6730,18 +6971,7 @@ export function createDispatchBundle(
 			if (event.type === "clio_coder_tool_finish" && event.payload && typeof event.payload.tool === "string") {
 				recordToolCompletion(inFlightTools, event.payload);
 				recordToolFinish(toolStats, event.payload);
-				if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
-				else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
-				else if (event.payload.decision === "permission_requested") safetyDecisionCounts.permissionRequested += 1;
-				if (event.payload.outcome === "blocked" || event.payload.decision === "blocked") {
-					const attempt: SafetyBlockedAttempt = { tool: event.payload.tool };
-					if (event.payload.actionClass !== undefined) attempt.actionClass = event.payload.actionClass;
-					if (event.payload.ruleId !== undefined) attempt.ruleId = event.payload.ruleId;
-					if (event.payload.reasonCode !== undefined) attempt.reasonCode = event.payload.reasonCode;
-					if (event.payload.policySource !== undefined) attempt.policySource = event.payload.policySource;
-					if (event.payload.reason !== undefined) attempt.reason = event.payload.reason;
-					blockedAttempts.push(attempt);
-				}
+				foldToolDecision(event.payload, event.payload.tool, safetyDecisionCounts, blockedAttempts);
 			}
 		};
 
@@ -7068,68 +7298,16 @@ export function createDispatchBundle(
 			};
 		};
 
-		const emitTerminalDispatchEvent = (receipt: RunResult, outcome: RunOutcome): void => {
-			const startMs = Date.parse(receipt.startedAt);
-			const endMs = Date.parse(receipt.endedAt);
-			const durationMs =
-				Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, rawDurationMs(startMs, endMs)) : 0;
-			const payload: DispatchCompletedPayload = {
-				runId: envelope.id,
-				agentId: req.agentId,
-				task: req.task,
-				requestOrigin: lifecycle.requestOrigin,
-				targetId,
-				wireModelId,
-				runtimeId,
-				runtimeKind: "acp-delegation",
-				outcome,
-				outcomeCode: receipt.outcomeCode ?? null,
-				outcomeDetail: receipt.outcomeDetail ?? null,
-				lineage: publishedLineage(lineage, hostRun),
-				sessionId: receipt.sessionId,
-				spend: receipt.spend,
-				durationMs,
-				exitCode: receipt.exitCode,
-				toolActivity: receipt.toolActivity ?? null,
-				...(receipt.hostVerification !== undefined ? { hostVerification: receipt.hostVerification.status } : {}),
-				...(receipt.skillActivations && receipt.skillActivations.length > 0
-					? { skillActivations: [...receipt.skillActivations] }
-					: {}),
-				...(receipt.safety?.flowRestrictions !== undefined ? { flowRestrictions: receipt.safety.flowRestrictions } : {}),
-			};
-			if (outcome === "succeeded") {
-				context.bus.emit("run.completed", payload);
-				return;
-			}
-			context.bus.emit("run.failed", { ...payload, reason: outcome });
-		};
-
-		const assessDispatchFinishContract = (): DispatchFinishContractSnapshot | null => {
-			if (finishContractAssistantText.trim().length === 0) return null;
-			const rigor = resolveRigor({ cwd: lifecycle.cwd, override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) });
-			const assessment = assessFinishContract({
-				sessionEntries: finishContractEntries,
-				assistantTurnId: finishContractAssistantTurnId,
-				workspaceRoot: lifecycle.cwd,
-				rigor,
-			});
-			try {
-				safety.decisions.recordCompletionContract?.({
-					...(req.ownerSessionId ? { sessionId: req.ownerSessionId } : {}),
-					runId: envelope.id,
-					turnId: finishContractAssistantTurnId,
-					decision: assessment.kind,
-					reason: assessment.reason,
-					rigor,
-					mutatedPaths: assessment.mutatedPaths,
-					evidenceKinds: Array.from(new Set(assessment.evidence.map((item) => item.kind))),
-					...(assessment.quality ? { quality: assessment.quality } : {}),
-					...(assessment.verificationScope ? { verificationScope: assessment.verificationScope } : {}),
-				});
-			} catch {
-				// Audit must not destabilize dispatch finalization.
-			}
-			return { assessment, rigor };
+		const finalizing: FinalizingRun = {
+			runId: envelope.id,
+			req,
+			requestOrigin: lifecycle.requestOrigin,
+			targetId,
+			wireModelId,
+			runtimeId,
+			runtimeKind: "acp-delegation",
+			lineage,
+			hostRun,
 		};
 
 		(async (): Promise<RunResult> => {
@@ -7174,7 +7352,14 @@ export function createDispatchBundle(
 				let finalDetail = detail;
 				// Same high-rigor completion gate as native dispatch: an external
 				// agent is a guest inside Clio's policy model, not an exemption.
-				const finishContract = assessDispatchFinishContract();
+				const finishContract = assessDispatchFinishContract({
+					req,
+					runId: envelope.id,
+					cwd: lifecycle.cwd,
+					entries: finishContractEntries,
+					assistantText: finishContractAssistantText,
+					assistantTurnId: finishContractAssistantTurnId,
+				});
 				if (finishContract?.rigor === "high" && finishContract.assessment.kind === "engage" && outcome === "succeeded") {
 					evidence.qualityGateFailure = true;
 					finalOutcome = "failed";
@@ -7222,24 +7407,12 @@ export function createDispatchBundle(
 					}
 				}
 				if (req.taskWorktree !== undefined && worktreeReceipt === undefined) {
-					try {
-						worktreeReceipt = snapshotTaskWorktree(req.taskWorktree, req.apply ?? "merge");
-						// An already failed run whose HEAD also moved says so, so the
-						// operator knows the preserved branch lacks the work (F5).
-						if (worktreeReceipt.detail !== undefined) {
-							finalDetail = [finalDetail, worktreeReceipt.detail].filter(Boolean).join("; ");
-							failureMessage = finalDetail;
-						}
-					} catch (snapshotError) {
-						reportDispatchDiagnostic(`snapshot failed task worktree ${req.taskWorktree.runId}`, snapshotError);
-						worktreeReceipt = {
-							path: req.taskWorktree.path,
-							branch: req.taskWorktree.branch,
-							diffHash: null,
-							snapshot: "unavailable",
-							apply: req.apply ?? "merge",
-							applied: false,
-						};
+					worktreeReceipt = snapshotUnappliedTaskWorktree(req.taskWorktree, req.apply ?? "merge");
+					// An already failed run whose HEAD also moved says so, so the
+					// operator knows the preserved branch lacks the work (F5).
+					if (worktreeReceipt.detail !== undefined) {
+						finalDetail = [finalDetail, worktreeReceipt.detail].filter(Boolean).join("; ");
+						failureMessage = finalDetail;
 					}
 				}
 				const status = runStatusForOutcome(finalOutcome);
@@ -7254,19 +7427,7 @@ export function createDispatchBundle(
 				const terminal = resolveRunTerminalReason(evidence, outcomeCode);
 				resolvedTerminal = terminal;
 				Object.assign(receiptDraft, runSettlementReceiptFields(terminal, callUsage?.snapshot()));
-				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
-					try {
-						// The merge is durable; finish cleanup before sealing its preservation paths.
-						const kept = cleanupAccountedTaskWorktree(req.taskWorktree, accounted);
-						if (kept !== null) worktreeReceipt = receiptWithDrift(worktreeReceipt, req.taskWorktree, kept);
-					} catch (cleanupError) {
-						reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
-					}
-				}
-				if (worktreeReceipt !== undefined) receiptDraft.worktree = worktreeReceipt;
-				// A merge needs no card at default autonomy, so the operator's transcript says it landed.
-				const mergedNotice = workerMergedNotice(req.agentId, req.taskWorktree?.runId ?? envelope.id, worktreeReceipt);
-				if (mergedNotice !== null) context.bus.emit("run.scope_notice_raised", mergedNotice);
+				worktreeReceipt = sealTaskWorktreeReceipt(req, envelope.id, worktreeReceipt, accounted, receiptDraft);
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
 					outcome: finalOutcome,
@@ -7312,7 +7473,7 @@ export function createDispatchBundle(
 					exitCode: receipt.exitCode,
 				});
 				await closeRunJournal();
-				emitTerminalDispatchEvent(receipt, finalOutcome);
+				emitTerminalDispatchEvent(finalizing, receipt, finalOutcome);
 				completeAssignmentAttempt(
 					activeRun,
 					receipt,
@@ -7323,56 +7484,11 @@ export function createDispatchBundle(
 				);
 				return receipt;
 			} catch (error) {
-				// Finalization itself failed (ACP promise rejection, ledger or
-				// persist failure). Without containment the run row stays
-				// "running" forever, no receipt or terminal event exists, and the
-				// active entry leaks until restart.
-				reportDispatchDiagnostic(`finalize run ${envelope.id}`, error);
-				// The journal still ends with how the worker loop ended, so no reader waits on this run (#425, #434).
-				const endedAt = new Date().toISOString();
-				timing.endedAt = endedAt;
-				const detail = `finalization failure: ${error instanceof Error ? error.message : String(error)}`;
-				runJournal
-					?.settle(
-						settleUnfinishedRun(ledgerRef.get(envelope.id) ?? envelope, {
-							terminal: resolvedTerminal,
-							outcome: "failed",
-							detail,
-							endedAt,
-							processExitCode: null,
-						}),
-					)
-					.catch((settleError: unknown) => reportDispatchDiagnostic(`settle run ${envelope.id}`, settleError));
-				try {
-					ledgerRef.update(envelope.id, {
-						status: "failed",
-						outcome: "failed",
-						outcomeDetail: detail,
-						endedAt,
-						exitCode: 1,
-					});
-					await ledgerRef.persist();
-				} catch (ledgerError) {
-					reportDispatchDiagnostic(`persist failed row for run ${envelope.id}`, ledgerError);
-				}
-				active.delete(envelope.id);
-				settleAssignmentDurablyWithoutReceipt(lineage.rootRunId, envelope.id);
-				recordTargetOutcome(envelope.id, targetId, runtimeId, wireModelId, "failed", 1, "internal");
-				context.bus.emit("run.failed", {
-					runId: envelope.id,
-					agentId: req.agentId,
-					task: req.task,
-					requestOrigin: lifecycle.requestOrigin,
-					targetId,
-					wireModelId,
-					runtimeId,
-					runtimeKind: "acp-delegation",
-					outcome: "failed" satisfies RunOutcome,
-					outcomeDetail: detail,
-					reason: "failed",
-					lineage: publishedLineage(lineage, hostRun),
-					exitCode: 1,
-				});
+				await failFinalization(
+					finalizing,
+					{ ledger: ledgerRef, envelope, runJournal, terminal: resolvedTerminal, timing },
+					error,
+				);
 				throw error;
 			} finally {
 				// A terminal seal that did not land fails the run, after its slot is released (#434).
@@ -8491,30 +8607,10 @@ export function createDispatchBundle(
 					escalation: true,
 				});
 			}
-			if (
-				event.type === "clio_coder_model_call" &&
-				isRecord(event.payload) &&
-				typeof event.payload.callIndex === "number"
-			) {
-				upstreamResponses.push(
-					upstreamResponse(
-						{ ...event.payload, ...(event.payload.responseModel ? { servedModel: event.payload.responseModel } : {}) },
-						event.payload.callIndex,
-						"call",
-					),
-				);
-			}
+			foldModelCallEvent(event, upstreamResponses);
 			if (event.type === "message_end" && event.message?.role === "assistant") {
-				const toolRounds = readToolRounds(event.message);
-				if (toolRounds.length > 0) {
-					tokenMeter.toolRounds ??= [];
-					tokenMeter.toolRounds.push(...toolRounds);
-				}
-				// A final ACP reply can omit usage, and an ACP delegation fault never has any. Only the metering and the
-				// per-call usage row are skipped then: counting such a message would inflate apiCalls and falsely flag token
-				// usage as missing, while its failure text and served-model observations remain real.
-				const u = isRecord(event.message.usage) ? event.message.usage : null;
 				if (lifecycle.runtimeKind === "subprocess") {
+					const u = isRecord(event.message.usage) ? event.message.usage : null;
 					const evidence = u !== null && isRecord(u.clioExternal) ? u.clioExternal : null;
 					const stopReason = event.message.stopReason;
 					externalTelemetry = {
@@ -8531,28 +8627,10 @@ export function createDispatchBundle(
 						toolTelemetry: "unavailable",
 					};
 				}
-				const failure = readCallFailure(event.message.failure);
-				if (failure?.invoked === false || (u !== null && u.callInvoked === false)) {
-					// A message Clio wrote into the loop (a result-contract repair, a
-					// synthesis reprompt) never reached a provider and is not a call.
-				} else if (u !== null) {
-					upstreamResponses.push(
-						upstreamResponse(
-							event.message,
-							upstreamResponses.length + 1,
-							u.clioSdkAggregate === true ? "run-aggregate" : "call",
-						),
-					);
-				} else {
-					const row = usagelessUpstreamResponse(event.message, upstreamResponses.length + 1, lifecycle.target.wireModelId);
-					if (row !== null) upstreamResponses.push(row);
-				}
-				if (event.message.stopReason === "error") {
-					const message = readStringOrNull(event.message.errorMessage);
-					if (message !== null) {
-						failureMessage = message;
-						providerErrorMessage = message;
-					}
+				const errorMessage = foldAssistantCall(event.message, tokenMeter, upstreamResponses, lifecycle.target.wireModelId);
+				if (errorMessage !== null) {
+					failureMessage = errorMessage;
+					providerErrorMessage = errorMessage;
 				}
 			}
 			if (event.type === "clio_coder_permission_resolved" && typeof event.payload?.requestId === "string") {
@@ -8671,18 +8749,7 @@ export function createDispatchBundle(
 				if (isSkillActivation(event.payload.skillActivation)) {
 					skillActivations.push(event.payload.skillActivation);
 				}
-				if (event.payload.decision === "allowed") safetyDecisionCounts.allowed += 1;
-				else if (event.payload.decision === "blocked") safetyDecisionCounts.blocked += 1;
-				else if (event.payload.decision === "permission_requested") safetyDecisionCounts.permissionRequested += 1;
-				if (event.payload.outcome === "blocked" || event.payload.decision === "blocked") {
-					const attempt: SafetyBlockedAttempt = { tool };
-					if (event.payload.actionClass !== undefined) attempt.actionClass = event.payload.actionClass;
-					if (event.payload.ruleId !== undefined) attempt.ruleId = event.payload.ruleId;
-					if (event.payload.reasonCode !== undefined) attempt.reasonCode = event.payload.reasonCode;
-					if (event.payload.policySource !== undefined) attempt.policySource = event.payload.policySource;
-					if (event.payload.reason !== undefined) attempt.reason = event.payload.reason;
-					blockedAttempts.push(attempt);
-				}
+				foldToolDecision(event.payload, tool, safetyDecisionCounts, blockedAttempts);
 			}
 		};
 
@@ -9182,69 +9249,17 @@ export function createDispatchBundle(
 			};
 		};
 
-		const emitTerminalDispatchEvent = (receipt: RunResult, outcome: RunOutcome): void => {
-			const startMs = Date.parse(receipt.startedAt);
-			const endMs = Date.parse(receipt.endedAt);
-			const durationMs =
-				Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, rawDurationMs(startMs, endMs)) : 0;
-			const payload: DispatchCompletedPayload = {
-				runId: envelope.id,
-				agentId: req.agentId,
-				task: req.task,
-				agentAudience: lifecycle.agentAudience,
-				requestOrigin: lifecycle.requestOrigin,
-				targetId: lifecycle.target.target.id,
-				wireModelId: lifecycle.target.wireModelId,
-				runtimeId: lifecycle.target.runtime.id,
-				runtimeKind: lifecycle.runtimeKind,
-				outcome,
-				outcomeCode: receipt.outcomeCode ?? null,
-				outcomeDetail: receipt.outcomeDetail ?? null,
-				lineage: publishedLineage(lineage, hostRun),
-				sessionId: receipt.sessionId,
-				spend: receipt.spend,
-				durationMs,
-				exitCode: receipt.exitCode,
-				toolActivity: receipt.toolActivity ?? null,
-				...(receipt.hostVerification !== undefined ? { hostVerification: receipt.hostVerification.status } : {}),
-				...(receipt.skillActivations && receipt.skillActivations.length > 0
-					? { skillActivations: [...receipt.skillActivations] }
-					: {}),
-				...(receipt.safety?.flowRestrictions !== undefined ? { flowRestrictions: receipt.safety.flowRestrictions } : {}),
-			};
-			if (outcome === "succeeded") {
-				context.bus.emit("run.completed", payload);
-				return;
-			}
-			context.bus.emit("run.failed", { ...payload, reason: outcome });
-		};
-
-		const assessDispatchFinishContract = (): DispatchFinishContractSnapshot | null => {
-			if (finishContractAssistantText.trim().length === 0) return null;
-			const rigor = resolveRigor({ cwd: lifecycle.cwd, override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) });
-			const assessment = assessFinishContract({
-				sessionEntries: finishContractEntries,
-				assistantTurnId: finishContractAssistantTurnId,
-				workspaceRoot: lifecycle.cwd,
-				rigor,
-			});
-			try {
-				safety.decisions.recordCompletionContract?.({
-					...(req.ownerSessionId ? { sessionId: req.ownerSessionId } : {}),
-					runId: envelope.id,
-					turnId: finishContractAssistantTurnId,
-					decision: assessment.kind,
-					reason: assessment.reason,
-					rigor,
-					mutatedPaths: assessment.mutatedPaths,
-					evidenceKinds: Array.from(new Set(assessment.evidence.map((item) => item.kind))),
-					...(assessment.quality ? { quality: assessment.quality } : {}),
-					...(assessment.verificationScope ? { verificationScope: assessment.verificationScope } : {}),
-				});
-			} catch {
-				// Audit must not destabilize dispatch finalization.
-			}
-			return { assessment, rigor };
+		const finalizing: FinalizingRun = {
+			runId: envelope.id,
+			req,
+			agentAudience: lifecycle.agentAudience,
+			requestOrigin: lifecycle.requestOrigin,
+			targetId: lifecycle.target.target.id,
+			wireModelId: lifecycle.target.wireModelId,
+			runtimeId: lifecycle.target.runtime.id,
+			runtimeKind: lifecycle.runtimeKind,
+			lineage,
+			hostRun,
 		};
 
 		// The worker is spawned and its ledger row exists, so from here it can
@@ -9357,7 +9372,14 @@ export function createDispatchBundle(
 						failureMessage = finalDetail;
 					}
 				}
-				const finishContract = assessDispatchFinishContract();
+				const finishContract = assessDispatchFinishContract({
+					req,
+					runId: envelope.id,
+					cwd: lifecycle.cwd,
+					entries: finishContractEntries,
+					assistantText: finishContractAssistantText,
+					assistantTurnId: finishContractAssistantTurnId,
+				});
 				if (finishContract?.rigor === "high" && finishContract.assessment.kind === "engage" && outcome === "succeeded") {
 					evidence.qualityGateFailure = true;
 					finalOutcome = "failed";
@@ -9882,24 +9904,12 @@ export function createDispatchBundle(
 					}
 				}
 				if (req.taskWorktree !== undefined && worktreeReceipt === undefined) {
-					try {
-						worktreeReceipt = snapshotTaskWorktree(req.taskWorktree, req.apply ?? "merge");
-						// An already failed run whose HEAD also moved says so, so the
-						// operator knows the preserved branch lacks the work (F5).
-						if (worktreeReceipt.detail !== undefined) {
-							finalDetail = [finalDetail, worktreeReceipt.detail].filter(Boolean).join("; ");
-							failureMessage = finalDetail;
-						}
-					} catch (snapshotError) {
-						reportDispatchDiagnostic(`snapshot failed task worktree ${req.taskWorktree.runId}`, snapshotError);
-						worktreeReceipt = {
-							path: req.taskWorktree.path,
-							branch: req.taskWorktree.branch,
-							diffHash: null,
-							snapshot: "unavailable",
-							apply: req.apply ?? "merge",
-							applied: false,
-						};
+					worktreeReceipt = snapshotUnappliedTaskWorktree(req.taskWorktree, req.apply ?? "merge");
+					// An already failed run whose HEAD also moved says so, so the
+					// operator knows the preserved branch lacks the work (F5).
+					if (worktreeReceipt.detail !== undefined) {
+						finalDetail = [finalDetail, worktreeReceipt.detail].filter(Boolean).join("; ");
+						failureMessage = finalDetail;
 					}
 				}
 				const status = runStatusForOutcome(finalOutcome);
@@ -9966,19 +9976,7 @@ export function createDispatchBundle(
 							.join("; "),
 					};
 				}
-				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
-					try {
-						// The merge is durable; finish cleanup before sealing its preservation paths.
-						const kept = cleanupAccountedTaskWorktree(req.taskWorktree, accounted);
-						if (kept !== null) worktreeReceipt = receiptWithDrift(worktreeReceipt, req.taskWorktree, kept);
-					} catch (cleanupError) {
-						reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
-					}
-				}
-				if (worktreeReceipt !== undefined) receiptDraft.worktree = worktreeReceipt;
-				// A merge needs no card at default autonomy, so the operator's transcript says it landed.
-				const mergedNotice = workerMergedNotice(req.agentId, req.taskWorktree?.runId ?? envelope.id, worktreeReceipt);
-				if (mergedNotice !== null) context.bus.emit("run.scope_notice_raised", mergedNotice);
+				worktreeReceipt = sealTaskWorktreeReceipt(req, envelope.id, worktreeReceipt, accounted, receiptDraft);
 				// The harness read its own files unreconciled; the operator owns them and hears once per process.
 				const peerStale = lifecycle.peerStale;
 				if (
@@ -10176,7 +10174,7 @@ export function createDispatchBundle(
 					exitCode: receipt.exitCode,
 				});
 				await closeRunJournal();
-				emitTerminalDispatchEvent(receipt, finalOutcome);
+				emitTerminalDispatchEvent(finalizing, receipt, finalOutcome);
 				completeAssignmentAttempt(
 					activeRun,
 					receipt,
@@ -10187,65 +10185,11 @@ export function createDispatchBundle(
 				);
 				return receipt;
 			} catch (error) {
-				// Finalization itself failed (worker promise rejection, ledger or
-				// persist failure). Without containment the run row stays
-				// "running" forever, no receipt or terminal event exists, and the
-				// active entry leaks until restart.
-				reportDispatchDiagnostic(`finalize run ${envelope.id}`, error);
-				// The journal still ends with how the worker loop ended, so no reader waits on this run (#425, #434).
-				const endedAt = new Date().toISOString();
-				timing.endedAt = endedAt;
-				const detail = `finalization failure: ${error instanceof Error ? error.message : String(error)}`;
-				runJournal
-					?.settle(
-						settleUnfinishedRun(ledgerRef.get(envelope.id) ?? envelope, {
-							terminal: resolvedTerminal,
-							outcome: "failed",
-							detail,
-							endedAt,
-							processExitCode: null,
-						}),
-					)
-					.catch((settleError: unknown) => reportDispatchDiagnostic(`settle run ${envelope.id}`, settleError));
-				try {
-					ledgerRef.update(envelope.id, {
-						status: "failed",
-						outcome: "failed",
-						outcomeDetail: detail,
-						endedAt,
-						exitCode: 1,
-					});
-					await ledgerRef.persist();
-				} catch (ledgerError) {
-					reportDispatchDiagnostic(`persist failed row for run ${envelope.id}`, ledgerError);
-				}
-				active.delete(envelope.id);
-				settleAssignmentDurablyWithoutReceipt(lineage.rootRunId, envelope.id);
-				recordTargetOutcome(
-					envelope.id,
-					lifecycle.target.target.id,
-					lifecycle.target.runtime.id,
-					lifecycle.target.wireModelId,
-					"failed",
-					1,
-					"internal",
+				await failFinalization(
+					finalizing,
+					{ ledger: ledgerRef, envelope, runJournal, terminal: resolvedTerminal, timing },
+					error,
 				);
-				context.bus.emit("run.failed", {
-					runId: envelope.id,
-					agentId: req.agentId,
-					task: req.task,
-					agentAudience: lifecycle.agentAudience,
-					requestOrigin: lifecycle.requestOrigin,
-					targetId: lifecycle.target.target.id,
-					wireModelId: lifecycle.target.wireModelId,
-					runtimeId: lifecycle.target.runtime.id,
-					runtimeKind: lifecycle.runtimeKind,
-					outcome: "failed" satisfies RunOutcome,
-					outcomeDetail: detail,
-					reason: "failed",
-					lineage: publishedLineage(lineage, hostRun),
-					exitCode: 1,
-				});
 				throw error;
 			} finally {
 				// A terminal seal that did not land fails the run, after its slot is released (#434).
