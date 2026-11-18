@@ -104,6 +104,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Inception mercury-3 at thinking off now sends `reasoning_effort: "instant"` instead of no effort, so it no longer reasons at the backend default while Clio strips that reasoning and shows thinking as off (bt-34).
 - The /fork picker lists one row per prompt and forks after that turn's last reply (bt-11 #3).
 - The resume picker explains its ● and ◌ markers in a legend row (bt-11 #4).
 - Enter sends a typed /thinking level as typed instead of a sibling that only matches its letters (bt-11).
