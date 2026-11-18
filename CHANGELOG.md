@@ -108,6 +108,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Snapshot and golden update flags on recognised test runners (`go test -update`, `pytest --snapshot-update`/`--force-regen`/`--regen-all`, `bun test -u`/`--update-snapshots`, `--update-goldens`, `cargo insta accept`) now count as tree changes, so a run that regenerated its expectations is no longer credited a passing check (x7-2).
+- A check written across lines with a backslash continuation now has its pass or failure recorded under its single-line name, instead of reading as "no check observed" (x7-4).
 - A replayed or forked receipt says "Turn ended · N workers running" when its workers outlived the turn, as the live one did (bt-11 a).
 - A worker card replayed by /fork, /resume or /tree while its run is live keeps streaming and settles, and an unfollowed one reads "still running" (bt-11 c).
 - The steer refusal names the session that owns the run, and says when it is the session this one was forked from (bt-11 d).
