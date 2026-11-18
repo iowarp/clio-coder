@@ -223,7 +223,8 @@ it("editing reports distinguish lack of measured checks from execution success",
 			observedRunEffects: recorder.snapshot(),
 		});
 		strictEqual(result.conformance, "pass");
-		strictEqual(result.quality, "unmeasured");
+		// A red verify on the final tree is an observed failure, as a red bash check is (bt-27).
+		strictEqual(result.quality, (outcomes as ReadonlyArray<string | null>).includes("error") ? "fail" : "unmeasured");
 	}
 });
 
@@ -663,6 +664,36 @@ it("an observed red judges only the tree it ran on, and respelled runs of one ch
 		1,
 	);
 	strictEqual(exitCode(seal([["base", "pytest", true]], [{ ...red, name: "pytest" }, green]).quality), 0);
+});
+
+it("a green claim against a red latest verify on the final tree seals fail, as the bash equivalent does (bt-27)", () => {
+	const seal = (steps: string) => {
+		const recorder = createRunEffectsRecorder(process.cwd());
+		for (const [index, step] of steps.split(" ").entries()) {
+			const id = `call-${index}`;
+			recorder.start(
+				id,
+				step === "edit" ? "edit" : "verify",
+				step === "edit" ? { path: "src/calc.c" } : { check: "test" },
+			);
+			recorder.checkOutcome(id, step === "red" ? "error" : "ok");
+			recorder.finish(id, step === "red");
+		}
+		return validateResultContract({
+			contract: { kind: "mutation-report" },
+			output: JSON.stringify({
+				mutatedPaths: ["src/calc.c"],
+				validations: [{ name: "test", passed: true, evidence: "exit 0" }],
+			}),
+			cwd: process.cwd(),
+			networkAllowed: false,
+			filesystem: { readFile: () => "" },
+			observedRunEffects: recorder.snapshot(),
+		}).quality;
+	};
+	strictEqual(seal("pass edit red"), "fail");
+	strictEqual(seal("red edit pass"), "pass");
+	strictEqual(seal("edit red pass"), "pass");
 });
 
 it("a check judges only the tree it ran on, sealed per verify call or from a tool's aggregate (bt-27c)", () => {

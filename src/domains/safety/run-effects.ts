@@ -71,6 +71,12 @@ export interface RunEffects {
 	 * about the final one (bt-27).
 	 */
 	validationOutcomes: ReadonlyMap<string, boolean>;
+	/**
+	 * `validationOutcomes` joined, in finish order, by each `verify` call's outcome under its check id and under the
+	 * command it resolved to. Only the result contract's claim judgement reads it, so a green claim against a red
+	 * latest verify seals fail; typed facts keep reading `validationOutcomes`, since verify calls seal their own (bt-27).
+	 */
+	checkOutcomes: ReadonlyMap<string, boolean>;
 	/** True once a call counted as a workspace mutation ran, so no standing outcome predates every change. */
 	mutationObserved: boolean;
 	/** True only when every observed checking call has an authoritative blocked outcome. */
@@ -358,6 +364,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	const failedMutationPaths = new Set<string>();
 	const validationCommands = new Set<string>();
 	const validationOutcomes = new Map<string, boolean>();
+	const checkOutcomes = new Map<string, boolean>();
 	let mutationRevision = 0;
 	// Every call in flight, with the revision it started on, so finish can tell whether it ran on the final tree.
 	const inFlight = new Map<string, { tool: string; revision: number; outcome: "ok" | "error" | "blocked" | null }>();
@@ -461,6 +468,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			if (mutation) {
 				mutationRevision += 1;
 				validationOutcomes.clear();
+				checkOutcomes.clear();
 				validationCommands.clear();
 			}
 			const checkedAfterOwnMutation = mutation && effects.checkShape !== "mixed" && effects.checkShape !== "pure";
@@ -469,12 +477,17 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			// Only a check that ran can fail. A call the engine answered without
 			// reaching its tool settles with no outcome, so it records nothing.
 			// `pytest; echo done` ran the check, but its status is echo's, so the outcome stays unknown either way.
-			if (
-				effects.validationName !== null &&
-				effects.checkStatusAttributable &&
-				(failed ? effects.outcome === "error" : effects.outcome !== "blocked" && checkedRevision === mutationRevision)
-			)
+			const settled = failed
+				? effects.outcome === "error"
+				: effects.outcome !== "blocked" && checkedRevision === mutationRevision;
+			if (effects.validationName !== null && effects.checkStatusAttributable && settled) {
 				validationOutcomes.set(effects.validationName, !failed);
+				checkOutcomes.set(effects.validationName, !failed);
+			}
+			if (effects.proofCheck !== null && effects.proofCheck.length > 0 && settled) {
+				checkOutcomes.set(effects.proofCheck, !failed);
+				if (effects.shellCommand !== null) checkOutcomes.set(observedValidationCommand(effects.shellCommand), !failed);
+			}
 			if (failed) {
 				for (const target of effects.paths) failedMutationPaths.add(target);
 				return;
@@ -548,6 +561,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				failedMutationPaths: new Set([...failedMutationPaths].filter((target) => !mutatedPaths.has(target))),
 				validationCommands: new Set(validationCommands),
 				validationOutcomes: new Map(validationOutcomes),
+				checkOutcomes: new Map(checkOutcomes),
 				mutationObserved: mutationRevision > 0,
 				checksAllBlocked: checkingCalls.size > 0 && [...checkingCalls.values()].every((outcome) => outcome === "blocked"),
 				verificationCommands: new Set(verificationCommands),
