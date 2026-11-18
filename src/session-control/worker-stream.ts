@@ -197,9 +197,15 @@ export interface WorkerStream {
 	 * Forget every assignment. Called with the transcript's own reset, so a
 	 * session change clears the routing table and the visible blocks together:
 	 * a late event for a run of the old session then finds no entry, rather than
-	 * repainting an old block into the new transcript.
+	 * repainting an old block into the new transcript. A run still underway is
+	 * set aside until it settles, in case the new transcript replays its card.
 	 */
 	reset(): void;
+	/**
+	 * Route a run set aside by `reset` to the card the new transcript replays for it, so a fork or resume taken while a
+	 * worker runs keeps streaming into that card and settles it. Undefined when this stream holds no such run.
+	 */
+	adopt(runId: string): WorkerEntryState | undefined;
 }
 
 function nonEmptyString(value: unknown): string | undefined {
@@ -291,6 +297,8 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 	const progressByAssignment = new Map<string, WorkerProgressFold>();
 	/** Plan steps named before their run started. */
 	const pendingPlanSteps = new Map<string, string>();
+	/** Runs still underway when the transcript reset, by current run id, until a replay adopts or a terminal event drops them. */
+	const parked = new Map<string, { entry: WorkerEntryState; fold: WorkerProgressFold | undefined; attempt: number }>();
 
 	/** Copy the canonical projection onto the entry fields the block renders. */
 	const applyProgress = (entry: WorkerEntryState, fold: WorkerProgressFold): void => {
@@ -428,18 +436,21 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 		},
 
 		completed(payload): WorkerStreamChange | null {
+			parked.delete(payload.runId);
 			const entry = currentEntryForRun(payload.runId);
 			if (entry === undefined) return null;
 			return settle(entry, terminalFacts(payload));
 		},
 
 		failed(payload): WorkerStreamChange | null {
+			parked.delete(payload.runId);
 			const entry = currentEntryForRun(payload.runId);
 			if (entry === undefined) return null;
 			return settle(entry, terminalFacts(payload));
 		},
 
 		aborted(payload): WorkerStreamChange | null {
+			parked.delete(payload.runId);
 			const entry = currentEntryForRun(payload.runId);
 			// A cancelled stream or a loop-guard stop names no dispatched run; only
 			// an abort that hits a live worker of ours settles anything.
@@ -463,11 +474,29 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 		},
 
 		reset(): void {
+			parked.clear();
+			for (const [assignmentId, entry] of byAssignment) {
+				if (!entry.pending) continue;
+				const fold = progressByAssignment.get(assignmentId);
+				parked.set(entry.runId, { entry, fold, attempt: attemptByAssignment.get(assignmentId) ?? 0 });
+			}
 			byAssignment.clear();
 			attemptByAssignment.clear();
 			assignmentByRun.clear();
 			progressByAssignment.clear();
 			pendingPlanSteps.clear();
+		},
+
+		adopt(runId): WorkerEntryState | undefined {
+			const held = parked.get(runId);
+			if (held === undefined) return undefined;
+			parked.delete(runId);
+			const { entry, fold, attempt } = held;
+			byAssignment.set(entry.assignmentId, entry);
+			attemptByAssignment.set(entry.assignmentId, attempt);
+			for (const step of entry.attempts) assignmentByRun.set(step.runId, entry.assignmentId);
+			if (fold !== undefined) progressByAssignment.set(entry.assignmentId, fold);
+			return entry;
 		},
 	};
 }

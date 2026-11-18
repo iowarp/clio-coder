@@ -349,6 +349,12 @@ function isPending(entry: WorkerEntryState): boolean {
 	return entry.result === undefined || entry.result.stillRunning === true;
 }
 
+/** A replayed run no stream here follows has done more than start, and what it does now is unknown. */
+function pendingActivity(entry: WorkerEntryState): readonly [glyph: string, words: string] {
+	if (entry.progress === undefined && entry.result?.stillRunning === true) return [GLYPH.phaseWaiting, "still running"];
+	return workerPhaseActivity(entry.progress);
+}
+
 /** Wrap one annotation onto the rail, prefixed on its first row and hanging under it after. */
 function railLines(text: string, token: SemanticRole, width: number): string[] {
 	return cardRows(text, width, token === "error", token);
@@ -789,7 +795,7 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 							? ((entry.progress === undefined
 									? null
 									: workerSilenceWords(entry.progress, { room: 48, history: entry.routeFirstOutput ?? null })) ??
-								workerPhaseActivity(entry.progress)[1])
+								pendingActivity(entry)[1])
 							: "";
 	const facts = [
 		target,
@@ -855,11 +861,7 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number, inc
 					history: entry.routeFirstOutput ?? null,
 				});
 	const [glyph, idle] =
-		quiet !== null
-			? [GLYPH.warnInline, quiet]
-			: silence !== null
-				? [GLYPH.warnInline, silence]
-				: workerPhaseActivity(entry.progress);
+		quiet !== null ? [GLYPH.warnInline, quiet] : silence !== null ? [GLYPH.warnInline, silence] : pendingActivity(entry);
 	// Only a worker writing is saying these words now, and its latest ones: the first sentence of a long run is long stale.
 	const answer =
 		entry.helper ||

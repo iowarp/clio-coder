@@ -63,6 +63,7 @@ import type {
 } from "../session-control/slash-commands.js";
 import { panesInactiveWords } from "../session-control/slash-commands.js";
 import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
+import type { WorkerEntryState } from "../session-control/worker-stream.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import { runParkedInterview } from "../tools/extension-interview.js";
 import type { JobOperations } from "../tools/job-types.js";
@@ -629,6 +630,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		...(deps.readSessionEntries ? { readSessionEntries: deps.readSessionEntries } : {}),
 		...(deps.gitHookChanges !== undefined ? { gitHookChanges: deps.gitHookChanges } : {}),
 		...(deps.autonomy !== undefined ? { autonomy: deps.autonomy } : {}),
+		readRunResult: (runId) => readWorkerRunResultFacts(runId, deps.stateDir),
 		getModel: () => {
 			const settings = deps.getSettings?.();
 			return settings?.chat.target && settings.chat.model
@@ -888,7 +890,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		notice: (level, text) => notify(level === "warn" ? "warning" : "info", text, "project-trust"),
 		onChange: () => tui.requestRender(),
 	});
+	// The worker fold is built with the subscriptions below; a replay before then has no live run to adopt.
+	let adoptLiveWorker: (runId: string) => WorkerEntryState | undefined = () => undefined;
 	const presentation = createInteractivePresentation({
+		adoptLiveWorker: (runId) => adoptLiveWorker(runId),
 		getLastCommand: () => lastSlashCommand,
 		getProjectConfigReminder: () => projectTrust.reminder(),
 		commandUnavailable: (command) =>
@@ -1665,7 +1670,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	 * The one transcript reset. The chat panel and the worker fold are two views
 	 * of one session, so a session change (/new, /resume, /tree, /fork) clears
 	 * them together: a late event for a run of the old session then finds no
-	 * entry, and bare /share cannot select the old session's result. Read lazily
+	 * entry unless the new transcript replays that run's card, and bare /share
+	 * cannot select the old session's result. Read lazily
 	 * because the subscriptions that own the fold are built below.
 	 */
 	const resetTranscript = (): void => {
@@ -2095,6 +2101,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			}
 		},
 	});
+	adoptLiveWorker = (runId) => interactiveSubscriptions.workers.adopt(runId);
 
 	const keyLabel = (id: ClioKeybinding, fallback: string): string => actionKeyLabel(id) ?? fallback;
 	/** Answers a refused exit with what is in the way and the key that deals with each thing. */

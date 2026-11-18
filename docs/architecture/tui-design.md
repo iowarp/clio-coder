@@ -17,7 +17,7 @@ Toggle tiers with **Alt+O** (`Minimal` → `Default` → `Detailed` → `Minimal
 | Content | Minimal | Default | Detailed |
 | :--- | :--- | :--- | :--- |
 | **Answers & Prompts** | Complete | Complete | Complete |
-| **Supplied Reasoning** | Single fold marker per run | 3 rows before words, marker before action | 12 preview rows |
+| **Supplied Reasoning** | Single fold marker per run | 3 rows before words, 1 row before action | 12 preview rows |
 | **Reads & Searches** | Class fold (`▸ explored N files`) | Action and outcome | 8 result rows |
 | **Knowledge Lookups** | Class fold (`§ consulted N`) | Action and outcome | 8 result rows |
 | **File Mutations** | Class fold (`± edited N files`) | 8 diff rows | 20 diff rows |

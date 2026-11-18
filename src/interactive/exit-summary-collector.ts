@@ -132,6 +132,11 @@ interface CollectorDeps {
 	gitHookChanges?: () => ReadonlyArray<{ path: string; kind: string; key?: string }>;
 	/** The autonomy window's audit; null when the session never ran at yolo. */
 	autonomy?: () => AutonomyReport | null;
+	/**
+	 * A settled run's receipt, the checkout delta /usage's Changes row agrees with. A worker card that /fork or
+	 * /resume replaced never hands its receipt over, so a run with no write record is read here at the snapshot.
+	 */
+	readRunResult?: (runId: string) => WorkerRunResultFacts | null;
 	now?: () => number;
 }
 
@@ -406,6 +411,23 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		hasModelTurn ||= deps.session?.current()?.hasModelTurn === true;
 		noteSession();
 	};
+	/** Runs whose receipt this collector has read, so a receipt with no changed paths is read once. */
+	const receiptsRead = new Set<string>();
+	const observeRunResult = (runId: string, record: WorkerRunResultFacts | null): void => {
+		const worker = workers.get(runId);
+		if (!worker || record === null) return;
+		receiptsRead.add(runId);
+		const { against: _prior, ...rest } = worker;
+		const caveat = settledRunCaveat(record);
+		workers.set(runId, {
+			...rest,
+			...(caveat?.kind === "against" ? { against: caveat.words } : {}),
+			record: record.trust ? summarizeTrustStatus(record.trust).verdict : "unknown",
+		});
+		if (record.toolCounts) workerTools.set(runId, record.toolCounts);
+		if (record.changedPaths !== undefined) workersWithReceiptPaths.add(runId);
+		noteFiles(record.changedPaths ?? [], process.cwd(), workerPaths.get(runId));
+	};
 	const settled = (run: { runId: string; agentId: string; outcome: string }): void => {
 		const worker = workers.get(run.runId);
 		if (!worker) return;
@@ -577,26 +599,21 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				}
 			}
 		},
-		observeRunResult(runId: string, record: WorkerRunResultFacts | null): void {
-			const worker = workers.get(runId);
-			if (!worker || record === null) return;
-			const { against: _prior, ...rest } = worker;
-			const caveat = settledRunCaveat(record);
-			workers.set(runId, {
-				...rest,
-				...(caveat?.kind === "against" ? { against: caveat.words } : {}),
-				record: record.trust ? summarizeTrustStatus(record.trust).verdict : "unknown",
-			});
-			if (record.toolCounts) workerTools.set(runId, record.toolCounts);
-			if (record.changedPaths !== undefined) workersWithReceiptPaths.add(runId);
-			noteFiles(record.changedPaths ?? [], process.cwd(), workerPaths.get(runId));
-		},
+		observeRunResult,
 		observeLocalEntry(entry: unknown): void {
 			noteFiles(mutatingReceipts([entry]).paths);
 		},
 		snapshot(): ExitSummarySnapshot | null {
 			const session = deps.session?.current();
 			if (!session || (!hasModelTurn && reopenedSessionId !== session.id)) return null;
+			for (const runId of workersWithoutWriteRecord) {
+				if (!workers.has(runId) || receiptsRead.has(runId)) continue;
+				try {
+					observeRunResult(runId, deps.readRunResult?.(runId) ?? null);
+				} catch {
+					// An unreadable receipt leaves the worker named as one that kept no write record.
+				}
+			}
 			let gitHooks: ReadonlyArray<{ path: string; kind: string; key?: string }> = [];
 			try {
 				gitHooks = (deps.gitHookChanges?.() ?? []).map((change) => ({
