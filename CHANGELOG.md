@@ -102,6 +102,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - P2D-3: the dispatch event pump and the assignment event stream share one bounded drop-oldest tee.
 - P2D-6: reservation tests exercise the async release and lock-held transfer that production uses; the test-only twins and unused path helpers are gone.
 - A run now reads its own evidence from a submit-keyed log (ContextFold CF-3, F12). A compaction or recovery edit mid-submit no longer loses the step call or miscounts a machine turn's usage; retry eligibility after a reprompt or compact-and-retry run judges only that run; `agent_end.messages` and the json-stream `messageCount` no longer count in-run host inserts; a machine turn whose recovery ladder is exhausted reports the failure reason, not an earlier round's text (#445).
+- A small-tier route with prompt caching on, including the WTF-P `models.<id>.tier: small` opt-in, no longer ages observations; only routes without prompt caching do, until the maintainer turns on D5 (ContextFold, bt-47 cf1j-a).
 
 ### Removed
 
@@ -393,6 +394,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - A render at a past position and a fork at an earlier message no longer show an eviction or recall written after that point (ContextFold CF-2, F11).
 - Request admission prices the synthesis directive whenever the sent request carries it, including a middleware text lock sent as `auto` (ContextFold CF-2, F15).
 - The worker context guard commits ContextFold records with `r<N>` aliases, the working-set target and rearm band, journals `context.fold` under the run, and refuses recall of parent aliases (ContextFold CF-7, F7).
+- Observation aging no longer runs on a route that caches prompts when a `--max-context-tokens` cap below 32k makes it small-tier; its gate is the ContextFold S0 gate, `promptCaching: false` only (bt-47 cf1j-a).
+- The working-set skip notice after a cut inside a turn says the visible context starts inside a turn and all of its steps are protected, not "all 0 turns are inside the protected window" (bt-47 cf1j-c).
 
 ## 0.8.3 - 2026-11-16
 
