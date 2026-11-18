@@ -200,6 +200,7 @@ export const NEVER_OFFER_CAUSES: ReadonlySet<FailureCause> = new Set<FailureCaus
 	"parent_cancel",
 	"route_moved",
 	"triage_stop",
+	"autonomy_stop",
 	"repetition",
 	"shutdown",
 	"budget_wait_aborted",
