@@ -1,6 +1,6 @@
 import type { Api, AssistantMessage, Context, Model, StreamOptions } from "@earendil-works/pi-ai";
 import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
-import { estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate";
+import { estimateMessageTokens, estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { CLIO_MIN_MAX_OUTPUT_TOKENS } from "../../core/context-floor.js";
 import { ceilChars, estimateAgentMessageTokens, toolSchemaChars } from "../../domains/session/context-accounting.js";
 import { normalizeContext, resolvedRequestContext } from "../context.js";
@@ -12,7 +12,8 @@ import { normalizeContext, resolvedRequestContext } from "../context.js";
  * input is sized by {@link estimateInputTokensFromContext}, because Pi's
  * estimator anchors on the last assistant usage, which is stale after
  * observation masking or working-set eviction (the `contextUsageInvalidated`
- * stamp), and it throws on an assistant message that carries no usage.
+ * stamp), and it throws on an assistant message that carries no usage. A worker
+ * request carries its guard's own count instead ({@link PinnedInputTokens}).
  */
 const MARGIN_PROBE_WINDOW = 1_000_000;
 const CONTEXT_BUDGET_SAFETY_TOKENS =
@@ -193,12 +194,66 @@ export function estimateInputTokensFromContext(input: Context): number {
 	return system + messages + tools;
 }
 
+/**
+ * A request's input as its caller already counted and admitted it. A worker's
+ * context guard sets `clioInputTokens` to the figure its fit check passed, so
+ * admission sizes the request it fitted rather than recounting it another way
+ * (A2c). The main loop never sets it and keeps the structural estimate.
+ */
+export interface PinnedInputTokens {
+	clioInputTokens?: number;
+}
+
+function requestInputTokens(context: Context, options: PinnedInputTokens | undefined): number {
+	const pinned = options?.clioInputTokens;
+	return typeof pinned === "number" && Number.isFinite(pinned) && pinned > 0
+		? pinned
+		: estimateInputTokensFromContext(context);
+}
+
+/**
+ * The provider-bound copy of a request whose input the caller already counted,
+ * re-anchored so Pi's clamp reads that same count. Pi sizes the input from the
+ * newest assistant usage plus the messages after it, and a worker's projection
+ * changes the prefix under that usage without invalidating it, so a guard
+ * eviction left Pi clamping against the request before the eviction. The anchor
+ * Pi would pick gets usage equal to the count less Pi's own estimate of the
+ * trailing messages. Usage never reaches the wire, and the originals are not
+ * touched. A request with no assistant to anchor on keeps Pi's own estimate.
+ */
+export function anchorContextAtInputTokens(context: Context, inputTokens: number): Context {
+	if (!(inputTokens > 0) || !Number.isFinite(inputTokens)) return context;
+	let latest = Number.NEGATIVE_INFINITY;
+	let anchor: AssistantMessage | undefined;
+	let trailing = 0;
+	// Pi's rule (`getLastAssistantUsageInfo`): a usable answer no newer prefix message precedes.
+	for (const message of normalizeContext(context).messages) {
+		if (
+			message.role === "assistant" &&
+			message.timestamp >= latest &&
+			message.stopReason !== "aborted" &&
+			message.stopReason !== "error"
+		) {
+			anchor = message;
+			trailing = 0;
+		} else trailing += estimateMessageTokens(message);
+		latest = Math.max(latest, message.timestamp);
+	}
+	if (anchor === undefined) return context;
+	const tokens = Math.max(1, Math.round(inputTokens) - trailing);
+	const usage = { ...anchor.usage, input: tokens, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: tokens };
+	return {
+		...context,
+		messages: context.messages.map((message) => (message === anchor ? { ...anchor, usage } : message)),
+	};
+}
+
 export function remainingContextMaxTokens(
 	model: Pick<Model<Api>, "contextWindow" | "maxTokens"> & { clioCoder?: unknown },
 	context: Context,
-	options: Pick<StreamOptions, "maxTokens"> | undefined,
+	options: (Pick<StreamOptions, "maxTokens"> & PinnedInputTokens) | undefined,
 ): number {
-	const inputTokens = estimateInputTokensFromContext(context);
+	const inputTokens = requestInputTokens(context, options);
 	const contextWindow = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
 	const resolved = clampOutputToRemainingContext(requestedOutputCeiling(model, options), contextWindow, inputTokens);
 	return Number.isFinite(resolved) ? resolved : DEFAULT_MAX_OUTPUT_TOKENS;
@@ -240,7 +295,7 @@ export const LOCAL_CONTEXT_OVERFLOW_PREFIX = "Context window exceeded before the
 export function outputBudgetShortfall(
 	model: Pick<Model<Api>, "contextWindow" | "maxTokens"> & { clioCoder?: unknown },
 	context: Context,
-	options: Pick<StreamOptions, "maxTokens"> | undefined,
+	options: (Pick<StreamOptions, "maxTokens"> & PinnedInputTokens) | undefined,
 ): string | null {
 	const contextWindow = model.contextWindow;
 	if (!(contextWindow > 0) || !Number.isFinite(contextWindow)) return null;
@@ -250,7 +305,7 @@ export function outputBudgetShortfall(
 	const sent = clampMaxTokensToContext(model as Model<Api>, normalizeContext(context), clio);
 	const floor = usableOutputFloor(ceiling, contextWindow);
 	if (sent >= floor) return null;
-	return `${LOCAL_CONTEXT_OVERFLOW_PREFIX}: the request would leave ${sent} output tokens of a ${contextWindow}-token window (estimated input ${estimateInputTokensFromContext(context)}), below the usable minimum of ${floor}.`;
+	return `${LOCAL_CONTEXT_OVERFLOW_PREFIX}: the request would leave ${sent} output tokens of a ${contextWindow}-token window (estimated input ${requestInputTokens(context, options)}), below the usable minimum of ${floor}.`;
 }
 
 /** Reasoning tokens inferred from visible thinking text, for servers that report none. */
