@@ -31,7 +31,7 @@ import {
 } from "../engine/agent.js";
 import { providerCheckpointCompatibility } from "../engine/ai.js";
 import { prepareInPrefixSummary } from "../engine/in-prefix-summary.js";
-import { createContextFold, type FoldDecision, foldCheckpointFor } from "./context-fold.js";
+import { createContextFold, type FoldDecision, foldCheckpointFor, ledgerHoldsCheckpoint } from "./context-fold.js";
 import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
 import type { MessageListDigests } from "./message-list-digest.js";
@@ -132,6 +132,7 @@ import {
 import {
 	type CompactInput,
 	type CompactResult,
+	checkpointContinuityCarry,
 	checkpointSkillContext,
 	hostCheckpoint,
 } from "../domains/session/compaction/compact.js";
@@ -157,8 +158,6 @@ import {
 	type PrewarmStats,
 	type PromptCacheStats,
 } from "../domains/session/context-ledger.js";
-import { continuityPayloadFromFold } from "../domains/session/continuity/carry.js";
-import { resolveContinuityProjection } from "../domains/session/continuity/projection.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import {
 	type CompactionSummaryEntry,
@@ -429,7 +428,11 @@ export interface TurnContext {
 	 * summarizer call. False when nothing was cut, or when a skill load it
 	 * cannot carry would be cut (WTF-P 0.8.3 C5).
 	 */
-	runStepCheckpoint(agentRuntime: AgentRuntime, lead: string, pendingSkillPolicy?: PendingSkillToolPolicy): boolean;
+	runStepCheckpoint(
+		agentRuntime: AgentRuntime,
+		lead: string,
+		pendingSkillPolicy?: PendingSkillToolPolicy,
+	): Promise<boolean>;
 	/** The last reduction that ended in a stop or failure settled its own transcript card, which already says so. */
 	lastCompactionCardSettled(): boolean;
 	cancelCompaction(): void;
@@ -1882,7 +1885,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		if (pressureEstimate && !requiredFit && !route.shouldCompact(pressureEstimate.tokens).shouldCompact) return false;
 		// Past the trigger, or forced: every stage this checkpoint reaches from here goes into its `context.fold` event.
 		const decision = contextFold.beginDecision({
-			checkpoint: foldCheckpointFor(triggerOverride ?? (force ? "force" : "auto"), pendingUserText),
+			// The portable-fallback resolution is forced on the operator's behalf; its pending prompt is not a submit (cf-q2 R1).
+			checkpoint: foldCheckpointFor(
+				triggerOverride ?? (force ? "force" : "auto"),
+				providerFallbackReason === undefined ? pendingUserText : undefined,
+			),
 			agentRuntime,
 			sessionId: originSession,
 		});
@@ -2287,13 +2294,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								? "protected_recent"
 								: "nothing_to_summarize",
 			});
-		else
+		else {
+			const recordId = result.checkpointId ?? summaryRecordId;
 			decision.stage({
 				stage: "llm_summary",
 				outcome: "committed",
 				reason: "summarized",
-				...(summaryRecordId !== undefined ? { recordId: summaryRecordId } : {}),
+				...(recordId !== undefined ? { recordId } : {}),
 			});
+		}
 		if (
 			originSession !== deps.session?.current()?.id ||
 			originNavigation !== navigationEpoch ||
@@ -2344,25 +2353,31 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		}
 		if (!summaryLifecycleStarted) startSummaryLifecycle();
 		emitCompactionActivity("running", "saving checkpoint and rebuilding context", "state");
+		// The flow names the checkpoint it confirmed; a compactor that does not is read back from the ledger.
+		const checkpointId =
+			result.checkpointId ??
+			findLastEntry(deps.readSessionEntries?.() ?? [], (entry) => entry.kind === "compactionSummary")?.turnId;
+		if (checkpointId === undefined) throw new Error("compaction returned a summary but no checkpoint is on the ledger");
 
 		if (deps.memoryCommitBridge && !handoff && deps.session?.flushAppends) {
 			deps.session.flushAppends();
 			await deps.session.checkpoint("context-summary");
 			if (originSession !== deps.session.current()?.id || originNavigation !== navigationEpoch)
 				throw new Error("Context ownership changed during checkpoint.");
-			const summary = findLastEntry(deps.readSessionEntries(), (entry) => entry.kind === "compactionSummary");
-			if (summary) notifyMemoryCommit(summary.turnId, "summary", "summarized");
+			notifyMemoryCommit(checkpointId, "summary", "summarized");
 		}
 
-		const { tokensBefore, tokensAfter } = await contextFold.publishSummaryCheckpoint({
+		const { tokensBefore, tokensAfter } = await contextFold.publishCheckpoint({
+			checkpointId,
+			kind: "summary",
 			agentRuntime,
-			compactionThreshold,
+			before: preCompactSnapshot,
+			threshold: compactionThreshold,
 			snapshotMetadata,
-			preCompactSnapshot,
-			footerTokensBefore,
+			tokensBefore: footerTokensBefore,
 			pendingUserText,
 			trigger,
-			originSession,
+			sessionId: originSession,
 		});
 		decision.committed({ tokensBefore, tokensAfter });
 		// The reducer reports selected ledger rows, not just message rows.
@@ -2464,7 +2479,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * right after the summary, and the memory bridge learns of the commit, so
 	 * its restoration rides this turn's tail.
 	 */
-	const runStepCheckpoint: TurnContext["runStepCheckpoint"] = (agentRuntime, lead, pendingSkillPolicy) => {
+	const runStepCheckpoint: TurnContext["runStepCheckpoint"] = async (agentRuntime, lead, pendingSkillPolicy) => {
 		if (reductionInFlight !== null || !deps.readSessionEntries || !deps.session?.current()) return false;
 		const sessionId = deps.session.current()?.id;
 		const active = activeEntries();
@@ -2481,8 +2496,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// A native checkpoint keeps a skill turn it cannot carry as raw messages; this one keeps none, so it does not cut.
 		if (skills.protectedStart !== null) return false;
 		const continuity = continuityContextFromSession(deps.session);
-		const fold = resolveContinuityProjection({ entries: active, ...continuity }).current;
-		const continuityCarry = fold === null ? null : continuityPayloadFromFold(fold);
+		const continuityCarry = checkpointContinuityCarry({ entries: active, ...continuity });
 		deps.bus?.emit("compaction.started", { trigger: "step", at: Date.now() });
 		const threshold = deps.getSettings().context.compaction?.threshold ?? null;
 		const before = captureRuntimeContextSnapshot(agentRuntime, state.activeUserTurnId || "compaction", threshold);
@@ -2515,17 +2529,30 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			deps.session.appendEntry(entry);
 			deps.session.flushAppends?.();
 		} catch (error) {
-			decision.stage({ stage: "step_checkpoint", outcome: "failed", reason: "error" });
-			deps.bus?.emit("compaction.ended", { trigger: "step", at: Date.now(), outcome: "failed" });
-			decision.close();
-			throw error;
+			// A write may reach the ledger before its caller throws: the checkpoint id decides, as it does for a summary.
+			if (!ledgerHoldsCheckpoint(deps.readSessionEntries(), entry.turnId)) {
+				decision.stage({ stage: "step_checkpoint", outcome: "failed", reason: "error" });
+				deps.bus?.emit("compaction.ended", { trigger: "step", at: Date.now(), outcome: "failed" });
+				decision.close();
+				throw error;
+			}
 		}
 		decision.stage({ stage: "step_checkpoint", outcome: "committed", reason: "step_boundary", recordId: entry.turnId });
 		try {
 			// The entry carries no memory receipt, so nothing waits on a durable session checkpoint before memory hears of it.
 			if (deps.memoryCommitBridge) notifyMemoryCommit(entry.turnId, "summary", "summarized");
-			const published = contextFold.publishStepCheckpoint({ agentRuntime, before, threshold, tokensBefore, sessionId });
-			decision.measure(published.tokensAfter);
+			const published = await contextFold.publishCheckpoint({
+				checkpointId: entry.turnId,
+				kind: "step",
+				agentRuntime,
+				before,
+				threshold,
+				tokensBefore,
+				pendingUserText: undefined,
+				trigger: "step",
+				sessionId,
+			});
+			decision.committed({ tokensBefore: published.tokensBefore, tokensAfter: published.tokensAfter });
 			// Ended last: its subscriber restarts the cache comparison for the new context generation.
 			deps.bus?.emit("compaction.ended", { trigger: "step", at: Date.now(), outcome: "completed" });
 		} finally {

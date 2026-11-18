@@ -26,7 +26,9 @@ export {
 } from "../../memory/compaction-prompts.js";
 
 import { ceilChars, normalizeTokenUsage } from "../../../core/token-split.js";
+import { continuityPayloadFromFold } from "../continuity/carry.js";
 import type { ContinuityCheckpointPayload } from "../continuity/contract.js";
+import { type ContinuityProjectionInput, resolveContinuityProjection } from "../continuity/projection.js";
 /**
  * Compaction orchestration.
  *
@@ -275,6 +277,8 @@ export interface CompactResult {
 	publishProviderCheckpoint?: () => void;
 	providerFallbackReason?: string;
 	checkpointParentTurnId?: string;
+	/** Turn id of the checkpoint entry the flow confirmed in the ledger; publication keys on it. */
+	checkpointId?: string;
 	memoryReceipt?: MemoryConsumptionReceipt;
 	/** The paid checkpoint was discarded because it would not reduce context. */
 	noGain?: boolean;
@@ -967,6 +971,38 @@ export function checkpointSkillContext(
 	return { skillContext, protectedStart };
 }
 
+/**
+ * The continuity payload a checkpoint written now carries: the latest validated
+ * fold over the full active path before the cut. A suppressed projection carries
+ * nothing, and `continuityPayloadFromFold` refuses an unvalidated fold. The
+ * summary flow and the step checkpoint both carry this.
+ */
+export function checkpointContinuityCarry(input: ContinuityProjectionInput): ContinuityCheckpointPayload | null {
+	const fold = resolveContinuityProjection(input).current;
+	return fold === null ? null : continuityPayloadFromFold(fold);
+}
+
+/**
+ * The prior checkpoint's preserved request, carried while it is still the
+ * latest operator turn in `entries`. A summary and a step checkpoint carry it by
+ * this one rule; a summary may then replace it with the active request its cut
+ * removes.
+ */
+export function carriedUserContext(
+	entries: ReadonlyArray<SessionEntry>,
+	prior: SessionEntry | undefined,
+): PreservedUserContext | undefined {
+	if (prior?.kind !== "compactionSummary" || !prior.userContext) return undefined;
+	const latestOperator = findLastEntry(
+		entries,
+		(entry) =>
+			entry.kind === "message" &&
+			entry.role === "user" &&
+			(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
+	);
+	return !latestOperator || latestOperator.turnId === prior.userContext.turnId ? prior.userContext : undefined;
+}
+
 const CHECKPOINT_BUILT_BLOCK = /\n*<(operator-notes|recallable-refs)\b[^>]*>[\s\S]*?<\/\1\s*>\n*/giu;
 
 /**
@@ -1000,15 +1036,7 @@ export function hostCheckpoint(
 			const kept = maxChars - marker(carried.length).length;
 			carried = `${marker(carried.length - kept)}${carried.slice(-kept)}`;
 		}
-		const latestOperator = findLastEntry(
-			entries,
-			(entry) =>
-				entry.kind === "message" &&
-				entry.role === "user" &&
-				(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
-		);
-		if (prior.userContext && (!latestOperator || latestOperator.turnId === prior.userContext.turnId))
-			userContext = prior.userContext;
+		userContext = carriedUserContext(entries, prior);
 	}
 	const summary = `${carried.length > 0 ? `${carried}\n\n---\n\n` : ""}${lead}${formatOperatorNotes(extractOperatorNotes(entries))}${formatExactFacts(extractFileOps(entries), entries, cwd)}${formatRecallableRefs(entries, entries.length, foldWorkingSet(entries))}`;
 	return { summary, ...(userContext !== undefined ? { userContext } : {}) };
@@ -1756,26 +1784,23 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 
 	// A generated split summary is not a reliable copy of the active request.
 	// Keep it in the canonical checkpoint so live replay and resume agree.
-	let userContext: PreservedUserContext | undefined =
-		!input.pendingOperatorTurn && priorCheckpoint?.kind === "compactionSummary" ? priorCheckpoint.userContext : undefined;
+	// A checkpoint's verbatim request belongs to its original turn. Once a new
+	// user turn exists, replay must not present the old request as still active.
+	let userContext: PreservedUserContext | undefined = input.pendingOperatorTurn
+		? undefined
+		: carriedUserContext(entries, priorCheckpoint);
 	// Manual compaction has no live active-turn hint after a turn settles.
 	// Preserve the latest operator request if the split removes it as well.
 	let activeUserIndex = -1;
-	let latestUserIndex = -1;
 	for (let index = entries.length - 1; !input.pendingOperatorTurn && index >= 0; index--) {
 		const entry = entries[index];
 		if (entry?.kind !== "message" || entry.role !== "user") continue;
 		if ((entry.payload as { synthetic?: unknown } | null)?.synthetic === true) continue;
-		if (latestUserIndex === -1) latestUserIndex = index;
 		if (input.preserveUserTurnId === undefined || entry.turnId === input.preserveUserTurnId) {
 			activeUserIndex = index;
 			break;
 		}
 	}
-	// A checkpoint's verbatim request belongs to its original turn. Once a new
-	// user turn exists, replay must not present the old request as still active.
-	if (userContext && latestUserIndex >= 0 && entries[latestUserIndex]?.turnId !== userContext.turnId)
-		userContext = undefined;
 	const activeUser =
 		activeUserIndex >= 0 && activeUserIndex < cut.firstKeptEntryIndex ? entries[activeUserIndex] : undefined;
 	if (activeUser?.kind === "message" && activeUser.payload && typeof activeUser.payload === "object") {

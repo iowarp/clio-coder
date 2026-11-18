@@ -251,7 +251,7 @@ export type StepChainData =
 	  }
 	| { version: 1; sessionId: string; cleared: true };
 
-function isStepChainData(value: unknown): value is StepChainData {
+export function isStepChainData(value: unknown): value is StepChainData {
 	if (!isRecord(value) || value.version !== 1 || !isString(value.sessionId)) return false;
 	if (value.cleared === true) return true;
 	return (

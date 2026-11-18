@@ -5,7 +5,7 @@ import { seedForkCallJournal } from "../../telemetry/call-journal.js";
 import { collectSessionEntries } from "../compaction/session-entries.js";
 import { HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE } from "../continuity/operator-request.js";
 import type { SessionMeta } from "../contract.js";
-import { HOST_INSERT_CUSTOM_TYPE, isSessionHeader, type SessionEntry } from "../entries.js";
+import { HOST_INSERT_CUSTOM_TYPE, isSessionHeader, type SessionEntry, STEP_CHAIN_CUSTOM_TYPE } from "../entries.js";
 import { enrichForkMeta } from "../history.js";
 import { type SessionManagerState, startSession } from "../manager.js";
 import { entryBelongsToPath } from "./active-path.js";
@@ -132,7 +132,8 @@ function isDisplayRecord(entry: SessionEntry): boolean {
 	return (
 		entry.kind === "contextEviction" ||
 		entry.kind === "contextRecall" ||
-		(entry.kind === "custom" && entry.customType === HOST_INSERT_CUSTOM_TYPE)
+		(entry.kind === "custom" &&
+			(entry.customType === HOST_INSERT_CUSTOM_TYPE || entry.customType === STEP_CHAIN_CUSTOM_TYPE))
 	);
 }
 
