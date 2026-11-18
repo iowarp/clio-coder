@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, type Dirent } from "node:fs";
+import type { Dirent } from "node:fs";
 import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { release, tmpdir } from "node:os";
 import path from "node:path";
@@ -10,7 +10,8 @@ import { resolveSafeCwd, runCommandVector, type SafeCommandResult } from "../../
 import { type MainSandboxPolicy, mainSandboxWriteHint } from "../../core/sandbox/main-session.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { currentProcessLease, ownerIsAlive, type ProcessLease, validProcessLease } from "../process-lease.js";
-import { extractNumericPayloadText, type NumericReferenceProvenance } from "./numeric.js";
+import { extractNumericPayloadText, type NumericReferenceProvenance, payloadSpread } from "./numeric.js";
+import { runProvenanceProbes, sha256File } from "./provenance.js";
 import {
 	type DeclaredReproduce,
 	judgeReproduce,
@@ -93,11 +94,14 @@ export interface ReproduceRunFacts {
 export type ReproduceOutcome =
 	| { kind: "refused"; refusal: ReproduceRefusal }
 	/**
-	 * A run did not complete cleanly, so nothing was judged. `run` is 1 or 2; `facts.launched` says whether it started,
+	 * A run did not complete cleanly, so nothing was judged. `run` is the 1-based run; `facts.launched` says whether it started,
 	 * and `completed` holds the runs before it, each launched and completed cleanly: the check ran when either holds.
 	 */
 	| { kind: "run-failed"; run: number; facts: ReproduceRunFacts; completed: ReproduceRunFacts[]; message: string }
-	/** The command completed but its output or the reference could not be judged. */
+	/**
+	 * The command completed but its output or the reference could not be judged; `facts` is empty when the sealed
+	 * reference changed since admission, which fails the check before any run.
+	 */
 	| { kind: "unjudgeable"; message: string; facts: ReproduceRunFacts[] }
 	| { kind: "judged"; report: ReproduceReport; facts: ReproduceRunFacts[] };
 
@@ -119,16 +123,11 @@ export interface ReproduceRunInput {
 	 * write, because Clio's state directory is read-only inside it.
 	 */
 	shellSandbox?: MainSandboxPolicy;
-}
-
-async function sha256File(filePath: string): Promise<{ sha256: string; sizeBytes: number }> {
-	const hash = createHash("sha256");
-	let sizeBytes = 0;
-	for await (const chunk of createReadStream(filePath)) {
-		hash.update(chunk as Buffer);
-		sizeBytes += (chunk as Buffer).byteLength;
-	}
-	return { sha256: hash.digest("hex"), sizeBytes };
+	/**
+	 * The reference digest dispatch admission sealed (null: absent then). When
+	 * given, a reference whose text now differs fails the check before any run.
+	 */
+	referenceSha256?: string | null;
 }
 
 function errorText(error: unknown): string {
@@ -153,18 +152,23 @@ interface RepositoryState {
 	toplevel: string;
 	commit: string;
 	trackedTreeClean: boolean;
+	/** Untracked files git does not ignore; null when status could not be read. */
+	untracked: number | null;
 	tracked: Set<string>;
 }
 
 /**
- * HEAD and whether tracked files match it, for a judged check that runs in the live checkout; null outside a
- * repository. A numeric-compare result carries it so the claim it becomes names the commit it held at (#406).
+ * HEAD, whether tracked files match it, and how many untracked files git does not ignore, for a judged check that
+ * runs in the live checkout; null outside a repository. A numeric-compare result carries it so the claim it becomes
+ * names the commit it held at (#406); the untracked count says how much the commit alone does not name.
  */
 export async function checkoutState(
 	workspaceRoot: string,
-): Promise<{ commit: string; trackedTreeClean: boolean } | null> {
+): Promise<{ commit: string; trackedTreeClean: boolean; untracked: number | null } | null> {
 	const state = await repositoryState(workspaceRoot, []);
-	return state === null ? null : { commit: state.commit, trackedTreeClean: state.trackedTreeClean };
+	return state === null
+		? null
+		: { commit: state.commit, trackedTreeClean: state.trackedTreeClean, untracked: state.untracked };
 }
 
 async function repositoryState(workspaceRoot: string, inputs: ReadonlyArray<string>): Promise<RepositoryState | null> {
@@ -176,13 +180,22 @@ async function repositoryState(workspaceRoot: string, inputs: ReadonlyArray<stri
 	} catch {
 		return null;
 	}
-	const status = await git(toplevel, ["status", "--porcelain", "--untracked-files=no"]).catch(() => null);
+	const status = await git(toplevel, ["status", "--porcelain", "-z", "--no-renames", "--untracked-files=all"]).catch(
+		() => null,
+	);
+	const entries = status === null ? [] : status.split("\0").filter((entry) => entry.length > 3);
 	const tracked = new Set<string>();
 	if (inputs.length > 0) {
 		const listed = await git(workspaceRoot, ["ls-files", "-z", "--", ...inputs]).catch(() => "");
 		for (const entry of listed.split("\0")) if (entry.length > 0) tracked.add(entry);
 	}
-	return { toplevel, commit, trackedTreeClean: status !== null && status.trim().length === 0, tracked };
+	return {
+		toplevel,
+		commit,
+		trackedTreeClean: status !== null && entries.every((entry) => entry.startsWith("??")),
+		untracked: status === null ? null : entries.filter((entry) => entry.startsWith("??")).length,
+		tracked,
+	};
 }
 
 async function pythonVersion(
@@ -475,17 +488,33 @@ async function runReproduceIn(input: ReproduceRunInput, scratchRoot: string): Pr
 	let referenceProvenance: NumericReferenceProvenance | undefined;
 	if (spec.compare.mode === "reference") {
 		const reference = spec.compare.reference;
+		let unreadable: unknown;
 		try {
 			const read = readRegularFileText(resolveSafeCwd(reference, workspaceRoot), REPRODUCE_MAX_OUTPUT_BYTES);
 			if (!read.ok)
 				throw new Error(read.reason === "not-regular" ? "not a regular file" : `${read.size} bytes exceeds the cap`);
 			referenceText = read.text;
 		} catch (error) {
+			unreadable = error;
+		}
+		// A sealed digest is checked before a missing file is refused, so a reference removed since admission reads
+		// as the change it is, the same rule host verification applies to a numeric-compare reference.
+		if (input.referenceSha256 !== undefined) {
+			const now = referenceText === undefined ? null : createHash("sha256").update(referenceText).digest("hex");
+			if (now !== input.referenceSha256) {
+				return {
+					kind: "unjudgeable",
+					message: `reference '${reference}' changed since admission (${input.referenceSha256 ?? "absent"}→${now ?? "absent"})`,
+					facts: [],
+				};
+			}
+		}
+		if (referenceText === undefined) {
 			return {
 				kind: "refused",
 				refusal: {
 					reason: "reference-unreadable",
-					message: `reference '${reference}' cannot be read (${errorText(error)}); nothing ran`,
+					message: `reference '${reference}' cannot be read (${errorText(unreadable)}); nothing ran`,
 				},
 			};
 		}
@@ -533,14 +562,24 @@ async function runReproduceIn(input: ReproduceRunInput, scratchRoot: string): Pr
 		environment: reproduceEnvironment(spec),
 		commit: repository?.commit ?? null,
 		trackedTreeClean: repository?.trackedTreeClean ?? null,
+		...(repository !== null && repository.untracked !== null ? { untracked: repository.untracked } : {}),
 		seed: spec.seed !== undefined ? { ...spec.seed } : null,
 		platform,
 		argv: [...argv],
 		cwd: input.cwd,
 	};
+	if (spec.provenance !== undefined) {
+		// Probes run in the operator's checkout, where the interpreter and libraries the clean runs use are found.
+		conditions.probes = await runProvenanceProbes(spec.provenance, {
+			cwd: resolveSafeCwd(input.cwd, workspaceRoot),
+			workspaceRoot,
+			...(input.shellSandbox !== undefined ? { shellSandbox: input.shellSandbox } : {}),
+			...(input.signal !== undefined ? { signal: input.signal } : {}),
+		});
+	}
 
 	await sweepAbandonedEnvironments(scratchRoot);
-	const runCount = spec.compare.mode === "twice" ? 2 : 1;
+	const runCount = spec.repeat ?? (spec.compare.mode === "twice" ? 2 : 1);
 	const facts: ReproduceRunFacts[] = [];
 	const records: ReproduceRunRecord[] = [];
 	const payloads: ReproducePayload[] = [];
@@ -610,22 +649,41 @@ async function runReproduceIn(input: ReproduceRunInput, scratchRoot: string): Pr
 		});
 	}
 
-	let expected: ReproducePayload;
+	let reference: ReproducePayload | undefined;
 	if (referenceText !== undefined) {
 		const parsed = parseReproducePayload(referenceText, `reference '${referenceProvenance?.path ?? ""}'`);
 		if (parsed instanceof Error) return { kind: "unjudgeable", message: parsed.message, facts };
-		expected = parsed;
-	} else {
-		expected = payloads[1] as ReproducePayload;
+		reference = parsed;
 	}
-	const report = judgeReproduce({
-		spec,
-		actual: payloads[0] as ReproducePayload,
-		expected,
-		expectedIsReference: referenceText !== undefined,
-		conditions,
-		runs: records,
-		...(referenceProvenance !== undefined ? { reference: referenceProvenance } : {}),
+	// `twice` judges each later run against run 1; `reference` judges every run against the reference. The report is
+	// the first failing comparison's, else the first's, and records which runs failed and how far the runs spread.
+	const judged = (reference === undefined ? payloads.slice(1) : payloads).map((payload, index) => {
+		const run = reference === undefined ? index + 2 : index + 1;
+		return {
+			run,
+			report: judgeReproduce({
+				spec,
+				actual: reference === undefined ? (payloads[0] as ReproducePayload) : payload,
+				expected: reference ?? payload,
+				expectedIsReference: reference !== undefined,
+				conditions,
+				runs: records,
+				...(referenceProvenance !== undefined ? { reference: referenceProvenance } : {}),
+				...(reference !== undefined && runCount > 1 ? { actualLabel: `run ${run}` } : {}),
+				...(reference === undefined && run > 2 ? { expectedLabel: `run ${run}` } : {}),
+			}),
+		};
 	});
+	const chosen = judged.find((entry) => !entry.report.passed) ?? (judged[0] as (typeof judged)[number]);
+	const flat = (payload: ReproducePayload) =>
+		Object.fromEntries(Object.entries(payload).map(([key, metric]) => [key, metric.value]));
+	const report: ReproduceReport = {
+		...chosen.report,
+		repeat: {
+			runs: runCount,
+			failedRuns: judged.filter((entry) => !entry.report.passed).map((entry) => entry.run),
+			spread: payloadSpread(payloads.map(flat)),
+		},
+	};
 	return { kind: "judged", report, facts };
 }

@@ -10,7 +10,7 @@ import {
 	SEALED_CHECK_REPORT_KEYS_MAX,
 	type SealedCheckReport,
 } from "../../core/telemetry/schemas.js";
-import type { NumericDeviation } from "../../tools/verify/numeric.js";
+import { type NumericDeviation, widestSpread } from "../../tools/verify/numeric.js";
 import type { DeclaredCheckReport } from "../../tools/verify/scripts.js";
 import { RESULT_CONTRACT_REPAIR_LIMIT } from "../agents/result-contract.js";
 import type { RunAssessmentContext } from "../evidence/assessment.js";
@@ -206,6 +206,11 @@ function sealedCheckReport(report: DeclaredCheckReport): SealedCheckReport {
 	const failedKeys = report.kind === "numeric-compare" ? report.failedKeys : report.failedMetrics;
 	const payloadSha256 =
 		report.kind === "numeric-compare" ? (report.actual?.sha256 ?? null) : (report.runs[0]?.payload?.sha256 ?? null);
+	const inputs = report.kind === "numeric-compare" ? (report.provenance?.inputs ?? []) : report.conditions.inputs;
+	const probes = report.kind === "numeric-compare" ? report.provenance?.probes : report.conditions.probes;
+	const untracked = report.kind === "reproduce" ? report.conditions.untracked : undefined;
+	const repeat = report.repeat;
+	const spread = repeat === undefined ? [] : widestSpread(repeat.spread).slice(0, SEALED_CHECK_REPORT_KEYS_MAX);
 	return {
 		kind: report.kind,
 		passed: report.passed,
@@ -220,6 +225,31 @@ function sealedCheckReport(report: DeclaredCheckReport): SealedCheckReport {
 			0,
 			SEALED_CHECK_REPORT_KEYS_MAX,
 		),
+		...(inputs.length > 0
+			? {
+					inputs: inputs.slice(0, SEALED_CHECK_REPORT_KEYS_MAX).map((input) => ({ path: input.path, sha256: input.sha256 })),
+				}
+			: {}),
+		...(probes !== undefined && probes.length > 0
+			? {
+					probes: probes.slice(0, 8).map((probe) => ({
+						argv: probe.argv.slice(0, 64).map(clipped),
+						exitCode: probe.exitCode,
+						sha256: probe.sha256,
+						version: probe.version === null ? null : clipped(probe.version),
+					})),
+				}
+			: {}),
+		...(untracked !== undefined ? { untracked } : {}),
+		...(repeat !== undefined
+			? {
+					runs: repeat.runs,
+					failedRuns: repeat.failedRuns.slice(0, 8),
+					...(spread.length > 0
+						? { spread: spread.map((entry) => ({ key: clipped(entry.key), spread: entry.spread })) }
+						: {}),
+				}
+			: {}),
 	};
 }
 
@@ -400,7 +430,15 @@ export function settleFinishedRun(
 							...(check.notRun !== undefined ? { notRun: check.notRun } : {}),
 							baseComparison: check.baseComparison ? { ...check.baseComparison } : null,
 							...(check.report !== undefined ? { report: sealedCheckReport(check.report) } : {}),
-							...(check.tree !== undefined ? { tree: { head: check.tree.head, fingerprint: check.tree.fingerprint } } : {}),
+							...(check.tree !== undefined
+								? {
+										tree: {
+											head: check.tree.head,
+											fingerprint: check.tree.fingerprint,
+											...(check.tree.untracked !== undefined ? { untracked: check.tree.untracked } : {}),
+										},
+									}
+								: {}),
 						})),
 					}
 				: null,

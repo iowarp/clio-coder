@@ -888,10 +888,11 @@ export interface RunHostVerificationCheck {
 	/**
 	 * The checkout this verdict judged: the task worktree for a `worktree: true`
 	 * run, else the source checkout. `fingerprint` digests HEAD plus the
-	 * working-tree content the check saw. Absent outside a Git checkout and on
-	 * receipts sealed before it existed (F6).
+	 * working-tree content the check saw; `untracked` counts the untracked files
+	 * git does not ignore there, which HEAD does not name. Absent outside a Git
+	 * checkout and on receipts sealed before it existed (F6).
 	 */
-	tree?: { root: string; head: string; fingerprint: string };
+	tree?: { root: string; head: string; fingerprint: string; untracked?: number };
 }
 
 /**

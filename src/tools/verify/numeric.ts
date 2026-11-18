@@ -162,6 +162,54 @@ export interface NumericPayloadProvenance {
 	bytes: number;
 }
 
+/** A declared input file as it was hashed before the command ran; the check fails when it differs afterwards. */
+export interface JudgedInputRecord {
+	/** Repository-relative as declared, or the absolute path dispatch admission sealed. */
+	path: string;
+	sha256: string;
+	sizeBytes: number;
+}
+
+/**
+ * A declared provenance probe as it ran beside the check, for example `[python3, -c, "import numpy;
+ * print(numpy.__version__)"]` or `[printenv, OMP_NUM_THREADS]`. A probe that fails or cannot start is recorded, never
+ * gating; nothing beyond what a probe prints is captured, so no environment dump enters a record.
+ */
+export interface ProvenanceProbeRecord {
+	argv: string[];
+	/** Null when the probe could not start or did not exit. */
+	exitCode: number | null;
+	/** SHA-256 of the probe's stdout then stderr; null when it could not start. */
+	sha256: string | null;
+	/** The first non-empty output line, clipped; null when there was none. */
+	version: string | null;
+}
+
+/** What a judged check declared it reads and runs beside: input digests and probe outputs. */
+export interface JudgedProvenance {
+	inputs: JudgedInputRecord[];
+	probes: ProvenanceProbeRecord[];
+}
+
+/** One key's spread across the runs of a repeated check. */
+export interface RepeatKeySpread {
+	key: string;
+	/**
+	 * The largest max-minus-min across runs of any one element; 0 means every run agreed exactly. Null when the runs
+	 * cannot be lined up: the key is missing from a run, its shape differs, or a value is not finite.
+	 */
+	spread: number | null;
+}
+
+/** How many times a judged check ran and how far its runs disagreed. */
+export interface RepeatRecord {
+	runs: number;
+	/** 1-based runs whose judgement failed; empty when every run passed. */
+	failedRuns: number[];
+	/** Per key, sorted by key; empty for a single run, which checks no determinism. */
+	spread: RepeatKeySpread[];
+}
+
 export interface NumericCompareReport {
 	kind: "numeric-compare";
 	passed: boolean;
@@ -181,6 +229,10 @@ export interface NumericCompareReport {
 	reference?: NumericReferenceProvenance;
 	/** Actual payload identity, present when the judgement extracted payload text. */
 	actual?: NumericPayloadProvenance;
+	/** Declared inputs and probes; present when the check declared either. */
+	provenance?: JudgedProvenance;
+	/** Runs and their spread; set by the runners, so a single run reads as determinism not checked. */
+	repeat?: RepeatRecord;
 }
 
 export const NUMERIC_PAYLOAD_CAPS = Object.freeze({
@@ -692,6 +744,72 @@ export function renderNumericReport(report: NumericCompareReport): string {
 	if (report.actual !== undefined) {
 		lines.push(`actual: sha256=${report.actual.sha256.slice(0, 12)} (${report.actual.bytes}B)`);
 	}
+	if (report.repeat !== undefined) lines.push(`repeat: ${describeRepeat(report.repeat)}`);
+	if (report.provenance !== undefined) lines.push(...renderProvenance(report.provenance));
 	for (const key of report.keys) lines.push(`- ${key.detail}`);
 	return lines.join("\n");
+}
+
+/** Declared inputs and probe outputs as report lines. */
+export function renderProvenance(provenance: Partial<JudgedProvenance>): string[] {
+	return [
+		...(provenance.inputs ?? []).map(
+			(input) => `input: ${input.path} sha256=${input.sha256.slice(0, 12)} (${input.sizeBytes}B), unchanged by the run`,
+		),
+		...(provenance.probes ?? []).map(
+			(probe) =>
+				`probe: ${JSON.stringify(probe.argv)} ${probe.exitCode === null ? "did not run to an exit" : `exit ${probe.exitCode}`}${probe.version === null ? "" : `: ${probe.version}`}`,
+		),
+	];
+}
+
+function elementSpread(values: ReadonlyArray<NumericValue | undefined>): number | null {
+	const first = values[0];
+	if (first === undefined) return null;
+	const width = Array.isArray(first) ? first.length : -1;
+	let spread = 0;
+	for (let index = 0; index < Math.max(width, 1); index += 1) {
+		let low = Number.POSITIVE_INFINITY;
+		let high = Number.NEGATIVE_INFINITY;
+		for (const value of values) {
+			if (value === undefined || (Array.isArray(value) ? value.length !== width : width !== -1)) return null;
+			const element = Array.isArray(value) ? value[index] : value;
+			if (element === undefined || !Number.isFinite(element)) return null;
+			low = Math.min(low, element);
+			high = Math.max(high, element);
+		}
+		spread = Math.max(spread, high - low);
+	}
+	return spread;
+}
+
+/** Per key, how far the runs' payloads spread; empty for fewer than two runs. */
+export function payloadSpread(payloads: ReadonlyArray<NumericPayload>): RepeatKeySpread[] {
+	if (payloads.length < 2) return [];
+	const keys = [...new Set(payloads.flatMap((payload) => Object.keys(payload)))].sort();
+	return keys.map((key) => ({ key, spread: elementSpread(payloads.map((payload) => payload[key])) }));
+}
+
+/** Keys whose runs cannot be lined up first, then the widest spread first. */
+export function widestSpread(spread: ReadonlyArray<RepeatKeySpread>): RepeatKeySpread[] {
+	return [
+		...spread.filter((entry) => entry.spread === null),
+		...spread
+			.filter((entry) => entry.spread !== null)
+			.sort((left, right) => (right.spread as number) - (left.spread as number)),
+	];
+}
+
+const REPEAT_SPREAD_SHOWN = 5;
+
+/** The runs in words: `n=1, determinism not checked`, or the failed runs and the widest spreads. */
+export function describeRepeat(repeat: RepeatRecord): string {
+	if (repeat.runs <= 1) return "n=1, determinism not checked";
+	const outcome = repeat.failedRuns.length === 0 ? "every run passed" : `run(s) ${repeat.failedRuns.join(", ")} failed`;
+	const widest = widestSpread(repeat.spread);
+	const shown = widest
+		.slice(0, REPEAT_SPREAD_SHOWN)
+		.map((entry) => `${entry.key}=${entry.spread === null ? "not comparable" : formatNumber(entry.spread)}`);
+	const more = widest.length > REPEAT_SPREAD_SHOWN ? `, and ${widest.length - REPEAT_SPREAD_SHOWN} more key(s)` : "";
+	return `n=${repeat.runs}, ${outcome}; max spread across runs: ${shown.length === 0 ? "no keys" : `${shown.join(", ")}${more}`}`;
 }

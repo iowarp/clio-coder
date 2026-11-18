@@ -45,8 +45,19 @@ export interface ResolvedVerificationCheck {
 	/**
 	 * Sealed at admission with the reference as an absolute path and the sha256 of its text then; null when it was
 	 * absent. Host verification fails the check when the reference no longer matches. Absent on older requests.
+	 * `inputs` are the declared input files as absolute paths, hashed before the run and after it; `provenance`
+	 * holds the declared probes. `seed` is passed to every run, and `repeat` is the run count. Each is absent when the
+	 * catalog declared none and on older requests.
 	 */
-	numeric?: { reference: string; tolerance: NumericTolerance; referenceSha256?: string | null };
+	numeric?: {
+		reference: string;
+		tolerance: NumericTolerance;
+		referenceSha256?: string | null;
+		inputs?: string[];
+		provenance?: string[][];
+		seed?: { env: string; value: string };
+		repeat?: number;
+	};
 	/** Sealed at admission with the baseline as an absolute path and its digest, as `numeric` seals its reference. */
 	perf?: {
 		budget?: PerfBudgetSpec;
@@ -57,9 +68,11 @@ export interface ResolvedVerificationCheck {
 	/**
 	 * Sealed at admission with paths kept repository-relative and the declared
 	 * cwd beside them, so host verification derives the root from `cwd` and
-	 * judges the inputs, digests and reference the catalog declared.
+	 * judges the inputs, digests and reference the catalog declared. A
+	 * `compare: {reference}` check also seals the reference's digest, as
+	 * `numeric` does; absent on older requests and for `compare: twice`.
 	 */
-	reproduce?: { spec: DeclaredReproduce; declaredCwd: string };
+	reproduce?: { spec: DeclaredReproduce; declaredCwd: string; referenceSha256?: string | null };
 }
 
 export interface DispatchRequest extends JobSpec {

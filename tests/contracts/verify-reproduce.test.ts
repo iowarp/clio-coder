@@ -80,6 +80,22 @@ describe("reproduce judgement", () => {
 		]);
 	});
 
+	it("fails a per-key tolerance naming a metric neither side reports", () => {
+		const payload = parseReproducePayload('{"x":1}', "out");
+		ok(!(payload instanceof Error));
+		const report = judgeReproduce({
+			spec: { inputs: [], compare: { mode: "twice" }, tolerance: { absolute: 0, keys: { energy: { relative: 1e-9 } } } },
+			actual: payload,
+			expected: payload,
+			expectedIsReference: false,
+			conditions,
+			runs: [],
+		});
+		strictEqual(report.passed, false);
+		deepStrictEqual(report.failedMetrics, ["energy"]);
+		strictEqual(report.metrics[0]?.detail, "energy: failed missing; declared but reported by neither side");
+	});
+
 	it("refuses a ragged array instead of flattening it", () => {
 		ok(parseReproducePayload('{"m":[[1,2],[3]]}', "out") instanceof Error);
 	});
@@ -139,6 +155,38 @@ describe("reproduce runner", () => {
 		deepStrictEqual(outcome.report.conditions.seed, { env: "SEED", value: "7" });
 		strictEqual(outcome.report.runs.length, 2);
 		deepStrictEqual(readdirSync(join(root, "envs")), []);
+	});
+
+	it("fails a reference that changed since admission before any run, and judges one that still matches", async () => {
+		const root = scratch();
+		const script = "require('fs').writeFileSync('ran','1');console.log(JSON.stringify({x:1}))\n";
+		const sealed = JSON.stringify({ x: 1 });
+		writeFileSync(join(root, "a.js"), script);
+		writeFileSync(join(root, "ref.json"), JSON.stringify({ x: 9 }));
+		const input = {
+			command: ["node", "a.js"],
+			cwd: ".",
+			timeoutMs: 10_000,
+			spec: {
+				inputs: [{ path: "a.js", sha256: sha256(script) }],
+				environment: "copy" as const,
+				compare: { mode: "reference" as const, reference: "ref.json" },
+				tolerance: { absolute: 0 },
+			},
+			workspaceRoot: root,
+			scratchRoot: join(root, "envs"),
+			referenceSha256: sha256(sealed),
+		};
+		const drifted = await runReproduce(input);
+		deepStrictEqual(drifted, {
+			kind: "unjudgeable",
+			message: `reference 'ref.json' changed since admission (${sha256(sealed)}→${sha256(JSON.stringify({ x: 9 }))})`,
+			facts: [],
+		});
+		ok(!existsSync(join(root, "envs")), "nothing ran");
+		writeFileSync(join(root, "ref.json"), sealed);
+		const judged = await runReproduce(input);
+		strictEqual(judged.kind === "judged" && judged.report.passed, true);
 	});
 
 	// A contained verify call: the check runs in the main-session sandbox, where Clio's state is read-only.

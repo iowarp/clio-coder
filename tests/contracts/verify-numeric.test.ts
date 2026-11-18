@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -981,5 +982,164 @@ describe("numeric-compare under host verification", () => {
 				`verify: numeric-compare reference 'ref.json' changed while the check ran (${sealed}→${forgedDigest})`,
 			);
 		}
+	});
+
+	it("records declared inputs, probes and the untracked count, and fails a run that changes an input, on both paths", async () => {
+		const touching = ["node", "-e", `require("node:fs").appendFileSync("data.csv", "2");process.stdout.write('{"e":1}')`];
+		const declared = (id: string, command: string[]) => ({
+			id,
+			description: "E",
+			kind: "numeric-compare",
+			command,
+			reference: "ref.json",
+			tolerance: { absolute: 0 },
+			inputs: ["data.csv"],
+			provenance: [["node", "--version"]],
+			cwd: ".",
+			timeoutMs: 30_000,
+			tags: ["scientific"],
+		});
+		const root = workspace({
+			".gitignore": "state/\n",
+			"ref.json": '{"e":1}',
+			"data.csv": "1\n",
+			".clio-coder/verifiers.yaml": JSON.stringify({
+				version: 2,
+				checks: [declared("e", printing({ e: 1 })), declared("touch", touching)],
+			}),
+		});
+		const git = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { stdio: "ignore" });
+		git("init", "-q");
+		git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init");
+		const inputRecord = { path: "data.csv", sha256: createHash("sha256").update("1\n").digest("hex"), sizeBytes: 2 };
+		process.chdir(root);
+		const loaded = loadProjectVerifierCatalog(root);
+		const [plain, touch] = loaded.ok ? (loaded.source?.checks ?? []) : [];
+		if (plain === undefined || touch === undefined) throw new Error("expected two checks");
+		const ordinary = await runProjectCheck(plain);
+		strictEqual(ordinary.kind, "ok");
+		const details = ordinary.details as { report: { provenance: unknown }; checkout: { untracked: number } };
+		strictEqual(details.checkout.untracked, 4);
+		const provenance = details.report.provenance as { inputs: unknown[]; probes: Array<Record<string, unknown>> };
+		deepStrictEqual(provenance.inputs, [inputRecord]);
+		strictEqual(provenance.probes[0]?.exitCode, 0);
+		match(String(provenance.probes[0]?.version), /^v\d+\./u);
+		const sealed = (argv: string[]) => ({
+			check: "e",
+			cwd: root,
+			timeoutMs: 30_000,
+			kind: "numeric-compare" as const,
+			argv,
+			numeric: {
+				reference: join(root, "ref.json"),
+				tolerance: { absolute: 0 },
+				inputs: [join(root, "data.csv")],
+				provenance: [["node", "--version"]],
+			},
+		});
+		const run = (argv: string[]) =>
+			runHostVerification({
+				runId: "run-inputs",
+				request: { resolvedVerification: [sealed(argv)] },
+				workerSuccessful: true,
+				stateDir: join(root, "state"),
+			});
+		const host = await run(printing({ e: 1 }));
+		strictEqual(host?.status, "verified");
+		strictEqual(host?.checks[0]?.tree?.untracked, 4);
+		const report = host?.checks[0]?.report;
+		deepStrictEqual(report?.kind === "numeric-compare" ? report.provenance?.inputs : undefined, [
+			{ ...inputRecord, path: join(root, "data.csv") },
+		]);
+		const touched = await run(touching);
+		strictEqual(touched?.status, "rejected");
+		const after = createHash("sha256").update("1\n2").digest("hex");
+		strictEqual(
+			touched?.checks[0]?.outputTail,
+			`numeric-compare: input '${join(root, "data.csv")}' changed while the check ran (${inputRecord.sha256}→${after})`,
+		);
+		writeFileSync(join(root, "data.csv"), "1\n");
+		const ordinaryTouched = await runProjectCheck(touch);
+		strictEqual(
+			ordinaryTouched.kind === "error" ? ordinaryTouched.message : "",
+			`verify: numeric-compare input 'data.csv' changed while the check ran (${inputRecord.sha256}→${after})`,
+		);
+	});
+
+	it("runs a repeated check with its seed, records the failed runs and spread, and says when one run checks no determinism", async () => {
+		const drifting = [
+			"node",
+			"-e",
+			`const fs=require("node:fs");const n=fs.existsSync("count.txt")?Number(fs.readFileSync("count.txt","utf8"))+1:1;fs.writeFileSync("count.txt",String(n));process.stdout.write(JSON.stringify({x:Number(process.env.RUN_SEED)+(n-1)*0.1,y:[1,2]}))`,
+		];
+		const declared = (id: string, extra: Record<string, unknown>) => ({
+			id,
+			description: "X",
+			kind: "numeric-compare",
+			command: drifting,
+			reference: "ref.json",
+			tolerance: { absolute: 0.15 },
+			seed: { env: "RUN_SEED", value: 42 },
+			cwd: ".",
+			timeoutMs: 30_000,
+			tags: ["scientific"],
+			...extra,
+		});
+		const root = workspace({
+			"ref.json": '{"x":42,"y":[1,2]}',
+			".clio-coder/verifiers.yaml": JSON.stringify({
+				version: 2,
+				checks: [declared("thrice", { repeat: 3 }), declared("once", {})],
+			}),
+		});
+		const repeatLine = /^repeat: n=3, run\(s\) 3 failed; max spread across runs: x=0\.2, y=0$/mu;
+		const expectRepeat = (repeat: { runs: number; failedRuns: number[]; spread: unknown[] } | undefined) => {
+			strictEqual(repeat?.runs, 3);
+			deepStrictEqual(repeat?.failedRuns, [3]);
+			const [x, y] = repeat?.spread as Array<{ key: string; spread: number }>;
+			strictEqual(x?.key, "x");
+			ok(Math.abs((x?.spread ?? 0) - 0.2) < 1e-9);
+			deepStrictEqual(y, { key: "y", spread: 0 });
+		};
+		process.chdir(root);
+		const loaded = loadProjectVerifierCatalog(root);
+		const [once, thrice] = loaded.ok ? (loaded.source?.checks ?? []) : [];
+		if (once === undefined || thrice === undefined) throw new Error("expected two checks");
+		deepStrictEqual([thrice.numeric?.seed, thrice.numeric?.repeat], [{ env: "RUN_SEED", value: "42" }, 3]);
+		const repeated = await runProjectCheck(thrice);
+		strictEqual(repeated.kind, "error");
+		match(repeated.kind === "error" ? repeated.message : "", repeatLine);
+		expectRepeat((repeated.details as { report: { repeat: never } }).report.repeat);
+		rmSync(join(root, "count.txt"));
+		const single = await runProjectCheck(once);
+		strictEqual(single.kind, "ok");
+		match(single.kind === "ok" ? single.output : "", /^repeat: n=1, determinism not checked$/mu);
+		rmSync(join(root, "count.txt"));
+		const host = await runHostVerification({
+			runId: "run-repeat",
+			request: {
+				resolvedVerification: [
+					{
+						check: "thrice",
+						cwd: root,
+						timeoutMs: 30_000,
+						kind: "numeric-compare",
+						argv: drifting,
+						numeric: {
+							reference: join(root, "ref.json"),
+							tolerance: { absolute: 0.15 },
+							seed: { env: "RUN_SEED", value: "42" },
+							repeat: 3,
+						},
+					},
+				],
+			},
+			workerSuccessful: true,
+			stateDir: join(root, "state"),
+		});
+		strictEqual(host?.status, "rejected");
+		match(host?.checks[0]?.outputTail ?? "", repeatLine);
+		const report = host?.checks[0]?.report;
+		expectRepeat(report?.kind === "numeric-compare" ? report.repeat : undefined);
 	});
 });

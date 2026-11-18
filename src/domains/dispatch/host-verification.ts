@@ -28,6 +28,15 @@ import { settingsFileMasks, workerSandboxMasks } from "../../core/sandbox/worker
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { taskWorktreeManifestsChanged } from "../../tools/task-worktree.js";
+import {
+	describeRepeat,
+	extractNumericPayloadText,
+	type NumericPayload,
+	parseNumericPayload,
+	payloadSpread,
+	type RepeatRecord,
+} from "../../tools/verify/numeric.js";
+import { hashJudgedInputs, judgedInputDrift, runProvenanceProbes } from "../../tools/verify/provenance.js";
 import { renderReproduceReport } from "../../tools/verify/reproduce.js";
 import { runReproduce } from "../../tools/verify/reproduce-run.js";
 import {
@@ -99,8 +108,30 @@ function repositoryRoot(cwd: string): string {
 	}).trim();
 }
 
-/** The checkout a check judged: its root, HEAD, and a digest of HEAD plus working-tree content. */
-function checkedTree(cwd: string): { root: string; head: string; fingerprint: string } | null {
+/** Untracked files git does not ignore under `root`; undefined when git cannot list them. */
+function untrackedCount(root: string): number | undefined {
+	try {
+		const listed = execFileSync(
+			"git",
+			internalGitArgv(["-C", root, "ls-files", "--others", "--exclude-standard", "-z"]),
+			{
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+				timeout: 30_000,
+				maxBuffer: 64 * 1024 * 1024,
+			},
+		);
+		return listed.split("\0").filter((entry) => entry.length > 0).length;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The checkout a check judged: its root, HEAD, a digest of HEAD plus working-tree content, and how many untracked
+ * files it held, which HEAD alone does not name.
+ */
+function checkedTree(cwd: string): { root: string; head: string; fingerprint: string; untracked?: number } | null {
 	try {
 		const snapshot = captureWorkspaceSnapshot(repositoryRoot(cwd));
 		const fingerprint = sha256(
@@ -109,7 +140,8 @@ function checkedTree(cwd: string): { root: string; head: string; fingerprint: st
 				entries: [...snapshot.entries.entries()].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
 			}),
 		);
-		return { root: snapshot.root, head: snapshot.head, fingerprint };
+		const untracked = untrackedCount(snapshot.root);
+		return { root: snapshot.root, head: snapshot.head, fingerprint, ...(untracked !== undefined ? { untracked } : {}) };
 	} catch {
 		return null;
 	}
@@ -933,6 +965,7 @@ async function runSealedReproduce(
 		timeoutMs: resolvedCheck.timeoutMs,
 		spec: sealed.spec,
 		workspaceRoot: root,
+		...(sealed.referenceSha256 !== undefined ? { referenceSha256: sealed.referenceSha256 } : {}),
 		...(shellSandbox !== undefined ? { shellSandbox } : {}),
 	});
 	const base = { check: resolvedCheck.check, argv, cwd: resolvedCheck.cwd, memo: false };
@@ -1077,30 +1110,101 @@ async function spawnResolvedCheck(
 	const resolvedCheck = input.resolvedCheck;
 	const judged = resolvedCheck.kind === "numeric-compare" || resolvedCheck.kind === "perf-budget";
 	const captureMaxBytes = judged ? JUDGED_CHECK_MAX_OUTPUT_BYTES : CODE_STEP_CAPTURE_MAX_BYTES;
-	const outcome = await runCodeStep({
-		stepId: `verification-${input.index + 1}-${resolvedCheck.check.replace(/[^a-z0-9._-]/giu, "_")}`,
-		command,
-		workspaceRoot: resolvedCheck.cwd,
-		artifactDir: join(input.stateDir, "artifacts", input.runId, "verification"),
-		env: input.env,
-		maxOutputBytes: captureMaxBytes,
-		...(input.shellSandbox !== undefined ? { shellSandbox: input.shellSandbox } : {}),
-	});
+	const numeric = resolvedCheck.kind === "numeric-compare" ? resolvedCheck.numeric : undefined;
+	const inputs = (numeric?.inputs ?? []).map((absolute) => ({ path: absolute, absolute }));
+	// Hashed before the command runs and again after it, so the verdict names the bytes the command read.
+	const inputsBefore = await hashJudgedInputs(inputs);
+	if (inputsBefore instanceof Error) {
+		return {
+			check: {
+				check: resolvedCheck.check,
+				argv: [...resolvedCheck.argv],
+				cwd: resolvedCheck.cwd,
+				exitCode: 1,
+				durationMs: 0,
+				memo: false,
+				notRun: "refused",
+				outputTail: outputTail(`numeric-compare: ${inputsBefore.message}; nothing ran`),
+				...(tree !== undefined ? { tree } : {}),
+			},
+			outputExcerpt: "",
+		};
+	}
+	const probes =
+		numeric?.provenance === undefined
+			? []
+			: await runProvenanceProbes(numeric.provenance, {
+					cwd: resolvedCheck.cwd,
+					workspaceRoot: resolvedCheck.cwd,
+					...(input.shellSandbox !== undefined ? { shellSandbox: input.shellSandbox } : {}),
+				});
+	const seed = numeric?.seed;
+	const runCommand: PlaybookCommand = seed === undefined ? command : { ...command, env: [...command.env, seed.env] };
+	const runEnv: NodeJS.ProcessEnv = seed === undefined ? input.env : { ...input.env, [seed.env]: seed.value };
+	const runCount = numeric?.repeat ?? 1;
+	const stepId = `verification-${input.index + 1}-${resolvedCheck.check.replace(/[^a-z0-9._-]/giu, "_")}`;
+	type Judgement = ReturnType<typeof judgeResolvedCheck>;
+	let chosen: { outcome: Awaited<ReturnType<typeof runCodeStep>>; judgement: Judgement } | undefined;
+	let durationMs = 0;
+	const failedRuns: number[] = [];
+	const payloads: NumericPayload[] = [];
+	// Every run is judged; one that fails to execute or to be judged ends the repetition, while one outside the
+	// tolerance is recorded and the rest still run, so the spread covers every run that produced a payload.
+	for (let run = 1; run <= runCount; run += 1) {
+		const outcome = await runCodeStep({
+			stepId: runCount > 1 ? `${stepId}-run${run}` : stepId,
+			command: runCommand,
+			workspaceRoot: resolvedCheck.cwd,
+			artifactDir: join(input.stateDir, "artifacts", input.runId, "verification"),
+			env: runEnv,
+			maxOutputBytes: captureMaxBytes,
+			...(input.shellSandbox !== undefined ? { shellSandbox: input.shellSandbox } : {}),
+		});
+		durationMs += outcome.record.durationMs;
+		// outputTruncated also covers the report excerpt; only capture loss prevents judgement.
+		let judgement: Judgement =
+			judged && outcome.record.outputTruncated && outcome.record.outputBytes > captureMaxBytes
+				? {
+						exitCode: 1,
+						outputTail: `verify: ${resolvedCheck.kind} command output exceeded ${captureMaxBytes} bytes before judgement; captured output was truncated`,
+					}
+				: judgeResolvedCheck(resolvedCheck, outcome.record.exitCode, outcome.record.durationMs, outcome.stdout);
+		const inputDrift =
+			inputs.length === 0 || outcome.record.exitCode !== 0 ? undefined : await judgedInputDrift(inputsBefore, inputs);
+		if (inputDrift !== undefined) judgement = { exitCode: 1, outputTail: outputTail(`numeric-compare: ${inputDrift}`) };
+		const runLabel = runCount > 1 ? `run ${run} of ${runCount}: ` : "";
+		if (judgement.report?.kind !== "numeric-compare") {
+			if (judgement.exitCode !== 0 && runLabel !== "" && judgement.outputTail !== undefined) {
+				judgement = { ...judgement, outputTail: outputTail(`${runLabel}${judgement.outputTail}`) };
+			}
+			// A command or perf check runs once; a numeric run that could not be judged ends the repetition.
+			if (chosen === undefined || judgement.exitCode !== 0) chosen = { outcome, judgement };
+			if (judgement.exitCode !== 0 || resolvedCheck.kind !== "numeric-compare") break;
+			continue;
+		}
+		const payload = parseNumericPayload(extractNumericPayloadText(outcome.stdout), `run ${run} output`);
+		if (!(payload instanceof Error)) payloads.push(payload);
+		if (!judgement.report.passed) failedRuns.push(run);
+		if (chosen === undefined || (chosen.judgement.exitCode === 0 && judgement.exitCode !== 0)) {
+			chosen = { outcome, judgement };
+		}
+	}
+	const { outcome, judgement } = chosen as NonNullable<typeof chosen>;
 	const artifactPath = outcome.record.artifactPaths[0];
-	// outputTruncated also covers the report excerpt; only capture loss prevents judgement.
-	const judgement =
-		judged && outcome.record.outputTruncated && outcome.record.outputBytes > captureMaxBytes
-			? {
-					exitCode: 1,
-					outputTail: `verify: ${resolvedCheck.kind} command output exceeded ${captureMaxBytes} bytes before judgement; captured output was truncated`,
-				}
-			: judgeResolvedCheck(resolvedCheck, outcome.record.exitCode, outcome.record.durationMs, outcome.stdout);
+	if (judgement.report?.kind === "numeric-compare") {
+		if (numeric?.inputs !== undefined || numeric?.provenance !== undefined) {
+			judgement.report.provenance = { inputs: inputsBefore, probes };
+		}
+		const repeat: RepeatRecord = { runs: runCount, failedRuns, spread: payloadSpread(payloads) };
+		judgement.report.repeat = repeat;
+		judgement.outputTail = outputTail(`${judgement.report.summary}\nrepeat: ${describeRepeat(repeat)}`);
+	}
 	const check: RunHostVerificationCheck = {
 		check: resolvedCheck.check,
 		argv: [...outcome.record.argv],
 		cwd: outcome.record.cwd,
 		exitCode: judgement.exitCode,
-		durationMs: outcome.record.durationMs,
+		durationMs,
 		memo: false,
 		...(outcome.launched ? {} : { notRun: "spawn-failed" as const }),
 		outputTail: judgement.outputTail ?? outputTail(outcome.report.outputExcerpt),
@@ -1215,6 +1319,10 @@ function checkDedupeKey(resolvedCheck: ResolvedCheck): string {
 							referenceDigest: sha256(JSON.stringify(readJudgedFile(numeric.reference) ?? null)),
 							sealedReference: numeric.referenceSha256,
 							tolerance: numeric.tolerance,
+							inputs: numeric.inputs,
+							provenance: numeric.provenance,
+							seed: numeric.seed,
+							repeat: numeric.repeat,
 						},
 			perf:
 				perf === undefined

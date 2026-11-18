@@ -28,7 +28,9 @@ import {
 	compareNumeric,
 	extractNumericPayloadText,
 	type NumericCompareReport,
+	type NumericPayload,
 	parseNumericPayload,
+	payloadSpread,
 	renderNumericReport,
 } from "./numeric.js";
 import {
@@ -41,6 +43,7 @@ import {
 	renderPerfBaseline,
 } from "./perf.js";
 import { captureProofSnapshot } from "./proof.js";
+import { hashJudgedInputs, judgedInputDrift, runProvenanceProbes } from "./provenance.js";
 import { type ReproduceReport, renderReproduceReport } from "./reproduce.js";
 import { checkoutState, type ReproduceOutcome, runReproduce } from "./reproduce-run.js";
 import { availableToolchainChecks } from "./resolve.js";
@@ -567,54 +570,110 @@ async function runJudgedCheck(
 				? check.perf?.baseline
 				: undefined;
 	const judgedBefore = judgedPath === undefined ? undefined : checkFileSha256(workspaceRoot, judgedPath);
-	let result: SafeCommandResult;
+	const numeric = check.kind === "numeric-compare" ? check.numeric : undefined;
+	let inputs: Array<{ path: string; absolute: string }>;
 	try {
-		result = await runCommandVector(file, vector, {
-			cwd,
-			...(options?.workspaceRoot !== undefined ? { workspaceRoot: options.workspaceRoot } : {}),
-			timeoutMs: check.timeoutMs,
-			maxOutputBytes: JUDGED_CHECK_MAX_OUTPUT_BYTES,
-			...(options?.signal !== undefined ? { signal: options.signal } : {}),
-			...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
-		});
+		inputs = (numeric?.inputs ?? []).map((input) => ({ path: input, absolute: resolveSafeCwd(input, workspaceRoot) }));
 	} catch (error) {
 		return { kind: "error", message: `verify: ${error instanceof Error ? error.message : String(error)}` };
 	}
-	const execution = executionOutcome(result);
-	const facts = { ...commandFacts(result), judgement: judgement(execution, "not-run") };
-	if (result.aborted) return { kind: "error", message: "verify: aborted", details: facts };
-	if (result.timedOut) return { kind: "error", message: `verify: timed out after ${check.timeoutMs}ms`, details: facts };
-	if (result.outputCapped) {
+	// Hashed before the command runs and again after it, so the verdict names the bytes the command read.
+	const inputsBefore = await hashJudgedInputs(inputs);
+	if (inputsBefore instanceof Error) {
 		return {
 			kind: "error",
-			message: `verify: ${check.kind} command output exceeded ${JUDGED_CHECK_MAX_OUTPUT_BYTES} bytes before judgement`,
-			details: facts,
+			message: `verify: numeric-compare ${inputsBefore.message}; nothing ran`,
+			details: { judgement: judgement("unavailable", "not-run") },
 		};
 	}
-	if (result.exitCode !== 0) {
-		const tail = `${result.stdout}${result.stderr}`.trim().slice(-2_000);
-		const hint = sandboxHint(`${result.stdout}\n${result.stderr}`, options);
-		return {
-			kind: "error",
-			message: `verify: ${check.kind} command exited with code ${result.exitCode ?? "?"} before judgement: ${tail}${hint}`,
-			details: facts,
-		};
+	const probes =
+		numeric?.provenance === undefined
+			? []
+			: await runProvenanceProbes(numeric.provenance, {
+					cwd,
+					workspaceRoot,
+					...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
+					...(options?.signal !== undefined ? { signal: options.signal } : {}),
+				});
+	const runCount = numeric?.repeat ?? 1;
+	const failedRuns: number[] = [];
+	const payloads: NumericPayload[] = [];
+	let chosen: { report: NumericCompareReport | PerfBudgetReport; facts: Record<string, unknown> } | undefined;
+	let execution: ReturnType<typeof executionOutcome> = "succeeded";
+	// Every run is judged. A run that fails to execute or to be judged ends the check with its own error; one outside
+	// the tolerance is recorded and the rest still run, so the spread covers every run.
+	for (let run = 1; run <= runCount; run += 1) {
+		const runLabel = runCount > 1 ? `run ${run} of ${runCount}: ` : "";
+		let result: SafeCommandResult;
+		try {
+			result = await runCommandVector(file, vector, {
+				cwd,
+				...(options?.workspaceRoot !== undefined ? { workspaceRoot: options.workspaceRoot } : {}),
+				timeoutMs: check.timeoutMs,
+				maxOutputBytes: JUDGED_CHECK_MAX_OUTPUT_BYTES,
+				...(numeric?.seed !== undefined ? { env: { [numeric.seed.env]: numeric.seed.value } } : {}),
+				...(options?.signal !== undefined ? { signal: options.signal } : {}),
+				...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
+			});
+		} catch (error) {
+			return { kind: "error", message: `verify: ${runLabel}${error instanceof Error ? error.message : String(error)}` };
+		}
+		execution = executionOutcome(result);
+		const facts = { ...commandFacts(result), judgement: judgement(execution, "not-run") };
+		if (result.aborted) return { kind: "error", message: `verify: ${runLabel}aborted`, details: facts };
+		if (result.timedOut) {
+			return { kind: "error", message: `verify: ${runLabel}timed out after ${check.timeoutMs}ms`, details: facts };
+		}
+		if (result.outputCapped) {
+			return {
+				kind: "error",
+				message: `verify: ${runLabel}${check.kind} command output exceeded ${JUDGED_CHECK_MAX_OUTPUT_BYTES} bytes before judgement`,
+				details: facts,
+			};
+		}
+		if (result.exitCode !== 0) {
+			const tail = `${result.stdout}${result.stderr}`.trim().slice(-2_000);
+			const hint = sandboxHint(`${result.stdout}\n${result.stderr}`, options);
+			return {
+				kind: "error",
+				message: `verify: ${runLabel}${check.kind} command exited with code ${result.exitCode ?? "?"} before judgement: ${tail}${hint}`,
+				details: facts,
+			};
+		}
+		const report =
+			check.kind === "numeric-compare" && check.numeric !== undefined
+				? judgeNumericCompare(result.stdout, check.numeric, workspaceRoot)
+				: check.kind === "perf-budget" && check.perf !== undefined
+					? judgePerfBudget(result.durationMs, check.perf, workspaceRoot)
+					: new Error(`declared check '${check.id}' has kind ${check.kind} without its parameters`);
+		if (report instanceof Error)
+			return { kind: "error", message: `verify: ${runLabel}${report.message}`, details: facts };
+		const judgedAfter = report.kind === "numeric-compare" ? report.reference?.sha256 : report.baseline?.sha256;
+		if (judgedPath !== undefined && judgedAfter !== undefined && judgedAfter !== judgedBefore) {
+			const label = report.kind === "numeric-compare" ? "reference" : "baseline";
+			return {
+				kind: "error",
+				message: `verify: ${runLabel}${report.kind} ${label} '${judgedPath}' changed while the check ran (${judgedBefore ?? "absent"}→${judgedAfter})`,
+				details: facts,
+			};
+		}
+		const inputDrift = await judgedInputDrift(inputsBefore, inputs);
+		if (inputDrift !== undefined) {
+			return { kind: "error", message: `verify: ${runLabel}numeric-compare ${inputDrift}`, details: facts };
+		}
+		if (report.kind === "numeric-compare") {
+			const payload = parseNumericPayload(extractNumericPayloadText(result.stdout), `run ${run} output`);
+			if (!(payload instanceof Error)) payloads.push(payload);
+		}
+		if (!report.passed) failedRuns.push(run);
+		if (chosen === undefined || (chosen.report.passed && !report.passed)) chosen = { report, facts };
 	}
-	const report =
-		check.kind === "numeric-compare" && check.numeric !== undefined
-			? judgeNumericCompare(result.stdout, check.numeric, workspaceRoot)
-			: check.kind === "perf-budget" && check.perf !== undefined
-				? judgePerfBudget(result.durationMs, check.perf, workspaceRoot)
-				: new Error(`declared check '${check.id}' has kind ${check.kind} without its parameters`);
-	if (report instanceof Error) return { kind: "error", message: `verify: ${report.message}`, details: facts };
-	const judgedAfter = report.kind === "numeric-compare" ? report.reference?.sha256 : report.baseline?.sha256;
-	if (judgedPath !== undefined && judgedAfter !== undefined && judgedAfter !== judgedBefore) {
-		const label = report.kind === "numeric-compare" ? "reference" : "baseline";
-		return {
-			kind: "error",
-			message: `verify: ${report.kind} ${label} '${judgedPath}' changed while the check ran (${judgedBefore ?? "absent"}→${judgedAfter})`,
-			details: facts,
-		};
+	const { report, facts } = chosen as NonNullable<typeof chosen>;
+	if (report.kind === "numeric-compare") {
+		if (numeric?.inputs !== undefined || numeric?.provenance !== undefined) {
+			report.provenance = { inputs: inputsBefore, probes };
+		}
+		report.repeat = { runs: runCount, failedRuns, spread: payloadSpread(payloads) };
 	}
 	const rendered = report.kind === "numeric-compare" ? renderNumericReport(report) : report.summary;
 	const details = {

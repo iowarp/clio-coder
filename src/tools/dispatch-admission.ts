@@ -430,6 +430,14 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 											reference: resolve(workspaceRoot, check.numeric.reference),
 											tolerance: { ...check.numeric.tolerance },
 											referenceSha256: judgedFileSha256(readJudgedFile(resolve(workspaceRoot, check.numeric.reference))),
+											...(check.numeric.inputs !== undefined
+												? { inputs: check.numeric.inputs.map((input) => resolve(workspaceRoot, input)) }
+												: {}),
+											...(check.numeric.provenance !== undefined
+												? { provenance: check.numeric.provenance.map((probe) => [...probe]) }
+												: {}),
+											...(check.numeric.seed !== undefined ? { seed: { ...check.numeric.seed } } : {}),
+											...(check.numeric.repeat !== undefined ? { repeat: check.numeric.repeat } : {}),
 										},
 									}
 								: {}),
@@ -448,7 +456,19 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 									}
 								: {}),
 							...(check.reproduce !== undefined
-								? { reproduce: { spec: structuredClone(check.reproduce), declaredCwd: check.cwd } }
+								? {
+										reproduce: {
+											spec: structuredClone(check.reproduce),
+											declaredCwd: check.cwd,
+											...(check.reproduce.compare.mode === "reference"
+												? {
+														referenceSha256: judgedFileSha256(
+															readJudgedFile(resolve(workspaceRoot, check.reproduce.compare.reference)),
+														),
+													}
+												: {}),
+										},
+									}
 								: {}),
 						};
 					}),
