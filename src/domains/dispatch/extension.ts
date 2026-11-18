@@ -4374,9 +4374,19 @@ export function createDispatchBundle(
 		},
 		onChange: (record, previous) => publishGrantChange(record, previous),
 	});
+	/** The session an ask belongs to when that is not the current one, which alone may answer it (bt-11 f), else null. */
+	function foreignAskOwner(runId: string, requestId: string): string | null {
+		const ownerSessionId =
+			grantBroker.get(requestId)?.ownerSessionId ?? currentAssignmentRun(runId)?.req.ownerSessionId ?? null;
+		const current = contract.owner?.();
+		return ownerSessionId === null || current === undefined || ownerSessionId === current.sessionId
+			? null
+			: ownerSessionId;
+	}
 	const workerApprovalWindows = createWorkerApprovalWindows({
 		now: monotonicNow,
 		onChange: ({ runId, agentId, requestId }, view) => {
+			const owner = foreignAskOwner(runId, requestId);
 			context.bus.emit("run.progressed", {
 				runId,
 				agentId,
@@ -4388,6 +4398,7 @@ export function createDispatchBundle(
 						expiresAt: now() + view.remainingMs,
 						fallback: view.fallback,
 						decider: view.decider,
+						...(owner !== null ? { owner } : {}),
 					},
 				},
 			});
@@ -11369,6 +11380,9 @@ export function createDispatchBundle(
 						`the owning session was ${payload.reason === "close" ? "closed" : "parked"}`,
 					);
 				}),
+				// A fork, or a /resume back to the dispatching session, changes who may answer an open ask.
+				context.bus.subscribe("session.created", () => workerApprovalWindows.republish()),
+				context.bus.subscribe("session.reattached", () => workerApprovalWindows.republish()),
 				context.bus.subscribe("session.ended", () => {
 					const sessions = new Set(grantBroker.list({ state: "pending" }).map((record) => record.ownerSessionId));
 					for (const sessionId of sessions) grantBroker.revokeSession(sessionId, "the owning session ended");
@@ -12212,10 +12226,9 @@ export function createDispatchBundle(
 			}
 		},
 		workerPermissionRefusal(runId, requestId) {
-			const ownerSessionId =
-				grantBroker.get(requestId)?.ownerSessionId ?? currentAssignmentRun(runId)?.req.ownerSessionId ?? null;
+			const ownerSessionId = foreignAskOwner(runId, requestId);
 			const owner = contract.owner?.();
-			if (ownerSessionId === null || owner === undefined || ownerSessionId === owner.sessionId) return null;
+			if (ownerSessionId === null || owner === undefined) return null;
 			return `run '${runId}' belongs to ${owningSessionPhrase(dispatchOwnership(owner), ownerSessionId)}; only the session that dispatched it can answer its approvals, steer it or cancel it. /resume ${ownerSessionId} to answer it`;
 		},
 		resolveWorkerPermission(runId, requestId, decision) {

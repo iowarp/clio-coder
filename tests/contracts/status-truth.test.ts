@@ -1429,6 +1429,11 @@ test("the rail beside a worker's ask states its expiry, and a short rail keeps t
 		);
 	match(facts(100) ?? "", /^coder waiting for your approval · denied in 1:59/u);
 	match(facts(40) ?? "", /^coder your approval · denied in 1:59/u);
+	// A fork cannot answer its parent's ask (bt-11 l): the worker reads as running and the ask as the parent's.
+	Object.assign(progress, { approvalWindow: { ...progress.approvalWindow, owner: "session-p" } });
+	match(facts(100) ?? "", /^coder running · approval held by session session-p · denied in 1:59/u);
+	strictEqual((facts(100) ?? "").includes("your approval"), false);
+	match(facts(20) ?? "", /^coder running/u);
 });
 
 test("the rail names who is working beside the main turn and what a card is not holding up", () => {
