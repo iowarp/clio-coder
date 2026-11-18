@@ -525,6 +525,36 @@ function operatorUnavailableLine(receipt: RunResult): string | null {
 	);
 }
 
+// A sentence of the worker's own account that says a call of its went wrong.
+const FAILED_WORDS = /\b(?:malformed|rejected|refused|denied|failed|errored|blocked|invalid)\b/iu;
+const ATTEMPT_WORDS = /\b(?:attempts?|calls?|tries|tried|retried|edits?|writes?|commands?)\b/iu;
+
+/**
+ * When the worker's answer describes calls of its own that failed or were refused, one line with what the host feed
+ * recorded for them. A worker has reported a malformed attempt the feed never saw and more denials than happened, and
+ * the parent repeated the worker's account (bt-23).
+ */
+function attemptFactsLine(receipt: RunResult): string | null {
+	if (receipt.externalTelemetry?.toolTelemetry === "unavailable") return null;
+	const text = receipt.output?.text ?? "";
+	const claims = text.split(/[.!?\n]+/u).some((sentence) => FAILED_WORDS.test(sentence) && ATTEMPT_WORDS.test(sentence));
+	if (!claims) return null;
+	let errored = 0;
+	let refused = 0;
+	const tools: string[] = [];
+	for (const stat of receipt.toolStats) {
+		errored += stat.errors;
+		refused += stat.blocked;
+		if (stat.errors + stat.blocked > 0) tools.push(stat.tool);
+	}
+	const named = tools.length > 0 ? ` (${tools.join(", ")})` : "";
+	return (
+		`attempts ${receipt.runId}: the worker's answer describes failed or refused calls; the host feed recorded ` +
+		`${receipt.toolCalls} ${receipt.toolCalls === 1 ? "call" : "calls"}, ${errored} errored and ${refused} refused${named}. ` +
+		"Report these counts, not the worker's account of its attempts."
+	);
+}
+
 interface CompletedRun {
 	recording?: import("../domains/dispatch/index.js").RecordingReference;
 	readOnly?: boolean;
@@ -727,6 +757,7 @@ export function formatDispatchOutput(
 					mcpSandboxNoNetworkNotice(run.receipt),
 					...routeWarningLines(run.receipt),
 					operatorUnavailableLine(run.receipt),
+					attemptFactsLine(run.receipt),
 				])
 				.filter((action): action is string => action !== null),
 		),
