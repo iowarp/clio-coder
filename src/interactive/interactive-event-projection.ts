@@ -215,12 +215,14 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 				// wrapper's tally stays only when no step settled (a plan that never
 				// parsed), and so does its error.
 				const steps = gatewayChainSteps(event.toolName, event.result);
+				// A call the output limit cut off never ran: like a chain's wrapper it leaves the tallies, and it is no error (bt-39 a).
+				const notRun = (event as { notRun?: unknown }).notRun !== undefined;
 				deps.recordToolEnd(
 					displayToolCall(event.toolName, undefined, details).toolName,
 					event.toolCallId,
-					event.isError && steps.length === 0,
+					event.isError && steps.length === 0 && !notRun,
 					summary?.truncated === true,
-					steps.length > 0,
+					steps.length > 0 || notRun,
 				);
 				for (const step of steps) {
 					const stepId = chainStepToolCallId(event.toolCallId, step.id);

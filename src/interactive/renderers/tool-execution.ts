@@ -154,6 +154,11 @@ export interface ToolExecutionFinished {
 	 */
 	notRun?: boolean | undefined;
 	/**
+	 * A not-run call whose result is the engine's refusal rather than a failure: the output limit cut off the reply
+	 * that made it, so its arguments may be cut off too (bt-39 a). Its row reads `not run … output limit`, not `✗`.
+	 */
+	notRunCause?: "output_limit" | undefined;
+	/**
 	 * Why admission refused this call, from the registry verdict. A blocked row
 	 * that states only that something was refused leaves the operator, and the
 	 * model reading the same transcript, to guess at the rule.
@@ -910,7 +915,16 @@ function approvalReceiptRows(
  * glyph hangs off the right of the header line so the tool name + args read
  * left-to-right without extra punctuation.
  */
-type HeaderStatus = "forming" | "ready" | "running" | "ok" | "unfinished" | "cancelled" | "error" | undefined;
+type HeaderStatus =
+	| "forming"
+	| "ready"
+	| "running"
+	| "ok"
+	| "unfinished"
+	| "cancelled"
+	| "not_run"
+	| "error"
+	| undefined;
 
 /** Keeps a refusal reason to one scannable clause on the status tail. */
 const BLOCK_REASON_LIMIT = 72;
@@ -972,6 +986,7 @@ function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	if (status === "ok") return ` ${green(STATUS_OK_GLYPH)}${durationSuffix}`;
 	if (status === "unfinished") return ` ${yellow(GLYPH.warn)}${durationSuffix}`;
 	if (status === "cancelled") return ` ${toolMeta(GLYPH.cancelled)}${durationSuffix}`;
+	if (status === "not_run") return ` ${yellow(GLYPH.warn)}${toolMeta(" output limit")}`;
 	// A blocked row says `blocked` as its verb; an aborted or orphaned one names
 	// its outcome here. The exit status is a fact on the row, never a suffix.
 	const outcomeSuffix = meta.outcome !== undefined && meta.outcome !== "blocked" ? toolMeta(` ${meta.outcome}`) : "";
@@ -1268,7 +1283,8 @@ function sublineParts(
 		const lead = `${classMark("knowledge")}${toolMeta("skill")} ${theme.fg("skillIdentity", sanitizeCallTargetText(refusal.name))} ${functionText(theme, "skill", "not loaded")}${toolMeta(" · ")}${refusalFact(refusal)}`;
 		return { lead, tail: statusGlyph(status, meta) };
 	}
-	const settled = status === "ok" || status === "unfinished" || status === "cancelled" || status === "error";
+	const settled =
+		status === "ok" || status === "unfinished" || status === "cancelled" || status === "not_run" || status === "error";
 	const notRun = didNotRun(finished);
 	// A change the tool refused or failed to apply never landed, so the row
 	// must not read "edited" beside its error glyph.
@@ -1845,8 +1861,17 @@ function renderResultBlock(
 	return renderOutputRows(resultText(unwrapped, resultCharLimit(opts)), width, isError, resultRowLimit(opts));
 }
 
+/**
+ * A call the output limit cut off settles with the engine's refusal as an error result, but it never ran, so its
+ * body reads as that note rather than as a failure's output. Its status still comes from `notRunCause`.
+ */
+function asNotFailed<T extends ToolExecutionFinished>(finished: T): T {
+	return finished.notRunCause === undefined || !finished.isError ? finished : { ...finished, isError: false };
+}
+
 /** A question the operator dismissed finished cleanly, but nothing was answered, so its mark is not a success. */
 function settledStatus(finished: ToolExecutionFinished): HeaderStatus {
+	if (finished.notRunCause !== undefined) return "not_run";
 	// A delegation whose worker was cancelled did not fail; its card under the row already says who stopped it.
 	if (finished.isError) {
 		const details = detailsOf(finished.result);
@@ -1944,7 +1969,7 @@ export function renderToolExecution(
 	width: number,
 	opts: ToolBodyRenderOptions = {},
 ): string[] {
-	const finished = presentedCall(wire);
+	const finished = presentedCall(asNotFailed(wire));
 	if (isChainCall(finished)) return renderChainExecution(finished, width, opts);
 	const status = settledStatus(finished);
 	const statusMeta: StatusMeta = {
@@ -2008,7 +2033,7 @@ export function renderToolResultOnly(
 	opts: ToolBodyRenderOptions = {},
 ): string[] {
 	if (!opts.unbounded && opts.detail) return renderToolPreview(wire, width, opts.detail, opts);
-	const finished = presentedCall({ ...wire, args: undefined });
+	const finished = presentedCall(asNotFailed({ ...wire, args: undefined }));
 	if (isChainCall(finished)) return renderChainExecution(finished, width, opts);
 	const status = settledStatus(finished);
 	const statusMeta: StatusMeta = {
@@ -2398,7 +2423,7 @@ export function renderToolPreview(
 	const liveFact = payload === null ? undefined : livePayloadFact(payload, view);
 	const call = payload === null ? presented : withoutLivePayload(presented);
 	const finished = "result" in call ? call : undefined;
-	const failure = finished?.isError === true || finished?.outcome !== undefined;
+	const failure = (finished?.isError === true && finished.notRunCause === undefined) || finished?.outcome !== undefined;
 	const row = resolveRow(call);
 	const command = row.spec.class === "execute";
 	const limit = previewBudget(
@@ -2607,7 +2632,8 @@ function chainSublineParts(
 	status: HeaderStatus,
 	meta: StatusMeta,
 ): SublineParts {
-	const settled = status === "ok" || status === "unfinished" || status === "cancelled" || status === "error";
+	const settled =
+		status === "ok" || status === "unfinished" || status === "cancelled" || status === "not_run" || status === "error";
 	const verb =
 		status === "forming" || status === "ready"
 			? sanitizeCallTargetText(call.toolName)

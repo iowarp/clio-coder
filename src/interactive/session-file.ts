@@ -271,7 +271,9 @@ export function createSessionFileRecorder(deps: {
 					settle();
 				}
 			} else if (event.type === "tool_execution_end") {
-				if (event.isError) failedToolCalls += 1;
+				// A call the output limit cut off never ran: no call and no failure (bt-39 a).
+				if ((event as { notRun?: unknown }).notRun !== undefined) toolCalls = Math.max(0, toolCalls - 1);
+				else if (event.isError) failedToolCalls += 1;
 				pending.delete(event.toolCallId);
 				if (event.toolName === ASK_USER_TOOL && askWaiting) {
 					askWaiting = undefined;

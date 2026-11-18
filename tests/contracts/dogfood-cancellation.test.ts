@@ -1,11 +1,13 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { Type } from "typebox";
 import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { readArenaStream } from "../../src/domains/arena/facts.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
@@ -26,7 +28,9 @@ import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import { renderSessionHtml } from "../../src/interactive/export-html/index.js";
 import { expandInteractiveSubmitAsync } from "../../src/interactive/interactive-application.js";
-import { buildSummary } from "../../src/interactive/status/summary.js";
+import { createSessionFileRecorder } from "../../src/interactive/session-file.js";
+import { lastTurnSummaryFromLedger } from "../../src/interactive/session-last-turn.js";
+import { buildSummary, emptyRunTally, foldMessageIntoRunTally } from "../../src/interactive/status/summary.js";
 import { resolveFooterVerb } from "../../src/interactive/status/verbs.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
@@ -1208,6 +1212,68 @@ it("calls the output limit cut off are flagged as not run under one notice that 
 		match(String((notices[0] as { text?: unknown }).text), /3 tool calls in it; none ran/u);
 		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
 	} finally {
+		await f.close();
+	}
+});
+
+it("calls the output limit cut off count as no call and no tool error and read as not run, live and resumed (bt-39 a)", {
+	timeout: 15_000,
+}, async () => {
+	const f = fixture("truncated");
+	const dir = mkdtempSync(join(tmpdir(), "clio-cut-off-"));
+	try {
+		const path = join(dir, "session.json");
+		const recorder = createSessionFileRecorder({
+			path,
+			cwd: dir,
+			snapshot: () => ({ sessionId: "s", sessionName: null, turns: 1, models: [] }) as never,
+		});
+		await f.loop.submit("Read the three files.");
+		await f.loop.whenSettled();
+		for (const event of f.events) recorder.observeChat(event);
+		let tally = emptyRunTally();
+		for (const event of f.events) if (event.type === "message_end") tally = foldMessageIntoRunTally(tally, event.message);
+		const end = [...f.events].reverse().find((event) => event.type === "agent_end");
+		ok(end?.type === "agent_end");
+		const summary = buildSummary({
+			startedAt: 1,
+			endedAt: 2,
+			modelId: model.id,
+			targetId: target.id,
+			messages: end.messages,
+			watchdogPeak: 0,
+			cancelled: false,
+		});
+		const resumed = lastTurnSummaryFromLedger(f.entries());
+		ok(resumed);
+		const arena = readArenaStream(f.events.map((event) => JSON.stringify(event)).join("\n"));
+		const lastTurn = JSON.parse(readFileSync(path, "utf8")).lastTurn;
+		deepStrictEqual(
+			{
+				live: [tally.toolCount, tally.toolErrorCount],
+				summary: [summary.toolCount, summary.toolErrorCount],
+				ledger: [resumed.toolCount, resumed.toolErrorCount],
+				arena: [arena.toolCalls, arena.toolErrors],
+				sessionFile: [lastTurn.toolCalls, lastTurn.failedToolCalls],
+			},
+			{ live: [0, 0], summary: [0, 0], ledger: [0, 0], arena: [0, 0], sessionFile: [0, 0] },
+		);
+		const replay = createChatPanel({ getOutputStyle: () => "detailed" });
+		rehydrateChatPanelFromTurns(replay, f.entries());
+		for (const [surface, panel] of [
+			["live", f.panel],
+			["resumed", replay],
+		] as const) {
+			const rendered = panel.render(120).map(stripTerminalSequences).join("\n");
+			const rows = rendered.split("\n").filter((line) => /not run/u.test(line));
+			strictEqual(rows.length, 3, `${surface}:\n${rendered}`);
+			for (const row of rows) {
+				match(row, new RegExp(`${GLYPH.warn} output limit`, "u"), surface);
+				ok(!row.includes(GLYPH.error), `${surface}: ${row}`);
+			}
+		}
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
 		await f.close();
 	}
 });

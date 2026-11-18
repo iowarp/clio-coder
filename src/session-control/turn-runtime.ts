@@ -1,3 +1,4 @@
+import { outputLimitCutOffToolCallIds } from "../core/assistant-output.js";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { isHostAuthored, rememberMessageCalls } from "../core/message-accounting.js";
 import { applyModelAdmission, type ModelAdmissionEvent } from "../core/model-admission.js";
@@ -1776,10 +1777,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			let enrichedEvent = event;
 			if (event.type === "message_end" && event.message.role === "assistant") {
 				requiredToolReminder = middlewareToolChoice.completeRound(event.message);
-				const cutOff =
-					event.message.stopReason === "length"
-						? event.message.content.flatMap((block) => (block.type === "toolCall" ? [block.id] : []))
-						: [];
+				const cutOff = outputLimitCutOffToolCallIds(event.message);
 				for (const id of cutOff) cutOffToolCalls.add(id);
 				// One line states the limit where it applies, instead of one failed call per call (bt-39 a).
 				if (cutOff.length > 0)
