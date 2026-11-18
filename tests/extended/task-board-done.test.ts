@@ -57,11 +57,21 @@ describe("task board done", () => {
 		);
 	});
 
-	it("still refuses done without evidence", () => {
-		const store = createTaskBoardStore({ getSessionId: () => "s1", createBoardId: () => "b1" });
-		store.apply({ op: "plan", title: "issues", tasks: ["fix #12"] });
-		const done = store.apply({ op: "done", id: "t1", evidence: "  " });
-		strictEqual(done.ok, false);
+	it("refuses done without a note and an unknown key, naming the key to use (bt-22)", async () => {
+		const board = createTaskBoardStore({ getSessionId: () => "s1", createBoardId: () => "b1" });
+		const tool = createTasksTool({ board });
+		await tool.run({ action: "plan", title: "issues", tasks: ["fix #12"] });
+		const errorOf = async (args: Record<string, unknown>) => {
+			const result = await tool.run(args);
+			return result.kind === "error" ? result.message : `unexpected ${result.kind}`;
+		};
+		strictEqual(
+			await errorOf({ action: "done", id: "t1", evidence: "fixed" }),
+			'tasks: unknown key "evidence"; use note',
+		);
+		strictEqual(await errorOf({ action: "start", task_id: "t1" }), 'tasks: unknown key "task_id"; use id');
+		match(await errorOf({ action: "done", id: "t1", note: "  " }), /^tasks: done requires note="<what was done/);
+		strictEqual(board.snapshot()?.tasks[0]?.status, "pending");
 	});
 
 	it("keeps a failed-check completion note without projecting passed validation", async () => {

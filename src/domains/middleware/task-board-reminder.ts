@@ -26,7 +26,7 @@ export function taskBoardReminderMessage(steps: number, placement: "direct" | "g
 	return (
 		`[Tasks] This request enumerates ${steps} steps. Before the first edit, declare the task board: ${plan}` +
 		"work them one at a time " +
-		'("start", then "done" with an evidence note for observed work and check results, disclosing failed or unrun checks). ' +
+		'("start", then "done" with note="<observed work and check results>", disclosing failed or unrun checks). ' +
 		"Bookkeeping is not a reason to end a model response: when IDs and arguments are known, use gateway op=chain for " +
 		"done -> start -> next read/work, or decide -> authorized implementation, with each dependent step's after naming its predecessor's step id. " +
 		"Never predict results or prewrite done for work/checks in that chain. Successful returned board and operator-task state is authoritative; " +
