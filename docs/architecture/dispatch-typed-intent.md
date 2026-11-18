@@ -244,7 +244,7 @@ compatibility identifiers that have no current producer.
 | Code | Decision | Meaning |
 | :--- | :--- | :--- |
 | `typed_scope_replaced_inferred_paths` | warn | Typed intent was declared, so prose-only paths took no part in scope. |
-| `legacy_scope_inferred` | warn | Emitted by `path-scope.ts` when prose inference resolves a leading `../` run against the dispatch root. The detail lists each token as `<raw token> -> <path or dropped>`. |
+| `legacy_scope_inferred` | warn | Emitted by `path-scope.ts` when prose inference resolves a leading `../` run against the dispatch root. The message names dropped tokens as paths outside the workspace that were not granted, and anchored ones as `<raw token> as <path>`. |
 | `legacy_scope_empty` | retained compatibility id | Accepted by the event projection for older producers; no current source emits it. |
 | `write_root_dot_unconfined` | warn | A write root of `.` names the whole workspace, so it sets no write boundary and the worker keeps bash, verify and git. |
 | `write_roots_checks_withheld` | warn | Narrow write roots run without an OS sandbox enforcing them, so the worker loses bash and verify and cannot run checks. |

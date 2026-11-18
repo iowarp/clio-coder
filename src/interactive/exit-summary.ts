@@ -1,7 +1,7 @@
 import type { ExitSummaryStyle, OutputStyle } from "../core/defaults.js";
 import { resolveExitSummaryStyle } from "../core/defaults.js";
 import { formatFooterTokens } from "../core/display-units.js";
-import { plainOutcomeLabel } from "../domains/dispatch/failure-headline.js";
+import { plainOutcomeLabel, refusedCallsWords } from "../domains/dispatch/failure-headline.js";
 import { formatOpenDecision } from "../domains/safety/autonomy-window.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
@@ -222,9 +222,14 @@ function outcomes(snapshot: ExitSummarySnapshot): string[] {
 		counts.set(outcome, (counts.get(outcome) ?? 0) + 1);
 	}
 	// Quitting drains the fleet, so a worker still running when the summary was taken did not keep running.
-	return [...counts].map(
+	const words = [...counts].map(
 		([outcome, n]) => `${count(n)} ${outcome === "running" ? "stopped by quitting" : plainOutcomeLabel(outcome)}`,
 	);
+	// A clean exit says nothing of a refused call; the collected block names it, so this row does too.
+	const refused = snapshot.workers.reduce((sum, worker) => sum + (worker.refusedCalls ?? 0), 0);
+	if (refused === 0) return words;
+	const guarded = snapshot.workers.reduce((sum, worker) => sum + (worker.guardedCalls ?? 0), 0);
+	return [...words, refusedCallsWords(refused, guarded)];
 }
 
 /**
