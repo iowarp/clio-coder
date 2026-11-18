@@ -36,6 +36,12 @@ export const DEFAULT_HOOK_BUDGET_WARMUP_CALLS = 1;
 export const DEFAULT_HOOK_BUDGET_WINDOW = 5;
 /** Warn only when ≥N of the last M post-warmup calls exceeded budget. */
 export const DEFAULT_HOOK_BUDGET_THRESHOLD = 3;
+/**
+ * A lone overrun of at least this multiple of the budget is a stall (a cold
+ * spawn, a blocking read), not jitter, so it is recorded without waiting for
+ * the window. A smaller lone overrun only counts in the window.
+ */
+export const HOOK_BUDGET_STALL_FACTOR = 10;
 
 export type HookBudgetMap = Record<MiddlewareHook, number>;
 

@@ -7,6 +7,7 @@ import { Type } from "typebox";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
+import { createHookBudgetTracker } from "../../src/domains/middleware/budget.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import {
 	type HookReceipt,
@@ -343,6 +344,27 @@ describe("middleware hook boundary", () => {
 		deepStrictEqual(diagnostics, [
 			{ kind: "hook_failed", registrationId: "failed", hook: "before_tool", message: "hook exploded" },
 		]);
+	});
+
+	it("records a stall but not a lone overrun short of one as a hook failure (bt-12)", () => {
+		const tracker = createHookBudgetTracker();
+		const diagnostics: MiddlewareDiagnostic[] = [];
+		const observer = registration("observer", () => []);
+		for (const elapsedMs of [40, 30, 300]) {
+			const clock = [0, elapsedMs];
+			runMiddlewareRegistrations({ hook: "before_tool", toolName: "read" }, [observer], {
+				onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+				now: () => clock.shift() ?? 0,
+				budgetTracker: tracker,
+			});
+		}
+		// 40 is warmup and 30 a lone overrun of the 25 ms budget; 300 is past ten times it.
+		deepStrictEqual(
+			diagnostics.map((diagnostic) =>
+				diagnostic.kind === "budget_exceeded" ? [diagnostic.elapsedMs, diagnostic.steadyStateWarn] : diagnostic.kind,
+			),
+			[[300, false]],
+		);
 	});
 
 	it("matches exact hook and tool scopes", () => {

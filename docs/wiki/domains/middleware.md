@@ -56,7 +56,7 @@ The middleware domain is the ordered evaluation layer that runs at tool and turn
 1. A registration is skipped unless its `hooks` include `input.hook` and `registrationMatchesTool` accepts `input.toolName`.
 2. `evaluate` receives a clone of the input and a context whose `priorEffects` holds the effects emitted so far in this run, plus an `evidence` callback that names what triggered the effects.
 3. A throw is caught and emitted as a `hook_failed` diagnostic, with the hook occurrence's session, run, turn, and tool call attached through `withToolTelemetryContext`. The registration contributes nothing.
-4. The elapsed time is recorded in the budget tracker. A post-warmup overrun emits a `budget_exceeded` diagnostic; only steady-state overruns carry `steadyStateWarn`, and the stderr writer prints only those unless `CLIO_CODER_HOOK_BUDGET_DEBUG=1`.
+4. The elapsed time is recorded in the budget tracker. A post-warmup overrun emits a `budget_exceeded` diagnostic when it is steady-state or a stall of ten times the budget or more; a smaller lone overrun only counts in the window. Only steady-state overruns carry `steadyStateWarn`, and the stderr writer prints only those. `CLIO_CODER_HOOK_BUDGET_DEBUG=1` emits and prints every post-warmup overrun.
 5. Emitted effects are cloned and appended. The result carries `effects`, `ruleIds`, and `fired` records, which the bundle passes to `recordFiredRules`.
 
 `runMiddlewareAsyncRegistrations` runs only registrations with `evaluateAsync`, in order, and skips an `awaited` tool-hook registration when the input has no tool name. The bundle's async path, which is consumed by the tool registry and turn middleware, is not traced further on this page.

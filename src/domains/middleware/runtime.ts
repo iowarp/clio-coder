@@ -1,6 +1,11 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { withToolTelemetryContext } from "../../core/telemetry/context.js";
-import { createHookBudgetTracker, type HookBudgetStats, type HookBudgetTracker } from "./budget.js";
+import {
+	createHookBudgetTracker,
+	HOOK_BUDGET_STALL_FACTOR,
+	type HookBudgetStats,
+	type HookBudgetTracker,
+} from "./budget.js";
 import type { MiddlewareRegistrationConflictTier, MiddlewareRegistrationOwner } from "./registrations.js";
 import {
 	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
@@ -279,10 +284,18 @@ export function runMiddlewareRegistrations(
 		const elapsedMs = now() - startedAt;
 		// Record every evaluation so the rolling window has an accurate
 		// denominator, but never surface warmup overruns (one-time JIT/module
-		// warmup is not misbehavior; a subprocess has none, so it gets no grace). Post-warmup overruns ride the bus for
-		// telemetry; only steady-state slowness carries steadyStateWarn.
+		// warmup is not misbehavior; a subprocess has none, so it gets no grace).
+		// A lone overrun short of a stall is host jitter, not a failure: it only
+		// counts in the window. Steady-state slowness and a stall ride the bus,
+		// and only steady-state slowness carries steadyStateWarn.
 		const outcome = budgetTracker.record(registration.id, input.hook, elapsedMs, registration.spawnsProcess !== true);
-		if (outcome.exceeded && !outcome.warmup) {
+		if (
+			outcome.exceeded &&
+			!outcome.warmup &&
+			(outcome.warn ||
+				elapsedMs >= outcome.budgetMs * HOOK_BUDGET_STALL_FACTOR ||
+				process.env.CLIO_CODER_HOOK_BUDGET_DEBUG === "1")
+		) {
 			emitDiagnostic(
 				onDiagnostic,
 				{

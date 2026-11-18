@@ -78,7 +78,7 @@ Diagnostic toggles default off and activate on `1`:
 - `CLIO_CODER_TRACE_BOOT` — stamps `[clio-coder:boot] +<ms> <phase>` lines to stderr ([boot-trace.ts](../../src/core/boot-trace.ts)).
 - `CLIO_CODER_TIMING` — prints startup timing summary on non-interactive bannered boot ([orchestrator.ts](../../src/entry/orchestrator.ts)).
 - `CLIO_CODER_DEBUG_SHUTDOWN` — logs shutdown hook timings/diagnostics ([termination.ts](../../src/core/termination.ts), [domain-loader.ts](../../src/core/domain-loader.ts)).
-- `CLIO_CODER_HOOK_BUDGET_DEBUG` — logs every hook-budget overrun, not only steady-state warnings ([runtime.ts](../../src/domains/middleware/runtime.ts)).
+- `CLIO_CODER_HOOK_BUDGET_DEBUG` — records and logs every hook-budget overrun, not only steady-state warnings and stalls ([runtime.ts](../../src/domains/middleware/runtime.ts)).
 - `CLIO_CODER_CONFIG_DEBUG` — prints full error/stack when settings hot-reload watcher fails instead of one summary line ([watcher.ts](../../src/domains/config/watcher.ts)).
 
 File-writing trace:
