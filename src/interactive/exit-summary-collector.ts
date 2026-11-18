@@ -346,7 +346,11 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 	 * session on the first prompt.
 	 */
 	let reopenedSessionId = deps.session?.current()?.id ?? null;
-	let compactions = 0;
+	/**
+	 * Compactions each session ran this visit, by the session the event names. The card counts the named session's own,
+	 * so a fork never shows the parent's `Compactions: 11` (bt-47 D3), as its Tools row never shows the parent's calls.
+	 */
+	const compactions = new Map<string, number>();
 	const models = new Map<string, { target: string; model: string }>();
 	const files = new Map<string, number>();
 	const workerPaths = new Map<string, Set<string>>();
@@ -474,8 +478,9 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			for (const [tool, count] of deps.getToolCounts()) parked.set(tool, (parked.get(tool) ?? 0) + count);
 			parkedTools.set(sessionId, parked);
 		}),
-		deps.bus.subscribe("context.pruned", () => {
-			compactions += 1;
+		deps.bus.subscribe("context.pruned", (_event, context) => {
+			const sessionId = context?.sessionId ?? deps.session?.current()?.id ?? "";
+			compactions.set(sessionId, (compactions.get(sessionId) ?? 0) + 1);
 			highlight("Context compacted");
 		}),
 		deps.bus.subscribe("run.started", (run) => {
@@ -666,7 +671,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				}),
 				timelineOmitted,
 				workers: [...workers.values()],
-				compactions,
+				compactions: compactions.get(session.id) ?? 0,
 				...(gitHooks.length > 0 ? { gitHooks } : {}),
 				...(autonomy !== null ? { autonomy } : {}),
 				...(sessions > 1 ? { visitSessions: sessions } : {}),
