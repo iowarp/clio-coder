@@ -48,7 +48,7 @@ const PENDING_EVENT_TURN_ID = "";
 const STEP_OVERFLOW_ADVICE =
 	"This read did not fit the model's context window. Read only the part you need, with offset and limit.";
 const SEEN_OVERFLOW_ADVICE =
-	'You already read this; its body was dropped to fit the context window. Continue from what you took from it, or recall a detail by ref with context(scope="recall"). Do not read it again in full.';
+	'You already read this; its body was dropped to fit the context window. Continue from what you took from it, or recall a detail by ref with context(scope="recall"), one ref at a time. Do not read it again in full.';
 
 /**
  * The stub that replaces this unit's body, or null when there is nothing to
