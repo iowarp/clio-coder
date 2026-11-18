@@ -44,6 +44,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- The finish assessment replays the shared check fold once per turn end instead of up to twice (x8-6).
 - Standard keeps one row of the reasoning before an action instead of a bare Thinking marker (bt-11 b).
 - Each bash command is scanned once per classification and only checks compute their extra facets; the registry and finish contract ask for the verdict alone; task-board replays within one run share git lookups and per-call readings (x6-7).
 - Tool guard blocks are listed under `safety.guardBlockedAttempts` (receipts, turn_end/run_end, run.settled), no longer under `safety.blockedAttempts`, matching `decisions.guardBlocked`. Receipts and journals written earlier keep guard blocks in `blockedAttempts` (bt-15 c12b).
@@ -108,6 +109,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- The finish contract credits a passing check (bash, `verify`, operator `!`, or declared) only while no later edit has retired it, so edit-test-edit no longer finishes "checks passed" and the high-rigor acceptance gate no longer passes on a stale check, for the main agent and dispatched workers. Any shell or `!` check pass the shared check fold still holds is credited under its observed name, so a green `cargo clippy`, `mypy .`, `go vet` or `ruff check` after the last edit satisfies the gate (x8-1).
 - Read-only checks from other ecosystems now settle a recorded outcome instead of reading as unknown: `cargo check`/`clippy`, `go vet`/`build`, `gofmt -l`, `mypy`, `pyright`, `ruff check`, `prettier --check`, `biome check`, `dotnet test`, `rspec`, `phpunit`, `deno`, `playwright`, `cypress`, `tox`, `nox`, `make test`/`check`/`lint`, and runs behind `poetry`, `pipenv`, `hatch`, `pdm`, `rye` or `bundle exec`. Their `--fix` and `--write` forms stay writers (x8-2).
 - A write into a scratch root or temp dir inside the workspace now retires standing check passes (x8-4).
 - A check call that also copies or creates files only outside the workspace (`npm test && cp coverage/lcov.info /tmp/`) no longer retires earlier passes (x8-5).
