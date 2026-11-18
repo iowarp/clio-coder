@@ -501,6 +501,28 @@ function routeWarningLines(receipt: RunResult): string[] {
 	);
 }
 
+// The worker's denial for an operator-authority ask nobody can answer (src/engine/worker-runtime.ts).
+const OPERATOR_UNAVAILABLE_DENIAL =
+	/^permission denied by policy: \S+ raised an operator-authority ask and no operator can answer worker asks/u;
+
+/**
+ * One line when the worker had calls denied because they needed an operator and no operator can answer worker asks
+ * for this dispatch. The policy stands; the parent learns the worker's own checks were limited, so a pass the
+ * worker reports does not cover what those calls would have checked (bt-23).
+ */
+function operatorUnavailableLine(receipt: RunResult): string | null {
+	const denied = (receipt.safety?.blockedAttempts ?? []).filter((attempt) =>
+		OPERATOR_UNAVAILABLE_DENIAL.test(attempt.reason ?? ""),
+	);
+	if (denied.length === 0) return null;
+	const tools = [...new Set(denied.map((attempt) => attempt.tool))].join(", ");
+	return (
+		`verification_limited ${receipt.runId}: ${denied.length} worker ${denied.length === 1 ? "call" : "calls"} (${tools}) ` +
+		"needed operator approval that no one can give a worker in this dispatch, so they did not run; " +
+		"run any check they covered yourself before relying on the worker's verification."
+	);
+}
+
 interface CompletedRun {
 	recording?: import("../domains/dispatch/index.js").RecordingReference;
 	readOnly?: boolean;
@@ -658,6 +680,7 @@ export function formatDispatchOutput(
 					withheldMergeNotice(run.receipt),
 					mcpSandboxNoNetworkNotice(run.receipt),
 					...routeWarningLines(run.receipt),
+					operatorUnavailableLine(run.receipt),
 				])
 				.filter((action): action is string => action !== null),
 		),

@@ -206,3 +206,31 @@ test("a worker route warning reaches the dispatching model once, ahead of the ru
 	ok(lines.indexOf(`route_warning run-thinking: ${message}`) < lines.findIndex((line) => line.startsWith("- ")));
 	ok(!output.includes("not a warning"));
 });
+
+test("a worker call denied for want of an operator tells the dispatching model its verification was limited", () => {
+	const envelope = fixtureEnvelope("run-denied");
+	const draft = fixtureReceiptDraft(envelope);
+	const reason =
+		"permission denied by policy: bash raised an operator-authority ask and no operator can answer worker asks for this dispatch; bash requires execute confirmation";
+	draft.safety = {
+		decisions: { allowed: 3, blocked: 0, permissionRequested: 2 },
+		blockedAttempts: [
+			{ tool: "bash", reason },
+			{ tool: "bash", reason },
+			{ tool: "write", reason: "outside the write roots" },
+		],
+	};
+	const receipt = finishRunResult(draft, envelope, {
+		terminal: { terminalReason: draft.terminalReason ?? "completed" },
+		processExitCode: envelope.exitCode,
+		frameType: null,
+		usage: undefined,
+	}).result;
+	const lines = formatDispatchOutput("parallel", [{ ...run("run-denied", 0, "target-rates", 1), receipt }], 16384).split(
+		"\n",
+	);
+	const limited = lines.filter((line) => line.startsWith("verification_limited"));
+	deepStrictEqual(limited.length, 1);
+	match(limited[0] ?? "", /^verification_limited run-denied: 2 worker calls \(bash\) needed operator approval/u);
+	ok(lines.indexOf(limited[0] ?? "") < lines.findIndex((line) => line.startsWith("- ")));
+});
