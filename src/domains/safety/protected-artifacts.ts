@@ -258,6 +258,16 @@ export function detectValidationCommand(
 }
 
 /**
+ * The command's single-line form: a backslash-newline is a line continuation, not a separator, so
+ * `npm test \<newline>  -- -x` is `npm test -- -x` (x7-4).
+ */
+export function joinLineContinuations(command: string): string {
+	return command.replace(/([ \t]*)(?<=(?:^|[^\\])(?:\\\\)*)\\\n([ \t]*)/gu, (_, before: string, after: string) =>
+		before.length > 0 || after.length > 0 ? " " : "",
+	);
+}
+
+/**
  * The name an observed check's outcome is filed under: the command with trailing output plumbing (`2>&1`, `| tail`,
  * `| head`, `| tee log`, `> log`) removed, so `make test 2>&1 | tail -5` and `make test` settle each other. Under `pipefail` a pipeline exits
  * 0 only when the check did, so a green settles the name however it was piped; `head` can turn a green into a red
@@ -265,7 +275,7 @@ export function detectValidationCommand(
  * `pytest` never settles `pytest -q` (bt-27).
  */
 export function observedValidationCommand(command: string): string {
-	let current = command.trim();
+	let current = joinLineContinuations(command).trim();
 	for (;;) {
 		const next = current
 			.replace(/\s*\|&?\s*(?:tail|head|tee)(?:\s+[^|;&<>]*)?$/u, "")

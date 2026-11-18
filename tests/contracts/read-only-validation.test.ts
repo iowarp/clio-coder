@@ -793,6 +793,8 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	for (const check of ["npx tsc --noEmit", "npx eslint ."])
 		deepStrictEqual(seal("npm test", `!${check}`), [["npm test"], "unverified", [check]], check);
 	deepStrictEqual(seal("!npm test", "npm test -- -t parses"), [["npm test"], "unverified", ["npm test"]]);
+	// A line continuation separates nothing, so the continued check's red stands under its single-line name (x7-4).
+	deepStrictEqual(seal("!npm test \\\n  -- --reporter=dot"), [[], "unverified", ["npm test -- --reporter=dot"]]);
 	deepStrictEqual(seal("!npm test", "npm test -- --import ./x.mjs"), red);
 	deepStrictEqual(seal("npm test -- --run"), green);
 	// Every change ran before the check through `&&`, or the call held only checks, cd and plumbing.
