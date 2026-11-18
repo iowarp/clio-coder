@@ -1,6 +1,6 @@
 import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
@@ -825,6 +825,23 @@ it("a check sharing its bash call with a change judges the final tree only when 
 		deepStrictEqual(seal("npm test", scratch), green, scratch);
 	for (const change of ["echo hi > notes.txt", "echo hi > /tmp/x && npm ci", "mv src/a.ts /tmp/a.ts"])
 		deepStrictEqual(seal("npm test", change), stale, change);
+	// A scratch root inside the workspace holds a check's log, but a write there changes the tree (x8-4).
+	const workspace = mkdtempSync(join(tmpdir(), "in-tree-scratch-"));
+	try {
+		mkdirSync(join(workspace, ".scratch"));
+		const recorder = createRunEffectsRecorder(workspace, { scratchRoots: [join(workspace, ".scratch")] });
+		const standing = (index: number, tool: string, args: Record<string, unknown>) => {
+			recorder.start(`call-${index}`, tool, args);
+			recorder.checkOutcome(`call-${index}`, "ok");
+			recorder.finish(`call-${index}`, false);
+			return [...recorder.snapshot().checkOutcomes.keys()];
+		};
+		standing(0, "edit", { path: "src/a.ts" });
+		deepStrictEqual(standing(1, "bash", { command: "npm test > .scratch/out.txt" }), ["npm test"]);
+		deepStrictEqual(standing(2, "bash", { command: "echo x > .scratch/f.txt" }), []);
+	} finally {
+		rmSync(workspace, { recursive: true, force: true });
+	}
 	// Shell setup changes no tree, so a standing red stands beside a narrower green (x3-1).
 	for (const setup of ["source .venv/bin/activate", "export CI=1"])
 		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [["npm test"], "unverified", ["npm test"]]);
