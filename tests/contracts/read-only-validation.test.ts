@@ -785,6 +785,42 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	// A check run in another directory is not this workspace's check (x3-5).
 	deepStrictEqual(seal("cd /elsewhere && npm test"), stale);
 	deepStrictEqual(seal("cd pkg/.. && npm test"), green);
+	// Its pass settles no outcome, so a red in the workspace still fails a green claim.
+	for (const outside of [{ command: "cd /elsewhere && pytest" }, { command: "pytest", cwd: "/elsewhere" }]) {
+		const recorder = createRunEffectsRecorder(process.cwd());
+		const calls = [
+			["edit", { path: "src/a.py" }, false],
+			["bash", { command: "pytest" }, true],
+			["bash", outside, false],
+		] as const;
+		for (const [index, [tool, args, red]] of calls.entries()) {
+			recorder.start(`call-${index}`, tool, args);
+			recorder.checkOutcome(`call-${index}`, red ? "error" : "ok");
+			recorder.finish(`call-${index}`, red);
+		}
+		const effects = recorder.snapshot();
+		deepStrictEqual(
+			[...effects.validationOutcomes, ...effects.checkOutcomes],
+			[
+				["pytest", false],
+				["pytest", false],
+			],
+		);
+		const typedValidations = typedValidationFactsFromObservedEffects(effects);
+		strictEqual(deriveRunVerification({ toolStats: [], typedValidations }).state, "unverified");
+		const claim = validateResultContract({
+			contract: { kind: "mutation-report" },
+			output: JSON.stringify({
+				mutatedPaths: ["src/a.py"],
+				validations: [{ name: "pytest", passed: true, evidence: "exit 0" }],
+			}),
+			cwd: process.cwd(),
+			networkAllowed: false,
+			filesystem: { readFile: () => "" },
+			observedRunEffects: effects,
+		});
+		strictEqual(claim.quality, "fail");
+	}
 });
 
 it("read-only inspection refuses helpers that write the tree or run another program (x1-3)", () => {

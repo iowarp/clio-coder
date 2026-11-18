@@ -494,10 +494,11 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			// Only a check that ran can fail. A call the engine answered without
 			// reaching its tool settles with no outcome, so it records nothing.
 			// `pytest; echo done` ran the check, but its status is echo's, so the outcome stays unknown either way.
-			// `pytest | head` exits 0 only when pytest did, but its red may be head's SIGPIPE (x3-2).
+			// `pytest | head` exits 0 only when pytest did, but its red may be head's SIGPIPE (x3-2). A pass in another
+			// directory judged another tree, so it settles nothing here and a standing red stays (x3-5).
 			const settled = failed
 				? effects.outcome === "error" && effects.checkFailureAttributable
-				: effects.outcome !== "blocked" && checkedRevision === mutationRevision;
+				: effects.outcome !== "blocked" && checkedRevision === mutationRevision && !effects.checkOutsideCwd;
 			if (effects.validationName !== null && effects.checkStatusAttributable && settled) {
 				validationOutcomes.set(effects.validationName, !failed);
 				checkOutcomes.set(effects.validationName, !failed);
