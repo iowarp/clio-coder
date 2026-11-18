@@ -1,0 +1,702 @@
+import { deepStrictEqual, notDeepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdirSync } from "node:fs";
+import path from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { Type } from "typebox";
+import type { DomainContext } from "../../src/core/domain-loader.js";
+import { createWorkerContextGuard } from "../../src/domains/context/worker/pressure.js";
+import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
+import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
+import type { SessionContract, SessionEntryInput } from "../../src/domains/session/contract.js";
+import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
+import { createSessionBundle } from "../../src/domains/session/extension.js";
+import { engineModels } from "../../src/engine/models.js";
+import { createRequestStructures } from "../../src/engine/request-structure.js";
+import { openSession } from "../../src/engine/session.js";
+import type { AgentMessage } from "../../src/engine/types.js";
+import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
+import {
+	agedToolCallIdsFromEntries,
+	ageObservations,
+	createObservationAging,
+	OBSERVATION_AGING_CUSTOM_TYPE,
+	observationAgingRecord,
+} from "../../src/session-control/observation-aging.js";
+import { createStepStartTracker, stepTurnOutcome } from "../../src/session-control/step-start.js";
+import { createDispatchTool } from "../../src/tools/dispatch.js";
+import type { ToolSpec } from "../../src/tools/registry.js";
+import {
+	type CapturedRequest,
+	type CaptureServer,
+	chatHarness,
+	startCaptureServer,
+	wireElements,
+} from "../harness/context-capture.js";
+import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
+
+/**
+ * ContextFold CF-0 witnesses. Each asserts the truth after its lane lands and fails today, so each is marked `todo`
+ * with its finding and owning lane. The owning lane removes the `todo` when its fix makes the witness pass. Where the
+ * production hook a witness needs does not exist yet, the witness is the narrowest version observable today and its
+ * comment names what the owning lane must add.
+ */
+
+let env: IsolatedClioEnv;
+let previousCwd: string;
+beforeEach(async () => {
+	env = await isolateClioEnv("context-fold-witnesses-");
+	previousCwd = process.cwd();
+	const project = path.join(env.dir, "project");
+	mkdirSync(project);
+	process.chdir(project);
+});
+afterEach(() => {
+	process.chdir(previousCwd);
+	env.restore();
+});
+
+const AT = "2026-09-21T09:00:00.000Z";
+const READ = "read";
+const noDeclared = () => undefined;
+
+function message(
+	turnId: string,
+	parentTurnId: string | null,
+	role: MessageEntry["role"],
+	payload: unknown,
+): MessageEntry {
+	return { kind: "message", turnId, parentTurnId, timestamp: AT, role, payload };
+}
+function readCall(turnId: string, parentTurnId: string, id: string, file: string): MessageEntry {
+	return message(turnId, parentTurnId, "assistant", {
+		content: [{ type: "toolCall", id, name: READ, arguments: { path: file } }],
+		stopReason: "toolUse",
+	});
+}
+function readResult(turnId: string, parentTurnId: string, id: string, text: string, details?: unknown): MessageEntry {
+	return message(turnId, parentTurnId, "tool_result", {
+		toolCallId: id,
+		toolName: READ,
+		result: { content: [{ type: "text", text }], ...(details === undefined ? {} : { details }) },
+	});
+}
+function eviction(turnId: string, parentTurnId: string, refs: string[]): SessionEntry {
+	return {
+		kind: "contextEviction",
+		turnId,
+		parentTurnId,
+		timestamp: AT,
+		policyId: "structural-v2",
+		trigger: "pressure",
+		tokensBefore: 60_000,
+		tokensAfter: 20_000,
+		pressureBefore: 0.9,
+		snapshotIdBefore: null,
+		evicted: refs.map((entry, index) => ({
+			alias: `r${index + 1}`,
+			ref: { entry },
+			reason: "age_horizon" as const,
+			tokensFreed: 8_000,
+			marker: `[evicted ${entry} as r${index + 1}]`,
+		})),
+	};
+}
+/** A body of `bytes` ASCII bytes that names its owner, so a request shows which copy it kept. */
+const body = (owner: string, bytes: number): string => `${owner}:`.padEnd(bytes, "x");
+const requestText = (messages: ReadonlyArray<AgentMessage>): string => JSON.stringify(messages);
+const withoutSystem = (request: CapturedRequest): string[] =>
+	wireElements(request).filter((element) => !element.startsWith("system:"));
+
+describe("W12 (F14 -> CF-9): native checkpoint handles in the entry digest", () => {
+	it("two different native handles hash to different entry digests", { todo: "F14 -> CF-9" }, () => {
+		const model = engineModels.getModel("openai-codex", "gpt-6-luna");
+		ok(model);
+		const withHandle = (digest: string) => ({
+			systemPrompt: "system",
+			messages: [
+				{
+					role: "user",
+					content: [{ type: "text", text: "continue" }],
+					timestamp: 1,
+					clioProviderCheckpoint: { version: 1, digest: digest.repeat(64), outputTokens: 5 },
+				},
+			],
+		});
+		const a = createRequestStructures()(model, withHandle("a") as never);
+		const b = createRequestStructures()(model, withHandle("b") as never);
+		notDeepStrictEqual(a.entries, b.entries, "a different native handle is a different element");
+	});
+});
+
+describe("W6 (F7 -> CF-7): the worker guard's target and band", () => {
+	function user(text: string): AgentMessage {
+		return { role: "user", content: text, timestamp: 1 };
+	}
+	function assistant(id: string, file: string): AgentMessage {
+		return {
+			role: "assistant",
+			content: [{ type: "toolCall", id, name: READ, arguments: { path: file } }],
+			stopReason: "toolUse",
+			timestamp: 2,
+			api: "openai-completions",
+			provider: "openai",
+			model: "fixture",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+		};
+	}
+	function result(id: string, text: string): AgentMessage {
+		return {
+			role: "toolResult",
+			toolCallId: id,
+			toolName: READ,
+			content: [{ type: "text", text }],
+			isError: false,
+			timestamp: 3,
+		};
+	}
+
+	it("a worker at threshold does not evict again on the next small round", { todo: "F7 -> CF-7" }, () => {
+		const archived: string[] = [];
+		const guard = createWorkerContextGuard((ref) => {
+			archived.push(ref);
+			return `/evidence/${ref}.json`;
+		});
+		const input = { systemPrompt: "worker", tools: [], contextWindow: 20_000, outputReserve: () => 500 };
+		const messages: AgentMessage[] = [user("survey the package")];
+		guard({ ...input, messages });
+		// Each round reads one file of about 6% of the window, well under the 10% band.
+		const counts: number[] = [];
+		for (let round = 0; round < 24; round++) {
+			messages.push(assistant(`read-${round}`, `src/f${round}.ts`), result(`read-${round}`, body(`f${round}`, 4_800)));
+			guard({ ...input, messages });
+			counts.push(archived.length);
+		}
+		const first = counts.findIndex((count) => count > 0);
+		ok(first >= 0, "the fixture crosses the threshold");
+		// After a batch to the target, the next round grows the request by less than the band and evicts nothing.
+		strictEqual(counts[first + 1], counts[first], `rounds evicting: ${counts.join(",")}`);
+	});
+});
+
+describe("W7 (F8 -> CF-8): the step chain lives in the stream", () => {
+	const STEP = "extension_wtfp__next_step";
+	const BODY = "Advance the paper one step: call extension_wtfp__next_step, run the step it returns, then summarize.";
+	const constraints = { turnPolicy: { mode: "step" as const, stepTool: STEP, template: "wtfp:advance" } };
+
+	it("a step chain reopened mid-pipeline still leads the next step", { todo: "F8 -> CF-8" }, () => {
+		const position = { sessionId: "session-a", leafTurnId: "a-leaf" };
+		const live = createStepStartTracker();
+		strictEqual(live.begin(constraints, BODY, false, { ...position, leafTurnId: "a-start" }), null);
+		live.settle(constraints, "Step one ran: drafted intro.", true, position);
+		// What a reopen sees: a new process, a new tracker, the same session standing on the settled leaf.
+		// CF-8 adds the step-chain record and has `begin` read it when the in-memory chain is empty.
+		const reopened = createStepStartTracker();
+		const lead = reopened.begin(constraints, BODY, true, position);
+		ok(lead?.includes("Step one ran: drafted intro."), "the reopened chain leads with the settled step's summary");
+	});
+});
+
+describe("W3 (F11 -> CF-2): a historical render and a historical fork see the earlier state", () => {
+	const BODY_A = body("A", 2_000);
+	/** Send 1 at leaf r2 carries r1's body; an eviction at r2, then send 2 at r2 carries the marker. */
+	function twoSendsAtOneLeaf(): SessionEntry[] {
+		return [
+			message("u1", null, "user", { text: "read both" }),
+			readCall("a1", "u1", "c1", "src/a.ts"),
+			readResult("r1", "a1", "c1", BODY_A),
+			readCall("a2", "r1", "c2", "src/b.ts"),
+			readResult("r2", "a2", "c2", "B"),
+			eviction("ev", "r2", ["r1"]),
+			message("a3", "r2", "assistant", { content: [{ type: "text", text: "done" }] }),
+			message("u3", "a3", "user", { text: "next" }),
+			message("a4", "u3", "assistant", { content: [{ type: "text", text: "ok" }] }),
+		];
+	}
+
+	it("a render at a past position does not fold a later eviction", { todo: "F11 -> CF-2" }, () => {
+		const entries = twoSendsAtOneLeaf();
+		const now = requestText(buildModelReplayAgentMessagesFromTurns(entries));
+		ok(!now.includes(BODY_A) && now.includes("[evicted r1 as r1]"), "the tip renders the marker");
+		// The position of send 1: the ledger through r2. The eviction was written after it.
+		const historical = requestText(buildModelReplayAgentMessagesFromTurns(entries, { uptoTurnId: "r2" }));
+		ok(historical.includes(BODY_A), "the historical render keeps the body send 1 carried");
+		ok(!historical.includes("[evicted r1 as r1]"), "and not the later marker");
+	});
+
+	/** An eviction anchored at a2 but written after a3: a fork at a2 is the state at a2's file position. */
+	function laterEvictionOnAncestor(): SessionEntry[] {
+		return [
+			message("u1", null, "user", { text: "read it" }),
+			readCall("a1", "u1", "c1", "src/a.ts"),
+			readResult("r1", "a1", "c1", BODY_A),
+			message("a2", "r1", "assistant", { content: [{ type: "text", text: "noted" }] }),
+			message("u2", "a2", "user", { text: "next" }),
+			message("a3", "u2", "assistant", { content: [{ type: "text", text: "ok" }] }),
+			eviction("ev", "a2", ["r1"]),
+		];
+	}
+
+	it("a fork at a2 copies only the display records written before a2's successor", {
+		todo: "F11 -> CF-2",
+	}, async () => {
+		const session: SessionContract = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
+		let childId: string;
+		try {
+			session.create({ cwd: process.cwd() });
+			for (const entry of laterEvictionOnAncestor()) session.appendEntry(entry as SessionEntryInput);
+			childId = session.fork("a2").id;
+		} finally {
+			await session.close();
+		}
+		const child = openSession(childId).turns() as SessionEntry[];
+		strictEqual(
+			child.filter((entry) => entry.kind === "contextEviction").length,
+			0,
+			"the eviction was written after u2, a2's successor on the path",
+		);
+		ok(requestText(buildModelReplayAgentMessagesFromTurns(child)).includes(BODY_A), "the child renders r1's body");
+	});
+});
+
+describe("W4 and W5 (F2 -> CF-5): superseded selection over the rendered history", () => {
+	const SIZE = 33 * 1024;
+
+	it("W4: two identical 33 KB reads, the newer evicted: the request keeps the older body", {
+		todo: "F2 -> CF-5",
+		timeout: 30_000,
+	}, async (t) => {
+		const OLDER = body("OLDER", SIZE);
+		const server = await startCaptureServer(() => ({ text: "answered" }));
+		t.after(() => server.close());
+		const seed = chatHarness({ server, route: { caching: false } });
+		let id: string;
+		try {
+			id = seed.session.create({ cwd: process.cwd() }).id;
+			for (const entry of [
+				message("u1", null, "user", { text: "read it twice" }),
+				readCall("a1", "u1", "c1", "src/big.ts"),
+				readResult("r1", "a1", "c1", OLDER),
+				readCall("a2", "r1", "c2", "src/big.ts"),
+				readResult("r2", "a2", "c2", body("NEWER", SIZE)),
+				message("a3", "r2", "assistant", { content: [{ type: "text", text: "read" }] }),
+				eviction("ev", "a3", ["r2"]),
+			])
+				seed.session.appendEntry(entry as SessionEntryInput);
+		} finally {
+			await seed.close();
+		}
+		const reopened = chatHarness({ server, route: { caching: false } });
+		try {
+			reopened.reopen(id);
+			await reopened.submit("go on");
+		} finally {
+			await reopened.close();
+		}
+		const request = server.requests.at(-1);
+		ok(request);
+		const sent = JSON.stringify(request.body);
+		ok(sent.includes("[evicted r2 as r1]"), "the newer read is its marker");
+		ok(sent.includes(OLDER), "a marker covers nothing: the older body stays");
+	});
+
+	/** An older full read and a newer identical read whose delivery `details` says how much it showed. */
+	function repeated(newer: string, details: unknown): SessionEntry[] {
+		return [
+			message("u1", null, "user", { text: "read it twice" }),
+			readCall("a1", "u1", "c1", "src/big.ts"),
+			readResult("r1", "a1", "c1", body("OLDER", 40 * 1024)),
+			readCall("a2", "r1", "c2", "src/big.ts"),
+			readResult("r2", "a2", "c2", newer, details),
+			message("a3", "r2", "assistant", { content: [{ type: "text", text: "read" }] }),
+		];
+	}
+	const aged = (entries: SessionEntry[]): string =>
+		requestText(ageObservations(buildModelReplayAgentMessagesFromTurns(entries), new Set(), noDeclared).messages);
+
+	it("W5: a clipped repeat is not a full cover after a rebuild", { todo: "F2 -> CF-5" }, () => {
+		const clipped = repeated(body("CLIPPED", 2_000), {
+			observation: { truncated: true, shownCount: 1, shownBytes: 2_000 },
+		});
+		// The rebuilt request is the replay of the ledger; its results no longer carry `details`.
+		ok(aged(clipped).includes(body("OLDER", 40 * 1024)), "a 2 KB slice does not stand in for a 40 KB read");
+	});
+
+	it("W5: a filtered repeat that showed nothing is not a cover after a rebuild", { todo: "F2 -> CF-5" }, () => {
+		const filtered = repeated("[read: output budget exhausted; nothing shown]", {
+			observation: { truncated: true, shownCount: 0, shownBytes: 0 },
+		});
+		ok(aged(filtered).includes(body("OLDER", 40 * 1024)), "an empty delivery covers nothing");
+	});
+});
+
+describe("W11 (F2, F5 -> CF-5): a v6 aging record meets the fold", () => {
+	const OLDER = body("OLDER", 33 * 1024);
+	/** c1 was aged under cover of r2; r2 was evicted later, and that eviction also names r3. */
+	function v6Ledger(): SessionEntry[] {
+		return [
+			message("u1", null, "user", { text: "read it three times" }),
+			readCall("a1", "u1", "c1", "src/big.ts"),
+			readResult("r1", "a1", "c1", OLDER),
+			readCall("a2", "r1", "c2", "src/big.ts"),
+			readResult("r2", "a2", "c2", body("MIDDLE", 33 * 1024)),
+			{
+				kind: "custom",
+				turnId: "aging-1",
+				parentTurnId: "r2",
+				timestamp: AT,
+				customType: OBSERVATION_AGING_CUSTOM_TYPE,
+				data: observationAgingRecord(["c1"]),
+			} as SessionEntry,
+			readCall("a3", "r2", "c3", "src/other.ts"),
+			readResult("r3", "a3", "c3", body("OTHER", 33 * 1024)),
+			message("a4", "r3", "assistant", { content: [{ type: "text", text: "read" }] }),
+			eviction("ev", "a4", ["r2", "r3"]),
+		];
+	}
+	/** What a chat loop opening `entries` sends on an uncached route. */
+	function open(entries: SessionEntry[], sessionId: string): string {
+		const aging = createObservationAging(noDeclared, {
+			load: () => agedToolCallIdsFromEntries(entries),
+			record() {},
+		});
+		const messages = buildModelReplayAgentMessagesFromTurns(entries);
+		return requestText(aging.project(messages, { promptCaching: false }, sessionId).messages);
+	}
+
+	it("first open, second open and a fork keep the body whose cover was lost", { todo: "F2 -> CF-5" }, async () => {
+		const entries = v6Ledger();
+		ok(open(entries, "v6").includes(OLDER), "first open: the aged id's cover is a marker, so its body returns");
+		ok(open(entries, "v6").includes(OLDER), "second open: the same");
+		const session: SessionContract = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
+		let childId: string;
+		try {
+			session.create({ cwd: process.cwd() });
+			for (const entry of entries) session.appendEntry(entry as SessionEntryInput);
+			childId = session.fork("a4").id;
+		} finally {
+			await session.close();
+		}
+		ok(open(openSession(childId).turns() as SessionEntry[], childId).includes(OLDER), "a fork at the tip: the same");
+	});
+
+	it("an id prepared for a request that is never sent is not recorded", { todo: "F5 -> CF-5" }, () => {
+		const recorded: string[][] = [];
+		const aging = createObservationAging(noDeclared, { load: () => [], record: (_id, ids) => recorded.push([...ids]) });
+		const entries = [
+			message("u1", null, "user", { text: "read it twice" }),
+			readCall("a1", "u1", "c1", "src/big.ts"),
+			readResult("r1", "a1", "c1", OLDER),
+			readCall("a2", "r1", "c2", "src/big.ts"),
+			readResult("r2", "a2", "c2", OLDER),
+		];
+		// The prewarm transform projects the request and then declines to send it (src/engine/prewarm.ts:211-225).
+		// CF-5 moves the commit to the dispatched attempt; this call stands for a transform with no dispatch after it.
+		const projected = aging.project(buildModelReplayAgentMessagesFromTurns(entries), { promptCaching: false }, "s");
+		ok(requestText(projected.messages).includes("observation aged"), "the transform aged c1");
+		deepStrictEqual(recorded, [], "nothing is recorded before an attempt is dispatched");
+	});
+});
+
+describe("W9 (F12 -> CF-3): a run judges its own evidence, not the projected array", () => {
+	it("the step outcome survives a cut inside the submit", { todo: "F12 -> CF-3" }, () => {
+		const STEP = "extension_wtfp__next_step";
+		const entries: SessionEntry[] = [
+			message("u1", null, "user", { text: "/wtfp:advance" }),
+			message("a1", "u1", "assistant", {
+				content: [{ type: "toolCall", id: "s1", name: STEP, arguments: {} }],
+				stopReason: "toolUse",
+			}),
+			message("r1", "a1", "tool_result", {
+				toolCallId: "s1",
+				toolName: STEP,
+				result: { content: [{ type: "text", text: "step: draft intro" }] },
+			}),
+			readCall("a2", "r1", "c2", "src/intro.md"),
+			readResult("r2", "a2", "c2", "intro"),
+			{
+				kind: "compactionSummary",
+				turnId: "cut",
+				parentTurnId: "r2",
+				timestamp: AT,
+				summary: "The step drafted the intro.",
+				tokensBefore: 60_000,
+				firstKeptTurnId: "a2",
+			} as SessionEntry,
+		];
+		// The chat loop slices the rebuilt array from the submit's start index (chat-loop.ts:4075, :4087). After the
+		// cut that array no longer holds the step call. CF-3 adds the submit-keyed run log and reads the outcome from it.
+		const projected = buildModelReplayAgentMessagesFromTurns(entries);
+		deepStrictEqual(stepTurnOutcome(projected, STEP), { pipelineDone: false }, "the submit ran its step");
+	});
+});
+
+describe("W10 (F10 -> CF-10): the council peer briefing", () => {
+	it("five seats, an oversized original briefing, multibyte answers and a failed seat: every peer is labeled", {
+		todo: "F10 -> CF-10",
+		timeout: 30_000,
+	}, async () => {
+		const labels = ["a", "b", "c", "d", "e"];
+		const seated: DispatchRequest[] = [];
+		let next = 0;
+		const tool = createDispatchTool({
+			dispatch: {
+				dispatch: async (request: DispatchRequest) => {
+					seated.push(request);
+					next += 1;
+					const label = request.council?.label ?? "member";
+					const runId = `run-${next}-${label}`;
+					const failed = label === "c" && request.council?.round === 1;
+					const answer = `${label} answers: ${"é".repeat(1_500)}`;
+					const events = (async function* () {
+						yield { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: answer }] } };
+					})();
+					const receipt = {
+						runId,
+						agentId: request.agentId,
+						exitCode: failed ? 1 : 0,
+						outcome: failed ? "failed" : "succeeded",
+						...(request.council ? { council: request.council } : {}),
+						...(request.gate ? { gate: request.gate } : {}),
+					};
+					return { runId, events, finalPromise: Promise.resolve(receipt) };
+				},
+				abort() {},
+				getRun: () => undefined,
+			} as unknown as DispatchContract,
+			getAgentSpecs: () => [{ id: "scout" }] as never,
+			getAutonomy: () => "yolo",
+		});
+		await tool.run(
+			{
+				mode: "council",
+				members: labels.map((label) => ({ label, target: "mini" })),
+				rounds: 2,
+				briefing: `Background: ${"context ".repeat(1_400)}`.slice(0, 11_500),
+				task: "Which module owns the clock?",
+			},
+			{} as never,
+		);
+		const second = seated.filter((request) => request.council?.round === 2 && request.gate?.role === "member");
+		strictEqual(second.length, labels.length, "every seat sits a second round");
+		for (const request of second) {
+			const briefing = request.briefing ?? "";
+			for (const peer of labels.filter((label) => label !== request.council?.label))
+				ok(briefing.includes(`[${peer}]`), `${request.council?.label}'s briefing names peer ${peer}`);
+		}
+	});
+});
+
+const probeTool = (run: () => void): ToolSpec => ({
+	name: "probe" as ToolSpec["name"],
+	description: "Moves host state between two requests of one turn",
+	parameters: Type.Object({}),
+	baseActionClass: "read",
+	run: async () => {
+		run();
+		return { kind: "ok", output: "probed" };
+	},
+});
+
+describe("W1 and W2 (F6 -> CF-4): host inserts are records", () => {
+	const PINS = ["Milestone 3: results. Next: verify", "Milestone 4: review. Next: submit"];
+	const OLD = "old ".repeat(25_000);
+	/**
+	 * Two large turns a compaction can cut, then one turn whose tool moves the pinned block twice, so two later
+	 * requests of the turn each carry a host insert. The forced compaction keeps that turn as its suffix.
+	 */
+	async function liveTurn(server: CaptureServer) {
+		const pins = [{ extensionId: "desk", text: "Milestone 2: methods. Next: plan-section" }];
+		let moves = 0;
+		const harness = chatHarness({
+			server,
+			autoCompact: true,
+			pinnedContext: () => pins,
+			tools: [probeTool(() => pins.splice(0, 1, { extensionId: "desk", text: PINS[moves++] ?? "" }))],
+		});
+		const id = harness.session.create({ cwd: process.cwd() }).id;
+		await harness.submit("survey the field");
+		await harness.submit("survey it again");
+		await harness.submit("draft the results");
+		await harness.submit("keep going");
+		return { harness, pins, id };
+	}
+	/** Rebuilds the live history from the ledger the way a compaction does, then sends one more request. */
+	async function rebuild(harness: Awaited<ReturnType<typeof liveTurn>>["harness"]) {
+		const before = harness.counter.summaries;
+		await harness.loop.compact();
+		await harness.loop.whenSettled();
+		ok(harness.counter.summaries > before, "the compaction ran");
+		await harness.submit("after a rebuild");
+	}
+	const script = (_request: CapturedRequest, index: number) =>
+		index < 2
+			? { text: OLD }
+			: index < 4
+				? { calls: [{ id: `p${index}`, name: "probe", arguments: {} }] }
+				: { text: `answer ${index}` };
+	/** The standalone host-insert elements a request carries; a pin re-rendered into a new prompt is not one. */
+	const inserts = (request: CapturedRequest | undefined): string[] =>
+		request === undefined
+			? []
+			: withoutSystem(request).filter(
+					(element) => element.startsWith("user:<system-reminder>") && element.endsWith("</system-reminder>"),
+				);
+	/** The insert turn and its follow-up as the request carries them: the suffix every compaction here keeps. */
+	const kept = (request: CapturedRequest | undefined): string[] => {
+		if (request === undefined) return [];
+		const elements = withoutSystem(request);
+		const start = elements.indexOf("user:draft the results");
+		const end = elements.indexOf("user:keep going");
+		return start < 0 || end < start ? [] : elements.slice(start, end + 1);
+	};
+
+	it("W1: mid-turn inserts survive a rebuild and a reopen", { todo: "F6 -> CF-4", timeout: 60_000 }, async (t) => {
+		const server = await startCaptureServer(script);
+		t.after(() => server.close());
+		const { harness, pins, id } = await liveTurn(server);
+		const live = inserts(server.requests.at(-1));
+		strictEqual(live.length, 2, "the live history holds both inserts");
+		try {
+			await rebuild(harness);
+		} finally {
+			await harness.close();
+		}
+		deepStrictEqual(inserts(server.requests.at(-1)), live, "a rebuild keeps both");
+		const reopened = chatHarness({ server, pinnedContext: () => pins });
+		try {
+			reopened.reopen(id);
+			await reopened.submit("after a reopen");
+		} finally {
+			await reopened.close();
+		}
+		deepStrictEqual(inserts(server.requests.at(-1)), live, "a reopen keeps both");
+	});
+
+	it("W2: the kept element sequence with inserts is the same live, rebuilt and reopened", {
+		todo: "F6 -> CF-4",
+		timeout: 60_000,
+	}, async (t) => {
+		const server = await startCaptureServer(script);
+		t.after(() => server.close());
+		const { harness, pins, id } = await liveTurn(server);
+		const expected = kept(server.requests.at(-1));
+		ok(expected.length > 4, "the live request carries the insert turn");
+		try {
+			await rebuild(harness);
+		} finally {
+			await harness.close();
+		}
+		deepStrictEqual(kept(server.requests.at(-1)), expected, "a rebuild keeps the live sequence");
+		const reopened = chatHarness({ server, pinnedContext: () => pins });
+		try {
+			reopened.reopen(id);
+			await reopened.submit("after a reopen");
+		} finally {
+			await reopened.close();
+		}
+		deepStrictEqual(kept(server.requests.at(-1)), expected, "a reopen keeps it too");
+	});
+});
+
+describe("W8 (F13 -> CF-4): recovery exchanges are records", () => {
+	it("a thinking-length recovery exchange is the same in the next request live and after a reopen", {
+		todo: "F13 -> CF-4",
+		timeout: 30_000,
+	}, async (t) => {
+		const server = await startCaptureServer((_request, index) =>
+			index === 0 ? { thinkingOnlyLength: "deliberating at length" } : { text: `answer ${index}` },
+		);
+		t.after(() => server.close());
+		const harness = chatHarness({ server });
+		let id: string;
+		try {
+			id = harness.session.create({ cwd: process.cwd() }).id;
+			await harness.submit("solve it");
+			const recovery = server.requests[1];
+			ok(recovery, "the cut-off reply was recovered once");
+			const elements = withoutSystem(recovery);
+			ok(elements.includes("user:solve it"), "the recovery request keeps the original user content");
+			ok(
+				elements.some((element) => element.startsWith("call:")) && elements.some((e) => e.startsWith("result:")),
+				"and carries the paired exchange",
+			);
+			await harness.submit("next");
+		} finally {
+			await harness.close();
+		}
+		const live = server.requests.at(-1);
+		ok(live);
+		const reopened = chatHarness({ server });
+		try {
+			reopened.reopen(id);
+			await reopened.submit("next");
+		} finally {
+			await reopened.close();
+		}
+		const resumed = server.requests.at(-1);
+		ok(resumed);
+		const expected = withoutSystem(live);
+		deepStrictEqual(withoutSystem(resumed).slice(0, expected.length), expected, "a reopen replays the exchange");
+	});
+});
+
+describe("W13 (F15 -> CF-2): admission prices the attempt it sends", () => {
+	const lockNone = (): MiddlewareToolChoiceControl => ({
+		apply() {},
+		current: () => ({ kind: "none" }),
+		toolStarted() {},
+		completeRound: () => null,
+		reset() {},
+	});
+	const auto = (): MiddlewareToolChoiceControl => ({ ...lockNone(), current: () => ({ kind: "auto" }) });
+
+	it("a middleware none lock sent as auto is priced with its directive at the fit boundary", {
+		todo: "F15 -> CF-2",
+		timeout: 120_000,
+	}, async (t) => {
+		// The route rejects tool_choice "none", so a middleware text lock goes out as "auto" with the directive.
+		const server = await startCaptureServer((request) =>
+			request.body.tool_choice === "none"
+				? { status: 400, error: "400 tool_choice 'none' is not supported by this model" }
+				: { text: "answered" },
+		);
+		t.after(() => server.close());
+		const prompt = "summarize what you know";
+		/** Whether one fresh submit at `window` reaches the server. */
+		const sends = async (window: number, choice: () => MiddlewareToolChoiceControl): Promise<boolean> => {
+			const harness = chatHarness({ server, route: { window }, middlewareToolChoice: choice() });
+			const before = server.requests.length;
+			try {
+				harness.session.create({ cwd: process.cwd() });
+				await harness.submit(prompt);
+			} finally {
+				await harness.close();
+			}
+			return server.requests.length > before;
+		};
+		ok(await sends(131_072, lockNone), "the rejection is learned");
+		/** The smallest window that admits the request. */
+		const boundary = async (choice: () => MiddlewareToolChoiceControl): Promise<number> => {
+			let low = 1_000;
+			let high = 131_072;
+			while (low < high) {
+				const mid = Math.floor((low + high) / 2);
+				if (await sends(mid, choice)) high = mid;
+				else low = mid + 1;
+			}
+			return low;
+		};
+		const plain = await boundary(auto);
+		const locked = await boundary(lockNone);
+		const sent = server.requests.filter((request) => request.body.tool_choice === "auto").at(-1);
+		ok(sent && wireElements(sent).some((element) => element.includes("final synthesis")), "the directive was sent");
+		ok(locked > plain, `the directive is priced: plain fits at ${plain}, locked at ${locked}`);
+	});
+});
