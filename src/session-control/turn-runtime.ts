@@ -104,7 +104,13 @@ import {
 	toolResultSummary,
 } from "./chat-loop-messages.js";
 import { createObservationAging } from "./observation-aging.js";
-import { assessRepetition, repetitionAbortReason, shouldAssessRepetition } from "./repetition-detector.js";
+import {
+	assessRepetition,
+	assessToolCallFlood,
+	repetitionAbortReason,
+	shouldAssessRepetition,
+	toolCallFloodAbortReason,
+} from "./repetition-detector.js";
 import type { ModelRequestFacts, ModelRequestSlots } from "./status-types.js";
 import { assessToolProseLoop, runtimeNarratesToolCalls, shouldAssessToolProse } from "./tool-prose-loop.js";
 import type { ExpectedColdReason, TurnContext } from "./turn-context.js";
@@ -1978,6 +1984,21 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							deps.emitNotice(state.repetitionAbortReason, "warning");
 							localRuntime.agent.abort();
 						}
+					}
+				}
+				// Some adapters end every call block only when the stream ends, so the calls before a starting one are judged
+				// at its start: their arguments are complete by then, and the stop lands while the flood is still streaming.
+				if (
+					(assistantEvent.type === "toolcall_start" || assistantEvent.type === "toolcall_end") &&
+					state.repetitionAbortReason === null &&
+					state.activeInterruptReason === null
+				) {
+					const completeBlocks = (assistantEvent.contentIndex ?? 0) + (assistantEvent.type === "toolcall_end" ? 1 : 0);
+					const flood = assessToolCallFlood(assistantEvent.partial, completeBlocks);
+					if (flood.kind === "flooding") {
+						state.repetitionAbortReason = toolCallFloodAbortReason(flood);
+						deps.emitNotice(state.repetitionAbortReason, "warning");
+						localRuntime.agent.abort();
 					}
 				}
 				if (assistantEvent.type === "text_delta") {
