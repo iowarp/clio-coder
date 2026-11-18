@@ -361,8 +361,11 @@ export interface TurnRuntime {
 
 export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	const { state, context, persistence, middleware, middlewareToolChoice } = deps;
-	/** What this session's requests stubbed; a rebuilt agent keeps it, another session id starts it over. */
-	const observationAging = createObservationAging((tool) => deps.declaredToolEffect?.(tool));
+	/** What this session's requests stubbed; a rebuilt agent keeps it, and the ledger carries it across a reopen. */
+	const observationAging = createObservationAging(
+		(tool) => deps.declaredToolEffect?.(tool),
+		context.observationAgingLedger,
+	);
 	// The window checks price the same aged request; only `transformContext` below commits a batch.
 	context.bindObservationAging(observationAging);
 

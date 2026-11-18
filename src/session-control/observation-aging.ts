@@ -25,10 +25,15 @@
  * commits nothing, so a superseded read never compacts or stops a request
  * that fits once it is stubbed. The tracker
  * belongs to the session, not the agent: a model switch or reload that rebuilds
- * the agent keeps every stub, and only a different session starts over.
+ * the agent keeps every stub. Each batch's call ids are also recorded in the
+ * session ledger (`OBSERVATION_AGING_CUSTOM_TYPE`), and a session the tracker
+ * opens is seeded from those records, so a resume, a fork or a new process
+ * sends the request shape the stub set had reached rather than one fresh batch
+ * over every superseded result (D1-6).
  */
 
 import type { ModelTier } from "../core/model-tier.js";
+import type { SessionEntry } from "../domains/session/entries.js";
 import { callRepeatsAsRead, type DeclaredToolEffect, effectiveCallIdentity } from "../engine/loop-guard.js";
 import type { AgentMessage } from "../engine/types.js";
 import { effectiveToolCall } from "../tools/surface.js";
@@ -43,6 +48,35 @@ import { effectiveToolCall } from "../tools/surface.js";
  * break.
  */
 export const OBSERVATION_AGING_BATCH_BYTES = 32 * 1024;
+
+/**
+ * Ledger record of one batch: the tool call ids it stubbed. Bookkeeping only;
+ * replay renders no custom entry but the handoff seed, so the record changes no
+ * request bytes.
+ */
+export const OBSERVATION_AGING_CUSTOM_TYPE = "clio-coder.observation-aging";
+
+interface ObservationAgingRecord {
+	version: 1;
+	toolCallIds: string[];
+}
+
+/** Every tool call id an aging record in `entries` names; seeds a session the tracker opens. */
+export function agedToolCallIdsFromEntries(entries: ReadonlyArray<SessionEntry>): string[] {
+	const ids: string[] = [];
+	for (const entry of entries) {
+		if (entry.kind !== "custom" || entry.customType !== OBSERVATION_AGING_CUSTOM_TYPE) continue;
+		const data = entry.data as Partial<ObservationAgingRecord> | undefined;
+		if (data?.version !== 1 || !Array.isArray(data.toolCallIds)) continue;
+		for (const id of data.toolCallIds) if (typeof id === "string") ids.push(id);
+	}
+	return ids;
+}
+
+/** The record data for one batch. */
+export function observationAgingRecord(toolCallIds: ReadonlyArray<string>): ObservationAgingRecord {
+	return { version: 1, toolCallIds: [...toolCallIds] };
+}
 
 /** Longest rendering of a call's arguments a stub carries. */
 const STUB_ARGS_CHARS = 160;
@@ -63,6 +97,8 @@ export interface ObservationAgingBatch {
 	results: number;
 	/** Bytes of result text the batch removed, less the stubs that replaced it. */
 	bytesSaved: number;
+	/** Tool call ids this batch stubbed. */
+	toolCallIds: string[];
 }
 
 export interface ObservationAgingResult {
@@ -254,10 +290,11 @@ export function ageObservations(
 	let next = stubbed;
 	if (pendingBytes > 0 && pendingBytes >= thresholdBytes) {
 		const grown = new Set(stubbed);
-		batch = { results: 0, bytesSaved: 0 };
+		batch = { results: 0, bytesSaved: 0, toolCallIds: [] };
 		for (const [id, result] of superseded) {
 			if (grown.has(id)) continue;
 			grown.add(id);
+			batch.toolCallIds.push(id);
 			batch.results += 1;
 			batch.bytesSaved += result.bytes - Buffer.byteLength(result.stub, "utf8");
 		}
@@ -298,36 +335,47 @@ export interface ObservationAgingTracker {
 		route: ObservationAgingRoute,
 		sessionId: string | undefined,
 	): ObservationAgingPreview | null;
-	/** Ids stubbed by requests already sent under `sessionId`. */
+	/** Ids stubbed by requests already sent under `sessionId`, in this process or recorded in its ledger. */
 	sent(sessionId: string | undefined): ReadonlySet<string>;
 }
 
-const NONE: ReadonlySet<string> = new Set();
+/** Where a tracker keeps its stub set beyond the process: the session ledger (D1-6). */
+export interface ObservationAgingLedger {
+	/** Ids earlier batches of `sessionId` recorded; empty when none or unreadable. */
+	load(sessionId: string): Iterable<string>;
+	/** Record one batch's ids under `sessionId`. */
+	record(sessionId: string, toolCallIds: ReadonlyArray<string>): void;
+}
 
 /**
  * The stateful half: remembers what earlier requests of one session stubbed so
  * a result, once stubbed, stays stubbed. One per chat loop, outliving every
  * agent it builds, so a rebuild neither repeats a batch nor reverts a stub.
- * A request under a different session id starts from nothing. After a switch or
- * a new session the old ids never recur; a fork's copied transcript keeps its
- * parent's ids, so its first request forms its own batch over them.
+ * A session it has not seen yet is seeded from `ledger`, which holds every
+ * batch the session recorded, a fork's inherited records included; without a
+ * ledger or a session id it starts from nothing.
  */
 export function createObservationAging(
 	declared: DeclaredToolEffects,
+	ledger?: ObservationAgingLedger,
 	thresholdBytes: number = OBSERVATION_AGING_BATCH_BYTES,
 ): ObservationAgingTracker {
 	let stubbed: ReadonlySet<string> = new Set();
 	let owner: string | undefined;
-	const sent = (sessionId: string | undefined): ReadonlySet<string> => (sessionId === owner ? stubbed : NONE);
+	const sent = (sessionId: string | undefined): ReadonlySet<string> => {
+		if (sessionId !== owner) {
+			owner = sessionId;
+			stubbed = new Set(sessionId === undefined ? [] : (ledger?.load(sessionId) ?? []));
+		}
+		return stubbed;
+	};
 	return {
 		project(messages, route, sessionId) {
-			if (sessionId !== owner) {
-				owner = sessionId;
-				stubbed = new Set();
-			}
+			const prior = sent(sessionId);
 			if (!observationAgingApplies(route)) return { messages: [...messages], batch: null };
-			const aged = ageObservations(messages, stubbed, declared, thresholdBytes);
+			const aged = ageObservations(messages, prior, declared, thresholdBytes);
 			stubbed = aged.stubbed;
+			if (aged.batch !== null && sessionId !== undefined) ledger?.record(sessionId, aged.batch.toolCallIds);
 			return { messages: aged.messages, batch: aged.batch };
 		},
 		preview(messages, route, sessionId) {

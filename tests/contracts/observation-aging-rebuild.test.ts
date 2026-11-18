@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
@@ -17,6 +17,7 @@ import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-compl
 import type { AgentMessage, Model } from "../../src/engine/types.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { createObservationAging, OBSERVATION_AGING_BATCH_BYTES } from "../../src/session-control/observation-aging.js";
+import { replayCurrentSession } from "../../src/session-control/session-restore.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -38,6 +39,7 @@ afterEach(() => {
 const text = (message: AgentMessage | undefined): string =>
 	((message as { content?: Array<{ text?: string }> } | undefined)?.content ?? []).map((block) => block.text).join("");
 const RECORD = `record body\n${"r".repeat(40_000 - 12)}`;
+const SMALL = `small body\n${"s".repeat(2_000)}`;
 const declared = () => undefined;
 
 it("a different session id starts the stubbed set over; the same one keeps it (WTF-P 0.8.3 C3)", () => {
@@ -69,8 +71,8 @@ const targetA = {
 const targetB = { ...targetA, id: "aging-b" };
 const model = litellm.synthesizeModel(targetA, "aging-model", null) as Model<"openai-completions">;
 
-/** Two identical reads, then an answer for every later request; every request the provider would receive is kept. */
-function transport() {
+/** One read per scripted path, then an answer for every later request; every request the provider would receive is kept. */
+function transport(paths: ReadonlyArray<string> = ["record.md", "record.md"]) {
 	const requests: AgentMessage[][] = [];
 	const fetch: typeof globalThis.fetch = async () => {
 		const call = requests.length;
@@ -79,7 +81,7 @@ function transport() {
 			encoder.encode(
 				`data: ${JSON.stringify({ id: "fixture", object: "chat.completion.chunk", model: model.id, choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
 			);
-		const tool = call <= 2;
+		const tool = call <= paths.length;
 		const stream = new ReadableStream<Uint8Array>({
 			start(controller) {
 				controller.enqueue(
@@ -92,7 +94,7 @@ function transport() {
 											index: 0,
 											id: `read-${call}`,
 											type: "function",
-											function: { name: "read", arguments: '{"path":"record.md"}' },
+											function: { name: "read", arguments: JSON.stringify({ path: paths[call - 1] }) },
 										},
 									],
 								}
@@ -112,9 +114,8 @@ function transport() {
 const toolResults = (messages: AgentMessage[] | undefined): string[] =>
 	(messages ?? []).filter((message) => message.role === "toolResult").map(text);
 
-it("a model switch that rebuilds the agent keeps every stub and announces no second batch (WTF-P 0.8.3 C3)", {
-	timeout: 20_000,
-}, async () => {
+/** A chat loop over its own session bundle, as one process holds it; every loop shares `wire`. */
+function harness(wire: ReturnType<typeof transport>) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	settings.chat.target = targetA.id;
@@ -137,23 +138,23 @@ it("a model switch that rebuilds the agent keeps every stub and announces no sec
 	const registry = createRegistry({ safety, autonomy: () => "yolo" });
 	registry.register({
 		name: ToolNames.Read,
-		description: "Returns the same 40 KB record every time",
+		description: "Returns the same body for a path every time",
 		parameters: Type.Object({ path: Type.String() }),
 		baseActionClass: "read",
-		run: async () => ({ kind: "ok", output: RECORD }),
+		run: async (args) => ({ kind: "ok", output: args.path === "small.md" ? SMALL : RECORD }),
 	});
-	const wire = transport();
 	const events: ChatLoopEvent[] = [];
-	let agents = 0;
+	const counter = { agents: 0 };
 	const loop = createChatLoop({
 		getSettings: () => settings,
 		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([targetA.id, targetB.id]),
 		session,
+		readSessionEntries: () => (session.current() ? session.readEntries() : []),
 		toolRegistry: registry,
 		bus: context.bus,
 		createAgent: (options) => {
-			agents += 1;
+			counter.agents += 1;
 			return createEngineAgent({
 				...options,
 				streamFn: (requestModel, requestContext, requestOptions) => {
@@ -174,6 +175,19 @@ it("a model switch that rebuilds the agent keeps every stub and announces no sec
 		events.filter(
 			(event) => event.type === "notice" && /observation aging: /u.test((event as { text?: string }).text ?? ""),
 		).length;
+	const close = async () => {
+		loop.dispose();
+		await loop.whenSettled();
+		await session.close();
+	};
+	return { settings, session, loop, counter, batches, close };
+}
+
+it("a model switch that rebuilds the agent keeps every stub and announces no second batch (WTF-P 0.8.3 C3)", {
+	timeout: 20_000,
+}, async () => {
+	const wire = transport();
+	const { settings, loop, counter, batches, close } = harness(wire);
 	try {
 		await loop.submit("Read the record twice.");
 		await loop.whenSettled();
@@ -182,21 +196,55 @@ it("a model switch that rebuilds the agent keeps every stub and announces no sec
 		ok(stub?.startsWith('[observation aged] read {"path":"record.md"}'), stub?.slice(0, 200));
 		strictEqual(fresh, RECORD);
 		strictEqual(batches(), 1);
-		const built = agents;
+		const built = counter.agents;
 
 		// Another target with the same model rebuilds the agent rather than hot-swapping it.
 		settings.chat.target = targetB.id;
 		await loop.submit("Now answer.");
 		await loop.whenSettled();
-		strictEqual(agents, built + 1, "the switch built a new agent");
+		strictEqual(counter.agents, built + 1, "the switch built a new agent");
 		strictEqual(wire.requests.length, 4);
 		const [kept, still] = toolResults(wire.requests[3]);
 		strictEqual(kept, stub, "the stub reaches the rebuilt agent's request byte for byte");
 		strictEqual(still, RECORD);
 		strictEqual(batches(), 1, "no second batch notice after the rebuild");
 	} finally {
-		loop.dispose();
-		await loop.whenSettled();
-		await session.close();
+		await close();
+	}
+});
+
+it("a resumed session in a new process sends the request the stub set had reached (D1-6)", {
+	timeout: 20_000,
+}, async () => {
+	// The record read is superseded past the threshold and stubbed; the small read is superseded below it and is not.
+	const wire = transport(["record.md", "record.md", "small.md", "small.md"]);
+	const first = harness(wire);
+	let id: string | undefined;
+	try {
+		await first.loop.submit("Read the record twice, then the small file twice.");
+		await first.loop.whenSettled();
+		id = first.session.current()?.id;
+		strictEqual(first.batches(), 1);
+	} finally {
+		await first.close();
+	}
+	ok(id);
+	const before = toolResults(wire.requests.at(-1));
+	ok(before[0]?.startsWith("[observation aged]"), before[0]?.slice(0, 200));
+	strictEqual(before[2], SMALL, "below the threshold the small read waits");
+
+	const second = harness(wire);
+	try {
+		second.session.resume(id);
+		replayCurrentSession(
+			{ session: second.session, chat: second.loop, readEntries: () => second.session.readEntries() },
+			id,
+		);
+		await second.loop.submit("Now answer.");
+		await second.loop.whenSettled();
+		deepStrictEqual(toolResults(wire.requests.at(-1)), before, "the resumed request carries the same stub set");
+		strictEqual(second.batches(), 0, "the seeded set forms no fresh batch");
+	} finally {
+		await second.close();
 	}
 });

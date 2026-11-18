@@ -35,7 +35,13 @@ import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
 import type { MessageListDigests } from "./message-list-digest.js";
 import { createMessageListFold } from "./message-list-digest.js";
-import type { ObservationAgingTracker } from "./observation-aging.js";
+import {
+	agedToolCallIdsFromEntries,
+	OBSERVATION_AGING_CUSTOM_TYPE,
+	type ObservationAgingLedger,
+	type ObservationAgingTracker,
+	observationAgingRecord,
+} from "./observation-aging.js";
 import {
 	effectivePosture,
 	POSTURE_GENERATION,
@@ -377,6 +383,8 @@ export interface TurnContext {
 	liveContextEstimate(agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate;
 	/** The session's observation-aging tracker, so every window check prices the request the provider receives. */
 	bindObservationAging(tracker: ObservationAgingTracker): void;
+	/** The current session's ledger, which seeds the aging tracker on session open and records each batch (D1-6). */
+	readonly observationAgingLedger: ObservationAgingLedger;
 	/**
 	 * Recompute and publish the live budget view.
 	 *
@@ -2822,6 +2830,27 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		bindObservationAging(tracker: ObservationAgingTracker): void {
 			observationAging = tracker;
+		},
+		observationAgingLedger: {
+			load(sessionId) {
+				if (deps.session?.current()?.id !== sessionId) return [];
+				try {
+					return agedToolCallIdsFromEntries(deps.readSessionEntries?.() ?? []);
+				} catch {
+					// An unreadable ledger seeds nothing, which is the pre-record behaviour: the next request batches afresh.
+					return [];
+				}
+			},
+			record(sessionId, toolCallIds) {
+				if (!deps.session || deps.session.current()?.id !== sessionId) return;
+				deps.session.appendEntry({
+					kind: "custom",
+					customType: OBSERVATION_AGING_CUSTOM_TYPE,
+					parentTurnId: state.lastTurnId,
+					display: false,
+					data: observationAgingRecord(toolCallIds),
+				});
+			},
 		},
 		refreshLiveBudget,
 		refreshAgentMessagesFromSession,
