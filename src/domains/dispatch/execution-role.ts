@@ -222,6 +222,19 @@ export interface DispatchResultContractRequest {
 }
 
 /**
+ * True when a read-only run drops the plan contract its recipe demands. A read-only run cannot write the plan file an
+ * architect contract demands, so its answer is the reply. It is offered no artifact tool, runs under a read-only permit,
+ * and its persona loses the lines that send the plan to an artifact.
+ */
+export function readOnlyDropsPlanContract(
+	req: DispatchResultContractRequest,
+	recipe: { resultContract: ResultContract } | null | undefined,
+): boolean {
+	if (req.readOnly !== true || !appliesRecipeResultContract(req.gate?.role) || req.gate?.role === "member") return false;
+	return (req.resultContractOverride ?? recipe?.resultContract)?.kind === "architect-plan";
+}
+
+/**
  * The one resolution of the contract a run is validated and sealed against.
  * Every reader (the worker spec, the capture bound, the seal) calls this so
  * the worker repairs against exactly the contract the receipt will name.
@@ -245,8 +258,7 @@ export function dispatchResultContract(
 	// hold there. Only the topology's own override (the vote ballot) applies.
 	if (req.gate?.role === "member") return req.resultContractOverride;
 	const base = req.resultContractOverride ?? recipe?.resultContract;
-	// A read-only run cannot write the plan file an architect contract demands; its answer is the reply.
-	if (req.readOnly === true && base?.kind === "architect-plan") return undefined;
+	if (readOnlyDropsPlanContract(req, recipe)) return undefined;
 	const allowance = req.resultSummary;
 	if (allowance === undefined) return base;
 	if (base?.kind === "mutation-report") return withResultSummaryAllowance(base, allowance.maxBytes);
