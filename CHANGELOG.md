@@ -105,6 +105,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A turn whose last call streamed before it stopped now settles with stage "streaming", not "firstToken", and a harness stop (shutdown, run --timeout, repetition guard, operator cancel, route move) persists failure stage "harness" with its own cause instead of a transport abort (bt-26 N2a).
+- why-stopped words harness-initiated stops as "Stopped on <cause>" instead of "Failed on <cause>"; provider and transport failures still read "Failed on" (bt-26 N2b).
 - A headless or ACP run that ends while an extension reload is still staging no longer prints "Extension reload failed"; the closed runtime drops the reload silently (cw-6).
 - The yolo autonomous token cap now counts cache reads at one tenth and names its figure "cap tokens", so a long cached prefix no longer trips the 5M default after a few dozen calls (cw-2).
 - A /fork session is now nudged about and can collect its ancestors' uncollected detached batches; the first collector wins and cancel stays with the dispatching session (D1-4).
