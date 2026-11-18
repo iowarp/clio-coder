@@ -5,12 +5,15 @@ import { evaluateSkillToolSurface } from "../core/skill-activation.js";
 import type { TelemetryContext } from "../core/telemetry/context.js";
 import { telemetryContext, withToolTelemetryContext } from "../core/telemetry/context.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
+import { telemetryHub } from "../core/telemetry/hub.js";
 import { sumRunSpend } from "../core/telemetry/pricing.js";
 import { renderFactField, renderPricingSum } from "../core/telemetry/render.js";
 import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsTool } from "../core/turn-constraints.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { CouncilReport, CouncilReportMember } from "../domains/agents/result-contract.js";
+import type { BriefingPart, BuiltBriefing } from "../domains/context/index.js";
+import { buildBriefing } from "../domains/context/index.js";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
 import {
 	closeAgentLedger,
@@ -2237,7 +2240,12 @@ function competeResult(
 }
 
 const COUNCIL_BRIEFING_MAX_BYTES = 8 * 1024;
-const COUNCIL_BRIEFING_TRUNCATION = "\n[council peer briefing truncated]";
+/**
+ * A council seat or judge holds read-only tools and no `monitor`, so nothing it can call reaches a peer's run output:
+ * the notice says what was omitted and points nowhere.
+ */
+const councilBriefingNotice = (omitted: number, total: number): string =>
+	`\n[clio: ${omitted} of ${total} bytes omitted from this excerpt]\n`;
 
 /**
  * The verdict a council answer casts, lower-cased.
@@ -2262,8 +2270,8 @@ function councilJudgeText(text: string): string {
 		: text;
 }
 
-function boundedCouncilBriefing(parts: ReadonlyArray<string>): string {
-	return truncateUtf8(parts.join("\n\n"), COUNCIL_BRIEFING_MAX_BYTES, COUNCIL_BRIEFING_TRUNCATION);
+function boundedCouncilBriefing(parts: ReadonlyArray<BriefingPart>): BuiltBriefing {
+	return buildBriefing(parts, COUNCIL_BRIEFING_MAX_BYTES, councilBriefingNotice);
 }
 
 /** Every member's briefing opens with this, whatever recipe it runs as. */
@@ -2276,14 +2284,30 @@ async function runCouncil(
 	council: DispatchCouncilSettings,
 	timeoutMs: number | undefined,
 	signal: AbortSignal | undefined,
+	gateTelemetry: TelemetryContext | undefined,
 ): Promise<{ report: CouncilReport; runs: CompletedRun[]; group: string }> {
 	const group = newGateGroupId("council");
 	const runs: CompletedRun[] = [];
 	let prior = new Map<string, CompletedRun>();
 	const timedOut = new Set<string>();
-	const runMember = async (request: DispatchRequest): Promise<CompletedRun> => {
+	const runMember = async (request: DispatchRequest, briefing?: BuiltBriefing): Promise<CompletedRun> => {
 		if (signal?.aborted) throw new Error("council dispatch aborted");
 		const handle = await deps.dispatch.dispatch(request);
+		if (briefing !== undefined && briefing.clips.length > 0 && request.council !== undefined) {
+			(deps.bus ?? telemetryHub()).emit(
+				"context.briefing_clipped",
+				{
+					runId: handle.runId,
+					role: request.gate?.role === "synthesis" ? "synthesis" : "member",
+					group,
+					round: request.council.round ?? 1,
+					capBytes: COUNCIL_BRIEFING_MAX_BYTES,
+					bytes: briefing.bytes,
+					parts: briefing.clips.map((clip) => ({ ...clip })),
+				},
+				gateTelemetry,
+			);
+		}
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		// A member deadline ends one slow voice, not the council: the others'
 		// answers come back and the report names who was cut off.
@@ -2320,19 +2344,26 @@ async function runCouncil(
 		const settled = await Promise.all(
 			council.members.map(async (member, index) => {
 				// A seated coder or architect argues from its perspective; it must not try to edit and fail.
-				const peerParts: string[] = [COUNCIL_MEMBER_FRAMING];
-				if (base.briefing !== undefined) peerParts.push(`[original briefing] ${base.briefing}`);
+				// The original briefing counts against the seat's cap; each peer keeps its label or failure status.
+				const peerParts: BriefingPart[] = [{ kind: "framing", lead: COUNCIL_MEMBER_FRAMING }];
+				if (base.briefing !== undefined)
+					peerParts.push({ kind: "task", lead: "[original briefing] ", body: base.briefing });
 				if (round > 1) {
 					for (const peer of council.members) {
 						if (peer.label === member.label) continue;
 						const previous = prior.get(peer.label);
 						if (previous === undefined || isPipelineStepFailure(previous.receipt)) {
-							peerParts.push(`[${peer.label}] failed in prior round; no answer contributed.`);
+							peerParts.push({ kind: "evidence", lead: `[${peer.label}] failed in prior round; no answer contributed.` });
 						} else {
-							peerParts.push(`[${peer.label}] ${normalizedAssistantText(previous.summary)}`);
+							peerParts.push({
+								kind: "evidence",
+								lead: `[${peer.label}] `,
+								body: normalizedAssistantText(previous.summary),
+							});
 						}
 					}
 				}
+				const peerBriefing = round > 1 ? boundedCouncilBriefing(peerParts) : undefined;
 				const position = (round - 1) * council.members.length + index + 1;
 				const pinned = council.resolvedTasks?.find((task) => task.role === "member" && task.position === position);
 				let voteTask = base.task;
@@ -2386,13 +2417,12 @@ async function runCouncil(
 					},
 					council: { group, label: member.label, ...(member.color ? { color: member.color } : {}), round },
 					briefing:
-						round > 1
-							? boundedCouncilBriefing(peerParts)
-							: [COUNCIL_MEMBER_FRAMING, ...(base.briefing !== undefined ? [base.briefing] : [])].join("\n\n"),
+						peerBriefing?.text ??
+						[COUNCIL_MEMBER_FRAMING, ...(base.briefing !== undefined ? [base.briefing] : [])].join("\n\n"),
 				};
 				return [
 					member.label,
-					await runMember(withResolvedPlanTaskPin(request, pinned, { pinTask: false, pinBriefing: false })),
+					await runMember(withResolvedPlanTaskPin(request, pinned, { pinTask: false, pinBriefing: false }), peerBriefing),
 				] as const;
 			}),
 		);
@@ -2431,19 +2461,26 @@ async function runCouncil(
 		synthesis = { kind: "vote", verdict, tally };
 	} else if (council.synthesis === "judge") {
 		const finalRuns = [...prior.values()];
+		// The task travels in the judge's own task field, so only the seats' answers count against the cap.
+		const judgeBriefing = boundedCouncilBriefing(
+			finalReports.map(
+				(member): BriefingPart =>
+					member.failed === undefined
+						? { kind: "evidence", lead: `[${member.label}] `, body: member.answer }
+						: {
+								kind: "evidence",
+								lead: `[${member.label}] failed; no final answer contributed. Reason: `,
+								body: member.failed.reason,
+							},
+			),
+		);
 		const judgeRequest: DispatchRequest = {
 			agentId: councilJudgeAgentId(council.judge?.agent, base.agentId),
 			...(base.budget === undefined ? {} : { budget: base.budget }),
 			...(base.record === undefined ? {} : { record: base.record }),
 			executionRole: "judge",
 			task: `Synthesize the council answers for this task:\n\n${base.task}`,
-			briefing: boundedCouncilBriefing(
-				finalReports.map((member) =>
-					member.failed === undefined
-						? `[${member.label}] ${member.answer}`
-						: `[${member.label}] failed; no final answer contributed. Reason: ${member.failed.reason}`,
-				),
-			),
+			briefing: judgeBriefing.text,
 			systemPrompt: COUNCIL_JUDGE_PROMPT,
 			readOnly: true,
 			toolProfile: "council-read-only",
@@ -2459,6 +2496,7 @@ async function runCouncil(
 		const pinned = council.resolvedTasks?.find((task) => task.role === "synthesis");
 		const judgeRun = await runMember(
 			withResolvedPlanTaskPin(judgeRequest, pinned, { pinTask: false, pinBriefing: false }),
+			judgeBriefing,
 		);
 		runs.push(judgeRun);
 		const rawText = normalizedAssistantText(judgeRun.summary);
@@ -2962,7 +3000,7 @@ export async function runDispatchTool(
 				return { kind: "error", message: "dispatch: trusted council settings are unavailable" };
 			}
 			try {
-				return councilResult(deps, await runCouncil(deps, requests[0], council, timeoutMs, options?.signal));
+				return councilResult(deps, await runCouncil(deps, requests[0], council, timeoutMs, options?.signal, gateTelemetry));
 			} catch (err) {
 				return { kind: "error", message: dispatchErrorMessage(err) };
 			}

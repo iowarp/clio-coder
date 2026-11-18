@@ -568,6 +568,11 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		policyId: "token",
 	},
 	"context.recalled": { ...keep("trigger", "tokensReadmitted", "at"), ref: "id" },
+	"context.briefing_clipped": {
+		...keep("role", "round", "capBytes", "bytes", "parts"),
+		runId: "id",
+		group: "id",
+	},
 	"context.fold": {
 		...keep("checkpoint", "route", "tokensBefore", "tokensAfter", "cause"),
 		stages: { ...keep("stage", "outcome", "reason"), recordId: "id" },
