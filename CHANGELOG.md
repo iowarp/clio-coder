@@ -133,6 +133,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- ask_user: a timed-out question that names writing outside the workspace now declines a recommended option that affirms it ("Yes, run it"). Before, only the option's own words were checked. A recommended option that declines is still picked (bt-21).
 - `telemetry why-stopped` now reports a turn that stopped normally without answering, such as one that wrote a tool call as text, as a failed turn naming the cause. Before, it read "ended normally". turn.settled carries an optional content-free `terminal.noAnswer` (J1).
 - An output-limit cut with tool calls shows only its warning notice, without a second red "[stopped: length]" row (J4).
 - ACP: session/load replay separates the assistant messages of one turn with a blank line, as live does. A slash command's failure line now crosses a prompt once (J9, J10).
