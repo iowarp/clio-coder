@@ -218,6 +218,8 @@ export interface ChatPanelTurnUsage {
 	ending?: TurnEnding;
 	/** Epoch ms the turn ended: live, when it settled; replayed, its terminal ledger entry's timestamp. */
 	endedAtMs?: number;
+	/** Replayed from the session, so a forked session's copied turn reads the calls its parent journaled. */
+	replayed?: true;
 }
 
 /**
@@ -3246,7 +3248,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			return;
 		}
 		// The answer closes the run, so the moved turn's answering call is the run's last.
-		const spend = turnSpend(view, usage.turnId, usage.movedTo === undefined ? undefined : usage.callIds?.at(-1));
+		const spend = turnSpend(
+			view,
+			usage.turnId,
+			usage.movedTo === undefined ? undefined : usage.callIds?.at(-1),
+			usage.replayed === true ? "lineage" : "session",
+		);
 		if (spend === null) return;
 		if (JSON.stringify(spend) !== JSON.stringify(usage.spend)) {
 			invalidateEntryCache(entry);
@@ -3553,6 +3560,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					...(callIds.length > 0 ? { callIds } : {}),
 					...(elapsedMs === undefined ? {} : { elapsedMs }),
 					...(endedAtMs === undefined ? {} : { endedAtMs }),
+					...(replayed !== undefined ? { replayed: true as const } : {}),
 					...(humanWaitMs > 0 ? { humanWaitMs } : {}),
 					...(coldReasons.length > 0 ? { coldReasons: [...coldReasons] } : {}),
 					...(runRetries > 0 ? { retries: runRetries } : {}),

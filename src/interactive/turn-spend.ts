@@ -105,10 +105,18 @@ function answerSpend(view: TelemetryView, turnId: string, callId: string): NonNu
 	return { tokens: measuredTokens(usage.input, usage.output), cached: measuredCached(usage.cacheRead) };
 }
 
-/** Null when the view cannot resolve the turn's references. `answeringCallId` also reads that one call's own amounts. */
-export function turnSpend(view: TelemetryView, turnId: string, answeringCallId?: string): TurnSpend | null {
+/**
+ * Null when the view cannot resolve the turn's references. `answeringCallId` also reads that one call's own amounts.
+ * A replayed turn reads the `lineage` scope: a forked session's copied turns journaled their calls under its parent.
+ */
+export function turnSpend(
+	view: TelemetryView,
+	turnId: string,
+	answeringCallId?: string,
+	scope: "session" | "lineage" = "session",
+): TurnSpend | null {
 	const read = (metric: FactMetric) =>
-		view.quantity(factRef({ scope: "session", owner: view.sessionId, metric, group: { by: "turn", key: turnId } }));
+		view.quantity(factRef({ scope, owner: view.sessionId, metric, group: { by: "turn", key: turnId } }));
 	const calls = read("calls");
 	// `in` is the uncached input on every surface, with the cache read beside it: the receipt's whole prompt read
 	// `in 150k` beside /usage's `input 27k · cache read 123k` for the same calls (bt-11).
