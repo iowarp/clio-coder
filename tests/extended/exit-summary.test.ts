@@ -104,6 +104,39 @@ test("the activity row names its visit scope and a worker whose writes went unre
 	collector.dispose();
 });
 
+test("a /resume mid-visit keeps the visit's turns, files and workers on the exit card (bt-11)", () => {
+	const bus = createTelemetryHub();
+	let current = { id: "session-1", hasModelTurn: true };
+	let turns = 0;
+	const collector = createExitSummaryCollector({
+		bus,
+		telemetry: { subscribe: () => () => {} } as unknown as TelemetryContract,
+		dispatch: { observedRunWrites: () => null },
+		session: { current: () => current } as unknown as Pick<SessionContract, "current">,
+		getTurns: () => turns,
+		getToolCounts: () => new Map(),
+		getModel: () => null,
+	});
+	turns = 3;
+	bus.emit("run.started", { runId: "run-a", agentId: "coder", targetId: "local", wireModelId: "m" } as never);
+	bus.emit("run.completed", { runId: "run-a", agentId: "coder", outcome: "completed" } as never);
+	collector.observeRunResult("run-a", { changedPaths: ["a.txt", "b.txt"] } as never);
+	// /resume parks the current session, reattaches the chosen one and adopts its transcript.
+	bus.emit("session.parked", { sessionId: "session-1", reason: "resume_other", at: 0 });
+	current = { id: "session-2", hasModelTurn: true };
+	turns = 7;
+	bus.emit("session.reattached", { sessionId: "session-2", via: "resume" } as never);
+	collector.sessionChanged();
+	turns = 8;
+	const snapshot = collector.snapshot();
+	strictEqual(snapshot?.sessionId, "session-2");
+	match(
+		renderExitSummary(snapshot, "standard", 160, false).join("\n"),
+		/^This visit, workers included: 4 turns · 2 files changed · 1 worker · 2 sessions$/mu,
+	);
+	collector.dispose();
+});
+
 test("the session report states the cached share of the prompt, for the session and its last turn", () => {
 	const view = telemetryViewOf("session-1", [
 		...telemetryCall("session-1", { turnId: "t1", usage: { input: 1000, output: 10 } }),

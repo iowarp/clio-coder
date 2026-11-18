@@ -291,6 +291,15 @@ export interface MuxClient {
 		path: ReadonlyArray<boolean>;
 		ratio: number;
 	}): Promise<MuxLayoutTree>;
+	/**
+	 * Move the split edge beside a pane `amount` toward `direction`. An amount of zero moves nothing, and herdr still
+	 * sends every pane in the tab its current size, which it skips after a `pane.move` (herdr 0.9.5).
+	 */
+	paneResize(request: {
+		paneId: string;
+		direction: "left" | "right" | "up" | "down";
+		amount: number;
+	}): Promise<{ changed: boolean }>;
 	worktreeList(request?: MuxWorktreeListRequest): Promise<MuxWorktreeListResult>;
 	worktreeCreate(request: MuxWorktreeCreateRequest): Promise<MuxWorktreeCreatedResult>;
 	worktreeOpen(request: MuxWorktreeOpenRequest): Promise<MuxWorktreeOpenedResult>;
@@ -1088,6 +1097,13 @@ export function createMuxClient(options: MuxClientOptions): MuxClient {
 				params({ tab_id: request.tabId, pane_id: request.paneId, path: [...request.path], ratio: request.ratio }),
 			);
 			return readLayoutTree(result.layout);
+		},
+		async paneResize(request): Promise<{ changed: boolean }> {
+			const result = await callObject(
+				"pane.resize",
+				params({ pane_id: request.paneId, direction: request.direction, amount: request.amount }),
+			);
+			return { changed: asRecord(result.resize)?.changed === true };
 		},
 		async worktreeList(request = {}): Promise<MuxWorktreeListResult> {
 			const result = await callObject("worktree.list", params({ workspace_id: request.workspaceId, cwd: request.cwd }));

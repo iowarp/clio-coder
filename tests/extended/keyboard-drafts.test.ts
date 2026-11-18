@@ -13,6 +13,7 @@ import {
 	type EditorSubmitExpansion,
 } from "../../src/interactive/editor-submit.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
+import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
 import {
 	dispatchSlashCommand,
 	parseSlashCommand,
@@ -315,4 +316,35 @@ it("Enter on a slash row that leaves the typed line unchanged submits it", async
 	editor.handleInput("\r");
 	assert.equal(editor.getText(), "/model claude-sonnet-5.5");
 	assert.deepEqual(submitted, ["/model claude-sonnet-5.5"]);
+});
+it("Enter sends an unknown /tools as typed instead of the /skill its description matched (bt-11)", async () => {
+	const previous = getKeybindings();
+	createKeybindingManager(DEFAULT_SETTINGS, {});
+	cleanups.push(() => setKeybindings(previous));
+	const terminal = new Proxy({ columns: 80, rows: 24 }, { get: (target, key) => Reflect.get(target, key) ?? noop });
+	const editor = new ClioEditor(new TuiMainScreen(terminal as unknown as Terminal), {
+		getModelLabel: () => "fixture",
+		getThinkingLabel: () => "off",
+	});
+	const submitted: string[] = [];
+	editor.onSubmit = (text) => submitted.push(text);
+	editor.setAutocompleteProvider(createSlashCommandAutocompleteProvider({ fdPath: null }));
+	const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+	const type = async (text: string) => {
+		editor.setText("");
+		for (const key of text) editor.handleInput(key);
+		await settle();
+		assert.equal(editor.isShowingAutocomplete(), true, text);
+	};
+
+	await type("/tools");
+	editor.handleInput("\r");
+	assert.deepEqual(submitted, ["/tools"]);
+
+	// Down chooses the row on purpose, and then Enter completes it as before.
+	await type("/tools");
+	editor.handleInput("\x1b[B");
+	editor.handleInput("\r");
+	assert.equal(editor.getText(), "/skill ");
+	assert.deepEqual(submitted, ["/tools"]);
 });

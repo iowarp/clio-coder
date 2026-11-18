@@ -4,9 +4,14 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { createBoardSource, loadBoard } from "../../src/cli/fleet-board-model.js";
+import { fleetInspectionScope } from "../../src/cli/fleet-project-scope.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { gateDecisionsDirectory, stagePendingGateDecision } from "../../src/domains/dispatch/gate-decisions.js";
 import { openLedger, writeFleetRun } from "../../src/domains/dispatch/state.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { writeSettledRun } from "../harness/settled-run.js";
 
 const cli = fileURLToPath(new URL("../../dist/cli/index.js", import.meta.url));
 
@@ -136,6 +141,36 @@ test("fleet inspection defaults to this project and --all deliberately shows eve
 		strictEqual(hiddenRoot.status, 2);
 		const globalRoot = run("view", "fleet-foreign-root", "--all");
 		strictEqual(globalRoot.status, 0, globalRoot.stderr);
+	} finally {
+		home.restore();
+	}
+});
+
+test("the workers board reads a finished run's record again until its seal lands (bt-11)", async () => {
+	const home = await isolateClioEnv("clio-fleet-board-seal-");
+	try {
+		const ledger = openLedger();
+		const run = ledger.create({
+			agentId: "coder",
+			executionRole: "builder",
+			task: "seal race",
+			targetId: "local",
+			wireModelId: "model",
+			runtimeId: "openai",
+			runtimeKind: "http",
+			sessionId: null,
+			cwd: process.cwd(),
+		});
+		const endedAt = new Date();
+		ledger.update(run.id, { status: "completed", outcome: "succeeded", endedAt: endedAt.toISOString() });
+		await ledger.persist();
+		const source = createBoardSource(clioStateDir());
+		const seal = (nowMs: number) => loadBoard(source, null, fleetInspectionScope(true), nowMs).finished[0]?.record?.seal;
+		// The ledger closed the run before dispatch sealed its record.
+		strictEqual(seal(endedAt.getTime()), undefined);
+		await writeSettledRun(clioStateDir(), fixtureReceiptDraft({ ...fixtureEnvelope(run.id), sessionId: null }));
+		strictEqual(seal(endedAt.getTime() + 500), undefined);
+		strictEqual(seal(endedAt.getTime() + 1_500), "sealed");
 	} finally {
 		home.restore();
 	}

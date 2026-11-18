@@ -318,6 +318,23 @@ export function createDockController(options: DockControllerOptions): DockContro
 		return client.paneMove(request);
 	};
 
+	/**
+	 * herdr lays the anchor's tab out again after a `pane.move` but does not resize the panes' terminals, so Clio kept
+	 * drawing at the width it had beside the dock after the dock left (bt-11). A zero-amount resize of the anchor makes
+	 * herdr send each pane in the tab its size without moving any edge or focus. Best effort: a host without
+	 * `pane.resize` leaves the old width, never a failed hide or show.
+	 */
+	const resyncAnchorTab = async (): Promise<void> => {
+		try {
+			await client.paneResize({ paneId: anchorPaneId, direction: "right", amount: 0 });
+		} catch (error) {
+			log(
+				"debug",
+				`mux anchor resync after a dock move failed: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	};
+
 	/** Any hidden dock marks the parking tab; the tab itself disappears when its last pane leaves. */
 	const parkingState = (): DockState | null => {
 		for (const state of bySlot.values()) {
@@ -415,6 +432,7 @@ export function createDockController(options: DockControllerOptions): DockContro
 		state.paneId = moved.pane.paneId;
 		state.tabId = moved.pane.tabId;
 		state.hidden = true;
+		await resyncAnchorTab();
 		return true;
 	};
 
@@ -511,6 +529,7 @@ export function createDockController(options: DockControllerOptions): DockContro
 			state.hidden = false;
 			state.lastAppliedShare = plan.share;
 			await converge(state, spec);
+			await resyncAnchorTab();
 			return { paneId: moved.pane.paneId, tabId: moved.pane.tabId, workspaceId: moved.pane.workspaceId };
 		},
 

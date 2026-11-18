@@ -89,6 +89,12 @@ export interface ExitSummarySnapshot {
 	}>;
 	/** The session's yolo audit: its window, its halt and the calls left for the operator (ob-yolo D7). */
 	autonomy?: AutonomyReport;
+	/**
+	 * Sessions this visit opened, the current one included, when it switched at least once (/resume, /fork, /tree,
+	 * /handoff, /new). The visit's own counts cover them all; the telemetry read model is the current session's, so
+	 * its model calls are that session's only.
+	 */
+	visitSessions?: number;
 }
 
 /** A path inside the workspace by its workspace path, any other as given. */
@@ -321,8 +327,8 @@ function workerBlockWords(
 
 export function createExitSummaryCollector(deps: CollectorDeps) {
 	const now = deps.now ?? (() => performance.now());
-	let startedAt = now();
-	let visitFrom = new Date().toISOString();
+	const startedAt = now();
+	const visitFrom = new Date().toISOString();
 	let baseTurns = deps.getTurns() ?? 0;
 	let priorTurns = 0;
 	let hasModelTurn = deps.session?.current()?.hasModelTurn === true;
@@ -377,28 +383,23 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			files.set(name, (files.get(name) ?? 0) + 1);
 		}
 	};
-	const reset = (): void => {
-		startedAt = now();
-		visitFrom = new Date().toISOString();
+	/** Every session this visit has had current, so the card can say its counts span more than the one it names. */
+	const visitSessions = new Set<string>();
+	const noteSession = (): void => {
+		const id = deps.session?.current()?.id;
+		if (id) visitSessions.add(id);
+	};
+	noteSession();
+	/**
+	 * Another session became current. The visit is the process, so its turns, files, workers and time keep counting
+	 * across the switch; wiping them read "0 turns · 0 files changed · 8.9s" after a /resume in a 5m49s visit with two
+	 * edits (bt-11). The park before the switch already folded the old session's turns into `priorTurns`, so only the
+	 * turn baseline and the resume line's facts move to the new session.
+	 */
+	const sessionChanged = (): void => {
 		baseTurns = deps.getTurns() ?? 0;
-		priorTurns = 0;
-		hasModelTurn = deps.session?.current()?.hasModelTurn === true;
-		compactions = 0;
-		models.clear();
-		files.clear();
-		workerPaths.clear();
-		workersWithoutWriteRecord.clear();
-		workersWithReceiptPaths.clear();
-		failures.clear();
-		timeline.length = 0;
-		timelineOmitted = 0;
-		permissions.granted = permissions.denied = permissions.expired = permissions.blocked = 0;
-		unattended.questions = unattended.permissions = 0;
-		calls.clear();
-		workers.clear();
-		assignmentRuns.clear();
-		workerTools.clear();
-		workerCapabilities.clear();
+		hasModelTurn ||= deps.session?.current()?.hasModelTurn === true;
+		noteSession();
 	};
 	const settled = (run: { runId: string; agentId: string; outcome: string }): void => {
 		const worker = workers.get(run.runId);
@@ -430,11 +431,13 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			internalGit.set(id, entry);
 		}),
 		deps.bus.subscribe("session.reattached", ({ sessionId }) => {
+			visitSessions.add(sessionId);
 			baseTurns = deps.getTurns() ?? 0;
 			hasModelTurn ||= deps.session?.current()?.hasModelTurn === true;
 			reopenedSessionId = sessionId;
 		}),
-		deps.bus.subscribe("session.parked", () => {
+		deps.bus.subscribe("session.parked", ({ sessionId }) => {
+			visitSessions.add(sessionId);
 			reopenedSessionId = null;
 			priorTurns += Math.max(0, (deps.getTurns() ?? 0) - baseTurns);
 			baseTurns = deps.getTurns() ?? 0;
@@ -528,7 +531,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		deps.bus.subscribe("run.failed", settled),
 	];
 	return {
-		reset,
+		sessionChanged,
 		observeChat(event: ChatLoopEvent): void {
 			if (event.type === "agent_start") {
 				const model = deps.getModel();
@@ -609,6 +612,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			}
 			const spend = exitSpend(deps.telemetry.read?.live(), visitFrom, entries);
 			const autonomy = deps.autonomy?.() ?? null;
+			const sessions = new Set([...visitSessions, session.id]).size;
 			return {
 				sessionId: session.id,
 				sessionName: session.name ?? null,
@@ -635,6 +639,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				compactions,
 				...(gitHooks.length > 0 ? { gitHooks } : {}),
 				...(autonomy !== null ? { autonomy } : {}),
+				...(sessions > 1 ? { visitSessions: sessions } : {}),
 				...(internalGit.size > 0
 					? {
 							internalGit: [...internalGit.values()].map((entry) => ({
