@@ -250,6 +250,11 @@ test("observed checks follow the receipt's rules on the task board and the headl
 	]);
 	for (const change of [`node -e "fs.writeFileSync('src/a.ts', '')"`, "tsc", "npx jest -u"])
 		deepStrictEqual(standing(bash("npm test"), bash(change)), [], change);
+	// A check no vocabulary names files under its command on the board as in the recorder, red included (x6-1).
+	deepStrictEqual(standing(bash("npm test"), bash("npx eslint .", 1)), [
+		["npm test", true, "test"],
+		["npx eslint .", false, undefined],
+	]);
 	// A runner flag after `--` files a check; a runtime loader refuses one, which settles and retires nothing (x5-2).
 	deepStrictEqual(standing(bash("npm test", 1), bash("npm test -- -t parses")), [
 		["npm test", false, "test"],
@@ -263,6 +268,34 @@ test("observed checks follow the receipt's rules on the task board and the headl
 			["b1", "bash", "execute", "ok", { command: "make test; echo EXIT=$?" }],
 		]);
 		match(text.stderr, /1 write · no check observed after the last write/u);
+		// A typecheck red after a test pass fails the sealed receipt and the headless line alike (x6-1).
+		const red = await headlessRun(
+			"text",
+			[
+				["e1", "edit", "write", "ok", { path: "src/a.py", edits: [] }],
+				["b1", "bash", "execute", "ok", { command: "npm test" }],
+				["b2", "bash", "execute", "error", { command: "npx tsc --noEmit" }],
+			],
+			{
+				targetId: "fixture",
+				runtimeId: "openai-compat",
+				runtimeKind: "http",
+				wireModelId: "fixture-model",
+				promptSignature: null,
+				toolSignature: null,
+				cwd: env.dir,
+			},
+		);
+		match(red.stderr, /check passed: npm test · check failed: npx tsc --noEmit/u);
+		const settled = readRunJournal(join(env.dir, "state"))?.runs.at(-1)?.settled;
+		deepStrictEqual(settled?.verification, { state: "unverified", basis: "validation-tool" });
+		deepStrictEqual(
+			settled?.quality?.typedValidations.map((fact) => [fact.sourceId, fact.passed]),
+			[
+				["command:npm test", true],
+				["command:npx tsc --noEmit", false],
+			],
+		);
 	} finally {
 		env.restore();
 	}

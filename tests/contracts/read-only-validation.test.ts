@@ -779,6 +779,9 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	for (const change of [`node -e "fs.writeFileSync('src/a.ts', '')"`, "tsc", "npx jest -u", "npm test -- -u"])
 		deepStrictEqual(seal("npm test", change), stale, change);
 	deepStrictEqual(seal("!npm test", "npx tsc --noEmit"), red);
+	// A red from a check no receipt vocabulary names still settles under the classifier's name (x6-1).
+	for (const check of ["npx tsc --noEmit", "npx eslint ."])
+		deepStrictEqual(seal("npm test", `!${check}`), [["npm test"], "unverified", [check]], check);
 	deepStrictEqual(seal("!npm test", "npm test -- -t parses"), [["npm test"], "unverified", ["npm test"]]);
 	deepStrictEqual(seal("!npm test", "npm test -- --import ./x.mjs"), red);
 	deepStrictEqual(seal("npm test -- --run"), green);

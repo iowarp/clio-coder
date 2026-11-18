@@ -11,7 +11,6 @@ import {
 	type CallClassification,
 	type CheckOutputReader,
 	classifyCall,
-	observedCheckName,
 	settleCheckCall,
 	validationCommandOf,
 } from "./check-classifier.js";
@@ -350,7 +349,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			// The classifier alone says whether the call ran a check; the vocabularies only name it.
 			const validationCommand = reading.verdict === "check" ? receiptValidationCommand(toolName, args, base) : null;
 			const verificationCommand = validationCommandOf(toolName, args, "grounding");
-			const command = shell === null ? null : reading.shellCommand;
+			// Every bash check settles under the classifier's name, named by a vocabulary or not, as the board files it (x6-1).
+			const validationName = shell === null ? null : reading.name;
 			// A listing names no check and runs none, so it is not a checking call (bt-19).
 			if (reading.verdict === "check") checkingCalls.set(toolCallId, null);
 			// An opaque call is tracked even when it exposed no path and no
@@ -361,6 +361,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				!reading.opaque &&
 				reading.paths.length === 0 &&
 				validationCommand === null &&
+				validationName === null &&
 				verificationCommand === null
 			)
 				return;
@@ -370,7 +371,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				toolCallId,
 				reading,
 				validationCommand,
-				validationName: command !== null && validationCommand !== null ? observedCheckName(command, base, cwd) : null,
+				validationName,
 				checkStatusAttributable: shell?.statusAttributable ?? true,
 				mutationRevision,
 				verificationCommand,

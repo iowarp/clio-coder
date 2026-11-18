@@ -93,12 +93,15 @@ export interface CallClassification {
 	shape: CheckCommandShape | null;
 	/** A check's canonical identity in the `grounding` vocabulary; null for anything but a named check. */
 	check: string | null;
-	/** The name a check's outcome is filed under: a bash check's full observed command, else {@link check}. */
+	/**
+	 * The name a check's outcome is filed under: a bash check's full observed command, named or not by a vocabulary,
+	 * else {@link check}. The recorder and the task board both key on it, so neither drops a check the other keeps (x6-1).
+	 */
 	name: string | null;
 }
 
 /** The name a bash check's outcome is filed under: its full observed command, prefixed with its directory off `cwd`. */
-export function observedCheckName(command: string, base: string, cwd: string): string {
+function observedCheckName(command: string, base: string, cwd: string): string {
 	return `${base === cwd ? "" : `cwd=${base}: `}${observedValidationCommand(command)}`;
 }
 
@@ -276,7 +279,7 @@ export function classifyCall(
 		opaque: toolWritesOpaquely(toolName),
 		shape,
 		check,
-		name: check === null ? null : command === null ? check : observedCheckName(command, base, cwd),
+		name: verdict === "check" && command !== null ? observedCheckName(command, base, cwd) : check,
 	};
 }
 
