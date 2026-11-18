@@ -1234,6 +1234,45 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		// Resolved once per admitted call, so the before_tool hook, the body and
 		// the after_tool hook all mean the same landing (undefined: not yet resolved).
 		let landing: ToolCallLanding | null | undefined;
+		// A flow refusal records the decision it re-shapes, then settles as blocked.
+		const flowBlocked = (reason: string): RegistryVerdict => {
+			recordRegistryDisposition(call, decision, "blocked", { reasonCode: FLOW_BLOCK_REASON_CODE });
+			return { ...flowBlockedVerdict(decision, call.tool, reason), ...execution };
+		};
+		const withheld = (restrictions: FlowRestrictionSet | null, what: string): RegistryVerdict | null => {
+			if (restrictions === null) return null;
+			deps.flow?.absorb(restrictions, {
+				tool: spec.name,
+				...(options?.toolCallId !== undefined ? { toolCallId: options.toolCallId } : {}),
+			});
+			// A label that did not reach the ledger must not be outlived by the
+			// content it labels: the transcript would then hold the bytes
+			// without the restriction across a restart. The content is withheld
+			// and the queued label is retried on the next ledger access.
+			const unlabeled = deps.flow?.refusal() ?? null;
+			return unlabeled === null ? null : flowBlocked(`${spec.name} ${what} withheld: ${unlabeled}`);
+		};
+		// Extension runtime after_tool hooks are awaited only when one matches this tool.
+		const afterEffects = (
+			result: ToolResult,
+			digest: ToolResultDigest,
+		): ReadonlyArray<MiddlewareEffect> | Promise<ReadonlyArray<MiddlewareEffect>> => {
+			const syncAfter = runToolHook("after_tool", spec, call, decision, options, result, digest);
+			if (!deps.middleware?.hasAwaitedHook?.("after_tool", spec.name)) return syncAfter;
+			const awaited = runAwaitedToolHook(
+				"after_tool",
+				spec,
+				call,
+				decision,
+				options,
+				landing === undefined ? hookLanding(spec, call) : landing,
+				syncAfter,
+				result,
+				digest,
+				bodyMs(),
+			);
+			return awaited.then((effects) => [...syncAfter, ...effects]);
+		};
 		try {
 			// Explicit information-flow violations are final at every autonomy
 			// level, including yolo, and are decided before any hook can run the
@@ -1242,12 +1281,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			// Yolo admits the transfer as well (#407); the source's label is still
 			// absorbed below, so the session keeps the record of what it carried.
 			const flowViolation = trueYolo() ? null : (sourceAdmissionRefusal(spec, call) ?? outboundFlowViolation(spec, call));
-			if (flowViolation !== null) {
-				recordRegistryDisposition(call, decision, "blocked", {
-					reasonCode: FLOW_BLOCK_REASON_CODE,
-				});
-				return flowBlockedVerdict(decision, call.tool, flowViolation);
-			}
+			if (flowViolation !== null) return flowBlocked(flowViolation);
 			// The hook layer is the only control stage past safety admission. Guards
 			// (loop, protected artifacts, dispatch dedup) are before_tool
 			// registrations; the first block_tool effect decides the verdict. Keep
@@ -1292,10 +1326,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				}
 			}
 			if (block) {
-				const verdict = guardBlockedVerdict(decision, call.tool, block.reason, guardRuleIds.get(block));
-				recordRegistryDisposition(call, verdict.decision, "blocked", {
-					reasonCode: GUARD_BLOCK_REASON_CODE,
-				});
+				const verdict = guardBlocked(call, decision, block.reason, guardRuleIds.get(block));
 				return block.redundantRepeat === true ? { ...verdict, redundantRepeat: true } : verdict;
 			}
 			// Recoverability point: admission allowed the call and no hook blocked it,
@@ -1303,7 +1334,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			const snapshot = await snapshotBeforeBody(spec, call, decision, options);
 			if (snapshot.missing !== null && decision.policy?.recoverable === true) {
 				const reason = `${spec.name} did not run: it was admitted without approval because a workspace snapshot would undo it, and no complete snapshot could be taken (${snapshot.missing}). Take a route that discards nothing, or record the open decision for the operator.`;
-				const verdict = snapshotRequiredVerdict(decision, call.tool, reason);
+				const verdict = blockedVerdict(decision, `${call.tool} blocked: no workspace snapshot`, reason, {
+					kind: "block",
+					reasonCode: SNAPSHOT_REQUIRED_REASON_CODE,
+				});
 				recordRegistryDisposition(call, verdict.decision, "blocked", {
 					reasonCode: SNAPSHOT_REQUIRED_REASON_CODE,
 				});
@@ -1378,51 +1412,19 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				// The restriction enters the ledger before the result goes anywhere:
 				// not to the screening classifier, not to the hooks, not to the model.
 				// An error can quote the source, so it is labeled and absorbed too.
-				if (sourceRestrictions !== null) {
-					deps.flow?.absorb(sourceRestrictions, {
-						tool: spec.name,
-						...(options?.toolCallId !== undefined ? { toolCallId: options.toolCallId } : {}),
-					});
-					// A label that did not reach the ledger must not be outlived by the
-					// content it labels: the transcript would then hold the bytes
-					// without the restriction across a restart. The content is withheld
-					// and the queued label is retried on the next ledger access.
-					const unlabeled = deps.flow?.refusal() ?? null;
-					if (unlabeled !== null) {
-						const reason = `${spec.name} result withheld: ${unlabeled}`;
-						recordRegistryDisposition(call, decision, "blocked", { reasonCode: FLOW_BLOCK_REASON_CODE });
-						return { ...flowBlockedVerdict(decision, call.tool, reason), ...execution };
-					}
-				}
+				const resultWithheld = withheld(sourceRestrictions, "result");
+				if (resultWithheld !== null) return resultWithheld;
 				// A refusal settles only after its label is absorbed: an MCP server's
 				// refusal quotes the server's own text, which the source rule labels
 				// exactly as it would label a result.
 				if (nestedBlocked !== null) return nestedBlocked;
 				const labeled = withFlowRestrictions(result, sourceRestrictions);
-				const digest = toolResultDigestFor(spec, labeled, resultDisposition, options);
-				const syncAfter = runToolHook("after_tool", spec, call, decision, options, labeled, digest);
-				const afterEffects = deps.middleware?.hasAwaitedHook?.("after_tool", spec.name)
-					? [
-							...syncAfter,
-							...(await runAwaitedToolHook(
-								"after_tool",
-								spec,
-								call,
-								decision,
-								options,
-								landing === undefined ? hookLanding(spec, call) : landing,
-								syncAfter,
-								labeled,
-								digest,
-								bodyMs(),
-							)),
-						]
-					: syncAfter;
+				const after = afterEffects(labeled, toolResultDigestFor(spec, labeled, resultDisposition, options));
 				const finalResult = shapeToolResult(
 					spec,
 					applyToolResultEffects(
 						labeled,
-						[...beforeEffects, ...afterEffects],
+						[...beforeEffects, ...(after instanceof Promise ? await after : after)],
 						labeled !== result,
 						nestedExecutions.has(result) ? "call" : nestedChainResults.has(result) ? "chain" : null,
 					),
@@ -1435,46 +1437,15 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				// A body that threw may have read the source before failing, so
 				// its message carries the same label as a result would.
 				const thrownRestrictions = deps.safety.policy?.flowRestrictionsFor?.(call) ?? null;
-				if (thrownRestrictions !== null) {
-					deps.flow?.absorb(thrownRestrictions, {
-						tool: spec.name,
-						...(options?.toolCallId !== undefined ? { toolCallId: options.toolCallId } : {}),
-					});
-				}
-				const unlabeled = thrownRestrictions === null ? null : (deps.flow?.refusal() ?? null);
-				if (unlabeled !== null) {
-					const reason = `${spec.name} error withheld: ${unlabeled}`;
-					recordRegistryDisposition(call, decision, "blocked", { reasonCode: FLOW_BLOCK_REASON_CODE });
-					return {
-						...flowBlockedVerdict(decision, call.tool, reason),
-						...execution,
-					};
-				}
+				const errorWithheld = withheld(thrownRestrictions, "error");
+				if (errorWithheld !== null) return errorWithheld;
 				const result: ToolResult = withFlowRestrictions({ kind: "error", message }, thrownRestrictions);
-				const digest = toolResultDigestFor(spec, result, resultDisposition, options);
-				const syncAfter = runToolHook("after_tool", spec, call, decision, options, result, digest);
-				const afterEffects = deps.middleware?.hasAwaitedHook?.("after_tool", spec.name)
-					? [
-							...syncAfter,
-							...(await runAwaitedToolHook(
-								"after_tool",
-								spec,
-								call,
-								decision,
-								options,
-								landing === undefined ? hookLanding(spec, call) : landing,
-								syncAfter,
-								result,
-								digest,
-								bodyMs(),
-							)),
-						]
-					: syncAfter;
+				const after = afterEffects(result, toolResultDigestFor(spec, result, resultDisposition, options));
 				return {
 					kind: "ok",
 					result: shapeToolResult(
 						spec,
-						applyToolResultEffects(result, [...beforeEffects, ...afterEffects]),
+						applyToolResultEffects(result, [...beforeEffects, ...(after instanceof Promise ? await after : after)]),
 						options,
 						resultDisposition,
 					),
@@ -1488,6 +1459,28 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		}
 	};
 
+	/** The hook input with what the session carries and the effective tool's declared metadata. */
+	const hookInput = (
+		hook: "before_tool" | "after_tool",
+		spec: ToolSpec,
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		options: ToolInvokeOptions | undefined,
+		result: ToolResult | undefined,
+		resultDigest: ToolResultDigest | undefined,
+	): MiddlewareHookInput =>
+		buildToolHookInput(
+			hook,
+			spec,
+			call,
+			decision,
+			options,
+			result,
+			resultDigest,
+			deps.flow?.carried() ?? null,
+			tools.get(effectiveToolCall(call.tool, call.args).toolName as ToolName)?.metadata,
+		);
+
 	const runToolHook = (
 		hook: "before_tool" | "after_tool",
 		spec: ToolSpec,
@@ -1498,18 +1491,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		resultDigest?: ToolResultDigest,
 	): ReadonlyArray<MiddlewareEffect> => {
 		if (!deps.middleware) return [];
-		const input = buildToolHookInput(
-			hook,
-			spec,
-			call,
-			decision,
-			"operating",
-			options,
-			result,
-			resultDigest,
-			deps.flow?.carried() ?? null,
-			tools.get(effectiveToolCall(call.tool, call.args).toolName as ToolName)?.metadata,
-		);
+		const input = hookInput(hook, spec, call, decision, options, result, resultDigest);
 		const effects = noteGuardRule(deps.middleware.runHook(input));
 		try {
 			deps.onMiddlewareEffects?.(effects, input);
@@ -1638,18 +1620,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		durationMs?: number,
 	): Promise<ReadonlyArray<MiddlewareEffect>> => {
 		if (!deps.middleware?.runAwaitedHook) return [];
-		const built = buildToolHookInput(
-			hook,
-			spec,
-			call,
-			decision,
-			"operating",
-			options,
-			result,
-			resultDigest,
-			deps.flow?.carried() ?? null,
-			tools.get(effectiveToolCall(call.tool, call.args).toolName as ToolName)?.metadata,
-		);
+		const built = hookInput(hook, spec, call, decision, options, result, resultDigest);
 		const input = {
 			...built,
 			...(durationMs === undefined ? {} : { metadata: { ...built.metadata, durationMs } }),
@@ -1973,12 +1944,11 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			);
 		}
 		const reasonCode = `admission:${admission.code}`;
-		const blocked: SafetyDecision = {
-			kind: "block",
-			classification: decision.classification,
-			rejection: { short: admission.reason, detail: admission.reason, hints: [] },
-			...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode } } : {}),
-		};
+		const blocked = blockDecision(
+			decision,
+			{ short: admission.reason, detail: admission.reason, hints: [] },
+			{ reasonCode },
+		);
 		recordRegistryDisposition(call, blocked, "blocked", { reasonCode });
 		return withDenial(
 			{ kind: "blocked", reason: admission.reason, decision: blocked },
@@ -2058,10 +2028,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const reason = `${call.tool} refused: ${refused.label} would not be admitted as a direct call (${refused.cause})`;
 		const scheduled = call.tool === ToolNames.Job;
 		const reasonCode = hard !== null ? "host_effect_blocked" : "host_effect_not_admitted";
-		const blocked: SafetyDecision = {
-			kind: "block",
-			classification: decision.classification,
-			rejection: {
+		const blocked = blockDecision(
+			decision,
+			{
 				short: reason,
 				detail: scheduled
 					? `${reason}. A scheduled job runs its command as this session, outside any sandbox, so the command must pass the admission its direct uncontained call would.`
@@ -2076,8 +2045,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 							"Approving the dispatch does not approve the commands its verification runs.",
 						],
 			},
-			...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode } } : {}),
-		};
+			{ reasonCode },
+		);
 		recordRegistryDisposition(call, blocked, "blocked", { reasonCode });
 		return { kind: "terminal", verdict: { kind: "blocked", reason, decision: blocked } };
 	};
@@ -2147,10 +2116,29 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		reason: string | null,
 	): RegistryVerdict | null => {
 		if (reason === null || !isWorkerToolCallCapExceededReason(reason)) return null;
-		const verdict = guardBlockedVerdict(decision, call.tool, reason);
-		recordRegistryDisposition(call, verdict.decision, "blocked", {
+		return guardBlocked(call, decision, reason);
+	};
+
+	/**
+	 * Terminal blocked verdict for a before_tool guard block (loop guard,
+	 * protected artifacts, dispatch dedup, declarative block rules) on a call
+	 * whose admission already passed. The decision is re-shaped as a block, and
+	 * the carried policy's net-pass reasonCode is replaced with the guard axis,
+	 * so downstream consumers (worker finish events, dispatch receipts, audit)
+	 * count a blocked safety decision instead of repeating the admission's allow.
+	 * The ledger records the re-shaped decision.
+	 */
+	const guardBlocked = (
+		call: ClassifierCall,
+		decision: SafetyDecision,
+		reason: string,
+		ruleId?: string,
+	): Extract<RegistryVerdict, { kind: "blocked" }> => {
+		const verdict = blockedVerdict(decision, `${call.tool} blocked: tool guard`, reason, {
 			reasonCode: GUARD_BLOCK_REASON_CODE,
+			...(ruleId !== undefined ? { ruleId } : {}),
 		});
+		recordRegistryDisposition(call, verdict.decision, "blocked", { reasonCode: GUARD_BLOCK_REASON_CODE });
 		return verdict;
 	};
 
@@ -2356,18 +2344,11 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (judged.kind === "block") {
 			disposeAdmissionArgs(judgedSpec, admissionCall.args ?? {});
 			const reasonCode = `${SAFETY_JUDGE_REASON_PREFIX}${judged.rule}`;
-			const blocked: SafetyDecision = {
-				kind: "block",
-				classification: outcome.decision.classification,
-				rejection: {
-					short: `${call.tool} blocked by the safety judge (rule ${judged.rule})`,
-					detail: judged.refusal,
-					hints: [],
-				},
-				...(outcome.decision.policy !== undefined
-					? { policy: { ...outcome.decision.policy, kind: "block" as const, reasonCode } }
-					: {}),
-			};
+			const blocked = blockDecision(
+				outcome.decision,
+				{ short: `${call.tool} blocked by the safety judge (rule ${judged.rule})`, detail: judged.refusal, hints: [] },
+				{ kind: "block", reasonCode },
+			);
 			recordRegistryDisposition(admissionCall, blocked, "blocked", { reasonCode });
 			if (unattended) observeUnattendedRefusal(admissionCall, outcome.decision, "judge-block", judged.rule);
 			const verdict = withDenial(
@@ -2542,17 +2523,13 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 						: `${turnId}\0${deps.mutationEpoch?.(turnId) ?? 0}\0${hashToolCall(call.tool, call.args)}`;
 				const prior = key === null ? undefined : deniedCalls.get(key);
 				if (prior?.denial !== undefined) {
-					const decision: SafetyDecision = {
-						kind: "block",
-						classification: prior.decision.classification,
-						rejection:
-							prior.decision.kind === "allow"
-								? { short: prior.reason, detail: prior.reason, hints: [] }
-								: prior.decision.rejection,
-						...(prior.decision.policy !== undefined
-							? { policy: { ...prior.decision.policy, reasonCode: DENIED_REPEAT_REASON_CODE } }
-							: {}),
-					};
+					const decision = blockDecision(
+						prior.decision,
+						prior.decision.kind === "allow"
+							? { short: prior.reason, detail: prior.reason, hints: [] }
+							: prior.decision.rejection,
+						{ reasonCode: DENIED_REPEAT_REASON_CODE },
+					);
 					const repeat: Extract<RegistryVerdict, { kind: "blocked" }> = {
 						kind: "blocked",
 						reason: `${repeatedDenialReason(effectiveToolCall(call.tool, call.args).toolName, prior.denial)}\n${prior.reason}`,
@@ -3140,56 +3117,35 @@ function nestedBlockedVerdict(result: ToolResult): Extract<RegistryVerdict, { ki
 	};
 }
 
+type PolicyPatch = Partial<NonNullable<SafetyDecision["policy"]>>;
+
 /**
- * Terminal blocked verdict for a before_tool guard block (loop guard,
- * protected artifacts, dispatch dedup, declarative block rules) on a call
- * whose admission already passed. The decision is re-shaped as a block, and
- * the carried policy's net-pass reasonCode is replaced with the guard axis,
- * so downstream consumers (worker finish events, dispatch receipts, audit)
- * count a blocked safety decision instead of repeating the admission's allow.
+ * The decision re-shaped as a block. A patch is spread last, so the carried
+ * policy keeps its key order; without one the policy is reused as it is.
  */
-function guardBlockedVerdict(
+function blockDecision(
 	decision: SafetyDecision,
-	tool: string,
-	reason: string,
-	ruleId?: string,
-): Extract<RegistryVerdict, { kind: "blocked" }> {
-	const blocked: SafetyDecision = {
+	rejection: Extract<SafetyDecision, { kind: "block" }>["rejection"],
+	patch?: PolicyPatch,
+): SafetyDecision {
+	return {
 		kind: "block",
 		classification: decision.classification,
-		rejection: {
-			short: `${tool} blocked: tool guard`,
-			detail: reason,
-			hints: [],
-		},
+		rejection,
 		...(decision.policy !== undefined
-			? {
-					policy: {
-						...decision.policy,
-						reasonCode: GUARD_BLOCK_REASON_CODE,
-						...(ruleId !== undefined ? { ruleId } : {}),
-					},
-				}
+			? { policy: patch === undefined ? decision.policy : { ...decision.policy, ...patch } }
 			: {}),
 	};
-	return { kind: "blocked", reason, decision: blocked };
 }
 
-/** Terminal blocked verdict for a recoverable call whose workspace snapshot could not be taken. */
-function snapshotRequiredVerdict(
+/** Terminal blocked verdict whose rejection detail is the reason itself. */
+function blockedVerdict(
 	decision: SafetyDecision,
-	tool: string,
+	short: string,
 	reason: string,
+	patch: PolicyPatch,
 ): Extract<RegistryVerdict, { kind: "blocked" }> {
-	const blocked: SafetyDecision = {
-		kind: "block",
-		classification: decision.classification,
-		rejection: { short: `${tool} blocked: no workspace snapshot`, detail: reason, hints: [] },
-		...(decision.policy !== undefined
-			? { policy: { ...decision.policy, kind: "block" as const, reasonCode: SNAPSHOT_REQUIRED_REASON_CODE } }
-			: {}),
-	};
-	return { kind: "blocked", reason, decision: blocked };
+	return { kind: "blocked", reason, decision: blockDecision(decision, { short, detail: reason, hints: [] }, patch) };
 }
 
 /**
@@ -3204,13 +3160,7 @@ function flowBlockedVerdict(
 	tool: string,
 	reason: string,
 ): Extract<RegistryVerdict, { kind: "blocked" }> {
-	const blocked: SafetyDecision = {
-		kind: "block",
-		classification: decision.classification,
-		rejection: { short: `${tool} blocked: information flow`, detail: reason, hints: [] },
-		...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode: FLOW_BLOCK_REASON_CODE } } : {}),
-	};
-	return { kind: "blocked", reason, decision: blocked };
+	return blockedVerdict(decision, `${tool} blocked: information flow`, reason, { reasonCode: FLOW_BLOCK_REASON_CODE });
 }
 
 /**
@@ -3302,16 +3252,11 @@ function parkAnsweredBlockedVerdict(
 		const gate = gateReasonText(gateReason);
 		if (gate !== "") detail.push(`why it needed the operator: "${gate}"`);
 	}
-	const blocked: SafetyDecision = {
-		kind: "block",
-		classification: decision.classification,
-		rejection: {
-			short: `${tool} blocked: ${decision.classification.actionClass} was not approved`,
-			detail: detail.join("\n"),
-			hints: [],
-		},
-		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
-	};
+	const blocked = blockDecision(decision, {
+		short: `${tool} blocked: ${decision.classification.actionClass} was not approved`,
+		detail: detail.join("\n"),
+		hints: [],
+	});
 	return { kind: "blocked", reason, decision: blocked, deniedPark: true };
 }
 
@@ -3333,16 +3278,15 @@ function skillSurfaceBlockedVerdict(
 		violation.disallowedBy.length > 0
 			? `${tool} is disallowed by the active skill(s) ${violation.disallowedBy.join(", ")} (disallowed-tools). ${lifetime} Work within the skill workflow; if it genuinely needs this step, use ask_user when available or state the blocker in your reply.`
 			: `${tool} is outside the tool surface declared by the active skill(s) ${violation.skills.join(", ")}. Tools are narrowed to: ${(violation.mergedAllowedTools ?? []).join(", ")} (plus context and ask_user). The limitation receipt is also available unless explicitly disallowed. ${lifetime} Work within the skill workflow; if it genuinely needs this step, use ask_user when available or state the blocker in your reply.`;
-	const blocked: SafetyDecision = {
-		kind: "block",
-		classification: decision.classification,
-		rejection: {
+	const blocked = blockDecision(
+		decision,
+		{
 			short: `${tool} blocked: outside active skill tool surface`,
 			detail: reason,
 			hints: ["Skill narrowing never grants tools; it only blocks calls outside the declared workflow surface."],
 		},
-		...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode: "skill_surface" } } : {}),
-	};
+		{ reasonCode: "skill_surface" },
+	);
 	return { kind: "blocked", reason, decision: blocked };
 }
 
@@ -3413,15 +3357,9 @@ function readOnlyDeniedVerdict(
 						"Inspection tools remain available for paths inside the workspace.",
 					],
 				};
-	const blocked: SafetyDecision = {
-		kind: "block",
-		classification: decision.classification,
-		rejection,
-		// The net passed this call; the block is the read-only ceiling's, so the
-		// carried policy must not keep reporting the net's "allowed" code.
-		...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode } } : {}),
-	};
-	return { kind: "blocked", reason: rejection.short, decision: blocked };
+	// The net passed this call; the block is the read-only ceiling's, so the
+	// carried policy must not keep reporting the net's "allowed" code.
+	return { kind: "blocked", reason: rejection.short, decision: blockDecision(decision, rejection, { reasonCode }) };
 }
 
 /** One task reads as a task, not a plan: the overlay says what the approval launches. */
@@ -3509,7 +3447,6 @@ function buildToolHookInput(
 	spec: ToolSpec,
 	call: ClassifierCall,
 	decision: SafetyDecision,
-	posture: string,
 	options: ToolInvokeOptions | undefined,
 	result: ToolResult | undefined,
 	resultDigest: ToolResultDigest | undefined,
@@ -3517,7 +3454,7 @@ function buildToolHookInput(
 	effectiveMetadata: ToolMetadata | undefined,
 ): MiddlewareHookInput {
 	const metadata: Record<string, MiddlewareMetadataValue> = {
-		posture,
+		posture: "operating",
 		actionClass: decision.classification.actionClass,
 		decisionKind: decision.kind,
 		repeatableRead: effectiveMetadata?.repeatableRead === true,
