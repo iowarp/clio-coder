@@ -7,7 +7,7 @@ import {
 	COMPACTION_USER_PROMPT_TEMPLATE,
 	compact,
 } from "../../src/domains/session/compaction/compact.js";
-import type { SessionEntry } from "../../src/domains/session/entries.js";
+import type { DecisionRecord, SessionEntry } from "../../src/domains/session/entries.js";
 import { toTaskLedgerEntryFields } from "../../src/domains/session/task-board.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { resolvedRequestContext } from "../../src/engine/context.js";
@@ -23,6 +23,23 @@ function history(text = "Earlier work"): SessionEntry[] {
 		role: "user",
 		payload: { text: body },
 	}));
+}
+
+function decisions(interviewId: string, records: DecisionRecord[]): SessionEntry {
+	const timestamp = "2026-09-07T00:00:00Z";
+	return {
+		kind: "decisionLedger",
+		turnId: interviewId,
+		parentTurnId: "user-0",
+		timestamp,
+		origin: "agent",
+		interviewId,
+		interviewStatus: "complete",
+		startedAt: timestamp,
+		endedAt: timestamp,
+		roundCount: 0,
+		decisions: records,
+	};
 }
 
 describe("compaction checkpoint format and semantic replay", () => {
@@ -91,7 +108,7 @@ describe("compaction checkpoint format and semantic replay", () => {
 		}
 	});
 
-	it("freezes the task board at the checkpoint while later work stays in the suffix", () => {
+	it("freezes the task board and active decisions at the checkpoint while later work stays in the suffix", () => {
 		const board = {
 			boardId: "b1",
 			title: "Repair",
@@ -102,6 +119,10 @@ describe("compaction checkpoint format and semantic replay", () => {
 		const entries: SessionEntry[] = [
 			...history(),
 			{ ...toTaskLedgerEntryFields(board, new Date(timestamp)), turnId: "board", timestamp, parentTurnId: "user-0" },
+			decisions("agent:d1", [
+				{ key: "approach", value: "B", status: "active", decidedAt: timestamp, rationale: "A breaks the exchange" },
+				{ key: "store", value: "SUPERSEDED-MARKER", status: "superseded", decidedAt: timestamp },
+			]),
 			{
 				kind: "compactionSummary",
 				turnId: "checkpoint",
@@ -115,6 +136,11 @@ describe("compaction checkpoint format and semantic replay", () => {
 		const before = buildModelReplayAgentMessagesFromTurns(entries);
 		strictEqual(before[1]?.role, "user");
 		ok(JSON.stringify(before[1]).includes("[Task board as of checkpoint] Repair\\nt1 pending Fix exchange"));
+		ok(
+			JSON.stringify(before[2]).includes("[Decisions as of checkpoint]\\nagent:d1/approach B (A breaks the exchange)"),
+			JSON.stringify(before),
+		);
+		ok(!JSON.stringify(before).includes("SUPERSEDED-MARKER"));
 		const after = buildModelReplayAgentMessagesFromTurns([
 			...entries,
 			{
@@ -126,6 +152,7 @@ describe("compaction checkpoint format and semantic replay", () => {
 				timestamp,
 				parentTurnId: "user-1",
 			},
+			decisions("agent:d2", [{ key: "later", value: "LATER-DECISION", status: "active", decidedAt: timestamp }]),
 			{
 				kind: "message",
 				role: "assistant",
@@ -137,6 +164,7 @@ describe("compaction checkpoint format and semantic replay", () => {
 		]);
 		deepStrictEqual(after.slice(0, before.length), before);
 		ok(JSON.stringify(after).includes("Task t1 completed"));
+		ok(!JSON.stringify(after).includes("LATER-DECISION"));
 	});
 
 	it("replays the whole checkpoint beyond the ordinary replay cap", () => {

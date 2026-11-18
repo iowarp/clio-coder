@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ModelTier } from "../../src/core/model-tier.js";
@@ -6,6 +6,7 @@ import { subscribeExtensionObservations } from "../../src/domains/extensions/bus
 import type { ExtensionObservationV2 } from "../../src/domains/extensions/public-api-v2.js";
 import type { MiddlewareContract, MiddlewareHookInput } from "../../src/domains/middleware/index.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import { hostCheckpoint } from "../../src/domains/session/compaction/compact.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import { type SessionEntry, SKILL_CONTEXT_STATE } from "../../src/domains/session/entries.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
@@ -404,6 +405,48 @@ describe("step turns start from a compact state on small or uncached routes", ()
 		} finally {
 			await run.close();
 		}
+	});
+
+	it("a step checkpoint folds the previous checkpoint's goal and keeps its preserved request", () => {
+		const timestamp = new Date().toISOString();
+		const userContext = { turnId: "request", text: "Write the methods section; never touch the intro." };
+		const entries = (later: boolean) =>
+			[
+				{
+					kind: "message",
+					turnId: "request",
+					parentTurnId: null,
+					timestamp,
+					role: "user",
+					payload: { text: userContext.text },
+				},
+				{
+					kind: "compactionSummary",
+					turnId: "s1",
+					parentTurnId: "request",
+					timestamp,
+					summary:
+						'## Goal\nGOAL-MARKER finish the paper\n\n<operator-notes encoding="xml">\n- NOTE-MARKER keep APA style\n</operator-notes>\n\n<recallable-refs>\nREF-MARKER\n</recallable-refs>',
+					tokensBefore: 100,
+					firstKeptTurnId: "",
+					userContext,
+				},
+				{
+					kind: "message",
+					turnId: "next",
+					parentTurnId: "s1",
+					timestamp,
+					role: "user",
+					payload: later ? { text: "A new request." } : { text: "continue", synthetic: true },
+				},
+			] as SessionEntry[];
+		const carried = hostCheckpoint(entries(false), "Step checkpoint.");
+		ok(carried.summary.indexOf("GOAL-MARKER") < carried.summary.indexOf("Step checkpoint."), carried.summary);
+		strictEqual(carried.summary.split("NOTE-MARKER").length, 2, carried.summary);
+		ok(!carried.summary.includes("REF-MARKER"), carried.summary);
+		deepStrictEqual(carried.userContext, userContext);
+		// A later operator turn retires the old request, as native compaction does.
+		strictEqual(hostCheckpoint(entries(true), "Step checkpoint.").userContext, undefined);
 	});
 
 	it("a settled step leads only the same session standing on the settled leaf", () => {

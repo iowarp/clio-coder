@@ -60,6 +60,7 @@ import {
 	standingOperatorNotes,
 	verifiedSkillContextCheckpoint,
 } from "../entries.js";
+import { findLastEntry } from "../tree/active-path.js";
 import { serializeConversation, TOOL_RESULT_MAX_CHARS } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
 import { DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS } from "./defaults.js";
@@ -70,7 +71,7 @@ import {
 	stripEchoedExactFacts,
 } from "./exact-facts.js";
 import { noteSummaryUsage } from "./reasoning-share.js";
-import { summaryOutputBudget } from "./summary-output.js";
+import { summaryOutputBudget, summaryRoomTokens } from "./summary-output.js";
 import { type ContinuityNoteCost, calculateContextTokens, estimateTokens, getLastAssistantUsage } from "./tokens.js";
 
 /** Validate the history checkpoint, never the intentionally different split-turn prompt. */
@@ -955,14 +956,44 @@ export function checkpointSkillContext(
 	return { skillContext, protectedStart };
 }
 
+const CHECKPOINT_BUILT_BLOCK = /\n*<(operator-notes|recallable-refs)\b[^>]*>[\s\S]*?<\/\1\s*>\n*/giu;
+const CARRIED_SUMMARY_TRUNCATED = "\n[earlier checkpoint truncated]";
+
 /**
- * A checkpoint summary the host writes without a model call: `lead`, then the
+ * A checkpoint the host writes without a model call. Its summary is the
+ * previous checkpoint's body (its goal and decisions, without the blocks this
+ * one rebuilds, held to the summary's token room), then `lead`, then the
  * operator notes, file facts and recallable tool-result refs the entries
  * carry, exactly as a native checkpoint appends them, so a later summary and
- * `context(scope="recall")` still reach what the cut removed from replay.
+ * `context(scope="recall")` still reach what the cut removed from replay. The
+ * previous checkpoint's preserved request carries while it is still the
+ * latest operator turn, as in native compaction.
  */
-export function hostCheckpointSummary(entries: ReadonlyArray<SessionEntry>, lead: string, cwd?: string): string {
-	return `${lead}${formatOperatorNotes(extractOperatorNotes(entries))}${formatExactFacts(extractFileOps(entries), entries, cwd)}${formatRecallableRefs(entries, entries.length, foldWorkingSet(entries))}`;
+export function hostCheckpoint(
+	entries: ReadonlyArray<SessionEntry>,
+	lead: string,
+	cwd?: string,
+): { summary: string; userContext?: PreservedUserContext } {
+	const prior = entries[findLatestCompactionIndex(entries)];
+	let carried = "";
+	let userContext: PreservedUserContext | undefined;
+	if (prior?.kind === "compactionSummary") {
+		carried = stripEchoedExactFacts(prior.summary.replace(CHECKPOINT_BUILT_BLOCK, "\n\n")).trim();
+		const maxChars = summaryRoomTokens() * 4;
+		if (carried.length > maxChars)
+			carried = `${carried.slice(0, maxChars - CARRIED_SUMMARY_TRUNCATED.length)}${CARRIED_SUMMARY_TRUNCATED}`;
+		const latestOperator = findLastEntry(
+			entries,
+			(entry) =>
+				entry.kind === "message" &&
+				entry.role === "user" &&
+				(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
+		);
+		if (prior.userContext && (!latestOperator || latestOperator.turnId === prior.userContext.turnId))
+			userContext = prior.userContext;
+	}
+	const summary = `${carried.length > 0 ? `${carried}\n\n---\n\n` : ""}${lead}${formatOperatorNotes(extractOperatorNotes(entries))}${formatExactFacts(extractFileOps(entries), entries, cwd)}${formatRecallableRefs(entries, entries.length, foldWorkingSet(entries))}`;
+	return { summary, ...(userContext !== undefined ? { userContext } : {}) };
 }
 
 function numberOrZero(value: unknown): number {
