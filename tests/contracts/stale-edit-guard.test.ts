@@ -112,4 +112,19 @@ describe("stale-file edit guard", () => {
 		});
 		deepStrictEqual(guard.evaluate({ hook: "before_tool", toolName: "write", toolArgs: { path: "src/a.ts" } }), []);
 	});
+
+	it("keeps its verdict across appends and a branch switch while it reuses its index", () => {
+		let entries: ReadonlyArray<SessionEntry> = Object.freeze([...beforeCut, checkpoint, ...afterCut]);
+		const guard = createStaleEditGuardRegistration({ readEntries: () => entries, cwd: () => cwd });
+		const edit = () =>
+			guard.evaluate({ hook: "before_tool", toolName: "edit", toolArgs: { path: "src/a.ts", edits: [] } });
+		const base = entries;
+		strictEqual(edit().length, 1);
+		entries = Object.freeze([...base, ...toolTurn("call_b", "read", { path: "src/b.ts" })]);
+		strictEqual(edit().length, 1);
+		entries = Object.freeze([...entries, ...toolTurn("call_new", "read", { path: "src/a.ts" })]);
+		deepStrictEqual(edit(), []);
+		entries = Object.freeze([...base, ...toolTurn("call_c", "read", { path: "src/c.ts" })]);
+		strictEqual(edit().length, 1, "a path that does not extend the last one is indexed afresh");
+	});
 });

@@ -413,7 +413,12 @@ function chainMember(child: MessageEntry, observation: PathObservation | null): 
 
 function toolResultObservation(
 	entry: MessageEntry,
-	context: { entryIndex: number; turnIndex: number; cwd: string | null; calls: ReadonlyMap<string, ToolCallFacts> },
+	context: {
+		entryIndex: number;
+		turnIndex: number;
+		cwd: string | null;
+		calls: { get(id: string): ToolCallFacts | undefined };
+	},
 ): PathObservation | null {
 	const obj = payloadRecord(entry.payload);
 	const toolCallId = stringField(obj, "toolCallId", "tool_call_id", "id");
@@ -447,59 +452,91 @@ function toolResultObservation(
 }
 
 export function buildPathIndex(entries: ReadonlyArray<SessionEntry>, options?: PathIndexOptions): PathIndex {
+	const builder = createPathIndexBuilder(options);
+	builder.append(entries, 0);
+	return builder.index;
+}
+
+/** A `PathIndex` over a ledger slice that only grows, folding each appended suffix once. */
+export interface PathIndexBuilder {
+	/** The index over every entry appended so far; it changes in place on the next append. */
+	readonly index: PathIndex;
+	/**
+	 * Index `entries` from `from` on, where `entries` holds the entries already indexed in its
+	 * first `from` slots. False, with nothing changed, when an appended tool call reuses an id an
+	 * indexed result already looked up: that observation would change, so the caller rebuilds.
+	 */
+	append(entries: ReadonlyArray<SessionEntry>, from: number): boolean;
+}
+
+export function createPathIndexBuilder(options?: PathIndexOptions): PathIndexBuilder {
 	const cwd = usableCwd(options);
-	const calls = collectToolCalls(expandChainMessages(entries));
+	const calls = new Map<string, ToolCallFacts>();
+	const lookedUp = new Set<string>();
+	const recordingCalls = {
+		get(id: string): ToolCallFacts | undefined {
+			lookedUp.add(id);
+			return calls.get(id);
+		},
+	};
 	const observations: PathObservation[] = [];
 	const byRef = new Map<string, PathObservation>();
 	const byPath = new Map<string, PathObservation[]>();
 	const chainMembers = new Map<string, ChainMember[]>();
 	const turnIndexOf = new Map<string, number>();
 	let turnIndex = 0;
+	const index = { observations, byRef, byPath, chainMembers, turnIndexOf, turnCount: 0 };
 
-	for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
-		const entry = entries[entryIndex];
-		if (entry === undefined) continue;
-		turnIndexOf.set(entry.turnId, turnIndex);
-		const entryObservations: PathObservation[] = [];
-		if (entry.kind === "fileEntry") {
-			entryObservations.push({
-				ref: { entry: entry.turnId },
-				toolCallId: null,
-				toolName: "fileEntry",
-				op: fileEntryOp(entry.operation),
-				path: canonicalize(entry.path, cwd),
-				range: null,
-				surfaced: [],
-				isError: false,
-				isBlocked: false,
-				turnIndex,
-				entryIndex,
-				argsKey: "",
-			});
-		} else if (entry.kind === "message" && entry.role === "tool_result") {
-			const expanded = expandChainMessages([entry]);
-			const members: ChainMember[] | null = expanded.length > 1 ? [] : null;
-			for (const child of expanded) {
-				if (child.role !== "tool_result") continue;
-				const observation = toolResultObservation(child, { entryIndex, turnIndex, cwd, calls });
-				if (observation) entryObservations.push(observation);
-				if (members !== null && child !== entry) members.push(chainMember(child, observation));
+	const append = (entries: ReadonlyArray<SessionEntry>, from: number): boolean => {
+		const added = collectToolCalls(expandChainMessages(from === 0 ? entries : entries.slice(from)));
+		for (const id of added.keys()) if (lookedUp.has(id)) return false;
+		for (const [id, call] of added) calls.set(id, call);
+		for (let entryIndex = from; entryIndex < entries.length; entryIndex += 1) {
+			const entry = entries[entryIndex];
+			if (entry === undefined) continue;
+			turnIndexOf.set(entry.turnId, turnIndex);
+			const entryObservations: PathObservation[] = [];
+			if (entry.kind === "fileEntry") {
+				entryObservations.push({
+					ref: { entry: entry.turnId },
+					toolCallId: null,
+					toolName: "fileEntry",
+					op: fileEntryOp(entry.operation),
+					path: canonicalize(entry.path, cwd),
+					range: null,
+					surfaced: [],
+					isError: false,
+					isBlocked: false,
+					turnIndex,
+					entryIndex,
+					argsKey: "",
+				});
+			} else if (entry.kind === "message" && entry.role === "tool_result") {
+				const expanded = expandChainMessages([entry]);
+				const members: ChainMember[] | null = expanded.length > 1 ? [] : null;
+				for (const child of expanded) {
+					if (child.role !== "tool_result") continue;
+					const observation = toolResultObservation(child, { entryIndex, turnIndex, cwd, calls: recordingCalls });
+					if (observation) entryObservations.push(observation);
+					if (members !== null && child !== entry) members.push(chainMember(child, observation));
+				}
+				if (members !== null) chainMembers.set(entry.turnId, members);
 			}
-			if (members !== null) chainMembers.set(entry.turnId, members);
-		}
-		for (const observation of entryObservations) {
-			observations.push(observation);
-			// A compound receipt has multiple facts under one recallable body.
-			// Never identify that entire body with its last child operation.
-			if (entryObservations.length === 1) byRef.set(observation.ref.entry, observation);
-			if (observation.path.length > 0) {
-				const bucket = byPath.get(observation.path);
-				if (bucket === undefined) byPath.set(observation.path, [observation]);
-				else bucket.push(observation);
+			for (const observation of entryObservations) {
+				observations.push(observation);
+				// A compound receipt has multiple facts under one recallable body.
+				// Never identify that entire body with its last child operation.
+				if (entryObservations.length === 1) byRef.set(observation.ref.entry, observation);
+				if (observation.path.length > 0) {
+					const bucket = byPath.get(observation.path);
+					if (bucket === undefined) byPath.set(observation.path, [observation]);
+					else bucket.push(observation);
+				}
 			}
+			if (isTurnStart(entry)) turnIndex += 1;
 		}
-		if (isTurnStart(entry)) turnIndex += 1;
-	}
-
-	return { observations, byRef, byPath, chainMembers, turnIndexOf, turnCount: turnIndex };
+		index.turnCount = turnIndex;
+		return true;
+	};
+	return { index, append };
 }
