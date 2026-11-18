@@ -12,6 +12,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Added
 
+- ACP session openers return a models block, and `session/set_model` is served. (ACP low 1)
+- Standard ACP `session/fork`, advertised in sessionCapabilities when branching is on. (ACP low 2)
+- `campaign run --dry-run` validates every entry and prints its plan without creating anything. (bt-20 p4)
 - Interactive `clio-coder` accepts `--max-context-tokens`, with the same meaning as on `run`. (c16-E)
 - A mutation report's validation may carry `"baseline":true` for a deliberate red run before the change; quality judges only the checks run after the change (bt-17).
 - `models` lists the thinking levels each route offers (`thinkingLevels` in `--json`) (bt-20).
@@ -46,6 +49,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- Calls the output limit cuts off are stated once, read as not run, and count as no call and no tool error on any surface. (bt-39 a)
+- A test pins ACP compaction failure lines as reply text. (c2b-3)
 - A worker's account of failed attempts is followed by the feed's own attempt counts. (bt-23 #3)
 - A judge-mode dispatch with no seated safety judge raises a worker_judge_withheld notice saying workers run as deny. (N2)
 - Unattended countdowns read m:ss under a minute too (0:59, 0:05). (bt-11 q)
@@ -119,6 +124,12 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A `<tool_call …>` opener with attributes is read as a written call. (c2b-2b/m2a-4)
+- An operator's cancel no longer names a failure route. (operator-cancel failureRoute)
+- A response that rewrites one file five times is stopped by the flood check. (bt-39 b)
+- Reasoning that re-drafts the same lines, or reaches 75% of the output cap with nothing but thinking, is stopped on routes without an enforced thinking budget. (bt-25 fix 2)
+- ACP checkpoints a live session before session/close, a fork or a handoff closes it. (ACP low 3)
+- ACP keeps an assistant message's text blocks apart with a blank line, live and on replay. (bt-acp-tail)
 - A worker ask that no operator could answer counts as a permission request in the receipt. (bt-readonly residual)
 - A worker call refused before it reached a tool counts in toolStats as an error, and a call cut off by the output token limit is not counted as one. (bt-23 #5)
 - A worker call refused by an approval timeout names that cause in its evidence. (bt-11 t)
