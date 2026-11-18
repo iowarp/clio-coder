@@ -14,7 +14,7 @@ import { assessQualityPolicy, loadQualityPolicy, type QualityFinding } from "../
 import { validateTrustStatus } from "../evidence/trust-status.js";
 import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
 import { callVerdict } from "./check-classifier.js";
-import { runCheckFacts } from "./observed-checks.js";
+import { type RunCheckFacts, runCheckFacts } from "./observed-checks.js";
 import {
 	detectValidationCommand,
 	extractCommandDeleteTargets,
@@ -196,7 +196,8 @@ interface MutationCandidate {
  * wording alone and a real limitation is never missed for its phrasing.
  */
 export function assessFinishContract(input: FinishContractInput): FinishContractAssessment {
-	const assessment = assessMutationFinishContract(input);
+	const scope = assessmentScope(input);
+	const assessment = assessMutationFinishContract(input, scope);
 	if (
 		assessment.mutatedPaths.length === 0 ||
 		assessment.reason === "deletion_only" ||
@@ -234,12 +235,44 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 			? {
 					advisory: !hasPassedChecks
 						? FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE
-						: checkFailedSinceLastChange(input)
+						: checkFailedSinceLastChange(input, scope)
 							? FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE
 							: FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
 				}
 			: {}),
 	};
+}
+
+/** The window one assessment reads, with its declared checks and the shared fold over it, each read at most once. */
+interface AssessmentScope {
+	window: ReadonlyArray<unknown>;
+	declared(): ReadonlyArray<DeclaredVerifierCommand>;
+	/** The shared classifier's replay of the window, run once per assessment for every consumer (x8-6). */
+	facts(): RunCheckFacts;
+}
+
+function assessmentScope(input: FinishContractInput): AssessmentScope {
+	const window = recentEntries(
+		input.sessionEntries ?? [],
+		input.assistantTurnId ?? null,
+		input.recentEntryLimit ?? DEFAULT_RECENT_ENTRY_LIMIT,
+		input.windowStartTurnId,
+	);
+	let declared: DeclaredVerifierCommand[] | undefined;
+	let facts: RunCheckFacts | undefined;
+	const scope: AssessmentScope = {
+		window,
+		declared: () => {
+			declared ??= declaredVerifierCommands(input.workspaceRoot, input.sessionVerifiers);
+			return declared;
+		},
+		facts: () => {
+			const root = resolve(input.workspaceRoot ?? ".");
+			facts ??= runCheckFacts(window, root, [...scope.declared(), ...acceptanceScriptChecks(input, root)]);
+			return facts;
+		},
+	};
+	return scope;
 }
 
 /**
@@ -259,18 +292,11 @@ function acceptanceScriptChecks(input: FinishContractInput, root: string): Decla
  * Whether a check's last outcome since the run's last change is red, read by the shared classifier's replay as the
  * run-effects recorder seals it, so the notice never says checks passed beside a red the receipt keeps (bt-44).
  */
-function checkFailedSinceLastChange(input: FinishContractInput): boolean {
+function checkFailedSinceLastChange(input: FinishContractInput, scope: AssessmentScope): boolean {
 	if (input.workspaceRoot === undefined) return false;
-	const window = recentEntries(
-		input.sessionEntries ?? [],
-		input.assistantTurnId ?? null,
-		input.recentEntryLimit ?? DEFAULT_RECENT_ENTRY_LIMIT,
-		input.windowStartTurnId,
-	);
 	// Only a failed result can seal a red, so an all-green window skips the replay's reads.
-	if (!capabilityEntries(window).some(failedResult)) return false;
-	const declared = declaredVerifierCommands(input.workspaceRoot, input.sessionVerifiers);
-	return runCheckFacts(window, input.workspaceRoot, declared).failing.length > 0;
+	if (!capabilityEntries(scope.window).some(failedResult)) return false;
+	return scope.facts().failing.length > 0;
 }
 
 function failedResult(entry: unknown): boolean {
@@ -291,15 +317,10 @@ function failedResult(entry: unknown): boolean {
 	);
 }
 
-function assessMutationFinishContract(input: FinishContractInput): FinishContractAssessment {
+function assessMutationFinishContract(input: FinishContractInput, scope: AssessmentScope): FinishContractAssessment {
 	const sessionEntries = input.sessionEntries ?? [];
 	const assistantTurnId = input.assistantTurnId ?? null;
-	const window = recentEntries(
-		sessionEntries,
-		assistantTurnId,
-		input.recentEntryLimit ?? DEFAULT_RECENT_ENTRY_LIMIT,
-		input.windowStartTurnId,
-	);
+	const { window } = scope;
 
 	const { paths: touchedPaths, written } = mutatingReceipts(window);
 	if (touchedPaths.length === 0) {
@@ -319,10 +340,14 @@ function assessMutationFinishContract(input: FinishContractInput): FinishContrac
 	}
 
 	const acceptanceChecks = new Set(input.activeAcceptance?.verification.map((item) => item.check) ?? []);
-	const declared = declaredVerifierCommands(input.workspaceRoot, input.sessionVerifiers);
-	const root = resolve(input.workspaceRoot ?? ".");
-	const standing = runCheckFacts(window, root, [...declared, ...acceptanceScriptChecks(input, root)]).passCalls;
-	const evidence = collectValidationEvidence(window, acceptanceChecks, input.workspaceRoot, declared, standing);
+	const declared = scope.declared();
+	const evidence = collectValidationEvidence(
+		window,
+		acceptanceChecks,
+		input.workspaceRoot,
+		declared,
+		scope.facts().passCalls,
+	);
 	const limitations = collectLimitationEvidence(window);
 	let quality: QualityFinding[] = [];
 	if (input.workspaceRoot) {
