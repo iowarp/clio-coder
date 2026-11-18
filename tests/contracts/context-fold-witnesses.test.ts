@@ -5,26 +5,27 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { Type } from "typebox";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createWorkerContextGuard } from "../../src/domains/context/worker/pressure.js";
+import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
+import { selectSuperseded } from "../../src/domains/context/working-set/superseded.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
 import type { SessionContract, SessionEntryInput } from "../../src/domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
-import { lockedSynthesisFallbackText } from "../../src/engine/loop-guard.js";
+import { createEngineAgent, type EngineAgentHandle } from "../../src/engine/agent.js";
+import { callRepeatsAsRead, effectiveCallIdentity, lockedSynthesisFallbackText } from "../../src/engine/loop-guard.js";
 import { engineModels } from "../../src/engine/models.js";
+import { runPrewarmRound } from "../../src/engine/prewarm.js";
 import { createRequestStructures } from "../../src/engine/request-structure.js";
 import { openSession } from "../../src/engine/session.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { lastToolCallOf } from "../../src/session-control/continuation-tool-call.js";
 import { createHostInserts } from "../../src/session-control/host-inserts.js";
-import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
 import {
-	agedToolCallIdsFromEntries,
-	ageObservations,
-	createObservationAging,
-	OBSERVATION_AGING_CUSTOM_TYPE,
-	observationAgingRecord,
-} from "../../src/session-control/observation-aging.js";
+	buildModelReplayAgentMessagesFromTurns,
+	renderModelReplay,
+} from "../../src/session-control/model-session-replay.js";
+import { OBSERVATION_AGING_CUSTOM_TYPE, observationAgingRecord } from "../../src/session-control/observation-aging.js";
 import { RunEvidenceLog } from "../../src/session-control/run-evidence.js";
 import {
 	createStepStartTracker,
@@ -68,6 +69,18 @@ afterEach(() => {
 const AT = "2026-09-21T09:00:00.000Z";
 const READ = "read";
 const noDeclared = () => undefined;
+/** What S0 selects over the replay of `entries`, classified by the loop guard as the session classifies. */
+function superseded(entries: ReadonlyArray<SessionEntry>) {
+	return selectSuperseded({
+		entries,
+		sourceIds: renderModelReplay(entries).sourceIds,
+		view: foldWorkingSet(entries),
+		classify: (name, args) => ({
+			identity: effectiveCallIdentity(name, args),
+			read: callRepeatsAsRead(name, args, noDeclared),
+		}),
+	});
+}
 
 function message(
 	turnId: string,
@@ -352,7 +365,6 @@ describe("W4 and W5 (F2 -> CF-5): superseded selection over the rendered history
 	const SIZE = 33 * 1024;
 
 	it("W4: two identical 33 KB reads, the newer evicted: the request keeps the older body", {
-		todo: "F2 -> CF-5",
 		timeout: 30_000,
 	}, async (t) => {
 		const OLDER = body("OLDER", SIZE);
@@ -400,10 +412,38 @@ describe("W4 and W5 (F2 -> CF-5): superseded selection over the rendered history
 			message("a3", "r2", "assistant", { content: [{ type: "text", text: "read" }] }),
 		];
 	}
-	const aged = (entries: SessionEntry[]): string =>
-		requestText(ageObservations(buildModelReplayAgentMessagesFromTurns(entries), new Set(), noDeclared).messages);
+	/** The request a rebuild sends once S0 has committed what it selects over the ledger's replay. */
+	const aged = (entries: SessionEntry[]): string => {
+		const selected = superseded(entries);
+		const record: SessionEntry[] =
+			selected.length === 0
+				? []
+				: [
+						{
+							kind: "contextEviction",
+							turnId: "s0",
+							parentTurnId: entries.at(-1)?.turnId ?? null,
+							timestamp: AT,
+							policyId: "superseded-v1",
+							trigger: "superseded",
+							tokensBefore: 20_000,
+							tokensAfter: 10_000,
+							pressureBefore: null,
+							snapshotIdBefore: null,
+							evicted: selected.map((candidate, index) => ({
+								alias: `r${index + 1}`,
+								ref: candidate.ref,
+								reason: candidate.reason,
+								by: candidate.by,
+								tokensFreed: 8_000,
+								marker: `[evicted ${candidate.ref.entry} by ${candidate.by}]`,
+							})),
+						},
+					];
+		return requestText(buildModelReplayAgentMessagesFromTurns([...entries, ...record]));
+	};
 
-	it("W5: a clipped repeat is not a full cover after a rebuild", { todo: "F2 -> CF-5" }, () => {
+	it("W5: a clipped repeat is not a full cover after a rebuild", () => {
 		const clipped = repeated(body("CLIPPED", 2_000), {
 			observation: { truncated: true, shownCount: 1, shownBytes: 2_000 },
 		});
@@ -411,11 +451,35 @@ describe("W4 and W5 (F2 -> CF-5): superseded selection over the rendered history
 		ok(aged(clipped).includes(body("OLDER", 40 * 1024)), "a 2 KB slice does not stand in for a 40 KB read");
 	});
 
-	it("W5: a filtered repeat that showed nothing is not a cover after a rebuild", { todo: "F2 -> CF-5" }, () => {
+	it("W5: a filtered repeat that showed nothing is not a cover after a rebuild", () => {
 		const filtered = repeated("[read: output budget exhausted; nothing shown]", {
 			observation: { truncated: true, shownCount: 0, shownBytes: 0 },
 		});
 		ok(aged(filtered).includes(body("OLDER", 40 * 1024)), "an empty delivery covers nothing");
+	});
+
+	it("W5: parallel identical calls completed in reverse: the earlier call's result is the one superseded", () => {
+		const entries: SessionEntry[] = [
+			message("u1", null, "user", { text: "read it twice at once" }),
+			message("a1", "u1", "assistant", {
+				content: [
+					{ type: "toolCall", id: "c1", name: READ, arguments: { path: "src/big.ts" } },
+					{ type: "toolCall", id: "c2", name: READ, arguments: { path: "src/big.ts" } },
+				],
+				stopReason: "toolUse",
+			}),
+			// The ledger holds c2's result first; render orders results by call, so c1's comes first in the request.
+			readResult("r2", "a1", "c2", body("SECOND", 40 * 1024)),
+			readResult("r1", "r2", "c1", body("FIRST", 40 * 1024)),
+			message("a2", "r1", "assistant", { content: [{ type: "text", text: "read" }] }),
+		];
+		deepStrictEqual(
+			superseded(entries).map((candidate) => [candidate.ref.entry, candidate.by]),
+			[["r1", "r2"]],
+		);
+		const sent = aged(entries);
+		ok(sent.includes(body("SECOND", 40 * 1024)), "the later call's copy stays");
+		ok(!sent.includes(body("FIRST", 40 * 1024)), "the earlier call's copy leaves");
 	});
 });
 
@@ -443,47 +507,100 @@ describe("W11 (F2, F5 -> CF-5): a v6 aging record meets the fold", () => {
 			eviction("ev", "a4", ["r2", "r3"]),
 		];
 	}
-	/** What a chat loop opening `entries` sends on an uncached route. */
-	function open(entries: SessionEntry[], sessionId: string): string {
-		const aging = createObservationAging(noDeclared, {
-			load: () => agedToolCallIdsFromEntries(entries),
-			record() {},
-		});
-		const messages = buildModelReplayAgentMessagesFromTurns(entries);
-		return requestText(aging.project(messages, { promptCaching: false }, sessionId).messages);
+	/** What a chat loop reopening session `id` sends on an uncached route. */
+	async function open(server: CaptureServer, id: string): Promise<string> {
+		const reopened = chatHarness({ server, route: { caching: false } });
+		try {
+			reopened.reopen(id);
+			await reopened.submit("go on");
+		} finally {
+			await reopened.close();
+		}
+		const request = server.requests.at(-1);
+		ok(request);
+		return JSON.stringify(request.body);
 	}
 
-	it("first open, second open and a fork keep the body whose cover was lost", { todo: "F2 -> CF-5" }, async () => {
-		const entries = v6Ledger();
-		ok(open(entries, "v6").includes(OLDER), "first open: the aged id's cover is a marker, so its body returns");
-		ok(open(entries, "v6").includes(OLDER), "second open: the same");
-		const session: SessionContract = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
+	it("first open, second open and a fork keep the body whose cover was lost", { timeout: 30_000 }, async (t) => {
+		const server = await startCaptureServer(() => ({ text: "answered" }));
+		t.after(() => server.close());
+		const seed = chatHarness({ server, route: { caching: false } });
+		let id: string;
 		let childId: string;
 		try {
-			session.create({ cwd: process.cwd() });
-			for (const entry of entries) session.appendEntry(entry as SessionEntryInput);
-			childId = session.fork("a4").id;
+			id = seed.session.create({ cwd: process.cwd() }).id;
+			for (const entry of v6Ledger()) seed.session.appendEntry(entry as SessionEntryInput);
+			childId = seed.session.fork("ev").id;
 		} finally {
-			await session.close();
+			await seed.close();
 		}
-		ok(open(openSession(childId).turns() as SessionEntry[], childId).includes(OLDER), "a fork at the tip: the same");
+		ok((await open(server, id)).includes(OLDER), "first open: the aged id's cover is a marker, so its body returns");
+		ok((await open(server, id)).includes(OLDER), "second open: the same");
+		ok((await open(server, childId)).includes(OLDER), "a fork at the tip: the same");
 	});
 
-	it("an id prepared for a request that is never sent is not recorded", { todo: "F5 -> CF-5" }, () => {
-		const recorded: string[][] = [];
-		const aging = createObservationAging(noDeclared, { load: () => [], record: (_id, ids) => recorded.push([...ids]) });
-		const entries = [
-			message("u1", null, "user", { text: "read it twice" }),
-			readCall("a1", "u1", "c1", "src/big.ts"),
-			readResult("r1", "a1", "c1", OLDER),
-			readCall("a2", "r1", "c2", "src/big.ts"),
-			readResult("r2", "a2", "c2", OLDER),
-		];
-		// The prewarm transform projects the request and then declines to send it (src/engine/prewarm.ts:211-225).
-		// CF-5 moves the commit to the dispatched attempt; this call stands for a transform with no dispatch after it.
-		const projected = aging.project(buildModelReplayAgentMessagesFromTurns(entries), { promptCaching: false }, "s");
-		ok(requestText(projected.messages).includes("observation aged"), "the transform aged c1");
-		deepStrictEqual(recorded, [], "nothing is recorded before an attempt is dispatched");
+	it("an id prepared for a request that is never sent is not recorded", { timeout: 30_000 }, async (t) => {
+		const server = await startCaptureServer(() => ({ text: "answered" }));
+		t.after(() => server.close());
+		let handle: EngineAgentHandle | undefined;
+		const harness = chatHarness({
+			server,
+			route: { caching: false },
+			createAgent: (options) => {
+				handle = createEngineAgent(options);
+				return handle;
+			},
+		});
+		try {
+			// The chat loop builds its agent on the first submit.
+			await harness.submit("hello");
+			ok(handle);
+			const agent = handle.agent;
+			const leaf = harness.session.readEntries().at(-1)?.turnId;
+			ok(leaf);
+			for (const entry of [
+				message("u1", leaf, "user", { text: "read it twice" }),
+				readCall("a1", "u1", "c1", "src/big.ts"),
+				readResult("r1", "a1", "c1", OLDER),
+				readCall("a2", "r1", "c2", "src/big.ts"),
+				readResult("r2", "a2", "c2", OLDER),
+			])
+				harness.session.appendEntry(entry as SessionEntryInput);
+			const entries = harness.session.readEntries() as SessionEntry[];
+			deepStrictEqual(
+				superseded(entries).map((candidate) => candidate.toolCallId),
+				["c1"],
+				"S0 would select c1",
+			);
+			const prepared: string[] = [];
+			const convert = agent.convertToLlm;
+			agent.convertToLlm = async (messages) => {
+				prepared.push(requestText(messages));
+				return await convert(messages);
+			};
+			// The prewarm round prepares the request and then declines to send it (src/engine/prewarm.ts).
+			const warm = await runPrewarmRound({
+				model: agent.state.model,
+				state: { ...agent.state, messages: buildModelReplayAgentMessagesFromTurns(entries) },
+				agent,
+				canSend: () => false,
+			});
+			strictEqual(warm.invoked, false);
+			ok(
+				prepared.some((text) => text.includes(OLDER)),
+				"the prepared request carried c1",
+			);
+			const after = harness.session.readEntries() as SessionEntry[];
+			deepStrictEqual(
+				after
+					.filter((entry) => entry.kind === "contextEviction" || entry.kind === "custom")
+					.filter((entry) => JSON.stringify(entry).includes('"r1"') || JSON.stringify(entry).includes('"c1"')),
+				[],
+				"nothing is recorded before an attempt is dispatched",
+			);
+		} finally {
+			await harness.close();
+		}
 	});
 });
 

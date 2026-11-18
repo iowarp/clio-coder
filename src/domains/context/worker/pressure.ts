@@ -21,6 +21,12 @@ export interface WorkerPressureInput {
 	 * same reserve the main loop admits a turn against (D1-5).
 	 */
 	outputReserve: (inputTokens: number) => number;
+	/**
+	 * Tokens the request carries at send time beyond these messages, such as the
+	 * result-contract reminders. They ride fixed positions, so projection never
+	 * changes them, but the fit check must price the request that is sent.
+	 */
+	overheadTokens?: number;
 	/** The economic trigger as a share of the window. */
 	threshold?: number;
 	/** `context.workingSet.target`: where a batch over the trigger stops. */
@@ -52,14 +58,17 @@ function workerSupersededStageApplies(route: FoldRouteFacts): boolean {
 	return WORKER_SUPERSEDED_STAGE && supersededStageApplies(route);
 }
 
-export type WorkerEvictionReason = Extract<MarkerReason, "age_horizon" | "thinking_turn_closed" | "step_overflow">;
+export type WorkerEvictionReason = Extract<
+	MarkerReason,
+	"age_horizon" | "thinking_turn_closed" | "step_overflow" | "unseen_overflow"
+>;
 export type WorkerEvictedItem = Omit<EvictedItem, "reason"> & { reason: WorkerEvictionReason };
 
 /** The worker's in-memory eviction record: one per checkpoint, in the fold's item shape. */
 export interface WorkerEvictionRecord {
 	id: string;
 	checkpoint: FoldCheckpoint;
-	/** The stage id: `step_overflow` when the record bypassed the band for fit. */
+	/** The stage id: `step_overflow` when the record took a protected read for fit, seen or unseen. */
 	policyId: "working_set" | "step_overflow";
 	evicted: WorkerEvictedItem[];
 	tokensBefore: number;
@@ -88,6 +97,12 @@ export interface WorkerContextGuard {
 	 */
 	recover(input: WorkerPressureInput): AgentMessage[] | null;
 	readonly records: ReadonlyArray<WorkerEvictionRecord>;
+	/**
+	 * The input the last admitted request was counted at, the figure its fit
+	 * check passed. Admission and the output clamp size that request from it,
+	 * so a request the guard fitted is never refused for a different count (A2c).
+	 */
+	readonly inputTokens: number;
 }
 
 type StageEntry = ContextFoldPayload["stages"][number];
@@ -119,6 +134,7 @@ export function createWorkerContextGuard(
 	let anchorKey = "";
 	let anchorUsage = 0;
 	let anchorFootprint = 0;
+	let admittedTokens = 0;
 
 	const checkpointAt = (input: WorkerPressureInput, checkpoint: FoldCheckpoint): AgentMessage[] | null => {
 		const recovering = checkpoint === "overflow";
@@ -137,7 +153,8 @@ export function createWorkerContextGuard(
 			return unit !== undefined && unit.digest === contextHash(message) ? unit.message : message;
 		});
 		const breakdown = estimateAgentContextBreakdown({ systemPrompt: input.systemPrompt, tools: input.tools, messages });
-		let structural = Object.values(breakdown).reduce((sum, value) => sum + value, 0);
+		let structural =
+			Object.values(breakdown).reduce((sum, value) => sum + value, 0) + Math.max(0, input.overheadTokens ?? 0);
 
 		// Parent usage never anchors a child. Only a response to this worker's own request can do so.
 		if (calls === 0) firstInputLength = input.messages.length;
@@ -185,6 +202,7 @@ export function createWorkerContextGuard(
 			close();
 			calls++;
 			lastRequestTokens = structural;
+			admittedTokens = Math.max(0, Math.round(count()));
 			return messages;
 		};
 		const fail = (message: string): never => {
@@ -223,6 +241,8 @@ export function createWorkerContextGuard(
 		let planAliases = aliasSequence;
 		const assistantIndices = input.messages.flatMap((message, index) => (message.role === "assistant" ? [index] : []));
 		const cutoff = assistantIndices[Math.max(0, assistantIndices.length - 2)] ?? 0;
+		// A result after the last assistant arrived in the round being admitted: the model has not read it yet.
+		const lastAssistant = assistantIndices.at(-1) ?? -1;
 		const toolCalls = new Map(input.messages.flatMap(messageToolCalls).map((call) => [call.id, call]));
 		const open = (index: number) => !plan.has(index) && messages[index] === input.messages[index];
 		const observation = (index: number): (AgentMessage & { role: "toolResult" }) | undefined => {
@@ -271,9 +291,9 @@ export function createWorkerContextGuard(
 			const projection = { ...message, content: [{ type: "text" as const, text: marker }] } as AgentMessage;
 			if (take(index, message, projection, { alias, ref, reason, marker })) planAliases += 1;
 		};
-		// Over the trigger: units before the last two steps, in position order, to the target.
-		const selectAged = (goal: number) => {
-			for (let index = 0; index < cutoff && measure() > goal; index++) {
+		// Units before the last two steps, in position order, while the request is still over.
+		const selectAged = (over: () => boolean) => {
+			for (let index = 0; index < cutoff && over(); index++) {
 				const message = input.messages[index];
 				if (message?.role === "assistant" && open(index)) {
 					// Thinking is its own unit and leaves no marker, as on the session.
@@ -294,11 +314,14 @@ export function createWorkerContextGuard(
 		// One step's own results can outgrow the window: a 64K-token worker that
 		// reads eight large files in parallel protects all of them as its latest
 		// step. Before failing, evict the protected read results too, largest
-		// first, and say why so the next step reads narrower.
-		const selectStepOverflow = (over: () => boolean) => {
+		// first. Seen results go first and say why, so the next step reads
+		// narrower. Results the model has not seen go only after every seen one
+		// (A2b): evicting one costs a re-read the model did nothing to cause.
+		const selectStepOverflow = (over: () => boolean, unseen: boolean) => {
+			const reason: WorkerEvictionReason = unseen ? "unseen_overflow" : "step_overflow";
 			const recent = input.messages
 				.map((_message, index) => index)
-				.filter((index) => index >= cutoff && observation(index) !== undefined)
+				.filter((index) => index >= cutoff && index > lastAssistant === unseen && observation(index) !== undefined)
 				.sort(
 					(a, b) =>
 						estimateAgentMessageTokens(input.messages[b] as AgentMessage) -
@@ -307,14 +330,19 @@ export function createWorkerContextGuard(
 			for (const index of recent) {
 				if (!over()) break;
 				const result = observation(index);
-				if (result !== undefined) takeObservation(index, result, "step_overflow");
+				if (result !== undefined) takeObservation(index, result, reason);
 			}
+		};
+		// Older units, then seen protected reads, then unseen ones: each stage only while still over.
+		const selectForFit = (over: () => boolean) => {
+			selectAged(over);
+			selectStepOverflow(over, false);
+			selectStepOverflow(over, true);
 		};
 
 		if (recovering) {
 			const goal = Math.floor(lastRequestTokens * OVERFLOW_RECOVERY_KEEP);
-			selectAged(goal);
-			selectStepOverflow(() => structural > goal);
+			selectForFit(() => structural > goal);
 			if (structural > goal) {
 				// No retry unless the target is reached: the plan is dropped and the server's error stands.
 				stages.push(
@@ -338,11 +366,14 @@ export function createWorkerContextGuard(
 					lastEvictionTokensAfter: records.at(-1)?.tokensAfter ?? null,
 				});
 			if (held) stages.push({ stage: "working_set", outcome: "held", reason: "rearm_band" });
-			else if (estimate > trigger)
-				selectAged(Math.floor(input.contextWindow * (input.target ?? DEFAULT_WORKING_SET_SETTINGS.target)));
+			else if (estimate > trigger) {
+				const goal = Math.floor(input.contextWindow * (input.target ?? DEFAULT_WORKING_SET_SETTINGS.target));
+				selectAged(() => count() > goal);
+			}
 			// Short of headroom, or still over after the batch: the band holds the trigger, never a fit.
+			// A fit takes older units before any protected read, without the band (A2a).
 			const exhausted = () => (held ? !fitsWindow(count()) : !fits(count()));
-			if (exhausted()) selectStepOverflow(exhausted);
+			if (exhausted()) selectForFit(exhausted);
 			if (exhausted()) {
 				if (items.length > 0) stages.push({ stage: "working_set", outcome: "none", reason: "no_gain" });
 				return fail("worker context: protected task context exceeds available headroom after reversible eviction");
@@ -356,7 +387,9 @@ export function createWorkerContextGuard(
 		const record: WorkerEvictionRecord = {
 			id: `eviction-${records.length + 1}`,
 			checkpoint,
-			policyId: items.some((item) => item.reason === "step_overflow") ? "step_overflow" : "working_set",
+			policyId: items.some((item) => item.reason === "step_overflow" || item.reason === "unseen_overflow")
+				? "step_overflow"
+				: "working_set",
 			evicted: items,
 			tokensBefore: Math.max(0, Math.round(tokensBefore)),
 			tokensAfter: Math.max(0, Math.round(measure())),
@@ -368,15 +401,20 @@ export function createWorkerContextGuard(
 		}
 		aliasSequence = planAliases;
 		records.push(record);
-		stages.push({ stage: "working_set", outcome: "committed", reason: "evicted", recordId: record.id });
+		// The journal names a commit that took a protected read; the item reasons stay on the record.
+		const reason = items.some((item) => item.reason === "unseen_overflow")
+			? "unseen_overflow"
+			: items.some((item) => item.reason === "step_overflow")
+				? "step_overflow"
+				: "evicted";
+		stages.push({ stage: "working_set", outcome: "committed", reason, recordId: record.id });
 		return accept();
 	};
-	return Object.assign(
-		(input: WorkerPressureInput): AgentMessage[] =>
-			checkpointAt(input, calls === 0 ? "submit" : "tool_batch") as AgentMessage[],
-		{
-			recover: (input: WorkerPressureInput): AgentMessage[] | null => checkpointAt(input, "overflow"),
-			records,
-		},
-	);
+	const guard = (input: WorkerPressureInput): AgentMessage[] =>
+		checkpointAt(input, calls === 0 ? "submit" : "tool_batch") as AgentMessage[];
+	return Object.defineProperties(guard, {
+		recover: { value: (input: WorkerPressureInput): AgentMessage[] | null => checkpointAt(input, "overflow") },
+		records: { value: records },
+		inputTokens: { get: () => admittedTokens },
+	}) as WorkerContextGuard;
 }

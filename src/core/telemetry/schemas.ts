@@ -282,7 +282,7 @@ export const CallSettledSchema = Type.Object(
 						"step_checkpoint",
 					]),
 				),
-				/** Superseded tool-result bytes an observation-aging batch took out of this request (WTF-P 0.8.3 C3). */
+				/** Superseded tool-result bytes a v6 observation-aging batch took out of this request; no longer written (CF-5). */
 				observationAgingBytes: Type.Optional(count),
 				rePrefilledTokens: factSchema(count),
 				uncachedPrefillTokens: factSchema(count),
@@ -473,7 +473,7 @@ export const EmptySchema = Type.Object({}, closed);
 /** One context reduction: which stage ran, the tokens it moved, and what it removed (#434). */
 export const ContextPrunedSchema = Type.Object(
 	{
-		stage: vocabulary(["mask_observations", "working_set", "llm_summary", "step_checkpoint"]),
+		stage: vocabulary(["mask_observations", "superseded", "working_set", "llm_summary", "step_checkpoint"]),
 		tokensBefore: count,
 		tokensAfter: count,
 		trigger: vocabulary(["auto", "force", "overflow", "step"]),
@@ -513,8 +513,14 @@ export const ContextFoldSchema = Type.Object(
 				{
 					stage: vocabulary(["superseded", "working_set", "step_checkpoint", "llm_summary", "stop"]),
 					outcome: vocabulary(["committed", "held", "none", "failed"]),
+					/**
+					 * A worker commit that took a protected read names it: `unseen_overflow` when any read the
+					 * model had not answered left, otherwise `step_overflow` when any read it had seen did.
+					 */
 					reason: vocabulary([
 						"evicted",
+						"step_overflow",
+						"unseen_overflow",
 						"summarized",
 						"step_boundary",
 						"rearm_band",
@@ -523,6 +529,8 @@ export const ContextFoldSchema = Type.Object(
 						"no_candidates",
 						"unavailable",
 						"no_gain",
+						"below_floor",
+						"adopted",
 						"protected_recent",
 						"protected_skill",
 						"repeat_no_gain",
@@ -539,7 +547,24 @@ export const ContextFoldSchema = Type.Object(
 		tokensBefore: count,
 		tokensAfter: count,
 		/** The expected cold-cache reason of the last stage that committed. */
-		cause: Type.Optional(vocabulary(["working_set_evict", "compaction", "step_checkpoint"])),
+		cause: Type.Optional(vocabulary(["observation_aging", "working_set_evict", "compaction", "step_checkpoint"])),
+		/**
+		 * A v6 session's observation-aging stubs, met at the first checkpoint after it opens: adopted as one eviction
+		 * record on an uncached route, or released on a cached one, which sends those results whole again.
+		 */
+		legacy: Type.Optional(
+			Type.Object(
+				{
+					outcome: vocabulary(["adopted", "legacy_aging_released"]),
+					results: count,
+					/** The earliest adopted result's row id. */
+					earliest: Type.Optional(ExistingId),
+					/** What the provider's cache held of the stubbed request is not on the ledger. */
+					priorState: vocabulary(["unknown"]),
+				},
+				closed,
+			),
+		),
 	},
 	closed,
 );

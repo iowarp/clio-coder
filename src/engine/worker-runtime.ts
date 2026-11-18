@@ -22,9 +22,11 @@ import { createWorkerObservationStore } from "../domains/context/worker/recall.j
 import { compactionBudget, resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { confirmationRuleOf } from "../domains/safety/decision-events.js";
 import type { WorkerFlowPolicyInput } from "../domains/safety/information-flow.js";
+import { estimateAgentMessageTokens } from "../domains/session/context-accounting.js";
+import { abortReasonCause } from "../domains/telemetry/call-facts.js";
 import { seededWorkerMessages, seedRecallLineage } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
-import { requestOutputReserve } from "./apis/output-budget.js";
+import { anchorContextAtInputTokens, requestOutputReserve } from "./apis/output-budget.js";
 import { resolvedRequestContext } from "./context.js";
 import { disableCopilotConversationResume } from "./copilot/session-fs.js";
 import { retryStreamOnceOnAuthRejection } from "./oauth-retry-stream.js";
@@ -822,6 +824,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	};
 	let workerBoundAborted = false;
 	let abortWorkerForBound: (() => void) | null = null;
+	// Who aborted the agent, so the call it cut off and the run's diagnostic name the same cause (cf1h-D3).
+	let workerStopCause: "loop_guard" | "parent_cancel" | undefined;
 	// For synthesis:false, the loop guard records the final admitted call while
 	// rejecting later siblings immediately. The runtime stops only after pi has
 	// emitted that call's tool-result message, so a slow tool is never aborted
@@ -1384,6 +1388,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				? { action: "end" }
 				: undefined;
 		},
+		// Each round sends through engineStreamSimple, whose guard sees the evicted request.
+		delegateGuardsToolArguments: true,
 		streamFn: (currentModel, transcript, streamOptions) => {
 			if (resultContractRepairsQueued > resultContractRepairsStarted) resultContractRepairsStarted += 1;
 			const round = ++responseRound;
@@ -1435,8 +1441,18 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					? { requiredResult: input.resultContract ? resultContractShape(input.resultContract) : undefined }
 					: undefined;
 			const window = input.runtimeResolution?.capabilities.contextWindow ?? currentModel.contextWindow;
+			const reminded = withResultContractReminders(currentContext.messages, contractReminder);
 			const pressure = {
 				messages: currentContext.messages,
+				overheadTokens: reminded.reduce(
+					(sum, message, index) =>
+						message === currentContext.messages[index]
+							? sum
+							: sum +
+								estimateAgentMessageTokens(message as AgentMessage) -
+								estimateAgentMessageTokens(currentContext.messages[index] as AgentMessage),
+					0,
+				),
 				// Priced with the tail directive the round will carry; only the estimate sees it here.
 				systemPrompt:
 					synthesisDirective === undefined
@@ -1498,7 +1514,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// A refreshed credential replaces the one Pi resolved for this round; the
 			// next round resolves its own through getApiKey (#427).
 			let roundApiKey: string | undefined;
-			const request = (history: AgentMessage[]) => {
+			// `inputTokens` is the count the guard admitted `history` at; admission and the clamp size it from that.
+			const request = (history: AgentMessage[], inputTokens: number) => {
 				const projected = withResultContractReminders(history, contractReminder);
 				const middlewareChoice = middlewareToolChoice.current();
 				// Codex retains the work phase's parallel setting for WS deltas;
@@ -1604,12 +1621,16 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						});
 						// Every attempt of a locked round carries the same tail directive, as does the "auto" form of a
 						// middleware text lock; the system prompt and earlier messages keep their bytes.
-						const attemptContext =
+						// The guard projected this history without invalidating the usage Pi anchors on, so the
+						// provider-bound copy is re-anchored at the guard's count (A2c).
+						const attemptContext = anchorContextAtInputTokens(
 							synthesisDirective !== undefined
 								? withLockedSynthesisDirective(attempt.context, synthesisDirective.requiredResult)
 								: middlewareChoice.kind === "none" && attempt.options?.toolChoice === "auto"
 									? withLockedSynthesisDirective(attempt.context)
-									: attempt.context;
+									: attempt.context,
+							inputTokens,
+						);
 						const fetchImpl = attempt.options?.fetch ?? ((url, init) => globalThis.fetch(url, init));
 						const tracking = trackCallFetch(fetchImpl);
 						callTracking = tracking;
@@ -1617,13 +1638,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						roundProviderHttpStatus = null;
 						tracking.start(currentModel.api, attempt.options?.transport);
 						const lockedRound = synthesisToolLock || helperTerminalPhase;
-						const { reasoning: _reasoning, thinkingBudgets: _thinkingBudgets, ...thinkingOffOptions } = attempt.options ?? {};
+						const attemptOptions = { ...attempt.options, clioInputTokens: inputTokens };
+						const { reasoning: _reasoning, thinkingBudgets: _thinkingBudgets, ...thinkingOffOptions } = attemptOptions;
 						// Codex renders the reasoning effort ahead of the whole input, so a locked round there keeps
 						// the run's level; dropping it made the round miss every cached token.
 						const source = boundWorkerResponse(
 							currentModel,
 							attemptContext,
-							lockedRound && currentModel.api !== "openai-codex-responses" ? thinkingOffOptions : attempt.options,
+							lockedRound && currentModel.api !== "openai-codex-responses" ? thinkingOffOptions : attemptOptions,
 							{
 								locked: lockedRound,
 								responseSeconds: workerSettings.safety.limits.workerResponseSeconds,
@@ -1661,13 +1683,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 								}),
 						);
 						return (
-							workerTelemetry?.observe(source, (message) =>
-								tracking.failure(
-									message,
-									input.signal?.aborted || (message as { stopReason?: unknown } | null)?.stopReason === "aborted",
-									callUsageReported,
-								),
-							) ?? source
+							workerTelemetry?.observe(source, (message) => {
+								const aborted = input.signal?.aborted || (message as { stopReason?: unknown } | null)?.stopReason === "aborted";
+								const failure = tracking.failure(message, aborted, callUsageReported);
+								const harness = aborted
+									? (workerStopCause ?? (input.signal?.aborted ? "parent_cancel" : undefined))
+									: undefined;
+								return harness ? { ...failure, stage: "harness", errorClass: harness } : failure;
+							}) ?? source
 						);
 					},
 					input.target.id,
@@ -1676,14 +1699,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// A token the server rejects as expired earns one locked refresh and one
 			// retry of the same request, as the main turn does; a failed refresh ends
 			// the round with the login remedy (#427).
+			const admitted = contextGuard.inputTokens;
 			const authRetried = retryStreamOnceOnAuthRejection(
-				request(messages),
+				request(messages, admitted),
 				(error) => isProviderAuthRejection(error.errorMessage, roundProviderHttpStatus ?? undefined),
 				async () => {
 					const apiKey = await refreshWorkerOAuthKey();
 					if (apiKey === null) return null;
 					roundApiKey = apiKey;
-					return request(messages);
+					return request(messages, admitted);
 				},
 			);
 			// A server that refuses the contract's schema before answering gets the
@@ -1698,7 +1722,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							async () => {
 								contractResponseFormat = undefined;
 								requestOptions = optionsWith(workerResponseFormat);
-								return request(messages);
+								return request(messages, admitted);
 							},
 						);
 			// The server is the authority on its own limit. An unreported window, a
@@ -1707,7 +1731,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// one reversible eviction and one retry; a second overflow is final.
 			return retryStreamOnceOnOverflow(first, () => {
 				const projected = contextGuard.recover(pressure);
-				return projected ? request(projected) : null;
+				return projected ? request(projected, contextGuard.inputTokens) : null;
 			});
 		},
 		initialState: {
@@ -1757,7 +1781,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// steers batch the same way the main agent's do: all at the next slot.
 	agent.followUpMode = "all";
 	agent.steeringMode = "all";
-	abortWorkerForBound = () => agent.abort();
+	abortWorkerForBound = () => {
+		workerStopCause ??= "loop_guard";
+		agent.abort();
+	};
 	// Qwopus 3.8 explored context init's whole 240 s ceiling one read at a time and was
 	// aborted before submitting. A host deadline ends exploration while the terminal round fits.
 	const synthesisTimer =
@@ -2718,9 +2745,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				(fallbackOnly || !isTerminalAssistantMessage(messages.at(-1)) || !assistantMessageText(messages.at(-1)))
 			) {
 				const lastAssistant = [...messages].reverse().find(isAssistantMessage);
+				const stopped = lastAssistant?.stopReason === "aborted" || lastAssistant?.stopReason === "error";
+				const cause = stopped ? (workerStopCause ?? abortReasonCause(lastAssistant) ?? "unrecorded") : undefined;
+				const why = cause ? `, cause=${cause}${lastAssistant?.errorMessage ? `: ${lastAssistant.errorMessage}` : ""}` : "";
 				const detail = fallbackOnly
 					? "worker synthesis reply held only tool-call markup after the tool-call lockout, so no final answer was delivered"
-					: `worker loop ended without a final assistant output (last role=${messages.at(-1)?.role ?? "none"}, stopReason=${lastAssistant?.stopReason ?? "none"})`;
+					: `worker loop ended without a final assistant output (last role=${messages.at(-1)?.role ?? "none"}, stopReason=${lastAssistant?.stopReason ?? "none"}${why})`;
 				emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "worker_final_output_missing", detail } });
 				process.stderr.write(`[worker] ${detail}\n`);
 				return { messages, exitCode: 1 };
@@ -2773,6 +2803,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				denyActiveEscalationOnAbort(reason);
 				registry.cancelParkedCalls(reason);
 			}
+			workerStopCause ??= "parent_cancel";
 			agent.abort();
 		},
 		steer: (text: string) => {

@@ -69,6 +69,10 @@ const FAILURE_WORDS: Record<Failure, string> = {
 	operator_cancel: "you stopped it",
 	parent_cancel: "its parent run stopped it",
 	repetition: "stopped for repeating itself",
+	generation_guard: "its tool arguments passed the generation bound",
+	turn_timeout: "it ran past the worker response limit",
+	output_cap: "it used up the worker output limit",
+	loop_guard: "the worker loop guard ended the run",
 	shutdown: "Clio Coder shut down",
 	internal: "Clio failed internally",
 };
