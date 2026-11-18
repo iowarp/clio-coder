@@ -17,6 +17,8 @@ import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
 import { callVerdict } from "./check-classifier.js";
 import { type RunCheckFacts, runCheckFacts } from "./observed-checks.js";
 import {
+	type CommandStep,
+	commandSteps,
 	detectValidationCommand,
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
@@ -554,9 +556,11 @@ const SHELL_STATE_WORDS = new Set([
 ]);
 
 /**
- * Words that run the rest of their segment as a command, such as `time exit 0`
+ * Words that run the rest of their segment as a command, such as `/usr/bin/time exit 0`
  * or `env cd /`. The guard does not model what they run, so a segment they
  * lead ends the part of the chain that can be credited, as a state change does.
+ * A leading `time`, `timeout`, `nice` or `xvfb-run` is read through to the
+ * command it runs, as every check reader reads it (x10-1).
  */
 const COMMAND_PREFIX_WORDS = new Set([
 	"!",
@@ -580,26 +584,31 @@ const COMMAND_PREFIX_WORDS = new Set([
 
 const SHELL_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*\+?=/u;
 
-function changesShellState(segment: ReadonlyArray<string>): boolean {
+function changesShellState(step: CommandStep): boolean {
+	if (!step.literal) return true;
 	// A bare assignment persists for the rest of the chain; one before a command applies to that command only.
-	const word = segment.find((candidate) => !SHELL_ASSIGNMENT.test(candidate));
+	const word = step.argv.slice(step.command).find((candidate) => !SHELL_ASSIGNMENT.test(candidate));
 	if (word === undefined || SHELL_STATE_WORDS.has(word)) return true;
 	const name = word.slice(word.lastIndexOf("/") + 1);
 	return COMMAND_PREFIX_WORDS.has(name) || SHELL_STATE_WORDS.has(name);
 }
 
-/** A declared check a shell command ran whole, and the indices of the `&&` steps that ran it. */
+/** A declared check a shell command ran whole, and the indices of the steps that ran it. */
 export interface DeclaredCheckRun {
 	check: DeclaredVerifierCommand;
 	steps: number[];
 }
 
 /**
- * Every declared check a shell command runs whole, each as a contiguous run of
- * its `&&` segments that no earlier segment could have skipped, redirected or
- * moved to another cwd. A leading `cd <dir> &&` moves where the rest ran. This
- * only names the steps; whether the call settles them and stands after the
- * run's changes is the shared classifier's answer (x7-5).
+ * Every declared check a shell command runs whole, each as a contiguous `&&` run
+ * of the classifier's own steps ({@link commandSteps}) that no earlier step could
+ * have skipped, redirected or moved to another cwd. A step runs a declared
+ * segment when its words, or the command a leading `time`, `timeout`, `nice` or
+ * `xvfb-run` runs, are exactly that segment's, so `make ci FOO=1` runs no `make
+ * ci`. A leading `cd <dir> &&` moves where the rest ran. This only names the
+ * steps; whether the call settles them (pipes, logs, `2>&1`) and stands after
+ * the run's changes is the shared classifier's answer, as for any check (x7-5,
+ * x10-1).
  */
 export function declaredCheckRuns(
 	command: string,
@@ -607,32 +616,45 @@ export function declaredCheckRuns(
 	declared: ReadonlyArray<DeclaredVerifierCommand>,
 ): DeclaredCheckRun[] {
 	if (declared.length === 0) return [];
-	let segments = shellAndSegments(command);
-	if (segments === null) return [];
+	let steps = commandSteps(command);
+	if (steps.length === 0 || steps.some((step) => step.grouped)) return [];
 	let ranIn = resolve(base);
 	let offset = 0;
-	const [first] = segments;
-	if (first?.[0] === "cd" && first.length === 2 && segments.length > 1 && !first[1]?.startsWith("-")) {
-		ranIn = resolve(base, first[1] as string);
+	const [first] = steps;
+	if (
+		first?.argv[0] === "cd" &&
+		first.argv.length === 2 &&
+		first.literal &&
+		first.joinedBy === "&&" &&
+		steps.length > 1 &&
+		!first.argv[1]?.startsWith("-")
+	) {
+		ranIn = resolve(base, first.argv[1] as string);
 		offset = 1;
-		segments = segments.slice(1);
+		steps = steps.slice(1);
 	}
-	const same = (left: string[], right: string[]) =>
+	const same = (left: ReadonlyArray<string>, right: ReadonlyArray<string>) =>
 		left.length === right.length && left.every((word, index) => word === right[index]);
-	const firstStateChange = segments.findIndex(changesShellState);
-	const reachable = firstStateChange === -1 ? segments.length : firstStateChange + 1;
+	const runs = (segment: ReadonlyArray<string>, step: CommandStep | undefined) =>
+		step !== undefined && step.literal && (same(segment, step.argv) || same(segment, step.argv.slice(step.command)));
+	const firstStateChange = steps.findIndex(changesShellState);
+	const reachable = firstStateChange === -1 ? steps.length : firstStateChange + 1;
 	const matches: DeclaredCheckRun[] = [];
 	for (const check of declared) {
 		if (check.cwd !== ranIn) continue;
-		// The last run of a check is the one the fewest later segments can undo.
+		// The last run of a check is the one the fewest later steps can undo.
 		let end = -1;
-		for (let start = 0; start < reachable && start + check.segments.length <= segments.length; start += 1) {
-			if (check.segments.every((segment, index) => same(segment, segments[start + index] as string[])))
-				end = start + check.segments.length;
+		for (let start = 0; start < reachable && start + check.segments.length <= steps.length; start += 1) {
+			const ran = check.segments.every(
+				(segment, index) =>
+					runs(segment, steps[start + index]) &&
+					(index === check.segments.length - 1 || steps[start + index]?.joinedBy === "&&"),
+			);
+			if (ran) end = start + check.segments.length;
 		}
 		if (end === -1) continue;
-		const steps = check.segments.map((_, index) => end - check.segments.length + index + offset);
-		matches.push({ check, steps });
+		const indices = check.segments.map((_, index) => end - check.segments.length + index + offset);
+		matches.push({ check, steps: indices });
 	}
 	return matches;
 }
@@ -1066,12 +1088,29 @@ function bashDeclaredVerifierCalls(
 	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
 	if (toolCallId === null) return [];
 	const turnId = turnIdOf(entry);
-	return declaredCheckRuns(args.command, shellBase(workspaceRoot, args.cwd), declared).map(({ check }) => ({
-		toolCallId,
-		command: `${execution.command.trim()} (declared check ${check.id})`,
-		check: check.id,
-		...(turnId !== null ? { turnId } : {}),
-	}));
+	return declaredCheckRuns(args.command, shellBase(workspaceRoot, args.cwd), declared).map(({ check }) => {
+		const catalog = catalogCheckExecution(check, workspaceRoot);
+		return {
+			toolCallId,
+			command: `${execution.command.trim()} (declared check ${check.id})`,
+			check: check.id,
+			...(catalog !== undefined ? { execution: catalog } : {}),
+			...(turnId !== null ? { turnId } : {}),
+		};
+	});
+}
+
+/** A catalog check run through the shell keeps its declaration's source, cwd and argv, as a package script run does. */
+function catalogCheckExecution(
+	check: DeclaredVerifierCommand,
+	workspaceRoot: string,
+): ValidationExecutionEvidence | undefined {
+	if (check.session || check.segments.length !== 1) return undefined;
+	return {
+		source: { kind: "project-catalog", path: resolve(workspaceRoot, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH) },
+		cwd: check.cwd,
+		argv: [...(check.segments[0] ?? [])],
+	};
 }
 
 function shellBase(workspaceRoot: string, cwd: unknown): string {
@@ -1095,6 +1134,7 @@ function bashExecutionDeclaredEvidence(
 		kind: "validation_command",
 		summary: `validation command passed: ${execution.command.trim()} (declared check ${check.id})`,
 		check: check.id,
+		...(catalogCheckExecution(check, workspaceRoot) ?? {}),
 		...(turnId !== null ? { turnId } : {}),
 	}));
 }

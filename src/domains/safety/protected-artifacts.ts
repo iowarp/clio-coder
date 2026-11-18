@@ -1647,6 +1647,44 @@ function shellSteps(tokens: ReadonlyArray<ShellToken>): ShellStep[] {
 	return steps;
 }
 
+/** One step of a shell command as {@link checkCommandShape} indexes it, for the declared-check reader (x7-5). */
+export interface CommandStep {
+	/** The step's words, its redirections left out. */
+	argv: string[];
+	/** Where its command starts past a leading `time` and the transparent wrappers (`timeout 600`, `nice`, `xvfb-run`). */
+	command: number;
+	/** The separator joining it to the next step; `""` where two meet, null for the last step. */
+	joinedBy: string | null;
+	/** No word is one the shell would rewrite: no expansion, substitution, glob or `~`. */
+	literal: boolean;
+	/** It opens or closes a subshell. */
+	grouped: boolean;
+}
+
+export function commandSteps(command: string): CommandStep[] {
+	return shellSteps(scanShellLike(command, true)).map((step) => {
+		let start = 0;
+		for (let past = -1; past !== start; ) {
+			past = start;
+			if (step.argv[start] === "time") start += step.argv[start + 1] === "-p" ? 2 : 1;
+			start = pastTransparentWrapper(step.argv, start);
+		}
+		const literal = shellCommandWords(step.tokens).every((token) => {
+			if (token.substitutions?.length || token.hiddenContent || token.ansiCQuoted || token.homeRelative) return false;
+			const raw = command.slice(token.start, token.end);
+			if (/[$`]/u.test(raw) && !/^'[^']*'$/u.test(raw)) return false;
+			return token.quoted || !/[*?[]/u.test(token.value);
+		});
+		return {
+			argv: step.argv,
+			command: start,
+			joinedBy: step.joinedBy,
+			literal,
+			grouped: step.opens > 0 || step.closes > 0,
+		};
+	});
+}
+
 function isCheckStep(step: ShellStep): boolean {
 	return step.index !== null && checkStepMatch(basenameToken(step.argv[step.index]), step.argv.slice(step.index + 1));
 }
@@ -2094,13 +2132,14 @@ export function checkCommandShape(
 /**
  * The targets only a check pipeline's own output stream writes (x5-4): a `tee` stage after the check and the last
  * stage's redirects, so `npm test 2>&1 | tee out.txt` and `npm test > out.txt 2>&1` name `out.txt`. Whether such a
- * target is output and not a change is the caller's call.
+ * target is output and not a change is the caller's call. `declaredSteps` count as check steps, as in
+ * {@link checkCommandShape}.
  */
-export function checkLogTargets(command: string): ReadonlySet<string> {
+export function checkLogTargets(command: string, declaredSteps: ReadonlySet<number> = new Set()): ReadonlySet<string> {
 	const logs = new Set<string>();
 	let checked = false;
-	for (const step of shellSteps(scanShellLike(command, true))) {
-		checked ||= isCheckStep(step);
+	for (const [index, step] of shellSteps(scanShellLike(command, true)).entries()) {
+		checked ||= isCheckStep(step) || declaredSteps.has(index);
 		const argv = step.index === null ? [] : step.argv.slice(step.index);
 		if (checked && basenameToken(argv[0]) === "tee") for (const target of pathArgs(argv, 0)) logs.add(target);
 		if (step.joinedBy === "|") continue;
@@ -2170,11 +2209,12 @@ function drainsInput(step: ShellStep): boolean {
  * after the check fails a green check: `head` closes the pipe so the check dies of SIGPIPE or EPIPE, and `grep`
  * exits 1 when a clean run prints no match. So a check piped onward into anything but `tail`, `cat` or `tee`, which read to
  * the end and exit 0, settles no failure. Its clean exit still speaks for it, since every stage then exited 0.
+ * `declaredSteps` count as check steps, as in {@link checkCommandShape}.
  */
-export function checkFailureAttributable(command: string): boolean {
+export function checkFailureAttributable(command: string, declaredSteps: ReadonlySet<number> = new Set()): boolean {
 	const steps = shellSteps(scanShellLike(command, true));
 	return steps.every((step, position) => {
-		if (!isCheckStep(step)) return true;
+		if (!isCheckStep(step) && !declaredSteps.has(position)) return true;
 		for (let next = position; ; next += 1) {
 			const joinedBy = steps[next]?.joinedBy;
 			if (joinedBy !== "|") return joinedBy !== "";
@@ -3777,20 +3817,28 @@ function commandTokenIndex(segment: ReadonlyArray<string>): number | null {
 			while (index < segment.length && segment[index]?.startsWith("-") === true) index += 1;
 			continue;
 		}
-		const valued = TRANSPARENT_WRAPPERS.get(token);
-		if (valued !== undefined) {
-			index += 1;
-			for (let option = segment[index]; option?.startsWith("-") === true; option = segment[index]) {
-				index += valued.has(option) ? 2 : 1;
-				if (option === "--") break;
-			}
-			// timeout's duration stands between its options and the command it runs.
-			if (token === "timeout") index += 1;
+		const past = pastTransparentWrapper(segment, index);
+		if (past !== index) {
+			index = past;
 			continue;
 		}
 		return index;
 	}
 	return null;
+}
+
+/** The index past a transparent wrapper standing at `index` and its options, or `index` when none stands there. */
+function pastTransparentWrapper(segment: ReadonlyArray<string>, index: number): number {
+	const token = segment[index];
+	const valued = token === undefined ? undefined : TRANSPARENT_WRAPPERS.get(token);
+	if (valued === undefined) return index;
+	let next = index + 1;
+	for (let option = segment[next]; option?.startsWith("-") === true; option = segment[next]) {
+		next += valued.has(option) ? 2 : 1;
+		if (option === "--") break;
+	}
+	// timeout's duration stands between its options and the command it runs.
+	return token === "timeout" ? next + 1 : next;
 }
 
 /**
