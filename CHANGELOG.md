@@ -111,6 +111,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- The finish gate no longer credits a dispatched worker's passing run record after a later edit; the shared check fold retires that record like any check, so the edit engages `unvalidated_mutation` (x9-1).
+- A green check behind `timeout`, `nice` or `xvfb-run`, or spelled `python -m mypy|ruff|pylint|flake8`, `pnpm|yarn <runner>`, `npm|yarn|bun exec <runner>`, `npm --prefix <dir>` / `pnpm -C` / `yarn --cwd`, `cargo build` or `php artisan test`, now settles the finish gate after an edit, and `npm exec vitest run` no longer retires standing passes as a change. The safety readers also see through these prefixes, so `timeout 5 rm -rf x` reads as the delete it is (x9-2).
 - A passing check the model ran through the shell now files its typed receipt fact from the shared classifier verdict, under its declared check ids and label, so declared scripts such as `./acceptance.sh` count toward verification (bt-46 S1).
 - Line continuations inside a here-document body no longer join across its terminator, so the check after the heredoc keeps its own name and scope (bt-46 S2).
 - Here-document bodies are data in the check-step verdict: a scratch script that only spells a check neither counts as running it nor retires a standing pass, and the finish gate no longer credits it (bt-46 S3).
