@@ -526,13 +526,15 @@ function runValidationStatus(facts: RunTrustFacts): ValidationGroundingStatus {
 	}
 	if (host?.status === "verified") {
 		// Only checks executed for this run validate it. A pass reused from another run's memo is not authenticated
-		// evidence, a skipped check judged nothing, and a record that predates the counts cannot say which it was.
+		// evidence, and a record that predates the counts cannot say which it was. A lint or format check skipped
+		// because the task changed nothing under it is moot, so it neither validates nor blocks; a run whose every
+		// check was skipped judged nothing.
 		const answered =
 			host.executed === undefined || host.reused === undefined || host.skipped === undefined
 				? "host-verification-unrecorded"
 				: host.reused > 0
 					? "host-verification-reused"
-					: host.skipped > 0
+					: host.executed === 0
 						? "host-verification-skipped"
 						: null;
 		if (answered !== null) return attributed("unknown", source, { kind: "validator", id: answered }, artifacts);

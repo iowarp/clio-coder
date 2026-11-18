@@ -123,7 +123,8 @@ export function integrityClause(status: CanonicalTrustStatus): string {
  */
 export function unexecutedHostChecksClause(authorityId: string): string | undefined {
 	if (authorityId === "host-verification-reused") return "host checks reused an earlier run's pass; validation unknown";
-	if (authorityId === "host-verification-skipped") return "host checks passed but some did not run; validation unknown";
+	if (authorityId === "host-verification-skipped")
+		return "no host check ran: nothing changed under any of them; validation unknown";
 	if (authorityId === "host-verification-unrecorded")
 		return "host checks passed without a record of which ran; validation unknown";
 	return undefined;

@@ -505,7 +505,7 @@ test("a judged host check seals its bounded report and the tree it judged in the
 
 const PRODUCER = { state: "verified", by: "producer" } as const;
 
-test("only host checks executed for the run validate it; reused, skipped and unrecorded passes leave it unknown", async () => {
+test("only host checks executed for the run validate it; reused, all-skipped and unrecorded passes leave it unknown", async () => {
 	const stateDir = mkdtempSync(join(tmpdir(), "d3-host-answered-"));
 	try {
 		const check = {
@@ -526,10 +526,16 @@ test("only host checks executed for the run validate it; reused, skipped and unr
 				[1, 1, 0],
 			],
 			[
-				"skipped",
-				[check, { ...check, notRun: "nothing-changed" as const }],
-				"unknown:host-verification-skipped",
+				"partly-skipped",
+				[check, { ...check, check: "lint", notRun: "nothing-changed" as const }],
+				"validated:host-verification",
 				[1, 0, 1],
+			],
+			[
+				"skipped",
+				[{ ...check, check: "lint", notRun: "nothing-changed" as const }],
+				"unknown:host-verification-skipped",
+				[0, 0, 1],
 			],
 		] as const;
 		for (const [runId, checks, validation, counts] of cases) {
