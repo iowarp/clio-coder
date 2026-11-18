@@ -31,18 +31,12 @@ import {
 } from "../engine/agent.js";
 import { providerCheckpointCompatibility } from "../engine/ai.js";
 import { prepareInPrefixSummary } from "../engine/in-prefix-summary.js";
+import { callRepeatsAsRead, effectiveCallIdentity } from "../engine/loop-guard.js";
 import { createContextFold, type FoldDecision, foldCheckpointFor } from "./context-fold.js";
 import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
 import type { MessageListDigests } from "./message-list-digest.js";
 import { createMessageListFold } from "./message-list-digest.js";
-import {
-	agedToolCallIdsFromEntries,
-	OBSERVATION_AGING_CUSTOM_TYPE,
-	type ObservationAgingLedger,
-	type ObservationAgingTracker,
-	observationAgingRecord,
-} from "./observation-aging.js";
 import {
 	effectivePosture,
 	POSTURE_GENERATION,
@@ -84,7 +78,7 @@ import type {
 	ResidencyMutationPayload,
 } from "../core/telemetry/live-events.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
-import { isBuiltinToolName, isHarnessExtensionToolName, ToolNames } from "../core/tool-names.js";
+import { isBuiltinToolName, isHarnessExtensionToolName, type ToolName, ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import {
@@ -97,11 +91,14 @@ import {
 	resolveLiveBudgetPolicy,
 } from "../domains/context/budget/live-view.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
+import { supersededStageApplies } from "../domains/context/fold/contract.js";
 import { economicPressure, foldTriggerReserve } from "../domains/context/fold/pressure.js";
 import { withinRearmBand } from "../domains/context/working-set/checkpoint.js";
 import type { planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
+import { foldAttemptKey } from "../domains/context/working-set/plan.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
+import type { ClassifyCall } from "../domains/context/working-set/superseded.js";
 import { compactionCut } from "../domains/context/working-set/visible.js";
 import { type PinnedContextBlock, pinnedContextDelta } from "../domains/extensions/pinned-context.js";
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
@@ -385,10 +382,6 @@ export interface TurnContext {
 	 */
 	promptSideTokens(): number;
 	liveContextEstimate(agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate;
-	/** The session's observation-aging tracker, so every window check prices the request the provider receives. */
-	bindObservationAging(tracker: ObservationAgingTracker): void;
-	/** The current session's ledger, which seeds the aging tracker on session open and records each batch (D1-6). */
-	readonly observationAgingLedger: ObservationAgingLedger;
 	/**
 	 * Recompute and publish the live budget view.
 	 *
@@ -640,46 +633,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		wireModelId: string;
 		systemPromptTokens: number;
 		toolSchemaTokens: number;
-		/** Tool results the attested request carried as aging stubs. */
-		agedIds: ReadonlySet<string>;
 	} | null = null;
-	let observationAging: ObservationAgingTracker | null = null;
-	/**
-	 * The history as the next request carries it after observation aging, priced
-	 * without committing a batch. Null when the route does not age or nothing is
-	 * stubbed, so those estimates stay the history's own figures. `pending` is
-	 * each stub no request has sent yet, with the tokens it saves.
-	 */
-	const agedHistory = (
-		agentRuntime: AgentRuntime,
-		observed: MessageListDigests,
-	): {
-		messages: AgentMessage[];
-		messageTokens: number[];
-		saved: Array<{ index: number; id: string; tokens: number }>;
-		pending: Array<{ index: number; tokens: number }>;
-	} | null => {
-		const preview = observationAging?.preview(
-			observed.messages,
-			agentRuntime.runtimeResolution,
-			deps.session?.current()?.id,
-		);
-		if (!preview) return null;
-		let messageTokens: number[] | null = null;
-		const saved: Array<{ index: number; id: string; tokens: number }> = [];
-		const pending: Array<{ index: number; tokens: number }> = [];
-		preview.messages.forEach((message, index) => {
-			if (message === observed.messages[index]) return;
-			messageTokens ??= [...observed.messageTokens];
-			const tokens = estimateAgentMessageTokens(message);
-			const saving = { index, tokens: Math.max(0, (observed.messageTokens[index] ?? tokens) - tokens) };
-			const id = (message as { toolCallId?: string }).toolCallId ?? "";
-			messageTokens[index] = tokens;
-			saved.push({ ...saving, id });
-			if (!preview.sent.has(id)) pending.push(saving);
-		});
-		return messageTokens === null ? null : { messages: preview.messages, messageTokens, saved, pending };
-	};
 	let lastCompactionNoGain = false;
 	let lastCompactionEvent: { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null = null;
 	// Last settled run's provider cache usage plus whether the compiled system
@@ -768,6 +722,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// context. Same-turn tool growth or same-length content replacement must
 	// get a fresh cut; ordinary below-threshold checks never fingerprint it.
 	let emptyAutoCompactContextKey: string | null = null;
+	/** The last request S0 found nothing to commit in; the same request is not read again. */
+	let supersededAttemptKey: string | null = null;
+	/** The session whose v6 aging records the first checkpoint already adopted or released. */
+	let legacyCheckedFor: string | undefined;
+	/** The loop guard's call identity and A1 read test, with each extension tool's declared effect. */
+	const classifyCall: ClassifyCall = (name, args) => ({
+		identity: effectiveCallIdentity(name, args),
+		read: callRepeatsAsRead(name, args, (tool) => deps.toolRegistry?.get(tool as ToolName)?.metadata),
+	});
 	// A summarizer that fails deterministically (a summary request too large for
 	// the window, a broken route) would otherwise be called again after every
 	// tool batch, because each batch changes the attempt key. Count consecutive
@@ -1258,15 +1221,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	): LiveContextEstimate => {
 		const contextWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
 		const observed = replayMessages === undefined ? (history ?? observeHistory(agentRuntime)) : undefined;
-		const aged = observed ? agedHistory(agentRuntime, observed) : null;
 		const estimateInput = {
 			systemPrompt: engineInitialSystemPrompt(agentRuntime.agent),
 			messages:
-				aged?.messages ??
 				observed?.messages ??
 				(replayMessages ?? []).filter((message) => message.role !== "system" || isHostPolicyMessage(message)),
-			...(observed ? { messageTokens: aged?.messageTokens ?? observed.messageTokens } : {}),
-			...(aged ? { attestedSavings: aged.pending } : {}),
+			...(observed ? { messageTokens: observed.messageTokens } : {}),
 			tools: agentRuntime.agent.state.tools,
 			...(pendingUserText !== undefined ? { pendingUserText, pendingUserImages } : {}),
 		};
@@ -1275,15 +1235,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const pendingPolicyTokens =
 			policyText === null ? 0 : estimateAgentMessageTokens({ role: "system", content: policyText });
 		breakdown.pendingUserTokens += pendingPolicyTokens;
-		const attestedHistory = observed ? reconciledHistoryTokens(agentRuntime, observed) : null;
+		const historyTokens = observed ? reconciledHistoryTokens(agentRuntime, observed) : null;
 		const anchor = reconciledAnchor;
-		// The anchor's provider count already reflects the stubs its request carried;
-		// every other stub, and any in the estimated tail, comes off.
-		let agedSaving = 0;
-		if (attestedHistory !== null && aged && anchor)
-			for (const saving of aged.saved)
-				if (saving.index >= anchor.anchoredMessages.length || !anchor.agedIds.has(saving.id)) agedSaving += saving.tokens;
-		const historyTokens = attestedHistory === null ? null : Math.max(0, attestedHistory - agedSaving);
 		// Provider usage already includes the old system prompt and schemas.
 		// Price only positive growth, separately: shrinking one must not hide
 		// growth in the other when the measured prompt exceeds chars/4.
@@ -1771,8 +1724,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		deps,
 		state,
 		syncCodexConfiguration: (runtime) => syncCodexConfiguration(runtime),
-		observeHistory: (runtime) => observeHistory(runtime),
-		agedHistory: (runtime, observed) => agedHistory(runtime, observed),
 		liveContextEstimate: (runtime, pendingUserText) => liveContextEstimate(runtime, pendingUserText),
 		reconciledHistoryTokens: (runtime) => reconciledHistoryTokens(runtime),
 		carryReconciledAnchorThroughProjection: (runtime, historyTokens, tokensRemoved) =>
@@ -1852,7 +1803,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const settings = deps.getSettings();
 		const cfg = settings.context.compaction;
 		const autoEnabled = cfg?.auto !== false;
-		if (!force && !autoEnabled) return false;
 		const routeKey = JSON.stringify([
 			agentRuntime.targetId,
 			agentRuntime.runtimeId,
@@ -1872,6 +1822,85 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const workingSetTarget = settings.context.workingSet.target * economic.fractionScale;
 		const rearmBand = (summaryChars: number): number =>
 			Math.max(0.08 * compactionWindow, 2 * Math.ceil(summaryChars / 4));
+		const trigger: CompactionTrigger = triggerOverride ?? (force ? "force" : "auto");
+		// S0 (SPEC §3.4): automatic and fit checkpoints on an uncached route, never a manual force or an unknown-window
+		// overflow. It reads none of the summary's settings, so every exit below the trigger still runs it (§3.1).
+		const supersededApplies =
+			(!force || requiredFit) &&
+			supersededStageApplies(agentRuntime.runtimeResolution) &&
+			Boolean(deps.session?.current());
+		let openedDecision: FoldDecision | null = null;
+		const openDecision = (): FoldDecision => {
+			if (openedDecision === null) {
+				openedDecision = contextFold.beginDecision({
+					checkpoint: foldCheckpointFor(trigger, pendingUserText),
+					agentRuntime,
+					sessionId: originSession,
+				});
+				foldDecision = openedDecision;
+			}
+			return openedDecision;
+		};
+		/** A v6 session's aging stubs, met once per session at its first checkpoint (SPEC §1.5). */
+		const adoptOnce = (estimate: LiveContextEstimate): void => {
+			const session = deps.session;
+			if (originSession === undefined || legacyCheckedFor === originSession || !session?.current()) return;
+			legacyCheckedFor = originSession;
+			contextFold.adoptLegacyAging({
+				agentRuntime,
+				decision: openDecision(),
+				session,
+				settings,
+				compactionThreshold,
+				superseded: supersededStageApplies(agentRuntime.runtimeResolution),
+				estimate,
+				beforeSnapshotId: currentContextSnapshot?.snapshotId ?? null,
+				trigger,
+				originSession,
+				pendingUserText,
+				handoff,
+				classify: classifyCall,
+			});
+		};
+		/** S0 alone, where the checkpoint goes no further: it commits once its floor is met, under the trigger too. */
+		const supersededOnly = (estimate: LiveContextEstimate | null): false => {
+			const session = deps.session;
+			if (!session?.current()) return false;
+			const current = estimate ?? liveContextEstimate(agentRuntime, pendingUserText);
+			adoptOnce(current);
+			if (!supersededApplies) return false;
+			const key = foldAttemptKey({
+				turn: state.activeUserTurnId || null,
+				leaf: state.lastTurnId ?? null,
+				view: foldWorkingSet(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined),
+				history: observeHistory(agentRuntime).digest(),
+			});
+			if (key === supersededAttemptKey) return false;
+			const stage = contextFold.runEvictionStage({
+				agentRuntime,
+				decision: openDecision(),
+				session,
+				settings,
+				estimate: current,
+				verdict: route.shouldCompact(current.tokens),
+				beforeSnapshotId: currentContextSnapshot?.snapshotId ?? null,
+				requiredFit: false,
+				compactionWindow,
+				compactionThreshold,
+				workingSetTarget,
+				trigger,
+				originSession,
+				pendingUserText,
+				handoff,
+				shouldCompact: route.shouldCompact,
+				structural: false,
+				superseded: true,
+				classify: classifyCall,
+			});
+			if (!stage.committed) supersededAttemptKey = key;
+			return false;
+		};
+		if (!force && !autoEnabled) return supersededOnly(null);
 		if (originSession !== undefined && summaryRearmSeededFor !== originSession) {
 			summaryRearmSeededFor = originSession;
 			const checkpoint = findLastEntry(activeEntries(), (entry) => entry.kind === "compactionSummary");
@@ -1879,14 +1908,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				summaryRearm = { tokensAfter: checkpoint.tokensAfter, band: rearmBand(checkpoint.summary.length) };
 		}
 		const pressureEstimate = force && !requiredFit ? null : liveContextEstimate(agentRuntime, pendingUserText);
-		if (pressureEstimate && !requiredFit && !route.shouldCompact(pressureEstimate.tokens).shouldCompact) return false;
+		if (pressureEstimate && !requiredFit && !route.shouldCompact(pressureEstimate.tokens).shouldCompact)
+			return supersededOnly(pressureEstimate);
 		// Past the trigger, or forced: every stage this checkpoint reaches from here goes into its `context.fold` event.
-		const decision = contextFold.beginDecision({
-			checkpoint: foldCheckpointFor(triggerOverride ?? (force ? "force" : "auto"), pendingUserText),
-			agentRuntime,
-			sessionId: originSession,
-		});
-		foldDecision = decision;
+		const decision = openDecision();
 		if (pressureEstimate) decision.measure(pressureEstimate.tokens);
 		// Paused or inside the rearm band, the paid summary waits; the free pre-summary stages below still run.
 		const summaryHoldReason = (tokens: number): "paused" | "rearm_band" | null =>
@@ -1903,7 +1928,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const hold = summaryHoldReason(pressureEstimate?.tokens ?? 0);
 			if (hold !== null) {
 				decision.stage({ stage: "llm_summary", outcome: "held", reason: hold });
-				return false;
+				return supersededOnly(pressureEstimate);
 			}
 		}
 		// The hysteresis band. A checkpoint runs before every request, so without
@@ -1931,7 +1956,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 			if (held) {
 				decision.stage({ stage: "working_set", outcome: "held", reason: "rearm_band" });
-				return false;
+				return supersededOnly(pressureEstimate);
 			}
 		}
 		// Empty cuts are reusable only while their source and provider context
@@ -1978,7 +2003,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			noUsefulCutBasisKey = liveBudgetInput(pendingUserText).reductionBasisKey;
 		};
 
-		const trigger: CompactionTrigger = triggerOverride ?? (force ? "force" : "auto");
 		compactionLifecycleTrigger = trigger;
 		const operationCwd = process.cwd();
 		compactionFacts = [];
@@ -2027,6 +2051,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const session = deps.session;
 
 			if (session?.current()) {
+				adoptOnce(estimate);
 				const stage = contextFold.runEvictionStage({
 					agentRuntime,
 					decision,
@@ -2044,8 +2069,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					pendingUserText,
 					handoff,
 					shouldCompact: route.shouldCompact,
+					structural: true,
+					superseded: supersededApplies,
+					classify: classifyCall,
 				});
 				if (stage.acted) preSummaryStageActed = true;
+				else if (stage.committed) compactionConclusion = "superseded tool results evicted";
 				if (stage.fit) return true;
 				evictionSkipNotice = stage.skipNotice;
 			}
@@ -2803,30 +2832,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		persistContextSnapshot,
 		liveContextEstimate,
 
-		bindObservationAging(tracker: ObservationAgingTracker): void {
-			observationAging = tracker;
-		},
-		observationAgingLedger: {
-			load(sessionId) {
-				if (deps.session?.current()?.id !== sessionId) return [];
-				try {
-					return agedToolCallIdsFromEntries(deps.readSessionEntries?.() ?? []);
-				} catch {
-					// An unreadable ledger seeds nothing, which is the pre-record behaviour: the next request batches afresh.
-					return [];
-				}
-			},
-			record(sessionId, toolCallIds) {
-				if (!deps.session || deps.session.current()?.id !== sessionId) return;
-				deps.session.appendEntry({
-					kind: "custom",
-					customType: OBSERVATION_AGING_CUSTOM_TYPE,
-					parentTurnId: state.lastTurnId,
-					display: false,
-					data: observationAgingRecord(toolCallIds),
-				});
-			},
-		},
 		refreshLiveBudget,
 		refreshAgentMessagesFromSession,
 		runAutoCompact,
@@ -2897,7 +2902,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					wireModelId: runtime.wireModelId,
 					systemPromptTokens: breakdown.systemPromptTokens,
 					toolSchemaTokens: breakdown.toolSchemaTokens,
-					agedIds: observationAging?.sent(deps.session?.current()?.id) ?? new Set(),
 				};
 			}
 			if (!currentContextSnapshot) {
@@ -3518,7 +3522,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const messagesBefore = agentRuntime.agent.state.messages;
 			const mustFit =
 				knownWindow && !requestFits(beforeView.inputTokens, beforeView.outputReserveTokens, beforeView.effectiveWindow);
-			const attempted = mustFit || verdict.shouldCompact;
+			// S0 commits under the trigger on an uncached route, so the guard asks there too (SPEC §3.4).
+			const attempted = mustFit || verdict.shouldCompact || supersededStageApplies(agentRuntime.runtimeResolution);
 			if (attempted) {
 				try {
 					compacted = await runAutoCompact(

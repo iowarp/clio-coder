@@ -11,13 +11,13 @@ import {
 	type RuntimeDescriptor,
 } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import type { AgentMessage, Model } from "../../src/engine/types.js";
 import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
-import { createObservationAging, OBSERVATION_AGING_BATCH_BYTES } from "../../src/session-control/observation-aging.js";
 import { replayCurrentSession } from "../../src/session-control/session-restore.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
@@ -42,29 +42,8 @@ const text = (message: AgentMessage | undefined): string =>
 	((message as { content?: Array<{ text?: string }> } | undefined)?.content ?? []).map((block) => block.text).join("");
 const RECORD = `record body\n${"r".repeat(40_000 - 12)}`;
 const SMALL = `small body\n${"s".repeat(2_000)}`;
-const declared = () => undefined;
 /** Small enough that the post-tool guard compacts after each further record read. */
 const WINDOW = 40_000;
-
-it("a different session id starts the stubbed set over; the same one keeps it (WTF-P 0.8.3 C3)", () => {
-	const big = `big\n${"r".repeat(OBSERVATION_AGING_BATCH_BYTES + 1024)}`;
-	const messages = ["a", "b"].flatMap((id) => [
-		{
-			role: "assistant",
-			content: [{ type: "toolCall", id, name: "read", arguments: { path: "x.md" } }],
-			stopReason: "toolUse",
-			timestamp: 0,
-		},
-		{ role: "toolResult", toolCallId: id, toolName: "read", content: [{ type: "text", text: big }], timestamp: 0 },
-	]) as unknown as AgentMessage[];
-	const route = { promptCaching: false };
-	const aging = createObservationAging(declared);
-	strictEqual(aging.project(messages, route, "s1").batch?.results, 1);
-	const again = aging.project(messages, route, "s1");
-	strictEqual(again.batch, null, "one batch per session");
-	ok(text(again.messages[1]).startsWith("[observation aged]"), "and it stays stubbed");
-	strictEqual(aging.project(messages, route, "s2").batch?.results, 1, "a switched, new or forked session starts over");
-});
 
 const targetA = {
 	id: "aging-a",
@@ -196,31 +175,38 @@ function harness(wire: ReturnType<typeof transport>, window?: number) {
 	loop.onEvent((event) => {
 		events.push(event);
 	});
-	const batches = () =>
+	/** S0 records on the current session's ledger. */
+	const records = () =>
+		(session.current() ? (session.readEntries() as SessionEntry[]) : []).filter(
+			(entry) => entry.kind === "contextEviction" && entry.policyId === "superseded-v1",
+		).length;
+	const notices = () =>
 		events.filter(
-			(event) => event.type === "notice" && /observation aging: /u.test((event as { text?: string }).text ?? ""),
+			(event) =>
+				event.type === "notice" && ((event as { text?: string }).text ?? "").startsWith("[context engine] superseded:"),
 		).length;
 	const close = async () => {
 		loop.dispose();
 		await loop.whenSettled();
 		await session.close();
 	};
-	return { settings, session, loop, counter, batches, close };
+	return { settings, session, loop, counter, records, notices, close };
 }
 
-it("a model switch that rebuilds the agent keeps every stub and announces no second batch (WTF-P 0.8.3 C3)", {
+it("a model switch that rebuilds the agent keeps the marker and writes no second record (WTF-P 0.8.3 C3)", {
 	timeout: 20_000,
 }, async () => {
 	const wire = transport();
-	const { settings, loop, counter, batches, close } = harness(wire);
+	const { settings, loop, counter, records, notices, close } = harness(wire);
 	try {
 		await loop.submit("Read the record twice.");
 		await loop.whenSettled();
 		strictEqual(wire.requests.length, 3);
-		const [stub, fresh] = toolResults(wire.requests[2]);
-		ok(stub?.startsWith('[observation aged] read {"path":"record.md"}'), stub?.slice(0, 200));
+		const [marker, fresh] = toolResults(wire.requests[2]);
+		ok(marker?.startsWith("[evicted ref=r1 reason=superseded_call by="), marker?.slice(0, 200));
 		strictEqual(fresh, RECORD);
-		strictEqual(batches(), 1);
+		strictEqual(records(), 1);
+		strictEqual(notices(), 1);
 		const built = counter.agents;
 
 		// Another target with the same model rebuilds the agent rather than hot-swapping it.
@@ -230,33 +216,36 @@ it("a model switch that rebuilds the agent keeps every stub and announces no sec
 		strictEqual(counter.agents, built + 1, "the switch built a new agent");
 		strictEqual(wire.requests.length, 4);
 		const [kept, still] = toolResults(wire.requests[3]);
-		strictEqual(kept, stub, "the stub reaches the rebuilt agent's request byte for byte");
+		strictEqual(kept, marker, "the marker reaches the rebuilt agent's request byte for byte");
 		strictEqual(still, RECORD);
-		strictEqual(batches(), 1, "no second batch notice after the rebuild");
+		strictEqual(records(), 1, "the rebuild writes no second record");
+		strictEqual(notices(), 1, "nor announces one");
 	} finally {
 		await close();
 	}
 });
 
-it("a resumed session in a new process sends the request the stub set had reached (D1-6)", {
+it("a resumed session, and a fork at its tip, send the request the live session had reached (D1-6)", {
 	timeout: 20_000,
 }, async () => {
-	// The record read is superseded past the threshold and stubbed; the small read is superseded below it and is not.
+	// The record read is superseded past the floor and evicted; the small read is superseded below it and is not.
 	const wire = transport(["record.md", "record.md", "small.md", "small.md"]);
 	const first = harness(wire);
 	let id: string | undefined;
+	let tip: string | undefined;
 	try {
 		await first.loop.submit("Read the record twice, then the small file twice.");
 		await first.loop.whenSettled();
 		id = first.session.current()?.id;
-		strictEqual(first.batches(), 1);
+		tip = (first.session.readEntries() as SessionEntry[]).filter((entry) => entry.kind === "message").at(-1)?.turnId;
+		strictEqual(first.records(), 1);
 	} finally {
 		await first.close();
 	}
-	ok(id);
+	ok(id && tip);
 	const before = toolResults(wire.requests.at(-1));
-	ok(before[0]?.startsWith("[observation aged]"), before[0]?.slice(0, 200));
-	strictEqual(before[2], SMALL, "below the threshold the small read waits");
+	ok(before[0]?.startsWith("[evicted ref=r1 reason=superseded_call"), before[0]?.slice(0, 200));
+	strictEqual(before[2], SMALL, "below the floor the small read waits");
 
 	const second = harness(wire);
 	try {
@@ -267,10 +256,30 @@ it("a resumed session in a new process sends the request the stub set had reache
 		);
 		await second.loop.submit("Now answer.");
 		await second.loop.whenSettled();
-		deepStrictEqual(toolResults(wire.requests.at(-1)), before, "the resumed request carries the same stub set");
-		strictEqual(second.batches(), 0, "the seeded set forms no fresh batch");
+		deepStrictEqual(toolResults(wire.requests.at(-1)), before, "the resumed request carries the same results");
+		strictEqual(second.records(), 1, "the resumed session writes no fresh record");
+		strictEqual(second.notices(), 0);
 	} finally {
 		await second.close();
+	}
+
+	const third = harness(wire);
+	try {
+		third.session.resume(id);
+		const child = third.session.fork(tip).id;
+		ok(child !== id);
+		strictEqual(third.records(), 1, "the fork inherits the parent's record");
+		replayCurrentSession(
+			{ session: third.session, chat: third.loop, readEntries: () => third.session.readEntries() },
+			child,
+		);
+		await third.loop.submit("Answer from the fork.");
+		await third.loop.whenSettled();
+		deepStrictEqual(toolResults(wire.requests.at(-1)), before, "the fork sends the parent's results at its tip");
+		strictEqual(third.records(), 1, "the fork writes no record of its own");
+		strictEqual(third.notices(), 0);
+	} finally {
+		await third.close();
 	}
 });
 

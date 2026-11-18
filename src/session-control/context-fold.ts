@@ -14,20 +14,33 @@ import type { ContextActivityStatus, ContextFoldPayload, ContextPrunedPayload } 
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import type { FoldCheckpoint } from "../domains/context/fold/contract.js";
 import { createFoldPriceBook } from "../domains/context/fold/price.js";
-import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
+import type { EvictionPlan, PolicyInput } from "../domains/context/working-set/contract.js";
+import { buildEvictionFields } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { isTurnStart, protectionCutoffIndex } from "../domains/context/working-set/horizon.js";
+import { type FoldPlan, planFold, planSelection } from "../domains/context/working-set/plan.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
+import {
+	type ClassifyCall,
+	LEGACY_AGING_POLICY_ID,
+	type SupersededCandidate,
+	selectSuperseded,
+} from "../domains/context/working-set/superseded.js";
 import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
 import type { ContextCompactionVerdict } from "../domains/session/compaction/auto.js";
 import type { ContextSnapshot } from "../domains/session/context-accounting.js";
 import type { SessionContract } from "../domains/session/contract.js";
-import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
+import type { CompactionTrigger, EvictionRoute, EvictionTrigger, SessionEntry } from "../domains/session/entries.js";
+import { activePath } from "../domains/session/tree/active-path.js";
 import { replaceEngineMessages } from "../engine/agent.js";
 import { renderEvictionSkipLine } from "./compaction-lines.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
-import type { MessageListDigests } from "./message-list-digest.js";
-import { buildModelReplayAgentMessagesFromTurns, continuityContextFromSession } from "./model-session-replay.js";
+import {
+	buildModelReplayAgentMessagesFromTurns,
+	continuityContextFromSession,
+	renderModelReplay,
+} from "./model-session-replay.js";
+import { legacyAgingOnPath } from "./observation-aging.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 import { createReplayMessageConverter } from "./session-replay-messages.js";
 import type { ExpectedColdReason, LiveContextEstimate, TurnContext, TurnContextDeps } from "./turn-context.js";
@@ -49,9 +62,6 @@ export interface ContextFoldPort {
 	>;
 	state: TurnContextState;
 	syncCodexConfiguration(runtime: AgentRuntime): void;
-	observeHistory(agentRuntime: AgentRuntime): MessageListDigests;
-	/** Tool results the next request carries as aging stubs; null when nothing is stubbed. */
-	agedHistory(agentRuntime: AgentRuntime, observed: MessageListDigests): { saved: ReadonlyArray<{ id: string }> } | null;
 	liveContextEstimate(agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate;
 	reconciledHistoryTokens(agentRuntime: AgentRuntime): number | null;
 	carryReconciledAnchorThroughProjection(
@@ -88,6 +98,8 @@ export interface FoldDecision {
 	stage(entry: FoldStageEntry): void;
 	/** A context size the checkpoint measured: the first is its before figure, the latest its after figure. */
 	measure(tokens: number): void;
+	/** What the checkpoint did with a v6 session's aging stubs. */
+	legacy(outcome: Omit<NonNullable<ContextFoldPayload["legacy"]>, "priorState">): void;
 	/** Writes the event when a stage was recorded; a checkpoint that reached no stage writes nothing. */
 	close(): void;
 }
@@ -112,6 +124,7 @@ export function foldCheckpointFor(trigger: CompactionTrigger, pendingUserText: s
 
 /** The expected cold-cache reason each committing stage notes. */
 const COMMIT_CAUSE: Partial<Record<FoldStageEntry["stage"], NonNullable<ContextFoldPayload["cause"]>>> = {
+	superseded: "observation_aging",
 	working_set: "working_set_evict",
 	llm_summary: "compaction",
 	step_checkpoint: "step_checkpoint",
@@ -136,11 +149,36 @@ export interface EvictionStageInput {
 	pendingUserText: string | undefined;
 	handoff: ContinuityReductionHooks | undefined;
 	shouldCompact(tokens: number): ContextCompactionVerdict;
+	/** S1 runs: the checkpoint is past the trigger, or forced. False runs S0 alone. */
+	structural: boolean;
+	/** S0 runs: an uncached route, on a checkpoint that may evict (SPEC §3.4). */
+	superseded: boolean;
+	/** The loop guard's call identity and read test, for S0. */
+	classify: ClassifyCall;
+}
+
+export interface LegacyAdoptionInput {
+	agentRuntime: AgentRuntime;
+	decision: FoldDecision;
+	session: SessionContract;
+	settings: Readonly<ClioSettings>;
+	compactionThreshold: number;
+	/** S0 applies on this route; on a cached route the stubs are released, not adopted. */
+	superseded: boolean;
+	estimate: LiveContextEstimate;
+	beforeSnapshotId: string | null;
+	trigger: CompactionTrigger;
+	originSession: string | undefined;
+	pendingUserText: string | undefined;
+	handoff: ContinuityReductionHooks | undefined;
+	classify: ClassifyCall;
 }
 
 export interface EvictionStageResult {
-	/** An eviction record was written. */
+	/** S1 placed items in an eviction record. */
 	acted: boolean;
+	/** An eviction record was written, by either stage. */
+	committed: boolean;
 	/** The eviction alone brought the context under the trigger, or fitted the request. */
 	fit: boolean;
 	/** Why the stage declined, held for the transcript until a summary follows. */
@@ -170,6 +208,8 @@ export interface ContextFold {
 	beginDecision(input: FoldDecisionInput): FoldDecision;
 	refreshAgentMessagesFromSession(agentRuntime: AgentRuntime): ReadonlyArray<SessionEntry>;
 	runEvictionStage(input: EvictionStageInput): EvictionStageResult;
+	/** The first checkpoint of a session whose path holds v6 aging records: adopt or release them, once. */
+	adoptLegacyAging(input: LegacyAdoptionInput): boolean;
 	publishSummaryCheckpoint(input: SummaryPublicationInput): Promise<{ tokensBefore: number; tokensAfter: number }>;
 	publishStepCheckpoint(input: StepPublicationInput): { tokensAfter: number };
 }
@@ -226,12 +266,16 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			...(promptCaching !== undefined ? { promptCaching } : {}),
 		};
 		const stages: FoldStageEntry[] = [];
+		let legacy: ContextFoldPayload["legacy"];
 		let tokensBefore: number | null = null;
 		let tokensAfter = 0;
 		let closed = false;
 		return {
 			stage: (entry) => {
 				stages.push(entry);
+			},
+			legacy: (outcome) => {
+				legacy = { ...outcome, priorState: "unknown" };
 			},
 			measure: (tokens) => {
 				const figure = Math.max(0, Math.round(tokens));
@@ -252,6 +296,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 						tokensBefore: tokensBefore ?? tokensAfter,
 						tokensAfter,
 						...(coldReason !== undefined ? { cause: coldReason } : {}),
+						...(legacy !== undefined ? { legacy } : {}),
 					} satisfies ContextFoldPayload,
 					sessionTelemetryContext(input.sessionId),
 				);
@@ -259,154 +304,130 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		};
 	};
 
-	/** S1: plan and commit one working-set eviction, then re-check pressure (or fit) on the rebuilt request. */
-	const runEvictionStage = (input: EvictionStageInput): EvictionStageResult => {
-		const { agentRuntime, session, settings, estimate, verdict, beforeSnapshotId, requiredFit } = input;
-		const { compactionWindow, compactionThreshold, workingSetTarget, trigger, originSession, pendingUserText } = input;
-		const { decision } = input;
-		if (!settings.context.workingSet.enabled) {
-			decision.stage({ stage: "working_set", outcome: "none", reason: "disabled" });
-			return {
-				acted: false,
-				fit: false,
-				skipNotice: renderEvictionSkipLine({
-					reason: "disabled",
-					turns: 0,
-					protectLastTurns: settings.context.workingSet.protectLastTurns,
-					protectLastSteps: settings.context.workingSet.protectLastSteps,
-					policyId: settings.context.workingSet.policy,
-				}),
-			};
-		}
-		let planned: ReturnType<typeof planEviction>;
-		let visibleEntries: ReadonlyArray<SessionEntry> = [];
-		let policyId = settings.context.workingSet.policy;
-		try {
-			const entries = deps.readSessionEntries?.() ?? [];
-			const view = foldWorkingSet(entries, state.lastTurnId ?? undefined);
-			const policy = resolveWorkingSetPolicy(settings.context.workingSet.policy);
-			policyId = policy.id;
-			visibleEntries = selectVisibleEntries(entries, state.lastTurnId ?? undefined);
-			// Results the next request carries as aging stubs: the pressure figure and the anchor hold only
-			// the stub, so crediting their ledger bodies would end the plan short of the target (D1-1).
-			const aged = new Set(port.agedHistory(agentRuntime, port.observeHistory(agentRuntime))?.saved.map(({ id }) => id));
-			const prices = createFoldPriceBook(
-				visibleEntries,
-				createReplayMessageConverter(entries, {
-					...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
-				}),
-			);
-			planned = (deps.planEviction ?? planEviction)(policy, {
-				entries: visibleEntries,
-				view,
-				cwd: session.current()?.cwd ?? null,
-				settings: settings.context.workingSet,
-				pressure: {
-					tokens: port.liveContextEstimate(agentRuntime, pendingUserText).tokens,
-					contextWindow: compactionWindow,
-					threshold: requiredFit
-						? Math.min(
-								compactionThreshold,
-								Math.max(0, 1 - resolveTurnOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow),
-							)
-						: compactionThreshold,
-					target: requiredFit
-						? Math.min(
-								workingSetTarget,
-								Math.max(0, 1 - resolveTurnOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow),
-							)
-						: workingSetTarget,
-					...(requiredFit ? { forced: true } : {}),
-				},
-				estimateTokens: prices.tokens,
-				aged,
-			});
-		} catch (error) {
-			decision.stage({ stage: "working_set", outcome: "failed", reason: "error" });
-			deps.middleware.fireCompactionHook("working_set_evict", "pressure", estimate.tokens);
-			port.emitCompactionActivity("started", "compacting context (working-set eviction)");
-			port.emitCompactionActivity("failed", port.compactionFailureMessage(error));
-			throw error;
-		}
-		if (!planned) {
-			decision.stage({ stage: "working_set", outcome: "none", reason: "no_candidates" });
-			return {
-				acted: false,
-				fit: false,
-				skipNotice: evictionSkipMessage(visibleEntries, settings.context.workingSet, policyId),
-			};
-		}
+	/** The request's superseded results, read over the render `refreshAgentMessagesFromSession` builds. */
+	const supersededIn = (
+		entries: ReadonlyArray<SessionEntry>,
+		view: PolicyInput["view"],
+		classify: ClassifyCall,
+	): SupersededCandidate[] => {
+		const { sourceIds } = renderModelReplay(entries, {
+			...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
+			continuity: continuityContextFromSession(deps.session),
+		});
+		return selectSuperseded({ entries, sourceIds, view, classify });
+	};
+
+	/** The selection's view of the ledger: what the model sees, priced as the replay converter prices it. */
+	const selectionInput = (
+		entries: ReadonlyArray<SessionEntry>,
+		session: SessionContract,
+		settings: Readonly<ClioSettings>,
+		pressure: PolicyInput["pressure"],
+	): PolicyInput => {
+		const leaf = state.lastTurnId ?? undefined;
+		const visibleEntries = selectVisibleEntries(entries, leaf);
+		const prices = createFoldPriceBook(
+			visibleEntries,
+			createReplayMessageConverter(entries, { ...(leaf ? { activeLeafTurnId: leaf } : {}) }),
+		);
+		return {
+			entries: visibleEntries,
+			view: foldWorkingSet(entries, leaf),
+			cwd: session.current()?.cwd ?? null,
+			settings: settings.context.workingSet,
+			pressure,
+			estimateTokens: prices.tokens,
+		};
+	};
+
+	const evictionRoute = (agentRuntime: AgentRuntime): EvictionRoute | undefined => {
+		const { modelTier, promptCaching } = agentRuntime.runtimeResolution;
+		return modelTier !== undefined && promptCaching !== undefined ? { tier: modelTier, promptCaching } : undefined;
+	};
+
+	interface CommitInput {
+		agentRuntime: AgentRuntime;
+		decision: FoldDecision;
+		session: SessionContract;
+		planned: EvictionPlan;
+		/** No S1 item: the superseded stage's commit, which has no rail activity and its own cold reason. */
+		superseded: boolean;
+		stages(recordId: string | undefined): FoldStageEntry[];
+		pressureBefore: number | null;
+		beforeSnapshotId: string | null;
+		compactionThreshold: number;
+		trigger: CompactionTrigger;
+		originSession: string | undefined;
+		pendingUserText: string | undefined;
+		handoff: ContinuityReductionHooks | undefined;
+		route: EvictionRoute | undefined;
+		notice: string;
+	}
+
+	/** Append one eviction record and publish it: rebuild, carry the anchor, snapshot, `context.pruned`, budget. */
+	const commitEviction = (input: CommitInput): void => {
+		const { agentRuntime, decision, session, planned, superseded, trigger, pendingUserText } = input;
+		const stage = superseded ? "superseded" : "working_set";
 		let committed = false;
-		deps.middleware.fireCompactionHook("working_set_evict", "pressure", estimate.tokens);
-		port.emitCompactionActivity("started", "compacting context (working-set eviction)");
 		try {
 			const historyTokens = port.reconciledHistoryTokens(agentRuntime);
 			const evictionEntry = session.appendEntry({
 				...buildEvictionFields(planned, {
-					trigger: "pressure",
-					pressureBefore: verdict.pressure,
-					snapshotIdBefore: beforeSnapshotId,
+					trigger: superseded ? "superseded" : ("pressure" satisfies EvictionTrigger),
+					pressureBefore: input.pressureBefore,
+					snapshotIdBefore: input.beforeSnapshotId,
 				}),
+				...(input.route !== undefined ? { route: input.route } : {}),
 				// appendEntry does not infer this anchor; the interactive
 				// cursor is the leaf the next message will extend.
 				parentTurnId: state.lastTurnId,
 			});
 			// Read without assuming the append returned its entry, as the commit above does: only the memory notice needs it.
 			const recordId = (evictionEntry as SessionEntry | undefined)?.turnId;
-			decision.stage({
-				stage: "working_set",
-				outcome: "committed",
-				reason: "evicted",
-				...(recordId !== undefined ? { recordId } : {}),
-			});
+			for (const entry of input.stages(recordId)) decision.stage(entry);
 			committed = true;
 			if (session.flushAppends) {
 				session.flushAppends();
 				if (!input.handoff) port.notifyMemoryCommit(evictionEntry.turnId, "summary", "evicted");
 			}
 			port.resetCacheCallBaseline();
-			port.noteColdReason("working_set_evict");
+			port.noteColdReason(superseded ? "observation_aging" : "working_set_evict");
 			refreshAgentMessagesFromSession(agentRuntime);
 			port.carryReconciledAnchorThroughProjection(agentRuntime, historyTokens, planned.tokensBefore - planned.tokensAfter);
 
 			const postEvictionSnapshot = port.captureRuntimeContextSnapshot(
 				agentRuntime,
 				state.activeUserTurnId || "compaction",
-				compactionThreshold,
+				input.compactionThreshold,
 			);
 			port.setCurrentSnapshot(postEvictionSnapshot);
 			port.persistContextSnapshot(postEvictionSnapshot);
 
 			// All event surfaces quote the request anchor less the priced
 			// bodies; the live re-check below remains authoritative (#422).
-			port.noteCompactionEvent({
-				stage: "working_set",
-				tokensBefore: planned.tokensBefore,
-				tokensAfter: planned.tokensAfter,
-				trigger,
-			});
+			port.noteCompactionEvent({ stage, tokensBefore: planned.tokensBefore, tokensAfter: planned.tokensAfter, trigger });
 			deps.bus?.emit(
 				"context.pruned",
 				{
-					stage: "working_set",
-					pressure: verdict.pressure,
+					stage,
+					pressure: input.pressureBefore,
 					tokensBefore: planned.tokensBefore,
 					tokensAfter: planned.tokensAfter,
 					trigger,
-					snapshotIdBefore: beforeSnapshotId,
+					snapshotIdBefore: input.beforeSnapshotId,
 					snapshotIdAfter: postEvictionSnapshot.snapshotId,
 					policyId: planned.policyId,
 					evictedItems: planned.items.length,
 					at: Date.now(),
 				} satisfies ContextPrunedPayload,
-				sessionTelemetryContext(originSession),
+				sessionTelemetryContext(input.originSession),
 			);
-			port.recordCompactionFact({ kind: "omitted", unit: "observations", count: planned.items.length });
-			const itemsWord = planned.items.length === 1 ? "item" : "items";
-			port.emitCompactionActivity("completed", `${planned.items.length} working-set ${itemsWord} evicted`);
-			deps.emitNotice(
-				`[context engine] working set: ${planned.items.length} ${itemsWord} evicted by ${planned.policyId}; ~${planned.tokensBefore} -> ~${planned.tokensAfter} tokens, recall by ref with context(scope="recall")`,
-			);
+			if (!superseded) {
+				port.recordCompactionFact({ kind: "omitted", unit: "observations", count: planned.items.length });
+				const itemsWord = planned.items.length === 1 ? "item" : "items";
+				port.emitCompactionActivity("completed", `${planned.items.length} working-set ${itemsWord} evicted`);
+			}
+			deps.emitNotice(input.notice);
 
 			// Published only after the carried anchor and the post-eviction
 			// capture are both in place: `liveContextEstimate` clears an
@@ -414,18 +435,191 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			// rebuilt list any earlier would discard the attestation the
 			// projection carry exists to preserve.
 			port.refreshLiveBudget(pendingUserText);
-			const after = port.liveContextEstimate(agentRuntime, pendingUserText);
-			decision.measure(after.tokens);
-			port.recordCompactionTokens({ before: estimate.tokens, after: after.tokens, basis: "runtime-estimate" });
-			const fit = requiredFit
-				? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
-				: !input.shouldCompact(after.tokens).shouldCompact;
-			return { acted: true, fit, skipNotice: null };
+			// The superseded stage's fold figures are its record's, the same pair `context.pruned` quotes.
+			if (superseded) {
+				decision.measure(planned.tokensBefore);
+				decision.measure(planned.tokensAfter);
+			}
 		} catch (error) {
-			if (!committed) decision.stage({ stage: "working_set", outcome: "failed", reason: "error" });
+			if (!committed) decision.stage({ stage, outcome: "failed", reason: "error" });
+			if (!superseded) port.emitCompactionActivity("failed", port.compactionFailureMessage(error));
+			throw error;
+		}
+	};
+
+	const supersededNotice = (planned: EvictionPlan, lead: string): string =>
+		`[context engine] superseded: ${lead}; ~${planned.tokensBefore} -> ~${planned.tokensAfter} tokens, recall by ref with context(scope="recall")`;
+
+	/**
+	 * S0 and S1 as one record (SPEC §2.4), then a re-check of pressure (or fit) on the rebuilt request. S0 alone
+	 * commits below the trigger once its floor is met; S1 runs only when the checkpoint reached it.
+	 */
+	const runEvictionStage = (input: EvictionStageInput): EvictionStageResult => {
+		const { agentRuntime, session, settings, estimate, verdict, beforeSnapshotId, requiredFit } = input;
+		const { compactionWindow, compactionThreshold, workingSetTarget, trigger, originSession, pendingUserText } = input;
+		const { decision } = input;
+		const workingSet = settings.context.workingSet;
+		const structural = input.structural && workingSet.enabled;
+		let skipNotice: string | null = null;
+		if (input.structural && !workingSet.enabled) {
+			decision.stage({ stage: "working_set", outcome: "none", reason: "disabled" });
+			skipNotice = renderEvictionSkipLine({
+				reason: "disabled",
+				turns: 0,
+				protectLastTurns: workingSet.protectLastTurns,
+				protectLastSteps: workingSet.protectLastSteps,
+				policyId: workingSet.policy,
+			});
+		}
+		if (!structural && !input.superseded) return { acted: false, committed: false, fit: false, skipNotice };
+		let folded: FoldPlan;
+		let visibleEntries: ReadonlyArray<SessionEntry> = [];
+		let policyId = workingSet.policy;
+		try {
+			const entries = deps.readSessionEntries?.() ?? [];
+			const policy = structural ? resolveWorkingSetPolicy(workingSet.policy) : null;
+			if (policy !== null) policyId = policy.id;
+			const fitShare = () =>
+				Math.max(0, 1 - resolveTurnOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow);
+			const policyInput = selectionInput(entries, session, settings, {
+				tokens: port.liveContextEstimate(agentRuntime, pendingUserText).tokens,
+				contextWindow: compactionWindow,
+				threshold: requiredFit ? Math.min(compactionThreshold, fitShare()) : compactionThreshold,
+				target: requiredFit ? Math.min(workingSetTarget, fitShare()) : workingSetTarget,
+				...(requiredFit ? { forced: true } : {}),
+			});
+			visibleEntries = policyInput.entries;
+			folded = planFold({
+				policy,
+				superseded: input.superseded ? supersededIn(entries, policyInput.view, input.classify) : [],
+				input: policyInput,
+				...(deps.planEviction !== undefined ? { planner: deps.planEviction } : {}),
+			});
+		} catch (error) {
+			if (!structural) {
+				// S0 alone is never what lets a request through, so a failed selection costs only its gain.
+				decision.stage({ stage: "superseded", outcome: "failed", reason: "error" });
+				return { acted: false, committed: false, fit: false, skipNotice };
+			}
+			decision.stage({ stage: "working_set", outcome: "failed", reason: "error" });
+			deps.middleware.fireCompactionHook("working_set_evict", "pressure", estimate.tokens);
+			port.emitCompactionActivity("started", "compacting context (working-set eviction)");
 			port.emitCompactionActivity("failed", port.compactionFailureMessage(error));
 			throw error;
 		}
+		const { plan: planned, superseded } = folded;
+		if (superseded.outcome === "held") decision.stage({ stage: "superseded", outcome: "held", reason: "below_floor" });
+		if (superseded.outcome === "dropped") decision.stage({ stage: "superseded", outcome: "none", reason: "no_gain" });
+		const structuralSkip = () => evictionSkipMessage(visibleEntries, workingSet, policyId);
+		if (!planned) {
+			if (!structural) return { acted: false, committed: false, fit: false, skipNotice };
+			decision.stage({ stage: "working_set", outcome: "none", reason: "no_candidates" });
+			return { acted: false, committed: false, fit: false, skipNotice: structuralSkip() };
+		}
+		const alone = !folded.structural;
+		if (alone) deps.middleware.fireCompactionHook("superseded", "superseded", estimate.tokens);
+		else {
+			deps.middleware.fireCompactionHook("working_set_evict", "pressure", estimate.tokens);
+			port.emitCompactionActivity("started", "compacting context (working-set eviction)");
+		}
+		const s0Items = superseded.outcome === "planned" ? superseded.items : 0;
+		const itemsWord = planned.items.length === 1 ? "item" : "items";
+		commitEviction({
+			agentRuntime,
+			decision,
+			session,
+			planned,
+			superseded: alone,
+			stages: (recordId) => {
+				const ref = recordId !== undefined ? { recordId } : {};
+				const entries: FoldStageEntry[] = [];
+				if (s0Items > 0) entries.push({ stage: "superseded", outcome: "committed", reason: "evicted", ...ref });
+				if (folded.structural) entries.push({ stage: "working_set", outcome: "committed", reason: "evicted", ...ref });
+				else if (structural) entries.push({ stage: "working_set", outcome: "none", reason: "no_candidates" });
+				return entries;
+			},
+			pressureBefore: verdict.pressure,
+			beforeSnapshotId,
+			compactionThreshold,
+			trigger,
+			originSession,
+			pendingUserText,
+			handoff: input.handoff,
+			route: s0Items > 0 ? evictionRoute(agentRuntime) : undefined,
+			notice: alone
+				? supersededNotice(
+						planned,
+						`${s0Items} ${s0Items === 1 ? "result" : "results"} a later identical call covers evicted`,
+					)
+				: `[context engine] working set: ${planned.items.length} ${itemsWord} evicted by ${planned.policyId}; ~${planned.tokensBefore} -> ~${planned.tokensAfter} tokens, recall by ref with context(scope="recall")`,
+		});
+		const after = port.liveContextEstimate(agentRuntime, pendingUserText);
+		if (!alone) {
+			decision.measure(after.tokens);
+			port.recordCompactionTokens({ before: estimate.tokens, after: after.tokens, basis: "runtime-estimate" });
+		}
+		const fit = requiredFit
+			? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
+			: !input.shouldCompact(after.tokens).shouldCompact;
+		return { acted: !alone, committed: true, fit, skipNotice: alone && structural ? structuralSkip() : skipNotice };
+	};
+
+	const adoptLegacyAging = (input: LegacyAdoptionInput): boolean => {
+		const { agentRuntime, decision, session } = input;
+		const entries = deps.readSessionEntries?.() ?? [];
+		const path = activePath(entries, state.lastTurnId ?? undefined);
+		const found = legacyAgingOnPath(path, []);
+		if (found.kind === "none") return false;
+		if (!input.superseded) {
+			// A cached route never had these results stubbed and S0 does not run on it: nothing to adopt.
+			decision.stage({ stage: "superseded", outcome: "none", reason: "disabled" });
+			decision.legacy({ outcome: "legacy_aging_released", results: found.results });
+			return false;
+		}
+		const settings = input.settings;
+		const policyInput = selectionInput(entries, session, settings, {
+			tokens: port.liveContextEstimate(agentRuntime, input.pendingUserText).tokens,
+			contextWindow: input.estimate.contextWindow,
+			threshold: 1,
+			target: 1,
+		});
+		const legacy = legacyAgingOnPath(path, supersededIn(entries, policyInput.view, input.classify));
+		const planned =
+			legacy.kind === "found" && legacy.adopt.length > 0
+				? planSelection(LEGACY_AGING_POLICY_ID, legacy.adopt, policyInput)
+				: null;
+		if (planned === null) {
+			decision.stage({ stage: "superseded", outcome: "none", reason: "no_candidates" });
+			decision.legacy({ outcome: "adopted", results: 0 });
+			return false;
+		}
+		deps.middleware.fireCompactionHook("superseded", "superseded", input.estimate.tokens);
+		const results = planned.items.length;
+		commitEviction({
+			agentRuntime,
+			decision,
+			session,
+			planned,
+			superseded: true,
+			stages: (recordId) => [
+				{ stage: "superseded", outcome: "committed", reason: "adopted", ...(recordId !== undefined ? { recordId } : {}) },
+			],
+			pressureBefore: null,
+			beforeSnapshotId: input.beforeSnapshotId,
+			compactionThreshold: input.compactionThreshold,
+			trigger: input.trigger,
+			originSession: input.originSession,
+			pendingUserText: input.pendingUserText,
+			handoff: input.handoff,
+			route: evictionRoute(agentRuntime),
+			notice: supersededNotice(
+				planned,
+				`${results} ${results === 1 ? "result" : "results"} this session's earlier requests stubbed kept as eviction markers`,
+			),
+		});
+		const earliest = planned.items[0]?.ref.entry;
+		decision.legacy({ outcome: "adopted", results, ...(earliest !== undefined ? { earliest } : {}) });
+		return true;
 	};
 
 	/** After a summary checkpoint is on the ledger: rebuild, drop the anchor, snapshot, emit `context.pruned`. */
@@ -511,6 +705,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		beginDecision,
 		refreshAgentMessagesFromSession,
 		runEvictionStage,
+		adoptLegacyAging,
 		publishSummaryCheckpoint,
 		publishStepCheckpoint,
 	};

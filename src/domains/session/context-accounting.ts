@@ -15,13 +15,6 @@ export interface AgentContextEstimateInput {
 	tools?: ReadonlyArray<unknown>;
 	/** `estimateAgentMessageTokens` of each message, aligned with `messages`, when the caller already holds them. */
 	messageTokens?: ReadonlyArray<number>;
-	/**
-	 * Messages this request carries smaller than the request a provider usage
-	 * figure measured (an observation-aging stub not yet sent), with the tokens
-	 * each saves. A saving before the latest usable assistant usage comes off
-	 * that usage; `messages` and `messageTokens` already carry the smaller copy.
-	 */
-	attestedSavings?: ReadonlyArray<{ index: number; tokens: number }>;
 }
 
 export interface ContextUsageSnapshot {
@@ -287,11 +280,9 @@ export function estimateAgentContextTokens(input: AgentContextEstimateInput): nu
 		const message = input.messages[index];
 		if (message !== undefined) trailingTokens += estimatedMessageTokens(input, message, index);
 	}
-	let saved = 0;
-	for (const saving of input.attestedSavings ?? []) if (saving.index < usage.index) saved += saving.tokens;
 	// The provider's count already carries the system prompt and tool schemas; adding them again inflated
 	// every meter read after /fork or /resume dropped the live anchor.
-	const anchored = Math.max(0, usage.tokens - saved) + trailingTokens + breakdown.pendingUserTokens;
+	const anchored = usage.tokens + trailingTokens + breakdown.pendingUserTokens;
 	return Math.max(projection, anchored);
 }
 

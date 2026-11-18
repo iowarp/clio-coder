@@ -74,7 +74,7 @@ export type CacheBreakCause =
 	| "input_changed"
 	| "compaction"
 	| "working_set_evict"
-	/** An observation-aging batch stubbed superseded tool results earlier in the request (WTF-P 0.8.3 C3). */
+	/** The superseded stage evicted tool results a later identical call replaced (WTF-P 0.8.3 C3, ContextFold CF-5). */
 	| "observation_aging"
 	| "model_changed"
 	| "transport_reset"
