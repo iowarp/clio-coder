@@ -24,6 +24,7 @@ import { outwardShellReason } from "../../src/domains/safety/containment.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
 import { grantEffectDigest } from "../../src/domains/safety/grant-effect.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
 import {
 	DEFAULT_RETRY_SETTINGS,
 	formatStatedWait,
@@ -35,6 +36,7 @@ import { createWorkerProgressFold, type WorkerProgressSnapshot } from "../../src
 import { markClioLoaded, reconcileResidency } from "../../src/engine/apis/residency.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import {
 	createDispatchBoardView,
 	type DispatchBoardRow,
@@ -2268,6 +2270,71 @@ test("a loop repair after a step that succeeded opens its own card, and a retry 
 	} as never);
 	strictEqual(retry?.kind, "updated", "a retry after a failure stays on the same card");
 	strictEqual(first?.entry.attempts.length, 2);
+});
+
+test("a card replayed by /fork while its worker runs keeps streaming and settles, and one no stream follows never reads starting (bt-11 c)", () => {
+	const stream = createWorkerStream({ readResult: () => null });
+	const started = stream.started({
+		runId: "run-a",
+		assignmentId: "run-a",
+		attempt: 0,
+		requestOrigin: "agent",
+		agentId: "coder",
+		task: "write slugify",
+		targetId: "local",
+		wireModelId: "worker-model",
+		runtimeId: "openai",
+		runtimeKind: "http",
+		pid: 1,
+	} as never);
+	stream.reset();
+	const entries = [
+		{
+			kind: "message",
+			role: "user",
+			turnId: "ask",
+			parentTurnId: null,
+			timestamp: "2026-09-17T00:00:00Z",
+			payload: "go",
+		},
+		{
+			kind: "workerRun",
+			turnId: "worker",
+			parentTurnId: "ask",
+			timestamp: "2026-09-17T00:00:01Z",
+			assignmentId: "run-a",
+			runId: "run-a",
+			origin: "agent",
+			agentId: "coder",
+			task: "write slugify",
+			runtime: { kind: "clio", targetId: "local", wireModelId: "worker-model" },
+		},
+	] as unknown as SessionEntry[];
+	const replay = { readWorkerRunResult: () => ({ outcome: "running" as const, stillRunning: true }) };
+	const panel = createChatPanel({ adoptLiveWorker: (runId) => stream.adopt(runId) });
+	rehydrateChatPanelFromTurns(panel, entries, replay);
+	strictEqual(panel.workerStates()[0], started?.entry, "the replayed card is the live one");
+	const progressed = stream.progress({
+		runId: "run-a",
+		agentId: "coder",
+		event: { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "slug written" } },
+	});
+	strictEqual(progressed?.entry, started?.entry);
+	const settled = stream.completed({
+		runId: "run-a",
+		agentId: "coder",
+		outcome: "succeeded",
+		outcomeCode: null,
+		outcomeDetail: null,
+		durationMs: 10,
+		exitCode: 0,
+	} as never);
+	strictEqual(settled?.entry.pending, false, "the adopted card settles");
+	const unfollowed = createChatPanel();
+	rehydrateChatPanelFromTurns(unfollowed, entries, replay);
+	const card = screen(unfollowed);
+	match(card, /still running/u);
+	doesNotMatch(card, /starting/u);
 });
 
 test("a worker that stopped answering takes no steer, and takes one again once it answers", () => {

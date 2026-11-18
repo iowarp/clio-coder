@@ -153,6 +153,8 @@ export interface InteractivePresentationFactories {
 }
 
 export interface InteractivePresentationDeps {
+	/** The live card for a run a replayed transcript finds still underway; see the chat panel's option. */
+	adoptLiveWorker?: (runId: string) => import("../session-control/worker-stream.js").WorkerEntryState | undefined;
 	/** The last slash command the operator ran, so a demo tip can name its key. */
 	getLastCommand?: () => string | null;
 	/** How many of the main turn's own calls are parked on the operator. */
@@ -497,6 +499,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		getHumanWaitMs: () => humanWaitTotalMs(statusController.current(), Date.now()),
 		...(deps.recordTurnHumanWait ? { recordTurnHumanWait: deps.recordTurnHumanWait } : {}),
+		...(deps.adoptLiveWorker ? { adoptLiveWorker: deps.adoptLiveWorker } : {}),
 		requestRender,
 		...(renderTrace ? { onRenderMetrics: (metrics) => renderTrace.recordPanelRender(metrics) } : {}),
 		// Rendering ahead yields to input between steps and waits out a stream.

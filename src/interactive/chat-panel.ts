@@ -721,6 +721,11 @@ export interface ChatPanelOptions {
 	scheduleIdle?: (step: () => boolean) => void;
 	/** Ask for a frame when the panel changes outside an event, as when an edit's diff finishes computing. */
 	requestRender?: () => void;
+	/**
+	 * The live card this process still streams for a run a replay finds underway. A fork or resume taken while a worker
+	 * runs replays its card from the ledger, which knows only that it started; the live one keeps streaming and settles.
+	 */
+	adoptLiveWorker?: (runId: string) => WorkerEntryState | undefined;
 }
 
 /**
@@ -4249,7 +4254,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			appendRow({ role: "replayBlock", renderBlock, at: stamp(), isLive });
 			markDirty();
 		},
-		applyWorkerState(state: WorkerEntryState): void {
+		applyWorkerState(placed: WorkerEntryState): void {
+			const state = placed.result?.stillRunning === true ? (options.adoptLiveWorker?.(placed.runId) ?? placed) : placed;
 			const existing = workerEntries.get(state.assignmentId);
 			if (existing !== undefined) {
 				// The reducer mutated the same state object this entry already holds,
