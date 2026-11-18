@@ -6,6 +6,10 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 0.8.3 install (send-back, revision plan, rewrite, acceptance, re-audit and re-archive at autonomy `yolo`, orchestrator and writers on openai-codex gpt-6-luna, reviewers on gpt-6.1-terra), and adds the harness features an extension-driven pipeline needs to run across small, mid-tier and frontier models. Each entry names its finding id from that run.
 
+### Upgrade notes
+
+- **`CLIO_CODER_LEGACY_MASK` is gone.** Setting it no longer brings back the stale-observation mask; working-set eviction runs unless `context.workingSet.enabled` is `false`.
+
 ### Added
 
 - A1: an api 2 extension tool may declare `readOnly: true` and `idempotent: true` in `clio-coder-extension.yaml`. Only a tool declared one or the other counts toward the loop guard's identical-call repeats; a `read` tool is read-only by default, and a `write` tool cannot claim it.
@@ -48,6 +52,11 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - Astra r9-6: the repetition detector resets on each streamed message instead of each partial object, so a long reply is checked about a hundredth as often.
 - Astra r9-3: the attached gateway schema shows a known edit and its verify as one chain, which saves a round when the model uses it.
 - Astra r10-6: `/export` shows an "exporting" notice at once and writes the file asynchronously; rendering a long session still holds input briefly.
+- P1-8: turn context shares one compaction budget and trigger helper, one JSON digest and one active-path read; prompt bytes, ledger records and telemetry are unchanged.
+
+### Removed
+
+- P1-1: the `CLIO_CODER_LEGACY_MASK=1` escape hatch (announced as one-release in 0.3.4) and its destructive stale-observation mask stage; working-set eviction is the only pre-summary stage, and `context.workingSet.enabled: false` turns it off.
 
 ### Fixed
 
