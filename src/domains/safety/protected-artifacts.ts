@@ -1750,13 +1750,22 @@ function writerStep(executable: string, args: ReadonlyArray<string>): boolean {
 		return inner !== null && writerStep(inner.executable, inner.args);
 	}
 	if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
-		if ((args[0] === "exec" || args[0] === "dlx") && typeof args[1] === "string" && !args[1].startsWith("-"))
+		// A read-only check behind `exec` is the check, not a writer (`npm exec vitest run`).
+		const exec = packageExecInvocation(executable, args);
+		if (exec !== null) return !readOnlyCheckMatch(exec.executable, exec.args) && writerStep(exec.executable, exec.args);
+		if (args[0] === "dlx" && typeof args[1] === "string" && !args[1].startsWith("-"))
 			return writerStep(basenameToken(args[1]), args.slice(2));
 		if (args[0] !== undefined && PACKAGE_WRITES.has(args[0])) return true;
 	}
 	if (TOOLCHAIN_WRITES.get(executable)?.has(args[0] ?? "") === true) return true;
-	if (isPythonExecutable(executable))
-		return args.includes("-c") || (moduleArg(args) === "pip" && args.some((arg) => PACKAGE_WRITES.has(arg)));
+	if (isPythonExecutable(executable)) {
+		const module = pythonToolModule(executable, args);
+		return (
+			args.includes("-c") ||
+			(moduleArg(args) === "pip" && args.some((arg) => PACKAGE_WRITES.has(arg))) ||
+			(module !== null && writerStep(module.executable, module.args))
+		);
+	}
 	const inline = INLINE_SCRIPT_FLAGS.get(executable);
 	if (inline?.some((flag) => args.some((arg) => arg === flag || arg.startsWith(`${flag}=`))) === true) return true;
 	const checksOnly = args.some((arg) => arg === "--check" || arg === "--diff" || arg.startsWith("--check="));
@@ -1881,10 +1890,10 @@ function makeCheckMatch(args: ReadonlyArray<string>): boolean {
 }
 
 /**
- * Read-only checks of other ecosystems by their subcommand (x8-2): cargo check and clippy, go vet and build (without
- * `-o`), `gofmt -l`, mypy, pyright, ruff check, `prettier --check`, biome check and lint, dotnet test, rspec, phpunit,
- * composer test, deno test, check and lint, playwright test, cypress run, tox, nox, hatch test, rake test, `python
- * manage.py test` and make's check targets. An option that writes what they read (`--fix`, `--write`, `-w`, a
+ * Read-only checks of other ecosystems by their subcommand (x8-2): cargo check, clippy and build, go vet and build
+ * (without `-o`), `gofmt -l`, mypy, pyright, pylint, flake8, ruff check, `prettier --check`, biome check and lint,
+ * dotnet test, rspec, phpunit, composer test, deno test, check and lint, playwright test, cypress run, tox, nox, hatch
+ * test, rake test, `python manage.py test`, `php artisan test` and make's check targets. An option that writes what they read (`--fix`, `--write`, `-w`, a
  * snapshot update, mypy's `--install-types`, ruff's `--add-noqa`, biome's `--apply`) or a tox or nox environment named
  * as a writer (`-e format`) keeps the run out of the set.
  */
@@ -1894,7 +1903,7 @@ function ecosystemCheckMatch(executable: string, args: ReadonlyArray<string>): b
 	let matched: boolean;
 	switch (executable) {
 		case "cargo":
-			matched = subcommand === "check" || subcommand === "clippy";
+			matched = subcommand === "check" || subcommand === "clippy" || subcommand === "build";
 			break;
 		case "go":
 			matched = subcommand === "vet" || (subcommand === "build" && !has(/^-o(?:=|$)/u));
@@ -1904,6 +1913,10 @@ function ecosystemCheckMatch(executable: string, args: ReadonlyArray<string>): b
 			break;
 		case "mypy":
 			matched = !has(/^--install-types/u);
+			break;
+		case "pylint":
+		case "flake8":
+			matched = true;
 			break;
 		case "pyright":
 			matched = !has(/^--(?:createstub|writebaseline)/u);
@@ -1946,34 +1959,34 @@ function ecosystemCheckMatch(executable: string, args: ReadonlyArray<string>): b
 			matched = makeCheckMatch(args);
 			break;
 		default:
-			matched = isPythonExecutable(executable) && basenameToken(args[0]) === "manage.py" && args[1] === "test";
+			matched =
+				((isPythonExecutable(executable) && basenameToken(args[0]) === "manage.py") ||
+					(executable === "php" && basenameToken(args[0]) === "artisan")) &&
+				args[1] === "test";
 	}
 	return matched && !args.some(writesSnapshots) && !checkWritesTree([executable, ...args]);
 }
 
 /**
  * The closed read-only half of the check vocabulary (x5-1): `tsc --noEmit`, `node --check`, `node --test`, and
- * vitest, jest, mocha or eslint, bare or behind `npx` or `pnpm exec`, the other ecosystems' read-only checks
- * ({@link ecosystemCheckMatch}), and any check behind `uv run`, `poetry run` or `bundle exec`. A snapshot update,
+ * vitest, jest, mocha or eslint, bare or behind `npx`, `npm|pnpm|yarn|bun exec` or `pnpm|yarn <bin>`, the other
+ * ecosystems' read-only checks ({@link ecosystemCheckMatch}), also as `python -m <tool>`, and any check behind `uv
+ * run`, `poetry run` or `bundle exec`. A snapshot update,
  * `--fix`, `node -e` and a bare `tsc` that emits stay outside it, so they remain changes that retire earlier passes.
  */
 function readOnlyCheckMatch(executable: string, args: ReadonlyArray<string>): boolean {
 	const wrapped = environmentRunnerInvocation(executable, args);
 	if (wrapped !== null) return checkStepMatch(wrapped.executable, wrapped.args);
+	const module = pythonToolModule(executable, args);
+	if (module !== null) return readOnlyCheckMatch(module.executable, module.args);
 	if (ecosystemCheckMatch(executable, args)) return true;
 	if (executable === "npx") {
 		if (args.some((arg) => arg === "-c" || arg === "--call" || arg.startsWith("--call="))) return false;
 		const inner = npxInvocation(args);
 		return inner !== null && inner.executable !== "node" && readOnlyCheckMatch(inner.executable, inner.args);
 	}
-	if (executable === "pnpm")
-		return (
-			args[0] === "exec" &&
-			typeof args[1] === "string" &&
-			!args[1].startsWith("-") &&
-			basenameToken(args[1]) !== "node" &&
-			readOnlyCheckMatch(basenameToken(args[1]), args.slice(2))
-		);
+	const exec = packageExecInvocation(executable, args) ?? packageBinInvocation(executable, args);
+	if (exec !== null) return exec.executable !== "node" && readOnlyCheckMatch(exec.executable, exec.args);
 	if (executable === "tsc") return args.some((arg) => arg.toLowerCase() === "--noemit");
 	if (executable === "node")
 		return (
@@ -2979,13 +2992,22 @@ const PACKAGE_MANAGER_BUILTINS: ReadonlyMap<string, ReadonlySet<string>> = new M
 	],
 ]);
 
-/** pnpm workspace selectors before a script; `--filter` and `-F` take a value. */
+/** pnpm workspace selectors before a script that take no value. */
 const PNPM_SELECTOR_FLAGS: ReadonlySet<string> = new Set(["-r", "--recursive", "-w", "--workspace-root"]);
+
+/** Selectors before a script that take a value: pnpm's `--filter` and each manager's project directory. */
+const PACKAGE_VALUE_SELECTORS: Readonly<Record<PackageManager, ReadonlySet<string>>> = {
+	npm: new Set(["--prefix"]),
+	pnpm: new Set(["--filter", "-F", "-C", "--dir"]),
+	yarn: new Set(["--cwd"]),
+	bun: new Set(["--cwd"]),
+};
 
 /**
  * The package script a package manager runs: `<pm> test`, `<pm> run <script>`, or for pnpm and yarn a bare script
- * name, past pnpm's `--filter <v>`, `-F <v>`, `-r` and `-w` or yarn's `workspace <name>` (x6-4). `forwarded` are the
- * arguments after the script name. Null for anything else.
+ * name, past pnpm's `--filter <v>`, `-F <v>`, `-r` and `-w` or yarn's `workspace <name>` (x6-4), and past the project
+ * directory (`npm --prefix <dir>`, `pnpm -C <dir>`, `yarn --cwd <dir>`), which stays in the check's identity.
+ * `forwarded` are the arguments after the script name. Null for anything else.
  */
 function packageScriptRun(
 	executable: string,
@@ -2993,22 +3015,23 @@ function packageScriptRun(
 ): { manager: PackageManager; selectors: string[]; script: string; forwarded: ReadonlyArray<string> } | null {
 	if (executable !== "npm" && executable !== "pnpm" && executable !== "yarn" && executable !== "bun") return null;
 	const selectors: string[] = [];
+	const valued = PACKAGE_VALUE_SELECTORS[executable];
 	let index = 0;
-	if (executable === "pnpm") {
-		for (let arg = args[index]; arg !== undefined; arg = args[index]) {
-			if (arg === "--filter" || arg === "-F") {
-				const value = args[index + 1];
-				if (value === undefined) return null;
-				selectors.push(arg, value);
-				index += 2;
-			} else if (arg.startsWith("--filter=") || PNPM_SELECTOR_FLAGS.has(arg)) {
-				selectors.push(arg);
-				index += 1;
-			} else break;
-		}
-	} else if (executable === "yarn" && args[0] === "workspace" && args[1] !== undefined && !args[1].startsWith("-")) {
-		selectors.push("workspace", args[1]);
-		index = 2;
+	for (let arg = args[index]; arg !== undefined; arg = args[index]) {
+		const equals = arg.indexOf("=");
+		if (valued.has(equals > 0 ? arg.slice(0, equals) : arg)) {
+			const value = equals > 0 ? arg.slice(equals + 1) : args[index + 1];
+			if (value === undefined) return null;
+			selectors.push(...(equals > 0 ? [arg] : [arg, value]));
+			index += equals > 0 ? 1 : 2;
+		} else if (executable === "pnpm" && PNPM_SELECTOR_FLAGS.has(arg)) {
+			selectors.push(arg);
+			index += 1;
+		} else break;
+	}
+	if (executable === "yarn" && args[index] === "workspace" && args[index + 1]?.startsWith("-") === false) {
+		selectors.push("workspace", args[index + 1] as string);
+		index += 2;
 	}
 	const first = args[index];
 	if (first === undefined) return null;
@@ -3093,6 +3116,59 @@ function moduleArg(args: ReadonlyArray<string>): string | null {
 		if (args[index] === "-m") return args[index + 1] ?? null;
 	}
 	return null;
+}
+
+/** Python tools that `python -m <tool>` runs as the bare tool of that name. */
+const PYTHON_TOOL_MODULES: ReadonlySet<string> = new Set([
+	"mypy",
+	"ruff",
+	"pylint",
+	"flake8",
+	"black",
+	"isort",
+	"autopep8",
+]);
+
+/** The tool `python -m <tool>` runs, past the interpreter's own options, when it is one of {@link PYTHON_TOOL_MODULES}. */
+function pythonToolModule(
+	executable: string,
+	args: ReadonlyArray<string>,
+): { executable: string; args: ReadonlyArray<string> } | null {
+	if (!isPythonExecutable(executable)) return null;
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		if (arg === "-m") {
+			const module = args[index + 1];
+			return module !== undefined && PYTHON_TOOL_MODULES.has(module)
+				? { executable: module, args: args.slice(index + 2) }
+				: null;
+		}
+		if (arg === "-W" || arg === "-X") index += 1;
+		else if (!arg.startsWith("-") || arg === "-" || arg === "-c") return null;
+	}
+	return null;
+}
+
+/** The binary `npm exec`, `pnpm exec`, `yarn exec` or `bun exec` runs, past an optional `--`; null for anything else. */
+function packageExecInvocation(
+	executable: string,
+	args: ReadonlyArray<string>,
+): { executable: string; args: ReadonlyArray<string> } | null {
+	if (args[0] !== "exec" || !["npm", "pnpm", "yarn", "bun"].includes(executable)) return null;
+	const at = args[1] === "--" ? 2 : 1;
+	const bin = args[at];
+	return bin === undefined || bin.startsWith("-") ? null : { executable: basenameToken(bin), args: args.slice(at + 1) };
+}
+
+/** The binary `pnpm <bin>` or `yarn <bin>` runs when the first word is no builtin of theirs (`pnpm vitest run`). */
+function packageBinInvocation(
+	executable: string,
+	args: ReadonlyArray<string>,
+): { executable: string; args: ReadonlyArray<string> } | null {
+	const bin = args[0];
+	if (bin === undefined || bin.startsWith("-") || PACKAGE_MANAGER_BUILTINS.get(executable)?.has(bin) !== false)
+		return null;
+	return { executable: basenameToken(bin), args: args.slice(1) };
 }
 
 function isPythonExecutable(executable: string): boolean {
@@ -3701,10 +3777,48 @@ function commandTokenIndex(segment: ReadonlyArray<string>): number | null {
 			while (index < segment.length && segment[index]?.startsWith("-") === true) index += 1;
 			continue;
 		}
+		const valued = TRANSPARENT_WRAPPERS.get(token);
+		if (valued !== undefined) {
+			index += 1;
+			for (let option = segment[index]; option?.startsWith("-") === true; option = segment[index]) {
+				index += valued.has(option) ? 2 : 1;
+				if (option === "--") break;
+			}
+			// timeout's duration stands between its options and the command it runs.
+			if (token === "timeout") index += 1;
+			continue;
+		}
 		return index;
 	}
 	return null;
 }
+
+/**
+ * Commands that run the rest of their segment unchanged, each with its options that take the next word as a value:
+ * `timeout [opts] DURATION`, `nice [-n N | -N]` and `xvfb-run [opts]`. The command after them is the one every
+ * reader judges, so `timeout 300 npm test` runs a check and `timeout 5 rm -rf x` deletes.
+ */
+const TRANSPARENT_WRAPPERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+	["timeout", new Set(["-s", "--signal", "-k", "--kill-after"])],
+	["nice", new Set(["-n", "--adjustment"])],
+	[
+		"xvfb-run",
+		new Set([
+			"-e",
+			"--error-file",
+			"-f",
+			"--auth-file",
+			"-n",
+			"--server-num",
+			"-p",
+			"--xauth-protocol",
+			"-s",
+			"--server-args",
+			"-w",
+			"--wait",
+		]),
+	],
+]);
 
 function isEnvAssignment(token: string): boolean {
 	return /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
