@@ -21,14 +21,24 @@ function summaryTextShare(model: Pick<EngineModel, "provider" | "baseUrl" | "id"
 }
 
 /**
- * The output cap that leaves a summary `roomTokens` of text past the route's reasoning share, so a stated length
- * budget is also the request's (bt-18 item 8).
+ * The text share of a capped summary call. On a reasoning route it keeps at least the share the trigger assumes: a
+ * route whose summaries reported no reasoning got a request of exactly its stated room, and a summarizer that ran past
+ * that budget stopped at the output limit and saved no checkpoint (bt3 drv-m3c b3).
+ */
+function cappedTextShare(model: Pick<EngineModel, "provider" | "baseUrl" | "id" | "reasoning">): number {
+	const share = summaryTextShare(model);
+	return model.reasoning ? Math.min(share, 1 - DEFAULT_REASONING_SHARE) : share;
+}
+
+/**
+ * The output cap that leaves a capped summary `roomTokens` of text past the route's reasoning share, so a stated
+ * length budget is also the request's (bt-18 item 8).
  */
 export function summaryOutputForRoom(
 	model: Pick<EngineModel, "provider" | "baseUrl" | "id" | "reasoning">,
 	roomTokens: number,
 ): number {
-	return Math.ceil(roomTokens / summaryTextShare(model));
+	return Math.ceil(roomTokens / cappedTextShare(model));
 }
 
 /** Tokens a checkpoint summary keeps in the next context: the reserve's room. */
@@ -44,7 +54,8 @@ export function summaryRoomTokens(reserveTokens: number = DEFAULT_RESERVE_TOKENS
  * the cap adds the reasoning share observed on that route, up to the model's
  * output limit; a reasoning route with nothing observed yet gets its whole limit. An `outputCap` bounds the cap
  * further, and the room to what that cap leaves past reasoning: a chat-route summary on a small window keeps to the
- * admissible reserve (bt-18).
+ * admissible reserve (bt-18). Under a cap a reasoning route keeps at least the trigger's reasoning share, so the
+ * request asks the room plus that share, never just the room (bt3 drv-m3c b3).
  */
 export function summaryOutputBudget(
 	model: Pick<EngineModel, "provider" | "baseUrl" | "id" | "maxTokens" | "reasoning">,
@@ -53,11 +64,16 @@ export function summaryOutputBudget(
 ): SummaryOutputBudget {
 	const outputLimit = Number.isFinite(model.maxTokens) && model.maxTokens >= 1 ? Math.floor(model.maxTokens) : undefined;
 	const reasoningShare = summaryReasoningShare(model);
-	const textShare = summaryTextShare(model);
 	const summaryRoom = Math.min(
 		summaryRoomTokens(reserveTokens),
-		outputCap === undefined ? Number.POSITIVE_INFINITY : summaryRoomTokens(outputCap * textShare),
+		outputCap === undefined ? Number.POSITIVE_INFINITY : summaryRoomTokens(outputCap * cappedTextShare(model)),
 	);
+	if (outputCap !== undefined)
+		return {
+			maxTokens:
+				outputLimit === undefined ? undefined : Math.min(outputLimit, outputCap, summaryOutputForRoom(model, summaryRoom)),
+			summaryRoom,
+		};
 	const maxTokens =
 		outputLimit === undefined
 			? undefined
@@ -69,10 +85,7 @@ export function summaryOutputBudget(
 							: summaryRoom
 						: Math.ceil(summaryRoom / (1 - reasoningShare)),
 				);
-	return {
-		maxTokens: maxTokens === undefined || outputCap === undefined ? maxTokens : Math.min(maxTokens, outputCap),
-		summaryRoom,
-	};
+	return { maxTokens, summaryRoom };
 }
 
 /**
