@@ -2346,8 +2346,9 @@ async function runCouncil(
 				// A seated coder or architect argues from its perspective; it must not try to edit and fail.
 				// The original briefing counts against the seat's cap; each peer keeps its label or failure status.
 				const peerParts: BriefingPart[] = [{ kind: "framing", lead: COUNCIL_MEMBER_FRAMING }];
+				// Round 1 has no peers to tell the original briefing from, so its text stays what it always was.
 				if (base.briefing !== undefined)
-					peerParts.push({ kind: "task", lead: "[original briefing] ", body: base.briefing });
+					peerParts.push({ kind: "task", lead: round > 1 ? "[original briefing] " : "", body: base.briefing });
 				if (round > 1) {
 					for (const peer of council.members) {
 						if (peer.label === member.label) continue;
@@ -2363,7 +2364,8 @@ async function runCouncil(
 						}
 					}
 				}
-				const peerBriefing = round > 1 ? boundedCouncilBriefing(peerParts) : undefined;
+				// Round 1 is bounded by the same builder and cap as later rounds; it simply has no peers yet.
+				const peerBriefing = boundedCouncilBriefing(peerParts);
 				const position = (round - 1) * council.members.length + index + 1;
 				const pinned = council.resolvedTasks?.find((task) => task.role === "member" && task.position === position);
 				let voteTask = base.task;
@@ -2416,9 +2418,7 @@ async function runCouncil(
 							: {}),
 					},
 					council: { group, label: member.label, ...(member.color ? { color: member.color } : {}), round },
-					briefing:
-						peerBriefing?.text ??
-						[COUNCIL_MEMBER_FRAMING, ...(base.briefing !== undefined ? [base.briefing] : [])].join("\n\n"),
+					briefing: peerBriefing.text,
 				};
 				return [
 					member.label,
