@@ -244,7 +244,11 @@ const VALIDATION_TOOL_NEEDLES = [
 
 export const OBSERVED_COMMAND_PREFIX = "command:";
 
-/** Observed checks remain evidence of execution even when a later tool call invalidates their freshness. */
+/**
+ * Observed checks as typed facts, judged against the final tree: only clean checks and failures observed since the
+ * run's last workspace mutation count, so a pass or a red from before a later edit seals no fact (bt-27b). The run
+ * effects still keep earlier checks as execution evidence in `verificationCommands`, which no verdict reads as a pass.
+ */
 export function typedValidationFactsFromObservedEffects(
 	effects: Pick<RunEffects, "validationCommands" | "validationOutcomes">,
 ): RunResultTypedValidationFact[] {

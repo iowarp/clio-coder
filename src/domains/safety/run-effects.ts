@@ -55,7 +55,11 @@ export interface RunEffects {
 	 * run's own failed tool result can.
 	 */
 	failedMutationPaths: ReadonlySet<string>;
-	/** Canonical validation commands the run ran to a clean exit. */
+	/**
+	 * Canonical validation commands the run ran to a clean exit since its last workspace mutation. A mutation clears
+	 * them like `validationOutcomes`: a pass on the pre-change tree cannot verify the final one (bt-27b). The run's
+	 * earlier checks stay visible as execution evidence in `verificationCommands` and `executedShellCommands`.
+	 */
 	validationCommands: ReadonlySet<string>;
 	/**
 	 * Outcomes observed since the run's last workspace mutation, keyed by `observedValidationCommand`; observed
@@ -359,6 +363,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			if (!refused && (effects.paths.length > 0 || (effects.opaque && effects.validationCommand === null))) {
 				mutationRevision += 1;
 				validationOutcomes.clear();
+				validationCommands.clear();
 			}
 			// Only a check that ran can fail. A call the engine answered without
 			// reaching its tool settles with no outcome, so it records nothing.
@@ -389,7 +394,11 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				if (recordWasComplete) options.onWriteRecordDowngraded?.({ ...downgrade });
 			}
 			for (const target of effects.paths) mutatedPaths.add(target);
-			if (effects.validationCommand !== null && effects.checkStatusAttributable)
+			if (
+				effects.validationCommand !== null &&
+				effects.checkStatusAttributable &&
+				effects.mutationRevision === mutationRevision
+			)
 				validationCommands.add(effects.validationCommand);
 			if (effects.verificationCommand !== null) verificationCommands.add(effects.verificationCommand);
 			if (effects.tool === ToolNames.Verify) {
