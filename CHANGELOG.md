@@ -112,7 +112,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
-- A worker past its window before eviction no longer loses a tool call to a 32-byte argument ceiling; a cut-off worker call names its stop cause in telemetry and `why stopped`, and a dispatch that recovered on a retry reports `recovered=N` and the failed attempt (bt-47 cf1h-D3).
+- A `verify` naming an undeclared check ran nothing, so it no longer fails a worker's result quality after the declared check passes (bt-45 c16-C).
+- A worker past its window before eviction no longer loses a tool call to a 32-byte argument ceiling; a worker call cut off by its turn timeout, output cap or tool-argument bound settles with that cause instead of `transport_dropped`; `why stopped` names the stop of each worker run the last turn dispatched; and a dispatch that recovered on a retry reports `recovered=N` and the failed attempt (bt-47 cf1h-D3).
 - The worker context guard evicts older reads before a read the model has not yet seen; such a read leaves last, largest first, and is journaled as `unseen_overflow` (ContextFold A2, bt-47 cf1h-D1).
 - A worker request the context guard fitted after an eviction is no longer refused at admission as leaving too few output tokens; the guard, admission and the output clamp size it by one count (ContextFold A2, bt-47 cf1h-D2).
 - The [Collected elsewhere] notice names a forked collection's refused tool calls in the worker card's words (e.g. "succeeded · 1 tool call · 1 call refused"), so the parent model no longer reports a run whose only action was refused as a clean success (bt-11 o).
