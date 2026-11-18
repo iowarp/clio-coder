@@ -1,4 +1,4 @@
-import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -145,6 +145,17 @@ for (const scenario of ["clean", "recovered", "terminal-error"] as const) {
 
 			strictEqual(envelope.exitCode, direct.code);
 			strictEqual(envelope.outcome, succeeded ? "succeeded" : "failed");
+			if (scenario === "clean") {
+				// The run's calls live in its session, so its evidence reads the usage its settlement folded, not a zero (bt-31).
+				const evidence = await inspectRunEvidence(join(scratch.dir, "state"), envelope.id);
+				deepStrictEqual(evidence.totals?.tokens.fact, {
+					measured: 22,
+					estimated: 0,
+					unknownCount: 0,
+					absentCount: 0,
+					coverage: { measured: 1, estimated: 0, unknown: 0 },
+				});
+			}
 		} finally {
 			await closeServer(fixture.server);
 			scratch.cleanup();

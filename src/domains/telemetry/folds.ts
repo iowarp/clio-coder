@@ -373,6 +373,39 @@ function componentSubtotal(components: readonly FactSum[]): FactSum {
 }
 
 /** Parts are disjoint reported contributions, not inferred calls; a whole-scope snapshot replaces them (#434). */
+/**
+ * A run whose calls another journal holds, such as a headless main-agent run's in its session (bt-31): its scope holds
+ * none of the calls its run.settled names, so that settlement, the producer's fold of those calls, is the run's reported
+ * usage. Without it the run would read as a measured zero.
+ */
+function settledUsage(rows: readonly TelemetryRecord[], base: ReturnType<typeof foldRunScope>) {
+	let settled: TelemetryRecord<"run.settled"> | undefined;
+	for (const row of rows) if (row.k === "run.settled" && (!settled || row.t >= settled.t)) settled = row;
+	const data = settled?.data;
+	if (!data?.callIds || data.callIds.length === 0) return null;
+	const usage = Object.fromEntries(fields.map((field) => [field, foldFacts([data.usage[field]])])) as Record<
+		(typeof fields)[number],
+		FactSum
+	>;
+	const totalTokens = foldFacts([data.totalTokens]);
+	const known = (fact: Fact<number>) => fact.kind === "measured" || fact.kind === "estimated";
+	return {
+		...base,
+		source: "aggregate" as const,
+		usage,
+		totalTokens:
+			data.totalTokens.kind === "unknown"
+				? componentSubtotal([usage.input, usage.output, usage.cacheRead, usage.cacheWrite])
+				: totalTokens,
+		usd: foldFacts([data.pricing.usd]),
+		apiCalls: foldFacts([data.apiCalls]),
+		unmeteredCalls: foldFacts([unknown]),
+		amountCoverageUnknown: !known(data.totalTokens) || !known(data.pricing.usd),
+		unknownCoverage: true,
+		allKnownFree: data.pricing.pricedBy === "free",
+	};
+}
+
 export function foldRunJournal(records: Iterable<TelemetryRecord>, options: FoldOptions = {}) {
 	const rows = [...records];
 	const whole = rows.filter((row) => row.k !== "run.usage_reported" || row.data.partId === undefined);
@@ -392,6 +425,10 @@ export function foldRunJournal(records: Iterable<TelemetryRecord>, options: Fold
 					invoked.length > 0 &&
 					invoked.every((attempt) => attempt.settled?.pricing.pricedBy === "free");
 	};
+	if (base.source === "calls" && parts.size === 0 && base.calls.attempts.length === 0) {
+		const settled = settledUsage(rows, base);
+		if (settled !== null) return settled;
+	}
 	if (base.source !== "calls" || parts.size === 0) return { ...base, allKnownFree: allKnownFree(base) };
 	const scopes = [...parts.entries()]
 		.sort(([a], [b]) => a.localeCompare(b))
