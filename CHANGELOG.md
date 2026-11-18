@@ -44,6 +44,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- The citation-check nudge asks for the full answer again with corrected citations instead of "keep the rest of the answer as it is" (bt-29).
 - `evidence inspect --json` names the top-level failed-validation count `quality.failedValidationCount`, so it no longer shares a name with the `evidence.quality.failedValidations` array of names (bt-20 P-C).
 - Repetitive test files are consolidated into tables with shared harnesses: loop-guard and template-budget scenarios, one fake ACP transport, both quota providers' error paths, and the damage-control shell segments; constant pins that behaviour already covers are removed (P4-2, P4-5, P4-6, P4-9, P4-10; 214 to 167 tests).
 - The slowest test files run faster with the same coverage: state-file-lock no longer waits on a leaked namespace peer, cli-leaf-help keeps one --help row per router, dispatch-admission judges an empty scratch cwd, upgrade-command runs its plan checks in process, and run-timeout waits out one stalled run instead of two (P4-3, P4-4, P4-7, P4-8).
@@ -102,6 +103,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- `run --json` (full) keeps the checked answer in the final `turn_end.message` when the reply to a citation check only confirms or corrects citations (bt-29).
+- The citation check credits line numbers printed by a bash `grep -n`/`rg -n` for files the command names, so citing them no longer draws a false nudge (bt-29).
 - A dispatched worker now reserves output with the same function the main loop's admission uses, so it no longer refuses with worker_context_exhausted a fork the parent fitted on the same model and window (D1-5).
 - Evicted worker observation archives are filed per run and age out with the run journals' 90-day retention in the daily telemetry sweep; running and recoverable runs keep theirs (D1-5).
 - A step checkpoint on a small or uncached route now keeps the previous checkpoint's goal, constraints and decisions, held to the summary room, and its preserved operator request, instead of replacing them with the step lead (D1-2).
