@@ -380,6 +380,23 @@ test("a recoverable stash drop is refused when its snapshot cannot pin the stash
 	strictEqual(snapshots.list().length, 1);
 });
 
+// N3: a scratch-root delete was journaled snapshot-recoverable, though no workspace snapshot covers a scratch root.
+test("a lone delete inside a scratch root runs as scratch-disposable and needs no workspace snapshot", async () => {
+	const cwd = workspace("clio-contained-scratch-rm-ws-");
+	const scratch = workspace("clio-contained-scratch-rm-");
+	const session = defaultSession(
+		cwd,
+		{ sandbox: true, snapshots: true },
+		{ workspaceSnapshot: async () => ({ kind: "unavailable", reason: "git timed out", durationMs: 0 }) },
+	);
+	const ran = await session.registry.invoke(bash(`rm -rf ${join(scratch, "build")}`));
+	strictEqual(ran.kind, "ok", JSON.stringify(ran));
+	const policy = ran.kind === "ok" ? ran.decision.policy : undefined;
+	strictEqual(policy?.reasonCode, "scratch-disposable");
+	strictEqual(policy?.recoverable, undefined);
+	deepStrictEqual(session.reviewed, []);
+});
+
 // cw-5: a lane's rm under its own $TMPDIR was refused as destroy-data; the judge was never told the scratch roots.
 test("the judge reads the session's workspace and scratch roots by path, and a delete escaping them by its real target", async (t) => {
 	const cwd = workspace("clio-judge-roots-ws-");

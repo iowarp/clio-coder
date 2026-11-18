@@ -6,7 +6,7 @@ import { resolveOnPath } from "../domains/interop/detect.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
 import { type AutonomyLevel, mapAutonomy } from "../domains/safety/autonomy.js";
-import { SNAPSHOT_RECOVERABLE_REASON_CODE } from "../domains/safety/containment.js";
+import { SCRATCH_DISPOSABLE_REASON_CODE, SNAPSHOT_RECOVERABLE_REASON_CODE } from "../domains/safety/containment.js";
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
 import { loadValidationContract } from "../domains/safety/validation-contract.js";
 
@@ -160,7 +160,10 @@ export function contractDryRunFindings(options: ContractDryRunOptions): DoctorFi
 			// Admission at the operator's yolo runs whatever the net allowed (#407),
 			// and the operator's default runs a contained or recoverable call.
 			const disposition =
-				level === "yolo" || decision.shellSandbox !== undefined || decision.reasonCode === SNAPSHOT_RECOVERABLE_REASON_CODE
+				level === "yolo" ||
+				decision.shellSandbox !== undefined ||
+				decision.reasonCode === SNAPSHOT_RECOVERABLE_REASON_CODE ||
+				decision.reasonCode === SCRATCH_DISPOSABLE_REASON_CODE
 					? "allow"
 					: mapAutonomy(level, decision.actionClass, {
 							executeRecognized: decision.execRecognition !== "unrecognized",

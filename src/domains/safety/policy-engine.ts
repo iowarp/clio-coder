@@ -47,6 +47,7 @@ import {
 	type OutwardPlaces,
 	outwardLineLeaves,
 	outwardShellReason,
+	SCRATCH_DISPOSABLE_REASON_CODE,
 	SNAPSHOT_RECOVERABLE_GIT_PATTERNS,
 	SNAPSHOT_RECOVERABLE_GIT_RULE_IDS,
 	SNAPSHOT_RECOVERABLE_REASON_CODE,
@@ -1575,6 +1576,12 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 						}
 					: { ...deferred, reasons: [...deferred.reasons, SANDBOX_ESCAPE_REASON] };
 		}
+		// A delete that lands only inside scratch roots is disposable, and no workspace snapshot covers it.
+		const scratchOnly =
+			resort !== undefined &&
+			command !== null &&
+			workspaceDeletes.length === 0 &&
+			deletesOnlyScratch(command, resort.scratchRoots);
 		// Every decision below settles the operator's default when it applies.
 		const settle = (decision: SafetyPolicyDecision): SafetyPolicyDecision =>
 			resort === undefined
@@ -1584,7 +1591,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 						base,
 						deferred,
 						resort,
-						(sorted?.recoverable ?? null) !== null || workspaceDeletes.length > 0,
+						((sorted?.recoverable ?? null) !== null && !scratchOnly) || workspaceDeletes.length > 0,
 					);
 
 		if (!projectPolicy.valid && EXECUTION_TOOLS.has(call.tool)) {
@@ -1751,6 +1758,18 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const lone = command !== null && !hasShellOperators(command) && !/[$`]/u.test(command);
 		const loneDiscard = lone && undone !== null && LONE_GIT_DISCARD.test(command?.trim() ?? "");
 		const loneDelete = lone && resort?.snapshots === true && deferred === null && LONE_DELETE.test(command?.trim() ?? "");
+		if (loneDelete && !loneDiscard && scratchOnly) {
+			return settle(
+				allowDecision(base, {
+					ruleId: undone?.match?.ruleId ?? SCRATCH_DISPOSABLE_REASON_CODE,
+					reasonCode: SCRATCH_DISPOSABLE_REASON_CODE,
+					reasons: [...classification.reasons, SCRATCH_DISPOSABLE_REASON],
+					policySource: "damage-control:base",
+					execRecognition: "recognized",
+					...(undone?.match !== null && undone?.match !== undefined ? { match: undone.match } : {}),
+				}),
+			);
+		}
 		if (loneDiscard || loneDelete) {
 			return settle(
 				allowDecision(base, {
@@ -3853,6 +3872,10 @@ const CONTAINED_REASON =
 const SNAPSHOT_RECOVERABLE_REASON =
 	"a workspace snapshot is taken right before this call runs, so /rewind undoes it; it needs no approval";
 
+/** Reason a lone delete confined to scratch roots carries: nothing undoes it, and nothing there needs undoing. */
+const SCRATCH_DISPOSABLE_REASON =
+	"it deletes only inside scratch roots, whose contents are disposable; no workspace snapshot covers them, so /rewind does not undo it; it needs no approval";
+
 /** Asks only the operator answers; a deferred former block joins their reasons instead of replacing them. */
 const OPERATOR_ONLY_ASKS: ReadonlySet<string> = new Set(["project-settings-confirm", "library-confirm"]);
 
@@ -3882,6 +3905,24 @@ function deletesNeedingSnapshot(command: string, workspace: string): string[] {
 		}
 	}
 	return targets;
+}
+
+/**
+ * True when a command deletes something and every delete target is an
+ * absolute path strictly inside a scratch root.
+ */
+function deletesOnlyScratch(command: string, roots: ReadonlyArray<string>): boolean {
+	let deletes = 0;
+	for (const walk of extractCommandPathWalks(command)) {
+		for (const event of walk) {
+			if (event.kind !== "delete" || event.scope === "input" || event.scope === "remote") continue;
+			if (!path.isAbsolute(event.target)) return false;
+			const resolved = canonicalizeRawPath(event.target, "/");
+			if (resolved === null || !roots.some((root) => resolved !== root && isUnderOrSame(resolved, root))) return false;
+			deletes += 1;
+		}
+	}
+	return deletes > 0;
 }
 
 /** A single rm, rmdir or unlink, which runs nothing else; the delete judge has already placed its operands. */
