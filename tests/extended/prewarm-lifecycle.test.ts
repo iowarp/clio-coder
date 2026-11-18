@@ -17,13 +17,19 @@ beforeEach(async () => {
 });
 afterEach(() => scratch.restore());
 
-function fixture() {
+function fixture(budget: { maxInputTokens?: number; contextWindow?: number } = {}) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = true;
 	settings.chat.target = "local";
 	settings.chat.model = "fixture";
-	const target = { id: "local", runtime: "llamacpp", url: "https://fixture.invalid" };
+	const target = {
+		id: "local",
+		runtime: "llamacpp",
+		url: "https://fixture.invalid",
+		...(budget.maxInputTokens !== undefined ? { cache: { warm: { maxInputTokens: budget.maxInputTokens } } } : {}),
+	};
 	const model = llamacpp.synthesizeModel(target, "fixture", null);
+	if (budget.contextWindow !== undefined) model.contextWindow = budget.contextWindow;
 	const { agent } = createEngineAgent({ initialState: { model, thinkingLevel: "off" } });
 	const runtime = { agent, targetId: target.id, runtimeId: target.runtime, wireModelId: model.id } as AgentRuntime;
 	const rounds: Array<{ input: PrewarmRoundInput; finish: (value: PrewarmRoundResult) => void }> = [];
@@ -136,5 +142,24 @@ test("journaled warming keeps its display result without writing a second usage 
 		deepStrictEqual(f.counts(), { reservations: 0, visible: 1 });
 	} finally {
 		f.warm.dispose();
+	}
+});
+
+test("an unset warm budget fits the attended prompt within the serving window; an operator cap wins", async () => {
+	for (const [budget, expected] of [
+		[{ contextWindow: 131_072 }, 16_384],
+		[{ contextWindow: 12_000 }, 12_000],
+		[{ contextWindow: 131_072, maxInputTokens: 4096 }, 4096],
+	] as const) {
+		const f = fixture(budget);
+		try {
+			f.warm.schedule("session-start");
+			await f.roundStarted;
+			strictEqual(f.rounds[0]?.input.maxInputTokens, expected);
+			f.rounds[0]?.finish(completed);
+			await f.warm.settled();
+		} finally {
+			f.warm.dispose();
+		}
 	}
 });

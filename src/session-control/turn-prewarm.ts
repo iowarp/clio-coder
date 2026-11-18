@@ -144,6 +144,16 @@ export interface TurnPrewarm {
  */
 const ABORT_ROUND_ON_SUBMIT = false;
 
+/**
+ * Input budget when the target sets no `cache.warm.maxInputTokens`. The attended
+ * surface's system prompt and tool schemas alone estimate near 11,000 tokens, so
+ * the old 8,192 refused the ordinary first warm. The cap never exceeds the
+ * serving window, and an unknown window keeps the old budget.
+ */
+function defaultWarmInputTokens(contextWindow: number): number {
+	return contextWindow > 0 && Number.isFinite(contextWindow) ? Math.min(16_384, contextWindow) : 8192;
+}
+
 export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 	const round = deps.runPrewarm ?? runPrewarmRound;
 	const abortOnSubmit = deps.abortRoundOnSubmit ?? ABORT_ROUND_ON_SUBMIT;
@@ -376,7 +386,8 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 				},
 				...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
 				signal: controller.signal,
-				maxInputTokens: target.cache?.warm?.maxInputTokens ?? 8192,
+				maxInputTokens:
+					target.cache?.warm?.maxInputTokens ?? defaultWarmInputTokens(runtime.agent.state.model.contextWindow),
 				canSend,
 			});
 		} finally {
