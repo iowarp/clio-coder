@@ -438,6 +438,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			| "unresolved"
 		>
 	>();
+	/** Calls of a response the output token limit cut off: the engine fails each unrun, so they are flagged as not run (bt-39 a). */
+	const cutOffToolCalls = new Set<string>();
 	const toolTelemetry: ToolTelemetry = {
 		onFinish(event) {
 			if (event.toolCallId === undefined) return;
@@ -1772,6 +1774,17 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			let enrichedEvent = event;
 			if (event.type === "message_end" && event.message.role === "assistant") {
 				requiredToolReminder = middlewareToolChoice.completeRound(event.message);
+				const cutOff =
+					event.message.stopReason === "length"
+						? event.message.content.flatMap((block) => (block.type === "toolCall" ? [block.id] : []))
+						: [];
+				for (const id of cutOff) cutOffToolCalls.add(id);
+				// One line states the limit where it applies, instead of one failed call per call (bt-39 a).
+				if (cutOff.length > 0)
+					deps.emitNotice(
+						`[Clio Coder] the response hit the output token limit with ${cutOff.length} tool call${cutOff.length === 1 ? "" : "s"} in it; none ran, since their arguments may be cut off, and the model is asked to re-issue them.`,
+						"warning",
+					);
 			}
 			if (event.type === "tool_execution_start") {
 				toolsInFlight += 1;
@@ -1792,6 +1805,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// (which prints `cancelled 0`) a permission block.
 				const admission = toolOutcomes.get(event.toolCallId);
 				toolOutcomes.delete(event.toolCallId);
+				const notRun = cutOffToolCalls.delete(event.toolCallId);
 				// The registry's own span is the one that means "how long the tool
 				// took": the engine's start-to-end frame also covers the operator,
 				// because a call awaiting a permission decision is parked between
@@ -1803,6 +1817,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					...event,
 					...(durationMs !== undefined ? { durationMs } : {}),
 					resultSummary: toolResultSummary(event.result),
+					...(notRun ? { notRun: "output_limit" } : {}),
 					...(admission === undefined
 						? {}
 						: {

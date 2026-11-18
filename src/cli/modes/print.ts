@@ -548,6 +548,11 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	const tool = stats.pendingCapabilities.get(event.toolCallId) ?? event.toolName ?? "tool";
 	stats.pendingCapabilities.delete(event.toolCallId);
 	const shellWrite = stats.pendingShellWrites.delete(event.toolCallId);
+	// A call the output limit cut off never ran: its run's one notice states it, and it is no tool error (bt-39 a).
+	if ((event as { notRun?: unknown }).notRun !== undefined) {
+		stats.pendingVerifyCalls.delete(event.toolCallId);
+		return;
+	}
 	// Fold completed child operations into accounting only. The provider and
 	// session history retain the real aggregate call/result pair.
 	const children = gatewayChainReceipts(event.toolName, event.result);

@@ -63,6 +63,7 @@ type WireMode =
 	| "guard"
 	| "repeat"
 	| "flood"
+	| "truncated"
 	| "loop"
 	| "overthink"
 	| "overthink-always";
@@ -98,6 +99,20 @@ function transport(mode: WireMode) {
 							`data: ${JSON.stringify({ id: "fixture-completion", object: "chat.completion.chunk", model: model.id, choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
 						),
 					);
+				if (mode === "truncated" && calls === 1) {
+					// The output cap cuts off a response of three distinct calls; none may run.
+					for (let index = 0; index < 3; index++)
+						send({
+							...(index === 0 ? { role: "assistant" } : {}),
+							tool_calls: [
+								{ index, id: `cut-${index}`, type: "function", function: { name: "read", arguments: `{"path":"f${index}"}` } },
+							],
+						});
+					send({}, "length");
+					controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+					controller.close();
+					return;
+				}
 				if (mode === "overthink-always" || (mode === "overthink" && calls === 1)) {
 					// The output cap runs out mid-deliberation: reasoning, then a length stop with no answer or call.
 					send({ role: "assistant", reasoning_content: THOUGHT });
@@ -110,7 +125,7 @@ function transport(mode: WireMode) {
 					mode === "success" ||
 					mode === "overthink" ||
 					(mode === "tool" && calls === 1) ||
-					((mode === "repeat" || mode === "flood") && calls > 1)
+					((mode === "repeat" || mode === "flood" || mode === "truncated") && calls > 1)
 				) {
 					send(
 						mode === "tool"
@@ -280,7 +295,7 @@ function fixture(
 		auth: "none",
 		defaultCapabilities: {
 			...capabilities,
-			tools: initialMode === "tool" || initialMode === "guard",
+			tools: initialMode === "tool" || initialMode === "guard" || initialMode === "truncated",
 			vision: visionCapable,
 		},
 		synthesizeModel: () => ({
@@ -1170,6 +1185,27 @@ it("a response repeating one tool call is stopped while streaming and re-prompte
 		ok(
 			f.events.some((event) => event.type === "notice" && /repeating one tool call \("write" 5 times/u.test(event.text)),
 		);
+		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
+	} finally {
+		await f.close();
+	}
+});
+
+it("calls the output limit cut off are flagged as not run under one notice that states the limit (bt-39 a)", {
+	timeout: 15_000,
+}, async () => {
+	const f = fixture("truncated");
+	try {
+		await f.loop.submit("Read the three files.");
+		await f.loop.whenSettled();
+		const ends = f.events.filter((event) => event.type === "tool_execution_end");
+		deepStrictEqual(
+			ends.map((event) => (event as { notRun?: unknown }).notRun),
+			["output_limit", "output_limit", "output_limit"],
+		);
+		const notices = f.events.filter((event) => event.type === "notice" && /output token limit/u.test(event.text));
+		strictEqual(notices.length, 1);
+		match(String((notices[0] as { text?: unknown }).text), /3 tool calls in it; none ran/u);
 		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
 	} finally {
 		await f.close();
