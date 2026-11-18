@@ -366,35 +366,20 @@ function assertAdmitted(
 	return pinned;
 }
 
-const SEEN_MARKER =
-	/\[evicted ref=r\d+ reason=step_overflow tool=read path=notes\/station-\d\.md [^\]]*\] You already read this; its body was dropped to fit the context window\./;
-
 /**
- * The overflow fold cut seen station reads as `step_overflow` and kept the fresh manual (A2b), the request after it
- * carried the manual in full and markers that do not ask for a re-read, and no summary ran.
+ * Under 52,428 tokens the overflow fold cuts no protected read (maintainer ruling, drv-f1x): S1 and then the one
+ * requireFit summary clear the manual's overflow, and the request after it carries the manual in full.
  */
-function assertSeenCut(live: ReturnType<typeof harness>, wire: ReturnType<typeof transport>): void {
-	strictEqual(live.summaries(), 0, "no summary call");
-	ok(!live.notices().some((text) => text.startsWith("Clio compacted")), "no summary notice");
-	ok(live.notices().some((text) => /working set: \d+ protected reads? cut to fit the window/.test(text)));
-	const manual = live.session
-		.readEntries()
-		.find(
-			(entry) =>
-				entry.kind === "message" &&
-				entry.role === "tool_result" &&
-				(entry.payload as { toolCallId?: string }).toolCallId === `call_${READS.length}`,
-		);
-	ok(manual);
+function assertNoCut(live: ReturnType<typeof harness>, wire: ReturnType<typeof transport>): void {
+	strictEqual(live.summaries(), 1, "the requireFit summary ends the overflow");
+	ok(!live.notices().some((text) => /protected reads? cut to fit the window/.test(text)), "no cut notice");
 	const cut = live.session
 		.readEntries()
 		.flatMap((entry) => (entry.kind === "contextEviction" ? entry.evicted : []))
 		.filter((item) => item.reason === "step_overflow");
-	ok(cut.length > 0, "a protected read is cut");
-	ok(!cut.some((item) => item.ref.entry === manual.turnId), "the fresh manual survives the cut");
-	for (const item of cut) ok(!item.marker.includes("offset and limit"), `${item.marker} asks for a re-read`);
+	deepStrictEqual(cut, [], "no protected read is cut");
 	const next = wire.requests.at(-1)?.body ?? "";
-	ok(SEEN_MARKER.test(next), "the next request carries the seen marker");
+	ok(!next.includes("reason=step_overflow"), "the next request carries no cut marker");
 	ok(next.includes(JSON.stringify(FILES["bignotes/manual.md"]).slice(1, -1)), "the next request carries the manual");
 }
 
@@ -411,8 +396,8 @@ it("drv-cf3a D-A: an overflow fit admits the next request on the figure it fitte
 		await live.loop.whenSettled();
 		deepStrictEqual(refusals(live.notices()), [], "no refusal and no retry");
 		ok(live.notices().some((text) => /working set: \d+ items evicted/.test(text)));
-		// The A4 addendum on format 7: the fold cuts protected reads itself, seen ones before the fresh manual (A2b).
-		assertSeenCut(live, wire);
+		// At 32768, under the A1/A3/A5 boundary, the fold cuts no protected read; the requireFit summary fits it.
+		assertNoCut(live, wire);
 		strictEqual(wire.requests.length, READS.length + 1);
 		assertAdmitted(wire, live.piCounts, live.published);
 		const entries = live.session.readEntries();
@@ -430,7 +415,7 @@ it("drv-cf3a D-A: an overflow fit admits the next request on the figure it fitte
 	}
 });
 
-it("drv-cf3a A4 addendum: the format 7 ledger reopens with the cut's marker and sends the same next request (bt-47)", {
+it("drv-cf3a A4 addendum: the format 7 ledger reopens after the overflow summary and sends the same next request (bt-47)", {
 	timeout: 30_000,
 }, async () => {
 	const first = transport(READS);
@@ -439,7 +424,7 @@ it("drv-cf3a A4 addendum: the format 7 ledger reopens with the cut's marker and 
 	try {
 		await live.loop.submit(A1_ASK);
 		await live.loop.whenSettled();
-		assertSeenCut(live, first);
+		assertNoCut(live, first);
 		id = live.session.current()?.id;
 	} finally {
 		await live.close();
@@ -465,8 +450,8 @@ it("drv-cf3a A4 addendum: the format 7 ledger reopens with the cut's marker and 
 			(JSON.parse(body) as { messages: Array<{ role: string }> }).messages.filter((m) => m.role === "tool");
 		const before = toolMessages(first.requests.at(-1)?.body ?? "{}");
 		const after = toolMessages(wire.requests[0]?.body ?? "{}");
-		deepStrictEqual(after, before, "the resumed request replays the observations the live one sent, marker and all");
-		ok(SEEN_MARKER.test(wire.requests[0]?.body ?? ""));
+		deepStrictEqual(after, before, "the resumed request replays the observations the live one sent");
+		ok(!(wire.requests[0]?.body ?? "").includes("reason=step_overflow"));
 	} finally {
 		await second.close();
 	}
@@ -738,36 +723,47 @@ it("drv-cf3a D-A: a protected read larger than the window ends the turn once, na
 /**
  * drv-m3a: one turn at a 28000-token window reads 8 or 12 design notes of about 8.1 KB, one per round, every read
  * inside the protected window (protectLastSteps 8). The ask's guidance stands in for the copilot route's system
- * prompt and tools, so the automatic pass first sees about 16.9k, as the run did.
+ * prompt and tools, so the automatic pass first sees about 16.9k, as the run did. At 64000 the notes are 1.5 times
+ * as large and the guidance longer, so the reads cross the fit line mid-turn there too.
  */
 const M3A_SIZES = [8_102, 8_066, 8_010, 8_097, 8_006, 8_104, 8_109, 8_053, 8_084, 8_133, 8_086, 8_173];
 const M3A_PAD = 1_550;
-// The 12-read row is drv-f1's F1b shape, run by a model that follows each cut marker's advice as Haiku did. The
-// drv-f1r rows rerun both, and after the reads the model recalls r1..rN in one batch, as Haiku did on r8b and r12b.
-for (const [count, recalls] of [
-	[8, 0],
-	[12, 0],
-	[8, 6],
-	[12, 10],
+const M3A_LARGE = { pad: 2_700, scale: 1.5 };
+// The 12-read rows are drv-f1's F1b shape, run by a model that follows each cut marker's advice as Haiku did. The
+// drv-f1r rows rerun both, and after the reads the model recalls r1..rN in one batch, as Haiku did on r8b and r12b;
+// at 64000 N is the number of reads the cuts took (drv-f1x).
+for (const [count, recalls, window] of [
+	[8, 0, 28_000],
+	[12, 0, 28_000],
+	[12, 0, 64_000],
+	[8, 4, 64_000],
+	[12, 9, 64_000],
 ] as const) {
 	const obey = count === 12;
+	// Under the A1/A3/A5 boundary no overflow cut runs (maintainer ruling, drv-f1x); at 64000 it runs as before.
+	const small = window < 52_428;
 	const title =
 		recalls > 0
-			? `drv-f1r: a ${count}-read turn at 28000 then one batch of ${recalls} recalls readmits only what fits`
-			: `drv-m3a: a ${count}-read turn at 28000 cuts protected reads${obey ? ", seen ones without a re-read" : " instead of paying overflow summaries"}`;
+			? `drv-f1r: a ${count}-read turn at ${window} then one batch of ${recalls} recalls readmits only what fits`
+			: small
+				? `drv-f1x: a ${count}-read turn at ${window} cuts no protected read${obey ? " and re-reads nothing" : ""}`
+				: `drv-f1x: a ${count}-read turn at ${window} still cuts protected reads, seen ones first`;
 	it(`${title} (bt-47)`, {
 		timeout: 60_000,
 	}, async () => {
 		const files: Record<string, string> = {};
 		M3A_SIZES.slice(0, count).forEach((size, index) => {
-			files[`docs/part${index + 1}.md`] = body(`Design note part ${index + 1}`, size);
+			files[`docs/part${index + 1}.md`] = body(
+				`Design note part ${index + 1}`,
+				small ? size : Math.round(size * M3A_LARGE.scale),
+			);
 		});
 		const reads = Object.keys(files);
 		const wire = transport(reads, { ...(obey ? { obey: files } : {}), recalls });
-		const live = harness(wire, files, { window: 28_000, protectLastSteps: 8, recall: recalls > 0 });
+		const live = harness(wire, files, { window, protectLastSteps: 8, recall: recalls > 0 });
 		try {
 			await live.loop.submit(
-				`Read ${reads.join(", ")} in order, one read per round, each in full, then say done.\n\n${"Read guidance for the design notes. ".repeat(M3A_PAD)}`,
+				`Read ${reads.join(", ")} in order, one read per round, each in full, then say done.\n\n${"Read guidance for the design notes. ".repeat(small ? M3A_PAD : M3A_LARGE.pad)}`,
 			);
 			await live.loop.whenSettled();
 			// cf-x6 r2's m3a residual: an unpinned request admitted at 20310 met Pi's anchor clamp at 20575, whose answer
@@ -781,7 +777,8 @@ for (const [count, recalls] of [
 			);
 			strictEqual(refusals.length, 0, "no local context-window refusal");
 			const cuts = live.notices().filter((text) => /protected reads? cut to fit the window/.test(text));
-			ok(cuts.length >= 3, `${cuts.length} overflow cuts`);
+			if (small) deepStrictEqual(cuts, [], "no overflow cut");
+			else ok(cuts.length > 0, "the overflow cut runs");
 			const guardStops = [
 				...live.notices(),
 				...live.events.flatMap((event) =>
@@ -798,8 +795,10 @@ for (const [count, recalls] of [
 				"every read and the recall batch answered, then the answer",
 			);
 			const entries = live.session.readEntries();
-			if (!obey) {
-				strictEqual(live.summaries(), 0, "no reactive-retry summary");
+			// Small: every overflow ends in the requireFit summary; the oversized-read stop never fires on 8 KB reads.
+			if (small) ok(live.summaries() > 0, "the requireFit summary clears each overflow");
+			else strictEqual(live.summaries(), 0, "the cut clears each overflow");
+			if (!obey || small) {
 				strictEqual(
 					entries.filter((entry) => entry.kind === "message" && entry.role === "tool_result").length,
 					count + recalls,
@@ -850,17 +849,20 @@ for (const [count, recalls] of [
 			// A seen read's marker never asks for it again; the latest read goes only after every seen one, and some cut keeps it.
 			let fresh: string | undefined;
 			let kept = 0;
+			let journaled = 0;
 			for (const entry of entries) {
 				if (entry.kind === "message" && entry.role === "tool_result") fresh = entry.turnId;
 				if (entry.kind !== "contextEviction") continue;
 				const taken = entry.evicted.filter((item) => item.reason === "step_overflow");
+				journaled += taken.length;
 				for (const item of taken) {
 					strictEqual(item.marker.includes("offset and limit"), item.ref.entry === fresh, item.marker);
 					strictEqual(item.marker.includes("one ref at a time"), item.ref.entry !== fresh, item.marker);
 				}
 				if (taken.length > 0 && !taken.some((item) => item.ref.entry === fresh)) kept += 1;
 			}
-			ok(kept > 0, "a cut took seen reads and kept the latest one");
+			if (small) strictEqual(journaled, 0, "no step_overflow is journaled");
+			else ok(kept > 0, "a cut took seen reads and kept the latest one");
 			const answer = entries.at(-2);
 			strictEqual(answer?.kind === "message" ? (answer.payload as { text?: string }).text : undefined, "done");
 		} finally {
@@ -968,11 +970,12 @@ it("drv-r4a: on copilot-sdk cut and evicted reads leave the provider's held inpu
 	const held = { calls: [] as Array<{ held: string }>, script: reads, next: 0 };
 	(globalThis as { __clioCopilotHeld?: unknown }).__clioCopilotHeld = held;
 	const reasons = new Set<string>();
-	// drv-m3a's protected window cuts every read; with one protected step the age horizon evicts some first.
+	// drv-m3a's protected window cuts every read; with one protected step the age horizon evicts some first. At 64000,
+	// since no overflow cut runs under the A1/A3/A5 boundary (drv-f1x).
 	for (const protectLastSteps of [8, 1]) {
 		held.calls = [];
 		held.next = 0;
-		const live = harness(transport([]), files, { window: 28_000, protectLastSteps, api: "copilot-sdk" });
+		const live = harness(transport([]), files, { window: 64_000, protectLastSteps, api: "copilot-sdk" });
 		try {
 			await live.loop.submit(
 				`Read ${reads.join(", ")} in order, one read per round, each in full, then say done.\n\n${"Read guidance for the design notes. ".repeat(M3A_PAD)}`,

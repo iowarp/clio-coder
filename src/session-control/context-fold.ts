@@ -13,7 +13,7 @@ import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import type { ContextActivityStatus, ContextFoldPayload, ContextPrunedPayload } from "../core/telemetry/live-events.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import type { FoldCheckpoint } from "../domains/context/fold/contract.js";
-import { evictionPressure } from "../domains/context/fold/pressure.js";
+import { evictionPressure, isSmallFoldWindow } from "../domains/context/fold/pressure.js";
 import { createFoldPriceBook } from "../domains/context/fold/price.js";
 import type { EvictionPlan, PolicyInput } from "../domains/context/working-set/contract.js";
 import { buildEvictionFields } from "../domains/context/working-set/engine.js";
@@ -501,9 +501,14 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 	 * The A4 addendum's cut, overflow only: S1 is committed (or had nothing to take) and the A4 count still does not
 	 * fit, so the successful reads S1's protection kept leave, largest first, down to S1's own target, journaled as
 	 * `step_overflow`. Measured after S1, not predicted, because S1's priced savings and Pi's count part ways.
+	 *
+	 * Never under the A1/A3/A5 boundary: there the cut ran out of seen reads, took the fresh one, and the model
+	 * re-read it in slices without answering (bt-47 drv-f1x). The requireFit summary runs instead, and what it cannot
+	 * clear ends the turn once through the oversized-read stop (maintainer ruling).
 	 */
 	const runOverflowCut = (input: EvictionStageInput, policyId: string, fitTokens: () => number): boolean => {
 		const { agentRuntime, session, settings, estimate, verdict, beforeSnapshotId, decision } = input;
+		if (isSmallFoldWindow(agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow)) return false;
 		const tokens = fitTokens();
 		const reserve = resolveFitOutputReserve(agentRuntime, tokens);
 		if (requestFits(tokens, reserve, estimate.contextWindow)) return false;
