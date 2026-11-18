@@ -192,6 +192,9 @@ function pointEvent(
 	workspace?: WorkerLandingWorkspace,
 ): ExtensionHookEvent {
 	const turnId = input.turnId ?? null;
+	// A turn point names the user turn its tool events carry; turn_end's own turnId is its final assistant entry.
+	const userTurnId = input.metadata?.userTurnId;
+	const turnPointId = typeof userTurnId === "string" && userTurnId.length > 0 ? userTurnId : (turnId ?? "");
 	const tool = input.toolName ?? "";
 	// The landing is derived from the arguments, so it crosses under the same class.
 	const args =
@@ -218,14 +221,14 @@ function pointEvent(
 		case "turn_start":
 			return {
 				point,
-				turnId: turnId ?? "",
+				turnId: turnPointId,
 				...(access.includes("prompt") && input.text !== undefined ? { text: input.text } : {}),
 				...turnOriginFromMetadata(input.metadata),
 			};
 		case "turn_end":
 			return {
 				point,
-				turnId: turnId ?? "",
+				turnId: turnPointId,
 				outcome:
 					input.metadata?.stopReason === "aborted"
 						? "aborted"

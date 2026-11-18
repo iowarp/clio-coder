@@ -60,11 +60,16 @@ export interface TurnMiddlewareDeps {
 export interface TurnMiddleware {
 	/** Async-only completed tool-batch observation and delivery of already-finished background reminders. */
 	prepareToolContinuation(agentRuntime: AgentRuntime, signal?: AbortSignal): Promise<boolean>;
+	/**
+	 * `userTurnId` is the id the turn's user row is filed under; without it the
+	 * turn already filed (an in-run continuation's) is the one that starts.
+	 */
 	fireTurnStart(
 		agentRuntime: AgentRuntime,
 		promptText: string,
 		pendingSkillRequestCount?: number,
 		requestContinuation?: boolean,
+		userTurnId?: string,
 	): void;
 	/**
 	 * The awaited turn_start phase for extension runtime hooks, run after
@@ -77,6 +82,7 @@ export interface TurnMiddleware {
 		agentRuntime: AgentRuntime,
 		promptText: string,
 		pendingSkillRequestCount?: number,
+		userTurnId?: string,
 	): Promise<string | null>;
 	fireTurnEnd(
 		agentRuntime: AgentRuntime,
@@ -358,8 +364,11 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		promptText: string,
 		pendingSkillRequestCount: number,
 		requestContinuation: boolean,
+		userTurnId: string | undefined,
 	): MiddlewareHookInput => {
 		const sessionId = deps.session?.current()?.id;
+		// The user turn its tool hooks and turn_end name in `userTurnId`, so extensions correlate a turn by one id.
+		const turnId = userTurnId ?? state.activeUserTurnId;
 		return {
 			hook: "turn_start",
 			...(sessionId ? { sessionId } : {}),
@@ -380,6 +389,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				conversationMessages: agentRuntime.agent.state.messages.filter((message) => message.role !== "system").length,
 				pendingSkillRequests: pendingSkillRequestCount,
 				...turnOriginMetadata(state.currentTurnOrigin),
+				...(turnId ? { userTurnId: turnId } : {}),
 			},
 		};
 	};
@@ -431,17 +441,17 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			return true;
 		},
 
-		fireTurnStart(agentRuntime, promptText, pendingSkillRequestCount = 0, requestContinuation = false): void {
-			const input = turnStartInput(agentRuntime, promptText, pendingSkillRequestCount, requestContinuation);
+		fireTurnStart(agentRuntime, promptText, pendingSkillRequestCount = 0, requestContinuation = false, userTurnId): void {
+			const input = turnStartInput(agentRuntime, promptText, pendingSkillRequestCount, requestContinuation, userTurnId);
 			// The skills reminder and the marketplace offer each list installed
 			// skills on a session's first substantive turn. One discovery pass
 			// verifies every plugin tree once for all turn_start registrations.
 			applyTurnStartEffects(withPluginDiscoveryPass(() => runMiddlewareTurnHook(input)));
 		},
 
-		async awaitTurnStart(agentRuntime, promptText, pendingSkillRequestCount = 0): Promise<string | null> {
+		async awaitTurnStart(agentRuntime, promptText, pendingSkillRequestCount = 0, userTurnId): Promise<string | null> {
 			if (!deps.middleware?.hasAwaitedHook?.("turn_start") || !deps.middleware.runAwaitedHook) return null;
-			const input = turnStartInput(agentRuntime, promptText, pendingSkillRequestCount, false);
+			const input = turnStartInput(agentRuntime, promptText, pendingSkillRequestCount, false, userTurnId);
 			try {
 				const { effects } = await deps.middleware.runAwaitedHook(input);
 				const refusal = effects.find((effect) => effect.kind === "block_tool");
