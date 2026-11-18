@@ -213,7 +213,7 @@ test("a dispatch whose worker started and failed is not reported as never starte
 	const env = await isolateClioEnv("headless-dispatch-failed-");
 	try {
 		const started = await failedDispatchRun(
-			"dispatch (sequential) total=1 failed=1\nruns=1hj006g52rl9\nbatch observed_tool_calls=2 cost=not measured\n\n- 1hj006g52rl9 agent=debugger exit=1 outcome=failed detail=worker process signal: SIGKILL",
+			`dispatch (sequential) total=1 failed=1\nruns=1hj006g52rl9\nbatch observed_tool_calls=2 cost=not measured\n\n- 1hj006g52rl9 agent=debugger exit=1 target=litellm model=mini/qwen3.8-27b-iq4r-v4 tokens=unknown trust="sealed; no validation observed; ${"completion not applied; ".repeat(8)}" outcome=failed detail=worker process signal: SIGKILL`,
 		);
 		strictEqual(started.code, 1, started.stderr);
 		match(
