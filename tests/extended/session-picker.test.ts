@@ -353,8 +353,10 @@ it("hides a failed user-only session but retains assistant and tool-call turns",
 	assert.match(text, /Conversation tool_call/u);
 });
 
-it("closed sessions carry no success claim", (t) => {
+it("closed sessions carry no success claim, and the legend names the row marker (bt-11 #4)", (t) => {
 	const f = picker(t, [session("failed", { endedAt: new Date().toISOString(), firstMessagePreview: "Failed task" })]);
 	assert.match(f.lines().join("\n"), /Failed task/u);
 	assert.doesNotMatch(f.lines().join("\n"), /✓/u);
+	assert.ok(f.lines().some((line) => line.includes("◌ 3 turns")));
+	assert.ok(f.lines().some((line) => line.includes("● open in a running Clio · ◌ not open")));
 });

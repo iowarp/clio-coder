@@ -81,6 +81,8 @@ class SessionSelectList extends SelectList {
 					width,
 				),
 			);
+		if (this.sessionItems.length > 0)
+			rows.push(truncateToWidth(theme.fg("annotation", SESSION_STATUS_LEGEND), width, GLYPH.ellipsis, false));
 		return rows;
 	}
 
@@ -119,10 +121,23 @@ function previewLine(meta: SessionMeta): string {
 	return `${id} · ${cwdLeaf || "no preview"}`;
 }
 
+/**
+ * The status marker each row leads its strip with, and what it means. Closing a
+ * session does not establish that its run succeeded; a session that never ended
+ * reads as open only while its owning process is (#420). The picker's legend
+ * row is spelled from this same table.
+ */
+const SESSION_STATUS = {
+	open: { glyph: GLYPH.running, meaning: "open in a running Clio" },
+	closed: { glyph: GLYPH.queued, meaning: "not open" },
+} as const;
+
+const SESSION_STATUS_LEGEND = Object.values(SESSION_STATUS)
+	.map((status) => `${status.glyph} ${status.meaning}`)
+	.join(" · ");
+
 function metaStrip(meta: SessionMeta): string {
-	// Closing a session does not establish that its run succeeded. A session that
-	// never ended reads as running only while its owning process is (#420).
-	const status = liveSessionOwner(meta) ? GLYPH.running : GLYPH.queued;
+	const status = (liveSessionOwner(meta) ? SESSION_STATUS.open : SESSION_STATUS.closed).glyph;
 	const count = typeof meta.messageCount === "number" ? meta.messageCount : 0;
 	const countLabel = count === 1 ? "1 turn" : `${count} turns`;
 	const folder = sanitizeCallTargetText(meta.cwd ? basename(meta.cwd) : "") || "no folder";
@@ -193,9 +208,9 @@ function createSessionOverlayBox(
 	let filtered = [...sessions];
 	let lastQuery = "";
 	let selectedSessionId: string | undefined;
-	// Sessions the dock has room for: two rows each under the filter row and a
-	// position row, never more than the six a page moves by. Zero means the
-	// frame has not said yet, so the six stand.
+	// Sessions the dock has room for: two rows each under the filter row, a
+	// position row and the marker legend, never more than the six a page moves
+	// by. Zero means the frame has not said yet, so the six stand.
 	let visibleBudget = VISIBLE_ROWS;
 	let list = buildList(filtered);
 	let pendingEscape = "";
@@ -224,7 +239,7 @@ function createSessionOverlayBox(
 		backOutOneLayer(box.escapeLayers());
 	};
 	box.setBodyRows = (rows: number): void => {
-		const next = rows > 0 ? Math.max(1, Math.min(VISIBLE_ROWS, Math.floor((rows - 2) / 2))) : VISIBLE_ROWS;
+		const next = rows > 0 ? Math.max(1, Math.min(VISIBLE_ROWS, Math.floor((rows - 3) / 2))) : VISIBLE_ROWS;
 		if (next === visibleBudget) return;
 		visibleBudget = next;
 		applyFilter();
