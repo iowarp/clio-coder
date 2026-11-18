@@ -126,9 +126,10 @@ result.
 
 CLIO Coder-managed peer dispatches run at default permissions, even when the main
 session uses yolo. A [read-only run](../architecture/safety-model.md#read-only-runs)
-must leave every file outside CLIO Coder's home unchanged, so it is admitted only on a
-peer whose own enforcement guarantees that, and `trustedUnmediated` does not
-change the answer. Headless Codex runs read-only work under
+applies a mediated read-only ceiling, so it is admitted only on a peer whose
+own OS-enforced mode qualifies; `trustedUnmediated` does not broaden that
+ceiling. This is a selected-runtime guarantee, not a statement about arbitrary
+external processes. Headless Codex runs read-only work under
 `--sandbox read-only`, an OS-level sandbox that refuses every write, so
 `/run --read-only --target <codex target>` is admitted; writable work uses
 `workspace-write`. Claude Code (`--permission-mode plan` with a `--tools`

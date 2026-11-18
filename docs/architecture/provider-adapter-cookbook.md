@@ -180,9 +180,12 @@ budget-based models. CLIO Coder's request controls in `src/engine/provider-paylo
 and effort only on forced-tool rounds for Claude models that accept forced choice. Models that
 reject forced choice keep thinking and use automatic tool selection. OpenAI Responses and
 Codex use Pi's stock `reasoning.summary: "auto"`; CLIO Coder does not override it.
-A required-tool round on Codex always sends `tool_choice: "auto"` over the narrowed tool surface: Pi's
-WebSocket continuation delta omits `tools`, and Codex rejects a `required` or named choice without
-them, while a text-only `none` is accepted.
+A required-tool round on `openai-codex` and OpenAI Responses keeps the full tool list and names the
+tool with the Responses function choice, `{ type: "function", name }`, so the round reuses the cached
+prefix. On Codex the changed `tool_choice` makes Pi send a full frame rather than a tool-less WebSocket
+delta. If the provider rejects the named choice before any output, the round is retried once with
+`"auto"` over the same full list, and that rejection is remembered per target and model. A text-only
+`none` is accepted.
 [thinking-off-wire.test.ts](https://github.com/iowarp/clio-coder/blob/main/tests/extended/thinking-off-wire.test.ts) locks the local LM Studio and
 llama.cpp controls used when thinking is off. Anthropic request assembly is
 inherited from the pinned Pi dependency, and no CLIO Coder test reconstructs Pi's whole adaptive or

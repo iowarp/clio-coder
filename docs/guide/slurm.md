@@ -15,7 +15,7 @@ rest. Fleet nodes are SSH hosts and do not submit through Slurm; see
 Install clio-kit so `clio-kit` is on `PATH` (for example
 `uv tool install clio-kit`), on a host where `sbatch`, `squeue`, `scontrol`,
 and `scancel` reach your cluster. Then declare the server in the user file
-`<Clio config directory>/mcp.yaml` (`clio-coder paths` prints the directory):
+`<CLIO Coder config directory>/mcp.yaml` (`clio-coder paths` prints the directory):
 
 ```yaml
 version: 1
@@ -137,7 +137,8 @@ bash policy and then follows the command rows of the
 `toolActionClasses` (up to 128 entries) classifies named tools individually.
 
 Without the MCP server, the agent can run `squeue`, `sbatch` and the other
-scheduler clients through `bash`. They run outside the shell sandbox with the
+scheduler clients through `bash`. They pass outward-action and containment
+policy; recognized literal commands may run outside the shell sandbox with the
 same approval as `ssh`; see [HPC clusters](hpc-clusters.md#scheduler-clients).
 
 ## The skill

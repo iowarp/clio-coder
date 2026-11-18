@@ -3,6 +3,14 @@ title: "GUI server"
 summary: "How the local GUI server starts, owns its domain worker threads, child processes, and path completion, and how the background launcher reuses it. Read this before changing server startup, worker dispatch, ACP child lifecycle, or background install behavior."
 sources:
   - "apps/clio-coder-gui/server/main.ts"
+  - "apps/clio-coder-gui/server/app.ts"
+  - "apps/clio-coder-gui/server/http/routes-arena.ts"
+  - "apps/clio-coder-gui/server/http/routes-research.ts"
+  - "apps/clio-coder-gui/server/http/routes-reports.ts"
+  - "apps/clio-coder-gui/server/http/routes-review.ts"
+  - "apps/clio-coder-gui/server/http/routes-control.ts"
+  - "apps/clio-coder-gui/server/http/routes-auth.ts"
+  - "apps/clio-coder-gui/server/services/session-control.ts"
   - "apps/clio-coder-gui/server/worker/host.ts"
   - "apps/clio-coder-gui/server/process-policy.ts"
   - "apps/clio-coder-gui/server/acp/client.ts"
@@ -62,6 +70,23 @@ The server is composed in `main` in this order:
 Listening uses `createAdaptorServer` bound to `127.0.0.1`. A persistent background app tries `listenPorts(port)` in order and moves to the next candidate on `EADDRINUSE`. A private server only uses its requested port. Shutdown (`close`) stops the idle timer, removes the signal handlers, closes the server, and then shuts down the supervisor, CLI runner, setup service and both worker hosts before removing any scratch directory and writing a final lifecycle log line.
 
 `inspectGuiBackground` calls `inspectBackground` from `apps/clio-coder-gui/server/launcher/background.ts` with the state directory under `gui/background`.
+
+## Current domain HTTP composition
+
+`apps/clio-coder-gui/server/app.ts` registers meta/OpenAPI, events, launch, toolchain and operations, then delegates families:
+
+| Area | Owner |
+| --- | --- |
+| Arena | `apps/clio-coder-gui/server/http/routes-arena.ts` → `apps/clio-coder-gui/server/services/arena.ts` for match list/detail, standings, start and vote. |
+| Research | `apps/clio-coder-gui/server/http/routes-research.ts` → `apps/clio-coder-gui/server/services/research.ts` for campaign list/detail/report/start. |
+| Usage/reports | `apps/clio-coder-gui/server/http/routes-reports.ts` → `apps/clio-coder-gui/server/services/reports.ts` and optional problem-report service; draft plan/update/send/bundle are separate. |
+| Review | `apps/clio-coder-gui/server/http/routes-review.ts` → `apps/clio-coder-gui/server/services/project-review.ts` for trust and pending-memory decisions. |
+| Session control | `apps/clio-coder-gui/server/http/routes-control.ts` plus `apps/clio-coder-gui/server/services/session-control.ts`; `controlGuard` protects session mutations while allowing listed read/view paths. |
+| Auth | `apps/clio-coder-gui/server/http/routes-auth.ts` and `apps/clio-coder-gui/server/http/auth.ts` → `apps/clio-coder-gui/server/services/clients.ts`; launch proof/challenge, exchange, rotate, revoke and tickets. |
+| Rewind | Session routes plus supervisor/workspace snapshot integration for snapshot and transcript operations. |
+| Launch | Direct registration in `apps/clio-coder-gui/server/app.ts`; a valid page path is published only when a live window can hear it. |
+
+Ordinary API bodies are capped at 64 KiB; session turns alone receive 1 MiB for attachments.
 
 ## Worker host
 

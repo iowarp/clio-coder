@@ -7,12 +7,14 @@ sources:
   - "site/dev.mjs"
   - "site/check.py"
   - "site/browser-check.mjs"
+  - "site/html_scripts.py"
   - "site/js/site.js"
   - "site/js/docs.js"
   - "site/js/landing.js"
   - "site/public-docs.json"
 tests:
   - "site/tests/sync-docs.test.py"
+  - "site/tests/html-scripts.test.py"
 invariants:
   - "site/build.mjs refuses an --out directory that is not empty-or-owned by its marker file, and refuses an --out equal to the filesystem root, the site source directory, or a parent of it."
   - "site/sync-docs.py builds documentation pages only from entries in site/public-docs.json whose source is a guide under the docs/guide directory or README.md; a source or summary outside that boundary raises before any output is written."
@@ -63,7 +65,9 @@ the documentation allowlist, or the preview server.
 | Browser checks | `site/browser-check.mjs` | the per-case loop over theme, width and path |
 | Client behavior | `site/js/site.js`, `site/js/docs.js`, `site/js/landing.js` | copy buttons, screenshot viewer, tabs, capture sequences, search, table-of-contents tracking, scene playback |
 
-The only focused test under `site/` is `site/tests/sync-docs.test.py`. A search of the
+Focused Python tests include `site/tests/sync-docs.test.py` and `site/tests/html-scripts.test.py`.
+The latter checks `site/html_scripts.py` extraction of attributed/uppercase tags, exclusion of
+external and JSON-LD scripts, and preservation of inline script bytes. A search of the
 repository for references to these scripts from `package.json` was not repeated,
 so this page does not claim how they are wired into package scripts. Deployment and the
 contributor notes in `site/CONTENT.md` were not read for this page.

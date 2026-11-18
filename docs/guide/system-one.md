@@ -1,6 +1,13 @@
 # System One
 
-System One is an experimental way to bring a fast decision model to CLIO Coder. You opt in with one setting, and the main agent gets one tool, `consult`, that asks the model typed questions or screens a long list of things the agent has not read. Two harness uses come with it: a screen beside the safety judge and typed steering triage. System One never answers the operator, never edits anything and never removes a confirmation.
+System One is an experimental way to bring a fast decision model to CLIO Coder. You opt in with one setting, and the main agent gets one tool, `consult`, that asks the model typed questions or screens a long list of things the agent has not read. Two harness uses come with it: a screen beside the safety judge and typed steering triage. System One returns typed advice only: `consult` and the decision points that read its answers have no edit operation, and the judge screen can only tighten a verdict. A hosted route still receives the bounded, redacted content each request names.
+
+Source: [factory.ts](../../src/domains/system-one/factory.ts),
+[runner.ts](../../src/domains/system-one/runner.ts),
+[consult.ts](../../src/tools/consult.ts) and
+[safety-judge-host.ts](../../src/entry/safety-judge-host.ts). Tests:
+`tests/contracts/consult-tool.test.ts` and
+`tests/contracts/judge-screen.test.ts`.
 
 Experimental means that the keys and the tool may change between releases. Every surface that shows System One says so.
 
@@ -42,7 +49,10 @@ A named route does more than answer the tool. It also drives the judge screen an
 
 ## Off
 
-Off is the default, and off is byte-identical to a build that has no System One. The tool registry, the gateway listing, the tool signatures and the prompt do not change, no request is sent, nothing waits for a decision and doctor reports no error. `systemOne.use: null`, an empty list and `off` all mean this.
+Off is the default. With no named route, the tool registry, gateway listing and
+prompt omit `consult`, no System One point sends a request, and doctor has no
+System One error. `systemOne.use: null`, an empty list and `off` all select
+this mode.
 
 ## What it is honest about
 

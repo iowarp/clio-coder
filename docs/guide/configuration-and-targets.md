@@ -307,9 +307,9 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `safety.limits.templateToolCallsPerTurnMax` | `null` | next turn; a project layer can only lower it below the user value |
 | `safety.limits.templateObservationBytesPerTurnMax` | `null` | next turn; a project layer can only lower it below the user value |
 | `safety.limits.workerResponseSeconds` | `600` | next turn; a project layer can only tighten it |
-| `safety.limits.autonomousToolCalls` | `600` | immediately; a project layer can only tighten it |
-| `safety.limits.autonomousMinutes` | `120` | immediately; a project layer can only tighten it |
-| `safety.limits.autonomousTokens` | `5000000` | immediately; a project layer can only tighten it |
+| `safety.limits.autonomousToolCalls` | `600` | next turn; a project layer can only tighten it |
+| `safety.limits.autonomousMinutes` | `120` | next turn; a project layer can only tighten it |
+| `safety.limits.autonomousTokens` | `5000000` | next turn; a project layer can only tighten it |
 | `safety.review.enabled` | `false` | immediately; a project layer can only turn review on or lower the cadence |
 | `safety.review.target` | unset | immediately |
 | `safety.review.cadenceToolCalls` | unset | immediately; a project layer can only turn review on or lower the cadence |
@@ -410,6 +410,16 @@ Inside a container, bubblewrap must be installed in the image, and the container
 ### Model tiers
 
 Each model gets a tier, `small`, `standard` or `frontier`, that says how much scaffolding a prompt should give it. Hooks read it as `model.tier` ([extension hooks](harness-extensions.md#runtime-api-2)) and prompt templates pick a body by it ([variants](extensions-and-sharing.md#variants-per-model-tier)). Nothing in the system prompt reads it, so a tier never changes a cached prefix.
+
+Turn policy and context also consume the resolved tier without changing that
+prefix. A template's `turnPolicy.when` admits the matching `small`, `standard`
+or `frontier` token at the start of each turn
+([turn-constraints.ts](../../src/core/turn-constraints.ts)); observation aging
+also runs on `small` routes and on routes that do not cache prompts
+([observation-aging.ts](../../src/session-control/observation-aging.ts)).
+The separate `uncached` token tests the route's `promptCaching: false` fact.
+Consequently a model switch can activate step turns and aging on the next turn
+while leaving the template bytes and system-prompt shape alone.
 
 `models.<id>.tier` sets the tier for one model, keyed by the wire model id; `models` takes no other field. In `/settings` the map is under **Model tiers**.
 
@@ -572,7 +582,7 @@ CLIO Coder reads both files at startup and rereads them whenever the `/model` ov
 
 A `targets[]` entry accepts `id` and `runtime` (both required), `url`, `auth`, `defaultModel`, `wireModels`, `capabilities`, `lifecycle`, `gateway`, `pricing`, `cache`, `lmstudio`, `litellm`, `ollama`, `maxConcurrentRequests`, `trustedUnmediated` and `contextTier`. Any other key is rejected. Target ids are unique. When `defaultModel` is omitted, the first `wireModels` entry is used.
 
-`auth` takes `apiKeyEnvVar` (environment variable read per request), `apiKeyRef`, `oauthProfile` and `headers`. `capabilities` takes the booleans `chat`, `tools`, `reasoning`, `vision`, `audio`, `embeddings`, `rerank` and `fim`, the enums `toolCallFormat`, `thinkingFormat` and `structuredOutputs`, and the integers `contextWindow` and `maxTokens`. `gateway: true` marks the endpoint as a gateway. `pricing` is `free` or a rate map; see [pricing and cost provenance](#pricing-and-cost-provenance). `cache.retention` is `none`, `short` or `long`; `cache.deployment` binds the read-only control URL of a `llamacpp`, `vllm` or `lmstudio` deployment (`backend`, `controlUrl`, `model`, `build`, and an optional `gatewayDeploymentId`) so CLIO Coder can observe its cache state; `cache.warm` bounds startup prewarm with `startup`, `maxInputTokens`, `maxDurationMs` and `cooldownMs`, and startup prewarm does nothing while `cache.retention` is `none`. `maxConcurrentRequests` is an explicit request-slot limit for the endpoint and overrides live discovery. `lifecycle` is `user-managed` or `clio-coder-managed`; `user-managed` keeps CLIO Coder from loading or unloading models on that server. `trustedUnmediated: true` lets a runtime that runs its own tool loop (`claude-code`, `codex-cli`, `pi-cli`, `opencode-cli`, `antigravity-code`) take write-capable dispatch work under its own authority; without it such work is refused, and the opt-in is recorded in the worker permit the run's result carries. Only user settings may set it; a project layer's value is ignored. `contextTier` (`default` or `long_context`, `copilot-sdk` targets only) opts a Copilot target into the long-context tier; see [GitHub Copilot](#github-copilot).
+`auth` takes `apiKeyEnvVar` (environment variable read per request), `apiKeyRef`, `oauthProfile` and `headers`. `capabilities` takes the booleans `chat`, `tools`, `reasoning`, `vision`, `audio`, `embeddings`, `rerank` and `fim`, the enums `toolCallFormat`, `thinkingFormat` and `structuredOutputs`, and the integers `contextWindow` and `maxTokens`. `gateway: true` marks the endpoint as a gateway. `pricing` is `free` or a rate map; see [pricing and cost provenance](#pricing-and-cost-provenance). `cache.retention` is `none`, `short` or `long`; `cache.deployment` binds the read-only control URL of a `llamacpp`, `vllm` or `lmstudio` deployment (`backend`, `controlUrl`, `model`, `build`, and an optional `gatewayDeploymentId`) so CLIO Coder can observe its cache state; `cache.warm` bounds startup prewarm with `startup`, `maxInputTokens`, `maxDurationMs` and `cooldownMs`; an unset `maxInputTokens` allows 16,384 input tokens, or the model's context window when that is smaller, and 8,192 when the window is unknown. Startup prewarm does nothing while `cache.retention` is `none`. `maxConcurrentRequests` is an explicit request-slot limit for the endpoint and overrides live discovery. `lifecycle` is `user-managed` or `clio-coder-managed`; `user-managed` keeps CLIO Coder from loading or unloading models on that server. `trustedUnmediated: true` lets a runtime that runs its own tool loop (`claude-code`, `codex-cli`, `pi-cli`, `opencode-cli`, `antigravity-code`) take write-capable dispatch work under its own authority; without it such work is refused, and the opt-in is recorded in the worker permit the run's result carries. Only user settings may set it; a project layer's value is ignored. `contextTier` (`default` or `long_context`, `copilot-sdk` targets only) opts a Copilot target into the long-context tier; see [GitHub Copilot](#github-copilot).
 
 ## Pricing and cost provenance
 
@@ -612,7 +622,7 @@ Cost appears in these places, and every one renders the journaled facts through 
 - The footer shows the session total, and the expanded footer dashboard (Alt+U) shows the session ceiling beside it as `ceiling`, which reads `none` when `safety.limits.sessionCostUsd` is `0`.
 - `/usage` shows a `cost` row for the session and for each model.
 - The dispatch board, `clio-coder fleet` output and the `monitor` tool show a cost per run.
-- The exit summary prints a `Cost` row, and under `report` a cost per model in its `Models` section, in the same wording as the table below.
+- The exit summary prints a `Session cost` row, and under `report` a cost per model in its `Models` section, in the same wording as the table below.
 
 | `usd` fact | What the footer, `/usage` and run tables show |
 | --- | --- |
@@ -691,7 +701,7 @@ CLIO Coder supplies a thinking choice for model calls outside the main conversat
 
 | Tier | Runtime ids | API family and auth |
 | --- | --- | --- |
-| `cloud` | `openai`, `openai-codex`, `anthropic`, `anthropic-max`, `google`, `mistral`, `groq`, `deepseek`, `openrouter`, `bedrock`, `inception`, `alcf` | `openai` uses `openai-responses`, `openai-codex` uses `openai-codex-responses`, `anthropic` and `anthropic-max` use `anthropic-messages`, `google` uses `google-generative-ai`, `mistral` uses `mistral-conversations`, `bedrock` uses `bedrock-converse-stream`, and `groq`, `deepseek`, `openrouter`, `inception` and `alcf` use `openai-completions`. Auth is an API key from the runtime's variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `MISTRAL_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`, `INCEPTION_API_KEY`), OAuth for `openai-codex`, `anthropic-max` and `alcf`, or the AWS SDK credential chain for `bedrock`. |
+| `cloud` | `openai`, `openai-codex`, `anthropic`, `anthropic-max`, `google`, `mistral`, `groq`, `deepseek`, `openrouter`, `inception`, `alcf` | `openai` uses `openai-responses`, `openai-codex` uses `openai-codex-responses`, `anthropic` and `anthropic-max` use `anthropic-messages`, `google` uses `google-generative-ai`, `mistral` uses `mistral-conversations`, and `groq`, `deepseek`, `openrouter`, `inception` and `alcf` use `openai-completions`. Auth is an API key from the runtime's variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `MISTRAL_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`, `INCEPTION_API_KEY`), or OAuth for `openai-codex`, `anthropic-max` and `alcf`. |
 | `local-native` | `lmstudio`, `ollama`, `llamacpp`, `vllm`, `sglang`, `lemonade` | `ollama` speaks its native API and needs no key. The others use `openai-completions` with an optional key. They probe the server, report loaded models and serving windows, and price as free. |
 | `protocol` | `openai-compat`, `anthropic-compat`, `litellm` | Generic endpoints that carry no local-server assumptions, over `openai-completions` or `anthropic-messages`. `litellm` is a gateway runtime with per-route capability discovery. They never price as free. |
 | `subscription` | `claude-code`, `claude-sdk`, `codex-cli`, `opencode-cli`, `pi-cli`, `antigravity-code` | Worker-only. `claude-code` runs the installed `claude` CLI and `claude-sdk` the Claude Agent SDK, both on the CLI's own login. For this release the `claude-sdk` paths have been exercised only against a stand-in for the Claude Agent SDK, not against the real package and a live account. `codex-cli`, `opencode-cli`, `pi-cli` and `antigravity-code` run the installed command headlessly under its own login. `claude-code` and those four run their own tool loop, so write-capable dispatch work on them needs the target's `trustedUnmediated`. |
@@ -699,6 +709,16 @@ CLIO Coder supplies a thinking choice for model calls outside the main conversat
 `copilot-sdk` is the one `subscription` runtime that is not worker-only. It is an `http`-kind runtime with the `copilot-sdk` API family, so it serves chat, main and worker routes like any target; [GitHub Copilot](#github-copilot) describes it.
 
 Hidden registrations stay resolvable by id: `llamacpp-anthropic`, `llamacpp-completion`, `llamacpp-embed` and `llamacpp-rerank` are the other surfaces of one llama.cpp server, `lemonade-anthropic` is Lemonade's Anthropic surface, `systemone` is the System One decision server, and `typesafe-jev` is its hosted engine. `alcf` is documented in the [ALCF provider contract](../architecture/alcf-provider.md). A custom runtime joins the registry as the [provider adapter cookbook](../architecture/provider-adapter-cookbook.md) describes. The Claude Agent SDK is an optional dependency that the installer skips; see the [installation guide](installation-and-lifecycle.md) for how `claude-sdk` obtains it on first use.
+
+`bedrock` is also a hidden registered runtime, not a removed runtime. Its
+descriptor has `hidden: true`, so new-configuration lists such as
+`clio-coder configure --list` omit it unless `--all` is supplied. A legacy or
+otherwise existing target whose `runtime` is `bedrock` still resolves through
+the registry and runs with the `bedrock-converse-stream` adapter and the AWS
+SDK credential chain. The distinction is the visibility of new configuration,
+not runtime compatibility ([bedrock.ts](../../src/domains/providers/runtimes/cloud/bedrock.ts),
+[support.ts](../../src/domains/providers/support.ts) and
+[runtime-descriptor.ts](../../src/domains/providers/types/runtime-descriptor.ts)).
 
 `inception` declares no reasoning support. The older Mercury models get `reasoning_effort: "instant"` pinned on every chat request, because their reasoning is not observable over the API and any higher effort returns an empty completion. `mercury-3` takes no pin. Thinking controls supplied by callers are still removed for it.
 

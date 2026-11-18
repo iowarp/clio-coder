@@ -438,12 +438,13 @@ that need the human are listed at the end.
    ```
 
 **Driving `clio-coder run`.** One call is one headless turn. It denies
-anything that would need an approval and has no way to ask a question, so put
-limits and decisions in the task text.
+anything that would need an approval, and nobody answers its questions unless
+`--answers <file.yaml>` scripts them, so put limits and decisions in the task
+text.
 
 | Flag | Effect |
 | --- | --- |
-| `--read-only` | Deny every write, command and delegation. |
+| `--read-only` | Refuse writes and edits, run shell commands only in the read-only OS sandbox (refused where none is available), and delegate only to runtimes that enforce read-only. |
 | `--json` | Stream JSONL on stdout: a `session` header first, one `run_end` frame last, carrying `exitCode` and `outcome`. Read the result from `run_end`. |
 | `--timeout <seconds>` | Wall-clock limit for the run; exit 124 on expiry. |
 | `--max-cost-usd <N>` | Stop when priced spend reaches the cap; exit 4. |
@@ -451,6 +452,7 @@ limits and decisions in the task text.
 | `--cwd <dir>` | Run as if started in `<dir>`. |
 | `--session <id>`, `--continue` | Append the turn to an existing session. |
 | `--verify "<cmd>"` | An acceptance check for this run, repeatable. |
+| `--answers <file.yaml>` | Answer the author-only questions (extension interviews and `operator_only` questions) from this file. |
 
 | Exit code | Meaning |
 | --- | --- |
@@ -459,6 +461,7 @@ limits and decisions in the task text.
 | 2 | Usage or configuration: an unknown flag, target or model, no usable chat route, or a task piped to bare `clio-coder`. |
 | 3 | A dispatched worker was ended by permission refusals, or a yolo run was ended by repeated safety-judge blocks. |
 | 4 | The priced spend ceiling, `--max-cost-usd` or a yolo run's autonomous budget stopped the run. |
+| 5 | `--answers` met an author question the file did not script. |
 | 124 | `--timeout` expired. |
 | 129, 130, 143 | SIGHUP, SIGINT or SIGTERM ended the run. |
 | 141 | The reader of stdout went away. |

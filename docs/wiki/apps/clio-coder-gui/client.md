@@ -3,6 +3,17 @@ title: "Browser client"
 summary: "The React single-page client of the Clio Coder GUI: its route table, query and error policy, the chat composer's submit decision and draft store, tool-call presentation, the settings controls view, the machines registration flow, the setup wizard steps, and the Markdown rendering boundary. Read this to find where a browser view or client rule lives."
 sources:
   - "apps/clio-coder-gui/client/main.tsx"
+  - "apps/clio-coder-gui/client/api/credentials.ts"
+  - "apps/clio-coder-gui/client/api/token.ts"
+  - "apps/clio-coder-gui/client/pages/arena.tsx"
+  - "apps/clio-coder-gui/client/pages/arena-model.ts"
+  - "apps/clio-coder-gui/client/pages/research.tsx"
+  - "apps/clio-coder-gui/client/pages/research-model.ts"
+  - "apps/clio-coder-gui/client/pages/operator-metrics.tsx"
+  - "apps/clio-coder-gui/client/pages/reports.tsx"
+  - "apps/clio-coder-gui/client/chat/RewindDialog.tsx"
+  - "apps/clio-coder-gui/client/report/ReportDialog.tsx"
+  - "apps/clio-coder-gui/client/pages/session-control-actions.ts"
   - "apps/clio-coder-gui/client/chat/composer-model.ts"
   - "apps/clio-coder-gui/client/chat/Composer.tsx"
   - "apps/clio-coder-gui/client/chat/tool-presentation.ts"
@@ -47,6 +58,20 @@ The browser client is the React application under `apps/clio-coder-gui/client`. 
 `apps/clio-coder-gui/client/main.tsx` builds the whole client. It creates an API client, configures a TanStack `QueryClient`, and declares a `createBrowserRouter` route table. Each route is either a lazily imported page or a fixed element. The `App` shell wraps every route, and the file renders `RouterProvider` under a `QueryClientProvider` into the `root` element.
 
 The route table maps paths to page modules. Examples: `/sessions` and `/sessions/:id` to the mission-control and session pages, `/machines` to `MachinesPage`, `/fleet` and `/fleet/:id` to fleet pages, `/settings/*` to the settings pages, and `/` to `Home`. `/setup` has `element: null` because the app shell draws the setup wizard full window.
+
+The table also exposes `/metrics`, `/usage`, `/arena`, `/research`, evidence list/detail, `/library`, `/skills`, `/system` and interop, `/traces` and run detail, and `/toolchain`.
+
+## Current domain views
+
+| Concern | Browser owner |
+| --- | --- |
+| Arena | `apps/clio-coder-gui/client/pages/arena.tsx` and `apps/clio-coder-gui/client/pages/arena-model.ts`: bounded 2–4 contender requests, blinded facts, vote state, standings and explicit start/vote calls. |
+| Research | `apps/clio-coder-gui/client/pages/research.tsx` and `apps/clio-coder-gui/client/pages/research-model.ts`: bounded campaign requests, progress following, grade/campaign rendering and report recomputation display. |
+| Operator metrics/usage | `apps/clio-coder-gui/client/pages/operator-metrics.tsx`, `apps/clio-coder-gui/client/pages/operator-metrics-model.ts` and `apps/clio-coder-gui/client/pages/reports.tsx`: ranked cost groups, workspace scope and shared metric surfaces; unknown readings stay unknown rather than becoming zero. |
+| Reports | `apps/clio-coder-gui/client/report/ReportDialog.tsx` and `apps/clio-coder-gui/client/pages/reports.tsx`: reviewed planning/editing precedes an explicit send operation. |
+| Rewind/transcript | `apps/clio-coder-gui/client/chat/RewindDialog.tsx`: snapshot list/preview/restore and transcript download are explicit operations. |
+| Session control | `apps/clio-coder-gui/client/pages/session-control-actions.ts`: read-only viewing is distinct from controller actions. |
+| Auth/launch | `apps/clio-coder-gui/client/api/credentials.ts` and `apps/clio-coder-gui/client/api/token.ts`: one window identity, launch-token exchange, in-memory bearer rotation/revocation, and launch-link handling. |
 
 ## Query and error policy
 

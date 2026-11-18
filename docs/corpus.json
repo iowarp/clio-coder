@@ -1,5 +1,6 @@
 {
 	"schema": 1,
+	"role": "Maintainer documentation-policy metadata; not an executable or runtime manifest",
 	"product": {
 		"label": "Authored product, operator, and current architecture documentation",
 		"roots": ["README.md", "architecture/", "guide/"],
@@ -13,7 +14,6 @@
 	"developmentWiki": {
 		"label": "Generated development Wiki reference",
 		"root": "wiki/",
-		"generated": true,
-		"version": "0.1"
+		"generated": true
 	}
 }

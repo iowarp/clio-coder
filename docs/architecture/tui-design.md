@@ -30,7 +30,7 @@ Toggle tiers with **Alt+O** (`Minimal` → `Default` → `Detailed` → `Minimal
 | **Failures & Refusals** | Up to 4 rows actionable reason | Up to 4 rows actionable reason | Up to 12 rows with context |
 | **Notices & Retries** | Level mark + bounded message | Level mark + bounded message | Diagnostic detail |
 | **Reports** (Doctor, multiline notices, command stdout/stderr, extension results) | Title and counters on 1 row | Counters + up to 8 rows (Doctor lists errors first), then `… N more · Detailed or /view for all` | Every row and detail |
-| **Turn Receipt** | One row: outcome glyph + duration | Outcome + duration | Outcome, duration, calls, tokens, cache, reasoning, prewarm |
+| **Turn Receipt** | One row: outcome glyph + duration + local end time | Outcome, duration, then calls, tokens and cache as width allows, and local end time | Outcome, duration, calls, tokens, cache, reasoning, cost, coverage and local end time |
 | **Approval & Question Cards** | Every decision input | Every decision input | Every decision input |
 
 - **Preview Budgets**: Counted *after terminal wrapping*, including the `… N rows · /view` overflow hint. Short terminals scale a budget down to `max(2, floor((terminal rows - 8) / 2))` when that is smaller than the style's own limit (`previewBudget` in [preview.ts](../../src/interactive/renderers/preview.ts)).
@@ -55,7 +55,7 @@ Renderers ask for semantic roles (`TEXT_ROLES`, `STRUCTURAL_ROLES` and `FUNCTION
 | `editorAction` | `#c7783d` (`orangeFocal`) | Compatibility name; no renderer paints it. |
 | `editorYoloBackground` | `#1d2b2a` (`yoloSurface`) | Compatibility name. The `yolo` composer surface paints the `composerSurface` role, which resolves to the same palette entry. |
 | `editorYoloText` | `#948773` (`ivoryFocal`) | Compatibility name; `yolo` composer text resolves through the role matrix. |
-| `accent` | `#15959e` (`cyanFocal`) | Selections, prompts, the active dashboard tab, voice glyph (`✦`), active phases. |
+| `accent` | `#15959e` (`cyanFocal`) | Selections, prompts, the expanded footer's `Dashboard` title, voice glyph (`✦`), active phases. |
 | `accentDeep` | `#1b929a` (`cyanReading`) | Bold CAPS section headers and structural tags. |
 | `action` | `#c7783d` (`orangeFocal`) | Active operations: dispatch pills, running fleet badges, steering queue markers. |
 | `emphasis` | `#998a73` (`neutralFocal`) | Emphasized neutral text. |
@@ -105,7 +105,7 @@ All symbols are defined in the `GLYPH` object in [src/interactive/theme/glyphs.t
 
 | Glyph | `GLYPH` key | Token | Meaning | Used by |
 | :--- | :--- | :--- | :--- | :--- |
-| `>C_` | `brand` | `accent`, `title` | Brand wordmark | Launchpad, session header and footer dashboard tabs. |
+| `>C_` | `brand` | `accent`, `title` | Brand wordmark | Launchpad, session header and expanded footer title. |
 | `✦` | `agent` | `accent` | Agent voice | First row of agent prose; `error` on a failed turn. |
 | `▌` | `userBar` | `accent` | Operator input | Gutter of every prompt row. |
 | `›` | `user` | `action` | Quoted operator text | Steering queue entries, `/btw` and `/draft` request echoes, command reference cards. |
@@ -135,7 +135,7 @@ All symbols are defined in the `GLYPH` object in [src/interactive/theme/glyphs.t
 | `…` | `ellipsis` | inherits | Cut | Every truncation. |
 | `↺` | `recent` | `dim` | Recently used | Model picker mark column. |
 | `━` `─` | `meterFull` `meterEmpty` | by meter | Meter cells | Quota and resource bars. |
-| `→` | `next` | inherits | Next step | Dashboard page order, key chords. |
+| `→` | `next` | inherits | Next step | Key chords, the expanded footer's close hint. |
 
 Trust verdicts on a dispatch card print `✓` for reviewed (`success`) and `✗` for compromised (`error`). Grounded (`info`) and unverified (`body`) print the verdict word alone, because a diamond on that line would read as an origin.
 
@@ -303,7 +303,7 @@ Every transcript row follows a rigid 2-column gutter format:
 - **YOLO Receipt**: A risky call that actually started under `yolo` keeps `YOLO auto-approved · no prompt` under its action row, and a chain keeps it above its step rows. Minimal never folds it away. A local read, a call at `default`, a one-shot grant and a call refused before it started carry none. Unlike an operator grant, the mark is stored with the call, so it returns on replay and on resume after switching to `default`, and calls inside delegated runs and chains keep it.
 - **Edit Preview**: An `edit` call shows its diff as soon as its arguments close, before it runs, in Default and Detailed. Minimal keeps the row alone. Long-running write, edit and command output streams in the fixed-height live windows of the output-style table.
 - **Worker Rows**: The origin mark (`◆` model, `◇` operator) heads the worker block; a running tool inside it shows `⚙`.
-- **Turn Settlement**: The final outcome closes the block with its mark in the gutter. Minimal ends with one dim row of the outcome glyph and duration (`✓ 900ms`), keeping the outcome word for anything but Done. Default prints the outcome and duration (`✓ Done · 14s`). A turn that ends while workers it or the operator started still run is not Done: it closes with the dispatch mark as `⇲ Turn ended · 2 workers running · 14s`, and the workers' own cards report when they settle. Detailed adds the call count when more than one, input and output tokens, cache read and write, reasoning (`≈` when estimated), why a cold cache was expected, and prewarm results (`✓ Done · 14s · 3 calls · in 100k · out 380`).
+- **Turn Settlement**: The final outcome closes the block with its mark in the gutter. Every tier closes the receipt with the turn's local end time, with the date when the turn ended on another day. Minimal ends with one dim row of the outcome glyph, duration and end time (`✓ 900ms · 18:42`), keeping the outcome word for anything but Done. Default prints the outcome and duration, then, as the width allows, the call, retry and move counts, a coverage note, tokens and the cached amount (`✓ Done · 1m4s · 3 calls · 18:42`). A turn that ends while workers it or the operator started still run is not Done: it closes with the dispatch mark as `⇲ Turn ended · 2 workers running · 14s`, and the workers' own cards report when they settle. Detailed adds the call count when more than one, input and output tokens, cache read and write, reasoning (`≈` when estimated), cost, why a cold cache was expected, how many calls reported no usage, and the end time (`✓ Done · 14s · 3 calls · in 100k · out 380 · 18:42`).
 - **Context Progress**: Known stage counts fill the bar; unknown work advances an unfilled marker monotonically within the stage without claiming a percentage. Helper timing stays live, showing elapsed seconds, the limit and the run id.
 
 ### 5.1 Assistant Text Rendering

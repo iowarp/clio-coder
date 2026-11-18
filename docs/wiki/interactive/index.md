@@ -2,7 +2,7 @@
 
 6 complete, 0 pending.
 
-- [Interactive footer: compact line, expanded pages and notices](footer.md) — The live region under the interactive prompt: the compact status line, the three expanded pages (Activity, Context, Status), the notification center, the spend and context readers, and the local machine sampler. Read this when changing what the footer shows or when it refreshes.
+- [Interactive footer: compact line, expanded page and notices](footer.md) — The compact line, one scrollable expanded dashboard, notifications, and spend/context readers. The machine sampler belongs to `/usage` Health.
 - [Command-line surfaces](overlays.md) — Describes the modal overlay surfaces under src/interactive/overlays: the shared tabbed list view, the Library browser and its review gate, the /interop peer surface, the ask-user interview, the model picker, the settings center and the library-model projection. Read this when changing one of these screens or the way they hand keys, state or writes to the session.
 - [Command-line surfaces: transcript renderers](renderers.md) — How Clio renders transcript rows for tool calls, worker entries, notices, diffs, provider errors and fenced code inside the interactive panel. Read this before changing how any transcript row is drawn or how untrusted text is bounded and redacted before display.
 - [Command-line status and footer state](status.md) — How the interactive session derives its live status (phase, watchdog tier, tool and dispatch overlays, end-of-turn summary) from chat and telemetry events, and how that status is rendered as footer verbs and reasoning chips. Read this before changing footer status text, watchdog timing, or turn summaries.

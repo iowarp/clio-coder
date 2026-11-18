@@ -62,8 +62,8 @@ runs in its own process namespace and cannot signal your other programs.
 
 ## What the sandbox hides
 
-A contained command cannot read your credentials, even though it can read
-the rest of the filesystem. Hidden are, among others:
+A contained command can read the rest of the filesystem, but the known
+credential paths and value shapes are masked. Hidden are, among others:
 
 - SSH and GPG keys, the SSH agent, and Kerberos ticket caches;
 - cloud and cluster logins: `~/.aws`, `~/.azure`, `~/.config/gcloud`,
@@ -90,8 +90,9 @@ start method. `safety.sandboxUnixSockets` (`owned` or `allow`) loosens this.
 
 ## When a command leaves the sandbox
 
-Some commands cannot work without your credentials. CLIO Coder never runs
-these inside the sandbox; it sends them to the safety judge first:
+Some commands cannot work without your credentials or reach beyond the
+machine. At `default` CLIO Coder runs them outside the sandbox, after the
+safety judge has reviewed them:
 
 - `git push` (other than `--dry-run`);
 - code-host and cloud CLIs such as `gh`, `glab`, `aws`, `gcloud`, `az`,
@@ -100,6 +101,13 @@ these inside the sandbox; it sends them to the safety judge first:
   the rest), PBS (`qsub`, `qstat`), LSF (`bsub`, `bjobs`) and Flux;
 - publishing, such as `npm publish`, `cargo publish` or `docker push`;
 - network writes, such as `curl` with a body or a method other than GET.
+
+A name that may point at something else is not read as that CLI, so the line
+stays contained: a relative path such as `./sbatch`, a name the line defines
+as an alias or function, or any name on a line that sets `PATH`. Under
+`safety.sandbox: required` at unconfined yolo, an outward command leaves the
+sandbox only in the narrow cases described in
+[Make the sandbox stricter or looser](#make-the-sandbox-stricter-or-looser).
 
 When a contained command fails because of the sandbox, CLIO Coder can rerun it
 with `unsandboxed: true`. That rerun also goes to the judge, which lets it run
@@ -184,7 +192,8 @@ than your user settings:
 - It can lower limits such as `safety.limits`, never raise them.
 - It can switch the review watchdog on, never off.
 - It cannot carry credentials, add scratch roots, pass variables into the
-  sandbox, change the judge, or accept yolo for you.
+  sandbox, change the judge's rules or switch it off, or accept yolo for you.
+  It may point the judge at another target your user settings declare.
 
 An ignored key is reported as a settings issue. A project `safety.yaml` can
 add its own rules: commands that run without asking, and paths that stay
@@ -202,17 +211,37 @@ and restores files only; it never moves your branches. See
 
 ## Workers
 
-Workers you dispatch run in their own sandbox, with no network unless
-`safety.sandboxNetwork` is on or they hold `web_fetch`. Their ordinary asks go
-to the same safety judge by default, and a worker cannot raise its own level.
+Native workers you dispatch run their commands in their own sandbox when the
+host has a backend. Without one, `auto` runs them unsandboxed and `required`
+refuses them. Subprocess and SDK runtimes, and workers on a `fleet.nodes`
+node, are not sandboxed by CLIO Coder. A sandboxed worker has no network
+unless `safety.sandboxNetwork` is on or it holds `web_fetch`; an MCP server it
+starts reaches the network only with its own grant
+(`clio-coder mcp trust <id> --network`). Ordinary asks go to the same safety
+judge by default, and a worker cannot raise its own level.
 See [Workers at each level](../architecture/safety-model.md#workers-at-each-level).
 
 ## What the sandbox does not cover
 
-Typed tools such as `write` and `edit`, git hooks, the MCP servers the main
-session starts, and external coding agents are checked by the rules above but
-run with your own operating-system permissions. Windows has no sandbox
-backend; WSL uses the Linux one.
+The OS sandbox holds shell commands, the MCP servers a worker starts, and
+api 2 extension runtimes. These are checked by the rules above but run with
+your own operating-system permissions:
+
+- typed tools such as `write`, `edit` and `artifact`, which run inside
+  CLIO Coder under their own path and admission rules;
+- the MCP servers the main session starts. A server's `read` class is your
+  classification, not proof of what the server does;
+- the commands a project's `.clio-coder/hooks.yaml` and
+  `.clio-coder/hooks.local.yaml` declare;
+- git hooks run by the typed `git` tool or by a command outside the sandbox;
+- external coding agents, which apply their own policy. For a read-only run
+  CLIO Coder admits only the runtimes it mediates or that confine themselves,
+  such as `codex-cli`, which starts with `--sandbox read-only`.
+
+An api 2 extension runs inside the sandbox when the host has a backend, and
+under Node permission flags alone when it has none. Provider calls send only
+the request CLIO Coder builds; a provider gets no access to local files.
+Windows has no sandbox backend; WSL uses the Linux one.
 
 The masks match known names and value shapes, so a credential stored under an
 unusual name stays readable. The network stays on, so a contained command can

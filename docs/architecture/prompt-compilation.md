@@ -212,7 +212,7 @@ The compiled prompt has fixed sections in this order (`SESSION_PROMPT_SECTION_OR
 | --- | --- | --- | --- |
 | `project-context` | Under a `# Project` heading, a `Declared checks (verify):` line naming up to 12 of the project's declared check ids when `verify` is reachable, then the project handbook text. | session | Captured in the session source snapshot and sized by `selectProjectPreload`. |
 | `memory` | The task-scored memory section. | session | Selected at each prepared turn but frozen into the compiled prompt until a completed compaction, a session switch or a recompile that another input forces. The `promptRecompiled` ledger entry records the frozen section, so a resumed process (`run --session`, ACP `session/load`, `/resume`) compiles the same bytes. Later changes arrive as a `# Memory update` block in the turn's reminder. See [Memory in the prompt](#memory-in-the-prompt). |
-| `runtime` | Provider, model, the `Routes:` line, the context window, thinking guidance, and the `model.anthropic-5-5` notes for a Claude 5.5 model. | session | Rendered on every compile. The `Routes:` line is frozen per route identity. |
+| `runtime` | Provider, model, the `Routes:` line, the context window, the operator's local date, weekday and time zone, thinking guidance, and the `model.anthropic-5-5` notes for a Claude 5.5 model. | session | Rendered on every compile. The `Routes:` line is frozen per route identity. A change of local date recompiles the block ([Local clock](#local-clock)). |
 | `context.workspace-root` | Absolute workspace root, local OS account and hostname. | session | Snapshot. The workspace facts stay pinned for the session while the process lives, even when another source is recaptured. Per-session facts are not in this fragment; see [Session context](#session-context). |
 | `context.fleet` | Observed SSH node readiness and capacity. | turn | Rendered only when `fleet.nodes` is non-empty and `dispatch` is attached. It is absent from the layer table, so it counts as turn, and its hash is part of `inputEpoch()`. |
 | `context.clio-repo-awareness` | The note that the workspace is CLIO Coder's own source tree, and whether the running build came from that tree or from another one. | session | Snapshot. |
@@ -224,6 +224,16 @@ The compiled prompt has fixed sections in this order (`SESSION_PROMPT_SECTION_OR
 ### Session context
 
 Facts that differ between two sessions on an unchanged tree are not compiled into the system prompt, so two sessions in one workspace share the whole prompt as a cache prefix. The prompts extension renders them as a `<session-context>` block (`renderSessionContext` in `src/domains/prompts/extension.ts`), bounded at 400 characters before the orientation line: git branch and tree state, the last recorded session in this workspace, the last commit, a `Rigor: high` line when the project or `CLIO_CODER_RIGOR` declares it, and the time the project orientation snapshot was recorded. The block rides in the reminder of the session's first user message, beside the task scope. It is sent again only when no message still in context carries it, as after a compaction that summarized the first turn away. It is captured once per session and pinned with the workspace facts.
+
+### Local clock
+
+The main session compiles the operator's local date, weekday and IANA time zone into the Runtime block from `operatorCalendar` ([format-time.ts](../../src/core/format-time.ts)). The line tells the model that any date it writes, in an id, a record or prose, comes from this date. The date is read on every submit, so the first submit after the local date changes recompiles the prompt. The Runtime block sits after the pinned prefix, so the install-wide head keeps its bytes.
+
+At every main-turn start, continuations included, the `observer.local-clock` middleware puts the local date, weekday, `HH:MM` time and zone with its UTC offset in the turn's reminder ([local-clock-reminder.ts](../../src/domains/middleware/local-clock-reminder.ts)). If the local date changes while a turn is running, the first tool result after the change carries one `[Clock]` annotation with the new date. A nested gateway capability is not announced a second time.
+
+### Promoted extension tools
+
+An extension tool promoted by `runtime.promote` is part of the same typed tool-surface input as a builtin direct tool ([compiler.ts](../../src/domains/prompts/compiler.ts), [extension-runtime-tools.ts](../../src/tools/extension-runtime-tools.ts)). The compiler names it on the `Direct tools` line, and its exact attached schema is part of the cache identity. Promotion belongs to the installed extension, not to a turn or a template.
 
 ### Route provenance
 

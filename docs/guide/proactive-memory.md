@@ -212,6 +212,12 @@ the bank; when its scope ends, only the entries that carry a `command:` or
 `src/domains/memory/completion-retention.ts` and
 `src/domains/memory/lesson-feedback.ts`.
 
+A completed task with no successful command receipt and no read excerpt, such
+as a run that only edited files, settles as `abstained` with reason
+`no-grounding-evidence` before any lesson call and records a
+`lesson-extraction-skipped` observation. Its tool calls stay unreviewed, so
+history review can still file a provisional proposal from them later.
+
 Between turns the guardian also reviews earlier sessions of the same
 repository for lessons. An excerpt counts as reviewed only after what it
 taught is durable: filed in the store, or saved as pending candidates under
@@ -361,7 +367,11 @@ offers whole prepared batches that lie inside it. Uncovered units are
 serialized from the same working-set projection the ordinary summary uses. The
 compactor uses the offer only when the whole substituted summarizer request
 fits the model's window and is smaller than the ordinary request; otherwise it
-summarizes the ordinary history (`src/domains/session/compaction/compact.ts`).
+summarizes the ordinary history. When the main route can summarize inside its
+cached request prefix more cheaply than the portable requests, and that live
+call succeeds, the offer is declined as `live-prefix-cheaper` and no
+`offer-used` event is recorded; if the live call fails, the portable request
+carries the offer (`src/domains/session/compaction/compact.ts`).
 Lifecycle events such as `batch-ready`, `notes-rejected`, `offer-declined` and
 `offer-used`, which records `originalInputTokens` and `substitutedInputTokens`,
 are journaled as `memory.observation_recorded` records in the session's

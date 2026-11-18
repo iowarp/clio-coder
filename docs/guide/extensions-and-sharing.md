@@ -1,6 +1,6 @@
 # Prompts, skills, and share archives
 
-CLIO Coder has two package systems. A plugin is an Agent Plugin, content only: prompts, skills, agents, playbooks, scripts, and reference files, installed with `clio-coder library install plugin:<name>` or from a path, and never running code inside CLIO Coder. An extension is code that runs in its own process (hooks, runtime tools, commands, workspaces, interviews), installed with `clio-coder library install extension:<name>` or `clio-coder extensions install <path>` after the operator reviews its capability envelope. Only plugins contribute resources. An extension may name the one plugin it serves with `plugin: <name>`. An extension command tool runs inside the main session's sandbox when admission contains it, as `bash` does, and a retry with `unsandboxed: true` raises the reviewed sandbox-escape ask; an api 2 runtime tool can declare `actionClass: write` for workspace writes. See [plugins.md](plugins.md) for the concept map and [harness-extensions.md](harness-extensions.md) for the extension contract.
+CLIO Coder has two package systems. A plugin is an Agent Plugin, content only: prompts, skills, agents, playbooks, scripts, and reference files, installed with `clio-coder library install plugin:<name>` or from a path. Installation and resource discovery do not execute plugin code; its scripts are ordinary executable content if a tool later runs them. An extension is code that runs in its own process (hooks, runtime tools, commands, workspaces, interviews), installed with `clio-coder library install extension:<name>` or `clio-coder extensions install <path>` after the operator reviews its capability envelope. Only plugins contribute resources. An extension may name the one plugin it serves with `plugin: <name>`. An extension command tool runs inside the main session's sandbox when admission contains it, as `bash` does, and a retry with `unsandboxed: true` raises the reviewed sandbox-escape ask; an api 2 runtime tool can declare `actionClass: write` for workspace writes. See [plugins.md](plugins.md) for the concept map and [harness-extensions.md](harness-extensions.md) for the extension contract.
 
 This page covers how prompt templates and skills are discovered, ranked, trusted, and invoked, and how share archives move user and project resources between machines.
 
@@ -245,6 +245,16 @@ must be non-empty, with each known token named once; anything else makes the
 template unavailable. On a cached `standard` or `frontier` route the full
 history is kept anyway, so scoping the policy to `[small, uncached]` lets those
 routes chain steps in one turn instead of stopping for a re-prompt after each.
+
+`turnPolicy` is a turn constraint, not a compiled prompt fragment. At turn
+start `routeScopedTurnConstraints` in
+[turn-constraints.ts](../../src/core/turn-constraints.ts) moves a miss into a
+dormant policy; the loop guard, continuation logic and step-checkpoint builder
+then consume the active form. The tier and `promptCaching` facts come from the
+resolved chat route, including a worker's own model facts when an extension
+hook sees it. A prompt-template `when`, a `variants` body, an extension hook's
+`event.model.tier`, and observation aging are separate consumers of the same
+resolved facts; selecting one does not change the others.
 
 On a route whose model tier is `small`, or that does not cache prompts
 ([model tiers](configuration-and-targets.md#model-tiers)), each step turn after
