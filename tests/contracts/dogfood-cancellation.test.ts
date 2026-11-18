@@ -1072,6 +1072,27 @@ it("headless shutdown retains its cancelled receipt and exit 143 without route a
 	}
 });
 
+it("a reply cut off by shutdown is the harness's stop and names no route", { timeout: 15_000 }, async () => {
+	const f = fixture("partial");
+	// A `run --timeout` deadline or a signal reaches the turn as the composition root disposing the loop.
+	f.loop.onEvent((event) => {
+		if (event.type === "text_delta") f.loop.dispose();
+	});
+	try {
+		await f.loop.submit("Start");
+		await f.loop.whenSettled();
+		const closing = f
+			.entries()
+			.map((entry) => (entry.kind === "message" && entry.role === "assistant" ? recordValue(entry.payload) : undefined))
+			.find((payload) => payload?.stopReason === "aborted");
+		ok(closing, JSON.stringify(f.entries()));
+		strictEqual(closing.failureRoute, undefined);
+		match(String(closing.errorMessage), /Clio Coder shut down/u);
+	} finally {
+		await f.close();
+	}
+});
+
 it("a looping stream is stopped and re-prompted once with a nudge, without resending the loop", {
 	timeout: 15_000,
 }, async () => {

@@ -51,6 +51,7 @@ export const FailureCause = vocabulary([
 	"parent_cancel",
 	"route_moved",
 	"repetition",
+	"shutdown",
 	"internal",
 ]);
 export type FailureCause = Static<typeof FailureCause>;

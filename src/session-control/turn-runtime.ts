@@ -119,6 +119,8 @@ import type { TurnPersistence } from "./turn-persistence.js";
 import type { AgentRuntime, ChatLoopTarget, PreInvocationStage, TurnRuntimeState } from "./turn-state.js";
 
 const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
+/** The reason a reply cut off by shutdown carries in place of the transport's abort text (bt-26). */
+const SHUTDOWN_STOP_REASON = "[Clio Coder] stopped the request because Clio Coder shut down before it finished.";
 type StreamAdmission = NonNullable<NonNullable<Parameters<typeof createEngineAgent>[0]>["beforeStreamRequest"]>;
 type AdmissionHold = { waitedOn?: "budget" };
 
@@ -918,7 +920,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 									? "operator_cancel"
 									: state.repetitionAbortReason !== null
 										? "repetition"
-										: undefined
+										: disposed
+											? "shutdown"
+											: undefined
 							: undefined,
 						interrupted,
 					),
@@ -1825,9 +1829,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					});
 					Object.assign(message, { callInvoked: failure.invoked });
 					// The harness, not the route, stopped this reply: it carries the harness's reason and names no route.
+					// A shutdown (a `run --timeout` deadline, a signal, quitting) aborts the stream through dispose.
 					const harnessStop =
 						terminal.stopReason === "aborted" && state.activeInterruptReason === null
-							? (state.repetitionAbortReason ?? state.toolProseAbortReason)
+							? (state.repetitionAbortReason ?? state.toolProseAbortReason ?? (disposed ? SHUTDOWN_STOP_REASON : null))
 							: null;
 					if (harnessStop !== null) Object.assign(message, { errorMessage: harnessStop, harnessStopped: true });
 					else
