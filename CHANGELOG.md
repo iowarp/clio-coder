@@ -132,6 +132,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- The citation check no longer reads a decimal label such as `line 3.37` as a line citation. (B-66)
 - A headless no-op line for a failed sequential or parallel dispatch names the failed run, with its outcome and detail, instead of the batch header. (H6)
 - `run --json` on a resumed session reports the active target and model in its session frame, not the creation-time route.
 - ACP session/load of a session written by a newer Clio returns -32602 `session_format` with the upgrade text (no path) instead of a generic load failure.
@@ -154,8 +155,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - Copilot route: host reminders that follow tool results, such as the result-contract reminder, now go in Copilot's immediate send before the next model request. They are never appended inside a tool result, which models read as an injection (D4).
 - Telemetry insights counts a fork's own verified outcomes after its own check, so the verified share moves with it. (c16-D, bt-fork-verified, drv-n3)
 - `telemetry why-stopped` names a dispatched worker's stop on the parent session, in text and in `--json` `workerStops`. (D3-b, drv-n2a)
-- A dispatched architect task that forbids writing files no longer carries the plan/artifact recipe, the artifact tool or an artifact-write permit; it returns its plan in the reply. (D-C residue, drv-n5)
-- Read-only inline python (`python -c`, heredoc) and jq no longer retire a standing check; a body that may write still reads as a change. (c17-a, verify3)
+- Inline python (`python -c`, heredoc) and jq no longer retire a standing check; python that shows a write-shaped call (a write-mode `open`, `write_text`, a remove, rename or subprocess call) still does. (c17-a)
 - A bash check's pass is filed on the receipt under its full command. (x8-2)
 - A check after a known write on an earlier line or after `;` is credited. (bt-46 S2)
 - A heredoc-written script that a later step may run is read as code. (bt-low1 heredoc limit)
@@ -184,7 +184,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - A JSON-encoded off-schema dispatch field (candidates, judge, members, review, routing, budget, per-task budget) is decoded when it is that field's valid value, instead of refused. (bt-dispatch-schema limit)
 - CLIO_CODER_PROVIDER_DUMP_PATH records each request Clio hands the Copilot runtime instead of `payloads: []`. (c2b-1)
 - A worker's result-contract reminder arrives as a host reminder after its tool results instead of inside them, so models no longer treat it as an injection. (D4, drv-cf3b)
-- A dispatched task that says not to write files runs read-only and no longer gets the architect plan contract. (D-C)
+- Dispatching an architect with a task that forbids writing any file is refused with `task_forbids_writes` before a worker starts, naming a read-only agent (scout, oracle, researcher) instead. (D-C)
 - The [Tasks] reminder no longer fires when the request's own words forbid writing files. (bt-22b)
 - The safety judge is told when an operator message spells a call's outside path, so a requested report file is no longer refused as shared-config. (cw-3)
 - The approval card for a judge-allowed sandbox escape names the word it needs instead of saying the operator never mentioned the sandbox. (bt-24 residual)
