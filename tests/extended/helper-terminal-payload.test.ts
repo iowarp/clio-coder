@@ -155,8 +155,8 @@ test("Codex sends only accepted tool_choice shapes and retries one rejected choi
 		// The tester call that died in #426: the worker sends its terminal handoff ahead of the synthesis lock.
 		// Codex now takes the named function choice over the full list, which keeps the cached prefix (#423).
 		["handoff", [codexHandoff, lock], ["write", name], { type: "function", name }],
-		// The worker synthesis lock strips the surface, so Codex sees no tools and no tool_choice.
-		["synthesis", [lock], undefined, undefined],
+		// The worker synthesis lock keeps the declarations under none on Codex: they lead the cached prefix.
+		["synthesis", [lock], ["write", name], "none"],
 		["required", [{ kind: "required", toolName: "write" }], ["write", name], { type: "function", name: "write" }],
 		["middleware text-only", [{ kind: "text-only" }], ["write", name], "none"],
 	];
@@ -171,7 +171,7 @@ test("Codex sends only accepted tool_choice shapes and retries one rejected choi
 	}
 	strictEqual(bodies.get("handoff")?.parallel_tool_calls, bodies.get("ordinary")?.parallel_tool_calls);
 	for (const [label, round, , choice] of rounds) {
-		// The record names the wire choice of each forced round; tools-removed sends none, recorded as null.
+		// The record names the wire choice of each forced round.
 		const records = applyToolRounds(
 			codex,
 			{ messages: [], tools: [tool("write"), tool(name)] },

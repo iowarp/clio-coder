@@ -448,6 +448,11 @@ test("a read-only worker seals its synthesis after a chain or direct call reache
 		);
 		strictEqual(lastAssistantText(run.events), SYNTHESIS, `${label}: the synthesis round still runs`);
 		strictEqual(run.requests, 2, `${label}: one synthesis round after the refusal`);
+		// The lock rides the request tail: the system prompt keeps the work round's bytes (Astra r1-4a).
+		const [work, locked] = run.bodies as Array<{ messages: Array<{ role: string; content: unknown }> }>;
+		deepStrictEqual(locked?.messages[0], work?.messages[0], `${label}: the locked round keeps the system prompt`);
+		ok(!JSON.stringify(locked?.messages[0]).includes("final synthesis"), `${label}: no directive in the prompt`);
+		ok(JSON.stringify(locked?.messages.at(-1)).includes("Current execution phase: final synthesis"), label);
 	}
 	const details = chainDetails(chained.events);
 	const children = details.chainResults as Array<{

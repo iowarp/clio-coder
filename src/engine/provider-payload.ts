@@ -254,7 +254,10 @@ function textOnlyRound(
  *
  * Anthropic keeps the tool_choice knob instead: its API rejects a history that
  * carries tool_use blocks unless tools are defined, and it honors none
- * properly. Google and Vertex take Pi's function-calling mode NONE.
+ * properly. Google and Vertex take Pi's function-calling mode NONE. The OpenAI
+ * Responses APIs honor none too and keep their declarations: Codex sends them
+ * as the first input item, so removing them made every locked round miss the
+ * whole cached prefix.
  */
 function toolsRemovedRound(
 	model: EngineModel,
@@ -263,7 +266,12 @@ function toolsRemovedRound(
 ): ControlledRequest | undefined {
 	const resolved = lockableContext(model, context);
 	if (resolved === undefined) return undefined;
-	if (model.api === "anthropic-messages" || model.api === "google-generative-ai" || model.api === "google-vertex") {
+	if (
+		model.api === "anthropic-messages" ||
+		model.api === "google-generative-ai" ||
+		model.api === "google-vertex" ||
+		isOpenAIResponsesApi(model.api)
+	) {
 		return { context, options: { ...options, toolChoice: "none" } };
 	}
 	return { context: { ...resolved, tools: [] }, options: withPayloadEdit(options, withoutToolSurface) };
