@@ -109,6 +109,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- `clio telemetry cost --run` and `calls --run` now break a main run's cost down by model and role from the session calls its settlement names, instead of printing an empty breakdown (bt-45 E).
+- A receipt whose only passing check was a host-observed bash command now reports verification basis `host-observed-command` instead of `validation-tool` (bt-45 F).
+- A dispatched worker's `context(scope="workspace")` now returns a snapshot of its own working directory instead of refusing for lack of a bound session (bt-45 G).
 - Worker and contained main-session approval cards now say that an approved shell call still runs inside the OS sandbox, where writes outside its writable roots fail; approval never widened the sandbox (bt-11 k).
 - why-stopped names the tool boundary when a harness stop (autonomy cap, cancel) lands after a call that asked for tools (bt-26 N2g).
 - A turn steered mid-run settles with every model call it opened and its cause, so a headless `--timeout` after a steer reports `shutdown` (bt-26 N2h).
