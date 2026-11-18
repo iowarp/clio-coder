@@ -12,7 +12,7 @@ import {
 	promptRefName,
 	resolveExtensionCommands,
 } from "./operator-commands.js";
-import type { OperatorReloadResult, OperatorRuntimeEntry } from "./operator-runtime.js";
+import { ClosedDuringReload, type OperatorReloadResult, type OperatorRuntimeEntry } from "./operator-runtime.js";
 import { extensionOwnerLabel } from "./owner-label.js";
 import type { ExtensionRuntimeSnapshot } from "./public-api.js";
 import type {
@@ -570,7 +570,8 @@ export class OperatorExtensionRuntimeV2 {
 					}
 				}),
 			);
-			if (this.closed || lifetime !== this.lifetime || !sameContext(key, this.context()))
+			if (this.closed) throw new ClosedDuringReload();
+			if (lifetime !== this.lifetime || !sameContext(key, this.context()))
 				throw new Error("session or workspace changed while staging runtimes");
 			const current = this.list();
 			if (
@@ -624,7 +625,8 @@ export class OperatorExtensionRuntimeV2 {
 					}
 				}),
 			);
-			if (this.closed || lifetime !== this.lifetime || !sameContext(key, this.context()))
+			if (this.closed) throw new ClosedDuringReload();
+			if (lifetime !== this.lifetime || !sameContext(key, this.context()))
 				throw new Error("session or workspace changed during runtime activation");
 			// Every session host (the terminal, a headless run, ACP) arms ticks and
 			// watches and opens the session; the one-shot `extensions run` answers
@@ -669,15 +671,17 @@ export class OperatorExtensionRuntimeV2 {
 				error instanceof SessionBusyWhileStaging
 					? // A turn began while the new generation staged. Nothing failed: the reload is queued and runs at the next idle boundary.
 						{ status: "deferred", generation: this.generation, message: error.message }
-					: {
-							status: this.generation === next ? "committed" : "rejected",
-							generation: this.generation,
-							message: `${this.generation === next ? "Extensions reloaded with errors: " : "Extension reload failed: "}${message(error)}`,
-						};
+					: error instanceof ClosedDuringReload
+						? { status: "rejected", generation: this.generation, message: error.message }
+						: {
+								status: this.generation === next ? "committed" : "rejected",
+								generation: this.generation,
+								message: `${this.generation === next ? "Extensions reloaded with errors: " : "Extension reload failed: "}${message(error)}`,
+							};
 		}
 		this.changed();
 		try {
-			this.options.onReload?.(result, reason);
+			if (!this.closed) this.options.onReload?.(result, reason);
 		} catch {
 			/* Reporting follows settlement. */
 		}

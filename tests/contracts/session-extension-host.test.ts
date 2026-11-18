@@ -275,6 +275,41 @@ test("a headless run's last turn_end reaches its runtime before the host dispose
 	deepStrictEqual(notices, []);
 });
 
+test("a headless run that ends while its startup reload stages reports no reload failure", async (t) => {
+	const env = await isolateClioEnv("clio-coder-session-host-");
+	const cwd = installRuntime(
+		env.dir,
+		"slow_probe",
+		{ events: ["session_open"] },
+		`export default async (api) => {
+	await new Promise((resolve) => setTimeout(resolve, 300));
+	api.on("session_open", () => {});
+};
+`,
+	);
+	const previous = process.cwd();
+	process.chdir(cwd);
+	const notices: string[] = [];
+	const host = startExtensionHost({
+		mode: "headless",
+		list: (root) => listInstalledExtensions(root, { all: true }),
+		runtimeHooks: createExtensionRuntimeHookBridge(),
+		bus: createTelemetryHub(),
+		chat: { isStreaming: () => false, turnPreparation: () => ({ phase: "idle", since: 0 }), onEvent: () => () => {} },
+		sessionId: () => "headless-session",
+		targetId: () => "target",
+		notify: (line) => notices.push(line),
+	});
+	t.after(() => {
+		process.chdir(previous);
+		env.restore();
+	});
+	await new Promise((resolve) => setTimeout(resolve, 100));
+	await host.dispose();
+	equal((await host.ready).message, "operator runtime is disposed");
+	deepStrictEqual(notices, []);
+});
+
 test("an ACP client that closes stdin leaves no runtime child and the process exits", async (t) => {
 	const env = await isolateClioEnv("clio-coder-session-host-");
 	const cwd = installRuntime(
