@@ -621,8 +621,9 @@ async function withNotRetried(deps: DispatchToolDeps, runs: readonly CompletedRu
 	await deps.dispatch.assignments?.flushWrites?.();
 	return runs.map((run) => {
 		if (run.receipt.exitCode === 0) return run;
-		const rootRunId = deps.dispatch.getRun(run.receipt.runId)?.lineage?.rootRunId ?? run.receipt.runId;
-		const assignment = deps.dispatch.assignments?.get(rootRunId);
+		// The attempt id resolves to its assignment. A hosted run's published lineage root names the main run, which
+		// keys no assignment, so headless `run` printed no not_retried line (bt-45 D3-c).
+		const assignment = deps.dispatch.assignments?.get(run.receipt.runId);
 		if (assignment?.status !== "failed") return run;
 		const detail = assignment.outcomeDetail;
 		if (detail) return { ...run, notRetried: detail.length > 240 ? `${detail.slice(0, 239)}…` : detail };
