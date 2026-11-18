@@ -29,7 +29,7 @@ export interface EvidenceDetailSnapshot {
 	/** Every axis, so an absent axis is stated rather than missing. */
 	readonly axes: Readonly<Record<TrustStatusAxis, string>>;
 	/** The result contract's stored verdict and how many reported validations failed; null when the record holds none. */
-	readonly quality: { readonly verdict: "pass" | "fail" | "unmeasured"; readonly failedValidations: number } | null;
+	readonly quality: { readonly verdict: "pass" | "fail" | "unmeasured"; readonly failedValidationCount: number } | null;
 }
 
 /** The snapshot fields, then the run evidence the text output renders and its one-line trust summary. */
@@ -70,6 +70,6 @@ function detailSnapshot(run: RunEvidence, now: () => number): EvidenceDetailSnap
 		quality:
 			run.quality === null
 				? null
-				: { verdict: run.quality.verdict, failedValidations: run.quality.failedValidations.length },
+				: { verdict: run.quality.verdict, failedValidationCount: run.quality.failedValidations.length },
 	};
 }
