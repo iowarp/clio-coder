@@ -524,7 +524,20 @@ function runValidationStatus(facts: RunTrustFacts): ValidationGroundingStatus {
 			return attributed("unknown", source, { kind: "validator", id: "host-verification-baseline-failed" }, artifacts);
 		return attributed("failed", source, hostAuthority, artifacts);
 	}
-	if (host?.status === "verified") return attributed("validated", source, hostAuthority, artifacts);
+	if (host?.status === "verified") {
+		// Only checks executed for this run validate it. A pass reused from another run's memo is not authenticated
+		// evidence, a skipped check judged nothing, and a record that predates the counts cannot say which it was.
+		const answered =
+			host.executed === undefined || host.reused === undefined || host.skipped === undefined
+				? "host-verification-unrecorded"
+				: host.reused > 0
+					? "host-verification-reused"
+					: host.skipped > 0
+						? "host-verification-skipped"
+						: null;
+		if (answered !== null) return attributed("unknown", source, { kind: "validator", id: answered }, artifacts);
+		return attributed("validated", source, hostAuthority, artifacts);
+	}
 	// A batch member the failure was charged away from has no validator verdict of its own.
 	if (host?.status === "not_implicated") return attributed("unknown", source, hostAuthority, artifacts);
 	const commands =

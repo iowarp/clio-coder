@@ -976,7 +976,8 @@ async function runResolvedCheck(
 				exitCode: 0,
 				durationMs: 0,
 				memo: false,
-				outputTail: "host verification: the task changed no file under this lint or format check; nothing to check",
+				notRun: "nothing-changed",
+				outputTail: "not run: nothing changed under it",
 			},
 			outputExcerpt: "",
 		};
@@ -992,7 +993,10 @@ async function runResolvedCheck(
 	const judgmentKey = checkDedupeKey(resolvedCheck);
 	const tree = checkedTree(resolvedCheck.cwd) ?? undefined;
 	const fingerprint = tree?.fingerprint ?? null;
-	const key = fingerprint === null ? null : memoKey(command, judgmentKey, fingerprint, input.env);
+	// A judged verdict is never memoized: the memo is not authenticated, and a stored pass would stand in for a
+	// judgement against a reference or baseline the fingerprint does not cover.
+	const memoable = resolvedCheck.kind !== "numeric-compare" && resolvedCheck.kind !== "perf-budget";
+	const key = fingerprint === null || !memoable ? null : memoKey(command, judgmentKey, fingerprint, input.env);
 	const memoHit = (): { check: RunHostVerificationCheck; outputExcerpt: string } | undefined => {
 		const hit =
 			key === null

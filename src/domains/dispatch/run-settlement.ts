@@ -337,6 +337,9 @@ export function settleFinishedRun(
 						failed: host.checks.filter((check) => check.exitCode !== 0).length,
 						failedOnBase: host.checks.filter((check) => check.exitCode !== 0 && check.baseComparison?.status === "failed")
 							.length,
+						executed: host.checks.filter((check) => !check.memo && check.notRun === undefined).length,
+						reused: host.checks.filter((check) => check.memo).length,
+						skipped: host.checks.filter((check) => !check.memo && check.notRun !== undefined).length,
 					}
 				: null,
 			contextProvenance: runContextProvenance(receipt),

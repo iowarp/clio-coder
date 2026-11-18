@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { readRunResultFacts, runEvidenceOf } from "../../src/domains/dispatch/run-result-facts.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+import { adaptRunTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import { readRunRecord, telemetryRunDirectory } from "../../src/domains/telemetry/index.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
@@ -497,6 +498,63 @@ test("a judged host check seals its bounded report and the tree it judged in the
 				{ key: "grid", passed: true, absolute: 0, relative: 0, ulp: 0 },
 			],
 		});
+	} finally {
+		rmSync(stateDir, { recursive: true, force: true });
+	}
+});
+
+const PRODUCER = { state: "verified", by: "producer" } as const;
+
+test("only host checks executed for the run validate it; reused, skipped and unrecorded passes leave it unknown", async () => {
+	const stateDir = mkdtempSync(join(tmpdir(), "d3-host-answered-"));
+	try {
+		const check = {
+			check: "unit",
+			argv: ["npm", "test"],
+			cwd: "/r",
+			exitCode: 0,
+			durationMs: 1,
+			memo: false,
+			outputTail: "",
+		};
+		const cases = [
+			["executed", [check], "validated:host-verification", [1, 0, 0]],
+			[
+				"reused",
+				[check, { ...check, memo: true, evidenceRunId: "earlier" }],
+				"unknown:host-verification-reused",
+				[1, 1, 0],
+			],
+			[
+				"skipped",
+				[check, { ...check, notRun: "nothing-changed" as const }],
+				"unknown:host-verification-skipped",
+				[1, 0, 1],
+			],
+		] as const;
+		for (const [runId, checks, validation, counts] of cases) {
+			const draft = fixtureReceiptDraft(fixtureEnvelope(runId));
+			draft.hostVerification = { status: "verified", checks: [...checks] };
+			await writeSettledRun(stateDir, draft);
+			const sealed = readRunRecord(stateDir, runId)?.settled;
+			const host = sealed?.hostVerification;
+			assert.deepEqual([host?.executed, host?.reused, host?.skipped], counts, runId);
+			assert.ok(sealed);
+			const entry = adaptRunTrustStatus({ ...sealed, runId, digest: null }, PRODUCER).validationGrounding;
+			assert.equal(`${entry.state}:${"authority" in entry ? entry.authority.id : ""}`, validation, runId);
+			if (runId !== "executed") continue;
+			// A run settled before the counts existed cannot say whether its pass was executed.
+			assert.ok(host);
+			const legacy = { ...host };
+			delete legacy.executed;
+			delete legacy.reused;
+			delete legacy.skipped;
+			const old = adaptRunTrustStatus(
+				{ ...sealed, hostVerification: legacy, runId, digest: null },
+				PRODUCER,
+			).validationGrounding;
+			assert.equal(`${old.state}:${"authority" in old ? old.authority.id : ""}`, "unknown:host-verification-unrecorded");
+		}
 	} finally {
 		rmSync(stateDir, { recursive: true, force: true });
 	}

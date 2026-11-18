@@ -4,6 +4,7 @@ import type { RunHostVerificationCheck } from "./types.js";
 export function hostCheckNotRunNote(notRun: NonNullable<RunHostVerificationCheck["notRun"]>): string {
 	if (notRun === "refused") return "refused before launch";
 	if (notRun === "unconfigured") return "the check is not configured";
+	if (notRun === "nothing-changed") return "nothing changed under it";
 	return "its process could not start";
 }
 

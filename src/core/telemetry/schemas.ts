@@ -949,6 +949,13 @@ export const RunSettledSchema = Type.Object(
 					failed: count,
 					/** Failing checks that also failed on the task base, so they cannot show the change caused them. */
 					failedOnBase: count,
+					/**
+					 * How the checks were answered: run for this run, a pass reused from another run's memo, or not run.
+					 * Only a verdict every check of which executed validates the run. Absent on runs settled before them.
+					 */
+					executed: Type.Optional(count),
+					reused: Type.Optional(count),
+					skipped: Type.Optional(count),
 				},
 				closed,
 			),
@@ -1081,7 +1088,7 @@ export const RunResultObjectSchema = Type.Object(
 								outputTail: Type.String(),
 								evidenceRunId: nullable(Type.String()),
 								/** Why the check ran nothing (refused, unconfigured, or its executable never started); absent when it ran. */
-								notRun: Type.Optional(vocabulary(["refused", "unconfigured", "spawn-failed"])),
+								notRun: Type.Optional(vocabulary(["refused", "unconfigured", "spawn-failed", "nothing-changed"])),
 								/** The same check replayed on the task base; null when it was not compared. */
 								baseComparison: nullable(
 									Type.Object(
