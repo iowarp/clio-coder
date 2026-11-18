@@ -367,6 +367,7 @@ import {
 	nodeComponentRemedyEvent,
 	type RetryDecision,
 } from "./failure-classification.js";
+import { TOOL_GUARD_REASON_CODE } from "./failure-headline.js";
 import {
 	cleanupFleetChangeReturn,
 	type FleetChangeImport,
@@ -1119,7 +1120,10 @@ function foldAssistantCall(
 	return message.stopReason === "error" ? readStringOrNull(message.errorMessage) : null;
 }
 
-/** Counts one finished tool call's safety decision, and records it as a blocked attempt when it was refused. */
+/**
+ * Counts one finished tool call's safety decision, a tool guard's block apart from a safety refusal, and records it as
+ * a blocked attempt when it was refused.
+ */
 function foldToolDecision(
 	payload: {
 		decision?: unknown;
@@ -1131,10 +1135,11 @@ function foldToolDecision(
 		reason?: string;
 	},
 	tool: string,
-	counts: { allowed: number; blocked: number; permissionRequested: number },
+	counts: { allowed: number; blocked: number; guardBlocked: number; permissionRequested: number },
 	blockedAttempts: SafetyBlockedAttempt[],
 ): void {
 	if (payload.decision === "allowed") counts.allowed += 1;
+	else if (payload.decision === "blocked" && payload.reasonCode === TOOL_GUARD_REASON_CODE) counts.guardBlocked += 1;
 	else if (payload.decision === "blocked") counts.blocked += 1;
 	else if (payload.decision === "permission_requested") counts.permissionRequested += 1;
 	if (payload.outcome !== "blocked" && payload.decision !== "blocked") return;
@@ -6913,7 +6918,7 @@ export function createDispatchBundle(
 		timing.workerSpawnedAt = new Date(now()).toISOString();
 
 		const tokenMeter: RunTokenMeter = {};
-		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
+		const safetyDecisionCounts = { allowed: 0, blocked: 0, guardBlocked: 0, permissionRequested: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
 		const toolStats = new Map<string, ToolCallStat>();
 		const inFlightTools = new Map<string, number>();
@@ -7860,7 +7865,7 @@ export function createDispatchBundle(
 			}
 		})();
 		const tokenMeter: RunTokenMeter = {};
-		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
+		const safetyDecisionCounts = { allowed: 0, blocked: 0, guardBlocked: 0, permissionRequested: 0 };
 		const escalationCounts = { requested: 0, approved: 0, denied: 0, timedOut: 0 };
 		let escalationDeniedBy: "operator" | "main agent" | "safety judge" | undefined;
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
@@ -8564,6 +8569,8 @@ export function createDispatchBundle(
 							outcome: child.admission.outcome,
 						});
 						if (child.admission.decision === "allowed") safetyDecisionCounts.allowed += 1;
+						else if (child.admission.decision === "blocked" && child.admission.reasonCode === TOOL_GUARD_REASON_CODE)
+							safetyDecisionCounts.guardBlocked += 1;
 						else if (child.admission.decision === "blocked") safetyDecisionCounts.blocked += 1;
 						else safetyDecisionCounts.permissionRequested += 1;
 						if (child.admission.outcome === "blocked") {

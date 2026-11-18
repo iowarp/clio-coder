@@ -267,7 +267,7 @@ interface HeadlessMainAgentRunStats {
 	/** Journal attempts already counted, so a call two messages carry counts once. */
 	seenAttempts: Set<string>;
 	/** The decision axis, counted the way a worker's settled run counts it. */
-	decisions: RunResultSafetySummary["decisions"];
+	decisions: RunResultSafetySummary["decisions"] & { guardBlocked: number };
 	/** Every call whose outcome was blocked, in a worker's settled shape, up to `BLOCKED_ATTEMPTS_LIMIT`. */
 	blockedAttempts: SafetyBlockedAttempt[];
 	/** Blocked attempts past `BLOCKED_ATTEMPTS_LIMIT`, counted but not listed. */
@@ -610,10 +610,11 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	// registry's `deniedPark` flag routes it there. The flag, not the reason
 	// text, is the signal: the loop guard replaces the reason of a repeated
 	// denied call with its own guidance. `decisions.blocked` keeps meaning a
-	// hard block by a rule or a guard.
+	// hard block by a rule, and a tool guard's block counts as `guardBlocked`.
 	const deniedAsk = decision === "blocked" && detail.deniedPark === true;
 	if (decision === "allowed") stats.decisions.allowed += 1;
 	else if (decision === "permission_requested" || deniedAsk) stats.decisions.permissionRequested += 1;
+	else if (decision === "blocked" && detail.reasonCode === "guard_block") stats.decisions.guardBlocked += 1;
 	else if (decision === "blocked") stats.decisions.blocked += 1;
 	const actionClass = (event as { actionClass?: unknown }).actionClass;
 	if (outcome === "blocked" || decision === "blocked") {
@@ -1040,7 +1041,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		skillActivations: [],
 		calls: [],
 		seenAttempts: new Set(),
-		decisions: { allowed: 0, blocked: 0, permissionRequested: 0 },
+		decisions: { allowed: 0, blocked: 0, guardBlocked: 0, permissionRequested: 0 },
 		blockedAttempts: [],
 		blockedAttemptsTruncated: 0,
 		mutatingSucceeded: 0,
