@@ -261,6 +261,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** A sealed reference or baseline digest: a sha256, null for a file absent at admission, or absent on older plans. */
+function isOptionalDigest(value: unknown): boolean {
+	return value === undefined || value === null || (typeof value === "string" && /^[0-9a-f]{64}$/u.test(value));
+}
+
 function str(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
@@ -679,8 +684,11 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 						(isRecord(check.reproduce) &&
 							isRecord(check.reproduce.spec) &&
 							typeof check.reproduce.declaredCwd === "string")) &&
-					(check.numeric === undefined || (isRecord(check.numeric) && typeof check.numeric.reference === "string")) &&
-					(check.perf === undefined || isRecord(check.perf)),
+					(check.numeric === undefined ||
+						(isRecord(check.numeric) &&
+							typeof check.numeric.reference === "string" &&
+							isOptionalDigest(check.numeric.referenceSha256))) &&
+					(check.perf === undefined || (isRecord(check.perf) && isOptionalDigest(check.perf.baselineSha256))),
 			))
 	)
 		return false;

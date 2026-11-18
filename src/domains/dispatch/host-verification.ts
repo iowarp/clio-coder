@@ -30,7 +30,13 @@ import { clioStateDir } from "../../core/xdg.js";
 import { taskWorktreeManifestsChanged } from "../../tools/task-worktree.js";
 import { renderReproduceReport } from "../../tools/verify/reproduce.js";
 import { runReproduce } from "../../tools/verify/reproduce-run.js";
-import { JUDGED_CHECK_MAX_OUTPUT_BYTES, judgeNumericTexts, judgePerfTexts } from "../../tools/verify/scripts.js";
+import {
+	JUDGED_CHECK_MAX_OUTPUT_BYTES,
+	judgedFileSha256,
+	judgeNumericTexts,
+	judgePerfTexts,
+	readJudgedFile,
+} from "../../tools/verify/scripts.js";
 import { PLAYBOOK_COMMAND_BASE_ENV, type PlaybookCommand } from "../agents/playbook-commands.js";
 import { redactCommandOutputSecrets } from "../evidence/redact.js";
 import { effectiveScratchRoots } from "../safety/scratch-roots.js";
@@ -795,12 +801,21 @@ export function hostVerificationRejection(
 	};
 }
 
-function readSealedFile(absolutePath: string): string | undefined {
-	try {
-		return readFileSync(absolutePath, "utf8");
-	} catch {
-		return undefined;
-	}
+/**
+ * A judged check whose admission sealed its reference or baseline digest fails when the file it reads now differs:
+ * the task, or the check's own command, rewrote what the verdict is judged against. A digest that is absent (a
+ * request sealed before digests existed) checks nothing.
+ */
+function sealedFileDrift(
+	label: string,
+	path: string,
+	sealed: string | null | undefined,
+	text: string | undefined,
+): string | undefined {
+	if (sealed === undefined) return undefined;
+	const now = judgedFileSha256(text);
+	if (now === sealed) return undefined;
+	return `${label} '${path}' changed since admission (${sealed ?? "absent"}→${now ?? "absent"})`;
 }
 
 /**
@@ -819,7 +834,14 @@ function judgeResolvedCheck(
 ): { exitCode: number; report?: RunHostVerificationCheck["report"]; outputTail?: string } {
 	if (resolvedCheck.kind === undefined || resolvedCheck.kind === "command" || exitCode !== 0) return { exitCode };
 	if (resolvedCheck.kind === "numeric-compare" && resolvedCheck.numeric !== undefined) {
-		const referenceText = readSealedFile(resolvedCheck.numeric.reference);
+		const referenceText = readJudgedFile(resolvedCheck.numeric.reference);
+		const drift = sealedFileDrift(
+			"reference",
+			resolvedCheck.numeric.reference,
+			resolvedCheck.numeric.referenceSha256,
+			referenceText,
+		);
+		if (drift !== undefined) return { exitCode: 1, outputTail: `numeric-compare: ${drift}` };
 		if (referenceText === undefined) {
 			return { exitCode: 1, outputTail: `numeric-compare: reference '${resolvedCheck.numeric.reference}' cannot be read` };
 		}
@@ -835,12 +857,12 @@ function judgeResolvedCheck(
 	}
 	if (resolvedCheck.kind === "perf-budget" && resolvedCheck.perf !== undefined) {
 		const baselinePath = resolvedCheck.perf.baseline;
-		const report = judgePerfTexts(
-			durationMs,
-			resolvedCheck.perf,
-			baselinePath === undefined ? undefined : readSealedFile(baselinePath),
-			`baseline '${baselinePath ?? ""}'`,
-		);
+		const baselineText = baselinePath === undefined ? undefined : readJudgedFile(baselinePath);
+		if (baselinePath !== undefined) {
+			const drift = sealedFileDrift("baseline", baselinePath, resolvedCheck.perf.baselineSha256, baselineText);
+			if (drift !== undefined) return { exitCode: 1, outputTail: `perf-budget: ${drift}` };
+		}
+		const report = judgePerfTexts(durationMs, resolvedCheck.perf, baselineText, `baseline '${baselinePath ?? ""}'`);
 		if (report instanceof Error) return { exitCode: 1, outputTail: `perf-budget: ${report.message}` };
 		return { exitCode: report.passed ? 0 : 1, report, outputTail: outputTail(report.summary) };
 	}
@@ -1149,7 +1171,8 @@ function checkDedupeKey(resolvedCheck: ResolvedCheck): string {
 					? undefined
 					: {
 							reference: numeric.reference,
-							referenceDigest: sha256(JSON.stringify(readSealedFile(numeric.reference) ?? null)),
+							referenceDigest: sha256(JSON.stringify(readJudgedFile(numeric.reference) ?? null)),
+							sealedReference: numeric.referenceSha256,
 							tolerance: numeric.tolerance,
 						},
 			perf:
@@ -1165,7 +1188,8 @@ function checkDedupeKey(resolvedCheck: ResolvedCheck): string {
 										},
 							baseline: perf.baseline,
 							baselineDigest:
-								perf.baseline === undefined ? undefined : sha256(JSON.stringify(readSealedFile(perf.baseline) ?? null)),
+								perf.baseline === undefined ? undefined : sha256(JSON.stringify(readJudgedFile(perf.baseline) ?? null)),
+							sealedBaseline: perf.baselineSha256,
 							tolerance: perf.tolerance,
 						},
 		}),

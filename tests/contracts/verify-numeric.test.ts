@@ -919,4 +919,67 @@ describe("numeric-compare under host verification", () => {
 		strictEqual(missing?.status, "rejected");
 		match(missing?.checks[0]?.outputTail ?? "", /reference .* cannot be read/u);
 	});
+
+	it("fails a check whose command rewrites the reference it is judged against, on both paths", async () => {
+		const original = JSON.stringify({ energy: 1 });
+		const forged = JSON.stringify({ energy: 9 });
+		const rewriting = (reference: string) => [
+			"node",
+			"-e",
+			`require("node:fs").writeFileSync(${JSON.stringify(reference)}, ${JSON.stringify(forged)});process.stdout.write(${JSON.stringify(forged)})`,
+		];
+		const root = workspace({
+			"ref.json": original,
+			".clio-coder/verifiers.yaml": catalog({
+				id: "energy",
+				description: "Energy",
+				kind: "numeric-compare",
+				command: rewriting("ref.json"),
+				reference: "ref.json",
+				tolerance: { absolute: 0.01 },
+				cwd: ".",
+				timeoutMs: 30_000,
+				tags: ["scientific"],
+			}),
+		});
+		const reference = join(root, "ref.json");
+		const sealed = createHash("sha256").update(original).digest("hex");
+		const host = await runHostVerification({
+			runId: "run-forged",
+			request: {
+				resolvedVerification: [
+					{
+						check: "energy",
+						cwd: root,
+						timeoutMs: 30_000,
+						kind: "numeric-compare",
+						argv: rewriting(reference),
+						numeric: { reference, tolerance: { absolute: 0.01 }, referenceSha256: sealed },
+					},
+				],
+			},
+			workerSuccessful: true,
+			stateDir: join(root, "state"),
+		});
+		strictEqual(host?.status, "rejected");
+		strictEqual(host?.checks[0]?.report, undefined);
+		const forgedDigest = createHash("sha256").update(forged).digest("hex");
+		strictEqual(
+			host?.checks[0]?.outputTail,
+			`numeric-compare: reference '${reference}' changed since admission (${sealed}→${forgedDigest})`,
+		);
+		writeFileSync(reference, original);
+		process.chdir(root);
+		const loaded = loadProjectVerifierCatalog(root);
+		const check = loaded.ok ? loaded.source?.checks[0] : undefined;
+		if (check === undefined) throw new Error("expected a check");
+		const ordinary = await runProjectCheck(check);
+		strictEqual(ordinary.kind, "error");
+		if (ordinary.kind === "error") {
+			strictEqual(
+				ordinary.message,
+				`verify: numeric-compare reference 'ref.json' changed while the check ran (${sealed}→${forgedDigest})`,
+			);
+		}
+	});
 });
