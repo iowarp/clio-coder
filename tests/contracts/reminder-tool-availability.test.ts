@@ -19,7 +19,7 @@ const surface = (...tools: string[]): string => [ToolNames.Gateway, ...tools].jo
 const ENUMERATED = "Do this:\n1) read the config\n2) fix the parser\n3) run the tests\n4) report";
 
 describe("reminders gate on the turn's callable tools", () => {
-	it("task-board reminder is absent without tasks and gateway, present with both", () => {
+	it("task-board reminder is absent without tasks and gateway or under a step policy, present with both", () => {
 		const reminder = createTaskBoardReminderRegistration();
 		const turn = (names: string): MiddlewareHookInput => ({
 			hook: "turn_start",
@@ -30,6 +30,9 @@ describe("reminders gate on the turn's callable tools", () => {
 		deepStrictEqual(reminder.evaluate(turn(SCOPED)), []);
 		// The text also teaches gateway op=chain.
 		deepStrictEqual(reminder.evaluate(turn(ToolNames.Tasks)), []);
+		// A step template's turn runs one step, not the enumerated list (bt-12 #4).
+		const step = turn(surface(ToolNames.Tasks));
+		deepStrictEqual(reminder.evaluate({ ...step, metadata: { ...step.metadata, turnStepPolicy: true } }), []);
 		// The skipped turn did not spend the session's one reminder.
 		const effects = reminder.evaluate(turn(surface(ToolNames.Tasks)));
 		strictEqual(effects.length, 1);

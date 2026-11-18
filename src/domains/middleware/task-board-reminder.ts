@@ -82,6 +82,9 @@ export function createTaskBoardReminderRegistration(): MiddlewareHookRegistratio
 			}
 			if (spentForActiveSession) return NO_EFFECTS;
 
+			// A step template's turn runs one step per turn, so its enumerated steps are the pipeline's,
+			// not a task list for this turn; the shot is kept for a later turn.
+			if (input.metadata?.turnStepPolicy === true) return NO_EFFECTS;
 			const steps = countEnumeratedSteps(input.text);
 			if (steps < 3) return NO_EFFECTS;
 			// The reminder names tasks and gateway op=chain; a turn that cannot call

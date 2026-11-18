@@ -382,6 +382,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				queued: false,
 				requestContinuation,
 				turnMode: state.currentTurnConstraints?.mode ?? "",
+				// The route-scoped step policy this turn runs under, if any: such a turn runs one step, not a task list.
+				turnStepPolicy: state.currentTurnConstraints?.turnPolicy !== undefined,
 				activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools).join(","),
 				activeCapabilityNames: activeCapabilityNames(agentRuntime),
 				// First-substantive-turn signal for once-per-session reminders:
