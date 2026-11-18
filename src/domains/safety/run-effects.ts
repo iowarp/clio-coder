@@ -318,7 +318,7 @@ const GIT_CONFIG_BOOLEAN = /^(?:true|false|yes|no|on|off|1|0|)$/iu;
  * (x1-3). Read once per run; planting such config later is a mutation of its own. No match, no git and no `cwd`
  * all answer false, because then no git command can run a helper there. Any other failure answers true.
  */
-export function gitRunsConfiguredHelpers(cwd: string, env: NodeJS.ProcessEnv = process.env): boolean {
+function gitRunsConfiguredHelpers(cwd: string, env: NodeJS.ProcessEnv = process.env): boolean {
 	let listing: string;
 	try {
 		listing = execFileSync("git", ["config", "--get-regexp", GIT_HELPER_KEYS], {
