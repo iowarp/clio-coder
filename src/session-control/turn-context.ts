@@ -2416,7 +2416,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		deps.emitNotice(
 			renderCompactionSummaryLine({
-				messagesSummarized: result.messagesSummarized,
+				messagesSummarized: result.conversationMessagesSummarized,
 				summaryChars: result.summary.length,
 				tokensBefore,
 				tokensAfter,

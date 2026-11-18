@@ -5,6 +5,7 @@ import { it } from "node:test";
 import { renderTokenSources } from "../../src/cli/telemetry-tokens.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
+import { encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
@@ -22,6 +23,7 @@ import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { goldenSessionJournal, telemetryCall } from "../harness/telemetry-view.js";
 
 const SESSION_ID = "token-sources-session";
 
@@ -234,6 +236,7 @@ it("the default tokens table counts unmeasured calls and prints a span with no m
 		output: calls > 0 ? 5 : 0,
 		coldReasons: [],
 		rows: [],
+		roles: [],
 	});
 	const text = renderTokenSources(
 		{
@@ -241,7 +244,7 @@ it("the default tokens table counts unmeasured calls and prints a span with no m
 			sessionId: "s",
 			basis: { usage: "ledger", systemSide: "residual", split: "estimated", note: "n", freshIsCacheWriteCalls: 0 },
 			turns: [turn(1, 0, 1, 0), turn(2, 2, 1, 40)],
-			totals: { calls: 2, unmeasuredCalls: 2, input: { ...input, fresh: 40, total: 40 }, output: 5, rows: [] },
+			totals: { calls: 2, unmeasuredCalls: 2, input: { ...input, fresh: 40, total: 40 }, output: 5, rows: [], roles: [] },
 		},
 		false,
 	);
@@ -289,6 +292,81 @@ it("names the copilot-sdk calls whose fresh input is their cache write (bt-12 #1
 			),
 			renderTokenSources(report, false),
 		);
+	} finally {
+		env.restore();
+	}
+});
+
+it("charges compaction and memory calls to the turn they ran in, by role, inside its totals (bt-12 #10)", async () => {
+	const env = await isolateClioEnv("clio-coder-token-sources-side-");
+	try {
+		const sessionId = "token-sources-side";
+		const at = (second: number) => `2026-01-01T00:00:${String(second).padStart(2, "0")}.000Z`;
+		const memory = telemetryCall(sessionId, { role: "memory", at: at(3), usage: { input: 900, output: 50 } });
+		// The checkpoint's calls run before the prompt they make room for is written, so by time alone they would land
+		// in turn 1; the ledger's call ids put them in turn 2.
+		const compaction = [
+			telemetryCall(sessionId, { role: "compaction", at: at(4), usage: { input: 3, cacheWrite: 13874, output: 1351 } }),
+			telemetryCall(sessionId, { role: "compaction", at: at(5), usage: { input: 3, cacheWrite: 1201, output: 424 } }),
+		];
+		const callIds = compaction.map((records) => (records[0]?.k === "call.started" ? records[0].data.callId : ""));
+		const header = scanTelemetrySegment(goldenSessionJournal(sessionId)).rows.find((row) => row.kind === "header");
+		ok(header?.kind === "header");
+		const journalDirectory = telemetrySessionDirectory(clioStateDir(), sessionId);
+		mkdirSync(journalDirectory, { recursive: true });
+		writeFileSync(
+			join(journalDirectory, "journal.jsonl"),
+			Buffer.concat([header.header, ...memory, ...compaction.flat()].map(encodeTelemetryLine)),
+		);
+		const assistant = (turnId: string, second: number) => ({
+			kind: "message",
+			turnId,
+			parentTurnId: null,
+			timestamp: at(second),
+			role: "assistant",
+			payload: { role: "assistant", content: [{ type: "text", text: "ok" }], usage: { input: 400, output: 20 } },
+		});
+		const user = (turnId: string, second: number) => ({
+			kind: "message",
+			turnId,
+			parentTurnId: null,
+			timestamp: at(second),
+			role: "user",
+			payload: { text: "go" },
+		});
+		const lines = [
+			{ type: "session", version: 6, id: sessionId, timestamp: at(0), cwd: env.dir },
+			user("u1", 1),
+			assistant("a1", 2),
+			{
+				kind: "compactionSummary",
+				callIds,
+				turnId: "c1",
+				parentTurnId: "a1",
+				timestamp: at(6),
+				summary: "earlier work",
+				tokensBefore: 30000,
+				firstKeptTurnId: "a1",
+			},
+			user("u2", 7),
+			assistant("a2", 8),
+		];
+		const directory = join(clioStateDir(), "sessions", "token-sources-repo", sessionId);
+		mkdirSync(directory, { recursive: true });
+		writeFileSync(join(directory, "current.jsonl"), `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+
+		const report = loadTokenSourcesReport(clioStateDir(), sessionId);
+		ok(report, "the session ledger loads");
+		const [first, second] = report.turns;
+		const roles = (turn: typeof first) => turn?.roles.map((role) => `${role.role}:${role.calls}:${role.output}`);
+		strictEqual(roles(first)?.join(","), "main:1:20,memory:1:50", JSON.stringify(first));
+		strictEqual(roles(second)?.join(","), "main:1:20,compaction:2:1775", JSON.stringify(second));
+		strictEqual(second?.input.total, 400 + 3 + 13874 + 3 + 1201);
+		strictEqual(second?.rows.find((row) => row.source === "role:compaction")?.label, "compaction calls");
+		strictEqual(report.totals.calls, 5);
+		strictEqual(report.totals.output, 20 + 50 + 20 + 1775);
+		ok(renderTokenSources(report, false).includes("3 (compaction 2)"), renderTokenSources(report, false));
+		ok(renderTokenSources(report, true).includes("output 1795 (compaction 1775)"), renderTokenSources(report, true));
 	} finally {
 		env.restore();
 	}

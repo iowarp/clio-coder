@@ -127,6 +127,9 @@ test("the session report states the cached share of the prompt, for the session 
 	const card = (style: "standard" | "report") => renderExitSummary(snapshot, style, 120, false).join("\n");
 	match(card("report"), /^Cache: 45\.0% of prompt tokens read from cache · last turn 90\.0%$/mu);
 	strictEqual(card("standard").includes("read from cache"), false);
+	// `in` is the whole prompt as the turn receipt says it, cached reads included, not the uncached 1,100 (bt-tokens).
+	ok(snapshot.spend.kind === "ready");
+	match(snapshot.spend.breakdown, /^in 2,000 · out 20 · cache read 900\b/u);
 	collector.dispose();
 });
 

@@ -281,6 +281,8 @@ export interface CompactResult {
 	tokensBefore: number;
 	/** Number of newly compacted entries (excluding a carried-forward prior checkpoint and retained suffix). */
 	messagesSummarized: number;
+	/** The same span counted in provider messages, the unit a context snapshot's `messageRange` counts. */
+	conversationMessagesSummarized: number;
 	/** True when the cut split a turn (caller may want to show a banner). */
 	isSplitTurn: boolean;
 }
@@ -323,6 +325,19 @@ function hasConversation(slice: ReadonlyArray<SessionEntry>): boolean {
 			(entry.kind === "bashExecution" && entry.excludeFromContext !== true) ||
 			entry.kind === "branchSummary",
 	);
+}
+
+/**
+ * Provider messages a slice replays as, the unit a context snapshot's `messageRange` counts: a tool call rides in its
+ * assistant message, and bookkeeping rows send nothing.
+ */
+function conversationMessages(slice: ReadonlyArray<SessionEntry>): number {
+	return slice.filter(
+		(entry) =>
+			(entry.kind === "message" && entry.role !== "checkpoint" && entry.role !== "tool_call") ||
+			(entry.kind === "bashExecution" && entry.excludeFromContext !== true) ||
+			entry.kind === "branchSummary",
+	).length;
 }
 
 /** Floor for the per-message cap applied when a span only fits with user and assistant text clipped. */
@@ -1272,6 +1287,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 				firstKeptTurnId: null,
 				tokensBefore: calculateContextTokens(input.entries, getLastAssistantUsage(input.entries), input.continuityNote),
 				messagesSummarized: input.entries.filter((entry) => entry.kind === "message").length,
+				conversationMessagesSummarized: conversationMessages(input.entries),
 				isSplitTurn: false,
 				...(nativeUsage ? { usage: nativeUsage } : {}),
 				...(skillContext ? { skillContext } : {}),
@@ -1388,6 +1404,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		firstKeptTurnId: firstKept?.turnId ?? null,
 		tokensBefore,
 		messagesSummarized: 0,
+		conversationMessagesSummarized: 0,
 		isSplitTurn: cut.isSplitTurn,
 		emptyReason,
 	});
@@ -1689,6 +1706,10 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		firstKeptTurnId: firstKept?.turnId ?? null,
 		tokensBefore,
 		messagesSummarized: pre.length + turnPrefix.length + (summarizePriorSuffix ? priorSuffix.length : 0),
+		conversationMessagesSummarized:
+			conversationMessages(pre) +
+			conversationMessages(turnPrefix) +
+			(summarizePriorSuffix ? conversationMessages(priorSuffix) : 0),
 		isSplitTurn: cut.isSplitTurn,
 		summaryDigest,
 		...(memoryOffer !== null ? { memoryReceipt: (memoryOffer as MemoryCompactionOffer).receipt } : {}),
