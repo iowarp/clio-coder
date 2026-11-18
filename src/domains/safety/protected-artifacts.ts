@@ -1838,9 +1838,37 @@ function isRuntimeLoaderFlag(arg: string): boolean {
 	return arg === "-r" || arg === "-e" || RUNTIME_LOADER_FLAGS.some((flag) => arg === flag || arg.startsWith(`${flag}=`));
 }
 
-/** A test runner's option that rewrites its snapshots: `-u`, `--update*`, node's `--test-update-snapshots`. */
+/** Options that make a test runner rewrite its own snapshots or goldens instead of comparing against them (x7-2). */
+const SNAPSHOT_WRITE_FLAGS: ReadonlySet<string> = new Set([
+	"-u",
+	"--test-update-snapshots",
+	"--snapshot-update",
+	"--force-regen",
+	"--regen-all",
+]);
+
+/**
+ * A test runner's option that rewrites its snapshots or goldens: `-u`, `--update*` (`--update-goldens` included), Go's
+ * single-dash `-update`, node's `--test-update-snapshots`, syrupy's `--snapshot-update`, pytest-regressions'
+ * `--force-regen` and `--regen-all`.
+ */
 function writesSnapshots(arg: string): boolean {
-	return arg === "-u" || arg.startsWith("--update") || arg === "--test-update-snapshots";
+	return SNAPSHOT_WRITE_FLAGS.has(arg) || arg.startsWith("--update") || /^-update(?:=|$)/u.test(arg);
+}
+
+/**
+ * The arguments a validated test runner reads its own options from, or null for any other command: `go test`,
+ * `pytest`, `python -m pytest`, `uv run [python -m] pytest`, `bun test` and `cargo insta` (x7-2).
+ */
+function testRunnerArgs(executable: string, args: ReadonlyArray<string>): ReadonlyArray<string> | null {
+	if (executable === "pytest" || executable === "py.test") return args;
+	if (isPythonExecutable(executable) && moduleArg(args) === "pytest") return args;
+	if ((executable === "go" || executable === "bun") && args[0] === "test") return args.slice(1);
+	if (executable === "uv" && args[0] === "run") {
+		const inner = args.slice(1).findIndex((arg) => !arg.startsWith("-"));
+		return inner < 0 ? null : testRunnerArgs(basenameToken(args[inner + 1]), args.slice(inner + 2));
+	}
+	return null;
 }
 
 /**
@@ -1914,7 +1942,7 @@ const W_FLAG_WRITERS: ReadonlySet<string> = new Set(["prettier", "gofmt", "goimp
 /**
  * Whether a check command may rewrite the tree it checks (x3-3): a package script, make or just target named as a
  * writer ({@link isWriteCapableScriptName}), `--fix` or `--write`, a formatter's `-w`, or a snapshot update passed to a
- * package script or `node --test`. A heuristic on names and flags: a writer spelled otherwise reads as a check, and a
+ * package script, `node --test` or a validated test runner ({@link testRunnerArgs}), or a `cargo insta` accept. A heuristic on names and flags: a writer spelled otherwise reads as a check, and a
  * read-only script named `format` reads as a change, which only clears passes the run must then earn again.
  */
 export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
@@ -1925,6 +1953,10 @@ export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
 	if (args.some((arg) => TREE_WRITING_FLAGS.has(arg) || arg.startsWith("--fix="))) return true;
 	if (W_FLAG_WRITERS.has(executable) && args.includes("-w")) return true;
 	if (executable === "node") return args.includes("--test-update-snapshots");
+	// `go test -update`, `pytest --snapshot-update` and `bun test -u` rewrite the goldens they compare against (x7-2).
+	if (testRunnerArgs(executable, args)?.some(writesSnapshots) === true) return true;
+	if (executable === "cargo" && args[0] === "insta")
+		return args[1] === "accept" || args[1] === "review" || args.some((arg) => arg === "--accept" || writesSnapshots(arg));
 	if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
 		const run = packageScriptRun(executable, args);
 		const script = run?.script ?? (args[0] === "run" ? args[1] : args[0]);
