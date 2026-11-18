@@ -10,7 +10,8 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, rmSync } from "node:fs";
+import type { Stats } from "node:fs";
+import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { Value } from "typebox/value";
 import { parseJsonObjectPayload } from "../../core/json-payload.js";
@@ -1204,25 +1205,111 @@ export function preparePendingGateDecisionRecovery(
 	};
 }
 
+interface ArtifactIdentity {
+	dev: number;
+	ino: number;
+	size: number;
+	mtimeMs: number;
+	ctimeMs: number;
+}
+
+interface CachedArtifact {
+	identity: ArtifactIdentity;
+	/** The verified artifact, frozen; null when the file is unreadable or fails verification. */
+	artifact: GateDecisionArtifact | null;
+}
+
+/**
+ * Verified artifacts per resolved state directory, keyed by file name. Artifacts are written once by rename, so a
+ * file whose stat identity is unchanged holds the bytes that were verified; any change re-reads and re-verifies it.
+ */
+const artifactCache = new Map<string, Map<string, CachedArtifact>>();
+const ARTIFACT_CACHE_DIRECTORIES = 16;
+const ARTIFACT_CACHE_ENTRIES = 4096;
+
+function sameArtifactIdentity(left: ArtifactIdentity, right: Stats): boolean {
+	return (
+		left.dev === right.dev &&
+		left.ino === right.ino &&
+		left.size === right.size &&
+		left.mtimeMs === right.mtimeMs &&
+		left.ctimeMs === right.ctimeMs
+	);
+}
+
+function deepFreeze<T>(value: T): T {
+	if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+		Object.freeze(value);
+		for (const child of Object.values(value)) deepFreeze(child);
+	}
+	return value;
+}
+
+function artifactCacheFor(stateDir: string): Map<string, CachedArtifact> {
+	const key = resolve(stateDir);
+	let cache = artifactCache.get(key);
+	if (cache === undefined) {
+		cache = new Map();
+		artifactCache.set(key, cache);
+		for (const stale of artifactCache.keys()) {
+			if (artifactCache.size <= ARTIFACT_CACHE_DIRECTORIES) break;
+			artifactCache.delete(stale);
+		}
+	}
+	return cache;
+}
+
+/**
+ * Integrity-valid decision artifacts, optionally of one group, in file name order. One directory listing and one
+ * lstat per file serve an unchanged archive; a new or changed file is read and verified again. The artifacts are
+ * frozen and shared across calls.
+ */
 export function readGateDecisionArtifacts(
 	group?: string,
 	stateDir = clioStateDir(),
 ): Array<{ artifact: GateDecisionArtifact; path: string }> {
 	const directory = decisionsDirectory(stateDir);
-	const out: Array<{ artifact: GateDecisionArtifact; path: string }> = [];
-	for (const name of listGateDirectory(stateDir, directory)
+	const names = listGateDirectory(stateDir, directory)
 		.filter((entry) => entry.endsWith(".json"))
-		.sort()) {
+		.sort();
+	const cache = artifactCacheFor(stateDir);
+	const present = new Set(names);
+	for (const name of cache.keys()) if (!present.has(name)) cache.delete(name);
+	const out: Array<{ artifact: GateDecisionArtifact; path: string }> = [];
+	for (const name of names) {
 		const path = join(directory, name);
+		let stats: Stats;
 		try {
-			const artifact = readStateJson(stateDir, path) as GateDecisionArtifact;
-			if (group !== undefined && artifact.group !== group) continue;
-			if (!verifyGateDecisionArtifact(artifact).ok) continue;
-			out.push({ artifact, path });
+			// The directory was bounded by the listing; lstat never follows a symlinked entry.
+			stats = lstatSync(path);
 		} catch {
-			// Read APIs ignore malformed artifacts; verification tooling can inspect
-			// the file directly without treating it as trusted evidence.
+			continue;
 		}
+		if (!stats.isFile()) continue;
+		let entry = cache.get(name);
+		if (entry === undefined || !sameArtifactIdentity(entry.identity, stats)) {
+			let artifact: GateDecisionArtifact | null = null;
+			try {
+				const parsed = readStateJson(stateDir, path) as GateDecisionArtifact;
+				if (verifyGateDecisionArtifact(parsed).ok) artifact = deepFreeze(parsed);
+			} catch {
+				// Read APIs ignore malformed artifacts; verification tooling can inspect
+				// the file directly without treating it as trusted evidence.
+			}
+			entry = {
+				identity: { dev: stats.dev, ino: stats.ino, size: stats.size, mtimeMs: stats.mtimeMs, ctimeMs: stats.ctimeMs },
+				artifact,
+			};
+			cache.delete(name);
+			cache.set(name, entry);
+			for (const stale of cache.keys()) {
+				if (cache.size <= ARTIFACT_CACHE_ENTRIES) break;
+				cache.delete(stale);
+			}
+		}
+		if (entry.artifact === null) continue;
+		if (group !== undefined && entry.artifact.group !== group) continue;
+		out.push({ artifact: entry.artifact, path });
 	}
 	return out;
 }

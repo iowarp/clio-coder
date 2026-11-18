@@ -1560,8 +1560,13 @@ function renderSettledSplit(
 	return rows;
 }
 
-/** A fence's opening line at the very start of a tail: a marker, then at most a plain language word. */
-const FENCE_OPENER = /^(`{3,}|~{3,})([ \t]*[\w+#.-]*[ \t]*)\n/u;
+/**
+ * A fence's opening line at the very start of a tail, by marked's fence rule: at most three spaces, a marker, then
+ * an info string that holds no backtick after a backtick marker. A carriage return leaves the tail to the whole view.
+ */
+const FENCE_OPENER = /^ {0,3}(`{3,}(?=[^`\r\n]*\n)|~{3,})([^\r\n]*)\n/u;
+// Marked unescapes backslash-escaped punctuation in the info string it hands on as the fence's language.
+const INFO_ESCAPE = /\\([\p{P}\p{S}])/gu;
 
 /**
  * The tail as one fenced code block still open at the top level, or null. A tail starts at a top-level block
@@ -1574,7 +1579,7 @@ function openFence(settled: SettledBlocks, region: string): OpenFence | null {
 		const opener = FENCE_OPENER.exec(region);
 		// Until its first line completes, the tail may still open with anything.
 		if (opener === null && region.indexOf("\n") < 0) return null;
-		const lang = opener === null ? undefined : inkLang(opener[2]);
+		const lang = opener === null ? undefined : inkLang(opener[2]?.trim().replace(INFO_ESCAPE, "$1"));
 		// A Mermaid fence becomes a diagram drawn from its whole source.
 		const open =
 			opener === null || lang?.toLowerCase() === "mermaid"

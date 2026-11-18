@@ -1,11 +1,16 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import fs, { mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import fs, { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
-import { gateDecisionsDirectory } from "../../src/domains/dispatch/gate-decisions.js";
+import {
+	gateDecisionsDirectory,
+	materializePendingGateDecision,
+	readGateDecisionArtifacts,
+	stagePendingGateDecision,
+} from "../../src/domains/dispatch/gate-decisions.js";
 import { fixedRouteDecision, type RouteCandidate } from "../../src/domains/dispatch/route-decision.js";
 import { createRouteObserver, type RouteObserver } from "../../src/domains/dispatch/route-observer.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
@@ -161,6 +166,47 @@ describe("contracts/route readiness reads", () => {
 			["run-new", "run-mid"],
 		);
 		deepStrictEqual(reads, [], "the read finds every bounded run warmed");
+	});
+
+	it("gate decision reads verify each artifact once and a rewritten one again", async () => {
+		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-gate-reads-"));
+		const subject = { runId: "candidate", digest: "a".repeat(64) };
+		const written = [];
+		for (const group of ["gate-a", "gate-b"]) {
+			const handle = stagePendingGateDecision(
+				{
+					group,
+					topology: "compete",
+					cycle: 1,
+					outcome: "yolo-applied",
+					subjects: [subject],
+					winner: { index: 1, subject, branch: `clio-coder/compete/${group}/1` },
+					confirmation: { id: "judge", digest: "b".repeat(64) },
+					detail: "applied judge",
+				},
+				{ stateDir, telemetry: { sessionId: null, runId: group, agent: { role: "coordinator", id: group } } },
+			);
+			written.push(await materializePendingGateDecision(handle));
+		}
+		const { reads, restore } = countLedgerReads(stateDir);
+		after(restore);
+		const drain = (): string[] => reads.splice(0).sort();
+		const groups = (): string[] => readGateDecisionArtifacts(undefined, stateDir).map(({ artifact }) => artifact.group);
+
+		deepStrictEqual(groups(), ["gate-a", "gate-b"]);
+		strictEqual(drain().length, 2, "the first read verifies both artifacts");
+		deepStrictEqual(groups(), ["gate-a", "gate-b"]);
+		deepStrictEqual(drain(), [], "an unchanged archive costs no file reads");
+		strictEqual(Object.isFrozen(readGateDecisionArtifacts("gate-a", stateDir)[0]?.artifact.winner), true);
+
+		// Same size, altered body, rewritten in place: verified again and rejected.
+		const forgedPath = written[0]?.path ?? "";
+		writeFileSync(forgedPath, readFileSync(forgedPath, "utf8").replace("applied judge", "applied JUDGE"));
+		drain();
+		deepStrictEqual(groups(), ["gate-b"]);
+		deepStrictEqual(drain(), [forgedPath]);
+		rmSync(written[1]?.path ?? "");
+		deepStrictEqual(groups(), []);
 	});
 
 	it("route history folds each sealed run.settled under its executed route", async () => {
