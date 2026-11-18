@@ -1,4 +1,5 @@
 import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +21,7 @@ import {
 } from "../../src/domains/dispatch/run-findings.js";
 import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
+import { isReadOnlyInspectionCommand } from "../../src/domains/safety/protected-artifacts.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { clearTaskGates, configureTaskGates } from "../../src/tools/verify/task-gates.js";
 
@@ -608,6 +610,18 @@ it("an observed red judges only the tree it ran on, and respelled runs of one ch
 	deepStrictEqual(
 		seal(
 			[
+				["test", "make test"],
+				["fix", "edit"],
+				["final", "make test", true],
+				["look", "git status"],
+			],
+			[{ ...green, name: "make test" }],
+		),
+		{ quality: "fail", state: "unverified" },
+	);
+	deepStrictEqual(
+		seal(
+			[
 				["fix", "edit"],
 				["test", "make test"],
 				["look", "git status && git diff"],
@@ -690,6 +704,78 @@ it("a check judges only the tree it ran on, sealed per verify call or from a too
 	strictEqual(seal("edit pass list"), "verified");
 	// A tool named like a check is not one: only `verify` runs a check (x1-2).
 	strictEqual(seal("edit pass", "run_tests"), "unverified");
+});
+
+it("a check sharing its bash call with a change judges the final tree only when every change ran first (x1-1)", () => {
+	const seal = (command: string, failed = false) => {
+		const recorder = createRunEffectsRecorder(process.cwd());
+		for (const [id, tool, args, red] of [
+			["fix", "edit", { path: "src/a.ts" }, false],
+			["test", "bash", { command: "npm test" }, false],
+			["mixed", "bash", { command }, failed],
+		] as const) {
+			recorder.start(id, tool, args);
+			recorder.checkOutcome(id, red ? "error" : "ok");
+			recorder.finish(id, red);
+		}
+		const effects = recorder.snapshot();
+		const typedValidations = typedValidationFactsFromObservedEffects(effects);
+		return [[...effects.validationCommands], deriveRunVerification({ toolStats: [], typedValidations }).state];
+	};
+	const stale = [[], "unverified"];
+	// The earlier pass judged a tree the call then changed, whether the check ran before or after the change.
+	deepStrictEqual(seal("git apply fix.patch; npm test", true), stale);
+	deepStrictEqual(seal("npm test && node codemod.mjs"), stale);
+	deepStrictEqual(seal("pytest; git stash pop"), stale);
+	deepStrictEqual(seal("npm ci | npm test"), stale);
+	deepStrictEqual(seal("npm test > log.txt"), stale);
+	// Every change ran before the check through `&&`, or the call held only checks, cd and plumbing.
+	deepStrictEqual(seal("npm ci && npm test"), [["npm test"], "verified"]);
+	deepStrictEqual(seal("cd pkg && npm test 2>&1 | tail -5"), [["npm test"], "verified"]);
+});
+
+it("read-only inspection refuses helpers that write the tree or run another program (x1-3)", () => {
+	for (const command of [
+		"file -C -m mymagic",
+		"rg --hostname-bin=./x.sh foo",
+		"git diff --ext-diff",
+		"git show --textconv",
+	])
+		strictEqual(isReadOnlyInspectionCommand(command, false), false, command);
+	for (const command of ["git status", "git diff", "git log -p"])
+		strictEqual(isReadOnlyInspectionCommand(command, false), true, command);
+	// Where git config names a helper program, only log and show with both helpers switched off still count.
+	for (const command of ["git status", "git diff --no-ext-diff --no-textconv", "git log -p"])
+		strictEqual(isReadOnlyInspectionCommand(command, true), false, command);
+	strictEqual(isReadOnlyInspectionCommand("git log -p --no-ext-diff --no-textconv", true), true);
+	// The recorder reads the repository's config: a core.fsmonitor hook makes a later git status a mutation.
+	const repo = mkdtempSync(join(tmpdir(), "fsmonitor-"));
+	const env: NodeJS.ProcessEnv = {
+		...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_CONFIG"))),
+		GIT_CONFIG_GLOBAL: "/dev/null",
+		GIT_CONFIG_NOSYSTEM: "1",
+	};
+	const standing = () => {
+		const recorder = createRunEffectsRecorder(repo, { env });
+		for (const [id, tool, args] of [
+			["fix", "edit", { path: "src/a.ts" }],
+			["test", "bash", { command: "npm test" }],
+			["look", "bash", { command: "git status" }],
+		] as const) {
+			recorder.start(id, tool, args);
+			recorder.checkOutcome(id, "ok");
+			recorder.finish(id, false);
+		}
+		return [...recorder.snapshot().validationCommands];
+	};
+	try {
+		execFileSync("git", ["init", "-q"], { cwd: repo, env });
+		deepStrictEqual(standing(), ["npm test"]);
+		execFileSync("git", ["config", "core.fsmonitor", "./hook.sh"], { cwd: repo, env });
+		deepStrictEqual(standing(), []);
+	} finally {
+		rmSync(repo, { recursive: true, force: true });
+	}
 });
 
 it("the review gate reads a verifier report that closes prose containing braces, and nothing weaker", () => {

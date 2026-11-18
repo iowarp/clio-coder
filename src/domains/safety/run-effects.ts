@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import type { ObservedProof } from "../../core/hoare.js";
 import { ToolNames } from "../../core/tool-names.js";
@@ -10,6 +11,8 @@ import { isVerifyListing } from "../../tools/verify/surface.js";
 import { classify } from "./action-classifier.js";
 import { typedValidationSummary } from "./finish-contract.js";
 import {
+	type CheckCommandShape,
+	checkCommandShape,
 	commandArgumentSegments,
 	detectValidationCommand,
 	extractCommandDeleteTargets,
@@ -139,6 +142,8 @@ export interface CheckFreshness {
 export interface RunEffectsRecorderOptions {
 	/** Fires once, when the first successful opaque call opens the record. */
 	onWriteRecordDowngraded?(downgrade: WriteRecordDowngrade): void;
+	/** The environment the run's commands inherit, whose `GIT_CONFIG_*` entries join the git config read. */
+	env?: NodeJS.ProcessEnv;
 }
 
 export interface RunEffectsRecorder {
@@ -166,6 +171,8 @@ interface PendingEffects {
 	opaque: boolean;
 	/** A bash call made only of read-only inspection ({@link isReadOnlyInspectionCommand}), so it changed no tree. */
 	inspection: boolean;
+	/** Where the call's check stands against its own changes ({@link checkCommandShape}); null when it runs none. */
+	checkShape: CheckCommandShape | null;
 	/** The bash command text, or a verify call's resolved argv joined by spaces; null otherwise. */
 	shellCommand: string | null;
 	/** The tool's own outcome, when the call reached it. Stays null when the engine answered instead. */
@@ -300,6 +307,42 @@ function receiptValidationCommand(
 	}
 }
 
+const GIT_HELPER_KEYS = "^(core\\.fsmonitor|diff\\.external|diff\\..+\\.(command|textconv))$";
+
+/** `core.fsmonitor` set to a boolean names git's own daemon or nothing, never a program of the repository's. */
+const GIT_CONFIG_BOOLEAN = /^(?:true|false|yes|no|on|off|1|0|)$/iu;
+
+/**
+ * Whether the effective git config at `cwd` names a program that `git status`, `git diff`, `git log` or
+ * `git show` would run: a `core.fsmonitor` hook, `diff.external`, or a diff driver's `command` or `textconv`
+ * (x1-3). Read once per run; planting such config later is a mutation of its own. No match, no git and no `cwd`
+ * all answer false, because then no git command can run a helper there. Any other failure answers true.
+ */
+export function gitRunsConfiguredHelpers(cwd: string, env: NodeJS.ProcessEnv = process.env): boolean {
+	let listing: string;
+	try {
+		listing = execFileSync("git", ["config", "--get-regexp", GIT_HELPER_KEYS], {
+			cwd,
+			env,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+			timeout: 5000,
+		});
+	} catch (error) {
+		const failure = error as { code?: unknown; status?: unknown };
+		return !(failure.code === "ENOENT" || failure.status === 1);
+	}
+	const effective = new Map<string, string>();
+	for (const line of listing.split("\n")) {
+		if (line.length === 0) continue;
+		const space = line.indexOf(" ");
+		effective.set(space === -1 ? line : line.slice(0, space), space === -1 ? "true" : line.slice(space + 1));
+	}
+	return [...effective].some(([key, value]) =>
+		key === "core.fsmonitor" ? !GIT_CONFIG_BOOLEAN.test(value) : value.length > 0,
+	);
+}
+
 /**
  * Fold a run's tool calls into its observed effects. A call's effects land only
  * when its result comes back clean: a blocked write and a red command are not
@@ -307,6 +350,7 @@ function receiptValidationCommand(
  */
 export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorderOptions = {}): RunEffectsRecorder {
 	const pending = new Map<string, PendingEffects>();
+	const gitHelpers = gitRunsConfiguredHelpers(cwd, options.env);
 	const mutatedPaths = new Set<string>();
 	const failedMutationPaths = new Set<string>();
 	const validationCommands = new Set<string>();
@@ -340,6 +384,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			const validationCommand = receiptValidationCommand(toolName, args, base);
 			const verificationCommand = validationCommandOf(toolName, args, "grounding");
 			const opaque = toolWritesOpaquely(toolName);
+			const command = toolName === ToolNames.Bash ? commandOf(args) : null;
 			// A listing names no check and runs none, so it is not a checking call (bt-19).
 			if ((toolName === ToolNames.Verify && !isVerifyListing(args)) || verificationCommand !== null)
 				checkingCalls.set(toolCallId, null);
@@ -361,8 +406,9 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				mutationRevision,
 				verificationCommand,
 				opaque,
-				inspection: toolName === ToolNames.Bash && isReadOnlyInspectionCommand(commandOf(args) ?? ""),
-				shellCommand: toolName === ToolNames.Bash ? commandOf(args) : verifyCommandOf(toolName, args, base),
+				inspection: command !== null && isReadOnlyInspectionCommand(command, gitHelpers),
+				checkShape: command === null ? null : checkCommandShape(command, gitHelpers),
+				shellCommand: command ?? verifyCommandOf(toolName, args, base),
 				outcome: null,
 			});
 		},
@@ -398,25 +444,31 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			// A refused call never reached its tool, so it changed nothing and leaves
 			// outcomes standing. A failed call that really ran may have partly written.
 			const refused = failed && effects.outcome !== "error" && effects.outcome !== "ok";
-			// A verify call is a check, as a recognized validation command is: even a bare listing changes no tree.
+			// A verify call is a check, as a recognized validation command is: even a bare listing changes no tree. Its
+			// argv is one simple command (a catalog refuses shell executables, a task gate takes bare words). A bash
+			// check that shares its call with steps that may change the tree is still a mutation, and it judged the
+			// final tree only when every such step ran first (x1-1).
+			const checkChangedTree = effects.checkShape === "after-change" || effects.checkShape === "mixed";
 			const opaqueMutation =
-				effects.opaque && effects.tool !== ToolNames.Verify && effects.validationCommand === null && !effects.inspection;
+				effects.opaque &&
+				!effects.inspection &&
+				(checkChangedTree || (effects.tool !== ToolNames.Verify && effects.validationCommand === null));
 			const mutation = !refused && (effects.paths.length > 0 || opaqueMutation);
 			if (mutation) {
 				mutationRevision += 1;
 				validationOutcomes.clear();
 				validationCommands.clear();
 			}
-			settleRan(mutation);
+			const checkedAfterOwnMutation = mutation && effects.checkShape !== "mixed" && effects.checkShape !== "pure";
+			const checkedRevision = effects.mutationRevision + (checkedAfterOwnMutation ? 1 : 0);
+			settleRan(checkedAfterOwnMutation);
 			// Only a check that ran can fail. A call the engine answered without
 			// reaching its tool settles with no outcome, so it records nothing.
 			// `pytest; echo done` ran the check, but its status is echo's, so the outcome stays unknown either way.
 			if (
 				effects.validationName !== null &&
 				effects.checkStatusAttributable &&
-				(failed
-					? effects.outcome === "error"
-					: effects.outcome !== "blocked" && effects.mutationRevision === mutationRevision)
+				(failed ? effects.outcome === "error" : effects.outcome !== "blocked" && checkedRevision === mutationRevision)
 			)
 				validationOutcomes.set(effects.validationName, !failed);
 			if (failed) {
@@ -437,11 +489,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				if (recordWasComplete) options.onWriteRecordDowngraded?.({ ...downgrade });
 			}
 			for (const target of effects.paths) mutatedPaths.add(target);
-			if (
-				effects.validationCommand !== null &&
-				effects.checkStatusAttributable &&
-				effects.mutationRevision === mutationRevision
-			)
+			if (effects.validationCommand !== null && effects.checkStatusAttributable && checkedRevision === mutationRevision)
 				validationCommands.add(effects.validationCommand);
 			if (effects.verificationCommand !== null) verificationCommands.add(effects.verificationCommand);
 			if (effects.tool === ToolNames.Verify) {

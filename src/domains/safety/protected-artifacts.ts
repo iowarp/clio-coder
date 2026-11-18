@@ -1233,10 +1233,10 @@ const READ_ONLY_INSPECTION_REFUSALS: ReadonlyMap<string, ReadonlyArray<string>> 
 	["wc", []],
 	["pwd", []],
 	["grep", []],
-	["rg", ["--pre"]],
+	// `--hostname-bin` runs the named program even with no hyperlink format and stdout piped (x1-3).
+	["rg", ["--pre", "--hostname-bin"]],
 	["find", ["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"]],
 	["stat", []],
-	["file", []],
 	["which", []],
 	["echo", []],
 	["printf", []],
@@ -1250,6 +1250,13 @@ const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
 	"rev-parse",
 	"branch",
 ]);
+
+/**
+ * Where the repository's git config names a helper program (x1-3), `git status` and `git diff` refresh the index
+ * and run `core.fsmonitor`, and `git log` and `git show` run an external diff or textconv driver unless both are
+ * switched off.
+ */
+const GIT_HELPER_OPT_OUTS: ReadonlyArray<string> = ["--no-ext-diff", "--no-textconv"];
 
 /** `git branch` flags that only list or name branches; any other argument creates, moves or deletes one. */
 const READ_ONLY_GIT_BRANCH_FLAGS: ReadonlySet<string> = new Set([
@@ -1266,14 +1273,17 @@ const READ_ONLY_GIT_BRANCH_FLAGS: ReadonlySet<string> = new Set([
 	"--no-color",
 ]);
 
-function readOnlyInspectionStep(argv: ReadonlyArray<string>): boolean {
+function readOnlyInspectionStep(argv: ReadonlyArray<string>, gitHelpersConfigured: boolean): boolean {
 	const [executable, ...args] = argv;
 	if (executable === undefined) return false;
 	if (executable === "git") {
 		const [subcommand, ...rest] = args;
 		if (subcommand === undefined || !READ_ONLY_GIT_SUBCOMMANDS.has(subcommand)) return false;
 		if (subcommand === "branch") return rest.every((arg) => READ_ONLY_GIT_BRANCH_FLAGS.has(arg));
-		return !rest.some((arg) => arg.startsWith("--output"));
+		if (subcommand === "rev-parse") return true;
+		if (rest.some((arg) => arg.startsWith("--output") || arg === "--ext-diff" || arg === "--textconv")) return false;
+		if (!gitHelpersConfigured) return true;
+		return (subcommand === "log" || subcommand === "show") && GIT_HELPER_OPT_OUTS.every((flag) => rest.includes(flag));
 	}
 	const refused = READ_ONLY_INSPECTION_REFUSALS.get(executable);
 	if (refused === undefined) return false;
@@ -1283,10 +1293,11 @@ function readOnlyInspectionStep(argv: ReadonlyArray<string>): boolean {
 /**
  * True when every step of a shell command is an exact leading-command match on a small read-only inspection
  * allowlist (`git diff`, `cat`, `grep`, ...), joined only by `;`, `&&`, `||` or `|`, with no redirect, no
- * substitution, no inline script and no write or delete target. Run effects read such a call as no workspace
- * mutation; anything this cannot prove stays one, so the answer fails closed.
+ * substitution, no inline script and no write or delete target. `gitHelpersConfigured` says the repository's git
+ * config names a helper program, which narrows the git steps that count. Run effects read such a call as no
+ * workspace mutation; anything this cannot prove stays one, so the answer fails closed.
  */
-export function isReadOnlyInspectionCommand(command: string): boolean {
+export function isReadOnlyInspectionCommand(command: string, gitHelpersConfigured: boolean): boolean {
 	const tokens = scanShellLike(command);
 	if (tokens.length === 0) return false;
 	for (const token of tokens) {
@@ -1295,7 +1306,64 @@ export function isReadOnlyInspectionCommand(command: string): boolean {
 	}
 	if (hasUnparsedShellScript(command)) return false;
 	if (extractCommandWriteTargets(command).length > 0 || extractCommandDeleteTargets(command).length > 0) return false;
-	return splitSegments(tokens).every((segment) => readOnlyInspectionStep(shellCommandArguments(segment)));
+	return splitSegments(tokens).every((segment) =>
+		readOnlyInspectionStep(shellCommandArguments(segment), gitHelpersConfigured),
+	);
+}
+
+/**
+ * How a shell command that runs a recognized check stands against the tree it leaves (x1-1). `pure`: every step is
+ * that check, read-only inspection, `cd` or output plumbing, so the command changed no tree. `after-change`: every
+ * step that may change the tree runs before every check, the last of them hands over through `&&`, and nothing but
+ * `&&` and `|` joins the steps, so the check judged the changed tree (`npm ci && npm test`). `mixed`: anything else
+ * (`git apply x.patch; npm test`, `npm test && node codemod.mjs`), whose check cannot speak for the tree the command
+ * left. Null when no step is a recognized check.
+ */
+export type CheckCommandShape = "pure" | "after-change" | "mixed";
+
+export function checkCommandShape(command: string, gitHelpersConfigured: boolean): CheckCommandShape | null {
+	const tokens = scanShellLike(command);
+	const steps: Array<{ check: boolean; changes: boolean; joinedBy: string | null }> = [];
+	let current: ShellToken[] = [];
+	let separator: string | null = null;
+	const endStep = () => {
+		if (current.length === 0) return;
+		const previous = steps.at(-1);
+		if (previous !== undefined) previous.joinedBy = separator;
+		separator = null;
+		const argv = shellCommandArguments(current);
+		const index = commandTokenIndex(argv);
+		const writes: string[] = [];
+		collectRedirectTargets(current, writes);
+		const check = index !== null && validationMatch(basenameToken(argv[index]), argv.slice(index + 1)) !== null;
+		const readOnly =
+			index === null || check || argv[index] === "cd" || readOnlyInspectionStep(argv.slice(index), gitHelpersConfigured);
+		steps.push({ check, changes: !readOnly || writes.some(isInterestingWriteTarget), joinedBy: null });
+		current = [];
+	};
+	for (const token of tokens) {
+		if (token.operator && COMMAND_SEPARATORS.has(token.value)) {
+			endStep();
+			// Two separators in a row (`) ;`) join no simple pair, so neither can hand a change to a check.
+			separator = separator === null && steps.length > 0 ? token.value : "";
+			continue;
+		}
+		current.push(token);
+	}
+	endStep();
+	if (!steps.some((step) => step.check)) return null;
+	const opaque =
+		tokens.some((token) => token.substitutions !== undefined || token.hiddenContent === true || token.unterminated) ||
+		hasUnparsedShellScript(command);
+	if (opaque) return "mixed";
+	let lastChange = steps.length - 1;
+	while (lastChange >= 0 && steps[lastChange]?.changes !== true) lastChange -= 1;
+	if (lastChange === -1) return "pure";
+	const handsOver =
+		steps[lastChange]?.joinedBy === "&&" &&
+		steps.every((step) => step.joinedBy === null || step.joinedBy === "&&" || step.joinedBy === "|") &&
+		!steps.slice(0, lastChange + 1).some((step) => step.check);
+	return handsOver ? "after-change" : "mixed";
 }
 
 /**
