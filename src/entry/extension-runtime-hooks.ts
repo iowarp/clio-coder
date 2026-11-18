@@ -3,6 +3,7 @@ import { isAbsolute, join, relative as relativePath, resolve, sep } from "node:p
 import type { ModelRunInfo } from "../core/model-tier.js";
 import { type TurnOrigin, turnOriginFromMetadata } from "../core/turn-origin.js";
 import {
+	blockPolicyHolds,
 	capabilityEnvelope,
 	type ExtensionContentAccess,
 	type ExtensionEffect,
@@ -339,8 +340,9 @@ function landingFields(
 }
 
 /**
- * A gate that fails closed. Only a call not yet run can be refused; at the
- * other points a closed gate is said, not enforced.
+ * A gate that fails closed. Only a call not yet run can be refused, and a
+ * result that ran carries the warning; a turn point has no gate to close
+ * (`blockPolicyHolds`), so its runner says the turn proceeds instead.
  */
 function closedGate(point: ToolOrTurnPoint, extensionId: string, reason: string): MiddlewareEffect[] {
 	const message = `extension ${extensionId} ${point} hook ${reason}; the gate fails closed`;
@@ -400,7 +402,10 @@ function createRuntimeHookRunner(
 		}
 	};
 	const failed = (reason: string, policy: "pass" | "block", outcome: HookReceipt["outcome"]): RunnerOutcome => {
-		notify(policy === "block" ? `${reason}; it fails closed` : `${reason}; skipped`);
+		const closed = blockPolicyHolds(point)
+			? "it fails closed"
+			: `its block policy is not enforced at ${point}, so the turn proceeds`;
+		notify(policy === "block" ? `${reason}; ${closed}` : `${reason}; skipped`);
 		return { kind: "failed", reason, policy, outcome };
 	};
 	const evaluate = async (

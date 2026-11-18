@@ -75,7 +75,13 @@ export {
 	type ExtensionRuntimeHookExecutor,
 	type ParkedInterviewResult,
 } from "./runtime-hook-bridge.js";
-export { capabilityEnvelope, envelopeDigest, envelopeGrowth, RUNTIME_V2_LIMITS } from "./runtime-schema-v2.js";
+export {
+	blockPolicyHolds,
+	capabilityEnvelope,
+	envelopeDigest,
+	envelopeGrowth,
+	RUNTIME_V2_LIMITS,
+} from "./runtime-schema-v2.js";
 export {
 	buildExtensionSnapshot,
 	diffExtensionSnapshots,

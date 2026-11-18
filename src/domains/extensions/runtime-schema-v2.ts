@@ -196,6 +196,26 @@ function parseEvents(
 	return tickMs === undefined ? { events } : { events, tickMs };
 }
 
+/**
+ * Whether a failed hook's `block` policy refuses anything at `point`: the
+ * prompt, a call not yet run, or the result of one that ran. A turn point has
+ * nothing to refuse, so the turn proceeds whatever the policy says.
+ */
+export function blockPolicyHolds(point: ExtensionHookPoint): boolean {
+	return point !== "turn_start" && point !== "turn_end";
+}
+
+/** One warning per hook whose declared `block` policy the host cannot apply at its point. */
+export function unheldBlockPolicies(hooks: readonly ExtensionHookDeclaration[]): string[] {
+	return hooks.flatMap((hook, index) => {
+		const keys = (["onTimeout", "onError"] as const).filter((key) => hook[key] === "block");
+		if (keys.length === 0 || blockPolicyHolds(hook.on)) return [];
+		return [
+			`runtime.hooks[${index}] declares ${keys.join(" and ")}: block at ${hook.on}, which a failed hook cannot stop; the host reports the failure and the turn proceeds`,
+		];
+	});
+}
+
 function parseHooks(value: unknown, policy: ManifestKeyPolicy): ExtensionHookDeclaration[] {
 	return list(value, "runtime.hooks", RUNTIME_V2_LIMITS.hooks).map((item, index) => {
 		const path = `runtime.hooks[${index}]`;
