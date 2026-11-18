@@ -1,4 +1,8 @@
 import { match, ok, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { resultContractRepairMessages } from "../../src/domains/agents/result-contract.js";
@@ -112,5 +116,45 @@ describe("exhausted result contract detail", () => {
 		strictEqual(rows[1]?.providerResponseId, null);
 		strictEqual(rows[1]?.stopReason, "error");
 		strictEqual(rows[1]?.errorMessage, "provider closed the stream before the first chunk");
+	});
+
+	it("judges the report a capped worker replies with and names the files it left", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-coder-refusal-cap-"));
+		execFileSync("git", ["init", "-q", cwd]);
+		const cap = "permission refusal limit reached: the worker ended after 3 refused commands with no approval route";
+		const report = {
+			role: "assistant",
+			content: [{ type: "text", text: "Nothing to report." }],
+			stopReason: "stop",
+			usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 },
+		};
+		const bundle = makeDispatchBundle(dispatchStubContext(), {
+			heartbeatIntervalMs: 3_600_000,
+			spawnWorker: () => ({
+				pid: null,
+				promise: Promise.resolve({ exitCode: 3, signal: null }),
+				heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+				abort: () => {},
+				send: () => true,
+				events: (async function* () {
+					writeFileSync(join(cwd, "verify_slug_edge.py"), "print(1)\n");
+					yield {
+						type: "clio_coder_permission_resolved",
+						payload: { tool: "bash", actionClass: "execute", mode: "deny", source: "policy", reason: cap },
+					};
+					yield { type: "message_end", message: report };
+				})(),
+			}),
+		});
+		await bundle.extension.start();
+		try {
+			const receipt = await (await bundle.contract.dispatch({ ...REQUEST, cwd })).finalPromise;
+			strictEqual(receipt.outcome, "failed", "a report does not lift the cap");
+			ok(receipt.outcomeDetail?.startsWith(`permission_required; ${cap}`), receipt.outcomeDetail ?? "");
+			strictEqual(receipt.quality.resultContract?.conformance, "fail", "the prose report is judged, not left unreached");
+			match(receipt.outcomeDetail ?? "", /untracked files this run left in the checkout: verify_slug_edge\.py$/u);
+		} finally {
+			await bundle.extension.stop?.();
+		}
 	});
 });

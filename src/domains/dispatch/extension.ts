@@ -118,6 +118,7 @@ import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runti
 import type { AskUserHandler } from "../../tools/ask-user.js";
 import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
 import {
+	addedUntrackedPaths,
 	type CheckoutSnapshot,
 	changedCheckoutDiff,
 	changedCheckoutPaths,
@@ -164,6 +165,7 @@ import {
 	DEFAULT_ESCALATION_TIMEOUT_MS,
 	serializeWorkerRuntimeDescriptor,
 	WORKER_PROTECTED_ARTIFACT_STATE_VERSION,
+	WORKER_REFUSAL_LIMIT_PREFIX,
 	WORKER_SPEC_HOOKLESS_VERSION,
 	type WorkerBudget,
 	type WorkerGrantBinding,
@@ -342,7 +344,12 @@ import type {
 	MainGrantOutcome,
 	WorkerGrantView,
 } from "./contract.js";
-import { createWorkerOutputCapture, startDispatchEventPump, workerOutputCaptureBytes } from "./event-pump.js";
+import {
+	createWorkerOutputCapture,
+	durableAssistantTextFromEvent,
+	startDispatchEventPump,
+	workerOutputCaptureBytes,
+} from "./event-pump.js";
 import type { ExecutionHandoff } from "./execution-handoff.js";
 import { abbreviateHandoffText } from "./execution-handoff.js";
 import { dispatchResultContract, routeCorrelationFactsForRun, withAttemptRole } from "./execution-role.js";
@@ -8339,6 +8346,8 @@ export function createDispatchBundle(
 		let finishContractAssistantTurnId: string | null = null;
 		let failureMessage: string | undefined;
 		let permissionDenialDetail: string | null = null;
+		// The worker hit its execute refusal limit, then whether its one report reply arrived.
+		let refusalLimit: "reached" | "reported" | null = null;
 		let providerErrorMessage: string | null = null;
 		let externalTelemetry: RunResultDraft["externalTelemetry"];
 		let outcomeCode: RunOutcomeCode | null = null;
@@ -8410,6 +8419,11 @@ export function createDispatchBundle(
 				return;
 			}
 			outputCapture.observe(raw);
+			if (
+				refusalLimit === "reached" &&
+				(durableAssistantTextFromEvent(raw).trim().length > 0 || (isRecord(raw) && raw.type === "clio_coder_helper_result"))
+			)
+				refusalLimit = "reported";
 			if (
 				prefixLeader &&
 				raw !== null &&
@@ -8676,6 +8690,14 @@ export function createDispatchBundle(
 				typeof event.payload.reason === "string"
 			) {
 				permissionDenialDetail = event.payload.reason;
+			}
+			if (
+				event.type === "clio_coder_permission_resolved" &&
+				typeof event.payload?.reason === "string" &&
+				event.payload.reason.startsWith(WORKER_REFUSAL_LIMIT_PREFIX)
+			) {
+				permissionDenialDetail = event.payload.reason;
+				refusalLimit ??= "reached";
 			}
 			const brokered =
 				event.type === "clio_coder_permission_resolved" &&
@@ -9543,7 +9565,7 @@ export function createDispatchBundle(
 				}
 				const resultContract = validateRecipeResult({
 					contract: appliedResultContract,
-					reachedTerminalResult: resultContractWasDue(finalOutcome, outcomeCode),
+					reachedTerminalResult: resultContractWasDue(finalOutcome, outcomeCode, refusalLimit === "reported"),
 					output: capturedOutput?.state === "final" ? capturedOutput.text : null,
 					outputTruncated: capturedOutput?.truncated === true,
 					cwd: lifecycle.cwd,
@@ -9665,6 +9687,17 @@ export function createDispatchBundle(
 				const checkoutBefore = lifecycle.runtimeKind === "subprocess" ? checkoutBaseline : null;
 				const checkoutAfter =
 					checkoutBaseline === null ? null : await snapshotCheckoutSince(checkoutBaseline, lifecycle.cwd);
+				// Refused attempts often leave their probe script behind; the operator learns of it here, not by accident.
+				const strayFiles =
+					refusalLimit !== null && checkoutBaseline !== null && checkoutAfter !== null
+						? addedUntrackedPaths(checkoutBaseline, checkoutAfter)
+						: [];
+				if (strayFiles.length > 0) {
+					const listed = `${strayFiles.slice(0, 5).join(", ")}${strayFiles.length > 5 ? `, and ${strayFiles.length - 5} more` : ""}`;
+					const note = `untracked files this run left in the checkout: ${listed}`;
+					finalDetail = [finalDetail, note].filter(Boolean).join("; ");
+					failureMessage = [failureMessage, note].filter(Boolean).join("; ");
+				}
 				const hostRejection = hostVerificationRejection(hostVerification);
 				const workerSucceeded = finalOutcome === "succeeded";
 				if (hostRejection !== null && workerSucceeded) {

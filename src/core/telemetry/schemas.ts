@@ -1867,6 +1867,8 @@ export const PromptCompiledSchema = Type.Object(
 		thinkingLevel: Type.Optional(ExistingId),
 		contextWindow: Type.Optional(count),
 		contextWindowSource: Type.Optional(ExistingId),
+		/** When the prompt was compiled; outside the structure object so a byte-stable recompile keeps its id. */
+		compiledAt: Type.Optional(utc),
 	},
 	closed,
 );

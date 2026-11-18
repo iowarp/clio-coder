@@ -469,6 +469,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		...keep("structure", "layoutVersion", "tokenEstimate", "sections", "contextWindow"),
 		thinkingLevel: "token",
 		contextWindowSource: "token",
+		compiledAt: "id",
 	},
 	"context.snapshotted": {
 		...keep(

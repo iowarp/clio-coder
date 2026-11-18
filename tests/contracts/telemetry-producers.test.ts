@@ -235,11 +235,20 @@ test("prompt.compiled is recorded once per structure by a writer, under the call
 			prompt: { sections: compile.sections, fragmentManifest: compile.fragments, compile },
 		});
 		ok(structure?.promptStructure);
+		// A byte-stable recompile keeps the structure id; only its time moves.
+		const recompiled = await lease.storeRequestObjects?.({
+			prompt: {
+				sections: compile.sections,
+				fragmentManifest: compile.fragments,
+				compile: { ...compile, at: "2026-10-31T12:05:00.000Z" },
+			},
+		});
+		deepStrictEqual(recompiled?.promptStructure, structure.promptStructure);
 		const ids = [newCallId(), newCallId()];
 		for (const callId of ids)
 			lease.recordPromptCompiled?.(
 				structure.promptStructure,
-				{ layoutVersion: 4, tokenEstimate: 3, sections: 1 },
+				{ layoutVersion: 4, tokenEstimate: 3, sections: 1, compiledAt: compile.at },
 				{ ...lease.context, callId, attemptId: newAttemptId() },
 			);
 		await lease.release();
