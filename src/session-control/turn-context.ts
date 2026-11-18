@@ -2165,8 +2165,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// and the specific reason nothing was reduced (#422).
 		const settleWithoutSummary = (reason: string | null): void => {
 			if (reason !== null) compactionConclusion = preSummaryStageActed ? `${compactionConclusion}; ${reason}` : reason;
-			compactionTokens = {
-				before: compactionTokens?.before ?? footerTokensBefore,
+			// An eviction earlier in this pass reported its own figures, and a settle without a summary changed nothing after it.
+			compactionTokens ??= {
+				before: footerTokensBefore,
 				after: liveContextEstimate(agentRuntime, pendingUserText).tokens,
 				basis: "runtime-estimate",
 			};
@@ -2355,7 +2356,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			trigger,
 			originSession,
 		});
-		decision.measure(tokensAfter);
+		decision.committed({ tokensBefore, tokensAfter });
 		// The reducer reports selected ledger rows, not just message rows.
 		compactionFacts.push({ kind: "summarized", unit: "entries", count: result.messagesSummarized });
 		compactionTokens = { before: tokensBefore, after: tokensAfter, basis: "runtime-estimate" };
