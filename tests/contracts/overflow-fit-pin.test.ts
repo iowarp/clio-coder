@@ -8,6 +8,7 @@ import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { resolveClioDirs } from "../../src/core/xdg.js";
+import type { BudgetInspection } from "../../src/domains/context/budget/inspection.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
@@ -23,6 +24,7 @@ import type { Model } from "../../src/engine/types.js";
 import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { replayCurrentSession } from "../../src/session-control/session-restore.js";
+import { createContextTool } from "../../src/tools/context/index.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -81,13 +83,17 @@ interface WireRequest {
  * scripted files), the model first follows every cut marker that asks for a narrower read, as drv-f1's Haiku did,
  * with a 40-line slice; `rereadConsumed` names each such read of a part an earlier request had carried in full.
  */
-function transport(paths: ReadonlyArray<string>, { obey }: { obey?: Record<string, string> } = {}) {
+function transport(
+	paths: ReadonlyArray<string>,
+	{ obey, recalls = 0 }: { obey?: Record<string, string>; recalls?: number } = {},
+) {
 	const requests: WireRequest[] = [];
 	const called: string[] = [];
 	const consumed = new Set<string>();
 	const followed = new Set<string>();
 	const rereadConsumed: string[] = [];
 	let reads = 0;
+	let recalled = false;
 	const fetch: typeof globalThis.fetch = async (_url, init) => {
 		const raw = String(init?.body);
 		const parsed = JSON.parse(raw) as { max_tokens?: number; max_completion_tokens?: number };
@@ -111,9 +117,12 @@ function transport(paths: ReadonlyArray<string>, { obey }: { obey?: Record<strin
 		for (const [name, text] of Object.entries(obey ?? {}))
 			if (raw.includes(JSON.stringify(text).slice(1, -1))) consumed.add(name);
 		const next = reread ?? paths[reads];
-		const tool = next !== undefined;
-		if (tool && reread === undefined) reads += 1;
-		if (tool) called.push(next);
+		// drv-f1r: after the reads, one batch recalls r1..rN, as Haiku did on the reruns.
+		const batch = next === undefined && recalls > 0 && !recalled;
+		if (batch) recalled = true;
+		const tool = next !== undefined || batch;
+		if (next !== undefined && reread === undefined) reads += 1;
+		if (next !== undefined) called.push(next);
 		// A provider tokenizer near 3.3 characters a token, as drv-cf3a's measured about 27.2k for this request.
 		const prompt = Math.ceil(raw.length / 3.3);
 		const stream = new ReadableStream<Uint8Array>({
@@ -133,17 +142,27 @@ function transport(paths: ReadonlyArray<string>, { obey }: { obey?: Record<strin
 							tool
 								? {
 										role: "assistant",
-										tool_calls: [
-											{
-												index: 0,
-												id: `call_${called.length}`,
-												type: "function",
-												function: {
-													name: "read",
-													arguments: JSON.stringify(reread === undefined ? { path: next } : { path: next, offset: 1, limit: 40 }),
-												},
-											},
-										],
+										tool_calls: batch
+											? Array.from({ length: recalls }, (_, index) => ({
+													index,
+													id: `recall_${index + 1}`,
+													type: "function",
+													function: {
+														name: ToolNames.Context,
+														arguments: JSON.stringify({ scope: "recall", ref: `r${index + 1}` }),
+													},
+												}))
+											: [
+													{
+														index: 0,
+														id: `call_${called.length}`,
+														type: "function",
+														function: {
+															name: "read",
+															arguments: JSON.stringify(reread === undefined ? { path: next } : { path: next, offset: 1, limit: 40 }),
+														},
+													},
+												],
 									}
 								: { role: "assistant", content: "done" },
 						),
@@ -175,7 +194,8 @@ function harness(
 		window = WINDOW,
 		protectLastSteps = 3,
 		api,
-	}: { window?: number; protectLastSteps?: number; api?: "copilot-sdk" } = {},
+		recall = false,
+	}: { window?: number; protectLastSteps?: number; api?: "copilot-sdk"; recall?: boolean } = {},
 ) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
@@ -234,6 +254,27 @@ function harness(
 			};
 		},
 	});
+	let inspectLiveBudget: (() => BudgetInspection) | undefined;
+	if (recall)
+		registry.register({
+			...createContextTool({
+				getContextBudget: () => inspectLiveBudget?.() ?? { status: "unavailable", reason: "no loop yet" },
+				session: {
+					hasSession: () => session.current() !== null,
+					readEntries: () => session.readEntries(),
+					activeLeafTurnId: () => {
+						const meta = session.current();
+						return meta ? (session.leafId(meta.id) ?? undefined) : undefined;
+					},
+					appendEntry: (entry) => session.appendEntry(entry),
+				},
+			}),
+			metadata: {
+				objective: "Recall an evicted body.",
+				uiLabel: "Context",
+				resultSizePolicy: { kind: "bounded", maxBytes: 196_608 },
+			},
+		});
 	const events: ChatLoopEvent[] = [];
 	const piCounts: number[] = [];
 	const published: Array<number | null> = [];
@@ -278,6 +319,7 @@ function harness(
 			}),
 	});
 	publishedInput = () => loop.liveBudget().inputTokens;
+	inspectLiveBudget = () => loop.inspectLiveBudget();
 	loop.onEvent((event) => {
 		events.push(event);
 	});
@@ -700,10 +742,20 @@ it("drv-cf3a D-A: a protected read larger than the window ends the turn once, na
  */
 const M3A_SIZES = [8_102, 8_066, 8_010, 8_097, 8_006, 8_104, 8_109, 8_053, 8_084, 8_133, 8_086, 8_173];
 const M3A_PAD = 1_550;
-// The 12-read row is drv-f1's F1b shape, run by a model that follows each cut marker's advice as Haiku did.
-for (const count of [8, 12]) {
+// The 12-read row is drv-f1's F1b shape, run by a model that follows each cut marker's advice as Haiku did. The
+// drv-f1r rows rerun both, and after the reads the model recalls r1..rN in one batch, as Haiku did on r8b and r12b.
+for (const [count, recalls] of [
+	[8, 0],
+	[12, 0],
+	[8, 6],
+	[12, 10],
+] as const) {
 	const obey = count === 12;
-	it(`drv-m3a: a ${count}-read turn at 28000 cuts protected reads${obey ? ", seen ones without a re-read" : " instead of paying overflow summaries"} (bt-47)`, {
+	const title =
+		recalls > 0
+			? `drv-f1r: a ${count}-read turn at 28000 then one batch of ${recalls} recalls readmits only what fits`
+			: `drv-m3a: a ${count}-read turn at 28000 cuts protected reads${obey ? ", seen ones without a re-read" : " instead of paying overflow summaries"}`;
+	it(`${title} (bt-47)`, {
 		timeout: 60_000,
 	}, async () => {
 		const files: Record<string, string> = {};
@@ -711,8 +763,8 @@ for (const count of [8, 12]) {
 			files[`docs/part${index + 1}.md`] = body(`Design note part ${index + 1}`, size);
 		});
 		const reads = Object.keys(files);
-		const wire = transport(reads, obey ? { obey: files } : {});
-		const live = harness(wire, files, { window: 28_000, protectLastSteps: 8 });
+		const wire = transport(reads, { ...(obey ? { obey: files } : {}), recalls });
+		const live = harness(wire, files, { window: 28_000, protectLastSteps: 8, recall: recalls > 0 });
 		try {
 			await live.loop.submit(
 				`Read ${reads.join(", ")} in order, one read per round, each in full, then say done.\n\n${"Read guidance for the design notes. ".repeat(M3A_PAD)}`,
@@ -730,15 +782,70 @@ for (const count of [8, 12]) {
 			strictEqual(refusals.length, 0, "no local context-window refusal");
 			const cuts = live.notices().filter((text) => /protected reads? cut to fit the window/.test(text));
 			ok(cuts.length >= 3, `${cuts.length} overflow cuts`);
-			ok(!live.notices().some((text) => text.includes("post-tool context guard")), "no guard stop");
+			const guardStops = [
+				...live.notices(),
+				...live.events.flatMap((event) =>
+					event.type === "message_end" && event.message.role === "assistant" ? [event.message.errorMessage ?? ""] : [],
+				),
+			].filter((text) => text.includes("post-tool context guard"));
+			deepStrictEqual(guardStops, [], "no guard stop");
 			// drv-f1: cuts told the model to re-read parts it had consumed, and it looped on narrower slices (A2b).
 			deepStrictEqual(wire.rereadConsumed, [], "no part the model consumed is read again");
 			deepStrictEqual([...new Set(wire.called)], reads, "every part read, in order");
-			strictEqual(wire.requests.length, wire.called.length + 1, "every read answered, then the answer");
+			strictEqual(
+				wire.requests.length,
+				wire.called.length + (recalls > 0 ? 2 : 1),
+				"every read and the recall batch answered, then the answer",
+			);
 			const entries = live.session.readEntries();
 			if (!obey) {
 				strictEqual(live.summaries(), 0, "no reactive-retry summary");
-				strictEqual(entries.filter((entry) => entry.kind === "message" && entry.role === "tool_result").length, count);
+				strictEqual(
+					entries.filter((entry) => entry.kind === "message" && entry.role === "tool_result").length,
+					count + recalls,
+				);
+			}
+			if (recalls > 0) {
+				// drv-f1r: the batch readmitted about 2020 tokens a recall past the fit line, and the guard stopped the run.
+				const results = entries.flatMap((entry) =>
+					entry.kind === "message" &&
+					entry.role === "tool_result" &&
+					String((entry.payload as { toolCallId?: string }).toolCallId).startsWith("recall_")
+						? [JSON.stringify(entry.payload)]
+						: [],
+				);
+				strictEqual(results.length, recalls);
+				const stubbed = results.filter((text) => text.includes("not recalled: no room in the context window now"));
+				ok(stubbed.length > 0, "the recalls past the room return the stub");
+				strictEqual(
+					entries.filter((entry) => entry.kind === "contextRecall").length,
+					recalls - stubbed.length,
+					"a stubbed recall appends no contextRecall entry",
+				);
+				// Siblings share one room: no summary follows the batch, and the next request carries every admitted body.
+				const last =
+					entries.length -
+					1 -
+					[...entries]
+						.reverse()
+						.findIndex(
+							(entry) =>
+								entry.kind === "message" &&
+								entry.role === "tool_result" &&
+								String((entry.payload as { toolCallId?: string }).toolCallId).startsWith("recall_"),
+						);
+				ok(!entries.slice(last).some((entry) => entry.kind === "compactionSummary"), "the admitted recalls fit");
+				const sent = (
+					JSON.parse(wire.requests.at(-1)?.body ?? "{}") as {
+						messages: Array<{ role: string; tool_call_id?: string; content?: unknown }>;
+					}
+				).messages.filter((message) => message.role === "tool" && message.tool_call_id?.startsWith("recall_"));
+				strictEqual(sent.length, recalls);
+				strictEqual(
+					sent.filter((message) => !/not recalled|^\[evicted/.test(JSON.stringify(message.content).slice(1))).length,
+					recalls - stubbed.length,
+					"the next request carries every admitted body",
+				);
 			}
 			// A seen read's marker never asks for it again; the latest read goes only after every seen one, and some cut keeps it.
 			let fresh: string | undefined;
@@ -747,8 +854,10 @@ for (const count of [8, 12]) {
 				if (entry.kind === "message" && entry.role === "tool_result") fresh = entry.turnId;
 				if (entry.kind !== "contextEviction") continue;
 				const taken = entry.evicted.filter((item) => item.reason === "step_overflow");
-				for (const item of taken)
+				for (const item of taken) {
 					strictEqual(item.marker.includes("offset and limit"), item.ref.entry === fresh, item.marker);
+					strictEqual(item.marker.includes("one ref at a time"), item.ref.entry !== fresh, item.marker);
+				}
 				if (taken.length > 0 && !taken.some((item) => item.ref.entry === fresh)) kept += 1;
 			}
 			ok(kept > 0, "a cut took seen reads and kept the latest one");

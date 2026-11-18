@@ -7,6 +7,7 @@ import { settingsAwareness } from "../../core/settings-awareness.js";
 import { SKILL_SUGGESTION_ANCHOR, type SkillLoadRefusal, type SkillRefusalKind } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { BudgetProvider } from "../../domains/context/budget/inspection.js";
+import { requestFits } from "../../domains/context/budget/request-fit.js";
 import type { WorkerRecall } from "../../domains/context/worker/recall.js";
 import { foldWorkingSet } from "../../domains/context/working-set/fold.js";
 import {
@@ -34,6 +35,7 @@ import {
 	type SkillCatalogRowKind,
 	skillVerification,
 } from "../../domains/resources/index.js";
+import { estimateAgentMessageTokens } from "../../domains/session/context-accounting.js";
 import type { SessionEntryInput } from "../../domains/session/contract.js";
 import type { SessionEntry } from "../../domains/session/entries.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
@@ -757,6 +759,48 @@ function runSkillsScope(
 	});
 }
 
+const RECALL_NO_ROOM = "not recalled: no room in the context window now; recall one ref at a time after using this one";
+const RECALL_ROOM_TRACK_LIMIT = 64;
+/** Tokens recalled bodies already took from one request's room, keyed by the live figures that room was read from. */
+const recallRoomSpent = new Map<string, number>();
+
+interface RecallRoom {
+	input: number;
+	reserve: number;
+	window: number;
+	spent(): number;
+	charge(tokens: number): void;
+}
+
+/**
+ * The room a recall may fill under the fit line: the live view's input estimate and fit output reserve (A5)
+ * against its window, the same three figures the post-tool guard's stop hands to `requestFits`. A parallel
+ * batch runs before any of its results reach the request, so its recalls read the same figures and share one
+ * tally, first come first served; a result that has landed moves the figures and starts a fresh tally. Null
+ * without a native live budget (workers, external registries, no known window), where recall is unchanged
+ * (bt-47 drv-f1r).
+ */
+function recallRoom(deps: ContextToolDeps, options: ToolInvokeOptions | undefined): RecallRoom | null {
+	const budget = deps.getContextBudget?.();
+	if (budget?.status !== "available" || budget.view.historical) return null;
+	const { inputTokens: input, outputReserveTokens: reserve, effectiveWindow: window } = budget.view;
+	if (input === null || reserve === null || window === null) return null;
+	const key = [options?.sessionId ?? "", options?.turnId ?? "", window, reserve, input].join(":");
+	return {
+		input,
+		reserve,
+		window,
+		spent: () => recallRoomSpent.get(key) ?? 0,
+		charge: (tokens) => {
+			const spent = (recallRoomSpent.get(key) ?? 0) + tokens;
+			recallRoomSpent.delete(key);
+			recallRoomSpent.set(key, spent);
+			const oldest = recallRoomSpent.keys().next().value;
+			if (recallRoomSpent.size > RECALL_ROOM_TRACK_LIMIT && oldest !== undefined) recallRoomSpent.delete(oldest);
+		},
+	};
+}
+
 /**
  * scope=recall: the body goes back through the observation envelope like any
  * OBSERVE result, so the per-turn pool and the self cap still apply; an
@@ -838,6 +882,28 @@ function runRecallScope(
 	if (!resolved.ok)
 		return { kind: "error", message: `context: ${recallErrorMessage(resolved.error, entries, view, leaf)}` };
 	const { result } = resolved;
+	const truncation = truncateHead(result.body, {
+		maxBytes: reservation.callCapBytes,
+		maxLines: Number.MAX_SAFE_INTEGER,
+	});
+	const room = recallRoom(deps, options);
+	const cost = estimateAgentMessageTokens({ role: "toolResult", content: [{ type: "text", text: truncation.content }] });
+	if (room !== null && !requestFits(room.input + room.spent() + cost, room.reserve, room.window)) {
+		// Nothing was readmitted, so no contextRecall entry and no recalled event. The stub still lands in the
+		// request, so later siblings see its cost.
+		room.charge(estimateAgentMessageTokens({ role: "toolResult", content: [{ type: "text", text: RECALL_NO_ROOM }] }));
+		return finalizeObservation({
+			tool: ToolNames.Context,
+			unit: "results",
+			output: RECALL_NO_ROOM,
+			shownCount: 0,
+			totalCount: 1,
+			truncated: false,
+			details: { recall: { ref: result.ref.entry, state: result.state, notRecalled: "no_room", tokens: cost } },
+			reservation,
+			...(options ? { options } : {}),
+		});
+	}
 	const fields = buildRecallFields(result, {
 		trigger: "tool",
 		...(options?.toolCallId ? { toolCallId: options.toolCallId } : {}),
@@ -854,12 +920,9 @@ function runRecallScope(
 			message: `context: recall of ${result.ref.entry} could not be recorded: ${err instanceof Error ? err.message : String(err)}`,
 		};
 	}
+	room?.charge(cost);
 	session.onRecalled?.({ ref: result.ref.entry, trigger: "tool", tokensReadmitted: result.tokens, at: Date.now() });
 	const evictedState = view.evicted.get(result.ref.entry);
-	const truncation = truncateHead(result.body, {
-		maxBytes: reservation.callCapBytes,
-		maxLines: Number.MAX_SAFE_INTEGER,
-	});
 	return finalizeObservation({
 		tool: ToolNames.Context,
 		unit: "results",
