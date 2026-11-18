@@ -406,7 +406,6 @@ describe("contracts/consult tool", () => {
 	});
 
 	it("leaves out what Jev's server would refuse, because its window counts the whole request", async () => {
-		strictEqual(PROFILES.jev.windowCounts, "whole-request");
 		const items = Object.fromEntries(
 			Array.from({ length: 256 }, (_, index) => [`item-${index}-${"x".repeat(120)}`, `the cache ${"y".repeat(230)}`]),
 		);

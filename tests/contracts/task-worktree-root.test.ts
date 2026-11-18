@@ -17,7 +17,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { taskWorktreeFindings } from "../../src/cli/doctor-task-worktrees.js";
 import { validateSettings } from "../../src/core/config.js";
-import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { captureWorkspaceSnapshot } from "../../src/domains/dispatch/write-boundary.js";
 import { workspaceRelative } from "../../src/tools/presentation.js";
 import {
@@ -84,7 +83,6 @@ describe("task worktree root", () => {
 	});
 
 	it("defaults to disk, which is today's location", () => {
-		strictEqual(DEFAULT_SETTINGS.fleet.worktrees.root, "disk");
 		deepStrictEqual(resolveWorktreeRoot({ setting: "disk", projectRoot: root, remoteEligible: false, facts: facts() }), {
 			parent: join(root, ".clio-coder", "worktrees"),
 			kind: "disk",

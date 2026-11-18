@@ -13,117 +13,123 @@ import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine
 // `sh -c`. Rules are checked against each executable segment now.
 const engine = createSafetyPolicyEngine({ cwd: process.cwd() });
 
-function decide(command: string, posture: "default" | "yolo" | "confirmed") {
-	return engine.evaluate({ tool: ToolNames.Bash, args: { command, cwd: "." } }, posture);
+type Posture = "default" | "yolo" | "confirmed";
+
+interface Row {
+	/** The old per-case test title, so a failure reads as it did. */
+	name: string;
+	commands: string[];
+	postures: Posture[];
+	/** `ask` must come from the damage-control rail; `ruleId` pins which rule decided. */
+	kind: "ask" | "block" | "allow";
+	ruleId?: string;
 }
 
-function asksBothLevels(command: string): void {
-	for (const posture of ["default", "yolo"] as const) {
-		const decision = decide(command, posture);
-		strictEqual(decision.kind, "ask", `${posture} ${JSON.stringify(command)}: ${decision.reasonCode}`);
-		strictEqual(
-			decision.reasonCode.startsWith("damage-control:"),
-			true,
-			`${posture} ${JSON.stringify(command)}: ${decision.reasonCode}`,
-		);
-	}
-}
+const BOTH: Posture[] = ["default", "yolo"];
 
-// The verbatim command from the BT-002 repro, which discarded `lib/math.js`.
-test("BT-002: the chained restore asks at both levels through the damage-control rail", () => {
-	asksBothLevels("git restore . && echo RESTORED");
-	asksBothLevels('git restore . && echo "EXIT:$?"');
-});
+const rows: Row[] = [
+	// The verbatim command from the BT-002 repro, which discarded `lib/math.js`.
+	{
+		name: "BT-002: the chained restore asks at both levels through the damage-control rail",
+		commands: ["git restore . && echo RESTORED", 'git restore . && echo "EXIT:$?"'],
+		postures: BOTH,
+		kind: "ask",
+	},
+	{
+		name: "every shell operator that can follow a damage-control command still asks",
+		commands: [
+			"git restore .; echo done",
+			"git restore . || true",
+			"git restore . > /dev/null",
+			"git restore .|cat",
+			"git restore .\necho ok",
+			"git restore . # keep going",
+			"echo ready && git restore . && echo done",
+			"git checkout -- . && echo ok",
+		],
+		postures: BOTH,
+		kind: "ask",
+	},
+	// ORCH-005 covers the double-quoted form in damage-control-scan-args.test.ts.
+	{
+		name: "a damage-control command hidden in a substitution or an inner shell still asks",
+		commands: ["$(git restore .)", "echo $(git restore .)", 'sh -c "git restore ."', "bash -c 'git restore .'"],
+		postures: BOTH,
+		kind: "ask",
+	},
+	// BT-002 `suspect`: spellings of "restore everything" that the anchored
+	// pattern never covered, chained and bare.
+	{
+		name: "the pathspec spellings of a whole-worktree restore ask too",
+		commands: [
+			"git restore ./",
+			"git restore -- .",
+			"git restore --worktree .",
+			"git restore :/",
+			"git restore ./ && echo ok",
+			"git restore -- . ; echo ok",
+		],
+		postures: BOTH,
+		kind: "ask",
+	},
+	{
+		name: "a one-shot confirmation admits the chained command",
+		commands: ["git restore . && echo RESTORED"],
+		postures: ["confirmed"],
+		kind: "allow",
+	},
+	// Hard blocks are not part of the ask rail. Chaining must not soften one, and
+	// the segment scan must not turn one into a mere confirmation.
+	{
+		name: "hard blocks stay blocks behind every operator",
+		commands: [
+			"rm -rf build && echo ok",
+			"echo ready && git reset --hard HEAD~1",
+			"git clean -fd; echo ok",
+			'sh -c "rm -rf build"',
+			"git push --force origin main | cat",
+		],
+		postures: ["yolo"],
+		kind: "block",
+	},
+	// F1: an earlier confirmation rule matched the first segment and hid the hard
+	// block on the second, so a confirmed posture admitted the project deletion.
+	{
+		name: "F1: a hard block in a later segment outranks an earlier confirmation rule",
+		commands: [
+			"gcloud iam policies list; firebase projects:delete example",
+			"gcloud iam policies list && firebase projects:delete example",
+		],
+		postures: ["default", "yolo", "confirmed"],
+		kind: "block",
+		ruleId: "firebase-projects-delete",
+	},
+	// Segments come from the original text, so a rule cannot fire on a word that
+	// only looks like a command inside a quoted argument.
+	{
+		name: "quoted text that merely spells a damage-control command does not ask",
+		commands: ['echo "git restore ."', "echo 'git restore . && x'", "git commit -m 'git restore .'"],
+		postures: ["yolo"],
+		kind: "allow",
+	},
+	{
+		name: "ordinary chained work still runs without a confirmation",
+		commands: ["git status --short && echo ok", "cd pkg && ls -la", "echo one; echo two"],
+		postures: ["yolo"],
+		kind: "allow",
+	},
+];
 
-test("every shell operator that can follow a damage-control command still asks", () => {
-	for (const command of [
-		"git restore .; echo done",
-		"git restore . || true",
-		"git restore . > /dev/null",
-		"git restore .|cat",
-		"git restore .\necho ok",
-		"git restore . # keep going",
-		"echo ready && git restore . && echo done",
-		"git checkout -- . && echo ok",
-	]) {
-		asksBothLevels(command);
-	}
-});
-
-// ORCH-005 covers the double-quoted form in damage-control-scan-args.test.ts.
-test("a damage-control command hidden in a substitution or an inner shell still asks", () => {
-	for (const command of [
-		"$(git restore .)",
-		"echo $(git restore .)",
-		'sh -c "git restore ."',
-		"bash -c 'git restore .'",
-	]) {
-		asksBothLevels(command);
-	}
-});
-
-// BT-002 `suspect`: spellings of "restore everything" that the anchored pattern
-// never covered, chained and bare.
-test("the pathspec spellings of a whole-worktree restore ask too", () => {
-	for (const command of [
-		"git restore ./",
-		"git restore -- .",
-		"git restore --worktree .",
-		"git restore :/",
-		"git restore ./ && echo ok",
-		"git restore -- . ; echo ok",
-	]) {
-		asksBothLevels(command);
-	}
-});
-
-test("a one-shot confirmation admits the chained command", () => {
-	const decision = decide("git restore . && echo RESTORED", "confirmed");
-	strictEqual(decision.kind, "allow", decision.reasonCode);
-});
-
-// Hard blocks are not part of the ask rail. Chaining must not soften one, and
-// the segment scan must not turn one into a mere confirmation.
-test("hard blocks stay blocks behind every operator", () => {
-	for (const command of [
-		"rm -rf build && echo ok",
-		"echo ready && git reset --hard HEAD~1",
-		"git clean -fd; echo ok",
-		'sh -c "rm -rf build"',
-		"git push --force origin main | cat",
-	]) {
-		const decision = decide(command, "yolo");
-		strictEqual(decision.kind, "block", `${JSON.stringify(command)}: ${decision.reasonCode}`);
-	}
-});
-
-// F1: an earlier confirmation rule matched the first segment and hid the hard
-// block on the second, so a confirmed posture admitted the project deletion.
-test("F1: a hard block in a later segment outranks an earlier confirmation rule", () => {
-	for (const command of [
-		"gcloud iam policies list; firebase projects:delete example",
-		"gcloud iam policies list && firebase projects:delete example",
-	]) {
-		for (const posture of ["default", "yolo", "confirmed"] as const) {
-			const decision = decide(command, posture);
-			strictEqual(decision.kind, "block", `${posture} ${JSON.stringify(command)}: ${decision.reasonCode}`);
-			strictEqual(decision.ruleId, "firebase-projects-delete", `${posture} ${JSON.stringify(command)}`);
+test("damage-control rules judge every executable segment of a shell command", () => {
+	for (const row of rows) {
+		for (const command of row.commands) {
+			for (const posture of row.postures) {
+				const decision = engine.evaluate({ tool: ToolNames.Bash, args: { command, cwd: "." } }, posture);
+				const label = `${row.name}: ${posture} ${JSON.stringify(command)}: ${decision.reasonCode}`;
+				strictEqual(decision.kind, row.kind, label);
+				if (row.kind === "ask") strictEqual(decision.reasonCode.startsWith("damage-control:"), true, label);
+				if (row.ruleId !== undefined) strictEqual(decision.ruleId, row.ruleId, label);
+			}
 		}
-	}
-});
-
-// Segments come from the original text, so a rule cannot fire on a word that
-// only looks like a command inside a quoted argument.
-test("quoted text that merely spells a damage-control command does not ask", () => {
-	for (const command of ['echo "git restore ."', "echo 'git restore . && x'", "git commit -m 'git restore .'"]) {
-		const decision = decide(command, "yolo");
-		strictEqual(decision.kind, "allow", `${JSON.stringify(command)}: ${decision.reasonCode}`);
-	}
-});
-
-test("ordinary chained work still runs without a confirmation", () => {
-	for (const command of ["git status --short && echo ok", "cd pkg && ls -la", "echo one; echo two"]) {
-		const decision = decide(command, "yolo");
-		strictEqual(decision.kind, "allow", `${JSON.stringify(command)}: ${decision.reasonCode}`);
 	}
 });
