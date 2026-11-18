@@ -102,6 +102,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A dispatched worker now reserves output with the same function the main loop's admission uses, so it no longer refuses with worker_context_exhausted a fork the parent fitted on the same model and window (D1-5).
+- Evicted worker observation archives are filed per run and age out with the run journals' 90-day retention in the daily telemetry sweep; running and recoverable runs keep theirs (D1-5).
 - A step checkpoint on a small or uncached route now keeps the previous checkpoint's goal, constraints and decisions, held to the summary room, and its preserved operator request, instead of replacing them with the step lead (D1-2).
 - Checkpoint replay now restores the active decisions recorded before the cut as `[Decisions as of checkpoint]`, beside the task board, up to 12 lines (D1-3).
 - Socket drops (ECONNRESET, EPIPE, ETIMEDOUT and similar), "Connection closed.", "connection reset by peer" and the Codex WebSocket connection limit now retry instead of failing the turn (PI-1).
