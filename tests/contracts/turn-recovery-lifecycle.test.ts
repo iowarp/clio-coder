@@ -190,6 +190,23 @@ test("recovery matrix preserves route, output, cancellation and loading policy",
 		});
 });
 
+test("socket drops, closed connections and the WebSocket age limit retry; overflow and content filter stay final (PI-1)", () => {
+	const cases: Array<[string, RecoveryFailureKind]> = [
+		["read ECONNRESET", "transient-provider"],
+		["write EPIPE", "transient-provider"],
+		["connect ETIMEDOUT 1.2.3.4:443", "transient-provider"],
+		["Connection closed.", "transient-provider"],
+		['{"type":"error","error":{"type":"api_error","message":"Connection closed."}}', "transient-provider"],
+		["Responses websocket connection limit reached", "transient-provider"],
+		["websocket_connection_limit_reached", "transient-provider"],
+		["connection reset by peer", "transient-provider"],
+		["maximum context length exceeded; connection closed", "context-overflow"],
+		["provider content filter refused the response (content_filter): Connection closed.", "terminal-provider"],
+	];
+	for (const [message, kind] of cases)
+		strictEqual(classifyRecoveryFailure({ runtimeId: "openai-codex", message }).kind, kind, message);
+});
+
 test("the overflow notice says Clio refused when its own guard stopped the request before sending", async () => {
 	const notices: string[] = [];
 	const runtime = {

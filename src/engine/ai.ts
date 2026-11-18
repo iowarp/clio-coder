@@ -315,9 +315,17 @@ export function providerContentFilterMessage(providerText: string): string {
 	return `provider content filter refused the response (content_filter)${text.length > 0 ? `: ${text}` : ""}`;
 }
 
+// Mirrors pi-ai post-1.5.2 `utils/retry.ts` transport patterns; delete at the pi upgrade.
+const TRANSPORT_DROP_PATTERN =
+	/connection.?closed|(?<![a-z0-9_])(?:ECONNRESET|ECONNABORTED|ECONNREFUSED|ETIMEDOUT|EPIPE)(?![a-z0-9_])|connection reset by peer|websocket.?connection.?limit.?reached/i;
+
 /** Classify one provider error through pi-ai without leaking its message shape across the engine boundary. */
 export function isEngineRetryableAssistantError(errorMessage: string): boolean {
-	return piIsRetryableAssistantError(errorOnlyMessage(errorMessage));
+	const message = errorOnlyMessage(errorMessage);
+	if (piIsRetryableAssistantError(message)) return true;
+	return (
+		TRANSPORT_DROP_PATTERN.test(errorMessage) && !piIsContextOverflow(message) && !isProviderContentFilter(errorMessage)
+	);
 }
 
 export {
