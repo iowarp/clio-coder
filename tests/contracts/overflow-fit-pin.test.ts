@@ -17,6 +17,7 @@ import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
+import { LOCAL_CONTEXT_OVERFLOW_PREFIX } from "../../src/engine/apis/output-budget.js";
 import { sessionCurrentPath } from "../../src/engine/session.js";
 import type { Model } from "../../src/engine/types.js";
 import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
@@ -198,6 +199,8 @@ function harness(
 	});
 	const events: ChatLoopEvent[] = [];
 	const piCounts: number[] = [];
+	const published: Array<number | null> = [];
+	let publishedInput: () => number | null = () => null;
 	let summaries = 0;
 	const providers = context.getContract("providers") as ProvidersContract;
 	const loop = createChatLoop({
@@ -223,6 +226,7 @@ function harness(
 				...options,
 				transcriptStreamFn: (requestModel, requestContext, requestOptions) => {
 					piCounts.push(requestContext.messages.reduce((sum, m) => sum + estimateMessageTokens(m as never), 0));
+					published.push(publishedInput());
 					return (
 						options?.transcriptStreamFn ??
 						(() => {
@@ -236,6 +240,7 @@ function harness(
 				},
 			}),
 	});
+	publishedInput = () => loop.liveBudget().inputTokens;
 	loop.onEvent((event) => {
 		events.push(event);
 	});
@@ -246,7 +251,7 @@ function harness(
 		await loop.whenSettled();
 		await session.close();
 	};
-	return { settings, session, loop, events, notices, close, piCounts, summaries: () => summaries };
+	return { settings, session, loop, events, notices, close, piCounts, published, summaries: () => summaries };
 }
 
 const A1_ASK = `Read ${READS.join(", ")} in order, one read per round, each in full, then say done.\n\n${"Read guidance for the station fixture. ".repeat(700)}`;
@@ -261,8 +266,15 @@ const B1_ASK = [
 	"Do not read files yourself. When the worker returns, reply with its full report verbatim.",
 ].join("\n");
 
-/** Every request the provider saw left the 4096-token output floor, and the last one is the request Pi counts. */
-function assertAdmitted(wire: ReturnType<typeof transport>, piCounts: ReadonlyArray<number>): number {
+/**
+ * Every request the provider saw left the 4096-token output floor, the last one is the request Pi counts, and the
+ * published view priced it on that same figure (CF-6 r2 item 2).
+ */
+function assertAdmitted(
+	wire: ReturnType<typeof transport>,
+	piCounts: ReadonlyArray<number>,
+	published: ReadonlyArray<number | null>,
+): number {
 	for (const request of wire.requests) ok(request.maxTokens >= OUTPUT_SAFETY, `max_tokens ${request.maxTokens}`);
 	const last = wire.requests.at(-1);
 	ok(last);
@@ -270,6 +282,7 @@ function assertAdmitted(wire: ReturnType<typeof transport>, piCounts: ReadonlyAr
 	const pinned = WINDOW - OUTPUT_SAFETY - last.maxTokens;
 	// A4 pins max(fold count, Pi's count): after a cut the fold's carried anchor can be the larger of the two.
 	ok(pinned >= (piCounts.at(-1) ?? Number.POSITIVE_INFINITY), `Pi's clamp read ${pinned}, below Pi's own count`);
+	strictEqual(published.at(-1), pinned, "the published view showed the figure admission and Pi's clamp read");
 	ok(pinned + 8_192 <= WINDOW, `admitted input ${pinned} fits the window with the reserve`);
 	return pinned;
 }
@@ -319,7 +332,7 @@ it("drv-cf3a D-A: an overflow fit admits the next request on the figure it fitte
 		// The A4 addendum on format 7: the fold cuts the protected manual itself, so no summary is paid.
 		assertManualCut(live, wire);
 		strictEqual(wire.requests.length, READS.length + 1);
-		assertAdmitted(wire, live.piCounts);
+		assertAdmitted(wire, live.piCounts, live.published);
 		const entries = live.session.readEntries();
 		strictEqual(entries.filter((entry) => JSON.stringify(entry).includes("admission_refused")).length, 0);
 		const answer = entries.at(-2);
@@ -590,7 +603,7 @@ it("drv-cf3a D-A: a session the old build wedged resumes and is admitted on the 
 			"the overflow fold ran before the request",
 		);
 		strictEqual(wire.requests.length, 1, "one request, no retry");
-		assertAdmitted(wire, second.piCounts);
+		assertAdmitted(wire, second.piCounts, second.published);
 		const added = second.session.readEntries().slice(sliced.length + tail.length);
 		strictEqual(added.filter((entry) => JSON.stringify(entry).includes("admission_refused")).length, 0);
 	} finally {
@@ -663,7 +676,17 @@ for (const count of [8, 12]) {
 				`Read ${reads.join(", ")} in order, one read per round, each in full, then say done.\n\n${"Read guidance for the design notes. ".repeat(M3A_PAD)}`,
 			);
 			await live.loop.whenSettled();
-			ok(live.summaries() <= 1, `${live.summaries()} paid summaries in one turn`);
+			// cf-x6 r2's m3a residual: an unpinned request admitted at 20310 met Pi's anchor clamp at 20575, whose answer
+			// room fell below the usable floor; the local refusal's reactive retry paid one summary per row. Admission now
+			// hands Pi's clamp its own figure on every main request (CF-6 r2 item 2).
+			const refusals = live.events.filter(
+				(event) =>
+					event.type === "message_end" &&
+					event.message.role === "assistant" &&
+					(event.message.errorMessage ?? "").startsWith(LOCAL_CONTEXT_OVERFLOW_PREFIX),
+			);
+			strictEqual(refusals.length, 0, "no local context-window refusal");
+			strictEqual(live.summaries(), 0, "no reactive-retry summary");
 			const cuts = live.notices().filter((text) => /protected reads? cut to fit the window/.test(text));
 			ok(cuts.length >= 3, `${cuts.length} overflow cuts`);
 			ok(!live.notices().some((text) => text.includes("post-tool context guard")), "no guard stop");
