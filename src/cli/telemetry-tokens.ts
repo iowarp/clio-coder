@@ -1,6 +1,7 @@
 import { clioStateDir } from "../core/xdg.js";
 import type {
 	TokenSourceInput,
+	TokenSourceRole,
 	TokenSourceRow,
 	TokenSourcesReportV1,
 	TokenSourceTurn,
@@ -21,8 +22,11 @@ output header says so. The calls column counts every invoked call and names
 those the provider sent no token counts for; their tokens are in no sum, and a
 turn with no measured call prints its tokens as unknown. Fresh is uncached input
 plus cache write; copilot-sdk reports the whole prompt as cache read plus cache
-write, so on its calls fresh is cache write and the output says so. --json emits
-the report verbatim.
+write, so on its calls fresh is cache write and the output says so. Calls a
+side agent made for the session (compaction, memory and the like) are charged to
+the turn they ran in and counted in its totals; the calls column names them by
+role, and --by-source gives each role its own row. --json emits the report
+verbatim.
 `;
 
 const count = (value: number | null) => (value === null ? "unknown" : String(value));
@@ -31,11 +35,25 @@ interface Coverage {
 	/** Measured calls. */
 	calls: number;
 	unmeasuredCalls: number;
+	roles: readonly TokenSourceRole[];
 }
 
-/** Invoked calls, naming the unmeasured ones whose tokens no sum below includes. */
-function callsCell({ calls, unmeasuredCalls }: Coverage): string {
-	return unmeasuredCalls > 0 ? `${calls + unmeasuredCalls} (${unmeasuredCalls} unmeasured)` : String(calls);
+const sideRoles = (roles: readonly TokenSourceRole[]) => roles.filter((role) => role.role !== "main");
+
+/** Invoked calls, naming the unmeasured ones whose tokens no sum below includes and the side agents' share. */
+function callsCell({ calls, unmeasuredCalls, roles }: Coverage): string {
+	const notes = [
+		...(unmeasuredCalls > 0 ? [`${unmeasuredCalls} unmeasured`] : []),
+		...sideRoles(roles).map((role) => `${role.role} ${role.calls + role.unmeasuredCalls}`),
+	];
+	return notes.length > 0 ? `${calls + unmeasuredCalls} (${notes.join(", ")})` : String(calls);
+}
+
+/** The output figure, naming what the side agents wrote within it. */
+function outputCell(span: Coverage & { output: number }): string {
+	const sides = sideRoles(span.roles).filter((role) => role.calls > 0);
+	const share = sides.length > 0 ? ` (${sides.map((role) => `${role.role} ${role.output}`).join(", ")})` : "";
+	return `${measuredCount(span, span.output)}${share}`;
 }
 
 /** A token figure over a span that invoked calls but measured none is unknown, not zero. */
@@ -58,7 +76,7 @@ function inputCells(label: string, coverage: Coverage, input: TokenSourceInput):
 
 function turnHeading(turn: TokenSourceTurn): string {
 	const cold = turn.coldReasons.length > 0 ? ` · cold: ${turn.coldReasons.join(", ")}` : "";
-	return `turn ${turn.index} ${turn.at} · ${callsCell(turn)} call(s) · output ${measuredCount(turn, turn.output)}${cold}`;
+	return `turn ${turn.index} ${turn.at} · ${callsCell(turn)} call(s) · output ${outputCell(turn)}${cold}`;
 }
 
 function freshNote({ basis, totals }: TokenSourcesReportV1): string[] {
@@ -101,13 +119,11 @@ export function renderTokenSources(report: TokenSourcesReportV1, bySource: boole
 			]).trimEnd()}`,
 	);
 	const { totals } = report;
-	const session = `session · ${callsCell(totals)} call(s) · output ${measuredCount(totals, totals.output)}\n${formatColumns(
-		[
-			["  source", "cached", "fresh", "total"],
-			...totals.rows.map(rowCells),
-			inputCells("  session input", totals, totals.input),
-		],
-	).trimEnd()}`;
+	const session = `session · ${callsCell(totals)} call(s) · output ${outputCell(totals)}\n${formatColumns([
+		["  source", "cached", "fresh", "total"],
+		...totals.rows.map(rowCells),
+		inputCells("  session input", totals, totals.input),
+	]).trimEnd()}`;
 	return `${header.join("\n")}\n\n${[...sections, session].join("\n\n")}\n`;
 }
 

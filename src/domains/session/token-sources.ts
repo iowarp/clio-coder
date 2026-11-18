@@ -1,4 +1,5 @@
 import { recordedToolResultNotes } from "../../core/reminder-framing.js";
+import type { AgentRole } from "../../core/telemetry/enums.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import { ceilChars } from "../../core/token-split.js";
@@ -20,7 +21,13 @@ import { filterEntriesToActivePath } from "./tree/active-path.js";
  * tokens: the system side from the session journal's latest context snapshot, every message from the session
  * ledger's active path as replayed since the last compaction. Prompt caching is a prefix, so the call's cache read
  * goes to the leading segments in request order and the rest is fresh. Totals are measured; the split is estimated.
+ *
+ * Calls a side agent made for the session (compaction, memory and the like) are charged to the turn they ran in, one
+ * row per role: a compaction by the checkpoint's call ids in the ledger, any other by when the call started.
  */
+
+/** Agents that run beside a session's own; worker and coordinator calls belong to their runs. */
+export type SideRole = Exclude<AgentRole, "main" | "coordinator" | "worker">;
 
 export type TokenSource =
 	| "system-prompt"
@@ -29,7 +36,8 @@ export type TokenSource =
 	| "template"
 	| "reminders"
 	| "history"
-	| `tool:${string}`;
+	| `tool:${string}`
+	| `role:${SideRole}`;
 
 export interface TokenSourceRow {
 	source: TokenSource;
@@ -46,6 +54,15 @@ export interface TokenSourceInput {
 	total: number;
 }
 
+/** One agent role's calls inside a span; the span's own figures are their sum. */
+export interface TokenSourceRole {
+	role: "main" | SideRole;
+	calls: number;
+	unmeasuredCalls: number;
+	input: TokenSourceInput;
+	output: number;
+}
+
 export interface TokenSourceTurn {
 	index: number;
 	turnId: string;
@@ -59,6 +76,8 @@ export interface TokenSourceTurn {
 	/** Expected-cold reasons the journal stamped on the turn's calls, as wire codes. */
 	coldReasons: string[];
 	rows: TokenSourceRow[];
+	/** Main first, then each side role that made a call in the turn. */
+	roles: TokenSourceRole[];
 }
 
 export interface TokenSourcesReportV1 {
@@ -73,11 +92,18 @@ export interface TokenSourcesReportV1 {
 		freshIsCacheWriteCalls: number;
 	};
 	turns: TokenSourceTurn[];
-	totals: { calls: number; unmeasuredCalls: number; input: TokenSourceInput; output: number; rows: TokenSourceRow[] };
+	totals: {
+		calls: number;
+		unmeasuredCalls: number;
+		input: TokenSourceInput;
+		output: number;
+		rows: TokenSourceRow[];
+		roles: TokenSourceRole[];
+	};
 }
 
 export const TOKEN_SOURCES_NOTE =
-	"Input totals are provider-reported per call; the split by source is estimated. Each call's total is apportioned over its request's segments by estimated tokens (chars/4 over the session ledger, the journal's context snapshot for the system side), and its cache read is assigned to the leading segments in request order.";
+	"Input totals are provider-reported per call; the split by source is estimated. Each call's total is apportioned over its request's segments by estimated tokens (chars/4 over the session ledger, the journal's context snapshot for the system side), and its cache read is assigned to the leading segments in request order. Side-agent calls (compaction, memory) are not split: each role is one row of the turn it ran in.";
 
 interface Segment {
 	/** Ledger turn the segment came from; null for the system side. */
@@ -119,7 +145,9 @@ function tokenSourceLabel(source: TokenSource): string {
 		case "history":
 			return "history";
 		default:
-			return `tool results: ${source.slice("tool:".length)}`;
+			return source.startsWith("role:")
+				? `${source.slice("role:".length)} calls`
+				: `tool results: ${source.slice("tool:".length)}`;
 	}
 }
 
@@ -274,7 +302,9 @@ interface RowAccumulator {
 function rowsOf(accumulated: ReadonlyMap<TokenSource, RowAccumulator>): TokenSourceRow[] {
 	const rank = (source: TokenSource) => {
 		const fixed = FIXED_ORDER.indexOf(source);
-		return fixed >= 0 ? fixed : source === "history" ? FIXED_ORDER.length + 1 : FIXED_ORDER.length;
+		if (fixed >= 0) return fixed;
+		if (source.startsWith("role:")) return FIXED_ORDER.length + 2;
+		return source === "history" ? FIXED_ORDER.length + 1 : FIXED_ORDER.length;
 	};
 	return [...accumulated]
 		.filter(([, row]) => row.total > 0)
@@ -298,29 +328,56 @@ function addRow(target: Map<TokenSource, RowAccumulator>, source: TokenSource, r
 	});
 }
 
-interface TurnAccumulator {
-	index: number;
-	turnId: string;
-	at: string;
+interface RoleAccumulator {
 	calls: number;
 	unmeasuredCalls: number;
 	output: number;
-	coldReasons: Set<string>;
-	rows: Map<TokenSource, RowAccumulator>;
 }
 
-function inputOf(rows: ReadonlyMap<TokenSource, RowAccumulator>): TokenSourceInput {
+interface TurnAccumulator extends RoleAccumulator {
+	index: number;
+	turnId: string;
+	at: string;
+	coldReasons: Set<string>;
+	rows: Map<TokenSource, RowAccumulator>;
+	roles: Map<TokenSourceRole["role"], RoleAccumulator>;
+}
+
+function inputOf(rows: ReadonlyMap<TokenSource, RowAccumulator>, role?: TokenSourceRole["role"]): TokenSourceInput {
 	let cached = 0;
 	let fresh = 0;
 	let total = 0;
 	let known = true;
-	for (const row of rows.values()) {
+	for (const [source, row] of rows) {
+		if (role !== undefined && (role === "main" ? source.startsWith("role:") : source !== `role:${role}`)) continue;
 		cached += row.cached;
 		fresh += row.fresh;
 		total += row.total;
 		known &&= row.cacheKnown;
 	}
 	return { cached: known ? cached : null, fresh: known ? fresh : null, total };
+}
+
+function isSideRole(role: AgentRole): role is SideRole {
+	return role !== "main" && role !== "coordinator" && role !== "worker";
+}
+
+function rolesOf(
+	roles: ReadonlyMap<TokenSourceRole["role"], RoleAccumulator>,
+	rows: ReadonlyMap<TokenSource, RowAccumulator>,
+): TokenSourceRole[] {
+	return [...roles]
+		.sort(([a], [b]) => (a === "main" ? -1 : b === "main" ? 1 : a.localeCompare(b)))
+		.map(([role, tally]) => ({ role, ...tally, input: inputOf(rows, role) }));
+}
+
+/** A side-agent call waiting for the turn it is charged to. */
+interface SideCharge {
+	role: SideRole;
+	usage: CallUsage | null;
+	invoked: boolean;
+	/** Calls the usage covers: a ledger checkpoint's usage sums its summary streams. */
+	calls: number;
 }
 
 /** Fold a session's ledger entries and its own journal records into the per-turn split. */
@@ -330,6 +387,8 @@ function tokenSourcesReport(
 	records: ReadonlyArray<TelemetryRecord>,
 ): TokenSourcesReportV1 {
 	const settled = new Map<string, TelemetryRecord<"call.settled">>();
+	const sideCalls: TelemetryRecord<"call.settled">[] = [];
+	const startedAt = new Map<string, string>();
 	const snapshots: TelemetryRecord<"context.snapshotted">[] = [];
 	const compiles: TelemetryRecord<"prompt.compiled">[] = [];
 	for (const record of records) {
@@ -338,7 +397,9 @@ function tokenSourcesReport(
 		if (record.k === "call.settled") {
 			settled.set(record.data.attemptId, record);
 			settled.set(record.data.callId, record);
-		} else if (record.k === "context.snapshotted") snapshots.push(record);
+			if (isSideRole(record.ctx.agent.role)) sideCalls.push(record);
+		} else if (record.k === "call.started") startedAt.set(record.data.attemptId, record.t);
+		else if (record.k === "context.snapshotted") snapshots.push(record);
 		else if (record.k === "prompt.compiled") compiles.push(record);
 	}
 	const byTime = (a: TelemetryRecord, b: TelemetryRecord) => a.t.localeCompare(b.t);
@@ -374,13 +435,77 @@ function tokenSourcesReport(
 			output: 0,
 			coldReasons: new Set(),
 			rows: new Map(),
+			roles: new Map(),
 		};
 		turns.push(turn);
 		return turn;
 	};
+	const tally = (turn: TurnAccumulator, role: TokenSourceRole["role"], output: number | null, calls = 1): void => {
+		const tallies = turn.roles.get(role) ?? { calls: 0, unmeasuredCalls: 0, output: 0 };
+		for (const target of [turn, tallies]) {
+			if (output === null) target.unmeasuredCalls += calls;
+			else {
+				target.calls += calls;
+				target.output += output;
+			}
+		}
+		turn.roles.set(role, tallies);
+	};
+	const chargeSide = (turn: TurnAccumulator, charge: SideCharge): void => {
+		const { usage } = charge;
+		const total = usage === null ? 0 : usage.input + (usage.cacheRead ?? 0) + usage.cacheWrite;
+		if (usage === null || total <= 0) {
+			if (charge.invoked) tally(turn, charge.role, null, charge.calls);
+			return;
+		}
+		usageFrom.add(usage.from);
+		if (usage.api !== null && NO_UNCACHED_INPUT_APIS.has(usage.api)) freshIsCacheWriteCalls += charge.calls;
+		tally(turn, charge.role, usage.output, charge.calls);
+		const cached = Math.min(total, usage.cacheRead ?? 0);
+		addRow(turn.rows, `role:${charge.role}`, {
+			cached,
+			fresh: total - cached,
+			total,
+			cacheKnown: usage.cacheRead !== null,
+		});
+	};
+	const sideCharge = (record: TelemetryRecord<"call.settled">): SideCharge => ({
+		role: record.ctx.agent.role as SideRole,
+		usage: journalUsage(record),
+		invoked: record.data.disposition !== "never_sent",
+		calls: 1,
+	});
+	// A checkpoint's calls are charged to the turn whose prompt it ran ahead of, or to the open turn when it ran inside
+	// one; the next ledger message says which.
+	let pending: SideCharge[] = [];
+	const charged = new Set<TelemetryRecord<"call.settled">>();
+	const flushPending = (turn: TurnAccumulator | undefined): void => {
+		if (turn !== undefined) for (const charge of pending) chargeSide(turn, charge);
+		pending = [];
+	};
 
 	for (const entry of path) {
 		if (entry.kind === "compactionSummary") {
+			const linked = sideCalls.filter(
+				(record) => record.ctx.agent.role === "compaction" && entry.callIds?.includes(record.data.callId) === true,
+			);
+			for (const record of linked) charged.add(record);
+			pending.push(...linked.map(sideCharge));
+			if (linked.length === 0 && entry.usage !== undefined)
+				pending.push({
+					role: "compaction",
+					usage: {
+						input: entry.usage.input,
+						cacheRead: entry.usage.cacheRead,
+						cacheWrite: entry.usage.cacheWrite,
+						output: entry.usage.output,
+						from: "ledger",
+						coldReasons: [],
+						api: null,
+					},
+					invoked: true,
+					calls: Math.max(1, entry.usage.apiCalls),
+				});
 			const kept = context.findIndex((segment) => segment.turnId === entry.firstKeptTurnId);
 			context = [
 				{ turnId: entry.turnId, source: "history", tokens: estimateTokens(entry) },
@@ -395,7 +520,7 @@ function tokenSourcesReport(
 			continue;
 		}
 		if (entry.role === "user") {
-			openTurn(entry);
+			flushPending(openTurn(entry));
 			context.push(...userSegments(entry));
 			continue;
 		}
@@ -408,18 +533,18 @@ function tokenSourcesReport(
 		// A row Clio synthesized for a terminating tool result is no provider message and was never sent.
 		if (payload.terminalToolResult === true) continue;
 		const turn = turns.at(-1) ?? openTurn(entry);
+		flushPending(turn);
 		const journal =
 			(typeof payload.attemptId === "string" ? settled.get(payload.attemptId) : undefined) ??
 			(typeof payload.callId === "string" ? settled.get(payload.callId) : undefined);
 		const usage = (journal ? journalUsage(journal) : null) ?? ledgerUsage(payload);
 		const total = usage === null ? 0 : usage.input + (usage.cacheRead ?? 0) + usage.cacheWrite;
 		if (usage === null || total <= 0) {
-			if (payload.callInvoked !== false) turn.unmeasuredCalls += 1;
+			if (payload.callInvoked !== false) tally(turn, "main", null);
 		} else {
 			usageFrom.add(usage.from);
-			turn.calls += 1;
+			tally(turn, "main", usage.output);
 			if (usage.api !== null && NO_UNCACHED_INPUT_APIS.has(usage.api)) freshIsCacheWriteCalls += 1;
-			turn.output += usage.output;
 			for (const reason of usage.coldReasons) turn.coldReasons.add(reason);
 			const side = systemSide(entry.timestamp, snapshots, compiles);
 			systemFrom.add(side.basis);
@@ -454,7 +579,17 @@ function tokenSourcesReport(
 		if (tokens > 0) context.push({ turnId: entry.turnId, source: "history", tokens });
 	}
 
+	flushPending(turns.at(-1));
+	// Any other side call is charged to the turn that was open when it started.
+	for (const record of sideCalls) {
+		if (charged.has(record)) continue;
+		const at = startedAt.get(record.data.attemptId) ?? record.t;
+		const turn = [...turns].reverse().find((candidate) => candidate.at <= at) ?? turns[0];
+		if (turn !== undefined) chargeSide(turn, sideCharge(record));
+	}
+
 	const sessionRows = new Map<TokenSource, RowAccumulator>();
+	const sessionRoles = new Map<TokenSourceRole["role"], RoleAccumulator>();
 	let calls = 0;
 	let unmeasuredCalls = 0;
 	let output = 0;
@@ -463,6 +598,14 @@ function tokenSourcesReport(
 		unmeasuredCalls += turn.unmeasuredCalls;
 		output += turn.output;
 		for (const [source, row] of turn.rows) addRow(sessionRows, source, row);
+		for (const [role, tallies] of turn.roles) {
+			const prior = sessionRoles.get(role) ?? { calls: 0, unmeasuredCalls: 0, output: 0 };
+			sessionRoles.set(role, {
+				calls: prior.calls + tallies.calls,
+				unmeasuredCalls: prior.unmeasuredCalls + tallies.unmeasuredCalls,
+				output: prior.output + tallies.output,
+			});
+		}
 	}
 	const one = <T extends string>(set: ReadonlySet<T>, none: T, mixed: T): T =>
 		set.size === 0 ? none : set.size > 1 ? mixed : ([...set][0] as T);
@@ -486,8 +629,16 @@ function tokenSourcesReport(
 			output: turn.output,
 			coldReasons: [...turn.coldReasons].sort(),
 			rows: rowsOf(turn.rows),
+			roles: rolesOf(turn.roles, turn.rows),
 		})),
-		totals: { calls, unmeasuredCalls, input: inputOf(sessionRows), output, rows: rowsOf(sessionRows) },
+		totals: {
+			calls,
+			unmeasuredCalls,
+			input: inputOf(sessionRows),
+			output,
+			rows: rowsOf(sessionRows),
+			roles: rolesOf(sessionRoles, sessionRows),
+		},
 	};
 }
 
