@@ -10,6 +10,7 @@ import { clioStateDir } from "../../core/xdg.js";
 import type { SettledRunRecord } from "../telemetry/index.js";
 import { readSettledRun } from "../telemetry/index.js";
 import { runStatusForOutcome } from "./outcome.js";
+import { readRunLiveSpend } from "./run-feed.js";
 import type { RunSettlement } from "./run-settlement.js";
 import { settleUnfinishedRun } from "./run-settlement.js";
 import type { Ledger } from "./state.js";
@@ -94,6 +95,8 @@ export function isOpenRunRow(row: RunEnvelope): boolean {
  * whole orchestrator downtime, which is not a measurement of anything. The
  * last heartbeat is the honest bound; a row that never heartbeat has only its
  * own start, which reads as a zero-length run rather than an invented one.
+ * The run's spend file, written while it streamed, holds a later heartbeat and
+ * the spend observed by then, so the closed row keeps both.
  *
  * A restart has no shared monotonic origin with the process that owned the
  * worker, so recovery never estimates heartbeat age. It first adjudicates the
@@ -121,8 +124,11 @@ export function recoverAbandonedRuns(ledger: Ledger, options: RunRecoveryOptions
 			continue;
 		}
 		const detail = "abandoned: orchestrator exited before the run finalized";
-		const endedAt = row.heartbeatAt ?? row.startedAt;
+		const live = readRunLiveSpend(row.id, stateDir);
+		const lastSeen = [live?.heartbeatAt, row.heartbeatAt].filter((at): at is string => typeof at === "string");
+		const endedAt = lastSeen.sort().at(-1) ?? row.startedAt;
 		const closedRow = ledger.update(row.id, {
+			...(live !== null ? { spend: live.spend, spendSums: live.spendSums } : {}),
 			status: "dead",
 			outcome: "stalled",
 			outcomeDetail: detail,

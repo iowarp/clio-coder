@@ -1,11 +1,13 @@
-import { ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { noCallRunUsageFacts, spendSumsOf } from "../../src/core/telemetry/pricing.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 
 import { recoverAbandonedRuns } from "../../src/domains/dispatch/orphan-recovery.js";
+import { writeRunLiveSpend } from "../../src/domains/dispatch/run-feed.js";
 import { openRunTelemetry, settleOrphanedRunJournal } from "../../src/domains/dispatch/run-telemetry.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import {
@@ -268,13 +270,18 @@ describe("session durability boundary", () => {
 		);
 		journal.feed({ kind: "open", runId: run.id, agentId: "coder" }, 1_000_000);
 		await journal.close();
+		// Live spend went to the run's own file while it streamed, with the heartbeat it was written at (P3 #2).
+		const lastSeen = new Date(Date.parse(run.startedAt) + 60_000).toISOString();
+		const spend = noCallRunUsageFacts();
+		await writeRunLiveSpend(run.id, { spend, spendSums: spendSumsOf(spend), heartbeatAt: lastSeen });
 
 		const reopened = openLedger({ maxRuns: 10 });
 		const recovered = recoverAbandonedRuns(reopened);
 		strictEqual(recovered.abandoned, 1);
 		strictEqual(reopened.get(run.id)?.status, "dead");
 		strictEqual(reopened.get(run.id)?.outcome, "stalled");
-		ok(reopened.get(run.id)?.endedAt !== null);
+		strictEqual(reopened.get(run.id)?.endedAt, lastSeen);
+		deepStrictEqual(reopened.get(run.id)?.spend, spend);
 		// The run's journal gets the settlement its dead host never wrote, so no reader waits on it.
 		const [unsettled] = recovered.unsettled;
 		strictEqual(unsettled?.runId, run.id);
