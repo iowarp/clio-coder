@@ -405,6 +405,9 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 			["verify", ran(ToolNames.Verify, { check: "test" })],
 			["operator !", [{ kind: "bashExecution", turnId: "bang", command: "npm test", exitCode: 0 }]],
 			["declared make check", ran(ToolNames.Bash, { command: "make check" })],
+			// Checks the shared classifier settles that the finish vocabulary does not name.
+			["cargo clippy", ran(ToolNames.Bash, { command: "cargo clippy" })],
+			["operator ! mypy", [{ kind: "bashExecution", turnId: "bang", command: "mypy .", exitCode: 0 }]],
 		];
 		for (const [label, check] of checks)
 			for (const stale of [false, true]) {

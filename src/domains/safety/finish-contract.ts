@@ -12,6 +12,7 @@ import {
 } from "../../tools/verify/catalog.js";
 import { assessQualityPolicy, loadQualityPolicy, type QualityFinding } from "../../tools/verify/quality-policy.js";
 import { validateTrustStatus } from "../evidence/trust-status.js";
+import type { ObservedCheck } from "../session/task-board.js";
 import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
 import { callVerdict } from "./check-classifier.js";
 import { type RunCheckFacts, runCheckFacts } from "./observed-checks.js";
@@ -873,10 +874,11 @@ function pushPath(paths: string[], seen: Set<string>, path: string): void {
 }
 
 /**
- * Receipt-based validation evidence over the recent window. Kept verbatim from
- * the pre-redesign engine minus the requested-inspection path: validation
- * commands (`detectValidationCommand`), verify check runs, passed dispatch
- * receipts, and protected-artifact records.
+ * Receipt-based validation evidence over the recent window: shell and operator
+ * `!` checks the shared fold settled, verify check runs, passed dispatch
+ * receipts, and protected-artifact records. The finish vocabulary
+ * (`detectValidationCommand`) only labels a shell check and admits its package
+ * execution; it never decides whether one is credited.
  * Inspection was removed because inspecting the repo is never a mutation, so it
  * can no longer be on the path to engaging the contract.
  */
@@ -885,12 +887,13 @@ function collectValidationEvidence(
 	acceptanceChecks: ReadonlySet<string>,
 	workspaceRoot: string | undefined,
 	declared: ReadonlyArray<DeclaredVerifierCommand>,
-	standing: ReadonlySet<string>,
+	standing: ReadonlyMap<string, ObservedCheck>,
 ): FinishContractEvidence[] {
 	const evidence: FinishContractEvidence[] = [];
 	const toolCalls = new Map<string, ToolCallEvidenceCandidate>();
 	const declaredRuns = new Map<string, ToolCallEvidenceCandidate[]>();
 	const dispatchCalls = new Map<string, ToolCallEvidenceCandidate>();
+	const shellCalls = new Map<string, string | null>();
 	const seen = new Set<string>();
 	const entries = capabilityEntries(recent);
 	// A check run through the shell, `verify` or an operator's `!` counts only where the shared classifier settled its
@@ -915,6 +918,11 @@ function collectValidationEvidence(
 			continue;
 		}
 		if (declaredCallId !== undefined) continue;
+		const shellCallId = bashCallId(entry);
+		if (shellCallId !== null) {
+			shellCalls.set(shellCallId, turnIdOf(entry));
+			continue;
+		}
 
 		const typedValidationCall = validationToolCall(entry);
 		if (typedValidationCall !== null) {
@@ -936,19 +944,27 @@ function collectValidationEvidence(
 				pushEvidence(evidence, seen, dispatchRunRecord);
 				continue;
 			}
-			if (!standing.has(resultId)) continue;
+			const pass = standing.get(resultId);
+			if (pass === undefined) continue;
 			const candidate = toolCalls.get(resultId);
 			if (candidate !== undefined) pushEvidence(evidence, seen, validationEvidence(candidate, entry));
 			for (const declaredCandidate of declaredRuns.get(resultId) ?? [])
 				pushEvidence(evidence, seen, validationEvidence(declaredCandidate, entry));
+			if (shellCalls.has(resultId))
+				pushEvidence(evidence, seen, observedCheckEvidence(pass, shellCalls.get(resultId) ?? null));
 			continue;
 		}
 
-		if (!standing.has(`#${index}`)) continue;
+		const pass = standing.get(`#${index}`);
+		if (pass === undefined) continue;
 		const bashExecution = bashExecutionEvidence(entry, acceptanceChecks, workspaceRoot);
+		const declaredExecutions = bashExecutionDeclaredEvidence(entry, workspaceRoot, declared);
 		if (bashExecution !== null) pushEvidence(evidence, seen, bashExecution);
-		for (const declaredExecution of bashExecutionDeclaredEvidence(entry, workspaceRoot, declared))
-			pushEvidence(evidence, seen, declaredExecution);
+		for (const declaredExecution of declaredExecutions) pushEvidence(evidence, seen, declaredExecution);
+		if (bashExecution === null && declaredExecutions.length === 0) {
+			const marker = asRecord(entry)?.excludeFromContext === true ? " [not sent to model]" : "";
+			pushEvidence(evidence, seen, observedCheckEvidence(pass, turnIdOf(entry), marker));
+		}
 	}
 
 	return evidence;
@@ -1009,6 +1025,28 @@ function bashValidationCall(
 	const turnId = turnIdOf(entry);
 	if (turnId !== null) candidate.turnId = turnId;
 	return candidate;
+}
+
+/** A model `bash` call's id, for a check the shared fold settles that the finish vocabulary does not name. */
+function bashCallId(entry: unknown): string | null {
+	const record = asRecord(entry);
+	if (record?.kind !== "message" || record.role !== "tool_call") return null;
+	const payload = asRecord(record.payload);
+	if (payload === null || stringFromFirst(payload, ["name", "toolName", "tool"]) !== "bash") return null;
+	return stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
+}
+
+/**
+ * A pass the shared classifier settled and no later change retired, credited under the name the fold filed it by
+ * (`cargo clippy`, `mypy .`) when the finish vocabulary has no label for it, so the gate and the receipt agree (x8-1).
+ */
+function observedCheckEvidence(pass: ObservedCheck, turnId: string | null, marker = ""): FinishContractEvidence {
+	return {
+		kind: "validation_command",
+		summary: `validation command passed: ${pass.name}${marker}`,
+		...(pass.check ? { check: pass.check } : {}),
+		...(turnId !== null ? { turnId } : {}),
+	};
 }
 
 /** A model `bash` call's runs of declared checks, each credited when the call's result succeeds. */
