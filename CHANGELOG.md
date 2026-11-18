@@ -105,6 +105,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A System One typed-wire call (TypeSafe Jev and the other decide() wires) now records cache read and cache write as a known zero, and `telemetry tokens` no longer blanks a session's cached/fresh when one call lacks a cache-read count: cached and fresh sum the calls with a split, the total stays exact, and the rest is named "N without split" (optional `unsplitCalls` in the --json report and campaign metrics) (bt-42).
 - A steer that steering triage reads as a stop in a headless `--steer-channel` run or an ACP prompt now interrupts the turn and answers it, keeping queued follow-ups; the run no longer ends canceled with exit 1, and the cut reply journals cause `triage_stop` (stage harness, abort source `triage`) instead of an operator cancel (bt-41).
 - /view dispatch:<run> words a worker's structured output as its Fleet Runs card does instead of raw JSON (bt-11 i22-e).
 - A narrow finish line marks the token amounts it had no room for with an ellipsis (bt-11 i22-d).
