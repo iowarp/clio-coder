@@ -188,14 +188,39 @@ export function sentCallCount(view: TelemetryView, filter: { roles?: AgentRole[]
 		const calls = view.calls({ ...filter, dispositions: [...SENT_DISPOSITIONS] }).calls;
 		const own = new Set(calls.map((call) => call.callId)).size;
 		if (filter.roles !== undefined && !filter.roles.includes("worker")) return own;
-		const runs = view
-			.runs()
-			.filter((run) => filter.from === undefined || run.firstAt === null || run.firstAt >= filter.from);
-		return own + runs.reduce((sum, run) => sum + factKnownValue(run.apiCalls.fact), 0);
+		return own + sentRuns(view, filter.from).reduce((sum, run) => sum + factKnownValue(run.apiCalls.fact), 0);
 	} catch {
 		// A read model that cannot list calls has no sent count to give; the caller shows its own total instead.
 		return Number.NaN;
 	}
+}
+
+/** The worker runs {@link sentCallCount} counts: every referenced run that began at or after `from`. */
+function sentRuns(view: TelemetryView, from: string | undefined) {
+	return view.runs().filter((run) => from === undefined || run.firstAt === null || run.firstAt >= from);
+}
+
+/**
+ * The cumulative time from each attempt's start to its settle over the calls {@link sentCallCount} counts from `from`,
+ * worker runs' attempts included, so the time sits beside a count of the same calls. `untimed` counts the calls a run
+ * reported with no per-call record to time; the caller says so with the sum's own gap. Null when no call went out.
+ */
+export function sentCallTime(
+	view: TelemetryView,
+	from: string,
+): { time: ReturnType<TelemetryView["attempts"]>; untimed: number } | null {
+	const sent = [...SENT_DISPOSITIONS];
+	const attemptIds = view.calls({ from, dispositions: sent }).calls.map((call) => call.attemptId);
+	let untimed = 0;
+	for (const run of sentRuns(view, from)) {
+		const calls = view.calls({ runId: run.runId, dispositions: sent }).calls;
+		attemptIds.push(...calls.map((call) => call.attemptId));
+		// The run's call count is its sent attempts that reached the provider; one it holds no record of has no timing.
+		const recorded = calls.filter((call) => call.disposition !== "incomplete").length;
+		untimed += Math.max(0, factKnownValue(run.apiCalls.fact) - recorded);
+	}
+	if (attemptIds.length === 0 && untimed === 0) return null;
+	return { time: view.attempts(attemptIds, "settle"), untimed };
 }
 
 /** A single fact as the one-contribution sum it is, so a share of it renders through the sum renderers. */

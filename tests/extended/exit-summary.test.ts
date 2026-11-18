@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { extractGlobalFlags } from "../../src/cli/argv.js";
+import { makeTelemetryRecord, type TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { countVerifiedOutcomes } from "../../src/domains/evidence/verified-outcomes.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
@@ -364,4 +365,32 @@ test("--session-file keeps a live lane state at turn ends and permission cards u
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+test("the exit card's model-call time covers the worker calls its count covers (Astra r5-5)", () => {
+	const timed = (records: TelemetryRecord[], settle: number, runId?: string) =>
+		records.map((record) => {
+			const ctx = runId ? { ...record.ctx, runId, agent: { role: "worker" as const, id: runId } } : record.ctx;
+			return (
+				record.k === "call.settled"
+					? { ...record, ctx, data: { ...record.data, stages: { ...record.data.stages, settle } } }
+					: { ...record, ctx }
+			) as TelemetryRecord;
+		});
+	const main = [
+		...timed(telemetryCall("session-1", { usage: { input: 10, output: 1 } }), 1_000),
+		...timed(telemetryCall("session-1", { usage: { input: 10, output: 1 } }), 1_000),
+	];
+	const worker = timed(telemetryCall("session-1", { role: "worker", usage: { input: 10, output: 1 } }), 60_000, "run-w");
+	const [first] = main;
+	ok(first);
+	const linked = makeTelemetryRecord("run.linked", { runId: "run-w" }, first.ctx, { t: first.t, mono: 0 });
+	const spend = exitSpend(
+		telemetryViewOf("session-1", [...main, linked], new Map([["run-w", worker]])),
+		"1970-01-01T00:00:00.000Z",
+	);
+	ok(spend.kind === "ready");
+	strictEqual(spend.visitCalls, 3);
+	strictEqual(spend.callTime, "1m02s");
+	strictEqual(spend.callTimeCoverage, null);
 });
