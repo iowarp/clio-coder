@@ -109,6 +109,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Worker and contained main-session approval cards now say that an approved shell call still runs inside the OS sandbox, where writes outside its writable roots fail; approval never widened the sandbox (bt-11 k).
 - why-stopped names the tool boundary when a harness stop (autonomy cap, cancel) lands after a call that asked for tools (bt-26 N2g).
 - A turn steered mid-run settles with every model call it opened and its cause, so a headless `--timeout` after a steer reports `shutdown` (bt-26 N2h).
 - The sealed run's tools row no longer counts an ask refused by a `--timeout` abort as blocked; decisions already counted it as a permission request (bt-15 c14a).
