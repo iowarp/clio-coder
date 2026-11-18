@@ -2284,7 +2284,7 @@ async function runCouncil(
 	council: DispatchCouncilSettings,
 	timeoutMs: number | undefined,
 	signal: AbortSignal | undefined,
-	gateTelemetry: TelemetryContext | undefined,
+	clipTelemetry: TelemetryContext | undefined,
 ): Promise<{ report: CouncilReport; runs: CompletedRun[]; group: string }> {
 	const group = newGateGroupId("council");
 	const runs: CompletedRun[] = [];
@@ -2305,7 +2305,7 @@ async function runCouncil(
 					bytes: briefing.bytes,
 					parts: briefing.clips.map((clip) => ({ ...clip })),
 				},
-				gateTelemetry,
+				clipTelemetry,
 			);
 		}
 		let timer: ReturnType<typeof setTimeout> | undefined;
@@ -3000,7 +3000,13 @@ export async function runDispatchTool(
 				return { kind: "error", message: "dispatch: trusted council settings are unavailable" };
 			}
 			try {
-				return councilResult(deps, await runCouncil(deps, requests[0], council, timeoutMs, options?.signal, gateTelemetry));
+				// A clip belongs to the journal of the call that convened the council: the session's (or a worker's own
+				// run), open now. The gate's host run journal opens only at its seal, so a clip there was dropped unowned.
+				const clipTelemetry = withToolTelemetryContext(
+					{ ...options, ...(sessionId == null ? {} : { sessionId }) },
+					telemetryContext,
+				);
+				return councilResult(deps, await runCouncil(deps, requests[0], council, timeoutMs, options?.signal, clipTelemetry));
 			} catch (err) {
 				return { kind: "error", message: dispatchErrorMessage(err) };
 			}
