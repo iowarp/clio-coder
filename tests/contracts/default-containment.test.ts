@@ -1,9 +1,10 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
@@ -16,7 +17,12 @@ import {
 	type OperatorDefaultScope,
 	type OperatorYoloScope,
 } from "../../src/domains/safety/policy-engine.js";
-import { createSafetyJudge, operatorOnlyAsk, type SafetyJudgeSubject } from "../../src/domains/safety/safety-judge.js";
+import {
+	createSafetyJudge,
+	operatorOnlyAsk,
+	resolveSafetyJudgeConfig,
+	type SafetyJudgeSubject,
+} from "../../src/domains/safety/safety-judge.js";
 import { asksToLeaveSandbox } from "../../src/domains/safety/sandbox-escape.js";
 import { effectiveScratchRoots } from "../../src/domains/safety/scratch-roots.js";
 import {
@@ -372,6 +378,44 @@ test("a recoverable stash drop is refused when its snapshot cannot pin the stash
 	match(refused.kind === "blocked" ? refused.reason : "", /could not pin the stash/);
 	deepStrictEqual(session.ran, []);
 	strictEqual(snapshots.list().length, 1);
+});
+
+// cw-5: a lane's rm under its own $TMPDIR was refused as destroy-data; the judge was never told the scratch roots.
+test("the judge reads the session's workspace and scratch roots by path, and a delete escaping them by its real target", async (t) => {
+	const cwd = workspace("clio-judge-roots-ws-");
+	const temp = workspace("clio-judge-roots-tmp-");
+	const outside = workspace("clio-judge-roots-out-");
+	symlinkSync(outside, join(temp, "link"));
+	const saved = { cwd: process.cwd(), tmp: process.env.TMPDIR };
+	process.env.TMPDIR = temp;
+	process.chdir(cwd);
+	t.after(() => {
+		process.chdir(saved.cwd);
+		if (saved.tmp === undefined) delete process.env.TMPDIR;
+		else process.env.TMPDIR = saved.tmp;
+	});
+	const prompts: Array<{ system: string; user: string }> = [];
+	const judge = createSafetyJudge({
+		config: () => ({ ...resolveSafetyJudgeConfig(DEFAULT_SETTINGS, cwd), target: "local" }),
+		complete: async ({ system, user }) => {
+			prompts.push({ system, user });
+			return { text: JSON.stringify({ verdict: "allow", rule: "scratch", reason: "inside a scratch root" }) };
+		},
+		operatorMessages: () => ["remove your scratch files when done"],
+		session: () => "s",
+		consequences: () => [],
+	});
+	const { registry } = defaultSession(cwd, { sandbox: false, snapshots: false }, { safetyJudge: judge });
+	for (const command of [`rm -rf ${temp}/sub`, `rm -rf "$TMPDIR/sub"`, `rm -rf ${temp}/link/`]) {
+		strictEqual((await registry.invoke(bash(command))).kind, "ok", command);
+	}
+	strictEqual(prompts.length, 3);
+	const system = prompts[0]?.system ?? "";
+	ok(system.includes(`The workspace is ${cwd}.`), system);
+	ok(system.includes(`- ${temp} (this process's temp directory, $TMPDIR)`), system);
+	match(system, /strictly inside a scratch root is the scratch allow rule, never destroy-data/u);
+	deepStrictEqual(new Set(prompts.map((prompt) => prompt.system)).size, 1);
+	ok(prompts[2]?.user.includes(`delete-path-outside-workspace: ${outside}`), prompts[2]?.user);
 });
 
 test("a force push asks at default instead of being refused, and the floor still refuses", () => {
