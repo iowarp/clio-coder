@@ -84,6 +84,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- `telemetry tokens` charges compaction and memory calls to the turn they ran in and counts them in its totals, labelled by role (bt-12 #10).
+- The compaction notice counts the messages it summarized as the context snapshot does, in provider messages, not ledger entries (bt-12 #11).
+- The exit summary's `in` is the whole prompt, matching the turn receipt, footer and usage report (bt-12 #2 follow-up).
 - On an on/off thinking route, the Shift+Tab toast, the composer rail and the /thinking picker now use one word ("on") for a state; a level the route changes is shown with its note (bt-11 item 5).
 - A refused `/compact <instructions>` on a short or empty session now says the instructions were not used (bt-11 item 7).
 - ACP `session/delete` on an open session now says to close it first (session/close or the client's close action) (bt-12 item 6).
