@@ -906,7 +906,11 @@ describe("dispatch admission boundary", () => {
 		strictEqual(isBoundedGateRolePrompt({ role: "reviewer", readOnly: true, systemPrompt: "caller persona" }), false);
 	});
 
-	it("admits a budget-declaring recipe on a Claude CLI target as an external one-shot budget", async () => {
+	it("admits a budget-declaring recipe on a Claude CLI target as an external one-shot budget", async (t) => {
+		// A Claude CLI run judges the CLAUDE.md files of its cwd against that tree, which indexes every source file of
+		// a real checkout; an empty scratch cwd keeps this budget check off the developer's tree.
+		const cwd = mkdtempSync(join(tmpdir(), "clio-coder-claude-budget-"));
+		t.after(() => rmSync(cwd, { recursive: true, force: true }));
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		// An artifact-write run on an unmediated CLI needs the operator's trust (Q6).
 		settings.targets = [{ id: "claude-worker", runtime: "claude-code", defaultModel: "sonnet", trustedUnmediated: true }];
@@ -941,6 +945,7 @@ describe("dispatch admission boundary", () => {
 			executionRole: "builder" as const,
 			target: "claude-worker",
 			model: "sonnet",
+			cwd,
 		};
 
 		const declared = spawn(claudeCodeRuntime);
