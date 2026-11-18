@@ -982,9 +982,15 @@ function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
 	return lines.join("\n");
 }
 
-/** Worker guidance always describes default admission and run-specific permission routing. */
-export function workerSafetyOneLiner(mode: WorkerPromptInputs["onPermission"]): string {
-	return `workspace edits and recognized commands run; other commands require approval. ${workerPermissionSentence(mode)}`;
+/**
+ * Worker guidance always describes default admission and run-specific permission routing. A read-only run (the
+ * restriction that renders `# Read-only run`) is told what holds for it; every other worker's line is unchanged.
+ */
+export function workerSafetyOneLiner(mode: WorkerPromptInputs["onPermission"], readOnly = false): string {
+	const admission = readOnly
+		? "workspace edits are not permitted in this run; read-only inspection runs; other commands require approval."
+		: "workspace edits and recognized commands run; other commands require approval.";
+	return `${admission} ${workerPermissionSentence(mode)}`;
 }
 
 /**
@@ -1008,7 +1014,7 @@ function renderWorkerSafetySection(safetyFragment: LoadedFragment, inputs: Worke
 	const oneLine =
 		inputs.permit?.allowance.executeAutonomy === "yolo"
 			? permitLine
-			: `${permitLine} ${workerSafetyOneLiner(inputs.onPermission)}`;
+			: `${permitLine} ${workerSafetyOneLiner(inputs.onPermission, inputs.readOnly === true)}`;
 	const body = safetyFragment.body.trim();
 	return body.length > 0 ? `${oneLine}\n\n${body}` : oneLine;
 }

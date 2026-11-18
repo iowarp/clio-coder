@@ -74,7 +74,7 @@ Reach `data`, `git`, `store` through gateway(op="call", capability="<name>", arg
 Use code_nav with source=workspace (default) for project code and source=clio for Clio's shipped code map; modes: symbol, path, entries, outline, deps, dependents, wiki, project (wiki and project are workspace only).
 This worker has no operator skill-activation channel; do not load or suggest skills. Recall needed [evicted ...] content with context(scope="recall", ref=...).
 
-Permit: read-only, git inspect, asks main (the main agent decides ordinary asks; operator rails go to the operator). workspace edits and recognized commands run; other commands require approval. Approval-required calls pause for a bounded operator decision before execution.
+Permit: read-only, git inspect, asks main (the main agent decides ordinary asks; operator rails go to the operator). workspace edits are not permitted in this run; read-only inspection runs; other commands require approval. Approval-required calls pause for a bounded operator decision before execution.
 
 # Default mode
 

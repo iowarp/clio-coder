@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -13,6 +13,7 @@ import {
 	compileWorker,
 	PROMPT_BUDGET_CHARS,
 	type WorkerPromptInputs,
+	workerSafetyOneLiner,
 } from "../../src/domains/prompts/compiler.js";
 import { type FragmentTable, loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 
@@ -90,6 +91,31 @@ describe("prompt tiers", () => {
 			strictEqual(actual, readFileSync(expectedPath, "utf8"));
 		});
 	}
+});
+
+describe("read-only worker authority line (D-C)", () => {
+	const promise = /workspace edits and recognized commands run/;
+	const worker = (name: string, extra: Partial<WorkerPromptInputs> = {}) => {
+		const tier = loadTier(name);
+		if (tier.kind !== "worker") throw new Error(`${name} is not a worker tier`);
+		return compileWorker(loadFragments(), { ...tier.inputs, ...extra }).systemPrompt;
+	};
+
+	it("a read-only run is not promised workspace edits; any other worker's line is unchanged", () => {
+		const readOnly = worker("worker-scout");
+		ok(readOnly.includes("# Read-only run"));
+		ok(!promise.test(readOnly), "a read-only run must not be told workspace edits run");
+		match(
+			readOnly,
+			/workspace edits are not permitted in this run; read-only inspection runs; other commands require approval\./,
+		);
+		ok(promise.test(worker("worker-scout", { readOnly: false })));
+		ok(promise.test(worker("worker-coder")));
+		strictEqual(
+			workerSafetyOneLiner("deny"),
+			"workspace edits and recognized commands run; other commands require approval. Approval-required calls are denied immediately; they are not parked for an operator.",
+		);
+	});
 });
 
 describe("prompts.profile v2 (S-82)", () => {
