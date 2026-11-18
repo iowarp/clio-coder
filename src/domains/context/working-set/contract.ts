@@ -142,8 +142,6 @@ export interface EvictionCandidate {
 	by?: string;
 	/** A marker fixed by the stage instead of the rendered one: the stub a v6 session's request already carried. */
 	marker?: string;
-	/** A `step_overflow` cut of a read the model already answered: its marker says not to read it again. */
-	seen?: boolean;
 }
 
 export interface WorkingSetPolicy {
