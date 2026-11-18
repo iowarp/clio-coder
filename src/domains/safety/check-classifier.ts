@@ -18,6 +18,7 @@ import {
 	extractCommandCdTargets,
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
+	joinLineContinuations,
 	observedValidationCommand,
 	shellCommandVerdict,
 	shellWritesOnlyNamedTargets,
@@ -210,7 +211,7 @@ export function validationCommandOf(
 		// A scoped unittest run must not stand in for the full suite, so the first positional target names the check.
 		if (detected.matched === "python -m unittest") {
 			const target = /\s-m\s+unittest((?:\s+\S+)*)/u
-				.exec(command)?.[1]
+				.exec(joinLineContinuations(command))?.[1]
 				?.trim()
 				.split(/\s+/u)
 				.find((token) => token.length > 0 && !token.startsWith("-") && !/^[0-9]*[<>|&]/u.test(token));

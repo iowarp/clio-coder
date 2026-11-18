@@ -266,6 +266,7 @@ import {
 	type AgentRuntime,
 	type ChatLoopRunSnapshot,
 	type ChatLoopTarget,
+	clearActiveInterrupt,
 	createTurnState,
 	type TurnPreparationPhase,
 	type TurnPreparationStep,
@@ -3672,7 +3673,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.toolProseAbortReason = null;
 				state.toolProseAssessedChars = 0;
 				state.repetitionAbortReason = null;
-				state.activeInterruptReason = null;
+				clearActiveInterrupt(state);
 				state.interruptedAssistantMessage = null;
 				state.interruptedCall = null;
 
@@ -3975,6 +3976,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						}
 						state.interruptedAssistantMessage = null;
 						state.interruptedCall = null;
+						clearActiveInterrupt(state);
 					}
 					// A continuation writes its outcome too: the streak that gates the next
 					// turn's direction workflow resets on a turn that used a tool, and a
@@ -4695,7 +4697,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				throw new Error("Wait for the current turn to settle before recovery.");
 			const runtime = turnRuntime.ensureRuntime();
 			if (!runtime) throw new Error("No native runtime is configured.");
-			state.activeInterruptReason = null;
+			clearActiveInterrupt(state);
 			if (!state.activeUserTurnId) {
 				const operator = findLastEntry(
 					activePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined),

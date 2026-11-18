@@ -1072,20 +1072,32 @@ it("headless shutdown retains its cancelled receipt and exit 143 without route a
 	}
 });
 
-it("a reply cut off by shutdown is the harness's stop and names no route", { timeout: 15_000 }, async () => {
+it("a reply cut off by shutdown is the harness's stop and names no route, even after an earlier Esc", {
+	timeout: 15_000,
+}, async () => {
 	const f = fixture("partial");
-	// A `run --timeout` deadline or a signal reaches the turn as the composition root disposing the loop.
+	// The first turn is the operator's Esc. A `run --timeout` deadline or a signal then reaches the second turn as the
+	// composition root disposing the loop, and the earlier Esc must not name that stop (x7-3).
+	let turn = 0;
 	f.loop.onEvent((event) => {
-		if (event.type === "text_delta") f.loop.dispose();
+		if (event.type !== "text_delta") return;
+		if (turn === 1) f.loop.cancel();
+		else if (turn === 2) f.loop.dispose();
+		turn = -turn;
 	});
 	try {
+		turn = 1;
+		await f.loop.submit("Stop");
+		await f.loop.whenSettled();
+		turn = 2;
 		await f.loop.submit("Start");
 		await f.loop.whenSettled();
-		const closing = f
+		const [cancelled, closing] = f
 			.entries()
 			.map((entry) => (entry.kind === "message" && entry.role === "assistant" ? recordValue(entry.payload) : undefined))
-			.find((payload) => payload?.stopReason === "aborted");
-		ok(closing, JSON.stringify(f.entries()));
+			.filter((payload) => payload?.stopReason === "aborted");
+		ok(cancelled && closing, JSON.stringify(f.entries()));
+		strictEqual(recordValue(cancelled.failure)?.errorClass, "operator_cancel");
 		strictEqual(closing.failureRoute, undefined);
 		match(String(closing.errorMessage), /Clio Coder shut down/u);
 		// The persisted failure names the harness's cause, not a transport abort (bt-26 N2a).
