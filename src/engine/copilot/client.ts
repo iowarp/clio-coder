@@ -14,6 +14,7 @@
 import type { ChildProcess } from "node:child_process";
 import type { CopilotClient, ModelInfo } from "@github/copilot-sdk";
 import { COPILOT_HEADLESS_LOGIN_FIX, copilotKeychainAllowed } from "../../core/copilot-keychain.js";
+import type { ThinkingLevel } from "../../core/defaults.js";
 import { type CopilotSdkModule, loadCopilotSdk } from "./sdk-module.js";
 import { copilotSessionFsConfig } from "./session-fs.js";
 
@@ -348,6 +349,13 @@ export interface CopilotModelRow {
 	maxOutputTokens: number | undefined;
 	vision: boolean;
 	reasoning: boolean;
+	/**
+	 * The effort values the listing names for this model (`supportedReasoningEfforts`) in Clio's vocabulary,
+	 * `none` read as `off`; absent when the model takes no effort.
+	 */
+	reasoningLevels?: ThinkingLevel[];
+	/** The listing's `defaultReasoningEffort`, when it names one. */
+	reasoningDefaultLevel?: ThinkingLevel;
 	/** The tier the window and prices were read for; `default` unless the target opted into `long_context`. */
 	contextTier: CopilotContextTier;
 	prices: CopilotModelPrices | undefined;
@@ -400,6 +408,24 @@ function tierPrices(model: ModelInfo, tier: CopilotContextTier): CopilotModelPri
 	};
 }
 
+const EFFORT_ORDER: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** A listed effort value in Clio's vocabulary; the runtime's `none` is Clio's `off`. */
+function listedLevel(effort: string | undefined): ThinkingLevel | undefined {
+	if (effort === "none") return "off";
+	return EFFORT_ORDER.find((level) => level !== "off" && level === effort);
+}
+
+/** The listing's effort set, ordered and deduplicated, for a model that takes an effort. */
+function listedReasoning(model: ModelInfo): Pick<CopilotModelRow, "reasoningLevels" | "reasoningDefaultLevel"> {
+	if (model.capabilities?.supports?.reasoningEffort !== true) return {};
+	const listed = new Set((model.supportedReasoningEfforts ?? []).map((effort) => listedLevel(effort)));
+	const levels = EFFORT_ORDER.filter((level) => listed.has(level));
+	if (levels.length === 0) return {};
+	const preset = listedLevel(model.defaultReasoningEffort);
+	return { reasoningLevels: levels, ...(preset && levels.includes(preset) ? { reasoningDefaultLevel: preset } : {}) };
+}
+
 /** One listing row read for a tier; the contract test feeds it a faked listing row. */
 export function copilotModelRow(model: ModelInfo, contextTier: CopilotContextTier = "default"): CopilotModelRow {
 	const long = model.billing?.tokenPrices?.longContext;
@@ -410,6 +436,7 @@ export function copilotModelRow(model: ModelInfo, contextTier: CopilotContextTie
 		maxOutputTokens: model.capabilities?.limits?.max_output_tokens,
 		vision: model.capabilities?.supports?.vision === true,
 		reasoning: model.capabilities?.supports?.reasoningEffort === true,
+		...listedReasoning(model),
 		contextTier,
 		prices: tierPrices(model, contextTier),
 		...(long

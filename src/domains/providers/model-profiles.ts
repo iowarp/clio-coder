@@ -105,6 +105,7 @@ const LIVE_ONLY_CAPABILITY_FIELDS: readonly string[] = [
 	"contextWindow",
 	"maxTokens",
 	"reasoningLevels",
+	"reasoningDefaultLevel",
 	"thinkingControlRuntime",
 	"parallelSlots",
 ];

@@ -23,6 +23,10 @@ import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
 import { copilotAuthState, detectCopilotLogin, prepareCopilotSdk } from "../../src/domains/providers/copilot-setup.js";
 import { endpointCapacityFor, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { toContextOverflowError } from "../../src/domains/providers/errors.js";
+import { resolveModelRuntimeCapabilitiesForModel } from "../../src/domains/providers/model-runtime-capabilities.js";
+import copilotSdkRuntime from "../../src/domains/providers/runtimes/copilot/copilot-sdk.js";
+import type { ProbeContext } from "../../src/domains/providers/types/runtime-descriptor.js";
+import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { copilotSdkAccount, copilotSdkRestartIdle, listCopilotSdkModels } from "../../src/engine/ai.js";
@@ -91,7 +95,7 @@ class FakeSession {
 	}
 	on(handler) { this.handlers.add(handler); return () => this.handlers.delete(handler); }
 	emit(type, data) { for (const handler of [...this.handlers]) handler({ type, data, id: "e", parentId: null, timestamp: "" }); }
-	async setModel() {}
+	async setModel(model, options) { (this.switches ??= []).push({ model, ...options }); }
 	async setTools(tools) { this.tools = new Map(tools.map((tool) => [tool.name, tool])); }
 	async abort() { this.aborted = true; }
 	async disconnect() { state.disconnected.push(this.sessionId); }
@@ -555,6 +559,55 @@ test("the default tier's billed prompt budget bounds the window when the limits 
 		const rows = await listCopilotSdkModels();
 		strictEqual(rows.find((row) => row.id === "long-context")?.contextWindow, 200_000);
 	} finally {
+		models.splice(0, models.length, ...original);
+	}
+});
+
+test("Copilot's listed reasoning efforts are the model's thinking levels, and each reaches the wire by name", async () => {
+	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
+	const original = [...models];
+	const reasoning = { supports: { vision: false, reasoningEffort: true }, limits: { max_context_window_tokens: 64000 } };
+	models.push(
+		{ ...original[0], id: "three-levels", capabilities: reasoning, supportedReasoningEfforts: ["low", "medium", "high"] },
+		{
+			...original[0],
+			id: "with-none",
+			capabilities: reasoning,
+			supportedReasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
+		},
+	);
+	try {
+		const target = { id: "copilot", runtime: "copilot-sdk" } as TargetDescriptor;
+		ok((await copilotSdkRuntime.probe(target, {} as ProbeContext)).ok);
+		const synth = (id: string) => copilotSdkRuntime.synthesizeModel(target, id, null);
+		const thinking = (id: string, level: "off" | "medium" | "max") =>
+			resolveModelRuntimeCapabilitiesForModel(synth(id), level).thinking;
+
+		const medium = thinking("three-levels", "medium");
+		deepStrictEqual([medium.mechanism, medium.effectiveLevel, medium.notice], ["effort-levels", "medium", ""]);
+		const max = thinking("three-levels", "max");
+		strictEqual(max.effectiveLevel, "high");
+		strictEqual(max.notice, "This model offers thinking low, medium, high, so Thinking max runs as high.");
+		const off = thinking("three-levels", "off");
+		strictEqual(off.effectiveLevel, "low");
+		strictEqual(off.notice, "This model cannot turn thinking off, so Thinking off runs at low.");
+		deepStrictEqual(thinking("with-none", "off").supportedLevels, ["off", "low", "medium", "high", "xhigh", "max"]);
+		strictEqual(thinking("with-none", "off").effectiveLevel, "off");
+		strictEqual(thinking("fake-model", "medium").mechanism, "none");
+
+		const first = await engineStreamSimple(synth("with-none"), normalizeContext({ messages: [user("hello")] }), {
+			sessionId: "effort-session",
+			reasoning: "max",
+		}).result();
+		const session = fake().sessions.at(-1) as FakeSession & { switches?: Array<Record<string, unknown>> };
+		strictEqual(session.config.reasoningEffort, "max");
+		await engineStreamSimple(synth("with-none"), normalizeContext({ messages: [user("hello"), first, user("again")] }), {
+			sessionId: "effort-session",
+		}).result();
+		strictEqual(fake().sessions.at(-1), session, "thinking off switches the live session");
+		deepStrictEqual(session.switches, [{ model: "with-none", reasoningEffort: "none" }]);
+	} finally {
+		disposeCopilotConversations("effort-session");
 		models.splice(0, models.length, ...original);
 	}
 });

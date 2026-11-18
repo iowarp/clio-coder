@@ -65,8 +65,10 @@ export function applyModelCapabilityPatch<T extends ModelCapabilityPatchTarget>(
 		const metadata = { ...model.clioCoder };
 		delete metadata.thinkingControlRuntime;
 		delete metadata.reasoningLevels;
+		delete metadata.reasoningDefaultLevel;
 		if (caps.thinkingControlRuntime !== undefined) metadata.thinkingControlRuntime = caps.thinkingControlRuntime;
 		if (caps.reasoningLevels !== undefined) metadata.reasoningLevels = [...caps.reasoningLevels];
+		if (caps.reasoningDefaultLevel !== undefined) metadata.reasoningDefaultLevel = caps.reasoningDefaultLevel;
 		model.clioCoder = metadata;
 	}
 	return model;

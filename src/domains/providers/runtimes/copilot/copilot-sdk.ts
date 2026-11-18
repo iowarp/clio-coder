@@ -1,6 +1,7 @@
 import { listCopilotSdkModels } from "../../../../engine/ai.js";
 import type { Api, Model } from "../../../../engine/types.js";
 import { synthesizeCatalogBackedModel } from "../../catalog.js";
+import { applyModelCapabilityPatch } from "../../model-capabilities.js";
 import { readTargetModelSnapshot, recordTargetModelSnapshot } from "../../target-model-cache.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
@@ -41,6 +42,8 @@ type ListedRow = {
 	maxOutputTokens: number | undefined;
 	vision: boolean;
 	reasoning: boolean;
+	reasoningLevels?: CapabilityFlags["reasoningLevels"];
+	reasoningDefaultLevel?: CapabilityFlags["reasoningDefaultLevel"];
 	longContext?: { contextWindow: number | undefined };
 };
 
@@ -48,6 +51,9 @@ function rowCapabilities(row: ListedRow, contextWindow = row.contextWindow): Par
 	return {
 		vision: row.vision,
 		reasoning: row.reasoning,
+		// The listed effort values are the model's levels: Copilot takes each as `reasoningEffort`.
+		...(row.reasoningLevels ? { reasoningLevels: row.reasoningLevels } : {}),
+		...(row.reasoningDefaultLevel ? { reasoningDefaultLevel: row.reasoningDefaultLevel } : {}),
 		...(contextWindow !== undefined ? { contextWindow } : {}),
 		...(row.maxOutputTokens !== undefined ? { maxTokens: row.maxOutputTokens } : {}),
 	};
@@ -171,6 +177,12 @@ const copilotSdkRuntime = {
 			provider: "copilot-sdk",
 			defaultBaseUrl: "copilot-sdk://local",
 		});
+		// The engine reads the listed effort levels off the model it streams with, as a probed turn's patch does.
+		if (discovered?.reasoningLevels)
+			applyModelCapabilityPatch(model, {
+				reasoningLevels: discovered.reasoningLevels,
+				...(discovered.reasoningDefaultLevel ? { reasoningDefaultLevel: discovered.reasoningDefaultLevel } : {}),
+			});
 		// The engine reads the tier off the model it streams with: session create and model switch pass it on.
 		return copilotContextTierOf(target) === "long_context"
 			? (Object.assign(model, { copilotContextTier: "long_context" }) as Model<Api>)
