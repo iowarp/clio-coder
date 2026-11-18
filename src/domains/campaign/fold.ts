@@ -39,6 +39,8 @@ export interface CampaignMetrics {
 		cached: number | null;
 		input: number;
 		output: number;
+		/** Measured calls with no cache-read count: in input, in neither fresh nor cached (bt-42). */
+		unsplitCalls?: number;
 	} | null;
 }
 
@@ -110,6 +112,7 @@ export function foldCampaignMetrics(
 						cached: tokens.totals.input.cached,
 						input: tokens.totals.input.total,
 						output: tokens.totals.output,
+						...(tokens.totals.input.unsplitCalls ? { unsplitCalls: tokens.totals.input.unsplitCalls } : {}),
 					},
 	};
 }

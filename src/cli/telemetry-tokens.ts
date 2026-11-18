@@ -20,9 +20,12 @@ report one input total per call, so the totals are measured and the split is
 estimated from the session ledger and the journal's context snapshot; the
 output header says so. The calls column counts every invoked call and names
 those the provider sent no token counts for; their tokens are in no sum, and a
-turn with no measured call prints its tokens as unknown. Fresh is uncached input
-plus cache write; copilot-sdk reports the whole prompt as cache read plus cache
-write, so on its calls fresh is cache write and the output says so. Calls a
+turn with no measured call prints its tokens as unknown. A measured call that
+sent no cache-read count has no cached/fresh split: its tokens are in the input
+total only, cached and fresh sum the calls that have one, and the calls column
+names the rest as without split. Fresh is uncached input plus cache write;
+copilot-sdk reports the whole prompt as cache read plus cache write, so on its
+calls fresh is cache write and the output says so. Calls a
 side agent made for the session (compaction, memory and the like) are charged to
 the turn they ran in and counted in its totals; the calls column names them by
 role, and --by-source gives each role its own row. --json emits the report
@@ -36,14 +39,16 @@ interface Coverage {
 	calls: number;
 	unmeasuredCalls: number;
 	roles: readonly TokenSourceRole[];
+	input: TokenSourceInput;
 }
 
 const sideRoles = (roles: readonly TokenSourceRole[]) => roles.filter((role) => role.role !== "main");
 
 /** Invoked calls, naming the unmeasured ones whose tokens no sum below includes and the side agents' share. */
-function callsCell({ calls, unmeasuredCalls, roles }: Coverage): string {
+function callsCell({ calls, unmeasuredCalls, roles, input }: Coverage): string {
 	const notes = [
 		...(unmeasuredCalls > 0 ? [`${unmeasuredCalls} unmeasured`] : []),
+		...(input.unsplitCalls ? [`${input.unsplitCalls} without split`] : []),
 		...sideRoles(roles).map((role) => `${role.role} ${role.calls + role.unmeasuredCalls}`),
 	];
 	return notes.length > 0 ? `${calls + unmeasuredCalls} (${notes.join(", ")})` : String(calls);
@@ -62,7 +67,8 @@ function measuredCount(coverage: Coverage, value: number | null): string {
 }
 
 function rowCells(row: TokenSourceRow): string[] {
-	return [`  ${row.label}`, count(row.cached), count(row.fresh), String(row.total)];
+	const unsplit = row.unsplitCalls ? ` (${row.unsplitCalls} call(s) without split)` : "";
+	return [`  ${row.label}`, count(row.cached), count(row.fresh), `${row.total}${unsplit}`];
 }
 
 function inputCells(label: string, coverage: Coverage, input: TokenSourceInput): string[] {

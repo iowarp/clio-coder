@@ -223,7 +223,7 @@ describe("System One paid requests: admission and accounting", () => {
 		ok(settled.every((row) => row.ctx.sessionId === "session-1" && row.ctx.agent.role === "system-one"));
 	});
 
-	it("journals a typed-wire round trip as a system-one call carrying the wire's usage (bt-33)", async () => {
+	it("journals a typed-wire round trip as a system-one call carrying the wire's usage, cache read a known zero (bt-33, bt-42)", async () => {
 		const target = paidTarget("typesafe-jev", "http://jev.test/v1");
 		const { admit, charges: journaled, admitted, calls } = ledger(target);
 		fakeFetch(async () =>
@@ -247,6 +247,10 @@ describe("System One paid requests: admission and accounting", () => {
 		ok(charge);
 		strictEqual(factKnownValue(charge.facts.usage.input), 568);
 		strictEqual(factKnownValue(charge.facts.usage.output), 21);
+		// The wire has no prompt cache, so no read is unreported and the call's total is exact (bt-42).
+		strictEqual(factKnownValue(charge.facts.usage.cacheRead), 0);
+		strictEqual(factKnownValue(charge.facts.usage.cacheWrite), 0);
+		strictEqual(factKnownValue(charge.facts.totalTokens), 589);
 		strictEqual(charge.pricedBy, "target-rates");
 		const settled = await calls();
 		strictEqual(settled.length, 1);
