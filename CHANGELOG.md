@@ -133,6 +133,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- `telemetry why-stopped` now reports a turn that stopped normally without answering, such as one that wrote a tool call as text, as a failed turn naming the cause. Before, it read "ended normally". turn.settled carries an optional content-free `terminal.noAnswer` (J1).
+- An output-limit cut with tool calls shows only its warning notice, without a second red "[stopped: length]" row (J4).
+- ACP: session/load replay separates the assistant messages of one turn with a blank line, as live does. A slash command's failure line now crosses a prompt once (J9, J10).
 - Verification: after a passing check, a Python probe that imports the workspace's own module and writes nothing reads as unknown. A no-op step such as `exit 0;` reads as inspection. Neither retires the pass, so the run no longer settles unverified with no-validation-tool. A probe that writes still retires it (c17-a).
 - Receipts: a headless main run with no check of its own is credited with a dispatched worker's validated pass (basis dispatch-run-record, naming the run and agent), unless the main run changed the tree afterwards (c17-a).
 - Copilot route: host reminders that follow tool results, such as the result-contract reminder, now go in Copilot's immediate send before the next model request. They are never appended inside a tool result, which models read as an injection (D4).
