@@ -1016,6 +1016,26 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 		["biome check --write .", "mutation"],
 		["ruff check --fix", "mutation"],
 		["npx playwright test -u", "mutation"],
+		// Format checks read the tree while their bare forms rewrite it (x10-2).
+		["isort --check-only .", "check"],
+		["isort -c .", "check"],
+		["python -m isort --check-only .", "check"],
+		["black --check src", "check"],
+		["ruff format --check .", "check"],
+		["cargo fmt --check", "check"],
+		["cargo fmt --all -- --check", "check"],
+		["rustfmt --check src/lib.rs", "check"],
+		["isort .", "mutation"],
+		["ruff format .", "mutation"],
+		["cargo fmt", "mutation"],
+		// Go and Rust's routine third-party runner and linters (x10-3).
+		["cargo nextest run --workspace", "check"],
+		["golangci-lint run ./...", "check"],
+		["staticcheck ./...", "check"],
+		["golangci-lint run --fix ./...", "mutation"],
+		// A writer behind `pnpm|yarn <bin>` writes as it does behind `exec` (x10-4).
+		["pnpm prettier -w .", "mutation"],
+		["pnpm tsc", "mutation"],
 		// Neither a known check, reader nor writer: it neither settles nor clears.
 		["node codemod.mjs", "unknown"],
 		["python script.py", "unknown"],
@@ -1028,7 +1048,6 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 		["pnpm test --import ./loader.mjs", "unknown"],
 		["source env.sh", "unknown"],
 		["echo $(npm test)", "unknown"],
-		["black --check src", "unknown"],
 		// A builtin, not the project's script (x6-4).
 		["yarn check", "unknown"],
 		["pnpm dev", "unknown"],
@@ -1037,9 +1056,14 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 	// A check-named script that fixes or updates snapshots still rewrites the tree it checks (x6-4).
 	for (const command of ["pnpm lint --fix", "pnpm --filter web lint:fix", "pnpm test -u", "yarn workspace web format"])
 		strictEqual(classifyCall("bash", { command }, { cwd }).shape, "mixed", command);
+	strictEqual(
+		classifyCall("bash", { command: "pytest && isort --check-only . && black --check ." }, { cwd }).shape,
+		"pure",
+	);
 	// A selected workspace's run keeps its selectors, so it never stands for the root's `pnpm test`.
 	strictEqual(classifyCall("bash", { command: "pnpm --filter web test" }, { cwd }).check, "pnpm --filter web test");
 	strictEqual(classifyCall("bash", { command: "pnpm lint" }, { cwd }).check, "pnpm run lint");
+	strictEqual(classifyCall("bash", { command: "cargo nextest run" }, { cwd }).check, "cargo test");
 	strictEqual(verdict("read", { path: "a.ts" }), "inspection");
 	strictEqual(verdict("edit", { path: "src/a.ts" }), "mutation");
 	strictEqual(verdict("verify", { check: "test" }), "check");

@@ -1763,6 +1763,11 @@ const TOOLCHAIN_WRITES: ReadonlyMap<string, ReadonlySet<string>> = new Map([
 /** Formatters that rewrite what they read unless told only to check or diff. */
 const CHECKABLE_FORMATTERS: ReadonlySet<string> = new Set(["black", "isort", "rustfmt"]);
 
+/** isort's own spellings of check-only mode (x10-2). */
+function isortCheckFlag(arg: string): boolean {
+	return arg === "--check-only" || arg === "--check" || arg === "-c";
+}
+
 /** Interpreter flags that run a script given on the command line. */
 const INLINE_SCRIPT_FLAGS: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
 	["node", ["-e", "--eval", "-p", "--print"]],
@@ -1794,6 +1799,11 @@ function writerStep(executable: string, args: ReadonlyArray<string>): boolean {
 		if (args[0] === "dlx" && typeof args[1] === "string" && !args[1].startsWith("-"))
 			return writerStep(basenameToken(args[1]), args.slice(2));
 		if (args[0] !== undefined && PACKAGE_WRITES.has(args[0])) return true;
+		// `pnpm prettier -w .` runs the writer `pnpm exec prettier -w .` does (x10-4); anything else falls through, so a
+		// write-capable script name (`pnpm format`) still writes.
+		const bin = packageBinInvocation(executable, args);
+		if (bin !== null && !readOnlyCheckMatch(bin.executable, bin.args) && writerStep(bin.executable, bin.args))
+			return true;
 	}
 	if (TOOLCHAIN_WRITES.get(executable)?.has(args[0] ?? "") === true) return true;
 	if (isPythonExecutable(executable)) {
@@ -1806,7 +1816,13 @@ function writerStep(executable: string, args: ReadonlyArray<string>): boolean {
 	}
 	const inline = INLINE_SCRIPT_FLAGS.get(executable);
 	if (inline?.some((flag) => args.some((arg) => arg === flag || arg.startsWith(`${flag}=`))) === true) return true;
-	const checksOnly = args.some((arg) => arg === "--check" || arg === "--diff" || arg.startsWith("--check="));
+	const checksOnly = args.some(
+		(arg) =>
+			arg === "--check" ||
+			arg === "--diff" ||
+			arg.startsWith("--check=") ||
+			(executable === "isort" && isortCheckFlag(arg)),
+	);
 	if (CHECKABLE_FORMATTERS.has(executable)) return !checksOnly;
 	if ((executable === "cargo" || executable === "go") && args[0] === "fmt") return !checksOnly;
 	if (executable === "ruff" && args[0] === "format") return !checksOnly;
@@ -1929,7 +1945,9 @@ function makeCheckMatch(args: ReadonlyArray<string>): boolean {
 
 /**
  * Read-only checks of other ecosystems by their subcommand (x8-2): cargo check, clippy and build, go vet and build
- * (without `-o`), `gofmt -l`, mypy, pyright, pylint, flake8, ruff check, `prettier --check`, biome check and lint,
+ * (without `-o`), `gofmt -l`, mypy, pyright, pylint, flake8, ruff check, `prettier --check`, the format checks
+ * `black --check`, `isort --check-only`, `ruff format --check`, `cargo fmt --check` and `rustfmt --check` (x10-2),
+ * `golangci-lint run`, staticcheck (x10-3), biome check and lint,
  * dotnet test, rspec, phpunit, composer test, deno test, check and lint, playwright test, cypress run, tox, nox, hatch
  * test, rake test, `python manage.py test`, `php artisan test` and make's check targets. An option that writes what they read (`--fix`, `--write`, `-w`, a
  * snapshot update, mypy's `--install-types`, ruff's `--add-noqa`, biome's `--apply`) or a tox or nox environment named
@@ -1941,7 +1959,11 @@ function ecosystemCheckMatch(executable: string, args: ReadonlyArray<string>): b
 	let matched: boolean;
 	switch (executable) {
 		case "cargo":
-			matched = subcommand === "check" || subcommand === "clippy" || subcommand === "build";
+			matched =
+				subcommand === "check" ||
+				subcommand === "clippy" ||
+				subcommand === "build" ||
+				(subcommand === "fmt" && args.includes("--check"));
 			break;
 		case "go":
 			matched = subcommand === "vet" || (subcommand === "build" && !has(/^-o(?:=|$)/u));
@@ -1954,13 +1976,24 @@ function ecosystemCheckMatch(executable: string, args: ReadonlyArray<string>): b
 			break;
 		case "pylint":
 		case "flake8":
+		case "staticcheck":
 			matched = true;
+			break;
+		case "golangci-lint":
+			matched = subcommand === "run";
 			break;
 		case "pyright":
 			matched = !has(/^--(?:createstub|writebaseline)/u);
 			break;
 		case "ruff":
-			matched = subcommand === "check" && !has(/^--add-noqa/u);
+			matched = (subcommand === "check" && !has(/^--add-noqa/u)) || (subcommand === "format" && args.includes("--check"));
+			break;
+		case "black":
+		case "rustfmt":
+			matched = args.includes("--check");
+			break;
+		case "isort":
+			matched = args.some(isortCheckFlag);
 			break;
 		case "prettier":
 			matched = has(/^(?:--check|-c|--list-different|-l)$/u);
@@ -2944,7 +2977,9 @@ function validationMatch(
 	if (executable === "pytest") return "pytest";
 	if (isPythonExecutable(executable) && moduleArg(args) === "pytest") return "python -m pytest";
 	if (isPythonExecutable(executable) && moduleArg(args) === "unittest") return "python -m unittest";
-	if (executable === "cargo" && args[0] === "test") return "cargo test";
+	// nextest runs the same cargo tests, so it carries their label (x10-3).
+	if (executable === "cargo" && (args[0] === "test" || (args[0] === "nextest" && args[1] === "run")))
+		return "cargo test";
 	if (executable === "go" && args[0] === "test") return "go test";
 	if (executable === "ctest") return "ctest";
 	if (executable === "make" && args[0] === "test") return "make test";
@@ -3200,13 +3235,24 @@ function packageExecInvocation(
 	return bin === undefined || bin.startsWith("-") ? null : { executable: basenameToken(bin), args: args.slice(at + 1) };
 }
 
-/** The binary `pnpm <bin>` or `yarn <bin>` runs when the first word is no builtin of theirs (`pnpm vitest run`). */
+/** Package-manager commands that run a package script, never a binary. */
+const SCRIPT_RUNNING_COMMANDS: ReadonlySet<string> = new Set(["run", "test", "start"]);
+
+/**
+ * The binary `pnpm <bin>` or `yarn <bin>` runs when the first word is no builtin of theirs (`pnpm vitest run`) and
+ * none of the commands that run a package script (`run`, `test`, `start`).
+ */
 function packageBinInvocation(
 	executable: string,
 	args: ReadonlyArray<string>,
 ): { executable: string; args: ReadonlyArray<string> } | null {
 	const bin = args[0];
-	if (bin === undefined || bin.startsWith("-") || PACKAGE_MANAGER_BUILTINS.get(executable)?.has(bin) !== false)
+	if (
+		bin === undefined ||
+		bin.startsWith("-") ||
+		SCRIPT_RUNNING_COMMANDS.has(bin) ||
+		PACKAGE_MANAGER_BUILTINS.get(executable)?.has(bin) !== false
+	)
 		return null;
 	return { executable: basenameToken(bin), args: args.slice(1) };
 }
