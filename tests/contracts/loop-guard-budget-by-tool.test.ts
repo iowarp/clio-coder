@@ -13,7 +13,7 @@ test("the soft tool budget refusal names where the turn's calls went", () => {
 			return verdict;
 		},
 	} as unknown as Parameters<typeof createLoopGuardRegistration>[0]["safety"];
-	const guard = createLoopGuardRegistration({ safety, turnToolCallBudget: () => ({ soft: 4, hard: 19 }) });
+	const guard = createLoopGuardRegistration({ safety, turnToolCallBudget: () => ({ soft: 3, hard: 18 }) });
 	const calls: Array<[string, Record<string, unknown>]> = [
 		["read", { path: "a.md" }],
 		["read", { path: "b.md" }],
@@ -32,7 +32,7 @@ test("the soft tool budget refusal names where the turn's calls went", () => {
 		const block = effects.find((effect) => effect.kind === "block_tool");
 		if (block?.kind === "block_tool") reason = block.reason;
 	}
-	ok(reason.includes("soft budget 4"), reason);
+	ok(reason.includes("soft budget 3"), reason);
 	ok(
 		reason.includes("This turn's calls by tool: read 2, extension_desk__next_step 1, extension_desk__record 1."),
 		reason,

@@ -53,20 +53,20 @@ function guardedRegistry(operatorSoft: number) {
 	return registry;
 }
 
-/** The ordinal of the first refused call in a turn, and its reason. */
+/** How many calls ran before the first refusal in a turn, and its reason. */
 async function firstRefusal(
 	operatorSoft: number,
 	constraints: TurnConstraints | undefined,
-): Promise<{ at: number; reason: string }> {
+): Promise<{ ran: number; reason: string }> {
 	const registry = guardedRegistry(operatorSoft);
 	for (let n = 1; n <= operatorSoft + 1; n++) {
 		const verdict = await registry.invoke(
 			{ tool: "extension_desk__status", args: { n } },
 			{ sessionId: "s1", turnId: "t1", ...(constraints ? { turnConstraints: constraints } : {}) },
 		);
-		if (verdict.kind === "blocked") return { at: n, reason: verdict.reason };
+		if (verdict.kind === "blocked") return { ran: n - 1, reason: verdict.reason };
 	}
-	return { at: -1, reason: "" };
+	return { ran: -1, reason: "" };
 }
 
 describe("template budget", () => {
@@ -108,15 +108,15 @@ describe("template budget", () => {
 
 	it("lowers the turn's tool-call limit and names the template; above the cap it gets the cap", async () => {
 		const lowered = await firstRefusal(6, { budget: { toolCalls: 3, template: "desk:write" } });
-		strictEqual(lowered.at, 3);
+		strictEqual(lowered.ran, 3);
 		ok(lowered.reason.includes('soft budget 3, set by prompt template "desk:write" budget.toolCalls'), lowered.reason);
 
 		const capped = await firstRefusal(6, { budget: { toolCalls: 50, template: "desk:write" } });
-		strictEqual(capped.at, 6);
+		strictEqual(capped.ran, 6);
 		// No template ceiling is set, so the operator's limit applies and the refusal says so.
 		ok(capped.reason.includes("soft budget 6, safety.limits.chatToolCallsPerTurn;"), capped.reason);
 
-		strictEqual((await firstRefusal(6, undefined)).at, 6);
+		strictEqual((await firstRefusal(6, undefined)).ran, 6);
 	});
 
 	it("lowers the turn's observation pool and names the template; above the cap it gets the cap", () => {

@@ -66,7 +66,7 @@ describe("loop guard identical-call epoch", () => {
 			const repeated = createLoopGuardRegistration({ safety: createWorkerSafety() });
 			const counted = createLoopGuardRegistration({
 				safety: createWorkerSafety(),
-				turnToolCallBudget: { soft: 2, hard: 3 },
+				turnToolCallBudget: { soft: 1, hard: 2 },
 			});
 			const call = before("exempt", ToolNames.Read, "same");
 			for (let i = 0; i < 8; i += 1) {
@@ -81,7 +81,7 @@ describe("loop guard identical-call epoch", () => {
 			ok(
 				counted
 					.evaluate(before("exempt", ToolNames.Read, "second"))
-					.some((effect) => effect.kind === "block_tool" && effect.reason.includes("soft budget 2")),
+					.some((effect) => effect.kind === "block_tool" && effect.reason.includes("soft budget 1")),
 			);
 		}
 	});

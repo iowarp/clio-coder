@@ -149,8 +149,8 @@ budget:
 ```
 
 - `toolCalls` sets the per-turn tool-call budget in place of
-  `safety.limits.chatToolCallsPerTurn`. The call that reaches the budget is
-  refused, so `toolCalls: 40` lets 39 calls run. The hard ceiling that stops
+  `safety.limits.chatToolCallsPerTurn`. `toolCalls: 40` lets 40 calls run
+  and refuses the 41st. The hard ceiling that stops
   the turn stays 15 calls above the effective budget.
 - `observationBytes` sets the turn's observation pool in place of
   `safety.limits.observationBytesPerTurn`: the combined tool output the model

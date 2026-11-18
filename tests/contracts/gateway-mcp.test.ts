@@ -278,7 +278,7 @@ describe("gateway MCP capabilities", () => {
 		open.push(source);
 		await source.ensure("mcp_fake__sleep");
 		const call = { tool: ToolNames.Gateway, args: { op: "call", capability: "mcp_fake__sleep", args: { ms: 1 } } };
-		for (let i = 0; i < 4; i++) {
+		for (let i = 0; i < 5; i++) {
 			const verdict = await registry.invoke(call, { turnId: "poll-turn" });
 			strictEqual(verdict.kind, "ok");
 		}

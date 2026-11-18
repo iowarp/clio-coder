@@ -113,8 +113,8 @@ describe("loop guard bash repeat credit (#445)", () => {
 	it("leaves the turn tool budget in force over a credited poll", () => {
 		const { call } = harness({ soft: 5, hard: 8 });
 		deepStrictEqual(
-			admitted(() => call({ elapsedMs: 300_000, output: "pending" }), 6),
-			[true, true, true, true, false, false],
+			admitted(() => call({ elapsedMs: 300_000, output: "pending" }), 7),
+			[true, true, true, true, true, false, false],
 		);
 	});
 });

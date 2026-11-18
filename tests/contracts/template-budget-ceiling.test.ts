@@ -31,7 +31,8 @@ function ceilings(toolCalls: number | null, observationBytes: number | null = nu
 }
 
 /** The ordinal of the first refused call in a turn under a template's budget, and its reason. */
-async function firstRefusal(templateCalls: number): Promise<{ at: number; reason: string }> {
+/** How many calls ran before the first refusal, and its reason. */
+async function firstRefusal(templateCalls: number): Promise<{ ran: number; reason: string }> {
 	let loopState = createLoopState();
 	const guard = createLoopGuardRegistration({
 		safety: {
@@ -60,9 +61,9 @@ async function firstRefusal(templateCalls: number): Promise<{ at: number; reason
 			{ tool: "extension_desk__status", args: { n } },
 			{ sessionId: "s1", turnId: "t1", turnConstraints },
 		);
-		if (verdict.kind === "blocked") return { at: n, reason: verdict.reason };
+		if (verdict.kind === "blocked") return { ran: n - 1, reason: verdict.reason };
 	}
-	return { at: -1, reason: "" };
+	return { ran: -1, reason: "" };
 }
 
 describe("template budget ceiling", () => {
@@ -92,23 +93,23 @@ describe("template budget ceiling", () => {
 	it("unset keeps a template budget lower-only", async () => {
 		ceilings(null);
 		const raised = await firstRefusal(100);
-		strictEqual(raised.at, OPERATOR);
+		strictEqual(raised.ran, OPERATOR);
 		ok(raised.reason.includes(`soft budget ${OPERATOR}, safety.limits.chatToolCallsPerTurn;`), raised.reason);
 		ok(raised.reason.includes("templateToolCallsPerTurnMax is unset"), raised.reason);
 
 		const lowered = await firstRefusal(20);
-		strictEqual(lowered.at, 20);
+		strictEqual(lowered.ran, 20);
 		ok(lowered.reason.includes('soft budget 20, set by prompt template "wtfp:advance" budget.toolCalls'), lowered.reason);
 	});
 
 	it("a ceiling of 120 lets a budget of 100 through, clamps 200 to 120, and lowering still works", async () => {
 		ceilings(120);
 		const raised = await firstRefusal(100);
-		strictEqual(raised.at, 100);
+		strictEqual(raised.ran, 100);
 		ok(raised.reason.includes("raised within safety.limits.templateToolCallsPerTurnMax 120"), raised.reason);
 
 		const clamped = await firstRefusal(200);
-		strictEqual(clamped.at, 120);
+		strictEqual(clamped.ran, 120);
 		ok(
 			clamped.reason.includes(
 				'soft budget 120, safety.limits.templateToolCallsPerTurnMax; prompt template "wtfp:advance" asked for 200',
@@ -117,7 +118,7 @@ describe("template budget ceiling", () => {
 		);
 
 		const lowered = await firstRefusal(20);
-		strictEqual(lowered.at, 20);
+		strictEqual(lowered.ran, 20);
 
 		ok(turnScopeGuidance({ budget: { toolCalls: 200, template: "wtfp:advance" } }).includes("at most 120 tool calls"));
 	});

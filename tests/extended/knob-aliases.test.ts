@@ -65,7 +65,7 @@ describe("removed knob spellings", () => {
 	});
 
 	it("reads a changed orchestrator turn budget on the next attempt", () => {
-		let budget: OrchTurnToolCallBudget = { soft: 2, hard: 3 };
+		let budget: OrchTurnToolCallBudget = { soft: 1, hard: 2 };
 		const guard = createLoopGuardRegistration({
 			safety: createWorkerSafety({ cwd: process.cwd() }),
 			turnToolCallBudget: () => budget,
@@ -73,12 +73,12 @@ describe("removed knob spellings", () => {
 		const attempt = () => guard.evaluate({ hook: "before_tool", toolName: "read", turnId: "turn-1" });
 		assert.deepEqual(attempt(), []);
 		const firstBlocked = attempt();
-		assert.match(firstBlocked[0]?.kind === "block_tool" ? firstBlocked[0].reason : "", /soft budget 2/);
-		budget = { soft: 4, hard: 5 };
+		assert.match(firstBlocked[0]?.kind === "block_tool" ? firstBlocked[0].reason : "", /soft budget 1/);
+		budget = { soft: 3, hard: 4 };
 		assert.deepEqual(attempt(), []);
 		const blocked = attempt();
 		assert.equal(blocked[0]?.kind, "block_tool");
-		assert.match(blocked[0]?.kind === "block_tool" ? blocked[0].reason : "", /soft budget 4/);
+		assert.match(blocked[0]?.kind === "block_tool" ? blocked[0].reason : "", /soft budget 3/);
 	});
 
 	it("rejects removed run aliases and accepts the canonical agent flags", () => {
