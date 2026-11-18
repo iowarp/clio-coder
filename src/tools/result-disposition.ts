@@ -770,3 +770,12 @@ export function toolResultPresentationText(result: unknown): string | null {
 	const presentation = metadata !== null && isRecord(metadata.presentation) ? metadata.presentation : null;
 	return presentation !== null && typeof presentation.content === "string" ? presentation.content : null;
 }
+
+/** The text blocks of a tool result's content, joined and trimmed: what the tool told the model. */
+export function toolResultText(content: unknown): string {
+	if (!Array.isArray(content)) return "";
+	return content
+		.map((block) => (isRecord(block) && block.type === "text" && typeof block.text === "string" ? block.text : ""))
+		.join("")
+		.trim();
+}

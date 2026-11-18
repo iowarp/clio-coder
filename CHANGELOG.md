@@ -58,7 +58,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - Receipts: a pass retired by a later change now reads basis retired-by-change instead of no-validation-tool. Older journals keep their basis (c17-a).
 - Calls the output limit cuts off are stated once, read as not run, and count as no call and no tool error on any surface. (bt-39 a)
 - A test pins ACP compaction failure lines as reply text. (c2b-3)
-- A worker's account of failed attempts is followed by the feed's own attempt counts. (bt-23 #3)
+- A run whose host feed recorded an errored or refused call is followed by the feed's own attempt counts, whatever the worker wrote. (bt-23 #3)
 - A judge-mode dispatch with no seated safety judge raises a worker_judge_withheld notice saying workers run as deny. (N2)
 - Unattended countdowns read m:ss under a minute too (0:59, 0:05). (bt-11 q)
 - The exit card row reads "Session verified" in every style. (drv-tui11)
@@ -132,6 +132,10 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A killed worker's work label counts the calls it started but never finished (unfinished:N). (bt-47 r5)
+- `fleet cancel` of an orphaned run files the canceled attempt and its terminal run id in the assignment record.
+- A council member that fails to resolve reports the real cause (for example a scope refusal) instead of calling every failure an unknown target.
+- The not_retried policy line is one sentence: the outcome, its code and how many of maxRetries were used.
 - `steer` cancel and `clio-coder fleet cancel` now find a headless (hosted) worker's assignment by its attempt id. Cancelling a hosted worker waiting on its retry backoff no longer reports 'nothing to cancel' and lets the retry spawn, and `fleet cancel` of a hosted worker whose owner is gone seals it as an orphan instead of waiting 15 s and exiting pending.
 - A very large bash call (for example a 130 KB heredoc) no longer stalls admission: each distinct read token is judged once per evaluation, so path lookups no longer grow with repeated lines (about 1.8 s to 0.65 s end to end at 130 KB). While such a call is still streaming, the TUI renders only the visible preview of its arguments, so each frame stays a few milliseconds whatever the argument size; the settled card and `/view` are unchanged.
 - A read-only worker's authority line now says workspace edits are not permitted in this run. It no longer says "workspace edits and recognized commands run". Other workers' prompts are byte-identical (D-C).

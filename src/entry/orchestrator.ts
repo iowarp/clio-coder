@@ -394,7 +394,11 @@ function buildBanner(): string {
 `;
 }
 
-function printJsonSessionHeader(meta: SessionMeta | null): RunJsonMainSessionFrame | null {
+/** The session frame names the route the run is on, which a resume's --target or --model may have moved (B-52). */
+function printJsonSessionHeader(
+	meta: SessionMeta | null,
+	active: ClioSettings["chat"],
+): RunJsonMainSessionFrame | null {
 	if (!meta) return null;
 	return {
 		type: "session",
@@ -404,8 +408,8 @@ function printJsonSessionHeader(meta: SessionMeta | null): RunJsonMainSessionFra
 		id: meta.id,
 		timestamp: meta.createdAt,
 		cwd: meta.cwd,
-		target: meta.target,
-		model: meta.model,
+		target: active.target ?? meta.target,
+		model: active.model ?? meta.model,
 		clioCoderVersion: meta.clioCoderVersion,
 	};
 }
@@ -3922,7 +3926,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						}
 					: {}),
 				...(runCostCap !== null ? { costCap: { maxUsd: runCostCap.maxUsd, unpricedRoutes } } : {}),
-				getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
+				getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null, getCurrentSettings().chat),
 			});
 			unsubscribeInternalFault();
 			if (internalFault) {

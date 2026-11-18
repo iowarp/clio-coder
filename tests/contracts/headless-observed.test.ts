@@ -314,11 +314,14 @@ test("observed checks follow the receipt's rules on the task board and the headl
 	deepStrictEqual(standing(bash("npm test"), bash("npm test -- --import ./x.mjs")), [["npm test", true, "test"]]);
 	const env = await isolateClioEnv("headless-observed-");
 	try {
+		// Writes count distinct paths, an edit or a redirect alike, not calls (A1).
 		const text = await headlessRun("text", [
 			["e1", "edit", "write", "ok", { path: "src/a.py", edits: [] }],
+			["b0", "bash", "execute", "ok", { command: "echo x >> src/a.py && echo y > src/b.py" }],
+			["e2", "edit", "write", "ok", { path: "src/b.py", edits: [] }],
 			["b1", "bash", "execute", "ok", { command: "make test; echo EXIT=$?" }],
 		]);
-		match(text.stderr, /1 write · no check observed after the last write/u);
+		match(text.stderr, /4 tool calls, 0 refused · 2 writes · no check observed after the last write/u);
 		// A typecheck red after a test pass fails the sealed receipt and the headless line alike (x6-1).
 		const red = await headlessRun(
 			"text",
