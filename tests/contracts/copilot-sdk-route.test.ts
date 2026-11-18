@@ -25,7 +25,7 @@ import { endpointCapacityFor, registerForegroundStream } from "../../src/domains
 import { toContextOverflowError } from "../../src/domains/providers/errors.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
-import { copilotSdkAccount, listCopilotSdkModels } from "../../src/engine/ai.js";
+import { copilotSdkAccount, copilotSdkRestartIdle, listCopilotSdkModels } from "../../src/engine/ai.js";
 import { engineStreamSimple } from "../../src/engine/api-registry.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
 import { normalizeContext } from "../../src/engine/context.js";
@@ -236,7 +236,10 @@ export class CopilotClient {
 			this.cliStartTimeout = null;
 		}
 	}
-	async start() { this.state = "connected"; }
+	async start() {
+		if (state.startError) throw new Error(state.startError);
+		this.state = "connected";
+	}
 	async stop() { this.state = "disconnected"; return []; }
 	async forceStop() { this.state = "disconnected"; }
 	/** The runtime child exits: every session is marked disconnected, as the SDK does, and the child emits exit. */
@@ -301,6 +304,7 @@ interface FakeState {
 	order: string[];
 	failBaselineOnce: boolean;
 	referenced: boolean;
+	startError?: string | undefined;
 }
 const fake = (): FakeState => (globalThis as { __clioCopilotFake?: FakeState }).__clioCopilotFake as FakeState;
 
@@ -596,6 +600,39 @@ test("the runtime authenticates as the copilot login user only, and no token rea
 		if (file.includes(join("components", "copilot-sdk"))) continue;
 		strictEqual(readFileSync(file, "utf8").includes(SECRET), false, `${file} holds a token`);
 	}
+});
+
+test("a parent Copilot CLI's runtime is never launched, and a protocol mismatch names the foreign runtime", async () => {
+	const inherited = {
+		COPILOT_CLI_PATH: "/parent/bin/copilot",
+		COPILOT_CLI: "1",
+		COPILOT_CLI_RESOLVED_DIST_DIR: "/parent/dist",
+		COPILOT_CLI_BINARY_VERSION: "1.0.113",
+		COPILOT_LOADER_PID: "4242",
+		COPILOT_AGENT_SESSION_ID: "parent-session",
+	};
+	Object.assign(process.env, inherited);
+	fake().startError =
+		"SDK protocol version mismatch: SDK supports versions 3-3, but server reports version 4. Please update your SDK or server to ensure compatibility.";
+	try {
+		await copilotSdkRestartIdle();
+		const error = await listCopilotSdkModels().then(
+			() => null,
+			(err: Error & { code?: string }) => err,
+		);
+		ok(error);
+		strictEqual(error.code, "COPILOT_RUNTIME_MISMATCH");
+		match(error.message, /inherited or foreign Copilot CLI runtime/);
+		match(error.message, /server reports version 4\)/);
+		strictEqual(/update your SDK/.test(error.message), false);
+		const options = fake().clients.at(-1);
+		ok(options);
+		for (const name of Object.keys(inherited)) strictEqual(options.env[name], undefined, name);
+	} finally {
+		for (const name of Object.keys(inherited)) delete process.env[name];
+		fake().startError = undefined;
+	}
+	ok((await listCopilotSdkModels()).length > 0, "the next use starts a fresh runtime");
 });
 
 test("Clio's loop runs the tool; Copilot continues the same session and reports billing as facts", async () => {
