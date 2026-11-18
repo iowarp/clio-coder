@@ -1,6 +1,8 @@
 import { registerEngineSessionCleanup } from "../ai.js";
 import { registerEngineApiProvider } from "../api-registry.js";
+import { forgetCopilotConversation } from "../copilot/session-fs.js";
 import { copilotSdkApiProvider, disposeCopilotConversations } from "../copilot/stream.js";
+import { onSessionDeleted } from "../session.js";
 import { ollamaNativeApiProvider } from "./ollama-native.js";
 import { openAICompletionsApiProvider } from "./openai-completions.js";
 
@@ -18,4 +20,6 @@ export function registerClioApiProviders(): void {
 	registerEngineApiProvider(copilotSdkApiProvider, "clio");
 	// A call without a session id used the "default" conversation key.
 	registerEngineSessionCleanup((sessionId) => disposeCopilotConversations(sessionId ?? "default"));
+	// A deleted Clio session takes its resumable Copilot conversation with it (bt-10).
+	onSessionDeleted(forgetCopilotConversation);
 }

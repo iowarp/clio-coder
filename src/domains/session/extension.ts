@@ -6,7 +6,7 @@ import type {
 	SessionParkReason as ParkReason,
 	SessionResumeVia as ResumeVia,
 } from "../../core/telemetry/live-events.js";
-import { cwdHash } from "../../engine/session.js";
+import { cwdHash, noteSessionDeleted } from "../../engine/session.js";
 import { performCheckpoint } from "./checkpoint.js";
 import type { DeleteSessionOptions, SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
 import type { LabelEntry, SessionEntry, SessionInfoEntry } from "./entries.js";
@@ -425,6 +425,8 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				throw new Error("session.deleteSession: refusing to delete the currently open session; close() first");
 			}
 			const options: DeleteSessionOptions = opts ?? {};
+			// Its resumable Copilot conversation (bt-10) goes with it, records and all.
+			noteSessionDeleted(id);
 			if (options.keepFiles) {
 				tombstoneSession(id);
 			} else {

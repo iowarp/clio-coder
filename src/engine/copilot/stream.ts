@@ -52,7 +52,18 @@ import {
 	listCopilotModels,
 	onCopilotRuntimeGone,
 } from "./client.js";
-import { createCopilotSessionFs, removeCopilotSessionRecords, removeCopilotSessionRecordsSync } from "./session-fs.js";
+import {
+	type CopilotConversationRecord,
+	copilotConversationResumeAllowed,
+	copilotSessionRecordsExist,
+	createCopilotSessionFs,
+	readCopilotConversationRecord,
+	removeCopilotConversationRecord,
+	removeCopilotSessionRecords,
+	removeCopilotSessionRecordsSync,
+	sweepCopilotConversationRecords,
+	writeCopilotConversationRecord,
+} from "./session-fs.js";
 
 type ReasoningEffort = NonNullable<SessionConfig["reasoningEffort"]>;
 type ContextTier = "default" | "long_context";
@@ -168,6 +179,8 @@ class Conversation {
 	readonly policiesSent = new Set<string>();
 	busy = false;
 	disposed = false;
+	/** A record names this session as its Clio session's resumable conversation, so closing it keeps its records. */
+	persisted = false;
 	lastUsed = Date.now();
 	/** The open step; events reach no other. */
 	activeStep: Step | null = null;
@@ -328,11 +341,14 @@ class Conversation {
 		await settledWithin(this.session.abort(), DISPOSE_RPC_TIMEOUT_MS);
 		await settledWithin(this.session.disconnect(), DISPOSE_RPC_TIMEOUT_MS);
 		// The runtime wrote this session's records only through Clio's sessionFs, so removing them is the delete;
-		// the SDK's deleteSession looks in COPILOT_HOME and finds nothing there.
-		try {
-			await removeCopilotSessionRecords(sessionId);
-		} catch {
-			// The records directory is disposable cache; a later close or cache sweep removes what is left.
+		// the SDK's deleteSession looks in COPILOT_HOME and finds nothing there. A resumable conversation keeps them
+		// for the next process that continues its Clio session (bt-10).
+		if (!this.persisted) {
+			try {
+				await removeCopilotSessionRecords(sessionId);
+			} catch {
+				// The records directory is disposable cache; a later close or cache sweep removes what is left.
+			}
 		}
 		release();
 	}
@@ -365,6 +381,7 @@ function installExitCleanup(): void {
 	exitCleanupInstalled = true;
 	process.once("exit", () => {
 		for (const conversation of conversations) {
+			if (conversation.persisted) continue;
 			try {
 				removeCopilotSessionRecordsSync(conversation.session.sessionId);
 			} catch {
@@ -387,6 +404,101 @@ function remove(conversation: Conversation, reason = "Clio closed this Copilot c
 	const index = conversations.indexOf(conversation);
 	if (index >= 0) conversations.splice(index, 1);
 	void conversation.dispose(reason);
+}
+
+/** The conversation each Clio session's record names, among those this process opened or resumed. */
+const persistedByKey = new Map<string, Conversation>();
+let sweptRecords = false;
+
+/**
+ * An idle conversation becomes its Clio session's resumable one (bt-10): a later process continues it with
+ * resumeSession instead of replaying the transcript into a new session. Of the conversations open on a key the
+ * longest transcript holds the record, so a short side call never displaces the main one. A record that cannot
+ * be written leaves the next process to seed afresh, as before.
+ */
+function persist(conversation: Conversation): void {
+	const key = conversation.key;
+	if (!copilotConversationResumeAllowed() || key === "default" || conversation.disposed) return;
+	const holder = persistedByKey.get(key);
+	if (holder && holder !== conversation && !holder.disposed && holder.synced.length > conversation.synced.length) return;
+	try {
+		writeCopilotConversationRecord({
+			version: 1,
+			key,
+			sessionId: conversation.session.sessionId,
+			systemHash: conversation.systemHash,
+			synced: conversation.synced,
+			policies: [...conversation.policiesSent],
+			updatedAt: Date.now(),
+		});
+	} catch {
+		return;
+	}
+	if (holder && holder !== conversation) {
+		holder.persisted = false;
+		// A closed holder kept its records only for the record that no longer names it.
+		if (holder.disposed) removeCopilotSessionRecordsSafely(holder.session.sessionId);
+	}
+	persistedByKey.set(key, conversation);
+	conversation.persisted = true;
+	if (!sweptRecords) {
+		sweptRecords = true;
+		sweepCopilotConversationRecords(new Set(conversations.map((open) => open.session.sessionId)));
+	}
+}
+
+/** Before anything is sent the record goes: a process that dies mid-turn leaves no record of a stale transcript. */
+function unpersist(conversation: Conversation): void {
+	if (!conversation.persisted) return;
+	conversation.persisted = false;
+	if (persistedByKey.get(conversation.key) !== conversation) return;
+	persistedByKey.delete(conversation.key);
+	removeCopilotConversationRecord(conversation.key);
+}
+
+function removeCopilotSessionRecordsSafely(sessionId: string): void {
+	try {
+		removeCopilotSessionRecordsSync(sessionId);
+	} catch {
+		// The sweep removes what is left.
+	}
+}
+
+/**
+ * The conversation an earlier process left for this Clio session, when the transcript still extends exactly what
+ * it holds, under the same system prompt, and only new user messages follow (as for in-process reuse). Model,
+ * effort, tier and tools are passed afresh on resume. Anything else is stale: its record and session records go.
+ * A record naming a session open in this process is left to that conversation.
+ */
+function storedConversation(
+	key: string,
+	systemHash: string,
+	core: ReadonlyArray<CoreMessage>,
+	prints: ReadonlyArray<string>,
+): CopilotConversationRecord | null {
+	if (!copilotConversationResumeAllowed() || key === "default") return null;
+	const record = readCopilotConversationRecord(key);
+	if (!record) return null;
+	if (conversations.some((open) => open.session.sessionId === record.sessionId)) return null;
+	const usable =
+		record.systemHash === systemHash &&
+		record.synced.length < prints.length &&
+		record.synced.every((print, index) => prints[index] === print) &&
+		core.slice(record.synced.length).every((message) => message.role === "user") &&
+		copilotSessionRecordsExist(record.sessionId);
+	if (usable) return record;
+	forgetStored(record);
+	return null;
+}
+
+function forgetStored(record: CopilotConversationRecord): void {
+	removeCopilotConversationRecord(record.key);
+	const holder = persistedByKey.get(record.key);
+	if (holder?.session.sessionId === record.sessionId) {
+		holder.persisted = false;
+		persistedByKey.delete(record.key);
+	}
+	removeCopilotSessionRecordsSafely(record.sessionId);
 }
 
 /** Dispose every Copilot conversation bound to a Clio session, settling its parked handlers. */
@@ -549,7 +661,7 @@ function emptyUsage(): AssistantMessage["usage"] {
 
 /** Drive one model step: forward root-agent output into the Clio stream and end it at the step boundary. */
 class Step {
-	readonly message: AssistantMessage & { copilotBilling?: CopilotStepBilling };
+	readonly message: AssistantMessage & { copilotBilling?: CopilotStepBilling; copilotContinuation?: "delta" | "full" };
 	private textIndex: number | null = null;
 	private thinkingIndex: number | null = null;
 	private started = false;
@@ -575,6 +687,8 @@ class Step {
 	private answered = false;
 	/** Runs when the step stops taking events, before any settling; later usage then waits for the next step. */
 	onDetach: ((step: Step) => void) | null = null;
+	/** Whether this step's request continued a session holding the transcript (delta) or carried all of it (full). */
+	continuation: "delta" | "full" | null = null;
 	private toolUseTimer: ReturnType<typeof setTimeout> | undefined;
 	onFinish:
 		| ((outcome: { stop: "stop" | "toolUse" | "aborted" | "error"; toolCallIds: string[]; toolNames: string[] }) => void)
@@ -819,6 +933,8 @@ class Step {
 				? { state: "reported", reportedModelId: this.servedModel }
 				: { state: "not-reported" };
 		}
+		// Read by the prompt-cache record: a full request after a continued one explains the cache it re-wrote.
+		if (this.continuation !== null) this.message.copilotContinuation = this.continuation;
 		if (stop === "stop" || stop === "toolUse") {
 			this.message.stopReason = stop;
 			this.stream.push({ type: "done", reason: stop, message: this.message });
@@ -921,42 +1037,47 @@ async function openConversationHeld(input: {
 	tools: ReadonlyArray<Tool>;
 	reasoningEffort: string | undefined;
 	contextTier: ContextTier;
+	/** An earlier process's conversation to continue instead of creating one. */
+	resume?: CopilotConversationRecord;
 }): Promise<Conversation> {
 	// The signed-in account is the authorization; a missing login fails here with `copilot login` named.
 	await copilotAccount();
 	const client = await copilotClient();
 	let conversation: Conversation | null = null;
-	const sessionId = randomUUID();
-	const session = await client
-		.createSession({
-			sessionId,
-			createSessionFsProvider: () => createCopilotSessionFs(sessionId),
-			model: input.model.id,
-			clientName: COPILOT_CLIENT_NAME,
-			streaming: true,
-			// Replace, not append: Clio's compiled prompt carries its identity, safety rules and tool contract, and
-			// Copilot's default sections describe built-in tools that are excluded here.
-			systemMessage: { mode: "replace", content: input.systemPrompt },
-			tools: declareTools(() => conversation, input.tools),
-			availableTools: ["custom:*"],
-			infiniteSessions: { enabled: false },
-			enableSessionStore: false,
-			enableSkills: false,
-			enableConfigDiscovery: false,
-			workingDirectory: process.cwd(),
-			...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort as ReasoningEffort } : {}),
-			// Opt-in only: a target without `contextTier: long_context` sends nothing and keeps the runtime default.
-			...(input.contextTier === "long_context" ? { contextTier: input.contextTier } : {}),
-			// No Copilot built-in runs, so any permission request is outside Clio's surface and is refused.
-			onPermissionRequest: () => ({
-				kind: "reject",
-				feedback: "Clio governs every tool call; Copilot built-in tools are disabled in this session.",
-			}),
-		})
-		.catch(async (error: unknown) => {
-			await removeCopilotSessionRecords(sessionId).catch(() => {});
-			throw await withListedModels(error, input.model.id);
-		});
+	const sessionId = input.resume?.sessionId ?? randomUUID();
+	// One configuration for both: a resumed session gets the same sessionFs, system message, tools and refusal of
+	// built-ins as a created one, with the current model, effort and tier.
+	const config = {
+		createSessionFsProvider: () => createCopilotSessionFs(sessionId),
+		model: input.model.id,
+		clientName: COPILOT_CLIENT_NAME,
+		streaming: true,
+		// Replace, not append: Clio's compiled prompt carries its identity, safety rules and tool contract, and
+		// Copilot's default sections describe built-in tools that are excluded here.
+		systemMessage: { mode: "replace" as const, content: input.systemPrompt },
+		tools: declareTools(() => conversation, input.tools),
+		availableTools: ["custom:*"],
+		infiniteSessions: { enabled: false },
+		enableSessionStore: false,
+		enableSkills: false,
+		enableConfigDiscovery: false,
+		workingDirectory: process.cwd(),
+		...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort as ReasoningEffort } : {}),
+		// Opt-in only: a target without `contextTier: long_context` sends nothing and keeps the runtime default.
+		...(input.contextTier === "long_context" ? { contextTier: input.contextTier } : {}),
+		// No Copilot built-in runs, so any permission request is outside Clio's surface and is refused.
+		onPermissionRequest: () => ({
+			kind: "reject" as const,
+			feedback: "Clio governs every tool call; Copilot built-in tools are disabled in this session.",
+		}),
+	};
+	const session = await (input.resume
+		? client.resumeSession(sessionId, config)
+		: client.createSession({ sessionId, ...config })
+	).catch(async (error: unknown) => {
+		await removeCopilotSessionRecords(sessionId).catch(() => {});
+		throw await withListedModels(error, input.model.id);
+	});
 	const opened = new Conversation({
 		key: input.key,
 		session,
@@ -968,6 +1089,10 @@ async function openConversationHeld(input: {
 		contextTier: input.contextTier,
 	});
 	conversation = opened;
+	if (input.resume) {
+		opened.synced = [...input.resume.synced];
+		for (const id of input.resume.policies) opened.policiesSent.add(id);
+	}
 	await acquireBoundaries(opened);
 	return opened;
 }
@@ -1088,9 +1213,14 @@ async function runStep(
 
 	let { conversation } = plan(key, systemHash, kept, prints);
 	const reused = conversation !== null;
+	// No open conversation fits: one an earlier process left for this Clio session may (bt-10).
+	const stored = conversation ? null : storedConversation(key, systemHash, kept, prints);
+	// Whether the session already holds the transcript up to `fresh`, so only what follows is sent.
+	let continued = reused;
 	// Everything after what the session has seen, in order, host framing (reminder-only messages) included:
 	// framing carries no transcript identity, but each request's own framing still reaches the model.
-	const lastSeen = conversation ? kept[conversation.synced.length - 1] : undefined;
+	const syncedCount = conversation?.synced.length ?? stored?.synced.length ?? 0;
+	const lastSeen = syncedCount > 0 ? kept[syncedCount - 1] : undefined;
 	const fresh = lastSeen ? core.slice(core.indexOf(lastSeen) + 1) : core;
 	const lastKept = kept[kept.length - 1];
 	const tailFraming = core
@@ -1101,7 +1231,23 @@ async function runStep(
 	try {
 		if (!conversation) {
 			evictFor(key);
-			const opened = await openConversation({ key, model, systemPrompt, tools, reasoningEffort, contextTier }, signal);
+			const base = { key, model, systemPrompt, tools, reasoningEffort, contextTier };
+			let opened: Conversation | null = null;
+			if (stored) {
+				opened = await openConversation({ ...base, resume: stored }, signal).catch((error: unknown) => {
+					if (error instanceof CopilotOpenCancelled) throw error;
+					// A session the runtime cannot resume is stale: the transcript is seeded into a new one.
+					forgetStored(stored);
+					return null;
+				});
+				if (opened) {
+					// Its record stays until something is sent, so a step cancelled before then keeps it resumable.
+					continued = true;
+					opened.persisted = true;
+					persistedByKey.set(key, opened);
+				}
+			}
+			opened ??= await openConversation(base, signal);
 			if (step.isFinished) {
 				// Ended another way while the session was being created: it never carries a message.
 				void opened.dispose("The Copilot step was cancelled before its session was used.");
@@ -1147,6 +1293,8 @@ async function runStep(
 				active.synced = [...prints, `a:${toolCallIds.join(",")}`];
 				active.state = stop === "toolUse" ? "awaiting-tools" : "idle";
 				active.pendingToolCallIds = toolCallIds;
+				// Only an idle conversation can be continued elsewhere; one waiting on tool results ends with its process.
+				if (stop === "stop") persist(active);
 			} else {
 				// After an abort or error the Copilot run's state is not Clio's; the next call seeds afresh.
 				remove(active, "The Copilot step ended without a result; its conversation was closed");
@@ -1158,6 +1306,8 @@ async function runStep(
 			active.busy = false;
 			return;
 		}
+		unpersist(active);
+		step.continuation = continued ? "delta" : "full";
 		if (active.model !== model.id || active.reasoningEffort !== reasoningEffort || active.contextTier !== contextTier) {
 			// The tier is named whenever either side is long_context, so leaving it returns the session to default.
 			const tierOption = contextTier === "long_context" || active.contextTier === "long_context" ? { contextTier } : {};
@@ -1228,7 +1378,7 @@ async function runStep(
 				.map((message) => textOf(message.content))
 				.filter((text) => text.length > 0)
 				.join("\n\n");
-			const seed = reused
+			const seed = continued
 				? {
 						prompt: fresh
 							.map((message) => textOf(message.content))

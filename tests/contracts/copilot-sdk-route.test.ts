@@ -295,6 +295,27 @@ export class CopilotClient {
 		state.sessions.push(session);
 		return session;
 	}
+	/** As the runtime does on session.resume: the session's state is read back through sessionFs, and none is an error. */
+	async resumeSession(sessionId, config) {
+		if (this.options.mode === "empty" && config.availableTools === undefined)
+			throw new Error("CopilotClient is in mode: 'empty' but the session config did not specify 'availableTools'.");
+		const session = new FakeSession({ ...config, sessionId }, state.sessions.length + 1, this);
+		this.sessionsOpen.push(session);
+		if (this.options.sessionFs) {
+			if (!config.createSessionFsProvider) throw new Error("createSessionFsProvider is required in session config when sessionFs is enabled in client options.");
+			session.fs = config.createSessionFsProvider(session);
+			const log = this.options.sessionFs.sessionStatePath + "/events.jsonl";
+			try {
+				await session.fs.readFile(log);
+			} catch {
+				throw new Error("Request session.resume failed with message: Session not found: " + sessionId);
+			}
+			await session.fs.appendFile(log, "{}\n");
+		}
+		session.resumed = true;
+		state.sessions.push(session);
+		return session;
+	}
 }
 `;
 
@@ -302,6 +323,7 @@ interface FakeSession {
 	sessionId: string;
 	config: Record<string, unknown> & { tools: Array<Record<string, unknown>> };
 	prompts: string[];
+	resumed?: boolean;
 }
 interface FakeState {
 	clients: Array<Record<string, unknown> & { env: Record<string, string | undefined> }>;
@@ -1131,6 +1153,39 @@ test("a rewritten history seeds a fresh session; a side call never disturbs the 
 	await step({ messages: [user("compacted summary"), turn1, user("third")] });
 	strictEqual(fake().sessions.length, start + 3, "compaction is a divergence");
 	match(fake().sessions.at(-1)?.prompts[0] ?? "", /conversation-history[\s\S]*compacted summary/);
+});
+
+test("a continued Clio session resumes its Copilot conversation in a new process; a rewritten history reseeds (bt-10)", async () => {
+	const key = "resume-session";
+	const turn1 = await step({ messages: [user("one")] }, key);
+	const first = fake().sessions.at(-1);
+	ok(first);
+	strictEqual((turn1 as { copilotContinuation?: string }).copilotContinuation, "full");
+	// The process ends: its conversations close, and the idle one stays resumable with its records on disk.
+	disposeCopilotConversations(key);
+	const records = join(resolveClioDirs().cache, "copilot-sdk", "sessions", first.sessionId);
+	ok(await eventually(() => fake().disconnected.includes(first.sessionId), 60_000), "the session was disconnected");
+	ok(existsSync(join(records, "events.jsonl")), "a resumable conversation keeps its records");
+
+	// The next process continues the same SDK session and sends only the new turn.
+	const turn2 = await step({ messages: [user("one"), turn1, user("two")] }, key);
+	const resumed = fake().sessions.at(-1);
+	strictEqual(resumed?.sessionId, first.sessionId);
+	strictEqual(resumed?.resumed, true);
+	deepStrictEqual(resumed?.prompts, ["two"]);
+	strictEqual((turn2 as { copilotContinuation?: string }).copilotContinuation, "delta");
+	disposeCopilotConversations(key);
+	const closed = () => fake().disconnected.filter((id) => id === first.sessionId).length === 2;
+	ok(await eventually(closed, 60_000), "the resumed session was disconnected");
+
+	// A compacted history no longer extends what that session holds: a fresh seeded session, and the stale records go.
+	const turn3 = await step({ messages: [user("compacted summary"), turn1, user("three")] }, key);
+	const reseeded = fake().sessions.at(-1);
+	ok(reseeded && reseeded.sessionId !== first.sessionId && reseeded.resumed !== true);
+	match(reseeded.prompts[0] ?? "", /conversation-history[\s\S]*compacted summary/);
+	strictEqual((turn3 as { copilotContinuation?: string }).copilotContinuation, "full");
+	strictEqual(existsSync(records), false, "the stale conversation's records were removed");
+	disposeCopilotConversations(key);
 });
 
 test("a reseed replays earlier tool output without letting it close the transcript or forge host policy", async () => {

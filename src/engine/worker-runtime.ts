@@ -25,6 +25,7 @@ import { seededWorkerMessages } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
 import { recommendedOutputTokens, resolvePressureOutputReserve } from "./apis/output-budget.js";
 import { resolvedRequestContext } from "./context.js";
+import { disableCopilotConversationResume } from "./copilot/session-fs.js";
 import { retryStreamOnceOnAuthRejection } from "./oauth-retry-stream.js";
 import { retryStreamOnceOnOverflow } from "./overflow-retry-stream.js";
 import { boundWorkerResponse } from "./worker-response-stream.js";
@@ -1722,6 +1723,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// the main agent's 89%. One opaque ID per invocation keeps it out of the
 	// prompt, so prompt and tool attestation hashes are unchanged.
 	options.sessionId = input.sessionId || randomUUID();
+	// That id may be the parent's: a worker leaves the parent's resumable Copilot conversation alone (bt-10).
+	disableCopilotConversationResume();
 
 	const { agent } = createEngineAgent(options);
 	// Pi adds a leading prompt/tool declaration; exclude the entire inherited baseline.
