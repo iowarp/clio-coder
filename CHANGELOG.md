@@ -105,6 +105,12 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- /view dispatch:<run> words a worker's structured output as its Fleet Runs card does instead of raw JSON (bt-11 i22-e).
+- A narrow finish line marks the token amounts it had no room for with an ellipsis (bt-11 i22-d).
+- The /usage Session tab shows the cache write, so its rows add up to `processed` (bt-11 i22-cw).
+- Replayed finish lines in a forked session state the calls and tokens the live ones did (bt-11 i22-replay).
+- Reasoning the provider redacted reads `Thinking · hidden by provider` instead of a fold that opens a placeholder (bt-11 i22-think).
+- The expanded Fleet Runs record row no longer prints the provider's raw tool call id (bt-11 i22-toolu).
 - The run-effects recorder, task board, finish contract, receipts and headless observed line now read every call through one check classifier (check, inspection, mutation or unknown), so they agree on what ran a check; an unknown command neither settles nor clears a recorded outcome (x5-1).
 - A runner flag after `--` (`npm test -- --runInBand`) is a check; a loader flag (`--import`, `--require`) is unknown and settles nothing. Unknown calls after the last check are disclosed as unclassifiedAfterLastCheck without changing the verdict (x5-2).
 - A turn whose last call streamed before it stopped now settles with stage "streaming", not "firstToken", and a harness stop (shutdown, run --timeout, repetition guard, operator cancel, route move) persists failure stage "harness" with its own cause instead of a transport abort (bt-26 N2a).
