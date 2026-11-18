@@ -287,10 +287,10 @@ interface HeadlessMainAgentRunStats {
 	/** Blocked action classes not followed by successful substantive work of that class. */
 	unresolvedBlocks: Set<string>;
 	/**
-	 * Why the last dispatch call failed before any worker ran, until a later dispatch starts one or other substantive
-	 * work succeeds. The delegated task never started, so it is as unmet as a blocked call (c16-B).
+	 * Why the last dispatch call failed, until a later dispatch succeeds or other substantive work succeeds. The
+	 * delegated task is as unmet as a blocked call whether it never started (c16-B) or its workers started and failed.
 	 */
-	unstartedDispatch: string | null;
+	failedDispatch: { reason: string; started: boolean } | null;
 	/**
 	 * Whether the task asked for a change. Only an explicit `--turn-mode answer`
 	 * or `proposal` says it did not; the no-op verdict applies only when it did.
@@ -703,7 +703,7 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 			(plane === "observe" || plane === "retrieve" || plane === "execute" || plane === "mutate")
 		) {
 			stats.unresolvedBlocks.delete(action);
-			stats.unstartedDispatch = null;
+			stats.failedDispatch = null;
 			// A read may be useful progress after a denied command, but cannot
 			// attest that command's requirement (for example a test) was met.
 			// An independent task verifier can accept an alternate workflow;
@@ -717,10 +717,9 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	if (outcome === "ok" && tool === ToolNames.Dispatch)
 		stats.mergedTaskWorktrees += mergedTaskWorktreeCount(event.result);
 	if (tool === ToolNames.Dispatch) {
-		const runs = (event.result as { details?: { runs?: unknown } } | undefined)?.details?.runs;
-		if (outcome === "ok" || (outcome === undefined && !event.isError) || (Array.isArray(runs) && runs.length > 0))
-			stats.unstartedDispatch = null;
-		else if (outcome === "error" || outcome === undefined) stats.unstartedDispatch = dispatchFailureReason(event);
+		if (outcome === "ok" || (outcome === undefined && !event.isError)) stats.failedDispatch = null;
+		else if (outcome === "error" || outcome === undefined)
+			stats.failedDispatch = { reason: dispatchFailureReason(event), started: dispatchStartedRuns(event) };
 	}
 	if (tool === ToolNames.Context) {
 		const rawTurnId = (event as { turnId?: unknown }).turnId;
@@ -768,9 +767,23 @@ function changedWorkspace(stats: HeadlessMainAgentRunStats): boolean {
 	return stats.mutatingSucceeded > 0 || stats.mergedTaskWorktrees > 0;
 }
 
-/** A blocked call or a dispatch that started no worker remains, and nothing changed the workspace. */
+/** A blocked call or a failed dispatch remains, and nothing changed the workspace. */
 function unmetWithoutChange(stats: HeadlessMainAgentRunStats): boolean {
-	return (stats.unresolvedBlocks.size > 0 || stats.unstartedDispatch !== null) && !changedWorkspace(stats);
+	return (stats.unresolvedBlocks.size > 0 || stats.failedDispatch !== null) && !changedWorkspace(stats);
+}
+
+/**
+ * Whether a failed dispatch started any worker. A thrown tool error reaches this fold with its details replaced by
+ * `{}`, so the dispatch summary's `runs=` line is the witness when the details carry no runs (bt-45 H6).
+ */
+function dispatchStartedRuns(event: ChatLoopEvent): boolean {
+	const result = (event as { result?: { details?: { runs?: unknown }; content?: unknown } }).result;
+	const runs = result?.details?.runs;
+	if (Array.isArray(runs) && runs.length > 0) return true;
+	const content = result?.content;
+	if (!Array.isArray(content)) return false;
+	const text = content.map((block) => (typeof block?.text === "string" ? block.text : "")).join("");
+	return /^runs=\S/mu.test(text);
 }
 
 /** The first line of a failed dispatch's reason, bounded, for the run's failure message. */
@@ -819,8 +832,8 @@ function noopFailureMessage(stats: HeadlessMainAgentRunStats, failOnNoop: boolea
 	const cause =
 		stats.unresolvedBlocks.size > 0 && !changedWorkspace(stats)
 			? `${totals.blocked} tool call${totals.blocked === 1 ? " was" : "s were"} blocked without recovery and no write succeeded`
-			: stats.unstartedDispatch !== null && !changedWorkspace(stats)
-				? `the delegated task never started (${stats.unstartedDispatch || "dispatch failed"}) and no write succeeded`
+			: stats.failedDispatch !== null && !changedWorkspace(stats)
+				? `the delegated task ${stats.failedDispatch.started ? "failed" : "never started"} (${stats.failedDispatch.reason || "dispatch failed"}) and no write succeeded`
 				: `${totals.calls} tool call${totals.calls === 1 ? "" : "s"} ran and none succeeded`;
 	return `clio-coder run: no-op${failOnNoop ? " under --fail-on-noop" : ""}: ${cause}`;
 }
@@ -1119,7 +1132,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		mutatingSucceeded: 0,
 		mergedTaskWorktrees: 0,
 		unresolvedBlocks: new Set<string>(),
-		unstartedDispatch: null,
+		failedDispatch: null,
 		changeAsked: options.constraints?.mode !== "answer" && options.constraints?.mode !== "proposal",
 	};
 	// The ledger row is this run's accounting, so it has to exist on the costly
