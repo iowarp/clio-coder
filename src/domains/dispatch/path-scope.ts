@@ -488,11 +488,18 @@ export function declaredScopeReplacementNotice(scope: DispatchPathScope): Declar
  * abbreviations that filter exists for ("0.5", "v24.9", "e.g", "4/10") cannot
  * carry one.
  *
- * Both notices render one `<raw token> -> <anchored path or "dropped">` pair
- * per entry, under the same twelve-entry cap the replacement notice uses.
+ * The notice reads as plain sentences at narrow widths: dropped tokens are
+ * named as paths that were not granted, anchored ones as `<raw> as <anchored>`,
+ * each list under the same twelve-entry cap the replacement notice uses.
  */
 function renderParentTokens(tokens: ReadonlyArray<DispatchInferredParentToken>): string {
-	return renderOmittedPaths(tokens.map((entry) => `${entry.token} -> ${entry.resolved ?? "dropped"}`));
+	const dropped = tokens.filter((entry) => entry.resolved === null).map((entry) => entry.token);
+	const anchored = tokens.flatMap((entry) => (entry.resolved === null ? [] : [`${entry.token} as ${entry.resolved}`]));
+	const sentences: string[] = [];
+	if (dropped.length > 0)
+		sentences.push(`Paths outside the workspace were not granted: ${renderOmittedPaths(dropped)}.`);
+	if (anchored.length > 0) sentences.push(`Read from the workspace root: ${renderOmittedPaths(anchored)}.`);
+	return sentences.join(" ");
 }
 
 /** Render the interactive warning for prose tokens whose leading "../" run was reinterpreted. */
@@ -511,9 +518,7 @@ export function inferredScopeParentTokenNotice(scope: DispatchPathScope): Inferr
 			source: entry.source,
 			confidence: "low",
 		})),
-		message: `[dispatch scope] Prose inference resolved path tokens carrying a leading '../' run against the dispatch root: ${renderParentTokens(
-			tokens,
-		)}. An anchored token selects project rules without expanding worker authority; a dropped one took no part in scope.`,
+		message: `[dispatch scope] ${renderParentTokens(tokens)}`,
 	};
 }
 
