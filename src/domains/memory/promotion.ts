@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
+import { createRedactionTally, redactSecretsPreservingMarkers } from "../evidence/redact.js";
 import { canonicalMemoryRepositoryIdentity } from "./operations.js";
 import type { MemoryMutationOptions } from "./store.js";
 import { insertMemoryRecordIfAbsent } from "./store.js";
@@ -11,10 +11,8 @@ import type {
 	MemoryRepositoryIdentity,
 	MemoryRuntimeIdentity,
 } from "./types.js";
-import { validateMemoryRecord } from "./validate.js";
-
-export const MEMORY_PROMOTION_SCOPES = ["repo", "global", "runtime", "agent"] as const;
-export type MemoryPromotionScope = (typeof MEMORY_PROMOTION_SCOPES)[number];
+import { compareCodeUnits } from "./util.js";
+import { assertValidMemoryRecord, validNamedIdentityKey, validSourceValue } from "./validate.js";
 
 export type MemoryScopeSelection =
 	| { scope: "repo"; repository: MemoryRepositoryIdentity }
@@ -102,12 +100,7 @@ export async function proposeMemoryPromotion(
 	findExisting?: (records: ReadonlyArray<MemoryRecord>) => MemoryRecord | null,
 	options: MemoryMutationOptions = {},
 ): Promise<MemoryProposalResult> {
-	validatePromotionSource(source);
-	const validatedScope = validateMemoryScopeSelection(selection, {
-		runtimeIds: source.runtimeIds ?? [],
-		agentIds: source.agentIds ?? [],
-	});
-	const record = memoryRecordFromPromotion(source, validatedScope, now);
+	const record = memoryRecordFromPromotion(source, selection, now);
 	return insertMemoryRecordIfAbsent(dataDir, record, findExisting, options);
 }
 
@@ -124,7 +117,7 @@ export function memoryRecordFromPromotion(
 		agentIds: source.agentIds ?? [],
 	});
 	const tally = createRedactionTally();
-	const lesson = redactPromotionText(source.entry.content, tally).replace(/\s+/gu, " ").trim();
+	const lesson = redactSecretsPreservingMarkers(source.entry.content, tally).replace(/\s+/gu, " ").trim();
 	const sourceFields = new Set(source.redaction?.sourceFields ?? []);
 	if (lesson !== source.entry.content) sourceFields.add("content");
 	const replacementCount = (source.redaction?.replacementCount ?? 0) + tally.count;
@@ -158,18 +151,12 @@ export function memoryRecordFromPromotion(
 			redaction: {
 				appliedBeforePersistence: true,
 				replacementCount,
-				sourceFields: [...sourceFields].sort(compareStrings),
+				sourceFields: [...sourceFields].sort(compareCodeUnits),
 			},
 		},
 	};
 	applyScopeIdentity(record, validatedScope);
-	const validated = validateMemoryRecord(record);
-	if (!validated.valid) {
-		throw new Error(
-			`promoted memory record invalid: ${validated.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`,
-		);
-	}
-	return validated.record;
+	return assertValidMemoryRecord(record, "promoted");
 }
 
 export function applyScopeIdentity(record: MemoryRecord, selection: MemoryScopeSelection): void {
@@ -225,14 +212,6 @@ function normalizeNamedIdentity<T extends "runtime" | "agent">(
 	return { kind, key: identity.key };
 }
 
-function validNamedIdentityKey(value: string): boolean {
-	return value.length > 0 && value.length <= 256 && value.trim() === value && !/[\0\r\n\t ]/u.test(value);
-}
-
-function validSourceValue(value: string): boolean {
-	return value.length > 0 && value.length <= 1_024 && value.trim() === value && !/[\0\r\n]/u.test(value);
-}
-
 function scopeApplicability(selection: MemoryScopeSelection): string[] {
 	switch (selection.scope) {
 		case "repo":
@@ -260,25 +239,7 @@ function promotedMemoryId(value: {
 }
 
 function uniqueStrings(values: ReadonlyArray<string>): string[] {
-	return [...new Set(values)].sort(compareStrings);
-}
-
-function redactPromotionText(text: string, tally: ReturnType<typeof createRedactionTally>): string {
-	const markers: string[] = [];
-	const masked = text.replace(/\[redacted:[a-z-]+\]/gu, (marker) => {
-		const token = `\uE000${String.fromCharCode(0xe100 + markers.length)}`;
-		markers.push(marker);
-		return token;
-	});
-	let redacted = redactSecretsText(masked, tally);
-	for (let index = 0; index < markers.length; index += 1) {
-		redacted = redacted.replaceAll(`\uE000${String.fromCharCode(0xe100 + index)}`, markers[index] ?? "");
-	}
-	return redacted;
-}
-
-function compareStrings(left: string, right: string): number {
-	return left < right ? -1 : left > right ? 1 : 0;
+	return [...new Set(values)].sort(compareCodeUnits);
 }
 
 /**

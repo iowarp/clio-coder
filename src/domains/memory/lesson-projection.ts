@@ -63,37 +63,6 @@ export function projectKeptLesson(record: MemoryRecord): KeptLesson {
 	});
 }
 
-/**
- * A lesson supplied as bare `{ id, text }` (older callers) read from its text
- * alone: no conditions, operator approval as the store's legacy default, and
- * command roles from the wording rules.
- */
-export function asKeptLesson(lesson: { id: string; text: string } & Partial<KeptLesson>): KeptLesson {
-	if (
-		lesson.commands !== undefined &&
-		lesson.paths !== undefined &&
-		lesson.revision !== undefined &&
-		lesson.approval !== undefined &&
-		lesson.appliesWhen !== undefined &&
-		lesson.avoidWhen !== undefined &&
-		lesson.evidenceRefs !== undefined
-	)
-		return lesson as KeptLesson;
-	return projectKeptLesson({
-		id: lesson.id,
-		scope: "repo",
-		key: lesson.id,
-		lesson: lesson.text,
-		evidenceRefs: [...(lesson.evidenceRefs ?? [])],
-		appliesWhen: [...(lesson.appliesWhen ?? [])],
-		avoidWhen: [...(lesson.avoidWhen ?? [])],
-		confidence: 1,
-		createdAt: new Date(0).toISOString(),
-		approved: true,
-		...(lesson.approval === "automatic" ? { approval: { by: "guardian" as const, at: new Date(0).toISOString() } } : {}),
-	});
-}
-
 /** How a reminder names who stands behind a lesson. */
 export function keptLessonLabel(lesson: KeptLesson): string {
 	if (lesson.approval === "operator") return "operator-approved";

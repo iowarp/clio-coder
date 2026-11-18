@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { canonicalMemoryRepositoryIdentity, cloneMemoryRecord } from "./operations.js";
 import { insertMemoryRecordIfAbsent, mutateMemoryRecords } from "./store.js";
 import type { MemoryProposalResult, MemoryRecord } from "./types.js";
-import { validateMemoryRecord } from "./validate.js";
+import { assertValidMemoryRecord } from "./validate.js";
 
 /**
  * Memory's side of the claims log (#406). A record rests on a claim when its evidence refs name it; a contradiction of
@@ -56,7 +56,7 @@ export interface ClaimMemorySource {
 	at: string;
 }
 
-export function memoryIdFromClaim(claimId: string): string {
+function memoryIdFromClaim(claimId: string): string {
 	return `mem-${createHash("sha256").update(`claim\n${claimId}`, "utf8").digest("hex").slice(0, 16)}`;
 }
 
@@ -65,7 +65,7 @@ export function memoryIdFromClaim(claimId: string): string {
  * reaches it, and it waits for `clio-coder memory approve` like any proposal: the guardian gate approves only
  * task-bank lessons, so nothing here approves on its own.
  */
-export function memoryRecordFromClaim(source: ClaimMemorySource): MemoryRecord {
+function memoryRecordFromClaim(source: ClaimMemorySource): MemoryRecord {
 	const repository = canonicalMemoryRepositoryIdentity(source.project);
 	if (repository === null) throw new Error(`claim project ${source.project} is not a usable repository path`);
 	const lesson = `Recorded claim: ${source.text}`;
@@ -83,12 +83,7 @@ export function memoryRecordFromClaim(source: ClaimMemorySource): MemoryRecord {
 		approved: false,
 		repository,
 	};
-	const validated = validateMemoryRecord(record);
-	if (!validated.valid)
-		throw new Error(
-			`claim memory record invalid: ${validated.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`,
-		);
-	return validated.record;
+	return assertValidMemoryRecord(record, "claim");
 }
 
 export async function proposeMemoryFromClaim(

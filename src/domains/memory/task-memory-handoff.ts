@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
+import { createRedactionTally, redactSecretsPreservingMarkers } from "../evidence/redact.js";
 import {
 	TASK_MEMORY_CONTENT_MAX_CHARS,
 	TASK_MEMORY_DEFAULT_KNOWLEDGE_CAP,
@@ -9,6 +9,8 @@ import {
 	type TaskMemoryEntry,
 	type TaskMemorySnapshot,
 } from "./task-bank.js";
+import { compareCodeUnits, hasExactKeys, isRecord, nonEmptyString } from "./util.js";
+import { validNamedIdentityKey, validSourceValue } from "./validate.js";
 
 export const TASK_MEMORY_HANDOFF_VERSION = 2;
 export const TASK_MEMORY_HANDOFF_LANGUAGE = "clio-coder-task-memory";
@@ -114,7 +116,7 @@ export function renderTaskMemoryHandoffSnapshot(snapshot: TaskMemoryHandoffSnaps
 					source: cloneSource(snapshot.source),
 					redaction: {
 						replacementCount: snapshot.redaction.replacementCount + tally.count,
-						sourceFields: [...sourceFields].sort(compareStrings),
+						sourceFields: [...sourceFields].sort(compareCodeUnits),
 					},
 					knowledge,
 					procedural,
@@ -199,7 +201,7 @@ export function seedTaskMemoryBank(
 }
 
 /** Read only the newest handoff; an older embedded snapshot never shadows a newer brief. */
-export function readNewestTaskMemoryHandoff(cwd: string): TaskMemoryHandoffArtifact | null {
+function readNewestTaskMemoryHandoff(cwd: string): TaskMemoryHandoffArtifact | null {
 	const directory = join(cwd, ".clio-coder", "handoffs");
 	if (!existsSync(directory)) return null;
 	let candidates: Array<{ path: string; mtimeMs: number }>;
@@ -303,26 +305,13 @@ function parseRedaction(value: unknown): TaskMemoryHandoffRedaction | null {
 function parseSourceValues(value: unknown, allowEmpty: boolean): string[] | null {
 	if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) return null;
 	if (value.some((item) => !validSourceValue(item))) return null;
-	return [...new Set(value as string[])].sort(compareStrings);
+	return [...new Set(value as string[])].sort(compareCodeUnits);
 }
 
 function parseNamedIdentities(value: unknown): string[] | null {
-	if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !validNamedIdentity(item))) return null;
-	return [...new Set(value as string[])].sort(compareStrings);
-}
-
-function validSourceValue(value: unknown): value is string {
-	return (
-		typeof value === "string" &&
-		value.length > 0 &&
-		value.length <= 1_024 &&
-		value.trim() === value &&
-		!/[\0\r\n]/u.test(value)
-	);
-}
-
-function validNamedIdentity(value: string): boolean {
-	return value.length > 0 && value.length <= 256 && value.trim() === value && !/[\0\r\n\t ]/u.test(value);
+	if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !validNamedIdentityKey(item)))
+		return null;
+	return [...new Set(value as string[])].sort(compareCodeUnits);
 }
 
 function redactHandoffEntry(
@@ -331,23 +320,9 @@ function redactHandoffEntry(
 	tally: ReturnType<typeof createRedactionTally>,
 	sourceFields: Set<string>,
 ): TaskMemoryHandoffEntry {
-	const content = redactHandoffText(entry.content, tally);
+	const content = redactSecretsPreservingMarkers(entry.content, tally);
 	if (content !== entry.content) sourceFields.add(field);
 	return { ...entry, content };
-}
-
-function redactHandoffText(text: string, tally: ReturnType<typeof createRedactionTally>): string {
-	const markers: string[] = [];
-	const masked = text.replace(/\[redacted:[a-z-]+\]/gu, (marker) => {
-		const token = `\uE000${String.fromCharCode(0xe100 + markers.length)}`;
-		markers.push(marker);
-		return token;
-	});
-	let redacted = redactSecretsText(masked, tally);
-	for (let index = 0; index < markers.length; index += 1) {
-		redacted = redacted.replaceAll(`\uE000${String.fromCharCode(0xe100 + index)}`, markers[index] ?? "");
-	}
-	return redacted;
 }
 
 function cloneSource(source: TaskMemoryHandoffSourceProvenance): TaskMemoryHandoffSourceProvenance {
@@ -359,20 +334,6 @@ function cloneSource(source: TaskMemoryHandoffSourceProvenance): TaskMemoryHando
 	};
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasExactKeys(value: Record<string, unknown>, keys: ReadonlyArray<string>): boolean {
-	const actual = Object.keys(value).sort();
-	const expected = [...keys].sort();
-	return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
-}
-
-function nonEmptyString(value: unknown): value is string {
-	return typeof value === "string" && value.trim().length > 0;
-}
-
 function isIsoTimestamp(value: unknown): value is string {
 	if (typeof value !== "string") return false;
 	const timestamp = Date.parse(value);
@@ -381,8 +342,4 @@ function isIsoTimestamp(value: unknown): value is string {
 
 function handoffSourceName(path: string): string {
 	return path.split(/[\\/]/u).pop() ?? path;
-}
-
-function compareStrings(left: string, right: string): number {
-	return left < right ? -1 : left > right ? 1 : 0;
 }

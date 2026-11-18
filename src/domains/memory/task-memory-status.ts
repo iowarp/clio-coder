@@ -41,7 +41,7 @@ export interface TaskMemoryBudgetSkip {
 	resumeAt?: string;
 }
 
-/** What the always-on memory guardian is doing; one value every operator surface projects. */
+/** What the always-on memory guardian is doing; one value every operator surface projects. `off` covers a disabled or rules-only tier. */
 export type TaskMemoryGuardianState = "off" | "idle" | "reviewing" | "waiting-capacity" | "unavailable";
 
 /** Read-only projection shared by operator surfaces. */

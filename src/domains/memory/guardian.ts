@@ -45,6 +45,7 @@ import type { HistoryReviewSlice, HistoryReviewSource } from "./history-review.j
 import type { MemoryInterventionRegistration, MemoryStepLaunchOutcome } from "./intervention.js";
 import { lessonEvidence } from "./lesson-evidence.js";
 import type { HistoryFiling } from "./lesson-feedback.js";
+import type { KeptLesson } from "./lesson-projection.js";
 import type { TaskMemoryTelemetrySink } from "./memory-events.js";
 import { taskMemoryBankDelta } from "./memory-events.js";
 import { provenRecipes, recipeAlreadyClaimed } from "./recipes.js";
@@ -53,9 +54,6 @@ import { TaskMemoryBank } from "./task-bank.js";
 import type { TaskMemoryModelClient, TaskMemoryPolicyResult } from "./task-memory-policy.js";
 import { runTaskMemoryPolicy } from "./task-memory-policy.js";
 import type { TaskMemoryGuardianState } from "./task-memory-status.js";
-
-/** What operator surfaces show for the guardian. `off` covers a disabled or rules-only tier. */
-export type MemoryGuardianState = TaskMemoryGuardianState;
 
 interface GuardianDepth {
 	/** Idle time after which this depth applies. */
@@ -119,7 +117,7 @@ export interface MemoryGuardianDeps {
 	settings(): { maxTokens: number; timeoutMs: number };
 	/** Current checkout a source-cited lesson's quote is verified against. */
 	workspaceRoot(): string;
-	getKeptLessons(): ReadonlyArray<{ id: string; text: string; evidenceRefs?: readonly string[] }>;
+	getKeptLessons(): readonly KeptLesson[];
 	/**
 	 * Lessons from one history excerpt, with the session that produced them.
 	 * The excerpt's cursor advances only after this settles as filed or saved
@@ -134,13 +132,13 @@ export interface MemoryGuardianDeps {
 		commandVerified?: ReadonlyArray<string>;
 	}): Promise<HistoryFiling | undefined> | HistoryFiling | undefined;
 	telemetry?: TaskMemoryTelemetrySink;
-	onStateChange(state: MemoryGuardianState): void;
+	onStateChange(state: TaskMemoryGuardianState): void;
 	/** Session and workspace the history source belongs to; a change retires in-flight history work. */
 	scopeKey(): string;
 }
 
 export interface MemoryGuardian {
-	state(): MemoryGuardianState;
+	state(): TaskMemoryGuardianState;
 	/** A turn started or ended, a step settled, or settings changed. Cheap and synchronous. */
 	wake(reason: "turn-start" | "turn-end" | "step-settled" | "settings" | "ready"): void;
 	/** Retire in-flight work and results for a session, branch or repository change. */
@@ -159,7 +157,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 	 * kept here and replayed when it finishes instead of being lost.
 	 */
 	let wakePending = false;
-	let current: MemoryGuardianState = "idle";
+	let current: TaskMemoryGuardianState = "idle";
 	// Monotonic: idle spans live inside one process and must not jump with the wall clock.
 	let idleSinceMs = performance.now();
 	let controller = new AbortController();
@@ -173,7 +171,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 	let source: HistoryReviewSource | null = null;
 	let sourceScope: string | null = null;
 
-	const setState = (next: MemoryGuardianState): void => {
+	const setState = (next: TaskMemoryGuardianState): void => {
 		if (next === current) return;
 		current = next;
 		try {
@@ -486,7 +484,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		}
 	}
 
-	function safeKeptLessons(): ReadonlyArray<{ id: string; text: string; evidenceRefs?: readonly string[] }> {
+	function safeKeptLessons(): readonly KeptLesson[] {
 		try {
 			return deps.getKeptLessons();
 		} catch {

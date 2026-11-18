@@ -46,7 +46,7 @@ export interface ClearedMemoryRegressions {
 	regressions: string[];
 }
 
-export function memoryRegressionsClearedPath(dataDir: string): string {
+function memoryRegressionsClearedPath(dataDir: string): string {
 	return join(memoryRoot(dataDir), "regressions-cleared.jsonl");
 }
 
