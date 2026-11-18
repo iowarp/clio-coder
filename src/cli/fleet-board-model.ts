@@ -463,6 +463,14 @@ export interface RunRecordView {
 	changedPaths?: ReadonlyArray<string>;
 }
 
+/** Whether a record's seal has been checked, verified or broken; before then its words are provisional. */
+function sealChecked(view: RunRecordView | null): boolean {
+	return (
+		view?.seal === trustStateWord("artifactIntegrity", "verified") ||
+		view?.seal === trustStateWord("artifactIntegrity", "failed")
+	);
+}
+
 function runRecordView(runId: string, stateDir: string): RunRecordView | null {
 	const facts = readRunResultFacts(runId, stateDir);
 	if (facts === null) return null;
@@ -552,13 +560,18 @@ function lastProse(fold: RunFold): string | undefined {
 export interface BoardSource {
 	stateDir: string;
 	folds: RunFoldCache;
-	/** Run records are immutable once sealed, so each is authenticated and read once. */
+	/** Run records are immutable once sealed, so each is authenticated and read once its seal is checked. */
 	records: Map<string, RunRecordView | null>;
+	/**
+	 * When a finished run whose seal was not yet checked is read again. The ledger closes a run before its record is
+	 * sealed, and a read in that gap kept `seal unchecked` on the dock while `evidence inspect` said verified (bt-11).
+	 */
+	unsealed: Map<string, number>;
 	ledger: { mtimeMs: number; size: number; runs: ReadonlyArray<RunEnvelope> } | null;
 }
 
 export function createBoardSource(stateDir: string = clioStateDir()): BoardSource {
-	return { stateDir, folds: createRunFoldCache(stateDir), records: new Map(), ledger: null };
+	return { stateDir, folds: createRunFoldCache(stateDir), records: new Map(), unsealed: new Map(), ledger: null };
 }
 
 /** The ledger rows, re-read only when `runs.json` changed. A torn or failed read keeps the last good copy. */
@@ -597,14 +610,27 @@ function supersededIds(runs: ReadonlyArray<RunEnvelope>): Set<string> {
 	return superseded;
 }
 
+/** A finished record is re-read at most this often until its seal is checked, and not past the wait after it ended. */
+const UNSEALED_REREAD_MS = 1_000;
+const UNSEALED_WAIT_MS = 60_000;
+
+function finishedRecord(source: BoardSource, run: RunEnvelope, nowMs: number): RunRecordView | null {
+	const retryAt = source.unsealed.get(run.id);
+	if (source.records.has(run.id) && (retryAt === undefined || nowMs < retryAt))
+		return source.records.get(run.id) ?? null;
+	const view = runRecordView(run.id, source.stateDir);
+	source.records.set(run.id, view);
+	const endedAtMs = run.endedAt === null ? nowMs : Date.parse(run.endedAt);
+	if (sealChecked(view) || !(nowMs - endedAtMs < UNSEALED_WAIT_MS)) source.unsealed.delete(run.id);
+	else source.unsealed.set(run.id, nowMs + UNSEALED_REREAD_MS);
+	return view;
+}
+
 function buildCard(source: BoardSource, run: RunEnvelope, nowMs: number): WorkerCard {
 	const fold = source.folds.fold(run.id);
 	const state = cardState(run);
 	let record: RunRecordView | null = null;
-	if (!isLive(state)) {
-		if (!source.records.has(run.id)) source.records.set(run.id, runRecordView(run.id, source.stateDir));
-		record = source.records.get(run.id) ?? null;
-	}
+	if (!isLive(state)) record = finishedRecord(source, run, nowMs);
 	const startedAtMs = Date.parse(run.startedAt);
 	const endedAtMs = run.endedAt === null ? null : Date.parse(run.endedAt);
 	const toolCap = toolCapOf(run);
