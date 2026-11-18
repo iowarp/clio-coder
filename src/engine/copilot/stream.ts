@@ -563,9 +563,8 @@ function blobAttachments(images: ReadonlyArray<ImageContent>) {
 /** The wire's `skipLargeOutputProcessing` (rpc ToolResultExpanded), which the SDK passes through untyped. */
 function toolResultObject(
 	message: Extract<CoreMessage, { role: "toolResult" }>,
-	extraText = "",
 ): ToolResultObject & { skipLargeOutputProcessing: true } {
-	const text = [textOf(message.content), extraText].filter((part) => part.length > 0).join("\n\n");
+	const text = textOf(message.content);
 	const images = imagesOf(message.content);
 	return {
 		textResultForLlm: text,
@@ -1373,18 +1372,19 @@ async function runStep(
 			);
 			const after = fresh.filter((message) => message.role === "user");
 			// The tool's own output and the registry's `[middleware:*]` notes stay byte-for-byte what Clio produced,
-			// as on the Pi route. Host reminders keep riding on the last result in their `<system-reminder>` frame.
-			// A person's text that followed the results (a mid-turn steer) is a real user message: it goes in
-			// Copilot's immediate mode, which places it before the run's next model request, so the model reads it
-			// as the operator's turn and never as tool output. It is sent before the results are delivered, while
-			// the run is still waiting on them, so it lands at the very next request.
-			const extra = after.flatMap((message) => remindersOf(textOf(message.content))).join("\n\n");
+			// as on the Pi route, and nothing else rides in a tool result: a model reads a host frame inside tool
+			// output as an injection (D4). Host reminders that followed the results, in their `<system-reminder>`
+			// frame, and a person's text (a mid-turn steer, a real user message) go in Copilot's immediate mode
+			// with any new host policy. Immediate mode places them before the run's next model request; sent while
+			// the run still waits on the results, they land at the very next request, with no request of their own.
+			// A reminder alone is host framing, not a steer: Clio's steer accounting reads its own transcript.
+			const reminders = after.flatMap((message) => remindersOf(textOf(message.content))).join("\n\n");
 			const steer = after
 				.map((message) => operatorTextOf(textOf(message.content)))
 				.filter((text) => text.length > 0)
 				.join("\n\n");
 			const steerImages = after.flatMap((message) => imagesOf(message.content));
-			const immediate = [policyText, steer].filter((text) => text.length > 0).join("\n\n");
+			const immediate = [policyText, steer, reminders].filter((text) => text.length > 0).join("\n\n");
 			if (immediate.length > 0 || steerImages.length > 0) {
 				const steerSend = {
 					prompt: immediate,
@@ -1396,9 +1396,9 @@ async function runStep(
 				if (step.isFinished) return;
 			}
 			const answered = new Set(results.map((message) => message.toolCallId));
-			const delivered: Array<ToolResultObject & { toolCallId: string }> = results.map((message, index) => ({
+			const delivered: Array<ToolResultObject & { toolCallId: string }> = results.map((message) => ({
 				toolCallId: message.toolCallId,
-				...toolResultObject(message, index === results.length - 1 ? extra : ""),
+				...toolResultObject(message),
 			}));
 			// Every requested call settles even when Clio's loop produced no result for it.
 			for (const id of active.pendingToolCallIds) {

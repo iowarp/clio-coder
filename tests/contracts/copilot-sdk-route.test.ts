@@ -991,19 +991,18 @@ test("Clio's loop runs the tool; Copilot continues the same session and reports 
 	strictEqual(second.stopReason, "stop");
 	match((second.content[0] as { text: string }).text, /tool said file body/);
 	strictEqual(fake().sessions.length, before + 1, "the tool round trip reuses one Copilot session");
-	// The tool's output and the registry's note reach Copilot exactly as Clio wrote them, the host reminder rides
-	// with them in its own frame, and the operator's steer is never part of the tool result.
-	strictEqual(
-		fake().toolResults.at(-1)?.textResultForLlm,
-		`file body${HOST_NOTE}\n\n<system-reminder>host note</system-reminder>`,
-	);
-	// The steer is a real user message in immediate mode, in the run before its next model request.
-	deepStrictEqual(fake().toolResults.at(-1)?.injectedBefore, ["operator steer"]);
+	// The tool's output and the registry's note reach Copilot exactly as Clio wrote them; neither the host
+	// reminder nor the operator's steer is ever part of the tool result (D4).
+	strictEqual(fake().toolResults.at(-1)?.textResultForLlm, `file body${HOST_NOTE}`);
+	// The steer is a real user message in immediate mode, in the run before its next model request, and the
+	// reminder follows it there in its own frame.
+	const steered = "operator steer\n\n<system-reminder>host note</system-reminder>";
+	deepStrictEqual(fake().toolResults.at(-1)?.injectedBefore, [steered]);
 	deepStrictEqual(
 		fake()
 			.sends?.filter((entry) => entry.mode === "immediate")
 			.map((entry) => entry.prompt),
-		["operator steer"],
+		[steered],
 	);
 	const firstSettled = callSettlementFromMessage(first, "none");
 	// Usage reported after the tool started still settles on the call that requested the tool.
@@ -1081,6 +1080,8 @@ test("the provider dump records each request Clio hands the Copilot runtime (c2b
 	);
 	strictEqual(results[0]?.[0]?.toolCallId, "call_1");
 	strictEqual(results[0]?.[0]?.textResultForLlm, fake().toolResults.at(-1)?.textResultForLlm);
+	// A result with no host reminder after it reaches Copilot as Clio wrote it.
+	strictEqual(results[0]?.[0]?.textResultForLlm, "file body");
 });
 
 test("a call to a tool Copilot was never given reseeds the next call instead of waiting on Copilot's own run", async () => {
@@ -1102,7 +1103,7 @@ test("a call to a tool Copilot was never given reseeds the next call instead of 
 	disposeCopilotConversations("undeclared-session");
 });
 
-test("a reminder-only follow-up rides on the tool result; a steer is sent once and never replayed", async () => {
+test("a reminder-only follow-up goes in the immediate send, never the tool result; a steer is sent once and never replayed", async () => {
 	disposeCopilotConversations("steer-session");
 	const sendsBefore = fake().sends?.length ?? 0;
 	const context: Context = { systemPrompt: "You are Clio.", tools: [readTool], messages: [user("please use tool")] };
@@ -1114,18 +1115,10 @@ test("a reminder-only follow-up rides on the tool result; a steer is sent once a
 		"steer-session",
 	);
 	strictEqual(second.stopReason, "stop");
-	strictEqual(
-		fake().toolResults.at(-1)?.textResultForLlm,
-		"file body\n\n<system-reminder>only a reminder</system-reminder>",
-	);
-	deepStrictEqual(fake().toolResults.at(-1)?.injectedBefore, []);
-	strictEqual(
-		fake()
-			.sends?.slice(sendsBefore)
-			.some((entry) => entry.mode === "immediate"),
-		false,
-		"a reminder alone is no operator message",
-	);
+	// The result contract reminder (D4) reaches the very next model request as host framing, outside the result.
+	strictEqual(fake().toolResults.at(-1)?.textResultForLlm, "file body");
+	deepStrictEqual(fake().toolResults.at(-1)?.injectedBefore, ["<system-reminder>only a reminder</system-reminder>"]);
+	strictEqual(fake().sessions.at(-1)?.prompts.length, 1, "the reminder starts no run of its own");
 	// A steer, then the next turn: the steer is in Clio's transcript, so Copilot already has it and gets only what is new.
 	const third = await step(
 		{ ...context, messages: [...withResult, second, user("please use tool again")] },
@@ -1147,8 +1140,10 @@ test("a reminder-only follow-up rides on the tool result; a steer is sent once a
 		"steer-session",
 	);
 	strictEqual(fourth.stopReason, "stop");
-	strictEqual(fake().toolResults.at(-1)?.textResultForLlm, "second body\n\n<system-reminder>r</system-reminder>");
-	deepStrictEqual(fake().toolResults.at(-1)?.injectedBefore, ["While you are at it, also list the dir"]);
+	strictEqual(fake().toolResults.at(-1)?.textResultForLlm, "second body");
+	deepStrictEqual(fake().toolResults.at(-1)?.injectedBefore, [
+		"While you are at it, also list the dir\n\n<system-reminder>r</system-reminder>",
+	]);
 	await step(
 		{
 			...context,
@@ -1170,8 +1165,9 @@ test("a reminder-only follow-up rides on the tool result; a steer is sent once a
 		later.map((entry) => [entry.mode ?? "enqueue", entry.prompt]),
 		[
 			["enqueue", "please use tool"],
+			["immediate", "<system-reminder>only a reminder</system-reminder>"],
 			["enqueue", "please use tool again"],
-			["immediate", "While you are at it, also list the dir"],
+			["immediate", "While you are at it, also list the dir\n\n<system-reminder>r</system-reminder>"],
 			["enqueue", "thanks"],
 		],
 	);
