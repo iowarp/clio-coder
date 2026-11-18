@@ -3506,10 +3506,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				let submittedText = composeSubmittedText();
 
 				// 2. Pre-submit auto-compaction trigger. Its stage figures price the request this turn sends, so a runtime
-				// a resume just built gets the session prompt first instead of the seeded fallback (bt-47 D1). The compile is
-				// keyed on its inputs, so a prompt already current is not compiled again; step 3 still owns the fallback replay.
-				await context.ensureSessionPrompt(agentRuntime, false, undefined, true);
-				if (!admissionCurrent()) return;
+				// a resume just built gets the session prompt first instead of the seeded fallback (bt-47 D1). Only such a
+				// runtime compiles here, so a submit whose prompt is applied reads memory once; step 3 owns the fallback replay.
+				if (context.sessionPromptPending?.(agentRuntime)) {
+					await context.ensureSessionPrompt(agentRuntime, false, undefined, true);
+					if (!admissionCurrent()) return;
+				}
 				const forceNow = process.env.CLIO_CODER_FORCE_COMPACT === "1";
 				const paintCompaction = prepareCompactionPaint();
 				try {
