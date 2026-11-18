@@ -2078,8 +2078,6 @@ const STREAM_LEAD_TOKEN_RE =
 	/^-|[:="'`]|pass|pwd|secret|token|key|auth|credential|bearer|basic|cookie|login|sshpass|docker|curl/iu;
 const STREAM_LEAD_LINE_RE = /curl|docker/iu;
 const STREAM_HEAD_TOKEN_RE = /[:="']/u;
-/** A secret word on a line of its own, which leads a tail into the quoted-value rules and redacts nothing itself. */
-const THINKING_WORD_PROBE = "key\n";
 
 function certifiedThinkingBreak(before: string, after: string): boolean {
 	const body = before.trimEnd();
@@ -2141,13 +2139,6 @@ function streamThinkingRail(
 	if (stream.head.length === 0) return renderProseThinkingRail(prose, width, limit, false, true);
 	const rest = escapeTerminalControls(prose.slice(stream.head.length));
 	const redacted = redactStreamingSecretString(rest, false);
-	// Quoted values redact only in text that holds a secret word anywhere, and `sig: 'a b'` names none, so the head can
-	// decide them. A tail whose quotes redact differently once a word leads it takes the whole path.
-	if (
-		/["']/u.test(rest) &&
-		redactStreamingSecretString(`${THINKING_WORD_PROBE}${rest}`, false) !== `${THINKING_WORD_PROBE}${redacted}`
-	)
-		return renderProseThinkingRail(prose, width, limit, false, true);
 	const tail = stripThinkingEmphasis(redacted).replace(/\s+$/u, "");
 	// A held value can leave the tail blank, and then the whole text's trim reaches back into the head.
 	if (tail.length === 0) return renderProseThinkingRail(prose, width, limit, false, true);

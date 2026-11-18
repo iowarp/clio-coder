@@ -570,8 +570,8 @@ test("a long open thinking stream hides a secret a line break parts from its nam
 });
 
 // One-line samples of every pattern family redactStreamingSecretString applies, the rail's equivalence corpus (Astra r10-1).
-// A rule that can match across a line break, or that reads past the lines around its match as the secret-word gate on
-// quoted values does, belongs here, and certifiedThinkingBreak or streamThinkingRail in chat-panel.ts must account for it.
+// A rule that can match across a line break, or that reads past the lines around its match, belongs here, and
+// certifiedThinkingBreak or streamThinkingRail in chat-panel.ts must account for it.
 const RAIL_FAMILIES: Record<string, readonly string[]> = {
 	SECRET_STRING_RE: [
 		"https://alice:ZQXJZQXJ@db.example/x",
@@ -610,9 +610,16 @@ const RAIL_FAMILIES: Record<string, readonly string[]> = {
 		'{"token": "ZQXJ ZQXJ"}',
 		`curl -d '{"secret":"ZQXJ"}'`,
 		'Proxy-Authorization "Basic ZQXJ ZQXJ"',
-		"sig: 'ZQXJ ZQXJ' for the keys",
+		"sig: 'ZQXJ ZQXJ'",
 	],
-	HOLD: ['password: "ZQXJ ZQ', "https://u:ZQXJ", "ghp_ZQXJ", "jdbc:oracle:thin:scott/ZQXJ", "x=https%3A%2F%2Fu%3AZQXJ"],
+	HOLD: [
+		'password: "ZQXJ ZQ',
+		"the password\n: 'ZQXJ ZQ",
+		"https://u:ZQXJ",
+		"ghp_ZQXJ",
+		"jdbc:oracle:thin:scott/ZQXJ",
+		"x=https%3A%2F%2Fu%3AZQXJ",
+	],
 	MARKUP: ["**bold** _it_ *x* `code span` ~~gone~~", "\u001b[31mred\u001b[0m \u0007 \u0000", "e\u0301 日本語 😀\tcell"],
 };
 

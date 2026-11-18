@@ -457,6 +457,15 @@ function versionProbePattern(): RegExp {
 }
 
 /**
+ * Interpreter flags a `python -m pytest|unittest` run may carry (bt-12): short
+ * switches that only buffer, warn, isolate or skip bytecode (`-B`, `-u`, `-I`,
+ * clustered as `-Bu`), a closed `-X` list, and `-W` with a builtin warning
+ * category. `-c`, `-i`, `-X pycache_prefix=` and a dotted `-W` category (which
+ * Python imports) stay unrecognized, so no flag runs code beyond the runner.
+ */
+const PYTHON_RUNNER_FLAGS = String.raw`(?:[ \t]+(?:-[BbEIOPqsu]+|-X[ \t]*(?:dev|utf8(?:=[01])?|faulthandler|importtime|tracemalloc(?:=\d+)?|warn_default_encoding)|-W[ \t]*(?:default|error|always|module|once|ignore)(?:::[A-Za-z]*Warning)?))*`;
+
+/**
  * Test runners run without an ask in default and yolo modes (#377). They
  * execute repository-authored code, which the maintainer accepted so a
  * headless run can verify its own work by the project's own command. Every id
@@ -513,8 +522,14 @@ export const TEST_RUNNER_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
 	},
 	{ id: "builtin:node-test", re: /^node[ \t]+--test(?:[ \t]+[\w=./:-]+)*$/ },
 	{ id: "builtin:pytest", re: /^pytest(?:[ \t]+[\w=./:-]+)*$/ },
-	{ id: "builtin:python-pytest", re: /^python(?:3(?:\.\d+)?)?[ \t]+-m[ \t]+pytest(?:[ \t]+[\w=./:-]+)*$/ },
-	{ id: "builtin:python-unittest", re: /^python(?:3(?:\.\d+)?)?[ \t]+-m[ \t]+unittest(?:[ \t]+[\w=./:-]+)*$/ },
+	{
+		id: "builtin:python-pytest",
+		re: new RegExp(String.raw`^python(?:3(?:\.\d+)?)?${PYTHON_RUNNER_FLAGS}[ \t]+-m[ \t]+pytest(?:[ \t]+[\w=./:-]+)*$`),
+	},
+	{
+		id: "builtin:python-unittest",
+		re: new RegExp(String.raw`^python(?:3(?:\.\d+)?)?${PYTHON_RUNNER_FLAGS}[ \t]+-m[ \t]+unittest(?:[ \t]+[\w=./:-]+)*$`),
+	},
 	{ id: "builtin:cargo-test", re: /^cargo[ \t]+test(?:[ \t]+[\w=./:-]+)*$/ },
 	{ id: "builtin:go-test", re: /^go[ \t]+test(?:[ \t]+[\w=./:-]+)*$/ },
 	{ id: "builtin:ctest", re: /^ctest(?:[ \t]+[\w=./:-]+)*$/ },
@@ -3473,6 +3488,7 @@ function gateDecision(
 	};
 	if (base.posture !== undefined) rejectionInput.posture = base.posture;
 	if (input.ruleId !== undefined) rejectionInput.ruleId = input.ruleId;
+	if (input.reasonCode.startsWith(YOLO_FLOOR_REASON_PREFIX)) rejectionInput.floor = true;
 	const rejection = formatRejection(rejectionInput);
 	return { ...base, ...input, kind, rejection };
 }

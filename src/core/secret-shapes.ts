@@ -24,6 +24,7 @@ export const CREDENTIAL_VALUE_SHAPES: ReadonlyArray<CredentialShape> = [
 ];
 
 /** Shapes where the command or header names the credential that follows it. */
+// A shape that can match across a line break needs certifiedThinkingBreak (chat-panel.ts) and RAIL_FAMILIES (url-userinfo-hold.test.ts) updated.
 export const CREDENTIAL_LEAD_SHAPES: ReadonlyArray<CredentialShape> = [
 	// `curl -u name:pw` and `--user name:pw`: the name stays, the password goes.
 	{
