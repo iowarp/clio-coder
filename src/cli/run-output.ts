@@ -228,9 +228,11 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 function receiptCaveat(receipt: RunResult): CompletedRunCaveat | null {
 	// Older and synthetic receipts can lack the per-tool counts; a missing count says nothing either way.
 	const refusedCalls = (receipt.toolStats ?? []).reduce((sum, stat) => sum + (stat.blocked ?? 0), 0);
+	// A receipt older than `guardBlockedAttempts` lists guard blocks among its blocked attempts.
 	const guardedCalls = Math.min(
 		refusedCalls,
-		(receipt.safety?.blockedAttempts ?? []).filter((attempt) => attempt.reasonCode === TOOL_GUARD_REASON_CODE).length,
+		(receipt.safety?.guardBlockedAttempts?.length ?? 0) +
+			(receipt.safety?.blockedAttempts ?? []).filter((attempt) => attempt.reasonCode === TOOL_GUARD_REASON_CODE).length,
 	);
 	const contract = receipt.quality?.resultContract?.conformance;
 	return completedRunCaveat({

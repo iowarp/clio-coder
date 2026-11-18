@@ -637,7 +637,8 @@ export interface RunResultSafetySummary {
 	 * block (see docs/architecture/safety-model.md). Such a call still appears in
 	 * `blockedAttempts` because its outcome was blocked, so `decisions.blocked`
 	 * is not a proxy for the number of blocked attempts; use `blockedAttempts`
-	 * or the `toolStats`/`toolActivity` blocked counts for that.
+	 * or the `toolStats`/`toolActivity` blocked counts for that. A guard block
+	 * is listed under `guardBlockedAttempts`, not `blockedAttempts`.
 	 */
 	decisions: {
 		allowed: number;
@@ -657,7 +658,16 @@ export interface RunResultSafetySummary {
 		escalationDenied?: number;
 		escalationTimedOut?: number;
 	};
+	/**
+	 * Every call whose outcome was blocked, except the ones a tool guard held back. Receipts written before
+	 * `guardBlockedAttempts` existed list guard blocks here too.
+	 */
 	blockedAttempts: SafetyBlockedAttempt[];
+	/**
+	 * The calls `decisions.guardBlocked` counts, in the same shape. Present only when a guard blocked a call, so a run
+	 * without one keeps its exact shape. The main agent keeps the first `BLOCKED_ATTEMPTS_LIMIT`; the count stays exact.
+	 */
+	guardBlockedAttempts?: SafetyBlockedAttempt[];
 	/**
 	 * Worker asks this attempt routed to the main agent's grant broker (Phase
 	 * D), one entry per request, oldest first. Present only when the run

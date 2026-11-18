@@ -160,10 +160,12 @@ function runResultFactsOf(record: RunTelemetryV1 | null, gates: ReadonlyArray<Ga
 	const text = result?.output?.text;
 	const structured = result?.output?.structured;
 	const refusedCalls = settled.tools.reduce((sum, entry) => sum + entry.blocked, 0);
-	// The attempt list is capped at 64, so it can undercount guards but never claim more than the tools refused.
+	// The attempt lists are capped at 64, so they can undercount guards but never claim more than the tools refused.
+	// A record older than `guardBlockedAttempts` lists guard blocks among its blocked attempts.
 	const guardedCalls = Math.min(
 		refusedCalls,
-		settled.blockedAttempts.filter((attempt) => attempt.reasonCode === TOOL_GUARD_REASON_CODE).length,
+		(settled.guardBlockedAttempts?.length ?? 0) +
+			settled.blockedAttempts.filter((attempt) => attempt.reasonCode === TOOL_GUARD_REASON_CODE).length,
 	);
 	return {
 		trust: readRunTrust(record, gates).trust,

@@ -178,6 +178,7 @@ for (const scenario of [
 		outcome: "failed",
 		calls: 1,
 		decisions: { allowed: 0, blocked: 1, guardBlocked: 1, permissionRequested: 0 },
+		attempts: { blocked: ["bash"], guarded: ["read"] },
 	},
 	{
 		name: "unrelated read cannot recover denied edit",
@@ -475,6 +476,15 @@ for (const scenario of [
 						.map((line) => JSON.parse(line))
 						.find((event) => event.type === "turn_end");
 					deepStrictEqual(end.safety.decisions, scenario.decisions);
+					// bt-15 c12b: the guard's block lists apart from the safety refusals, as the decisions count it.
+					if ("attempts" in scenario)
+						deepStrictEqual(
+							{
+								blocked: end.safety.blockedAttempts.map((attempt: { tool: string }) => attempt.tool),
+								guarded: end.safety.guardBlockedAttempts.map((attempt: { tool: string }) => attempt.tool),
+							},
+							scenario.attempts,
+						);
 				}
 				if (errored) strictEqual(envelope.spend.pricing.usd.kind, "unknown");
 				else strictEqual(factKnownValue(envelope.spend.pricing.usd), scenario.calls * 0.25);
