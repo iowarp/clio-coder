@@ -108,6 +108,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- An ask denied before the operator decided is listed in `safety.permissionRequestedAttempts`, matching its `permissionRequested` count, instead of in `blockedAttempts`. Older records keep such asks in `blockedAttempts` (bt-15 c13a).
+- `run --help` and the read-only docs now say `--read-only` runs shell commands in a read-only sandbox and runs delegations read-only, instead of claiming it denies every command and delegation (bt-15 c13b).
 - A write that lands outside the workspace (tmp, a scratch root, or outside the cwd) no longer retires standing checks on the receipt or the task board (x7-1).
 - Catalog and `run --verify` checks run through bash are read by the shared check classifier, so the finish gate, the receipt and the board agree on them (x7-5).
 - The finish footer says a check failed, not "checks passed", while a check's last outcome since the last change is red (bt-44).
