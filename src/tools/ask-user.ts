@@ -484,12 +484,26 @@ export function recommendedOptionIndex(question: Pick<AskUserQuestion, "options"
 	);
 }
 
-/** Whether a question's timeout pick would approve leaving the workspace or its sandbox. */
-export function recommendedOptionEscapes(question: Pick<AskUserQuestion, "options">): boolean {
+const ESCAPE_WORDS = /\boutside\b[^.;]*\b(workspace|sandbox|repo|repository|project)\b|\b(escape|unsandboxed)\b/iu;
+/** A label that turns the step down or keeps it inside: "No, keep it inside", "Skip", "Run it myself instead". */
+const DECLINING_LABEL =
+	/\b(no|not|don'?t|never|skip|cancel|decline|deny|abort|stop|leave it|inside|instead|myself|my terminal)\b/iu;
+/** A label that says yes to the step the question names: "Yes, run it", "Proceed", "Write the file". */
+const AFFIRMING_LABEL =
+	/^\W*(yes|yep|y|ok|okay|sure|go ahead|do it|proceed|continue|approve|allow|accept|confirm|run|execute|apply|write|create|append|touch|delete|remove|move|copy|install|overwrite|use)\b/iu;
+
+/**
+ * Whether a question's timeout pick would approve leaving the workspace or its
+ * sandbox: the recommended option says so itself, or the question (header or
+ * text) names a step outside the workspace and the option says yes to it.
+ */
+export function recommendedOptionEscapes(question: Pick<AskUserQuestion, "options" | "question" | "header">): boolean {
 	const option = question.options?.[recommendedOptionIndex(question)];
 	if (option === undefined) return false;
-	const words = `${option.label} ${option.description ?? ""}`;
-	return /\boutside\b[^.;]*\b(workspace|sandbox|repo|repository|project)\b|\b(escape|unsandboxed)\b/iu.test(words);
+	if (ESCAPE_WORDS.test(`${option.label} ${option.description ?? ""}`)) return true;
+	if (!ESCAPE_WORDS.test(`${question.header ?? ""} ${question.question ?? ""}`)) return false;
+	const label = option.label.replace(/\(?\s*(?:·\s*)?recommended\s*\)?/giu, " ");
+	return !DECLINING_LABEL.test(label) && AFFIRMING_LABEL.test(label);
 }
 
 /**

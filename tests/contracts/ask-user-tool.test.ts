@@ -340,6 +340,50 @@ describe("ask_user tool", () => {
 		match(result.output, /leaves the workspace was declined, not picked: do not take that step/);
 	});
 
+	it("declines a plain yes when the question names a write outside the workspace (bt-21, drv-p2i)", async () => {
+		const f = fixture([{ answers: [], timedOut: { afterSeconds: 60 } }]);
+		const question =
+			"The command `touch ../outside-p2i.txt` writes to a path outside the workspace root (/tmp/proj). It would create /tmp/outside-p2i.txt. Run it?";
+		const result = await f.call({
+			questions: [
+				{
+					question,
+					options: [
+						{
+							label: "Yes, run it · recommended",
+							description: "Run the touch command once; it creates an empty file one level above the workspace.",
+						},
+						{ label: "No, skip it" },
+						{ label: "Run it from my terminal instead" },
+					],
+				},
+			],
+		});
+		deepStrictEqual(interviewOf(result).latest_answers, [{ question, answer: UNATTENDED_ESCAPE_ANSWER, auto: true }]);
+	});
+
+	it("still picks a recommended option that keeps the step inside the workspace (bt-21)", async () => {
+		const f = fixture([{ answers: [], timedOut: { afterSeconds: 60 } }]);
+		const question = "The command writes to a path outside the workspace root. Run it?";
+		const result = await f.call({
+			questions: [
+				{
+					question,
+					header: "Outside write",
+					options: [{ label: "No, keep it inside (Recommended)" }, { label: "Yes, run it" }],
+				},
+			],
+		});
+		deepStrictEqual(interviewOf(result).latest_answers, [
+			{
+				question,
+				answer: "No, keep it inside (Recommended)",
+				options: ["No, keep it inside (Recommended)"],
+				auto: true,
+			},
+		]);
+	});
+
 	it("ends the turn unapproved on a plan card asked after Clio answered for an absent operator", async () => {
 		const f = fixture([{ answers: [], timedOut: { afterSeconds: 300 } }]);
 		await f.call({ questions: [CACHE_QUESTION] });
