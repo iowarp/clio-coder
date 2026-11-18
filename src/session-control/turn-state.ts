@@ -41,6 +41,7 @@ import type { MainRequestRecord } from "../engine/in-prefix-summary.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { AskUserToolPolicy } from "../tools/registry.js";
 import type { ToolMarkupRepromptBudget } from "./chat-loop-messages.js";
+import { RunEvidenceLog } from "./run-evidence.js";
 import type { ModelRequestFacts } from "./status-types.js";
 
 export interface ChatLoopTarget {
@@ -282,6 +283,8 @@ export interface ChatTurnState {
 	toolMarkupReprompt: ToolMarkupRepromptBudget | null;
 	/** Continuation requests, carries and stops; written only through its methods. */
 	readonly continuation: ContinuationState;
+	/** The in-flight submit's own message events by attempt; consumers judge a run from it, never from the projected array. */
+	readonly runEvidence: RunEvidenceLog;
 	/** Reason a streaming tool-prose cutoff (or hard-block reminder) aborted the run. */
 	toolProseAbortReason: string | null;
 	/** Set when the repetition check stopped a looping stream; consumed by the one nudge after it (`repetition-detector.ts`). */
@@ -344,6 +347,7 @@ export type TurnRuntimeState = TurnStateView<
 	| "lastRunSnapshot"
 	| "replayedContextMessages"
 	| "routeMove"
+	| "runEvidence"
 	| "streaming"
 	| "synthesisToolLock"
 	| "toolBudgetLock",
@@ -401,7 +405,7 @@ export type TurnPersistenceState = TurnStateView<
 
 /** turn-recovery: owns the route move and consumes the stall watchdog's reason. */
 export type TurnRecoveryState = TurnStateView<
-	"activeInterruptReason" | "continuation",
+	"activeInterruptReason" | "continuation" | "runEvidence",
 	"routeMove" | "routeMoveSeat" | "streamStallReason" | "streamStallStage"
 >;
 
@@ -442,6 +446,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		toolBudgetLock: false,
 		toolMarkupReprompt: null,
 		continuation: new ContinuationState(),
+		runEvidence: new RunEvidenceLog(),
 		toolProseAbortReason: null,
 		repetitionAbortReason: null,
 		repetitionRepromptTurnId: null,
