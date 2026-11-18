@@ -8,7 +8,11 @@ interface WorkerPressureInput {
 	systemPrompt: string;
 	tools: ReadonlyArray<unknown>;
 	contextWindow: number;
-	outputReserve: number;
+	/**
+	 * Output tokens the request must leave room for at a given input size, the
+	 * same reserve the main loop admits a turn against (D1-5).
+	 */
+	outputReserve: (inputTokens: number) => number;
 	threshold?: number;
 	autoEvict?: boolean;
 }
@@ -51,9 +55,11 @@ export function createWorkerContextGuard(archive: (ref: string, message: AgentMe
 		// server enforces its own limit, and a real overflow fails the run with
 		// the server's error instead of a fabricated "insufficient headroom".
 		const windowKnown = Number.isFinite(input.contextWindow) && input.contextWindow > 0;
-		const ceiling = windowKnown
-			? Math.min(Math.floor(input.contextWindow * (input.threshold ?? 0.8)), input.contextWindow - input.outputReserve)
-			: Number.POSITIVE_INFINITY;
+		const threshold = windowKnown ? Math.floor(input.contextWindow * (input.threshold ?? 0.8)) : Number.POSITIVE_INFINITY;
+		// The reserve is resolved at the request's own size: a wire-clamped transport
+		// reserves less as input grows, so no single reserve gives a fixed ceiling (D5).
+		const fits = (tokens: number) =>
+			!windowKnown || (tokens <= threshold && tokens + input.outputReserve(tokens) <= input.contextWindow);
 		const key = (message: AgentMessage) => contextHash(message);
 		const messages = input.messages.map((message) => evicted.get(key(message)) ?? message);
 
@@ -103,7 +109,7 @@ export function createWorkerContextGuard(archive: (ref: string, message: AgentMe
 			// The first request is the caller's chosen fork, never auto-trimmed.
 			if (calls <= 1 || input.autoEvict === false) return null;
 		} else {
-			if (count() <= ceiling) return accepted();
+			if (fits(count())) return accepted();
 			// The first request must honor the selected fork; never auto-trim it into a splice.
 			if (calls === 0)
 				throw new WorkerContextExhaustedError(
@@ -113,7 +119,7 @@ export function createWorkerContextGuard(archive: (ref: string, message: AgentMe
 				throw new WorkerContextExhaustedError("worker context: context budget exhausted with automatic eviction disabled");
 		}
 		const recoveryTarget = Math.floor(lastRequestTokens * OVERFLOW_RECOVERY_KEEP);
-		const over = () => (recovering ? structural > recoveryTarget : count() > ceiling);
+		const over = () => (recovering ? structural > recoveryTarget : !fits(count()));
 		const assistantIndices = input.messages.flatMap((message, index) => (message.role === "assistant" ? [index] : []));
 		const cutoff = assistantIndices[Math.max(0, assistantIndices.length - 2)] ?? 0;
 		const toolCalls = new Map(input.messages.flatMap(messageToolCalls).map((call) => [call.id, call]));
@@ -173,7 +179,7 @@ export function createWorkerContextGuard(archive: (ref: string, message: AgentMe
 			}
 		}
 		if (recovering) return structural <= recoveryTarget ? accepted() : null;
-		if (count() > ceiling)
+		if (!fits(count()))
 			throw new WorkerContextExhaustedError(
 				"worker context: protected task context exceeds available headroom after reversible eviction",
 			);

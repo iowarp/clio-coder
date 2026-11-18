@@ -1,7 +1,7 @@
 import type { Api, AssistantMessage, Context, Model, StreamOptions } from "@earendil-works/pi-ai";
 import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
 import { estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate";
-import { CLIO_MIN_CONTEXT_WINDOW, CLIO_MIN_MAX_OUTPUT_TOKENS } from "../../core/context-floor.js";
+import { CLIO_MIN_MAX_OUTPUT_TOKENS } from "../../core/context-floor.js";
 import { ceilChars, estimateAgentMessageTokens, toolSchemaChars } from "../../domains/session/context-accounting.js";
 import { normalizeContext, resolvedRequestContext } from "../context.js";
 
@@ -74,35 +74,31 @@ function windowOutputBound(servingWindow: number | undefined): number {
 		: Number.POSITIVE_INFINITY;
 }
 
-/**
- * Largest share of the serving window the worker pressure guard reserves for
- * output, the product ratio of {@link CLIO_MIN_MAX_OUTPUT_TOKENS} to
- * {@link CLIO_MIN_CONTEXT_WINDOW}.
- */
-const MAX_PRESSURE_OUTPUT_SHARE = CLIO_MIN_MAX_OUTPUT_TOKENS / CLIO_MIN_CONTEXT_WINDOW;
-
 function clampsOutputAtWire(api: string): boolean {
 	return api === "openai-completions" || api === "ollama-native";
 }
 
 /**
- * Output reserve for the worker pressure ceiling. The preflight reserve from
- * {@link resolveReservedOutputTokens} is already clamped to the room left after
- * the current input, so feeding it to a ceiling of `window - reserve` collapses
- * the ceiling to roughly the input itself and exhausts a worker with most of its
- * window free (D5). Transports that shrink max_tokens to the remaining room get
- * the unclamped budget bounded by a fixed share of the serving window instead.
+ * The output reserve one request is admitted against, at that request's own
+ * input size: the model's capability cap, the configured budget, the profile
+ * recommendation and the serving window, through {@link resolveReservedOutputTokens}.
+ * The main loop's admission and the worker pressure guard both resolve through
+ * it, so a worker on the parent's model and window reserves what the parent's
+ * fit check assumed (D1-5). The reserve depends on the input for wire-clamped
+ * transports, so a caller tests `input + reserve(input) <= window` rather than
+ * deriving a fixed ceiling from one reserve (D5).
  */
-export function resolvePressureOutputReserve(
+export function requestOutputReserve(
+	model: { api?: string } | null | undefined,
 	maxOutputTokens: number | null | undefined,
-	request: { api: string; contextWindow: number },
-	recommendedTokens?: number,
+	contextWindow: number,
+	inputTokens: number,
 ): number {
-	const ceiling = outputCeiling(maxOutputTokens, recommendedTokens, request.contextWindow);
-	if (!clampsOutputAtWire(request.api) || !Number.isFinite(request.contextWindow) || request.contextWindow <= 0) {
-		return ceiling;
-	}
-	return Math.min(ceiling, Math.floor(request.contextWindow * MAX_PRESSURE_OUTPUT_SHARE));
+	return resolveReservedOutputTokens(
+		maxOutputTokens,
+		{ api: model?.api ?? "", contextWindow, inputTokens },
+		recommendedOutputTokens(model, contextWindow),
+	);
 }
 
 /**

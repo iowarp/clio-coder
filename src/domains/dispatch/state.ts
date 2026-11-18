@@ -202,8 +202,7 @@ function rowChecks(rows: number): { spend: RowCheck; sums: RowCheck } {
 	return compiledRowChecks;
 }
 
-function readRuns(): RunEnvelope[] {
-	const path = runsPath();
+function readRuns(path = runsPath()): RunEnvelope[] {
 	if (!existsSync(path)) return [];
 	const raw = readFileSync(path, "utf8").trim();
 	if (raw.length === 0) return [];
@@ -218,6 +217,20 @@ function readRuns(): RunEnvelope[] {
 		envelopes.push(entry as unknown as RunEnvelope);
 	}
 	return envelopes;
+}
+
+/**
+ * When each ledger run ended, in epoch ms, or null while it has not; a run the map does not name is unknown to the
+ * ledger. A row without an end may still be recovered, so state kept for a run is kept while its end is null.
+ * A ledger file that does not parse throws, so a caller never mistakes it for an empty ledger.
+ */
+export function readRunEnds(stateDir = clioStateDir()): ReadonlyMap<string, number | null> {
+	const ends = new Map<string, number | null>();
+	for (const run of readRuns(join(stateDir, "runs.json"))) {
+		const end = run.endedAt === null ? Number.NaN : Date.parse(run.endedAt);
+		ends.set(run.id, Number.isFinite(end) ? end : null);
+	}
+	return ends;
 }
 
 function resolveMaxRuns(opt?: number | undefined): number {

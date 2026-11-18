@@ -4,6 +4,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { unlinkedStateDirectory } from "../../core/state-boundary.js";
 import { clearAbandonedStateLock, stateLockIsAbandoned, tryWithStateFileLockSync } from "../../core/state-file-lock.js";
 import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
+import { pruneWorkerObservations } from "../context/worker/observation-retention.js";
+import { readRunEnds } from "../dispatch/state.js";
 import { liveSessionOwner } from "../session/live-owner.js";
 import { CONTENT_SUBJECTS, collectRefs } from "./objects.js";
 import {
@@ -577,5 +579,34 @@ export async function sweepTelemetryDaily(
 		throw error;
 	}
 	const deadline = performance.now() + (options.budgetMs ?? SWEEP_BUDGET_MS);
-	return await applyTelemetryPrune(plan, { stopped: () => performance.now() > deadline || hostStopped() });
+	const result = await applyTelemetryPrune(plan, { stopped: () => performance.now() > deadline || hostStopped() });
+	await pruneWorkerObservationsWithRuns(stateDir, nowMs, options.budgetMs ?? SWEEP_BUDGET_MS, hostStopped);
+	return result;
+}
+
+/**
+ * Evicted worker observations age out with the run journals, keyed on the run that wrote them (D1-5). A ledger that
+ * cannot be read says nothing about which runs are still live, so nothing is removed that day.
+ */
+async function pruneWorkerObservationsWithRuns(
+	stateDir: string,
+	nowMs: number,
+	budgetMs: number,
+	hostStopped: () => boolean,
+): Promise<void> {
+	let runEnds: ReadonlyMap<string, number | null>;
+	try {
+		runEnds = readRunEnds(stateDir);
+	} catch {
+		return;
+	}
+	const deadline = performance.now() + budgetMs;
+	await pruneWorkerObservations(stateDir, {
+		nowMs,
+		retentionMs: DEFAULT_PRUNE_POLICY.days * DAY_MS,
+		runEnds,
+		stopped: () => performance.now() > deadline || hostStopped(),
+	}).catch(() => {
+		// A failed pass removes nothing it could not prove safe; the next day tries again.
+	});
 }
