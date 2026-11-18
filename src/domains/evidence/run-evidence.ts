@@ -6,6 +6,7 @@
 
 import { listStateDirectory } from "../../core/state-boundary.js";
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
+import { isBaselineValidation } from "../agents/result-contract.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
 import { isDecisionRecord } from "../session/entries.js";
 import { telemetryRunsDirectory } from "../telemetry/paths.js";
@@ -112,8 +113,9 @@ export function runEvidence(
 const VALIDATION_NAME_MAX_CHARS = 200;
 
 /**
- * The quality verdict the run settled and the validation names its result object reports as failed. Both are read as
- * stored; nothing here judges the result again.
+ * The quality verdict the run settled, the validation names its result object reports as failed, and its baselines. All
+ * are read as stored; nothing here judges the result again. A baseline ran before the change, so it is listed apart and
+ * never as a failure, by the rule the result contract judged quality with.
  */
 function storedQuality(record: RunTelemetryV1 | null): RunEvidence["quality"] {
 	const quality = record?.settled?.quality ?? null;
@@ -122,14 +124,17 @@ function storedQuality(record: RunTelemetryV1 | null): RunEvidence["quality"] {
 	const reported =
 		record?.result?.state === "resolved" ? record.result.value.output?.structured?.data.validations : null;
 	const failedValidations: string[] = [];
+	const baselines: { name: string; passed: boolean }[] = [];
 	if (Array.isArray(reported))
 		for (const entry of reported) {
 			if (entry === null || typeof entry !== "object") continue;
 			const { name, passed } = entry as { name?: unknown; passed?: unknown };
-			if (passed === false && typeof name === "string" && name.trim().length > 0)
-				failedValidations.push(sanitizeCallTargetText(name).slice(0, VALIDATION_NAME_MAX_CHARS));
+			if (typeof name !== "string" || name.trim().length === 0 || typeof passed !== "boolean") continue;
+			const shown = sanitizeCallTargetText(name).slice(0, VALIDATION_NAME_MAX_CHARS);
+			if (isBaselineValidation(entry)) baselines.push({ name: shown, passed });
+			else if (!passed) failedValidations.push(shown);
 		}
-	return { verdict: contract === null ? "unmeasured" : contract.quality, failedValidations };
+	return { verdict: contract === null ? "unmeasured" : contract.quality, failedValidations, baselines };
 }
 
 /** One run's evidence read from its run scope beneath the state root, with the review gates decided about it. */

@@ -94,6 +94,8 @@ export interface RunEvidence {
 	quality: {
 		verdict: "pass" | "fail" | "unmeasured";
 		failedValidations: string[];
+		/** Checks the result marked as run before the change; quality does not judge them, so none is a failure. */
+		baselines: { name: string; passed: boolean }[];
 	} | null;
 	/** Null unless the seal verifies: an unauthenticated record states no totals. */
 	totals: {

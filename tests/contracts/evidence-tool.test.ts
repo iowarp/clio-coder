@@ -139,6 +139,8 @@ describe("evidence tool", () => {
 	it("states the stored result-contract quality and the validations the result reported as failed", async () => {
 		const validations = [
 			{ name: "unit tests before implementation", passed: false, evidence: "red" },
+			// bt-17: a red baseline is shown as a baseline, never as a failed validation.
+			{ name: "red baseline", passed: false, evidence: "red", baseline: true },
 			{ name: "unit tests", passed: true, evidence: "green" },
 		];
 		await fixture(false, undefined, {
@@ -162,7 +164,11 @@ describe("evidence tool", () => {
 			},
 		});
 		const run = await inspectRunEvidence(clioStateDir(), "fixture");
-		deepStrictEqual(run.quality, { verdict: "fail", failedValidations: ["unit tests before implementation"] });
+		deepStrictEqual(run.quality, {
+			verdict: "fail",
+			failedValidations: ["unit tests before implementation"],
+			baselines: [{ name: "red baseline", passed: false }],
+		});
 		deepStrictEqual((await evidenceDetailSnapshot("fixture")).quality, { verdict: "fail", failedValidations: 1 });
 	});
 
