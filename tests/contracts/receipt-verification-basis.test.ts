@@ -1,8 +1,13 @@
 import { deepStrictEqual } from "node:assert/strict";
 import { test } from "node:test";
 
-import { deriveRunVerification, verificationWithHostVerdict } from "../../src/domains/dispatch/run-findings.js";
+import {
+	creditStandingDispatchRuns,
+	deriveRunVerification,
+	verificationWithHostVerdict,
+} from "../../src/domains/dispatch/run-findings.js";
 import type { RunHostVerificationCheck, ToolCallStat } from "../../src/domains/dispatch/types.js";
+import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 
 // BT-012. A worker ran `verify` and it failed, and the receipt still said
 // `basis: "no-validation-tool"` beside its own
@@ -127,4 +132,46 @@ test("the host verdict outranks the worker's own evidence, and reused or unrun c
 	);
 	const readOnly = { state: "not_applicable", basis: "read-only-agent" } as const;
 	deepStrictEqual(verificationWithHostVerdict(readOnly, { status: "verified", checks: [check(0)] }), readOnly);
+});
+
+// bt-c17a c: a pass a later change retired did run, so the receipt may not say no validation tool ran.
+test("a pass retired by a later change reads retired-by-change, not no-validation-tool", () => {
+	const freshness = (calls: ReadonlyArray<readonly [string, string, Record<string, unknown>]>) => {
+		const recorder = createRunEffectsRecorder(process.cwd());
+		for (const [id, tool, args] of calls) {
+			recorder.start(id, tool, args);
+			recorder.checkOutcome(id, "ok");
+			recorder.finish(id, false);
+		}
+		return recorder.checkFreshness();
+	};
+	const pass = ["t", "bash", { command: "npm test" }] as const;
+	const edit = ["e", "edit", { path: "src/a.ts", edits: [] }] as const;
+	const stats = [stat("bash", { ok: 2, errors: 0 }), stat("edit", { ok: 1, errors: 0 })];
+	deepStrictEqual(
+		deriveRunVerification({ toolStats: stats, typedValidations: [] }, { checkFreshness: freshness([pass, edit]) }),
+		{ state: "unverified", basis: "retired-by-change" },
+	);
+	// A change with no pass before it retired nothing.
+	deepStrictEqual(
+		deriveRunVerification({ toolStats: stats, typedValidations: [] }, { checkFreshness: freshness([edit]) }),
+		{ state: "unverified", basis: "no-validation-tool" },
+	);
+});
+
+test("a standing dispatch run record credits only a run with no verdict of its own (bt-c17a b)", () => {
+	const runs = ["run r1 agent coder"];
+	const credited = { state: "verified", basis: "dispatch-run-record", detail: "run r1 agent coder" };
+	deepStrictEqual(creditStandingDispatchRuns({ state: "unverified", basis: "no-validation-tool" }, runs), credited);
+	deepStrictEqual(creditStandingDispatchRuns({ state: "unverified", basis: "retired-by-change" }, runs), credited);
+	for (const own of [
+		{ state: "unverified", basis: "host-observed-command" },
+		{ state: "unverified", basis: "validation-tool" },
+		{ state: "verified", basis: "validation-tool" },
+	] as const)
+		deepStrictEqual(creditStandingDispatchRuns(own, runs), own);
+	deepStrictEqual(creditStandingDispatchRuns({ state: "unverified", basis: "no-validation-tool" }, []), {
+		state: "unverified",
+		basis: "no-validation-tool",
+	});
 });

@@ -391,7 +391,32 @@ export function deriveRunVerification(
 	if (context.acpDelegation === true) {
 		return { state: "unknown", basis: "acp-external-unobserved" };
 	}
+	// A pass the run recorded and then changed the tree under did run; saying no check ran would misreport it (bt-c17a c).
+	if (context.checkFreshness?.passRetired === true) return { state: "unverified", basis: "retired-by-change" };
 	return { state: "unverified", basis: "no-validation-tool" };
+}
+
+const DISPATCH_CREDIT_DETAIL_CHARS = 1024;
+
+/**
+ * A main run that settled no check of its own credits the dispatched workers whose sealed run records passed and still
+ * stand (bt-c17a b): `runs` are the task board's standing passing dispatch runs, named `run <id> agent <agent>` as the
+ * headless observed line names them (bt-verify7a), so a later change by this run has already retired any it lists. A
+ * run that has its own verdict, or a failing check of its own, keeps it.
+ */
+export function creditStandingDispatchRuns(
+	verification: RunResultVerification,
+	runs: ReadonlyArray<string>,
+): RunResultVerification {
+	if (runs.length === 0 || verification.state !== "unverified") return verification;
+	if (verification.basis !== "no-validation-tool" && verification.basis !== "retired-by-change") return verification;
+	const detail = runs.join("; ");
+	return {
+		state: "verified",
+		basis: "dispatch-run-record",
+		detail:
+			detail.length > DISPATCH_CREDIT_DETAIL_CHARS ? `${detail.slice(0, DISPATCH_CREDIT_DETAIL_CHARS - 1)}…` : detail,
+	};
 }
 
 /**
