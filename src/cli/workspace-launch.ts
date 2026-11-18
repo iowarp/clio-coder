@@ -82,16 +82,6 @@ function recentInstallFailure(stamp: string, version: string, now: number): bool
 	}
 }
 
-/** The notice for a home without the pane host is shown once per pin; the same stamp quiets a failed install. */
-function toldAbout(stamp: string, version: string): boolean {
-	try {
-		const record = JSON.parse(readFileSync(stamp, "utf8")) as { version?: unknown };
-		return record.version === version;
-	} catch {
-		return false;
-	}
-}
-
 function writeStamp(stamp: string, version: string): void {
 	try {
 		mkdirSync(dirname(stamp), { recursive: true, mode: 0o700 });
@@ -112,8 +102,9 @@ function hadPaneHost(versionDir: string): boolean {
 
 /**
  * Clio's own pinned herdr. On a platform with no pinned herdr build, panes are
- * silently unavailable. A home that never had it gets one notice and no
- * download. A pin an upgrade moved is installed on the spot; a failed install
+ * silently unavailable. A home that never had it starts plain, with no notice
+ * and no download: a pane feature's refusal names `clio-coder panes install`,
+ * and /doctor warns (bt-11 #4). A pin an upgrade moved is installed on the spot; a failed install
  * warns once and is not retried at launch for a day, or until the pin moves.
  * The installers, `panes install` and doctor always try.
  */
@@ -126,17 +117,9 @@ async function vendoredHerdr(): Promise<{ binaryPath: string; version: string } 
 	const entry = findPinnedTool("herdr");
 	const platform = currentToolPlatform();
 	if (entry === null || platform === null || entry.downloads[platform] === undefined) return null;
+	if (!hadPaneHost(toolVersionDir(entry.id, entry.version))) return null;
 	const { clioStateDir } = await import("../core/xdg.js");
 	const stamp = installFailureStamp(clioStateDir());
-	if (!hadPaneHost(toolVersionDir(entry.id, entry.version))) {
-		if (!toldAbout(stamp, entry.version)) {
-			process.stderr.write(
-				"Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.\n",
-			);
-			writeStamp(stamp, entry.version);
-		}
-		return null;
-	}
 	if (recentInstallFailure(stamp, entry.version, Date.now())) return null;
 	process.stderr.write("Clio Coder: setting up terminal panes (one time)...\n");
 	const installed = await installTool("herdr", { timeoutMs: LAUNCH_INSTALL_TIMEOUT_MS });

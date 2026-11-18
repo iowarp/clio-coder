@@ -97,9 +97,10 @@ Coder's own private pane host: it starts its pinned herdr, runs the session in
 one of its panes and hands the terminal back when you quit. Each project gets
 its own host. There is no question to answer and no setting to change. A
 missing herdr is not downloaded at launch in a home that never had panes: the
-launch prints ``Clio Coder: terminal panes are not installed. Install them with
-`clio-coder panes install`.`` once per pinned version and the session runs in
-the plain terminal; `clio-coder panes install` adds them. A home that already
+session runs in the plain terminal without a launch notice, a pane feature such
+as `/panes`, `/files` or `Alt+E` answers ``terminal panes are not installed. Run
+`clio-coder panes install`, then restart `clio-coder` ``, and `clio-coder doctor`
+warns; `clio-coder panes install` adds them. A home that already
 has panes updates them when the pinned version moves: the launch prints `Clio
 Coder: setting up terminal panes (one time)...` and downloads the new pin,
 waiting at most 30 seconds. If that fails, it prints ``Clio Coder: terminal

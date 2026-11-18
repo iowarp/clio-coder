@@ -225,7 +225,7 @@ lock, which exits 75. `--help` exits 0.
 | `--no-post-install` | none | Skip the `clio-coder upgrade --post-install` run after installing. |
 | `--gui` | `CLIO_CODER_INSTALL_GUI=1` | Install the desktop app without asking. See [Desktop app offer](#desktop-app-offer-linux-and-wsl). |
 | `--no-gui` | `CLIO_CODER_INSTALL_GUI=0` | Skip the desktop app. |
-| `--no-workspace` | none | Deprecated and ignored, with a warning. The installer always runs `clio-coder tools install herdr --json`, as `install.ps1` does, which downloads CLIO Coder's pinned herdr into its own data directory unless that version is already there. `CLIO_CODER_TOOLCHAIN_MIRROR` points it at a local or internal copy. A failure there never fails the install; bare `clio-coder` then starts in the plain terminal with one notice and never downloads on first launch, so run `clio-coder panes install` when you have network access. After an upgrade moves the pin, launch installs the new pin. A herdr on `PATH` is never used to host CLIO Coder. |
+| `--no-workspace` | none | Deprecated and ignored, with a warning. The installer always runs `clio-coder tools install herdr --json`, as `install.ps1` does, which downloads CLIO Coder's pinned herdr into its own data directory unless that version is already there. `CLIO_CODER_TOOLCHAIN_MIRROR` points it at a local or internal copy. A failure there never fails the install; bare `clio-coder` then starts in the plain terminal, where `/panes` and `clio-coder doctor` name the fix, and never downloads on first launch, so run `clio-coder panes install` when you have network access. After an upgrade moves the pin, launch installs the new pin. A herdr on `PATH` is never used to host CLIO Coder. |
 | `--force`, `-f` | none | Replace a `clio-coder` launcher this installer did not write, including a symlink that points outside the install. A symlink into an npm install of CLIO Coder is replaced without it, with a warning. |
 | `--dry-run` | none | Print the platform, Node build, package, install root and launcher, then what would run. Nothing is downloaded or changed. |
 | `-h`, `--help` | none | Print the usage text. |
@@ -412,9 +412,9 @@ before your primary model is set up. Upgrading preserves settings and
 credentials; reinstalling the package alone does not reset them.
 
 A launch never downloads the pane host into a home that never had it, which is
-what an npm, pnpm or Bun install sees on its first launch. Bare `clio-coder` prints
-``Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.``
-once and runs in the plain terminal until you run that command.
+what an npm, pnpm or Bun install sees on its first launch. Bare `clio-coder` runs in
+the plain terminal without a launch notice until you run `clio-coder panes install`;
+`/panes`, `/files` and `clio-coder doctor` name that command meanwhile.
 
 A returning user whose home already exists but has no saved chat route is not
 sent back through configure when a route can be detected; the contract is in

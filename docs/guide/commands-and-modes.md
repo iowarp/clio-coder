@@ -165,8 +165,8 @@ run feeds itself, so dispatch remains independent of the pane host and a second
 terminal can use the same journal surface directly.
 Bare `clio-coder` in an interactive terminal opens its own private
 pane host on the pinned herdr, and continues in the plain terminal when
-it cannot. A home that never had panes is not given them at launch: CLIO Coder says
-once that they are not installed, and `clio-coder panes install` adds them. A
+it cannot. A home that never had panes is not given them at launch: a pane feature
+such as `/panes` says they are not installed, and `clio-coder panes install` adds them. A
 second `clio-coder` in a folder whose pane host another open terminal still
 shows gets its own pane host and its own session, up to four per folder; a
 fifth runs without panes (see

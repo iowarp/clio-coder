@@ -14,6 +14,7 @@ export {
 	describeFloorRejection,
 	describeResolution,
 	installRemedy,
+	pinnedToolMissing,
 	resolveEntryBinary,
 	resolveToolBinary,
 	resolveVendoredBinary,

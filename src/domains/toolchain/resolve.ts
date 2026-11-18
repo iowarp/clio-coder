@@ -106,6 +106,14 @@ export function resolveVendoredBinary(id: string): { binaryPath: string; version
 	return statOrNull(path)?.isFile() ? { binaryPath: path, version: entry.version } : null;
 }
 
+/** Whether this platform has a pinned build of `id` that this home has not installed, the gap its install command closes. */
+export function pinnedToolMissing(id: string): boolean {
+	const entry = findPinnedTool(id);
+	const platform = currentToolPlatform();
+	if (entry === null || platform === null || entry.downloads[platform] === undefined) return false;
+	return resolveVendoredBinary(id) === null;
+}
+
 /** Per-entry state for the CLI and doctor. */
 export function toolStatus(entry: PinnedTool): ToolStatus {
 	const platform = currentToolPlatform();
