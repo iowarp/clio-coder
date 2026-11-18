@@ -402,6 +402,12 @@ export interface RegistryDeps {
 	 * wires it.
 	 */
 	unattendedAsks?: () => boolean;
+	/**
+	 * Whether a person can answer this session's approval cards: false for a
+	 * headless run. Absent reads as no operator. With one, a sandbox escape the
+	 * judge would block but whose outside target the operator named goes to the card.
+	 */
+	operatorAttends?: () => boolean;
 	/** Observes each call `unattendedAsks` refused, for contained yolo's open decisions (ob-yolo D7); decides nothing. */
 	onUnattendedRefusal?: (call: ClassifierCall, decision: SafetyDecision, kind: OpenDecisionKind, rule?: string) => void;
 	/**
@@ -2281,6 +2287,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				approvalAuthority: outcome.approvalAuthority,
 				...(outcome.planScale === true ? { dispatchPlan: true } : {}),
 				...(options?.origin === "harness" ? { harness: true } : {}),
+				...(deps.operatorAttends?.() === true && deps.unattendedAsks?.() !== true && permissionListeners.size > 0
+					? { operatorAttends: true }
+					: {}),
 				...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
 				...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
 				...(options?.toolCallId !== undefined ? { toolCallId: options.toolCallId } : {}),

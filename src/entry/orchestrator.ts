@@ -1825,6 +1825,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		absorbAwaitedEffects: (effects, input) => protectedArtifactsGuard.absorbAwaited(input, effects),
 		autonomy: resolveAdmissionAutonomy,
 		unattendedAsks: unattendedYolo,
+		operatorAttends: () => options.headless === undefined,
 		// An operator's own answer speaks for them: the judge reads it, and a yolo window reopens.
 		onOperatorAnswered: (answers) => {
 			recordOperatorAnswers(answers);

@@ -15,7 +15,7 @@ import { GIT_HOOKS_CHANGED_RULE_ID } from "./hook-drift.js";
 import { TOOL_CALL_RUNGS } from "./reach-ladder.js";
 import { redactSecretString, redactToolArgs } from "./redaction.js";
 import { CLIO_SETTINGS_RULE_ID } from "./routing-settings.js";
-import { asksToLeaveSandbox, operatorMentionsSandbox } from "./sandbox-escape.js";
+import { asksToLeaveSandbox, operatorMentionsSandbox, operatorNamedEscapeTargets } from "./sandbox-escape.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "./session-code-consent.js";
 
 /**
@@ -102,6 +102,13 @@ const BLOCK_RULES: ReadonlyArray<readonly [string, string]> = [
 
 export const OPERATOR_NAMED_RULE = "operator-named";
 
+/** Blocks that stay blocks even when the operator named the escaping call's target. */
+const HANDOFF_EXCLUDED_RULES: ReadonlySet<string> = new Set([
+	...BLOCK_RULES.map(([rule]) => rule),
+	"operator-deny",
+	"unclear",
+]);
+
 const ALLOW_RULES: ReadonlyArray<readonly [string, string]> = [
 	[OPERATOR_NAMED_RULE, "an action an operator message explicitly names"],
 	["read", "reads, listings and searches anywhere"],
@@ -162,6 +169,11 @@ export interface SafetyJudgeSubject {
 	dispatchPlan?: boolean;
 	/** A call the harness made on its own decision. */
 	harness?: boolean;
+	/**
+	 * Set when an operator can answer an approval card for this call: an attended
+	 * main session, never headless, contained yolo or a worker's ask.
+	 */
+	operatorAttends?: boolean;
 	sessionId?: string;
 	turnId?: string;
 	toolCallId?: string;
@@ -217,7 +229,7 @@ export type SafetyJudgeOutcome =
 	/** Falls back to today's operator path; `gateReason` is what the card says about why. */
 	| {
 			kind: "park";
-			cause: "escalated" | "screened" | "unnamed-escape" | SafetyJudgeNoVerdictCause;
+			cause: "escalated" | "screened" | "unnamed-escape" | "named-target" | SafetyJudgeNoVerdictCause;
 			gateReason: string;
 			build: string;
 			latencyMs: number;
@@ -505,6 +517,25 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 					}
 					return { kind: "allow", rule: parsed.rule, reason: parsed.reason, build, latencyMs };
 				}
+				// A sandbox escape whose outside target the operator's own words name is theirs to decide:
+				// it goes to the approval card, never runs on the judge's word, and is no block.
+				const namedTargets =
+					subject.operatorAttends === true &&
+					subject.worker === undefined &&
+					!HANDOFF_EXCLUDED_RULES.has(parsed.rule) &&
+					asksToLeaveSandbox(subject.decision)
+						? operatorNamedEscapeTargets(subject, operatorMessages)
+						: [];
+				if (namedTargets.length > 0) {
+					record({ ...base, ...prompted, verdict: "block", rule: parsed.rule, latencyMs, namedTarget: "parked" });
+					return {
+						kind: "park",
+						cause: "named-target",
+						gateReason: namedTargetReason(parsed, namedTargets),
+						build,
+						latencyMs,
+					};
+				}
 				after.consecutive += 1;
 				after.total += 1;
 				record({ ...base, ...prompted, verdict: "block", rule: parsed.rule, latencyMs });
@@ -560,6 +591,12 @@ function escalationReason(state: { consecutive: number; total: number }): string
 			? `blocked ${state.consecutive} calls in a row`
 			: `blocked ${state.total} calls`;
 	return `Clio's safety judge ${streak} this session, so it hands this call to you; approving a call turns its review back on.`;
+}
+
+function namedTargetReason(verdict: { rule: string; reason: string }, targets: ReadonlyArray<string>): string {
+	const named = boundedLine(redactSecretString(targets.join(", ")), REASON_MAX_CHARS);
+	const reason = redactSecretString(verdict.reason).replace(/[.\s]+$/u, "");
+	return `Clio's safety judge would block this sandbox escape (rule ${verdict.rule}): ${reason}. Your own words name its target ${named}, so this call needs your decision.`;
 }
 
 function noVerdictReason(cause: SafetyJudgeNoVerdictCause, detail?: string): string {

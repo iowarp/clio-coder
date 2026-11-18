@@ -139,6 +139,8 @@ export interface SafetyJudgementInput {
 	screened?: "parked";
 	/** Set when a sandbox escape was allowed under a rule other than operator-named and so went to the operator. */
 	unnamedEscape?: "parked";
+	/** Set when a blocked sandbox escape whose outside target the operator named went to the operator instead. */
+	namedTarget?: "parked";
 }
 
 export function safetyJudgedPayload(input: SafetyJudgementInput): EventPayload<"safety.judged"> {
@@ -158,6 +160,7 @@ export function safetyJudgedPayload(input: SafetyJudgementInput): EventPayload<"
 		...(input.operatorMessages !== undefined ? { operatorMessages: input.operatorMessages } : {}),
 		...(input.screened !== undefined ? { screened: input.screened } : {}),
 		...(input.unnamedEscape !== undefined ? { unnamedEscape: input.unnamedEscape } : {}),
+		...(input.namedTarget !== undefined ? { namedTarget: input.namedTarget } : {}),
 	};
 }
 
