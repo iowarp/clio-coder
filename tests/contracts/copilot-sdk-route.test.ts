@@ -1236,6 +1236,34 @@ test("a rewritten history seeds a fresh session; a side call never disturbs the 
 	match(fake().sessions.at(-1)?.prompts[0] ?? "", /conversation-history[\s\S]*compacted summary/);
 });
 
+test("a synced tool result the working set rewrote reseeds in full; an unchanged history stays a delta (bt-47 drv-r4a)", async () => {
+	const key = "rewrite-session";
+	disposeCopilotConversations(key);
+	const start = fake().sessions.length;
+	const ask = user("please use tool");
+	const first = await step({ tools: [readTool], messages: [ask] }, key);
+	const answered = await step(
+		{ tools: [readTool], messages: [ask, first, toolResult("call_1", `file body ALPHA${HOST_NOTE}`)] },
+		key,
+	);
+	const held = [ask, first, toolResult("call_1", "file body ALPHA"), answered];
+	// A note that rode only on the request that delivered the result is not a rewrite.
+	const next = await step({ tools: [readTool], messages: [...held, user("next")] }, key);
+	strictEqual((next as { copilotContinuation?: string }).copilotContinuation, "delta");
+	strictEqual(fake().sessions.length, start + 1);
+	deepStrictEqual(fake().sessions.at(-1)?.prompts.slice(1), ["next"], "the delta carries only the new turn");
+
+	const stub = "[evicted ref=r1 reason=step_overflow tool=read path=notes.txt]";
+	const rewritten = [ask, first, toolResult("call_1", stub), answered, user("next"), next, user("after")];
+	const reseeded = await step({ tools: [readTool], messages: rewritten }, key);
+	strictEqual((reseeded as { copilotContinuation?: string }).copilotContinuation, "full");
+	strictEqual(fake().sessions.length, start + 2, "the stale Copilot history is not continued");
+	const seed = fake().sessions.at(-1)?.prompts[0] ?? "";
+	ok(seed.includes(`<tool_result id="call_1" name="read">\n${stub}\n</tool_result>`), seed);
+	ok(!/<tool_result[^>]*>\nfile body/.test(seed), "the evicted body is absent from the provider's input");
+	disposeCopilotConversations(key);
+});
+
 test("a continued Clio session resumes its Copilot conversation in a new process; a rewritten history reseeds (bt-10)", async () => {
 	const key = "resume-session";
 	const turn1 = await step({ messages: [user("one")] }, key);
