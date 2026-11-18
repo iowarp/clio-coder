@@ -2022,13 +2022,16 @@ function testRunnerArgs(executable: string, args: ReadonlyArray<string>): Readon
 /**
  * `isOutput` says a redirect or `tee` target is a log the check's output lands in, not part of the tree (x4-2), so
  * `npm test 2>&1 | tee test.log` stays pure; it is asked only of commands that run a check. `declaredSteps` are the
- * indices of steps that run a declared check (x7-5), which count as check steps.
+ * indices of steps that run a declared check (x7-5), which count as check steps. `stepWritesTree` reads a writer step
+ * other than a check by its own text, so one that writes only named targets outside the workspace (`cp lcov.info
+ * /tmp/`) changes no tree, as the same mutation alone does not (x7-1, x8-5).
  */
 export function checkCommandShape(
 	command: string,
 	gitHelpersConfigured: boolean,
 	isOutput: (target: string) => boolean = () => false,
 	declaredSteps: ReadonlySet<number> = new Set(),
+	stepWritesTree: (step: string) => boolean = () => true,
 ): CheckCommandShape | null {
 	const tokens = scanShellLike(command);
 	const parsed = shellSteps(tokens);
@@ -2045,7 +2048,9 @@ export function checkCommandShape(
 			SHELL_SETUP_STEPS.has(argv[0] ?? "") ||
 			(basenameToken(argv[0]) === "tee" && pathArgs(argv, 0).every(isOutput)) ||
 			readOnlyInspectionStep(argv, gitHelpersConfigured);
-		const changes = !readOnly || writes.some((target) => isInterestingWriteTarget(target) && !isOutput(target));
+		const changes = readOnly
+			? writes.some((target) => isInterestingWriteTarget(target) && !isOutput(target))
+			: check || stepWritesTree(command.slice(step.tokens[0]?.start ?? 0, step.tokens.at(-1)?.end ?? 0));
 		return { check, changes, joinedBy: step.joinedBy };
 	});
 	const opaque =

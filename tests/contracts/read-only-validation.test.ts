@@ -825,6 +825,9 @@ it("a check sharing its bash call with a change judges the final tree only when 
 		deepStrictEqual(seal("npm test", scratch), green, scratch);
 	for (const change of ["echo hi > notes.txt", "echo hi > /tmp/x && npm ci", "mv src/a.ts /tmp/a.ts"])
 		deepStrictEqual(seal("npm test", change), stale, change);
+	// So does a check's own step that writes only targets it names outside the workspace (x8-5).
+	for (const check of ["npm test && cp coverage/lcov.info /tmp/", "mkdir -p /tmp/out && npm test"])
+		deepStrictEqual(seal("npm run lint", check), [["npm run lint", "npm test"], "verified", []], check);
 	// A scratch root inside the workspace holds a check's log, but a write there changes the tree (x8-4).
 	const workspace = mkdtempSync(join(tmpdir(), "in-tree-scratch-"));
 	try {

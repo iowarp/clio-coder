@@ -274,8 +274,8 @@ function toolVerdict(toolName: string, args: Record<string, unknown> | undefined
  * Whether a mutation changes the workspace tree (x7-1). One whose every write is a target it names, all landing outside
  * the workspace (out of `cwd`, never a git-ignored path or a scratch root inside it), leaves the
  * tree as it was, as the finish contract's in-workspace filter already reads it. An opaque writer (git, an interpreter,
- * an install, a tool that writes paths its arguments do not name) stays a change. After a `cd` only an absolute target
- * is placed.
+ * an install, a tool that writes paths its arguments do not name) stays a change. After a `cd` in `whole`, the full
+ * command a step of a check's call comes from (x8-5), only an absolute target is placed.
  */
 function writesTree(
 	toolName: string,
@@ -284,10 +284,11 @@ function writesTree(
 	base: string,
 	gitHelpers: boolean,
 	outputTarget: CheckOutputReader,
+	whole = command,
 ): boolean {
 	const named = command !== null ? shellWritesOnlyNamedTargets(command, gitHelpers) : !toolWritesOpaquely(toolName);
 	if (!named) return true;
-	const rebased = command !== null && extractCommandCdTargets(command).length > 0;
+	const rebased = whole !== null && extractCommandCdTargets(whole).length > 0;
 	const outside = outputTarget.outside(base);
 	return targets.some((target) => (rebased && !/^[/~$]/u.test(target)) || !outside(target));
 }
@@ -317,7 +318,9 @@ export function classifyCall(
 	const shape =
 		command !== null
 			? verdict === "check"
-				? checkCommandShape(command, gitHelpers, isOutput, declaredSteps)
+				? checkCommandShape(command, gitHelpers, isOutput, declaredSteps, (step) =>
+						writesTree(toolName, step, mutationTargets(toolName, { command: step }), base, gitHelpers, outputTarget, command),
+					)
 				: null
 			: // A verify check whose argv rewrites the tree (`npm run format`) is a change, as in bash (x3-3).
 				verdict === "check" && shellCommand !== null && checkWritesTree(shellCommand.split(" "))
