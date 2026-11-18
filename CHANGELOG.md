@@ -105,6 +105,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A headless or ACP run that ends while an extension reload is still staging no longer prints "Extension reload failed"; the closed runtime drops the reload silently (cw-6).
 - The yolo autonomous token cap now counts cache reads at one tenth and names its figure "cap tokens", so a long cached prefix no longer trips the 5M default after a few dozen calls (cw-2).
 - A /fork session is now nudged about and can collect its ancestors' uncollected detached batches; the first collector wins and cancel stays with the dispatching session (D1-4).
 - `go test -run '^TestX$' ./pkg` and other runner option values (jest/vitest `-t`, pytest `-k`) no longer read as a check run outside the workspace, so their green verifies and clears an earlier red (x5-3).
