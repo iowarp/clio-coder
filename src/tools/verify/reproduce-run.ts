@@ -10,7 +10,7 @@ import { resolveSafeCwd, runCommandVector, type SafeCommandResult } from "../../
 import { type MainSandboxPolicy, mainSandboxWriteHint } from "../../core/sandbox/main-session.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { currentProcessLease, ownerIsAlive, type ProcessLease, validProcessLease } from "../process-lease.js";
-import { extractNumericPayloadText, type NumericReferenceProvenance } from "./numeric.js";
+import { extractNumericPayloadText, type NumericReferenceProvenance, payloadSpread } from "./numeric.js";
 import { runProvenanceProbes, sha256File } from "./provenance.js";
 import {
 	type DeclaredReproduce,
@@ -94,7 +94,7 @@ export interface ReproduceRunFacts {
 export type ReproduceOutcome =
 	| { kind: "refused"; refusal: ReproduceRefusal }
 	/**
-	 * A run did not complete cleanly, so nothing was judged. `run` is 1 or 2; `facts.launched` says whether it started,
+	 * A run did not complete cleanly, so nothing was judged. `run` is the 1-based run; `facts.launched` says whether it started,
 	 * and `completed` holds the runs before it, each launched and completed cleanly: the check ran when either holds.
 	 */
 	| { kind: "run-failed"; run: number; facts: ReproduceRunFacts; completed: ReproduceRunFacts[]; message: string }
@@ -579,7 +579,7 @@ async function runReproduceIn(input: ReproduceRunInput, scratchRoot: string): Pr
 	}
 
 	await sweepAbandonedEnvironments(scratchRoot);
-	const runCount = spec.compare.mode === "twice" ? 2 : 1;
+	const runCount = spec.repeat ?? (spec.compare.mode === "twice" ? 2 : 1);
 	const facts: ReproduceRunFacts[] = [];
 	const records: ReproduceRunRecord[] = [];
 	const payloads: ReproducePayload[] = [];
@@ -649,22 +649,41 @@ async function runReproduceIn(input: ReproduceRunInput, scratchRoot: string): Pr
 		});
 	}
 
-	let expected: ReproducePayload;
+	let reference: ReproducePayload | undefined;
 	if (referenceText !== undefined) {
 		const parsed = parseReproducePayload(referenceText, `reference '${referenceProvenance?.path ?? ""}'`);
 		if (parsed instanceof Error) return { kind: "unjudgeable", message: parsed.message, facts };
-		expected = parsed;
-	} else {
-		expected = payloads[1] as ReproducePayload;
+		reference = parsed;
 	}
-	const report = judgeReproduce({
-		spec,
-		actual: payloads[0] as ReproducePayload,
-		expected,
-		expectedIsReference: referenceText !== undefined,
-		conditions,
-		runs: records,
-		...(referenceProvenance !== undefined ? { reference: referenceProvenance } : {}),
+	// `twice` judges each later run against run 1; `reference` judges every run against the reference. The report is
+	// the first failing comparison's, else the first's, and records which runs failed and how far the runs spread.
+	const judged = (reference === undefined ? payloads.slice(1) : payloads).map((payload, index) => {
+		const run = reference === undefined ? index + 2 : index + 1;
+		return {
+			run,
+			report: judgeReproduce({
+				spec,
+				actual: reference === undefined ? (payloads[0] as ReproducePayload) : payload,
+				expected: reference ?? payload,
+				expectedIsReference: reference !== undefined,
+				conditions,
+				runs: records,
+				...(referenceProvenance !== undefined ? { reference: referenceProvenance } : {}),
+				...(reference !== undefined && runCount > 1 ? { actualLabel: `run ${run}` } : {}),
+				...(reference === undefined && run > 2 ? { expectedLabel: `run ${run}` } : {}),
+			}),
+		};
 	});
+	const chosen = judged.find((entry) => !entry.report.passed) ?? (judged[0] as (typeof judged)[number]);
+	const flat = (payload: ReproducePayload) =>
+		Object.fromEntries(Object.entries(payload).map(([key, metric]) => [key, metric.value]));
+	const report: ReproduceReport = {
+		...chosen.report,
+		repeat: {
+			runs: runCount,
+			failedRuns: judged.filter((entry) => !entry.report.passed).map((entry) => entry.run),
+			spread: payloadSpread(payloads.map(flat)),
+		},
+	};
 	return { kind: "judged", report, facts };
 }

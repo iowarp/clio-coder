@@ -21,12 +21,14 @@
 import {
 	compareNumeric,
 	describeNumericRule,
+	describeRepeat,
 	type NumericKeyReport,
 	type NumericPayloadProvenance,
 	type NumericReferenceProvenance,
 	type NumericTolerance,
 	normalizeNumericTolerance,
 	type ProvenanceProbeRecord,
+	type RepeatRecord,
 	renderProvenance,
 } from "./numeric.js";
 
@@ -63,6 +65,11 @@ export interface DeclaredReproduce {
 	shapes?: Record<string, number[]>;
 	/** Argv probes run once beside the check and recorded in its conditions, never gating; validated by the catalog. */
 	provenance?: string[][];
+	/**
+	 * Clean runs: absent means 2 under `twice` and 1 under `reference`. `twice` judges each later run against run 1;
+	 * `reference` judges every run against the reference.
+	 */
+	repeat?: number;
 }
 
 export const REPRODUCE_CAPS = Object.freeze({
@@ -71,11 +78,22 @@ export const REPRODUCE_CAPS = Object.freeze({
 	shapeRank: 16,
 	unitsBytes: 64,
 	seedValueBytes: 256,
+	/** Runs of one judged check; see {@link normalizeRepeat}. */
+	repeat: 5,
 });
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/u;
-const REPRODUCE_FIELDS = new Set(["inputs", "environment", "seed", "compare", "tolerance", "units", "shapes"]);
+const REPRODUCE_FIELDS = new Set([
+	"inputs",
+	"environment",
+	"seed",
+	"compare",
+	"tolerance",
+	"units",
+	"shapes",
+	"repeat",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -87,6 +105,36 @@ function hasControlCharacter(value: string): boolean {
 		if (code <= 31 || code === 127) return true;
 	}
 	return false;
+}
+
+/** A seed passed to the command in one environment variable: `{env, value}`, the value a string or an integer. */
+export function normalizeSeed(seed: unknown, location: string): ReproduceSeed | Error {
+	if (!isRecord(seed)) return new Error(`${location} must be an object with env and value`);
+	const extra = Object.keys(seed).filter((key) => key !== "env" && key !== "value");
+	if (extra.length > 0) return new Error(`${location} has unknown field(s): ${extra.sort().join(", ")}`);
+	if (typeof seed.env !== "string" || !ENV_NAME_PATTERN.test(seed.env)) {
+		return new Error(`${location}.env must be an environment variable name`);
+	}
+	const raw = seed.value;
+	const value = typeof raw === "number" && Number.isSafeInteger(raw) ? String(raw) : raw;
+	if (typeof value !== "string" || value.length === 0 || hasControlCharacter(value)) {
+		return new Error(`${location}.value must be a non-empty string or an integer`);
+	}
+	if (Buffer.byteLength(value, "utf8") > REPRODUCE_CAPS.seedValueBytes) {
+		return new Error(`${location}.value exceeds the ${REPRODUCE_CAPS.seedValueBytes}-byte cap`);
+	}
+	return { env: seed.env, value };
+}
+
+/**
+ * How many times a judged check runs, from 1 to {@link REPRODUCE_CAPS.repeat}. Every run is judged and the report
+ * records the per-key spread across runs; one run leaves determinism unchecked, and the report says so.
+ */
+export function normalizeRepeat(value: unknown, location: string): number | Error {
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > REPRODUCE_CAPS.repeat) {
+		return new Error(`${location} must be an integer from 1 to ${REPRODUCE_CAPS.repeat}`);
+	}
+	return value;
 }
 
 /** Fields a catalog check of kind `reproduce` may carry beyond the common ones. */
@@ -144,22 +192,9 @@ export function normalizeReproduce(
 	}
 
 	if (Object.hasOwn(record, "seed")) {
-		const seed = record.seed;
-		if (!isRecord(seed)) return new Error(`${location}.seed must be an object with env and value`);
-		const extra = Object.keys(seed).filter((key) => key !== "env" && key !== "value");
-		if (extra.length > 0) return new Error(`${location}.seed has unknown field(s): ${extra.sort().join(", ")}`);
-		if (typeof seed.env !== "string" || !ENV_NAME_PATTERN.test(seed.env)) {
-			return new Error(`${location}.seed.env must be an environment variable name`);
-		}
-		const raw = seed.value;
-		const value = typeof raw === "number" && Number.isSafeInteger(raw) ? String(raw) : raw;
-		if (typeof value !== "string" || value.length === 0 || hasControlCharacter(value)) {
-			return new Error(`${location}.seed.value must be a non-empty string or an integer`);
-		}
-		if (Buffer.byteLength(value, "utf8") > REPRODUCE_CAPS.seedValueBytes) {
-			return new Error(`${location}.seed.value exceeds the ${REPRODUCE_CAPS.seedValueBytes}-byte cap`);
-		}
-		spec.seed = { env: seed.env, value };
+		const seed = normalizeSeed(record.seed, `${location}.seed`);
+		if (seed instanceof Error) return seed;
+		spec.seed = seed;
 	}
 
 	const compare = record.compare;
@@ -173,6 +208,14 @@ export function normalizeReproduce(
 		spec.compare = { mode: "reference", reference };
 	} else {
 		return new Error(`${location}.compare must be twice or {reference: <path>}`);
+	}
+	if (Object.hasOwn(record, "repeat")) {
+		const repeat = normalizeRepeat(record.repeat, `${location}.repeat`);
+		if (repeat instanceof Error) return repeat;
+		if (spec.compare.mode === "twice" && repeat < 2) {
+			return new Error(`${location}.repeat must be at least 2 for compare twice, which judges runs against run 1`);
+		}
+		spec.repeat = repeat;
 	}
 
 	const tolerance = normalizeNumericTolerance(record.tolerance);
@@ -246,6 +289,7 @@ export function reproduceCatalogFields(spec: DeclaredReproduce): Record<string, 
 			? { shapes: Object.fromEntries(Object.entries(spec.shapes).map(([key, shape]) => [key, [...shape]])) }
 			: {}),
 		...(spec.provenance !== undefined ? { provenance: spec.provenance.map((probe) => [...probe]) } : {}),
+		...(spec.repeat !== undefined ? { repeat: spec.repeat } : {}),
 	};
 }
 
@@ -441,6 +485,8 @@ export interface ReproduceReport {
 	metrics: ReproduceMetricVerdict[];
 	failedMetrics: string[];
 	summary: string;
+	/** Runs, the failed comparisons and the per-metric spread across runs; set by the runner. */
+	repeat?: RepeatRecord;
 }
 
 function shapeText(shape: ReadonlyArray<number> | null): string {
@@ -469,6 +515,9 @@ export function judgeReproduce(input: {
 	conditions: ReproduceConditions;
 	runs: ReproduceRunRecord[];
 	reference?: NumericReferenceProvenance;
+	/** Names of the two sides in the metric details; default `run 1` and `run 2` or `reference`. */
+	actualLabel?: string;
+	expectedLabel?: string;
 }): ReproduceReport {
 	const { spec, actual, expected } = input;
 	const flat = (payload: ReproducePayload) =>
@@ -484,10 +533,13 @@ export function judgeReproduce(input: {
 			...Object.keys(spec.tolerance.keys ?? {}),
 		]),
 	].sort();
-	const expectedLabel = input.expectedIsReference ? "reference" : "run 2";
-	// numeric-compare words a deviation as actual against expected; here they are run 1 against the other side.
+	const actualLabel = input.actualLabel ?? "run 1";
+	const expectedLabel = input.expectedLabel ?? (input.expectedIsReference ? "reference" : "run 2");
+	// numeric-compare words a deviation as actual against expected; here they are one run against the other side.
 	const sideWords = (text: string) =>
-		text.replace(/\bactual=/gu, "run1=").replace(/\bexpected=/gu, input.expectedIsReference ? "reference=" : "run2=");
+		text
+			.replace(/\bactual=/gu, `${actualLabel.replace(/\s/gu, "")}=`)
+			.replace(/\bexpected=/gu, `${expectedLabel.replace(/\s/gu, "")}=`);
 	const metrics: ReproduceMetricVerdict[] = [];
 	for (const metric of names) {
 		const got = actual[metric];
@@ -500,7 +552,7 @@ export function judgeReproduce(input: {
 				got === undefined && want === undefined
 					? "declared but reported by neither side"
 					: got === undefined
-						? "missing from run 1"
+						? `missing from ${actualLabel}`
 						: `missing from ${expectedLabel}`,
 			);
 		}
@@ -508,7 +560,7 @@ export function judgeReproduce(input: {
 		if (got !== undefined && want !== undefined) {
 			if (!sameShape(got.shape, want.shape)) {
 				failed.push("shape-mismatch");
-				notes.push(`run 1 shape ${shapeText(got.shape)} but ${expectedLabel} shape ${shapeText(want.shape)}`);
+				notes.push(`${actualLabel} shape ${shapeText(got.shape)} but ${expectedLabel} shape ${shapeText(want.shape)}`);
 			} else if (agreement !== undefined && !agreement.passed) {
 				failed.push("tolerance");
 				notes.push(sideWords(agreement.detail.replace(`${metric}: `, "")));
@@ -520,7 +572,7 @@ export function judgeReproduce(input: {
 		const declaredUnits = spec.units?.[metric];
 		if (declaredUnits !== undefined) {
 			const sides: Array<{ label: string; metric: ReportedMetric | undefined; required: boolean }> = [
-				{ label: "run 1", metric: got, required: true },
+				{ label: actualLabel, metric: got, required: true },
 				{ label: expectedLabel, metric: want, required: !input.expectedIsReference },
 			];
 			const reported = sides.map((side) => side.metric?.units ?? null);
@@ -551,7 +603,7 @@ export function judgeReproduce(input: {
 			if (!shapePassed) {
 				failed.push("shape-declared-mismatch");
 				notes.push(
-					`declared shape ${shapeText(declaredShape)}; run 1 ${shapeText(reported[0] ?? null)}, ${expectedLabel} ${shapeText(reported[1] ?? null)}`,
+					`declared shape ${shapeText(declaredShape)}; ${actualLabel} ${shapeText(reported[0] ?? null)}, ${expectedLabel} ${shapeText(reported[1] ?? null)}`,
 				);
 			}
 			shape = { declared: [...declaredShape], reported, passed: shapePassed };
@@ -569,7 +621,11 @@ export function judgeReproduce(input: {
 	}
 	const failedMetrics = metrics.filter((metric) => !metric.passed).map((metric) => metric.metric);
 	const passed = failedMetrics.length === 0 && metrics.length > 0;
-	const against = input.expectedIsReference ? "the reference" : "a second clean run";
+	const against = input.expectedIsReference
+		? "the reference"
+		: input.expectedLabel !== undefined
+			? input.expectedLabel
+			: "a second clean run";
 	return {
 		kind: "reproduce",
 		passed,
@@ -606,6 +662,7 @@ export function renderReproduceReport(report: ReproduceReport): string {
 		`tolerance: ${JSON.stringify(report.tolerance)}`,
 		`environment: ${c.environment}; commit: ${c.commit ?? "none"}${c.trackedTreeClean === false ? " (operator checkout has uncommitted tracked changes; the committed tree ran)" : ""}${c.untracked !== undefined ? `; ${c.untracked} untracked file(s) in the checkout` : ""}`,
 		`seed: ${c.seed === null ? "none" : `${c.seed.env}=${c.seed.value}`}`,
+		...(report.repeat !== undefined ? [`repeat: ${describeRepeat(report.repeat)}`] : []),
 		`platform: ${platform}`,
 		`argv: ${JSON.stringify(c.argv)} in ${c.cwd}`,
 		...c.inputs.map(

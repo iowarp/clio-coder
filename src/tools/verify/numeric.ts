@@ -191,6 +191,25 @@ export interface JudgedProvenance {
 	probes: ProvenanceProbeRecord[];
 }
 
+/** One key's spread across the runs of a repeated check. */
+export interface RepeatKeySpread {
+	key: string;
+	/**
+	 * The largest max-minus-min across runs of any one element; 0 means every run agreed exactly. Null when the runs
+	 * cannot be lined up: the key is missing from a run, its shape differs, or a value is not finite.
+	 */
+	spread: number | null;
+}
+
+/** How many times a judged check ran and how far its runs disagreed. */
+export interface RepeatRecord {
+	runs: number;
+	/** 1-based runs whose judgement failed; empty when every run passed. */
+	failedRuns: number[];
+	/** Per key, sorted by key; empty for a single run, which checks no determinism. */
+	spread: RepeatKeySpread[];
+}
+
 export interface NumericCompareReport {
 	kind: "numeric-compare";
 	passed: boolean;
@@ -212,6 +231,8 @@ export interface NumericCompareReport {
 	actual?: NumericPayloadProvenance;
 	/** Declared inputs and probes; present when the check declared either. */
 	provenance?: JudgedProvenance;
+	/** Runs and their spread; set by the runners, so a single run reads as determinism not checked. */
+	repeat?: RepeatRecord;
 }
 
 export const NUMERIC_PAYLOAD_CAPS = Object.freeze({
@@ -723,6 +744,7 @@ export function renderNumericReport(report: NumericCompareReport): string {
 	if (report.actual !== undefined) {
 		lines.push(`actual: sha256=${report.actual.sha256.slice(0, 12)} (${report.actual.bytes}B)`);
 	}
+	if (report.repeat !== undefined) lines.push(`repeat: ${describeRepeat(report.repeat)}`);
 	if (report.provenance !== undefined) lines.push(...renderProvenance(report.provenance));
 	for (const key of report.keys) lines.push(`- ${key.detail}`);
 	return lines.join("\n");
@@ -739,4 +761,55 @@ export function renderProvenance(provenance: Partial<JudgedProvenance>): string[
 				`probe: ${JSON.stringify(probe.argv)} ${probe.exitCode === null ? "did not run to an exit" : `exit ${probe.exitCode}`}${probe.version === null ? "" : `: ${probe.version}`}`,
 		),
 	];
+}
+
+function elementSpread(values: ReadonlyArray<NumericValue | undefined>): number | null {
+	const first = values[0];
+	if (first === undefined) return null;
+	const width = Array.isArray(first) ? first.length : -1;
+	let spread = 0;
+	for (let index = 0; index < Math.max(width, 1); index += 1) {
+		let low = Number.POSITIVE_INFINITY;
+		let high = Number.NEGATIVE_INFINITY;
+		for (const value of values) {
+			if (value === undefined || (Array.isArray(value) ? value.length !== width : width !== -1)) return null;
+			const element = Array.isArray(value) ? value[index] : value;
+			if (element === undefined || !Number.isFinite(element)) return null;
+			low = Math.min(low, element);
+			high = Math.max(high, element);
+		}
+		spread = Math.max(spread, high - low);
+	}
+	return spread;
+}
+
+/** Per key, how far the runs' payloads spread; empty for fewer than two runs. */
+export function payloadSpread(payloads: ReadonlyArray<NumericPayload>): RepeatKeySpread[] {
+	if (payloads.length < 2) return [];
+	const keys = [...new Set(payloads.flatMap((payload) => Object.keys(payload)))].sort();
+	return keys.map((key) => ({ key, spread: elementSpread(payloads.map((payload) => payload[key])) }));
+}
+
+/** Keys whose runs cannot be lined up first, then the widest spread first. */
+export function widestSpread(spread: ReadonlyArray<RepeatKeySpread>): RepeatKeySpread[] {
+	return [
+		...spread.filter((entry) => entry.spread === null),
+		...spread
+			.filter((entry) => entry.spread !== null)
+			.sort((left, right) => (right.spread as number) - (left.spread as number)),
+	];
+}
+
+const REPEAT_SPREAD_SHOWN = 5;
+
+/** The runs in words: `n=1, determinism not checked`, or the failed runs and the widest spreads. */
+export function describeRepeat(repeat: RepeatRecord): string {
+	if (repeat.runs <= 1) return "n=1, determinism not checked";
+	const outcome = repeat.failedRuns.length === 0 ? "every run passed" : `run(s) ${repeat.failedRuns.join(", ")} failed`;
+	const widest = widestSpread(repeat.spread);
+	const shown = widest
+		.slice(0, REPEAT_SPREAD_SHOWN)
+		.map((entry) => `${entry.key}=${entry.spread === null ? "not comparable" : formatNumber(entry.spread)}`);
+	const more = widest.length > REPEAT_SPREAD_SHOWN ? `, and ${widest.length - REPEAT_SPREAD_SHOWN} more key(s)` : "";
+	return `n=${repeat.runs}, ${outcome}; max spread across runs: ${shown.length === 0 ? "no keys" : `${shown.join(", ")}${more}`}`;
 }

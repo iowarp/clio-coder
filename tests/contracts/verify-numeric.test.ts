@@ -1065,4 +1065,81 @@ describe("numeric-compare under host verification", () => {
 			`verify: numeric-compare input 'data.csv' changed while the check ran (${inputRecord.sha256}→${after})`,
 		);
 	});
+
+	it("runs a repeated check with its seed, records the failed runs and spread, and says when one run checks no determinism", async () => {
+		const drifting = [
+			"node",
+			"-e",
+			`const fs=require("node:fs");const n=fs.existsSync("count.txt")?Number(fs.readFileSync("count.txt","utf8"))+1:1;fs.writeFileSync("count.txt",String(n));process.stdout.write(JSON.stringify({x:Number(process.env.RUN_SEED)+(n-1)*0.1,y:[1,2]}))`,
+		];
+		const declared = (id: string, extra: Record<string, unknown>) => ({
+			id,
+			description: "X",
+			kind: "numeric-compare",
+			command: drifting,
+			reference: "ref.json",
+			tolerance: { absolute: 0.15 },
+			seed: { env: "RUN_SEED", value: 42 },
+			cwd: ".",
+			timeoutMs: 30_000,
+			tags: ["scientific"],
+			...extra,
+		});
+		const root = workspace({
+			"ref.json": '{"x":42,"y":[1,2]}',
+			".clio-coder/verifiers.yaml": JSON.stringify({
+				version: 2,
+				checks: [declared("thrice", { repeat: 3 }), declared("once", {})],
+			}),
+		});
+		const repeatLine = /^repeat: n=3, run\(s\) 3 failed; max spread across runs: x=0\.2, y=0$/mu;
+		const expectRepeat = (repeat: { runs: number; failedRuns: number[]; spread: unknown[] } | undefined) => {
+			strictEqual(repeat?.runs, 3);
+			deepStrictEqual(repeat?.failedRuns, [3]);
+			const [x, y] = repeat?.spread as Array<{ key: string; spread: number }>;
+			strictEqual(x?.key, "x");
+			ok(Math.abs((x?.spread ?? 0) - 0.2) < 1e-9);
+			deepStrictEqual(y, { key: "y", spread: 0 });
+		};
+		process.chdir(root);
+		const loaded = loadProjectVerifierCatalog(root);
+		const [once, thrice] = loaded.ok ? (loaded.source?.checks ?? []) : [];
+		if (once === undefined || thrice === undefined) throw new Error("expected two checks");
+		deepStrictEqual([thrice.numeric?.seed, thrice.numeric?.repeat], [{ env: "RUN_SEED", value: "42" }, 3]);
+		const repeated = await runProjectCheck(thrice);
+		strictEqual(repeated.kind, "error");
+		match(repeated.kind === "error" ? repeated.message : "", repeatLine);
+		expectRepeat((repeated.details as { report: { repeat: never } }).report.repeat);
+		rmSync(join(root, "count.txt"));
+		const single = await runProjectCheck(once);
+		strictEqual(single.kind, "ok");
+		match(single.kind === "ok" ? single.output : "", /^repeat: n=1, determinism not checked$/mu);
+		rmSync(join(root, "count.txt"));
+		const host = await runHostVerification({
+			runId: "run-repeat",
+			request: {
+				resolvedVerification: [
+					{
+						check: "thrice",
+						cwd: root,
+						timeoutMs: 30_000,
+						kind: "numeric-compare",
+						argv: drifting,
+						numeric: {
+							reference: join(root, "ref.json"),
+							tolerance: { absolute: 0.15 },
+							seed: { env: "RUN_SEED", value: "42" },
+							repeat: 3,
+						},
+					},
+				],
+			},
+			workerSuccessful: true,
+			stateDir: join(root, "state"),
+		});
+		strictEqual(host?.status, "rejected");
+		match(host?.checks[0]?.outputTail ?? "", repeatLine);
+		const report = host?.checks[0]?.report;
+		expectRepeat(report?.kind === "numeric-compare" ? report.repeat : undefined);
+	});
 });

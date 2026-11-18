@@ -1042,6 +1042,16 @@ const SealedCheckReportSchema = Type.Object(
 		),
 		/** Untracked files git does not ignore in the checkout a reproduce check ran from; absent for other kinds. */
 		untracked: Type.Optional(count),
+		/** Runs of a numeric-compare or reproduce check; 1 left determinism unchecked. Absent on older results. */
+		runs: Type.Optional(count),
+		/** 1-based runs whose judgement failed. */
+		failedRuns: Type.Optional(Type.Array(count, { maxItems: 8 })),
+		/** Per key, the largest max-minus-min across runs, widest first; null when the runs cannot be lined up. */
+		spread: Type.Optional(
+			Type.Array(Type.Object({ key: text, spread: nullable(Type.Number({ minimum: 0 })) }, closed), {
+				maxItems: SEALED_CHECK_REPORT_KEYS_MAX,
+			}),
+		),
 	},
 	closed,
 );

@@ -10,7 +10,7 @@ import {
 	SEALED_CHECK_REPORT_KEYS_MAX,
 	type SealedCheckReport,
 } from "../../core/telemetry/schemas.js";
-import type { NumericDeviation } from "../../tools/verify/numeric.js";
+import { type NumericDeviation, widestSpread } from "../../tools/verify/numeric.js";
 import type { DeclaredCheckReport } from "../../tools/verify/scripts.js";
 import { RESULT_CONTRACT_REPAIR_LIMIT } from "../agents/result-contract.js";
 import type { RunAssessmentContext } from "../evidence/assessment.js";
@@ -209,6 +209,8 @@ function sealedCheckReport(report: DeclaredCheckReport): SealedCheckReport {
 	const inputs = report.kind === "numeric-compare" ? (report.provenance?.inputs ?? []) : report.conditions.inputs;
 	const probes = report.kind === "numeric-compare" ? report.provenance?.probes : report.conditions.probes;
 	const untracked = report.kind === "reproduce" ? report.conditions.untracked : undefined;
+	const repeat = report.repeat;
+	const spread = repeat === undefined ? [] : widestSpread(repeat.spread).slice(0, SEALED_CHECK_REPORT_KEYS_MAX);
 	return {
 		kind: report.kind,
 		passed: report.passed,
@@ -239,6 +241,15 @@ function sealedCheckReport(report: DeclaredCheckReport): SealedCheckReport {
 				}
 			: {}),
 		...(untracked !== undefined ? { untracked } : {}),
+		...(repeat !== undefined
+			? {
+					runs: repeat.runs,
+					failedRuns: repeat.failedRuns.slice(0, 8),
+					...(spread.length > 0
+						? { spread: spread.map((entry) => ({ key: clipped(entry.key), spread: entry.spread })) }
+						: {}),
+				}
+			: {}),
 	};
 }
 

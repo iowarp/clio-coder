@@ -695,7 +695,15 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 							isOptionalDigest(check.numeric.referenceSha256) &&
 							(check.numeric.inputs === undefined || isStringArray(check.numeric.inputs)) &&
 							(check.numeric.provenance === undefined ||
-								(Array.isArray(check.numeric.provenance) && check.numeric.provenance.every(isStringArray))))) &&
+								(Array.isArray(check.numeric.provenance) && check.numeric.provenance.every(isStringArray))) &&
+							(check.numeric.seed === undefined ||
+								(isRecord(check.numeric.seed) &&
+									typeof check.numeric.seed.env === "string" &&
+									typeof check.numeric.seed.value === "string")) &&
+							(check.numeric.repeat === undefined ||
+								(Number.isSafeInteger(check.numeric.repeat) &&
+									(check.numeric.repeat as number) >= 1 &&
+									(check.numeric.repeat as number) <= 5)))) &&
 					(check.perf === undefined || (isRecord(check.perf) && isOptionalDigest(check.perf.baselineSha256))),
 			))
 	)

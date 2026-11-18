@@ -437,6 +437,8 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 											...(check.numeric.provenance !== undefined
 												? { provenance: check.numeric.provenance.map((probe) => [...probe]) }
 												: {}),
+											...(check.numeric.seed !== undefined ? { seed: { ...check.numeric.seed } } : {}),
+											...(check.numeric.repeat !== undefined ? { repeat: check.numeric.repeat } : {}),
 										},
 									}
 								: {}),

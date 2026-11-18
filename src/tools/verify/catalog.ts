@@ -9,7 +9,14 @@ import { compareCodepoints } from "../../domains/evidence/ordering.js";
 import { type NumericTolerance, normalizeNumericTolerance } from "./numeric.js";
 import { normalizePerfBudget, normalizePerfTolerance, type PerfBudgetSpec } from "./perf.js";
 import { parseDeclaredProof } from "./proof.js";
-import { type DeclaredReproduce, normalizeReproduce, REPRODUCE_CATALOG_FIELDS } from "./reproduce.js";
+import {
+	type DeclaredReproduce,
+	normalizeRepeat,
+	normalizeReproduce,
+	normalizeSeed,
+	REPRODUCE_CATALOG_FIELDS,
+	type ReproduceSeed,
+} from "./reproduce.js";
 
 export const PROJECT_VERIFIER_CATALOG_RELATIVE_PATH = ".clio-coder/verifiers.yaml";
 /** The version this build writes. Version 1 files still load; every check there is `kind: command`. */
@@ -71,6 +78,10 @@ export interface DeclaredNumericCompare {
 	inputs?: string[];
 	/** Argv probes run once beside the check and recorded, never gating; see {@link validateProvenance}. */
 	provenance?: string[][];
+	/** Passed to every run in one environment variable. */
+	seed?: ReproduceSeed;
+	/** Runs, 1 to 5; absent means 1. Each run is judged against the reference, and the report records their spread. */
+	repeat?: number;
 }
 
 export interface DeclaredPerfBudget {
@@ -301,7 +312,7 @@ function validateCheckKind(
 	const present = (field: string): boolean => Object.hasOwn(value, field);
 	const accepted: Record<DeclaredCheckKind, ReadonlyArray<string>> = {
 		command: [],
-		"numeric-compare": ["reference", "tolerance", "inputs", "provenance"],
+		"numeric-compare": ["reference", "tolerance", "inputs", "provenance", "seed", "repeat"],
 		"perf-budget": ["budget", "baseline", "tolerance"],
 		reproduce: [...REPRODUCE_CATALOG_FIELDS, "provenance"],
 	};
@@ -326,6 +337,10 @@ function validateCheckKind(
 		if (tolerance instanceof Error) return new Error(`${location}.${tolerance.message}`);
 		const inputs = present("inputs") ? validateJudgedInputs(value.inputs, `${location}.inputs`) : undefined;
 		if (inputs instanceof Error) return inputs;
+		const seed = present("seed") ? normalizeSeed(value.seed, `${location}.seed`) : undefined;
+		if (seed instanceof Error) return seed;
+		const repeat = present("repeat") ? normalizeRepeat(value.repeat, `${location}.repeat`) : undefined;
+		if (repeat instanceof Error) return repeat;
 		return {
 			kind,
 			numeric: {
@@ -333,6 +348,8 @@ function validateCheckKind(
 				tolerance,
 				...(inputs !== undefined ? { inputs } : {}),
 				...(provenance !== undefined ? { provenance } : {}),
+				...(seed !== undefined ? { seed } : {}),
+				...(repeat !== undefined ? { repeat } : {}),
 			},
 		};
 	}

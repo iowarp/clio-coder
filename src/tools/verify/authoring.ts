@@ -558,6 +558,8 @@ function catalogEntry(check: AuthoringCheck): Record<string, unknown> {
 		entry.tolerance = { ...check.numeric.tolerance };
 		if (check.numeric.inputs !== undefined) entry.inputs = [...check.numeric.inputs];
 		if (check.numeric.provenance !== undefined) entry.provenance = check.numeric.provenance.map((probe) => [...probe]);
+		if (check.numeric.seed !== undefined) entry.seed = { env: check.numeric.seed.env, value: check.numeric.seed.value };
+		if (check.numeric.repeat !== undefined) entry.repeat = check.numeric.repeat;
 	}
 	if (check.perf !== undefined) {
 		if (check.perf.budget !== undefined) entry.budget = structuredClone(check.perf.budget);
@@ -797,6 +799,8 @@ function renderKind(check: AuthoringCheck): string[] {
 	if (check.numeric !== undefined) {
 		lines.push(`  reference: ${check.numeric.reference}`, `  tolerance: ${JSON.stringify(check.numeric.tolerance)}`);
 		for (const input of check.numeric.inputs ?? []) lines.push(`  input: ${input}`);
+		if (check.numeric.seed !== undefined) lines.push(`  seed: ${check.numeric.seed.env}=${check.numeric.seed.value}`);
+		if (check.numeric.repeat !== undefined) lines.push(`  repeat: ${check.numeric.repeat}`);
 	}
 	if (check.perf !== undefined) {
 		if (check.perf.budget !== undefined) lines.push(`  budget: ${JSON.stringify(check.perf.budget)}`);
@@ -813,6 +817,7 @@ function renderKind(check: AuthoringCheck): string[] {
 			...spec.inputs.map((input) => `  input: ${input.path} sha256=${input.sha256}`),
 			...(spec.units !== undefined ? [`  units: ${JSON.stringify(spec.units)}`] : []),
 			...(spec.shapes !== undefined ? [`  shapes: ${JSON.stringify(spec.shapes)}`] : []),
+			...(spec.repeat !== undefined ? [`  repeat: ${spec.repeat}`] : []),
 		);
 	}
 	for (const probe of check.numeric?.provenance ?? check.reproduce?.provenance ?? []) {

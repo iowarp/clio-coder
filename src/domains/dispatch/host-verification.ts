@@ -28,6 +28,14 @@ import { settingsFileMasks, workerSandboxMasks } from "../../core/sandbox/worker
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { taskWorktreeManifestsChanged } from "../../tools/task-worktree.js";
+import {
+	describeRepeat,
+	extractNumericPayloadText,
+	type NumericPayload,
+	parseNumericPayload,
+	payloadSpread,
+	type RepeatRecord,
+} from "../../tools/verify/numeric.js";
 import { hashJudgedInputs, judgedInputDrift, runProvenanceProbes } from "../../tools/verify/provenance.js";
 import { renderReproduceReport } from "../../tools/verify/reproduce.js";
 import { runReproduce } from "../../tools/verify/reproduce-run.js";
@@ -1093,40 +1101,73 @@ async function spawnResolvedCheck(
 					workspaceRoot: resolvedCheck.cwd,
 					...(input.shellSandbox !== undefined ? { shellSandbox: input.shellSandbox } : {}),
 				});
-	const outcome = await runCodeStep({
-		stepId: `verification-${input.index + 1}-${resolvedCheck.check.replace(/[^a-z0-9._-]/giu, "_")}`,
-		command,
-		workspaceRoot: resolvedCheck.cwd,
-		artifactDir: join(input.stateDir, "artifacts", input.runId, "verification"),
-		env: input.env,
-		maxOutputBytes: captureMaxBytes,
-		...(input.shellSandbox !== undefined ? { shellSandbox: input.shellSandbox } : {}),
-	});
+	const seed = numeric?.seed;
+	const runCommand: PlaybookCommand = seed === undefined ? command : { ...command, env: [...command.env, seed.env] };
+	const runEnv: NodeJS.ProcessEnv = seed === undefined ? input.env : { ...input.env, [seed.env]: seed.value };
+	const runCount = numeric?.repeat ?? 1;
+	const stepId = `verification-${input.index + 1}-${resolvedCheck.check.replace(/[^a-z0-9._-]/giu, "_")}`;
+	type Judgement = ReturnType<typeof judgeResolvedCheck>;
+	let chosen: { outcome: Awaited<ReturnType<typeof runCodeStep>>; judgement: Judgement } | undefined;
+	let durationMs = 0;
+	const failedRuns: number[] = [];
+	const payloads: NumericPayload[] = [];
+	// Every run is judged; one that fails to execute or to be judged ends the repetition, while one outside the
+	// tolerance is recorded and the rest still run, so the spread covers every run that produced a payload.
+	for (let run = 1; run <= runCount; run += 1) {
+		const outcome = await runCodeStep({
+			stepId: runCount > 1 ? `${stepId}-run${run}` : stepId,
+			command: runCommand,
+			workspaceRoot: resolvedCheck.cwd,
+			artifactDir: join(input.stateDir, "artifacts", input.runId, "verification"),
+			env: runEnv,
+			maxOutputBytes: captureMaxBytes,
+			...(input.shellSandbox !== undefined ? { shellSandbox: input.shellSandbox } : {}),
+		});
+		durationMs += outcome.record.durationMs;
+		// outputTruncated also covers the report excerpt; only capture loss prevents judgement.
+		let judgement: Judgement =
+			judged && outcome.record.outputTruncated && outcome.record.outputBytes > captureMaxBytes
+				? {
+						exitCode: 1,
+						outputTail: `verify: ${resolvedCheck.kind} command output exceeded ${captureMaxBytes} bytes before judgement; captured output was truncated`,
+					}
+				: judgeResolvedCheck(resolvedCheck, outcome.record.exitCode, outcome.record.durationMs, outcome.stdout);
+		const inputDrift =
+			inputs.length === 0 || outcome.record.exitCode !== 0 ? undefined : await judgedInputDrift(inputsBefore, inputs);
+		if (inputDrift !== undefined) judgement = { exitCode: 1, outputTail: outputTail(`numeric-compare: ${inputDrift}`) };
+		const runLabel = runCount > 1 ? `run ${run} of ${runCount}: ` : "";
+		if (judgement.report?.kind !== "numeric-compare") {
+			if (judgement.exitCode !== 0 && runLabel !== "" && judgement.outputTail !== undefined) {
+				judgement = { ...judgement, outputTail: outputTail(`${runLabel}${judgement.outputTail}`) };
+			}
+			// A command or perf check runs once; a numeric run that could not be judged ends the repetition.
+			if (chosen === undefined || judgement.exitCode !== 0) chosen = { outcome, judgement };
+			if (judgement.exitCode !== 0 || resolvedCheck.kind !== "numeric-compare") break;
+			continue;
+		}
+		const payload = parseNumericPayload(extractNumericPayloadText(outcome.stdout), `run ${run} output`);
+		if (!(payload instanceof Error)) payloads.push(payload);
+		if (!judgement.report.passed) failedRuns.push(run);
+		if (chosen === undefined || (chosen.judgement.exitCode === 0 && judgement.exitCode !== 0)) {
+			chosen = { outcome, judgement };
+		}
+	}
+	const { outcome, judgement } = chosen as NonNullable<typeof chosen>;
 	const artifactPath = outcome.record.artifactPaths[0];
-	// outputTruncated also covers the report excerpt; only capture loss prevents judgement.
-	let judgement =
-		judged && outcome.record.outputTruncated && outcome.record.outputBytes > captureMaxBytes
-			? {
-					exitCode: 1,
-					outputTail: `verify: ${resolvedCheck.kind} command output exceeded ${captureMaxBytes} bytes before judgement; captured output was truncated`,
-				}
-			: judgeResolvedCheck(resolvedCheck, outcome.record.exitCode, outcome.record.durationMs, outcome.stdout);
-	const inputDrift =
-		inputs.length === 0 || outcome.record.exitCode !== 0 ? undefined : await judgedInputDrift(inputsBefore, inputs);
-	if (inputDrift !== undefined) {
-		judgement = { exitCode: 1, outputTail: outputTail(`numeric-compare: ${inputDrift}`) };
-	} else if (
-		judgement.report?.kind === "numeric-compare" &&
-		(numeric?.inputs !== undefined || numeric?.provenance !== undefined)
-	) {
-		judgement.report.provenance = { inputs: inputsBefore, probes };
+	if (judgement.report?.kind === "numeric-compare") {
+		if (numeric?.inputs !== undefined || numeric?.provenance !== undefined) {
+			judgement.report.provenance = { inputs: inputsBefore, probes };
+		}
+		const repeat: RepeatRecord = { runs: runCount, failedRuns, spread: payloadSpread(payloads) };
+		judgement.report.repeat = repeat;
+		judgement.outputTail = outputTail(`${judgement.report.summary}\nrepeat: ${describeRepeat(repeat)}`);
 	}
 	const check: RunHostVerificationCheck = {
 		check: resolvedCheck.check,
 		argv: [...outcome.record.argv],
 		cwd: outcome.record.cwd,
 		exitCode: judgement.exitCode,
-		durationMs: outcome.record.durationMs,
+		durationMs,
 		memo: false,
 		...(outcome.launched ? {} : { notRun: "spawn-failed" as const }),
 		outputTail: judgement.outputTail ?? outputTail(outcome.report.outputExcerpt),
@@ -1243,6 +1284,8 @@ function checkDedupeKey(resolvedCheck: ResolvedCheck): string {
 							tolerance: numeric.tolerance,
 							inputs: numeric.inputs,
 							provenance: numeric.provenance,
+							seed: numeric.seed,
+							repeat: numeric.repeat,
 						},
 			perf:
 				perf === undefined
