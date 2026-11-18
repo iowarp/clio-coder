@@ -289,7 +289,7 @@ const UNCLASSIFIED_SHOWN = 5;
 const UNCLASSIFIED_CHARS = 160;
 
 /**
- * The calls the check classifier could not read that ran after the run's latest check outcome, as the receipt
+ * The calls the check classifier could not read that ran after the run's oldest standing check outcome, as the receipt
  * discloses them: the count, and the first few commands redacted and cut to one bounded line. They neither settled nor
  * cleared that outcome, so the disclosure sits beside the verdict and never changes it. Null when none ran.
  */

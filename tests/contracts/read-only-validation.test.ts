@@ -959,6 +959,16 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 	recorder.checkOutcome("again", "ok");
 	recorder.finish("again", false);
 	deepStrictEqual(recorder.snapshot().unclassifiedAfterLastCheck, []);
+	// A later outcome keeps the disclosure while an earlier pass that predates the unknown call still stands (x6-3).
+	for (const [id, command] of [
+		["gen", "python scripts/gen.py"],
+		["lint", "npm run lint"],
+	] as const) {
+		recorder.start(id, "bash", { command });
+		recorder.checkOutcome(id, "ok");
+		recorder.finish(id, false);
+	}
+	deepStrictEqual(recorder.snapshot().unclassifiedAfterLastCheck, ["python scripts/gen.py"]);
 	// The recorder reads the repository's config: a core.fsmonitor hook makes a later git status a mutation.
 	const repo = mkdtempSync(join(tmpdir(), "fsmonitor-"));
 	const env: NodeJS.ProcessEnv = {

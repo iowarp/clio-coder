@@ -62,7 +62,7 @@ test("the observed line omits a run with no tool calls and names a write with no
 	strictEqual(after.unclassifiedAfterLastCheck, 1);
 	match(
 		formatHeadlessObservedLine(after) ?? "",
-		/ · check failed: pytest · 1 unclassified command ran after the last check$/,
+		/ · check failed: pytest · 1 unclassified command ran after a standing check$/,
 	);
 });
 

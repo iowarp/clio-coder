@@ -38,7 +38,7 @@ import {
  *   and settles no pass of its own.
  * - `unknown`: cannot be told apart (an unrecognized command, a package check refused for a runtime loader after
  *   `--`, a tool this process has no registration for). It neither settles nor clears a recorded outcome; the
- *   recorder lists it so a receipt can say it ran after the last check.
+ *   recorder lists it so a receipt can say it ran after a standing check.
  */
 export type CallVerdict = CommandVerdict;
 

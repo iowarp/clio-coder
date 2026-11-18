@@ -121,10 +121,10 @@ export interface RunEffects {
 	 */
 	executedShellCommands?: ReadonlyArray<string>;
 	/**
-	 * Calls the check classifier could not read (`check-classifier.ts`, verdict `unknown`) that ran after the run's
-	 * latest settled check outcome, in run order: a bash call's command, any other call's tool name. They neither
-	 * settled nor cleared an outcome, so a receipt discloses them beside its verdict without changing it. Empty until
-	 * an outcome settles.
+	 * Calls the check classifier could not read (`check-classifier.ts`, verdict `unknown`) that ran after the oldest
+	 * check outcome still standing, in run order: a bash call's command, any other call's tool name. They neither
+	 * settled nor cleared an outcome, so a receipt discloses them beside its verdict without changing it. A later
+	 * outcome leaves them listed while an earlier one stands (x6-3). Empty while no outcome stands.
 	 */
 	unclassifiedAfterLastCheck?: ReadonlyArray<string>;
 }
@@ -329,8 +329,10 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	const checkingCalls = new Map<string, "ok" | "error" | "blocked" | null>();
 	const writeRecordDowngrades = new Map<string, WriteRecordDowngrade>();
 	const executedShellCommands: string[] = [];
-	// Null until an outcome settles: before the first check there is no "after the last check".
-	let unclassifiedAfterLastCheck: string[] | null = null;
+	// Each finished call's place in run order, so an unknown call is disclosed while any outcome older than it stands (x6-3).
+	let sequence = 0;
+	const outcomeSequence = new Map<string, number>();
+	const unclassifiedCalls: Array<{ sequence: number; label: string }> = [];
 	const proofs = new Map<string, ObservedProof>();
 	const latestProofCalls = new Map<string, string>();
 	return {
@@ -419,30 +421,34 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				mutationRevision += 1;
 				validationOutcomes.clear();
 				checkOutcomes.clear();
+				outcomeSequence.clear();
 				validationCommands.clear();
 			}
 			settleRan(checkedAfterOwnMutation);
+			sequence += 1;
+			const settleOutcome = (key: string) => {
+				checkOutcomes.set(key, !failed);
+				outcomeSequence.set(key, sequence);
+			};
 			// `pytest; echo done` ran the check, but its status is echo's, so the outcome stays unknown either way.
-			const recorded =
-				settled &&
-				((effects.validationName !== null && effects.checkStatusAttributable) ||
-					(effects.proofCheck !== null && effects.proofCheck.length > 0));
 			if (effects.validationName !== null && effects.checkStatusAttributable && settled) {
 				validationOutcomes.set(effects.validationName, !failed);
-				checkOutcomes.set(effects.validationName, !failed);
+				settleOutcome(effects.validationName);
 			}
 			if (effects.proofCheck !== null && effects.proofCheck.length > 0 && settled) {
-				checkOutcomes.set(effects.proofCheck, !failed);
-				if (reading.shellCommand !== null) checkOutcomes.set(observedValidationCommand(reading.shellCommand), !failed);
+				settleOutcome(effects.proofCheck);
+				if (reading.shellCommand !== null) settleOutcome(observedValidationCommand(reading.shellCommand));
 			}
-			// An unknown call that ran neither settles nor clears, so a receipt can only say it ran after the last check.
-			if (recorded) unclassifiedAfterLastCheck = [];
-			else if (
+			// An unknown call that ran neither settles nor clears, so a receipt can only say a standing outcome predates it.
+			if (
 				reading.verdict === "unknown" &&
-				unclassifiedAfterLastCheck !== null &&
+				outcomeSequence.size > 0 &&
 				(failed ? effects.outcome === "error" : effects.outcome !== "blocked")
 			)
-				unclassifiedAfterLastCheck.push(reading.shell === null ? effects.tool : (reading.shellCommand ?? effects.tool));
+				unclassifiedCalls.push({
+					sequence,
+					label: reading.shell === null ? effects.tool : (reading.shellCommand ?? effects.tool),
+				});
 			if (failed) {
 				for (const target of reading.paths) failedMutationPaths.add(target);
 				return;
@@ -505,6 +511,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			if (checkingCalls.has(toolCallId)) checkingCalls.set(toolCallId, outcome);
 		},
 		snapshot() {
+			const oldestStanding = Math.min(...outcomeSequence.values());
 			const currentProofs = new Map<string, ObservedProof>();
 			for (const [check, proof] of proofs) {
 				try {
@@ -529,7 +536,9 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				writeRecordComplete: writeRecordDowngrades.size === 0,
 				writeRecordDowngrades: [...writeRecordDowngrades.values()].map((entry) => ({ ...entry })),
 				executedShellCommands: [...executedShellCommands],
-				unclassifiedAfterLastCheck: [...(unclassifiedAfterLastCheck ?? [])],
+				unclassifiedAfterLastCheck: unclassifiedCalls
+					.filter((call) => call.sequence > oldestStanding)
+					.map((call) => call.label),
 			};
 		},
 		checkFreshness() {

@@ -1160,8 +1160,8 @@ export interface RunResult {
 	validationGrounding?: RunValidationGrounding;
 	/**
 	 * Calls the check classifier could not read (neither check, inspection nor mutation) that ran after the run's
-	 * latest check outcome. They neither settled nor cleared it, so `verification` stands as observed; this only
-	 * discloses them. Absent when none ran, and on receipts written before the field existed.
+	 * oldest check outcome still standing. They neither settled nor cleared it, so `verification` stands as observed;
+	 * this only discloses them. Absent when none ran, and on receipts written before the field existed.
 	 */
 	unclassifiedAfterLastCheck?: RunResultUnclassifiedCommands;
 	/** Read-only recipe admitted against a mutating task; absent when the pairing was sound. */
