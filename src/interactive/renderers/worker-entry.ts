@@ -13,10 +13,10 @@ import {
 	councilCollectedWords,
 	councilMemberAnswerLines,
 	exactWorkerAnswerObject,
+	mutationReportLines,
 	type PresentedContractAnswer,
 	presentCouncilReport,
 	presentWorkerContractAnswer,
-	safeWorkerAnswerText,
 	WorkerAnswerProjection,
 } from "./worker-answer.js";
 
@@ -373,46 +373,6 @@ function presentedContractAnswer(entry: WorkerEntryState): PresentedContractAnsw
 	);
 }
 
-const isStringArray = (value: unknown): value is string[] =>
-	Array.isArray(value) && value.every((entry) => typeof entry === "string");
-
-/**
- * A mutation report as prose: the paths it changed, each validation with its
- * verdict and evidence, then the summary and commit line. Null when the object
- * is not that shape.
- */
-function mutationReportLines(
-	value: Record<string, unknown>,
-	placement: WorkerRunResultSummary["placement"] | undefined,
-	taskBranch?: string,
-): string[] | null {
-	if (!isStringArray(value.mutatedPaths) || !Array.isArray(value.validations)) return null;
-	const lines: string[] = [];
-	lines.push(value.mutatedPaths.length === 0 ? "changed nothing" : `changed ${value.mutatedPaths.join(", ")}`);
-	for (const validation of value.validations) {
-		if (typeof validation !== "object" || validation === null) continue;
-		const check = validation as Record<string, unknown>;
-		const name = typeof check.name === "string" ? check.name : "validation";
-		const glyph = check.passed === true ? GLYPH.ok : check.passed === false ? GLYPH.error : GLYPH.queued;
-		const evidence =
-			typeof check.evidence === "string" && check.evidence.trim().length > 0 ? `: ${check.evidence.trim()}` : "";
-		lines.push(`${glyph} ${name}${evidence}`);
-	}
-	if (typeof value.summary === "string" && value.summary.trim().length > 0) lines.push(value.summary.trim());
-	if (typeof value.commitMessage === "string" && value.commitMessage.trim().length > 0) {
-		// The message is the worker's proposal. A worktree run commits it on the
-		// task branch; a run in the current tree commits nothing (race-Q4-t2-b).
-		lines.push(
-			placement?.mode === "worktree"
-				? `commit on ${placement.branch}: ${value.commitMessage.trim()}`
-				: taskBranch !== undefined
-					? `commit on ${taskBranch}: ${value.commitMessage.trim()}`
-					: `proposed commit message, not committed: ${value.commitMessage.trim()}`,
-		);
-	}
-	return lines;
-}
-
 /**
  * The body's source lines. A structured answer (a result-contract JSON object)
  * uses its result identity for a readable preview. Unknown objects retain
@@ -442,9 +402,11 @@ function bodySourceLines(entry: WorkerEntryState): string[] {
 	if (structured === null) return answerText(entry, entry.text).split("\n");
 	const presented = presentedContractAnswer(entry);
 	if (presented !== null) return presented.lines;
+	const placement = entry.result?.placement;
 	return (
-		mutationReportLines(structured, entry.result?.placement, entry.result?.taskWorktree?.branch)?.map(
-			safeWorkerAnswerText,
+		mutationReportLines(
+			structured,
+			placement?.mode === "worktree" ? placement.branch : entry.result?.taskWorktree?.branch,
 		) ?? answerText(entry, entry.text).split("\n")
 	);
 }

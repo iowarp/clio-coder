@@ -174,6 +174,44 @@ function scoutReport(value: Record<string, unknown>): PresentedContractAnswer | 
 	};
 }
 
+/**
+ * A mutation report as prose: the paths it changed, each validation with its
+ * verdict and evidence, then the summary and commit line. `commitOn` names the
+ * branch the proposed commit lands on, undefined when nothing commits it, and
+ * null when the reader cannot tell. Null when the object is not that shape.
+ */
+export function mutationReportLines(
+	value: Record<string, unknown>,
+	commitOn: string | null | undefined,
+): string[] | null {
+	if (!isStringArray(value.mutatedPaths) || !Array.isArray(value.validations)) return null;
+	const lines: string[] = [];
+	lines.push(value.mutatedPaths.length === 0 ? "changed nothing" : `changed ${value.mutatedPaths.join(", ")}`);
+	for (const validation of value.validations) {
+		if (typeof validation !== "object" || validation === null) continue;
+		const check = validation as Record<string, unknown>;
+		const name = typeof check.name === "string" ? check.name : "validation";
+		const glyph = check.passed === true ? GLYPH.ok : check.passed === false ? GLYPH.error : GLYPH.queued;
+		const evidence =
+			typeof check.evidence === "string" && check.evidence.trim().length > 0 ? `: ${check.evidence.trim()}` : "";
+		lines.push(`${glyph} ${name}${evidence}`);
+	}
+	if (typeof value.summary === "string" && value.summary.trim().length > 0) lines.push(value.summary.trim());
+	if (typeof value.commitMessage === "string" && value.commitMessage.trim().length > 0) {
+		// The message is the worker's proposal. A worktree run commits it on the
+		// task branch; a run in the current tree commits nothing (race-Q4-t2-b).
+		const message = value.commitMessage.trim();
+		lines.push(
+			commitOn === null
+				? `commit message: ${message}`
+				: commitOn !== undefined
+					? `commit on ${commitOn}: ${message}`
+					: `proposed commit message, not committed: ${message}`,
+		);
+	}
+	return lines.map(safeWorkerAnswerText);
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
