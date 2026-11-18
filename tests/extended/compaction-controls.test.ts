@@ -1287,7 +1287,7 @@ describe("production compaction controls", () => {
 		}
 	});
 
-	it("keeps the bt-18 shape on an uncapped 40K reasoning route to three automatic summaries, none on overflow (bt-18 item 7)", async () => {
+	it("keeps the bt-18 shape on an uncapped 40K reasoning route to three automatic summaries, none on overflow, each stating its budget (bt-18 items 7, 8)", async () => {
 		const f = fixture(false, false, true);
 		f.settings.context.workingSet.enabled = false;
 		faux.setResponses(Array.from({ length: 80 }, () => f.respond));
@@ -1402,6 +1402,11 @@ describe("production compaction controls", () => {
 			f.calls.every((call) => (call.maxTokens ?? Infinity) <= 8_192),
 			facts,
 		);
+		// Each request states its length budget and asks for that much output, the summarizer here not reasoning (item 8).
+		for (const call of f.calls) {
+			const room = /\((\d+) tokens\) in a small context window/.exec(call.user)?.[1];
+			strictEqual(call.maxTokens, Number(room), facts);
+		}
 		deepStrictEqual(
 			(await f.journalOutcomes()).map((row) => (row.data as { outcome: string }).outcome),
 			Array.from({ length: summaries }, () => "committed"),
@@ -1705,7 +1710,11 @@ describe("production compaction controls", () => {
 			await context.runAutoCompact(runtime, row.force, undefined, row.trigger);
 			const stages = folds.flatMap((fold) => fold.stages.map(({ stage, outcome }) => [stage, outcome]));
 			if (!row.force) {
-				deepStrictEqual(pressures, [{ threshold: 0.5, target: 0.375 }], row.label);
+				// 0.75 x the trigger over the history; the fixture's few-token prompt keeps a quarter of its own share.
+				strictEqual(pressures.length, 1, row.label);
+				strictEqual(pressures[0]?.threshold, 0.5, row.label);
+				const target = pressures[0]?.target ?? 0;
+				ok(target > 0.375 && target < 0.375 + 0.25 * (50 / 28_000), `${row.label}: ${target}`);
 				deepStrictEqual(stages, [["working_set", "committed"]], `${row.label}: S1 alone, no aging, no summary`);
 				strictEqual(f.calls.length, 0, row.label);
 				strictEqual(pruned.length, 1, row.label);
@@ -1793,10 +1802,12 @@ describe("production compaction controls", () => {
 				deepStrictEqual(stages, [["working_set", "committed"]], "S1 evicts, no summary");
 			} else {
 				deepStrictEqual(stages.at(-1), ["llm_summary", "committed"], "one automatic summary");
+				const room = Number(/\((\d+) tokens\) in a small context window/.exec(f.calls[0]?.user ?? "")?.[1]);
+				ok(room > 0 && room <= 6_553, `the prompt states a budget within 4,096 + Pi's 4,096 margin: ${room}`);
 				deepStrictEqual(
 					f.calls.map((call) => call.maxTokens),
-					[6_553],
-					"the summary room under 4,096 + Pi's 4,096 margin",
+					[room],
+					"and the request's output cap is that budget (bt-18 item 8)",
 				);
 			}
 			const after = context.refreshLiveBudget();
@@ -2703,6 +2714,23 @@ describe("compaction trigger output reservation", () => {
 			if (window >= 52_428 || route === small)
 				deepStrictEqual(auto, { threshold: 0.8, target: 0.6 }, `${window}: S1 inputs as today`);
 			deepStrictEqual(s1(false), { threshold: 0.8, target: 0.6 }, `${window}: a forced pass keeps S1's inputs`);
+			// S1's target counts the history below the trigger, not the static prefix it cannot evict (bt-18 item 8).
+			const prefixTokens = 8_300;
+			const history = evictionPressure({
+				automatic: true,
+				window,
+				threshold: 0.8,
+				target: 0.6,
+				triggerFraction: () => fraction,
+				prefixTokens,
+			});
+			if (window >= 52_428) deepStrictEqual(history, auto, `${window}: the prefix changes nothing from 52,428`);
+			else {
+				const expectedTarget = prefixTokens + 0.75 * (s1Threshold - prefixTokens);
+				ok(Math.abs(history.target * window - expectedTarget) < 1e-6, `${window}: ${history.target * window}`);
+				ok(history.target * window < s1Threshold, `${window}: below the trigger`);
+				strictEqual(history.threshold, auto.threshold);
+			}
 		}
 		// The fit line on an uncapped route, whose turn reserve is min(32,768, W / 2) (bt3 m2a, ContextFold A5). Under
 		// 52,428 fit counts 4,096 + Pi's 4,096 margin, so it sits above the trigger; from there both are as today.

@@ -15,6 +15,22 @@ export interface SummaryOutputBudget {
  */
 const DEFAULT_REASONING_SHARE = 0.5;
 
+/** The share of a summary call's output left for its text: past the observed reasoning share, or the default's. */
+function summaryTextShare(model: Pick<EngineModel, "provider" | "baseUrl" | "id" | "reasoning">): number {
+	return 1 - (summaryReasoningShare(model) ?? (model.reasoning ? DEFAULT_REASONING_SHARE : 0));
+}
+
+/**
+ * The output cap that leaves a summary `roomTokens` of text past the route's reasoning share, so a stated length
+ * budget is also the request's (bt-18 item 8).
+ */
+export function summaryOutputForRoom(
+	model: Pick<EngineModel, "provider" | "baseUrl" | "id" | "reasoning">,
+	roomTokens: number,
+): number {
+	return Math.ceil(roomTokens / summaryTextShare(model));
+}
+
 /** Tokens a checkpoint summary keeps in the next context: the reserve's room. */
 export function summaryRoomTokens(reserveTokens: number = DEFAULT_RESERVE_TOKENS): number {
 	return Math.max(1024, Math.floor(reserveTokens * 0.8));
@@ -37,7 +53,7 @@ export function summaryOutputBudget(
 ): SummaryOutputBudget {
 	const outputLimit = Number.isFinite(model.maxTokens) && model.maxTokens >= 1 ? Math.floor(model.maxTokens) : undefined;
 	const reasoningShare = summaryReasoningShare(model);
-	const textShare = 1 - (reasoningShare ?? (model.reasoning ? DEFAULT_REASONING_SHARE : 0));
+	const textShare = summaryTextShare(model);
 	const summaryRoom = Math.min(
 		summaryRoomTokens(reserveTokens),
 		outputCap === undefined ? Number.POSITIVE_INFINITY : summaryRoomTokens(outputCap * textShare),
