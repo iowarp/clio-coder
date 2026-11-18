@@ -3782,6 +3782,17 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 					? `The last turn ended normally (${terminal.stopReason})${retries}.`
 					: `The last turn stopped (${terminal.stopReason})${stage}${retries}.`,
 		);
+		// A worker that turn dispatched settles in its own run journal, so its stop is named here too (cf1h-D3).
+		for (const run of analysis.runs.values()) {
+			const stop =
+				run.turnId === last?.record.ctx.turnId
+					? run.attempts.filter((attempt) => attempt.settled).at(-1)?.settled?.stop
+					: null;
+			if (stop?.failure)
+				findings.push(
+					`Worker run ${run.runId} ${HARNESS_STOP_CAUSES.has(stop.failure) ? "stopped" : "failed"}: ${stop.failure}.`,
+				);
+		}
 	}
 	const incomplete = stepPipeline !== null ? stepPipelineIncomplete(stepPipeline) : null;
 	if (incomplete) findings.push(incomplete);
