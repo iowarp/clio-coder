@@ -15,7 +15,6 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 - ACP session openers return a models block, and `session/set_model` is served. (ACP low 1)
 - Standard ACP `session/fork`, advertised in sessionCapabilities when branching is on. (ACP low 2)
-- `campaign run --dry-run` validates every entry and prints its plan without creating anything. (bt-20 p4)
 - Interactive `clio-coder` accepts `--max-context-tokens`, with the same meaning as on `run`. (c16-E)
 - A mutation report's validation may carry `"baseline":true` for a deliberate red run before the change; quality judges only the checks run after the change (bt-17).
 - `models` lists the thinking levels each route offers (`thinkingLevels` in `--json`) (bt-20).
@@ -178,7 +177,6 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - An unanswered ask_user declines a recommended option that leaves the workspace, and prompts, help, the yolo card and docs say so. (bt-21 residual)
 - The default autonomy banner reads `auto edits · no OS sandbox` on hosts without a shell sandbox. (bt-11 banner wording)
 - The selected workers-dock card wraps its whole task at 45 columns. (bt-tui dock cut)
-- Hiding a dock from inside it returns focus to the herdr pane you came from. (bt-tui herdr focus)
 - The Fleet Runs board says where a coder's proposed commit lands, as the transcript card does. (board commit placement)
 - A Copilot target reads its own context tier's window from the cached listing, and the per-tier record survives the providers re-record. (bt-copilot limit)
 - A dispatch briefing that mentions a `~/` home path is admitted instead of refused as legacy_scope_path_absolute. (bt-11 r)
