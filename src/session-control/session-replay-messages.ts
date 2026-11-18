@@ -11,6 +11,7 @@ import { createHostPolicyMessage } from "../core/host-policy-message.js";
 import { compactionCut } from "../domains/context/working-set/visible.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import { captureSkillContext } from "../domains/session/compaction/compact.js";
+import { foldDecisionBoard } from "../domains/session/decision-board.js";
 import type {
 	BashExecutionEntry,
 	BranchSummaryEntry,
@@ -19,7 +20,7 @@ import type {
 	PreservedSkillContext,
 	SessionEntry,
 } from "../domains/session/entries.js";
-import { latestSkillContextState, verifiedSkillContextCheckpoint } from "../domains/session/entries.js";
+import { decisionRef, latestSkillContextState, verifiedSkillContextCheckpoint } from "../domains/session/entries.js";
 import { HANDOFF_SEED_CUSTOM_TYPE, handoffSeedContextText, isHandoffSeedData } from "../domains/session/handoff.js";
 import { foldTaskBoard } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
@@ -758,6 +759,33 @@ function branchContextText(entry: BranchSummaryEntry): string {
 	return `${BRANCH_SUMMARY_PREFIX}${entry.summary}${BRANCH_SUMMARY_SUFFIX}`;
 }
 
+const CHECKPOINT_DECISIONS_CAP = 12;
+const CHECKPOINT_DECISION_FIELD_CHARS = 160;
+
+function oneLine(text: string): string {
+	const flat = text.replace(/\s+/gu, " ").trim();
+	return flat.length > CHECKPOINT_DECISION_FIELD_CHARS ? `${flat.slice(0, CHECKPOINT_DECISION_FIELD_CHARS - 1)}…` : flat;
+}
+
+/**
+ * The active decisions a checkpoint's history recorded, newest first, one line
+ * each, so a summary that paraphrased or dropped one does not leave the model
+ * arguing with what its workers were sealed against. Null when there are none.
+ */
+function decisionsAsOfCheckpoint(entries: ReadonlyArray<SessionEntry>): string | null {
+	const rows = foldDecisionBoard(entries).flatMap((interview) =>
+		interview.decisions
+			.filter((decision) => decision.status === "active")
+			.map((decision) => {
+				const why = decision.rationale ?? decision.source_question;
+				return `${decisionRef(interview.interviewId, decision.key)} ${oneLine(decision.value)}${why ? ` (${oneLine(why)})` : ""}`;
+			}),
+	);
+	if (rows.length === 0) return null;
+	const more = rows.length > CHECKPOINT_DECISIONS_CAP ? ` (newest ${CHECKPOINT_DECISIONS_CAP} of ${rows.length})` : "";
+	return [`[Decisions as of checkpoint]${more}`, ...rows.slice(0, CHECKPOINT_DECISIONS_CAP)].join("\n");
+}
+
 /** Project Clio's ledger entry onto pi's bash message so pi owns the replay wording. */
 function bashContextText(entry: BashExecutionEntry): string {
 	const message: BashExecutionMessage = {
@@ -914,6 +942,8 @@ export function buildReplayAgentMessagesFromTurns(
 						makeTextMessage("user", [`[Task board as of checkpoint] ${board.title}`, ...rows].join("\n"), entry.timestamp),
 					);
 				}
+				const decisions = checkpointIndex < 0 ? null : decisionsAsOfCheckpoint(activeEntries.slice(0, checkpointIndex));
+				if (decisions) out.push(makeTextMessage("user", decisions, entry.timestamp));
 				if (entry.userContext && (!latestOperator || latestOperator.turnId === entry.userContext.turnId))
 					out.push(
 						makeTextMessage("user", `Active user instructions (verbatim):\n${entry.userContext.text}`, entry.timestamp),
