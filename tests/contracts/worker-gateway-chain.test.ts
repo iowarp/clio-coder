@@ -430,7 +430,8 @@ test("a read-only worker seals its synthesis after a chain or direct call reache
 			[
 				chain([
 					{ id: "a", capability: "read", args: { path: "overlays.ts" } },
-					{ id: "b", capability: "read", args: { path: "overlays.ts", offset: 3 }, after: ["a"] },
+					{ id: "b", capability: "read", args: { path: "overlays.ts", offset: 2 }, after: ["a"] },
+					{ id: "c", capability: "read", args: { path: "overlays.ts", offset: 3 }, after: ["b"] },
 				]),
 			],
 			{ text: SYNTHESIS },
@@ -463,13 +464,16 @@ test("a read-only worker seals its synthesis after a chain or direct call reache
 		children.map((child) => [child.id, child.result.details.chainAdmission?.outcome]),
 		[
 			["a", "ok"],
-			["b", "blocked"],
+			["b", "ok"],
+			["c", "blocked"],
 		],
 	);
-	ok(/^workerToolCallCap reached \(2\)/u.test(children[1]?.result.details.chainAdmission?.blockReason ?? ""));
+	ok(/^workerToolCallCap reached \(2\)/u.test(children[2]?.result.details.chainAdmission?.blockReason ?? ""));
 });
 
-test("a chain inside the cap charges the wrapper and each step once and succeeds", { timeout: 20_000 }, async () => {
+test("a chain that fits the cap exactly charges each step once, not the wrapper, and succeeds", {
+	timeout: 20_000,
+}, async () => {
 	const run = await runWorker(
 		[
 			[
@@ -480,7 +484,7 @@ test("a chain inside the cap charges the wrapper and each step once and succeeds
 			],
 			{ text: SYNTHESIS },
 		],
-		capBudget(3),
+		capBudget(2),
 	);
 	strictEqual(run.result.exitCode, 0, JSON.stringify(outcomes(run.events)));
 	deepStrictEqual(outcomes(run.events), []);

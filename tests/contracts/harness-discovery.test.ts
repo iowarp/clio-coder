@@ -540,9 +540,9 @@ describe("coordinator discovery and dependency composition", () => {
 		strictEqual(denied.kind, "error", "the loaded workflow's exclusions still bind resumed work");
 	});
 
-	it("counts every chained child against the worker call budget and stops at the ceiling", async () => {
+	it("counts every chained child against the worker call budget, not the wrapper, and stops at the ceiling", async () => {
 		const safety = createWorkerSafety({ cwd: env.dir });
-		const guard = createLoopGuardRegistration({ safety, toolCallCap: 2 });
+		const guard = createLoopGuardRegistration({ safety, toolCallCap: 1 });
 		const worker = createWorkerToolRegistry(undefined, safety, undefined, [guard]);
 		writeFileSync(join(env.dir, "a.txt"), "a");
 		writeFileSync(join(env.dir, "b.txt"), "b");
@@ -559,7 +559,7 @@ describe("coordinator discovery and dependency composition", () => {
 			}),
 		);
 		strictEqual(result.kind, "error");
-		strictEqual(guard.callCount(), 3, "wrapper and both child attempts are counted");
+		strictEqual(guard.callCount(), 2, "both child attempts are counted and the wrapper is not (bt-14)");
 		deepStrictEqual(
 			chainOf(result).steps.map((row) => row.kind),
 			["ok", "error"],

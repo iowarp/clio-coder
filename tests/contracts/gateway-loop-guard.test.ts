@@ -24,7 +24,13 @@ afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function workspace(guardOptions: { turnBlockBudget?: number; turnSynthesisLockout?: boolean } = {}): {
+function workspace(
+	guardOptions: {
+		turnBlockBudget?: number;
+		turnSynthesisLockout?: boolean;
+		turnToolCallBudget?: { soft: number; hard: number };
+	} = {},
+): {
 	cwd: string;
 	registry: ToolRegistry;
 } {
@@ -120,6 +126,31 @@ describe("stagnation through gateway chains", () => {
 		ok(write.outcome === "ok", write.reason);
 		outcomes.push((await chained(registry, grepArgs(cwd, 50, "beta"))).outcome);
 		deepStrictEqual(outcomes, ["ok", "ok", "ok", "ok", "ok"]);
+	});
+});
+
+describe("gateway chain accounting", () => {
+	it("charges an N-step chain N units of the turn budget, as N plain calls cost", async () => {
+		const { registry } = workspace({ turnToolCallBudget: { soft: 3, hard: 10 } });
+		const steps = [1, 2, 3].map((n) => ({
+			id: `s${n}`,
+			capability: ToolNames.CredentialPresent,
+			args: { name: `CLIO_GATEWAY_LOOP_GUARD_STEP_${n}` },
+		}));
+		const verdict = await registry.invoke(
+			{ tool: ToolNames.Gateway, args: { op: "chain", steps } },
+			{ turnId: "turn-1", toolCallId: "chain-1" },
+		);
+		ok(verdict.kind === "ok", verdict.kind === "ok" ? "" : verdict.reason);
+		const details = verdict.result.details as { steps?: Array<{ kind?: string }> } | undefined;
+		deepStrictEqual(
+			details?.steps?.map((step) => step.kind),
+			["ok", "ok", "ok"],
+		);
+		// The fourth unit is the first refusal, and its breakdown names only the steps.
+		const next = await invoke(registry, ToolNames.CredentialPresent, { name: "CLIO_GATEWAY_LOOP_GUARD_STEP_4" });
+		deepStrictEqual(next.outcome, "blocked");
+		match(next.reason, new RegExp(`This turn's calls by tool: ${ToolNames.CredentialPresent} 4\\.`, "u"));
 	});
 });
 

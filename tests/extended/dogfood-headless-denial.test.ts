@@ -349,7 +349,7 @@ describe("headless no-op contract through the built binary", () => {
 	});
 
 	test("a partial chain preserves its successful write after a denied operation", async () => {
-		const { project } = await headlessTurn({
+		const { project, turn } = await headlessTurn({
 			autonomy: "default",
 			steps: [
 				{
@@ -367,6 +367,8 @@ describe("headless no-op contract through the built binary", () => {
 			failOnNoop: true,
 		});
 		strictEqual(readFileSync(join(project, "c2-proof.txt"), "utf8"), PROOF);
+		// The two steps are the run's calls; the chain wrapper adds none (bt-14).
+		match(turn.stderr, /observed: 2 tool calls, 1 refused/u);
 	});
 
 	test("a prose answer with no tool call is not a no-op under --fail-on-noop", async () => {
