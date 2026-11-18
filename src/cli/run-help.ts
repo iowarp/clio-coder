@@ -15,7 +15,8 @@ Flags:
   --thinking <level>        one-run thinking level: off|minimal|low|medium|high|xhigh|max
   --autonomy <level>        main-agent autonomy: default|yolo
   --systemone <engine|off>  System One for this run: jev, memory, main, an engine, a target, or off
-  --read-only               deny every write, command, and delegation; with --agent, the dispatch is read-only
+  --read-only               refuse writes, edits and asks; shell commands run only in a read-only sandbox,
+                            where a write fails, and delegations run read-only; with --agent, the dispatch is read-only
   --record                  save a bounded redacted display asciicast for --agent dispatch
   --turn-mode <mode>        main-agent workflow: answer|proposal|change; not an authorization grant
   --allow-tools <names>     main-agent capability allowlist, comma-separated; none disables all tools
