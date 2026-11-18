@@ -113,6 +113,8 @@ export function readArenaStream(ndjson: string): ArenaStreamFacts {
 				break;
 			}
 			case "tool_execution_end": {
+				// A call the output limit cut off never ran: the contender made no call and no tool error (bt-39 a).
+				if (frame.notRun !== undefined) break;
 				const parent = typeof frame.parentToolCallId === "string" ? frame.parentToolCallId : undefined;
 				if (parent !== undefined && wrappers.has(parent)) {
 					const counted = wrappers.get(parent);

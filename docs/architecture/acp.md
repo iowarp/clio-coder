@@ -56,7 +56,7 @@ Framing rules:
 | `loadSession` | `true` |
 | `promptCapabilities` | `{audio: false, embeddedContext: true, image: true}` |
 | `mcpCapabilities` | `{http: false, sse: false}` |
-| `sessionCapabilities` | `{close: {}, list: {}, delete: {}, resume: {}}` |
+| `sessionCapabilities` | `{close: {}, list: {}, delete: {}, resume: {}, fork: {}}`; `fork` only when session branching is wired |
 | `auth` | `{logout: {}}` |
 
 Every CLIO Coder extension is namespaced under `agentCapabilities._meta`, so a strict generic ACP v1 client can use session discovery, modes, and configuration options without reading CLIO Coder metadata. The shipped composition (`src/cli/acp.ts`) wires every dependency, so it advertises all of the keys below. A narrower embedded or test composition omits the key whose dependency is absent, and a flag never claims a method the composition cannot serve.
@@ -129,13 +129,15 @@ Anything not listed returns `-32601` `method_not_found`. Methods answer after `i
 | `initialize` | client to server | Capability exchange. Once per connection. |
 | `authenticate` | client to server | Always `-32602`; terminal authentication runs in another process. |
 | `logout` | client to server | Ends the authenticated state, returns `{}`. |
-| `session/new` | client to server | Opens the one session this process hosts. Returns `sessionId`, `modes`, `configOptions`, `_meta`. |
+| `session/new` | client to server | Opens the one session this process hosts. Returns `sessionId`, `modes`, `models` (when a model is selected), `configOptions`, `_meta`. |
 | `session/load` | client to server | Restores a closed session and streams its active-branch history before returning. `mcpServers` is required (may be empty). |
 | `session/resume` | client to server | Restores a closed session and provider context without sending history. |
 | `session/list` | client to server | Lists workspace sessions newest first with cursor paging. |
 | `session/delete` | client to server | Permanently deletes a closed workspace session. |
 | `session/set_mode` | client to server | Sets autonomy to `default` or `yolo` while idle. |
 | `session/set_config_option` | client to server | Sets autonomy, target, model, or thinking level while idle; returns the full option list. |
+| `session/set_model` | client to server | Sets the model while idle, as the `model` config option does; returns `{}`. |
+| `session/fork` | client to server | Forks the hosted session at its active leaf and hosts the child in its place, without replaying the branch. Takes `{sessionId, cwd, mcpServers?}`; client MCP servers the parent attached stay attached. Returns `sessionId`, `modes`, `models`, `configOptions`, `_meta`. Idle only. |
 | `session/prompt` | client to server | Submits a user prompt. |
 | `session/cancel` | client to server | Cancels the in-flight prompt, running tools, and any outstanding permission request. Accepted as a request (returns `{}`) and as a notification. |
 | `session/close` | client to server | Cancels an active prompt, waits for its writer to settle, and closes the durable session. Idempotent. |
@@ -261,7 +263,7 @@ Every replay notification precedes the load response and carries `_meta["clio-co
 
 `_clio-coder/session/label` accepts `{sessionId, label}` with a label of 0 to 256 UTF-8 bytes free of C0 and DEL characters; empty clears it. It writes the session-wide name that `session/list` reads back as `title`, and a hosted session also emits a `session_info_update` with the new `title`. `session/delete` accepts `{sessionId}` and removes only a record whose `endedAt` is set; hosted or unended records fail `session_open`, and unknown or cross-workspace ids fail `session_unknown`. The delete checks again under the lock a resume takes, so a record that a concurrent resume reopened also fails `session_open`. Both are legal during an unrelated prompt, and both need an authenticated connection: after `logout` they fail `authentication_required`.
 
-`modes` offers `default` and `yolo`. `session/set_mode` takes `{sessionId, modeId}`, changes the hosted session's autonomy, emits `current_mode_update` and `config_option_update`, and returns `{}`. A client's choice of `yolo` counts as the operator's yolo acceptance and writes nothing; while CLIO Coder runs as root outside a detected container, or the server was started with `--autonomy default`, `yolo` fails with error code `yolo_refused`. The same control is the `autonomy` config option (category `mode`). A `model` option (category `model`) appears when a model is selected, listing the target's configured and discovered models, a `target` option (category `_target`) lists orchestrator-eligible configured targets when provider routing is wired, and `thinkingLevel` (category `thought_level`) offers only the selected model's resolved supported levels, with an empty list when unresolved. `session/set_config_option` takes `{sessionId, configId, value, type?}` where `type`, if present, must be `select`, and returns the full list. Target, model and thinking changes apply to the session route without saving a default. A model the target does not declare fails `invalid_params` with the `model_not_declared` detail described in the [error envelope](#error-envelope). All route, thinking and mode controls fail `prompt_active` during a prompt. A global autonomy patch changes the default for future sessions and never mutates a bound session.
+`modes` offers `default` and `yolo`. `session/set_mode` takes `{sessionId, modeId}`, changes the hosted session's autonomy, emits `current_mode_update` and `config_option_update`, and returns `{}`. A client's choice of `yolo` counts as the operator's yolo acceptance and writes nothing; while CLIO Coder runs as root outside a detected container, or the server was started with `--autonomy default`, `yolo` fails with error code `yolo_refused`. The same control is the `autonomy` config option (category `mode`). A `model` option (category `model`) appears when a model is selected, listing the target's configured and discovered models, a `target` option (category `_target`) lists orchestrator-eligible configured targets when provider routing is wired, and `thinkingLevel` (category `thought_level`) offers only the selected model's resolved supported levels, with an empty list when unresolved. `session/set_config_option` takes `{sessionId, configId, value, type?}` where `type`, if present, must be `select`, and returns the full list. Target, model and thinking changes apply to the session route without saving a default. Session openers, fork and handoff results also carry the ACP `models` block, `{currentModelId, availableModels: [{modelId, name}]}`, with the same list as the `model` option, and `session/set_model` takes `{sessionId, modelId}` and selects through that option. A model the target does not declare fails `invalid_params` with the `model_not_declared` detail described in the [error envelope](#error-envelope). All route, thinking and mode controls fail `prompt_active` during a prompt. A global autonomy patch changes the default for future sessions and never mutates a bound session.
 
 ### Slash commands
 
@@ -292,7 +294,7 @@ A live prompt streams `session/update` notifications of these kinds:
 
 | `sessionUpdate` | Content |
 | --- | --- |
-| `agent_message_chunk`, `agent_thought_chunk` | Text, at most 16 KiB per chunk. A longer delta splits across consecutive chunks and nothing is dropped. No split falls inside a code point. |
+| `agent_message_chunk`, `agent_thought_chunk` | Text, at most 16 KiB per chunk. A longer delta splits across consecutive chunks and nothing is dropped. No split falls inside a code point. Agent text opens on a blank line after earlier text when a new assistant message or a new text block of the same message starts, live and on replay. |
 | `tool_call`, `tool_call_update` | Tool lifecycle with `name`, `title`, `kind`, `status`, `rawInput`, `rawOutput`, `locations`, `content`. See [Bounds](#bounds). |
 | `usage_update`, `plan` | Pushed telemetry. See [Live telemetry](#live-telemetry-usage-plan-and-workspace). |
 | `session_info_update` | A new `title`, the workspace snapshot, the memory guardian's state, the active conversation eggs, a startup notice, or a context engine status line. |

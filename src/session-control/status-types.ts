@@ -141,6 +141,8 @@ export interface RunTally {
 	responseModelIdObservation: ResponseModelIdObservation;
 	/** The class of the last assistant call folded, when that call failed. */
 	failure?: TurnFailureFacts | undefined;
+	/** The last assistant call's tool calls the output limit cut off: their results count as no call and no error. */
+	notRunToolCallIds?: ReadonlyArray<string> | undefined;
 }
 
 export interface OverlayFrame {

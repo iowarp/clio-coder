@@ -55,6 +55,7 @@ test("ACP client stdio MCP server is callable through gateway and closes with it
 		},
 		tree: () => ({ leafId: null }),
 		leafId: () => null,
+		checkpoint: async () => {},
 		close: async () => {
 			if (stored) stored.endedAt = new Date().toISOString();
 			current = null;
@@ -174,6 +175,7 @@ test("a read-only or no-tools ACP session registers client stdio MCP servers wit
 				},
 				tree: () => ({ leafId: null }),
 				leafId: () => null,
+				checkpoint: async () => {},
 				close: async () => {
 					current = null;
 				},

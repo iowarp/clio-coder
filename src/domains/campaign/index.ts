@@ -9,6 +9,7 @@ export {
 	type CampaignProbe,
 	type CampaignProbeResult,
 	type CampaignResult,
+	campaignEntryDirName,
 	runCampaign,
 	validateCampaignInput,
 } from "./runner.js";

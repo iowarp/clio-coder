@@ -1,11 +1,13 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { Type } from "typebox";
 import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { readArenaStream } from "../../src/domains/arena/facts.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
@@ -26,7 +28,9 @@ import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import { renderSessionHtml } from "../../src/interactive/export-html/index.js";
 import { expandInteractiveSubmitAsync } from "../../src/interactive/interactive-application.js";
-import { buildSummary } from "../../src/interactive/status/summary.js";
+import { createSessionFileRecorder } from "../../src/interactive/session-file.js";
+import { lastTurnSummaryFromLedger } from "../../src/interactive/session-last-turn.js";
+import { buildSummary, emptyRunTally, foldMessageIntoRunTally } from "../../src/interactive/status/summary.js";
 import { resolveFooterVerb } from "../../src/interactive/status/verbs.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
@@ -63,6 +67,7 @@ type WireMode =
 	| "guard"
 	| "repeat"
 	| "flood"
+	| "truncated"
 	| "loop"
 	| "overthink"
 	| "overthink-always";
@@ -98,6 +103,20 @@ function transport(mode: WireMode) {
 							`data: ${JSON.stringify({ id: "fixture-completion", object: "chat.completion.chunk", model: model.id, choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
 						),
 					);
+				if (mode === "truncated" && calls === 1) {
+					// The output cap cuts off a response of three distinct calls; none may run.
+					for (let index = 0; index < 3; index++)
+						send({
+							...(index === 0 ? { role: "assistant" } : {}),
+							tool_calls: [
+								{ index, id: `cut-${index}`, type: "function", function: { name: "read", arguments: `{"path":"f${index}"}` } },
+							],
+						});
+					send({}, "length");
+					controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+					controller.close();
+					return;
+				}
 				if (mode === "overthink-always" || (mode === "overthink" && calls === 1)) {
 					// The output cap runs out mid-deliberation: reasoning, then a length stop with no answer or call.
 					send({ role: "assistant", reasoning_content: THOUGHT });
@@ -110,7 +129,7 @@ function transport(mode: WireMode) {
 					mode === "success" ||
 					mode === "overthink" ||
 					(mode === "tool" && calls === 1) ||
-					((mode === "repeat" || mode === "flood") && calls > 1)
+					((mode === "repeat" || mode === "flood" || mode === "truncated") && calls > 1)
 				) {
 					send(
 						mode === "tool"
@@ -280,7 +299,7 @@ function fixture(
 		auth: "none",
 		defaultCapabilities: {
 			...capabilities,
-			tools: initialMode === "tool" || initialMode === "guard",
+			tools: initialMode === "tool" || initialMode === "guard" || initialMode === "truncated",
 			vision: visionCapable,
 		},
 		synthesizeModel: () => ({
@@ -1072,7 +1091,7 @@ it("headless shutdown retains its cancelled receipt and exit 143 without route a
 	}
 });
 
-it("a reply cut off by shutdown is the harness's stop and names no route, even after an earlier Esc", {
+it("a reply cut off by the operator's Esc or by shutdown is the harness's stop and names no route", {
 	timeout: 15_000,
 }, async () => {
 	const f = fixture("partial");
@@ -1098,6 +1117,7 @@ it("a reply cut off by shutdown is the harness's stop and names no route, even a
 			.filter((payload) => payload?.stopReason === "aborted");
 		ok(cancelled && closing, JSON.stringify(f.entries()));
 		strictEqual(recordValue(cancelled.failure)?.errorClass, "operator_cancel");
+		strictEqual(cancelled.failureRoute, undefined, "an operator's cancel names no route");
 		strictEqual(closing.failureRoute, undefined);
 		match(String(closing.errorMessage), /Clio Coder shut down/u);
 		// The persisted failure names the harness's cause, not a transport abort (bt-26 N2a).
@@ -1171,6 +1191,89 @@ it("a response repeating one tool call is stopped while streaming and re-prompte
 		);
 		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
 	} finally {
+		await f.close();
+	}
+});
+
+it("calls the output limit cut off are flagged as not run under one notice that states the limit (bt-39 a)", {
+	timeout: 15_000,
+}, async () => {
+	const f = fixture("truncated");
+	try {
+		await f.loop.submit("Read the three files.");
+		await f.loop.whenSettled();
+		const ends = f.events.filter((event) => event.type === "tool_execution_end");
+		deepStrictEqual(
+			ends.map((event) => (event as { notRun?: unknown }).notRun),
+			["output_limit", "output_limit", "output_limit"],
+		);
+		const notices = f.events.filter((event) => event.type === "notice" && /output token limit/u.test(event.text));
+		strictEqual(notices.length, 1);
+		match(String((notices[0] as { text?: unknown }).text), /3 tool calls in it; none ran/u);
+		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
+	} finally {
+		await f.close();
+	}
+});
+
+it("calls the output limit cut off count as no call and no tool error and read as not run, live and resumed (bt-39 a)", {
+	timeout: 15_000,
+}, async () => {
+	const f = fixture("truncated");
+	const dir = mkdtempSync(join(tmpdir(), "clio-cut-off-"));
+	try {
+		const path = join(dir, "session.json");
+		const recorder = createSessionFileRecorder({
+			path,
+			cwd: dir,
+			snapshot: () => ({ sessionId: "s", sessionName: null, turns: 1, models: [] }) as never,
+		});
+		await f.loop.submit("Read the three files.");
+		await f.loop.whenSettled();
+		for (const event of f.events) recorder.observeChat(event);
+		let tally = emptyRunTally();
+		for (const event of f.events) if (event.type === "message_end") tally = foldMessageIntoRunTally(tally, event.message);
+		const end = [...f.events].reverse().find((event) => event.type === "agent_end");
+		ok(end?.type === "agent_end");
+		const summary = buildSummary({
+			startedAt: 1,
+			endedAt: 2,
+			modelId: model.id,
+			targetId: target.id,
+			messages: end.messages,
+			watchdogPeak: 0,
+			cancelled: false,
+		});
+		const resumed = lastTurnSummaryFromLedger(f.entries());
+		ok(resumed);
+		const arena = readArenaStream(f.events.map((event) => JSON.stringify(event)).join("\n"));
+		const lastTurn = JSON.parse(readFileSync(path, "utf8")).lastTurn;
+		deepStrictEqual(
+			{
+				live: [tally.toolCount, tally.toolErrorCount],
+				summary: [summary.toolCount, summary.toolErrorCount],
+				ledger: [resumed.toolCount, resumed.toolErrorCount],
+				arena: [arena.toolCalls, arena.toolErrors],
+				sessionFile: [lastTurn.toolCalls, lastTurn.failedToolCalls],
+			},
+			{ live: [0, 0], summary: [0, 0], ledger: [0, 0], arena: [0, 0], sessionFile: [0, 0] },
+		);
+		const replay = createChatPanel({ getOutputStyle: () => "detailed" });
+		rehydrateChatPanelFromTurns(replay, f.entries());
+		for (const [surface, panel] of [
+			["live", f.panel],
+			["resumed", replay],
+		] as const) {
+			const rendered = panel.render(120).map(stripTerminalSequences).join("\n");
+			const rows = rendered.split("\n").filter((line) => /not run/u.test(line));
+			strictEqual(rows.length, 3, `${surface}:\n${rendered}`);
+			for (const row of rows) {
+				match(row, new RegExp(`${GLYPH.warn} output limit`, "u"), surface);
+				ok(!row.includes(GLYPH.error), `${surface}: ${row}`);
+			}
+		}
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
 		await f.close();
 	}
 });

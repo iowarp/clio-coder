@@ -40,3 +40,16 @@ export function assistantOutputChars(message: unknown): number {
 		(typeof payload.thinking === "string" ? payload.thinking.length : 0)
 	);
 }
+
+/**
+ * The tool calls of a reply the output limit cut off. The engine runs none of them, since their arguments may be cut
+ * off too, and settles each with an error result; every count of tool calls and tool errors leaves those out (bt-39 a).
+ */
+export function outputLimitCutOffToolCallIds(message: unknown): string[] {
+	const value = record(message);
+	if (value?.stopReason !== "length" || !Array.isArray(value.content)) return [];
+	return value.content.flatMap((block) => {
+		const call = record(block);
+		return call?.type === "toolCall" && typeof call.id === "string" ? [call.id] : [];
+	});
+}

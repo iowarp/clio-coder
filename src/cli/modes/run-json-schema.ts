@@ -130,6 +130,8 @@ export type RunJsonToolExecutionEndFrame = LoopEvent<"tool_execution_end"> &
 		decision?: string;
 		blockReason?: string;
 		bindingError?: string;
+		/** The output limit cut off the reply that made this call, so it never ran; its error result is no tool error. */
+		notRun?: "output_limit";
 	};
 
 export interface RunJsonTextDeltaFrame {

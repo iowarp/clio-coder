@@ -600,7 +600,9 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			}
 			if (event.type === "tool_execution_end") {
 				const call = calls.get(event.toolCallId);
-				if (event.isError) noteFailure(call?.tool ?? event.toolName);
+				// A call the output limit cut off never ran, so it is no failed tool (bt-39 a).
+				if (event.isError && (event as { notRun?: unknown }).notRun === undefined)
+					noteFailure(call?.tool ?? event.toolName);
 				const answeredAlone = event.isError ? 0 : autoResolvedQuestions(event.toolName, event.result);
 				if (answeredAlone > 0) {
 					unattended.questions += answeredAlone;
