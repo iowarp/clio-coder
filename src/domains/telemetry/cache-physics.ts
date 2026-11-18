@@ -13,7 +13,10 @@ export interface CacheBaseline {
 	promptTokens: number | null;
 }
 
-type CachePhysics = Pick<CallSettled["cache"], "firstDivergentSection" | "rePrefilledTokens" | "bill">;
+type CachePhysics = Pick<
+	CallSettled["cache"],
+	"firstDivergentSection" | "rePrefilledTokens" | "bill" | "firstChangedElement"
+>;
 
 const notApplicable = { kind: "absent", reason: "not-applicable" } as const;
 const unobserved = { kind: "unknown", reason: "not-observed" } as const;
@@ -57,6 +60,22 @@ export function firstDivergentSection(previous: CacheRequestStructure, current: 
 	return current.entries.length < previous.entries.length ? "messages" : null;
 }
 
+/**
+ * Cold attribution (F14): the first transcript element `current` changed against `previous`, by position and role.
+ * Undefined when `current` keeps every element of `previous`; a shorter transcript changed the first one it dropped.
+ */
+function firstChangedElement(
+	previous: CacheRequestStructure,
+	current: CacheRequestStructure,
+): CallSettled["cache"]["firstChangedElement"] {
+	const shared = Math.min(previous.entries.length, current.entries.length);
+	let index = 0;
+	while (index < shared && previous.entries[index] === current.entries[index]) index += 1;
+	if (index === previous.entries.length) return undefined;
+	const role = (index < current.entries.length ? current.roles : previous.roles)?.[index];
+	return { index, role: role === "user" || role === "assistant" || role === "toolResult" ? role : "entry" };
+}
+
 const short = (digest: string) => digest.slice(0, 16);
 
 /**
@@ -67,6 +86,8 @@ const short = (digest: string) => digest.slice(0, 16);
 export function journaledStructure(
 	structure: CacheRequestStructure,
 	previous: CacheRequestStructure | undefined,
+	/** The attempt that sent `previous`, named so a reader can chain the `base` entries. */
+	previousAttemptId?: string,
 ): NonNullable<CallSettled["cache"]["structure"]> {
 	let base = 0;
 	if (previous) {
@@ -77,6 +98,7 @@ export function journaledStructure(
 		system: short(structure.system),
 		tools: short(structure.tools),
 		...(previous ? { base } : {}),
+		...(previous && previousAttemptId ? { baseAttempt: previousAttemptId } : {}),
 		entries: structure.entries
 			.slice(base)
 			.map((entry, index) => `${structure.roles?.[base + index] ?? "entry"}:${short(entry)}`),
@@ -144,8 +166,10 @@ export function cachePhysics(input: {
 	};
 	let divergence: CachePhysics["firstDivergentSection"] = unobserved;
 	let rePrefilled: Fact<number> = unobserved;
+	let changed: CachePhysics["firstChangedElement"];
 	if (structure && previous) {
 		divergence = counted(firstDivergentSection(previous.structure, structure));
+		changed = firstChangedElement(previous.structure, structure);
 		if (!settled)
 			rePrefilled = {
 				kind: "unknown",
@@ -169,6 +193,7 @@ export function cachePhysics(input: {
 				pricing,
 				uncached === null || cacheRead === null ? null : uncached + cacheRead + (cacheWrite ?? 0),
 			),
+			...(changed ? { firstChangedElement: changed } : {}),
 		},
 		baseline,
 	};

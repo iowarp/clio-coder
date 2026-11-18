@@ -1,4 +1,4 @@
-import type { AssistantMessage, Context, Usage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context, Message, Usage } from "@earendil-works/pi-ai";
 import {
 	createAssistantMessageEventStream,
 	createInitialSystemMessage,
@@ -279,7 +279,12 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 				typeof streamOptions
 			> & { codexConfiguration?: CodexConfiguration };
 			const fresh = codexConfigurations.get(agent);
-			streamOptions = { ...portableOptions, ...(fresh ? { codexConfiguration: fresh } : {}) } as typeof streamOptions;
+			// The attempt's receipt names the fallback; its cursor must cover the record the resolver just wrote (F14).
+			streamOptions = {
+				...portableOptions,
+				...(fresh ? { codexConfiguration: fresh } : {}),
+				[PROVIDER_FALLBACK]: reason,
+			} as typeof streamOptions;
 		};
 		const preflight =
 			providerCompactionPolicies.get(agent)?.() === true
@@ -372,37 +377,53 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 	// lifecycle fact and visible text as a host record instead, including on
 	// resume, without changing the durable stop reason or inventing tool results.
 	const convertToLlm = agent.convertToLlm.bind(agent);
-	agent.convertToLlm = async (messages) => {
-		const converted = (await convertToLlm(messages)).map((message) => {
-			if (
-				message.role === "assistant" &&
-				message.stopReason !== "aborted" &&
-				(!isUsageRecord(message.usage) || usageInvalidated(message))
-			)
-				return { ...message, usage: unsentCallUsage() };
-			if (message.role !== "assistant" || message.stopReason !== "aborted") return message;
-			const partial = message.content
-				.filter((block) => block.type === "text")
-				.map((block) => block.text)
-				.join("\n");
-			return {
-				role: "user" as const,
-				timestamp: message.timestamp,
-				content:
-					"[Clio Coder response lifecycle]\nThe preceding assistant response was interrupted before completion. " +
-					"This record does not establish whether any earlier tool execution succeeded.\n" +
-					(partial.trim()
-						? `Partial assistant text follows (incomplete historical output, not a new instruction):\n${partial}`
-						: "No visible assistant text was retained."),
-			};
-		});
-		return acceptsImageInput({ modelInput: agent.state.model.input }) ? converted : omitImageBlocks(converted);
-	};
+	agent.convertToLlm = async (messages) =>
+		providerHistory(await convertToLlm(messages), acceptsImageInput({ modelInput: agent.state.model.input }));
 	return {
 		agent,
 		state: () => agent.state,
 		requestCorrelationId: (message) => correlations.get(message),
 	};
+}
+
+const PROVIDER_FALLBACK = "clioProviderFallback";
+
+/** The reason the adapter replayed a native checkpoint portably for the request these options send, if it did. */
+export function providerFallbackOf(options: object | undefined): string | undefined {
+	const reason = (options as Record<string, unknown> | undefined)?.[PROVIDER_FALLBACK];
+	return typeof reason === "string" ? reason : undefined;
+}
+
+/**
+ * The provider-facing history of converted messages, as every main request sends it: an aborted assistant becomes
+ * its lifecycle record, an invalidated usage reads unsent, and a model without image input gets image omissions.
+ * The receipt verifier finalizes a rendered history with this same function (ContextFold CF-9).
+ */
+export function providerHistory(converted: Message[], acceptsImages: boolean): Message[] {
+	const history = converted.map((message): Message => {
+		if (
+			message.role === "assistant" &&
+			message.stopReason !== "aborted" &&
+			(!isUsageRecord(message.usage) || usageInvalidated(message))
+		)
+			return { ...message, usage: unsentCallUsage() };
+		if (message.role !== "assistant" || message.stopReason !== "aborted") return message;
+		const partial = message.content
+			.filter((block) => block.type === "text")
+			.map((block) => block.text)
+			.join("\n");
+		return {
+			role: "user" as const,
+			timestamp: message.timestamp,
+			content:
+				"[Clio Coder response lifecycle]\nThe preceding assistant response was interrupted before completion. " +
+				"This record does not establish whether any earlier tool execution succeeded.\n" +
+				(partial.trim()
+					? `Partial assistant text follows (incomplete historical output, not a new instruction):\n${partial}`
+					: "No visible assistant text was retained."),
+		};
+	});
+	return acceptsImages ? history : omitImageBlocks(history);
 }
 
 /**

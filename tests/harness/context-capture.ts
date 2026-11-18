@@ -37,7 +37,7 @@ import type { createEngineAgent } from "../../src/engine/agent.js";
 import { type EngineRegisteredApiProvider, registerEngineApiProvider } from "../../src/engine/api-registry.js";
 import type { Model } from "../../src/engine/types.js";
 import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
-import { type ChatLoopEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
+import { type ChatLoopEvent, type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { replayCurrentSession } from "../../src/session-control/session-restore.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 import { syntheticCompactionSummary } from "./compaction-summary.js";
@@ -467,6 +467,8 @@ export interface ChatHarnessOptions {
 	middlewareToolChoice?: MiddlewareToolChoiceControl;
 	/** Builds each agent the loop asks for, so a case can hold the live agent. */
 	createAgent?: typeof createEngineAgent;
+	/** Journals the loop's calls, so a case can read the session's telemetry as the verifier does. */
+	telemetry?: CreateChatLoopDeps["telemetry"];
 }
 
 /**
@@ -557,6 +559,7 @@ export function chatHarness(options: ChatHarnessOptions) {
 		...(options.pinnedContext ? { pinnedContext: options.pinnedContext } : {}),
 		...(options.middlewareToolChoice ? { middlewareToolChoice: options.middlewareToolChoice } : {}),
 		...(options.createAgent ? { createAgent: options.createAgent } : {}),
+		...(options.telemetry ? { telemetry: options.telemetry } : {}),
 		...(options.autoCompact
 			? {
 					autoCompact: createProductionAutoCompact(
