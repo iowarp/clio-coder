@@ -203,7 +203,7 @@ describe("dispatch session ownership", () => {
 		try {
 			match(
 				errorMessage(await fork.call(ToolNames.Steer, { run_id: handle.runId, action: "cancel" })),
-				/belongs to another session/,
+				/belongs to session session-p, which this session was forked from;/,
 			);
 			strictEqual(parent.workers[0]?.aborts(), 0, "the fork never touched the parent's live worker");
 			parent.workers[0]?.finish();
@@ -293,11 +293,11 @@ describe("dispatch session ownership", () => {
 		try {
 			match(
 				errorMessage(await b.call(ToolNames.Steer, { run_id: handle.runId, action: "cancel" })),
-				/belongs to another session/,
+				/belongs to session session-a;/,
 			);
 			match(
 				errorMessage(await b.call(ToolNames.Steer, { run_id: handle.runId, action: "guide", message: "stop" })),
-				/belongs to another session/,
+				/belongs to session session-a;/,
 			);
 			strictEqual(a.workers[0]?.aborts(), 0, "A's worker was never touched");
 			okResult(await a.call(ToolNames.Steer, { run_id: handle.runId, action: "cancel" }));
