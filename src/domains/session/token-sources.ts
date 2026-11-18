@@ -69,6 +69,8 @@ export interface TokenSourcesReportV1 {
 		systemSide: "context-snapshot" | "prompt-compile" | "residual" | "mixed" | "none";
 		split: "estimated";
 		note: string;
+		/** Measured calls on a route that reports no uncached input, so their fresh share is their cache write. */
+		freshIsCacheWriteCalls: number;
 	};
 	turns: TokenSourceTurn[];
 	totals: { calls: number; unmeasuredCalls: number; input: TokenSourceInput; output: number; rows: TokenSourceRow[] };
@@ -91,7 +93,14 @@ interface CallUsage {
 	output: number;
 	from: "journal" | "ledger";
 	coldReasons: readonly string[];
+	api: string | null;
 }
+
+/**
+ * APIs that report the whole prompt as cache read plus cache write: copilot-sdk's uncached remainder is a constant
+ * few tokens, so its fresh share is its cache write.
+ */
+const NO_UNCACHED_INPUT_APIS: ReadonlySet<string> = new Set(["copilot-sdk"]);
 
 const FIXED_ORDER: readonly TokenSource[] = ["tool-schemas", "system-prompt", "skills", "template", "reminders"];
 
@@ -185,6 +194,7 @@ function journalUsage(record: TelemetryRecord<"call.settled">): CallUsage | null
 		output: measured(usage.output) ?? 0,
 		from: "journal",
 		coldReasons: record.data.cache.expectedColdReasons,
+		api: record.data.target.api,
 	};
 }
 
@@ -199,6 +209,7 @@ function ledgerUsage(payload: Record<string, unknown>): CallUsage | null {
 		output: number(usage.output),
 		from: "ledger",
 		coldReasons: [],
+		api: typeof payload.api === "string" ? payload.api : null,
 	};
 }
 
@@ -352,6 +363,7 @@ function tokenSourcesReport(
 	const turns: TurnAccumulator[] = [];
 	const usageFrom = new Set<CallUsage["from"]>();
 	const systemFrom = new Set<SystemSide["basis"]>();
+	let freshIsCacheWriteCalls = 0;
 	const openTurn = (entry: SessionEntry): TurnAccumulator => {
 		const turn: TurnAccumulator = {
 			index: turns.length + 1,
@@ -406,6 +418,7 @@ function tokenSourcesReport(
 		} else {
 			usageFrom.add(usage.from);
 			turn.calls += 1;
+			if (usage.api !== null && NO_UNCACHED_INPUT_APIS.has(usage.api)) freshIsCacheWriteCalls += 1;
 			turn.output += usage.output;
 			for (const reason of usage.coldReasons) turn.coldReasons.add(reason);
 			const side = systemSide(entry.timestamp, snapshots, compiles);
@@ -461,6 +474,7 @@ function tokenSourcesReport(
 			systemSide: one(systemFrom as Set<TokenSourcesReportV1["basis"]["systemSide"]>, "none", "mixed"),
 			split: "estimated",
 			note: TOKEN_SOURCES_NOTE,
+			freshIsCacheWriteCalls,
 		},
 		turns: turns.map((turn) => ({
 			index: turn.index,

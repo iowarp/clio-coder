@@ -24,6 +24,7 @@ import {
 import { settingsPath } from "../core/config.js";
 import {
 	addResponseModelIdObservationCount,
+	differingResponseModelId,
 	emptyResponseModelIdObservationCounts,
 	type ResponseModelIdObservation,
 	type ResponseModelIdObservationCounts,
@@ -759,10 +760,7 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 		const record = message as unknown as Record<string, unknown>;
 		summary.lastResponseModelIdObservation = responseModelIdObservationFromRecord(record, "not-observed");
 		addResponseModelIdObservationCount(summary.responseModelIdObservationCounts, summary.lastResponseModelIdObservation);
-		summary.lastDifferingResponseModelId =
-			typeof record.responseModel === "string" && record.responseModel.trim().length > 0
-				? record.responseModel.trim()
-				: null;
+		summary.lastDifferingResponseModelId = differingResponseModelId(record.model, record.responseModel);
 	}
 	return { ...summary, totals, cost: sumPricing(pricings) };
 }

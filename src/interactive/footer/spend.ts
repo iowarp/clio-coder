@@ -30,6 +30,7 @@ export interface FooterSpend {
 	 * because a bound such as `≥~25.2k +?` is true but unreadable here, and /usage keeps it (HS21).
 	 */
 	turn: {
+		/** The whole prompt, cached reads included, as the turn receipt's `in`. */
 		input: string | null;
 		output: string | null;
 		cacheRead: string | null;
@@ -130,7 +131,7 @@ export function footerTelemetry(view: TelemetryView | null | undefined): FooterT
 			turnId === undefined
 				? null
 				: {
-						input: turnCount("input"),
+						input: turnCount("prompt"),
 						output: turnCount("output"),
 						cacheRead: turnCount("cacheRead"),
 						cacheWrite: turnCount("cacheWrite"),

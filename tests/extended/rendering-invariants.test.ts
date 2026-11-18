@@ -1085,6 +1085,30 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("names the cleanup ceiling only when it fires before the window does", () => {
+		const footer = (compactionCeilingTokens: number): string => {
+			const ledger = () =>
+				buildContextLedger({
+					provider: "fixture",
+					model: "fixture",
+					contextWindow: 200_000,
+					messageTokens: 1000,
+					compactionThreshold: 0.8,
+					compactionCeilingTokens,
+					compactionAuto: true,
+				});
+			const tui = { showOverlay: () => ({ hide() {} }), requestRender() {} } as unknown as TUI;
+			const handle = openContextOverlay(tui, ledger);
+			try {
+				return (dockTop(tui)?.frame.renderDockBody(120, 60) ?? []).map(stripTerminalSequences).join("\n");
+			} finally {
+				handle.hide();
+			}
+		};
+		doesNotMatch(footer(400_000), /ceiling/u);
+		match(footer(100_000), /autocompact at 80% \(auto\) · cleanup ceiling 100,000 tokens/u);
+	});
+
 	it("words a partial cache reuse with the re-prefilled count the call's journal records", () => {
 		const ledger = () =>
 			buildContextLedger({

@@ -552,7 +552,7 @@ test("a replayed receipt states the duration, cold-cache reasons and end time th
 			payload: { ...cached, promptCache: { expectedColdReasons: ["dispatch"] } },
 		},
 	] as SessionEntry[]);
-	assert.equal(plainRows(warm).at(-1), "✓ Done · 1m36s · in 7 · out 5 · cached 68.6k · Sep 16 19:01");
+	assert.equal(plainRows(warm).at(-1), "✓ Done · 1m36s · in 68.6k · out 5 · cached 68.6k · Sep 16 19:01");
 });
 
 test("a middleware reminder reads the same live and on replay, and a skill activation adds no line", () => {

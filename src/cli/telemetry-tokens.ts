@@ -19,8 +19,10 @@ report one input total per call, so the totals are measured and the split is
 estimated from the session ledger and the journal's context snapshot; the
 output header says so. The calls column counts every invoked call and names
 those the provider sent no token counts for; their tokens are in no sum, and a
-turn with no measured call prints its tokens as unknown. --json emits the
-report verbatim.
+turn with no measured call prints its tokens as unknown. Fresh is uncached input
+plus cache write; copilot-sdk reports the whole prompt as cache read plus cache
+write, so on its calls fresh is cache write and the output says so. --json emits
+the report verbatim.
 `;
 
 const count = (value: number | null) => (value === null ? "unknown" : String(value));
@@ -59,10 +61,20 @@ function turnHeading(turn: TokenSourceTurn): string {
 	return `turn ${turn.index} ${turn.at} · ${callsCell(turn)} call(s) · output ${measuredCount(turn, turn.output)}${cold}`;
 }
 
+function freshNote({ basis, totals }: TokenSourcesReportV1): string[] {
+	const calls = basis.freshIsCacheWriteCalls;
+	if (calls === 0) return [];
+	const share = calls === totals.calls ? `all ${calls}` : `${calls} of ${totals.calls}`;
+	return [
+		`note: ${share} measured call(s) ran on copilot-sdk, which reports no uncached input; their fresh is cache write`,
+	];
+}
+
 export function renderTokenSources(report: TokenSourcesReportV1, bySource: boolean): string {
 	const header = [
 		`session ${report.sessionId} · usage from ${report.basis.usage} · system side from ${report.basis.systemSide}`,
 		...(bySource ? [`note: ${report.basis.note}`] : []),
+		...freshNote(report),
 	];
 	if (report.turns.length === 0) return `${header.join("\n")}\nno turns\n`;
 	if (!bySource) {

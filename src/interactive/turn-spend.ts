@@ -17,6 +17,7 @@ export interface TurnSpend {
 	calls: number | null;
 	/** How many of those calls Clio prepared but never sent. */
 	neverSent?: number;
+	/** The whole prompt, cached and fresh, as `telemetry tokens` counts a turn's input; `cached` says how much was read. */
 	input: string;
 	output: string;
 	/** Null when the provider served nothing from its prompt cache. */
@@ -101,7 +102,7 @@ function measuredCached(cacheRead: Quantity): string | null {
 function answerSpend(view: TelemetryView, turnId: string, callId: string): NonNullable<TurnSpend["answer"]> {
 	const usage = view.calls({ turnIds: [turnId] }).calls.find((call) => call.callId === callId)?.usage;
 	if (!usage) return { tokens: null, cached: null };
-	return { tokens: measuredTokens(usage.input, usage.output), cached: measuredCached(usage.cacheRead) };
+	return { tokens: measuredTokens(usage.prompt, usage.output), cached: measuredCached(usage.cacheRead) };
 }
 
 /** Null when the view cannot resolve the turn's references. `answeringCallId` also reads that one call's own amounts. */
@@ -109,7 +110,8 @@ export function turnSpend(view: TelemetryView, turnId: string, answeringCallId?:
 	const read = (metric: FactMetric) =>
 		view.quantity(factRef({ scope: "session", owner: view.sessionId, metric, group: { by: "turn", key: turnId } }));
 	const calls = read("calls");
-	const input = read("input");
+	// The provider's uncached remainder alone read `in 8` on a 17K-token prompt; the whole prompt is the input.
+	const input = read("prompt");
 	const output = read("output");
 	const cacheRead = read("cacheRead");
 	const cacheWrite = read("cacheWrite");

@@ -276,9 +276,13 @@ function renderContextLedgerLines(
 				? `autocompact at ${Math.round(ledger.compactionThreshold * 100)}% (${ledger.compactionAuto ? "auto" : "manual"})`
 				: "autocompact off";
 	const toolsLabel = ledger.toolCount > 0 ? `${ledger.toolCount} active tool${ledger.toolCount === 1 ? "" : "s"}` : null;
-	const ceiling = ledger.compactionCeilingTokens
-		? ` · ceiling ${formatTokens(ledger.compactionCeilingTokens)} tokens`
-		: "";
+	// The cleanup ceiling (context.compaction.maxTokens or a price tier) only fires cleanup sooner than the window does;
+	// at or above a known window it bounds nothing, and `ceiling 400,000 tokens` beside a 200K window read as a limit.
+	const ceilingTokens = ledger.compactionCeilingTokens ?? 0;
+	const ceiling =
+		ceilingTokens > 0 && (ledger.contextWindow <= 0 || ceilingTokens < ledger.contextWindow)
+			? ` · cleanup ceiling ${formatTokens(ceilingTokens)} tokens`
+			: "";
 	const footer = toolsLabel ? `${compaction}${ceiling} · ${toolsLabel}` : `${compaction}${ceiling}`;
 	lines.push(theme.fg("annotation", footer));
 

@@ -66,7 +66,7 @@ import { readClioVersion } from "../../core/package-root.js";
 import { asDirectoryPathBoundary } from "../../core/path-boundary.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { protectedResidencyModels } from "../../core/residency-protection.js";
-import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
+import { differingResponseModelId, responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
 import {
 	responseSchemaConflictsWithTools,
 	runtimeSpeaksResponseSchemaDialect,
@@ -1031,7 +1031,7 @@ function upstreamResponse(
 		usageScope,
 		requestedModelId: readStringOrNull(message.model),
 		responseModelIdObservation: responseModelIdObservationFromRecord(message, "not-observed"),
-		differingResponseModelId: readStringOrNull(message.responseModel),
+		differingResponseModelId: differingResponseModelId(message.model, message.responseModel),
 		providerResponseId: readStringOrNull(message.responseId),
 		...(gatewayRouting !== null ? { gatewayRouting } : {}),
 		...callOutcome(message),
