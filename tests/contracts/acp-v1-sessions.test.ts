@@ -737,7 +737,7 @@ test("ACP load reopens a crashed session and refuses one whose owner is alive", 
 });
 
 // A live terminal session must not get a second writer from a remote client's resume.
-test("ACP resume refuses a session another process claims between its check and the resume's own claim", async () => {
+test("ACP resume refuses a session another process claims between its check and the resume's own claim, and a newer format by name", async () => {
 	const peer = fixture();
 	try {
 		await peer.call("initialize", { protocolVersion: 1 });
@@ -751,6 +751,20 @@ test("ACP resume refuses a session another process claims between its check and 
 		await rejects(
 			peer.call("session/resume", { sessionId: "session-2", cwd: peer.cwd, mcpServers: [] }),
 			(err: AcpRequestError) => err.detail.code === "session_open",
+		);
+		// A session a newer build wrote says how to resume it, not that loading failed (B-2).
+		peer.session.resume = () => {
+			throw new Error(
+				"session was written by a newer Clio (format version 99, this build reads version 7): /home/u/s/meta.json. Upgrade clio-coder to resume this session.",
+			);
+		};
+		await rejects(
+			peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] }),
+			(err: AcpRequestError) =>
+				err.rpcCode === -32602 &&
+				err.detail.code === "session_format" &&
+				err.message ===
+					"session was written by a newer Clio (format version 99, this build reads version 7). Upgrade clio-coder to resume this session.",
 		);
 	} finally {
 		await peer.stop();

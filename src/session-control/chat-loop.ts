@@ -4265,7 +4265,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 				}
 			} finally {
-				void turnLease?.release();
+				await turnLease?.release();
 				returnUnstarted();
 				if (pathMessage && !promptStarted && options.queued === undefined) messagePath.neverStarted(pathMessage);
 				if (submitOwner === owner) {
@@ -4870,7 +4870,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			let agentRuntime: AgentRuntime | null;
 			try {
 				await turnRuntime.ensureLiveCapabilitiesForSelectedModel();
-				agentRuntime = turnRuntime.ensureRuntime();
+				agentRuntime = turnRuntime.ensureRuntime({ silent: true });
 			} catch (err) {
 				emitNotice(`[/context compact] ${err instanceof Error ? err.message : String(err)}`);
 				return;
