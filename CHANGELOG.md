@@ -12,6 +12,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Added
 
+- An extension interview's done result may set `pipelineDone`, so an approval-gated last step ends the step pipeline (bt-16).
 - D3-6: judged checks (numeric-compare, reproduce) record declared input hashes (an input that changes while the check runs fails it), provenance probe output and the untracked file count in their reports.
 - D3-7: numeric-compare and reproduce accept an opt-in `repeat` (at most 5) under a seed and report failed runs and per-key spread; a single run says "n=1, determinism not checked".
 - Extension tools (api 2) can return `pipelineDone: true` to end a yolo step-template pipeline.
@@ -84,6 +85,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A yolo step pipeline continues until its step tool says pipelineDone or the continuation cap; headless `run_end` reports `stepPipeline` when it ends unfinished (bt-15).
+- The task-board nudge no longer fires on a step-template turn, the first included (bt-12 #4).
+- The finish.unverified footer names a changed file a later command ran instead of saying nothing ran (bt-12).
 - ACP `session/list` reports a session's current model after a mid-session model switch (bt-5).
 - Dispatch results hand the worker's route warnings (e.g. coerced thinking) to the dispatching model, and dispatch tool details carry each worker's runtime resolution (bt-5).
 - Validation grounding reports basis "grounded" when every claimed check matched (bt-9).
