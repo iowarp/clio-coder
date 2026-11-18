@@ -252,8 +252,9 @@ export type { CheckOutputReader };
 
 /**
  * Where a check's output lands (x4-2): a `*.log`, outside the workspace, under the temp dir or a scratch root, or
- * git-ignored. `outside` asks only the first three, of any write (x7-1). `$TMPDIR`, `$HOME` and `~` expand from the run's env first (x5-4). A check log the call's check
- * pipeline writes (`npm test > out.txt`) to a path git does not track and the run did not change is output too.
+ * git-ignored. `outside` asks only of any write whether it leaves `cwd` (x7-1): a temp dir or scratch root inside the
+ * workspace holds output but is not outside it (x8-4). `$TMPDIR`, `$HOME` and `~` expand from the run's env first
+ * (x5-4). A check log the call's check pipeline writes (`npm test > out.txt`) to a path git does not track and the run did not change is output too.
  * A tracked source path stays a change, and a target this cannot resolve is one too. Shared by the recorder and the
  * task board's replay, so a check logged through `tee` keeps its outcome on both (x4-1).
  */
@@ -290,8 +291,10 @@ export function checkOutputReader(
 			.replace(/\$\{(TMPDIR|HOME)\}|\$(TMPDIR|HOME)(?![A-Za-z0-9_])/gu, (_, braced, bare) => env[braced ?? bare] || "\0");
 		return /^~|[$`\0]/u.test(expanded) ? null : expanded;
 	};
-	const landsOutside = (resolved: string): boolean => {
+	const landsOutside = (resolved: string, inTreeScratch: boolean): boolean => {
 		if (!isSameOrDescendant(resolved, cwd)) return true;
+		// A temp dir or scratch root inside the workspace holds a check's logs, but a write there changes the tree (x8-4).
+		if (!inTreeScratch) return false;
 		if (isSameOrDescendant(resolved, tmpdir()) && !isSameOrDescendant(cwd, tmpdir())) return true;
 		scratch ??= effectiveScratchRoots(configuredScratchRoots, cwd);
 		return scratch.some((root) => isSameOrDescendant(resolved, root) && !isSameOrDescendant(cwd, root));
@@ -301,7 +304,7 @@ export function checkOutputReader(
 		const expanded = expand(target);
 		if (expanded === null) return false;
 		const resolved = path.resolve(base, expanded);
-		if (landsOutside(resolved)) return true;
+		if (landsOutside(resolved, true)) return true;
 		if (gitIgnores(resolved)) return true;
 		return logs?.has(target) === true && !changedByRun.has(resolved) && untracked(resolved);
 	};
@@ -312,7 +315,7 @@ export function checkOutputReader(
 		outside(base: string) {
 			return (target: string) => {
 				const expanded = expand(target);
-				return expanded !== null && landsOutside(path.resolve(base, expanded));
+				return expanded !== null && landsOutside(path.resolve(base, expanded), false);
 			};
 		},
 	});

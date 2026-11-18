@@ -380,22 +380,28 @@ test("ACP reports a turn the loop guard stopped as max_turn_requests, not cancel
 });
 
 for (const [second, streamed] of [
-	["It's Wednesday.", true],
+	[["It's Wednesday."], ["It's Wednesday."]],
 	// A later message whose text arrives only on message_end opens at its own offset, not the prompt's (x7-6).
-	["Done.", false],
-	["Fixed it; tests pass now.", false],
+	[["Done."], []],
+	[["Fixed it; tests pass now."], []],
+	// Text blocks stream with no separator, so the tail starts where the deltas stopped (x8-3).
+	[
+		["Plan:", "Done."],
+		["Plan:", "Do"],
+	],
 ] as const) {
-	test(`ACP separates two assistant messages' text on a blank line without touching their content (bt-41): ${second}`, async () => {
+	test(`ACP separates two assistant messages' text on a blank line without touching their content (bt-41): ${second.join("")}`, async () => {
 		const first = "Let me look at the file.";
 		const peer = fixture([], (emit) => {
 			emit({ type: "agent_start", turnId: "turn-1" });
-			for (const [text, delta] of [
-				[first, true],
+			for (const [blocks, deltas] of [
+				[[first], [first]],
 				[second, streamed],
 			] as const) {
 				// No message_start: the assistant message_end alone resets the offset.
-				if (delta) emit({ type: "text_delta", text });
-				emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text }] } });
+				for (const text of deltas) emit({ type: "text_delta", text });
+				const content = blocks.map((text) => ({ type: "text", text }));
+				emit({ type: "message_end", message: { role: "assistant", content } });
 			}
 			emit({ type: "agent_end", turnId: "turn-1", messages: [] });
 		});
@@ -407,7 +413,7 @@ for (const [second, streamed] of [
 				.filter((params) => (params.update as { sessionUpdate?: string }).sessionUpdate === "agent_message_chunk")
 				.map((params) => (params.update as { content: { text: string } }).content.text)
 				.join("");
-			strictEqual(text, `${first}\n\n${second}`);
+			strictEqual(text, `${first}\n\n${second.join("")}`);
 		} finally {
 			await peer.stop();
 		}
