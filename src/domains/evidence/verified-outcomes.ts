@@ -130,19 +130,26 @@ export function runHostVerified(record: RunTelemetryV1 | null): boolean {
 /**
  * Count a session's verified outcomes. `entries` is the session's whole ledger, every branch included, as its token
  * and cost totals cover every branch; gateway chain children must already be expanded. `verified` names the worker
- * runs the session's telemetry references whose sealed record passes `runHostVerified`.
+ * runs the session's telemetry references whose sealed record passes `runHostVerified`. `forkedAt` is a fork's own
+ * start: the entries it copied from its parent were all recorded before it, so a pass they hold is the parent's and
+ * counts nothing here, as the fork's totals hold only its own spend. They still feed the task board fold, because a
+ * task the fork marks done may have been opened before it.
  */
 export function countVerifiedOutcomes(
 	entries: ReadonlyArray<unknown>,
 	verified: ReadonlySet<string>,
+	forkedAt: string | null = null,
 ): VerifiedOutcomeCount {
+	const fromMs = forkedAt === null ? Number.NaN : Date.parse(forkedAt);
+	// In a fork, an entry with no readable time is not known to be its own, so it counts nothing.
+	const own = (at: string): boolean => Number.isNaN(fromMs) || Date.parse(at) >= fromMs;
 	const checks = new Set<string>();
 	const hostKeys = new Map<string, Array<string | null>>();
 	/** Ledger times of the entries that recorded a counted pass or a host-verified run, counted or folded. */
 	const counted = new Set<string>();
 	for (const entry of entries) {
 		const result = toolResult(entry);
-		if (result === null) continue;
+		if (result === null || !own(result.at)) continue;
 		const key = passedCheckKey(result.details);
 		if (key !== null) checks.add(key);
 		const dispatched = result.tool === "dispatch";
@@ -161,7 +168,8 @@ export function countVerifiedOutcomes(
 	for (const board of foldSessionTaskHistory(entries))
 		for (const task of board.tasks) {
 			if (taskCompletionStanding(task) !== "checked") continue;
-			if (observedTaskChecks(task).passed.some((pass) => !counted.has(pass.observedAt))) tasks += 1;
+			if (observedTaskChecks(task).passed.some((pass) => own(pass.observedAt) && !counted.has(pass.observedAt)))
+				tasks += 1;
 		}
 	return { total: checks.size + workers.size + tasks, checks: checks.size, workers: workers.size, tasks };
 }
