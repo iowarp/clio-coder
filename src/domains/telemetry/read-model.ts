@@ -3618,6 +3618,7 @@ const HARNESS_STOP_CAUSES: ReadonlySet<string> = new Set([
 	"parent_cancel",
 	"route_moved",
 	"triage_stop",
+	"autonomy_stop",
 	"repetition",
 	"shutdown",
 ]);

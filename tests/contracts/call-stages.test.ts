@@ -6,6 +6,7 @@ import type { CallObservation } from "../../src/core/call-failure.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { telemetryContext } from "../../src/core/telemetry/context.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
+import { setTerminationPhase, type TerminationPhase } from "../../src/core/termination-phase.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
@@ -15,6 +16,7 @@ import type { SchedulingContract } from "../../src/domains/scheduling/contract.j
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { openCallScope } from "../../src/domains/telemetry/call-scope.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
@@ -323,6 +325,38 @@ it("a side call times its admission gate as its admission stage and names the ce
 	} finally {
 		await journals.closeAll();
 		faux.unregister();
+		env.restore();
+	}
+});
+
+it("a side call cut off by shutdown settles with the shutdown cause a main call gets (bt-26 N2c)", async () => {
+	const env = await isolateClioEnv("clio-coder-call-stages-");
+	const journals = createSessionJournals(clioStateDir(), () => {});
+	const origin = { id: "side-shutdown", cwdHash: "sidehash" };
+	const abortedSideCall = async (phase: TerminationPhase): Promise<void> => {
+		const scope = await openCallScope(
+			{ origin, acquire: journals.acquire, role: "memory", targetId: "t", runtimeId: "fixture", pricedBy: "none" },
+			{ api: "fixture", id: "side" },
+		);
+		scope.startAttempt();
+		setTerminationPhase(phase);
+		try {
+			scope.settle({ role: "assistant", content: [], stopReason: "aborted" });
+		} finally {
+			setTerminationPhase("idle");
+			await scope.close();
+		}
+	};
+	try {
+		await abortedSideCall("idle");
+		await abortedSideCall("draining");
+		await journals.closeAll();
+		const settled = (await readCallJournal(telemetrySessionDirectory(clioStateDir(), origin.id))).records.flatMap(
+			({ record }) => (record.k === "call.settled" ? [record.data.stop] : []),
+		);
+		deepStrictEqual(settled, [{ reason: "aborted" }, { reason: "aborted", failure: "shutdown" }]);
+	} finally {
+		await journals.closeAll();
 		env.restore();
 	}
 });

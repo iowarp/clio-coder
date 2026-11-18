@@ -65,6 +65,7 @@ const FAILURE_WORDS: Record<Failure, string> = {
 	stall_mid_stream: "the reply stalled",
 	route_moved: "you moved it to another route",
 	triage_stop: "steering triage stopped it to deliver your message",
+	autonomy_stop: "the autonomy window paused it",
 	operator_cancel: "you stopped it",
 	parent_cancel: "its parent run stopped it",
 	repetition: "stopped for repeating itself",

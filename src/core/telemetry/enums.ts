@@ -51,6 +51,7 @@ export const FailureCause = vocabulary([
 	"parent_cancel",
 	"route_moved",
 	"triage_stop",
+	"autonomy_stop",
 	"repetition",
 	"shutdown",
 	"internal",

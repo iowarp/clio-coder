@@ -19,9 +19,10 @@
 
 import { wrapTextWithAnsi } from "../engine/text-wrap.js";
 import { telemetryHub } from "./telemetry/hub.js";
+import { setTerminationPhase, type TerminationPhase, terminationPhase } from "./termination-phase.js";
 import { clampTimerDelayMs } from "./timers.js";
 
-export type TerminationPhase = "idle" | "draining" | "terminating" | "persisting" | "exiting";
+export type { TerminationPhase };
 
 export type Hook = (signal: AbortSignal) => void | Promise<void>;
 interface RegisteredHook {
@@ -116,7 +117,6 @@ export async function runWithBudget(
 }
 
 class TerminationCoordinator {
-	private phase: TerminationPhase = "idle";
 	private readonly drainHooks: RegisteredHook[] = [];
 	private readonly terminateHooks: RegisteredHook[] = [];
 	private readonly persistHooks: RegisteredHook[] = [];
@@ -130,7 +130,7 @@ class TerminationCoordinator {
 	private readonly forceExitHooks = new Set<() => void>();
 
 	getPhase(): TerminationPhase {
-		return this.phase;
+		return terminationPhase();
 	}
 
 	/**
@@ -200,8 +200,8 @@ class TerminationCoordinator {
 			process.stderr.write(`[clio-coder:shutdown] +${ms.toFixed(1)}ms ${msg}\n`);
 		};
 
-		this.phase = "draining";
-		bus.emit("shutdown.requested", { phase: this.phase });
+		setTerminationPhase("draining");
+		bus.emit("shutdown.requested", { phase: "draining" });
 		log("drain:start");
 		await this.runHooks(this.drainHooks, "drain", budgetMs, log);
 		log("drain:end");
@@ -209,19 +209,19 @@ class TerminationCoordinator {
 		this.flushNotices();
 		bus.emit("shutdown.drained", {});
 
-		this.phase = "terminating";
+		setTerminationPhase("terminating");
 		log("terminate:start");
 		await this.runHooks(this.terminateHooks, "terminate", budgetMs, log);
 		log("terminate:end");
 		bus.emit("shutdown.terminated", {});
 
-		this.phase = "persisting";
+		setTerminationPhase("persisting");
 		log("persist:start");
 		await this.runHooks(this.persistHooks, "persist", budgetMs, log);
 		log("persist:end");
 		bus.emit("shutdown.persisted", {});
 
-		this.phase = "exiting";
+		setTerminationPhase("exiting");
 		bus.emit("session.ended", { exitCode: this.exitCode });
 		if (this.exitHandoff) {
 			// The restarted child owns interactive signals. The handoff supplies the

@@ -1,10 +1,11 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
@@ -12,6 +13,10 @@ import {
 } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import type { Model } from "../../src/engine/types.js";
@@ -114,7 +119,11 @@ it("a cap halt during a tool call lets the call finish and sends no further mode
 		},
 	});
 	const events: ChatLoopEvent[] = [];
+	const journals = createSessionJournals(clioStateDir(), () => {
+		throw new Error("fixture journal unavailable");
+	});
 	loop = createChatLoop({
+		telemetry: { acquireTelemetrySession: journals.acquire } as unknown as TelemetryContract,
 		getSettings: () => settings,
 		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
@@ -149,6 +158,16 @@ it("a cap halt during a tool call lets the call finish and sends no further mode
 		ok(
 			events.some((event) => event.type === "notice" && (event as { text?: string }).text === CAP_REASON),
 			"the turn closes with the cap's notice",
+		);
+		// The cap is the harness's own stop, named on the turn's settlement (bt-26 N2d).
+		await journals.flush();
+		const sessionId = session.current()?.id;
+		ok(sessionId);
+		const journal = await readCallJournal(telemetrySessionDirectory(clioStateDir(), sessionId));
+		const turns = journal.records.flatMap(({ record }) => (record.k === "turn.settled" ? [record.data] : []));
+		deepStrictEqual(
+			turns.map((turn) => [turn.stopReason, turn.terminal.cause]),
+			[["toolUse", "autonomy_stop"]],
 		);
 	} finally {
 		loop.dispose();
