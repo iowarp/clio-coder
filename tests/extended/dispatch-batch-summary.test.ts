@@ -120,7 +120,11 @@ test("parallel dispatch returns scheduler assignments on a board with no worker 
 								scopeSource: "none" as const,
 							},
 						};
-						const receipt = finishRunResult(fixtureReceiptDraft(run), run, {
+						const draft = fixtureReceiptDraft(run);
+						draft.runtimeResolution = { wireModelId: `wire-${index}`, diagnostics: [] } as unknown as NonNullable<
+							typeof draft.runtimeResolution
+						>;
+						const receipt = finishRunResult(draft, run, {
 							terminal: { terminalReason: "completed" },
 							processExitCode: run.exitCode,
 							frameType: null,
@@ -167,6 +171,11 @@ test("parallel dispatch returns scheduler assignments on a board with no worker 
 		const result = await runDispatchTool({ dispatch, getAgentSpecs: () => [], getAutonomy: () => "yolo" }, state, args);
 		ok(result.kind === "ok", JSON.stringify(result));
 		match(String(result.details?.agentLedgerBoard), /Assignments:[\s\S]*Inspect entry points[\s\S]*Inspect boundaries/u);
+		const detailRuns = result.details?.runs as ReadonlyArray<{ runtimeResolution?: { wireModelId?: string } }>;
+		deepStrictEqual(
+			detailRuns.map((entry) => entry.runtimeResolution?.wireModelId),
+			["wire-0", "wire-1"],
+		);
 	} finally {
 		env.restore();
 	}

@@ -850,6 +850,8 @@ function dispatchDetails(
 				...(receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
 					? { routing: explainRouteDecision(receipt.routeDecision, receipt.routingIntent) }
 					: {}),
+				// The route the worker actually ran, as `run --agent` prints it: resolved model id, thinking, windows.
+				...(receipt.runtimeResolution !== undefined ? { runtimeResolution: receipt.runtimeResolution } : {}),
 			};
 		}),
 	};
