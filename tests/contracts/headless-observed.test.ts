@@ -342,7 +342,8 @@ test("a headless run whose check is a green verify after the dispatch that wrote
 		ok(runId, run.stderr);
 		const evidence = await inspectRunEvidence(stateDir, runId);
 		strictEqual(evidence.quality?.verdict, "pass");
-		ok(!evidence.tags.includes("no-validation"), evidence.tags.join(","));
+		// No validation gap, and no review tag on a run no review judged: its trust line says it was not reviewed.
+		deepStrictEqual(evidence.tags, []);
 		match(formatTrustSummary(evidence.trust), /validation observed passing: verify python-unittest/u);
 	} finally {
 		env.restore();
