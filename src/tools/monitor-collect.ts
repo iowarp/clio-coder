@@ -209,8 +209,15 @@ export async function collectRuns(
 		if (!record) return { kind: "error", message: `monitor: unknown batch '${batchId}'` };
 		// Collecting marks the batch collected and closes its agent ledger, which
 		// silences the owner's nudge and ends its peers' board. Only the session
-		// that dispatched the batch may do that.
-		if (!ownership.ownsBatch(record)) {
+		// that dispatched the batch, or a fork of it while the batch is still
+		// uncollected, may do that.
+		if (!ownership.collectsBatch(record)) {
+			if (ownership.inherits(record)) {
+				return {
+					kind: "error",
+					message: `monitor: batch '${batchId}' was already collected by another session in this session's fork lineage; its results went there`,
+				};
+			}
 			return {
 				kind: "error",
 				message: `monitor: batch '${batchId}' belongs to another session; only the session that dispatched it can collect it`,
@@ -221,7 +228,7 @@ export async function collectRuns(
 		scope = `batch ${batchId}${record.collectedAt !== null ? " (already collected)" : ""}`;
 	} else {
 		rows = runIds.map((runId) => resolveCollectRow(deps, runId, "unknown"));
-		const foreign = rows.find((row) => row.run !== null && !ownership.ownsRun(row.run));
+		const foreign = rows.find((row) => row.run !== null && !ownership.readsRun(row.run));
 		if (foreign !== undefined) {
 			return {
 				kind: "error",

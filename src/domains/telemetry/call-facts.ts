@@ -98,6 +98,12 @@ function failureCause(failure: Record<string, unknown>): FailureCause | undefine
 			return "context_overflow";
 		case "aborted":
 			return undefined;
+		// A harness stop persists its own cause as its class (bt-26 N2a).
+		case "operator_cancel":
+		case "route_moved":
+		case "repetition":
+		case "shutdown":
+			return failure.stage === "harness" ? failure.errorClass : undefined;
 	}
 	const status = amount(failure.httpStatus);
 	if (status === 401 || status === 403) return "auth_rejected";
@@ -322,10 +328,11 @@ export function turnSettlementFromCalls(
 		stopReason: reason,
 		terminal: {
 			cause: (reason === "error" || reason === "aborted" ? last?.stop.failure : undefined) ?? fallbackCause ?? null,
+			// A call that streamed thinking or text reached past its first token, so it settles as streaming (bt-26 N2a).
 			stage: !stages
 				? null
 				: stages.firstToken !== undefined
-					? "firstToken"
+					? "streaming"
 					: stages.send
 						? "send"
 						: stages.admission

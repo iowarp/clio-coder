@@ -141,11 +141,23 @@ test("a new session starts a fresh window", () => {
 	strictEqual(fx.window.usage().toolCalls, 1);
 });
 
-test("settled call tokens prefer the provider total and the notices name the way back", () => {
-	strictEqual(settledCallTokens({ total: { value: 90 }, input: { value: 10 } }), 90);
+test("settled call tokens weigh cache reads at one tenth and the notices name the way back", () => {
+	// A breakdown wins over the total, which counts cache reads in full; reads weigh 0.1 (cw-2).
+	strictEqual(
+		settledCallTokens({
+			total: { value: 91_300 },
+			input: { value: 800 },
+			cacheRead: { value: 90_000 },
+			cacheWrite: { value: 300 },
+			output: { value: 200 },
+		}),
+		10_300,
+	);
+	// A total alone cannot be weighted, so it counts in full.
+	strictEqual(settledCallTokens({ total: { value: 90 } }), 90);
 	strictEqual(
 		settledCallTokens({ input: { value: 10 }, cacheRead: { value: 5 }, output: { value: 3 }, cacheWrite: {} }),
-		18,
+		14,
 	);
 	strictEqual(settledCallTokens(null), 0);
 	const halt: AutonomyHalt = {
@@ -154,7 +166,10 @@ test("settled call tokens prefer the provider total and the notices name the way
 		detail: "600-call cap",
 		usage: { toolCalls: 600, activeMs: 38 * 60_000, tokens: 1_900_000 },
 	};
-	match(autonomyHaltNotice(halt), /600-call cap.*Enter on an empty prompt continues for another 600 calls/u);
+	match(
+		autonomyHaltNotice(halt),
+		/600-call cap \(600 tool calls, 38 min, 1\.9M cap tokens\).*Enter on an empty prompt continues for another 600 calls/u,
+	);
 	match(autonomyHaltNotice(halt, "headless"), /^autonomous-cap: .*clio-coder run --continue/u);
 	match(
 		autonomyHaltNotice({ kind: "judge", detail: "3 blocks in a row", usage: halt.usage }, "headless"),

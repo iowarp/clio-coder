@@ -68,7 +68,7 @@ it("records ACP tool kinds, completed spans, mutations, and only mediated safety
 		);
 		deepStrictEqual(receipt.safety?.toolTelemetry?.unfinished, []);
 		strictEqual(receipt.toolActivity?.mutatingSucceeded, true);
-		deepStrictEqual(receipt.safety?.decisions, { allowed: 0, blocked: 0, permissionRequested: 0 });
+		deepStrictEqual(receipt.safety?.decisions, { allowed: 0, blocked: 0, guardBlocked: 0, permissionRequested: 0 });
 	} finally {
 		await bundle.extension.stop?.();
 	}

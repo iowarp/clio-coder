@@ -237,11 +237,11 @@ it("a main call journals its stages in Pi's order and its cache physics, a budge
 		deepStrictEqual(turns, [
 			{
 				stopReason: "stop",
-				terminal: { cause: null, stage: "firstToken", retries: 0, callIds: [sent.callId] },
+				terminal: { cause: null, stage: "streaming", retries: 0, callIds: [sent.callId] },
 			},
 			{
 				stopReason: "stop",
-				terminal: { cause: null, stage: "firstToken", retries: 0, callIds: [recompiled.callId] },
+				terminal: { cause: null, stage: "streaming", retries: 0, callIds: [recompiled.callId] },
 			},
 			{
 				stopReason: "error",

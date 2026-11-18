@@ -351,6 +351,7 @@
 				"decisions": {
 					"allowed": 2,
 					"blocked": 1,
+					"guardBlocked": 0,
 					"permissionRequested": 0
 				},
 				"blockedAttempts": [
@@ -2240,6 +2241,7 @@
 				"decisions": {
 					"allowed": 2,
 					"blocked": 1,
+					"guardBlocked": 0,
 					"permissionRequested": 0
 				},
 				"blockedAttempts": [

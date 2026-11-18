@@ -103,7 +103,7 @@ export function loadVerifiedScoutSource(input: {
 	// A continuation dispatches workers into the source run's cwd, so a Scout
 	// run another session made would send this session's workers into that
 	// session's project.
-	if (!dispatchOwnership(dispatchOwnerOf(input.dispatch)).ownsRun(envelope)) {
+	if (!dispatchOwnership(dispatchOwnerOf(input.dispatch)).readsRun(envelope)) {
 		throw new Error(`dispatch: Scout source run '${input.ref.runId}' belongs to another session`);
 	}
 	const record = readVerifiedRun(clioStateDir(), input.ref.runId, input.ref.runDigest);

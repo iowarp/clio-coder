@@ -177,9 +177,11 @@ async function fixture(t: TestContext, script = normal, overrides: Record<string
 	const extension = result.extension;
 	let sessionId = "clio-coder-session-one";
 	let idle = true;
+	const reports: string[] = [];
 	const runtime = new OperatorExtensionRuntime({
 		context: () => ({ workspace: cwd, sessionId, mode: "interactive" }),
 		isIdle: () => idle,
+		onReload: (result) => reports.push(result.message),
 	});
 	t.after(async () => {
 		await runtime.dispose();
@@ -192,6 +194,7 @@ async function fixture(t: TestContext, script = normal, overrides: Record<string
 		extension,
 		runtime,
 		manifest,
+		reports,
 		setSession: (next: string) => {
 			sessionId = next;
 		},
@@ -378,6 +381,18 @@ test("install change while staging rejects candidate and starts no substituted b
 		f.runtime.commands().some((row) => row.available),
 		false,
 	);
+});
+
+test("a runtime closed while a reload stages drops the reload without reporting a failure", async (t) => {
+	const f = await fixture(
+		t,
+		'export default async api=>{await new Promise(r=>setTimeout(r,100));api.handle("inspect",()=>({text:"ok"}));};',
+	);
+	const reload = f.runtime.reload();
+	await delay(30);
+	await f.runtime.dispose();
+	deepStrictEqual(await reload, { status: "rejected", generation: 0, message: "operator runtime is disposed" });
+	deepStrictEqual(f.reports, []);
 });
 
 test("event observations have no bodies, cannot open panels, and status resets on reload", async (t) => {

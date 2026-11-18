@@ -12,6 +12,7 @@ import {
 } from "../../core/telemetry/pricing.js";
 import { renderUsdEstimate, renderUsdLimit } from "../../core/telemetry/render.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
+import { readSessionMeta } from "../../engine/session.js";
 import type { ToolRoundRecord } from "../../engine/types.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
 import { WORKER_EXTENSION_HOOKS_MAX, WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
@@ -366,6 +367,7 @@ import {
 	nodeComponentRemedyEvent,
 	type RetryDecision,
 } from "./failure-classification.js";
+import { TOOL_GUARD_REASON_CODE } from "./failure-headline.js";
 import {
 	cleanupFleetChangeReturn,
 	type FleetChangeImport,
@@ -427,6 +429,7 @@ import {
 	resultContractWasDue,
 	runStatusForOutcome,
 } from "./outcome.js";
+import { sessionAncestorIds } from "./ownership.js";
 import { canonicalWriteRoots } from "./parallel-writers.js";
 import {
 	type DispatchPathScope,
@@ -768,6 +771,12 @@ export interface DispatchBundleOptions {
 	 * project instead.
 	 */
 	getSessionId?: () => string | null;
+	/**
+	 * The live session's `parentSessionId`, set when it was forked. The rest of
+	 * the chain is read from each ancestor's meta.json, so a fork inherits the
+	 * uncollected batches and the runs of every session it descends from.
+	 */
+	getSessionParentId?: () => string | null;
 	getSessionOrigin?: () => TelemetrySessionOrigin | null;
 	/** Interactive sessions park paid routes until their session ceiling is raised. */
 	budgetWaitForRaise?: boolean;
@@ -1111,7 +1120,10 @@ function foldAssistantCall(
 	return message.stopReason === "error" ? readStringOrNull(message.errorMessage) : null;
 }
 
-/** Counts one finished tool call's safety decision, and records it as a blocked attempt when it was refused. */
+/**
+ * Counts one finished tool call's safety decision, a tool guard's block apart from a safety refusal, and records it as
+ * a blocked attempt when it was refused.
+ */
 function foldToolDecision(
 	payload: {
 		decision?: unknown;
@@ -1123,10 +1135,11 @@ function foldToolDecision(
 		reason?: string;
 	},
 	tool: string,
-	counts: { allowed: number; blocked: number; permissionRequested: number },
+	counts: { allowed: number; blocked: number; guardBlocked: number; permissionRequested: number },
 	blockedAttempts: SafetyBlockedAttempt[],
 ): void {
 	if (payload.decision === "allowed") counts.allowed += 1;
+	else if (payload.decision === "blocked" && payload.reasonCode === TOOL_GUARD_REASON_CODE) counts.guardBlocked += 1;
 	else if (payload.decision === "blocked") counts.blocked += 1;
 	else if (payload.decision === "permission_requested") counts.permissionRequested += 1;
 	if (payload.outcome !== "blocked" && payload.decision !== "blocked") return;
@@ -6905,7 +6918,7 @@ export function createDispatchBundle(
 		timing.workerSpawnedAt = new Date(now()).toISOString();
 
 		const tokenMeter: RunTokenMeter = {};
-		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
+		const safetyDecisionCounts = { allowed: 0, blocked: 0, guardBlocked: 0, permissionRequested: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
 		const toolStats = new Map<string, ToolCallStat>();
 		const inFlightTools = new Map<string, number>();
@@ -7852,7 +7865,7 @@ export function createDispatchBundle(
 			}
 		})();
 		const tokenMeter: RunTokenMeter = {};
-		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
+		const safetyDecisionCounts = { allowed: 0, blocked: 0, guardBlocked: 0, permissionRequested: 0 };
 		const escalationCounts = { requested: 0, approved: 0, denied: 0, timedOut: 0 };
 		let escalationDeniedBy: "operator" | "main agent" | "safety judge" | undefined;
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
@@ -8556,6 +8569,8 @@ export function createDispatchBundle(
 							outcome: child.admission.outcome,
 						});
 						if (child.admission.decision === "allowed") safetyDecisionCounts.allowed += 1;
+						else if (child.admission.decision === "blocked" && child.admission.reasonCode === TOOL_GUARD_REASON_CODE)
+							safetyDecisionCounts.guardBlocked += 1;
 						else if (child.admission.decision === "blocked") safetyDecisionCounts.blocked += 1;
 						else safetyDecisionCounts.permissionRequested += 1;
 						if (child.admission.outcome === "blocked") {
@@ -11922,6 +11937,23 @@ export function createDispatchBundle(
 		return failed(`request ${input.requestId} ${settled.state} before the operator answered`, settled);
 	}
 
+	// A fork's lineage never changes once stamped, so each complete chain is read
+	// from disk once; owner() runs on every turn end and wake poll.
+	const ancestorChains = new Map<string, string[]>();
+	const ownerAncestors = (sessionId: string): string[] => {
+		const parentSessionId = options?.getSessionParentId?.() ?? null;
+		if (parentSessionId === null) return [];
+		const key = `${sessionId}\0${parentSessionId}`;
+		const cached = ancestorChains.get(key);
+		if (cached !== undefined) return cached;
+		const chain = sessionAncestorIds(
+			sessionId,
+			parentSessionId,
+			(id) => (readSessionMeta(id) as { parentSessionId?: string | null }).parentSessionId,
+		);
+		ancestorChains.set(key, chain);
+		return chain;
+	};
 	const contract: DispatchContract = {
 		awaitStartupRecovery,
 		warmRouteHistory() {
@@ -11963,10 +11995,13 @@ export function createDispatchBundle(
 		owner: () => {
 			// Only a configured absolute root adds a location ownership cannot derive.
 			const worktreeRoot = getEffectiveSettings()?.fleet?.worktrees?.root;
+			const sessionId = options?.getSessionId?.() ?? null;
+			const ancestorSessionIds = sessionId === null ? [] : ownerAncestors(sessionId);
 			return {
-				sessionId: options?.getSessionId?.() ?? null,
+				sessionId,
 				cwd: process.cwd(),
 				...(worktreeRoot !== undefined && isAbsolute(worktreeRoot) ? { worktreeRoot } : {}),
+				...(ancestorSessionIds.length > 0 ? { ancestorSessionIds } : {}),
 			};
 		},
 		listRuns(status, where) {

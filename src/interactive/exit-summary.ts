@@ -183,7 +183,7 @@ function internalGitSummary(snapshot: Pick<ExitSummarySnapshot, "internalGit">):
 }
 
 /**
- * `contained yolo · 42 tool calls, 12 min, 310k tokens · paused at the 40-call cap · 2 open decisions`, then the
+ * `contained yolo · 42 tool calls, 12 min, 310k cap tokens · paused at the 40-call cap · 2 open decisions`, then the
  * decisions themselves when `list`, or null when the session never ran at yolo (ob-yolo D7).
  */
 function autonomySummary(snapshot: Pick<ExitSummarySnapshot, "autonomy">, list: boolean): string[] | null {
@@ -202,7 +202,7 @@ function autonomySummary(snapshot: Pick<ExitSummarySnapshot, "autonomy">, list: 
 	const shown = list ? report.openDecisions.slice(-GIT_HOOKS_SHOWN).map(formatOpenDecision) : [];
 	return [
 		`${report.confinement} yolo`,
-		`${countLabel(used.toolCalls, "tool call")}, ${formatCompactMs(used.activeMs)}, ${formatFooterTokens(used.tokens)} tokens`,
+		`${countLabel(used.toolCalls, "tool call")}, ${formatCompactMs(used.activeMs)}, ${formatFooterTokens(used.tokens)} cap tokens`,
 		...halted,
 		total === 0 ? "no open decisions" : countLabel(total, "open decision"),
 		...shown,

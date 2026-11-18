@@ -655,8 +655,9 @@ export const TurnSettledSchema = Type.Object(
 		terminal: Type.Object(
 			{
 				cause: Type.Union([FailureCause, Type.Null()]),
-				// The last stage the turn's final call completed; nothing has emitted this kind before #434's P2.
-				stage: Type.Union([vocabulary(["transform", "auth", "admission", "send", "firstToken"]), Type.Null()]),
+				// The last stage the turn's final call reached: `streaming` once it produced output. `firstToken` is the
+				// value journals before bt-26 N2a wrote for that; nothing writes it now.
+				stage: Type.Union([vocabulary(["transform", "auth", "admission", "send", "firstToken", "streaming"]), Type.Null()]),
 				retries: count,
 				/**
 				 * The turn's calls settled by turn end. A call settling later stays journaled under the same ctx.turnId

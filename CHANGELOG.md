@@ -44,6 +44,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- Run records and the headless terminal frame report tool guard blocks as safety.decisions.guardBlocked, and decisions.blocked counts safety refusals only. Run records written earlier keep the mixed count under blocked (bt-15 T3).
 - `run --agent` exits 1 when the run's sealed result-contract quality is `fail` (a check red after its last edit), as a verifier fail verdict already does; the outcome stays `succeeded`, and a baseline red before any edit stays exit 0 (x1-5).
 - The citation-check nudge asks for the full answer again with corrected citations instead of "keep the rest of the answer as it is" (bt-29).
 - `evidence inspect --json` names the top-level failed-validation count `quality.failedValidationCount`, so it no longer shares a name with the `evidence.quality.failedValidations` array of names (bt-20 P-C).
@@ -104,6 +105,11 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A turn whose last call streamed before it stopped now settles with stage "streaming", not "firstToken", and a harness stop (shutdown, run --timeout, repetition guard, operator cancel, route move) persists failure stage "harness" with its own cause instead of a transport abort (bt-26 N2a).
+- why-stopped words harness-initiated stops as "Stopped on <cause>" instead of "Failed on <cause>"; provider and transport failures still read "Failed on" (bt-26 N2b).
+- A headless or ACP run that ends while an extension reload is still staging no longer prints "Extension reload failed"; the closed runtime drops the reload silently (cw-6).
+- The yolo autonomous token cap now counts cache reads at one tenth and names its figure "cap tokens", so a long cached prefix no longer trips the 5M default after a few dozen calls (cw-2).
+- A /fork session is now nudged about and can collect its ancestors' uncollected detached batches; the first collector wins and cancel stays with the dispatching session (D1-4).
 - `go test -run '^TestX$' ./pkg` and other runner option values (jest/vitest `-t`, pytest `-k`) no longer read as a check run outside the workspace, so their green verifies and clears an earlier red (x5-3).
 - A check logged to `$TMPDIR/…`, `~/…`, a `safety.scratchRoots` directory, or a new untracked file through its own tee or redirect is output, not a change; its green verifies and no longer wipes earlier passes (x5-4).
 - A read-only `sed -n` script with a bracket expression (`/^[[:space:]]*x/p`) stays a read and no longer erases standing check outcomes (x5-5).

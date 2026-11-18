@@ -626,9 +626,12 @@ export interface RunResultSafetySummary {
 	 * The decision axis: how the safety classifier admitted each tool call. It is
 	 * distinct from the outcome axis (`blockedAttempts`, plus `toolStats`/
 	 * `toolActivity` blocked counts), which records whether a call executed.
-	 * `allowed` + `blocked` + `permissionRequested` equals the total tool calls.
-	 * `blocked` counts only hard denials by a policy rule or a tool guard
-	 * (reason code `guard_block`); a call that required permission and was denied
+	 * `allowed` + `blocked` + `guardBlocked` + `permissionRequested` equals the
+	 * total tool calls. `blocked` counts only safety refusals, hard denials by a
+	 * policy rule; a tool guard holding back a call (reason code `guard_block`,
+	 * such as rule `guard.loop`) counts under `guardBlocked`. Receipts written
+	 * before `guardBlocked` existed lack it and count guard blocks under
+	 * `blocked`. A call that required permission and was denied
 	 * non-interactively is counted under `permissionRequested`, not `blocked`, so
 	 * scripts can tell "approval would have been needed" apart from a policy
 	 * block (see docs/architecture/safety-model.md). Such a call still appears in
@@ -639,6 +642,8 @@ export interface RunResultSafetySummary {
 	decisions: {
 		allowed: number;
 		blocked: number;
+		/** Calls a tool guard held back (reason code `guard_block`); absent on receipts older than the field. */
+		guardBlocked?: number;
 		permissionRequested: number;
 		/**
 		 * Worker permission-escalation tallies. Present only on receipts that saw
