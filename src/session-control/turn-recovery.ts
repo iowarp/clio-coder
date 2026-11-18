@@ -6,6 +6,7 @@
  * terminal failure.
  */
 
+import { isHostAuthored } from "../core/message-accounting.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import type { RecoveryFailure, RetryCountdownHandle, RetrySettings } from "../domains/session/retry.js";
@@ -124,8 +125,6 @@ export interface TurnRecovery {
 	 * an attempt that will be retried is not a settled turn, and surfaces must not read it as one.
 	 */
 	forecastRetry(agentRuntime: AgentRuntime, message: AgentMessage): RetryForecast | null;
-	/** Where the current attempt's messages begin, which `forecastRetry` reads for attempt output. */
-	noteAttemptStart(messageIndex: number): void;
 	/** Close a forecast no ladder went on to settle, so nothing keeps waiting on a retry that never came. */
 	settleOpenForecast(): void;
 	cancelRetryCountdown(): void;
@@ -200,9 +199,14 @@ export function rewriteStallAbortMessage(
 }
 
 export function recoveryAttemptHasOutput(messages: ReadonlyArray<AgentMessage>): boolean {
+	// A reprompt run opens with a host-authored tool exchange; the host wrote it, so it is no output of the attempt.
+	const hostCalls = new Set<string>();
+	for (const message of messages)
+		if (message.role === "assistant" && isHostAuthored(message))
+			for (const block of message.content) if (block.type === "toolCall") hostCalls.add(block.id);
 	return messages.some((message) => {
-		if (message.role === "toolResult") return true;
-		if (message.role !== "assistant") return false;
+		if (message.role === "toolResult") return !hostCalls.has(message.toolCallId);
+		if (message.role !== "assistant" || isHostAuthored(message)) return false;
 		return message.content.some(
 			(block) =>
 				block.type === "toolCall" ||
@@ -222,7 +226,6 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 	/** Those the provider's rate limit made Clio sit out. No limit counts them, so nothing may show them against one. */
 	let chainProviderWaits = 0;
 	let chainWaitedMs = 0;
-	let attemptStart = 0;
 	let refreshingAuth = false;
 	let openForecast: RetryForecast | null = null;
 	let inLadderWait = false;
@@ -340,7 +343,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			openForecast = { attempt: 1, maxAttempts: 1 };
 			return openForecast;
 		}
-		const attempted = agentRuntime.agent.state.messages.slice(attemptStart);
+		const attempted = state.runEvidence.attempt();
 		const classified = classifyRecoveryFailure({
 			message: failure.errorMessage,
 			runtimeId: agentRuntime.runtimeId,
@@ -719,7 +722,8 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			}
 
 			if (cancelled()) return true;
-			attemptStart = agentRuntime.agent.state.messages.length;
+			// A continue that throws before its run starts still classifies against an attempt of its own.
+			state.runEvidence.beginAttempt();
 			try {
 				state.routeMoveSeat = true;
 				await agentRuntime.agent.continue();
@@ -729,7 +733,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				classified = classifyRecoveryFailure({
 					message,
 					runtimeId: agentRuntime.runtimeId,
-					hasAttemptOutput: recoveryAttemptHasOutput(agentRuntime.agent.state.messages.slice(attemptStart)),
+					hasAttemptOutput: recoveryAttemptHasOutput(state.runEvidence.attempt()),
 					cause: err,
 					...(typeof err === "object" && err !== null && "status" in err ? { status: err.status } : {}),
 				});
@@ -781,7 +785,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			// watchdog's abort as an operator cancel and stop one rung in.
 			const nextFailure = reclassifyStallAbort(state, settled);
 			ensureFailureVisibleAndPersisted(nextFailure);
-			classified = classify(nextFailure, agentRuntime.agent.state.messages.slice(attemptStart));
+			classified = classify(nextFailure, state.runEvidence.attempt());
 			if (moving()) {
 				failure = nextFailure;
 				continue;
@@ -823,9 +827,6 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		runTransientRetryChain,
 		ensureFailureVisibleAndPersisted,
 		forecastRetry,
-		noteAttemptStart(messageIndex): void {
-			attemptStart = messageIndex;
-		},
 		settleOpenForecast(): void {
 			if (openForecast === null) return;
 			recordRetryStatus({ phase: "cancelled", ...openForecast }, false);

@@ -175,6 +175,13 @@ async function drive(
 		createAgent: ((agentOptions: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
 			let listener: (event: AgentEvent) => unknown = () => {};
 			const state = { ...agentOptions?.initialState, messages: [] as AgentMessage[] };
+			// The engine appends a message and then emits its message_end, which the run evidence log records.
+			const settle = async (...messages: AgentMessage[]) => {
+				for (const message of messages) {
+					state.messages.push(message);
+					await listener({ type: "message_end", message });
+				}
+			};
 			return {
 				requestCorrelationId: () => undefined,
 				agent: {
@@ -241,7 +248,7 @@ async function drive(
 								continue;
 							}
 							// The engine's tool round: the call, then its result with the tool's details.
-							state.messages.push(
+							await settle(
 								{
 									role: "assistant",
 									content: [{ type: "toolCall", id, name: STEP, arguments: { after } }],
@@ -276,7 +283,7 @@ async function drive(
 								},
 							};
 							const id = `${turnId}-chain`;
-							state.messages.push(
+							await settle(
 								{
 									role: "assistant",
 									content: [{ type: "toolCall", id, name: "gateway", arguments: { op: "chain", steps: [] } }],

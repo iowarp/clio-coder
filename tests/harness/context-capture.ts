@@ -56,14 +56,15 @@ export interface ScriptedCall {
 }
 
 /**
- * One reply: plain text, tool calls, a reasoning-only reply cut by the output cap (chat completions only), or an
- * HTTP error with that status and message.
+ * One reply: plain text, tool calls, a reasoning-only reply cut by the output cap (chat completions only), an
+ * HTTP error with that status and message, or a connection dropped before any response.
  */
 export type CaptureReply =
 	| { text: string }
 	| { calls: ScriptedCall[] }
 	| { thinkingOnlyLength: string }
-	| { status: number; error: string };
+	| { status: number; error: string }
+	| { drop: true };
 type StreamReply = { text: string } | { calls: ScriptedCall[] };
 
 export type CaptureScript = (request: CapturedRequest, index: number) => CaptureReply;
@@ -224,6 +225,10 @@ export async function startCaptureServer(script: CaptureScript): Promise<Capture
 		const captured: CapturedRequest = { family, path, body };
 		const index = requests.push(captured) - 1;
 		const reply = script(captured, index);
+		if ("drop" in reply) {
+			req.socket.destroy();
+			return;
+		}
 		if ("status" in reply) {
 			res.writeHead(reply.status, { "content-type": "application/json" });
 			res.end(JSON.stringify({ error: { message: reply.error, type: "invalid_request_error" } }));
