@@ -28,7 +28,7 @@ import {
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
 	protectedArtifactMutationBlockReason,
-	tokenizeShellLike,
+	scanShellLike,
 } from "../../src/domains/safety/protected-artifacts.js";
 import { redactSecretString } from "../../src/domains/safety/redaction.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
@@ -733,9 +733,16 @@ describe("safety gate boundary", () => {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }, "yolo").kind, kind, command);
 			if (command === "printf $'a\\tb\\n'" || command === "echo $'x\\ny'") {
 				strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).execRecognition, "recognized", command);
-				deepStrictEqual(tokenizeShellLike(command), command.startsWith("printf") ? ["printf", "a\tb\n"] : ["echo", "x\ny"]);
+				deepStrictEqual(
+					scanShellLike(command).map((token) => token.value),
+					command.startsWith("printf") ? ["printf", "a\tb\n"] : ["echo", "x\ny"],
+				);
 			}
-			if (command === "IFS=$'\\n'") deepStrictEqual(tokenizeShellLike(command), ["IFS=\n"]);
+			if (command === "IFS=$'\\n'")
+				deepStrictEqual(
+					scanShellLike(command).map((token) => token.value),
+					["IFS=\n"],
+				);
 			if (command.startsWith("rm -rf $'") && command !== "rm -rf $'~'") {
 				strictEqual(
 					policy.evaluate({ tool: ToolNames.Bash, args: { command } }).reasonCode,
@@ -1215,7 +1222,10 @@ describe("safety gate boundary", () => {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
 		}
 		const command = 'clio-coder "" \'\' "\\#" "--he\\lp" \\# word#suffix # dropped\n';
-		deepStrictEqual(tokenizeShellLike(command), ["clio-coder", ...shellArgv(command), ";"]);
+		deepStrictEqual(
+			scanShellLike(command).map((token) => token.value),
+			["clio-coder", ...shellArgv(command), ";"],
+		);
 	});
 
 	it("keeps compound redirects to active skills blocked while allowing descriptor duplication on reads", () => {

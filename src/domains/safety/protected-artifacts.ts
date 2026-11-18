@@ -1836,11 +1836,6 @@ function pathArgs(segment: ReadonlyArray<string>, commandIndex: number): string[
 	return args;
 }
 
-/** Flat compatibility values; use scanShellLike when operator identity matters. */
-export function tokenizeShellLike(command: string): string[] {
-	return scanShellLike(command).map((token) => token.value);
-}
-
 /** Literal argv by command, with actual operators and redirections removed. */
 export function commandArgumentSegments(command: string): string[][] {
 	return splitSegments(scanShellLike(command)).map(shellCommandArguments);
