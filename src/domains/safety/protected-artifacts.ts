@@ -1827,12 +1827,129 @@ export function shellWritesOnlyNamedTargets(command: string, gitHelpersConfigure
 /** Runners that read the tree and write none of it, unless told to update snapshots or fix what they find. */
 const READ_ONLY_RUNNERS: ReadonlySet<string> = new Set(["vitest", "jest", "mocha", "eslint"]);
 
+/** Runners that run their operand in the project's environment; the operand is what runs (x8-2). */
+const ENVIRONMENT_RUNNERS: ReadonlyMap<string, string> = new Map([
+	["uv", "run"],
+	["poetry", "run"],
+	["pipenv", "run"],
+	["hatch", "run"],
+	["pdm", "run"],
+	["rye", "run"],
+	["bundle", "exec"],
+]);
+
+/** The command `uv run`, `poetry run`, `bundle exec` and the like run, past their own flags; null for anything else. */
+function environmentRunnerInvocation(
+	executable: string,
+	args: ReadonlyArray<string>,
+): { executable: string; args: ReadonlyArray<string> } | null {
+	if (args[0] === undefined || ENVIRONMENT_RUNNERS.get(executable) !== args[0]) return null;
+	const inner = args.findIndex((arg, index) => index > 0 && !arg.startsWith("-"));
+	return inner < 0 ? null : { executable: basenameToken(args[inner]), args: args.slice(inner + 1) };
+}
+
+/** Make targets that run a check, read like the opaque `npm test` and `npm run lint` scripts (x8-2). */
+const MAKE_CHECK_TARGETS: ReadonlySet<string> = new Set(["test", "check", "lint"]);
+
+/** `make test`, `make -s lint`, `make -j 4 test check`: only check targets, behind output and parallelism flags. */
+function makeCheckMatch(args: ReadonlyArray<string>): boolean {
+	let targets = 0;
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		if (arg === "-j" || arg === "--jobs") {
+			if (/^\d+$/u.test(args[index + 1] ?? "")) index += 1;
+			continue;
+		}
+		if (/^(?:-s|--silent|--quiet|-k|--keep-going|-j\d+|--jobs=\d+)$/u.test(arg)) continue;
+		if (arg.startsWith("-")) return false;
+		if (/^[A-Za-z_][A-Za-z0-9_]*=/u.test(arg)) continue;
+		if (!MAKE_CHECK_TARGETS.has(arg)) return false;
+		targets += 1;
+	}
+	return targets > 0;
+}
+
+/**
+ * Read-only checks of other ecosystems by their subcommand (x8-2): cargo check and clippy, go vet and build (without
+ * `-o`), `gofmt -l`, mypy, pyright, ruff check, `prettier --check`, biome check and lint, dotnet test, rspec, phpunit,
+ * composer test, deno test, check and lint, playwright test, cypress run, tox, nox, hatch test, rake test, `python
+ * manage.py test` and make's check targets. An option that writes what they read (`--fix`, `--write`, `-w`, a
+ * snapshot update, mypy's `--install-types`, ruff's `--add-noqa`, biome's `--apply`) or a tox or nox environment named
+ * as a writer (`-e format`) keeps the run out of the set.
+ */
+function ecosystemCheckMatch(executable: string, args: ReadonlyArray<string>): boolean {
+	const has = (pattern: RegExp) => args.some((arg) => pattern.test(arg));
+	const subcommand = args[0] ?? "";
+	let matched: boolean;
+	switch (executable) {
+		case "cargo":
+			matched = subcommand === "check" || subcommand === "clippy";
+			break;
+		case "go":
+			matched = subcommand === "vet" || (subcommand === "build" && !has(/^-o(?:=|$)/u));
+			break;
+		case "gofmt":
+			matched = has(/^-[ld]$/u);
+			break;
+		case "mypy":
+			matched = !has(/^--install-types/u);
+			break;
+		case "pyright":
+			matched = !has(/^--(?:createstub|writebaseline)/u);
+			break;
+		case "ruff":
+			matched = subcommand === "check" && !has(/^--add-noqa/u);
+			break;
+		case "prettier":
+			matched = has(/^(?:--check|-c|--list-different|-l)$/u);
+			break;
+		case "biome":
+			matched = (subcommand === "check" || subcommand === "lint") && !has(/^--apply/u);
+			break;
+		case "dotnet":
+		case "composer":
+		case "hatch":
+		case "playwright":
+			matched = subcommand === "test";
+			break;
+		case "rspec":
+			matched = !args.includes("--init");
+			break;
+		case "phpunit":
+			matched = !has(/^--(?:generate|migrate)-/u);
+			break;
+		case "deno":
+			matched = subcommand === "test" || subcommand === "check" || subcommand === "lint";
+			break;
+		case "cypress":
+			matched = subcommand === "run";
+			break;
+		case "tox":
+		case "nox":
+			matched = !args.flatMap((arg) => arg.split(/[=,]/u)).some(isWriteCapableScriptName);
+			break;
+		case "rake":
+			matched = subcommand === "test";
+			break;
+		case "make":
+			matched = makeCheckMatch(args);
+			break;
+		default:
+			matched = isPythonExecutable(executable) && basenameToken(args[0]) === "manage.py" && args[1] === "test";
+	}
+	return matched && !args.some(writesSnapshots) && !checkWritesTree([executable, ...args]);
+}
+
 /**
  * The closed read-only half of the check vocabulary (x5-1): `tsc --noEmit`, `node --check`, `node --test`, and
- * vitest, jest, mocha or eslint, bare or behind `npx` or `pnpm exec`. A snapshot update, `--fix`, `node -e` and a
- * bare `tsc` that emits stay outside it, so they remain changes that retire earlier passes.
+ * vitest, jest, mocha or eslint, bare or behind `npx` or `pnpm exec`, the other ecosystems' read-only checks
+ * ({@link ecosystemCheckMatch}), and any check behind `uv run`, `poetry run` or `bundle exec`. A snapshot update,
+ * `--fix`, `node -e` and a bare `tsc` that emits stay outside it, so they remain changes that retire earlier passes.
  */
 function readOnlyCheckMatch(executable: string, args: ReadonlyArray<string>): boolean {
+	const wrapped = environmentRunnerInvocation(executable, args);
+	if (wrapped !== null) return checkStepMatch(wrapped.executable, wrapped.args);
+	if (ecosystemCheckMatch(executable, args)) return true;
 	if (executable === "npx") {
 		if (args.some((arg) => arg === "-c" || arg === "--call" || arg.startsWith("--call="))) return false;
 		const inner = npxInvocation(args);
@@ -1887,18 +2004,18 @@ function writesSnapshots(arg: string): boolean {
 	return SNAPSHOT_WRITE_FLAGS.has(arg) || arg.startsWith("--update") || /^-update(?:=|$)/u.test(arg);
 }
 
+/** Runners whose `test` subcommand runs the tests, with the runner's own options after it. */
+const TEST_SUBCOMMAND_RUNNERS: ReadonlySet<string> = new Set(["go", "bun", "deno", "playwright"]);
+
 /**
  * The arguments a validated test runner reads its own options from, or null for any other command: `go test`,
- * `pytest`, `python -m pytest`, `uv run [python -m] pytest`, `bun test` and `cargo insta` (x7-2).
+ * `pytest`, `python -m pytest`, `bun test`, `deno test`, `playwright test` and `cargo insta` (x7-2, x8-2);
+ * {@link checkWritesTree} unwraps `uv run` first.
  */
 function testRunnerArgs(executable: string, args: ReadonlyArray<string>): ReadonlyArray<string> | null {
 	if (executable === "pytest" || executable === "py.test") return args;
 	if (isPythonExecutable(executable) && moduleArg(args) === "pytest") return args;
-	if ((executable === "go" || executable === "bun") && args[0] === "test") return args.slice(1);
-	if (executable === "uv" && args[0] === "run") {
-		const inner = args.slice(1).findIndex((arg) => !arg.startsWith("-"));
-		return inner < 0 ? null : testRunnerArgs(basenameToken(args[inner + 1]), args.slice(inner + 2));
-	}
+	if (TEST_SUBCOMMAND_RUNNERS.has(executable) && args[0] === "test") return args.slice(1);
 	return null;
 }
 
@@ -1976,7 +2093,8 @@ const W_FLAG_WRITERS: ReadonlySet<string> = new Set(["prettier", "gofmt", "goimp
 /**
  * Whether a check command may rewrite the tree it checks (x3-3): a package script, make or just target named as a
  * writer ({@link isWriteCapableScriptName}), `--fix` or `--write`, a formatter's `-w`, or a snapshot update passed to a
- * package script, `node --test` or a validated test runner ({@link testRunnerArgs}), or a `cargo insta` accept. A heuristic on names and flags: a writer spelled otherwise reads as a check, and a
+ * package script, `node --test` or a validated test runner ({@link testRunnerArgs}), or a `cargo insta` accept, also
+ * behind `uv run`, `poetry run` or `bundle exec`. A heuristic on names and flags: a writer spelled otherwise reads as a check, and a
  * read-only script named `format` reads as a change, which only clears passes the run must then earn again.
  */
 export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
@@ -1986,6 +2104,8 @@ export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
 	const args = argv.slice(index + 1);
 	if (args.some((arg) => TREE_WRITING_FLAGS.has(arg) || arg.startsWith("--fix="))) return true;
 	if (W_FLAG_WRITERS.has(executable) && args.includes("-w")) return true;
+	const wrapped = environmentRunnerInvocation(executable, args);
+	if (wrapped !== null) return checkWritesTree([wrapped.executable, ...wrapped.args]);
 	if (executable === "node") return args.includes("--test-update-snapshots");
 	// `go test -update`, `pytest --snapshot-update` and `bun test -u` rewrite the goldens they compare against (x7-2).
 	if (testRunnerArgs(executable, args)?.some(writesSnapshots) === true) return true;

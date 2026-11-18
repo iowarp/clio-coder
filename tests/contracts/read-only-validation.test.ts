@@ -785,6 +785,7 @@ it("a check sharing its bash call with a change judges the final tree only when 
 		"go test ./... -update",
 		"pytest --snapshot-update",
 		"python -m pytest --force-regen",
+		"poetry run pytest --snapshot-update",
 		"bun test -u",
 	])
 		deepStrictEqual(seal("npm test", change), stale, change);
@@ -967,6 +968,22 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 		["tsc", "mutation"],
 		["black src", "mutation"],
 		["ls && git stash pop", "mutation"],
+		// Other ecosystems' read-only checks, behind environment runners too, while their fixing forms write (x8-2).
+		["cargo clippy --all-targets", "check"],
+		["cargo clippy --fix --allow-dirty", "mutation"],
+		["go vet ./...", "check"],
+		["gofmt -l .", "check"],
+		["gofmt -l -w .", "mutation"],
+		["poetry run mypy .", "check"],
+		["bundle exec rspec", "check"],
+		["tox -e py311", "check"],
+		["make -j 4 lint", "check"],
+		["npx prettier --check .", "check"],
+		["npx prettier --write .", "mutation"],
+		["npx biome check .", "check"],
+		["biome check --write .", "mutation"],
+		["ruff check --fix", "mutation"],
+		["npx playwright test -u", "mutation"],
 		// Neither a known check, reader nor writer: it neither settles nor clears.
 		["node codemod.mjs", "unknown"],
 		["python script.py", "unknown"],
