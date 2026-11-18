@@ -761,7 +761,6 @@ describe("production compaction controls", () => {
 		// with a low configured trigger. Keep the empty-attempt memo contract
 		// separate from the saved read batch, which now has a useful safe cut.
 		install(1);
-		const threshold = f.settings.context.compaction.threshold;
 		f.settings.context.compaction.threshold = 0.1;
 		strictEqual(findCutPoint(f.entries(), 20000).firstKeptEntryIndex, 0);
 		strictEqual(await context.runAutoCompact(runtime, false), false);
@@ -777,7 +776,8 @@ describe("production compaction controls", () => {
 		context.refreshAgentMessagesFromSession(runtime);
 		strictEqual(await context.runAutoCompact(runtime, false), false);
 		strictEqual(attempts, 2, "same-length changed content invalidates the empty memo");
-		f.settings.context.compaction.threshold = threshold;
+		// The read stage's next request is about 22K tokens, 67% of the window.
+		f.settings.context.compaction.threshold = 0.65;
 		install(12);
 		strictEqual(findCutPoint(f.entries(), 20000).firstKeptEntryIndex, 0);
 		strictEqual(await context.runAutoCompact(runtime, false), true, "request-budget cut retains the final read batch");
@@ -785,7 +785,7 @@ describe("production compaction controls", () => {
 		ok(f.entries().some((entry) => entry.kind === "compactionSummary"));
 		install(17);
 		const before = context.liveContextEstimate(runtime);
-		ok(before.tokens > 32768);
+		ok(before.tokens + 8192 > 32768, "the grep growth no longer fits beside its output reserve");
 		ok(findCutPoint(f.entries(), 20000).firstKeptEntryIndex > 0);
 		f.response.text = syntheticCompactionSummary("Suggested skill: /skill clio-coder-test");
 		const abort = new AbortController();
