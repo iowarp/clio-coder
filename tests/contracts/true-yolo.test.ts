@@ -43,6 +43,7 @@ import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import { effectiveYoloConfinement, YOLO_CONFINEMENT_PIN_ENV } from "../../src/domains/safety/autonomy.js";
 import { type OutwardPlaces, outwardLineLeaves } from "../../src/domains/safety/containment.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
+import { denialLines } from "../../src/domains/safety/denial.js";
 import { createGitHookDriftGuard } from "../../src/domains/safety/hook-drift.js";
 import {
 	createSafetyPolicyEngine,
@@ -1477,6 +1478,20 @@ test("the raw-text reading follows a literal cd, joins and decodes its words, an
 	match(over.reasons.join("\n"), /too large to read that way/u);
 	// The headline names the floor rule that fired, not the classifier's action class.
 	strictEqual(over.rejection?.short, "bash blocked: yolo-floor-raw-text in yolo");
+	// So does the model's refusal line: the raw-text budget, never the class the classifier gave the call.
+	const registry = createRegistry({
+		safety: createWorkerSafety({ cwd }),
+		autonomy: () => "yolo",
+		scratchRoots: () => [],
+	});
+	registry.register({ ...bashTool, run: async () => ({ kind: "ok", output: "ran" }) });
+	const refused = await registry.invoke({
+		tool: ToolNames.Bash,
+		args: { command: `: "$(cat <<X\nX\n)" ${"rm ".repeat(1000)}` },
+	});
+	const [refusal] = refused.kind === "blocked" && refused.denial !== undefined ? denialLines(refused.denial) : [""];
+	match(refusal, /\(yolo-floor-raw-text\); .*32768-byte raw-text budget/u);
+	doesNotMatch(refusal, /classifies/u);
 	// A # beside a backtick, with no $( on the line, is not read as raw text.
 	strictEqual(
 		judge("git commit -m 'fix(cli): `clio-coder configure` keeps the saved route' -m 'fixes #412'").kind,

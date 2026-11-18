@@ -132,6 +132,8 @@ function claimedValidationNames(output: string | null): string[] {
 		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
 		const check = entry as Record<string, unknown>;
 		if (check.passed !== true || typeof check.name !== "string") continue;
+		// A baseline ran before the change, so it claims nothing about the changed tree (bt-17).
+		if (check.baseline === true) continue;
 		const name = check.name.trim();
 		if (name.length > 0) names.push(name);
 	}

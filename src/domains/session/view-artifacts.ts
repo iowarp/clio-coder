@@ -1360,7 +1360,7 @@ export class CompactionArtifactProvider implements ArtifactProvider {
 						`- trigger: ${entry.trigger ?? "unknown"}`,
 						`- tokens before: ${formatFooterTokens(entry.tokensBefore)}`,
 						...(entry.tokensAfter !== undefined ? [`- tokens after: ${formatFooterTokens(entry.tokensAfter)}`] : []),
-						...(entry.messagesSummarized !== undefined ? [`- messages summarized: ${entry.messagesSummarized}`] : []),
+						...(entry.messagesSummarized !== undefined ? [`- entries summarized: ${entry.messagesSummarized}`] : []),
 						`- continues at turn: ${entry.firstKeptTurnId}`,
 						"",
 						entry.summary,

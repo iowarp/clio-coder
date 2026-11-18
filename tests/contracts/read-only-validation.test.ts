@@ -73,6 +73,14 @@ it("read-only read claims do not require command evidence, but test claims still
 		})?.grounded,
 		0,
 	);
+	strictEqual(
+		groundClaimedValidations({
+			...input,
+			readOnly: false,
+			output: JSON.stringify({ validations: [{ name: "npm test", passed: true, baseline: true }] }),
+		}),
+		null,
+	);
 });
 it("mutation reports accept omitted denied checks as an empty array without asserting validation", () => {
 	const contract = { kind: "mutation-report" as const };

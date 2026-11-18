@@ -73,9 +73,14 @@ describe("bash write targets after cd, and links made in the same command", () =
 	});
 
 	it("follows two chained cds, a subshell, a brace group, and an if body", () => {
-		assertEscalated("cd data && cd sub && echo x > sublink/two.txt", [
-			`write-path-outside-cwd: ${join(deep, "two.txt")}`,
-		]);
+		// A cd on one line moves where the next line's cd and write resolve from.
+		for (const command of [
+			"cd data && cd sub && echo x > sublink/two.txt",
+			"cd data\ncd sub\necho x > sublink/two.txt",
+			"cd data\ncat > n.ts <<'EOF'\nconst f = (a) => a;\nEOF\ncd sub\necho x > sublink/two.txt",
+		]) {
+			assertEscalated(command, [`write-path-outside-cwd: ${join(deep, "two.txt")}`]);
+		}
 		assertEscalated("(cd data && echo x > linkdir/sub.txt)", [`write-path-outside-cwd: ${join(deep, "sub.txt")}`]);
 		assertEscalated("{ cd data; echo x > linkdir/brace.txt; }", [`write-path-outside-cwd: ${join(deep, "brace.txt")}`]);
 		assertEscalated("if true; then cd data; fi; echo x > linkdir/if.txt", [
@@ -132,6 +137,35 @@ describe("bash write targets after cd, and links made in the same command", () =
 			command: "rm -rf $(echo)/../..",
 		});
 		ok(block !== null, "rm -rf $(echo)/../.. is rm -rf / and still hits the protected artifact block");
+	});
+
+	it("reads a quoted here-document copied into a file as data, and one any other command gets as code", () => {
+		const data = "const up = (a) => rootlink/o;";
+		const code = "echo x > rootlink/o";
+		for (const command of [
+			`cat > notes.ts <<'EOF'\n${data}\nEOF`,
+			`cat <<"EOF" >> notes.ts\n${data}\nEOF`,
+			`tee notes.ts >/dev/null <<\\EOF\n${data}\nEOF`,
+			`cat > a.ts <<'EOF'\n${data}\nEOF\ncat > b.ts <<'EOF'\n${data}\nEOF\nnpm test`,
+		]) {
+			assertExecute(command);
+		}
+		const fromRoot = [`write-path-outside-cwd: ${join(deep, "o")}`];
+		for (const command of [
+			// Unquoted, the body is expanded, so it stays read as commands.
+			`cat > notes.ts <<EOF\n${data}\nEOF`,
+			...["bash", "sh", "zsh", "python3 -", "node", "perl", "ruby", "mytool"].map(
+				(consumer) => `${consumer} <<'EOF'\n${code}\nEOF`,
+			),
+			`eval "$(cat <<'EOF'\n${code}\nEOF\n)"`,
+			`cat <<'EOF' | bash\n${code}\nEOF`,
+			`cat <<'EOF' > >(sh)\n${code}\nEOF`,
+			`cat <<'EOF'\n${code}\nEOF`,
+			`cat > run.sh <<'EOF'\n${code}\nEOF\nbash run.sh`,
+			`cat() { sh; }; cat > n.ts <<'EOF'\n${code}\nEOF`,
+		]) {
+			assertEscalated(command, fromRoot);
+		}
 	});
 
 	it("cannot place a relative write after a cd the shell expands at run time, or one a loop repeats", () => {

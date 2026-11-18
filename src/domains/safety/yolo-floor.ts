@@ -117,7 +117,7 @@ const RAW_TEXT_START_WORD =
  * Most text the raw-text candidates of one line may hold together. Every candidate runs through the floor's
  * judgments, so the work grows with this sum; a line whose candidates exceed it is blocked.
  */
-const MAX_RAW_TEXT_BYTES = 32 * 1024;
+export const MAX_RAW_TEXT_BYTES = 32 * 1024;
 
 /** What each raw-text candidate costs the budget beyond its text: the floor's judgments have a fixed cost per call. */
 const RAW_TEXT_CANDIDATE_BYTES = 64;
