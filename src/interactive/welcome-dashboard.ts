@@ -98,6 +98,11 @@ export interface WelcomeDashboardDeps {
 	 * null. Read on every frame, so the supplier serves a cached line.
 	 */
 	getProjectConfigReminder?: () => string | null;
+	/**
+	 * Whether default autonomy's shell calls run in the OS sandbox here, or null
+	 * while the host probe has not answered. Read on every frame, so it never probes.
+	 */
+	getShellContained?: () => boolean | null;
 	/** Called when an off-render refresh lands, so the frame owner can ask for one. */
 	onFactsRefreshed?: () => void;
 	/**
@@ -127,6 +132,8 @@ export interface WelcomeDashboardStats {
 	autonomy: string;
 	/** The operator's yolo confinement; read only at yolo, absent reads contained. */
 	yoloConfinement?: string;
+	/** False when default's shell calls run uncontained on this host; absent or null while unknown. */
+	shellContained?: boolean | null;
 	targets: string;
 	fleet: string;
 	/** One line of connected subscription usage; null hides the row entirely. */
@@ -480,7 +487,12 @@ function gitSummary(stats: WelcomeDashboardStats): string {
 }
 
 function autonomySummary(stats: WelcomeDashboardStats): string {
-	if (stats.autonomy !== "yolo") return `Default ${GLYPH.dot} auto in workspace`;
+	if (stats.autonomy !== "yolo") {
+		// With no OS sandbox, shell calls keep their approval rails, so only edits are automatic (bt-11 #6).
+		return stats.shellContained === false
+			? `Default ${GLYPH.dot} auto edits ${GLYPH.dot} no OS sandbox`
+			: `Default ${GLYPH.dot} auto in workspace`;
+	}
 	return stats.yoloConfinement === "unconfined"
 		? `YOLO ${GLYPH.dot} UNCONFINED ${GLYPH.dot} never asks`
 		: `YOLO ${GLYPH.dot} contained ${GLYPH.dot} never waits`;
@@ -755,6 +767,7 @@ function statsSignature(stats: WelcomeDashboardStats): string {
 		stats.projectPreload,
 		stats.autonomy,
 		stats.yoloConfinement,
+		stats.shellContained,
 		stats.outputStyle,
 		stats.quota,
 		stats.projectConfig,
@@ -910,6 +923,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 			submitKeyLabel: null,
 			autonomy: settings?.safety?.autonomy ?? "default",
 			yoloConfinement: effectiveYoloConfinement(settings?.safety),
+			shellContained: this.deps.getShellContained?.() ?? null,
 			quota:
 				launchpad && settings?.interface?.outputDetail === "detailed" ? (this.deps.getQuotaSummary?.() ?? null) : null,
 			targets: "",

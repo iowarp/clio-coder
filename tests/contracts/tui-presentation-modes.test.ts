@@ -324,6 +324,36 @@ test("welcome centers the artwork and gives contextual project guidance without 
 	}
 });
 
+test("the default banner claims only automatic edits on a host whose shell runs without an OS sandbox (bt-11 #6)", () => {
+	process.env.TERM = "xterm-256color";
+	delete process.env.CLIO_CODER_SCREEN_READER;
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.target = "local";
+	settings.chat.model = "test-model";
+	settings.interface.demo = true;
+	settings.interface.outputDetail = "standard";
+	let contained: boolean | null = false;
+	const live = createWelcomeDashboard({
+		providers: { list: () => [] },
+		getSettings: () => settings,
+		getTerminalRows: () => 40,
+		getShellContained: () => contained,
+	});
+	try {
+		for (const width of [80, 120, 200]) {
+			const lines = live.render(width);
+			ok(lines.every((line) => visibleWidth(line) <= width));
+			const text = lines.map(stripTerminalSequences).join("\n");
+			match(text, /Default · auto edits · no OS sandbox/u);
+			ok(!text.includes("auto in workspace"), text);
+		}
+		contained = true;
+		match(live.render(120).map(stripTerminalSequences).join("\n"), /Default · auto in workspace/u);
+	} finally {
+		live.dispose();
+	}
+});
+
 test("startup and live tier changes share one bounded welcome policy", () => {
 	process.env.TERM = "xterm-256color";
 	delete process.env.CLIO_CODER_SCREEN_READER;
