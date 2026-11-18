@@ -49,6 +49,12 @@ export interface OperatorReloadResult {
 	message: string;
 	degraded?: number;
 }
+/** The runtime closed while a reload ran: a shutdown race, not a failed reload, so it is never reported. */
+export class ClosedDuringReload extends Error {
+	constructor() {
+		super("operator runtime is disposed");
+	}
+}
 export interface OperatorRuntimeOptions {
 	/** Captured from the existing registry, never inferred from runtime activation. */
 	frozenTools?: ReadonlyArray<ExtensionProvenance>;
@@ -298,7 +304,8 @@ export class OperatorExtensionRuntime {
 					}
 				}),
 			);
-			if (this.closed || lifetime !== this.lifetime || capturedContext !== contextIdentity(this.context()))
+			if (this.closed) throw new ClosedDuringReload();
+			if (lifetime !== this.lifetime || capturedContext !== contextIdentity(this.context()))
 				throw new Error("session or workspace changed while staging runtimes");
 			const current = this.list();
 			if (
@@ -329,7 +336,8 @@ export class OperatorExtensionRuntime {
 					}
 				}),
 			);
-			if (this.closed || lifetime !== this.lifetime || capturedContext !== contextIdentity(this.context()))
+			if (this.closed) throw new ClosedDuringReload();
+			if (lifetime !== this.lifetime || capturedContext !== contextIdentity(this.context()))
 				throw new Error("session or workspace changed during runtime activation");
 			// A session host (the terminal, a headless run, ACP) opens a session; the one-shot `extensions run` does not.
 			if (this.options.onlyId === undefined) await this.deliverObservation({ event: "session_open", reason });
@@ -351,15 +359,18 @@ export class OperatorExtensionRuntime {
 				this.retire(process, "reload-rejected");
 			}
 			this.processes.clear();
-			result = {
-				status: this.generation === next ? "committed" : "rejected",
-				generation: this.generation,
-				message: `${this.generation === next ? "Extensions reloaded with errors: " : "Extension reload failed: "}${error instanceof Error ? error.message : String(error)}`,
-			};
+			result =
+				error instanceof ClosedDuringReload
+					? { status: "rejected", generation: this.generation, message: error.message }
+					: {
+							status: this.generation === next ? "committed" : "rejected",
+							generation: this.generation,
+							message: `${this.generation === next ? "Extensions reloaded with errors: " : "Extension reload failed: "}${error instanceof Error ? error.message : String(error)}`,
+						};
 		}
 		this.changed();
 		try {
-			this.options.onReload?.(result, reason);
+			if (!this.closed) this.options.onReload?.(result, reason);
 		} catch {
 			/* Reporting follows settlement. */
 		}

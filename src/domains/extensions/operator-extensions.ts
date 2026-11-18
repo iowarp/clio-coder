@@ -55,6 +55,8 @@ export class OperatorExtensions {
 	readonly v2: OperatorExtensionRuntimeV2;
 	/** While above zero, a manager's own reload report is folded into the combined one. */
 	private combining = 0;
+	/** A reload settling after dispose has no session left to tell. */
+	private disposed = false;
 	/**
 	 * The reload waiting for an idle session, by the reason it was asked for. A
 	 * replay that forgot the reason announced a startup or session-change reload
@@ -150,7 +152,7 @@ export class OperatorExtensions {
 		}
 		const result = this.combine(results);
 		try {
-			this.options.onReload?.(result, reason);
+			if (!this.disposed) this.options.onReload?.(result, reason);
 		} catch {
 			/* Reporting follows settlement. */
 		}
@@ -238,6 +240,7 @@ export class OperatorExtensions {
 		this.v2.cancel();
 	}
 	async dispose(): Promise<void> {
+		this.disposed = true;
 		await Promise.all([this.v1.dispose(), this.v2.dispose()]);
 	}
 }
