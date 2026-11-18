@@ -72,6 +72,19 @@ function blockedThenRead(actionClass: "execute" | "write"): ChatLoopEvent[] {
 			decision: "blocked",
 			result: { content: [{ type: "text", text: "denied" }], details: {} },
 		} as ChatLoopEvent,
+		// Nor is an ask a --timeout abort denied before anyone decided (bt-15 c13a).
+		{
+			type: "tool_execution_end",
+			toolName: "bash",
+			toolCallId: "asked",
+			isError: true,
+			outcome: "blocked",
+			actionClass: "git_destructive",
+			decision: "permission_requested",
+			ruleId: "git-push-force-main",
+			blockReason: "run aborted before the operator decided",
+			result: { content: [{ type: "text", text: "run aborted before the operator decided" }], details: {} },
+		} as ChatLoopEvent,
 		// The loop guard withholding a repeated read is no safety refusal (bt-15 T3).
 		{
 			type: "tool_execution_end",
@@ -177,8 +190,8 @@ for (const scenario of [
 		code: 1,
 		outcome: "failed",
 		calls: 1,
-		decisions: { allowed: 0, blocked: 1, guardBlocked: 1, permissionRequested: 0 },
-		attempts: { blocked: ["bash"], guarded: ["read"] },
+		decisions: { allowed: 0, blocked: 1, guardBlocked: 1, permissionRequested: 1 },
+		attempts: { blocked: ["bash"], guarded: ["read"], asked: ["bash"] },
 	},
 	{
 		name: "unrelated read cannot recover denied edit",
@@ -476,12 +489,13 @@ for (const scenario of [
 						.map((line) => JSON.parse(line))
 						.find((event) => event.type === "turn_end");
 					deepStrictEqual(end.safety.decisions, scenario.decisions);
-					// bt-15 c12b: the guard's block lists apart from the safety refusals, as the decisions count it.
+					// bt-15 c12b, c13a: guard blocks and refused asks list apart from the safety refusals, as the decisions count them.
 					if ("attempts" in scenario)
 						deepStrictEqual(
 							{
 								blocked: end.safety.blockedAttempts.map((attempt: { tool: string }) => attempt.tool),
 								guarded: end.safety.guardBlockedAttempts.map((attempt: { tool: string }) => attempt.tool),
+								asked: end.safety.permissionRequestedAttempts.map((attempt: { tool: string }) => attempt.tool),
 							},
 							scenario.attempts,
 						);

@@ -390,9 +390,9 @@ Inline image references accept PNG, JPEG, GIF, or WebP bytes detected by file si
 
 ### Headless No-op Runs
 
-Every headless main-agent run record carries a `safety` summary and a `noop` flag, whatever the flags. `safety.decisions` counts how admission decided each call (`allowed`, `blocked` for a safety refusal, `guardBlocked` for a call a tool guard held back, `permissionRequested`; run records written before `guardBlocked` count guard blocks under `blocked`) and `safety.blockedAttempts` lists every call whose outcome was blocked, with its tool, action class, rule, and reason, except a call a tool guard held back: `safety.guardBlockedAttempts` lists those in the same shape and is absent when no guard blocked a call (run records written before it list guard blocks under `blockedAttempts`). These are the names and shapes a dispatched worker's run record already uses. A call that parked for approval and was denied, because a headless run has no operator to approve it, counts under `permissionRequested` every time, including a repeat whose reason the loop guard replaced with its own guidance.
+Every headless main-agent run record carries a `safety` summary and a `noop` flag, whatever the flags. `safety.decisions` counts how admission decided each call (`allowed`, `blocked` for a safety refusal, `guardBlocked` for a call a tool guard held back, `permissionRequested`; run records written before `guardBlocked` count guard blocks under `blocked`) and `safety.blockedAttempts` lists every call whose outcome was blocked, with its tool, action class, rule, and reason, except a call a tool guard held back: `safety.guardBlockedAttempts` lists those in the same shape and is absent when no guard blocked a call (run records written before it list guard blocks under `blockedAttempts`). These are the names and shapes a dispatched worker's run record already uses. A call that parked for approval and was denied, because a headless run has no operator to approve it or because the run was aborted first, counts under `permissionRequested` every time, including a repeat whose reason the loop guard replaced with its own guidance, and `safety.permissionRequestedAttempts` lists it in the same shape instead of `blockedAttempts`; the field is absent when no ask was denied (run records written before it list denied asks under `blockedAttempts`).
 
-`safety.blockedAttempts` keeps the first 50 blocked calls, and clips each reason to 500 characters. When more calls than that were blocked, `safety.blockedAttemptsTruncated` counts the ones left out; the field is absent otherwise. `safety.guardBlockedAttempts` keeps its first 50 the same way, and `safety.decisions.guardBlocked` stays its exact count. The per-tool `blocked` counts in `toolStats` stay exact either way.
+`safety.blockedAttempts` keeps the first 50 blocked calls, and clips each reason to 500 characters. When more calls than that were blocked, `safety.blockedAttemptsTruncated` counts the ones left out; the field is absent otherwise. `safety.guardBlockedAttempts` and `safety.permissionRequestedAttempts` keep their first 50 the same way, and `safety.decisions.guardBlocked` and `safety.decisions.permissionRequested` stay their exact counts. The per-tool `blocked` counts in `toolStats` stay exact either way.
 
 `noop` is true when either condition holds:
 
@@ -407,7 +407,8 @@ The separate rule for a run with no successful tools still applies.
 A run started with `--turn-mode answer` or `--turn-mode proposal` asked for no
 change, so `noop` is always false for it and neither rule fails it, even under
 `--fail-on-noop` when every call failed. A blocked
-call along the way stays in `safety.blockedAttempts`, and when the run exits 0
+call along the way stays in `safety.blockedAttempts` (a denied ask in
+`safety.permissionRequestedAttempts`), and when the run exits 0
 stderr names those calls in one line, for example
 `clio-coder run: answered with 1 blocked call: bash (yolo-sandbox-required)`.
 Without `--turn-mode`, or with `change`, the rules above apply.

@@ -351,6 +351,9 @@ export function settleFinishedRun(
 			...(receipt.safety?.guardBlockedAttempts?.length
 				? { guardBlockedAttempts: settledBlockedAttempts(receipt.safety.guardBlockedAttempts) }
 				: {}),
+			...(receipt.safety?.permissionRequestedAttempts?.length
+				? { permissionRequestedAttempts: settledBlockedAttempts(receipt.safety.permissionRequestedAttempts) }
+				: {}),
 			escalations: escalationsOf(receipt.safety),
 			flowRestrictions: receipt.safety?.flowRestrictions
 				? {

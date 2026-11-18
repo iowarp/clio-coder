@@ -9439,7 +9439,7 @@
 													"required": ["settled", "seal", "result"],
 													"properties": {
 														"settled": {
-															"$ref": "#/components/schemas/Union_fba56ba6"
+															"$ref": "#/components/schemas/Union_c735e156"
 														},
 														"seal": {
 															"$ref": "#/components/schemas/Union_4dc8870f"
@@ -20989,7 +20989,7 @@
 													"required": ["settled", "seal", "result"],
 													"properties": {
 														"settled": {
-															"$ref": "#/components/schemas/Union_fba56ba6"
+															"$ref": "#/components/schemas/Union_c735e156"
 														},
 														"seal": {
 															"$ref": "#/components/schemas/Union_4dc8870f"
@@ -27508,7 +27508,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_agentId_apiCalls_at_2a5ec54e": {
+			"Object_agentId_apiCalls_at_37222296": {
 				"type": "object",
 				"required": [
 					"version",
@@ -27563,7 +27563,7 @@
 					"digest"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_4192cc3e"
+					"$ref": "#/components/schemas/Shape_2a9d2ef6"
 				},
 				"additionalProperties": false
 			},
@@ -32411,7 +32411,7 @@
 						"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
 					},
 					"settled": {
-						"$ref": "#/components/schemas/Union_fba56ba6"
+						"$ref": "#/components/schemas/Union_c735e156"
 					},
 					"seal": {
 						"$ref": "#/components/schemas/Union_4dc8870f"
@@ -33617,165 +33617,7 @@
 					"type": "string"
 				}
 			},
-			"Shape_2b7a18ac": {
-				"target": {
-					"$ref": "#/components/schemas/Union_82090872"
-				},
-				"options": {
-					"$ref": "#/components/schemas/Array_de2d36b0"
-				}
-			},
-			"Shape_2db93e26": {
-				"p50": {
-					"$ref": "#/components/schemas/Object_display_fact_1897f681"
-				},
-				"p95": {
-					"$ref": "#/components/schemas/Object_display_fact_1897f681"
-				},
-				"measured": {
-					"$ref": "#/components/schemas/Object_display_fact_1897f681"
-				},
-				"missing": {
-					"$ref": "#/components/schemas/Object_display_fact_1897f681"
-				}
-			},
-			"Shape_39fec1f7": {
-				"resource": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"turnId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"text": {
-					"type": "string"
-				},
-				"origin": {
-					"$ref": "#/components/schemas/Union_e60bfcab"
-				},
-				"provenance": {
-					"$ref": "#/components/schemas/Array_721a7562"
-				}
-			},
-			"Shape_3a78a5e7": {
-				"kind": {
-					"type": "string",
-					"const": "gap"
-				},
-				"at": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"sink": {
-					"type": "string",
-					"minLength": 1,
-					"maxLength": 512
-				},
-				"reason": {
-					"type": "string",
-					"maxLength": 4096
-				},
-				"count": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"countShown": {
-					"$ref": "#/components/schemas/Object_display_fact_26230a1c"
-				}
-			},
-			"Shape_3c6ced13": {
-				"level": {
-					"type": "string",
-					"const": "yolo"
-				},
-				"confinement": {
-					"$ref": "#/components/schemas/Union_8cf6829a"
-				},
-				"osSandbox": {
-					"type": "boolean"
-				},
-				"label": {
-					"type": "string",
-					"maxLength": 64
-				},
-				"tone": {
-					"$ref": "#/components/schemas/Union_4141b040"
-				},
-				"window": {
-					"$ref": "#/components/schemas/Union_26071620"
-				}
-			},
-			"Shape_3d21f4f2": {
-				"type": {
-					"type": "string",
-					"const": "fleet.progress"
-				},
-				"payload": {
-					"$ref": "#/components/schemas/Object_agentId_progressCount_runId_b5633ec7"
-				}
-			},
-			"Shape_3d3ba765": {
-				"calls": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"tokens": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"usd": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				}
-			},
-			"Shape_3f8376bd": {
-				"targetId": {
-					"type": "string",
-					"minLength": 1,
-					"maxLength": 512
-				},
-				"runtimeId": {
-					"type": "string",
-					"minLength": 1,
-					"maxLength": 512
-				},
-				"api": {
-					"type": "string",
-					"minLength": 1,
-					"maxLength": 512
-				},
-				"requestedModel": {
-					"type": "string",
-					"minLength": 1,
-					"maxLength": 512
-				},
-				"reportedModel": {
-					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
-				}
-			},
-			"Shape_40d2c059": {
-				"artifactIntegrity": {
-					"$ref": "#/components/schemas/Object_authority_display_state_a3058eb8"
-				},
-				"validationGrounding": {
-					"$ref": "#/components/schemas/Object_authority_display_state_f6c3b8ed"
-				},
-				"independentReview": {
-					"$ref": "#/components/schemas/Object_authority_display_state_fa73a860"
-				},
-				"contextProvenance": {
-					"$ref": "#/components/schemas/Object_authority_display_state_b40f3648"
-				},
-				"completionEvidence": {
-					"$ref": "#/components/schemas/Object_authority_display_state_4b97d8c4"
-				},
-				"validation": {
-					"type": "string"
-				}
-			},
-			"Shape_4192cc3e": {
+			"Shape_2a9d2ef6": {
 				"version": {
 					"type": "number",
 					"const": 1
@@ -33938,6 +33780,9 @@
 				"guardBlockedAttempts": {
 					"$ref": "#/components/schemas/Array_cbd5fc6c"
 				},
+				"permissionRequestedAttempts": {
+					"$ref": "#/components/schemas/Array_cbd5fc6c"
+				},
 				"escalations": {
 					"$ref": "#/components/schemas/Union_4322c019"
 				},
@@ -33981,6 +33826,164 @@
 				"digest": {
 					"type": "string",
 					"pattern": "^[0-9a-f]{64}$"
+				}
+			},
+			"Shape_2b7a18ac": {
+				"target": {
+					"$ref": "#/components/schemas/Union_82090872"
+				},
+				"options": {
+					"$ref": "#/components/schemas/Array_de2d36b0"
+				}
+			},
+			"Shape_2db93e26": {
+				"p50": {
+					"$ref": "#/components/schemas/Object_display_fact_1897f681"
+				},
+				"p95": {
+					"$ref": "#/components/schemas/Object_display_fact_1897f681"
+				},
+				"measured": {
+					"$ref": "#/components/schemas/Object_display_fact_1897f681"
+				},
+				"missing": {
+					"$ref": "#/components/schemas/Object_display_fact_1897f681"
+				}
+			},
+			"Shape_39fec1f7": {
+				"resource": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"turnId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"text": {
+					"type": "string"
+				},
+				"origin": {
+					"$ref": "#/components/schemas/Union_e60bfcab"
+				},
+				"provenance": {
+					"$ref": "#/components/schemas/Array_721a7562"
+				}
+			},
+			"Shape_3a78a5e7": {
+				"kind": {
+					"type": "string",
+					"const": "gap"
+				},
+				"at": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"sink": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"reason": {
+					"type": "string",
+					"maxLength": 4096
+				},
+				"count": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"countShown": {
+					"$ref": "#/components/schemas/Object_display_fact_26230a1c"
+				}
+			},
+			"Shape_3c6ced13": {
+				"level": {
+					"type": "string",
+					"const": "yolo"
+				},
+				"confinement": {
+					"$ref": "#/components/schemas/Union_8cf6829a"
+				},
+				"osSandbox": {
+					"type": "boolean"
+				},
+				"label": {
+					"type": "string",
+					"maxLength": 64
+				},
+				"tone": {
+					"$ref": "#/components/schemas/Union_4141b040"
+				},
+				"window": {
+					"$ref": "#/components/schemas/Union_26071620"
+				}
+			},
+			"Shape_3d21f4f2": {
+				"type": {
+					"type": "string",
+					"const": "fleet.progress"
+				},
+				"payload": {
+					"$ref": "#/components/schemas/Object_agentId_progressCount_runId_b5633ec7"
+				}
+			},
+			"Shape_3d3ba765": {
+				"calls": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"tokens": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"usd": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				}
+			},
+			"Shape_3f8376bd": {
+				"targetId": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"runtimeId": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"api": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"requestedModel": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"reportedModel": {
+					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
+				}
+			},
+			"Shape_40d2c059": {
+				"artifactIntegrity": {
+					"$ref": "#/components/schemas/Object_authority_display_state_a3058eb8"
+				},
+				"validationGrounding": {
+					"$ref": "#/components/schemas/Object_authority_display_state_f6c3b8ed"
+				},
+				"independentReview": {
+					"$ref": "#/components/schemas/Object_authority_display_state_fa73a860"
+				},
+				"contextProvenance": {
+					"$ref": "#/components/schemas/Object_authority_display_state_b40f3648"
+				},
+				"completionEvidence": {
+					"$ref": "#/components/schemas/Object_authority_display_state_4b97d8c4"
+				},
+				"validation": {
+					"type": "string"
 				}
 			},
 			"Shape_41c86dad": {
@@ -39790,6 +39793,16 @@
 					}
 				]
 			},
+			"Union_c735e156": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_agentId_apiCalls_at_37222296"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_c9b7ca4a": {
 				"anyOf": [
 					{
@@ -40313,16 +40326,6 @@
 						"minLength": 1,
 						"maxLength": 256,
 						"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
-			"Union_fba56ba6": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_agentId_apiCalls_at_2a5ec54e"
 					},
 					{
 						"type": "null"

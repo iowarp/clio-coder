@@ -235,7 +235,7 @@ export interface RunJsonTerminalTurnEndFrame {
 	/** The run's safety summary; a `permissionRequired` attempt needed an approval the run could not give. */
 	safety?: Pick<
 		NonNullable<RunResult["safety"]>,
-		"decisions" | "blockedAttempts" | "blockedAttemptsTruncated" | "guardBlockedAttempts"
+		"decisions" | "blockedAttempts" | "blockedAttemptsTruncated" | "guardBlockedAttempts" | "permissionRequestedAttempts"
 	>;
 	/** A yolo run's window, its halt and the calls it left for the operator (ob-yolo D7). */
 	autonomy?: AutonomyReport;
