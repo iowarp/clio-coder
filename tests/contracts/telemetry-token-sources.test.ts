@@ -221,3 +221,37 @@ it("a recorded faux session splits each turn's input by source, summing to the c
 		env.restore();
 	}
 });
+
+it("the default tokens table counts unmeasured calls and prints a span with no measured call as unknown (Astra r5-1)", () => {
+	const input = { cached: 0, fresh: 0, total: 0 };
+	const turn = (index: number, calls: number, unmeasuredCalls: number, total: number) => ({
+		index,
+		turnId: `t${index}`,
+		at: `2026-01-01T00:00:0${index}Z`,
+		calls,
+		unmeasuredCalls,
+		input: { cached: 0, fresh: total, total },
+		output: calls > 0 ? 5 : 0,
+		coldReasons: [],
+		rows: [],
+	});
+	const text = renderTokenSources(
+		{
+			version: 1,
+			sessionId: "s",
+			basis: { usage: "ledger", systemSide: "residual", split: "estimated", note: "n" },
+			turns: [turn(1, 0, 1, 0), turn(2, 2, 1, 40)],
+			totals: { calls: 2, unmeasuredCalls: 2, input: { ...input, fresh: 40, total: 40 }, output: 5, rows: [] },
+		},
+		false,
+	);
+	const cells = (label: string) =>
+		text
+			.split("\n")
+			.find((line) => line.trimStart().startsWith(label))
+			?.trim()
+			.split(/\s{2,}/u);
+	strictEqual(cells("1 ")?.slice(2).join("|"), "1 (1 unmeasured)|unknown|unknown|unknown|unknown", text);
+	strictEqual(cells("2 ")?.slice(2).join("|"), "3 (1 unmeasured)|0|40|40|5", text);
+	strictEqual(cells("all")?.slice(1).join("|"), "4 (2 unmeasured)|0|40|40|5", text);
+});

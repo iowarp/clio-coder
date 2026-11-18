@@ -17,23 +17,46 @@ system prompt, skills, tool schemas, template body, extension effects (reminders
 and tool-result annotations), tool results per tool, and history. Providers
 report one input total per call, so the totals are measured and the split is
 estimated from the session ledger and the journal's context snapshot; the
-output header says so. --json emits the report verbatim.
+output header says so. The calls column counts every invoked call and names
+those the provider sent no token counts for; their tokens are in no sum, and a
+turn with no measured call prints its tokens as unknown. --json emits the
+report verbatim.
 `;
 
 const count = (value: number | null) => (value === null ? "unknown" : String(value));
+
+interface Coverage {
+	/** Measured calls. */
+	calls: number;
+	unmeasuredCalls: number;
+}
+
+/** Invoked calls, naming the unmeasured ones whose tokens no sum below includes. */
+function callsCell({ calls, unmeasuredCalls }: Coverage): string {
+	return unmeasuredCalls > 0 ? `${calls + unmeasuredCalls} (${unmeasuredCalls} unmeasured)` : String(calls);
+}
+
+/** A token figure over a span that invoked calls but measured none is unknown, not zero. */
+function measuredCount(coverage: Coverage, value: number | null): string {
+	return coverage.calls === 0 && coverage.unmeasuredCalls > 0 ? "unknown" : count(value);
+}
 
 function rowCells(row: TokenSourceRow): string[] {
 	return [`  ${row.label}`, count(row.cached), count(row.fresh), String(row.total)];
 }
 
-function inputCells(label: string, input: TokenSourceInput): string[] {
-	return [label, count(input.cached), count(input.fresh), String(input.total)];
+function inputCells(label: string, coverage: Coverage, input: TokenSourceInput): string[] {
+	return [
+		label,
+		measuredCount(coverage, input.cached),
+		measuredCount(coverage, input.fresh),
+		measuredCount(coverage, input.total),
+	];
 }
 
 function turnHeading(turn: TokenSourceTurn): string {
-	const unmeasured = turn.unmeasuredCalls > 0 ? ` · ${turn.unmeasuredCalls} unmeasured` : "";
 	const cold = turn.coldReasons.length > 0 ? ` · cold: ${turn.coldReasons.join(", ")}` : "";
-	return `turn ${turn.index} ${turn.at} · ${turn.calls} call(s)${unmeasured} · output ${turn.output}${cold}`;
+	return `turn ${turn.index} ${turn.at} · ${callsCell(turn)} call(s) · output ${measuredCount(turn, turn.output)}${cold}`;
 }
 
 export function renderTokenSources(report: TokenSourcesReportV1, bySource: boolean): string {
@@ -45,24 +68,15 @@ export function renderTokenSources(report: TokenSourcesReportV1, bySource: boole
 	if (!bySource) {
 		const table = formatColumns([
 			["turn", "at", "calls", "cached", "fresh", "input", "output"],
-			...report.turns.map((turn) => [
-				String(turn.index),
-				turn.at,
-				String(turn.calls),
-				count(turn.input.cached),
-				count(turn.input.fresh),
-				String(turn.input.total),
-				String(turn.output),
+			...[...report.turns, { ...report.totals, index: "all", at: "" }].map((span) => [
+				String(span.index),
+				span.at,
+				callsCell(span),
+				measuredCount(span, span.input.cached),
+				measuredCount(span, span.input.fresh),
+				measuredCount(span, span.input.total),
+				measuredCount(span, span.output),
 			]),
-			[
-				"all",
-				"",
-				String(report.totals.calls),
-				count(report.totals.input.cached),
-				count(report.totals.input.fresh),
-				String(report.totals.input.total),
-				String(report.totals.output),
-			],
 		]);
 		return `${header.join("\n")}\n\n${table}`;
 	}
@@ -71,14 +85,17 @@ export function renderTokenSources(report: TokenSourcesReportV1, bySource: boole
 			`${turnHeading(turn)}\n${formatColumns([
 				["  source", "cached", "fresh", "total"],
 				...turn.rows.map(rowCells),
-				inputCells("  turn input", turn.input),
+				inputCells("  turn input", turn, turn.input),
 			]).trimEnd()}`,
 	);
-	const session = `session · ${report.totals.calls} call(s) · output ${report.totals.output}\n${formatColumns([
-		["  source", "cached", "fresh", "total"],
-		...report.totals.rows.map(rowCells),
-		inputCells("  session input", report.totals.input),
-	]).trimEnd()}`;
+	const { totals } = report;
+	const session = `session · ${callsCell(totals)} call(s) · output ${measuredCount(totals, totals.output)}\n${formatColumns(
+		[
+			["  source", "cached", "fresh", "total"],
+			...totals.rows.map(rowCells),
+			inputCells("  session input", totals, totals.input),
+		],
+	).trimEnd()}`;
 	return `${header.join("\n")}\n\n${[...sections, session].join("\n\n")}\n`;
 }
 
