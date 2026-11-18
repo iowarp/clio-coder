@@ -1,10 +1,13 @@
 import { deepStrictEqual, notDeepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Type } from "typebox";
 import { codexAccountScope } from "../../src/core/codex-account.js";
 import { type ProviderCheckpoint, prepareProviderCheckpoint } from "../../src/core/provider-checkpoint.js";
+import { readWorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
+import type { ContextFoldPayload } from "../../src/core/telemetry/live-events.js";
+import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type {
 	AcceptedNote,
 	ContinuityCheckpointPayload,
@@ -17,15 +20,18 @@ import { resolveContinuityProjection } from "../../src/domains/session/continuit
 import type { SessionEntryInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { engineStreamSimple } from "../../src/engine/api-registry.js";
+import { openAICompletionsApiProvider, registerClioApiProviders } from "../../src/engine/apis/index.js";
 import { engineModels } from "../../src/engine/models.js";
 import { openSession } from "../../src/engine/session.js";
 import type { EngineModel, ProviderCheckpointHandle } from "../../src/engine/types.js";
+import { startWorkerRun } from "../../src/engine/worker-runtime.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import {
 	CAPTURE_TARGET_B,
 	type CapturedRequest,
 	type CaptureServer,
 	chatHarness,
+	contextElements,
 	startCaptureServer,
 	tapEngineApi,
 	wireElements,
@@ -145,6 +151,67 @@ describe("adapter capture", () => {
 			}
 		});
 	}
+	it("native worker: the adapter serializes the worker's finalized request after a guard commit", async () => {
+		const files = ["a", "b", "c"];
+		for (const name of files) writeFileSync(`${name}.ts`, `export const ${name} = "${name}";\n`.repeat(900));
+		const server = await startCaptureServer((_request, index) =>
+			index < files.length
+				? { calls: [{ id: `call_${index}`, name: "read", arguments: { path: `${files[index]}.ts` } }] }
+				: { text: "surveyed" },
+		);
+		// The worker registers Clio's chat-completions provider; the tap wraps that one.
+		registerClioApiProviders();
+		const tap = tapEngineApi("openai-completions", openAICompletionsApiProvider);
+		const telemetryContext = {
+			sessionId: null,
+			runId: "capture-run",
+			agent: { role: "worker", id: "capture-run" },
+		} as const;
+		const events: unknown[] = [];
+		try {
+			const worker = startWorkerRun(
+				{
+					agentId: "coder",
+					systemPrompt: "Read the files you are asked to survey.",
+					task: "Survey a.ts, b.ts and c.ts.",
+					target: { id: "capture", runtime: "litellm", url: server.url },
+					runtime: litellm,
+					wireModelId: "capture-model",
+					apiKey: "fixture",
+					thinkingLevel: "off",
+					// A window the three reads outgrow, so the last send runs a guard commit.
+					modelCapabilities: { contextWindow: 16_000, maxTokens: 512, tools: true },
+					allowedTools: ["read"],
+					budget: { mode: "advisory", toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 150 },
+					noSkills: true,
+					cwd: process.cwd(),
+					telemetryContext,
+				},
+				(event) => events.push(event),
+			);
+			await worker.promise;
+			const committed = server.requests.findIndex((request) =>
+				wireElements(request).some((element) => element.startsWith("result:[evicted ref=r1 ")),
+			);
+			ok(committed > 0, "a later send carries the guard's marker");
+			const context = tap.contexts[committed];
+			const request = server.requests[committed];
+			ok(context && request);
+			deepStrictEqual(wireElements(request), contextElements(context));
+			// The commit's decision is journaled under the run, on its receipt-bearing telemetry frame.
+			const folds = events.flatMap((event) => {
+				const record = readWorkerTelemetryFrame(event, telemetryContext);
+				return record?.kind === "context.fold" ? [record.data as ContextFoldPayload] : [];
+			});
+			deepStrictEqual(
+				folds.map((fold) => [fold.checkpoint, fold.cause, fold.stages.at(-1)?.outcome]),
+				[["tool_batch", "working_set_evict", "committed"]],
+			);
+		} finally {
+			tap.restore();
+			await server.close();
+		}
+	});
 });
 
 describe("P1: a text-only route with a historical image; a locked round then an unlocked one", () => {

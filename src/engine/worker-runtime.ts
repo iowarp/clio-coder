@@ -14,6 +14,7 @@ import { snapshotModelInfo } from "../core/model-tier.js";
 import { isProviderAuthRejection } from "../core/provider-auth-error.js";
 import type { WorkerTelemetryContext } from "../core/telemetry/context.js";
 import { observedToolCallOrigin, withTelemetryContext } from "../core/telemetry/context.js";
+import { telemetryHub } from "../core/telemetry/hub.js";
 import { hasTokenUsageCounts, normalizeTokenUsage } from "../core/token-split.js";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
 import { createWorkerContextGuard, WorkerContextExhaustedError } from "../domains/context/worker/pressure.js";
@@ -21,7 +22,7 @@ import { createWorkerObservationStore } from "../domains/context/worker/recall.j
 import { compactionBudget, resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { confirmationRuleOf } from "../domains/safety/decision-events.js";
 import type { WorkerFlowPolicyInput } from "../domains/safety/information-flow.js";
-import { seededWorkerMessages } from "../worker/context-seed.js";
+import { seededWorkerMessages, seedRecallLineage } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
 import { requestOutputReserve } from "./apis/output-budget.js";
 import { resolvedRequestContext } from "./context.js";
@@ -881,7 +882,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				}
 			: {}),
 	});
-	const observations = createWorkerObservationStore(input.telemetryContext?.runId);
+	const seedLineage = seedRecallLineage(input.contextSeed);
+	const observations = createWorkerObservationStore(input.telemetryContext?.runId, seedLineage);
 	// Run-scoped ledger: the inherited set plus what this run's reads add. It
 	// lives in memory only; every growth is reported to the parent at once and
 	// sealed in the receipt, so the parent's session ledger absorbs it before
@@ -1279,7 +1281,20 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	);
 
 	const inheritedMessages = seededWorkerMessages(input.contextSeed);
-	const contextGuard = createWorkerContextGuard(observations.archive);
+	const contextGuard = createWorkerContextGuard(observations.archive, {
+		aliasFloor: seedLineage.aliasFloor,
+		archivePath: observations.archivePath,
+		route: {
+			...(input.runtimeResolution?.modelTier !== undefined ? { modelTier: input.runtimeResolution.modelTier } : {}),
+			...(input.runtimeResolution?.promptCaching !== undefined
+				? { promptCaching: input.runtimeResolution.promptCaching }
+				: {}),
+		},
+		// Every fold decision is journaled under the run and forwarded on its receipt-bearing telemetry frame.
+		onDecision: (decision) => {
+			if (input.telemetryContext) telemetryHub().emit("context.fold", decision, input.telemetryContext);
+		},
+	});
 	// The constraint rides samplingParams, which the completions adapter merges
 	// into the body after every named field.
 	const workerResponseFormat = workerResponseFormatFor(input);
@@ -1435,6 +1450,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					workerSettings.context.compaction.maxTokens,
 					currentModel,
 				).threshold,
+				target: workerSettings.context.workingSet.target,
+				rearmFraction: workerSettings.context.workingSet.rearmFraction,
 				autoEvict: workerSettings.context.compaction.auto && workerSettings.context.workingSet.enabled,
 				outputReserve: (inputTokens: number) =>
 					requestOutputReserve(currentModel, currentModel.maxTokens, window, inputTokens),

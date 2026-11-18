@@ -29,10 +29,13 @@ import type { EvictionReason, WorkingSetRef } from "./contract.js";
 /** Characters of the original body the marker keeps as a preview. */
 const PREVIEW_LIMIT = 120;
 
+/** A worker's `step_overflow` cut renders through the same marker as the session's reasons. */
+export type MarkerReason = EvictionReason | "step_overflow";
+
 export interface MarkerInput {
 	alias?: string;
 	ref: WorkingSetRef;
-	reason: EvictionReason;
+	reason: MarkerReason;
 	/** Ref key of the entry that superseded or resolved this one, when the reason names one. */
 	by?: string | undefined;
 	toolName: string;
@@ -92,7 +95,7 @@ function firstLine(text: string): string {
  * included, previews: a search or a diff echo has no single headline, and an
  * offloaded body renders no tail at all.
  */
-const FIRST_LINE_REASONS: ReadonlySet<EvictionReason> = new Set<EvictionReason>([
+const FIRST_LINE_REASONS: ReadonlySet<MarkerReason> = new Set<MarkerReason>([
 	"failure_resolved",
 	"dispatch_run_record_settled",
 ]);

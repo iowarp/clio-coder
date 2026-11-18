@@ -1,12 +1,14 @@
 import { deepStrictEqual, equal, match, notEqual, ok, throws } from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
+import type { ContextFoldPayload } from "../../src/core/telemetry/live-events.js";
 import { parseWorkerContextPolicy } from "../../src/domains/context/worker/contract.js";
 import { createWorkerContextGuard } from "../../src/domains/context/worker/pressure.js";
 import { createWorkerObservationStore } from "../../src/domains/context/worker/recall.js";
 import { selectWorkerContext } from "../../src/domains/context/worker/select.js";
 import { captureWorkerContext, completeHistoryLength, contextHash } from "../../src/domains/context/worker/snapshot.js";
 import { persistWorkerContextSeed } from "../../src/domains/context/worker/store.js";
+import { renderMarker } from "../../src/domains/context/working-set/marker.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import type { AgentMessage } from "../../src/engine/types.js";
@@ -14,7 +16,7 @@ import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-contro
 import { createContextTool } from "../../src/tools/context/index.js";
 import { createDispatchAdmissionController } from "../../src/tools/dispatch-admission.js";
 import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT } from "../../src/tools/dispatch-plan.js";
-import { parseWorkerContextSeed, seededWorkerMessages } from "../../src/worker/context-seed.js";
+import { parseWorkerContextSeed, seededWorkerMessages, seedRecallLineage } from "../../src/worker/context-seed.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 import { settledRunTrust } from "../harness/settled-run.js";
@@ -207,56 +209,157 @@ test("admission reads the operator turn once, captures the seed once and preserv
 	equal(snapshot.requests[1]?.contextSeed, undefined);
 });
 
-test("worker guard ignores inherited usage and refuses an oversized first fork without rewriting it", () => {
-	const message = assistant();
-	if (message.role === "assistant") message.usage.input = 1_000_000;
-	const messages = [user("task"), message];
-	const guard = createWorkerContextGuard(() => {
-		throw new Error("must not archive");
-	});
-	deepStrictEqual(
-		guard({ messages, systemPrompt: "worker", tools: [], contextWindow: 4000, outputReserve: () => 500 }),
-		messages,
-	);
-	const fresh = createWorkerContextGuard(() => "archive");
-	throws(
-		() =>
-			fresh({
-				messages: [user("task".repeat(5000))],
-				systemPrompt: "worker",
-				tools: [],
-				contextWindow: 1000,
-				outputReserve: () => 200,
-			}),
-		/initial request/,
-	);
-});
+type ToolCallBlock = Extract<(AgentMessage & { role: "assistant" })["content"][number], { type: "toolCall" }>;
+function call(id: string, calls: ReadonlyArray<[string, string, ToolCallBlock["arguments"]]>): AgentMessage {
+	const message = assistant(id);
+	if (message.role === "assistant")
+		message.content = calls.map(([callId, name, args]) => ({ type: "toolCall", id: callId, name, arguments: args }));
+	return message;
+}
+function refusal(id: string, text: string): AgentMessage {
+	return {
+		role: "toolResult",
+		toolCallId: id,
+		toolName: "gateway",
+		content: [{ type: "text", text }],
+		isError: true,
+		timestamp: 3,
+	};
+}
+const gatewayFetch = { op: "call", capability: "web_fetch", args: { url: "https://example.test/spec" } };
+const refuseArchive = () => {
+	throw new Error("must not archive");
+};
 
-test("worker pressure evicts by completed rounds, preserves raw results, and keeps stable recall markers", () => {
-	const archived: AgentMessage[] = [];
-	const guard = createWorkerContextGuard((_ref, message) => {
-		archived.push(message);
-		return "/evidence/result.json";
-	});
+test("worker fold leaves the first request untrimmed and keeps exhaustion an error", () => {
+	const decisions: ContextFoldPayload[] = [];
+	const onDecision = (decision: ContextFoldPayload) => void decisions.push(decision);
 	const input = { systemPrompt: "worker", tools: [], contextWindow: 5000, outputReserve: () => 500 };
-	const initial = [user("task")];
-	guard({ ...input, messages: initial });
-	const messages = [
-		...initial,
+	// Parent usage never anchors the child's first request.
+	const inherited = assistant();
+	if (inherited.role === "assistant") inherited.usage.input = 1_000_000;
+	const small = [user("task"), inherited];
+	deepStrictEqual(createWorkerContextGuard(refuseArchive)({ ...input, messages: small }), small);
+	const evictable = [
+		user("task"),
 		assistant("large"),
-		result("large", "evidence ".repeat(2500)),
+		result("large", "data ".repeat(4000)),
 		assistant("small"),
 		result("small", "small"),
 		assistant("last"),
 		result("last", "last"),
 	];
+	const raw = JSON.stringify(evictable);
+	throws(
+		() => createWorkerContextGuard(refuseArchive, { onDecision })({ ...input, messages: evictable }),
+		/initial request/,
+	);
+	equal(JSON.stringify(evictable), raw);
+	deepStrictEqual(decisions.at(-1)?.stages, [
+		{ stage: "working_set", outcome: "none", reason: "protected_recent" },
+		{ stage: "stop", outcome: "failed", reason: "error" },
+	]);
+	equal(decisions.at(-1)?.checkpoint, "submit");
+	const disabled = createWorkerContextGuard(refuseArchive, { onDecision });
+	disabled({ ...input, messages: [user("task")] });
+	throws(() => disabled({ ...input, autoEvict: false, messages: evictable }), /automatic eviction disabled/);
+	deepStrictEqual(decisions.at(-1)?.stages[0], { stage: "working_set", outcome: "none", reason: "disabled" });
+	equal(disabled.records.length, 0);
+});
+
+test("an old thinking block leaves without a marker while refusals and opaque tools stay protected", () => {
+	const decisions: ContextFoldPayload[] = [];
+	const guard = createWorkerContextGuard(refuseArchive, { onDecision: (decision) => void decisions.push(decision) });
+	const input = { systemPrompt: "worker", tools: [], contextWindow: 5000, outputReserve: () => 500 };
+	guard({ ...input, messages: [user("task")] });
+	const thinking = assistant();
+	if (thinking.role === "assistant")
+		thinking.content = [
+			{ type: "thinking", thinking: "deliberation ".repeat(923) },
+			{ type: "text", text: "RETAINED_ANSWER" },
+		];
+	const messages = [
+		user("task"),
+		call("gw", [["gw", "gateway", gatewayFetch]]),
+		refusal("gw", "GATEWAY_REFUSAL ".repeat(200)),
+		call("probe", [["probe", "mcp_probe", { target: "svc" }]]),
+		{ ...(result("probe", "OPAQUE_PROBE ".repeat(230)) as AgentMessage & { role: "toolResult" }), toolName: "mcp_probe" },
+		thinking,
+		user("continue"),
+		assistant("next"),
+		result("next", "next"),
+		assistant("last"),
+		result("last", "last"),
+	];
 	const raw = JSON.stringify(messages);
 	const projected = guard({ ...input, messages });
-	equal(archived.length, 1);
-	match(JSON.stringify(projected), /Exact historical result/);
+	const text = JSON.stringify(projected);
+	ok(!text.includes("deliberation") && text.includes("RETAINED_ANSWER"));
+	ok(text.includes("GATEWAY_REFUSAL") && text.includes("OPAQUE_PROBE") && !text.includes("[evicted"));
 	equal(JSON.stringify(messages), raw);
+	equal(guard.records.length, 1);
+	deepStrictEqual(
+		guard.records[0]?.evicted.map(({ alias, reason, marker }) => ({ alias, reason, marker })),
+		[{ alias: undefined, reason: "thinking_turn_closed", marker: "" }],
+	);
+	deepStrictEqual(decisions.at(-1)?.stages, [
+		{ stage: "working_set", outcome: "committed", reason: "evicted", recordId: "eviction-1" },
+	]);
+	// The same history renders the same request and commits nothing new.
 	deepStrictEqual(guard({ ...input, messages }), projected);
-	equal(archived.length, 1);
+	equal(guard.records.length, 1);
+});
+
+test("the bypass rows: a step short of output room and a rejected later send each commit one record", () => {
+	const archived: string[] = [];
+	const guard = createWorkerContextGuard((alias) => void archived.push(alias));
+	// Under the trigger and the window, but the reserve does not fit: the protected step's read leaves, the refusal stays.
+	const tight = { systemPrompt: "worker", tools: [], contextWindow: 10_000, outputReserve: () => 4000 };
+	guard({ ...tight, messages: [user("task")] });
+	const step = [
+		user("task"),
+		call("batch", [
+			["big", "read", { path: "src/big.ts" }],
+			["gw", "gateway", gatewayFetch],
+		]),
+		result("big", "data ".repeat(5000)),
+		refusal("gw", "GATEWAY_REFUSAL ".repeat(250)),
+	];
+	const text = JSON.stringify(guard({ ...tight, messages: step }));
+	match(text, /\[evicted ref=r1 reason=step_overflow tool=read path=src\/big\.ts /);
+	match(text, /Read only the part you need/);
+	ok(text.includes("GATEWAY_REFUSAL"));
+	deepStrictEqual(archived, ["r1"]);
+	equal(guard.records[0]?.policyId, "step_overflow");
+
+	// An unreported window admits every send; only the server's rejection acts, once, to 0.7 of the failed request.
+	const unknown = { systemPrompt: "worker", tools: [], contextWindow: 0, outputReserve: () => 4000 };
+	const later = createWorkerContextGuard((alias) => void archived.push(alias));
+	later({ ...unknown, messages: [user("task")] });
+	equal(later.recover({ ...unknown, messages: [user("task")] }), null, "the first request is never trimmed");
+	const messages = [
+		user("task"),
+		assistant("old"),
+		result("old", "alpha ".repeat(2000)),
+		assistant("mid"),
+		result("mid", "beta ".repeat(2000)),
+		assistant("last"),
+		result("last", "gamma ".repeat(400)),
+	];
+	deepStrictEqual(later({ ...unknown, messages }), messages);
+	const recovered = later.recover({ ...unknown, messages });
+	ok(recovered);
+	const record = later.records[0];
+	equal(record?.checkpoint, "overflow");
+	ok(record && record.tokensAfter <= record.tokensBefore * 0.7, JSON.stringify(record));
+	deepStrictEqual(archived, ["r1", "r1"]);
+	deepStrictEqual(later({ ...unknown, messages }), recovered);
+	const stuck = createWorkerContextGuard(refuseArchive);
+	stuck({ ...unknown, messages: [user("task")] });
+	const refused = [user("task"), call("gw", [["gw", "gateway", gatewayFetch]]), refusal("gw", "x".repeat(8000))];
+	stuck({ ...unknown, messages: refused });
+	equal(stuck.recover({ ...unknown, messages: refused }), null, "no retry unless the target is reached");
+	equal(stuck.records.length, 0);
 });
 
 test("capture follows the active branch and preserves existing eviction projection", () => {
@@ -334,55 +437,119 @@ test("receipt integrity binds inherited context and reports it as context proven
 	);
 });
 
-test("worker recall admits only this run's evictions, checks persisted digests, and uses the bounded context tool", async () => {
+test("worker recall keeps its own aliases above every parent alias and recalls the exact archive", async () => {
 	const env = await isolateClioEnv("clio-coder-worker-recall-");
 	try {
-		const store = createWorkerObservationStore();
-		const other = createWorkerObservationStore();
-		const observation = result("read", "EXACT_WORKER_OBSERVATION");
-		const digest = contextHash(observation);
-		const file = store.archive(digest, observation);
-		const ref = `worker:${digest}`;
-		ok("error" in other.recall({ ref }));
-		ok("error" in store.recall({ ref: "../../parent/session" }));
+		const at = "2026-09-09T00:00:00Z";
+		const message = (turnId: string, parentTurnId: string | null, role: MessageEntry["role"], payload: unknown) =>
+			({ kind: "message", turnId, parentTurnId, role, payload, timestamp: at }) as MessageEntry;
+		const read = (turnId: string, parentTurnId: string, id: string) =>
+			message(turnId, parentTurnId, "assistant", {
+				content: [{ type: "toolCall", id, name: "read", arguments: { path: "a.ts" } }],
+			});
+		const body = (turnId: string, parentTurnId: string, id: string, text: string) =>
+			message(turnId, parentTurnId, "tool_result", {
+				toolCallId: id,
+				toolName: "read",
+				result: { content: [{ type: "text", text }] },
+			});
+		const eviction = (
+			turnId: string,
+			parentTurnId: string,
+			alias: string,
+			entry: string,
+			text: string,
+		): SessionEntry => ({
+			kind: "contextEviction",
+			turnId,
+			parentTurnId,
+			timestamp: at,
+			policyId: "age-horizon",
+			trigger: "pressure",
+			tokensBefore: 1000,
+			tokensAfter: 50,
+			pressureBefore: 0.9,
+			snapshotIdBefore: null,
+			evicted: [
+				{
+					alias,
+					ref: { entry },
+					reason: "age_horizon",
+					tokensFreed: 50,
+					marker: renderMarker({ alias, ref: { entry }, reason: "age_horizon", toolName: "read", text }),
+				},
+			],
+		});
+		// The parent's largest alias, r2, lives only on a sibling branch; the active path renders r1.
+		const entries: SessionEntry[] = [
+			message("u", null, "user", { text: "task" }),
+			read("a", "u", "read"),
+			body("res", "a", "read", "PARENT_BODY"),
+			eviction("e1", "res", "r1", "res", "PARENT_BODY"),
+			read("sa", "u", "sibling-read"),
+			body("sres", "sa", "sibling-read", "SIBLING_BODY"),
+			eviction("e2", "sres", "r2", "sres", "SIBLING_BODY"),
+			message("active", "res", "user", { text: "ACTIVE" }),
+		];
+		const visible = buildModelReplayAgentMessagesFromTurns(entries, { activeLeafTurnId: "active" });
+		const fork = selectWorkerContext(captureWorkerContext({ ...source, leafTurnId: "active" }, visible, entries), {
+			mode: "fork",
+		});
+		const lineage = seedRecallLineage(fork);
+		deepStrictEqual(lineage, { aliasFloor: 2, inheritedMarkers: [{ alias: "r1", ref: "res" }] });
+		// A seed from before the provenance fields still validates; its floor is the largest marker alias it carries.
+		const { recallAliasFloor: _floor, inheritedMarkers: _markers, contentHash: _hash, ...identity } = fork.provenance;
+		const legacy = {
+			provenance: { ...identity, contentHash: contextHash({ ...identity, messages: fork.messages }) },
+			messages: fork.messages,
+		};
+		deepStrictEqual(seedRecallLineage(legacy), { aliasFloor: 1, inheritedMarkers: [{ alias: "r1" }] });
+
+		const store = createWorkerObservationStore("run-1", lineage);
+		const files: string[] = [];
+		const guard = createWorkerContextGuard((alias, observation) => void files.push(store.archive(alias, observation)), {
+			aliasFloor: lineage.aliasFloor,
+			archivePath: store.archivePath,
+		});
+		const input = { systemPrompt: "worker", tools: [], contextWindow: 5000, outputReserve: () => 500 };
+		const seeded = [...seededWorkerMessages(fork), user("task")];
+		guard({ ...input, messages: seeded });
+		const messages = [
+			...seeded,
+			assistant("large"),
+			result("large", `EXACT_WORKER_OBSERVATION ${"data ".repeat(3500)}`),
+			assistant("small"),
+			result("small", "small"),
+			assistant("last"),
+			result("last", "last"),
+		];
+		const raw = JSON.stringify(messages);
+		const projected = JSON.stringify(guard({ ...input, messages }));
+		match(
+			projected,
+			/\[evicted ref=r3 reason=age_horizon tool=read path=src\/a\.ts .*recall=context\(scope=\\"recall\\", ref=\\"r3\\"\)/,
+		);
+		ok(projected.includes(`offload=${files[0]} recall=`), "a worker without the context tool can read the archive");
+		equal(JSON.stringify(messages), raw);
 		const tool = createContextTool({ workerRecall: store.recall });
-		const recalled = await tool.run({ scope: "recall", ref }, {});
-		match(JSON.stringify(recalled), /EXACT_WORKER_OBSERVATION/);
-		match(JSON.stringify(await tool.run({ scope: "recall" }, {})), /worker:/);
-		writeFileSync(file, "{}");
-		ok("error" in store.recall({ ref }));
+		match(JSON.stringify(await tool.run({ scope: "recall", ref: "r3" }, {})), /EXACT_WORKER_OBSERVATION/);
+		match(JSON.stringify(await tool.run({ scope: "recall" }, {})), /r3/);
+		match(
+			JSON.stringify(await tool.run({ scope: "recall", ref: "r1" }, {})),
+			/not_in_stream: r1 names parent history \(parent entry res\)/,
+		);
+		match(JSON.stringify(store.recall({ ref: "r2" })), /not_in_stream: r2/);
+		match(
+			JSON.stringify(createWorkerObservationStore("run-2", seedRecallLineage(legacy)).recall({ ref: "r1" })),
+			/not_in_stream/,
+		);
+		ok("error" in createWorkerObservationStore("run-3").recall({ ref: "r3" }));
+		ok("error" in store.recall({ ref: "../../parent/session" }));
+		writeFileSync(files[0] as string, "{}");
+		match(JSON.stringify(store.recall({ ref: "r3" })), /digest mismatch/);
 	} finally {
 		env.restore();
 	}
-});
-
-test("provider usage reconciliation stays stable after eviction and disabled eviction fails explicitly", () => {
-	const guard = createWorkerContextGuard(() => "/observation.json");
-	const input = { systemPrompt: "worker", tools: [], contextWindow: 10000, outputReserve: () => 500 };
-	const initial = [user("task")];
-	guard({ ...input, messages: initial });
-	const middle = [
-		...initial,
-		assistant("large"),
-		result("large", "data ".repeat(3500)),
-		assistant("small"),
-		result("small", "small"),
-	];
-	guard({ ...input, messages: middle });
-	const last = assistant("last");
-	if (last.role === "assistant") last.usage.input = 10000;
-	const messages = [...middle, last, result("last", "last")];
-	const projected = guard({ ...input, messages });
-	match(JSON.stringify(projected), /Exact historical result/);
-	deepStrictEqual(guard({ ...input, messages }), projected);
-	const disabled = createWorkerContextGuard(() => {
-		throw new Error("must not archive");
-	});
-	disabled({ ...input, messages: initial });
-	throws(
-		() => disabled({ ...input, autoEvict: false, messages: [user("too big ".repeat(10000))] }),
-		/automatic eviction disabled/,
-	);
 });
 
 test("worker snapshots exclude parent system prompts and declarations without charging interruption counts", () => {

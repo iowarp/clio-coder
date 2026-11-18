@@ -31,7 +31,7 @@ import {
 } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
-import { registerEngineApiProvider } from "../../src/engine/api-registry.js";
+import { type EngineRegisteredApiProvider, registerEngineApiProvider } from "../../src/engine/api-registry.js";
 import type { Model } from "../../src/engine/types.js";
 import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
@@ -338,6 +338,29 @@ export function wireElements(request: CapturedRequest): string[] {
 	return out;
 }
 
+/**
+ * The same element list for a finalized context the tap recorded, so a request the engine was handed and the body its
+ * adapter serialized compare element for element.
+ */
+export function contextElements(context: Context): string[] {
+	const out: string[] = context.systemPrompt === undefined ? [] : [`system:${context.systemPrompt}`];
+	for (const message of context.messages as ReadonlyArray<Json>) {
+		const role = String(message.role);
+		if (role === "toolResult") out.push(`result:${joined(message.content)}`);
+		else if (role === "assistant") {
+			const blocks = parts(message.content);
+			const text = blocks
+				.filter((block) => block.type === "text")
+				.map(partText)
+				.join("");
+			if (text) out.push(`assistant:${text}`);
+			for (const call of blocks.filter((block) => block.type === "toolCall"))
+				out.push(`call:${String(call.name)}(${args(call.arguments)})`);
+		} else out.push(`${role}:${joined(message.content)}`);
+	}
+	return out;
+}
+
 const BUILTIN: Partial<Record<Api, () => ReturnType<typeof openAICompletionsApi>>> = {
 	"openai-completions": openAICompletionsApi,
 	"openai-responses": openAIResponsesApi,
@@ -350,11 +373,14 @@ export interface EngineTap {
 	restore(): void;
 }
 
-/** Session capture for one API family; restores Pi's builtin provider for that family. */
-export function tapEngineApi(api: WireFamily): EngineTap {
+/**
+ * Session capture for one API family. It wraps Pi's builtin provider for that family, or `base` where the surface
+ * registers its own (the native worker registers Clio's), and restores the provider it wrapped.
+ */
+export function tapEngineApi(api: WireFamily, base?: EngineRegisteredApiProvider): EngineTap {
 	const builtin = BUILTIN[api];
-	if (!builtin) throw new Error(`no builtin to restore for ${api}`);
-	const real = builtin();
+	const real = base ?? builtin?.();
+	if (!real) throw new Error(`no builtin to restore for ${api}`);
 	const contexts: Context[] = [];
 	registerEngineApiProvider({
 		api,
@@ -367,7 +393,7 @@ export function tapEngineApi(api: WireFamily): EngineTap {
 			return real.streamSimple(model, context, options);
 		},
 	});
-	return { contexts, restore: () => registerEngineApiProvider({ api, ...builtin() }) };
+	return { contexts, restore: () => registerEngineApiProvider({ ...real, api }) };
 }
 
 /** Route facts every CF-0 fixture varies; see SPEC §3.1. */

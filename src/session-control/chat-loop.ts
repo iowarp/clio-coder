@@ -4288,6 +4288,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return captureWorkerContext(
 				{ sessionId: meta.id, leafTurnId: state.lastTurnId, cwd: meta.cwd },
 				state.runtime?.agent.state.messages ?? state.replayedContextMessages,
+				deps.readSessionEntries?.(),
 			);
 		},
 
