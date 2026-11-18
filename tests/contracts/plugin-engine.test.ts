@@ -33,6 +33,7 @@ import {
 	removePlugin,
 	updatePlugin,
 } from "../../src/domains/plugins/index.js";
+import { createResourcesLoader } from "../../src/domains/resources/loader.js";
 import { trustProjectPackages } from "../harness/project-trust.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -295,14 +296,27 @@ describe("agent plugin engine", () => {
 
 	it("revokes drifted resources even while an earlier snapshot remains committed", () => {
 		const root = fixture();
+		mkdirSync(join(root, "prompts"));
+		writeFileSync(join(root, "prompts", "run.md"), "---\ndescription: Run fixture\n---\nRun.\n");
+		const resources = { skills: "skills", prompts: "prompts" };
+		rewriteManifest(root, (manifest) => {
+			manifest.extensions = { "ai.iowarp.clio": { manifestVersion: 1, resources } };
+		});
 		const installed = installPlugin(root, { cwd: project }).plugin;
 		ok(installed);
 		const snapshot = reloadPluginResources(project);
 		ok(snapshot.generation > 0);
+		const loader = createResourcesLoader({ cwd: project });
+		ok(loader.expandPromptTemplate("/run", project).expanded, "the verified template expands");
 		writeFileSync(join(installed.rootPath, "skills", "research", "SKILL.md"), "tampered");
 		deepStrictEqual(enabledPluginResourceRoots("skills", project), []);
 		strictEqual(enablePlugin("research-kit", { cwd: project }).plugin, undefined);
 		ok(listInstalledPlugins(project)[0]?.diagnostics.some((entry) => entry.message.includes("drift")));
+		// Completion still lists from the committed snapshot; submit names the reload, not a typo.
+		ok(loader.promptsForDisplay(project).items.some((template) => template.name === "run"));
+		const drifted = loader.expandPromptTemplate("/run", project);
+		const refusal = drifted.expanded ? "" : (drifted.refusal?.message ?? "");
+		ok(refusal.includes("plugin research-kit changed on disk") && refusal.includes("/reload library"), refusal);
 	});
 
 	it("updates from durable local origin and preserves changed files during removal", () => {
