@@ -146,7 +146,9 @@ import {
 	estimateAgentContextBreakdown,
 	estimateAgentContextTokens,
 	estimateAgentMessageTokens,
+	latestUsableAssistantUsage,
 	reconcileSnapshot,
+	rehydrationRecord,
 	snapshotInputTokens,
 } from "../domains/session/context-accounting.js";
 import {
@@ -159,7 +161,10 @@ import type { SessionContract } from "../domains/session/contract.js";
 import {
 	type CompactionSummaryEntry,
 	type CompactionTrigger,
+	type EvictionAnchor,
+	HOST_INSERT_CUSTOM_TYPE,
 	type HostInsertRecord,
+	isHostInsertData,
 	mainSkillContextState,
 	type SessionEntry,
 	withProviderCheckpointMeasurements,
@@ -195,7 +200,11 @@ import {
 import { coldCacheNoticeText } from "./cold-reasons.js";
 import { footerTokens, renderCompactionSummaryLine } from "./compaction-lines.js";
 import type { HostInserts } from "./host-inserts.js";
-import { buildModelReplayAgentMessagesFromTurns, continuityContextFromSession } from "./model-session-replay.js";
+import {
+	buildModelReplayAgentMessagesFromTurns,
+	continuityContextFromSession,
+	renderModelReplay,
+} from "./model-session-replay.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
 import { extractTurnText } from "./session-replay-messages.js";
@@ -518,6 +527,30 @@ type LiveBudgetAccounting = Pick<
 	| "breakdownSource"
 	| "outputReserveTokens"
 >;
+
+/** The newest reduction on `path`, in the shape a live commit notes it. */
+function compactionEventOnPath(
+	path: ReadonlyArray<SessionEntry>,
+): { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null {
+	for (let index = path.length - 1; index >= 0; index -= 1) {
+		const entry = path[index];
+		if (entry?.kind === "contextEviction") {
+			const stage = entry.trigger === "superseded" ? "superseded" : "working_set";
+			return { stage, tokensBefore: entry.tokensBefore, tokensAfter: entry.tokensAfter, trigger: entry.trigger };
+		}
+		if (entry?.kind === "compactionSummary") {
+			if (entry.tokensAfter === undefined) return null;
+			const stage = entry.trigger === "step" ? "step_checkpoint" : "llm_summary";
+			return {
+				stage,
+				tokensBefore: entry.tokensBefore,
+				tokensAfter: entry.tokensAfter,
+				trigger: entry.trigger ?? "unknown",
+			};
+		}
+	}
+	return null;
+}
 
 const sha256Json = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
@@ -1121,11 +1154,117 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		return JSON.stringify([model?.id, model?.provider, model?.api, model?.baseUrl]);
 	};
 
-	/** Price appended history separately so eviction can retain it without folding in static growth twice. */
-	const reconciledHistoryTokens = (agentRuntime: AgentRuntime, history?: MessageListDigests): number | null => {
+	const sameRoute = (agentRuntime: AgentRuntime, route: EvictionAnchor["route"]): boolean =>
+		route.targetId === agentRuntime.targetId &&
+		route.runtimeId === agentRuntime.runtimeId &&
+		route.wireModelId === agentRuntime.wireModelId &&
+		route.modelKey === anchorModelKey(agentRuntime);
+
+	/** A failed rehydration, held until the path, the history or the runtime changes so each read does not render again. */
+	let rehydrationMiss: { key: string; runtime: AgentRuntime } | null = null;
+
+	/**
+	 * Seed the live anchor from the eviction record step 1 selects (ContextFold §4 step 3). The record's figure covers
+	 * the history elements whose rows precede it; an element whose row was written later, such as an insert rendered
+	 * ahead of it, is priced on top. The history has to be the path's render, byte for byte, or the figure describes
+	 * another request and the estimate stays structural.
+	 */
+	const rehydrateAnchor = (agentRuntime: AgentRuntime, observed: MessageListDigests): boolean => {
+		const stream = deps.readSessionEntries?.() ?? [];
+		if (stream.length === 0) return false;
+		const key = JSON.stringify([stream.length, state.lastTurnId, observed.digest(), anchorModelKey(agentRuntime)]);
+		if (rehydrationMiss?.key === key && rehydrationMiss.runtime === agentRuntime) return false;
+		rehydrationMiss = { key, runtime: agentRuntime };
+		const path = activePath(stream, state.lastTurnId ?? undefined);
+		const record = rehydrationRecord(path);
+		if (!record || !sameRoute(agentRuntime, record.anchor.route)) return false;
+		const render = renderModelReplay(stream, {
+			...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
+			continuity: continuityContextFromSession(deps.session),
+		});
+		const rendered: AgentMessage[] = [];
+		const sources: Array<string | null> = [];
+		render.messages.forEach((message, index) => {
+			if (message.role === "system" && !isHostPolicyMessage(message)) return;
+			rendered.push(message);
+			sources.push(render.sourceIds[index] ?? null);
+		});
+		if (rendered.length > observed.messages.length || observed.digest(rendered.length) !== sha256Json(rendered))
+			return false;
+		const position = new Map<string, number>();
+		path.forEach((entry, index) => {
+			position.set(entry.turnId, index);
+			if (entry.kind === "custom" && entry.customType === HOST_INSERT_CUSTOM_TYPE && isHostInsertData(entry.data))
+				position.set(entry.data.id, index);
+		});
+		const recordIndex = path.indexOf(record);
+		// An element with no row of its own, such as a continuity block, is priced on top: the figure may not cover it.
+		const written = sources.map((source) => (source === null ? Number.POSITIVE_INFINITY : (position.get(source) ?? -1)));
+		let covered = written.length - 1;
+		while (covered >= 0 && (written[covered] ?? 0) > recordIndex) covered -= 1;
+		let tokens = record.anchor.tokens;
+		for (let index = 0; index < covered; index += 1)
+			if ((written[index] ?? 0) > recordIndex) tokens += observed.messageTokens[index] ?? 0;
+		rehydrationMiss = null;
+		reconciledAnchor = {
+			tokens,
+			anchoredMessages: observed.messages.slice(0, covered + 1),
+			contentDigest: observed.digest(covered + 1),
+			runtime: agentRuntime,
+			model: agentRuntime.agent.state.model,
+			modelKey: anchorModelKey(agentRuntime),
+			targetId: agentRuntime.targetId,
+			runtimeId: agentRuntime.runtimeId,
+			wireModelId: agentRuntime.wireModelId,
+			systemPromptTokens: record.anchor.sys,
+			toolSchemaTokens: record.anchor.tools,
+		};
+		return true;
+	};
+
+	/**
+	 * At a commit with no live anchor, the usage the fallback rehydrated from the replayed history becomes the live
+	 * anchor, so the carry has a figure to subtract the saving from; the eviction then invalidates that usage. The
+	 * figure is the fallback's own: the usage, its system and tools as they stand, and the elements after it priced.
+	 */
+	const seedAnchorFromUsage = (agentRuntime: AgentRuntime, observed: MessageListDigests): void => {
+		const usage = latestUsableAssistantUsage(observed.messages);
+		if (!usage) return;
+		const breakdown = estimateAgentContextBreakdown({
+			systemPrompt: engineInitialSystemPrompt(agentRuntime.agent),
+			messages: [],
+			tools: agentRuntime.agent.state.tools,
+		});
+		reconciledAnchor = {
+			tokens: usage.tokens,
+			anchoredMessages: observed.messages.slice(0, usage.index + 1),
+			contentDigest: observed.digest(usage.index + 1),
+			runtime: agentRuntime,
+			model: agentRuntime.agent.state.model,
+			modelKey: anchorModelKey(agentRuntime),
+			targetId: agentRuntime.targetId,
+			runtimeId: agentRuntime.runtimeId,
+			wireModelId: agentRuntime.wireModelId,
+			systemPromptTokens: breakdown.systemPromptTokens,
+			toolSchemaTokens: breakdown.toolSchemaTokens,
+		};
+	};
+
+	/**
+	 * Price appended history separately so eviction can retain it without folding in static growth twice. With no
+	 * live anchor, an anchored eviction record on the path seeds one; `commit` also seeds one from a replayed usage.
+	 * Elements past the anchor are priced by `messageTokens`, the basis for content no count has measured.
+	 */
+	const reconciledHistoryTokens = (
+		agentRuntime: AgentRuntime,
+		history?: MessageListDigests,
+		commit = false,
+	): number | null => {
+		const observed = history ?? observeHistory(agentRuntime);
+		if (!reconciledAnchor && !rehydrateAnchor(agentRuntime, observed) && commit)
+			seedAnchorFromUsage(agentRuntime, observed);
 		const anchor = reconciledAnchor;
 		if (!anchor) return null;
-		const observed = history ?? observeHistory(agentRuntime);
 		const messages = observed.messages;
 		// The identity, route, and length checks are cheap and run first; `||`
 		// short-circuits, so the content digest is only computed for a prefix that
@@ -1545,6 +1684,30 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * anchor would lose tool results appended since the last measured call.
 	 * Static baselines stay tied to that call until the next reconciliation.
 	 */
+	const carriedTokens = (historyTokens: number, tokensRemoved: number): number =>
+		Math.max(0, historyTokens - Math.max(0, tokensRemoved));
+
+	/** The record's copy of what the carry leaves: the same figure, the anchor's system and tools, and its route. */
+	const evictionAnchor = (
+		agentRuntime: AgentRuntime,
+		historyTokens: number | null,
+		tokensRemoved: number,
+	): EvictionAnchor | undefined => {
+		const anchor = reconciledAnchor;
+		if (!anchor || historyTokens === null) return undefined;
+		return {
+			tokens: carriedTokens(historyTokens, tokensRemoved),
+			sys: anchor.systemPromptTokens,
+			tools: anchor.toolSchemaTokens,
+			route: {
+				targetId: agentRuntime.targetId,
+				runtimeId: agentRuntime.runtimeId,
+				wireModelId: agentRuntime.wireModelId,
+				modelKey: anchorModelKey(agentRuntime),
+			},
+		};
+	};
+
 	const carryReconciledAnchorThroughProjection = (
 		agentRuntime: AgentRuntime,
 		historyTokens: number | null,
@@ -1554,7 +1717,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const history = observeHistory(agentRuntime);
 		reconciledAnchor = {
 			...reconciledAnchor,
-			tokens: Math.max(0, historyTokens - Math.max(0, tokensRemoved)),
+			tokens: carriedTokens(historyTokens, tokensRemoved),
 			anchoredMessages: history.messages,
 			// Re-anchoring on the projected list is the point of this carry, so its
 			// content identity is retaken here. Keeping the old digest would fail
@@ -1728,7 +1891,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		state,
 		syncCodexConfiguration: (runtime) => syncCodexConfiguration(runtime),
 		liveContextEstimate: (runtime, pendingUserText) => liveContextEstimate(runtime, pendingUserText),
-		reconciledHistoryTokens: (runtime) => reconciledHistoryTokens(runtime),
+		reconciledHistoryTokens: (runtime, commit) => reconciledHistoryTokens(runtime, undefined, commit),
+		evictionAnchor: (runtime, historyTokens, tokensRemoved) => evictionAnchor(runtime, historyTokens, tokensRemoved),
 		carryReconciledAnchorThroughProjection: (runtime, historyTokens, tokensRemoved) =>
 			carryReconciledAnchorThroughProjection(runtime, historyTokens, tokensRemoved),
 		dropReconciledAnchor: () => {
@@ -3669,6 +3833,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const provider = routed?.targetId ?? settings.chat?.target ?? null;
 			const model = routed?.wireModelId ?? settings.chat?.model ?? null;
 			const liveToolCount = state.runtime?.agent.state.tools.length ?? 0;
+			// The total is the published view's, the figure the footer and admission read; the capture only splits it.
+			const view = budgetProducer.current() ?? refreshLiveBudget();
+			const streamingOutput = liveStreamingOutputTokens();
+			// Settled output is already history in the view, so only a response in flight is added, as the footer does.
+			const totalUsed = view.inputTokens === null ? 0 : view.inputTokens + (state.streaming ? streamingOutput : 0);
+			const measured = view.historical
+				? currentContextSnapshot?.sources.total === "reconciled"
+				: view.anchoredInputTokens !== null;
 
 			if (!currentContextSnapshot) {
 				return buildContextLedger({
@@ -3679,15 +3851,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					compactionThreshold: ledgerThreshold,
 					compactionCeilingTokens,
 					compactionAuto,
+					streamingTokens: streamingOutput,
+					liveTotalTokens: totalUsed > 0 ? totalUsed : null,
+					measured,
+					lastCompaction: lastCompactionEvent,
 					promptCache: lastPromptCache,
 					prewarm: lastPrewarm,
 				});
 			}
 
-			const streamingOutput = liveStreamingOutputTokens();
 			const pendingTokens = pendingUserInputTokens();
-			const totalUsed = snapshotInputTokens(currentContextSnapshot) + pendingTokens + streamingOutput;
-			const measured = currentContextSnapshot.sources.total === "reconciled";
 
 			return buildContextLedger({
 				provider,
@@ -4005,6 +4178,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			noGainSummaryDigest = null;
 			noUsefulCutBasisKey = null;
 			reconciledAnchor = null;
+			rehydrationMiss = null;
+			// The last reduction /context and ACP name is the one on the path now current, not the branch left.
+			lastCompactionEvent = compactionEventOnPath(activeEntries());
 			// Real branch navigation. The epoch separates two visits to the same
 			// leaf id, so an advisory announced on the branch this session left is
 			// re-armed rather than treated as already said.
@@ -4013,7 +4189,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			bindMemoryScope();
 			budgetProducer.reset();
 			const session = deps.session?.current();
-			currentContextSnapshot = session ? getLatestContextSnapshot(session) : null;
+			// The session's latest capture may describe the branch just left; a runtime captures the history now in place.
+			currentContextSnapshot = state.runtime
+				? captureRuntimeContextSnapshot(
+						state.runtime,
+						incomingBranchAnchorTurnId ?? "session",
+						deps.getSettings().context.compaction?.threshold ?? null,
+					)
+				: session
+					? getLatestContextSnapshot(session)
+					: null;
 		},
 
 		dispose(): void {

@@ -3,6 +3,7 @@ import { ceilChars } from "../../core/token-split.js";
 import type { AgentMessage, Usage } from "../../engine/types.js";
 import { DEFAULT_COMPACTION_THRESHOLD } from "./compaction/auto.js";
 import { categoryForSegment } from "./context-ledger.js";
+import type { ContextEvictionEntry, EvictionAnchor, SessionEntry } from "./entries.js";
 
 const IMAGE_CHAR_ESTIMATE = 4800;
 const MESSAGE_OVERHEAD_TOKENS = 16;
@@ -175,7 +176,9 @@ function usageInvalidated(message: AgentMessage): boolean {
 	return (message as { contextUsageInvalidated?: unknown }).contextUsageInvalidated === true;
 }
 
-function latestUsableAssistantUsage(messages: ReadonlyArray<AgentMessage>): { index: number; tokens: number } | null {
+export function latestUsableAssistantUsage(
+	messages: ReadonlyArray<AgentMessage>,
+): { index: number; tokens: number } | null {
 	for (let i = messages.length - 1; i >= 0; i -= 1) {
 		const message = messages[i] as AgentMessage | undefined;
 		if (message?.role !== "assistant") continue;
@@ -284,6 +287,30 @@ export function estimateAgentContextTokens(input: AgentContextEstimateInput): nu
 	// every meter read after /fork or /resume dropped the live anchor.
 	const anchored = usage.tokens + trailingTokens + breakdown.pendingUserTokens;
 	return Math.max(projection, anchored);
+}
+
+/**
+ * The eviction record a context with no live anchor rehydrates from (ContextFold §4 step 1): the newest row after the
+ * last checkpoint on `path` that is either a usable assistant usage or an eviction record, when that row is a record
+ * carrying `anchor`. A usage keeps `estimateAgentContextTokens` (step 2); a record without `anchor`, a recall that
+ * readmitted a body after it, or a checkpoint leaves the structural estimate (step 4).
+ */
+export function rehydrationRecord(
+	path: ReadonlyArray<SessionEntry>,
+): (ContextEvictionEntry & { anchor: EvictionAnchor }) | null {
+	for (let index = path.length - 1; index >= 0; index -= 1) {
+		const entry = path[index];
+		if (entry === undefined) continue;
+		if (entry.kind === "contextEviction")
+			return entry.anchor ? (entry as ContextEvictionEntry & { anchor: EvictionAnchor }) : null;
+		if (entry.kind === "contextRecall" || entry.kind === "compactionSummary") return null;
+		if (entry.kind !== "message" || entry.role !== "assistant" || !isRecord(entry.payload)) continue;
+		const { payload } = entry;
+		if (payload.contextUsageInvalidated === true || payload.stopReason === "error" || payload.stopReason === "aborted")
+			continue;
+		if (usageTotalTokens(payload.usage) !== null) return null;
+	}
+	return null;
 }
 
 export function contextUsageSnapshot(

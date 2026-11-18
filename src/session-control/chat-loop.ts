@@ -4527,6 +4527,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			middlewareToolChoice.reset();
 			state.lastTurnId = leafTurnId;
 			state.lastRunSnapshot = null;
+			// In place before the context resets, so it republishes on the history of the leaf arrived at.
+			state.replayedContextMessages = replayMessages ? [...replayMessages] : [];
+			if (state.runtime) replaceEngineMessages(state.runtime.agent, [...state.replayedContextMessages]);
 			// The incoming leaf is the advisory branch identity for the new session.
 			// Ordinary appends advance `state.lastTurnId` from here without re-arming
 			// an advisory; arriving here at all is the navigation that does.
@@ -4537,10 +4540,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// would run runs now, under the same TTL; the footer refreshes on the
 			// provider-health event the probe publishes.
 			void turnRuntime.ensureLiveCapabilitiesForSelectedModel().catch(() => {});
-			state.replayedContextMessages = replayMessages ? [...replayMessages] : [];
-			if (state.runtime) {
-				replaceEngineMessages(state.runtime.agent, [...state.replayedContextMessages]);
-			}
 			if (deps.protectedArtifacts) {
 				reloadProtectedArtifactsForSession(deps.protectedArtifacts, deps.readSessionEntries);
 			}
