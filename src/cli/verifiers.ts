@@ -44,7 +44,7 @@ Fields:
   --kind <kind>           command (default), numeric-compare, perf-budget, or reproduce
   --reference <path>      numeric-compare: repository-relative reference JSON of string -> number | number[];
                           reproduce: reference metrics JSON in the command's own output format
-  --tolerance <json>      numeric-compare: {"relative"?,"absolute"?,"ulp"?,"combine"?:all|any,"nonFinite"?:fail|match}, at least one numeric bound;
+  --tolerance <json>      numeric-compare: {"relative"?,"absolute"?,"ulp"?,"combine"?:all|any,"nonFinite"?:fail|match,"keys"?:{<key>:{bounds,"combine"?}}}, at least one numeric bound;
                           perf-budget with --baseline: {"relative"} headroom over the baseline
   --budget-ms <number>    perf-budget: wall-time bound in milliseconds
   --budget-relative <r>   perf-budget with --budget-ms: fractional headroom over the bound

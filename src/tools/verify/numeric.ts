@@ -41,7 +41,8 @@ export const DEFAULT_NUMERIC_NON_FINITE: NumericNonFinitePolicy = "fail";
  */
 export const MAX_ULP_TOLERANCE = Number.MAX_SAFE_INTEGER;
 
-export interface NumericTolerance {
+/** The bounds and combination rule that judge one key. */
+export interface NumericKeyTolerance {
 	/** |actual - expected| / |expected| must not exceed this. Zero expected passes only on exact equality. */
 	relative?: number;
 	/** |actual - expected| must not exceed this. */
@@ -50,8 +51,17 @@ export interface NumericTolerance {
 	ulp?: number;
 	/** Combination rule for the named bounds; absent means `all`. */
 	combine?: NumericToleranceCombine;
+}
+
+export interface NumericTolerance extends NumericKeyTolerance {
 	/** Non-finite pairing policy; absent means `fail`. */
 	nonFinite?: NumericNonFinitePolicy;
+	/**
+	 * Per-key rules. An entry replaces the check-level bounds and `combine` for
+	 * its key, absent `combine` meaning `all`; `nonFinite` stays check-level.
+	 * Keys without an entry use the check-level bounds.
+	 */
+	keys?: Record<string, NumericKeyTolerance>;
 }
 
 export type NumericValue = number | number[];
@@ -63,6 +73,8 @@ export type NumericFailureReason =
 	| "shape-mismatch"
 	| "length-mismatch"
 	| "not-finite"
+	/** Nothing to compare: both arrays are empty. Never a pass. */
+	| "unjudgeable"
 	| NumericToleranceKind;
 
 /**
@@ -155,7 +167,7 @@ export interface NumericCompareReport {
 	passed: boolean;
 	/** The tolerance exactly as declared, defaults not filled in. */
 	tolerance: NumericTolerance;
-	/** The combination rule that judged the payload, default applied. */
+	/** The check-level combination rule, default applied; a `tolerance.keys` entry carries its own, which `rule` states. */
 	combine: NumericToleranceCombine;
 	/** The non-finite policy that judged the payload, default applied. */
 	nonFinite: NumericNonFinitePolicy;
@@ -176,49 +188,82 @@ export const NUMERIC_PAYLOAD_CAPS = Object.freeze({
 	elements: 1_000_000,
 });
 
-const TOLERANCE_FIELDS = new Set(["relative", "absolute", "ulp", "combine", "nonFinite"]);
+const KEY_TOLERANCE_FIELDS = new Set(["relative", "absolute", "ulp", "combine"]);
+const TOLERANCE_FIELDS = new Set([...KEY_TOLERANCE_FIELDS, "nonFinite", "keys"]);
 const TOLERANCE_KINDS: ReadonlyArray<NumericToleranceKind> = ["relative", "absolute", "ulp"];
 
-/** True when the tolerance names at least one bound and every named field is usable. */
-export function normalizeNumericTolerance(value: unknown): NumericTolerance | Error {
-	if (value === null || typeof value !== "object" || Array.isArray(value)) {
-		return new Error("tolerance must be an object with relative, absolute, or ulp");
-	}
-	const record = value as Record<string, unknown>;
-	const unknown = Object.keys(record).filter((key) => !TOLERANCE_FIELDS.has(key));
-	if (unknown.length > 0) return new Error(`tolerance has unknown field(s): ${unknown.sort().join(", ")}`);
-	const tolerance: NumericTolerance = {};
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** The bounds and combine rule of `record`, which `path` names in errors; at least one bound is required. */
+function normalizeBounds(
+	record: Record<string, unknown>,
+	path: string,
+	fields: ReadonlySet<string>,
+): NumericKeyTolerance | Error {
+	const unknown = Object.keys(record).filter((key) => !fields.has(key));
+	if (unknown.length > 0) return new Error(`${path} has unknown field(s): ${unknown.sort().join(", ")}`);
+	const tolerance: NumericKeyTolerance = {};
 	for (const kind of ["relative", "absolute"] as const) {
 		if (!Object.hasOwn(record, kind)) continue;
 		const bound = record[kind];
 		if (typeof bound !== "number" || !Number.isFinite(bound) || bound < 0) {
-			return new Error(`tolerance.${kind} must be a finite non-negative number`);
+			return new Error(`${path}.${kind} must be a finite non-negative number`);
 		}
 		tolerance[kind] = bound;
 	}
 	if (Object.hasOwn(record, "ulp")) {
 		const bound = record.ulp;
 		if (typeof bound !== "number" || !Number.isInteger(bound) || bound < 0) {
-			return new Error("tolerance.ulp must be a non-negative integer");
+			return new Error(`${path}.ulp must be a non-negative integer`);
 		}
 		if (bound > MAX_ULP_TOLERANCE) {
-			return new Error(`tolerance.ulp must not exceed ${MAX_ULP_TOLERANCE} (Number.MAX_SAFE_INTEGER)`);
+			return new Error(`${path}.ulp must not exceed ${MAX_ULP_TOLERANCE} (Number.MAX_SAFE_INTEGER)`);
 		}
 		tolerance.ulp = bound;
 	}
 	if (tolerance.relative === undefined && tolerance.absolute === undefined && tolerance.ulp === undefined) {
-		return new Error("tolerance must name at least one of relative, absolute, or ulp");
+		return new Error(`${path} must name at least one of relative, absolute, or ulp`);
 	}
 	if (Object.hasOwn(record, "combine")) {
 		const combine = record.combine;
-		if (combine !== "all" && combine !== "any") return new Error("tolerance.combine must be all or any");
+		if (combine !== "all" && combine !== "any") return new Error(`${path}.combine must be all or any`);
 		tolerance.combine = combine;
 	}
-	if (Object.hasOwn(record, "nonFinite")) {
-		const policy = record.nonFinite;
+	return tolerance;
+}
+
+/** True when the tolerance and every `keys` entry name at least one bound and every named field is usable. */
+export function normalizeNumericTolerance(value: unknown): NumericTolerance | Error {
+	if (!isPlainRecord(value)) return new Error("tolerance must be an object with relative, absolute, or ulp");
+	const bounds = normalizeBounds(value, "tolerance", TOLERANCE_FIELDS);
+	if (bounds instanceof Error) return bounds;
+	const tolerance: NumericTolerance = bounds;
+	if (Object.hasOwn(value, "nonFinite")) {
+		const policy = value.nonFinite;
 		if (policy !== "fail" && policy !== "match") return new Error("tolerance.nonFinite must be fail or match");
 		tolerance.nonFinite = policy;
 	}
+	if (Object.hasOwn(value, "keys")) {
+		if (!isPlainRecord(value.keys)) return new Error("tolerance.keys must be an object of key -> tolerance");
+		const entries: Array<[string, NumericKeyTolerance]> = [];
+		for (const [key, entry] of Object.entries(value.keys)) {
+			const path = `tolerance.keys.${key}`;
+			if (!isPlainRecord(entry)) return new Error(`${path} must be an object with relative, absolute, or ulp`);
+			const rule = normalizeBounds(entry, path, KEY_TOLERANCE_FIELDS);
+			if (rule instanceof Error) return rule;
+			entries.push([key, rule]);
+		}
+		tolerance.keys = Object.fromEntries(entries);
+	}
+	return tolerance;
+}
+
+/** The rule that judges `key`: its `keys` entry when the tolerance has one, the check-level bounds otherwise. */
+function keyRule(tolerance: NumericTolerance, key: string): NumericKeyTolerance {
+	if (tolerance.keys !== undefined && Object.hasOwn(tolerance.keys, key))
+		return tolerance.keys[key] as NumericKeyTolerance;
 	return tolerance;
 }
 
@@ -308,7 +353,7 @@ export function extractNumericPayloadText(output: string): string {
 	}
 }
 
-function effectiveNumericCombine(tolerance: NumericTolerance): NumericToleranceCombine {
+function effectiveNumericCombine(tolerance: NumericKeyTolerance): NumericToleranceCombine {
 	return tolerance.combine ?? DEFAULT_NUMERIC_COMBINE;
 }
 
@@ -317,7 +362,7 @@ function effectiveNumericNonFinite(tolerance: NumericTolerance): NumericNonFinit
 }
 
 /** The named bounds, in schema order. */
-function namedKinds(tolerance: NumericTolerance): NumericToleranceKind[] {
+function namedKinds(tolerance: NumericKeyTolerance): NumericToleranceKind[] {
 	return TOLERANCE_KINDS.filter((kind) => tolerance[kind] !== undefined);
 }
 
@@ -386,7 +431,7 @@ function deviation(
 }
 
 /** Named bounds the deviation violates, in schema order. */
-function violatedTolerances(item: Deviation, tolerance: NumericTolerance): NumericToleranceKind[] {
+function violatedTolerances(item: Deviation, tolerance: NumericKeyTolerance): NumericToleranceKind[] {
 	const failed: NumericToleranceKind[] = [];
 	if (tolerance.relative !== undefined && (item.relative === null || item.relative > tolerance.relative)) {
 		failed.push("relative");
@@ -409,7 +454,7 @@ interface ElementJudgement {
  */
 function judgeDeviation(
 	item: Deviation,
-	tolerance: NumericTolerance,
+	tolerance: NumericKeyTolerance,
 	combine: NumericToleranceCombine,
 ): ElementJudgement {
 	if (item.nonFinite === "mismatched") return { failed: ["not-finite"], held: [], violated: [] };
@@ -467,25 +512,30 @@ function formatBound(value: number): string {
 	return magnitude < 1e-3 || magnitude >= 1e6 ? value.toExponential() : String(value);
 }
 
-function describeBound(kind: NumericToleranceKind, tolerance: NumericTolerance): string {
+function describeBound(kind: NumericToleranceKind, tolerance: NumericKeyTolerance): string {
 	return `${kind}<=${formatBound(tolerance[kind] ?? 0)}`;
+}
+
+function describeClause(tolerance: NumericKeyTolerance): string {
+	const bounds = namedKinds(tolerance).map((kind) => describeBound(kind, tolerance));
+	const combine = effectiveNumericCombine(tolerance);
+	return bounds.length === 1
+		? `${bounds[0]} must hold`
+		: combine === "all"
+			? `all of ${bounds.join(", ")} must hold`
+			: `any of ${bounds.join(", ")} may hold`;
 }
 
 /** The effective judgement rule in words, so a reader never has to infer the conjunction from the tolerance object. */
 export function describeNumericRule(tolerance: NumericTolerance): string {
-	const bounds = namedKinds(tolerance).map((kind) => describeBound(kind, tolerance));
-	const combine = effectiveNumericCombine(tolerance);
-	const clause =
-		bounds.length === 1
-			? `${bounds[0]} must hold`
-			: combine === "all"
-				? `all of ${bounds.join(", ")} must hold`
-				: `any of ${bounds.join(", ")} may hold`;
+	const keys = Object.entries(tolerance.keys ?? {}).map(
+		([key, rule]) => `key ${JSON.stringify(key)}: ${describeClause(rule)}`,
+	);
 	const nonFinite =
 		effectiveNumericNonFinite(tolerance) === "match"
 			? "NaN matches NaN and same-signed infinities match"
 			: "non-finite values fail";
-	return `${clause}; ${nonFinite}`;
+	return [describeClause(tolerance), ...keys, nonFinite].join("; ");
 }
 
 function passedDetail(key: string, judgement: ElementJudgement, worst: Deviation): string {
@@ -500,7 +550,7 @@ function compareElements(
 	key: string,
 	actual: number[],
 	expected: number[],
-	tolerance: NumericTolerance,
+	tolerance: NumericKeyTolerance,
 	combine: NumericToleranceCombine,
 	nonFinite: NumericNonFinitePolicy,
 ): NumericKeyReport {
@@ -523,7 +573,7 @@ function compareElements(
 		}
 	}
 	if (worst === undefined) {
-		return { key, passed: true, failed: [], held: [], violated: [], detail: `${key}: empty array matches` };
+		return structuralFailure(key, "unjudgeable", `${key}: unjudgeable, both arrays are empty so nothing was compared`);
 	}
 	const passed = worstJudgement.failed.length === 0;
 	return {
@@ -549,8 +599,14 @@ function structuralFailure(key: string, reason: NumericFailureReason, detail: st
  * against an array fails, arrays compare elementwise and fail on length
  * mismatch, and a NaN or infinity fails as not finite unless the tolerance's
  * `nonFinite` policy matches the pair. A comparable value passes when the
- * named bounds hold under the tolerance's `combine` rule: every bound under
- * `all` (the default), at least one under `any`.
+ * bounds of its rule (its `tolerance.keys` entry, else the check-level bounds)
+ * hold under that rule's `combine`: every bound under `all` (the default), at
+ * least one under `any`. A `tolerance.keys` entry naming a key the reference
+ * lacks fails, so a misspelt override never silently falls back.
+ *
+ * A comparison with nothing in it is unjudgeable and never passes: a reference
+ * with no keys fails the whole report, and a key whose arrays are both empty
+ * fails as `unjudgeable`.
  */
 export function compareNumeric(
 	actual: NumericPayload,
@@ -559,11 +615,19 @@ export function compareNumeric(
 ): NumericCompareReport {
 	const combine = effectiveNumericCombine(tolerance);
 	const nonFinite = effectiveNumericNonFinite(tolerance);
-	const keys = [...new Set([...Object.keys(reference), ...Object.keys(actual)])].sort();
+	const keys = [
+		...new Set([...Object.keys(reference), ...Object.keys(actual), ...Object.keys(tolerance.keys ?? {})]),
+	].sort();
 	const reports: NumericKeyReport[] = [];
 	for (const key of keys) {
 		const got = actual[key];
 		const want = reference[key];
+		if (got === undefined && want === undefined) {
+			reports.push(
+				structuralFailure(key, "missing-reference", `${key}: named by tolerance.keys but missing from the reference`),
+			);
+			continue;
+		}
 		if (got === undefined) {
 			reports.push(structuralFailure(key, "missing-actual", `${key}: missing from the command output`));
 			continue;
@@ -594,10 +658,12 @@ export function compareNumeric(
 			);
 			continue;
 		}
-		reports.push(compareElements(key, gotList, wantList, tolerance, combine, nonFinite));
+		const rule = keyRule(tolerance, key);
+		reports.push(compareElements(key, gotList, wantList, rule, effectiveNumericCombine(rule), nonFinite));
 	}
 	const failedKeys = reports.filter((report) => !report.passed).map((report) => report.key);
-	const passed = failedKeys.length === 0;
+	const empty = Object.keys(reference).length === 0;
+	const passed = failedKeys.length === 0 && !empty;
 	return {
 		kind: "numeric-compare",
 		passed,
@@ -607,9 +673,11 @@ export function compareNumeric(
 		rule: describeNumericRule(tolerance),
 		keys: reports,
 		failedKeys,
-		summary: passed
-			? `numeric-compare passed: ${reports.length} key(s) within tolerance`
-			: `numeric-compare failed: ${failedKeys.length} of ${reports.length} key(s) out of tolerance (${failedKeys.join(", ")})`,
+		summary: empty
+			? "numeric-compare unjudgeable: the reference has no keys, so nothing was compared"
+			: passed
+				? `numeric-compare passed: ${reports.length} key(s) within tolerance`
+				: `numeric-compare failed: ${failedKeys.length} of ${reports.length} key(s) out of tolerance (${failedKeys.join(", ")})`,
 	};
 }
 
