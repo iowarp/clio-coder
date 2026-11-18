@@ -321,6 +321,7 @@ export async function runCompactionFlow(
 				...compactionBudget,
 				...(nativeEnabled && providerCompaction ? { providerCompaction } : {}),
 				...(nativeEnabled ? { providerCheckpointSource: { sessionId: meta.id, archive: sessionPaths(meta).current } } : {}),
+				...(trigger === "auto" ? { automatic: true } : {}),
 				...(settings.context.compaction.provider === "native" && !nativeEnabled
 					? { providerFallbackReason: "non-codex-or-compaction-override" }
 					: {}),

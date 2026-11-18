@@ -26,8 +26,8 @@ export function economicPressure(input: EconomicPressureInput): ContextCompactio
 }
 
 export interface FoldTriggerReserveInput {
-	/** The route reports a real context window. */
-	knownWindow: boolean;
+	/** The route's real context window, the one its turn reserve is bounded by; zero or less when it reports none. */
+	window: number;
 	/** The summary's output reserve; it shares the window with the context it reads. */
 	summaryReserve: () => number;
 	/** The turn's own output reserve, the one admission checks. */
@@ -38,10 +38,14 @@ export interface FoldTriggerReserveInput {
  * The reserve the trigger counts: on a known window the larger of the summary's
  * and the turn's, so the trigger fires before admission would refuse the next
  * request; on an unknown window the summary's alone. The turn reserve is read
- * only when the window is known.
+ * only when the window is known. On a known window the summary's share is
+ * bounded at half the window, as the turn reserve is: a reasoning route's 26K
+ * summary reserve put a 28K window's trigger at 1,786 tokens, below the static
+ * prefix, so a summary fired nearly every round (bt-47 cf1j-b, ContextFold A1).
  */
 export function foldTriggerReserve(input: FoldTriggerReserveInput): number {
-	return input.knownWindow ? Math.max(input.summaryReserve(), input.turnReserve()) : input.summaryReserve();
+	if (!(input.window > 0)) return input.summaryReserve();
+	return Math.max(Math.min(input.summaryReserve(), Math.floor(input.window / 2)), input.turnReserve());
 }
 
 /**

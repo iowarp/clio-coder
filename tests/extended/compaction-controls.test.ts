@@ -788,11 +788,17 @@ describe("production compaction controls", () => {
 		context.refreshAgentMessagesFromSession(runtime);
 		strictEqual(await context.runAutoCompact(runtime, false), false);
 		strictEqual(attempts, 2, "same-length changed content invalidates the empty memo");
-		// The read stage's next request is about 22K tokens, 67% of the window.
+		// The read stage's next request is about 22K tokens, 67% of the window. What lies outside the kept read batch
+		// and the active request prices below the summary room, so an automatic pass skips it (ContextFold A1);
+		// overflow recovery takes the same request-budget cut.
 		f.settings.context.compaction.threshold = 0.65;
 		install(12);
 		strictEqual(findCutPoint(f.entries(), 20000).firstKeptEntryIndex, 0);
-		strictEqual(await context.runAutoCompact(runtime, false), true, "request-budget cut retains the final read batch");
+		strictEqual(
+			await context.runAutoCompact(runtime, true, undefined, "overflow"),
+			true,
+			"request-budget cut retains the final read batch",
+		);
 		strictEqual(attempts, 3);
 		ok(f.entries().some((entry) => entry.kind === "compactionSummary"));
 		install(17);
@@ -1142,8 +1148,11 @@ describe("production compaction controls", () => {
 			while (notes > 0 && write().length / 4 > room) notes--;
 			f.response.text = write();
 		};
-		// A reasoning chat route reserves 26,214 summary tokens, so on a 40K window the trigger sits near 13.8K,
-		// and an 8K static prefix leaves about 5.8K of history below it (the bt-18 run).
+		// A reasoning chat route reserves 26,214 summary tokens; on a 40K window A1 bounds that at half the window, so
+		// the threshold holds the trigger at the 13,786 of the bt-18 run, and an 8K static prefix leaves about 5.8K of
+		// history below it. Each span is then below the summary room, which an automatic pass skips (A1), so the cuts
+		// run as overflow recovery at that trigger, through the same request-budget cut.
+		f.settings.context.compaction.threshold = 13_786 / 40_000;
 		const runtime = {
 			targetId: "chat-target",
 			runtimeId: "fixture",
@@ -1226,7 +1235,8 @@ describe("production compaction controls", () => {
 				f.pinLeaf(leaf);
 				state.lastTurnId = leaf;
 				context.refreshAgentMessagesFromSession(runtime);
-				if (!(await context.runAutoCompact(runtime, false, undefined, "auto"))) continue;
+				if (context.liveContextEstimate(runtime).tokens < 13_786) continue;
+				if (!(await context.runAutoCompact(runtime, true, undefined, "overflow"))) continue;
 				const [checkpoint, ...suffix] = runtime.agent.state.messages
 					.filter((message) => message.role !== "system")
 					.map((message) => estimateAgentContextBreakdown({ systemPrompt: "", messages: [message] }).messageTokens);
@@ -1404,6 +1414,91 @@ describe("production compaction controls", () => {
 			basis: "runtime-estimate",
 		});
 		doesNotMatch(tokenRow(operation) ?? "", /−\d+%/);
+	});
+
+	it("skips an automatic summary whose span prices below the summary room, but not /compact or overflow (bt-47 cf1j-d, ContextFold A1)", async () => {
+		// Each row: user turns of `chars` before the active one, an optional reply in the active turn, how the pass runs,
+		// and what it must do. The active request is preserved verbatim, so it is never part of the span.
+		const rows: Array<{
+			turns: number;
+			chars: number;
+			force: boolean;
+			trigger?: "overflow";
+			reply?: number;
+			calls: number;
+			stage?: [string, string];
+		}> = [
+			{ turns: 2, chars: 8000, force: false, calls: 0, stage: ["none", "no_gain"] },
+			{ turns: 0, chars: 0, force: false, reply: 20_000, calls: 0, stage: ["none", "nothing_to_summarize"] },
+			{ turns: 2, chars: 8000, force: true, calls: 1 },
+			{ turns: 2, chars: 8000, force: true, trigger: "overflow", calls: 1 },
+			{ turns: 6, chars: 24_000, force: false, calls: 1 },
+		];
+		for (const row of rows) {
+			const label = JSON.stringify(row);
+			const f = fixture(false, false);
+			f.settings.context.workingSet.enabled = false;
+			let leaf: string | null = null;
+			let active: string | null = null;
+			for (let i = 0; i <= row.turns; i++)
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "user",
+					parentTurnId: leaf,
+					payload: { text: i < row.turns ? `older-${i} ${"x".repeat(row.chars)}` : "active: continue" },
+				}).turnId;
+			active = leaf;
+			// A tool batch inside the active turn is kept whole, so the split turn's prefix holds only the preserved request.
+			if (row.reply) {
+				const read = { path: "src/a.ts" };
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "assistant",
+					parentTurnId: leaf,
+					payload: { text: "", content: [{ type: "toolCall", id: "call-1", name: "read", arguments: read }] },
+				}).turnId;
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "tool_call",
+					parentTurnId: leaf,
+					payload: { toolCallId: "call-1", name: "read", args: read },
+				}).turnId;
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "tool_result",
+					parentTurnId: leaf,
+					payload: {
+						toolCallId: "call-1",
+						toolName: "read",
+						isError: false,
+						result: { content: [{ type: "text", text: "y".repeat(row.reply) }] },
+					},
+				}).turnId;
+			}
+			f.pinLeaf(leaf);
+			const notices: string[] = [];
+			const { state, runtime, context, bus } = automaticContext(f, f.run, {
+				emitNotice: (text) => notices.push(text),
+			});
+			state.activeUserTurnId = active;
+			const folds: ContextFoldPayload[] = [];
+			bus.subscribe("context.fold", (event) => {
+				folds.push(event);
+			});
+			await context.runAutoCompact(runtime, row.force, undefined, row.trigger);
+			strictEqual(f.calls.length, row.calls, label);
+			if (!row.stage) continue;
+			deepStrictEqual(
+				folds.flatMap((fold) =>
+					fold.stages
+						.filter(({ stage }) => stage === "llm_summary")
+						.map(({ stage, outcome, reason }) => [stage, outcome, reason]),
+				),
+				[["llm_summary", ...row.stage]],
+				label,
+			);
+			ok(!notices.some((text) => text.includes("usage recorded")), label);
+		}
 	});
 
 	it("routes a configured dedicated summary model through the production callback", async () => {
@@ -2167,5 +2262,36 @@ describe("compaction trigger output reservation", () => {
 		// A reserve the threshold's headroom covers leaves the threshold as configured.
 		strictEqual(effectiveCompactionThreshold(0.8, 100_000, 16_000), 0.8);
 		strictEqual(effectiveCompactionThreshold(0.9, 0, 26_214), 0.9);
+	});
+
+	it("bounds a reasoning route's summary reserve at half a known window (bt-47 cf1j-b, ContextFold A1)", async () => {
+		const { effectiveCompactionThreshold } = await import("../../src/domains/session/compaction/auto.js");
+		const { foldTriggerReserve } = await import("../../src/domains/context/fold/pressure.js");
+		const { summaryOutputReserve } = await import("../../src/domains/session/compaction/summary-output.js");
+		// A reasoning chat route with no observed summary share reserves ceil(0.8 x 16,384 / 0.5) = 26,214; the turn
+		// reserve sits below it. Old trigger: min(0.8, 1 - 26,214 / window) x window.
+		const model = { provider: "a1-table", baseUrl: "http://a1.invalid", id: "a1", maxTokens: 128_000, reasoning: true };
+		const table: Array<[window: number, trigger: number]> = [
+			[28_000, 14_000], // was 1,786
+			[32_768, 16_384], // was 6,554
+			[64_000, 64_000 - 26_214],
+			[128_000, 128_000 - 26_214],
+			[200_000, 0.8 * 200_000],
+		];
+		for (const [window, expected] of table) {
+			const reserve = foldTriggerReserve({
+				window,
+				summaryReserve: () => summaryOutputReserve(model, { summaryOnChatRoute: true }),
+				turnReserve: () => 8_192,
+			});
+			const trigger = effectiveCompactionThreshold(0.8, window, reserve) * window;
+			// Within 1e-6 tokens absolute: the fraction round-trips through a float.
+			ok(Math.abs(trigger - expected) < 1e-6, `${window}: ${trigger}`);
+		}
+		strictEqual(
+			foldTriggerReserve({ window: 0, summaryReserve: () => 26_214, turnReserve: () => 8_192 }),
+			26_214,
+			"an unknown window keeps the summary reserve unbounded",
+		);
 	});
 });
