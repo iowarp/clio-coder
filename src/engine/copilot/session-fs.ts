@@ -31,7 +31,21 @@
  * inside this OS user's own cache directory and race each operation; O_NOFOLLOW still guards the final entry.
  */
 
-import { constants, lstatSync, realpathSync, rmSync, unlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+	closeSync,
+	constants,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	renameSync,
+	rmSync,
+	unlinkSync,
+	writeSync,
+} from "node:fs";
 import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, unlink } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import type { SessionFsConfig, SessionFsProvider } from "@github/copilot-sdk";
@@ -225,6 +239,200 @@ export function removeCopilotSessionRecordsSync(sessionId: string): void {
 	rmSync(target, { recursive: true, force: true });
 	sessionIdentities.delete(target);
 	closedSessions.add(target);
+}
+
+/**
+ * A resumable conversation (bt-10): the SDK session a Clio session left idle, and the transcript identity it holds,
+ * so a later process continues it with `resumeSession` instead of replaying the history into a new one.
+ */
+export interface CopilotConversationRecord {
+	version: 1;
+	/** The Clio session id the conversation belongs to. */
+	key: string;
+	/** The Copilot SDK session id, whose records stay under `sessions/<id>/` while this record names them. */
+	sessionId: string;
+	systemHash: string;
+	/** Fingerprints of the Clio messages the conversation already holds, in order. */
+	synced: string[];
+	/** Host policy updates (#423) the conversation was already sent, by id. */
+	policies: string[];
+	updatedAt: number;
+}
+
+let resumeAllowed = true;
+
+/**
+ * A worker process runs under its parent's Clio session id or a throwaway one: it neither continues nor leaves a
+ * resumable conversation, so it never takes over the one its parent holds.
+ */
+export function disableCopilotConversationResume(): void {
+	resumeAllowed = false;
+}
+
+export function copilotConversationResumeAllowed(): boolean {
+	return resumeAllowed;
+}
+
+const CONVERSATIONS_PATH = ["copilot-sdk", "conversations"] as const;
+/** The sweep keeps at most this many resumable conversations, newest first... */
+const MAX_RESUMABLE_CONVERSATIONS = 32;
+/** ...and none idle for longer than this. */
+const RESUMABLE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/** A session directory no record names and nothing wrote for this long is a killed process's leftover. */
+const ORPHAN_MAX_AGE_MS = RESUMABLE_MAX_AGE_MS;
+
+function recordName(key: string): string {
+	return `${createHash("sha256").update(key).digest("hex").slice(0, 32)}.json`;
+}
+
+/** A chain of real directories below the trusted root, created one level at a time when asked; null when refused. */
+function directoryChainSync(parts: readonly string[], create: boolean): string | null {
+	const root = trustedRootSync();
+	if (root === null) return null;
+	let current = root;
+	for (const part of parts) {
+		const next = join(current, part);
+		let info = lstatSync(next, { throwIfNoEntry: false });
+		if (!info) {
+			if (!create) return null;
+			mkdirSync(next, { mode: 0o700 });
+			info = lstatSync(next);
+		}
+		if (info.isSymbolicLink() || !info.isDirectory()) return null;
+		current = next;
+	}
+	return current;
+}
+
+function parseRecord(text: string): CopilotConversationRecord | null {
+	const parsed = JSON.parse(text) as Partial<CopilotConversationRecord> | null;
+	if (
+		parsed?.version !== 1 ||
+		typeof parsed.key !== "string" ||
+		typeof parsed.sessionId !== "string" ||
+		!/^[A-Za-z0-9_-]{1,128}$/u.test(parsed.sessionId) ||
+		typeof parsed.systemHash !== "string" ||
+		!Array.isArray(parsed.synced) ||
+		!parsed.synced.every((print) => typeof print === "string") ||
+		!Array.isArray(parsed.policies) ||
+		!parsed.policies.every((id) => typeof id === "string") ||
+		typeof parsed.updatedAt !== "number"
+	)
+		return null;
+	return parsed as CopilotConversationRecord;
+}
+
+/** The record a Clio session left; null when there is none or it cannot be trusted (a corrupt one is removed). */
+export function readCopilotConversationRecord(key: string): CopilotConversationRecord | null {
+	try {
+		const dir = directoryChainSync(CONVERSATIONS_PATH, false);
+		if (dir === null) return null;
+		const path = join(dir, recordName(key));
+		if (lstatSync(path, { throwIfNoEntry: false })?.isFile() !== true) return null;
+		const record = parseRecord(readFileSync(path, "utf8"));
+		if (record?.key === key) return record;
+		unlinkSync(path);
+		return null;
+	} catch {
+		return null;
+	}
+}
+
+/** Written whole and renamed into place, never through a link. */
+export function writeCopilotConversationRecord(record: CopilotConversationRecord): void {
+	const dir = directoryChainSync(CONVERSATIONS_PATH, true);
+	if (dir === null) return;
+	const path = join(dir, recordName(record.key));
+	const temp = `${path}.${process.pid}.tmp`;
+	const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | NO_FOLLOW, 0o600);
+	try {
+		writeSync(fd, JSON.stringify(record));
+	} finally {
+		closeSync(fd);
+	}
+	renameSync(temp, path);
+}
+
+export function removeCopilotConversationRecord(key: string): void {
+	try {
+		const dir = directoryChainSync(CONVERSATIONS_PATH, false);
+		if (dir === null) return;
+		const path = join(dir, recordName(key));
+		if (lstatSync(path, { throwIfNoEntry: false })) unlinkSync(path);
+	} catch {
+		// A record that cannot be removed fails its next match check or ages out in the sweep.
+	}
+}
+
+/** Whether the runtime's records for an SDK session are still on disk, as a real directory with its event log. */
+export function copilotSessionRecordsExist(sessionId: string): boolean {
+	try {
+		const dir = directoryChainSync(sessionParts(sessionId), false);
+		return dir !== null && lstatSync(join(dir, "events.jsonl"), { throwIfNoEntry: false })?.isFile() === true;
+	} catch {
+		return false;
+	}
+}
+
+/** A deleted Clio session takes its resumable Copilot conversation with it. */
+export function forgetCopilotConversation(key: string): void {
+	const record = readCopilotConversationRecord(key);
+	removeCopilotConversationRecord(key);
+	if (!record) return;
+	try {
+		removeCopilotSessionRecordsSync(record.sessionId);
+	} catch {
+		// The sweep removes what is left.
+	}
+}
+
+/**
+ * The bound on what outlives a process: at most 32 resumable conversations, none idle for over 7 days, and no
+ * session directory that no record names and nothing wrote for 7 days (a killed process's leftover). Sessions
+ * open in this process are spared.
+ */
+export function sweepCopilotConversationRecords(live: ReadonlySet<string>, now = Date.now()): void {
+	try {
+		const kept = new Set<string>(live);
+		const dir = directoryChainSync(CONVERSATIONS_PATH, false);
+		if (dir !== null) {
+			const records: Array<{ path: string; record: CopilotConversationRecord }> = [];
+			for (const name of readdirSync(dir)) {
+				const path = join(dir, name);
+				let record: CopilotConversationRecord | null = null;
+				try {
+					if (name.endsWith(".json") && lstatSync(path).isFile()) record = parseRecord(readFileSync(path, "utf8"));
+				} catch {
+					record = null;
+				}
+				if (record) records.push({ path, record });
+				else if (now - (lstatSync(path, { throwIfNoEntry: false })?.mtimeMs ?? now) > ORPHAN_MAX_AGE_MS) unlinkSync(path);
+			}
+			records.sort((a, b) => b.record.updatedAt - a.record.updatedAt);
+			for (const [index, { path, record }] of records.entries()) {
+				if (live.has(record.sessionId)) continue;
+				if (index < MAX_RESUMABLE_CONVERSATIONS && now - record.updatedAt < RESUMABLE_MAX_AGE_MS) {
+					kept.add(record.sessionId);
+					continue;
+				}
+				unlinkSync(path);
+				removeCopilotSessionRecordsSync(record.sessionId);
+			}
+		}
+		const sessions = directoryChainSync(SESSIONS_PATH, false);
+		if (sessions === null) return;
+		for (const name of readdirSync(sessions)) {
+			if (kept.has(name) || !/^[A-Za-z0-9_-]{1,128}$/u.test(name)) continue;
+			const path = join(sessions, name);
+			const written = Math.max(
+				lstatSync(path, { throwIfNoEntry: false })?.mtimeMs ?? now,
+				lstatSync(join(path, "events.jsonl"), { throwIfNoEntry: false })?.mtimeMs ?? 0,
+			);
+			if (now - written > ORPHAN_MAX_AGE_MS) removeCopilotSessionRecordsSync(name);
+		}
+	} catch {
+		// The sweep is housekeeping; the next process runs it again.
+	}
 }
 
 function refuseWorkspaceWrite(path: string): never {

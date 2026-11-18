@@ -151,7 +151,8 @@ persisted. Route history is a fold over `run.settled` records in the run journal
 | `v8-compile-cache/` | Node compile cache |
 | `provider-target-models/<key>.json` | Per-target model discovery snapshots |
 | `provider-target-checks/<key>.json` | The last setup test request a target's model answered; read for 24 hours so a just-tested route starts as checked |
-| `copilot-sdk/sessions/<session id>/` | The Copilot runtime's records for one live `copilot-sdk` conversation, written through the SDK's `sessionFs`; removed when CLIO Coder closes the conversation |
+| `copilot-sdk/sessions/<session id>/` | The Copilot runtime's records for one `copilot-sdk` conversation, written through the SDK's `sessionFs`; removed when CLIO Coder closes the conversation, unless a record under `copilot-sdk/conversations/` keeps it resumable |
+| `copilot-sdk/conversations/<hash>.json` | One resumable Copilot conversation per CLIO Coder session (SDK session id, system prompt hash, transcript fingerprints), so a continued session resumes it; removed when that session is deleted, and swept to the newest 32 and none idle over 7 days |
 | `mcp-catalogs/<key>.json` | Cached MCP tool catalogs |
 | `yazi/profile/` | The managed file-browser profile for the files pane |
 | `yazi/sessions/` | Per-pane DDS/chooser transports and owner receipts (host, PID and birth token). Removed on close; old receipts are swept only after their local owner is confirmed dead. |

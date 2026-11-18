@@ -215,6 +215,21 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		if (interruptClosure !== undefined) payload.interruptClosure = interruptClosure;
 		const transport = (message as { codexTransport?: CodexTransportObservation }).codexTransport;
 		if (transport) payload.codexTransport = transport;
+		// The Copilot SDK route says whether its request continued a session holding the transcript (bt-10), so a
+		// full request after a continued one is explained as a transport reset.
+		const continuation = (message as { copilotContinuation?: unknown }).copilotContinuation;
+		const cacheTransport: CodexTransportObservation | undefined =
+			transport ??
+			(continuation === "delta" || continuation === "full"
+				? {
+						mode: "unknown",
+						request: continuation,
+						attribution: "no_session",
+						counters: null,
+						lastInputItems: null,
+						fallbackActive: false,
+					}
+				: undefined);
 		const quota = (message as { codexQuota?: CodexQuotaObservation }).codexQuota;
 		if (quota && state.runtime?.runtimeId === "openai-codex") {
 			noteCodexStreamQuota(state.runtime.targetId, quota);
@@ -251,7 +266,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		const usage = (message as { usage?: Usage }).usage;
 		if (usage && typeof usage === "object") {
 			const backendTimings = (message as { backendTimings?: BackendCompletionTimings }).backendTimings;
-			payload.promptCache = deps.promptCachePayloadForAssistant(usage, backendTimings, anthropicResponse, transport);
+			payload.promptCache = deps.promptCachePayloadForAssistant(usage, backendTimings, anthropicResponse, cacheTransport);
 		}
 		if (message && typeof message === "object") persistedAssistantMessages.add(message as object);
 		const turn = appendTurn(deps.session, {

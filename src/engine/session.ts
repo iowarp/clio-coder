@@ -190,6 +190,23 @@ export interface ClioSessionReader {
 
 export { cwdHash };
 
+const sessionDeletedListeners = new Set<(id: string) => void>();
+
+/** Engine state kept for a Clio session past its process (a resumable Copilot conversation) leaves when it is deleted. */
+export function onSessionDeleted(listener: (id: string) => void): void {
+	sessionDeletedListeners.add(listener);
+}
+
+export function noteSessionDeleted(id: string): void {
+	for (const listener of sessionDeletedListeners) {
+		try {
+			listener(id);
+		} catch {
+			// What a listener keeps is cache with its own bound; a failure never blocks the delete.
+		}
+	}
+}
+
 export const SESSION_FILE_MODE = 0o600;
 
 export function sessionPaths(meta: ClioSessionMeta): ClioSessionFile {
