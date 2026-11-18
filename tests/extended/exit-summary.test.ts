@@ -76,6 +76,14 @@ test("the session summary counts what Clio answered while the operator was away 
 		renderExitSummary({ ...snapshot, spend: { kind: "unavailable" } }, "brief", 120, false).join("\n"),
 		/not available/u,
 	);
+	// The share divides the whole session's spend, so one worker's outcome never reads as that worker's tokens (bt-11 #3).
+	const ready = exitSpend(telemetryViewOf("session-1", []), "1970-01-01T00:00:00.000Z");
+	ok(ready.kind === "ready");
+	const verified = { kind: "counted" as const, count: "1", parts: [], tokens: "172,879", cost: "~$0.05 est" };
+	match(
+		renderExitSummary({ ...snapshot, spend: { ...ready, verified } }, "standard", 160, false).join("\n"),
+		/^Verified: 1 outcome · 172,879 session tokens per outcome · ~\$0\.05 est per outcome$/mu,
+	);
 	collector.dispose();
 });
 

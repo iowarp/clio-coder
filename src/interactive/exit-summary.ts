@@ -24,9 +24,10 @@ const countLabel = (value: number | string, noun: string): string =>
 const SPEND_NOT_AVAILABLE = "not available";
 
 /**
- * `3 outcomes · 2 reproduce or numeric-compare passes · 1 worker run host-verified · 4,115 tokens each · ~$0.0041 est
- * each`, or the words saying there is nothing to divide by. A share keeps the session row's own mark, so an unpriced
- * route reads `cost not measured` here as it does on /usage.
+ * `3 outcomes · 2 reproduce or numeric-compare passes · 1 worker run host-verified · 4,115 session tokens per outcome ·
+ * ~$0.0041 est per outcome`, or the words saying there is nothing to divide by. The share divides the whole session's
+ * spend, so it says so: `172,879 tokens each` beside one worker's outcome read as that worker's 75,311 (bt-11). A
+ * share keeps the session row's own mark, so an unpriced route reads `cost not measured` here as it does on /usage.
  */
 function verifiedFacts(spend: ExitSummarySnapshot["spend"]): string[] {
 	if (spend.kind !== "ready") return [SPEND_NOT_AVAILABLE];
@@ -35,8 +36,10 @@ function verifiedFacts(spend: ExitSummarySnapshot["spend"]): string[] {
 	return [
 		countLabel(verified.count, "outcome"),
 		...verified.parts,
-		verified.tokens === USAGE_NOT_MEASURED ? `tokens ${USAGE_NOT_MEASURED}` : `${verified.tokens} tokens each`,
-		verified.cost === USAGE_NOT_MEASURED ? `cost ${USAGE_NOT_MEASURED}` : `${verified.cost} each`,
+		verified.tokens === USAGE_NOT_MEASURED
+			? `tokens ${USAGE_NOT_MEASURED}`
+			: `${verified.tokens} session tokens per outcome`,
+		verified.cost === USAGE_NOT_MEASURED ? `cost ${USAGE_NOT_MEASURED}` : `${verified.cost} per outcome`,
 	];
 }
 
