@@ -23,7 +23,7 @@ import {
 import { isExecutionRole } from "./execution-role.js";
 import { COMPETE_STANCES, type CompeteStance } from "./gate-role-prompts.js";
 import { type DispatchIntent, isDispatchIntent } from "./intent.js";
-import { classifyDispatchIntentCompatibility, dispatchIntentRefusals } from "./intent-compatibility.js";
+import { classifyDispatchIntentCompatibility } from "./intent-compatibility.js";
 import { isRoutingIntent, type RoutingIntent } from "./routing-intent.js";
 import type {
 	DispatchRequestOrigin,
@@ -512,14 +512,12 @@ export function validateJobSpec(spec: unknown): Validated {
 	// what makes the compatibility table true of the fleet, CLI, ACP, and
 	// extension paths rather than only of the model-facing tool.
 	if ("intent" in spec) {
-		for (const refusal of dispatchIntentRefusals(
-			classifyDispatchIntentCompatibility({
-				intent: spec.intent,
-				...(spec.writeRoots !== undefined ? { writeRoots: spec.writeRoots } : {}),
-				...(spec.readOnly !== undefined ? { readOnly: spec.readOnly } : {}),
-				...(typeof spec.cwd === "string" && spec.cwd.length > 0 ? { cwd: spec.cwd } : {}),
-			}),
-		)) {
+		for (const refusal of classifyDispatchIntentCompatibility({
+			intent: spec.intent,
+			...(spec.writeRoots !== undefined ? { writeRoots: spec.writeRoots } : {}),
+			...(spec.readOnly !== undefined ? { readOnly: spec.readOnly } : {}),
+			...(typeof spec.cwd === "string" && spec.cwd.length > 0 ? { cwd: spec.cwd } : {}),
+		})) {
 			errors.push(refusal.message);
 		}
 	}
