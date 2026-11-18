@@ -539,7 +539,14 @@ type ThinkingSegment = {
 	/** The stretch was streamed live and its target's history did not keep the text, so only the fact can be shown. */
 	notRetained?: true;
 };
-type ThinkingRender = { source: string; open: boolean; epoch: number; layouts: Map<string, string[]> };
+type ThinkingRender = {
+	source: string;
+	open: boolean;
+	epoch: number;
+	layouts: Map<string, string[]>;
+	/** An open segment's incremental rail, carried across its deltas (Astra r10-1). */
+	stream?: ThinkingStream;
+};
 type AssistantSegment = TextSegment | ToolSegment | ErrorSegment | ThinkingSegment;
 /**
  * A caller-rendered block receives the frame's transcript detail policy so a
@@ -2005,21 +2012,29 @@ function renderThinkingRail(
 	unbounded: boolean,
 	open: boolean,
 ): string[] {
+	return renderProseThinkingRail(sanitizeAssistantProse(thinking), width, limit, unbounded, open);
+}
+
+/** {@link renderThinkingRail} for reasoning already through {@link sanitizeAssistantProse}. */
+function renderProseThinkingRail(
+	prose: string,
+	width: number,
+	limit: number,
+	unbounded: boolean,
+	open: boolean,
+): string[] {
 	// Reasoning often ends on a newline; wrapped, that became an empty rail row.
 	// Presentation only: the provider's signed reasoning stays untouched.
-	const text = stripThinkingEmphasis(
-		redactStreamingSecretString(escapeTerminalControls(sanitizeAssistantProse(thinking)), !open),
-	).replace(/^\s*\n|\s+$/gu, "");
+	const text = stripThinkingEmphasis(redactStreamingSecretString(escapeTerminalControls(prose), !open)).replace(
+		/^\s*\n|\s+$/gu,
+		"",
+	);
 	if (text.length === 0) return [];
 	// A bounded excerpt spends no rows on paragraph breaks; /view keeps them. The excerpt opens with the word
 	// that says what it is, because the rail alone is the same mark a tool's output wears.
 	const wrapped = wrapTextWithAnsi(`${THINKING_LEAD}${text}`, Math.max(1, width - PROSE_GUTTER_WIDTH));
 	const kept = unbounded ? wrapped : wrapped.filter((row) => row.trim().length > 0);
-	const rows = kept.map((row, index) => {
-		const lead = index === 0 && row.startsWith(THINKING_LEAD) ? THINKING_LEAD : "";
-		const body = row.slice(lead.length);
-		return `${REASON_RAIL()}${lead ? clioTheme().fg("annotation", lead) : ""}${SGR_ITALIC}${clioTheme().fg("reasoningExcerpt", body)}${RESET}`;
-	});
+	const rows = kept.map((row, index) => styleThinkingRow(row, index));
 	if (unbounded) return rows;
 	return previewRows(
 		rows,
@@ -2029,6 +2044,151 @@ function renderThinkingRail(
 		REASON_RAIL(),
 		PROSE_GUTTER_WIDTH,
 	);
+}
+
+function styleThinkingRow(row: string, index: number): string {
+	const lead = index === 0 && row.startsWith(THINKING_LEAD) ? THINKING_LEAD : "";
+	const body = row.slice(lead.length);
+	return `${REASON_RAIL()}${lead ? clioTheme().fg("annotation", lead) : ""}${SGR_ITALIC}${clioTheme().fg("reasoningExcerpt", body)}${RESET}`;
+}
+
+/**
+ * An open, bounded rail that streams: the reasoning up to a certified line break is wrapped once and only its last rows
+ * are kept, so a delta redacts and wraps the text after that break rather than the whole stretch (Astra r10-1).
+ */
+interface ThinkingStream {
+	prose: AssistantProseProjection;
+	layout: string;
+	/** Sanitized reasoning through the certified break, ending in its `\n`; empty before the first. */
+	head: string;
+	headRows: number;
+	/** The head's last kept rows, unstyled, enough for the excerpt and the row its hint replaces. */
+	headTail: string[];
+	retryAt: number;
+}
+
+/** How far text runs past the head before a break is looked for, and again after a look finds none. */
+const THINKING_STREAM_STEP = 2048;
+const THINKING_STREAM_TRIES = 16;
+// A redaction pattern crosses a line break only after a name, flag, `:`, `=`, quote or scheme word leads into a value, or
+// from a curl or docker command into the flag on the next line. A break after none of those, ahead of a token that holds no
+// `:`, `=` or quote, splits no secret and no match, so the text on each side redacts as it would whole. RAIL_FAMILIES in
+// tests/contracts/url-userinfo-hold.test.ts samples every redaction rule and compares each frame with the whole render.
+const STREAM_LEAD_TOKEN_RE =
+	/^-|[:="'`]|pass|pwd|secret|token|key|auth|credential|bearer|basic|cookie|login|sshpass|docker|curl/iu;
+const STREAM_LEAD_LINE_RE = /curl|docker/iu;
+const STREAM_HEAD_TOKEN_RE = /[:="']/u;
+/** A secret word on a line of its own, which leads a tail into the quoted-value rules and redacts nothing itself. */
+const THINKING_WORD_PROBE = "key\n";
+
+function certifiedThinkingBreak(before: string, after: string): boolean {
+	const body = before.trimEnd();
+	if (body.length === 0) return false;
+	const line = body.slice(body.lastIndexOf("\n") + 1);
+	const token = escapeTerminalControls(line.slice(line.search(/\S+$/u)));
+	if (STREAM_LEAD_TOKEN_RE.test(token) || STREAM_LEAD_LINE_RE.test(escapeTerminalControls(line))) return false;
+	// The next token must be whole, since one still growing may yet gain a `:`.
+	const next = /^\s*(\S+)\s/u.exec(after);
+	return next?.[1] !== undefined && !STREAM_HEAD_TOKEN_RE.test(escapeTerminalControls(next[1]));
+}
+
+function thinkingStreamRows(text: string, width: number): string[] {
+	return wrapTextWithAnsi(text, Math.max(1, width - PROSE_GUTTER_WIDTH)).filter((row) => row.trim().length > 0);
+}
+
+/** Move the head to the latest certified break in `tail`, the sanitized text after it. */
+function advanceThinkingStream(stream: ThinkingStream, tail: string, width: number, limit: number): void {
+	let at = tail.length;
+	for (let tries = 0; tries < THINKING_STREAM_TRIES; tries += 1) {
+		at = tail.lastIndexOf("\n", at - 1);
+		if (at < 0) return;
+		const chunk = tail.slice(0, at + 1);
+		if (tail.charAt(at - 1) === "\r" || !/\S/u.test(chunk) || !certifiedThinkingBreak(chunk, tail.slice(at + 1)))
+			continue;
+		let text = stripThinkingEmphasis(redactStreamingSecretString(escapeTerminalControls(chunk), false));
+		if (stream.head.length === 0) text = `${THINKING_LEAD}${text.replace(/^\s*\n/u, "")}`;
+		if (!text.endsWith("\n") || text.endsWith("\r\n")) continue;
+		const rows = thinkingStreamRows(text.slice(0, -1), width);
+		stream.head += chunk;
+		stream.headRows += rows.length;
+		stream.headTail = [...stream.headTail, ...rows].slice(-(limit + 1));
+		return;
+	}
+}
+
+/** The rail {@link renderThinkingRail} draws for open, bounded reasoning, reusing what earlier deltas certified. */
+function streamThinkingRail(
+	stream: ThinkingStream,
+	thinking: string,
+	width: number,
+	limit: number,
+	step = THINKING_STREAM_STEP,
+): string[] {
+	const prose = stream.prose.project(thinking, false, true);
+	const layout = `${width}|${limit}`;
+	if (stream.layout !== layout || !prose.startsWith(stream.head)) {
+		stream.layout = layout;
+		stream.head = "";
+		stream.headRows = 0;
+		stream.headTail = [];
+		stream.retryAt = 0;
+	}
+	if (prose.length - stream.head.length >= step && prose.length >= stream.retryAt) {
+		const before = stream.head.length;
+		advanceThinkingStream(stream, prose.slice(before), width, limit);
+		stream.retryAt = stream.head.length === before ? prose.length + step : 0;
+	}
+	if (stream.head.length === 0) return renderProseThinkingRail(prose, width, limit, false, true);
+	const rest = escapeTerminalControls(prose.slice(stream.head.length));
+	const redacted = redactStreamingSecretString(rest, false);
+	// Quoted values redact only in text that holds a secret word anywhere, and `sig: 'a b'` names none, so the head can
+	// decide them. A tail whose quotes redact differently once a word leads it takes the whole path.
+	if (
+		/["']/u.test(rest) &&
+		redactStreamingSecretString(`${THINKING_WORD_PROBE}${rest}`, false) !== `${THINKING_WORD_PROBE}${redacted}`
+	)
+		return renderProseThinkingRail(prose, width, limit, false, true);
+	const tail = stripThinkingEmphasis(redacted).replace(/\s+$/u, "");
+	// A held value can leave the tail blank, and then the whole text's trim reaches back into the head.
+	if (tail.length === 0) return renderProseThinkingRail(prose, width, limit, false, true);
+	const tailRows = thinkingStreamRows(tail, width);
+	const total = stream.headRows + tailRows.length;
+	const shown = [...stream.headTail, ...tailRows].slice(-(limit + 1));
+	const first = total - shown.length;
+	return previewRows(
+		shown.map((row, index) => styleThinkingRow(row, first + index)),
+		limit,
+		width,
+		true,
+		REASON_RAIL(),
+		PROSE_GUTTER_WIDTH,
+		() => `${total - (limit - 1)} rows`,
+	);
+}
+
+/**
+ * An open, bounded rail fed the reasoning so far on each call: what {@link streamThinkingRail} draws, what
+ * {@link renderThinkingRail} draws from the whole text, and how much of it the stream has certified. A short `step` looks
+ * for a break far more often than a live rail does, so a short text puts many breaks to the certification.
+ */
+export function openThinkingRailForTesting(
+	width: number,
+	limit: number,
+	step: number,
+): (thinking: string) => { streamed: string[]; whole: () => string[]; head: number } {
+	const stream: ThinkingStream = {
+		prose: new AssistantProseProjection(),
+		layout: "",
+		head: "",
+		headRows: 0,
+		headTail: [],
+		retryAt: 0,
+	};
+	return (thinking) => ({
+		streamed: streamThinkingRail(stream, thinking, width, limit, step),
+		whole: () => renderThinkingRail(thinking, width, limit, false, true),
+		head: stream.head.length,
+	});
 }
 
 /**
@@ -2479,6 +2639,17 @@ type LiveSplit = { head: string[] | undefined };
 /** Segments walked by `renderEntryLines` since the panel's frame began. */
 let segmentsWalked = 0;
 
+/**
+ * The height a built-in row reads. Each bounds its rows with `previewBudget(limit, terminalRows)` for a limit of the
+ * style's policy, so this budget for the policy's largest limit renders every one alike, and a terminal taller than
+ * that renders them as the last one did. A caller-rendered replay block gets the raw height instead.
+ */
+function rowsBudget(detail: TranscriptDetailPolicy, terminalRows: number): number {
+	let ceiling = 0;
+	for (const value of Object.values(detail)) if (typeof value === "number" && value > ceiling) ceiling = value;
+	return previewBudget(ceiling, terminalRows);
+}
+
 function renderEntryLines(
 	entry: TranscriptEntry,
 	width: number,
@@ -2530,7 +2701,7 @@ function renderEntryLines(
 	// One model answered the whole turn, so its shell rows need not each name it;
 	// after a failover the row says which of the turn's models asked for it.
 	const nameRequester = (entry.models?.length ?? 0) > 1;
-	const settledKey = `${width}|${terminalRows}|${detail.style}|${unboundedToolBodies}|${nameRequester}|${skinEpoch()}`;
+	const settledKey = `${width}|${rowsBudget(detail, terminalRows)}|${detail.style}|${unboundedToolBodies}|${nameRequester}|${skinEpoch()}`;
 	// Reasoning stays between the prose and actions that surround it, one block
 	// per run of it: stretches that nothing visible separates read as one. A run
 	// is held until the block after it is known, because what follows decides
@@ -2571,14 +2742,26 @@ function renderEntryLines(
 			entry.reasoningRenders ??= new Map();
 			let cached = entry.reasoningRenders.get(index);
 			if (cached?.source !== text || cached.open !== reasoningOpen || cached.epoch !== skinEpoch()) {
+				const stream = reasoningOpen ? cached?.stream : undefined;
 				cached = { source: text, open: reasoningOpen, epoch: skinEpoch(), layouts: new Map() };
+				if (stream !== undefined) cached.stream = stream;
 				entry.reasoningRenders.set(index, cached);
 			}
 			const limit = previewBudget(rows, terminalRows);
 			const key = `${width}|${limit}|${unboundedToolBodies}`;
 			let lines = cached.layouts.get(key);
 			if (lines === undefined) {
-				lines = renderThinkingRail(text, width, limit, unboundedToolBodies, reasoningOpen);
+				if (reasoningOpen && !unboundedToolBodies) {
+					cached.stream ??= {
+						prose: new AssistantProseProjection(),
+						layout: "",
+						head: "",
+						headRows: 0,
+						headTail: [],
+						retryAt: 0,
+					};
+					lines = streamThinkingRail(cached.stream, text, width, limit);
+				} else lines = renderThinkingRail(text, width, limit, unboundedToolBodies, reasoningOpen);
 				cached.layouts.set(key, lines);
 				if (cached.layouts.size > 3) {
 					const oldest = cached.layouts.keys().next().value;
@@ -3048,11 +3231,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		if (prerender !== null && index >= 0 && index < prerender.next) prerender.next = index;
 	};
 	/** Read one receipt's turn from the view; it stays live until the view holds all of the turn's spend. */
-	const readReceipt = (
-		entry: Extract<TranscriptEntry, { role: "assistant" }>,
-		view: TelemetryView,
-		runningTurns: ReadonlySet<string>,
-	): void => {
+	const readReceipt = (entry: Extract<TranscriptEntry, { role: "assistant" }>, view: TelemetryView): void => {
 		const usage = entry.turnUsage;
 		if (usage?.turnId === undefined) {
 			liveReceipts.delete(entry);
@@ -3066,12 +3245,21 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			entry.turnUsage = { ...usage, spend };
 			markDirty();
 		}
-		if (!runningTurns.has(usage.turnId) && turnHoldsCalls(view, usage.turnId, usage.callIds ?? []))
+		if (!runningTurns(view).has(usage.turnId) && turnHoldsCalls(view, usage.turnId, usage.callIds ?? []))
 			liveReceipts.delete(entry);
 	};
-	/** The turns with a referenced run still going, read once per view. */
-	const runningTurns = (view: TelemetryView): Set<string> =>
-		new Set(view.runs().flatMap((run) => (run.terminalReason === null && run.turnId !== null ? [run.turnId] : [])));
+	/** The turns with a referenced run still going, built once per view: a replay reads one view for every receipt. */
+	const runningTurnsByView = new WeakMap<TelemetryView, ReadonlySet<string>>();
+	const runningTurns = (view: TelemetryView): ReadonlySet<string> => {
+		let running = runningTurnsByView.get(view);
+		if (running === undefined) {
+			running = new Set(
+				view.runs().flatMap((run) => (run.terminalReason === null && run.turnId !== null ? [run.turnId] : [])),
+			);
+			runningTurnsByView.set(view, running);
+		}
+		return running;
+	};
 	const refreshReceipts = (): void => {
 		const view = options.getTelemetry?.() ?? null;
 		if (view === receiptView) return;
@@ -3085,14 +3273,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		}
 		// A view still merging its cold read holds a partial session; its turns are read once it has merged.
 		if (view === null || view.seeding) return;
-		const running = runningTurns(view);
-		for (const entry of liveReceipts) readReceipt(entry, view, running);
+		for (const entry of liveReceipts) readReceipt(entry, view);
 	};
 	/** A receipt the run just gave a turn: read now, and again on each new view while it is live. */
 	const trackReceipt = (entry: Extract<TranscriptEntry, { role: "assistant" }>): void => {
 		liveReceipts.add(entry);
 		const view = options.getTelemetry?.() ?? null;
-		if (view !== null && !view.seeding) readReceipt(entry, view, runningTurns(view));
+		if (view !== null && !view.seeding) readReceipt(entry, view);
 	};
 	/** Full drop of both render caches; used by the toggle paths that touch many entries. */
 	const clearRenderCaches = (): void => {
@@ -3752,10 +3939,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			});
 			return cachedRegions;
 		}
-		// Stable entries cache by width, height budget, and preset.
-		const baseKey = `${width}|${terminalRows}|${detail.style}`;
+		// Stable entries cache by width, height budget, and preset; a replay block and a prefix holding one by height too.
+		const baseKey = `${width}|${rowsBudget(detail, terminalRows)}|${detail.style}`;
+		const heightKey = `${baseKey}|${terminalRows}`;
 		const capacity = entryCacheCapacity();
-		if (frozen !== null && frozen.key !== baseKey) frozen = null;
+		if (frozen !== null && frozen.key !== baseKey && frozen.key !== heightKey) frozen = null;
 		// A frozen head's turn may have left the end of the run: popped, or pushed on by an inserted entry.
 		if (frozen?.head !== undefined && transcript[frozen.through] !== frozen.head.entry)
 			frozen = { lines: frozen.head.base, through: frozen.through, key: frozen.key };
@@ -3780,6 +3968,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		let freezeChanged = false;
 		// The live turn whose settled head ends the freeze, and the row of `out` its head ends at.
 		let freezeHead: { entry: TranscriptEntry; rows: string[]; end: number; kept: boolean } | undefined;
+		let freezeKey = frozen?.key ?? baseKey;
 		const split: LiveSplit = { head: undefined };
 		let entriesRendered = 0;
 		segmentsWalked = 0;
@@ -3817,7 +4006,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			};
 			split.head = undefined;
 			const renders = entryRenderCache.get(entry);
-			const renderKey = entry.role === "worker" && entryHasRunningTool(entry) ? `${baseKey}|${tick}` : baseKey;
+			const renderKey =
+				entry.role === "replayBlock"
+					? heightKey
+					: entry.role === "worker" && entryHasRunningTool(entry)
+						? `${baseKey}|${tick}`
+						: baseKey;
 			const cached = renders?.get(renderKey);
 			// A replay block that is not live is a pure function of the render key,
 			// so it caches like any settled entry. Excluding every replay block made
@@ -3876,6 +4070,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			}
 			if (freezeOpen && i === freezeThrough && entryIsStable(entry)) {
 				freezeThrough = i + 1;
+				if (entry.role === "replayBlock") freezeKey = heightKey;
 				freezeTailRows = out.length;
 			} else {
 				freezeOpen = false;
@@ -3892,10 +4087,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					? {
 							lines: prefix.concat(out.slice(0, freezeHead.end)),
 							through: freezeThrough,
-							key: baseKey,
+							key: freezeKey,
 							head: { entry: freezeHead.entry, rows: freezeHead.rows, base },
 						}
-					: { lines: base, through: freezeThrough, key: baseKey };
+					: { lines: base, through: freezeThrough, key: freezeKey };
 		}
 		if (cachedRegions.prefix === prefix) keepRows(out, cachedRegions.tail, keptPieceRows(pieces, tailPieces));
 		tailPieces = pieces;
@@ -3941,7 +4136,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			}
 			for (const style of OUTPUT_STYLE_CYCLE) {
 				if (style === job.style) continue;
-				const key = `${job.width}|${job.terminalRows}|${style}`;
+				const detail = transcriptDetail(style);
+				const key = `${job.width}|${rowsBudget(detail, job.terminalRows)}|${style}${entry.role === "replayBlock" ? `|${job.terminalRows}` : ""}`;
 				const renders = entryRenderCache.get(entry);
 				if (renders?.has(key)) continue;
 				const lines = renderEntryLines(
@@ -3951,7 +4147,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					unboundedToolBodies,
 					bareFences,
 					copyMarks,
-					transcriptDetail(style),
+					detail,
 					job.terminalRows,
 					transcript[index - 1],
 					workerRenderOptions(entry),

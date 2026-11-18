@@ -26,7 +26,7 @@ import {
 	WORKER_PROGRESS_WINDOW_MS,
 } from "../../src/domains/telemetry/worker-progress.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
-import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-panel.js";
+import { type ChatPanel, createChatPanel, openThinkingRailForTesting } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import {
 	SideQuestionOverlayBody,
@@ -536,6 +536,153 @@ test("/view holds open thinking the way the rail does", async () => {
 	const open = panel.inspectionArtifacts().find((artifact) => artifact.title.startsWith("Thinking"));
 	strictEqual(open?.title, "Thinking · clone https://user:");
 	strictEqual((await open?.load())?.lines.join("\n"), "clone https://user:");
+});
+
+test("a long open thinking stream hides a secret a line break parts from its name in every frame", () => {
+	const prose = "The parser reads each token and checks the cache before it wraps a row.\n";
+	const leads = [
+		"pass --token\nZQXJZQXJ more",
+		"Authorization:\nBearer ZQXJ1ZQXJ next",
+		"the cookie:\nZQXJZQXJZQXJ next",
+		"curl -s https://h\n-u alice:ZQXJZQXJ next",
+		"sshpass\n-p ZQXJZQXJ x",
+	];
+	const text = leads.map((lead) => `${prose.repeat(30)}${lead}\n`).join("");
+	const open = (delta: string) => {
+		const panel = createChatPanel({ now: () => 1_000 });
+		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+		panel.applyEvent({ type: "thinking_delta", contentIndex: 0, delta, partialThinking: "x" });
+		return panel;
+	};
+	const streamed = open("");
+	for (let at = 0; at < text.length; at += 13) {
+		streamed.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 0,
+			delta: text.slice(at, at + 13),
+			partialThinking: "x",
+		});
+		const rows = streamed.render(120);
+		strictEqual(rows.map(stripTerminalSequences).join("\n").match(SECRET_LETTERS), null, `at ${at}`);
+		// The rail reuses rows from earlier deltas, so it must match one drawn from the whole text at once.
+		deepStrictEqual(rows, open(text.slice(0, at + 13)).render(120), `at ${at}`);
+	}
+});
+
+// One-line samples of every pattern family redactStreamingSecretString applies, the rail's equivalence corpus (Astra r10-1).
+// A rule that can match across a line break, or that reads past the lines around its match as the secret-word gate on
+// quoted values does, belongs here, and certifiedThinkingBreak or streamThinkingRail in chat-panel.ts must account for it.
+const RAIL_FAMILIES: Record<string, readonly string[]> = {
+	SECRET_STRING_RE: [
+		"https://alice:ZQXJZQXJ@db.example/x",
+		"see //alice:ZQXJ@h now",
+		'{"u":"https:\\/\\/alice:ZQXJ@h"}',
+		"ssh://u:ZQ/XJ@h/p",
+	],
+	PERCENT_USERINFO_RE: ["redirect=https%3A%2F%2Falice%3AZQXJZQXJ%40h&x=1"],
+	JDBC_ORACLE_USERINFO_RE: ["jdbc:oracle:thin:scott/ZQXJZQXJ@//db:1521/svc"],
+	URL_USERNAME_TOKEN_RE: ["https://zqxj1zqxjzqxjzqxjzqxj@github.com/r", "https://ghp_zqxjzqxjzq:x@github.com/r"],
+	SECRET_URL_PARAM: [
+		"https://h/cb?access_token=ZQXJZQXJ&x=1",
+		"jdbc:sqlserver://db:1433;user=sa;password=ZQXJZQXJ;",
+		"https://h/#access_token=ZQXJ",
+	],
+	SECRET_ASSIGNMENT_RE: ["API_KEY=ZQXJZQXJ", "export DB_PASSWORD=ZQXJ;"],
+	SECRET_FLAG: ["deploy --api-key ZQXJZQXJ now", "--password=ZQXJZQXJ", "run --token ZQXJ"],
+	TOKEN_SHAPE_RES: ["ghp_ZQXJZQXJZQXJZQXJZQXJZQXJ", "github_pat_ZQXJZQXJZQXJZQXJZQXJ", "glpat-ZQXJZQXJZQXJZQXJZQXJ"],
+	AUTHORIZATION_VALUE_RE: [
+		"Authorization: Bearer ZQXJ1ZQXJ",
+		"use bearer ZQXJ1ZQXJ9 here",
+		"authorization = 'token ZQXJZQXJ1'",
+		"Authorization: token ZQXJZQXJ1",
+	],
+	CREDENTIAL_LEAD_SHAPES: [
+		"curl -s -u alice:ZQXJZQXJ https://h",
+		"curl example.com -u alice:ZQXJZQXJ",
+		"Cookie: session=ZQXJZQXJZQXJ",
+		"sshpass -p ZQXJZQXJ ssh h",
+		"docker login -u me -p ZQXJZQXJ reg",
+	],
+	QUOTED_SECRET: [
+		'PASSWORD="ZQXJ ZQXJ"',
+		"--token 'ZQXJ ZQXJ'",
+		'"Authorization: Basic ZQXJ ZQXJ"',
+		'{"token": "ZQXJ ZQXJ"}',
+		`curl -d '{"secret":"ZQXJ"}'`,
+		'Proxy-Authorization "Basic ZQXJ ZQXJ"',
+		"sig: 'ZQXJ ZQXJ' for the keys",
+	],
+	HOLD: ['password: "ZQXJ ZQ', "https://u:ZQXJ", "ghp_ZQXJ", "jdbc:oracle:thin:scott/ZQXJ", "x=https%3A%2F%2Fu%3AZQXJ"],
+	MARKUP: ["**bold** _it_ *x* `code span` ~~gone~~", "\u001b[31mred\u001b[0m \u0007 \u0000", "e\u0301 日本語 😀\tcell"],
+};
+
+// A step of 1 tries for a break on every frame, so each split below meets the certification as soon as it can.
+const RAIL_STEP = 1;
+const RAIL_DOCUMENT_CHARS = 600;
+const RAIL_BREAKS = ["\n", "\n", "\r\n", "\n\n", " \n", "\n  ", "\u2028"];
+const RAIL_WORDS =
+	"the parser reads each row and checks a cache before it wraps state for the model frame author keys".split(" ");
+
+/** Every way one line break can part a sample: in place of each whitespace, and on each side of a `:`, `=` or quote. */
+function railSplits(sample: string): Array<readonly [string, string]> {
+	const splits: Array<readonly [string, string]> = [];
+	for (let at = 1; at < sample.length; at += 1) {
+		if (/\s/u.test(sample.charAt(at))) splits.push([sample.slice(0, at), sample.slice(at + 1)]);
+		else if (/[:="']/u.test(sample.charAt(at)) || /[:="']/u.test(sample.charAt(at - 1)))
+			splits.push([sample.slice(0, at), sample.slice(at)]);
+	}
+	return splits;
+}
+
+test("an open thinking rail that reuses certified rows draws every frame as the whole text would", () => {
+	for (const [family, members] of Object.entries(RAIL_FAMILIES)) {
+		if (family === "MARKUP") continue;
+		for (const sample of members)
+			ok(redactStreamingSecretString(sample) !== sample, `${family} sample ${JSON.stringify(sample)} redacts nothing`);
+	}
+	const parts = Object.values(RAIL_FAMILIES)
+		.flat()
+		.flatMap((sample) => [[sample, ""] as const, ...railSplits(sample)]);
+	let compared = 0;
+	for (const seed of [1, 2]) {
+		const next = random(SEED + seed);
+		const pick = <T>(items: readonly T[]): T => items[Math.floor(next() * items.length)] as T;
+		// Each document carries the frame ends a split needs: just past the first whole token after its break, where that
+		// break is the latest one a frame can certify.
+		const documents: Array<{ text: string; ends: number[] }> = [];
+		let text = "";
+		let ends: number[] = [];
+		for (const [before, after] of parts) {
+			const words = Array.from({ length: 2 + Math.floor(next() * 8) }, () => pick(RAIL_WORDS));
+			text += `${words.join(" ")}\n${before}`;
+			if (after !== "") {
+				text += pick(RAIL_BREAKS);
+				ends.push(text.length + (/^\s*\S+\s/u.exec(after)?.[0].length ?? after.length + 1));
+			}
+			text += `${after}${pick(["\n", " ", " and "])}`;
+			if (text.length < RAIL_DOCUMENT_CHARS) continue;
+			documents.push({ text, ends });
+			text = "";
+			ends = [];
+		}
+		documents.push({ text, ends });
+		for (const [index, document] of documents.entries()) {
+			const rail = openThinkingRailForTesting(pick([48, 60, 120]), pick([4, 8, 16]), RAIL_STEP);
+			for (let end = 0; end < document.text.length; ) {
+				end = Math.min(document.text.length, end + 1 + Math.floor(next() * 32));
+				document.ends.push(end);
+			}
+			for (const end of [...new Set(document.ends)].sort((a, b) => a - b)) {
+				const frame = rail(document.text.slice(0, end));
+				// Until a break is certified the rail is the whole text's.
+				if (frame.head === 0) continue;
+				compared += 1;
+				const where = `seed ${seed} document ${index} at ${end} of ${JSON.stringify(document.text.slice(0, end))}`;
+				deepStrictEqual(frame.streamed, frame.whole(), where);
+			}
+		}
+	}
+	ok(compared > 1000, `only ${compared} frames reused certified rows`);
 });
 
 test("a settled result's cuts leave no piece of a secret, in the model context or the display tail", () => {
