@@ -125,7 +125,7 @@ describe("dispatch admission boundary", () => {
 		});
 	});
 
-	it("refuses a harness-origin coder and admits shadow Scout to worker creation", async () => {
+	it("refuses a harness-origin coder in dispatch and preview and admits shadow Scout to worker creation", async () => {
 		let starts = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext(), {
 			spawnWorker: () => {
@@ -142,6 +142,10 @@ describe("dispatch admission boundary", () => {
 				readOnly: true,
 			};
 			await rejects(bundle.contract.dispatch({ ...request, agentId: "coder" }), {
+				message: "dispatch: harness-origin runs require a read-only recipe; 'coder' is workspace-edit",
+			});
+			// A plan preview refuses what dispatch refuses, so no approved plan carries a run admission will reject.
+			throws(() => bundle.contract.preview?.({ ...request, agentId: "coder" }), {
 				message: "dispatch: harness-origin runs require a read-only recipe; 'coder' is workspace-edit",
 			});
 			strictEqual(starts, 0);
@@ -172,6 +176,7 @@ describe("dispatch admission boundary", () => {
 				readOnly: true,
 			};
 			await rejects(bundle.contract.dispatch(request), /read-only recipe.*task classifies as test/u);
+			throws(() => bundle.contract.preview?.(request), /read-only recipe.*task classifies as test/u);
 			strictEqual(starts, 0);
 			const declared = normalizeDispatchIntent(
 				{ read_roots: [], write_roots: [], relevant_paths: [], expected_outputs: [], verification: [] },
