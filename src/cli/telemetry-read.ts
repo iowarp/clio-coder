@@ -63,8 +63,9 @@ clio-coder telemetry timeline <session> [--from <iso> --to <iso>] [--json]
 clio-coder telemetry why-stopped <session> [--json]
 clio-coder telemetry explain <ref> [--json]
 
-<session> is a session id or a session directory. Session spend covers the calls
-the session's journal owns on every branch, plus the worker runs it referenced;
+<session> is a session id or a session directory, given as an argument or as
+--session <session>, the form telemetry tokens takes. Session spend covers the
+calls the session's journal owns on every branch, plus the worker runs it referenced;
 a fork child folds its own calls, and inspect adds the lineage total. --json
 emits the read-model DTO the TUI, ACP and GUI serve. explain also takes a
 usage report's repo:<window> reference, refolded over that window ending now.
@@ -84,6 +85,7 @@ interface Args {
 }
 
 const VALUE_FLAGS = new Set([
+	"session",
 	"run",
 	"role",
 	"disposition",
@@ -462,7 +464,17 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 		stateDir = telemetryImportedStateDir(stateDir, imported);
 	}
 	const runId = args.values.get("run");
-	const target = args.positional[0];
+	// `--session <id>` names the same session the positional argument does, as `telemetry tokens` takes it (bt-20).
+	const sessionFlag = args.values.get("session");
+	if (sessionFlag !== undefined && (args.command === "explain" || args.positional.length > 0)) {
+		printError(
+			args.command === "explain"
+				? "explain takes a reference, not --session"
+				: "give the session once: as an argument or as --session",
+		);
+		return 2;
+	}
+	const target = sessionFlag ?? args.positional[0];
 	try {
 		if (args.command === "explain") {
 			const ref = target === undefined ? null : parseFactRef(target);
