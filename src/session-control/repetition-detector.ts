@@ -1,4 +1,5 @@
 import { markHostAuthored } from "../core/message-accounting.js";
+import { ToolNames } from "../core/tool-names.js";
 import type { AgentMessage } from "../engine/types.js";
 
 /**
@@ -67,13 +68,17 @@ export function repetitionAbortReason(assessment: Extract<RepetitionAssessment, 
  * where each then failed as truncated). Parallel calls in one response differ
  * in their arguments, so only a call repeated with the same arguments counts;
  * the leading characters of its arguments stand for them, as a rewrite with a
- * drifting tail is still the same call.
+ * drifting tail is still the same call. A whole-file `write` repeated to one
+ * path is the same loop whatever its content says, since each write replaces
+ * the last; edits to one path are not, as parallel hunks differ (bt-39 b).
  */
 const FLOOD_MIN_REPEATS = 5;
 const FLOOD_ARGUMENT_CHARS = 200;
 const TOOL_CALL_FLOOD_REASON_PREFIX = "[Clio Coder] stopped a model response that kept repeating one tool call";
 
-export type ToolCallFloodAssessment = { kind: "ok" } | { kind: "flooding"; toolName: string; repeats: number };
+export type ToolCallFloodAssessment =
+	| { kind: "ok" }
+	| { kind: "flooding"; toolName: string; repeats: number; path?: string };
 
 /** Judge the first `completeBlocks` content blocks of a streamed message, the ones whose arguments are final. */
 export function assessToolCallFlood(message: unknown, completeBlocks: number): ToolCallFloodAssessment {
@@ -91,12 +96,22 @@ export function assessToolCallFlood(message: unknown, completeBlocks: number): T
 		const repeats = (counts.get(key) ?? 0) + 1;
 		counts.set(key, repeats);
 		if (repeats >= FLOOD_MIN_REPEATS) return { kind: "flooding", toolName: block.name, repeats };
+		const path = (block.arguments as { path?: unknown } | null | undefined)?.path;
+		if (block.name !== ToolNames.Write || typeof path !== "string") continue;
+		const pathKey = `${block.name}\npath\n${path}`;
+		const writes = (counts.get(pathKey) ?? 0) + 1;
+		counts.set(pathKey, writes);
+		if (writes >= FLOOD_MIN_REPEATS) return { kind: "flooding", toolName: block.name, repeats: writes, path };
 	}
 	return { kind: "ok" };
 }
 
 export function toolCallFloodAbortReason(assessment: Extract<ToolCallFloodAssessment, { kind: "flooding" }>): string {
-	return `${TOOL_CALL_FLOOD_REASON_PREFIX} ("${assessment.toolName}" ${assessment.repeats} times with the same arguments in one response).`;
+	const basis =
+		assessment.path === undefined
+			? "with the same arguments"
+			: `to ${assessment.path.length > 80 ? `${assessment.path.slice(0, 79)}…` : assessment.path}`;
+	return `${TOOL_CALL_FLOOD_REASON_PREFIX} ("${assessment.toolName}" ${assessment.repeats} times ${basis} in one response).`;
 }
 
 export const REPETITION_REPROMPT_TOOL = "clio_repetition_reprompt";

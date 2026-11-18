@@ -36,4 +36,18 @@ test("a stream cycling a few sentences or paragraphs is repeating; varied long o
 	const writes = { content: Array.from({ length: 6 }, () => call("write", { path: "src/format.ts", content: "x" })) };
 	deepStrictEqual(assessToolCallFlood(writes, 4), { kind: "ok" }, "only complete calls are judged");
 	deepStrictEqual(assessToolCallFlood(writes, 5), { kind: "flooding", toolName: "write", repeats: 5 });
+	// Rewrites of one file whose content differs within the first 200 characters are the same loop (bt-39 b).
+	const rewrites = {
+		content: Array.from({ length: 5 }, (_, index) => call("write", { content: `v${index}`, path: "src/format.ts" })),
+	};
+	deepStrictEqual(assessToolCallFlood(rewrites, 5), {
+		kind: "flooding",
+		toolName: "write",
+		repeats: 5,
+		path: "src/format.ts",
+	});
+	const hunks = {
+		content: Array.from({ length: 6 }, (_, index) => call("edit", { path: "a.ts", oldText: `${index}` })),
+	};
+	deepStrictEqual(assessToolCallFlood(hunks, 6), { kind: "ok" }, "parallel edits to one file are not a flood");
 });
