@@ -334,10 +334,14 @@ const QUOTED_VALUE_RE = new RegExp(
 const QUOTED_HEADER_LEAD_RE = new RegExp(`(["'])${QUOTED_HEADER_HEAD}`, "giu");
 const QUOTED_VALUE_OPEN_RE = new RegExp(`(?:${QUOTED_VALUE_LEAD})(["'])`, "gu");
 const AWAITING_QUOTED_VALUE_RE = /(?:--?([A-Za-z0-9_-]+)\s+|\b([A-Za-z0-9_.-]+)["']?\s*[=:]\s*)$/u;
-// Every secret name holds one of these, so other text skips both scans, which a whitespace-free token pays on every frame.
-const QUOTED_SECRET_WORD_RE = /pass|pwd|secret|token|key|auth|credential/iu;
+// Every name isSecretUrlParamName accepts holds one of these, so other text skips both scans, which a whitespace-free token
+// pays on every frame.
+const QUOTED_SECRET_WORD_RE = /pass|pwd|secret|token|key|auth|credential|sig/iu;
 // `.` in the patterns above stops at these, so a quoted value never spans them.
 const LINE_BREAK_RE = /[\n\r\u2028\u2029]/u;
+// The whitespace inside a lead may cross line breaks, as in `the password\n: 'a b'`, and a lead holds at most this many
+// words: a header's quote, name, colon and scheme.
+const QUOTED_LEAD_WORDS = 4;
 
 /** Redact whole quoted credential values: `NAME="a b"`, `--token 'a b'`, `"Authorization: Basic a b"`. */
 export function redactQuotedSecrets(
@@ -371,15 +375,25 @@ function openQuotedSecret(text: string): { lead: number; value: number } | null 
 	if (!QUOTED_SECRET_WORD_RE.test(text)) return null;
 	let lineStart = text.length;
 	while (lineStart > 0 && !LINE_BREAK_RE.test(text.charAt(lineStart - 1))) lineStart -= 1;
+	// An open value sits on the last line, but its lead may start up to QUOTED_LEAD_WORDS words before it.
+	let scanStart = lineStart;
+	for (let words = 0; words < QUOTED_LEAD_WORDS; words += 1) {
+		while (scanStart > 0 && /\s/u.test(text.charAt(scanStart - 1))) scanStart -= 1;
+		while (scanStart > 0 && !/\s/u.test(text.charAt(scanStart - 1))) scanStart -= 1;
+	}
 	let open: { lead: number; value: number } | null = null;
 	for (const lead of [QUOTED_HEADER_LEAD_RE, QUOTED_VALUE_OPEN_RE]) {
 		const scan = new RegExp(lead);
-		scan.lastIndex = lineStart;
+		scan.lastIndex = scanStart;
 		for (let match = scan.exec(text); match !== null; match = scan.exec(text)) {
 			const header = lead === QUOTED_HEADER_LEAD_RE;
 			const quote = (header ? match[1] : match[3]) ?? '"';
 			const name = (header ? match[2] : (match[1] ?? match[2])) ?? "";
 			const value = match.index + match[0].length;
+			if (value < lineStart) {
+				scan.lastIndex = match.index + 1;
+				continue;
+			}
 			const close = text.indexOf(quote, value);
 			if (close >= 0 && close - value <= QUOTED_SECRET_CHARS) {
 				scan.lastIndex = close + 1;
