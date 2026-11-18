@@ -95,6 +95,8 @@ export interface ShellToken {
 	homeRelative?: true;
 	hiddenContent?: boolean;
 	ansiCQuoted?: boolean;
+	/** The command ends inside this word's quote, so the shell reads the rest differently or not at all. */
+	unterminated?: true;
 }
 
 /**
@@ -715,7 +717,7 @@ const MAX_HEREDOCS = 64;
  * (tabs stripped first for `<<-`), or at the end of the command, as in bash.
  * Several here-documents on one line take their bodies in order.
  */
-function withoutHeredocBodies(command: string, keepSubstitutions = false): string {
+export function withoutHeredocBodies(command: string, keepSubstitutions = false): string {
 	let text = command;
 	for (let pass = 0; pass < MAX_HEREDOCS; pass += 1) {
 		const tokens = scanShellLike(text);
@@ -1194,7 +1196,7 @@ function shellCommandArguments(segment: ReadonlyArray<ShellToken>): string[] {
 }
 
 /** {@link shellCommandArguments} with the tokens kept, for a reader that needs more than the text. */
-function shellCommandWords(segment: ReadonlyArray<ShellToken>): ShellToken[] {
+export function shellCommandWords(segment: ReadonlyArray<ShellToken>): ShellToken[] {
 	const args: ShellToken[] = [];
 	for (let index = 0; index < segment.length; index += 1) {
 		const token = segment[index];
@@ -2070,7 +2072,10 @@ export function scanShellLike(command: string): ShellToken[] {
 		wordStart ??= index;
 		current += char;
 	}
+	const unterminated = quote !== null;
 	pushCurrent(command.length);
+	const last = tokens.at(-1);
+	if (unterminated && last !== undefined) last.unterminated = true;
 	return tokens;
 }
 
@@ -2162,7 +2167,8 @@ export function scanShellLikeDeep(command: string, depth = 0): ShellToken[] {
 	return [...tokens, ...inner];
 }
 
-function splitSegments(tokens: ReadonlyArray<ShellToken>): ShellToken[][] {
+/** The simple commands of a token run: split at `;`, `&`, `&&`, `||`, `|` and parentheses, redirections kept. */
+export function splitSegments(tokens: ReadonlyArray<ShellToken>): ShellToken[][] {
 	const segments: ShellToken[][] = [];
 	let current: ShellToken[] = [];
 	for (const token of tokens) {

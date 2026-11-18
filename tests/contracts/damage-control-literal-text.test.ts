@@ -1,5 +1,6 @@
 import { strictEqual } from "node:assert/strict";
 import { it } from "node:test";
+import { classify } from "../../src/domains/safety/action-classifier.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 
 export const probes = [
@@ -67,14 +68,57 @@ it("BT-014: review round 2 execution probes retain parent outcomes", () => {
 			strictEqual(engine.evaluate({ tool: "bash", args: { command } }, level).kind, expected, `${level}: ${command}`);
 		}
 });
-it("BT-014: the three inert quoted targets are allowed", () => {
+// Astra r2-8: a system-modify word is a system change where the line can run it, and text where it cannot.
+const SYSTEM_WORD_CASES: ReadonlyArray<[command: string, actionClass: "execute" | "system_modify"]> = [
+	["rg sudo README.md", "execute"],
+	["grep -n doas docs/x.md", "execute"],
+	["git log --grep doas", "execute"],
+	["echo sudo > notes.txt", "execute"],
+	['echo "run sudo make install" > notes.txt', "execute"],
+	['rg -n "pip install" docs | sort | uniq -c | head -20', "execute"],
+	["cat > notes.md <<'EOF'\nsudo apt-get install jq\nsystemctl restart x\nEOF", "execute"],
+	['git add -A && git commit -m "docs: explain pip install" && git push', "execute"],
+	["git commit -m \"$(cat <<'EOF'\ndocs: drop sudo from the setup\nEOF\n)\"", "execute"],
+	["command -v sudo", "execute"],
+	["rg chown src; npm test", "execute"],
+	["echo done > status.txt && rg sudo README.md && npm test", "execute"],
+	["sudo make install", "system_modify"],
+	["env FOO=1 sudo x", "system_modify"],
+	["xargs sudo rm", "system_modify"],
+	["sh -c 'sudo id'", "system_modify"],
+	["find . -exec sudo rm {} \\;", "system_modify"],
+	["$(sudo cat /etc/shadow)", "system_modify"],
+	['echo "$(sudo cat /etc/shadow)"', "system_modify"],
+	["python -m pip install x", "system_modify"],
+	["npm run build && sudo apt update", "system_modify"],
+	// Unreadable: an open quote, a here-document for a shell, an expansion the scanner does not model.
+	['echo "sudo', "system_modify"],
+	["bash <<'EOF'\nsudo id\nEOF", "system_modify"],
+	["echo ${x:-<<q}\nsudo id", "system_modify"],
+	// The text reaches something that runs it.
+	["echo 'sudo id' | sh", "system_modify"],
+	["echo 'sudo id' > x.sh && ./x.sh", "system_modify"],
+	["(echo 'sudo id' >&3) 3>x.sh; sh x.sh", "system_modify"],
+	['git commit -m "sudo id"; sh -c "$(git log -1 --format=%B)"', "system_modify"],
+	["python3 -c \"import os; os.system('sudo id')\"", "system_modify"],
+	// A text program made to run its argument, by the line or by its own option.
+	['rg() { "$@"; }; rg sudo id', "system_modify"],
+	["alias rg=env; rg sudo id", "system_modify"],
+	["PATH=./bin:$PATH rg sudo id", "system_modify"],
+	["rg --pre sudo x README.md", "system_modify"],
+	["rg $X sudo README.md", "system_modify"],
+	["git grep --open-files-in-pager=sudo x", "system_modify"],
+	["command sudo id", "system_modify"],
+];
+
+it("Astra r2-8: a system-modify word counts where the line can run it and not as text", () => {
 	const engine = createSafetyPolicyEngine({ cwd: process.cwd() });
-	for (const command of [
-		"echo \"note: 'git clean -fd'\"",
-		'git commit -m "Explain git clean -fd"',
-		'echo "use sudo carefully"',
-	])
-		strictEqual(engine.evaluate({ tool: "bash", args: { command } }, "yolo").kind, "allow", command);
+	for (const [command, expected] of SYSTEM_WORD_CASES) {
+		const call = { tool: "bash", args: { command } };
+		strictEqual(classify(call).actionClass, expected, command);
+		// The class every admission path reads: default, the operator's yolo and a worker's refusal.
+		strictEqual(engine.evaluate(call, "default").actionClass, expected, `engine: ${command}`);
+	}
 });
 
 it("BT-014: eval anywhere in the full command prevents a quoted exemption", () => {
@@ -88,6 +132,8 @@ it("quoted inert targets keep their policy with an explicit bash cwd", () => {
 		"echo \"note: 'git clean -fd'\"",
 		'git commit -m "Explain git clean -fd"',
 		'echo "use sudo carefully"',
+		// Astra r2-8: a pipe between text commands no longer voids the exemption.
+		'rg "sudo rm" docs | head -5',
 	]) {
 		for (const cwd of [undefined, ".", "src"])
 			for (const level of ["default", "yolo"] as const) {
