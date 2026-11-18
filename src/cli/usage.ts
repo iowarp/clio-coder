@@ -105,6 +105,10 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	);
 	out(`sessions in window: ${report.sessions.display}`);
 	out(`dispatch runs in window: ${report.runs.display}`);
+	if (report.stepPipelines.settled.fact.kind !== "measured" || report.stepPipelines.settled.fact.value > 0)
+		out(
+			`step pipelines: ${report.stepPipelines.settled.display} ended, ${report.stepPipelines.incomplete.display} before the step tool reported pipelineDone`,
+		);
 	out(`tool decisions: ${report.decisions.total.display} (${report.decisions.blocked.display} blocked/denied)`);
 	const approvals = report.approvals;
 	out(

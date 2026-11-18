@@ -49,8 +49,6 @@ describe("gateway correction contracts", () => {
 			// A parameters envelope is refused on every op, never read as an empty find (bt-23).
 			{ op: "find", parameters: { pattern: "**/*" } },
 			{ op: "describe", parameters: { capability } },
-			{ op: "call", capability, parameters: { id: "r7" } },
-			{ op: "chain", parameters: { steps: [] } },
 			{ parameters: nested },
 		]) {
 			const verdict = await registry.invoke({ tool: ToolNames.Gateway, args });
@@ -58,6 +56,22 @@ describe("gateway correction contracts", () => {
 			ok(verdict.result.kind === "error", JSON.stringify(verdict));
 			match(verdict.result.message, /op and capability belong at the top level/);
 			match(verdict.result.message, /No capability was invoked/);
+		}
+		// A misplaced envelope or steps key is refused with the exact shape it meant (bt-23 N3, N4).
+		for (const [args, hint] of [
+			[
+				{ op: "call", capability, parameters: { id: "r7" } },
+				`{"op":"call","capability":"${capability}","args":{"id":"r7"}}`,
+			],
+			[{ op: "chain", parameters: { steps: [] } }, 'steps belongs at the top level beside op: {"op":"chain"'],
+			[
+				{ op: "chain", capability, args: { steps: [{ capability, args: { id: "r7" } }] } },
+				"steps belongs at the top level",
+			],
+		] as const) {
+			const verdict = await registry.invoke({ tool: ToolNames.Gateway, args });
+			ok(verdict.kind === "ok" && verdict.result.kind === "error", JSON.stringify(verdict));
+			ok(verdict.result.message.includes(hint), verdict.result.message);
 		}
 		const named = await registry.invoke({ tool: ToolNames.Gateway, args: { args: nested } });
 		ok(named.kind === "ok" && named.result.kind === "error");
@@ -68,13 +82,16 @@ describe("gateway correction contracts", () => {
 			ok(verdict.kind === "ok" && verdict.result.kind === "ok", JSON.stringify(verdict));
 			match(verdict.result.output, /mcp_lab__stage/);
 		}
-		// A capability's own op argument is valid once the capability is top-level.
-		const valid = await registry.invoke({
-			tool: ToolNames.Gateway,
-			args: { capability, args: { op: "stage", id: "r7" } },
-		});
-		ok(valid.kind === "ok" && valid.result.kind === "ok", JSON.stringify(valid));
-		strictEqual(calls, 1);
+		// A capability's own op argument is valid once the capability is top-level, and an empty
+		// parameters object beside a top-level call carries nothing to refuse (bt-23 N3).
+		for (const args of [
+			{ capability, args: { op: "stage", id: "r7" } },
+			{ op: "call", capability, parameters: {}, args: { op: "stage", id: "r7" } },
+		]) {
+			const valid = await registry.invoke({ tool: ToolNames.Gateway, args });
+			ok(valid.kind === "ok" && valid.result.kind === "ok", JSON.stringify(valid));
+		}
+		strictEqual(calls, 2);
 	});
 
 	it("refuses normalized protected data paths before the reader runs", async () => {

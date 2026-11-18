@@ -669,6 +669,20 @@ export const TurnSettledSchema = Type.Object(
 	},
 	closed,
 );
+/**
+ * How a step template's pipeline ended (`StepPipelineEnd`, bt-15): `done` when its step tool reported `pipelineDone`,
+ * otherwise `stoppedBy` names the continuation cap, the end of a turn nothing continued, or a last turn that made no
+ * step call (`unreported`). Journaled after the fact so a reader need not have watched the `run --json` stream (bt-20).
+ */
+export const StepPipelineSettledSchema = Type.Object(
+	{
+		stepTool: ExistingId,
+		template: Type.Optional(ExistingId),
+		done: Type.Boolean(),
+		stoppedBy: Type.Optional(vocabulary(["cap", "turn", "unreported"])),
+	},
+	closed,
+);
 const nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
 /** Diagnostic text a finished run states about itself, clipped and redacted where it is built (#434). */
 const diagnostic = Type.String({ maxLength: 1024 });
@@ -774,6 +788,8 @@ export const RunSettledSchema = Type.Object(
 		callIds: Type.Union([Type.Array(CallIdSchema), Type.Null()]),
 		processExitCode: Type.Union([Type.Integer(), Type.Null()]),
 		boundKind: Type.Optional(RunBoundKind),
+		/** How the run's step pipeline ended; absent for a run without a step template and in older journals. */
+		stepPipeline: Type.Optional(StepPipelineSettledSchema),
 		/** Only the worker's repair loop can count its rounds; the host never infers zero (#425). */
 		repairRounds: factSchema(count),
 		frameType: Type.Union([text, Type.Null()]),

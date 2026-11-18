@@ -2439,6 +2439,26 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 	};
 
+	/**
+	 * How a step template's pipeline ended, journaled after the turn.settled of its last turn so why-stopped and usage
+	 * read a stalled pipeline from the session rather than only from the `run --json` stream (bt-20).
+	 */
+	const recordStepPipelineSettled = async (userTurnId: string, end: StepPipelineEnd): Promise<void> => {
+		const origin = deps.session?.current();
+		const acquire = deps.telemetry?.acquireTelemetrySession;
+		if (!origin || !acquire) return;
+		try {
+			const lease = await acquire(origin, mainAgent(origin.id), userTurnId);
+			try {
+				telemetryHub().emit("step_pipeline.settled", { ...end }, lease.context);
+			} finally {
+				await lease.release();
+			}
+		} catch {
+			// Recording an outcome never costs the turn it describes; the journal reports its own write gaps.
+		}
+	};
+
 	/** Append the outcome row, settle the turn, then follow the worker receipts the row reported as partial. */
 	const writeTurnOutcome = async (
 		record: TurnOutcomeRecord,
@@ -4050,6 +4070,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								"info",
 								"step.unreported",
 							);
+						if (lastStepPipeline !== null && userTurnId !== null)
+							await recordStepPipelineSettled(userTurnId, lastStepPipeline);
 					}
 					if (
 						!disposed &&

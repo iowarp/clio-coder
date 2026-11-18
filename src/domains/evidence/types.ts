@@ -1,4 +1,5 @@
 import type { Quantity } from "../../core/telemetry/dto.js";
+import type { RunSettled } from "../../core/telemetry/schemas.js";
 import { EVIDENCE_TAGS, type EvidenceTag } from "../../core/telemetry/trust-vocabulary.js";
 import type { DecisionRecord } from "../session/entries.js";
 import type { RunProvenanceView } from "./provenance.js";
@@ -75,6 +76,8 @@ export interface RunEvidence {
 		wireModelId: string;
 		outcome: string;
 		exitCode: number | null;
+		/** How the run's step template pipeline ended; absent without one (bt-20). */
+		stepPipeline?: NonNullable<RunSettled["stepPipeline"]>;
 	} | null;
 	firstPassSuccess: boolean | null;
 	failureCause: EvidenceTag | null;

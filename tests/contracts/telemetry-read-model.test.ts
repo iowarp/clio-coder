@@ -466,6 +466,23 @@ test("a session's lifetime tells a clean close, an open owner, an abnormal end a
 	);
 	const ended = whyStopped({ ...source, journal: { ...source.journal, records: [...imported.records, turnEnd] } }, now);
 	ok(ended.findings.includes("The last turn ended normally (stop)."), ended.findings.join("\n"));
+	// bt-20 P-B: a step pipeline stalled at the cap is decisive even though its last turn ended normally.
+	const stalled = makeTelemetryRecord(
+		"step_pipeline.settled",
+		{ stepTool: "wtfp_step", template: "wtfp:advance", done: false, stoppedBy: "cap" },
+		{ sessionId: source.sessionId, agent: { role: "main", id: source.sessionId } },
+		{ t: "2026-10-29T00:00:00.000Z", mono: 0 },
+	);
+	const capped = whyStopped(
+		{ ...source, journal: { ...source.journal, records: [...imported.records, turnEnd, stalled] } },
+		now,
+	);
+	ok(Value.Check(WhyStoppedSchema, capped), [...Value.Errors(WhyStoppedSchema, capped)][0]?.message);
+	strictEqual(capped.stepPipeline?.stoppedBy, "cap");
+	strictEqual(
+		capped.findings[1],
+		"The step pipeline of prompt template wtfp:advance stopped at the continuation cap with a step still running, before wtfp_step reported pipelineDone; the pipeline did not finish.",
+	);
 	const crashed = why({ endedAt: null, owner }, false);
 	notStrictEqual(crashed.state, "closed");
 	ok(crashed.findings.includes("The session's process ended without closing it."));

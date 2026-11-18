@@ -85,6 +85,7 @@ export function runEvidence(
 						wireModelId: settled.route.wireModelId,
 						outcome: settled.outcome,
 						exitCode: settled.exitCode,
+						...(settled.stepPipeline !== undefined ? { stepPipeline: { ...settled.stepPipeline } } : {}),
 					},
 		firstPassSuccess: assessment?.firstPassSuccess ?? null,
 		failureCause: assessment?.failureCause ?? null,
