@@ -99,7 +99,7 @@ test("agent adapter emits visual content blocks and nonvision shaping explains o
 	const { createRegistry } = await import("../../src/tools/registry.js");
 	const { resolveAgentTools, resolveSessionTools } = await import("../../src/tools/agent-tools.js");
 	const { classify } = await import("../../src/domains/safety/action-classifier.js");
-	const { READONLY_SCOPE, WORKSPACE_SCOPE, CONFIRMED_SCOPE } = await import("../../src/domains/safety/scope.js");
+	const { READONLY_SCOPE, WORKSPACE_SCOPE } = await import("../../src/domains/safety/scope.js");
 	const { createMiddlewareBundle } = await import("../../src/domains/middleware/extension.js");
 	const { contract: middleware, registrar } = createMiddlewareBundle();
 	registrar.registerHook({
@@ -114,7 +114,7 @@ test("agent adapter emits visual content blocks and nonvision shaping explains o
 			classify,
 			evaluate: (call) => ({ kind: "allow", classification: classify(call) }),
 			observeLoop: () => ({ looping: false, key: "image", count: 0 }),
-			scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+			scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE },
 			isSubset: () => true,
 			decisions: {},
 		},

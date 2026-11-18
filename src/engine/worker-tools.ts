@@ -33,7 +33,7 @@ import {
 	type ProtectedArtifactState,
 	protectedArtifactMutationBlockReason,
 } from "../domains/safety/protected-artifacts.js";
-import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../domains/safety/scope.js";
+import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../domains/safety/scope.js";
 import { effectiveToolNames } from "../tools/agent-tools.js";
 import { assertRegisteredBuiltinTools, registerCoreTools } from "../tools/core-bootstrap.js";
 import type { McpCapabilitySource } from "../tools/gateway/index.js";
@@ -125,7 +125,7 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 			loopState = next;
 			return verdict;
 		},
-		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE },
 		isSubset,
 		policy: {
 			informationFlow: () => informationFlow,

@@ -25,7 +25,7 @@ import {
 } from "../../src/domains/resources/skills/loader.js";
 import { modelMayActivateSkills } from "../../src/domains/safety/autonomy.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
-import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { isSessionEntry, isSessionHeader, type SessionEntry } from "../../src/domains/session/index.js";
 import { readSessionFileEntries, sessionPaths } from "../../src/engine/session.js";
@@ -233,7 +233,7 @@ function allowAllSafety(recorded: { reasonCode?: string; decision?: string }[]) 
 		classify: () => ({ actionClass: "read" as const, reasons: [] }),
 		evaluate: () => ({ kind: "allow" as const, classification: { actionClass: "read" as const, reasons: [] } }),
 		observeLoop: () => ({ looping: false, key: "contract", count: 0 }),
-		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE },
 		isSubset: () => true,
 		decisions: {
 			recordToolCall: (row: { reasonCode?: string; decision?: string }) => {

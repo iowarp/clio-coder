@@ -15,7 +15,7 @@ import {
 import { mergeFlowRestrictions } from "./information-flow.js";
 import { createLoopState, type LoopDetectorState, observe as observeLoop } from "./loop-detector.js";
 import { createSafetyPolicyEngine, type SafetyPolicyEngine } from "./policy-engine.js";
-import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "./scope.js";
+import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "./scope.js";
 
 export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyContract> {
 	let policyEngine: SafetyPolicyEngine | null = null;
@@ -78,7 +78,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			loopState = next;
 			return verdict;
 		},
-		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE },
 		isSubset,
 		policy: {
 			metadata: (posture) => activePolicyEngine().metadata(posture),

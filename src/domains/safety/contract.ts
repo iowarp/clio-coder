@@ -85,7 +85,6 @@ export interface SafetyContract {
 	scopes: {
 		readonly readonly: ScopeSpec;
 		readonly workspace: ScopeSpec;
-		readonly confirmed: ScopeSpec;
 	};
 
 	/** Subset check used by dispatch admission. */
