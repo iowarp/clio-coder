@@ -67,6 +67,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - D2-1: live telemetry keeps cache floors, cache breaks and the session projection incremental across batches instead of re-folding every call (12k calls: about 380 ms to 1.4 ms per batch), and ACP skips unchanged session snapshots.
 - P2S-3..7: safety decisions convert through one `toSafetyDecision`, base rules load through one cached loader (the rule compiler and the `rulePacks` option are gone), the safety barrel drops 21 unread exports, and the dead confirmed scope and `tokenizeShellLike` are removed.
 - P2M-2..8: memory promotion validates once with the shared validators, the memory barrel keeps only names read outside the domain, the runtime stops forwarding unsupplied intervention callbacks, kept lessons are typed as projected values, duplicated helpers live in `memory/util.ts`, and the dead `experimentalRelevance` switch is removed (prompt bytes unchanged).
+- bt-12: a lone middleware hook budget overrun short of a stall (10x the budget) is no longer journaled as `middleware.hook_failed`; steady-state slowness and stalls still are, and `CLIO_CODER_HOOK_BUDGET_DEBUG=1` records every overrun.
 - P2D-2: the dispatch barrel re-exports only the names callers import through it, and ten single-file helpers are no longer exported.
 - P2D-3: the dispatch event pump and the assignment event stream share one bounded drop-oldest tee.
 - P2D-6: reservation tests exercise the async release and lock-held transfer that production uses; the test-only twins and unused path helpers are gone.
@@ -79,6 +80,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- D2-2: command hook `hook.ran` receipts record `durationMs`, `timeoutMs` and the `effectKinds` the output became, so a slow tool or an unexplained annotation traces back to its hook.
+- D2-3: a command hook's first-run stall is journaled (a subprocess gets no budget warmup grace), and a hook that throws is receipted as `failed`, not `skipped`, with its message reported as `hook_failed`.
 - P2M-1: memory promotion and task handoff redact a quoted secret even when the text already holds a `[redacted:...]` marker.
 - Lesson evidence treats a repository child named `..x` as inside the repository.
 - P2S-1: containment checks across safety, sandbox and core no longer treat a child whose name starts with `..` (such as `..cache`) as outside its parent; one shared helper replaces the private copies.
