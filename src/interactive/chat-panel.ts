@@ -2268,15 +2268,25 @@ function renderTurnUsageLine(
 			...(quiet === null ? [] : [quiet]),
 			...(usage.promptRecall === true ? [PROMPT_RECALL_FACT] : []),
 		];
-		for (const fact of [
-			calls !== null || retries !== null || moved !== null ? [calls, retries, moved].filter(Boolean).join(", ") : null,
-			coverageNote,
-			stated?.tokens ?? null,
-			// A route that reports no cache would end every row on the same unknown; Detailed and /usage keep that.
-			stated?.cached != null ? `cached ${stated.cached}` : null,
-		]) {
-			if (fact !== null && visibleWidth(joinFacts([...rowFacts, fact, ...endedFact])) <= room) rowFacts.push(fact);
+		const callsFact =
+			calls !== null || retries !== null || moved !== null ? [calls, retries, moved].filter(Boolean).join(", ") : null;
+		// `in` counts the cached part, so the cached share travels with the amounts: a narrow row that dropped it alone
+		// read the whole prompt as fresh input. A route that reports no cache states no cached share; Detailed and /usage
+		// keep that unknown.
+		const amounts =
+			[stated?.tokens ?? null, stated?.cached != null ? `cached ${stated.cached}` : null].filter(Boolean).join(" · ") ||
+			null;
+		// Shown in this order; kept by rank, where a bare call count yields to the amounts it qualifies.
+		const ordered = [callsFact, coverageNote, amounts];
+		const rank = retries === null && moved === null ? [2, 1, 0] : [0, 1, 2];
+		const kept = new Set<number>();
+		for (const index of rank) {
+			const fact = ordered[index];
+			if (fact == null) continue;
+			const trial = ordered.filter((_, at) => at === index || kept.has(at)) as string[];
+			if (visibleWidth(joinFacts([...rowFacts, ...trial, ...endedFact])) <= room) kept.add(index);
 		}
+		rowFacts.push(...(ordered.filter((fact, at) => fact != null && kept.has(at)) as string[]));
 		return [`${glyph}${dimLine(releaseSpaces(joinFacts([...rowFacts, ...endedFact])), room)}`, ...noAnswer];
 	}
 	const settled = `${outcome}${quiet === null ? "" : ` · ${quiet}`}${retries === null ? "" : ` · ${retries}`}${moved === null ? "" : ` · ${moved}`}${receiptDuration(usage)}`;

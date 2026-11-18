@@ -1135,3 +1135,52 @@ test("a receipt whose run ended before its last call was folded settles on the t
 	view = telemetryViewOf("settle-receipt", [...first, ...last, ...telemetryCall("settle-receipt", { turnId: "u" })]);
 	assert.equal(receipt(), "✓ Done · 0ms · 2 calls · in 10 · out 7 · 00:00");
 });
+
+test("a narrow receipt keeps the cached share beside the amounts it is part of (bt-11 dispatch-cached)", (t) => {
+	pinZone(t, "UTC");
+	const calls = [
+		telemetryCall("cached-receipt", {
+			turnId: "u",
+			usage: { input: 20_000, output: 4_000, cacheRead: 50_000 },
+			usd: null,
+		}),
+		telemetryCall("cached-receipt", {
+			turnId: "u",
+			usage: { input: 20_000, output: 4_000, cacheRead: 50_000 },
+			usd: null,
+		}),
+	];
+	const messages = calls.map((records, index) => {
+		const value = {
+			role: "assistant" as const,
+			content: [{ type: "text", text: `Step ${index}` }],
+			stopReason: "stop",
+			usage,
+		};
+		rememberMessageCalls(
+			value,
+			records.flatMap((record) => (record.k === "call.settled" ? [record.data] : [])),
+		);
+		return value;
+	});
+	const view = telemetryViewOf("cached-receipt", calls.flat());
+	const panel = createChatPanel({ getOutputStyle: () => "standard", getTelemetry: () => view, now: () => 0 });
+	panel.appendUser("Question");
+	panel.applyEvent({ type: "agent_start", turnId: "u" } as ChatLoopEvent);
+	for (const value of messages) {
+		panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } } as unknown as ChatLoopEvent);
+		panel.applyEvent({ type: "message_end", message: value } as unknown as ChatLoopEvent);
+	}
+	panel.applyEvent({ type: "agent_end", messages } as unknown as ChatLoopEvent);
+	const receipt = (width: number) =>
+		panel
+			.render(width)
+			.map(stripTerminalSequences)
+			.filter((line) => line.length > 0)
+			.at(-1);
+	assert.equal(receipt(120), "✓ Done · 0ms · 2 calls · in 140k · out 8k · cached 100k · 00:00");
+	// Too narrow for every fact: the call count yields before `cached`, which `in` already counts.
+	assert.equal(receipt(60), "✓ Done · 0ms · in 140k · out 8k · cached 100k · 00:00");
+	// Narrower still, the amounts leave together instead of reading the whole prompt as fresh input.
+	assert.equal(receipt(40), "✓ Done · 0ms · 2 calls · 00:00");
+});
