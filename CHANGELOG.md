@@ -60,6 +60,10 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - P1-7: information-flow admissions, the operator-shell command label and file-reference labels are answered by the flow ledger (`admitDestination`, `labelCommand`, `labelPaths`); refusal text and absorb attributions are unchanged.
 - P1-3: the session-settings state machine (overrides, routing, thinking and scoped-target advances, ACP safe settings) moves out of the composition root into `src/entry/session-settings-view.ts`, and four duplicate routed-session constructors become one.
 - P1-8: the stale-edit guard and decision boards read the active path through the same closure.
+- Astra r10-1: a streaming reasoning rail redacts and wraps only the text after its last certified line break, so per-delta cost no longer grows with the length of the reasoning.
+- Astra r10-4: restoring a session reads each telemetry view's run list once instead of once per receipt.
+- Astra r10-5: a terminal height change that leaves every preview budget unchanged keeps the settled transcript rows instead of re-rendering every entry.
+- P2D-1: ACP delegation and native worker runs settle through one shared finalizer with byte-identical receipts, ledger rows and events.
 - P2D-2: the dispatch barrel re-exports only the names callers import through it, and ten single-file helpers are no longer exported.
 - P2D-3: the dispatch event pump and the assignment event stream share one bounded drop-oldest tee.
 - P2D-6: reservation tests exercise the async release and lock-held transfer that production uses; the test-only twins and unused path helpers are gone.
@@ -72,6 +76,13 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- bt-1: Copilot targets launch the SDK's bundled runtime even from inside a Copilot CLI shell, and a protocol mismatch names the foreign runtime.
+- bt-2: Copilot models offer exactly the reasoning efforts their listing publishes (medium is no longer sent as low), with a notice when a level is clamped.
+- bt-5: ACP sessions and agent workers on Copilot list live models on a cold cache, resolve the same thinking levels, context window and output budget as the main agent, and keep their thinking level across model switches.
+- bt-9: a worker that verifies through the `verify` tool and claims that check, by `verify <id>` or by its resolved command, has the claim grounded instead of reported as "unmatched validation" next to a "verified" verdict.
+- D3-4: claims from host verification read as verified only against the sealed check of the run and settlement they cite; any other reads as unverified in delivery, `claims` and `memory propose`, and a numeric-compare that compared nothing records no claim.
+- D3-2: host verification honors a memoized pass only when the run it cites has a verified seal holding that check, executed with exit 0 on the same tree; a forged or dangling memo entry runs the check.
+- P2D-5: plan preview refuses what dispatch admission refuses for ACP delegations, harness-origin writers, pinned read-only recipes on mutating tasks and denyTools on external CLIs.
 - bt-7: dispatch `intent.verification` accepts the toolchain-derived checks verify lists (such as `python-unittest`) and seals the argv verify runs, so Python, C/C++ and Fortran projects with no package.json or verifiers.yaml no longer get "declared ids: none".
 - bt-8: gateway chains accept a step's `args` sent as a JSON-object string, number id-less steps `s1`, `s2`, ... when nothing depends on them, and name the step index and field in every shape error.
 - bt-4: api-2 extension `turn_end` hook events carry the id of the user turn that the same turn's `before_tool` and `after_tool` events name, instead of the final assistant entry's id.
