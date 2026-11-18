@@ -701,12 +701,6 @@ function readEvent(line: Record<string, unknown>): MuxEvent | null {
 		if (typeof paneId !== "string" || typeof tabId !== "string" || typeof workspaceId !== "string") return null;
 		return { kind: "pane.moved", paneId, previousPaneId, tabId, workspaceId };
 	}
-	if (wireKind === "pane_focused") {
-		const paneId = data.pane_id;
-		const workspaceId = data.workspace_id;
-		if (typeof paneId !== "string" || typeof workspaceId !== "string") return null;
-		return { kind: "pane.focused", paneId, workspaceId };
-	}
 	if (wireKind === "layout_updated") {
 		// The push already carries the full tab geometry, so a consumer never
 		// has to answer a layout event with a layout request.
