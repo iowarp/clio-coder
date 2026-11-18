@@ -52,6 +52,8 @@ interface Run {
 interface Pipeline {
 	calls: number | number[];
 	stages?: number;
+	/** The model chains each turn's step calls behind a tasks step in one gateway op=chain. */
+	chained?: boolean;
 }
 
 /**
@@ -203,6 +205,7 @@ async function drive(
 								: turns.length === 1 || (switchTo !== undefined && turns.length === 2)
 									? ["start", "intro-done"]
 									: [];
+						const chainResults: Record<string, unknown>[] = [];
 						for (const [index, after] of steps.entries()) {
 							const id = `${turnId}-call-${index}`;
 							const result = await registry.invoke(
@@ -210,6 +213,27 @@ async function drive(
 								{ sessionId: "when-session", turnId, ...(constraints ? { turnConstraints: constraints } : {}) },
 							);
 							verdicts.push(result.kind);
+							if (pipeline?.chained === true) {
+								const settled = result.kind === "ok" && result.result.kind === "ok";
+								chainResults.push({
+									id,
+									capability: STEP,
+									args: { after },
+									isError: !settled,
+									result: {
+										content: [],
+										details: {
+											...(result.kind === "ok" ? result.result.details : {}),
+											chainAdmission: {
+												outcome: settled ? "ok" : "blocked",
+												decision: settled ? "allowed" : "blocked",
+												actionClass: "read",
+											},
+										},
+									},
+								});
+								continue;
+							}
 							// The engine's tool round: the call, then its result with the tool's details.
 							state.messages.push(
 								{
@@ -230,6 +254,36 @@ async function drive(
 									],
 									...(result.kind === "ok" && result.result.details !== undefined ? { details: result.result.details } : {}),
 									isError: result.kind !== "ok",
+									timestamp: Date.now(),
+								} as unknown as AgentMessage,
+							);
+						}
+						if (chainResults.length > 0) {
+							const tasks = {
+								id: "start",
+								capability: "tasks",
+								args: { action: "start", id: "1" },
+								isError: false,
+								result: {
+									content: [],
+									details: { chainAdmission: { outcome: "ok", decision: "allowed", actionClass: "read" } },
+								},
+							};
+							const id = `${turnId}-chain`;
+							state.messages.push(
+								{
+									role: "assistant",
+									content: [{ type: "toolCall", id, name: "gateway", arguments: { op: "chain", steps: [] } }],
+									stopReason: "toolUse",
+									timestamp: Date.now(),
+								} as unknown as AgentMessage,
+								{
+									role: "toolResult",
+									toolCallId: id,
+									toolName: "gateway",
+									content: [{ type: "text", text: "chain settled" }],
+									details: { op: "chain", chainResults: [tasks, ...chainResults] },
+									isError: false,
 									timestamp: Date.now(),
 								} as unknown as AgentMessage,
 							);
@@ -394,6 +448,25 @@ describe("template turnPolicy when", () => {
 			deepStrictEqual(endless.stepPipeline, { stepTool: STEP, template: "wtfp:advance", done: false, stoppedBy: "cap" });
 		} finally {
 			await endless.close();
+		}
+	});
+
+	it("a step call inside a gateway chain counts as the turn's step, so the pipeline continues to its end (bt-15)", async () => {
+		const run = await drive(
+			{ model: "step-chain-model", tier: "frontier" },
+			{ mode: "step", stepTool: STEP },
+			undefined,
+			{ calls: 1, stages: 2, chained: true },
+		);
+		try {
+			deepStrictEqual(
+				run.turns.map((turn) => turn.verdicts),
+				[["ok"], ["ok"]],
+			);
+			deepStrictEqual(run.continued, ["tool_budget"]);
+			deepStrictEqual(run.stepPipeline, { stepTool: STEP, template: "wtfp:advance", done: true });
+		} finally {
+			await run.close();
 		}
 	});
 
