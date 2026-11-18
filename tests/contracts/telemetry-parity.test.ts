@@ -134,6 +134,23 @@ test("/usage shows the session's tokens and cost, and /context the newest main c
 	} finally {
 		usage.hide();
 	}
+	// Standard's rows sum to `processed`: the cache write it counts has a row of its own, as on the exit card (bt-11 i22-cw).
+	const written = telemetryViewOf(
+		"cache-write",
+		telemetryCall("cache-write", { usage: { input: 10, output: 5, cacheRead: 100, cacheWrite: 40 } }),
+	);
+	const writtenUsage = openUsageOverlay(tui, {
+		subscribe: () => () => {},
+		read: { ...telemetry, live: () => written },
+	} as unknown as TelemetryContract);
+	try {
+		const frame = dockTop(tui)?.frame;
+		(frame as unknown as { handleInput?: (data: string) => void } | undefined)?.handleInput?.("3");
+		const text = stripTerminalSequences(frame?.renderDockBody(200, 30).join("\n") ?? "");
+		ok(/cache read\s+100\s*\n.*cache write\s+40\s*\n.*processed\s+155 tokens/u.test(text), text);
+	} finally {
+		writtenUsage.hide();
+	}
 	const ledger = () =>
 		buildContextLedger({
 			provider: "fixture",

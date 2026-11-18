@@ -135,25 +135,25 @@ function tokenRows(
 ): Array<readonly [string, string, string?]> {
 	// Each row is the figure alone; the coverage row above the table says once how many calls reported nothing (F4).
 	// One mark at most: `≥~27,252` stacked two qualifiers; the usage data row says once which calls Clio estimated.
-	const display = (metric: FactMetric) =>
-		usageLineFigure(
-			view.quantity(
-				factRef({
-					scope: "session",
-					owner: view.sessionId,
-					metric,
-					...(model === undefined ? {} : { group: { by: "model", key: model } }),
-				}),
-			),
+	const quantity = (metric: FactMetric) =>
+		view.quantity(
+			factRef({
+				scope: "session",
+				owner: view.sessionId,
+				metric,
+				...(model === undefined ? {} : { group: { by: "model", key: model } }),
+			}),
 		);
+	const display = (metric: FactMetric) => usageLineFigure(quantity(metric));
 	if (style === "compact") return [["processed", tokensText(display("total"))]];
+	// `processed` counts the cache write, so Standard shows it whenever it is not zero, as the exit summary does.
+	const cacheWrite = style === "detailed" || nonZero(quantity("cacheWrite"));
 	return [
 		["input", display("input")],
 		["output", display("output")],
 		["cache read", display("cacheRead")],
-		...(style === "detailed"
-			? [["reasoning", display("reasoning"), REASONING_NOTE] as const, ["cache write", display("cacheWrite")] as const]
-			: []),
+		...(style === "detailed" ? [["reasoning", display("reasoning"), REASONING_NOTE] as const] : []),
+		...(cacheWrite ? [["cache write", display("cacheWrite")] as const] : []),
 		["processed", tokensText(display("total"))],
 	];
 }
