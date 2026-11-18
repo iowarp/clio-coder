@@ -53,10 +53,12 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - Astra r9-3: the attached gateway schema shows a known edit and its verify as one chain, which saves a round when the model uses it.
 - Astra r10-6: `/export` shows an "exporting" notice at once and writes the file asynchronously; rendering a long session still holds input briefly.
 - P1-8: turn context shares one compaction budget and trigger helper, one JSON digest and one active-path read; prompt bytes, ledger records and telemetry are unchanged.
+- P1-6: tool registry refusals go through one block builder (rejection text and policy key order unchanged), and a call's success and error paths share one flow-withhold and after_tool step.
 
 ### Removed
 
 - P1-1: the `CLIO_CODER_LEGACY_MASK=1` escape hatch (announced as one-release in 0.3.4) and its destructive stale-observation mask stage; working-set eviction is the only pre-summary stage, and `context.workingSet.enabled: false` turns it off.
+- P1-2: the unread `retrySafety` and `costLatency` tool metadata fields.
 
 ### Fixed
 
