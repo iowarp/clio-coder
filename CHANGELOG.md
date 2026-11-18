@@ -57,6 +57,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - P1-6: tool registry refusals go through one block builder (rejection text and policy key order unchanged), and a call's success and error paths share one flow-withhold and after_tool step.
 - P1-4: the chat loop drops seven unwired dependency seams and the duplicate `admitRuntimeFlow` gate; /btw, /draft, /handoff, triage and pre-warm admit information flow through `admitFlow` directly.
 - P1-5: worker receipt accounting moves from the chat loop into `session-control/worker-receipts.ts`, and the cancel-before-admission and submit-settle paths share one turn-outcome write.
+- P1-7: information-flow admissions, the operator-shell command label and file-reference labels are answered by the flow ledger (`admitDestination`, `labelCommand`, `labelPaths`); refusal text and absorb attributions are unchanged.
+- P1-3: the session-settings state machine (overrides, routing, thinking and scoped-target advances, ACP safe settings) moves out of the composition root into `src/entry/session-settings-view.ts`, and four duplicate routed-session constructors become one.
+- P1-8: the stale-edit guard and decision boards read the active path through the same closure.
 - P2D-2: the dispatch barrel re-exports only the names callers import through it, and ten single-file helpers are no longer exported.
 - P2D-3: the dispatch event pump and the assignment event stream share one bounded drop-oldest tee.
 - P2D-6: reservation tests exercise the async release and lock-held transfer that production uses; the test-only twins and unused path helpers are gone.
