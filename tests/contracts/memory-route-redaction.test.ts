@@ -7,6 +7,7 @@ import { createRedactionTally, headForRedaction, redactSecretsText } from "../..
 import { completedLessonSource } from "../../src/domains/memory/history-review.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
 import { reflectionRequest } from "../../src/domains/memory/observations.js";
+import { memoryRecordFromPromotion } from "../../src/domains/memory/promotion.js";
 import { MemoryRuntime } from "../../src/domains/memory/runtime.js";
 import { memoryRouteJson, redactForMemoryRoute } from "../../src/domains/memory/secret-text.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
@@ -221,4 +222,25 @@ it("a bound before redaction takes a token it lands inside whole", () => {
 	strictEqual(headForRedaction(text, 10), "aaa");
 	strictEqual(headForRedaction(text, 24), `aaa ${AWS_KEY}`);
 	strictEqual(headForRedaction("x".repeat(50), 10), "");
+});
+
+it("a promoted lesson hides a quoted secret even when the text already holds a marker", () => {
+	const record = memoryRecordFromPromotion(
+		{
+			kind: "task-bank-entry",
+			sessionId: "session-marker",
+			evidenceRefs: ["session:session-marker"],
+			entry: {
+				id: "k-marker",
+				kind: "knowledge",
+				content: 'token was [redacted:jwt]; set PASSWORD="correct horse battery staple" before deploy',
+				createdAt: "2026-01-01T00:00:00.000Z",
+				lastTouchedAt: "2026-01-01T00:00:00.000Z",
+				injectionCount: 0,
+			},
+		},
+		{ scope: "global", acknowledgeGlobal: true },
+		new Date("2026-01-02T00:00:00.000Z"),
+	);
+	strictEqual(record.lesson, 'token was [redacted:jwt]; set PASSWORD="[redacted:assignment]" before deploy');
 });

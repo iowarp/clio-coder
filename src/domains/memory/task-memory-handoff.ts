@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
+import { createRedactionTally, redactSecretsPreservingMarkers } from "../evidence/redact.js";
 import {
 	TASK_MEMORY_CONTENT_MAX_CHARS,
 	TASK_MEMORY_DEFAULT_KNOWLEDGE_CAP,
@@ -331,23 +331,9 @@ function redactHandoffEntry(
 	tally: ReturnType<typeof createRedactionTally>,
 	sourceFields: Set<string>,
 ): TaskMemoryHandoffEntry {
-	const content = redactHandoffText(entry.content, tally);
+	const content = redactSecretsPreservingMarkers(entry.content, tally);
 	if (content !== entry.content) sourceFields.add(field);
 	return { ...entry, content };
-}
-
-function redactHandoffText(text: string, tally: ReturnType<typeof createRedactionTally>): string {
-	const markers: string[] = [];
-	const masked = text.replace(/\[redacted:[a-z-]+\]/gu, (marker) => {
-		const token = `\uE000${String.fromCharCode(0xe100 + markers.length)}`;
-		markers.push(marker);
-		return token;
-	});
-	let redacted = redactSecretsText(masked, tally);
-	for (let index = 0; index < markers.length; index += 1) {
-		redacted = redacted.replaceAll(`\uE000${String.fromCharCode(0xe100 + index)}`, markers[index] ?? "");
-	}
-	return redacted;
 }
 
 function cloneSource(source: TaskMemoryHandoffSourceProvenance): TaskMemoryHandoffSourceProvenance {

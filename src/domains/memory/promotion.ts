@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
+import { createRedactionTally, redactSecretsPreservingMarkers } from "../evidence/redact.js";
 import { canonicalMemoryRepositoryIdentity } from "./operations.js";
 import type { MemoryMutationOptions } from "./store.js";
 import { insertMemoryRecordIfAbsent } from "./store.js";
@@ -124,7 +124,7 @@ export function memoryRecordFromPromotion(
 		agentIds: source.agentIds ?? [],
 	});
 	const tally = createRedactionTally();
-	const lesson = redactPromotionText(source.entry.content, tally).replace(/\s+/gu, " ").trim();
+	const lesson = redactSecretsPreservingMarkers(source.entry.content, tally).replace(/\s+/gu, " ").trim();
 	const sourceFields = new Set(source.redaction?.sourceFields ?? []);
 	if (lesson !== source.entry.content) sourceFields.add("content");
 	const replacementCount = (source.redaction?.replacementCount ?? 0) + tally.count;
@@ -261,20 +261,6 @@ function promotedMemoryId(value: {
 
 function uniqueStrings(values: ReadonlyArray<string>): string[] {
 	return [...new Set(values)].sort(compareStrings);
-}
-
-function redactPromotionText(text: string, tally: ReturnType<typeof createRedactionTally>): string {
-	const markers: string[] = [];
-	const masked = text.replace(/\[redacted:[a-z-]+\]/gu, (marker) => {
-		const token = `\uE000${String.fromCharCode(0xe100 + markers.length)}`;
-		markers.push(marker);
-		return token;
-	});
-	let redacted = redactSecretsText(masked, tally);
-	for (let index = 0; index < markers.length; index += 1) {
-		redacted = redacted.replaceAll(`\uE000${String.fromCharCode(0xe100 + index)}`, markers[index] ?? "");
-	}
-	return redacted;
 }
 
 function compareStrings(left: string, right: string): number {

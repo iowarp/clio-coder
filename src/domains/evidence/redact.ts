@@ -249,13 +249,15 @@ const QUOTED_ASSIGNMENT_MARKER = "[redacted:assignment]";
 const QUOTED_HEADER_ENV_REFERENCE_RE =
 	/(["'])\s*[A-Za-z0-9_-]+\s*:\s*(?:(?:bearer|basic|token)\s+)?\$(?:[A-Z_][A-Z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})\1/giu;
 const HELD_SEGMENT_RE = /\uE000(\d+)\uE001/gu;
+const HELD_SEGMENT_SHAPE_RE = /\uE000\d+\uE001/u;
 
 /**
  * Replace a quoted credential value (`TOKEN="a b"`, `--password 'a b'`) whole, before the value-shaped patterns run:
  * they stop at whitespace, so a space inside the quotes left the rest of the secret in the text.
  */
 function redactWholeQuotedSecrets(text: string, tally?: RedactionTally): string {
-	if (text.includes("\uE000")) return text;
+	// Only text already holding this pass's own token shape is skipped; a marker mask (`\uE000\uE1xx`) is not one.
+	if (HELD_SEGMENT_SHAPE_RE.test(text)) return text;
 	const held: string[] = [];
 	const guarded = text.replace(QUOTED_HEADER_ENV_REFERENCE_RE, (segment: string) => {
 		held.push(segment);
@@ -316,6 +318,26 @@ export function redactSecretsText(
 		});
 	}
 	return redactUrlParams(out, tally);
+}
+
+const EXISTING_MARKER_RE = /\[redacted:[a-z-]+\]/gu;
+
+/**
+ * {@link redactSecretsText} for text that may already hold `[redacted:…]` markers, which it keeps byte for byte instead of
+ * re-redacting `TOKEN=[redacted:sk-key]` as `[redacted:assignment]` and counting it twice. Each marker is masked as
+ * `\uE000` plus one private-use codepoint from `\uE100`, the shape `REDACTED_USERINFO_RE` in `safety/redaction.ts` accepts.
+ */
+export function redactSecretsPreservingMarkers(text: string, tally: RedactionTally): string {
+	const markers: string[] = [];
+	const masked = text.replace(EXISTING_MARKER_RE, (marker) => {
+		markers.push(marker);
+		return `\uE000${String.fromCharCode(0xe100 + markers.length - 1)}`;
+	});
+	let redacted = redactSecretsText(masked, tally);
+	for (let index = 0; index < markers.length; index += 1) {
+		redacted = redacted.replaceAll(`\uE000${String.fromCharCode(0xe100 + index)}`, markers[index] ?? "");
+	}
+	return redacted;
 }
 
 /**
