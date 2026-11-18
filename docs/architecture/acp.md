@@ -10,9 +10,9 @@ The server speaks ACP v1 (schema v1.23.0) as newline-delimited JSON-RPC 2.0 over
 
 ```mermaid
 graph LR
-    client[External ACP Client] <-->|JSON-RPC 2.0 / stdio| server[Clio Coder ACP Server]
+    client[External ACP Client] <-->|JSON-RPC 2.0 / stdio| server[CLIO Coder ACP Server]
     server --> mediator[Tool Mediator & Safety Net]
-    mediator --> engine[Clio Coder Execution Engine]
+    mediator --> engine[CLIO Coder Execution Engine]
     mediator --> session[Session Ledger v6]
 ```
 

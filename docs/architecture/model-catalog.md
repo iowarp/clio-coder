@@ -136,7 +136,7 @@ Use this shape when testing a subscription model, homelab GPU target, research-l
 
 ### Outcome
 - Status: candidate | verified | limited | avoid
-- Recommended Clio Coder runtime:
+- Recommended CLIO Coder runtime:
 - Required profile fields:
 - Known failures:
 - Additional configurations to evaluate:

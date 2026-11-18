@@ -2,13 +2,6 @@
 
 CLIO Coder records what a process, a session and a run did as typed events in local journals, and every token, cost, decision and outcome a surface shows is a fold of those journals. This page defines the namespace, the five nouns the system is built from, the on-disk layout, sealing, sharing and the read model. [The /view viewer](observability.md) browses the artifacts, and [Artifact Versions](artifact-versions.md) lists the format identities.
 
-> [!NOTE]
-> The `clio-coder telemetry doctor` section describes `0.8.4-dev` HEAD
-> behavior (`package.json`, `src/cli/telemetry.ts`,
-> `src/cli/telemetry-doctor.ts`). The public site remains on `0.8.3`
-> (`site/product.json`, `site/content/docs-manifest.json`), so use the
-> installed version to choose a compatible telemetry command set.
-
 ## Namespace
 
 Telemetry has one name everywhere: the domain [src/domains/telemetry](../../src/domains/telemetry/index.ts), the kernel under `src/core/telemetry/`, the `clio-coder telemetry` command, the ACP methods `_clio-coder/telemetry/*`, the `telemetry.*` settings and the `<stateDir>/telemetry/` root. No environment variable configures it.
@@ -244,6 +237,8 @@ Shutdown drains admitted research traces even while their session writer is stil
 | GUI | Its telemetry, usage, session and fleet routes, whose server renders every display string. |
 
 `clio-coder usage report [--repo <path>] [--days <n>] [--json]` is read-only ([usage.ts](../../src/cli/usage.ts)). It loads one window, the sessions of one repository (or of every repository without `--repo`) and the runs no session references that the run ledger attributes to it, and prints the read model's report: sessions in the window and the runs that settled in it, tool decisions and how many were blocked or denied, permission decisions with the approval rate, tokens, spend by agent role and by model, and decisions per tool. Every figure is a quantity with the renderer's display, so a lower bound or an estimate says so. `--json` prints the report DTO, which also carries each session's cache report, and anything the window read could not use is named on stderr. `telemetry explain` takes a report's `repo:<window>` reference and folds that window again, ending now.
+
+`clio-coder telemetry tokens --session <id> [--by-source] [--json]` ([telemetry-tokens.ts](../../src/cli/telemetry-tokens.ts)) lists each turn of a session with its input tokens, cached and fresh, and its output tokens, read from the session ledger and journal. Providers report one input total per call, so the totals are measured, while `--by-source` estimates how each turn's input splits across system prompt, skills, tool schemas, template body, extension effects, tool results per tool and history, and says so. A call the provider sent no token counts for is named as unmeasured and is in no sum.
 
 Route history is a fold too ([route-history.ts](../../src/domains/telemetry/route-history.ts)): every run that settled under a route decision carries the executed route's identity, outcome, priced spend, cache reads, attempt and phase timing on its `run.settled`, and route policy and readiness read that fold. The fold covers only the newest 2,000 runs from the last 30 days, by run directory modification time, and a sealed run already folded is not read again while it stays unchanged. Each entry carries a `settled` label from `routeSettledLabel`: `success`, else the run's `outcomeCode`, else `permission_required` when the outcome detail names it, else `failure` or the outcome itself. Adaptive routing does not read `settled`; routing on it needs a recorded decision first.
 

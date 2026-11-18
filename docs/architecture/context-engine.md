@@ -4,13 +4,6 @@
 
 CLIO Coder manages two complementary layers of context: the active working set compiled for the language model on every turn, and the persistent project knowledge used to navigate and ground repository work.
 
-> [!NOTE]
-> Observation aging is `0.8.4-dev` behavior in this checkout (`package.json`;
-> `src/session-control/observation-aging.ts`). The published site still pins
-> `0.8.3` in `site/product.json` and
-> `site/content/docs-manifest.json`; check the running build before relying on
-> the behavior.
-
 The core thesis of CLIO Coder's context architecture is that **context management must be deterministic, reversible, and source-grounded**. Rather than treating conversation history as an unbounded append-only log that periodically collapses into lossy prose summaries, it employs an active working-set model with deterministic token accounting, reversible observation eviction, prefix-stabilized prompt caching, and dual-layer repository indexing.
 
 **Start with `/context`.** It shows the active model window, current token occupancy, project handbook guidance, and live prompt-cache reuse measurements.
@@ -160,41 +153,13 @@ Assistant-directed handoffs have a unique `handoffId` bound to the branch and du
 
 ## Observation aging
 
-On a route whose model tier is `small`, **or** whose route resolution says
-`promptCaching: false`, the outgoing request may drop a read result that a
-later call has replaced
-([observation-aging.ts](../../src/session-control/observation-aging.ts)).
-This gate is tested in
-[observation-aging-gate.test.ts](../../tests/contracts/observation-aging-gate.test.ts):
-small plus caching still ages, and an uncached frontier route ages; cached
-standard/frontier routes do not.
+On a route whose model tier is `small`, or whose route resolution says `promptCaching: false`, the outgoing request may drop a read result that a later call has replaced ([observation-aging.ts](../../src/session-control/observation-aging.ts)). A small-tier route ages even when it caches prompts, and an uncached frontier route ages too; cached standard and frontier routes never do (`tests/contracts/observation-aging-gate.test.ts`).
 
-- **Superseded only.** A later successful result with the same effective tool
-  and canonical arguments must cover the earlier delivery. Gateway calls are
-  compared as their inner capability. A later complete result always covers;
-  a truncated result covers only at least the bytes/count it replaced. Age
-  alone, errors and later budget-exhausted notices supersede nothing.
-- **Reads only.** The call must be one the loop guard classifies as repeatable
-  state (`callRepeatsAsRead`): a builtin read tool, a read-only bash command,
-  a typed Git inspection, or an extension tool declared `readOnly` or
-  `idempotent`. A state-changing step tool such as `next_step` is never aged.
-- **Batched and cheaper only.** Results that have not already been stubbed
-  accumulate until 32 KiB of original text is pending. The projection then
-  stubs each eligible result only when the one-line stand-in is smaller. The
-  stub names the tool, a deterministic truncated argument rendering, the
-  removed byte count and the fact that a later same-argument result is below it.
-- **Session projection, not ledger mutation.** The tracker remembers sent stub
-  ids for the live session so an in-process agent rebuild, model switch and
-  replay request reuse the projection. A different session id starts from no
-  remembered stubs; a process restart does too. A resumed full ledger is
-  therefore scanned again at the next eligible request, so the resume can form
-  a new batch from its copied history when no live tracker state remains. A
-  fork likewise has a separate session id and can age copied superseded
-  results. The durable ledger retains every full result, and `/view
-  transcript` still reads the original history rather than a persisted stub.
-- **Reported.** A new batch records the `observation_aging` cold reason and the
-  bytes saved in `cache.observationAgingBytes` on `call.settled`. Later sends
-  carry existing stubs without announcing the same batch again.
+- **Superseded only.** A later successful result with the same effective tool and canonical arguments must cover the earlier one. A gateway call counts as the capability it runs. A later complete result always covers; a truncated one covers only when it showed at least as many bytes as the earlier result. Age alone, a failed call and a later budget-exhausted notice supersede nothing.
+- **Reads only.** The call must be one the loop guard reads as making no change (`callRepeatsAsRead`): a builtin read-class tool, a bash command that only reads, a typed git inspection, or an extension tool declared `readOnly` or `idempotent`. A step tool such as `next_step` returns a new state for the same arguments, so its earlier results always go out whole.
+- **Batched and smaller only.** Superseded results not yet stubbed wait until 32 KiB of them are pending. Each is then replaced by a one-line stub, and only when the stub is smaller than the result. The stub names the tool, its arguments (cut to 160 characters), the bytes it returned and the fact that a later identical call's result follows.
+- **Per session, never in the ledger.** The tracker remembers which results the live session's requests stubbed, so a stubbed result stays stubbed in every later request, model switches, agent rebuilds and provider replays included, and the prefix breaks once per batch. A different session id or a process restart starts with nothing stubbed, so a resumed or forked session's copied history can form a new batch at its next request. The session ledger keeps every full result, and `/view transcript` shows the original history; only the copy sent to the provider changes.
+- **Reported.** A new batch records the `observation_aging` cold reason and the bytes saved in `cache.observationAgingBytes` on the call's `call.settled` record. Later requests carry the existing stubs without reporting the batch again.
 
 This is the one exception to the rule that working-set eviction waits for pressure. It holds because it is superseded-only, batched and gated to routes where a reprocessed prefix costs little or nothing.
 
@@ -210,7 +175,7 @@ Prompt sections have different update boundaries:
 | **System identity, operating contract and safety** | Low | Prefix | Recompiled when effective settings or prompt inputs change. |
 | **Tool and gateway schemas** | Infrequent | Request tool list | Changes with the admitted tool surface. |
 | **Project handbook and bounded orientation** | Low | After the tool contract | Captured for the session and workspace; context-source invalidation or configuration hot reload recaptures it. The full codemap is retrieved separately. |
-| **Durable memories and lessons, then the Runtime block** | Medium | After the project handbook | Memory is selected at each prepared turn but frozen into the compiled prompt until a completed compaction or a session switch. A later approval or revision arrives as a `# Memory update` block in the turn's reminder. The Runtime block carries the route-source line, frozen per route identity. |
+| **Runtime block, then durable memories and lessons** | Medium | After the project handbook | The Runtime block carries the route-source line, frozen per route identity, and the operator's local date, which changes once a day. Additional fragments follow it, and memory renders last. Memory is selected at each prepared turn but frozen into the compiled prompt until a completed compaction or a session switch. A later approval or revision arrives as a `# Memory update` block in the turn's reminder. |
 | **Session working set and turns** | High | Suffix | Changes with new turns, eviction, recall, and compaction. |
 
 Section order and fragments are specified in [Prompt compilation](prompt-compilation.md).
@@ -264,7 +229,7 @@ The host records an event that may disturb the cache once, on the next call that
 
 Every surface counts a break by one band ([cache-break.ts](../../src/core/telemetry/cache-break.ts)): the call prefilled again more than 1,024 tokens and more than a tenth of the prefix the previous request sent, because a healthy append loses 91 to 849 tokens at a provider's 128-token cache boundaries. For a journal call that prefix is what it read plus what it re-prefilled; a server judged by its timings read its prompt less the prefill they measured. A re-prefill that is unknown is a break on a call whose verdict is `cold` or `partial`. A partial call whose re-prefill is a known zero, the ordinary append of a tool result to a warm prefix, is not a break (#423). The read model's cache report sums verdict counts, cache read and write, uncached prefill, re-prefill and its bill over every call in the session, lists each break with its section and reasons, and groups the breaks by expected reason, with `unattributed` for a break no reason explains; a break with two reasons counts under each, and a group's re-prefill and bill sum its breaks only. A break with no reason that is a process's first request on its route, whose transcript parts from the last journaled request on that route before that request's last entry, is `replay_mismatch` instead: the resumed session replayed a different prefix, and its section names the first entry that differs, such as `message[7]:toolResult` ([read-model.ts](../../src/domains/telemetry/read-model.ts)). `clio-coder telemetry cache <session>` prints the whole report, `--json` for the DTO, and ACP serves it as `_clio-coder/telemetry/cache`. `/usage` and `clio-coder usage` show its totals and break count, and the GUI's session timeline marks each break on its call's row with the re-prefill, its bill, the divergent section and the expected reasons.
 
-The ledger keeps a separate per-call observation on each assistant entry's `promptCache.observation` ([cache-telemetry.ts](../../src/core/cache-telemetry.ts)), which `clio-coder doctor` folds for the latest session. It applies the same band to the shortfall between the previous call's inclusive input and this call's cache read, and judges a server whose usage omits its read by the server's timings, as the journal does. A break names a cause: `model_changed`, `reasoning_changed`, `input_changed`, `tool_choice_changed`, `tools_changed`, `prompt_recompiled`, `compaction`, `working_set_evict`, `observation_aging`, `idle_expiry`, `transport_reset`, or `unknown` when nothing explains it. A change the host knows about wins, and a `step_checkpoint` counts as `compaction`. `idle_expiry` is an inference: the gap since the previous call reached the route's declared cache lifetime, the same lifetime the [prompt-cache keepalive](../guide/configuration-reference.md) refreshes against. OpenAI and Codex routes assume the documented 5-minute floor. `transport_reset` marks a full request frame that followed a delta frame or a transport recovery on a continuation transport. The observation records the lifetime it judged against as `ttl`, `declared` or `unknown`. On Codex the fingerprint uses the effort the request carried on the wire, which stays at the conversation's initial value while a `/thinking` change travels as a later item, so a thinking change is not a break cause there.
+The ledger keeps a separate per-call observation on each assistant entry's `promptCache.observation` ([cache-telemetry.ts](../../src/core/cache-telemetry.ts)), which `clio-coder doctor` folds for the latest session. It applies the same band to the shortfall between the previous call's inclusive input and this call's cache read, and judges a server whose usage omits its read by the server's timings, as the journal does. A break names a cause: `model_changed`, `reasoning_changed`, `input_changed`, `tool_choice_changed`, `tools_changed`, `prompt_recompiled`, `compaction`, `working_set_evict`, `observation_aging`, `idle_expiry`, `transport_reset`, or `unknown` when nothing explains it. A change the host knows about wins, and a `step_checkpoint` counts as `compaction`. `idle_expiry` is an inference: the gap since the previous call reached the route's declared cache lifetime, the same lifetime the [prompt-cache keepalive](../guide/configuration-reference.md) refreshes against. Codex, and OpenAI Responses under short retention, assume OpenAI's 5-minute floor; OpenAI Responses under long retention uses 24 hours, or 30 minutes on a model in explicit prompt-cache mode, unless the route declares its own lifetime. `transport_reset` marks a full request frame that followed a delta frame or a transport recovery on a continuation transport. The observation records the lifetime it judged against as `ttl`, `declared` or `unknown`. On Codex the fingerprint uses the effort the request carried on the wire, which stays at the conversation's initial value while a `/thinking` change travels as a later item, so a thinking change is not a break cause there.
 
 ### What /context shows
 
