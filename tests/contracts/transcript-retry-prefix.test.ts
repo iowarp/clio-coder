@@ -43,6 +43,41 @@ test("a settled retry row joins the frozen prefix and a stream tick renders only
 	}
 });
 
+/**
+ * Built-in rows read the terminal height only through their preview budgets, so a height change those budgets
+ * absorb keeps every settled row; a replay block, which its caller renders from the raw height, still reads it.
+ */
+test("a height change inside every preview budget keeps the settled rows and still reaches a replay block", () => {
+	let rows = 40;
+	let rendered = -1;
+	const panel = createChatPanel({
+		now: () => 0,
+		getTerminalRows: () => rows,
+		onRenderMetrics: (metrics) => {
+			rendered = metrics.entriesRendered;
+		},
+	});
+	panel.applyEvent({ type: "retry_status", status: { phase: "retrying", attempt: 1, maxAttempts: 3 } });
+	panel.appendUser("Explain the render path of a resize.");
+	// This frame freezes the settled rows.
+	panel.renderRegions(80);
+	rows = 41;
+	const settled = panel.renderRegions(80);
+	ok(settled.prefix.length > 0, "the retry and prompt rows are frozen");
+	strictEqual(rendered, 0, "no entry renders again");
+	rows = 43;
+	strictEqual(panel.renderRegions(80).prefix, settled.prefix, "the settled rows are the same array");
+	panel.appendReplayBlock((_width, _detail, _unbounded, height) => [`${height} rows`]);
+	panel.renderRegions(80);
+	rows = 42;
+	match(panel.render(80).map(stripTerminalSequences).join("\n"), /42 rows/u);
+	strictEqual(rendered, 1, "only the replay block renders again");
+	// A short terminal shrinks the budgets, so every row that reads one renders again.
+	rows = 12;
+	panel.renderRegions(80);
+	strictEqual(rendered, 3);
+});
+
 test("an update of the same retry attempt replaces its frozen row", () => {
 	for (const width of WIDTHS) {
 		const panel = createChatPanel({ now: () => 0 });

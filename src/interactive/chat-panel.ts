@@ -2479,6 +2479,17 @@ type LiveSplit = { head: string[] | undefined };
 /** Segments walked by `renderEntryLines` since the panel's frame began. */
 let segmentsWalked = 0;
 
+/**
+ * The height a built-in row reads. Each bounds its rows with `previewBudget(limit, terminalRows)` for a limit of the
+ * style's policy, so this budget for the policy's largest limit renders every one alike, and a terminal taller than
+ * that renders them as the last one did. A caller-rendered replay block gets the raw height instead.
+ */
+function rowsBudget(detail: TranscriptDetailPolicy, terminalRows: number): number {
+	let ceiling = 0;
+	for (const value of Object.values(detail)) if (typeof value === "number" && value > ceiling) ceiling = value;
+	return previewBudget(ceiling, terminalRows);
+}
+
 function renderEntryLines(
 	entry: TranscriptEntry,
 	width: number,
@@ -2530,7 +2541,7 @@ function renderEntryLines(
 	// One model answered the whole turn, so its shell rows need not each name it;
 	// after a failover the row says which of the turn's models asked for it.
 	const nameRequester = (entry.models?.length ?? 0) > 1;
-	const settledKey = `${width}|${terminalRows}|${detail.style}|${unboundedToolBodies}|${nameRequester}|${skinEpoch()}`;
+	const settledKey = `${width}|${rowsBudget(detail, terminalRows)}|${detail.style}|${unboundedToolBodies}|${nameRequester}|${skinEpoch()}`;
 	// Reasoning stays between the prose and actions that surround it, one block
 	// per run of it: stretches that nothing visible separates read as one. A run
 	// is held until the block after it is known, because what follows decides
@@ -3756,10 +3767,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			});
 			return cachedRegions;
 		}
-		// Stable entries cache by width, height budget, and preset.
-		const baseKey = `${width}|${terminalRows}|${detail.style}`;
+		// Stable entries cache by width, height budget, and preset; a replay block and a prefix holding one by height too.
+		const baseKey = `${width}|${rowsBudget(detail, terminalRows)}|${detail.style}`;
+		const heightKey = `${baseKey}|${terminalRows}`;
 		const capacity = entryCacheCapacity();
-		if (frozen !== null && frozen.key !== baseKey) frozen = null;
+		if (frozen !== null && frozen.key !== baseKey && frozen.key !== heightKey) frozen = null;
 		// A frozen head's turn may have left the end of the run: popped, or pushed on by an inserted entry.
 		if (frozen?.head !== undefined && transcript[frozen.through] !== frozen.head.entry)
 			frozen = { lines: frozen.head.base, through: frozen.through, key: frozen.key };
@@ -3784,6 +3796,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		let freezeChanged = false;
 		// The live turn whose settled head ends the freeze, and the row of `out` its head ends at.
 		let freezeHead: { entry: TranscriptEntry; rows: string[]; end: number; kept: boolean } | undefined;
+		let freezeKey = frozen?.key ?? baseKey;
 		const split: LiveSplit = { head: undefined };
 		let entriesRendered = 0;
 		segmentsWalked = 0;
@@ -3821,7 +3834,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			};
 			split.head = undefined;
 			const renders = entryRenderCache.get(entry);
-			const renderKey = entry.role === "worker" && entryHasRunningTool(entry) ? `${baseKey}|${tick}` : baseKey;
+			const renderKey =
+				entry.role === "replayBlock"
+					? heightKey
+					: entry.role === "worker" && entryHasRunningTool(entry)
+						? `${baseKey}|${tick}`
+						: baseKey;
 			const cached = renders?.get(renderKey);
 			// A replay block that is not live is a pure function of the render key,
 			// so it caches like any settled entry. Excluding every replay block made
@@ -3880,6 +3898,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			}
 			if (freezeOpen && i === freezeThrough && entryIsStable(entry)) {
 				freezeThrough = i + 1;
+				if (entry.role === "replayBlock") freezeKey = heightKey;
 				freezeTailRows = out.length;
 			} else {
 				freezeOpen = false;
@@ -3896,10 +3915,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					? {
 							lines: prefix.concat(out.slice(0, freezeHead.end)),
 							through: freezeThrough,
-							key: baseKey,
+							key: freezeKey,
 							head: { entry: freezeHead.entry, rows: freezeHead.rows, base },
 						}
-					: { lines: base, through: freezeThrough, key: baseKey };
+					: { lines: base, through: freezeThrough, key: freezeKey };
 		}
 		if (cachedRegions.prefix === prefix) keepRows(out, cachedRegions.tail, keptPieceRows(pieces, tailPieces));
 		tailPieces = pieces;
@@ -3945,7 +3964,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			}
 			for (const style of OUTPUT_STYLE_CYCLE) {
 				if (style === job.style) continue;
-				const key = `${job.width}|${job.terminalRows}|${style}`;
+				const detail = transcriptDetail(style);
+				const key = `${job.width}|${rowsBudget(detail, job.terminalRows)}|${style}${entry.role === "replayBlock" ? `|${job.terminalRows}` : ""}`;
 				const renders = entryRenderCache.get(entry);
 				if (renders?.has(key)) continue;
 				const lines = renderEntryLines(
@@ -3955,7 +3975,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					unboundedToolBodies,
 					bareFences,
 					copyMarks,
-					transcriptDetail(style),
+					detail,
 					job.terminalRows,
 					transcript[index - 1],
 					workerRenderOptions(entry),
