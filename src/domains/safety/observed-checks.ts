@@ -236,7 +236,16 @@ export function standingChecksFrom(
 	cache?: RunReplayCache,
 	declared: ReadonlyArray<DeclaredVerifierCommand> = declaredVerifierCommands(workspaceRoot, []),
 ): ReadonlyArray<ObservedCheck> {
-	return foldStanding(entries.slice(start), workspaceRoot, scratchRoots, declared, cache).checks;
+	return foldStanding(entries.slice(start), workspaceRoot, scratchRoots, declared, cache, pathStartedAt(entries)).checks;
+}
+
+/** When the path's first timestamped entry was written: an untracked check log born before it is not the session's. */
+function pathStartedAt(entries: ReadonlyArray<unknown>): number | undefined {
+	for (const entry of entries) {
+		const at = Date.parse(text(record(entry)?.timestamp) ?? "");
+		if (Number.isFinite(at)) return at;
+	}
+	return undefined;
 }
 
 /** What the same fold says of a finished stretch of work, for the finish contract. */
@@ -260,7 +269,7 @@ export function runCheckFacts(
 	workspaceRoot: string,
 	declared: ReadonlyArray<DeclaredVerifierCommand>,
 ): RunCheckFacts {
-	const { passCalls, sealed } = foldStanding(entries, workspaceRoot, [], declared);
+	const { passCalls, sealed } = foldStanding(entries, workspaceRoot, [], declared, undefined, pathStartedAt(entries));
 	return { passCalls, failing: [...sealed].flatMap(([name, passed]) => (passed ? [] : [name])) };
 }
 
@@ -270,10 +279,11 @@ function foldStanding(
 	scratchRoots: ReadonlyArray<string>,
 	declared: ReadonlyArray<DeclaredVerifierCommand>,
 	cache?: RunReplayCache,
+	startedAt?: number,
 ): { checks: ObservedCheck[]; passCalls: Map<string, ObservedCheck>; sealed: Map<string, boolean> } {
 	const root = path.resolve(workspaceRoot);
 	const gitHelpers = cache?.gitHelpers ?? gitRunsConfiguredHelpers(root);
-	const outputTarget = checkOutputReader(root, process.env, scratchRoots, cache?.gitAnswers);
+	const outputTarget = checkOutputReader(root, process.env, scratchRoots, cache?.gitAnswers, startedAt);
 	const replay: Replay = { root, gitHelpers, outputTarget, declared, ...(cache ? { readings: cache.readings } : {}) };
 	const calls = new Map<string, TrackedCall>();
 	const standing = new Map<string, ObservedCheck>();

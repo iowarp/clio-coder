@@ -913,6 +913,22 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	} finally {
 		rmSync(workspace, { recursive: true, force: true });
 	}
+	// An untracked file there before the run is not the check's log, so clobbering it is a change (bt-verify8b).
+	const repo = mkdtempSync(join(tmpdir(), "clobbered-log-"));
+	try {
+		execFileSync("git", ["init", "-q"], { cwd: repo });
+		writeFileSync(join(repo, "notes.txt"), "mine");
+		const startedAt = Date.now() + 1;
+		const reader = checkOutputReader(repo, process.env, [], new Map(), startedAt);
+		const isOutput = reader(repo, new Set(["notes.txt", "out.txt"]));
+		deepStrictEqual([isOutput("notes.txt"), isOutput("out.txt")], [false, true]);
+		// A log the run made itself, as a replay after the run finds it, stays output.
+		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+		writeFileSync(join(repo, "out.txt"), "log");
+		strictEqual(isOutput("out.txt"), true);
+	} finally {
+		rmSync(repo, { recursive: true, force: true });
+	}
 	// Shell setup changes no tree, so a standing red stands beside a narrower green (x3-1).
 	for (const setup of ["source .venv/bin/activate", "export CI=1"])
 		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [

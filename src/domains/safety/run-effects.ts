@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ObservedProof } from "../../core/hoare.js";
@@ -274,7 +275,9 @@ export type { CheckOutputReader };
  * git-ignored. `outside` asks only of any write whether it leaves `cwd` (x7-1): a temp dir or scratch root inside the
  * workspace holds output but is not outside it (x8-4). `$TMPDIR`, `$HOME` and `~` expand from the run's env first
  * (x5-4). A check log the call's check pipeline writes (`npm test > out.txt`) to a path git does not track and the run did not change is output too.
- * A tracked source path stays a change, and a target this cannot resolve is one too. Shared by the recorder and the
+ * A tracked source path stays a change, and a target this cannot resolve is one too. So is an untracked file born before
+ * `startedAt`, the run's start, which the log would clobber (bt-verify8b); a file system that keeps no birth time
+ * cannot say, so there the log stays output. Shared by the recorder and the
  * task board's replay, so a check logged through `tee` keeps its outcome on both (x4-1).
  */
 export function checkOutputReader(
@@ -283,6 +286,7 @@ export function checkOutputReader(
 	configuredScratchRoots: ReadonlyArray<string> = [],
 	/** Git's ignore and tracking answers, shared by every reader of one run and never kept past it (x6-7). */
 	gitAnswers = new Map<string, boolean>(),
+	startedAt?: number,
 ): CheckOutputReader {
 	const git = (args: string[], target: string, answer: (status: number | null) => boolean): boolean => {
 		const key = `${args[0]}\0${target}`;
@@ -304,6 +308,15 @@ export function checkOutputReader(
 	const untracked = (target: string) => git(["ls-files", "--error-unmatch"], target, (status) => status === 1);
 	let scratch: string[] | undefined;
 	const changedByRun = new Set<string>();
+	const predatesRun = (resolved: string): boolean => {
+		if (startedAt === undefined) return false;
+		try {
+			const born = statSync(resolved).birthtimeMs;
+			return born > 0 && born < startedAt;
+		} catch {
+			return false;
+		}
+	};
 	const expand = (target: string): string | null => {
 		const expanded = target
 			.replace(/^~(?=\/|$)/u, "$HOME")
@@ -325,7 +338,7 @@ export function checkOutputReader(
 		const resolved = path.resolve(base, expanded);
 		if (landsOutside(resolved, true)) return true;
 		if (gitIgnores(resolved)) return true;
-		return logs?.has(target) === true && !changedByRun.has(resolved) && untracked(resolved);
+		return logs?.has(target) === true && !changedByRun.has(resolved) && untracked(resolved) && !predatesRun(resolved);
 	};
 	return Object.assign(reader, {
 		changed(paths: Iterable<string>) {
@@ -348,7 +361,7 @@ export function checkOutputReader(
 export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorderOptions = {}): RunEffectsRecorder {
 	const pending = new Map<string, PendingEffects>();
 	const gitHelpers = gitRunsConfiguredHelpers(cwd, options.env);
-	const outputTarget = checkOutputReader(cwd, options.env, options.scratchRoots);
+	const outputTarget = checkOutputReader(cwd, options.env, options.scratchRoots, undefined, Date.now());
 	const declaredChecks = declaredVerifierCommands(cwd, options.sessionVerifiers);
 	const mutatedPaths = new Set<string>();
 	const failedMutationPaths = new Set<string>();
