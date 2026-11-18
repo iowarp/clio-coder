@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { buildCustomizationGraph } from "../../src/cli/config-inspect.js";
 import { updateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { initializeClioHome } from "../../src/core/init.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 test("config inspection includes effective safety limits for defaults and configured values", async () => {
@@ -24,6 +25,24 @@ test("config inspection includes effective safety limits for defaults and config
 		const configured = JSON.parse(JSON.stringify(limits()));
 		strictEqual(configured.detail.workerResponseSeconds, 321);
 		strictEqual(configured.detail.readBytesPerCall, DEFAULT_SETTINGS.safety.limits.readBytesPerCall);
+	} finally {
+		scratch.restore();
+	}
+});
+
+test("config inspection says what the seeded worker thinking level off does (bt-20)", async () => {
+	const scratch = await isolateClioEnv("clio-coder-inspect-thinking-");
+	try {
+		const workspace = join(scratch.dir, "workspace");
+		mkdirSync(workspace);
+		// The settings file setup seeds, which is where the operator meets this value as a [user] setting.
+		initializeClioHome();
+		const row = buildCustomizationGraph(workspace).settings.find((entry) => entry.key === "fleet.default.thinkingLevel");
+		strictEqual(row?.value, "off");
+		strictEqual(row.source, "user");
+		const note = row.note ?? "";
+		ok(note.includes("a route that cannot turn thinking off runs at its default or lowest level"), note);
+		ok(note.includes("built-in default"), note);
 	} finally {
 		scratch.restore();
 	}

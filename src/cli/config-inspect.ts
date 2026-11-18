@@ -14,6 +14,7 @@
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { cwdHash } from "../core/cwd-hash.js";
+import { DEFAULT_SETTINGS } from "../core/defaults.js";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { formatSettingsLayerIssue } from "../core/settings-layer-diagnostics.js";
 import type { SettingsOrigin } from "../core/settings-layers.js";
@@ -73,6 +74,8 @@ export interface SettingsKeyReport {
 	key: string;
 	value: unknown;
 	source: SettingsOrigin;
+	/** What the value does when that is not evident from the key, such as a level some routes cannot run. */
+	note?: string;
 }
 
 export interface CustomizationGraph {
@@ -96,15 +99,31 @@ function inspectSettings(cwd: string, graph: CustomizationGraph): void {
 		// AUD-2 finding 4: include the defaults restored after a rejected setting.
 		const keys = Object.keys(layered.sources).sort();
 		for (const key of keys) {
+			const value = settingsValueFor(layered.settings, key);
+			const note = settingNote(key, value);
 			graph.settings.push({
 				key,
-				value: settingsValueFor(layered.settings, key),
+				value,
 				source: settingsSourceFor(layered.sources, key),
+				...(note !== undefined ? { note } : {}),
 			});
 		}
 	} catch (err) {
 		graph.issues.push(`settings: ${err instanceof Error ? err.message : String(err)}`);
 	}
+}
+
+/**
+ * Setup seeds settings.yaml with the defaults, so a worker thinking level of off reads as the operator's own choice
+ * while a route that cannot turn thinking off, such as copilot-sdk, runs workers at another level (bt-20).
+ */
+function settingNote(key: string, value: unknown): string | undefined {
+	if (key !== "fleet.default.thinkingLevel" || value !== "off") return undefined;
+	const seeded =
+		value === DEFAULT_SETTINGS.fleet.default.thinkingLevel
+			? " off is the built-in default, which setup writes into settings.yaml."
+			: "";
+	return `workers run without thinking where their route allows it; a route that cannot turn thinking off runs at its default or lowest level, and the dispatch result names it in a route_warning.${seeded}`;
 }
 
 function inspectClioMd(cwd: string, graph: CustomizationGraph): void {

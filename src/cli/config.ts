@@ -32,6 +32,7 @@ function renderText(cwd: string): string {
 	for (const issue of graph.issues) if (issue.startsWith("settings ")) out.push(`  ! ${issue}`);
 	for (const entry of graph.settings) {
 		out.push(`  ${entry.key} = ${JSON.stringify(entry.value)}  [${entry.source}]`);
+		if (entry.note !== undefined) out.push(`    ${entry.note}`);
 	}
 	out.push("");
 

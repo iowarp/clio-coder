@@ -1038,6 +1038,7 @@ fleet:
   default:
     target: null
     model: null
+    # A route that cannot turn thinking off runs workers at its default or lowest level and reports a route_warning.
     thinkingLevel: off
   profiles: {}
   rosters: {}
