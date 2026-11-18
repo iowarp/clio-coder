@@ -29,6 +29,7 @@ import {
 	type LivePrefixSummary,
 } from "../../src/domains/session/compaction/compact.js";
 import { findCutPoint } from "../../src/domains/session/compaction/cut-point.js";
+import { noteSummaryUsage } from "../../src/domains/session/compaction/reasoning-share.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import { estimateAgentContextBreakdown, snapshotInputTokens } from "../../src/domains/session/context-accounting.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
@@ -1412,6 +1413,55 @@ describe("production compaction controls", () => {
 			Array.from({ length: summaries }, () => "committed"),
 			facts,
 		);
+	});
+
+	it("keeps the trigger's reasoning share in a capped summary request on a reasoning route whose summaries report none, so a summary past its stated budget completes (bt3 drv-m3c b3)", async () => {
+		// The b3 route: a 32K reasoning chat route, no output cap configured, threshold 0.38, whose summary calls
+		// reported 0 reasoning tokens. The request then asked exactly the stated room and the summarizer, writing
+		// about 1.3x that budget, stopped at the output limit twice.
+		const f = fixture(true);
+		f.settings.context.workingSet.enabled = false;
+		const chat = f.statuses[0];
+		ok(chat);
+		chat.target.url = "https://drv-m3c-b3.invalid/v1";
+		chat.target.capabilities = { contextWindow: 32_768, maxTokens: 32_768 };
+		const synthesize = f.runtime.synthesizeModel;
+		f.runtime.synthesizeModel = (...args) => ({ ...synthesize(...args), reasoning: true });
+		const route = { provider: faux.getModel("chat")?.provider ?? "", baseUrl: chat.target.url, id: "chat" };
+		noteSummaryUsage(route, { output: 883, reasoning: 0 });
+		const usage = (output: number): Usage =>
+			({
+				input: 7_659,
+				output,
+				reasoning: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 7_659 + output,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			}) as Usage;
+		f.response.beforeReturn = () => {
+			const call = f.calls.at(-1);
+			const room = Number(/\((\d+) tokens\) in a small context window/.exec(call?.user ?? "")?.[1]);
+			const written = Math.ceil(room * 1.3);
+			const limit = call?.maxTokens ?? Number.POSITIVE_INFINITY;
+			f.response.truncated = written > limit;
+			f.response.usage = usage(Math.min(written, limit));
+			f.response.text = syntheticCompactionSummary("kept fact ".repeat(Math.floor((Math.min(written, limit) * 4) / 10)));
+		};
+		const { runtime, context } = automaticContext(f);
+		runtime.agent.state.model = { ...runtime.agent.state.model, maxTokens: 32_768, reasoning: true };
+		Object.assign(runtime.runtimeResolution.capabilityDecisions, { maxTokens: 32_768 });
+		f.settings.context.compaction.threshold = 0.38;
+		strictEqual(await context.runAutoCompact(runtime, false), true);
+		const room = Number(/\((\d+) tokens\) in a small context window/.exec(f.calls[0]?.user ?? "")?.[1]);
+		const facts = JSON.stringify({ room, maxTokens: f.calls.map((call) => call.maxTokens) });
+		ok(room > 0 && room <= 3_276, `the visible room stays within the cap past A1's reasoning share: ${facts}`);
+		deepStrictEqual(
+			f.calls.map((call) => call.maxTokens),
+			[Math.min(8_192, 2 * room)],
+			`the request asks the room plus A1's reasoning share: ${facts}`,
+		);
+		strictEqual(f.entries().filter((entry) => entry.kind === "compactionSummary").length, 1, facts);
 	});
 
 	it("holds a checkpoint inside the rearm band without creating a context operation (#422)", async () => {
