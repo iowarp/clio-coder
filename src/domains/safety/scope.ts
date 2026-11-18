@@ -67,12 +67,3 @@ export const WORKSPACE_SCOPE: ScopeSpec = {
 	allowNetwork: true,
 	allowDispatch: true,
 };
-
-export const CONFIRMED_SCOPE: ScopeSpec = {
-	allowedActions: new Set<ActionClass>(["read", "write", "execute", "dispatch", "system_modify", "destructive"]),
-	get allowedWriteRoots() {
-		return processWorkspaceRoots();
-	},
-	allowNetwork: true,
-	allowDispatch: true,
-};

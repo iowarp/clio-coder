@@ -59,14 +59,20 @@ const PATCH_FLAGS: ReadonlyArray<string> = ["--no-ext-diff", "--no-textconv", "-
 const SUBMODULE_SCANNING_READS: ReadonlySet<string> = new Set(["diff", "diff-files", "diff-index", "status"]);
 const SUBMODULE_FLAG = "--ignore-submodules=dirty";
 
-/** Global options before the subcommand that take the next word as their value. */
-const GLOBAL_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set([
+/**
+ * Global options Git reads with a separate value word before the subcommand.
+ * Bare `--exec-path` prints and exits, so taking the next word as its value
+ * is the conservative reading.
+ */
+export const GIT_GLOBAL_VALUE_OPTIONS: ReadonlySet<string> = new Set([
 	"-C",
 	"-c",
 	"--git-dir",
 	"--work-tree",
 	"--namespace",
 	"--config-env",
+	"--super-prefix",
+	"--exec-path",
 	"--attr-source",
 ]);
 
@@ -152,7 +158,7 @@ function readForm(subcommand: string, rest: ReadonlyArray<string>): boolean {
 function subcommandIndex(args: ReadonlyArray<string>): number {
 	for (let at = 0; at < args.length; at += 1) {
 		const word = args[at] as string;
-		if (GLOBAL_OPTIONS_WITH_VALUE.has(word)) {
+		if (GIT_GLOBAL_VALUE_OPTIONS.has(word)) {
 			at += 1;
 			continue;
 		}
@@ -167,7 +173,7 @@ function runDirectory(globals: ReadonlyArray<string>, cwd: string | undefined): 
 	let dir = path.resolve(cwd ?? process.cwd());
 	for (let at = 0; at < globals.length; at += 1) {
 		if (globals[at] === "-C" && globals[at + 1] !== undefined) dir = path.resolve(dir, globals[at + 1] as string);
-		if (GLOBAL_OPTIONS_WITH_VALUE.has(globals[at] as string)) at += 1;
+		if (GIT_GLOBAL_VALUE_OPTIONS.has(globals[at] as string)) at += 1;
 	}
 	return dir;
 }

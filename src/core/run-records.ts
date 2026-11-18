@@ -18,6 +18,7 @@ import {
 import { open } from "node:fs/promises";
 import path from "node:path";
 import { canonicalizePath } from "./path-canonical.js";
+import { relativePathEscapes } from "./path-containment.js";
 import { ensureProjectIgnore } from "./project-root.js";
 
 /**
@@ -203,7 +204,7 @@ function landRunRecordsRoot(workspaceRoot: string): RecordsRootLanding {
 	if (relative === "") {
 		return { inside: false, reason: `${RUN_RECORDS_RELATIVE_DIR} resolves to the workspace root itself (${landed})` };
 	}
-	if (relative.startsWith("..") || path.isAbsolute(relative)) return outside(landed);
+	if (relativePathEscapes(relative)) return outside(landed);
 	return { inside: true, landed };
 }
 
@@ -263,7 +264,7 @@ export function workspaceRelativePath(workspaceRoot: string, target: string): st
 	const root = path.resolve(workspaceRoot);
 	const absolute = path.isAbsolute(target) ? path.resolve(target) : path.resolve(root, target);
 	const relative = path.relative(root, absolute);
-	if (relative.startsWith("..") || path.isAbsolute(relative)) return null;
+	if (relativePathEscapes(relative)) return null;
 	return relative.length === 0 ? "." : relative.split(path.sep).join("/");
 }
 

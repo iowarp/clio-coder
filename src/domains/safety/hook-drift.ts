@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import path from "node:path";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import {
 	diffGitHookFiles,
 	type GitHookChange,
@@ -10,6 +11,7 @@ import {
 import { ToolNames } from "../../core/tool-names.js";
 import type { ClassifierCall } from "./action-classifier.js";
 import { sanitizeCallTargetText } from "./call-target.js";
+import { isSameOrDescendant } from "./path-policy.js";
 
 /**
  * The git hook drift guard. A hook runs with the full privileges of whoever
@@ -76,7 +78,7 @@ export interface GitHookDriftDeps {
 
 function displayPath(file: string, workspace: string): string {
 	const rel = path.relative(workspace, file);
-	return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel : file;
+	return rel !== "" && !relativePathEscapes(rel) ? rel : file;
 }
 
 /**
@@ -122,11 +124,6 @@ function realOrSelf(entry: string): string {
 	}
 }
 
-function atOrBelow(parent: string, candidate: string): boolean {
-	const rel = path.relative(parent, candidate);
-	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
-}
-
 /** Impure: the guard, with its baseline taken now. */
 export function createGitHookDriftGuard(deps: GitHookDriftDeps): GitHookDriftGuard {
 	const start = deps.fingerprint().files;
@@ -169,7 +166,7 @@ export function createGitHookDriftGuard(deps: GitHookDriftDeps): GitHookDriftGua
 			const scopes = [...new Set(targets.flatMap((target) => [path.resolve(target), realOrSelf(target)]))];
 			const inScope = (file: string): boolean => {
 				const forms = [file, realOrSelf(file)];
-				return scopes.some((scope) => forms.some((form) => atOrBelow(scope, form)));
+				return scopes.some((scope) => forms.some((form) => isSameOrDescendant(form, scope)));
 			};
 			const current = deps.fingerprint().files;
 			for (const id of new Set([...baseline.keys(), ...current.keys()])) {

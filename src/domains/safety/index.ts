@@ -8,17 +8,10 @@ export const SafetyDomainModule: DomainModule<"safety"> = {
 };
 
 export {
-	AUTONOMY_EXPOSURES,
-	AUTONOMY_LEVELS,
 	type AutonomyDisposition,
 	type AutonomyExposure,
 	type AutonomyLevel,
-	autonomyAskRejection,
 	autonomyFromUserInput,
-	DEFAULT_AUTONOMY_EXPOSURE,
-	DEFAULT_AUTONOMY_LEVEL,
-	isAutonomyLevel,
-	mapAutonomy,
 	modelMayActivateSkills,
 } from "./autonomy.js";
 export type { SafetyContract, SafetyDecision } from "./contract.js";
@@ -29,7 +22,6 @@ export type {
 	FinishContractInput,
 	FinishContractReason,
 } from "./finish-contract.js";
-export { assessFinishContract, FINISH_CONTRACT_ADVISORY_MESSAGE } from "./finish-contract.js";
 export type {
 	FlowDestination,
 	FlowRestriction,
@@ -41,23 +33,15 @@ export type {
 } from "./information-flow.js";
 export {
 	EMPTY_INFORMATION_FLOW_POLICY,
-	evaluateInformationFlow,
-	flowEndpointIdentity,
-	flowRestrictionsForCall,
 	flowTransferRefusal,
 	flowUnmediatedAgentRefusal,
 	isFlowRestrictionSet,
-	mcpTransportIdentity,
 	mergeFlowRestrictions,
 	resolveModelDestination,
-	resolveToolDestination,
 } from "./information-flow.js";
-export { SafetyManifest } from "./manifest.js";
 export {
 	type CompiledPathPolicy,
-	compilePathPolicy,
 	evaluatePathPolicy,
-	isSameOrDescendant,
 	type PathPolicyDecision,
 	type PathPolicyEntry,
 	type PathPolicyInput,
@@ -70,15 +54,10 @@ export {
 	type RigorResolution,
 	type RigorSource,
 	resolveRigor,
-	rigorResolution,
 } from "./rigor.js";
 export {
 	describeValidationContract,
 	loadValidationContract,
-	parseValidationContractText,
-	VALIDATION_CONTRACT_CAPS,
-	VALIDATION_CONTRACT_MARKDOWN_PATH,
-	VALIDATION_CONTRACT_YAML_PATHS,
 	type ValidationContract,
 	type ValidationContractArtifact,
 	type ValidationContractLoadResult,

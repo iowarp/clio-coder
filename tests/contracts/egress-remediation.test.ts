@@ -148,7 +148,7 @@ test("legacy retrieve switch remains compatible and does not imply shell isolati
 
 test("registry parks outward HTTP requests and executes GET at every autonomy level", async () => {
 	const { createRegistry } = await import("../../src/tools/registry.js");
-	const { READONLY_SCOPE, WORKSPACE_SCOPE, CONFIRMED_SCOPE } = await import("../../src/domains/safety/scope.js");
+	const { READONLY_SCOPE, WORKSPACE_SCOPE } = await import("../../src/domains/safety/scope.js");
 	for (const level of AUTONOMY_LEVELS)
 		for (const args of [
 			{ url: "https://example.org" },
@@ -161,7 +161,7 @@ test("registry parks outward HTTP requests and executes GET at every autonomy le
 					classify,
 					evaluate: (call) => ({ kind: "allow", classification: classify(call) }),
 					observeLoop: () => ({ looping: false, key: "test", count: 0 }),
-					scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+					scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE },
 					isSubset: () => true,
 					decisions: {},
 				},

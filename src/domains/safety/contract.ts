@@ -40,6 +40,28 @@ export type SafetyDecision =
 			policy?: SafetyPolicyDecision;
 	  };
 
+/** The {@link SafetyDecision} for a policy decision, one mapping for the operator and worker paths. */
+export function toSafetyDecision(policy: SafetyPolicyDecision): SafetyDecision {
+	const classification = policy.classification;
+	if (policy.kind === "allow") return { kind: "allow", classification, policy };
+	const decision: SafetyDecision = {
+		kind: policy.kind,
+		classification,
+		rejection: policy.rejection ?? fallbackRejection(policy),
+		policy,
+	};
+	if (policy.match) (decision as { match?: typeof policy.match }).match = policy.match;
+	return decision;
+}
+
+function fallbackRejection(policy: SafetyPolicyDecision): RejectionMessage {
+	return {
+		short: `${policy.tool} blocked: ${policy.actionClass}`,
+		detail: policy.reasons.join("\n"),
+		hints: [],
+	};
+}
+
 export interface SafetyContract {
 	/** Pure classification. Records nothing and emits no events. */
 	classify(call: ClassifierCall): Classification;
@@ -63,7 +85,6 @@ export interface SafetyContract {
 	scopes: {
 		readonly readonly: ScopeSpec;
 		readonly workspace: ScopeSpec;
-		readonly confirmed: ScopeSpec;
 	};
 
 	/** Subset check used by dispatch admission. */

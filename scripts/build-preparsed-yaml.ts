@@ -14,7 +14,7 @@ import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
 import { resolveProviderKnowledgeBaseRoots } from "../src/domains/providers/knowledge-base-path.js";
 import { loadModelProfiles } from "../src/domains/providers/model-profiles.js";
 import { FileKnowledgeBase } from "../src/domains/providers/types/knowledge-base.js";
-import { getCachedDefaultRulePacks } from "../src/domains/safety/rule-pack-loader.js";
+import { getCachedBaseRuleset } from "../src/domains/safety/rule-pack-loader.js";
 import { reportBuildStage } from "./build-output.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -23,7 +23,7 @@ const startedAt = performance.now();
 
 const body = preparsePackagedYaml(() => {
 	loadFragments();
-	getCachedDefaultRulePacks();
+	getCachedBaseRuleset();
 	const packaged = resolveProviderKnowledgeBaseRoots(import.meta.url).filter((entry) => entry.packaged === true);
 	if (packaged.length === 0) throw new Error("build-preparsed-yaml: the bundled model catalog was not found");
 	new FileKnowledgeBase(packaged);

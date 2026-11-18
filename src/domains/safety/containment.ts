@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { hostname, networkInterfaces } from "node:os";
 import path from "node:path";
 import { canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { discoverSecretMasks, isSecretPath } from "../../core/sandbox/secret-files.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
 import { isSameOrDescendant } from "./path-policy.js";
@@ -353,7 +354,7 @@ function insideWritableRoots(value: string, places: OutwardPlaces): boolean {
 function shownPath(target: string, places: OutwardPlaces): string {
 	const relative = path.relative(places.workspace, target);
 	if (relative === "") return ".";
-	return relative.startsWith("..") || path.isAbsolute(relative) ? target : relative;
+	return relativePathEscapes(relative) ? target : relative;
 }
 
 /**

@@ -21,7 +21,7 @@ import type { ProvidersContract, RuntimeDescriptor, TargetStatus } from "../../s
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
-import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
 
 export interface DispatchStubOptions {
@@ -104,7 +104,7 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 		classify: () => ({ actionClass: "read", reasons: [] }),
 		evaluate: () => ({ kind: "allow", classification: { actionClass: "read", reasons: [] } }),
 		observeLoop: () => ({ looping: false, key: "test", count: 0 }),
-		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE },
 		isSubset,
 		decisions: {},
 	};

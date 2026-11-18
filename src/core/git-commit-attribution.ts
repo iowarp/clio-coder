@@ -23,7 +23,7 @@ import {
 } from "./commit-attribution.js";
 import type { GitCommitAuthorSetting } from "./defaults.js";
 import { writeDiagnostic } from "./diagnostics.js";
-import { internalGitArgv } from "./internal-git.js";
+import { GIT_GLOBAL_VALUE_OPTIONS, internalGitArgv } from "./internal-git.js";
 import { installWindowsLauncher, windowsLaunchFile } from "./windows-launcher.js";
 import { clioStateDir } from "./xdg.js";
 
@@ -632,7 +632,7 @@ const fs = require("node:fs");
 const nodePath = require("node:path");
 
 const SHIM_DIRECTORY = /[\\/]git-hooks[\\/]v\d+-shim[\\/]?$/i;
-const GLOBAL_VALUE_OPTIONS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env", "--attr-source"]);
+const GLOBAL_VALUE_OPTIONS = new Set(${JSON.stringify([...GIT_GLOBAL_VALUE_OPTIONS])});
 const COMMIT_VALUE_OPTIONS = new Set(["--author", "--date", "--cleanup", "--trailer", "--pathspec-from-file"]);
 const COMMIT_ATTACHED_VALUE = /^--(?:author|date|cleanup|trailer|pathspec-from-file|untracked-files|gpg-sign)=/;
 const COMMIT_UNSURE = /^--(?:template|reuse-message|reedit-message|fixup|squash)(?:=|$)|^--edit$/;

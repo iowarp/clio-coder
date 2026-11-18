@@ -2,7 +2,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { ToolNames } from "../../src/core/tool-names.js";
-import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { attestedToolSignature, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { registerCoreTools } from "../../src/tools/core-bootstrap.js";
 import { createRegistry } from "../../src/tools/registry.js";
@@ -43,7 +43,7 @@ describe("worker attestation: ledger on the signed surface", () => {
 				classify: () => ({ actionClass: "read" as const, reasons: [] }),
 				evaluate: () => ({ kind: "allow" as const, classification: { actionClass: "read" as const, reasons: [] } }),
 				observeLoop: () => ({ looping: false, key: "contract", count: 0 }),
-				scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+				scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE },
 				isSubset: () => true,
 				decisions: {},
 			},

@@ -8,7 +8,8 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
+import { relativePathEscapes } from "./path-containment.js";
 import { clioProjectRoot } from "./project-root.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
@@ -363,7 +364,7 @@ function hookScripts(root: string, files: ReadonlyArray<ProjectSurfaceFile>): Pr
 				try {
 					const real = realpathSync(target);
 					const rel = relative(realRoot, real);
-					if (rel.startsWith("..") || isAbsolute(rel) || !statSync(real).isFile()) continue;
+					if (relativePathEscapes(rel) || !statSync(real).isFile()) continue;
 					const bytes = readFileSync(real);
 					entries.set(target, { path: target, text: bytes.toString("utf8"), hash: sha256(bytes) });
 				} catch {
