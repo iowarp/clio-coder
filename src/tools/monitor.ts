@@ -338,8 +338,12 @@ function settledToolLines(facts: FinishedRun["facts"]): string[] {
 	}
 	for (const stat of facts.tools)
 		lines.push(`  ${stat.tool}: count=${stat.calls} ok=${stat.ok} errors=${stat.errors} blocked=${stat.blocked}`);
-	// The totals count a tool guard's blocks too, so they are listed beside the safety refusals.
-	for (const attempt of [...facts.blockedAttempts, ...(facts.guardBlockedAttempts ?? [])]) {
+	// The totals count a tool guard's blocks and refused asks too, so they are listed beside the safety refusals.
+	for (const attempt of [
+		...facts.blockedAttempts,
+		...(facts.guardBlockedAttempts ?? []),
+		...(facts.permissionRequestedAttempts ?? []),
+	]) {
 		const parts = [
 			`  blocked: ${attempt.tool}`,
 			attempt.actionClass !== null ? `class=${attempt.actionClass}` : "",

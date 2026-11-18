@@ -270,14 +270,16 @@ interface HeadlessMainAgentRunStats {
 	/** The decision axis, counted the way a worker's settled run counts it. */
 	decisions: RunResultSafetySummary["decisions"] & { guardBlocked: number };
 	/**
-	 * Every call whose outcome was blocked, except a tool guard's block, in a worker's settled shape, up to
-	 * `BLOCKED_ATTEMPTS_LIMIT`.
+	 * Every call whose outcome was blocked, except a tool guard's block and a refused ask, in a worker's settled shape,
+	 * up to `BLOCKED_ATTEMPTS_LIMIT`.
 	 */
 	blockedAttempts: SafetyBlockedAttempt[];
 	/** Blocked attempts past `BLOCKED_ATTEMPTS_LIMIT`, counted but not listed. */
 	blockedAttemptsTruncated: number;
 	/** The calls `decisions.guardBlocked` counts, up to `BLOCKED_ATTEMPTS_LIMIT`; the count stays exact. */
 	guardBlockedAttempts: SafetyBlockedAttempt[];
+	/** The blocked calls `decisions.permissionRequested` counts, up to `BLOCKED_ATTEMPTS_LIMIT`. */
+	permissionRequestedAttempts: SafetyBlockedAttempt[];
 	/** Successful calls the registry classified as `MUTATING_ACTION_CLASS`. */
 	mutatingSucceeded: number;
 	/** Dispatched runs whose task worktree merged into this workspace. */
@@ -621,9 +623,10 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	// denied call with its own guidance. `decisions.blocked` keeps meaning a
 	// hard block by a rule, and a tool guard's block counts as `guardBlocked`.
 	const deniedAsk = decision === "blocked" && detail.deniedPark === true;
+	const permissionAsk = decision === "permission_requested" || deniedAsk;
 	const guardBlock = decision === "blocked" && !deniedAsk && detail.reasonCode === "guard_block";
 	if (decision === "allowed") stats.decisions.allowed += 1;
-	else if (decision === "permission_requested" || deniedAsk) stats.decisions.permissionRequested += 1;
+	else if (permissionAsk) stats.decisions.permissionRequested += 1;
 	else if (guardBlock) stats.decisions.guardBlocked += 1;
 	else if (decision === "blocked") stats.decisions.blocked += 1;
 	const actionClass = (event as { actionClass?: unknown }).actionClass;
@@ -634,12 +637,15 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 		if (typeof detail.reasonCode === "string") attempt.reasonCode = detail.reasonCode;
 		if (typeof detail.policySource === "string") attempt.policySource = detail.policySource;
 		if (typeof detail.blockReason === "string") attempt.reason = detail.blockReason;
-		if (deniedAsk) attempt.permissionRequired = true;
+		if (permissionAsk) attempt.permissionRequired = true;
 		const layer = detail.denial?.layer;
 		if (layer === "clio_policy" || layer === "operator_approval" || layer === "mcp_server_policy") attempt.layer = layer;
 		// A guard's block lists apart from the safety refusals, the way `decisions` counts it (bt-15 c12b).
 		if (guardBlock)
 			recordBlockedAttempt({ blockedAttempts: stats.guardBlockedAttempts, blockedAttemptsTruncated: 0 }, attempt);
+		// So does a refused ask, such as one a --timeout abort denied before anyone decided (bt-15 c13a).
+		else if (permissionAsk)
+			recordBlockedAttempt({ blockedAttempts: stats.permissionRequestedAttempts, blockedAttemptsTruncated: 0 }, attempt);
 		else recordBlockedAttempt(stats, attempt);
 	}
 	// A terminating result (the artifact tool's plan, review, or report) is the
@@ -757,9 +763,11 @@ function toolTotals(stats: Map<string, ToolCallStat>): { calls: number; succeede
 
 /** Names an answer turn's blocked calls, which the run's exit code no longer reports. */
 function blockedCallsNotice(stats: HeadlessMainAgentRunStats): string | null {
-	const total = stats.blockedAttempts.length + stats.blockedAttemptsTruncated;
+	// A refused ask is a blocked call the operator would have decided, so it is named here too.
+	const listed = [...stats.blockedAttempts, ...stats.permissionRequestedAttempts];
+	const total = listed.length + stats.blockedAttemptsTruncated;
 	if (total === 0) return null;
-	const named = stats.blockedAttempts
+	const named = listed
 		.slice(0, 5)
 		.map((attempt) => {
 			const why = attempt.ruleId ?? attempt.reasonCode;
@@ -971,6 +979,9 @@ async function recordHeadlessMainAgentRun(input: {
 			...(input.stats.guardBlockedAttempts.length > 0
 				? { guardBlockedAttempts: [...input.stats.guardBlockedAttempts] }
 				: {}),
+			...(input.stats.permissionRequestedAttempts.length > 0
+				? { permissionRequestedAttempts: [...input.stats.permissionRequestedAttempts] }
+				: {}),
 		},
 		noop: headlessNoop(input.stats),
 		...(unclassified !== null ? { unclassifiedAfterLastCheck: unclassified } : {}),
@@ -1063,6 +1074,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		blockedAttempts: [],
 		blockedAttemptsTruncated: 0,
 		guardBlockedAttempts: [],
+		permissionRequestedAttempts: [],
 		mutatingSucceeded: 0,
 		mergedTaskWorktrees: 0,
 		unresolvedBlocks: new Set<string>(),
@@ -1176,6 +1188,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			blockedAttempts: [...runStats.blockedAttempts],
 			...(runStats.blockedAttemptsTruncated > 0 ? { blockedAttemptsTruncated: runStats.blockedAttemptsTruncated } : {}),
 			...(runStats.guardBlockedAttempts.length > 0 ? { guardBlockedAttempts: [...runStats.guardBlockedAttempts] } : {}),
+			...(runStats.permissionRequestedAttempts.length > 0
+				? { permissionRequestedAttempts: [...runStats.permissionRequestedAttempts] }
+				: {}),
 		},
 	});
 	// A full stream's last line says whether the run succeeded, which the model's own turn_end cannot (S-51).
