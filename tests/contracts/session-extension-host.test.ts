@@ -445,16 +445,16 @@ test("an ACP serve loop that throws still disposes the extension host and the pr
 	acp.stderr.on("data", (chunk: string) => {
 		stderr += chunk;
 	});
-	const poll = async <T>(read: () => T | undefined, what: string): Promise<T> => {
-		for (let tries = 0; tries < 400; tries++) {
+	const poll = async <T>(read: () => T | undefined, what: string, limit = 400): Promise<T> => {
+		for (let tries = 0; tries < limit; tries++) {
 			const value = read();
 			if (value !== undefined) return value;
 			await new Promise((resolve) => setTimeout(resolve, 50));
 		}
 		throw new Error(`${what}\n${stderr}`);
 	};
-	await poll(() => (stderr.includes("serve failed") ? true : undefined), "the serve loop did not throw");
-	// The client leaves; nothing but a runtime child could hold the process open now.
+	// A cold tsx boot of the whole orchestrator, 60 s; the client leaves and nothing but a runtime child holds the process open.
+	await poll(() => (stderr.includes("serve failed") ? true : undefined), "the serve loop did not throw", 1200);
 	acp.stdin.end();
 	equal(await poll(() => exitCode, "the ACP process did not exit after its serve loop threw"), 1, stderr);
 	deepStrictEqual(runtimes(), [], "a runtime child outlived the ACP process");

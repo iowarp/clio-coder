@@ -18,8 +18,9 @@ async function server(t: TestContext, handle: (req: IncomingMessage, res: Server
 	});
 	return `http://127.0.0.1:${(instance.address() as AddressInfo).port}`;
 }
-function ctx(signal?: AbortSignal): ProbeContext {
-	return { httpTimeoutMs: 120, credentialsPresent: new Set(), ...(signal ? { signal } : {}) };
+// Only rows asserting the deadline use 120 ms; the rest get room for a loaded event loop.
+function ctx(signal?: AbortSignal, httpTimeoutMs = 2000): ProbeContext {
+	return { httpTimeoutMs, credentialsPresent: new Set(), ...(signal ? { signal } : {}) };
 }
 function target(url: string, runtime = embedRuntime.id) {
 	return { id: "fixture", runtime, url, defaultModel: "fixture-model" };
@@ -56,7 +57,7 @@ for (const [runtime, path] of [
 			else res.end("{}");
 		});
 		assert.ok(runtime.probe, `${runtime.id} must expose its capability probe`);
-		const result = await runtime.probe(target(url, runtime.id), ctx());
+		const result = await runtime.probe(target(url, runtime.id), ctx(undefined, 120));
 		assert.equal(result.ok, false);
 		assert.match(result.error ?? "", /timeout after 120ms/);
 	});
@@ -134,7 +135,7 @@ for (const phase of ["headers", "body"] as const) {
 			}
 			later(res, () => res.end('{"data":[{"embedding":[1,2]}]}'));
 		});
-		await assert.rejects(embed(url), /timeout after 120ms/);
+		await assert.rejects(embed(url, ctx(undefined, 120)), /timeout after 120ms/);
 		assert.deepEqual(paths, ["/v1/embeddings"]);
 	});
 }
@@ -263,7 +264,7 @@ it("reasoning HTTP errors cancel unread bodies while retaining status", async (t
 	const result = await probeOpenAICompatReasoning({
 		baseUrl: url,
 		modelId: "fixture",
-		timeoutMs: 120,
+		timeoutMs: 2000,
 		signal: caller.signal,
 	});
 	assert.equal(result.reasoning, null);
@@ -276,7 +277,7 @@ it("healthy reasoning still requires a nonempty reasoning field", async (t) => {
 	const url = await server(t, (_req, res) =>
 		res.end('{"choices":[{"message":{"reasoning_content":"working","content":"4"}}]}'),
 	);
-	const result = await probeOpenAICompatReasoning({ baseUrl: url, modelId: "fixture", timeoutMs: 120 });
+	const result = await probeOpenAICompatReasoning({ baseUrl: url, modelId: "fixture", timeoutMs: 2000 });
 	assert.equal(result.reasoning, true);
 	assert.equal(result.field, "reasoning_content");
 });
@@ -325,6 +326,7 @@ it("caller cancellation before OAI headers fails without native fallback", async
 });
 
 for (const cause of ["timeout", "caller"] as const) {
+	const deadline = cause === "timeout" ? 120 : 2000;
 	it(`native embedding fallback respects ${cause} through body consumption`, async (t) => {
 		const paths = recordFetch(t);
 		const caller = new AbortController();
@@ -340,7 +342,7 @@ for (const cause of ["timeout", "caller"] as const) {
 			later(res, () => res.end('[{"embedding":[1,2]}]'));
 		});
 		await assert.rejects(
-			embed(url, ctx(caller.signal)),
+			embed(url, ctx(caller.signal, deadline)),
 			cause === "caller" ? /aborted by caller/ : /timeout after 120ms/,
 		);
 		assert.deepEqual(paths, ["/v1/embeddings", "/embedding"]);
@@ -356,7 +358,7 @@ for (const cause of ["timeout", "caller"] as const) {
 		});
 		assert.ok(rerankRuntime.rerank);
 		await assert.rejects(
-			rerankRuntime.rerank(target(url), "query", ["a"], ctx(caller.signal)),
+			rerankRuntime.rerank(target(url), "query", ["a"], ctx(caller.signal, deadline)),
 			cause === "caller" ? /aborted by caller/ : /timeout after 120ms/,
 		);
 		assert.deepEqual(paths, ["/reranking"]);
@@ -372,7 +374,7 @@ for (const cause of ["timeout", "caller"] as const) {
 		const result = await probeOpenAICompatReasoning({
 			baseUrl: url,
 			modelId: "fixture",
-			timeoutMs: 120,
+			timeoutMs: deadline,
 			signal: caller.signal,
 		});
 		assert.equal(result.reasoning, null);

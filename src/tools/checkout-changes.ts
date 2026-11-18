@@ -1,7 +1,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, lstatSync, openSync, readlinkSync, readSync, realpathSync } from "node:fs";
-import { lstat, open, readFile, readlink, realpath } from "node:fs/promises";
+import { lstat, readFile, readlink, realpath } from "node:fs/promises";
 import { promisify } from "node:util";
 import { internalGitArgv } from "../core/internal-git.js";
 
@@ -14,12 +14,6 @@ export interface CheckoutSnapshot {
 
 /** Above this size a run's delta identifies a dirty file by its stat tuple instead of reading it. */
 const CONTENT_IDENTITY_MAX_BYTES = 1024 * 1024;
-
-/**
- * Bytes read from each end of a dirty file on every snapshot, whether or not its stat moved. A rewrite that keeps
- * size, mtime, ctime and inode (one inside the same timestamp tick) is still seen when it changes these bytes.
- */
-const STAT_SAMPLE_BYTES = 64 * 1024;
 
 /** Files a snapshot stats and reads at once. */
 const OBSERVE_CONCURRENCY = 16;
@@ -99,35 +93,10 @@ export function snapshotCheckout(cwd: string): CheckoutSnapshot | null {
 	return { root, paths };
 }
 
-/** A digest of a file's first and last {@link STAT_SAMPLE_BYTES}, or of all of it when it is no longer than both. */
-async function sampleDigest(candidate: Buffer, size: number): Promise<string> {
-	const hash = createHash("sha256");
-	const handle = await open(candidate, "r");
-	try {
-		const spans: ReadonlyArray<readonly [number, number]> =
-			size <= 2 * STAT_SAMPLE_BYTES
-				? [[0, size]]
-				: [
-						[0, STAT_SAMPLE_BYTES],
-						[size - STAT_SAMPLE_BYTES, STAT_SAMPLE_BYTES],
-					];
-		for (const [position, length] of spans) {
-			const buffer = Buffer.allocUnsafe(length);
-			const { bytesRead } = await handle.read(buffer, 0, length, position);
-			hash.update(buffer.subarray(0, bytesRead));
-		}
-	} finally {
-		await handle.close();
-	}
-	return hash.digest("hex");
-}
-
 /**
- * The same git-visible state, off the event loop and keyed on stat. An entry whose status code,
- * (mode, size, mtime, ctime, inode) and first and last 64 KiB match `reference` keeps the identity it had there;
- * one that moved is read again up to 1 MiB, so a rewrite that leaves the content as it was is no change, and a
- * larger file is its stat tuple with those sampled bytes. Bound: a rewrite inside one timestamp tick that keeps
- * size and inode and changes only bytes between the two sampled ends goes unseen.
+ * The same git-visible state, off the event loop and keyed on stat. An entry whose status code and
+ * (mode, size, mtime, ctime, inode) match `reference` keeps the identity it had there; one that moved is read
+ * again up to 1 MiB, so a rewrite that leaves the content as it was is no change, and a larger file is its stat tuple.
  */
 async function observeCheckout(cwd: string, reference: CheckoutSnapshot | null): Promise<CheckoutSnapshot | null> {
 	let root: string;
@@ -159,7 +128,6 @@ async function observeCheckout(cwd: string, reference: CheckoutSnapshot | null):
 			const candidate = Buffer.concat([rootPrefix, raw]);
 			const stat = await lstat(candidate, { bigint: true });
 			tuple = `${code.toString("latin1")}:${stat.mode}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}:${stat.ino}`;
-			if (stat.isFile()) tuple = `${tuple}:${await sampleDigest(candidate, Number(stat.size))}`;
 			const kept = known?.get(name) === tuple ? reference?.paths.get(name) : undefined;
 			if (kept !== undefined) return { tuple, identity: kept };
 			hash.update(String(stat.mode));
