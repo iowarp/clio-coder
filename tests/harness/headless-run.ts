@@ -100,13 +100,13 @@ export interface CliResult {
 	elapsedMs: number;
 }
 
-/** Spawn the built CLI with stdin closed; SIGKILL and reject after `timeoutMs`. */
+/** Spawn the built CLI with stdin closed; SIGKILL and reject after `timeoutMs`. `node` precedes the entry. */
 export function runCli(
 	args: ReadonlyArray<string>,
-	options: { env: NodeJS.ProcessEnv; cwd: string; timeoutMs?: number; cli?: string },
+	options: { env: NodeJS.ProcessEnv; cwd: string; timeoutMs?: number; cli?: string; node?: ReadonlyArray<string> },
 ): Promise<CliResult> {
 	const startedAt = Date.now();
-	const child = spawn(process.execPath, [options.cli ?? CLI, ...args], {
+	const child = spawn(process.execPath, [...(options.node ?? []), options.cli ?? CLI, ...args], {
 		cwd: options.cwd,
 		env: options.env,
 		stdio: ["pipe", "pipe", "pipe"],

@@ -223,12 +223,14 @@ describe("W3 (F11 -> CF-2): a historical render and a historical fork see the ea
 		];
 	}
 
-	it("a render at a past position does not fold a later eviction", { todo: "F11 -> CF-2" }, () => {
+	it("a render at a past position does not fold a later eviction", () => {
 		const entries = twoSendsAtOneLeaf();
 		const now = requestText(buildModelReplayAgentMessagesFromTurns(entries));
 		ok(!now.includes(BODY_A) && now.includes("[evicted r1 as r1]"), "the tip renders the marker");
 		// The position of send 1: the ledger through r2. The eviction was written after it.
-		const historical = requestText(buildModelReplayAgentMessagesFromTurns(entries, { uptoTurnId: "r2" }));
+		const historical = requestText(
+			buildModelReplayAgentMessagesFromTurns(entries, { cursor: { hwm: "r2", leaf: "r2" } }),
+		);
 		ok(historical.includes(BODY_A), "the historical render keeps the body send 1 carried");
 		ok(!historical.includes("[evicted r1 as r1]"), "and not the later marker");
 	});
@@ -246,9 +248,7 @@ describe("W3 (F11 -> CF-2): a historical render and a historical fork see the ea
 		];
 	}
 
-	it("a fork at a2 copies only the display records written before a2's successor", {
-		todo: "F11 -> CF-2",
-	}, async () => {
+	it("a fork at a2 copies only the display records written before a2's successor", async () => {
 		const session: SessionContract = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
 		let childId: string;
 		try {
@@ -753,7 +753,6 @@ describe("W13 (F15 -> CF-2): admission prices the attempt it sends", () => {
 	const auto = (): MiddlewareToolChoiceControl => ({ ...lockNone(), current: () => ({ kind: "auto" }) });
 
 	it("a middleware none lock sent as auto is priced with its directive at the fit boundary", {
-		todo: "F15 -> CF-2",
 		timeout: 120_000,
 	}, async (t) => {
 		// The route rejects tool_choice "none", so a middleware text lock goes out as "auto" with the directive.

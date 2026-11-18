@@ -77,7 +77,13 @@ import {
 	sanitizeLockedSynthesisMessage,
 	withLockedSynthesisDirective,
 } from "../engine/loop-guard.js";
-import { applyToolRounds, streamToolRound } from "../engine/provider-payload.js";
+import {
+	applyToolRounds,
+	type ControlledRequest,
+	firstToolRoundAttempt,
+	streamToolRound,
+	type ToolRound,
+} from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
 import { effectiveToolCall } from "../tools/surface.js";
@@ -124,6 +130,31 @@ const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
 const SHUTDOWN_STOP_REASON = "[Clio Coder] stopped the request because Clio Coder shut down before it finished.";
 type StreamAdmission = NonNullable<NonNullable<Parameters<typeof createEngineAgent>[0]>["beforeStreamRequest"]>;
 type AdmissionHold = { waitedOn?: "budget" };
+type MiddlewareChoice = ReturnType<MiddlewareToolChoiceControl["current"]>;
+
+/** An attempt's tool rounds. A locked round has no named tool to require; it is text-only. */
+function attemptToolRounds(synthesisLock: boolean, choice: MiddlewareChoice): (ToolRound | undefined)[] {
+	return [
+		synthesisLock || choice.kind === "none" ? { kind: "text-only" } : undefined,
+		choice.kind === "required" && !synthesisLock ? { kind: "required", toolName: choice.toolName } : undefined,
+	];
+}
+
+/**
+ * `finalize` (SPEC §2.1): the request tail of one invocation, the context it sends. Admission prices it and the send
+ * path sends it, so the two cannot disagree (F15). The directive rides the tail, so the prompt prefix never changes. A
+ * middleware text lock sent as "none" needs no words and keeps its tail too: a note there would cost the next turn the
+ * cached copy of the last tool batch on a block-cached route. Only the "auto" form of that lock carries it.
+ */
+function finalizeAttempt(
+	request: ControlledRequest,
+	synthesisLock: boolean,
+	choice: MiddlewareChoice,
+): ControlledRequest["context"] {
+	return synthesisLock || (choice.kind === "none" && request.options?.toolChoice === "auto")
+		? withLockedSynthesisDirective(request.context)
+		: request.context;
+}
 
 const PRE_INVOCATION_STAGE_LABEL: Readonly<Record<PreInvocationStage, string>> = {
 	transform: "request transform",
@@ -319,6 +350,8 @@ export interface TurnRuntimeDeps {
 		context: TelemetrySessionLease["context"];
 	}) => void;
 	onModelCallSettled?: (facts: CallSettled) => void;
+	/** The `turnId` of the session ledger's last row, read when admission prepares a request: the attempt's `hwm`. */
+	ledgerHighWaterMark?: () => string | null;
 	/**
 	 * Information-flow admission of one model request: the block reason when
 	 * the session's restricted context may not reach this target, or null.
@@ -778,6 +811,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// What each attempt handed Pi, digested only at settle so the hashing stays off the send path (#434).
 		let attemptRequest:
 			| {
+					/** The cursor's `hwm`: the last ledger row when admission prepared this request (SPEC §1.1). */
+					hwm: string | null;
 					model: Parameters<typeof requestStructure>[0];
 					context: Parameters<typeof requestStructure>[1];
 					compiled: Parameters<typeof requestStructure>[2];
@@ -788,6 +823,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// Observation aging (WTF-P 0.8.3 C3): the bytes a batch saved that no sent request has journaled yet. What the
 		// session's requests stubbed lives in `observationAging`, which outlives this agent.
 		let unjournaledAgedBytes = 0;
+		let admittedHwm: string | null = null;
 		/**
 		 * Cache physics against the previous request on the same key. Every attempt the provider saw advances the
 		 * baseline, hidden #426 retries included, so the ledger's #423 shortfall, which only persisted replies
@@ -1067,17 +1103,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const handle = deps.createAgent({
 			transcriptStreamFn: (currentModel, currentContext, options) => {
 				const middlewareChoice = middlewareToolChoice.current();
-				// A locked round has no named tool to require; it is text-only.
 				const controlled = applyToolRounds(
 					currentModel,
 					currentContext,
 					options,
-					[
-						state.synthesisToolLock || middlewareChoice.kind === "none" ? { kind: "text-only" } : undefined,
-						middlewareChoice.kind === "required" && !state.synthesisToolLock
-							? { kind: "required", toolName: middlewareChoice.toolName }
-							: undefined,
-					],
+					attemptToolRounds(state.synthesisToolLock, middlewareChoice),
 					localRuntime.targetId,
 				);
 				delete localRuntime.lastProviderStatus;
@@ -1145,15 +1175,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								await request.options?.onResponse?.(...args);
 							},
 						};
-						// The directive rides the tail, so the prompt prefix never changes. A middleware text lock sent as
-						// "none" needs no words and keeps its tail too: a note there would cost the next turn the cached copy
-						// of the last tool batch on a block-cached route. Only the "auto" form of that lock carries it.
-						const sent =
-							state.synthesisToolLock || (middlewareChoice.kind === "none" && request.options?.toolChoice === "auto")
-								? withLockedSynthesisDirective(request.context)
-								: request.context;
+						const sent = finalizeAttempt(request, state.synthesisToolLock, middlewareChoice);
 						if (attempt) {
 							attemptRequest = {
+								hwm: admittedHwm,
 								model: currentModel,
 								context: sent,
 								compiled: context.compiledSessionPrompt?.() ?? null,
@@ -1248,7 +1273,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				}
 				return undefined;
 			},
-			beforeStreamRequest: stageAdmission(async ({ context: request, options: streamOptions }, hold) => {
+			beforeStreamRequest: stageAdmission(async ({ model, context: request, options: streamOptions }, hold) => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
 				callTracking = null;
 				delete localRuntime.lastProviderStatus;
@@ -1273,7 +1298,21 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				}
 				const view = context.refreshLiveBudget();
 				const resolved = resolvedRequestContext(request);
-				const actual = state.synthesisToolLock ? withLockedSynthesisDirective(request) : request;
+				admittedHwm = deps.ledgerHighWaterMark?.() ?? null;
+				// The first invocation as the send path builds it; a #426 retry after a rejection is not re-admitted.
+				const middlewareChoice = middlewareToolChoice.current();
+				const controlled = applyToolRounds(
+					model,
+					request,
+					streamOptions,
+					attemptToolRounds(state.synthesisToolLock, middlewareChoice),
+					localRuntime.targetId,
+				);
+				const actual = finalizeAttempt(
+					firstToolRoundAttempt(model, controlled, localRuntime.targetId),
+					state.synthesisToolLock,
+					middlewareChoice,
+				);
 				const input = Math.max(estimateInputTokensFromContext(actual), view.inputTokens ?? 0);
 				const output = resolveTurnOutputReserve(localRuntime, input);
 				if (view.effectiveWindow !== null && !requestFits(input, output, view.effectiveWindow))

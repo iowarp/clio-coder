@@ -124,6 +124,49 @@ function sessionEntryBelongsToPath(
 	return entryBelongsToPath(entry, pathIds, atOrBeforeForkPoint);
 }
 
+/**
+ * Records that change only what the model is shown. They are not authority, so
+ * the boundary above leaves them alone; the projection cursor below places them.
+ */
+function isDisplayRecord(entry: SessionEntry): boolean {
+	return entry.kind === "contextEviction" || entry.kind === "contextRecall";
+}
+
+/**
+ * The file index of the fork message's successor on the parent's path through
+ * it (SPEC §1.4): the current path when the fork message is on it, otherwise the
+ * newest branch below it. -1 when no row follows it there, which copies display
+ * records through the end of the file.
+ */
+function forkSuccessorIndex(
+	parsed: ReadonlyArray<SessionEntry>,
+	forkTurnId: string,
+	currentLeaf: string | undefined,
+): number {
+	const indexById = new Map(parsed.map((entry, index) => [entry.turnId, index]));
+	// The row after the fork message on the path from `leaf` to the root: null at
+	// the leaf itself, undefined when the path does not pass through it.
+	const successorOnPath = (leaf: string): string | null | undefined => {
+		const seen = new Set<string>();
+		let below: string | null = null;
+		for (let id: string | null = leaf; id !== null && !seen.has(id); ) {
+			if (id === forkTurnId) return below;
+			seen.add(id);
+			const index = indexById.get(id);
+			if (index === undefined) return undefined;
+			below = id;
+			id = parsed[index]?.parentTurnId ?? null;
+		}
+		return undefined;
+	};
+	let successor = currentLeaf === undefined ? undefined : successorOnPath(currentLeaf);
+	for (let index = parsed.length - 1; successor === undefined && index >= 0; index -= 1) {
+		const entry = parsed[index];
+		if (entry?.kind === "message") successor = successorOnPath(entry.turnId);
+	}
+	return successor === undefined || successor === null ? -1 : (indexById.get(successor) ?? -1);
+}
+
 function branchEntriesFromParent(
 	parentMeta: SessionMeta,
 	leafTurnId: string,
@@ -142,15 +185,19 @@ function branchEntriesFromParent(
 	// Forking the current leaf after an idle native cut inherits that cut. Historical selections stay positional (#423).
 	const latestMessage = [...parsed].reverse().find((entry) => entry.kind === "message");
 	const latestCompaction = [...parsed].reverse().find((entry) => entry.kind === "compactionSummary");
+	const currentLeaf = parentMeta.pinnedLeafTurnId ?? latestMessage?.turnId;
+	// Projection cursor: a display record written once the path had moved past the
+	// fork message describes a later request, not the state at the fork (F11).
+	const successorIndex = forkSuccessorIndex(parsed, leafTurnId, currentLeaf);
 	const nativeAtLeaf =
-		(parentMeta.pinnedLeafTurnId ?? latestMessage?.turnId) === leafTurnId &&
-		latestCompaction?.providerCheckpoint &&
-		latestCompaction.parentTurnId === leafTurnId
+		currentLeaf === leafTurnId && latestCompaction?.providerCheckpoint && latestCompaction.parentTurnId === leafTurnId
 			? latestCompaction
 			: undefined;
 	const entries = parsed.filter(
 		(entry, index) =>
-			entry === nativeAtLeaf || sessionEntryBelongsToPath(entry, pathIds, forkPointIndex >= 0 && index <= forkPointIndex),
+			entry === nativeAtLeaf ||
+			(!(isDisplayRecord(entry) && successorIndex >= 0 && index > successorIndex) &&
+				sessionEntryBelongsToPath(entry, pathIds, forkPointIndex >= 0 && index <= forkPointIndex)),
 	);
 	return {
 		parentCurrentPath,

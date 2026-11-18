@@ -1970,6 +1970,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		sessionOrigin: () => deps.session?.current() ?? null,
 		onModelRequestSent: (call) => messagePath.requestSent(call),
 		onModelCallSettled: (facts) => messagePath.callSettled(facts),
+		ledgerHighWaterMark: () => deps.readSessionEntries?.().at(-1)?.turnId ?? null,
 		...(deps.admitFlow !== undefined ? { admitFlow: deps.admitFlow } : {}),
 		emit: emitRuntimeEvent,
 		emitNotice,

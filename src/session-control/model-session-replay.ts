@@ -1,4 +1,5 @@
 import { providerFallbackDigests } from "../core/provider-checkpoint-handle.js";
+import type { FoldCursor, FoldOwner } from "../domains/context/index.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { projectWorkingSet } from "../domains/context/working-set/project.js";
 import {
@@ -13,8 +14,9 @@ import { withProviderCheckpointMeasurements } from "../domains/session/entries.j
 import type { AgentMessage } from "../engine/types.js";
 import {
 	activeEntriesBeforeCompactionCut,
-	buildReplayAgentMessagesFromTurns,
 	type RehydrateChatPanelOptions,
+	type ReplayRender,
+	renderReplayElements,
 } from "./session-replay-messages.js";
 
 /**
@@ -25,7 +27,7 @@ import {
  * because losing the note is the one outcome that is never safe, but no
  * transaction can reach execution authority.
  */
-export interface ContinuityReplayContext {
+export interface ContinuityReplayContext extends Partial<FoldOwner> {
 	/** The opened session's actual id, from `session.current()`. */
 	sessionId?: string;
 	/** `meta.parentSessionId` / `meta.parentTurnId`, when this session is a fork. */
@@ -42,7 +44,14 @@ export interface ContinuityReplayContext {
 }
 
 export interface ModelReplayOptions extends RehydrateChatPanelOptions {
+	/** The render's owner (SPEC §1.1), with the reader facts continuity needs beside it. */
 	continuity?: ContinuityReplayContext;
+	/**
+	 * Render as of one request preparation (SPEC §1.1, §2.2): rows after `hwm` did not exist then, and `leaf` picks
+	 * the path. A cursor replaces `activeLeafTurnId` and `uptoTurnId`. Without one the whole file renders, and
+	 * `uptoTurnId` keeps the live `/tree` meaning, display truncation after the fold.
+	 */
+	cursor?: FoldCursor;
 }
 
 /**
@@ -127,6 +136,23 @@ export function withContinuityReplay(
 }
 
 /**
+ * Truncate to the cursor's `hwm` before anything is folded, so a later record cannot reach a past render (F11). A
+ * null `hwm` is an empty ledger; one the file does not hold leaves the file whole, as `uptoTurnId` always has.
+ */
+function atCursor(
+	entries: ReadonlyArray<SessionEntry>,
+	options: ModelReplayOptions,
+): { entries: ReadonlyArray<SessionEntry>; options: ModelReplayOptions } {
+	const { cursor, activeLeafTurnId: _leaf, uptoTurnId: _upto, ...rest } = options;
+	if (cursor === undefined) return { entries, options };
+	const end = cursor.hwm === null ? -1 : entries.findIndex((entry) => entry.turnId === cursor.hwm);
+	return {
+		entries: cursor.hwm === null ? [] : end < 0 ? entries : entries.slice(0, end + 1),
+		options: { ...rest, ...(cursor.leaf !== null ? { activeLeafTurnId: cursor.leaf } : {}) },
+	};
+}
+
+/**
  * Build provider-facing replay messages from the durable session ledger.
  * Projection always honors existing eviction and recall entries; the enabled
  * setting gates creation of new evictions, not replay of durable state.
@@ -142,8 +168,21 @@ export function buildModelReplayAgentMessagesFromTurns(
 	entries: ReadonlyArray<SessionEntry>,
 	options: ModelReplayOptions = {},
 ): AgentMessage[] {
+	return renderModelReplay(entries, options).messages;
+}
+
+/**
+ * `render(stream, cursor, owner)` (SPEC §2.1): the replay elements in the order §2.2 fixes, with each element's
+ * source row id in parallel. The alias mark comes from every branch through `hwm`, because the fold reads the
+ * truncated file whole before it selects the path.
+ */
+export function renderModelReplay(
+	stream: ReadonlyArray<SessionEntry>,
+	replayOptions: ModelReplayOptions = {},
+): ReplayRender {
+	const { entries: truncated, options } = atCursor(stream, replayOptions);
 	const activeLeafTurnId = options.activeLeafTurnId ?? options.uptoTurnId;
-	entries = withProviderCheckpointMeasurements(entries);
+	let entries = withProviderCheckpointMeasurements(truncated);
 	const active = activeEntriesBeforeCompactionCut(entries, options, false);
 	const resolved = providerFallbackDigests(active);
 	const latest = [...active].reverse().find((entry) => entry.kind === "compactionSummary");
@@ -157,7 +196,7 @@ export function buildModelReplayAgentMessagesFromTurns(
 	// so the transcript beside this replay renders the identical bytes.
 	const blocks = options.continuityBlocks ?? continuityReplayBlocks(resolveReplayContinuity(entries, options));
 	const projected = projectWorkingSet(entries, foldWorkingSet(entries, activeLeafTurnId), activeLeafTurnId);
-	return buildReplayAgentMessagesFromTurns(projected, {
+	return renderReplayElements(projected, {
 		...options,
 		skillContextEntries: entries,
 		continuityBlocks: blocks,
