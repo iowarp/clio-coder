@@ -2,13 +2,6 @@
 
 This guide covers the installed CLI, headless run behavior, interactive commands, keyboard controls, and operator workflows. The command registry and parser are authoritative: the [CLI command table](../../src/cli/index.ts), [startup flags](../../src/cli/argv.ts), [run arguments](../../src/cli/args.ts), the [slash-command registry](../../src/session-control/slash-commands.ts), and the [keybinding manager](../../src/interactive/keybinding-manager.ts). Exit codes and stdout guarantees are in [Exit codes and output](exit-codes-and-output.md). The TUI's layout, theme and rendering contracts are in [TUI design](../architecture/tui-design.md).
 
-> [!NOTE]
-> The telemetry-doctor command documented below is verified in this
-> `0.8.4-dev` checkout (`package.json`, `src/cli/telemetry.ts` and
-> `src/cli/telemetry-doctor.ts`). The public site remains pinned to `0.8.3`
-> (`site/product.json`, `site/content/docs-manifest.json`); 0.8.x tags should
-> not be treated as interchangeable CLI snapshots.
-
 ## Demo presentation and guidance
 
 Demo presentation and guidance are on by default before 1.0 and follow output detail. Minimal opens with an identity header. Default shows a compact launchpad with the route, autonomy, project awareness and next action; Detailed adds artwork, project facts and shortcut hints. Detailed reserves two subscription rows from the first paint; longer account summaries end in an ellipsis and `/usage`. With `--no-demo` or `interface.demo: false`, both the instant shell and hydrated TUI use the identity header and skip welcome-only reads and learning tips. Immediate controls, work status and approval text remain visible. Stream pacing and motion preferences are independent. Dumb/unknown terminals and screen-reader mode also use the identity header.
@@ -306,7 +299,7 @@ Known confusions, as found on recorded sessions:
 | `--model <wireId>` | One-run model override. |
 | `--thinking <level>` | One-run thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 | `--autonomy <level>` | Main-agent one-run autonomy override: `default` or `yolo`. It does not change saved settings. A headless run takes `yolo` only from this flag: a `settings.yaml` that sets `yolo` runs at `default` and says so on stderr. `--autonomy yolo` as root outside a container exits 2. Combining it with `--agent` is a usage error; use `--read-only` to restrict a dispatch. |
-| `--read-only` | Apply CLIO Coder's mediated read-only ceiling. The main agent's writes are refused, its shell commands run only in the read-only sandbox, its delegations run read-only on runtimes that can enforce it, and only MCP tools the operator classes as read start. A third-party read-class server or other external process is still trusted for its classification; see the explicit boundary in [Read-only runs](../architecture/safety-model.md#read-only-runs). A refused call returns to the model and does not itself fail the run. With `--agent`, restrict the dispatch to read-only tools. `--agent-profile`, `--agent-runtime`, `--tool-profile` and `--require` need `--agent` (`fleet dispatch flags require --agent <recipe-id>`). |
+| `--read-only` | Apply CLIO Coder's mediated read-only ceiling. The main agent's writes are refused, its shell commands run only in the read-only sandbox, its delegations run read-only on runtimes that can enforce it, and only MCP tools the operator classes as read are admitted. A third-party read-class server or other external process is still trusted for its classification; see the explicit boundary in [Read-only runs](../architecture/safety-model.md#read-only-runs). A refused call returns to the model and does not itself fail the run. With `--agent`, restrict the dispatch to read-only tools. `--agent-profile`, `--agent-runtime`, `--tool-profile` and `--require` need `--agent` (`fleet dispatch flags require --agent <recipe-id>`). |
 | `--temperature <n>` / `--top-p <n>` / `--top-k <n>` / `--min-p <n>` | One-run sampler overrides when the selected runtime supports them. `--temperature` takes a number of 0 or more, `--top-p` and `--min-p` take 0 to 1, and `--top-k` takes a number of 0 or more, rounded down. They reach the main agent and an `--agent` worker alike. |
 | `--presence-penalty <n>` / `--frequency-penalty <n>` / `--repeat-penalty <n>` | One-run penalty overrides when the selected runtime supports them. They reach the main agent and an `--agent` worker alike. |
 | `--max-context-tokens <n>` | One-run context-window override for supported local runtimes. |

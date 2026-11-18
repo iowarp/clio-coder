@@ -12,7 +12,7 @@ The words you meet first, each in a sentence or two, with the guide that explain
 | Target (connection) | A place CLIO Coder sends prompts to: a provider account or a local model server, with its default model. Settings call it a connection. See [Configuration and targets](configuration-and-targets.md). |
 | Chat route | The target and model your main conversation uses right now. |
 | Autonomy level | How much CLIO Coder may do without you: `default` asks for approval when something is risky, `yolo` shows no approval cards. Both still ask you questions. See [Sandbox and safety](sandbox-and-safety.md). |
-| Sandbox | An operating-system boundary around qualifying shell commands and separately sandboxed child runtimes. It constrains the process's reads/writes and environment; known credential paths/shapes are masked, not every possible secret. Typed tools, trust-classed external processes and provider calls have separate boundaries. |
+| Sandbox | An operating-system wall around shell commands and some worker runtimes. Inside it a command can write only to the project and scratch folders, and known credential files and variables are hidden from it. Typed tools, external servers and model calls are checked by separate rules. |
 | Contained | A command that runs inside the sandbox. At `default` most contained work runs without asking. |
 | Safety judge | A model that checks a risky call against what you asked for, before you are asked. It allows it, refuses it, or passes it to you. |
 | Approval card | The question CLIO Coder shows when a call needs your answer. One nobody answers is denied after a timeout. |

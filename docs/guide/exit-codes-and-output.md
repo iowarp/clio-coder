@@ -2,13 +2,6 @@
 
 Process exit codes, stdout/stderr contracts, `--help` guarantees, and JSONL stream schemas across CLIO Coder CLI commands ([index.ts](../../src/cli/index.ts), [run.ts](../../src/cli/run.ts), [print.ts](../../src/cli/modes/print.ts), [run-json-schema.ts](../../src/cli/modes/run-json-schema.ts)).
 
-> [!NOTE]
-> `telemetry doctor` is present in the `0.8.4-dev` source checkout
-> (`package.json`, `src/cli/telemetry-doctor.ts`). The public site still pins
-> `0.8.3` in `site/product.json` and
-> `site/content/docs-manifest.json`; check `clio-coder --version` before
-> scripting this subcommand or its exit contract.
-
 ## Exit code contract
 
 Interactive sessions, headless main-agent `run`, and `run --agent` exit `128 + signal` on terminating signals (`129` SIGHUP, `130` SIGINT, `143` SIGTERM). `run` interrupted by SIGINT while reading `@file` inputs exits `130` before sending any request; `clio-coder configure` exits `130` if exited before saving a first target ([configure-import.ts](../../src/cli/configure-import.ts)).
@@ -99,12 +92,12 @@ Every full-mode `clio-coder run --json` / `--json-events full` stream ends with 
 In text mode (`formatDispatchHumanOutput`, [run-output.ts](../../src/cli/run-output.ts)), `stdout` prints up to six sections in order (redacting URL credentials):
 
 1. **Answer**: Last assistant text (prior attempts discarded on failover), or `sealedResultAnswer` when no prose was written (`mutation-report`: `summary`, `observations`, and `changed: <paths>` when `mutatedPaths` is non-empty; `scout-report` / `research-report`: `- <claim> [(<path>:<line>)|(<evidence>)]`; `world-knowledge-report`: `synthesis` and `facts`; `provenance-report`: `confirmedFacts`; `oracle-report`: `verdict`, `challenge`; fallback `output.text.trim()`). Cut-off partial output passes through `holdCutOffText`.
-2. **`Failed checks:`** (optional): Present only when `verifier-report` has failed checks (`- <name>: <evidence>`), causing exit `1`.
-3. **`Not verified:`** (optional): Typed unchecked items from final non-truncated sealed reports (each clipped to 400 chars): `mutation-report` (`declaredChecks`, failed `validations`), `code-report` (failed `checks`), `scout-report` (`degradedReason`, `ungroundedClaims`, ungrounded findings, `proposedSubtasks` when `needsSplit`), `world-knowledge-report` (`Discovery: unavailable|caller-supplied-only`, `uncertainties`, `followUpVerification`), `provenance-report` (`missingEvidence`, `nextInspections`), `debugger-report` (`Reproduction: unknown|not-reproduced`).
+2. **`Failed checks:`** (optional): Failed checks of a `verifier-report` and failed `code-report` checks that ran (`ran: true`), each as `- <name>: <evidence>`. A verifier `verdict: "fail"` exits `1`.
+3. **`Not verified:`** (optional): Typed unchecked items from final non-truncated sealed reports (each clipped to 400 chars): `mutation-report` (`declaredChecks`, failed `validations`), `code-report` (failed `checks` that never ran: `ran` not `true`, including reports sealed before `ran` existed), `scout-report` (`degradedReason`, `ungroundedClaims`, ungrounded findings, `proposedSubtasks` when `needsSplit`), `world-knowledge-report` (`Discovery: unavailable|caller-supplied-only`, `uncertainties`, `followUpVerification`), `provenance-report` (`missingEvidence`, `nextInspections`), `debugger-report` (`Reproduction: unknown|not-reproduced`).
 4. **`Failed: <headline>`** (optional): Shown when `receipt.exitCode !== 0` and a worker failure headline applies.
 5. **`Finished with a caveat: <words>`** (optional): Shown when `receipt.exitCode === 0` and calls were refused/guarded or contract conformance failed (excludes `no-tools`).
 6. **`result:` summary line**:
-   `result: <runId> agent=<id> exit=<n>[ verdict=<v>[ failed_checks=<N>]][ verification=unverified not_verified=<N>] target=<id> requested_model_id=<wireId>[ response_model_id_observation=...][ gateway=litellm route=...] tokens=<n>[ reasoning=<n>][ error=<msg>] start=<iso> end=<iso>`
+   `result: <runId> agent=<id> exit=<n>[ verdict=<v>][ failed_checks=<N>][ verification=unverified not_verified=<N>] target=<id> requested_model_id=<wireId>[ response_model_id_observation=...][ gateway=litellm route=...] tokens=<n>[ reasoning=<n>][ error=<msg>] start=<iso> end=<iso>`
 
 With `--json`, `stdout` emits NDJSON frames ([run-json-schema.ts](../../src/cli/modes/run-json-schema.ts)):
 - `session` (`mode: "agent"`, `agentId`, `schemaVersion: 1`, `cwd`, `clioCoderVersion`, `runId` once known),
