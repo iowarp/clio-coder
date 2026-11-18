@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import type { ObservedProof } from "../../core/hoare.js";
 import { ToolNames } from "../../core/tool-names.js";
@@ -141,6 +142,8 @@ export interface CheckFreshness {
 export interface RunEffectsRecorderOptions {
 	/** Fires once, when the first successful opaque call opens the record. */
 	onWriteRecordDowngraded?(downgrade: WriteRecordDowngrade): void;
+	/** The environment the run's commands inherit, whose `GIT_CONFIG_*` entries join the git config read. */
+	env?: NodeJS.ProcessEnv;
 }
 
 export interface RunEffectsRecorder {
@@ -304,6 +307,42 @@ function receiptValidationCommand(
 	}
 }
 
+const GIT_HELPER_KEYS = "^(core\\.fsmonitor|diff\\.external|diff\\..+\\.(command|textconv))$";
+
+/** `core.fsmonitor` set to a boolean names git's own daemon or nothing, never a program of the repository's. */
+const GIT_CONFIG_BOOLEAN = /^(?:true|false|yes|no|on|off|1|0|)$/iu;
+
+/**
+ * Whether the effective git config at `cwd` names a program that `git status`, `git diff`, `git log` or
+ * `git show` would run: a `core.fsmonitor` hook, `diff.external`, or a diff driver's `command` or `textconv`
+ * (x1-3). Read once per run; planting such config later is a mutation of its own. No match, no git and no `cwd`
+ * all answer false, because then no git command can run a helper there. Any other failure answers true.
+ */
+export function gitRunsConfiguredHelpers(cwd: string, env: NodeJS.ProcessEnv = process.env): boolean {
+	let listing: string;
+	try {
+		listing = execFileSync("git", ["config", "--get-regexp", GIT_HELPER_KEYS], {
+			cwd,
+			env,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+			timeout: 5000,
+		});
+	} catch (error) {
+		const failure = error as { code?: unknown; status?: unknown };
+		return !(failure.code === "ENOENT" || failure.status === 1);
+	}
+	const effective = new Map<string, string>();
+	for (const line of listing.split("\n")) {
+		if (line.length === 0) continue;
+		const space = line.indexOf(" ");
+		effective.set(space === -1 ? line : line.slice(0, space), space === -1 ? "true" : line.slice(space + 1));
+	}
+	return [...effective].some(([key, value]) =>
+		key === "core.fsmonitor" ? !GIT_CONFIG_BOOLEAN.test(value) : value.length > 0,
+	);
+}
+
 /**
  * Fold a run's tool calls into its observed effects. A call's effects land only
  * when its result comes back clean: a blocked write and a red command are not
@@ -311,6 +350,7 @@ function receiptValidationCommand(
  */
 export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorderOptions = {}): RunEffectsRecorder {
 	const pending = new Map<string, PendingEffects>();
+	const gitHelpers = gitRunsConfiguredHelpers(cwd, options.env);
 	const mutatedPaths = new Set<string>();
 	const failedMutationPaths = new Set<string>();
 	const validationCommands = new Set<string>();
@@ -366,8 +406,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				mutationRevision,
 				verificationCommand,
 				opaque,
-				inspection: command !== null && isReadOnlyInspectionCommand(command),
-				checkShape: command === null ? null : checkCommandShape(command),
+				inspection: command !== null && isReadOnlyInspectionCommand(command, gitHelpers),
+				checkShape: command === null ? null : checkCommandShape(command, gitHelpers),
 				shellCommand: command ?? verifyCommandOf(toolName, args, base),
 				outcome: null,
 			});

@@ -1,4 +1,5 @@
 import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -600,7 +601,19 @@ it("an observed red judges only the tree it ran on, and respelled runs of one ch
 			[
 				["fix", "edit"],
 				["test", "make test", true],
-				["look", "cat src/calc.c"],
+				["diff", "git diff"],
+			],
+			[{ ...green, name: "make test" }],
+		),
+		{ quality: "fail", state: "unverified" },
+	);
+	deepStrictEqual(
+		seal(
+			[
+				["test", "make test"],
+				["fix", "edit"],
+				["final", "make test", true],
+				["look", "git status"],
 			],
 			[{ ...green, name: "make test" }],
 		),
@@ -611,7 +624,7 @@ it("an observed red judges only the tree it ran on, and respelled runs of one ch
 			[
 				["fix", "edit"],
 				["test", "make test"],
-				["look", "ls src && grep -n sub src/calc.c"],
+				["look", "git status && git diff"],
 			],
 			[{ ...green, name: "make test" }],
 		),
@@ -663,7 +676,7 @@ it("a check judges only the tree it ran on, sealed per verify call or from a too
 				step === "edit"
 					? ["edit", { path: "src/calc.c" }]
 					: step === "diff"
-						? ["bash", { command: "cat src/calc.c" }]
+						? ["bash", { command: "git diff" }]
 						: [tool, step === "list" ? {} : { check: "test" }];
 			const outcome = step === "red" ? "error" : "ok";
 			recorder.start(id, name, args);
@@ -725,14 +738,44 @@ it("read-only inspection refuses helpers that write the tree or run another prog
 	for (const command of [
 		"file -C -m mymagic",
 		"rg --hostname-bin=./x.sh foo",
-		"git status",
-		"git diff --no-ext-diff --no-textconv",
-		"git log -p",
-		"git show --no-ext-diff --no-textconv --textconv",
+		"git diff --ext-diff",
+		"git show --textconv",
 	])
-		strictEqual(isReadOnlyInspectionCommand(command), false, command);
-	for (const command of ["rg foo src", "git log -p --no-ext-diff --no-textconv", "git rev-parse HEAD"])
-		strictEqual(isReadOnlyInspectionCommand(command), true, command);
+		strictEqual(isReadOnlyInspectionCommand(command, false), false, command);
+	for (const command of ["git status", "git diff", "git log -p"])
+		strictEqual(isReadOnlyInspectionCommand(command, false), true, command);
+	// Where git config names a helper program, only log and show with both helpers switched off still count.
+	for (const command of ["git status", "git diff --no-ext-diff --no-textconv", "git log -p"])
+		strictEqual(isReadOnlyInspectionCommand(command, true), false, command);
+	strictEqual(isReadOnlyInspectionCommand("git log -p --no-ext-diff --no-textconv", true), true);
+	// The recorder reads the repository's config: a core.fsmonitor hook makes a later git status a mutation.
+	const repo = mkdtempSync(join(tmpdir(), "fsmonitor-"));
+	const env: NodeJS.ProcessEnv = {
+		...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_CONFIG"))),
+		GIT_CONFIG_GLOBAL: "/dev/null",
+		GIT_CONFIG_NOSYSTEM: "1",
+	};
+	const standing = () => {
+		const recorder = createRunEffectsRecorder(repo, { env });
+		for (const [id, tool, args] of [
+			["fix", "edit", { path: "src/a.ts" }],
+			["test", "bash", { command: "npm test" }],
+			["look", "bash", { command: "git status" }],
+		] as const) {
+			recorder.start(id, tool, args);
+			recorder.checkOutcome(id, "ok");
+			recorder.finish(id, false);
+		}
+		return [...recorder.snapshot().validationCommands];
+	};
+	try {
+		execFileSync("git", ["init", "-q"], { cwd: repo, env });
+		deepStrictEqual(standing(), ["npm test"]);
+		execFileSync("git", ["config", "core.fsmonitor", "./hook.sh"], { cwd: repo, env });
+		deepStrictEqual(standing(), []);
+	} finally {
+		rmSync(repo, { recursive: true, force: true });
+	}
 });
 
 it("the review gate reads a verifier report that closes prose containing braces, and nothing weaker", () => {

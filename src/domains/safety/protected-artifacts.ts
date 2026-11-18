@@ -1242,13 +1242,20 @@ const READ_ONLY_INSPECTION_REFUSALS: ReadonlyMap<string, ReadonlyArray<string>> 
 	["printf", []],
 ]);
 
-/**
- * Git subcommands that never consult the work tree. `git status` and `git diff` refresh the index, which runs a
- * configured `core.fsmonitor` program that the command text cannot rule out, so neither is listed (x1-3).
- */
-const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set(["log", "show", "rev-parse", "branch"]);
+const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
+	"status",
+	"diff",
+	"log",
+	"show",
+	"rev-parse",
+	"branch",
+]);
 
-/** `git log` and `git show` run a configured external diff or textconv driver unless both are switched off (x1-3). */
+/**
+ * Where the repository's git config names a helper program (x1-3), `git status` and `git diff` refresh the index
+ * and run `core.fsmonitor`, and `git log` and `git show` run an external diff or textconv driver unless both are
+ * switched off.
+ */
 const GIT_HELPER_OPT_OUTS: ReadonlyArray<string> = ["--no-ext-diff", "--no-textconv"];
 
 /** `git branch` flags that only list or name branches; any other argument creates, moves or deletes one. */
@@ -1266,7 +1273,7 @@ const READ_ONLY_GIT_BRANCH_FLAGS: ReadonlySet<string> = new Set([
 	"--no-color",
 ]);
 
-function readOnlyInspectionStep(argv: ReadonlyArray<string>): boolean {
+function readOnlyInspectionStep(argv: ReadonlyArray<string>, gitHelpersConfigured: boolean): boolean {
 	const [executable, ...args] = argv;
 	if (executable === undefined) return false;
 	if (executable === "git") {
@@ -1274,10 +1281,9 @@ function readOnlyInspectionStep(argv: ReadonlyArray<string>): boolean {
 		if (subcommand === undefined || !READ_ONLY_GIT_SUBCOMMANDS.has(subcommand)) return false;
 		if (subcommand === "branch") return rest.every((arg) => READ_ONLY_GIT_BRANCH_FLAGS.has(arg));
 		if (subcommand === "rev-parse") return true;
-		return (
-			GIT_HELPER_OPT_OUTS.every((flag) => rest.includes(flag)) &&
-			!rest.some((arg) => arg.startsWith("--output") || arg === "--ext-diff" || arg === "--textconv")
-		);
+		if (rest.some((arg) => arg.startsWith("--output") || arg === "--ext-diff" || arg === "--textconv")) return false;
+		if (!gitHelpersConfigured) return true;
+		return (subcommand === "log" || subcommand === "show") && GIT_HELPER_OPT_OUTS.every((flag) => rest.includes(flag));
 	}
 	const refused = READ_ONLY_INSPECTION_REFUSALS.get(executable);
 	if (refused === undefined) return false;
@@ -1286,11 +1292,12 @@ function readOnlyInspectionStep(argv: ReadonlyArray<string>): boolean {
 
 /**
  * True when every step of a shell command is an exact leading-command match on a small read-only inspection
- * allowlist (`cat`, `grep`, `git log --no-ext-diff --no-textconv`, ...), joined only by `;`, `&&`, `||` or `|`,
- * with no redirect, no substitution, no inline script and no write or delete target. Run effects read such a call
- * as no workspace mutation; anything this cannot prove stays one, so the answer fails closed.
+ * allowlist (`git diff`, `cat`, `grep`, ...), joined only by `;`, `&&`, `||` or `|`, with no redirect, no
+ * substitution, no inline script and no write or delete target. `gitHelpersConfigured` says the repository's git
+ * config names a helper program, which narrows the git steps that count. Run effects read such a call as no
+ * workspace mutation; anything this cannot prove stays one, so the answer fails closed.
  */
-export function isReadOnlyInspectionCommand(command: string): boolean {
+export function isReadOnlyInspectionCommand(command: string, gitHelpersConfigured: boolean): boolean {
 	const tokens = scanShellLike(command);
 	if (tokens.length === 0) return false;
 	for (const token of tokens) {
@@ -1299,7 +1306,9 @@ export function isReadOnlyInspectionCommand(command: string): boolean {
 	}
 	if (hasUnparsedShellScript(command)) return false;
 	if (extractCommandWriteTargets(command).length > 0 || extractCommandDeleteTargets(command).length > 0) return false;
-	return splitSegments(tokens).every((segment) => readOnlyInspectionStep(shellCommandArguments(segment)));
+	return splitSegments(tokens).every((segment) =>
+		readOnlyInspectionStep(shellCommandArguments(segment), gitHelpersConfigured),
+	);
 }
 
 /**
@@ -1312,7 +1321,7 @@ export function isReadOnlyInspectionCommand(command: string): boolean {
  */
 export type CheckCommandShape = "pure" | "after-change" | "mixed";
 
-export function checkCommandShape(command: string): CheckCommandShape | null {
+export function checkCommandShape(command: string, gitHelpersConfigured: boolean): CheckCommandShape | null {
 	const tokens = scanShellLike(command);
 	const steps: Array<{ check: boolean; changes: boolean; joinedBy: string | null }> = [];
 	let current: ShellToken[] = [];
@@ -1327,7 +1336,8 @@ export function checkCommandShape(command: string): CheckCommandShape | null {
 		const writes: string[] = [];
 		collectRedirectTargets(current, writes);
 		const check = index !== null && validationMatch(basenameToken(argv[index]), argv.slice(index + 1)) !== null;
-		const readOnly = index === null || check || argv[index] === "cd" || readOnlyInspectionStep(argv.slice(index));
+		const readOnly =
+			index === null || check || argv[index] === "cd" || readOnlyInspectionStep(argv.slice(index), gitHelpersConfigured);
 		steps.push({ check, changes: !readOnly || writes.some(isInterestingWriteTarget), joinedBy: null });
 		current = [];
 	};
