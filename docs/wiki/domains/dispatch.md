@@ -36,16 +36,16 @@ The dispatch domain is the part of Clio Coder that turns a request or a compiled
 
 ## What the domain contains
 
-`src/domains/dispatch/index.ts` is the public surface. It exports `DispatchDomainModule`, a constant whose `createExtension` is `createDispatchBundle` from `src/domains/dispatch/extension.ts`, and `createDispatchDomainModule(options)`, which passes caller options through to `createDispatchBundle` as `DispatchBundleOptions`. The same file re-exports the helpers other layers use, including `executeFleetRun`, `planFleetResume`, `runHostVerification`, `workspaceFingerprint`, `readGateDecisionArtifacts`, and the run-record readers.
+`src/domains/dispatch/index.ts` is the public surface. It exports `createDispatchDomainModule(options)`, whose `createExtension` passes caller options through to `createDispatchBundle` from `src/domains/dispatch/extension.ts` as `DispatchBundleOptions`. The same file re-exports only the helpers other layers import through it, including `executeFleetRun`, `planFleetResume`, `compileFleetRunPreview`, and the run-record readers; other callers import a dispatch module by its own path.
 
 The main owning files are:
 
-- `src/domains/dispatch/fleet-run.ts`: drives one compiled fleet plan to completion. Exports `executeFleetRun`, `planFleetResume`, `fleetPlanWaveIndex`, and the input and outcome types (`ExecuteFleetRunInput`, `FleetRunOutcome`, `FleetRunStepEvent`, `FleetRunStepOutcome`, `FleetResumePlan`).
+- `src/domains/dispatch/fleet-run.ts`: drives one compiled fleet plan to completion. Exports `executeFleetRun`, `planFleetResume`, and the input and outcome types (`ExecuteFleetRunInput`, `FleetRunOutcome`, `FleetRunStepEvent`, `FleetRunStepOutcome`, `FleetResumePlan`).
 - `src/domains/dispatch/worker-spawn.ts`: orchestrator-side subprocess spawner for the native worker. Exports `spawnNativeWorker` and `spawnWorkerProcess` and the `SpawnOptions`, `SpawnedWorker`, and `WorkerProcessCleanup` types.
 - `src/domains/dispatch/route-decision.ts`: builds and evaluates the sealed `RouteDecisionV1` artifact through `decideRoute`, `fixedRouteDecision`, `evaluateRouteDecision`, and `routeOutcomeMetrics`.
 - `src/domains/dispatch/host-verification.ts`: runs declared checks after a worker finishes, through `runHostVerification`, and provides `createBatchVerificationGate` for batched runs.
 - `src/domains/dispatch/types.ts`: the run record types, including `RunStatus`, `RunOutcomeCode`, `RunResult`, `RunHostVerification`, and `RunHostVerificationCheck`.
-- `src/domains/dispatch/gate-decisions.ts`: gate decision artifact types (`GateDecisionArtifact`, `GateDecisionOutcome`, `ReviewGateResult`, `CompeteGateResult`) and the reader and verifier exported through `src/domains/dispatch/index.ts`.
+- `src/domains/dispatch/gate-decisions.ts`: gate decision artifact types (`GateDecisionArtifact`, `GateDecisionOutcome`, `ReviewGateResult`, `CompeteGateResult`) and the reader and verifier `readGateDecisionArtifacts` and `verifyGateDecisionArtifact`.
 - `src/domains/dispatch/extension.ts`: the bundle that composes the domain. It is the largest file in the area and holds the admission, dynamic prompt, and target-capability helpers.
 
 ## Fleet run execution

@@ -64,7 +64,7 @@ Each rule resolves to exactly one of three decisions.
 | Decision | Meaning | Where it surfaces |
 | :--- | :--- | :--- |
 | **accept** | The request is unambiguous. | Nothing is reported. |
-| **warn** | The request is compatible, but the classifier identified a weaker declaration or a scope-replacement tradeoff. The dispatch runs with the authority it would have had anyway. | Current admission publishes the typed-scope replacement warning as a dispatch diagnostic for internal and harness origin requests, except the context generators. Legacy provenance still appears in the approval artifact; the absent-intent and missing-verification classifier findings are not emitted as standalone warnings. |
+| **warn** | The request is compatible, but admission identified a weaker declaration or a scope-replacement tradeoff. The dispatch runs with the authority it would have had anyway. | Current admission publishes the typed-scope replacement warning as a dispatch diagnostic for internal and harness origin requests, except the context generators. Legacy provenance still appears in the approval artifact. |
 | **refuse** | The request states two incompatible things about authority, or states one this build cannot interpret. | Terminal admission error carrying the reason code. The dispatch never runs. |
 
 The invariant that separates `warn` from `refuse`: **a warning is never the
@@ -85,10 +85,10 @@ Inferred paths select project rules and compile worker context. They never
 become write boundaries and never add a verification requirement. The only path
 into a write boundary without a declaration is the explicit legacy `writeRoots`
 field, which the caller had to set on purpose. This is what makes omission a
-compatible rather than a refusal: nothing about it can widen authority. The pure
-compatibility classifier can return `intent_absent_legacy_inference`, but the
-production dispatch path deliberately treats omitted intent as ordinary. The
-approval artifact remains the operator-visible record.
+compatible rather than a refusal: nothing about it can widen authority. The
+compatibility classifier reports nothing for omitted intent, so the dispatch
+path treats it as ordinary. The approval artifact remains the operator-visible
+record.
 
 An absolute or malformed path token in prose is not silently dropped. It throws
 `DispatchPathScopeInferenceError` with code `legacy_scope_path_absolute` or
@@ -104,12 +104,10 @@ Accepted. Every field is independently optional and an omitted list normalizes
 to empty. A declaration is not required to be complete to be authoritative:
 declaring only `write_roots` is a complete statement about write scope.
 
-The pure classifier identifies one partial shape as a warning. Intent that declares `write_roots` or
-`expected_outputs` but no `verification` describes work that changes the tree
-with nothing the orchestrator itself runs to prove the change is sound
-(`intent_partial_verification_absent`). Current production admission keeps only
-terminal refusals from this classifier, so it does not emit that finding as an
-operator diagnostic.
+Intent that declares `write_roots` or `expected_outputs` but no `verification`
+describes work that changes the tree with nothing the orchestrator itself runs
+to prove the change is sound. It is admitted, and the classifier reports nothing
+for it.
 
 One partial shape is refused when both lists are non-empty. An `expected_outputs`
 entry outside every declared `write_root` (`intent_outputs_outside_write_roots`) means the write boundary
@@ -163,7 +161,7 @@ entries for the transcript. Declared always outranks inferred.
 
 Every producer that can reach a worker passes through `validateJobSpec()` in
 [validation.ts](../../src/domains/dispatch/validation.ts). When an `intent` property is present, that
-validator runs the classifier and retains its terminal refusals. Requests with
+validator runs the classifier, every finding of which is a terminal refusal. Requests with
 no intent skip compatibility classification and resolve scope through the legacy
 inference path, whose malformed-path errors remain terminal.
 
@@ -239,13 +237,10 @@ CLIO Coder installation. An undeclared id fails closed with
 
 Active refusal codes are stable and appear as the prefix of their diagnostic, in
 the form `<code>: <what is wrong and what to do about it>`. The table also marks
-classifier-only findings and compatibility identifiers that have no current
-producer.
+compatibility identifiers that have no current producer.
 
 | Code | Decision | Meaning |
 | :--- | :--- | :--- |
-| `intent_absent_legacy_inference` | classifier-only warn | No typed intent; scope came from legacy inference. Production admission does not emit it. |
-| `intent_partial_verification_absent` | classifier-only warn | Declares tree-changing work with no verification requirement. Production admission does not emit it. |
 | `typed_scope_replaced_inferred_paths` | warn | Typed intent was declared, so prose-only paths took no part in scope. |
 | `legacy_scope_inferred` | warn | Emitted by `path-scope.ts` when prose inference resolves a leading `../` run against the dispatch root. The detail lists each token as `<raw token> -> <path or dropped>`. |
 | `legacy_scope_empty` | retained compatibility id | Accepted by the event projection for older producers; no current source emits it. |

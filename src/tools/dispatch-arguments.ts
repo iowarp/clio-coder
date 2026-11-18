@@ -12,7 +12,6 @@ import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/di
 import type { DispatchIntent } from "../domains/dispatch/intent.js";
 import {
 	classifyDispatchIntentCompatibility,
-	dispatchIntentRefusals,
 	dispatchIntentScopeWidening,
 } from "../domains/dispatch/intent-compatibility.js";
 import { mergeOperatorNamedChecks } from "../domains/dispatch/operator-checks.js";
@@ -333,13 +332,11 @@ function dispatchRequestFromArgs(
 				// Asked through the same rule the job-spec validator asks, so the two
 				// cannot disagree about the same pair. A raw string comparison here
 				// would refuse './src/tools' against 'src/tools', which name one tree.
-				const refusal = dispatchIntentRefusals(
-					classifyDispatchIntentCompatibility({
-						intent: resolved.intent,
-						writeRoots: legacy,
-						...(cwd !== undefined ? { cwd } : {}),
-					}),
-				).find((entry) => entry.code === "intent_write_roots_contradiction");
+				const refusal = classifyDispatchIntentCompatibility({
+					intent: resolved.intent,
+					writeRoots: legacy,
+					...(cwd !== undefined ? { cwd } : {}),
+				}).find((entry) => entry.code === "intent_write_roots_contradiction");
 				if (refusal !== undefined) return { ok: false, message: refusal.message };
 				request.writeRoots = legacy;
 			} else {

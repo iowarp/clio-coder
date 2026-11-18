@@ -227,7 +227,7 @@ export interface WorkspaceChange {
  * baseline in both readings and cannot have been touched and restored in a way
  * that matters to the repository.
  */
-export function diffWorkspace(snapshot: WorkspaceSnapshot): WorkspaceChange[] {
+function diffWorkspace(snapshot: WorkspaceSnapshot): WorkspaceChange[] {
 	const candidates = [...new Set([...snapshot.entries.keys(), ...dirtyPaths(snapshot.root)])].sort();
 	if (candidates.length === 0) return [];
 	const unknownBefore = candidates.filter((path) => !snapshot.entries.has(path));
@@ -688,7 +688,7 @@ function repoRelative(root: string, path: string): string | null {
  * not about one model run, so it has no receipt to be sealed inside; it carries
  * its own digest and names the baseline commit it was computed against.
  */
-export function writeBoundaryDir(rootId: string): string {
+function writeBoundaryDir(rootId: string): string {
 	return join(clioStateDir(), "write-boundaries", rootId);
 }
 

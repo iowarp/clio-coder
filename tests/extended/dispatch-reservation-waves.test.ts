@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, it } from "node:test";
+import { withStateFileLockSync } from "../../src/core/state-file-lock.js";
 import { createCapacityAdmissionController } from "../../src/domains/dispatch/admission.js";
 import {
 	acquireCapacityLease,
@@ -17,9 +18,9 @@ import {
 	DEFAULT_RESERVATION_TTL_MS,
 	getDispatchReservation,
 	releaseDispatchReservation,
-	releaseDispatchReservationMember,
+	releaseDispatchReservationMemberAsync,
 	rollbackDispatchReservation,
-	transferDispatchReservationToLease,
+	transferDispatchReservationToLeaseUnsafe,
 } from "../../src/domains/dispatch/reservation-store.js";
 import { registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -53,21 +54,23 @@ function reserve(waves = [0, 1], cap = limits) {
 }
 
 function transfer(ownerId: string, memberId: string, cap = limits) {
-	return transferDispatchReservationToLease({
-		ownerId,
-		memberId,
-		assignmentId: memberId,
-		nodeId: "local",
-		endpointKey,
-		limits: cap,
-	});
+	return withStateFileLockSync(capacityStateLockPath(), () =>
+		transferDispatchReservationToLeaseUnsafe({
+			ownerId,
+			memberId,
+			assignmentId: memberId,
+			nodeId: "local",
+			endpointKey,
+			limits: cap,
+		}),
+	);
 }
 
 function durableBytes() {
 	return readFileSync(capacityStateLockPath());
 }
 
-it("admits both pipeline waves at concurrency one without releasing the future reservation", () => {
+it("admits both pipeline waves at concurrency one without releasing the future reservation", async () => {
 	const reservation = reserve();
 	const first = transfer(reservation.ownerId, "task-1");
 	strictEqual(first.reservationOwnerId, reservation.ownerId);
@@ -75,7 +78,7 @@ it("admits both pipeline waves at concurrency one without releasing the future r
 	strictEqual(readCapacityStateUnsafe().leases.length, 1);
 	strictEqual(getDispatchReservation(reservation.ownerId)?.members[1]?.status, "held");
 	releaseCapacityLease(first.leaseId);
-	releaseDispatchReservationMember(reservation.ownerId, "task-1");
+	await releaseDispatchReservationMemberAsync(reservation.ownerId, "task-1");
 	const second = transfer(reservation.ownerId, "task-2");
 	strictEqual(second.reservationMemberId, "task-2");
 	releaseCapacityLease(second.leaseId);
@@ -183,7 +186,7 @@ it("admits two waves through the real bounded admission controller", { timeout: 
 			});
 			strictEqual(admitted.lease.reservationMemberId, memberId);
 			controller.release(admitted.lease.leaseId);
-			releaseDispatchReservationMember(reservation.ownerId, memberId);
+			await releaseDispatchReservationMemberAsync(reservation.ownerId, memberId);
 		}
 		strictEqual(readCapacityStateUnsafe().leases.length, 0);
 		strictEqual(getDispatchReservation(reservation.ownerId)?.status, "released");
@@ -210,11 +213,11 @@ for (const dimension of ["global", "node", "endpoint"] as const) {
 	});
 }
 
-it("another owner still sees the future reserved peak after the current wave releases its lease", () => {
+it("another owner still sees the future reserved peak after the current wave releases its lease", async () => {
 	const reservation = reserve();
 	const first = transfer(reservation.ownerId, "task-1");
 	releaseCapacityLease(first.leaseId);
-	releaseDispatchReservationMember(reservation.ownerId, "task-1");
+	await releaseDispatchReservationMemberAsync(reservation.ownerId, "task-1");
 	const before = durableBytes();
 	throws(() => reserve(), /global concurrency capacity exceeded/);
 	throws(
@@ -226,9 +229,9 @@ it("another owner still sees the future reserved peak after the current wave rel
 });
 
 for (const identity of ["missing owner", "missing member", "held member", "released member", "no reference"] as const) {
-	it(`${identity} cannot obtain the reservation wave discount`, () => {
+	it(`${identity} cannot obtain the reservation wave discount`, async () => {
 		const reservation = reserve();
-		if (identity === "released member") releaseDispatchReservationMember(reservation.ownerId, "task-1");
+		if (identity === "released member") await releaseDispatchReservationMemberAsync(reservation.ownerId, "task-1");
 		const before = durableBytes();
 		throws(
 			() =>

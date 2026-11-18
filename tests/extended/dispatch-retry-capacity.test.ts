@@ -2,7 +2,7 @@ import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { withStateFileLock } from "../../src/core/state-file-lock.js";
+import { withStateFileLock, withStateFileLockSync } from "../../src/core/state-file-lock.js";
 import {
 	acquireCapacityLease,
 	capacityLeaseUsage,
@@ -13,7 +13,7 @@ import {
 	writeCapacityStateUnsafe,
 } from "../../src/domains/dispatch/capacity-lease.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
-import { transferDispatchReservationToLease } from "../../src/domains/dispatch/reservation-store.js";
+import { transferDispatchReservationToLeaseUnsafe } from "../../src/domains/dispatch/reservation-store.js";
 import { registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -85,13 +85,15 @@ async function retryFixture(
 			{ memberId: "later", wave: 1, resolution: previousResolution },
 		],
 	});
-	const previous = transferDispatchReservationToLease({
-		ownerId: prepared.ownerId,
-		memberId: "retry",
-		assignmentId: "retry-root",
-		nodeId: previousResolution.node.id,
-		limits: { global: 4, nodes: { local: 4 }, endpoints: {} },
-	});
+	const previous = withStateFileLockSync(capacityStateLockPath(), () =>
+		transferDispatchReservationToLeaseUnsafe({
+			ownerId: prepared.ownerId,
+			memberId: "retry",
+			assignmentId: "retry-root",
+			nodeId: previousResolution.node.id,
+			limits: { global: 4, nodes: { local: 4 }, endpoints: {} },
+		}),
+	);
 	strictEqual(previous.reservationOwnerId, prepared.ownerId);
 	strictEqual(previous.reservationMemberId, "retry");
 	releaseCapacityLease(previous.leaseId);

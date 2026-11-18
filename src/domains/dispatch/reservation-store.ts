@@ -5,7 +5,6 @@ import { withStateFileLockSection, withStateFileLockSync } from "../../core/stat
 import { endpointLabel } from "../providers/endpoint-capacity.js";
 import type { AcquireCapacityLeaseInput } from "./capacity-lease.js";
 import {
-	acquireCapacityLease,
 	acquireCapacityLeaseUnsafe,
 	activeCapacityDrainUnsafe,
 	type CapacityLease,
@@ -350,12 +349,7 @@ interface ReservationTransferInput {
 	ttlMs?: number;
 }
 
-/** Atomically convert one held plan member into the assignment's durable lease. */
-export function transferDispatchReservationToLease(input: ReservationTransferInput): CapacityLease {
-	return acquireCapacityLease(reservationTransferLease(input));
-}
-
-/** The same transfer for a caller that already holds the capacity state lock. */
+/** Atomically convert one held plan member into the assignment's durable lease; the caller holds the capacity state lock. */
 export function transferDispatchReservationToLeaseUnsafe(input: ReservationTransferInput): CapacityLease {
 	return acquireCapacityLeaseUnsafe(reservationTransferLease(input));
 }
@@ -506,28 +500,6 @@ export function rebindDispatchReservationMember(input: {
 		if (input.endpointKey === undefined) delete member.endpointKey;
 		else member.endpointKey = input.endpointKey;
 		member.costUpperBoundUsd = Math.max(0, input.costUpperBoundUsd);
-		writeStore(records);
-		return copyRecord(record);
-	});
-}
-
-export function releaseDispatchReservationMember(
-	ownerId: string,
-	memberId: string,
-	nowMs = Date.now(),
-): DispatchReservationRecord | null {
-	return withStateFileLockSync(capacityStateLockPath(), () => {
-		const records = readStore();
-		const record = records.find((entry) => entry.ownerId === ownerId);
-		if (!record) return null;
-		const member = record.members.find((entry) => entry.memberId === memberId);
-		if (record.status !== "active" || !member || member.status === "released") return copyRecord(record);
-		member.status = "released";
-		member.releasedAt = new Date(nowMs).toISOString();
-		if (record.members.every((entry) => entry.status === "released")) {
-			record.status = "released";
-			record.settledAt = new Date(nowMs).toISOString();
-		}
 		writeStore(records);
 		return copyRecord(record);
 	});

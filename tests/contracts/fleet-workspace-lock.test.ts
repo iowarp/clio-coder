@@ -1,18 +1,33 @@
 import { strict as assert } from "node:assert";
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	statSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import { processBirthToken } from "../../src/core/process-identity.js";
-import {
-	acquireFleetWorkspaceLock,
-	FleetWorkspaceBusyError,
-	fleetWorkspaceLockPath,
-} from "../../src/domains/dispatch/fleet-workspace-lock.js";
+import { clioStateDir } from "../../src/core/xdg.js";
+import { acquireFleetWorkspaceLock, FleetWorkspaceBusyError } from "../../src/domains/dispatch/fleet-workspace-lock.js";
+import { gitCheckoutRoot } from "../../src/tools/task-worktree.js";
 import { type IsolatedClioEnv, isolateClioEnv, scratchClioEnvVars } from "../harness/scratch-env.js";
 
 const LOCK_MODULE = pathToFileURL(resolve("src/domains/dispatch/fleet-workspace-lock.ts")).href;
+
+/** The record path the lock keys from the canonical checkout root. */
+function fleetWorkspaceLockPath(workspaceRoot: string): string {
+	const root = gitCheckoutRoot(workspaceRoot) ?? realpathSync(workspaceRoot);
+	const digest = createHash("sha256").update(root).digest("hex").slice(0, 32);
+	return join(clioStateDir(), "fleet-locks", `${digest}.json`);
+}
 
 /** A separate process that takes the workspace lock for `rootId` and holds it until killed. */
 function holdInChild(home: string, workspaceRoot: string, rootId: string): Promise<ChildProcess> {
