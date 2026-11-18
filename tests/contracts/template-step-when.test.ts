@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { TURN_CONTINUATION_CAP } from "../../src/core/job-types.js";
 import type { ModelTier } from "../../src/core/model-tier.js";
 import type { ToolName } from "../../src/core/tool-names.js";
 import { type TurnConstraints, turnScopeGuidance } from "../../src/core/turn-constraints.js";
@@ -41,7 +42,15 @@ interface Run {
 	/** Per model request: the turn's constraints, its submitted text, and each step call's verdict. */
 	turns: { constraints: TurnConstraints | undefined; text: string; verdicts: string[] }[];
 	continued: string[];
+	/** Loop-guard blocks and step-policy refusals the run raised. */
+	guardEvents: string[];
 	close(): Promise<void>;
+}
+
+/** A step tool with `stages` stages that says pipelineDone on the last, and how many step calls each turn makes. */
+interface Pipeline {
+	calls: number;
+	stages?: number;
 }
 
 /**
@@ -50,7 +59,12 @@ interface Run {
  * the session bus, under the constraints the chat loop holds for that turn.
  * `switchTo` moves the session to another route during the first request.
  */
-async function drive(route: Route, policy: NonNullable<TurnConstraints["turnPolicy"]>, switchTo?: Route): Promise<Run> {
+async function drive(
+	route: Route,
+	policy: NonNullable<TurnConstraints["turnPolicy"]>,
+	switchTo?: Route,
+	pipeline?: Pipeline,
+): Promise<Run> {
 	const scratch = await isolateClioEnv("clio-coder-step-when-");
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
@@ -97,6 +111,11 @@ async function drive(route: Route, policy: NonNullable<TurnConstraints["turnPoli
 	context.bus.subscribe("turn.continued", (payload) => {
 		continued.push((payload as { cause: string }).cause);
 	});
+	const guardEvents: string[] = [];
+	for (const channel of ["safety.loop_blocked", "safety.tool_budget_exceeded"] as const)
+		context.bus.subscribe(channel, () => {
+			guardEvents.push(channel);
+		});
 
 	let loopState = createLoopState();
 	const guard = createLoopGuardRegistration({
@@ -111,6 +130,7 @@ async function drive(route: Route, policy: NonNullable<TurnConstraints["turnPoli
 		turnToolCallBudget: () => ({ soft: 60, hard: 75 }),
 		turnSynthesisLockout: true,
 	});
+	let stage = 0;
 	const registry = createRegistry({
 		safety: createWorkerSafety(),
 		middleware: createMiddlewareBundle({ registrations: [guard] }).contract,
@@ -120,7 +140,12 @@ async function drive(route: Route, policy: NonNullable<TurnConstraints["turnPoli
 		description: "step fixture",
 		parameters: Type.Object({ after: Type.Optional(Type.String()) }),
 		baseActionClass: "read",
-		run: async () => ({ kind: "ok", output: "step: draft the intro" }),
+		run: async () => {
+			stage += 1;
+			return pipeline?.stages !== undefined && stage >= pipeline.stages
+				? { kind: "ok", output: `stage ${stage}: pipeline complete`, details: { pipelineDone: true } }
+				: { kind: "ok", output: "step: draft the intro" };
+		},
 	});
 
 	const middleware: MiddlewareContract = {
@@ -166,16 +191,44 @@ async function drive(route: Route, policy: NonNullable<TurnConstraints["turnPoli
 						} as unknown as AgentMessage);
 						await listener({ type: "agent_start" });
 						await listener({ type: "turn_start" });
-						// Later turns call the step tool once, so a locked step does not continue forever,
-						// except the switched route's turn, which shows whether a second call is refused.
+						// Later turns run no step, so the chain ends there, except the switched route's turn,
+						// which shows whether a second call is refused.
 						const steps =
-							turns.length === 1 || (switchTo !== undefined && turns.length === 2) ? ["start", "intro-done"] : ["intro-done"];
-						for (const after of steps) {
+							pipeline !== undefined
+								? Array.from({ length: pipeline.calls }, () => `stage-${turns.length}`)
+								: turns.length === 1 || (switchTo !== undefined && turns.length === 2)
+									? ["start", "intro-done"]
+									: [];
+						for (const [index, after] of steps.entries()) {
+							const id = `${turnId}-call-${index}`;
 							const result = await registry.invoke(
 								{ tool: STEP, args: { after } },
 								{ sessionId: "when-session", turnId, ...(constraints ? { turnConstraints: constraints } : {}) },
 							);
 							verdicts.push(result.kind);
+							// The engine's tool round: the call, then its result with the tool's details.
+							state.messages.push(
+								{
+									role: "assistant",
+									content: [{ type: "toolCall", id, name: STEP, arguments: { after } }],
+									stopReason: "toolUse",
+									timestamp: Date.now(),
+								} as unknown as AgentMessage,
+								{
+									role: "toolResult",
+									toolCallId: id,
+									toolName: STEP,
+									content: [
+										{
+											type: "text",
+											text: result.kind === "ok" && result.result.kind === "ok" ? result.result.output : "refused",
+										},
+									],
+									...(result.kind === "ok" && result.result.details !== undefined ? { details: result.result.details } : {}),
+									isError: result.kind !== "ok",
+									timestamp: Date.now(),
+								} as unknown as AgentMessage,
+							);
 						}
 						if (switchTo !== undefined && turns.length === 1) {
 							settings.chat.target = `route-${switchTo.model}`;
@@ -203,6 +256,7 @@ async function drive(route: Route, policy: NonNullable<TurnConstraints["turnPoli
 	return {
 		turns,
 		continued,
+		guardEvents,
 		close: async () => {
 			loop?.dispose();
 			await loop?.whenSettled();
@@ -304,6 +358,36 @@ describe("template turnPolicy when", () => {
 			deepStrictEqual(run.turns[1]?.verdicts, ["ok", "ok"]);
 		} finally {
 			await run.close();
+		}
+	});
+
+	it("a yolo step turn that ran its step continues until pipelineDone, a turn without a step, or the cap (bt-6)", async () => {
+		const policy = { mode: "step" as const, stepTool: STEP };
+		const route = { model: "step-compliant-model", tier: "frontier" as const };
+		const compliant = await drive(route, policy, undefined, { calls: 1, stages: 3 });
+		try {
+			deepStrictEqual(
+				compliant.turns.map((turn) => turn.verdicts),
+				[["ok"], ["ok"], ["ok"]],
+			);
+			deepStrictEqual(compliant.continued, ["tool_budget", "tool_budget"]);
+			deepStrictEqual(compliant.guardEvents, []);
+		} finally {
+			await compliant.close();
+		}
+		const idle = await drive(route, policy, undefined, { calls: 0 });
+		try {
+			strictEqual(idle.turns.length, 1);
+			deepStrictEqual(idle.continued, []);
+		} finally {
+			await idle.close();
+		}
+		const endless = await drive(route, policy, undefined, { calls: 1 });
+		try {
+			strictEqual(endless.turns.length, 1 + TURN_CONTINUATION_CAP);
+			strictEqual(endless.continued.length, TURN_CONTINUATION_CAP);
+		} finally {
+			await endless.close();
 		}
 	});
 

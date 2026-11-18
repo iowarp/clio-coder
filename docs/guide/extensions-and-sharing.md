@@ -204,9 +204,18 @@ Once the step tool has succeeded in a turn, other tools still run, but the next
 call to the step tool is refused with text asking for a compact state summary,
 and so is every tool call after it. That first refusal also locks tools for the
 rest of the turn, so the next round is text only, with the prompt prefix and
-tool schemas unchanged. Under yolo the stopped turn then continues into a fresh
-turn that runs the next step, and that continuation does not count against the
-cap of 3 continuations per operator prompt. Without yolo the turn ends after its
+tool schemas unchanged. Under yolo a turn whose step tool succeeded continues
+into a fresh turn that runs the next step, whether it ended on its own summary
+or on that refusal, and each such continuation counts against the cap of 3
+continuations per operator prompt. The chain stops at a turn that does not call
+the step tool, at a step result that sets `pipelineDone`, or at the cap. An api 2
+step tool marks its last step by returning `pipelineDone: true` beside `text`
+(any other tool sets `pipelineDone: true` in its result details); an error result
+never ends the chain this way. A step tool that never sets it stops at the first
+turn that does not call it, or at the cap. While the policy is active, no
+middleware re-prompts the model inside the turn: the high-rigor finish gate
+asks the summary to report an unverified change instead of requesting a check.
+Without yolo the turn ends after its
 summary and the operator starts the next step. A gateway call to the step tool
 counts as a call to it. A malformed policy, a bare `turnPolicy: step` included,
 makes the template unavailable.

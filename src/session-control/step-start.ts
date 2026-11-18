@@ -1,5 +1,6 @@
 import type { ModelTier } from "../core/model-tier.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
+import { effectiveToolCall } from "../tools/surface.js";
 
 /**
  * Compact start for step turns (WTF-P 0.8.3 C5). Under a template's
@@ -106,6 +107,43 @@ export function createStepStartTracker(): StepStartTracker {
 			chain = null;
 		},
 	};
+}
+
+/**
+ * Whether a step turn ran its step: a call to `stepTool`, a gateway call to it
+ * included, whose result came back without an error. `pipelineDone` is the
+ * terminal signal, `details.pipelineDone: true` on that result, which says the
+ * pipeline has no step left. Null when the turn ran no step. `messages` are
+ * the settled turn's own (bt-6).
+ */
+export function stepTurnOutcome(messages: ReadonlyArray<unknown>, stepTool: string): { pipelineDone: boolean } | null {
+	let ran = false;
+	let pipelineDone = false;
+	for (const [index, message] of messages.entries()) {
+		const assistant = message as { role?: unknown; content?: unknown };
+		if (assistant?.role !== "assistant" || !Array.isArray(assistant.content)) continue;
+		for (const block of assistant.content as ReadonlyArray<{
+			type?: unknown;
+			id?: unknown;
+			name?: unknown;
+			arguments?: unknown;
+		}>) {
+			if (block?.type !== "toolCall" || typeof block.name !== "string") continue;
+			const result = messages
+				.slice(index + 1)
+				.find(
+					(entry) =>
+						(entry as { role?: unknown; toolCallId?: unknown })?.role === "toolResult" &&
+						(entry as { toolCallId?: unknown }).toolCallId === block.id,
+				) as { isError?: unknown; details?: unknown } | undefined;
+			if (result === undefined || result.isError === true) continue;
+			if (effectiveToolCall(block.name, block.arguments, result.details).toolName !== stepTool) continue;
+			const details = result.details as { pipelineDone?: unknown } | null | undefined;
+			ran = true;
+			if (details?.pipelineDone === true) pipelineDone = true;
+		}
+	}
+	return ran ? { pipelineDone } : null;
 }
 
 /** The compact state a later step turn starts from, as the checkpoint summary's lead. */

@@ -528,6 +528,12 @@ function listAllowsTool(allowed: readonly string[] | undefined, capability: stri
 	);
 }
 
+/**
+ * Whether middleware may re-prompt the model inside the current turn. An
+ * active step policy tells the model to end the turn after one step, so an
+ * in-turn re-prompt (such as the finish gate's validation recovery) would
+ * contradict it; the step chain continues through the yolo step continuation.
+ */
 export function turnAllowsContinuation(constraints: TurnConstraints | undefined): boolean {
-	return constraints?.mode !== "answer" && constraints?.mode !== "proposal";
+	return constraints?.mode !== "answer" && constraints?.mode !== "proposal" && constraints?.turnPolicy === undefined;
 }

@@ -170,6 +170,7 @@ export function buildExtensionRuntimeToolSpecs(
 							// `campaign run` counts the gates a run reached without parsing what the model was shown.
 							const details = {
 								owner,
+								...(result.pipelineDone === true ? { pipelineDone: true } : {}),
 								interview: {
 									outcome: parked.outcome,
 									...(parked.reason === undefined ? {} : { reason: parked.reason }),
@@ -181,7 +182,12 @@ export function buildExtensionRuntimeToolSpecs(
 						const full = result.data === undefined ? result.text : `${result.text}\n${JSON.stringify(result.data)}`;
 						const compact = result.summary === undefined ? null : compactResult(result.summary, full, options?.sessionId);
 						const output = compact?.output ?? bounded(full);
-						const details = { owner, ...(compact?.details ?? {}) };
+						// The step policy reads pipelineDone off a step tool's result details (bt-6).
+						const details = {
+							owner,
+							...(result.pipelineDone === true ? { pipelineDone: true } : {}),
+							...(compact?.details ?? {}),
+						};
 						return result.isError === true ? { kind: "error", message: output, details } : { kind: "ok", output, details };
 					} catch (error) {
 						return {
