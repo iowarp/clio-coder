@@ -14,7 +14,8 @@
  * payload on a compaction summary; 6 widens the working-set records with four
  * eviction reasons, the `reread` recall trigger and the optional
  * `contentHash` on an evicted item; 7 adds the host-insert and step-chain
- * custom records and widens the eviction record again. Each step only makes
+ * custom records and widens the eviction record again, its reasons now
+ * including `skill_retired` and `refused_prompt_bound`. Each step only makes
  * new records legal, so a version-3 to 6 ledger is read exactly as it stands
  * and only the metadata is restamped. Nothing in the file changes, and an old
  * ledger simply has no handoff, no content hashes and no host inserts in it.

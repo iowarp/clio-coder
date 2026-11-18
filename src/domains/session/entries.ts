@@ -739,6 +739,10 @@ export const EVICTION_REASONS = [
 	"age_horizon",
 	"operator",
 	"step_overflow",
+	// Journal vocabulary for the two rewrites a replay makes on its own: a later skill state retiring a
+	// sent skill block, and a refused prompt replayed as a bounded copy. Additive within format 7.
+	"skill_retired",
+	"refused_prompt_bound",
 ] as const;
 export type EvictionReason = (typeof EVICTION_REASONS)[number];
 
