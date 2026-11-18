@@ -91,6 +91,10 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A step-template pipeline no longer gets `finish.unverified` on each step turn; the finish check assesses the whole pipeline when it ends (bt-12).
+- A pipeline whose step tool never reports `pipelineDone` ends with a `step.unreported` note instead of the continuation-cap warning (bt-15).
+- Step continuations journal `turn.continued` with cause `step`, not `tool_budget` (bt-15).
+- Arena facts and the TUI tool tally count a gateway chain as its steps, without the wrapper call (bt-14).
 - `evidence inspect` shows a red baseline as a baseline taken before the change, never as a failed validation (bt-17).
 - `evidence inspect --json` now carries the trust summary and the full run evidence (findings, totals, quality, baselines) that the text form prints (bt-20).
 - `config inspect` and the seeded settings.yaml explain the worker thinking level `off`, including the route_warning fallback (bt-20).
