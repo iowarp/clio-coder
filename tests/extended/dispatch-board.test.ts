@@ -357,6 +357,19 @@ describe("dispatch board uses the telemetry projection", () => {
 		deepStrictEqual(row.trust, projection.snapshot().runs[0]?.trust);
 		strictEqual(row.steerAcknowledgement?.chars, 24);
 		deepStrictEqual(row.writeRecordDowngrade, { reason: "opaque_tool_succeeded", tool: "bash", toolCallId: "call-3" });
+		// The expanded card names the call by its tool, never by the provider's call id (bt-11 i22-toolu).
+		const { council: _council, ...alone } = row;
+		const record = stripTerminalSequences(
+			createDispatchBoardView(
+				() => [alone],
+				() => undefined,
+				() => "detailed",
+			)
+				.render(200)
+				.join("\n"),
+		);
+		match(record, /record\s+open: a successful 'bash' call can write paths its arguments do not name/u);
+		doesNotMatch(record, /call-3/u);
 		strictEqual(prior.runs[0]?.status, "running");
 		// A reply's usage does not accrue into the run's spend; the call fold reaches it through the snapshot (#434).
 		strictEqual(prior.runs[0]?.spend.totalTokens.kind, "unknown");

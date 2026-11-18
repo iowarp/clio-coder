@@ -4,6 +4,7 @@ import { test } from "node:test";
 import type { RunEnvelope, RunResultDraft } from "../../src/domains/dispatch/types.js";
 import type { SessionMeta } from "../../src/domains/session/contract.js";
 import { DispatchArtifactProvider, RunRecordArtifactProvider } from "../../src/domains/session/view-artifacts.js";
+import { recordedRunAnswerLines } from "../../src/interactive/fleet-run-history.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 import { writeSettledRun } from "../harness/settled-run.js";
@@ -73,6 +74,7 @@ test("dispatch and run record views read a /run worker's settled output and muta
 			dispatch: { listRuns: () => rows, getRun: (id: string) => rows.find((row) => row.id === id) ?? null },
 			readSessionEntries: () => [],
 			sessionMeta: { id: "view-session", cwd: scratch.dir } as SessionMeta,
+			presentAgentOutput: (runId: string, output: string) => recordedRunAnswerLines(runId, output, stateDir),
 		};
 		const byId = async <T extends { id: string }>(list: Promise<T[]>, id: string) =>
 			(await list).find((a) => a.id === id);
@@ -81,13 +83,16 @@ test("dispatch and run record views read a /run worker's settled output and muta
 		ok(dispatch && record);
 		const dispatchBody = (await dispatch.load()).lines.join("\n");
 		const recordBody = (await record.load()).lines.join("\n");
+		// The preview words the agent output as the Fleet Runs card does, never the raw JSON.
 		deepStrictEqual(
 			[
 				dispatchBody.includes(text),
+				dispatchBody.includes("agent output:\nchanged src/rates.mjs, src/injected ## Forged.mjs"),
+				dispatchBody.includes("\nAdded the percent JSDoc."),
 				recordBody.includes("- `src/rates.mjs`"),
 				recordBody.includes("Changed paths were not recorded"),
 			],
-			[true, true, false],
+			[false, true, true, true, false],
 		);
 		for (const body of [dispatchBody, recordBody]) {
 			ok(body.includes("## What changed"));

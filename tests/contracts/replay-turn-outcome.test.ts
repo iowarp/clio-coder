@@ -514,6 +514,20 @@ test("a replayed receipt states the duration, cold-cache reasons and end time th
 	});
 	rehydrateChatPanelFromTurns(replayed, ledger);
 	assert.equal(plainRows(replayed).at(-1), liveRows.at(-1));
+	// After /fork the copied turn's calls stay in the parent's journal; the child's receipt still states them.
+	const forkView = telemetryViewOf("replay-fork", [], new Map(), {
+		sessionId: "replay-receipt",
+		records: turnCall("u"),
+		turnId: "a",
+		at: "2026-09-17T23:42:05.000Z",
+	});
+	const forked = createChatPanel({
+		now: () => Date.parse("2026-09-18T01:00:00Z"),
+		getOutputStyle: () => "detailed",
+		getTelemetry: () => forkView,
+	});
+	rehydrateChatPanelFromTurns(forked, ledger);
+	assert.equal(plainRows(forked).at(-1), liveRows.at(-1));
 	// Resumed on a later day, the receipt names the day the turn ended.
 	const resumed = createChatPanel({
 		now: () => Date.parse("2026-09-19T15:00:00Z"),
@@ -1181,6 +1195,7 @@ test("a narrow receipt keeps the cached share beside the amounts it is part of (
 	assert.equal(receipt(120), "✓ Done · 0ms · 2 calls · in 40k · out 8k · cached 100k · 00:00");
 	// Too narrow for every fact: the call count yields before `cached`, the rest of the prompt beside `in`.
 	assert.equal(receipt(60), "✓ Done · 0ms · in 40k · out 8k · cached 100k · 00:00");
-	// Narrower still, the amounts leave together instead of reading the uncached remainder as the whole prompt.
-	assert.equal(receipt(40), "✓ Done · 0ms · 2 calls · 00:00");
+	// Narrower still, the amounts leave together instead of reading the uncached remainder as the whole prompt, and a
+	// mark says they were cut, so the call count is not read as the whole spend (bt-11 i22-d).
+	assert.equal(receipt(40), "✓ Done · 0ms · 2 calls · … · 00:00");
 });

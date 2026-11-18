@@ -29,6 +29,8 @@ export function telemetryViewOf(
 	sessionId: string,
 	records: readonly TelemetryRecord[],
 	runs: ReadonlyMap<string, readonly TelemetryRecord[]> = new Map(),
+	/** A forked session's parent, whose journal holds the calls of the turns the fork copied. */
+	parent?: { sessionId: string; records: readonly TelemetryRecord[]; turnId: string; at: string },
 ): TelemetryView {
 	const journal = (owned: readonly TelemetryRecord[]): JournalSource => ({
 		present: owned.length > 0,
@@ -41,7 +43,14 @@ export function telemetryViewOf(
 		sessionId,
 		journal: journal(records),
 		runs: new Map([...runs].map(([runId, owned]) => [runId, journal(owned)])),
-		parent: null,
+		parent: parent
+			? {
+					sessionId: parent.sessionId,
+					turnId: parent.turnId,
+					at: parent.at,
+					source: { sessionId: parent.sessionId, journal: journal(parent.records), runs: new Map(), parent: null },
+				}
+			: null,
 	});
 }
 

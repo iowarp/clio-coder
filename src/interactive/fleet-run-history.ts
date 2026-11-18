@@ -4,9 +4,11 @@ import { dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope, RunStatus } from "../domains/dispatch/types.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
+import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { readRunRecord } from "../domains/telemetry/index.js";
 import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
 import type { DispatchBoardRow, DispatchBoardStatus, DispatchRunUsage } from "./dispatch-board.js";
+import { presentSettledWorkerAnswer } from "./renderers/worker-answer.js";
 
 /** Worker runs a restarted board shows. The ledger holds every run the machine kept. */
 const DURABLE_RUN_LIMIT = 12;
@@ -34,6 +36,18 @@ export function recordedRunUsage(runId: string): DispatchRunUsage {
 		// An unreadable journal leaves the usage unknown, never the row.
 		return { kind: "unavailable" };
 	}
+}
+
+/** The run's whole recorded answer in its Fleet Runs card's words, or null when the record does not admit them. */
+export function recordedRunAnswerLines(runId: string, text: string, stateDir = clioStateDir()): string[] | null {
+	const facts = readWorkerRunResultFacts(runId, stateDir);
+	const contract =
+		facts?.contractKind !== undefined && facts.contract !== undefined
+			? { kind: facts.contractKind, conformance: facts.contract }
+			: undefined;
+	const verified = facts?.trust?.artifactIntegrity.state === "verified";
+	const presented = presentSettledWorkerAnswer(text, contract, verified, true);
+	return presented && [...(presented.footer ? [presented.footer] : []), ...presented.lines].map(sanitizeCallTargetText);
 }
 
 function historyRow(run: RunEnvelope, status: DispatchBoardStatus): DispatchBoardRow {
