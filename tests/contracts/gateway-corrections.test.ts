@@ -46,6 +46,12 @@ describe("gateway correction contracts", () => {
 			{ op: "call", args: nested },
 			{ op: "find", args: nested },
 			{ op: "find", query: "stage", args: {} },
+			// A parameters envelope is refused on every op, never read as an empty find (bt-23).
+			{ op: "find", parameters: { pattern: "**/*" } },
+			{ op: "describe", parameters: { capability } },
+			{ op: "call", capability, parameters: { id: "r7" } },
+			{ op: "chain", parameters: { steps: [] } },
+			{ parameters: nested },
 		]) {
 			const verdict = await registry.invoke({ tool: ToolNames.Gateway, args });
 			ok(verdict.kind === "ok", JSON.stringify(verdict));
