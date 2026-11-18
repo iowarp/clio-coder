@@ -196,7 +196,7 @@ import {
 	type OperatorMemoryCommands,
 	type OperatorMemoryStorePort,
 } from "./operator-memory.js";
-import { resolveTurnOutputReserve } from "./output-reserve.js";
+import { resolveTurnOutputReserve, turnAdmissionRemedy } from "./output-reserve.js";
 import { REPETITION_REPROMPT_NOTICE_KEY, repetitionRepromptMessages } from "./repetition-detector.js";
 import { retireActiveUserContextForNextOperator, retiredUserContextWasSent } from "./session-replay-messages.js";
 import { type OutOfTurnRoute, runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./side-question.js";
@@ -3427,7 +3427,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						!requestFits(admission.inputTokens, admission.outputReserveTokens, admission.effectiveWindow)
 					) {
 						emitAdmissionNotice(
-							`[Clio Coder] Request exceeds the available context window (input ${admission.inputTokens ?? "unknown"} + output ${admission.outputReserveTokens ?? "unknown"}, window ${admission.effectiveWindow ?? "unknown"}).${failure ? ` ${failure}` : ""} Trim the prompt or reduce active tools.`,
+							`[Clio Coder] Request exceeds the available context window (input ${admission.inputTokens ?? "unknown"} + output ${admission.outputReserveTokens ?? "unknown"}, window ${admission.effectiveWindow ?? "unknown"}).${failure ? ` ${failure}` : ""} ${turnAdmissionRemedy(agentRuntime, admission.inputTokens ?? 0)}`,
 							"context-window-exceeded",
 							"error",
 						);
@@ -4614,10 +4614,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					usage.tokens !== null && usage.contextWindow > 0
 						? `${formatFooterTokens(usage.tokens)} of ${formatFooterTokens(usage.contextWindow)} tokens used`
 						: used;
+				// Nothing was summarized, so instructions given for the summary went unused, and the operator should know (bt-11).
+				const unused = instructions?.trim() ? ". Your compaction instructions were not used" : "";
 				emitNotice(
 					hasMessages
-						? `[/context compact] too short to compact (${budget}); no older history can be summarized yet`
-						: "[/context compact] session is empty; start a conversation first",
+						? `[/context compact] too short to compact (${budget}); no older history can be summarized yet${unused}`
+						: `[/context compact] session is empty; start a conversation first${unused}`,
 				);
 			}
 		},

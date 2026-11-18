@@ -968,8 +968,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 					return { label: asked, hasLevels: false };
 				}
 			}
-			// The rail states what the model will do. A setting the model cannot honor
-			// says so in words, where `low→off` left the reader to decode the arrow (F13).
+			// The rail states what the model will do, in the picker's word for it. A setting the model cannot honor
+			// says so in words, where `low → on` left the reader to decode the arrow (F13, bt-11).
 			const note = thinking ? thinkingNoteWords(thinking) : null;
 			return {
 				label:
@@ -977,7 +977,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 						? thinking.display
 						: thinking?.mechanism === "none"
 							? "unavailable"
-							: (thinking?.requestedDisplay ?? current?.chat?.thinkingLevel ?? "off"),
+							: (thinking?.display ?? current?.chat?.thinkingLevel ?? "off"),
 				hasLevels: thinking?.mechanism === "effort-levels" || thinking?.mechanism === "budget-tokens",
 				supportedLevels: thinking?.supportedLevels ?? [],
 				...(note !== null ? { note } : {}),
@@ -1043,7 +1043,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		const previous = lastSettingState;
 		lastSettingState = next;
 		const changes: string[] = [];
-		if (next.thinking !== previous.thinking) changes.push(`Thinking set to ${next.thinking}`);
+		if (next.thinking !== previous.thinking) {
+			// The rail's words, so the toast, the rail and the picker name one state alike (bt-11).
+			const rail = editorChrome.getThinking?.();
+			const words = rail && !rail.quiet ? `${rail.label}${rail.note ? ` (${rail.note})` : ""}` : next.thinking;
+			changes.push(`Thinking set to ${words}`);
+		}
 		if (next.output !== previous.output) changes.push(`Output detail: ${outputStyleLabel(next.output)}`);
 		if (next.autonomy !== previous.autonomy)
 			changes.push(`Autonomy set to ${next.autonomy === "yolo" ? "YOLO" : next.autonomy}`);

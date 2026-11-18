@@ -6713,8 +6713,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const request = assertParamKeys(params, new Set(["sessionId"]));
 		const id = sessionIdOf(request);
 		const meta = workspaceMeta(id);
+		// Delete never closes a session for the client: the refusal names the step that comes first (bt-12).
+		const stillOpen =
+			"session is still open; close it first (session/close, or the close action in the client that has it open), then delete it";
 		if (sessions.has(id) || meta.endedAt === null) {
-			throw new AcpRequestError(-32602, "session may already be open", { code: "session_open" });
+			throw new AcpRequestError(-32602, stillOpen, { code: "session_open" });
 		}
 		if (options.session === undefined) {
 			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
@@ -6724,7 +6727,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		} catch (error) {
 			// The delete re-checks under the claim lock; a resume that won the race reopened it.
 			if (error instanceof Error && error.message.includes("may still be open")) {
-				throw new AcpRequestError(-32602, "session may already be open", { code: "session_open" });
+				throw new AcpRequestError(-32602, stillOpen, { code: "session_open" });
 			}
 			throw new AcpRequestError(-32603, "session could not be deleted", { code: "internal_error" });
 		}

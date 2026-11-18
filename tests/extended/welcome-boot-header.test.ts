@@ -6,6 +6,10 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { JobRecord } from "../../src/core/job-types.js";
 import { readClioVersion } from "../../src/core/package-root.js";
 import {
+	resolveModelRuntimeCapabilitiesForProviders,
+	thinkingLevelChoiceLabel,
+} from "../../src/domains/providers/index.js";
+import {
 	stripTerminalSequences as stripAnsi,
 	type Terminal,
 	TuiMainScreen,
@@ -586,6 +590,7 @@ function presentation(
 	rendererFactory?: NonNullable<InteractivePresentationDeps["factories"]>["createChatRenderer"],
 ) {
 	let rendered = 0;
+	const notices: string[] = [];
 	let footerDeps!: Parameters<typeof buildFooterDashboard>[0];
 	const view = { render: () => [], invalidate: noop };
 	const deps = {
@@ -632,7 +637,12 @@ function presentation(
 			createStatusController: () => ({ current: () => ({ phase: "idle" }), reset: noop, dispose: noop }),
 			createDispatchBoardStore: () => ({ rows: () => [], activeRows: () => [], unsubscribe: noop }),
 			createContextActivityStore: () => ({ current: () => null, unsubscribe: noop }),
-			createNotificationCenter: () => ({ add: noop, list: () => [], ended: () => [], dismiss: noop }),
+			createNotificationCenter: () => ({
+				add: (notice: { text: string }) => notices.push(notice.text),
+				list: () => [],
+				ended: () => [],
+				dismiss: noop,
+			}),
 			buildFooter: (deps: Parameters<typeof buildFooterDashboard>[0]) => {
 				footerDeps = deps;
 				return realFooter
@@ -653,7 +663,7 @@ function presentation(
 		...over,
 	} as unknown as InteractivePresentationDeps;
 	const built = createInteractivePresentation(deps);
-	return { presentation: built, renders: () => rendered, footerDeps };
+	return { presentation: built, renders: () => rendered, footerDeps, notices };
 }
 
 function headerRows(built: ReturnType<typeof presentation>["presentation"], width = 100): string[] {
@@ -1194,4 +1204,31 @@ for (const width of [60, 80, 106, 160]) {
 test("source dev version identifies itself without bundle provenance", () => {
 	const version = readClioVersion();
 	strictEqual(readClioVersionLabel(), isDevVersion(version) ? `${version} (unreleased · source)` : version);
+});
+
+test("an on/off route's thinking reads one word on the toast, the rail and the picker", () => {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat = { ...settings.chat, target: "dynamo", model: "qwen3.8-27b", thinkingLevel: "off" };
+	const onOff = status({
+		probeModelCapabilities: { "qwen3.8-27b": { reasoning: true, reasoningLevels: ["off", "low"] } },
+		probeModelId: "qwen3.8-27b",
+	});
+	const { presentation: built, notices } = presentation({
+		getSettings: () => settings,
+		providers: { list: () => [onOff], getTarget: () => null } as never,
+	});
+	// Shift+Tab on an on/off route stores `low`, the level that switches thinking on.
+	settings.chat.thinkingLevel = "low";
+	built.announceSettingChanges();
+	deepStrictEqual(notices, ["Thinking set to on"]);
+	const rail = built.editorChrome.getThinking?.();
+	strictEqual(rail?.label, "on");
+	strictEqual(rail?.note, undefined);
+	const thinking = resolveModelRuntimeCapabilitiesForProviders(
+		{ list: () => [onOff] } as never,
+		"dynamo",
+		"qwen3.8-27b",
+		"low",
+	)?.thinking;
+	strictEqual(thinking && thinkingLevelChoiceLabel(thinking.mechanism, thinking.effectiveLevel), "on");
 });
