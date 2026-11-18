@@ -197,6 +197,8 @@ export interface CompactInput extends SideCallAuth {
 	reserveTokens?: number;
 	/** Override the built-in keep-recent default (DEFAULT_KEEP_RECENT_TOKENS). */
 	keepRecentTokens?: number;
+	/** A bound on the summary request's output cap: a chat-route summary on a small window (bt-18). */
+	summaryOutputCap?: number;
 	/**
 	 * History the cut aims to leave: the checkpoint plus the retained suffix. The summary request states the room
 	 * this leaves the checkpoint when that room is below the summary's own output room.
@@ -1514,7 +1516,9 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			(entry) => entry.turnId !== preservedTurnId,
 		);
 		if (!hasConversation(span)) return emptyResult("nothing-to-summarize");
-		if (span.reduce((tokens, entry) => tokens + estimateTokens(entry), 0) < summaryRoomTokens(reserveTokens))
+		// A capped summary on a small window keeps to the room its cap leaves, so a span above that still gains (bt-18).
+		const room = summaryOutputBudget(input.model, reserveTokens, input.summaryOutputCap).summaryRoom;
+		if (span.reduce((tokens, entry) => tokens + estimateTokens(entry), 0) < room)
 			return { ...emptyResult("below-summary-room"), noGain: true };
 	}
 
@@ -1556,7 +1560,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	}
 	// A fixed cap let reasoning consume it and the summary was never saved (pi
 	// upstream #9512); summaryOutputBudget sizes it per route.
-	const { maxTokens, summaryRoom } = summaryOutputBudget(input.model, reserveTokens);
+	const { maxTokens, summaryRoom } = summaryOutputBudget(input.model, reserveTokens, input.summaryOutputCap);
 	// A cumulative checkpoint told nothing of its room outgrew a small window's history space a little more each cycle,
 	// while the retained suffix could shrink no further than the newest tool batch, so each cut landed closer to the
 	// trigger (bt-18). The request names what the target leaves once the kept suffix and Clio's blocks are counted.

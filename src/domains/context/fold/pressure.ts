@@ -101,6 +101,21 @@ export function fitOutputReserve(input: FitOutputReserveInput): number {
 }
 
 /**
+ * The cap on a chat-route compaction summary call's own output. Under 52,428 tokens it is the admissible reserve, or
+ * a configured chat.maxOutputTokens above it, as fit counts (A5): a reasoning route asked its whole output limit, and
+ * the summary request kept that much of a small window from the history it reads (bt-18). Every other window has
+ * no cap, as today.
+ */
+export function summaryOutputCap(input: {
+	window: number;
+	admissibleReserve: number;
+	configured: number | null;
+}): number | undefined {
+	if (!(input.window > 0) || input.window >= SMALL_WINDOW_TOKENS) return undefined;
+	return Math.max(input.admissibleReserve, input.configured ?? 0);
+}
+
+/**
  * Whether one finalized attempt fits the real window: input plus reserved
  * output at most the window, so exactly at the window fits. An unknown window
  * (`null`) admits and leaves the verdict to the server.

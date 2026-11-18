@@ -20,7 +20,7 @@
  */
 
 import { runOverrides } from "../core/run-overrides.js";
-import { fitOutputReserve } from "../domains/context/fold/pressure.js";
+import { fitOutputReserve, summaryOutputCap } from "../domains/context/fold/pressure.js";
 import {
 	ADMISSIBLE_OUTPUT_RESERVE,
 	configuredMaxOutputTokens,
@@ -60,6 +60,15 @@ export function resolveFitOutputReserve(agentRuntime: ReserveRuntime, inputToken
 		turnReserve: resolveTurnOutputReserve(agentRuntime, inputTokens),
 		admissibleReserve: ADMISSIBLE_OUTPUT_RESERVE,
 		hardReserve: configuredMaxOutputTokens() !== null,
+	});
+}
+
+/** The output cap of a compaction summary written on this chat route; see `summaryOutputCap` (bt-18). */
+export function resolveSummaryOutputCap(agentRuntime: ReserveRuntime): number | undefined {
+	return summaryOutputCap({
+		window: agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
+		admissibleReserve: ADMISSIBLE_OUTPUT_RESERVE,
+		configured: configuredMaxOutputTokens(),
 	});
 }
 
