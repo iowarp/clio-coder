@@ -5288,6 +5288,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		});
 		return resolved.ok ? resolved.target.modelRuntime.thinking : null;
 	};
+	const sessionModelChoices = (session: AcpServerSession, current: string): string[] => {
+		const status = options.providers?.list().find((item) => item.target.id === session.target);
+		const models = status === undefined ? [] : safeTargetModels(status);
+		if (!models.includes(current)) models.unshift(current);
+		return models.slice(0, ACP_TARGET_MODEL_LIMIT);
+	};
 	const configOptions = (session: AcpServerSession) => {
 		const optionsList: Array<Record<string, unknown>> = [
 			{
@@ -5320,9 +5326,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			});
 		}
 		if (session.model !== null) {
-			const status = options.providers?.list().find((item) => item.target.id === session.target);
-			const models = status === undefined ? [] : safeTargetModels(status);
-			if (!models.includes(session.model)) models.unshift(session.model);
+			const models = sessionModelChoices(session, session.model);
 			const fallback = session.target === null ? undefined : listingFallbacks.get(session.target);
 			optionsList.push({
 				id: "model",
@@ -5331,7 +5335,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				type: "select",
 				currentValue: session.model,
 				...(fallback !== undefined ? { description: `Configured models only: ${fallback}.` } : {}),
-				options: models.slice(0, ACP_TARGET_MODEL_LIMIT).map((model) => {
+				options: models.map((model) => {
 					const thinking = sessionThinking(session, model);
 					return { value: model, name: model, ...(thinking ? { thinkingLevels: thinking.supportedLevels } : {}) };
 				}),
@@ -5431,6 +5435,18 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	};
 	const sessionConfig = (session: AcpServerSession) => ({
 		modes: modeState(session),
+		// The ACP models block, for a client that picks the model through session/set_model rather than configOptions.
+		...(session.model !== null
+			? {
+					models: {
+						currentModelId: session.model,
+						availableModels: sessionModelChoices(session, session.model).map((model) => ({
+							modelId: model,
+							name: model,
+						})),
+					},
+				}
+			: {}),
 		configOptions: configOptions(session),
 	});
 	// The catalog is rebuilt from `commandReference()` on every call and a
@@ -6813,7 +6829,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return { _meta: trustResultMeta(session.cwd) };
 	});
 
-	options.transport.onRequest("session/set_config_option", async (params) => {
+	const setConfigOption = async (params: unknown) => {
 		requireInitialized();
 		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId", "configId", "value", "type"]));
@@ -6919,6 +6935,16 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				throw new AcpRequestError(-32602, "unknown configuration option", { code: "invalid_params" });
 		}
 		return { configOptions: configOptions(session) };
+	};
+	options.transport.onRequest("session/set_config_option", setConfigOption);
+	options.transport.onRequest("session/set_model", async (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId", "modelId"]));
+		if (typeof request.modelId !== "string")
+			throw new AcpRequestError(-32602, "invalid model id", { code: "invalid_params" });
+		await setConfigOption({ sessionId: request.sessionId, configId: "model", value: request.modelId });
+		return {};
 	});
 
 	options.transport.onRequest(ACP_SETTINGS_GET_SAFE_METHOD, (params) => {

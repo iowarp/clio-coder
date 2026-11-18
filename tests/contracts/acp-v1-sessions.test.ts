@@ -229,6 +229,29 @@ test("ACP saved routing updates the bound session config before a conversation c
 	}
 });
 
+test("ACP session/new carries the models block and session/set_model selects through the model option", async () => {
+	const peer = fixture([], undefined, undefined, true);
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const opened = (await peer.call("session/new", { cwd: peer.cwd, mcpServers: [] })) as {
+			sessionId: string;
+			models?: unknown;
+		};
+		deepStrictEqual(opened.models, {
+			currentModelId: "model-a",
+			availableModels: [{ modelId: "model-a", name: "model-a" }],
+		});
+		await rejects(
+			peer.call("session/set_model", { sessionId: opened.sessionId, modelId: "model-z" }),
+			/model is not declared for this target/u,
+		);
+		deepStrictEqual(await peer.call("session/set_model", { sessionId: opened.sessionId, modelId: "model-a" }), {});
+		await rejects(peer.call("session/set_model", { sessionId: opened.sessionId, model: "model-a" }), /invalid/u);
+	} finally {
+		await peer.stop();
+	}
+});
+
 test("ACP stable session list pages SessionInfo and filters cwd", async () => {
 	const peer = fixture();
 	try {
