@@ -682,7 +682,6 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			metadata: {
 				objective: objectiveOf(tool),
 				uiLabel: `${declaration.id}/${tool.name}`,
-				retrySafety: "unknown",
 				repeatableRead:
 					trustClass === "read" && tool.annotations?.readOnlyHint === true && tool.annotations?.idempotentHint === true,
 				// The session cap alone (64 KiB) let one search result spend a sixth
@@ -694,7 +693,6 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					followUpHint:
 						"Call again with a narrower query or the server's own limit/page arguments, or read the offloaded file in windows.",
 				},
-				costLatency: "local_slow",
 			},
 			async run(args, invokeOptions): Promise<ToolResult> {
 				if (classDrift !== null) return { kind: "error", message: classDrift };

@@ -83,8 +83,6 @@ describe("tool boundary contract", () => {
 			metadata: {
 				objective: "exercise the tool boundary",
 				uiLabel: "Contract",
-				retrySafety: "idempotent",
-				costLatency: "local_fast",
 				resultSizePolicy: { kind: "bounded", maxBytes: 8_192 },
 				resultDisposition: {
 					presentation: {
