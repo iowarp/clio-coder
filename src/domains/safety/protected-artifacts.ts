@@ -745,7 +745,8 @@ function extractCommandPathWalk(command: string, topLevelHeredocs = true): Comma
  * no shell reads its body, so only the walk without bodies counts: `=>` in a
  * TypeScript body is not a redirect. A body fed to a shell, an interpreter,
  * a pipe, or any other command is still read as commands, and so is one whose
- * file a later command names, since that command may run it.
+ * file a later command names, since that command may run it, or a script
+ * file a step such as `make` may run without naming it.
  */
 export function extractCommandPathWalks(command: string): CommandPathEvent[][] {
 	const { text: withoutBodies, dataOutputs } = removeHeredocBodies(command, false);
@@ -804,13 +805,58 @@ function heredocDataOutputs(tokens: ReadonlyArray<ShellToken>, operatorIndex: nu
 	return [stdout, ...outputs].filter((output) => output !== "/dev/null");
 }
 
+/** Writers that run none of the files they touch, so a data here-document's file stays unrun by them. */
+const NON_RUNNING_WRITERS: ReadonlySet<string> = new Set([
+	"cat",
+	"tee",
+	"cp",
+	"mv",
+	"rm",
+	"rmdir",
+	"mkdir",
+	"touch",
+	"ln",
+	"chmod",
+	"chown",
+	"chgrp",
+	"truncate",
+	"unlink",
+]);
+
+/**
+ * A file name a step may run as a shell script without naming it (bt-low1): a `.sh`, `.bash`, `.zsh` or `.mk` file,
+ * or a name with no extension, such as a Makefile, a git hook, a `bin/` tool or `.envrc`.
+ */
+function shellRunnableOutput(output: string): boolean {
+	const name = basenameToken(output);
+	return /\.(?:sh|bash|zsh|ksh|mk)$/iu.test(name) || !name.slice(1).includes(".");
+}
+
+/**
+ * Whether a step of the command, bodies removed, may run a file it does not name: anything but shell setup, read-only
+ * inspection and {@link NON_RUNNING_WRITERS}, or any step with a substitution (`make`, `npm test`, `git commit`'s
+ * hooks, `for f in *.sh`).
+ */
+function mayRunUnnamedFile(command: string): boolean {
+	return shellSteps(scanShellLike(command)).some((step) => {
+		if (step.tokens.some((token) => (token.substitutions?.length ?? 0) > 0 || token.hiddenContent === true)) return true;
+		if (step.index === null) return false;
+		const argv = step.argv.slice(step.index);
+		const [first = ""] = argv;
+		if (SHELL_SETUP_STEPS.has(first)) return first === "source" || first === ".";
+		return !NON_RUNNING_WRITERS.has(basenameToken(first)) && !readOnlyInspectionStep(argv, true);
+	});
+}
+
 /**
  * Whether the command, bodies removed, may run a file a data here-document
- * wrote: another word names the file, or a function, alias, or PATH change
- * may make `cat` or `tee` something else.
+ * wrote: another word names the file, a function, alias, or PATH change
+ * may make `cat` or `tee` something else, or the file is a script some step
+ * may run unnamed ({@link shellRunnableOutput}, {@link mayRunUnnamedFile}).
  */
 function mayRunHeredocOutputs(command: string, outputs: ReadonlyArray<string>): boolean {
 	if (/\bPATH=|\balias\b|\bfunction\b|\(\s*\)/u.test(command)) return true;
+	if (outputs.some(shellRunnableOutput) && mayRunUnnamedFile(command)) return true;
 	const text = command.toLowerCase();
 	const count = (haystack: string, needle: string): number => haystack.split(needle).length - 1;
 	for (const output of outputs) {
