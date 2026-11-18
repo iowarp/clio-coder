@@ -1,7 +1,8 @@
 import { deepStrictEqual, notDeepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import type { Context } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { codexAccountScope } from "../../src/core/codex-account.js";
 import { type ProviderCheckpoint, prepareProviderCheckpoint } from "../../src/core/provider-checkpoint.js";
@@ -16,6 +17,7 @@ import { validateContinuityNote } from "../../src/domains/session/continuity/not
 import { resolveContinuityProjection } from "../../src/domains/session/continuity/projection.js";
 import type { SessionEntryInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { createStdioTransport } from "../../src/engine/acp/transport.js";
 import { engineStreamSimple } from "../../src/engine/api-registry.js";
 import { engineModels } from "../../src/engine/models.js";
 import { openSession } from "../../src/engine/session.js";
@@ -26,10 +28,14 @@ import {
 	type CapturedRequest,
 	type CaptureServer,
 	chatHarness,
+	contextElements,
 	startCaptureServer,
 	tapEngineApi,
+	tappedCli,
 	wireElements,
 } from "../harness/context-capture.js";
+import { headlessScratch, runCli } from "../harness/headless-run.js";
+import { seedOpenAICompatToolOrchestrator } from "../harness/openai-compat-fixture.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 /**
@@ -143,6 +149,68 @@ describe("adapter capture", () => {
 				tap.restore();
 				await server.close();
 			}
+		});
+	}
+
+	for (const surface of ["headless run", "acp"] as const) {
+		it(`${surface}: every adapter payload carries the context its attempt seam finalized`, {
+			timeout: 300_000,
+		}, async (t) => {
+			const server = await startCaptureServer((_request, index) =>
+				index === 0 ? { calls: [{ id: "call_1", name: "read", arguments: { path: "notes.txt" } }] } : { text: "done" },
+			);
+			const scratch = headlessScratch("cf-capture-");
+			t.after(async () => {
+				await server.close();
+				scratch.cleanup();
+			});
+			seedOpenAICompatToolOrchestrator(scratch.configDir, server.url, "yolo");
+			const project = path.join(scratch.root, "project");
+			mkdirSync(project);
+			writeFileSync(path.join(project, "notes.txt"), "body a\n");
+			const tapFile = path.join(scratch.root, "session-capture.jsonl");
+			const cli = tappedCli(tapFile);
+			const prompt = "read notes.txt";
+			if (surface === "headless run") {
+				const result = await runCli(["--no-context-files", "--no-skills", "run", prompt], {
+					env: scratch.env,
+					cwd: project,
+					timeoutMs: 240_000,
+					...cli,
+				});
+				strictEqual(result.code, 0, result.stderr);
+			} else {
+				const env = Object.fromEntries(
+					Object.entries(scratch.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+				);
+				const acp = createStdioTransport(
+					process.execPath,
+					[...cli.node, cli.cli, "--no-context-files", "--no-skills", "acp"],
+					{
+						cwd: project,
+						env,
+					},
+				);
+				t.signal.addEventListener("abort", () => void acp.forceTerminate(), { once: true });
+				try {
+					await acp.request("initialize", { protocolVersion: 1 });
+					const { sessionId } = await acp.request<{ sessionId: string }>("session/new", { cwd: project, mcpServers: [] });
+					const turn = await acp.request<{ stopReason: string }>("session/prompt", {
+						sessionId,
+						prompt: [{ type: "text", text: prompt }],
+					});
+					strictEqual(turn.stopReason, "end_turn");
+				} finally {
+					await acp.forceTerminate();
+				}
+			}
+			const tapped = readFileSync(tapFile, "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as Context);
+			ok(server.requests.length >= 2, "the tool round and the answer both reached the server");
+			ok(wireElements(server.requests.at(-1) as CapturedRequest).some((element) => element.startsWith("result:")));
+			deepStrictEqual(server.requests.map(wireElements), tapped.map(contextElements));
 		});
 	}
 });

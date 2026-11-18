@@ -658,7 +658,6 @@ describe("W13 (F15 -> CF-2): admission prices the attempt it sends", () => {
 	const auto = (): MiddlewareToolChoiceControl => ({ ...lockNone(), current: () => ({ kind: "auto" }) });
 
 	it("a middleware none lock sent as auto is priced with its directive at the fit boundary", {
-		todo: "F15 -> CF-2",
 		timeout: 120_000,
 	}, async (t) => {
 		// The route rejects tool_choice "none", so a middleware text lock goes out as "auto" with the directive.

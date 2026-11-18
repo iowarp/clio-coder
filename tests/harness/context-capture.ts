@@ -7,11 +7,13 @@
  * a family-neutral element list, which is what cross-family and cross-surface equality compares.
  *
  * Session capture: `tapEngineApi` wraps one API family's registered provider and records the finalized context the
- * attempt seam handed to the engine (turn-runtime's `sent`), then delegates to the real provider.
+ * attempt seam handed to the engine (turn-runtime's `sent`), then delegates to the real provider. `contextElements`
+ * projects such a context to the same element vocabulary as `wireElements`.
  *
  * The chat harness drives an in-process chat loop over a real session bundle against the capture server, across route
  * facts (tier, caching, known or unknown window, image input). Subprocess surfaces (headless, ACP, worker) reach the
  * same server through `seedOpenAICompatToolOrchestrator(configDir, server.url)`: the server routes on the path suffix.
+ * `tappedCli` runs the built CLI with the session capture installed in that process.
  */
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -336,6 +338,60 @@ export function wireElements(request: CapturedRequest): string[] {
 		flush();
 	}
 	return out;
+}
+
+/** `wireElements` for a context as the engine hands it to a provider: the session capture's side of an equality. */
+export function contextElements(context: Context): string[] {
+	const out: string[] = context.systemPrompt ? [`system:${context.systemPrompt}`] : [];
+	for (const message of context.messages as ReadonlyArray<Json>) {
+		const role = String(message.role);
+		if (role === "system" || role === "developer") out.push(`system:${joined(message.content)}`);
+		else if (role === "toolResult") out.push(`result:${joined(message.content)}`);
+		else if (role === "assistant") {
+			const blocks = parts(message.content);
+			const text = blocks
+				.filter((block) => block.type === "text")
+				.map(partText)
+				.join("");
+			if (text) out.push(`assistant:${text}`);
+			for (const call of blocks.filter((block) => block.type === "toolCall"))
+				out.push(`call:${String(call.name)}(${args(call.arguments)})`);
+		} else out.push(`${role}:${joined(message.content)}`);
+	}
+	return out;
+}
+
+const ROOT = new URL("../..", import.meta.url);
+/** The call in the built bundle's dispatch that hands a context to the registered provider, where `tapEngineApi` taps. */
+const DISPATCH_SEAM = "resolved(model.api).streamSimple(model,normalizeContext(context),";
+
+/**
+ * Session capture in the built CLI as a subprocess (`clio-coder run`, `clio-coder acp`). The bundle inlines Pi and the
+ * engine registry, so no import can reach them; a preload's load hook rewrites the one dispatch call above to pass the
+ * context through a recorder that appends it to `file`, one JSON line per request in send order. A bundle without that
+ * call text throws at load, so a moved seam fails the case instead of capturing nothing.
+ */
+export function tappedCli(file: string): { node: string[]; cli: string } {
+	const preload = `
+import { appendFileSync } from "node:fs";
+import { registerHooks } from "node:module";
+const seam = ${JSON.stringify(DISPATCH_SEAM)};
+globalThis.__clioSessionCapture = (context) => (appendFileSync(${JSON.stringify(file)}, JSON.stringify(context) + "\\n"), context);
+registerHooks({
+	load(url, context, nextLoad) {
+		const loaded = nextLoad(url, context);
+		if (!url.startsWith(${JSON.stringify(new URL("dist/", ROOT).href)})) return loaded;
+		const source = String(loaded.source);
+		if (!source.includes("function dispatchEngineStreamSimple(")) return loaded;
+		if (!source.includes(seam)) throw new Error("session capture: the dispatch seam moved in " + url);
+		const tapped = seam.replace("normalizeContext(context)", "globalThis.__clioSessionCapture(normalizeContext(context))");
+		return { ...loaded, source: source.replace(seam, tapped) };
+	},
+});`;
+	return {
+		node: ["--import", `data:text/javascript,${encodeURIComponent(preload)}`],
+		cli: new URL("dist/cli/index.js", ROOT).pathname,
+	};
 }
 
 const BUILTIN: Partial<Record<Api, () => ReturnType<typeof openAICompletionsApi>>> = {
