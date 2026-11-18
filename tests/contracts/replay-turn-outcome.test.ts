@@ -552,7 +552,7 @@ test("a replayed receipt states the duration, cold-cache reasons and end time th
 			payload: { ...cached, promptCache: { expectedColdReasons: ["dispatch"] } },
 		},
 	] as SessionEntry[]);
-	assert.equal(plainRows(warm).at(-1), "✓ Done · 1m36s · in 68.6k · out 5 · cached 68.6k · Sep 16 19:01");
+	assert.equal(plainRows(warm).at(-1), "✓ Done · 1m36s · in 7 · out 5 · cached 68.6k · Sep 16 19:01");
 });
 
 test("a middleware reminder reads the same live and on replay, and a skill activation adds no line", () => {
@@ -1178,9 +1178,9 @@ test("a narrow receipt keeps the cached share beside the amounts it is part of (
 			.map(stripTerminalSequences)
 			.filter((line) => line.length > 0)
 			.at(-1);
-	assert.equal(receipt(120), "✓ Done · 0ms · 2 calls · in 140k · out 8k · cached 100k · 00:00");
-	// Too narrow for every fact: the call count yields before `cached`, which `in` already counts.
-	assert.equal(receipt(60), "✓ Done · 0ms · in 140k · out 8k · cached 100k · 00:00");
-	// Narrower still, the amounts leave together instead of reading the whole prompt as fresh input.
+	assert.equal(receipt(120), "✓ Done · 0ms · 2 calls · in 40k · out 8k · cached 100k · 00:00");
+	// Too narrow for every fact: the call count yields before `cached`, the rest of the prompt beside `in`.
+	assert.equal(receipt(60), "✓ Done · 0ms · in 40k · out 8k · cached 100k · 00:00");
+	// Narrower still, the amounts leave together instead of reading the uncached remainder as the whole prompt.
 	assert.equal(receipt(40), "✓ Done · 0ms · 2 calls · 00:00");
 });

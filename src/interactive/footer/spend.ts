@@ -30,8 +30,10 @@ export interface FooterSpend {
 	 * because a bound such as `≥~25.2k +?` is true but unreadable here, and /usage keeps it (HS21).
 	 */
 	turn: {
-		/** The whole prompt, cached reads included, as the turn receipt's `in`. */
+		/** The uncached input, as the turn receipt's and /usage's `in`; `cacheRead` beside it is the cached part. */
 		input: string | null;
+		/** The whole prompt, cached reads included, which the live chip labels `prompt`. */
+		prompt: string | null;
 		output: string | null;
 		cacheRead: string | null;
 		cacheWrite: string | null;
@@ -90,7 +92,7 @@ function footerSpeed(call: CallRowV1): FooterSpeed {
 
 /**
  * The session's tokens as the read model displays them, without the `≥ … +?` bound the row has no room to explain:
- * the measured part alone read `session 1.7k tokens` beside /usage's `≥~27,316` and the exit card's `in ≥27,252`.
+ * the measured part alone read `session 1.7k tokens` beside /usage's `≥~27,316` and the exit card's `≥27,252`.
  */
 function knownSessionCount(quantity: Quantity): string | null {
 	// One mark at most, the one /usage and the exit card give the same sum: `≥` while some call reported nothing, and
@@ -131,7 +133,8 @@ export function footerTelemetry(view: TelemetryView | null | undefined): FooterT
 			turnId === undefined
 				? null
 				: {
-						input: turnCount("prompt"),
+						input: turnCount("input"),
+						prompt: turnCount("prompt"),
 						output: turnCount("output"),
 						cacheRead: turnCount("cacheRead"),
 						cacheWrite: turnCount("cacheWrite"),

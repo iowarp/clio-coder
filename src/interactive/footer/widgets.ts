@@ -271,11 +271,12 @@ export function liveTokenValue(
 ): string | null {
 	const output = finiteNonNegative(throughput?.outputTokens);
 	const context = finiteNonNegative(contextUsed);
-	const turnInput = telemetry?.kind === "ready" ? (telemetry.turn?.input ?? null) : null;
-	const input = context > 0 ? formatFooterTokens(context) : turnInput;
+	const turnPrompt = telemetry?.kind === "ready" ? (telemetry.turn?.prompt ?? null) : null;
+	// The whole prompt, cached reads included, so it is labelled `prompt`: `in` is the uncached input everywhere (bt-11).
+	const prompt = context > 0 ? formatFooterTokens(context) : turnPrompt;
 	const parts = [
 		output > 0 ? theme.fg("counter", `out ${throughput?.estimated ? "≈" : ""}${formatFooterTokens(output)}`) : null,
-		input !== null ? theme.fg("counter", `in ${input}`) : null,
+		prompt !== null ? theme.fg("counter", `prompt ${prompt}`) : null,
 	];
 	const joined = joinChips(theme, parts);
 	return joined.length > 0 ? joined : null;
