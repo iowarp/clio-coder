@@ -62,7 +62,6 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - A judge-mode dispatch with no seated safety judge raises a worker_judge_withheld notice saying workers run as deny. (N2)
 - Unattended countdowns read m:ss under a minute too (0:59, 0:05). (bt-11 q)
 - The exit card row reads "Session verified" in every style. (drv-tui11)
-- A live worker's spend is kept in `runs/<id>/spend.json`, and runs.json is written only at lifecycle and status transitions. (P3 #2)
 - A lone delete inside a scratch root is recorded as scratch-disposable and no longer needs or claims a workspace snapshot. (N3, conf11h)
 - The finish assessment replays the shared check fold once per turn end instead of up to twice (x8-6).
 - Standard keeps one row of the reasoning before an action instead of a bare Thinking marker (bt-11 b).
@@ -180,7 +179,6 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - A worker's result-contract reminder arrives as a host reminder after its tool results instead of inside them, so models no longer treat it as an injection. (D4, drv-cf3b)
 - A dispatched task that says not to write files runs read-only and no longer gets the architect plan contract. (D-C)
 - The [Tasks] reminder no longer fires when the request's own words forbid writing files. (bt-22b)
-- The checkout delta sees a same-size rewrite made inside one timestamp tick when it changes a file's first or last 64 KiB. (p3-snapshot)
 - The safety judge is told when an operator message spells a call's outside path, so a requested report file is no longer refused as shared-config. (cw-3)
 - The approval card for a judge-allowed sandbox escape names the word it needs instead of saying the operator never mentioned the sandbox. (bt-24 residual)
 - A dispatch that puts a target id in `node` (for example `node:'openai-codex'`) is told the value is a target id that belongs in `target`, with `node` omitted (bt-45 c16-A).

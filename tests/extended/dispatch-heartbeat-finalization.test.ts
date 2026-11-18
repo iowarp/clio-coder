@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -9,7 +9,6 @@ import { withStateFileLock } from "../../src/core/state-file-lock.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
-import { readRunLiveSpend } from "../../src/domains/dispatch/run-feed.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { readSettledRun, readVerifiedRun } from "../../src/domains/telemetry/index.js";
@@ -193,7 +192,7 @@ it("still marks an unfinished worker stale and terminates it when its heartbeat 
 	}
 });
 
-it("keeps a live worker's spend in its own file at most once per ten seconds, never in runs.json (P3-2)", async (t) => {
+it("persists a live worker's spend to runs.json at most once per ten seconds (P3-2)", async (t) => {
 	t.mock.timers.enable({ apis: ["setInterval"] });
 	const stateDir = process.env.CLIO_CODER_STATE_DIR;
 	ok(stateDir);
@@ -269,10 +268,7 @@ it("keeps a live worker's spend in its own file at most once per ten seconds, ne
 		const run = await bundle.contract.dispatch(request);
 		const spendIn = (rows: ReadonlyArray<{ id: string; spend: unknown }>) =>
 			JSON.stringify(rows.find((row) => row.id === run.runId)?.spend ?? null);
-		const inLedger = () => spendIn(JSON.parse(readFileSync(join(stateDir, "runs.json"), "utf8")));
-		const spendFile = join(stateDir, "runs", run.runId, "spend.json");
-		const onDisk = () =>
-			existsSync(spendFile) ? JSON.stringify(JSON.parse(readFileSync(spendFile, "utf8")).spend) : "null";
+		const onDisk = () => spendIn(JSON.parse(readFileSync(join(stateDir, "runs.json"), "utf8")));
 		const inMemory = () => spendIn(bundle.contract.listRuns());
 		const meterMoves = async (from: string) => {
 			await waitFor(() => {
@@ -280,15 +276,12 @@ it("keeps a live worker's spend in its own file at most once per ten seconds, ne
 				return inMemory() !== from;
 			});
 		};
-		await waitFor(() => inLedger() !== "null");
+		await waitFor(() => onDisk() !== "null");
 		const unspent = inMemory();
-		strictEqual(inLedger(), unspent);
 		push("call");
 		await meterMoves(unspent);
 		await waitFor(() => onDisk() === inMemory());
 		const first = onDisk();
-		// Another process reads the run's spend from its file; this one from the meter.
-		strictEqual(JSON.stringify(readRunLiveSpend(run.runId)?.spend ?? null), first);
 		monotonic = 9_000;
 		push("call");
 		await meterMoves(first);
@@ -301,11 +294,8 @@ it("keeps a live worker's spend in its own file at most once per ten seconds, ne
 		monotonic = 10_000;
 		t.mock.timers.tick(10);
 		await waitFor(() => onDisk() === inMemory());
-		strictEqual(inLedger(), unspent, "live spend never rewrites runs.json");
 		push("end");
-		const settled = await run.finalPromise;
-		strictEqual(settled.outcome, "succeeded");
-		strictEqual(inLedger(), JSON.stringify(settled.spend), "the settled row carries the run's spend");
+		strictEqual((await run.finalPromise).outcome, "succeeded");
 	} finally {
 		push("end");
 		await bundle.extension.stop?.();
