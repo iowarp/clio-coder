@@ -91,6 +91,11 @@ export interface SlashCompletionItem extends AutocompleteItem {
 	 * these opens unselected, so Enter sends `/tools` as typed instead of turning it into `/skill`.
 	 */
 	describedOnly?: boolean;
+	/**
+	 * A value row that does not start with what the operator typed, found only by its letters in order. A list of
+	 * these opens unselected, so Enter sends `/thinking high` as typed instead of turning it into `/thinking xhigh`.
+	 */
+	lettersOnly?: boolean;
 	submenu?: { parent: string; back: true };
 	/** Cursor adjustment after insertion; quoted directories keep it before the closing quote. */
 	cursorOffset?: number;
@@ -392,14 +397,20 @@ function fileReferenceContext(lines: string[], cursorLine: number, cursorCol: nu
 }
 
 /** Values the typed text names: prefix matches, then (two or more letters) its letters in order. */
-function sourceRows(values: ReadonlyArray<CompletionValue>, prefix: string): CompletionValue[] {
+function sourceRows(
+	values: ReadonlyArray<CompletionValue>,
+	prefix: string,
+): Array<CompletionValue & { lettersOnly?: true }> {
 	const lower = prefix.toLowerCase();
 	const visible = values.filter((value) => !value.sensitive);
-	const byPrefix = visible.filter((value) => value.value.toLowerCase().startsWith(lower));
+	// The value typed in full leads, so the selected row never swaps it for a longer sibling.
+	const byPrefix = visible
+		.filter((value) => value.value.toLowerCase().startsWith(lower))
+		.sort((a, b) => Number(b.value.toLowerCase() === lower) - Number(a.value.toLowerCase() === lower));
 	if (lower.length < 2) return byPrefix;
-	const byLetters = visible.filter(
-		(value) => !byPrefix.includes(value) && lettersInOrder(lower, value.value.toLowerCase()),
-	);
+	const byLetters = visible
+		.filter((value) => !byPrefix.includes(value) && lettersInOrder(lower, value.value.toLowerCase()))
+		.map((value) => ({ ...value, lettersOnly: true as const }));
 	return [...byPrefix, ...byLetters];
 }
 
@@ -785,7 +796,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 	}
 
 	private itemFromValue(
-		value: CompletionValue,
+		value: CompletionValue & { lettersOnly?: true },
 		grammar: ArgCompletion,
 		start: number,
 		end: number,
@@ -807,6 +818,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			...(grammar.completionSlot ? { completionSlot: grammar.completionSlot } : {}),
 			...(quote ? { quote } : {}),
 			...(value.disabledReason ? { disabledReason: value.disabledReason } : {}),
+			...(value.lettersOnly ? { lettersOnly: true } : {}),
 		};
 	}
 
