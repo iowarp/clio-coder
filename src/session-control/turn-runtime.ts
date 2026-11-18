@@ -25,7 +25,7 @@ import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js"
 import { resolvedRequestContext } from "../engine/context.js";
 import { hasAssistantGenerationDelta } from "../engine/generation-delta.js";
 import { MODEL_ADMISSION } from "../engine/model-admission.js";
-import { requestStructure } from "../engine/request-structure.js";
+import { createRequestStructures } from "../engine/request-structure.js";
 import { firstTokenStallLimitMs } from "./chat-loop-policy.js";
 import type { ContinuityController } from "./continuity-controller.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
@@ -760,6 +760,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let modelCall: TelemetryCall | undefined;
 		let journalLease: TelemetrySessionLease | undefined;
 		let settledAttempts: CallSettled[] = [];
+		const requestStructure = createRequestStructures();
 		// What each attempt handed Pi, digested only at settle so the hashing stays off the send path (#434).
 		let attemptRequest:
 			| {
