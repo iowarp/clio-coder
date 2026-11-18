@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { Type } from "typebox";
+import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -22,7 +23,7 @@ import { createSessionJournals } from "../../src/domains/telemetry/session-journ
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import type { Model } from "../../src/engine/types.js";
-import { type ChatLoopEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
+import { type ChatLoop, type ChatLoopEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -49,8 +50,8 @@ afterEach(() => {
 	env.restore();
 });
 
-/** The first request asks for one tool call; any later request answers with text. */
-function transport() {
+/** The first `toolRounds` requests each ask for one tool call; any later request answers with text. */
+function transport(toolRounds = 1) {
 	let calls = 0;
 	const fetch: typeof globalThis.fetch = async () => {
 		calls += 1;
@@ -59,7 +60,7 @@ function transport() {
 			encoder.encode(
 				`data: ${JSON.stringify({ id: "fixture", object: "chat.completion.chunk", model: model.id, choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
 			);
-		const first = calls === 1;
+		const first = calls <= toolRounds;
 		const body = new ReadableStream<Uint8Array>({
 			start(controller) {
 				controller.enqueue(
@@ -67,7 +68,9 @@ function transport() {
 						first
 							? {
 									role: "assistant",
-									tool_calls: [{ index: 0, id: "record-1", type: "function", function: { name: "read", arguments: "{}" } }],
+									tool_calls: [
+										{ index: 0, id: `record-${calls}`, type: "function", function: { name: "read", arguments: "{}" } },
+									],
 								}
 							: { role: "assistant", content: "PONG" },
 					),
@@ -82,9 +85,8 @@ function transport() {
 	return { fetch, calls: () => calls };
 }
 
-it("a cap halt during a tool call lets the call finish and sends no further model request", {
-	timeout: 10_000,
-}, async () => {
+/** A real engine and session journal over the fixture wire, with `run` standing in for the read tool. */
+function fixture(toolRounds: number, run: (loop: ChatLoop, signal: AbortSignal | undefined) => Promise<void>) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	settings.chat.target = target.id;
@@ -102,29 +104,11 @@ it("a cap halt during a tool call lets the call finish and sends no further mode
 	const safety = context.getContract("safety");
 	ok(safety);
 	const registry = createRegistry({ safety, autonomy: () => "yolo" });
-	const wire = transport();
-	let loop: ReturnType<typeof createChatLoop> | null = null;
-	const tool = { started: false, completed: false, sawAbort: false };
-	registry.register({
-		name: ToolNames.Read,
-		description: "Stands in for an extension record write the cap crosses during",
-		parameters: Type.Object({}),
-		baseActionClass: "read",
-		async run(_args, options) {
-			tool.started = true;
-			// The window latches inside the call that crossed the line, as the orchestrator's onHalt does.
-			loop?.cancel({ reason: CAP_REASON, source: "autonomy", auditReason: "autonomous-cap", atToolBoundary: true });
-			await new Promise((resolve) => setTimeout(resolve, 20));
-			tool.sawAbort = options?.signal?.aborted === true;
-			tool.completed = true;
-			return { kind: "ok", output: "recorded" };
-		},
-	});
-	const events: ChatLoopEvent[] = [];
+	const wire = transport(toolRounds);
 	const journals = createSessionJournals(clioStateDir(), () => {
 		throw new Error("fixture journal unavailable");
 	});
-	loop = createChatLoop({
+	const loop: ChatLoop = createChatLoop({
 		telemetry: { acquireTelemetrySession: journals.acquire } as unknown as TelemetryContract,
 		getSettings: () => settings,
 		providers: context.getContract("providers") as ProvidersContract,
@@ -144,12 +128,55 @@ it("a cap halt during a tool call lets the call finish and sends no further mode
 					}),
 			}),
 	});
-	loop.onEvent((event) => {
+	registry.register({
+		name: ToolNames.Read,
+		description: "Stands in for an extension record write or a bash command a stop lands during",
+		parameters: Type.Object({}),
+		baseActionClass: "read",
+		async run(_args, options) {
+			await run(loop, options?.signal);
+			return { kind: "ok", output: "recorded" };
+		},
+	});
+	/** The session's journal once flushed, and the turns it settled. */
+	const journal = async () => {
+		await journals.flush();
+		const sessionId = session.current()?.id;
+		ok(sessionId);
+		const read = await readCallJournal(telemetrySessionDirectory(clioStateDir(), sessionId));
+		const settled = <K extends "turn.settled" | "call.settled">(k: K) =>
+			read.records.flatMap(({ record }) =>
+				record.k === k ? [record.data as Extract<typeof record, { k: K }>["data"]] : [],
+			);
+		return { sessionId, turns: settled("turn.settled"), calls: settled("call.settled") };
+	};
+	const close = async () => {
+		loop.dispose();
+		await loop.whenSettled();
+		await session.close();
+	};
+	return { loop, wire, journal, close };
+}
+
+it("a cap halt during a tool call lets the call finish and sends no further model request", {
+	timeout: 10_000,
+}, async () => {
+	const tool = { started: false, completed: false, sawAbort: false };
+	const f = fixture(1, async (loop, signal) => {
+		tool.started = true;
+		// The window latches inside the call that crossed the line, as the orchestrator's onHalt does.
+		loop.cancel({ reason: CAP_REASON, source: "autonomy", auditReason: "autonomous-cap", atToolBoundary: true });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		tool.sawAbort = signal?.aborted === true;
+		tool.completed = true;
+	});
+	const events: ChatLoopEvent[] = [];
+	f.loop.onEvent((event) => {
 		events.push(event);
 	});
 	try {
-		await loop.submit("Record the section.");
-		await loop.whenSettled();
+		await f.loop.submit("Record the section.");
+		await f.loop.whenSettled();
 		ok(tool.started);
 		ok(tool.completed);
 		strictEqual(tool.sawAbort, false);
@@ -157,7 +184,7 @@ it("a cap halt during a tool call lets the call finish and sends no further mode
 			(event) => event.type === "tool_execution_end" && (event as { toolCallId?: string }).toolCallId === "record-1",
 		) as { isError?: boolean } | undefined;
 		strictEqual(ended?.isError, false);
-		strictEqual(wire.calls(), 1);
+		strictEqual(f.wire.calls(), 1);
 		ok(
 			events.some((event) => event.type === "notice" && (event as { text?: string }).text === CAP_REASON),
 			"the turn closes with the cap's notice",
@@ -165,11 +192,7 @@ it("a cap halt during a tool call lets the call finish and sends no further mode
 		// The cap is the harness's own stop, named on the turn's settlement (bt-26 N2d). It landed at the tool
 		// boundary after the call ended, so no stage of that call reads as cut (bt-26 N2f), and why-stopped says
 		// so from that call's toolUse though the turn itself settles aborted (bt-26 N2g).
-		await journals.flush();
-		const sessionId = session.current()?.id;
-		ok(sessionId);
-		const journal = await readCallJournal(telemetrySessionDirectory(clioStateDir(), sessionId));
-		const turns = journal.records.flatMap(({ record }) => (record.k === "turn.settled" ? [record.data] : []));
+		const { sessionId, turns } = await f.journal();
 		deepStrictEqual(
 			turns.map((turn) => [turn.stopReason, turn.terminal.cause, turn.terminal.stage]),
 			[["aborted", "autonomy_stop", null]],
@@ -179,8 +202,46 @@ it("a cap halt during a tool call lets the call finish and sends no further mode
 		const findings = whyStopped(source).findings;
 		ok(findings.includes("The last turn stopped (aborted) on autonomy_stop at the tool boundary."), findings.join("\n"));
 	} finally {
-		loop.dispose();
-		await loop.whenSettled();
-		await session.close();
+		await f.close();
+	}
+});
+
+it("a headless --timeout during a tool after a steer settles the turn on shutdown with every call it opened", {
+	timeout: 10_000,
+}, async () => {
+	// The steer files its own user entry and moves the active turn id; the follow-up call the shutdown leaves unsent
+	// was leased under it, and the run's turn still settles with that call and its cause (bt-26 N2h).
+	let shuttingDown = false;
+	let rounds = 0;
+	const f = fixture(2, async (loop) => {
+		rounds += 1;
+		if (rounds === 1) ok(loop.steer("Also check the docs."));
+		else {
+			// A `run --timeout` deadline reaches the loop as the composition root's drain disposing it.
+			shuttingDown = true;
+			loop.dispose();
+		}
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	});
+	try {
+		const code = await runHeadlessMainAgent(f.loop, {
+			prompt: "Record the section.",
+			mode: "text",
+			shutdown: { onDrain() {}, getExitCode: () => (shuttingDown ? 124 : 0), isShuttingDown: () => shuttingDown },
+		});
+		strictEqual(code, 124);
+		strictEqual(f.wire.calls(), 2);
+		const { turns, calls } = await f.journal();
+		strictEqual(calls.length, 3);
+		deepStrictEqual(
+			[calls.at(-1)?.disposition, calls.at(-1)?.stop],
+			["never_sent", { reason: "aborted", failure: "shutdown" }],
+		);
+		deepStrictEqual(
+			turns.map((turn) => [turn.stopReason, turn.terminal.cause, turn.terminal.callIds]),
+			[["aborted", "shutdown", calls.map((call) => call.callId)]],
+		);
+	} finally {
+		await f.close();
 	}
 });
