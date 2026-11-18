@@ -61,6 +61,7 @@ export interface FinishedRun {
 		| "toolCalls"
 		| "tools"
 		| "blockedAttempts"
+		| "guardBlockedAttempts"
 		| "worktree"
 	>;
 	delivered: RunResultObject | null;

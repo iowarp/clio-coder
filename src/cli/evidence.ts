@@ -127,6 +127,11 @@ function renderEvidence(evidence: RunEvidence): void {
 		for (const baseline of evidence.quality.baselines)
 			write(`  baseline before the change (not judged): ${baseline.name} ${baseline.passed ? "passed" : "failed"}`);
 	}
+	const unclassified = evidence.unclassifiedAfterLastCheck;
+	if (unclassified) {
+		write(`unclassified after last check: ${unclassified.count}`);
+		for (const command of unclassified.commands) write(`  ran: ${command}`);
+	}
 	write(`tags: ${formatList(evidence.tags)}`);
 	// The compact projection answers the trust questions; the canonical axis line beneath it is the drill-down, in the
 	// same form the dispatch tool and monitor print.

@@ -74,6 +74,7 @@ async function fixture(tampered = false, task?: string, extra: Partial<RunResult
 	await settle({
 		...fixtureReceiptDraft(envelope),
 		validationGrounding: { claimed: 12, grounded: 1, ungrounded: ["typecheck"], basis: "no-command-executed" },
+		unclassifiedAfterLastCheck: { count: 2, commands: ["node codemod.mjs", "./gen.sh"] },
 		...extra,
 	});
 	if (tampered) await tamper(envelope.id);
@@ -127,6 +128,8 @@ describe("evidence tool", () => {
 		const run = await inspectRunEvidence(clioStateDir(), "fixture");
 		deepStrictEqual(inspected, JSON.parse(JSON.stringify(run)));
 		strictEqual(inspected.ungroundedClaims, 11);
+		// bt-15 c12a: the sealed record carries the receipt's unclassified disclosure, so inspect reads it back.
+		deepStrictEqual(inspected.unclassifiedAfterLastCheck, { count: 2, commands: ["node codemod.mjs", "./gen.sh"] });
 		ok(inspected.assessedAt !== null);
 		deepStrictEqual(inspected.verdicts, []);
 		const detail = await evidenceDetailSnapshot("fixture");
@@ -372,6 +375,7 @@ describe("evidence tool", () => {
 		await fixture(true);
 		const inspected = output(await evidence({ mode: "inspect", runId: "fixture" }));
 		strictEqual(inspected.ungroundedClaims, 0);
+		strictEqual(inspected.unclassifiedAfterLastCheck, undefined);
 		strictEqual(inspected.totals, null);
 		strictEqual(inspected.assessedAt, null);
 		strictEqual((await evidenceDetailSnapshot("fixture")).verdict, "compromised");

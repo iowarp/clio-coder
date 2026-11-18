@@ -702,6 +702,15 @@ export const RunHashSchema = Type.Object(
 	closed,
 );
 export type RunHash = Static<typeof RunHashSchema>;
+const SettledBlockedAttemptSchema = Type.Object(
+	{
+		tool: ExistingId,
+		actionClass: nullable(ExistingId),
+		ruleId: nullable(ExistingId),
+		reasonCode: nullable(ExistingId),
+	},
+	closed,
+);
 /**
  * A finished run's one persisted record (#434). Version 1. What the run delivered (its output, failure text, worktree
  * and check commands) is content, kept in the run scope's `run-result` object that `result` names, so the seal covers
@@ -855,19 +864,13 @@ export const RunSettledSchema = Type.Object(
 		),
 		/** What the provider reported about the model and gateway route of the run's calls, each distinct one once. */
 		upstream: Type.Object({ responseModelIds: nullable(text), gatewayRoutes: nullable(text) }, closed),
-		/** Tool calls safety refused, by tool, class and rule; the call's arguments and reason prose are not kept. */
-		blockedAttempts: Type.Array(
-			Type.Object(
-				{
-					tool: ExistingId,
-					actionClass: nullable(ExistingId),
-					ruleId: nullable(ExistingId),
-					reasonCode: nullable(ExistingId),
-				},
-				closed,
-			),
-			{ maxItems: 64 },
-		),
+		/**
+		 * Tool calls safety refused, by tool, class and rule; the call's arguments and reason prose are not kept. Records
+		 * written before `guardBlockedAttempts` existed list a tool guard's blocks here too.
+		 */
+		blockedAttempts: Type.Array(SettledBlockedAttemptSchema, { maxItems: 64 }),
+		/** Tool calls a tool guard held back, in the same shape; absent when none was and in older journals. */
+		guardBlockedAttempts: Type.Optional(Type.Array(SettledBlockedAttemptSchema, { maxItems: 64 })),
 		/** Permission escalations the run asked for and how they ended; null when none was asked. */
 		escalations: nullable(Type.Object({ requested: count, approved: count, denied: count, timedOut: count }, closed)),
 		/** Information-flow restrictions the run's context carried, which its consumers must keep (`flow-restrictions.ts`). */
@@ -950,6 +953,13 @@ export const RunSettledSchema = Type.Object(
 				},
 				closed,
 			),
+		),
+		/**
+		 * Calls the check classifier could not read that ran after the run's oldest standing check outcome, as the
+		 * receipt discloses them: the count and up to 5 redacted commands. Absent when none ran and in older journals.
+		 */
+		unclassifiedAfterLastCheck: Type.Optional(
+			Type.Object({ count, commands: Type.Array(diagnostic, { maxItems: 5 }) }, closed),
 		),
 		/** The isolated writer checkout's verdict; its path, branch and changed paths are in the result object. */
 		worktree: nullable(
