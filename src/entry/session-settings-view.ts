@@ -214,7 +214,13 @@ export function createSessionSettingsView(deps: SessionSettingsViewDeps) {
 			? (resolved.target.modelRuntime.thinking.effort ??
 				(resolved.target.effectiveThinkingLevel === "off" ? "none" : resolved.target.effectiveThinkingLevel))
 			: undefined;
-		appendSessionThinkingLevel(session, level, effort, session.leafId(meta.id));
+		appendSessionThinkingLevel(
+			session,
+			level,
+			effort,
+			session.leafId(meta.id),
+			resolved?.ok ? resolved.target.effectiveThinkingLevel : undefined,
+		);
 	};
 	// Recomputed on every read from live state, so a compaction summary that
 	// dropped a session-only route cannot change what Clio says about it (DF-7).

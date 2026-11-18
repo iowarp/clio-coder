@@ -1202,7 +1202,7 @@ export const RunEvidenceSchema = Type.Object(
 								claimed: count,
 								grounded: count,
 								ungrounded: Type.Array(text),
-								basis: vocabulary(["grounded", "no-command-executed", "unmatched-command"]),
+								basis: vocabulary(["grounded", "no-command-executed", "unmatched-command", "unattributable-status"]),
 							},
 							closed,
 						),

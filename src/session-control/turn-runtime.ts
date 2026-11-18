@@ -684,6 +684,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		persistence.appendThinkingLevelChangeEntry(
 			requestedThinkingLevel,
 			target.runtimeResolution.modelRuntime.thinking.effort ?? target.runtimeResolution.effectiveThinkingLevel,
+			target.runtimeResolution.effectiveThinkingLevel,
 		);
 		if (
 			state.runtime &&
