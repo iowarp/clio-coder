@@ -47,9 +47,12 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - Astra r9-5: with no `cache.warm.maxInputTokens` set, the pre-warm input budget is 16,384 tokens, capped at the model's window (8,192 when the window is unknown), so the first attended prompt warms.
 - Astra r9-6: the repetition detector resets on each streamed message instead of each partial object, so a long reply is checked about a hundredth as often.
 - Astra r9-3: the attached gateway schema shows a known edit and its verify as one chain, which saves a round when the model uses it.
+- Astra r10-6: `/export` shows an "exporting" notice at once and writes the file asynchronously; rendering a long session still holds input briefly.
 
 ### Fixed
 
+- Astra r10-2: the fleet board no longer rereads every running worker's run scope and re-projects its rows several times on each frame.
+- Astra r10-3: the footer reads the main route's first-output history only when the long-silence note prints it, instead of on every refresh.
 - Astra r9-1: a failed `/context` operation no longer rewrites the system prompt and breaks the prompt cache; the fact arrives once in the turn reminder.
 - Astra r9-4: a completed task that left no command receipt or read excerpt settles its lesson retention without a model call, so headless exit no longer waits on one.
 - A1 (F-C13 residual): a successful call that may have changed state resets the identical-call count of every other call, so read, write, read of a desk record is admitted while three reads with nothing between are still blocked. Write, edit, any bash command that is not a plain read, and any extension tool not declared read-only count.
