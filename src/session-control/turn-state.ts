@@ -273,7 +273,7 @@ export interface ChatTurnState {
 	 * Cleared with `synthesisToolLock`.
 	 */
 	toolBudgetLock: boolean;
-	/** Re-prompts spent this operator turn for tool calls the model only wrote out (`claimToolMarkupReprompt`). */
+	/** Consecutive re-prompts this operator turn for tool calls the model only wrote out (`claimToolMarkupReprompt`). */
 	toolMarkupReprompt: ToolMarkupRepromptBudget | null;
 	/** Continuation requests, carries and stops; written only through its methods. */
 	readonly continuation: ContinuationState;
