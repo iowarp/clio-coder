@@ -332,24 +332,29 @@ export function turnSettlementFromCalls(
 	) as EventPayload<"turn.settled">["stopReason"];
 	const last = calls.at(-1);
 	const stages = last?.stages;
+	const cause = (reason === "error" || reason === "aborted" ? last?.stop.failure : undefined) ?? fallbackCause ?? null;
+	// A stop that landed after the final call ended, at its tool boundary, struck no stage of that call (bt-26 N2f).
+	const betweenCalls =
+		cause !== null && last !== undefined && last.stop.reason !== "aborted" && last.stop.reason !== "error";
 	return {
 		stopReason: reason,
 		terminal: {
-			cause: (reason === "error" || reason === "aborted" ? last?.stop.failure : undefined) ?? fallbackCause ?? null,
+			cause,
 			// A call that streamed thinking or text reached past its first token, so it settles as streaming (bt-26 N2a).
-			stage: !stages
-				? null
-				: stages.firstToken !== undefined
-					? "streaming"
-					: stages.send
-						? "send"
-						: stages.admission
-							? "admission"
-							: stages.auth
-								? "auth"
-								: stages.transform
-									? "transform"
-									: null,
+			stage:
+				!stages || betweenCalls
+					? null
+					: stages.firstToken !== undefined
+						? "streaming"
+						: stages.send
+							? "send"
+							: stages.admission
+								? "admission"
+								: stages.auth
+									? "auth"
+									: stages.transform
+										? "transform"
+										: null,
 			retries: Math.max(0, Math.trunc(retries)),
 			callIds: [...new Set(calls.map((call) => call.callId))],
 		},
