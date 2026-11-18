@@ -223,7 +223,7 @@ test("observed checks follow the receipt's rules on the task board and the headl
 	deepStrictEqual(standing(bash("! npm test")), []);
 	deepStrictEqual(standing(bash("npm test", 1), bash("! npm test")), [["npm test", false, "test"]]);
 	deepStrictEqual(standing(bash("npm test 2>&1 | tee /tmp/t.log")), [["npm test", true, "test"]]);
-	deepStrictEqual(standing(bash("npm test"), bash("npm test | tee src/a.ts")), []);
+	deepStrictEqual(standing(bash("npm test"), bash("npm test | tee src/a.py")), []);
 	deepStrictEqual(standing(bash("make test -C ../other")), []);
 	// The recorder's check vocabulary: a read-only check retires nothing, a writer retires every pass and lands none (x5-1).
 	deepStrictEqual(standing(bash("npm test"), bash("npx tsc --noEmit")), [

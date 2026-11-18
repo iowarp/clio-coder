@@ -4,6 +4,7 @@ import type { ObservedCheck } from "../session/task-board.js";
 import { capabilityEntries, dispatchRunRecordEvidence, validationCheckId } from "./finish-contract.js";
 import {
 	type CallReading,
+	type CheckOutputReader,
 	callRunsCheck,
 	checkOutputReader,
 	gitRunsConfiguredHelpers,
@@ -58,7 +59,7 @@ function trackCall(
 	args: Record<string, unknown> | undefined,
 	root: string,
 	gitHelpers: boolean,
-	outputTarget: (base: string) => (target: string) => boolean,
+	outputTarget: CheckOutputReader,
 	revision: number,
 ): TrackedCall {
 	const canonical = validationCommandOf(tool, args, "grounding");
@@ -131,21 +132,23 @@ export function standingChecks(
 	boardId: string,
 	taskId: string,
 	workspaceRoot: string,
+	scratchRoots: ReadonlyArray<string> = [],
 ): ReadonlyArray<ObservedCheck> {
 	const start = workWindowStart(entries, boardId, taskId);
 	if (start === -1) return [];
-	return standingChecksFrom(entries, start, workspaceRoot);
+	return standingChecksFrom(entries, start, workspaceRoot, scratchRoots);
 }
 
-/** The same fold over any stretch of the session path, from `start` on. */
+/** The same fold over any stretch of the session path, from `start` on; `scratchRoots` is `safety.scratchRoots`. */
 export function standingChecksFrom(
 	entries: ReadonlyArray<unknown>,
 	start: number,
 	workspaceRoot: string,
+	scratchRoots: ReadonlyArray<string> = [],
 ): ReadonlyArray<ObservedCheck> {
 	const root = path.resolve(workspaceRoot);
 	const gitHelpers = gitRunsConfiguredHelpers(root);
-	const outputTarget = checkOutputReader(root);
+	const outputTarget = checkOutputReader(root, process.env, scratchRoots);
 	const calls = new Map<string, TrackedCall>();
 	const standing = new Map<string, ObservedCheck>();
 	let revision = 0;
@@ -158,6 +161,7 @@ export function standingChecksFrom(
 			call.revision === revision,
 		);
 		if (settlement.mutation) {
+			outputTarget.changed(call.reading.changedPaths);
 			revision += 1;
 			for (const [name, item] of standing) if (item.passed) standing.delete(name);
 		}

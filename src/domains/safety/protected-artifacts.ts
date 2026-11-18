@@ -1307,19 +1307,43 @@ function sedOnlyReads(args: ReadonlyArray<string>): boolean {
 
 /**
  * A sed script made only of commands that print, edit the pattern space or branch. `w`, `W`, `e`, `r`, `R`, an `s`
- * flagged `w` or `e`, and anything this cannot parse answer false. A bracket expression may hold the delimiter
- * (`s/[/]/x/w out`), which the delimiter scan below does not model, so any `[` answers false (x4-3).
+ * flagged `w` or `e`, and anything this cannot parse answer false. A bracket expression in a regex may hold the
+ * delimiter (`s/[/]/x/w out`, x4-3), so the scan steps over it whole (x5-5); an unclosed one answers false.
  */
 function sedScriptOnlyReads(script: string): boolean {
-	if (script.includes("[")) return false;
 	let index = 0;
 	const at = () => script[index] ?? "";
 	const skip = (pattern: RegExp) => {
 		while (index < script.length && pattern.test(at())) index += 1;
 	};
-	const closes = (delimiter: string): boolean => {
+	// Past a bracket expression's `]`. A leading `]` (after an optional `^`) is literal, `[:class:]`, `[.x.]` and
+	// `[=x=]` nest, and a backslash inside is literal, as GNU sed reads it.
+	const bracket = (): boolean => {
+		index += 1;
+		if (at() === "^") index += 1;
+		if (at() === "]") index += 1;
 		while (index < script.length) {
 			const char = at();
+			const kind = script[index + 1] ?? "";
+			if (char === "]") {
+				index += 1;
+				return true;
+			}
+			if (char === "[" && ".:=".includes(kind) && kind !== "") {
+				const end = script.indexOf(`${kind}]`, index + 2);
+				if (end < 0) return false;
+				index = end + 2;
+			} else index += 1;
+		}
+		return false;
+	};
+	const closes = (delimiter: string, regex = true): boolean => {
+		while (index < script.length) {
+			const char = at();
+			if (regex && char === "[" && char !== delimiter) {
+				if (!bracket()) return false;
+				continue;
+			}
 			index += char === "\\" ? 2 : 1;
 			if (char === delimiter) return true;
 		}
@@ -1355,7 +1379,7 @@ function sedScriptOnlyReads(script: string): boolean {
 			const delimiter = at();
 			if (delimiter === "" || delimiter === "\\" || delimiter === "\n") return false;
 			index += 1;
-			if (!closes(delimiter) || !closes(delimiter)) return false;
+			if (!closes(delimiter, command === "s") || !closes(delimiter, false)) return false;
 			// `w` and `e` stop here and parse next as a command, which refuses them.
 			if (command === "s") skip(/[gpiImM0-9]/u);
 		} else if (command === "b" || command === "t" || command === "T" || command === ":" || command === "#")
@@ -1657,6 +1681,29 @@ export function checkCommandShape(
 	return handsOver ? "after-change" : "mixed";
 }
 
+/**
+ * The targets only a check pipeline's own output stream writes (x5-4): a `tee` stage after the check and the last
+ * stage's redirects, so `npm test 2>&1 | tee out.txt` and `npm test > out.txt 2>&1` name `out.txt`. Whether such a
+ * target is output and not a change is the caller's call.
+ */
+export function checkLogTargets(command: string): ReadonlySet<string> {
+	const logs = new Set<string>();
+	let checked = false;
+	for (const step of shellSteps(scanShellLike(command))) {
+		checked ||= isCheckStep(step);
+		const argv = step.index === null ? [] : step.argv.slice(step.index);
+		if (checked && basenameToken(argv[0]) === "tee") for (const target of pathArgs(argv, 0)) logs.add(target);
+		if (step.joinedBy === "|") continue;
+		if (checked) {
+			const writes: string[] = [];
+			collectRedirectTargets(step.tokens, writes);
+			for (const target of writes) logs.add(target);
+		}
+		checked = false;
+	}
+	return logs;
+}
+
 /** Flags that turn a linter or formatter into a writer of the files it checks. */
 const TREE_WRITING_FLAGS: ReadonlySet<string> = new Set(["--fix", "--write"]);
 /** Formatters whose `-w` writes the files back; elsewhere `-w` names a workspace or a warning filter. */
@@ -1784,6 +1831,19 @@ const CHECK_DIRECTORY_OPTIONS: ReadonlySet<string> = new Set([
 /** Runners whose positional operands are the paths they collect tests from. */
 const PATH_OPERAND_RUNNERS: ReadonlySet<string> = new Set(["pytest", "py.test", "jest", "vitest", "mocha", "go"]);
 
+const GO_VALUE_OPTIONS = ["-run", "-bench", "-skip", "-tags", "-timeout", "-count", "-cpu", "-parallel", "-p"];
+const JEST_VALUE_OPTIONS = ["-t", "--testNamePattern"];
+const PYTEST_VALUE_OPTIONS = ["-k", "-m", "-p", "-o", "-W"];
+
+/** Each runner's options whose separate next argument is a value (a test name, a regex), not a path operand (x5-3). */
+const RUNNER_VALUE_OPTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+	["go", new Set([...GO_VALUE_OPTIONS, "-coverprofile", "-covermode", "-o"])],
+	["jest", new Set(JEST_VALUE_OPTIONS)],
+	["vitest", new Set(JEST_VALUE_OPTIONS)],
+	["pytest", new Set(PYTEST_VALUE_OPTIONS)],
+	["py.test", new Set(PYTEST_VALUE_OPTIONS)],
+]);
+
 /**
  * Whether a check step's own directory options (`npm test --prefix ../x`, `make -C ../x`, `cargo test --manifest-path
  * ../x/Cargo.toml`) or a test runner's path operands (`pytest ../x`) reach outside `root` from `directory` (x4-4). The
@@ -1793,7 +1853,9 @@ const PATH_OPERAND_RUNNERS: ReadonlySet<string> = new Set(["pytest", "py.test", 
 function checkReachesOutside(argv: ReadonlyArray<string>, directory: string, root: string): boolean {
 	const [executable, ...args] = argv;
 	const module = args.indexOf("-m");
-	const operands = PATH_OPERAND_RUNNERS.has(basenameToken(executable)) || (module >= 0 && args[module + 1] === "pytest");
+	const runner = module >= 0 && args[module + 1] === "pytest" ? "pytest" : basenameToken(executable);
+	const operands = PATH_OPERAND_RUNNERS.has(runner);
+	const values = RUNNER_VALUE_OPTIONS.get(runner);
 	const targets: string[] = [];
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index] ?? "";
@@ -1805,6 +1867,7 @@ function checkReachesOutside(argv: ReadonlyArray<string>, directory: string, roo
 			if (equals < 0) index += 1;
 			if (option === "--manifest-path" && target !== undefined) target = path.dirname(target);
 		} else if (/^-C[^-]/u.test(arg)) target = arg.slice(2);
+		else if (values?.has(arg)) index += 1;
 		else if (operands && !arg.startsWith("-") && equals < 0) target = arg.split("::")[0];
 		if (target !== undefined) targets.push(target);
 	}

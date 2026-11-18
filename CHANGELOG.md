@@ -104,6 +104,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- `go test -run '^TestX$' ./pkg` and other runner option values (jest/vitest `-t`, pytest `-k`) no longer read as a check run outside the workspace, so their green verifies and clears an earlier red (x5-3).
+- A check logged to `$TMPDIR/…`, `~/…`, a `safety.scratchRoots` directory, or a new untracked file through its own tee or redirect is output, not a change; its green verifies and no longer wipes earlier passes (x5-4).
+- A read-only `sed -n` script with a bracket expression (`/^[[:space:]]*x/p`) stays a read and no longer erases standing check outcomes (x5-5).
 - bt-32: A catalog row whose rates are all zero, such as Inception mercury-3, now reads as unknown cost (pricedBy none) instead of a catalog-priced ~$0.00, so a paid route no longer looks free to cost caps and telemetry. OpenRouter `:free` models keep their catalog $0.
 - bt-39: Clio Coder stops a response that streams the same tool call five or more times and re-prompts it once to make one call.
 - bt-26 N2: A reply cut off by `run --timeout`, a signal or quitting is recorded as Clio Coder's shutdown, with cause `shutdown`, instead of a failure of the route.

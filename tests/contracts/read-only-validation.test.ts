@@ -764,7 +764,7 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	deepStrictEqual(seal("npm test", "npm test && node codemod.mjs"), stale);
 	deepStrictEqual(seal("npm test", "pytest; git stash pop"), stale);
 	deepStrictEqual(seal("npm test", "npm ci | npm test"), stale);
-	deepStrictEqual(seal("npm test", "npm test > log.txt"), stale);
+	deepStrictEqual(seal("npm test", "npm test > package.json"), stale);
 	// A check that rewrites the tree is a change, in bash or verify (x3-3).
 	deepStrictEqual(seal("npm test", "npm run lint:fix"), stale);
 	deepStrictEqual(seal("npm test && npm run format"), stale);
@@ -795,7 +795,15 @@ it("a check sharing its bash call with a change judges the final tree only when 
 		"unverified",
 		["pytest"],
 	]);
+	// A home or scratch log, or an untracked one only the check's own pipeline writes, is output too (x5-4).
+	deepStrictEqual(seal("npm run lint", "npm test 2>&1 | tee ~/t.txt", "npm test > test-output.txt 2>&1"), [
+		["npm run lint", "npm test"],
+		"verified",
+		[],
+	]);
+	// A file the run itself changed, or one a step other than the check writes, stays a change.
 	deepStrictEqual(seal("npm test", "npm test | tee src/a.ts"), stale);
+	deepStrictEqual(seal("npm test", "npm test && cat package.json > notes.txt"), stale);
 	// Shell setup changes no tree, so a standing red stands beside a narrower green (x3-1).
 	for (const setup of ["source .venv/bin/activate", "export CI=1"])
 		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [["npm test"], "unverified", ["npm test"]]);
@@ -807,8 +815,15 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	deepStrictEqual(seal("cd /elsewhere && npm test"), stale);
 	deepStrictEqual(seal("cd pkg/.. && npm test"), green);
 	// A check's own directory option or test path operand can leave the workspace too; root containment decides (x4-4).
-	for (const outside of ["npm test --prefix ../other", "make test -C ../other", "pytest ../other"])
+	for (const outside of [
+		"npm test --prefix ../other",
+		"make test -C ../other",
+		"pytest ../other",
+		"go test -run X ../o",
+	])
 		deepStrictEqual(seal(outside), stale, outside);
+	// A runner option's value is a test name, not a path, so its regex anchor reads inside and a green rerun clears a red.
+	deepStrictEqual(seal("!go test -run '^TestA$' ./pkg", "go test -run '^TestA$' ./pkg"), [["go test"], "verified", []]);
 	deepStrictEqual(seal("npm test --prefix packages/a"), green);
 	// A subshell or pushd cd ends at its `)` or popd, and `) &&` hands its status on, so a red there stands (x4-7).
 	deepStrictEqual(seal("(cd ../lib && make) && npm test"), green);
@@ -878,6 +893,8 @@ it("read-only inspection refuses helpers that write the tree or run another prog
 		"git diff",
 		"git log -p",
 		"sed -n 1,80p a.ts",
+		// A bracket expression with no write behind it reads (x5-5).
+		"sed -n '/^[[:space:]]*export/p' a.ts",
 		"awk '{print $1}' a.ts",
 		"sort --reverse --key=2 a.ts",
 	])
