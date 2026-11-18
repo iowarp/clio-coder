@@ -6,12 +6,16 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
+import { requestFits } from "../../src/domains/context/budget/request-fit.js";
+import { createWorkerContextGuard, WorkerContextExhaustedError } from "../../src/domains/context/worker/pressure.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
+import { estimateAgentContextBreakdown } from "../../src/domains/session/context-accounting.js";
 import {
 	recommendedOutputTokens,
-	resolvePressureOutputReserve,
+	requestOutputReserve,
 	setGlobalDefaultMaxOutputTokens,
 } from "../../src/engine/apis/output-budget.js";
+import type { AgentMessage } from "../../src/engine/types.js";
 import { startWorkerRun, type WorkerRunHandle } from "../../src/engine/worker-runtime.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -97,22 +101,51 @@ for (const scenario of scenarios) {
 	});
 }
 
-test("worker pressure reserve leaves input room under a window-sized recommendation (D5)", () => {
-	// A profile recommending the whole serving window must not collapse the pressure ceiling.
-	setGlobalDefaultMaxOutputTokens(0);
+test("worker pressure admits what main-loop admission admits and keeps input room under a window-sized recommendation (D5, D1-5)", () => {
+	const user = (chars: number): AgentMessage => ({
+		role: "user",
+		content: [{ type: "text", text: "x".repeat(chars) }],
+		timestamp: 0,
+	});
+	const admits = (model: { api: string }, window: number, messages: AgentMessage[]): boolean => {
+		try {
+			createWorkerContextGuard(() => "unused")({
+				messages,
+				systemPrompt: "",
+				tools: [],
+				contextWindow: window,
+				outputReserve: (tokens) => requestOutputReserve(model, undefined, window, tokens),
+			});
+			return true;
+		} catch (error) {
+			if (error instanceof WorkerContextExhaustedError) return false;
+			throw error;
+		}
+	};
 	try {
+		// A profile recommending the whole serving window must not collapse the pressure ceiling (D5).
+		setGlobalDefaultMaxOutputTokens(0);
+		const wide = { api: "openai-completions", clioCoder: { quirks: { outputTokens: 131072 } } };
+		strictEqual(recommendedOutputTokens(wide, 131072), 65536);
+		ok(admits(wide, 131072, [user(40_000)]), "a 10K-token request must fit a 131072-token window");
+		// On a wire-clamped transport the worker admits exactly what the main loop's fit check admits (D1-5);
+		// a fixed quarter-window reserve used to refuse a 100K-token fork the parent had admitted.
+		const model = { api: "openai-completions" };
 		const window = 131072;
-		const model = { clioCoder: { quirks: { outputTokens: window } } };
-		const recommended = recommendedOutputTokens(model, window);
-		strictEqual(recommended, 65536);
-		const reserve = resolvePressureOutputReserve(
-			undefined,
-			{ api: "openai-completions", contextWindow: window },
-			recommended,
-		);
-		strictEqual(reserve, 32768);
-		const ceiling = Math.min(Math.floor(window * 0.8), window - reserve);
-		ok(ceiling > 10_000, `pressure ceiling ${ceiling} leaves no room for 10K input`);
+		let admittedAboveFixedReserve = false;
+		for (const chars of [392_000, 400_000, 416_000, 424_000]) {
+			const messages = [user(chars)];
+			const tokens = Object.values(estimateAgentContextBreakdown({ systemPrompt: "", tools: [], messages })).reduce(
+				(sum, value) => sum + value,
+				0,
+			);
+			const parent =
+				tokens <= Math.floor(window * 0.8) &&
+				requestFits(tokens, requestOutputReserve(model, undefined, window, tokens), window);
+			strictEqual(admits(model, window, messages), parent, `${tokens}-token request`);
+			if (parent && tokens > window - window / 4) admittedAboveFixedReserve = true;
+		}
+		ok(admittedAboveFixedReserve, "the worker still reserves the full output budget the wire would clamp");
 	} finally {
 		setGlobalDefaultMaxOutputTokens(DEFAULT_SETTINGS.chat.maxOutputTokens);
 	}

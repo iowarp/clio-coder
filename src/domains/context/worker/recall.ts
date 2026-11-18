@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { clioStateDir } from "../../../core/xdg.js";
 import type { AgentMessage } from "../../../engine/types.js";
+import { workerObservationsDirectory } from "./observation-retention.js";
 import { contextHash } from "./snapshot.js";
 
 export type WorkerRecallResult =
@@ -10,8 +11,11 @@ export type WorkerRecallResult =
 	| { body: string; total: number; shown: number; nextOffset?: number };
 export type WorkerRecall = (args: Record<string, unknown>) => WorkerRecallResult;
 
-/** The in-memory allowlist is the capability. A ref never grants arbitrary file or parent-ledger access. */
-export function createWorkerObservationStore(): {
+/**
+ * The in-memory allowlist is the capability. A ref never grants arbitrary file or parent-ledger access. A dispatched
+ * worker archives under its run id, so retention can key the archives on that run (D1-5).
+ */
+export function createWorkerObservationStore(runId?: string): {
 	archive(ref: string, message: AgentMessage): string;
 	recall: WorkerRecall;
 } {
@@ -19,7 +23,7 @@ export function createWorkerObservationStore(): {
 	return {
 		archive(ref, message) {
 			if (contextHash(message) !== ref) throw new Error("worker context: observation digest mismatch");
-			const file = join(clioStateDir(), "context-observations", `${ref}.json`);
+			const file = join(workerObservationsDirectory(clioStateDir(), runId), `${ref}.json`);
 			safeResourceWrite(file, `${JSON.stringify(message)}\n`, { mode: 0o600 });
 			records.set(`worker:${ref}`, { file, label: message.role === "toolResult" ? message.toolName : message.role });
 			return file;

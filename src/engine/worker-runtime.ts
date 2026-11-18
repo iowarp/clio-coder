@@ -23,7 +23,7 @@ import { confirmationRuleOf } from "../domains/safety/decision-events.js";
 import type { WorkerFlowPolicyInput } from "../domains/safety/information-flow.js";
 import { seededWorkerMessages } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
-import { recommendedOutputTokens, resolvePressureOutputReserve } from "./apis/output-budget.js";
+import { requestOutputReserve } from "./apis/output-budget.js";
 import { resolvedRequestContext } from "./context.js";
 import { disableCopilotConversationResume } from "./copilot/session-fs.js";
 import { retryStreamOnceOnAuthRejection } from "./oauth-retry-stream.js";
@@ -876,7 +876,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				}
 			: {}),
 	});
-	const observations = createWorkerObservationStore();
+	const observations = createWorkerObservationStore(input.telemetryContext?.runId);
 	// Run-scoped ledger: the inherited set plus what this run's reads add. It
 	// lives in memory only; every growth is reported to the parent at once and
 	// sealed in the receipt, so the parent's session ledger absorbs it before
@@ -1427,11 +1427,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					currentModel,
 				).threshold,
 				autoEvict: workerSettings.context.compaction.auto && workerSettings.context.workingSet.enabled,
-				outputReserve: resolvePressureOutputReserve(
-					currentModel.maxTokens,
-					{ api: currentModel.api, contextWindow: window },
-					recommendedOutputTokens(currentModel, window),
-				),
+				outputReserve: (inputTokens: number) =>
+					requestOutputReserve(currentModel, currentModel.maxTokens, window, inputTokens),
 			};
 			let messages: AgentMessage[];
 			try {

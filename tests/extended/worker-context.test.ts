@@ -215,7 +215,7 @@ test("worker guard ignores inherited usage and refuses an oversized first fork w
 		throw new Error("must not archive");
 	});
 	deepStrictEqual(
-		guard({ messages, systemPrompt: "worker", tools: [], contextWindow: 4000, outputReserve: 500 }),
+		guard({ messages, systemPrompt: "worker", tools: [], contextWindow: 4000, outputReserve: () => 500 }),
 		messages,
 	);
 	const fresh = createWorkerContextGuard(() => "archive");
@@ -226,7 +226,7 @@ test("worker guard ignores inherited usage and refuses an oversized first fork w
 				systemPrompt: "worker",
 				tools: [],
 				contextWindow: 1000,
-				outputReserve: 200,
+				outputReserve: () => 200,
 			}),
 		/initial request/,
 	);
@@ -238,7 +238,7 @@ test("worker pressure evicts by completed rounds, preserves raw results, and kee
 		archived.push(message);
 		return "/evidence/result.json";
 	});
-	const input = { systemPrompt: "worker", tools: [], contextWindow: 5000, outputReserve: 500 };
+	const input = { systemPrompt: "worker", tools: [], contextWindow: 5000, outputReserve: () => 500 };
 	const initial = [user("task")];
 	guard({ ...input, messages: initial });
 	const messages = [
@@ -358,7 +358,7 @@ test("worker recall admits only this run's evictions, checks persisted digests, 
 
 test("provider usage reconciliation stays stable after eviction and disabled eviction fails explicitly", () => {
 	const guard = createWorkerContextGuard(() => "/observation.json");
-	const input = { systemPrompt: "worker", tools: [], contextWindow: 10000, outputReserve: 500 };
+	const input = { systemPrompt: "worker", tools: [], contextWindow: 10000, outputReserve: () => 500 };
 	const initial = [user("task")];
 	guard({ ...input, messages: initial });
 	const middle = [

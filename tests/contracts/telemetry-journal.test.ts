@@ -88,12 +88,13 @@ import {
 	applyTelemetryPrune,
 	DEFAULT_PRUNE_POLICY,
 	planTelemetryPrune,
+	sweepTelemetryDaily,
 } from "../../src/domains/telemetry/retention.js";
 import { readTelemetryScopeFiles, verifyTelemetryScope } from "../../src/domains/telemetry/seal.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { isReceiptBearingFrame } from "../../src/worker/protocol.js";
 import { checkTelemetryProducer, checkTelemetryWrites } from "../boundaries/check-boundaries.js";
-import { measuredRunSpend } from "../harness/receipt.js";
+import { fixtureEnvelope, measuredRunSpend } from "../harness/receipt.js";
 import { isolateClioEnv, scratchClioEnvVars } from "../harness/scratch-env.js";
 
 const context = { sessionId: "journal-session", agent: { role: "main" as const, id: "journal-session" } };
@@ -1018,6 +1019,41 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 		);
 		strictEqual(existsSync(expired), false, "the expired session keeps no telemetry, not even its directory");
 		deepStrictEqual(await readdir(join(keptDirectory, "objects")), [`${structure.id}.json`]);
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("the daily sweep ages out worker observation archives on the run journals' retention, keyed on their run (D1-5)", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "worker-observations-prune-"));
+	const nowMs = Date.parse("2026-12-01T00:00:00.000Z");
+	const day = 24 * 60 * 60 * 1000;
+	const old = new Date(nowMs - (DEFAULT_PRUNE_POLICY.days + 1) * day);
+	const root = join(stateDir, "context-observations");
+	const archive = async (directory: string, digit: string, aged: boolean) => {
+		await mkdir(directory, { recursive: true });
+		const file = join(directory, `${digit.repeat(64)}.json`);
+		await writeFile(file, "{}\n");
+		if (aged) await utimes(file, old, old);
+		return file;
+	};
+	try {
+		await mkdir(join(stateDir, "telemetry"), { recursive: true });
+		const ended = fixtureEnvelope("run-ended");
+		const live = { ...fixtureEnvelope("run-live"), status: "running" as const, endedAt: null };
+		const recent = { ...fixtureEnvelope("run-recent"), endedAt: new Date(nowMs - day).toISOString() };
+		await writeFile(join(stateDir, "runs.json"), JSON.stringify([ended, live, recent]));
+		const endedFresh = await archive(join(root, "run-ended"), "a", false);
+		const liveOld = await archive(join(root, "run-live"), "b", true);
+		const recentOld = await archive(join(root, "run-recent"), "c", true);
+		const unknownOld = await archive(join(root, "run-gone"), "d", true);
+		const unknownFresh = await archive(join(root, "run-gone"), "e", false);
+		const legacyOld = await archive(root, "f", true);
+		const legacyFresh = await archive(root, "0", false);
+		ok(await sweepTelemetryDaily(stateDir, { nowMs }));
+		for (const kept of [liveOld, recentOld, unknownFresh, legacyFresh]) ok(existsSync(kept), `${kept} kept`);
+		for (const gone of [endedFresh, unknownOld, legacyOld]) ok(!existsSync(gone), `${gone} removed`);
+		ok(!existsSync(join(root, "run-ended")));
 	} finally {
 		await rm(stateDir, { recursive: true, force: true });
 	}

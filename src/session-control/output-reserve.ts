@@ -20,11 +20,7 @@
  */
 
 import { runOverrides } from "../core/run-overrides.js";
-import {
-	configuredMaxOutputTokens,
-	recommendedOutputTokens,
-	resolveReservedOutputTokens,
-} from "../engine/apis/output-budget.js";
+import { configuredMaxOutputTokens, requestOutputReserve } from "../engine/apis/output-budget.js";
 import type { AgentRuntime } from "./turn-state.js";
 
 type ReserveRuntime = {
@@ -38,17 +34,11 @@ export function resolveTurnOutputReserve(agentRuntime: ReserveRuntime, inputToke
 	// resolver's own "no advertised limit" case, which falls back to the
 	// configured budget and then the product floor, rather than a crash on a path
 	// that now runs during ordinary accounting.
-	return resolveReservedOutputTokens(
+	return requestOutputReserve(
+		agentRuntime.agent.state.model,
 		agentRuntime.runtimeResolution.capabilityDecisions?.maxTokens,
-		{
-			api: agentRuntime.agent.state.model?.api ?? "",
-			contextWindow: agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
-			inputTokens,
-		},
-		recommendedOutputTokens(
-			agentRuntime.agent.state.model,
-			agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
-		),
+		agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
+		inputTokens,
 	);
 }
 
