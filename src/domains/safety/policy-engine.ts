@@ -3473,6 +3473,7 @@ function gateDecision(
 	};
 	if (base.posture !== undefined) rejectionInput.posture = base.posture;
 	if (input.ruleId !== undefined) rejectionInput.ruleId = input.ruleId;
+	if (input.reasonCode.startsWith(YOLO_FLOOR_REASON_PREFIX)) rejectionInput.floor = true;
 	const rejection = formatRejection(rejectionInput);
 	return { ...base, ...input, kind, rejection };
 }

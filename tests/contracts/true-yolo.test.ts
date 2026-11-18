@@ -1475,6 +1475,8 @@ test("the raw-text reading follows a literal cd, joins and decodes its words, an
 	strictEqual(over.kind, "block");
 	strictEqual(over.ruleId, "yolo-floor-raw-text");
 	match(over.reasons.join("\n"), /too large to read that way/u);
+	// The headline names the floor rule that fired, not the classifier's action class.
+	strictEqual(over.rejection?.short, "bash blocked: yolo-floor-raw-text in yolo");
 	// A # beside a backtick, with no $( on the line, is not read as raw text.
 	strictEqual(
 		judge("git commit -m 'fix(cli): `clio-coder configure` keeps the saved route' -m 'fixes #412'").kind,

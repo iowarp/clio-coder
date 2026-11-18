@@ -11,6 +11,8 @@ export interface RejectionContext {
 	posture?: string;
 	reasons: ReadonlyArray<string>;
 	ruleId?: string;
+	/** A yolo floor block: the short form names the floor rule that fired, not the call's action class. */
+	floor?: true;
 }
 
 export interface RejectionMessage {
@@ -23,7 +25,8 @@ const HARD_BLOCK_CLASSES: ReadonlyArray<string> = ["git_destructive"];
 
 function buildShort(ctx: RejectionContext): string {
 	const postureSuffix = ctx.posture ? ` in ${ctx.posture}` : "";
-	return `${ctx.tool} blocked: ${ctx.actionClass}${postureSuffix}`;
+	const subject = ctx.floor === true && ctx.ruleId !== undefined ? ctx.ruleId : ctx.actionClass;
+	return `${ctx.tool} blocked: ${subject}${postureSuffix}`;
 }
 
 function buildDetail(ctx: RejectionContext): string {
