@@ -1255,6 +1255,40 @@ it("a read-only inline python script or jq keeps a pass undisclosed; one that wr
 		deepStrictEqual(after(command), { standing: [], unclassifiedAfterLastCheck: [] }, command);
 });
 
+it("a probe importing the workspace's module, `exit 0; npm test` and `cd pkg; npm test` leave a standing pass (bt-c17a a, d)", () => {
+	const after = (command: string) => {
+		const recorder = createRunEffectsRecorder(process.cwd());
+		for (const [id, line] of [
+			["test", "npm test"],
+			["probe", command],
+		] as const) {
+			recorder.start(id, "bash", { command: line });
+			recorder.checkOutcome(id, "ok");
+			recorder.finish(id, false);
+		}
+		return [...recorder.snapshot().validationCommands];
+	};
+	// Importing the module under test runs its code, so the probe is unknown: it neither settles nor retires the pass.
+	for (const command of [
+		`python3 -c "from textutil import slugify; print(slugify('Hello, World!'))"`,
+		"python3 -B - <<'PY'\nfrom textutil import slugify\nassert slugify('Straße') == 'strasse'\nPY",
+		// Shell control writes nothing; the check after it is not credited (its status is not its own) but retires nothing.
+		"exit 0; npm test",
+		"cd pkg; npm test",
+	])
+		deepStrictEqual(after(command), ["npm test"], command);
+	// A write-shaped operation is a change whatever the script imports.
+	for (const command of [
+		`python3 -c "from textutil import slugify; open('out.txt', 'w').write(slugify('x'))"`,
+		`python3 -c "import textutil, pathlib; pathlib.Path('o').write_text('x')"`,
+		`python3 -c "from textutil import slugify; from pathlib import Path; Path('o').write_text(slugify('x'))"`,
+		`python3 -c "import textutil; textutil.out.write_text('x')"`,
+		`python3 -c "import textutil, shutil; shutil.rmtree('build')"`,
+		`python3 -c "from textutil import *; run()"`,
+	])
+		deepStrictEqual(after(command), [], command);
+});
+
 it("wrapped and alternate spellings of a check read as that check, and a green after an edit settles the gate", () => {
 	const cwd = process.cwd();
 	const read = (command: string) => classifyCall("bash", { command }, { cwd, outputTarget: checkOutputReader(cwd) });

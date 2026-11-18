@@ -5,6 +5,10 @@
  * direct call whose mode is a read-only literal, and no name that reaches the OS, runs code, or walks to the
  * interpreter's internals (`os`, `exec`, `getattr`, any dunder but `__name__`, any `_private` attribute) appears. A
  * module file shadowing one of those imports in the working directory is outside what text can prove.
+ *
+ * A script that passes every other test but imports a module outside that set (the workspace's own module under test,
+ * bt-c17a) cannot be proved to read, since importing runs that module's code, but shows no write either: it reads as
+ * unknown, which neither settles nor retires a recorded outcome. Any write-shaped name keeps it a change.
  */
 
 const SAFE_MODULES: ReadonlySet<string> = new Set([
@@ -95,6 +99,19 @@ const DENIED_NAMES: ReadonlySet<string> = new Set([
 	"evaluate_forward_ref",
 	"singledispatch",
 	"singledispatchmethod",
+]);
+
+/** Write-shaped attribute names a workspace module may reach without any denied name (`Path.write_text`, `shutil.move`). */
+const WRITE_SHAPED_NAMES: ReadonlySet<string> = new Set([
+	"write_text",
+	"write_bytes",
+	"touch",
+	"rmtree",
+	"copyfile",
+	"copytree",
+	"truncate",
+	"hardlink_to",
+	"symlink_to",
 ]);
 
 const OPEN_KEYWORDS: ReadonlySet<string> = new Set(["file", "mode", "encoding", "errors", "newline", "buffering"]);
@@ -245,34 +262,45 @@ function isBoundary(token: PyToken | undefined): boolean {
 	return token === undefined || token.kind === "newline" || token.value === ";" || token.value === ":";
 }
 
-/** Whether the dotted module path between `from` and `to` starts at an allowed top-level module. */
-function safeModule(tokens: ReadonlyArray<PyToken>, from: number, to: number): boolean {
+type ImportReading = "safe" | "foreign" | "refused";
+
+/**
+ * The dotted module path between `from` and `to`: `safe` when it starts at an allowed top-level module, `foreign` for
+ * any other well-formed absolute path (a denied top-level name is refused by the name scan), `refused` otherwise.
+ */
+function moduleReading(tokens: ReadonlyArray<PyToken>, from: number, to: number): ImportReading {
 	const first = tokens[from];
-	return first?.kind === "name" && SAFE_MODULES.has(first.value) && dotted(tokens, from, to);
+	if (first?.kind !== "name" || !dotted(tokens, from, to)) return "refused";
+	return SAFE_MODULES.has(first.value) ? "safe" : "foreign";
 }
 
-/** Whether each `import` in the script imports only allowed modules, as `import a.b as c, d` or `from a import x`. */
-function importsAreSafe(tokens: ReadonlyArray<PyToken>, at: number): boolean {
+const joinImports = (a: ImportReading, b: ImportReading): ImportReading =>
+	a === "refused" || b === "refused" ? "refused" : a === "foreign" || b === "foreign" ? "foreign" : "safe";
+
+/** How the `import` at `at` reads, as `import a.b as c, d` or `from a import x`; a star import hides what it binds. */
+function importReading(tokens: ReadonlyArray<PyToken>, at: number): ImportReading {
 	let back = at - 1;
 	while (back >= 0 && (tokens[back]?.kind === "name" || tokens[back]?.value === ".") && tokens[back]?.value !== "from")
 		back -= 1;
 	if (tokens[back]?.value === "from" && back < at - 1 && isBoundary(tokens[back - 1])) {
-		if (tokens[at + 1]?.value === "*") return false;
-		return safeModule(tokens, back + 1, at);
+		if (tokens[at + 1]?.value === "*") return "refused";
+		return moduleReading(tokens, back + 1, at);
 	}
-	if (!isBoundary(tokens[at - 1])) return false;
+	if (!isBoundary(tokens[at - 1])) return "refused";
+	let reading: ImportReading = "safe";
 	let index = at + 1;
 	for (;;) {
 		const start = index;
 		while (tokens[index]?.kind === "name" && tokens[index + 1]?.value === ".") index += 2;
-		if (tokens[index]?.kind !== "name") return false;
+		if (tokens[index]?.kind !== "name") return "refused";
 		index += 1;
-		if (!safeModule(tokens, start, index)) return false;
+		reading = joinImports(reading, moduleReading(tokens, start, index));
+		if (reading === "refused") return reading;
 		if (tokens[index]?.value === "as") {
-			if (tokens[index + 1]?.kind !== "name") return false;
+			if (tokens[index + 1]?.kind !== "name") return "refused";
 			index += 2;
 		}
-		if (tokens[index]?.value !== ",") return isBoundary(tokens[index]);
+		if (tokens[index]?.value !== ",") return isBoundary(tokens[index]) ? reading : "refused";
 		index += 1;
 	}
 }
@@ -320,20 +348,28 @@ function openOnlyReads(tokens: ReadonlyArray<PyToken>, at: number): boolean {
 	return true;
 }
 
-/** Whether `script` provably only reads files and prints; see the module comment for what that proof refuses. */
-export function pythonScriptOnlyReads(script: string): boolean {
+/**
+ * How an inline script bears on the tree: `inspection` when it provably only reads files and prints (see the module
+ * comment for what that proof refuses), `unknown` when the only thing short of that proof is an import from outside
+ * the allowed modules, `mutation` otherwise.
+ */
+export function pythonScriptVerdict(script: string): "inspection" | "unknown" | "mutation" {
 	const tokens = pythonTokens(script);
-	if (tokens === null) return false;
+	if (tokens === null) return "mutation";
+	let imports: ImportReading = "safe";
 	for (let index = 0; index < tokens.length; index += 1) {
 		const token = tokens[index] as PyToken;
 		if (token.kind !== "name") continue;
 		const name = token.value;
 		const attribute = tokens[index - 1]?.value === ".";
-		if (DENIED_NAMES.has(name)) return false;
-		if (name.startsWith("__") && name !== "__name__") return false;
-		if (attribute && (name.startsWith("_") || /^(?:f|gi|cr|ag|tb)_/u.test(name))) return false;
-		if (name === "open" && !openOnlyReads(tokens, index)) return false;
-		if (name === "import" && !importsAreSafe(tokens, index)) return false;
+		if (DENIED_NAMES.has(name) || WRITE_SHAPED_NAMES.has(name)) return "mutation";
+		if (name.startsWith("__") && name !== "__name__") return "mutation";
+		if (attribute && (name.startsWith("_") || /^(?:f|gi|cr|ag|tb)_/u.test(name))) return "mutation";
+		if (name === "open" && !openOnlyReads(tokens, index)) return "mutation";
+		if (name === "import") {
+			imports = joinImports(imports, importReading(tokens, index));
+			if (imports === "refused") return "mutation";
+		}
 	}
-	return true;
+	return imports === "foreign" ? "unknown" : "inspection";
 }
