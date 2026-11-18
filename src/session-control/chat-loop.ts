@@ -159,6 +159,7 @@ import { isGatewayChain } from "../tools/gateway-display.js";
 import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { effectiveToolCall } from "../tools/surface.js";
 import type { ApprovalRequestView } from "./approval-request-view.js";
+import { requestCursorOf } from "./attempt-receipt.js";
 import {
 	createAskUserToolPolicy,
 	createPendingSkillToolPolicy,
@@ -194,6 +195,7 @@ import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import { createHostInserts } from "./host-inserts.js";
 import { loopGuardContinuationDetail, TOOL_LOCK_RESET_DETAIL } from "./loop-guard-interrupt.js";
 import { createMessagePath } from "./message-path.js";
+import { continuityContextFromSession } from "./model-session-replay.js";
 import type { NoticeSource } from "./notice-source.js";
 import {
 	createOperatorMemory,
@@ -1999,7 +2001,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		sessionOrigin: () => deps.session?.current() ?? null,
 		onModelRequestSent: (call) => messagePath.requestSent(call),
 		onModelCallSettled: (facts) => messagePath.callSettled(facts),
-		ledgerHighWaterMark: () => deps.readSessionEntries?.().at(-1)?.turnId ?? null,
+		requestCursor: () =>
+			requestCursorOf(
+				deps.readSessionEntries?.() ?? [],
+				state.lastTurnId ?? null,
+				continuityContextFromSession(deps.session),
+			),
 		...(deps.admitFlow !== undefined ? { admitFlow: deps.admitFlow } : {}),
 		emit: emitRuntimeEvent,
 		emitNotice,

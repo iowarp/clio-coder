@@ -144,6 +144,9 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 			),
 			// Digests of the request's text: a short message could be guessed from its digest.
 			structure: "drop",
+			// Ledger row ids, owner ids and checkpoint digests of one session's request.
+			receipt: "drop",
+			firstChangedElement: keep("index", "role"),
 			firstDivergentSection: fact("token"),
 		},
 		quota: { ...keep("source"), provider: "runtime", windows: QUOTA_WINDOW },

@@ -23,6 +23,7 @@ import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { LOCAL_CONTEXT_OVERFLOW_PREFIX } from "../../src/engine/apis/output-budget.js";
 import type { AgentMessage } from "../../src/engine/types.js";
+import { boundWorkerResponse } from "../../src/engine/worker-response-stream.js";
 import { startWorkerRun, type WorkerRunHandle } from "../../src/engine/worker-runtime.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
@@ -462,15 +463,23 @@ test("only unseen reads can make room: the largest leaves first as unseen_overfl
 	]);
 	const run = { sessionId: null, runId: "unseen-run", agent: { role: "worker" as const, id: "unseen-run" } };
 	const frames: WorkerTelemetryFrame[] = [];
+	// A queue of one under output backpressure drops the second process fact and reports it, never the decision.
 	const forwarder = createTelemetryForwarder(
 		run,
 		{ host: "worker", pid: 1, birthToken: "unseen-birth", monoEpochWallMs: 0 },
 		(frame) => void frames.push(frame),
+		1,
 	);
-	ok(telemetryHub().emit("context.fold", decision as ContextFoldPayload, run));
+	telemetryHub().emit("process.started", {}, run);
+	telemetryHub().emit("process.started", {}, run);
+	telemetryHub().emit("context.fold", decision as ContextFoldPayload, run);
 	forwarder.close();
 	deepStrictEqual(
-		(readWorkerTelemetryFrame(frames[0], run)?.data as ContextFoldPayload | undefined)?.stages.at(-1)?.reason,
+		frames.map((frame) => frame.record.k),
+		["process.started", "context.fold", "journal.gap"],
+	);
+	deepStrictEqual(
+		(readWorkerTelemetryFrame(frames[1], run)?.data as ContextFoldPayload | undefined)?.stages.at(-1)?.reason,
 		"unseen_overflow",
 	);
 
@@ -589,6 +598,17 @@ test("drv-cf1h: a request the guard fitted after an eviction reaches the provide
 		match(last, /\[evicted ref=r1 reason=age_horizon tool=read path=a\.txt /);
 		ok(last.includes("c.txt pump output"), "the fresh read reached the provider");
 		ok(Number(requests[3]?.max_tokens) >= 4096, `max_tokens ${requests[3]?.max_tokens}`);
+		// A pinned request cut off by its window names the remaining context, read from the same pin (cf-q11).
+		const truncated = { role: "assistant", content: [], stopReason: "length", timestamp: 1, usage: {} };
+		const limits: string[] = [];
+		await boundWorkerResponse(
+			{ id: "pinned", api: "openai-completions", contextWindow: 32_768, maxTokens: 32_768 } as never,
+			{ messages: [] },
+			{ clioInputTokens: 20_000 } as never,
+			{ locked: true, responseSeconds: 600, round: 1, onLimit: (_code, detail) => void limits.push(detail) },
+			() => ({ async *[Symbol.asyncIterator]() {}, result: async () => truncated }) as never,
+		).result();
+		match(limits.join(), /output limit \(remaining context\)$/);
 	} finally {
 		worker?.abort();
 		await worker?.promise;
