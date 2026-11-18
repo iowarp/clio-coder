@@ -69,6 +69,18 @@ export {
 	isStale,
 } from "./fingerprint.js";
 export {
+	abbreviateHeadTail,
+	BRIEFING_MIN_EXCERPT_BYTES,
+	BRIEFING_SEPARATOR,
+	type BriefingClip,
+	type BriefingNotice,
+	type BriefingPart,
+	type BriefingPartKind,
+	type BuiltBriefing,
+	buildBriefing,
+	shareBytesFairly,
+} from "./fold/briefing.js";
+export {
 	FOLD_CHECKPOINTS,
 	FOLD_STAGE_IDS,
 	FOLD_STAGE_OUTCOMES,

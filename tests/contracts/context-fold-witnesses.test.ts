@@ -4,11 +4,15 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Type } from "typebox";
 import type { DomainContext } from "../../src/core/domain-loader.js";
+import type { EventPayload } from "../../src/core/telemetry/events.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { createWorkerContextGuard } from "../../src/domains/context/worker/pressure.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { selectSuperseded } from "../../src/domains/context/working-set/superseded.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
+import type { ProvidersContract } from "../../src/domains/providers/contract.js";
+import { resolveRuntimeTarget } from "../../src/domains/providers/runtime-resolution.js";
 import type { SessionContract, SessionEntryInput } from "../../src/domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
@@ -731,11 +735,14 @@ describe("W9 (F12 -> CF-3): a run judges its own evidence, not the projected arr
 
 describe("W10 (F10 -> CF-10): the council peer briefing", () => {
 	it("five seats, an oversized original briefing, multibyte answers and a failed seat: every peer is labeled", {
-		todo: "F10 -> CF-10",
 		timeout: 30_000,
 	}, async () => {
 		const labels = ["a", "b", "c", "d", "e"];
 		const seated: DispatchRequest[] = [];
+		const clipped: Array<EventPayload<"context.briefing_clipped">> = [];
+		const unsubscribe = telemetryHub().subscribe("context.briefing_clipped", (event) => {
+			clipped.push(event);
+		});
 		let next = 0;
 		const tool = createDispatchTool({
 			dispatch: {
@@ -744,7 +751,8 @@ describe("W10 (F10 -> CF-10): the council peer briefing", () => {
 					next += 1;
 					const label = request.council?.label ?? "member";
 					const runId = `run-${next}-${label}`;
-					const failed = label === "c" && request.council?.round === 1;
+					// Seat c fails every round, so the judge as well as the second round sees a failed seat.
+					const failed = label === "c";
 					const answer = `${label} answers: ${"é".repeat(1_500)}`;
 					const events = (async function* () {
 						yield { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: answer }] } };
@@ -765,16 +773,21 @@ describe("W10 (F10 -> CF-10): the council peer briefing", () => {
 			getAgentSpecs: () => [{ id: "scout" }] as never,
 			getAutonomy: () => "yolo",
 		});
-		await tool.run(
-			{
-				mode: "council",
-				members: labels.map((label) => ({ label, target: "mini" })),
-				rounds: 2,
-				briefing: `Background: ${"context ".repeat(1_400)}`.slice(0, 11_500),
-				task: "Which module owns the clock?",
-			},
-			{} as never,
-		);
+		try {
+			await tool.run(
+				{
+					mode: "council",
+					members: labels.map((label) => ({ label, target: "mini" })),
+					rounds: 2,
+					synthesis: "judge",
+					briefing: `Background: ${"context ".repeat(1_400)}`.slice(0, 11_500),
+					task: "Which module owns the clock?",
+				},
+				{} as never,
+			);
+		} finally {
+			unsubscribe();
+		}
 		const second = seated.filter((request) => request.council?.round === 2 && request.gate?.role === "member");
 		strictEqual(second.length, labels.length, "every seat sits a second round");
 		for (const request of second) {
@@ -782,6 +795,132 @@ describe("W10 (F10 -> CF-10): the council peer briefing", () => {
 			for (const peer of labels.filter((label) => label !== request.council?.label))
 				ok(briefing.includes(`[${peer}]`), `${request.council?.label}'s briefing names peer ${peer}`);
 		}
+		const judge = seated.filter((request) => request.gate?.role === "synthesis");
+		strictEqual(judge.length, 1, "the judge is dispatched once");
+		const COUNCIL_BRIEFING_CAP = 8 * 1024;
+		for (const request of [...second, ...judge]) {
+			const recipient = request.council?.label;
+			const briefing = request.briefing ?? "";
+			ok(Buffer.byteLength(briefing, "utf8") <= COUNCIL_BRIEFING_CAP, `${recipient}'s briefing is within the cap`);
+			ok(!briefing.includes("\uFFFD"), `${recipient}'s briefing carries no replacement character`);
+			const failedStatus =
+				request.gate?.role === "synthesis"
+					? "[c] failed; no final answer contributed."
+					: "[c] failed in prior round; no answer contributed.";
+			for (const peer of labels.filter((label) => label !== recipient)) {
+				strictEqual(briefing.split(`[${peer}]`).length, 2, `${recipient}'s briefing shows seat ${peer} exactly once`);
+				if (peer === "c") ok(briefing.includes(failedStatus), `${recipient}'s briefing gives seat c its failure status`);
+				else {
+					const excerpt = briefing.split("\n\n").find((segment) => segment.startsWith(`[${peer}] `)) ?? "";
+					ok(
+						excerpt.startsWith(`[${peer}] ${peer} answers: ${"é".repeat(16)}`) && excerpt.endsWith("é".repeat(16)),
+						`${recipient}'s excerpt of seat ${peer} keeps whole é runs at its head and tail`,
+					);
+				}
+			}
+		}
+		for (const request of second)
+			ok(
+				(request.briefing ?? "").includes("[original briefing] Background: context"),
+				"the member path counts the original briefing",
+			);
+		ok(!(judge[0]?.briefing ?? "").includes("[original briefing]"), "the judge carries the task outside its briefing");
+		match(judge[0]?.task ?? "", /Which module owns the clock\?/u);
+		deepStrictEqual(
+			clipped.map((event) => event.role).sort(),
+			[...second.map(() => "member"), "synthesis"].sort(),
+			"each clipped briefing is journaled",
+		);
+		for (const event of clipped) {
+			strictEqual(event.capBytes, COUNCIL_BRIEFING_CAP);
+			ok(event.bytes <= COUNCIL_BRIEFING_CAP && event.parts.length > 0);
+			ok(event.parts.every((part) => part.bytesAfter < part.bytesBefore));
+		}
+	});
+
+	/**
+	 * The seed assertion (SPEC §3.3 "Seeds", F1: a worker seed carries bodies the parent's request stubs). The parent
+	 * sends c1, an older 33 KB read that an identical newer read supersedes, as a stub; a forked seat's seed must carry
+	 * c1 as the parent's request did. S0 rewrites the agent history the seed is captured from, so the stub reaches the
+	 * seed. S0 acts only on an uncached route, so the setup pins the parent's route to `promptCaching: false`; on a
+	 * cached route the parent keeps c1's body and so must the seed.
+	 */
+	it("a forked seat's seed carries c1 as the parent's request sent it", { timeout: 30_000 }, async (t) => {
+		const SIZE = 33 * 1024;
+		const OLDER = body("OLDER", SIZE);
+		const server = await startCaptureServer(() => ({ text: "answered" }));
+		t.after(() => server.close());
+		const seed = chatHarness({ server, route: { caching: false } });
+		let id: string;
+		try {
+			id = seed.session.create({ cwd: process.cwd() }).id;
+			for (const entry of [
+				message("u1", null, "user", { text: "read it twice" }),
+				readCall("a1", "u1", "c1", "src/big.ts"),
+				readResult("r1", "a1", "c1", OLDER),
+				readCall("a2", "r1", "c2", "src/big.ts"),
+				readResult("r2", "a2", "c2", body("NEWER", SIZE)),
+				message("a3", "r2", "assistant", { content: [{ type: "text", text: "read" }] }),
+			])
+				seed.session.appendEntry(entry as SessionEntryInput);
+		} finally {
+			await seed.close();
+		}
+		const parent = chatHarness({ server, route: { caching: false } });
+		const seated: DispatchRequest[] = [];
+		try {
+			const parentRoute = resolveRuntimeTarget(parent.context.getContract("providers") as ProvidersContract, {
+				targetId: parent.settings.chat.target,
+			});
+			ok(parentRoute.ok, "the parent's route resolves");
+			strictEqual(
+				parentRoute.target.promptCaching,
+				false,
+				"S0 acts only on an uncached route; a cached parent keeps c1's body and the seed must too",
+			);
+			parent.reopen(id);
+			await parent.submit("go on");
+			const tool = createDispatchTool({
+				dispatch: {
+					dispatch: async (request: DispatchRequest) => {
+						seated.push(request);
+						const runId = `run-seed-${seated.length}`;
+						const events = (async function* () {})();
+						return {
+							runId,
+							events,
+							finalPromise: Promise.resolve({ runId, agentId: request.agentId, exitCode: 0, outcome: "succeeded" }),
+						};
+					},
+					abort() {},
+					getRun: () => undefined,
+				} as unknown as DispatchContract,
+				getAgentSpecs: () => [{ id: "scout" }] as never,
+				getAutonomy: () => "yolo",
+				captureWorkerContext: () => parent.loop.captureWorkerContext?.() ?? null,
+			});
+			await tool.run({ agent: "scout", task: "Which module owns the clock?", context: { mode: "fork" } }, {} as never);
+		} finally {
+			await parent.close();
+		}
+		const request = server.requests.at(-1);
+		ok(request);
+		const sentMessages = (
+			request.body as { messages?: Array<{ role?: string; tool_call_id?: string; content?: unknown }> }
+		).messages;
+		const sent = sentMessages?.find((entry) => entry.role === "tool" && entry.tool_call_id === "c1");
+		ok(sent, "the parent's request carries c1");
+		const sentText = typeof sent.content === "string" ? sent.content : JSON.stringify(sent.content);
+		ok(!sentText.includes(OLDER), "the parent's request stubs the superseded read");
+		const seedMessages = seated[0]?.contextSeed?.messages ?? [];
+		ok(seedMessages.length > 0, "the seat is seeded from the parent's history");
+		const seeded = seedMessages.find(
+			(entry) => entry.role === "toolResult" && (entry as { toolCallId?: string }).toolCallId === "c1",
+		) as { content?: Array<{ type: string; text?: string }> } | undefined;
+		ok(seeded, "the seed carries c1");
+		const seededText = (seeded.content ?? []).map((block) => block.text ?? "").join("");
+		ok(!seededText.includes(OLDER), "a worker seed carries no body the parent's request stubbed");
+		strictEqual(seededText, sentText, "the seed carries c1 as the parent's request sent it");
 	});
 });
 
