@@ -12,6 +12,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Added
 
+- D3-3: a run's sealed result keeps each judged host check's bounded report (rule, tolerance, reference and payload digests, worst deviation per key) and the tree it judged.
 - A1: an api 2 extension tool may declare `readOnly: true` and `idempotent: true` in `clio-coder-extension.yaml`. Only a tool declared one or the other counts toward the loop guard's identical-call repeats; a `read` tool is read-only by default, and a `write` tool cannot claim it.
 - A4: the session prompt carries the operator's local date, weekday and time zone, recompiled when the date changes. Each turn start, continuations included, states the local time, and the first tool result after the date changes inside a long turn says so.
 - B1: `clio-coder run --answers <file.yaml>` scripts the author of a headless run. The file answers only the author's questions: extension interview steps and `operator_only` `ask_user` questions. Each entry matches one by an extension question's checkpoint id (`id`), by its header (`header`) or by a regular expression over its text (`match`), and gives a `choice` by option label, a `note`, or both. With the file, `ask_user` is registered and extension interviews are asked; a matched question is answered as the operator and recorded as scripted, naming the file and the entry, on the decision ledger and on the extension's `InterviewAnswer.scripted`. An author question no entry matches is never answered for the author: its round is cancelled as `unscripted` and the run exits 5 naming the question. A model's ordinary `ask_user` call is refused as having no operator, as without the file, and no entry answers it. Permission asks stay denied, and a file that fails validation exits 2 naming the offending entry. Api 2 gains `InterviewQuestion.checkpoint`.
@@ -62,6 +63,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- D3-1: a numeric-compare or perf-budget host check fails when its reference or baseline changed since dispatch admission or while the check ran.
+- D3-2: host verification validates a run only when every check that applied ran for it: a pass reused from another run's memo, a run whose every check was skipped, and a record without the executed/reused/skipped counts read as unknown; numeric-compare and perf-budget verdicts are never memoized.
 - D3-5: `numeric-compare` checks accept per-key `tolerance.keys` bounds (an entry replaces the check-level bounds for its key; an entry naming a key the reference lacks fails), and a reference with no keys or a key whose arrays are both empty is unjudgeable and fails instead of passing.
 - Astra r10-2: the fleet board no longer rereads every running worker's run scope and re-projects its rows several times on each frame.
 - Astra r10-3: the footer reads the main route's first-output history only when the long-silence note prints it, instead of on every refresh.
