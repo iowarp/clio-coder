@@ -198,6 +198,8 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			}
 			deps.stderr(`[/resume] transcript replay failed: ${error instanceof Error ? error.message : String(error)}\n`);
 		}
+		const resumedName = session.current()?.name;
+		deps.getSlashNotice()("info", `Resumed session ${sessionId}${resumedName ? ` named ${resumedName}` : ""}.`);
 		if (sessionId !== preResumeSessionId) {
 			deps.announceTaskMemorySeedOffer();
 		}
@@ -360,7 +362,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 			// original went, and what did not change on disk.
 			deps.getSlashNotice()(
 				"info",
-				`Conversation forked into a new session${name ? ` named ${name}` : ""}; the original is unchanged and /resume opens it. Workspace files were not rewound; existing edits remain.`,
+				`Conversation forked into new session ${forkedSessionId}${name ? ` named ${name}` : ""}; the original ${preForkSessionId} is unchanged and /resume opens it. Workspace files were not rewound; existing edits remain.`,
 			);
 		} catch (error) {
 			emitCommandNotice(
