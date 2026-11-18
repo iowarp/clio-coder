@@ -50,6 +50,19 @@ describe("live tool views", () => {
 		);
 	});
 
+	it("state no diff counts for an edit still streaming, since only the applied diff knows them", () => {
+		const edit = { oldText: "a\nb\nc", newText: "a\nB\nc\nd\ne" };
+		const one = plain(
+			renderToolPreview(forming({ path: "src/a.ts", ...edit }, "edit"), 120, transcriptDetail("standard")),
+		);
+		match(one[0] ?? "", /edit src\/a\.ts ◌ preparing$/u);
+		strictEqual(one.at(-1), "  │ + e");
+		const two = plain(
+			renderToolPreview(forming({ path: "src/a.ts", edits: [edit, edit] }, "edit"), 120, transcriptDetail("standard")),
+		);
+		match(two[0] ?? "", /◌ preparing · 2 edits$/u);
+	});
+
 	it("redact a secret whose flag sits on the line above the window", () => {
 		const secret = `${content}\ncurl --token\nhunter2-secret-value\nl1\nl2\nl3\nl4`;
 		const rows = plain(
