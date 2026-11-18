@@ -1,3 +1,4 @@
+import type { TSchema } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import type { FleetSettings } from "../core/defaults.js";
@@ -53,10 +54,12 @@ export const COORDINATOR_DISPATCH_ARGUMENTS = {
 	prepare: (args: Record<string, unknown>): Record<string, unknown> =>
 		Object.hasOwn(args, "task") ? args : { ...args, task: "" },
 	restore(args: Record<string, unknown>): Record<string, unknown> {
-		const { task, tasks, ...rest } = args;
-		// context is described on demand, not attached, so a grammar parser types it as a string (bt-47 cf1h-D4).
-		const context = typeof rest.context === "string" ? parseWorkerContext(rest.context) : undefined;
-		if (context !== undefined) rest.context = context;
+		// Fields described on demand, not attached, reach a grammar parser untyped, so it sends them as strings (cf1h-D4).
+		const fields = offSchemaFields();
+		const { task, tasks: sent, ...rest } = decodeOffSchema(args, fields.call);
+		const tasks = Array.isArray(sent)
+			? sent.map((item: unknown) => (isPlainRecord(item) ? decodeOffSchema(item, fields.task) : item))
+			: sent;
 		// A grammar requires task first, so a model reaching for the batch field repeats its assignment there. A one-item
 		// batch is the form the tool normalizes every call into, so the copy loses nothing and the call means one run.
 		const only = Array.isArray(tasks) && tasks.length === 1 ? (tasks[0] as unknown) : undefined;
@@ -262,15 +265,46 @@ const WorkerContextSchema = Type.Union(
 	},
 );
 
-/** A JSON-encoded context that decodes to a valid worker context; anything else stays for canonical refusal. */
-function parseWorkerContext(text: string): Record<string, unknown> | undefined {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(text);
-	} catch {
-		return undefined;
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** The canonical fields, of the call and of one batch task, that the attached schema leaves to gateway describe. */
+let offSchema: { call: ReadonlyMap<string, TSchema>; task: ReadonlyMap<string, TSchema> } | undefined;
+
+function offSchemaFields(): { call: ReadonlyMap<string, TSchema>; task: ReadonlyMap<string, TSchema> } {
+	if (offSchema !== undefined) return offSchema;
+	const canonical = buildDispatchParameters().properties;
+	const attached: Record<string, TSchema> = coordinatorDispatchParameters().properties;
+	const taskFields = (tasks: TSchema | undefined): Record<string, TSchema> => {
+		const variants = (tasks as { items?: { anyOf?: { properties?: Record<string, TSchema> }[] } } | undefined)?.items
+			?.anyOf;
+		return variants?.find((variant) => isPlainRecord(variant.properties))?.properties ?? {};
+	};
+	const hidden = (all: Record<string, TSchema>, shown: Record<string, TSchema>) =>
+		new Map(Object.entries(all).filter(([key]) => !Object.hasOwn(shown, key)));
+	offSchema = {
+		call: hidden(canonical, attached),
+		task: hidden(taskFields(canonical.tasks), taskFields(attached.tasks)),
+	};
+	return offSchema;
+}
+
+/** Decode each off-schema string whose field refuses a string and whose JSON is that field's valid value; any other stays for canonical refusal. */
+function decodeOffSchema(args: Record<string, unknown>, fields: ReadonlyMap<string, TSchema>): Record<string, unknown> {
+	const decoded = { ...args };
+	for (const [key, schema] of fields) {
+		const text = args[key];
+		if (typeof text !== "string" || Value.Check(schema, text)) continue;
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(text);
+		} catch {
+			continue;
+		}
+		if (Value.Check(schema, parsed)) decoded[key] = parsed;
 	}
-	return Value.Check(WorkerContextSchema, parsed) ? (parsed as Record<string, unknown>) : undefined;
+	return decoded;
 }
 
 /**
