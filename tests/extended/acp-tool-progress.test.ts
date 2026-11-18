@@ -276,22 +276,31 @@ describe("contracts/acp streams a running tool's cumulative output only to a cli
 	});
 });
 
-it("projects transcript notices for plain ACP clients while keeping footer state off the transcript", async () => {
+it("projects transcript notices for plain ACP clients while keeping footer state and context status off the reply", async () => {
+	const status = [
+		"[context engine] working set: nothing evictable, all 1 turn are inside the protected window; llm_summary runs instead",
+		"compaction would not reduce context; checkpoint discarded (usage recorded)",
+		"Clio compacted 36.2K → 28.6K tokens: 42 earlier messages now read as one summary",
+	];
 	const turn = await runTurn({
 		optIn: false,
 		script: ({ emit }) => {
 			emit({ type: "notice", surface: "footer", level: "info", text: "cold cache" });
 			emit({ type: "notice", surface: "transcript", level: "info", text: "project instructions: all 42 lines loaded" });
-			emit({ type: "notice", surface: "transcript", level: "info", text: "[context engine] compacted 8K → 4K tokens" });
+			for (const text of status) emit({ type: "notice", surface: "transcript", level: "info", text });
 			emit({ type: "text_delta", delta: "Done." });
 		},
 	});
 	const texts = turn.updates
 		.filter((update) => update.sessionUpdate === "agent_message_chunk")
 		.map((update) => (update.content as { text: string }).text);
-	deepStrictEqual(texts, [
-		"project instructions: all 42 lines loaded\n",
-		"[context engine] compacted 8K → 4K tokens\n",
-		"Done.",
-	]);
+	deepStrictEqual(texts, ["project instructions: all 42 lines loaded\n", "Done."]);
+	// bt-47: context engine status crosses as session metadata, the startup notices' channel.
+	const notices = turn.updates
+		.filter((update) => update.sessionUpdate === "session_info_update")
+		.map((update) => (update._meta as Record<string, unknown>)["clio-coder/notice"]);
+	deepStrictEqual(
+		notices,
+		status.map((text) => ({ level: "info", text })),
+	);
 });

@@ -295,10 +295,10 @@ A live prompt streams `session/update` notifications of these kinds:
 | `agent_message_chunk`, `agent_thought_chunk` | Text, at most 16 KiB per chunk. A longer delta splits across consecutive chunks and nothing is dropped. No split falls inside a code point. |
 | `tool_call`, `tool_call_update` | Tool lifecycle with `name`, `title`, `kind`, `status`, `rawInput`, `rawOutput`, `locations`, `content`. See [Bounds](#bounds). |
 | `usage_update`, `plan` | Pushed telemetry. See [Live telemetry](#live-telemetry-usage-plan-and-workspace). |
-| `session_info_update` | A new `title`, the workspace snapshot, the memory guardian's state, the active conversation eggs, or a startup notice. |
+| `session_info_update` | A new `title`, the workspace snapshot, the memory guardian's state, the active conversation eggs, a startup notice, or a context engine status line. |
 | `available_commands_update`, `current_mode_update`, `config_option_update` | Session controls. |
 
-Transcript notices from the engine arrive as `agent_message_chunk` frames marked `_meta["clio-coder/notice"] = {level}`. Startup notices about the project, such as a missing CLIO-CODER.md, are not reply text: they cross once per process, on the first prompt, as `session_info_update` frames whose `_meta["clio-coder/notice"]` is `{level, text}`, so a client that ignores `_meta` shows a reply carrying only the model's text. Message, thought, notice, and tool-call updates carry `params._meta["clio-coder/agent"]`, an array that starts with orchestrator attribution and, on a tool-call frame, appends bounded attribution for each delegated agent that call started (at most 16). `user_message_chunk` appears only in branch replay (`session/load`, `switch_turn`, `fork`, and `handoff/commit`).
+Transcript notices from the engine arrive as `agent_message_chunk` frames marked `_meta["clio-coder/notice"] = {level}`. Context engine status lines (working set, observation aging, the `Clio compacted` row and a compaction that would not reduce context) are not reply text either: they cross as `session_info_update` frames whose `_meta["clio-coder/notice"]` is `{level, text}`. Startup notices about the project, such as a missing CLIO-CODER.md, are not reply text: they cross once per process, on the first prompt, as `session_info_update` frames whose `_meta["clio-coder/notice"]` is `{level, text}`, so a client that ignores `_meta` shows a reply carrying only the model's text. Message, thought, notice, and tool-call updates carry `params._meta["clio-coder/agent"]`, an array that starts with orchestrator attribution and, on a tool-call frame, appends bounded attribution for each delegated agent that call started (at most 16). `user_message_chunk` appears only in branch replay (`session/load`, `switch_turn`, `fork`, and `handoff/commit`).
 
 `session/prompt` settles with the standard ACP stop reasons:
 
@@ -558,7 +558,7 @@ Per-message `_meta` keys, beyond the capability keys above. The pushed telemetry
 | `clio-coder/context` | `usage_update` update | The projected context ledger. |
 | `clio-coder/plan` | `plan` update and each entry | Real task status, board identity, and omitted counts. |
 | `clio-coder/agent` | message, thought, notice, and tool-call `session/update` frames | Orchestrator attribution plus delegated agents. |
-| `clio-coder/notice` | `agent_message_chunk`, `session_info_update` | `{level}` on a transcript notice or replayed compaction summary chunk; `{level, text}` on a `session_info_update` carrying a startup notice (for example a missing CLIO-CODER.md), sent once per process on the first prompt. |
+| `clio-coder/notice` | `agent_message_chunk`, `session_info_update` | `{level}` on a transcript notice or replayed compaction summary chunk; `{level, text}` on a `session_info_update` carrying a startup notice (for example a missing CLIO-CODER.md), sent once per process on the first prompt, or a context engine status line. |
 | `clio-coder/interview` | `_clio-coder/interview/request` params | `{version: 1, operatorOnly, recommended}`. |
 | `clio-coder/replay` | replayed updates and events | `{turn}` on history, `{run: true}` on a replayed dispatch frame; absent on live frames. |
 | `clio-coder/run-result` | `run.completed` and `run.failed` events | Run result facts. |
