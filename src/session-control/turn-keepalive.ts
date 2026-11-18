@@ -6,7 +6,8 @@
  * attached dispatch whose workers routinely outlast that lifetime, and the request that follows then re-prefills
  * the whole conversation at the uncached price. While a turn waits on tools, Clio knows that request will come, so
  * it replays the turn's last request with a minimal output cap shortly before the entry expires, whenever the
- * refresh is expected to save more than it costs.
+ * refresh is expected to save more than it costs. That request avoids one miss at most, so the refreshes for it
+ * together spend no more than that miss, and one that reports reading nothing from the cache ends the keepalive.
  *
  * The keepalive is bound to one turn. It runs only while the turn waits on tools: for as long as an attached
  * dispatch awaits its runs (two hours at most), and for an hour on any other tool. It stands down while a person
@@ -25,7 +26,9 @@ import {
 	type CacheKeepaliveReply,
 	type CacheKeepaliveRequest,
 	cacheKeepaliveEconomics,
+	cacheKeepaliveMissed,
 	cacheKeepalivePromptTokens,
+	cacheKeepaliveReplyUsd,
 	cacheKeepaliveRoute,
 	replayCacheKeepalive,
 } from "../engine/cache-keepalive.js";
@@ -50,6 +53,7 @@ export type KeepaliveStopReason =
 	| "below-threshold"
 	| "budget"
 	| "refresh-failed"
+	| "refresh-missed"
 	| CacheKeepaliveRefusal;
 
 export interface KeepaliveRefresh {
@@ -110,6 +114,8 @@ interface Run {
 	/** When the cache entry was last read, by the request or a refresh. */
 	touchedAt: number;
 	promptTokens: number;
+	/** What the refreshes sent for this request cost so far. */
+	spentUsd: number;
 	timer: unknown;
 	controller: AbortController;
 }
@@ -157,8 +163,15 @@ export function createTurnKeepalive(deps: TurnKeepaliveDeps): TurnKeepalive {
 		const horizon = phase === "fleet" ? KEEPALIVE_FLEET_HORIZON_MS : KEEPALIVE_TOOL_HORIZON_MS;
 		if (now() - current.startedAt > horizon) return stop("horizon");
 		if (!pricesCalls(current.runtime.runtimeResolution.pricedBy)) return stop("economics-unavailable");
-		// The turn is waiting on its own tools, so its next request is certain; only its timing is not.
-		const economics = cacheKeepaliveEconomics(current.request.model, current.promptTokens, current.outputTokens, 1);
+		// The turn is waiting on its own tools, so its next request is certain; only its timing is not. It saves one
+		// miss at most, so the refreshes already sent for it bound what the next one may still save.
+		const economics = cacheKeepaliveEconomics(
+			current.request.model,
+			current.promptTokens,
+			current.outputTokens,
+			1,
+			current.spentUsd,
+		);
 		if (!economics.available) return stop("economics-unavailable");
 		if (economics.expectedSavingsUsd < CACHE_KEEPALIVE_MIN_SAVINGS_USD) return stop("below-threshold");
 		if (!deps.canSpend(economics.warmUsd)) return stop("budget");
@@ -196,7 +209,10 @@ export function createTurnKeepalive(deps: TurnKeepaliveDeps): TurnKeepalive {
 			// Booking is bookkeeping; it must not turn a refresh into a turn failure.
 		}
 		if (run !== current) return;
-		if (error !== null) return stop("refresh-failed");
+		if (error !== null || message === null) return stop("refresh-failed");
+		current.spentUsd += cacheKeepaliveReplyUsd(current.request.model, message);
+		// A refresh that read nothing rewrote the entry at full price; the next would only pay that again.
+		if (cacheKeepaliveMissed(message)) return stop("refresh-missed");
 		current.touchedAt = sentAt;
 		arm(current);
 	};
@@ -219,6 +235,7 @@ export function createTurnKeepalive(deps: TurnKeepaliveDeps): TurnKeepalive {
 				startedAt,
 				touchedAt: startedAt,
 				promptTokens: 0,
+				spentUsd: 0,
 				timer: undefined,
 				controller: new AbortController(),
 			};

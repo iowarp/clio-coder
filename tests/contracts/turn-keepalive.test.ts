@@ -98,6 +98,12 @@ test("routes refresh only where the output is capped and the cache lifetime is k
 	deepStrictEqual(responses, { ok: true, ttlMs: 300_000, delayMs: 270_000, outputTokens: 16 });
 	const extended = cacheKeepaliveRoute({ ...request(model("openai-responses")), options: { cacheRetention: "long" } });
 	strictEqual(extended.ok && extended.ttlMs, 24 * 60 * 60_000);
+	// In explicit prompt-cache mode Pi asks for `ttl: "30m"` instead of the 24-hour retention.
+	const explicit = model("openai-responses", {
+		compat: { supportsExplicitPromptCacheMode: true },
+	} as Partial<EngineModel>);
+	const thirty = cacheKeepaliveRoute({ ...request(explicit), options: { cacheRetention: "long" } });
+	strictEqual(thirty.ok && thirty.ttlMs, 30 * 60_000);
 	// Codex rejects retention but takes a body cap (measured 2026-10-30, #423), at OpenAI's documented floor.
 	deepStrictEqual(cacheKeepaliveRoute(request(model("openai-codex-responses"))), {
 		ok: true,
@@ -124,6 +130,12 @@ test("a turn awaiting an attached dispatch refreshes its prefix before each expi
 	strictEqual(first.promptTokens, 200_000);
 	ok(first.economics.expectedSavingsUsd >= 0.05);
 	strictEqual(run.keepalive.stopReason(), null);
+	// The awaited request saves one miss at most, so the refreshes together never spend more than that.
+	while ((await run.advance()) !== null) {}
+	strictEqual(run.keepalive.stopReason(), "below-threshold");
+	strictEqual(run.refreshes.length as number, 21);
+	const last = run.refreshes.at(-1)?.economics;
+	ok(last && last.spentUsd + last.warmUsd <= last.missUsd);
 });
 
 test("a Codex refresh carries max_output_tokens on the body after the turn's own payload edits", async () => {
@@ -159,6 +171,21 @@ test("the keepalive stands down without a known lifetime, for cheap prefixes, se
 	await cheap.advance();
 	strictEqual(cheap.refreshes.length, 0);
 	strictEqual(cheap.keepalive.stopReason(), "below-threshold");
+
+	// Only a read count the provider sent proves a miss; an omitted one is unknown.
+	const zero = reply(200_000, 0);
+	const missed = harness({
+		replay: async () => ({ ...zero, usage: { ...zero.usage, cacheReadField: "sent" } as never }),
+	});
+	await missed.follow(claude);
+	await missed.advance();
+	strictEqual(await missed.advance(), null);
+	strictEqual(missed.refreshes.length, 1);
+	strictEqual(missed.keepalive.stopReason(), "refresh-missed");
+	const omitted = harness({ replay: async () => zero });
+	await omitted.follow(claude);
+	await omitted.advance();
+	strictEqual(omitted.keepalive.stopReason(), null);
 
 	const settled = harness({ isTurnActive: () => false });
 	await settled.follow(claude);
