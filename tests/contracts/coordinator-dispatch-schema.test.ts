@@ -124,6 +124,33 @@ describe("compact coordinator dispatch contract", () => {
 			strictEqual(kept.context, garbage, garbage);
 			strictEqual(Value.Check(canonical, kept), false, garbage);
 		}
+		// Every advanced field is off the attached schema too, in the call and in a batch task.
+		const members = [
+			{ label: "a", target: "t1" },
+			{ label: "b", target: "t2" },
+		];
+		const advanced = {
+			mode: "council",
+			members,
+			review: { max_cycles: 2 },
+			candidates: 3,
+			budget: { toolCalls: 12, readReserve: 2 },
+			routing: { maxCostUsd: 1 },
+		};
+		const encoded = Object.fromEntries(
+			Object.entries(advanced).map(([k, v]) => [k, k === "mode" ? v : JSON.stringify(v)]),
+		);
+		const decoded = restore({ task: "x", ...encoded, tasks: [{ task: "y", budget: '{"toolCalls":5,"readReserve":0}' }] });
+		deepStrictEqual(decoded, {
+			task: "x",
+			...advanced,
+			tasks: [{ task: "y", budget: { toolCalls: 5, readReserve: 0 } }],
+		});
+		ok(Value.Check(canonical, decoded));
+		deepStrictEqual(restore({ task: "x", review: "true" }).review, true);
+		const refused = restore({ task: "x", members: '[{"label":"a","target":"t"}]', candidates: "many" });
+		strictEqual(refused.members, '[{"label":"a","target":"t"}]', "one member stays for canonical refusal");
+		strictEqual(refused.candidates, "many");
 	});
 
 	it("admits every shared ordinary field with its canonical type", () => {

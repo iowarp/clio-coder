@@ -224,7 +224,12 @@ export function callSettlementFromMessage(
 		...(total?.kind === "measured" ? { total } : {}),
 	};
 	const observed = Object.values(counts).some((fact) => fact.kind === "measured");
-	const failureCode = cause ?? failureCause(failure) ?? abortReasonCause(raw);
+	// A bound Clio stopped the call with outranks the transport failure its own abort produced (cf1h-D3).
+	const failureCode =
+		cause ??
+		(failure.stage === "harness" ? failureCause(failure) : undefined) ??
+		abortReasonCause(raw) ??
+		failureCause(failure);
 	const cost = record(usage.cost);
 	const usd = amount(cost.total);
 	let pricing: CallSettled["pricing"] = { usd: unknown, pricedBy: "none" };

@@ -23,7 +23,7 @@ import type { InterruptedUsageEstimate } from "../domains/telemetry/call-facts.j
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../domains/telemetry/session-journals.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
-import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
+import { anchorContextAtInputTokens, estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
 import { resolvedRequestContext } from "../engine/context.js";
 import { hasAssistantGenerationDelta } from "../engine/generation-delta.js";
 import { MODEL_ADMISSION } from "../engine/model-admission.js";
@@ -815,6 +815,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			  }
 			| undefined;
 		let admittedCursor: RequestCursor | null = null;
+		// The input admission passed on after an overflow fold; the provider-bound copy pins it.
+		let pinnedInputTokens: number | null = null;
 		/**
 		 * Cache physics against the previous request on the same key. Every attempt the provider saw advances the
 		 * baseline, hidden #426 retries included, so the ledger's #423 shortfall, which only persisted replies
@@ -1220,9 +1222,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						deps.hostInserts?.dispatched();
 						// The provider stream runs inside the attempt's context, so the engine seam and every observer below it
 						// find this call; the seam's marks agree with the ones taken here because each keeps its first (#434).
+						// Only the provider-bound copy carries the pin; telemetry and the keepalive replay keep the request as built.
+						const pin = pinnedInputTokens;
+						const providerContext = pin === null ? sent : anchorContextAtInputTokens(sent, pin);
+						const providerOptions = pin === null ? requestOptions : { ...requestOptions, clioInputTokens: pin };
 						const stream = attempt
-							? attempt.withContext(() => engineMainStreamSimple(currentModel, sent, requestOptions))
-							: engineMainStreamSimple(currentModel, sent, requestOptions);
+							? attempt.withContext(() => engineMainStreamSimple(currentModel, providerContext, providerOptions))
+							: engineMainStreamSimple(currentModel, providerContext, providerOptions);
 						// send.end is the handoff to Pi's provider, which owns serialization and the socket under
 						// transport option B. The journal's TTFT is firstToken minus this mark (#434).
 						attempt?.stage("send", "end");
@@ -1325,7 +1331,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					state.synthesisToolLock,
 					middlewareChoice,
 				);
-				const input = Math.max(estimateInputTokensFromContext(actual), view.inputTokens ?? 0);
+				// After an overflow fold that fit, admission and Pi's clamp size the request on its count (A4).
+				const pinned = context.takeOverflowInputPin?.(localRuntime) ?? null;
+				const input = Math.max(estimateInputTokensFromContext(actual), view.inputTokens ?? 0, pinned ?? 0);
+				pinnedInputTokens = pinned === null ? null : input;
 				const output = resolveFitOutputReserve(localRuntime, input);
 				if (view.effectiveWindow !== null && !requestFits(input, output, view.effectiveWindow))
 					return {

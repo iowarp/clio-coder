@@ -71,6 +71,10 @@ export interface ContextFoldPort {
 	state: TurnContextState;
 	syncCodexConfiguration(runtime: AgentRuntime): void;
 	liveContextEstimate(agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate;
+	/** The overflow path's one count (A4): the live estimate or Pi's chars/3.5 count, whichever is larger. */
+	overflowFitTokens(agentRuntime: AgentRuntime, pendingUserText?: string): number;
+	/** An overflow fold fit: the next main request pins the same count. */
+	armOverflowInputPin(): void;
 	/** `commit` seeds a live anchor from a replayed usage when none exists, so the carry has a figure (§4 Commit). */
 	reconciledHistoryTokens(agentRuntime: AgentRuntime, commit?: boolean): number | null;
 	/** What the carry will leave behind, stored on the eviction record; undefined with no live anchor (§4). */
@@ -515,6 +519,11 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			});
 		}
 		if (!structural && !input.superseded) return { acted: false, committed: false, fit: false, skipNotice };
+		// An overflow fold must leave Pi's clamp the output floor too, so it plans and fits on the A4 count (cf-q15).
+		const fitTokens = (): number =>
+			requiredFit
+				? port.overflowFitTokens(agentRuntime, pendingUserText)
+				: port.liveContextEstimate(agentRuntime, pendingUserText).tokens;
 		let folded: FoldPlan;
 		let visibleEntries: ReadonlyArray<SessionEntry> = [];
 		let policyId = workingSet.policy;
@@ -522,8 +531,9 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			const entries = deps.readSessionEntries?.() ?? [];
 			const policy = structural ? resolveWorkingSetPolicy(workingSet.policy) : null;
 			if (policy !== null) policyId = policy.id;
+			const tokens = fitTokens();
 			const fitShare = () =>
-				Math.max(0, 1 - resolveFitOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow);
+				Math.max(0, 1 - resolveFitOutputReserve(agentRuntime, Math.max(tokens, estimate.tokens)) / estimate.contextWindow);
 			// S1's figures (ContextFold A3); S0's selection reads neither, so its floor and gate are unchanged.
 			const pressure = evictionPressure({
 				automatic: trigger === "auto" && !requiredFit,
@@ -534,7 +544,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 				prefixTokens: estimate.breakdown.systemPromptTokens + estimate.breakdown.toolSchemaTokens,
 			});
 			const policyInput = selectionInput(entries, session, settings, {
-				tokens: port.liveContextEstimate(agentRuntime, pendingUserText).tokens,
+				tokens,
 				contextWindow: compactionWindow,
 				threshold: requiredFit ? Math.min(compactionThreshold, fitShare()) : pressure.threshold,
 				target: requiredFit ? Math.min(workingSetTarget, fitShare()) : pressure.target,
@@ -606,9 +616,12 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 				: `[context engine] working set: ${planned.items.length} ${itemsWord} evicted by ${planned.policyId}; ~${planned.tokensBefore} -> ~${planned.tokensAfter} tokens, recall by ref with context(scope="recall")`,
 		});
 		const after = port.liveContextEstimate(agentRuntime, pendingUserText);
-		const fit = requiredFit
-			? requestFits(after.tokens, resolveFitOutputReserve(agentRuntime, after.tokens), after.contextWindow)
-			: !input.shouldCompact(after.tokens).shouldCompact;
+		let fit: boolean;
+		if (requiredFit) {
+			const fitAfter = fitTokens();
+			fit = requestFits(fitAfter, resolveFitOutputReserve(agentRuntime, fitAfter), after.contextWindow);
+			if (fit) port.armOverflowInputPin();
+		} else fit = !input.shouldCompact(after.tokens).shouldCompact;
 		return { acted: !alone, committed: true, fit, skipNotice: alone && structural ? structuralSkip() : skipNotice };
 	};
 

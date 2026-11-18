@@ -230,6 +230,41 @@ it("editing reports distinguish lack of measured checks from execution success",
 	}
 });
 
+it("a verify that resolved to no check ran nothing, so a later pass under the declared check stands (c16-C)", () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-verify-unresolved-"));
+	try {
+		mkdirSync(join(root, ".clio-coder"));
+		writeFileSync(
+			join(root, ".clio-coder", "verifiers.yaml"),
+			"version: 2\nchecks:\n  - id: python-unittest\n    description: unittest\n    command: [python3, -m, unittest, discover, -s, tests]\n    cwd: .\n    timeoutMs: 60000\n    tags: [test]\n",
+		);
+		const quality = (unresolved: boolean) => {
+			const recorder = createRunEffectsRecorder(root);
+			recorder.start("refused", "verify", { check: "python3 -m unittest" });
+			recorder.checkOutcome("refused", "error", unresolved);
+			recorder.finish("refused", true);
+			recorder.start("passed", "verify", { check: "python-unittest" });
+			recorder.checkOutcome("passed", "ok");
+			recorder.finish("passed", false);
+			return validateResultContract({
+				contract: { kind: "mutation-report" },
+				output: JSON.stringify({
+					mutatedPaths: [],
+					validations: [{ name: "verify python-unittest", passed: true, evidence: "exit 0" }],
+				}),
+				cwd: root,
+				networkAllowed: false,
+				filesystem: { readFile: () => null },
+				observedRunEffects: recorder.snapshot(),
+			}).quality;
+		};
+		strictEqual(quality(true), "pass");
+		strictEqual(quality(false), "fail");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 it("withholds requested validation even when the worker omits declaredChecks", () => {
 	const input = {
 		quality: "unmeasured",

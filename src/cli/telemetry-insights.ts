@@ -70,7 +70,7 @@ function verifiedOutcomes(
 	stateDir: string,
 	ledgerPath: string,
 	runIds: Iterable<string>,
-	forkedAt: string | null,
+	forkTurnId: string | null,
 ): VerifiedOutcomeCount | null {
 	let text: string;
 	try {
@@ -100,7 +100,7 @@ function verifiedOutcomes(
 			// An unreadable run is not a verified one.
 		}
 	}
-	return countVerifiedOutcomes(expandChainMessages(entries), verified, forkedAt);
+	return countVerifiedOutcomes(expandChainMessages(entries), verified, forkTurnId);
 }
 
 function projectCwd(stateDir: string, bucketDir: string, sessionIds: readonly string[]): string | null {
@@ -131,13 +131,12 @@ function readProjectInsights(stateDir: string, bucket: string): ProjectInsights 
 			[...source.runs.values()].map((run) => run.records),
 			autonomyReader(stateDir, source.sessionId),
 		);
-		// A fork's ledger copied its parent's entries; its own start is the `session.forked` row its journal opens with.
-		const forked = source.journal.records.find((record) => record.k === "session.forked");
+		// A fork's ledger copied its parent's entries; the window keeps the turn they end at after it drops the parent.
 		const outcomes = verifiedOutcomes(
 			stateDir,
 			join(bucketDir, source.sessionId, "current.jsonl"),
 			source.runs.keys(),
-			source.parent === null ? null : (forked?.t ?? null),
+			source.forkTurnId ?? null,
 		);
 		signals.verifiedChecks = outcomes?.checks ?? 0;
 		rows.push({

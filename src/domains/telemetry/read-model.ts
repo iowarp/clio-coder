@@ -112,6 +112,11 @@ export interface SessionSource {
 	/** The fork parent; `source` is null when it could not be read. */
 	parent: { sessionId: string; turnId: string; at: string; source: SessionSource | null } | null;
 	/**
+	 * The parent turn a fork branched at, from the `session.forked` row its journal opens with. A window keeps it after
+	 * it drops `parent`, so a fork still counts only the outcomes it recorded itself.
+	 */
+	forkTurnId?: string;
+	/**
 	 * The ledger's own lifecycle: `endedAt` is set by a clean close and cleared by a reopen. Sessions that predate the
 	 * journal, and every session until the journal records its own close, end only here (#434 §6.1).
 	 */
@@ -3777,6 +3782,17 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 					? `The last turn ended normally (${terminal.stopReason})${retries}.`
 					: `The last turn stopped (${terminal.stopReason})${stage}${retries}.`,
 		);
+		// A worker that turn dispatched settles in its own run journal, so its stop is named here too (cf1h-D3).
+		for (const run of analysis.runs.values()) {
+			const stop =
+				run.turnId === last?.record.ctx.turnId
+					? run.attempts.filter((attempt) => attempt.settled).at(-1)?.settled?.stop
+					: null;
+			if (stop?.failure)
+				findings.push(
+					`Worker run ${run.runId} ${HARNESS_STOP_CAUSES.has(stop.failure) ? "stopped" : "failed"}: ${stop.failure}.`,
+				);
+		}
 	}
 	const incomplete = stepPipeline !== null ? stepPipelineIncomplete(stepPipeline) : null;
 	if (incomplete) findings.push(incomplete);

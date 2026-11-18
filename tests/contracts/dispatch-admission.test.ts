@@ -270,6 +270,14 @@ describe("dispatch admission boundary", () => {
 				agent: "coder",
 			});
 			match(String(legacy[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT]), /legacy_scope_path_absolute/u);
+			// A home path names no repository path, and is not read as the absolute path after its tilde (bt-11 r).
+			const home = tool.prepareAdmissionArguments({
+				task: "Explain the source",
+				briefing: "My notes are in ~/notes/plan.md.",
+				agent: "coder",
+			});
+			strictEqual(home[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT], undefined);
+			tool.disposeAdmissionArguments?.(home);
 			const invalid = tool.prepareAdmissionArguments({
 				task: "Explain the source",
 				agent: "coder",
@@ -624,8 +632,10 @@ describe("dispatch admission boundary", () => {
 			const notice = inferredScopeParentTokenNotice(scope);
 			ok(notice, "a reinterpreted prose token is named in the scope notice");
 			ok(notice.message.startsWith("[dispatch scope] "), notice.message);
-			ok(notice.message.includes("../src/store.js -> src/store.js"), notice.message);
-			ok(notice.message.includes("../src/absent.js -> dropped"), notice.message);
+			strictEqual(
+				notice.message,
+				"[dispatch scope] Paths outside the workspace were not granted: ../src/absent.js. Read from the workspace root: ../src/store.js as src/store.js.",
+			);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -677,7 +687,7 @@ describe("dispatch admission boundary", () => {
 			deepStrictEqual(collides.writeBoundaries, []);
 			deepStrictEqual(collides.parentTokens, [{ token: "../../../etc/passwd", resolved: "etc/passwd", source: "task" }]);
 			ok(
-				inferredScopeParentTokenNotice(collides)?.message.includes("../../../etc/passwd -> etc/passwd"),
+				inferredScopeParentTokenNotice(collides)?.message.includes("../../../etc/passwd as etc/passwd"),
 				"the rewrite the operator would otherwise never see is named",
 			);
 		} finally {

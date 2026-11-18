@@ -10,6 +10,8 @@ import {
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
+import fsPromises from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, it } from "node:test";
@@ -363,4 +365,34 @@ it("a run's checkout delta reads only files whose stat moved, and concurrent spa
 	const after = await snapshotCheckoutSince(before, root);
 	if (!after) throw new Error("the fixture is a git workspace");
 	deepStrictEqual(changedCheckoutPaths(before, after), ["large-rewritten.bin", "same-size.txt"]);
+});
+
+it("a same-size rewrite over 1 MiB inside one timestamp tick is seen by its sampled ends", async (t) => {
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-checkout-tick-"));
+	roots.push(root);
+	execFileSync("git", ["-C", root, "init", "-q"]);
+	const file = join(root, "large.bin");
+	writeFileSync(file, Buffer.alloc(2 * 1024 * 1024, 7));
+	// A coarse clock can leave mtime and ctime where they were; pin them to the baseline's to make that tick certain.
+	const lstat = fsPromises.lstat;
+	let pinned: { mtimeNs: bigint; ctimeNs: bigint } | null = null;
+	fsPromises.lstat = (async (target: Parameters<typeof lstat>[0], options?: { bigint?: boolean }) => {
+		const stat = await lstat(target, options as { bigint: true });
+		if (String(target) !== file || options?.bigint !== true) return stat;
+		pinned ??= { mtimeNs: stat.mtimeNs, ctimeNs: stat.ctimeNs };
+		return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, pinned);
+	}) as typeof lstat;
+	syncBuiltinESMExports();
+	t.after(() => {
+		fsPromises.lstat = lstat;
+		syncBuiltinESMExports();
+	});
+	const before = await takeCheckoutBaseline(root);
+	if (!before) throw new Error("the fixture is a git workspace");
+	const rewritten = Buffer.alloc(2 * 1024 * 1024, 7);
+	rewritten[0] = 8;
+	writeFileSync(file, rewritten);
+	const after = await snapshotCheckoutSince(before, root);
+	if (!after) throw new Error("the fixture is a git workspace");
+	deepStrictEqual(changedCheckoutPaths(before, after), ["large.bin"]);
 });
