@@ -1072,7 +1072,7 @@ it("headless shutdown retains its cancelled receipt and exit 143 without route a
 	}
 });
 
-it("a reply cut off by shutdown is the harness's stop and names no route, even after an earlier Esc", {
+it("a reply cut off by the operator's Esc or by shutdown is the harness's stop and names no route", {
 	timeout: 15_000,
 }, async () => {
 	const f = fixture("partial");
@@ -1098,6 +1098,7 @@ it("a reply cut off by shutdown is the harness's stop and names no route, even a
 			.filter((payload) => payload?.stopReason === "aborted");
 		ok(cancelled && closing, JSON.stringify(f.entries()));
 		strictEqual(recordValue(cancelled.failure)?.errorClass, "operator_cancel");
+		strictEqual(cancelled.failureRoute, undefined, "an operator's cancel names no route");
 		strictEqual(closing.failureRoute, undefined);
 		match(String(closing.errorMessage), /Clio Coder shut down/u);
 		// The persisted failure names the harness's cause, not a transport abort (bt-26 N2a).

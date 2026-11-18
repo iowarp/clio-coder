@@ -1900,7 +1900,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							? (state.repetitionAbortReason ?? state.toolProseAbortReason ?? (disposed ? SHUTDOWN_STOP_REASON : null))
 							: null;
 					if (harnessStop !== null) Object.assign(message, { errorMessage: harnessStop, harnessStopped: true });
-					else
+					// An interrupt (the operator's cancel, triage, autonomy) is no route failure either, so it names no route.
+					else if (harnessCause === undefined || harnessCause === "route_moved")
 						Object.assign(message, {
 							failureRoute: {
 								targetId: localRuntime.targetId,
