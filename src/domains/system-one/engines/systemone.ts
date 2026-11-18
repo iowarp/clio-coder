@@ -118,13 +118,20 @@ export function createSystemOneEngine(input: SystemOneEngineInput): DecisionEngi
 				});
 				throw error;
 			}
-			// The wire's input count is the whole prompt; it has no cache split, so no provider-reported mark, which
-			// would read a missing cache split as an unknown input.
+			// The typed decisions wire has no prompt cache: its input count is the whole prompt, so the call read and
+			// wrote no cache, a known zero, and a session's fresh/cached split stays whole (bt-42).
 			const tokens = result.tokensUsed;
 			recordUsage?.(
 				tokens === undefined
 					? null
-					: { input: tokens.input, output: tokens.output, totalTokens: tokens.input + tokens.output },
+					: {
+							providerReported: true,
+							input: tokens.input,
+							output: tokens.output,
+							cacheRead: 0,
+							cacheWrite: 0,
+							totalTokens: tokens.input + tokens.output,
+						},
 				{ callOutcome: "success" },
 			);
 			const answers: Record<string, EngineReply["answers"][string]> = {};

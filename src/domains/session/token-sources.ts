@@ -42,16 +42,23 @@ export type TokenSource =
 export interface TokenSourceRow {
 	source: TokenSource;
 	label: string;
-	/** Null when a call the row covers had no cache-read count, so the cached share is unknown. */
+	/**
+	 * Cached and fresh sum the calls that reported a cache-read count; null when none of the row's calls did. The
+	 * total is every call's, so a row with `unsplitCalls` has total above cached plus fresh (bt-42).
+	 */
 	cached: number | null;
 	fresh: number | null;
 	total: number;
+	/** Calls whose share of this row has no cached/fresh split; absent when every call had one. */
+	unsplitCalls?: number;
 }
 
 export interface TokenSourceInput {
 	cached: number | null;
 	fresh: number | null;
 	total: number;
+	/** Measured calls with no cache-read count: in the total, in neither cached nor fresh (bt-42). */
+	unsplitCalls?: number;
 }
 
 /** One agent role's calls inside a span; the span's own figures are their sum. */
@@ -296,7 +303,20 @@ interface RowAccumulator {
 	cached: number;
 	fresh: number;
 	total: number;
-	cacheKnown: boolean;
+	/** The part of the total from calls with no cache-read count, and how many such calls. */
+	unsplit: number;
+	unsplitCalls: number;
+}
+
+/** Cached and fresh over the split part; a span no call split stays unknown rather than an invented zero (bt-42). */
+function splitOf(row: RowAccumulator, unsplitCalls: number): TokenSourceInput {
+	const none = row.unsplit > 0 && row.unsplit === row.total;
+	return {
+		cached: none ? null : row.cached,
+		fresh: none ? null : row.fresh,
+		total: row.total,
+		...(unsplitCalls > 0 ? { unsplitCalls } : {}),
+	};
 }
 
 function rowsOf(accumulated: ReadonlyMap<TokenSource, RowAccumulator>): TokenSourceRow[] {
@@ -309,28 +329,32 @@ function rowsOf(accumulated: ReadonlyMap<TokenSource, RowAccumulator>): TokenSou
 	return [...accumulated]
 		.filter(([, row]) => row.total > 0)
 		.sort(([a, left], [b, right]) => rank(a) - rank(b) || right.total - left.total || a.localeCompare(b))
-		.map(([source, row]) => ({
-			source,
-			label: tokenSourceLabel(source),
-			cached: row.cacheKnown ? row.cached : null,
-			fresh: row.cacheKnown ? row.fresh : null,
-			total: row.total,
-		}));
+		.map(([source, row]) => ({ source, label: tokenSourceLabel(source), ...splitOf(row, row.unsplitCalls) }));
 }
 
 function addRow(target: Map<TokenSource, RowAccumulator>, source: TokenSource, row: RowAccumulator): void {
-	const prior = target.get(source) ?? { cached: 0, fresh: 0, total: 0, cacheKnown: true };
+	const prior = target.get(source) ?? { cached: 0, fresh: 0, total: 0, unsplit: 0, unsplitCalls: 0 };
 	target.set(source, {
 		cached: prior.cached + row.cached,
 		fresh: prior.fresh + row.fresh,
 		total: prior.total + row.total,
-		cacheKnown: prior.cacheKnown && row.cacheKnown,
+		unsplit: prior.unsplit + row.unsplit,
+		unsplitCalls: prior.unsplitCalls + row.unsplitCalls,
 	});
+}
+
+/** One measured call's share of a row: split into cached and fresh when the call reported a cache read. */
+function callRow(share: number, cached: number, split: boolean): RowAccumulator {
+	return split
+		? { cached, fresh: share - cached, total: share, unsplit: 0, unsplitCalls: 0 }
+		: { cached: 0, fresh: 0, total: share, unsplit: share, unsplitCalls: 1 };
 }
 
 interface RoleAccumulator {
 	calls: number;
 	unmeasuredCalls: number;
+	/** Measured calls with no cache-read count; a span's own unsplit count, since one call spans many rows. */
+	unsplitCalls: number;
 	output: number;
 }
 
@@ -343,19 +367,20 @@ interface TurnAccumulator extends RoleAccumulator {
 	roles: Map<TokenSourceRole["role"], RoleAccumulator>;
 }
 
-function inputOf(rows: ReadonlyMap<TokenSource, RowAccumulator>, role?: TokenSourceRole["role"]): TokenSourceInput {
-	let cached = 0;
-	let fresh = 0;
-	let total = 0;
-	let known = true;
+function inputOf(
+	rows: ReadonlyMap<TokenSource, RowAccumulator>,
+	unsplitCalls: number,
+	role?: TokenSourceRole["role"],
+): TokenSourceInput {
+	const sum: RowAccumulator = { cached: 0, fresh: 0, total: 0, unsplit: 0, unsplitCalls: 0 };
 	for (const [source, row] of rows) {
 		if (role !== undefined && (role === "main" ? source.startsWith("role:") : source !== `role:${role}`)) continue;
-		cached += row.cached;
-		fresh += row.fresh;
-		total += row.total;
-		known &&= row.cacheKnown;
+		sum.cached += row.cached;
+		sum.fresh += row.fresh;
+		sum.total += row.total;
+		sum.unsplit += row.unsplit;
 	}
-	return { cached: known ? cached : null, fresh: known ? fresh : null, total };
+	return splitOf(sum, unsplitCalls);
 }
 
 function isSideRole(role: AgentRole): role is SideRole {
@@ -368,7 +393,13 @@ function rolesOf(
 ): TokenSourceRole[] {
 	return [...roles]
 		.sort(([a], [b]) => (a === "main" ? -1 : b === "main" ? 1 : a.localeCompare(b)))
-		.map(([role, tally]) => ({ role, ...tally, input: inputOf(rows, role) }));
+		.map(([role, { calls, unmeasuredCalls, unsplitCalls, output }]) => ({
+			role,
+			calls,
+			unmeasuredCalls,
+			output,
+			input: inputOf(rows, unsplitCalls, role),
+		}));
 }
 
 /** A side-agent call waiting for the turn it is charged to. */
@@ -432,6 +463,7 @@ function tokenSourcesReport(
 			at: entry.timestamp,
 			calls: 0,
 			unmeasuredCalls: 0,
+			unsplitCalls: 0,
 			output: 0,
 			coldReasons: new Set(),
 			rows: new Map(),
@@ -440,13 +472,20 @@ function tokenSourcesReport(
 		turns.push(turn);
 		return turn;
 	};
-	const tally = (turn: TurnAccumulator, role: TokenSourceRole["role"], output: number | null, calls = 1): void => {
-		const tallies = turn.roles.get(role) ?? { calls: 0, unmeasuredCalls: 0, output: 0 };
+	const tally = (
+		turn: TurnAccumulator,
+		role: TokenSourceRole["role"],
+		output: number | null,
+		calls = 1,
+		split = true,
+	): void => {
+		const tallies = turn.roles.get(role) ?? { calls: 0, unmeasuredCalls: 0, unsplitCalls: 0, output: 0 };
 		for (const target of [turn, tallies]) {
 			if (output === null) target.unmeasuredCalls += calls;
 			else {
 				target.calls += calls;
 				target.output += output;
+				if (!split) target.unsplitCalls += calls;
 			}
 		}
 		turn.roles.set(role, tallies);
@@ -460,14 +499,10 @@ function tokenSourcesReport(
 		}
 		usageFrom.add(usage.from);
 		if (usage.api !== null && NO_UNCACHED_INPUT_APIS.has(usage.api)) freshIsCacheWriteCalls += charge.calls;
-		tally(turn, charge.role, usage.output, charge.calls);
-		const cached = Math.min(total, usage.cacheRead ?? 0);
-		addRow(turn.rows, `role:${charge.role}`, {
-			cached,
-			fresh: total - cached,
-			total,
-			cacheKnown: usage.cacheRead !== null,
-		});
+		const split = usage.cacheRead !== null;
+		tally(turn, charge.role, usage.output, charge.calls, split);
+		const row = callRow(total, Math.min(total, usage.cacheRead ?? 0), split);
+		addRow(turn.rows, `role:${charge.role}`, { ...row, unsplitCalls: split ? 0 : charge.calls });
 	};
 	const sideCharge = (record: TelemetryRecord<"call.settled">): SideCharge => ({
 		role: record.ctx.agent.role as SideRole,
@@ -543,7 +578,7 @@ function tokenSourcesReport(
 			if (payload.callInvoked !== false) tally(turn, "main", null);
 		} else {
 			usageFrom.add(usage.from);
-			tally(turn, "main", usage.output);
+			tally(turn, "main", usage.output, 1, usage.cacheRead !== null);
 			if (usage.api !== null && NO_UNCACHED_INPUT_APIS.has(usage.api)) freshIsCacheWriteCalls += 1;
 			for (const reason of usage.coldReasons) turn.coldReasons.add(reason);
 			const side = systemSide(entry.timestamp, snapshots, compiles);
@@ -567,12 +602,7 @@ function tokenSourcesReport(
 				if (share <= 0) return;
 				const cached = Math.min(share, cacheLeft);
 				cacheLeft -= cached;
-				addRow(turn.rows, segment.source, {
-					cached,
-					fresh: share - cached,
-					total: share,
-					cacheKnown: usage.cacheRead !== null,
-				});
+				addRow(turn.rows, segment.source, callRow(share, cached, usage.cacheRead !== null));
 			});
 		}
 		const tokens = estimateTokens(entry);
@@ -592,17 +622,20 @@ function tokenSourcesReport(
 	const sessionRoles = new Map<TokenSourceRole["role"], RoleAccumulator>();
 	let calls = 0;
 	let unmeasuredCalls = 0;
+	let unsplitCalls = 0;
 	let output = 0;
 	for (const turn of turns) {
 		calls += turn.calls;
 		unmeasuredCalls += turn.unmeasuredCalls;
+		unsplitCalls += turn.unsplitCalls;
 		output += turn.output;
 		for (const [source, row] of turn.rows) addRow(sessionRows, source, row);
 		for (const [role, tallies] of turn.roles) {
-			const prior = sessionRoles.get(role) ?? { calls: 0, unmeasuredCalls: 0, output: 0 };
+			const prior = sessionRoles.get(role) ?? { calls: 0, unmeasuredCalls: 0, unsplitCalls: 0, output: 0 };
 			sessionRoles.set(role, {
 				calls: prior.calls + tallies.calls,
 				unmeasuredCalls: prior.unmeasuredCalls + tallies.unmeasuredCalls,
+				unsplitCalls: prior.unsplitCalls + tallies.unsplitCalls,
 				output: prior.output + tallies.output,
 			});
 		}
@@ -625,7 +658,7 @@ function tokenSourcesReport(
 			at: turn.at,
 			calls: turn.calls,
 			unmeasuredCalls: turn.unmeasuredCalls,
-			input: inputOf(turn.rows),
+			input: inputOf(turn.rows, turn.unsplitCalls),
 			output: turn.output,
 			coldReasons: [...turn.coldReasons].sort(),
 			rows: rowsOf(turn.rows),
@@ -634,7 +667,7 @@ function tokenSourcesReport(
 		totals: {
 			calls,
 			unmeasuredCalls,
-			input: inputOf(sessionRows),
+			input: inputOf(sessionRows, unsplitCalls),
 			output,
 			rows: rowsOf(sessionRows),
 			roles: rolesOf(sessionRoles, sessionRows),

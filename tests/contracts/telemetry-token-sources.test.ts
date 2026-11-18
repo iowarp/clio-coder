@@ -297,6 +297,43 @@ it("names the copilot-sdk calls whose fresh input is their cache write (bt-12 #1
 	}
 });
 
+it("a call with no cache-read count keeps the session's cached and fresh over the calls that split, and is named (bt-42)", async () => {
+	const env = await isolateClioEnv("clio-coder-token-sources-unsplit-");
+	try {
+		const sessionId = "token-sources-unsplit";
+		const directory = join(clioStateDir(), "sessions", "token-sources-repo", sessionId);
+		mkdirSync(directory, { recursive: true });
+		const at = new Date().toISOString();
+		const message = (turnId: string, role: string, payload: Record<string, unknown>) => ({
+			kind: "message",
+			turnId,
+			parentTurnId: null,
+			timestamp: at,
+			role,
+			payload,
+		});
+		const assistant = (turnId: string, usage: Record<string, number>) =>
+			message(turnId, "assistant", { role: "assistant", content: [{ type: "text", text: "ok" }], usage });
+		const lines = [
+			{ type: "session", version: 6, id: sessionId, timestamp: at, cwd: env.dir },
+			message("u1", "user", { text: "hi" }),
+			assistant("a1", { input: 100, cacheRead: 900, cacheWrite: 0, output: 10 }),
+			message("u2", "user", { text: "again" }),
+			assistant("a2", { input: 500, output: 20 }),
+		];
+		writeFileSync(join(directory, "current.jsonl"), `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+		const report = loadTokenSourcesReport(clioStateDir(), sessionId);
+		ok(report, "the session ledger loads");
+		const { cached, fresh, total, unsplitCalls } = report.totals.input;
+		strictEqual(`${cached}/${fresh}/${total}/${unsplitCalls}`, "900/100/1500/1", JSON.stringify(report.totals));
+		strictEqual(report.turns[0]?.input.unsplitCalls, undefined, "a span whose calls all split names none");
+		strictEqual(report.turns[1]?.input.cached, null, "a span no call split stays unknown, never an invented zero");
+		ok(renderTokenSources(report, false).includes("2 (1 without split)"), renderTokenSources(report, false));
+	} finally {
+		env.restore();
+	}
+});
+
 it("charges compaction and memory calls to the turn they ran in, by role, inside its totals (bt-12 #10)", async () => {
 	const env = await isolateClioEnv("clio-coder-token-sources-side-");
 	try {
@@ -365,7 +402,10 @@ it("charges compaction and memory calls to the turn they ran in, by role, inside
 		strictEqual(second?.rows.find((row) => row.source === "role:compaction")?.label, "compaction calls");
 		strictEqual(report.totals.calls, 5);
 		strictEqual(report.totals.output, 20 + 50 + 20 + 1775);
-		ok(renderTokenSources(report, false).includes("3 (compaction 2)"), renderTokenSources(report, false));
+		ok(
+			renderTokenSources(report, false).includes("3 (1 without split, compaction 2)"),
+			renderTokenSources(report, false),
+		);
 		ok(renderTokenSources(report, true).includes("output 1795 (compaction 1775)"), renderTokenSources(report, true));
 	} finally {
 		env.restore();

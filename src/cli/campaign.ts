@@ -167,6 +167,8 @@ function renderCampaign(result: CampaignResult): string {
 		const lines: string[] = [];
 		if (entry.metrics.gates.reached.length > 0)
 			lines.push(`${entry.label}: gates ${entry.metrics.gates.reached.join(", ")}`);
+		const unsplit = entry.metrics.tokens?.unsplitCalls;
+		if (unsplit) lines.push(`${entry.label}: ${unsplit} call(s) without a cache split, in INPUT only`);
 		if (entry.error !== null) lines.push(`${entry.label}: ${entry.error.split("\n").join(" / ")}`);
 		return lines;
 	});
