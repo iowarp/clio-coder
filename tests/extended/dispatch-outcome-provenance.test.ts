@@ -10,6 +10,7 @@ import { resolveDispatchFailureStatus } from "../../src/core/dispatch-outcome.js
 import { pricedUsd } from "../../src/core/telemetry/pricing.js";
 import { renderPricing } from "../../src/core/telemetry/render.js";
 import { resolveEffectivePricing } from "../../src/domains/providers/catalog.js";
+import inception from "../../src/domains/providers/runtimes/cloud/inception.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 
 describe("resolveDispatchFailureStatus", () => {
@@ -83,5 +84,17 @@ describe("resolveEffectivePricing", () => {
 			),
 			["$0.00 local", "$0.00 free (declared)", "$0.00 free (zero-rates)", "$0.00 local"],
 		);
+	});
+
+	it("leaves an all-zero catalog row unknown on a paid cloud route instead of a catalog $0", () => {
+		const target = { id: "inception", runtime: "inception" };
+		deepStrictEqual(resolveEffectivePricing(target, inception, "mercury-3"), { rates: null, pricedBy: "none" });
+		strictEqual(resolveEffectivePricing(target, inception, "mercury-decide").pricedBy, "catalog");
+		const openrouter = { id: "openrouter", tier: "cloud" } as const;
+		strictEqual(resolveEffectivePricing({ id: "or", runtime: "openrouter" }, openrouter, "auto").pricedBy, "none");
+		const free = resolveEffectivePricing({ id: "or", runtime: "openrouter" }, openrouter, "google/gemma-4-31b-it:free");
+		deepStrictEqual([free.pricedBy, free.rates?.input, free.rates?.output], ["catalog", 0, 0]);
+		const declared = resolveEffectivePricing({ ...target, pricing: { input: 0.25, output: 1 } }, inception, "mercury-3");
+		strictEqual(declared.pricedBy, "target-rates");
 	});
 });

@@ -10,7 +10,8 @@ import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 const engineAi = createEngineAi();
 
-// Inception /v1/models, 2026-10-20: Pi has no Inception catalog.
+// Inception /v1/models, 2026-10-20: Pi has no Inception catalog. /v1/models publishes no
+// rates, so Mercury 3's zero cost marks it unpriced; operators set `pricing:` on the target.
 const MERCURY_3: Model<"openai-completions"> = {
 	id: "mercury-3",
 	name: "Inception: Mercury 3",
@@ -157,6 +158,12 @@ export type PricingRuntime = Pick<RuntimeDescriptor, "id" | "tier">;
 
 const FREE_RATES = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const;
 
+function hasNonZeroRate(cost: Model<Api>["cost"]): boolean {
+	return [cost, ...(cost.tiers ?? [])].some((rates) =>
+		[rates.input, rates.output, rates.cacheRead, rates.cacheWrite].some((rate) => (rate ?? 0) !== 0),
+	);
+}
+
 /** Resolve rates and who priced them together so callers cannot price from a different source. */
 export function resolveEffectivePricing(
 	target: TargetDescriptor,
@@ -182,6 +189,9 @@ export function resolveEffectivePricing(
 	if (runtime.tier === "local-native") return { rates: { ...FREE_RATES }, pricedBy: "free", freeRule: "local-native" };
 	const catalogModel = getCatalogModelForRuntime(runtime.id, wireModelId);
 	if (!catalogModel) return { rates: null, pricedBy: "none" };
+	// An all-zero catalog row is an unpriced placeholder, not a published $0 price (bt-32),
+	// except an OpenRouter `:free` id, whose zero is the published price.
+	if (!hasNonZeroRate(catalogModel.cost) && !catalogModel.id.endsWith(":free")) return { rates: null, pricedBy: "none" };
 	return {
 		rates: structuredClone(catalogModel.cost),
 		pricedBy: "catalog",
