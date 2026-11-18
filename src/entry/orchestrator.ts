@@ -695,7 +695,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let protectedArtifactStateForDispatch: (() => ProtectedArtifactState) | null = null;
 	// Bound once the session flow ledger exists; dispatch reads it per request.
 	let flowRestrictionsForDispatch: (() => FlowRestrictionSet | null) | null = null;
-	let sessionOriginForDispatch: (() => { id: string; cwdHash: string } | null) | null = null;
+	let sessionOriginForDispatch: (() => { id: string; cwdHash: string; parentSessionId?: string | null } | null) | null =
+		null;
 	// Bound once the safety judge and the autonomy resolver exist; a worker ask
 	// that arrives before then finds no judge and is denied.
 	let workerAskJudgeForDispatch: {
@@ -840,6 +841,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// Stamps every run with the session that dispatched it, which is what
 				// keeps a sibling Clio process's runs and batches out of this one.
 				getSessionId: () => sessionOriginForDispatch?.()?.id ?? null,
+				getSessionParentId: () => sessionOriginForDispatch?.()?.parentSessionId ?? null,
 				getSessionOrigin: () => sessionOriginForDispatch?.() ?? null,
 				// The domain owns the durable journal here, not the dispatch
 				// tool's event registry: `/run`, a watchdog run, and a model

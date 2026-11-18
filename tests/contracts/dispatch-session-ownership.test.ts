@@ -73,10 +73,16 @@ interface SessionFixture {
 	stop(): Promise<void>;
 }
 
-async function openSession(scratch: IsolatedClioEnv, sessionId: string, projectDir: string): Promise<SessionFixture> {
+async function openSession(
+	scratch: IsolatedClioEnv,
+	sessionId: string,
+	projectDir: string,
+	parentSessionId: string | null = null,
+): Promise<SessionFixture> {
 	const workers: ReturnType<typeof controlledWorker>[] = [];
 	const bundle = makeDispatchBundle(dispatchStubContext(), {
 		getSessionId: () => sessionId,
+		getSessionParentId: () => parentSessionId,
 		spawnWorker: () => {
 			const worker = controlledWorker();
 			workers.push(worker);
@@ -180,6 +186,57 @@ describe("dispatch session ownership", () => {
 		} finally {
 			await b.stop();
 			await a.stop();
+		}
+	});
+
+	it("lets a fork collect its parent's uncollected batch once but never cancel the parent's live run", async () => {
+		const parent = await openSession(scratch, "session-p", projectA);
+		const handle = await parent.contract.dispatch(parent.request);
+		await parent.contract.detached?.register({
+			batchId: "batch-p",
+			runs: [{ runId: handle.runId, assignmentId: handle.runId, agentId: "scout" }],
+			sessionId: "session-p",
+			cwd: projectA,
+		});
+		const fork = await openSession(scratch, "session-f", process.cwd(), "session-p");
+		const stranger = await openSession(scratch, "session-x", process.cwd());
+		try {
+			match(
+				errorMessage(await fork.call(ToolNames.Steer, { run_id: handle.runId, action: "cancel" })),
+				/belongs to another session/,
+			);
+			strictEqual(parent.workers[0]?.aborts(), 0, "the fork never touched the parent's live worker");
+			parent.workers[0]?.finish();
+			await handle.finalPromise;
+
+			deepStrictEqual(
+				openDetachedBatchViews(fork.contract).map((view) => [view.id, view.terminal, view.total]),
+				[["batch-p", 1, 1]],
+			);
+			deepStrictEqual(openDetachedBatchViews(stranger.contract), [], "a non-ancestor is never nudged");
+			match(
+				errorMessage(await stranger.call(ToolNames.Monitor, { mode: "collect", batch_id: "batch-p" })),
+				/batch 'batch-p' belongs to another session/,
+			);
+
+			strictEqual(
+				okResult(await fork.call(ToolNames.Monitor, { mode: "collect", batch_id: "batch-p" })).details?.collected,
+				true,
+			);
+			deepStrictEqual(openDetachedBatchViews(parent.contract), [], "the first collect silences every nudge");
+			deepStrictEqual(openDetachedBatchViews(fork.contract), []);
+			match(
+				okResult(await parent.call(ToolNames.Monitor, { mode: "collect", batch_id: "batch-p" })).output,
+				/batch batch-p \(already collected\)/,
+			);
+			match(
+				errorMessage(await fork.call(ToolNames.Monitor, { mode: "collect", batch_id: "batch-p" })),
+				/batch 'batch-p' was already collected/,
+			);
+		} finally {
+			await stranger.stop();
+			await fork.stop();
+			await parent.stop();
 		}
 	});
 

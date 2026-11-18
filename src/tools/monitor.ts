@@ -143,7 +143,7 @@ function listRuns(deps: MonitorToolDeps, options: ToolInvokeOptions | undefined)
 		return { kind: "error", message: `monitor: ${err instanceof Error ? err.message : String(err)}` };
 	}
 	const ownership = ownershipFor(deps, options);
-	const scoped = runs.filter((run) => ownership.ownsRun(run));
+	const scoped = runs.filter((run) => ownership.readsRun(run));
 	const shown = scoped.slice(0, LIST_LIMIT);
 	if (shown.length === 0) {
 		return {
