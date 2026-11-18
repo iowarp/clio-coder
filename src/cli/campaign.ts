@@ -10,6 +10,7 @@ import {
 	runCampaign,
 	validateCampaignInput,
 } from "../domains/campaign/index.js";
+import { operatorComponentsDir } from "../domains/lifecycle/components.js";
 import { formatColumns, printError } from "./argv.js";
 import { containedYoloRefusal } from "./contained-yolo-gate.js";
 import { loadScriptedAnswers } from "./run-answers.js";
@@ -33,7 +34,10 @@ empty Clio data, state and cache under --out, so entries share no sessions or
 memory. Each uses your config directory as it is (targets, credentials,
 installed extensions), as your own \`clio-coder run\` would: nothing secret is
 copied under --out, and a login an entry refreshes is saved to your credential
-store. Each runs headless \`clio-coder run --answers\` in its fixture copy.
+store. Each also reads the runtime components you installed with
+\`clio-coder tools install\` (copilot-sdk, claude-sdk) from your data directory,
+and never installs or writes one there. Each runs headless
+\`clio-coder run --answers\` in its fixture copy.
 
 Metrics come from what the run persisted: its session ledger (extension
 interviews and the checkpoint ids they asked, extension tool refusals), its
@@ -210,6 +214,7 @@ async function runCommand(args: ReadonlyArray<string>): Promise<number> {
 		autonomy,
 		probe,
 		operatorConfig: clioConfigDir(),
+		operatorComponents: operatorComponentsDir(),
 		clio: { file: process.execPath, args: [...process.execArgv, entry] },
 		env: parentEnv(),
 		envPolicy: { targets: settings.targets, passEnv: settings.safety.sandboxPassEnv },

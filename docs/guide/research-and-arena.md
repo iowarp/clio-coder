@@ -286,7 +286,9 @@ CLIO Coder data, state and cache under `<out>/<NN>-<label>/home`, so entries sha
 letters, digits, `.`, `_` and `-` become `-` in the directory name. Each uses
 your config directory as it is (targets, credentials, installed extensions and MCP configuration), the way your own
 `clio-coder run` would: nothing secret is copied under `--out`, and a login an entry refreshes is saved to your
-credential store. Each entry's environment is filtered the way an arena contender's is (see [Limits](#limits)). The
+credential store. Each also reads the runtime components you installed with `clio-coder tools install` (copilot-sdk,
+claude-sdk) from your own data directory, read-only, and an entry missing one names that directory in its install hint
+rather than offering to install under `--out`. Each entry's environment is filtered the way an arena contender's is (see [Limits](#limits)). The
 entry runs headless `clio-coder run --cwd <copy> --target <target> --model <model> --answers <file>`, with
 `--thinking`, `--timeout` and `--autonomy yolo` when given, and its output goes to `run.stdout.log` and
 `run.stderr.log` beside the copy. `--autonomy yolo` is contained yolo only. `--probe <extension>:<command>` then runs

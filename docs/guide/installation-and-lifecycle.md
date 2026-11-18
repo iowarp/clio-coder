@@ -321,7 +321,8 @@ for it in this order:
 1. `CLIO_CODER_CLAUDE_SDK_DIR`, an absolute administrator-prepared prefix holding
    `node_modules/@anthropic-ai/claude-agent-sdk`. It is never modified, and when
    it is set nothing else is consulted.
-2. The per-user component above.
+2. The per-user component above, then, inside a `clio-coder campaign run`
+   entry, the operator's own copy, which the entry reads and never writes.
 3. A package-local copy, which is the development checkout or an install that
    predates the component.
 

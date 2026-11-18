@@ -44,6 +44,11 @@ export interface CampaignInput {
 	 * is thrown away, which would strand a rotated refresh token.
 	 */
 	operatorConfig: string;
+	/**
+	 * The operator's installed components directory (`<data>/components`). Entries resolve runtime SDKs such as
+	 * copilot-sdk and claude-sdk from it, read-only, since their own data roots start empty.
+	 */
+	operatorComponents: string;
 	/** How to start this same Clio Coder: the executable and the arguments before the subcommand. */
 	clio: { file: string; args: ReadonlyArray<string> };
 	env: Record<string, string>;
@@ -204,7 +209,7 @@ async function probeDesk(
 async function runEntry(input: CampaignInput, entry: RosterEntry, index: number): Promise<CampaignEntryResult> {
 	const dir = join(input.out, entryDirName(index, entry.label));
 	const project = join(dir, "project");
-	const roots = entryRoots(join(dir, "home"), input.operatorConfig);
+	const roots = entryRoots(join(dir, "home"), input.operatorConfig, input.operatorComponents);
 	const result: CampaignEntryResult = {
 		schemaVersion: CAMPAIGN_SCHEMA_VERSION,
 		index,
@@ -277,9 +282,10 @@ async function runEntry(input: CampaignInput, entry: RosterEntry, index: number)
 
 /**
  * Run one fixture across a roster, one entry at a time so wall times do not contend. Each entry gets a fresh copy
- * of the fixture and its own empty Clio data, state and cache roots beside the operator's config, runs headless
- * `clio-coder run --answers`, and is folded from what that run persisted. An entry that fails, times out or cannot
- * start is recorded and the campaign moves on; a stop signal cancels the running entry and the rest.
+ * of the fixture and its own empty Clio data, state and cache roots beside the operator's config and installed
+ * components, runs headless `clio-coder run --answers`, and is folded from what that run persisted. An entry that
+ * fails, times out or cannot start is recorded and the campaign moves on; a stop signal cancels the running entry
+ * and the rest.
  */
 export async function runCampaign(input: CampaignInput): Promise<CampaignResult> {
 	validateCampaignInput(input);

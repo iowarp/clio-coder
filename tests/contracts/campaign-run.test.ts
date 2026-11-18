@@ -1,13 +1,25 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { resetXdgCache } from "../../src/core/xdg.js";
+import { entryRootEnv, entryRoots } from "../../src/domains/campaign/fold.js";
 import { foldCampaignMetrics, parseRoster } from "../../src/domains/campaign/index.js";
 import type { CampaignResult } from "../../src/domains/campaign/runner.js";
 import type { Interview } from "../../src/domains/extensions/public-api-v2.js";
+import {
+	CLAUDE_AGENT_SDK_VERSION,
+	ClaudeAgentSdkUnavailableError,
+} from "../../src/domains/lifecycle/claude-sdk-install.js";
+import {
+	COPILOT_SDK_PACKAGE,
+	COPILOT_SDK_VERSION,
+	CopilotSdkUnavailableError,
+	resolveCopilotSdkEntry,
+} from "../../src/domains/lifecycle/copilot-sdk-install.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { runParkedInterview } from "../../src/tools/extension-interview.js";
 import { type HeadlessScratch, headlessScratch } from "../harness/headless-run.js";
@@ -18,6 +30,7 @@ import {
 	seedOpenAICompatToolOrchestrator,
 	startOpenAICompatFixture,
 } from "../harness/openai-compat-fixture.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const DESK_MANIFEST = {
 	id: "desk",
@@ -315,5 +328,40 @@ describe("campaign metrics fold", () => {
 			/roster\[0\]\.effort: unknown key/u,
 		);
 		throws(() => parseRoster("entries: []\n"), /entries: unknown key/u);
+	});
+});
+
+describe("campaign entry components", () => {
+	it("an entry reads the operator's installed SDK, and a missing one names the operator's directory", async (t) => {
+		const env = await isolateClioEnv("clio-campaign-components-");
+		t.after(env.restore);
+		delete process.env.CLIO_CODER_CLAUDE_SDK_DIR;
+		const operatorComponents = join(env.dir, "operator-data", "components");
+		const sdk = join(operatorComponents, "copilot-sdk", COPILOT_SDK_VERSION, "node_modules", COPILOT_SDK_PACKAGE);
+		mkdirSync(sdk, { recursive: true });
+		writeFileSync(
+			join(sdk, "package.json"),
+			JSON.stringify({ name: COPILOT_SDK_PACKAGE, version: COPILOT_SDK_VERSION, type: "module", exports: "./sdk.mjs" }),
+		);
+		writeFileSync(join(sdk, "sdk.mjs"), "export class CopilotClient {}\n");
+		const configDir = process.env.CLIO_CODER_CONFIG_DIR ?? "";
+		const roots = entryRoots(join(env.dir, "out", "01-luna", "home"), configDir, operatorComponents);
+		Object.assign(process.env, entryRootEnv(roots));
+		resetXdgCache();
+
+		const entry = resolveCopilotSdkEntry();
+		ok(entry !== null, "the entry resolves the operator's copilot-sdk");
+		strictEqual(realpathSync(entry), realpathSync(join(sdk, "sdk.mjs")));
+
+		// Without the component, the install hint names the operator's directory, never the entry's throwaway home.
+		for (const [error, dir] of [
+			[new CopilotSdkUnavailableError(), join(operatorComponents, "copilot-sdk", COPILOT_SDK_VERSION)],
+			[new ClaudeAgentSdkUnavailableError(), join(operatorComponents, "claude-agent-sdk", CLAUDE_AGENT_SDK_VERSION)],
+		] as const) {
+			ok(error.message.includes(`separate component at ${dir};`), error.message);
+			ok(!error.message.includes(roots.home), error.message);
+		}
+		deepStrictEqual(readdirSync(operatorComponents), ["copilot-sdk"]);
+		strictEqual(existsSync(join(roots.data, "components")), false);
 	});
 });
