@@ -3,6 +3,7 @@ import { parseWorkerContextPolicy } from "../domains/context/worker/contract.js"
 /** Pure model-argument parsing; every returned DispatchRequest has a concrete agent id. */
 
 import { validateTagName } from "../core/store-paths.js";
+import { forbidsFileWrites } from "../core/write-prohibition.js";
 import { parseResultSummaryMaxBytes } from "../domains/agents/result-contract.js";
 import type { AgentAutomationAuthority } from "../domains/agents/spec.js";
 import { type AgentTaskType, classifyAgentTask } from "../domains/dispatch/agent-candidates.js";
@@ -377,6 +378,15 @@ function dispatchRequestFromArgs(
 			return { ok: false, message: error instanceof Error ? error.message : String(error) };
 		}
 	}
+	// A task whose own words forbid writing any file runs read-only, so a recipe contract that writes an
+	// artifact cannot outrank it. One that asks for a worktree, a write root or a host check still writes.
+	if (
+		forbidsFileWrites(task) &&
+		request.worktree !== true &&
+		(request.writeRoots?.length ?? 0) === 0 &&
+		(request.resolvedVerification?.length ?? 0) === 0
+	)
+		request.readOnly = true;
 	return { ok: true, request };
 }
 

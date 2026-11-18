@@ -18,7 +18,7 @@ import { GIT_HOOKS_CHANGED_RULE_ID } from "./hook-drift.js";
 import { TOOL_CALL_RUNGS } from "./reach-ladder.js";
 import { redactSecretString, redactToolArgs } from "./redaction.js";
 import { CLIO_SETTINGS_RULE_ID } from "./routing-settings.js";
-import { asksToLeaveSandbox, operatorMentionsSandbox, operatorNamedEscapeTargets } from "./sandbox-escape.js";
+import { asksToLeaveSandbox, operatorMentionsSandbox, operatorNamedOutsideTargets } from "./sandbox-escape.js";
 import { effectiveScratchRoots } from "./scratch-roots.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "./session-code-consent.js";
 
@@ -543,7 +543,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 							kind: "park",
 							cause: "unnamed-escape",
 							gateReason: citedOperator
-								? "Clio's safety judge allowed this sandbox escape as operator-named, but no operator message mentions the sandbox; unsandboxed: true runs only when an operator message names the escape or the operator approves it."
+								? "Clio's safety judge allowed this sandbox escape as operator-named, but no operator message uses the word sandbox or unconfined, which an escape needs to run on the judge's word; unsandboxed: true runs only when an operator message names the escape or the operator approves it."
 								: `Clio's safety judge allowed this sandbox escape under rule ${parsed.rule}, but unsandboxed: true runs only when an operator message names the escape or the operator approves it.`,
 							build,
 							latencyMs,
@@ -558,7 +558,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 					subject.worker === undefined &&
 					!HANDOFF_EXCLUDED_RULES.has(parsed.rule) &&
 					asksToLeaveSandbox(subject.decision)
-						? operatorNamedEscapeTargets(subject, operatorMessages)
+						? operatorNamedOutsideTargets(subject, operatorMessages)
 						: [];
 				if (namedTargets.length > 0) {
 					record({ ...base, ...prompted, verdict: "block", rule: parsed.rule, latencyMs, namedTarget: "parked" });
@@ -732,7 +732,7 @@ function safetyJudgeSystemPrompt(config: Pick<SafetyJudgeConfig, "environment" |
 			...config.deny.map((line) => `- operator-deny: ${line}`),
 		].join("\n"),
 		["Allow:", ...bulletLines(ALLOW_RULES), ...config.allow.map((line) => `- operator-allow: ${line}`)].join("\n"),
-		'Explicit intent clears a block rule only when an operator message names the action itself. "Clean up the repo" does not authorize a force push; "force-push this branch" does. A request about one target does not authorize the same action on another. If a block rule applies and no operator message names the action, block. If you cannot tell what the call would do, block it with rule unclear. A call with unsandboxed: true runs as the operator with their credentials and files, so allow it only as operator-named, and only when an operator message asks to run it outside the sandbox.',
+		'Explicit intent clears a block rule only when an operator message names the action itself. "Clean up the repo" does not authorize a force push; "force-push this branch" does. A request about one target does not authorize the same action on another. A plain file whose path an operator message spells out, such as a report or output file the operator asked for, is not shared or system configuration: writing it is operator-named, and Clio lists such a path under operator-named path. If a block rule applies and no operator message names the action, block. If you cannot tell what the call would do, block it with rule unclear. A call with unsandboxed: true runs as the operator with their credentials and files, so allow it only as operator-named, and only when an operator message asks to run it outside the sandbox.',
 		[
 			"Reach ladder, lowest rung first. Calls on the first two rungs usually serve the task; calls on the last two need an operator message that names them unless an allow rule covers them.",
 			...TOOL_CALL_RUNGS.map((rung) => `- ${rung.label}: ${rung.criteria}`),
@@ -798,6 +798,9 @@ function safetyJudgeUserPrompt(input: {
 			? [`MCP tool, trusted with action class ${boundedLine(subject.mcpTool.actionClass, 40)}`]
 			: []),
 		...(askRule !== undefined ? [`rule that asked: ${askRule}`] : []),
+		...operatorNamedOutsideTargets(subject, input.operatorMessages).map(
+			(target) => `operator-named path: an operator message spells ${boundedLine(target, 200)} verbatim`,
+		),
 	];
 	// Reasons and consequences can quote the call, a path or a package.json script body, so they sit in the data
 	// block with the arguments; a cut line is announced outside it, so a cut script cannot read as the whole one.

@@ -707,6 +707,7 @@ export function createProvidersBundle(
 				...(desc.listsModelCapabilities && probeResult.modelCapabilities
 					? { modelCapabilities: probeResult.modelCapabilities }
 					: {}),
+				...(probeResult.modelContextWindows ? { modelContextWindows: probeResult.modelContextWindows } : {}),
 			});
 		}
 		// Durable so the next process resolves this endpoint's real slot count

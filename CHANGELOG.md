@@ -45,6 +45,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- A lone delete inside a scratch root is recorded as scratch-disposable and no longer needs or claims a workspace snapshot. (N3, conf11h)
 - The finish assessment replays the shared check fold once per turn end instead of up to twice (x8-6).
 - Standard keeps one row of the reasoning before an action instead of a bare Thinking marker (bt-11 b).
 - Each bash command is scanned once per classification and only checks compute their extra facets; the registry and finish contract ask for the verdict alone; task-board replays within one run share git lookups and per-call readings (x6-7).
@@ -112,6 +113,12 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A worker's result-contract reminder arrives as a host reminder after its tool results instead of inside them, so models no longer treat it as an injection. (D4, drv-cf3b)
+- A dispatched task that says not to write files runs read-only and no longer gets the architect plan contract. (D-C)
+- The [Tasks] reminder no longer fires when the request's own words forbid writing files. (bt-22b)
+- The checkout delta sees a same-size rewrite made inside one timestamp tick when it changes a file's first or last 64 KiB. (p3-snapshot)
+- The safety judge is told when an operator message spells a call's outside path, so a requested report file is no longer refused as shared-config. (cw-3)
+- The approval card for a judge-allowed sandbox escape names the word it needs instead of saying the operator never mentioned the sandbox. (bt-24 residual)
 - A dispatch that puts a target id in `node` (for example `node:'openai-codex'`) is told the value is a target id that belongs in `target`, with `node` omitted (bt-45 c16-A).
 - The exit summary's Workers line shows refused worker calls (`· 1 call refused`) in the same words as the collected block (bt-11 s).
 - The dispatch scope notice for `../` briefing paths is one plain sentence naming the paths that were not granted, plus any read from the workspace root (bt-11 u).

@@ -36,6 +36,9 @@ describe("reminders gate on the turn's callable tools", () => {
 		// Nor does a turn the host scoped to an answer or to read-only work (bt-22).
 		deepStrictEqual(reminder.evaluate({ ...step, metadata: { ...step.metadata, turnMode: "answer" } }), []);
 		deepStrictEqual(reminder.evaluate({ ...step, metadata: { ...step.metadata, turnReadOnly: true } }), []);
+		// Nor one whose prose alone states read-only scope (bt-22b).
+		const prose = `This is a read-only task: do not create, modify or delete any file.\n${ENUMERATED}`;
+		deepStrictEqual(reminder.evaluate({ ...step, text: prose }), []);
 		// The skipped turn did not spend the session's one reminder.
 		const effects = reminder.evaluate(turn(surface(ToolNames.Tasks)));
 		strictEqual(effects.length, 1);

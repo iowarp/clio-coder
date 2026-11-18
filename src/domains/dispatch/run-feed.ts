@@ -16,6 +16,11 @@
  * Bounding follows the telemetry journal: past {@link RUN_FEED_CAP_BYTES} display `event` rows are dropped behind one
  * `journal_truncated` row, while `open`, `result` and `terminal` always land. The `terminal` row closes the feed.
  * Nothing here throws into a dispatch.
+ *
+ * A live run's spend sits beside its feed in `spend.json` ({@link RunLiveSpend}), not in runs.json: the heartbeat
+ * rewrites this small file, and the ledger row changes only at lifecycle transitions. The row's own spend is the
+ * settled one, and a row an earlier build wrote while live still carries its live spend, which a reader keeps when
+ * no spend file exists.
  */
 
 import {
@@ -30,8 +35,16 @@ import {
 	statSync,
 	writeSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
-import { unlinkedStateDirectory } from "../../core/state-boundary.js";
+import { join } from "node:path";
+import { Value } from "typebox/value";
+import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
+import { readStateFileSync, unlinkedStateDirectory } from "../../core/state-boundary.js";
+import {
+	type RunSpendSums,
+	RunSpendSumsSchema,
+	type RunUsageFacts,
+	RunUsageFactsSchema,
+} from "../../core/telemetry/schemas.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import type { ToolCallFacts } from "../../tools/agent-tools.js";
 import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
@@ -54,6 +67,7 @@ import type { RunEventJournalBody } from "./run-event-journal.js";
 
 export const RUN_FEED_VERSION = 1;
 export const RUN_FEED_FILE = "feed.jsonl";
+const RUN_LIVE_SPEND_FILE = "spend.json";
 /** Per-run size cap; crossing it drops display rows behind one marker. */
 export const RUN_FEED_CAP_BYTES = 2 * 1024 * 1024;
 /** Tail bytes a reader pulls, so following a capped feed stays cheap. */
@@ -114,16 +128,53 @@ export function newestRunFeedRunId(stateDir: string = clioStateDir()): string | 
 	return newest?.runId ?? null;
 }
 
-/** Remove the feeds of runs that left the ledger ring; recordings beside them keep their own authority. */
+/** Remove the feeds and live spend of runs that left the ledger ring; recordings beside them keep their own authority. */
 export function removeRunFeeds(stateDir: string, runIds: Iterable<string>): void {
 	for (const runId of runIds) {
 		if (!isSafeRunId(runId)) continue;
 		try {
-			const path = runFeedPath(runId, stateDir);
-			if (unlinkedStateDirectory(stateDir, dirname(path))) rmSync(path, { force: true });
+			const directory = runStateDirectory(stateDir, runId);
+			if (!unlinkedStateDirectory(stateDir, directory)) continue;
+			rmSync(join(directory, RUN_FEED_FILE), { force: true });
+			rmSync(join(directory, RUN_LIVE_SPEND_FILE), { force: true });
 		} catch {
 			// A feed we could not remove is retained display state, not an error.
 		}
+	}
+}
+
+/** A live run's spend as its host last wrote it, with the row's heartbeat at that moment. */
+export interface RunLiveSpend {
+	spend: RunUsageFacts;
+	spendSums: RunSpendSums;
+	heartbeatAt: string | null;
+}
+
+/** Replace a live run's spend file; the caller coalesces and reports a failure. */
+export async function writeRunLiveSpend(
+	runId: string,
+	live: RunLiveSpend,
+	stateDir: string = clioStateDir(),
+): Promise<void> {
+	if (!isSafeRunId(runId) || stateRootRemoved()) return;
+	const directory = ensureRunDirectory(stateDir, runId);
+	await safeResourceWriteAsync(join(directory, RUN_LIVE_SPEND_FILE), `${JSON.stringify({ v: 1, ...live })}\n`, {
+		mode: 0o600,
+	});
+}
+
+/** A live run's spend file, or null when it is missing, unreadable or not this shape. */
+export function readRunLiveSpend(runId: string, stateDir: string = clioStateDir()): RunLiveSpend | null {
+	if (!isSafeRunId(runId)) return null;
+	try {
+		const path = join(runStateDirectory(stateDir, runId), RUN_LIVE_SPEND_FILE);
+		const parsed = JSON.parse(readStateFileSync(stateDir, path).toString("utf8")) as unknown;
+		if (!isRecord(parsed) || parsed.v !== 1) return null;
+		const { spend, spendSums, heartbeatAt } = parsed;
+		if (!Value.Check(RunUsageFactsSchema, spend) || !Value.Check(RunSpendSumsSchema, spendSums)) return null;
+		return { spend, spendSums, heartbeatAt: typeof heartbeatAt === "string" ? heartbeatAt : null };
+	} catch {
+		return null;
 	}
 }
 
