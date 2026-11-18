@@ -117,7 +117,13 @@ import { isClaudeSdkTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
 import type { AskUserHandler } from "../../tools/ask-user.js";
 import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
-import { changedCheckoutDiff, changedCheckoutPaths, snapshotCheckout } from "../../tools/checkout-changes.js";
+import {
+	type CheckoutSnapshot,
+	changedCheckoutDiff,
+	changedCheckoutPaths,
+	snapshotCheckoutSince,
+	takeCheckoutBaseline,
+} from "../../tools/checkout-changes.js";
 import { networkToolsDisabled } from "../../tools/network-policy.js";
 import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
 import {
@@ -8092,8 +8098,9 @@ export function createDispatchBundle(
 		// Every run in the current checkout keeps its measured delta on the receipt, so a tool runtime's worker whose
 		// write record is incomplete still counts its edits there and in the exit summary (bt-11). The test-removal
 		// check and slate acceptance below keep reading it for a subprocess runtime only.
-		const checkoutBaseline = req.taskWorktree === undefined ? snapshotCheckout(lifecycle.cwd) : null;
-		const checkoutBefore = lifecycle.runtimeKind === "subprocess" ? checkoutBaseline : null;
+		// Taken off the event loop and awaited before the worker spawns; runs spawned against this cwd meanwhile share it.
+		const checkoutBaselineTaken = req.taskWorktree === undefined ? takeCheckoutBaseline(lifecycle.cwd) : null;
+		let checkoutBaseline: CheckoutSnapshot | null = null;
 		let worker: SpawnedWorker;
 		// A held follower's worker starts after its run row exists; this moves the row onto the real process.
 		let heldFollower = false;
@@ -8150,6 +8157,7 @@ export function createDispatchBundle(
 					reportDispatchDiagnostic("open run telemetry journal", error);
 				}
 			}
+			if (checkoutBaselineTaken !== null) checkoutBaseline = await checkoutBaselineTaken;
 			preparation?.signal?.throwIfAborted();
 			const spawnOptions = {
 				cwd: lifecycle.cwd,
@@ -9644,6 +9652,10 @@ export function createDispatchBundle(
 						? await runHostVerification(hostVerificationInput)
 						: await settlement.arrive(hostVerificationInput);
 				await compareHostVerificationBase({ verification: hostVerification, request: req, slot: hostVerificationSlot });
+				// One settle snapshot serves the test-removal check and the receipt; nothing between them writes the checkout.
+				const checkoutBefore = lifecycle.runtimeKind === "subprocess" ? checkoutBaseline : null;
+				const checkoutAfter =
+					checkoutBaseline === null ? null : await snapshotCheckoutSince(checkoutBaseline, lifecycle.cwd);
 				const hostRejection = hostVerificationRejection(hostVerification);
 				const workerSucceeded = finalOutcome === "succeeded";
 				if (hostRejection !== null && workerSucceeded) {
@@ -9657,7 +9669,7 @@ export function createDispatchBundle(
 				// the operator to judge (flywheel F-D1). A task that asks for the removal is exempt.
 				if (checkoutBefore !== null && finalOutcome === "succeeded" && !taskRequestsTestRemoval(req.task)) {
 					const removed = removedTestCases(
-						changedCheckoutDiff(checkoutBefore, lifecycle.cwd, (path) => isTestFilePath(path) || path.endsWith(".rs")),
+						await changedCheckoutDiff(checkoutBefore, checkoutAfter, (path) => isTestFilePath(path) || path.endsWith(".rs")),
 					);
 					if (removed.length > 0) {
 						finalOutcome = "failed";
@@ -9963,7 +9975,6 @@ export function createDispatchBundle(
 				resolvedTerminal = terminal;
 				Object.assign(receiptDraft, runSettlementReceiptFields(terminal, callUsage?.snapshot()));
 				if (checkoutBaseline !== null) {
-					const checkoutAfter = snapshotCheckout(lifecycle.cwd);
 					if (checkoutAfter !== null && checkoutAfter.root === checkoutBaseline.root) {
 						receiptDraft.checkoutChanges = {
 							cwd: checkoutBaseline.root,
