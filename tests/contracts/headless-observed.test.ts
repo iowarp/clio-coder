@@ -232,6 +232,12 @@ test("observed checks follow the receipt's rules on the task board and the headl
 	]);
 	for (const change of [`node -e "fs.writeFileSync('src/a.ts', '')"`, "tsc", "npx jest -u"])
 		deepStrictEqual(standing(bash("npm test"), bash(change)), [], change);
+	// A runner flag after `--` files a check; a runtime loader refuses one, which settles and retires nothing (x5-2).
+	deepStrictEqual(standing(bash("npm test", 1), bash("npm test -- -t parses")), [
+		["npm test", false, "test"],
+		["npm test -- -t parses", true, undefined],
+	]);
+	deepStrictEqual(standing(bash("npm test"), bash("npm test -- --import ./x.mjs")), [["npm test", true, "test"]]);
 	const env = await isolateClioEnv("headless-observed-");
 	try {
 		const text = await headlessRun("text", [

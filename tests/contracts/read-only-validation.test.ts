@@ -771,14 +771,17 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	deepStrictEqual(seal("npm test", { check: "format" }), stale);
 	deepStrictEqual(seal("!npm test", { check: "format" }), stale);
 	// One check vocabulary with the task board: a read-only check changes no tree, a writer that runs none is a
-	// change (x5-1).
+	// change (x5-1), and a runner flag after `--` files a check while a loader refuses one that settles nothing (x5-2).
 	const red = [[], "unverified", ["npm test"]];
 	for (const check of ["npx tsc --noEmit", "npx vitest run src/a.test.ts", "npx eslint src", "node --check a.js"])
 		deepStrictEqual(seal("npm test", check), green, check);
 	deepStrictEqual(seal("npm test", "npm run lint && npx tsc --noEmit"), [["npm test", "npm run lint"], "verified", []]);
-	for (const change of [`node -e "fs.writeFileSync('src/a.ts', '')"`, "tsc", "npx jest -u"])
+	for (const change of [`node -e "fs.writeFileSync('src/a.ts', '')"`, "tsc", "npx jest -u", "npm test -- -u"])
 		deepStrictEqual(seal("npm test", change), stale, change);
 	deepStrictEqual(seal("!npm test", "npx tsc --noEmit"), red);
+	deepStrictEqual(seal("!npm test", "npm test -- -t parses"), [["npm test"], "unverified", ["npm test"]]);
+	deepStrictEqual(seal("!npm test", "npm test -- --import ./x.mjs"), red);
+	deepStrictEqual(seal("npm test -- --run"), green);
 	// Every change ran before the check through `&&`, or the call held only checks, cd and plumbing.
 	deepStrictEqual(seal("npm test", "npm ci && npm test"), green);
 	deepStrictEqual(seal("npm test", "cd pkg && npm test 2>&1 | tail -5"), green);

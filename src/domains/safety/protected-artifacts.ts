@@ -1548,7 +1548,8 @@ function isCheckStep(step: ShellStep): boolean {
 /**
  * Whether a command runs a check, in the one vocabulary the run-effects recorder, the task board's replay and
  * {@link checkCommandShape} share (x5-1): a recognized validation command, a check from the closed read-only set
- * ({@link readOnlyCheckMatch}). A command outside it that is not read-only inspection counts as a change.
+ * ({@link readOnlyCheckMatch}), or a package check refused for a runtime loader after `--` (x5-2), which settles
+ * nothing but changes no tree. A command outside it that is not read-only inspection counts as a change.
  */
 export function runsCheckCommand(command: string): boolean {
 	return splitSegments(scanShellLike(command)).some((tokens) => {
@@ -1559,7 +1560,11 @@ export function runsCheckCommand(command: string): boolean {
 }
 
 function checkStepMatch(executable: string, args: ReadonlyArray<string>): boolean {
-	return validationMatch(executable, args) !== null || readOnlyCheckMatch(executable, args);
+	return (
+		packageScriptMatch(executable, args) !== null ||
+		validationMatch(executable, args) !== null ||
+		readOnlyCheckMatch(executable, args)
+	);
 }
 
 /** Runners that read the tree and write none of it, unless told to update snapshots or fix what they find. */
@@ -1659,8 +1664,8 @@ const W_FLAG_WRITERS: ReadonlySet<string> = new Set(["prettier", "gofmt", "goimp
 
 /**
  * Whether a check command may rewrite the tree it checks (x3-3): a package script, make or just target named as a
- * writer ({@link isWriteCapableScriptName}), `--fix` or `--write`, a formatter's `-w`, or a snapshot update passed to
- * `node --test`. A heuristic on names and flags: a writer spelled otherwise reads as a check, and a
+ * writer ({@link isWriteCapableScriptName}), `--fix` or `--write`, a formatter's `-w`, or a snapshot update passed to a
+ * package script or `node --test`. A heuristic on names and flags: a writer spelled otherwise reads as a check, and a
  * read-only script named `format` reads as a change, which only clears passes the run must then earn again.
  */
 export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
@@ -1673,6 +1678,9 @@ export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
 	if (executable === "node") return args.includes("--test-update-snapshots");
 	if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
 		const script = args[0] === "run" ? args[1] : args[0];
+		const separator = args.indexOf("--");
+		// `npm test -- -u` is a check that rewrites its snapshots (x5-2).
+		if (separator >= 0 && args.slice(separator + 1).some(writesSnapshots)) return true;
 		return script !== undefined && isWriteCapableScriptName(script);
 	}
 	if (executable === "make" || executable === "just")
@@ -2394,14 +2402,12 @@ function validationMatch(
 	args: ReadonlyArray<string>,
 ): ValidationCommandLabel | `${"npm" | "pnpm" | "yarn" | "bun"} run ${string}` | null {
 	if (executable === "node" && args[0] === "--test") return "node --test";
-	if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
-		// An option after `--` reaches the script's runtime (`--import`, `--require`), so it is not the project's check.
+	const script = packageScriptMatch(executable, args);
+	if (script !== null) {
+		// A runtime loader after `--` (`--import`, `--require`) runs code beside the script, so it is not the project's
+		// check. A runner's own flag (`--run`, `-t name`) is, filed under its full command (x5-2).
 		const separator = args.indexOf("--");
-		if (separator >= 0 && args.slice(separator + 1).some((arg) => arg.startsWith("-"))) return null;
-		if (args[0] === "test") return `${executable} test`;
-		const script = args[0] === "run" && typeof args[1] === "string" ? args[1] : null;
-		if (script === "test") return `${executable} test`;
-		if (script !== null && isVerificationScriptName(script)) return `${executable} run ${script}`;
+		return separator >= 0 && args.slice(separator + 1).some(isRuntimeLoaderFlag) ? null : script;
 	}
 	if (executable === "uv") {
 		const invocation = args.join(" ");
@@ -2424,6 +2430,18 @@ function validationMatch(
 	if (executable === "meson" && args[0] === "test") return "meson test";
 	if (executable === "mvn" && args[0] === "test") return "mvn test";
 	if ((executable === "gradle" || executable === "gradlew") && args[0] === "test") return "gradle test";
+	return null;
+}
+
+function packageScriptMatch(
+	executable: string,
+	args: ReadonlyArray<string>,
+): ValidationCommandLabel | `${"npm" | "pnpm" | "yarn" | "bun"} run ${string}` | null {
+	if (executable !== "npm" && executable !== "pnpm" && executable !== "yarn" && executable !== "bun") return null;
+	if (args[0] === "test") return `${executable} test`;
+	const script = args[0] === "run" && typeof args[1] === "string" ? args[1] : null;
+	if (script === "test") return `${executable} test`;
+	if (script !== null && isVerificationScriptName(script)) return `${executable} run ${script}`;
 	return null;
 }
 
