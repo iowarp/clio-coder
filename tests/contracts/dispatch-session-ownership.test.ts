@@ -40,6 +40,7 @@ function controlledWorker() {
 		resolve = yes;
 	});
 	let aborts = 0;
+	let refusedTool: string | null = null;
 	const worker: SpawnedWorker = {
 		pid: null,
 		promise: done,
@@ -53,6 +54,11 @@ function controlledWorker() {
 		},
 		events: (async function* () {
 			const outcome = await done;
+			if (refusedTool !== null) {
+				const payload = { tool: refusedTool, toolCallId: "refused-1" };
+				yield { type: "clio_coder_tool_start", payload };
+				yield { type: "clio_coder_tool_finish", payload: { ...payload, outcome: "blocked" } };
+			}
 			if (outcome.exitCode === 0)
 				yield {
 					type: "message_end",
@@ -64,7 +70,16 @@ function controlledWorker() {
 				};
 		})(),
 	};
-	return { worker, aborts: () => aborts, finish: () => resolve({ exitCode: 0, signal: null }) };
+	return {
+		worker,
+		aborts: () => aborts,
+		finish: () => resolve({ exitCode: 0, signal: null }),
+		/** Finish cleanly after one call the worker tried was kept from running. */
+		finishRefused: (tool: string) => {
+			refusedTool = tool;
+			resolve({ exitCode: 0, signal: null });
+		},
+	};
 }
 
 interface SessionFixture {
@@ -253,6 +268,39 @@ describe("dispatch session ownership", () => {
 			);
 		} finally {
 			await stranger.stop();
+			await fork.stop();
+			await parent.stop();
+		}
+	});
+
+	it("tells the dispatching session that a run a fork collected had a call refused", async () => {
+		const parent = await openSession(scratch, "session-p", projectA);
+		const handle = await parent.contract.dispatch(parent.request);
+		await parent.contract.detached?.register({
+			batchId: "batch-r",
+			runs: [{ runId: handle.runId, assignmentId: handle.runId, agentId: "scout" }],
+			sessionId: "session-p",
+			cwd: projectA,
+		});
+		const fork = await openSession(scratch, "session-f", process.cwd(), "session-p");
+		try {
+			parent.workers[0]?.finishRefused(ToolNames.Read);
+			await handle.finalPromise;
+			okResult(await fork.call(ToolNames.Monitor, { mode: "collect", batch_id: "batch-r" }));
+			const parentTurns = createTurnControlRunner({
+				getSettings: () => DEFAULT_SETTINGS,
+				dispatch: parent.contract,
+				getTurnConstraints: () => undefined,
+				finishedDetachedBatchIds: () => finishedDetachedBatchIds(parent.contract),
+				emitNotice: () => {},
+			});
+			match(
+				(await parentTurns.run({ userTurnId: "turn-p", signal: new AbortController().signal })).block ?? "",
+				new RegExp(
+					`batch batch-r was collected by session session-f: run ${handle.runId} \\(scout\\) succeeded · 1 tool call · 1 call refused\\. It is settled`,
+				),
+			);
+		} finally {
 			await fork.stop();
 			await parent.stop();
 		}

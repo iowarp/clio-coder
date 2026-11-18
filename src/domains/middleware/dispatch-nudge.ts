@@ -1,10 +1,13 @@
 import { isAbsolute, relative, sep } from "node:path";
 import { canonicalizeRawPath } from "../../core/path-canonical.js";
 import { dispatchTargetsScout, isReadOnlyCall } from "../../core/read-only-calls.js";
+import { renderCalls } from "../../core/telemetry/render.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { expandPath } from "../../tools/path-utils.js";
 import type { DispatchContract } from "../dispatch/contract.js";
+import { refusedCallsWords } from "../dispatch/failure-headline.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../dispatch/ownership.js";
+import { readRunResultFacts } from "../dispatch/run-result-facts.js";
 import { isTerminalRunEnvelope, type RunOutcome } from "../dispatch/types.js";
 import { dispatchMutatedParentWorkspace } from "../dispatch/workspace-mutation.js";
 import type { MiddlewareHookEvaluationContext, MiddlewareHookRegistration } from "./runtime.js";
@@ -415,7 +418,18 @@ export function finishedDetachedBatchIds(
 export interface CollectedElsewhereView {
 	id: string;
 	collectedBy: string;
-	runs: ReadonlyArray<{ runId: string; agentId: string; outcome: string }>;
+	/**
+	 * `refusedCalls` and `guardedCalls` come from the run's settled facts, the worker card's source, so a run whose
+	 * only call was refused is not reported as a clean success.
+	 */
+	runs: ReadonlyArray<{
+		runId: string;
+		agentId: string;
+		outcome: string;
+		toolCalls?: number;
+		refusedCalls?: number;
+		guardedCalls?: number;
+	}>;
 }
 
 /**
@@ -446,14 +460,31 @@ export function batchesCollectedElsewhere(
 			const assignment = dispatch.assignments?.getStored(run.assignmentId) ?? null;
 			const row = dispatch.getRun(assignment?.terminalRunId ?? run.runId);
 			const outcome = row === null ? "ledger row missing" : (row.outcome ?? row.status);
-			return { runId: row?.id ?? run.runId, agentId: run.agentId, outcome };
+			const runId = row?.id ?? run.runId;
+			const facts = readRunResultFacts(runId);
+			return {
+				runId,
+				agentId: run.agentId,
+				outcome,
+				...(facts?.toolCalls !== undefined ? { toolCalls: facts.toolCalls } : {}),
+				...(facts?.refusedCalls !== undefined ? { refusedCalls: facts.refusedCalls } : {}),
+				...(facts?.guardedCalls !== undefined ? { guardedCalls: facts.guardedCalls } : {}),
+			};
 		});
 		return [{ id: record.id, collectedBy, runs }];
 	});
 }
 
+/** The outcome, plus the worker card's call counts when a call was kept from running. */
+function collectedRunOutcome(run: CollectedElsewhereView["runs"][number]): string {
+	const refused = run.refusedCalls ?? 0;
+	if (refused <= 0) return run.outcome;
+	const calls = run.toolCalls !== undefined ? [renderCalls(String(run.toolCalls))] : [];
+	return [run.outcome, ...calls, refusedCallsWords(refused, run.guardedCalls ?? 0)].join(" · ");
+}
+
 export function collectedElsewhereLine(view: CollectedElsewhereView): string {
-	const runs = view.runs.map((run) => `run ${run.runId} (${run.agentId}) ${run.outcome}`).join(", ");
+	const runs = view.runs.map((run) => `run ${run.runId} (${run.agentId}) ${collectedRunOutcome(run)}`).join(", ");
 	return (
 		`- batch ${view.id} was collected by session ${view.collectedBy}: ${runs || "no runs"}. ` +
 		`It is settled, not running in the background; its results went to that session. ` +
