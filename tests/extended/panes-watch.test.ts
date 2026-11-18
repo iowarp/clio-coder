@@ -27,8 +27,8 @@ function fixture() {
 				splits: [],
 			};
 		},
-		async paneSplit() {
-			calls.push("split");
+		async paneSplit(request: { focus?: boolean }) {
+			calls.push(request.focus === true ? "split focused" : "split");
 			if (failure) throw failure;
 			return { paneId: "watch", tabId: "t1", workspaceId: "w1" };
 		},
@@ -39,6 +39,9 @@ function fixture() {
 		},
 		async paneClose() {
 			calls.push("close");
+		},
+		async paneFocus() {
+			calls.push("focus");
 		},
 	} as unknown as MuxClient;
 	const runtime = createMuxRuntime({
@@ -96,6 +99,17 @@ it("updates the worker pane tier without retargeting the selected run", async ()
 		strictEqual(controller.refreshPresentation?.(), true);
 		const next = f.writes.at(-1) ?? "";
 		strictEqual(next, first.replace("outputDetail=compact", "outputDetail=detailed"));
+	} finally {
+		controller.dispose();
+	}
+});
+
+it("opens the workers dock from the key without taking the keyboard (bt-11 b)", async () => {
+	const f = fixture();
+	const controller = f.watch();
+	try {
+		strictEqual((await controller.toggle()).status, "opened");
+		deepStrictEqual(f.calls, ["split", "send"]);
 	} finally {
 		controller.dispose();
 	}

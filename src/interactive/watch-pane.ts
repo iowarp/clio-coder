@@ -230,12 +230,6 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 		return run;
 	};
 
-	/** Put the keyboard in the dock, as the files key does for Yazi. */
-	const focusDock = async (): Promise<void> => {
-		const pane = record();
-		if (pane !== null) await deps.mux.focusPane(pane.ref.paneId);
-	};
-
 	// Reclaim durable ownership for inventory and navigation immediately. The
 	// scan remains best effort and never opens a replacement pane on its own.
 	void adoptExistingPane();
@@ -304,7 +298,6 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 					writeRequest(requested, false);
 					const refused = await showParked();
 					if (refused !== null) return { status: "unavailable", reason: refused };
-					await focusDock();
 					return { status: "shown" };
 				}
 				// A fresh dock starts on the board, whatever a past session asked for.
@@ -312,7 +305,7 @@ export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchContro
 				await deps.mux.unzoomSelf();
 				const opened = await openNew();
 				if (!("ref" in opened)) return { status: "unavailable", reason: opened.reason };
-				await focusDock();
+				// The dock shows the fleet beside the chat; the keyboard stays where the operator was typing (bt-11 b).
 				return { status: "opened" };
 			});
 		},

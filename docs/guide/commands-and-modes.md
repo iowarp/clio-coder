@@ -744,7 +744,7 @@ Three rules cover every key:
 | `Alt+O` | `o` | Cycle output detail: Minimal, Default, Detailed | |
 | `Alt+L` | `l` | Toggle the top-level Library | `/library` |
 | `Alt+U` | `u` | Open the one-page dashboard; press again to close it | |
-| `Alt+W` | `w` | Workers dock in a `--with-panes` session (first tap shows it and moves the keyboard in, a tap on a visible dock parks it, a second tap within 400 ms closes it); the Fleet Runs board without a pane host | `/fleet` |
+| `Alt+W` | `w` | Workers dock in a `--with-panes` session (first tap shows it and leaves the keyboard in CLIO Coder, a tap on a visible dock parks it, a second tap within 400 ms closes it); the Fleet Runs board without a pane host | `/fleet` |
 | `Alt+E` | `e` | Show or hide the files pane (first tap), close it (second tap within 400 ms); bound inside Yazi too | `/files` |
 | `Alt+A` | `a` | Show or hide the music pane (first tap), close it (second tap within 400 ms); bound inside cliamp too | `/music` |
 | `Alt+S` | `s` | Send now: interrupt the run with the draft, or flush the queue when the draft is empty; ordinary send while idle | |
