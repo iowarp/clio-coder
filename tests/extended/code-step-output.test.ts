@@ -1,11 +1,12 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, it } from "node:test";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { mainSandboxPolicy } from "../../src/core/sandbox/main-session.js";
+import { parseCodeReport } from "../../src/domains/agents/result-contract.js";
 import {
 	CODE_STEP_CAPTURE_MAX_BYTES,
 	CODE_STEP_EXCERPT_MAX_BYTES,
@@ -15,6 +16,7 @@ import {
 	workspaceChangeSnapshot,
 	writeCommitBaseline,
 } from "../../src/domains/dispatch/code-step.js";
+import { resolveTestFileChecks } from "../../src/tools/verify/test-files.js";
 
 const roots: string[] = [];
 
@@ -174,6 +176,65 @@ it("fails the check when a newly reported test fails outside the declared suite"
 	const fallback = await runCodeStep({ ...input, mutatedPaths: ["repro.test.unknown"] });
 	strictEqual(fallback.report.passed, true);
 	match(fallback.report.outputExcerpt, /no recognizable project runner.*declared check only/u);
+});
+
+it("targets a changed jest or vitest file so an empty selection fails, whatever the script's --passWithNoTests", () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-changed-test-js-"));
+	roots.push(root);
+	mkdirSync(join(root, "integration"));
+	writeFileSync(join(root, "integration", "api.test.js"), "test('api', () => {});\n");
+	writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { test: "jest --passWithNoTests" } }));
+	deepStrictEqual(resolveTestFileChecks(root, ["integration/api.test.js"]).checks[0]?.argv, [
+		"npm",
+		"run",
+		"test",
+		"--",
+		"--runTestsByPath",
+		"--passWithNoTests=false",
+		"./integration/api.test.js",
+	]);
+	// Vitest refuses the flag twice, so its script runs directly without its own --passWithNoTests.
+	mkdirSync(join(root, "node_modules", ".bin"), { recursive: true });
+	const vitest = join(root, "node_modules", ".bin", "vitest");
+	writeFileSync(vitest, "#!/bin/sh\n");
+	chmodSync(vitest, 0o755);
+	writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { test: "vitest run --passWithNoTests" } }));
+	deepStrictEqual(resolveTestFileChecks(root, ["integration/api.test.js"]).checks[0]?.argv, [
+		vitest,
+		"run",
+		"--passWithNoTests=false",
+		"./integration/api.test.js",
+	]);
+});
+
+it("fails the check without a repair when a changed test's known runner needs provisioning", async () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-changed-test-uv-"));
+	roots.push(root);
+	writeFileSync(join(root, "pyproject.toml"), '[project]\nname = "api"\n\n[tool.pytest.ini_options]\n');
+	writeFileSync(join(root, "uv.lock"), "version = 1\n");
+	mkdirSync(join(root, "tests"));
+	writeFileSync(join(root, "tests", "test_api.py"), "def test_api():\n    assert True\n");
+	const outcome = await runCodeStep({
+		stepId: "check",
+		command: {
+			id: "lint",
+			argv: [process.execPath, "-e", ""],
+			cwd: "",
+			timeoutMs: 30_000,
+			env: [],
+			description: "Declared lint",
+		},
+		workspaceRoot: root,
+		mutatedPaths: ["tests/test_api.py"],
+	});
+	strictEqual(outcome.report.passed, false);
+	strictEqual(outcome.report.checks[0]?.passed, true);
+	strictEqual(outcome.report.checks[1]?.name, "changed tests (python-pytest)");
+	match(outcome.report.checks[1]?.evidence ?? "", /tests\/test_api\.py was not run.*\.venv is missing.*uv sync/u);
+	strictEqual(outcome.unrepairable, true);
+	// The sealed report validates with the check's execution state.
+	strictEqual(parseCodeReport(outcome.output)?.checks[1]?.ran, false);
+	strictEqual(parseCodeReport(outcome.output)?.checks[0]?.ran, true);
 });
 
 it("commits neither a file that only stopped being ignored nor a rewrite behind a staged deletion", async () => {

@@ -751,10 +751,21 @@ export interface OracleResult {
  * `outputExcerpt` is the command's own bytes so a builder repairs from what
  * the command printed rather than from someone's summary of it.
  */
+/**
+ * One code-step check. `ran` is false when the check never started (a refusal, a spawn failure, a runner that needs
+ * provisioning), so a reader can tell an executed failure from a gap; reports sealed before it existed omit it.
+ */
+export interface CodeReportCheck {
+	name: string;
+	passed: boolean;
+	evidence: string;
+	ran?: boolean;
+}
+
 export interface CodeReportResult {
 	passed: boolean;
 	exitCode: number;
-	checks: ReadonlyArray<VerifierCheck>;
+	checks: ReadonlyArray<CodeReportCheck>;
 	artifactPaths: ReadonlyArray<string>;
 	outputExcerpt: string;
 }
@@ -1092,21 +1103,28 @@ function validateScout(contract: ResultContract, output: string | null): ResultC
 	return success(contract, "pass", scout, { scout });
 }
 
-function parseChecks(value: unknown): VerifierCheck[] | null {
+/** `codeReport` admits the optional `ran` a code step records; a model-authored report's checks never carry it. */
+function parseChecks(value: unknown, codeReport = false): CodeReportCheck[] | null {
 	if (!Array.isArray(value) || value.length === 0) return null;
-	const checks: VerifierCheck[] = [];
+	const checks: CodeReportCheck[] = [];
 	for (const entry of value) {
 		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return null;
 		const check = entry as Record<string, unknown>;
 		if (
-			!hasOnlyKeys(check, ["name", "passed", "evidence"]) ||
+			!hasOnlyKeys(check, codeReport ? ["name", "passed", "evidence", "ran"] : ["name", "passed", "evidence"]) ||
 			!string(check.name) ||
 			typeof check.passed !== "boolean" ||
-			!string(check.evidence)
+			!string(check.evidence) ||
+			(check.ran !== undefined && typeof check.ran !== "boolean")
 		) {
 			return null;
 		}
-		checks.push({ name: check.name, passed: check.passed, evidence: check.evidence });
+		checks.push({
+			name: check.name,
+			passed: check.passed,
+			evidence: check.evidence,
+			...(typeof check.ran === "boolean" ? { ran: check.ran } : {}),
+		});
 	}
 	return checks;
 }
@@ -1465,7 +1483,7 @@ function validateCodeReport(contract: ResultContract, output: string | null): Re
 	if (!Array.isArray(value.artifactPaths) || value.artifactPaths.some((entry) => !string(entry))) {
 		return failure(contract, "unmeasured", "Code result artifactPaths must be an array of non-empty path strings");
 	}
-	const checks = parseChecks(value.checks);
+	const checks = parseChecks(value.checks, true);
 	if (checks === null) return failure(contract, "unmeasured", "Code result must carry typed checks");
 	if (value.passed !== (value.exitCode === 0) || value.passed !== checks.every((check) => check.passed)) {
 		return failure(contract, "unmeasured", "Code result passed must agree with its exit code and every check");

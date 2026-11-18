@@ -43,7 +43,7 @@ import {
 	type PlaybookCommand,
 	validatePlaybookCommandArgs,
 } from "../agents/playbook-commands.js";
-import type { CodeReportResult } from "../agents/result-contract.js";
+import type { CodeReportCheck, CodeReportResult } from "../agents/result-contract.js";
 import { redactCommandOutputSecrets } from "../evidence/redact.js";
 
 /** Bytes of command output retained for the artifact log. */
@@ -172,6 +172,8 @@ export interface CodeStepOutcome {
 	output: string;
 	/** Whether the command's process started: false when the step refused before launch or the spawn itself failed. */
 	launched: boolean;
+	/** Every failed check is a changed test whose runner needs provisioning, which no repair edit can change. */
+	unrepairable?: true;
 }
 
 /** Stable stringification of the report, so its digest is reproducible. */
@@ -179,7 +181,12 @@ export function canonicalCodeReport(report: CodeReportResult): string {
 	return JSON.stringify({
 		passed: report.passed,
 		exitCode: report.exitCode,
-		checks: report.checks.map((check) => ({ name: check.name, passed: check.passed, evidence: check.evidence })),
+		checks: report.checks.map((check) => ({
+			name: check.name,
+			passed: check.passed,
+			evidence: check.evidence,
+			...(check.ran !== undefined ? { ran: check.ran } : {}),
+		})),
 		artifactPaths: [...report.artifactPaths],
 		outputExcerpt: report.outputExcerpt,
 	});
@@ -710,20 +717,37 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 			(spawned.timedOut
 				? `timed out after ${command.timeoutMs}ms (exit ${spawned.exitCode})`
 				: `exit ${spawned.exitCode} in ${primaryDurationMs}ms`)) + (notes.length > 0 ? `; ${notes.join("; ")}` : "");
-	const checks = [
+	// `ran` keeps an executed failure apart from a check that never started: a refusal or a spawn failure did not run.
+	const checks: CodeReportCheck[] = [
 		{
 			name: command.id,
 			passed: spawned.exitCode === 0,
 			evidence: `\`${argv.join(" ")}\` ${primaryEvidence}`,
+			ran: launched,
 		},
 	];
 	const commandRuns = [{ argv: [...argv], cwd, exitCode: spawned.exitCode, durationMs: primaryDurationMs }];
 	const testFiles = input.mutatedPaths?.length
 		? (await import("../../tools/verify/test-files.js")).resolveTestFileChecks(input.workspaceRoot, input.mutatedPaths)
-		: { checks: [], notes: [], refusals: [] };
+		: { checks: [], notes: [], refusals: [], unavailable: [] };
 	// A changed test that cannot be run fails the step so the loop repairs or reports it, never a silent pass.
 	for (const refusal of testFiles.refusals) {
-		checks.push({ name: "changed tests", passed: false, evidence: refusal });
+		checks.push({ name: "changed tests", passed: false, evidence: refusal, ran: false });
+		spawned = { ...spawned, exitCode: spawned.exitCode === 0 ? 1 : spawned.exitCode };
+	}
+	// A known runner that cannot start (DF-10: never provisioned silently) leaves its changed test unrun. The step
+	// fails, and since no edit to the workspace makes the runner start, the loop is told not to repair it.
+	const unavailableLines: string[] = [];
+	const unrun = new Set<(typeof checks)[number]>();
+	for (const missing of testFiles.unavailable) {
+		const provision = missing.provisionCommand
+			? `; operator provisioning command: ${missing.provisionCommand.join(" ")}`
+			: "";
+		const evidence = `Changed test ${missing.file} was not run: runner '${missing.runner}' is unavailable: ${missing.reason}${provision}. A repair edit cannot make it run; report the limitation.`;
+		const check = { name: `changed tests (${missing.runner})`, passed: false, evidence, ran: false };
+		unavailableLines.push(evidence);
+		unrun.add(check);
+		checks.push(check);
 		spawned = { ...spawned, exitCode: spawned.exitCode === 0 ? 1 : spawned.exitCode };
 	}
 	for (const test of testFiles.checks) {
@@ -743,10 +767,15 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 		const testClock = process.hrtime.bigint();
 		const result = await spawnCommand({ ...input, command: testCommand }, testCwd, test.argv);
 		const testDurationMs = Number((process.hrtime.bigint() - testClock) / 1_000_000n);
+		// Jest and vitest print this when a targeted run selected nothing, which they fail without --passWithNoTests.
+		const empty = /\bNo test(?:s| files) found, exiting with code [1-9]/u.test(result.captured.toString("utf8"))
+			? "; the runner selected no tests, so the changed test did not run"
+			: "";
 		checks.push({
 			name: testCommand.id,
 			passed: result.exitCode === 0,
-			evidence: `\`${test.argv.join(" ")}\` exit ${result.exitCode} in ${testDurationMs}ms${test.detail === undefined ? "" : `; ${test.detail}`}`,
+			evidence: `\`${test.argv.join(" ")}\` exit ${result.exitCode} in ${testDurationMs}ms${empty}${test.detail === undefined ? "" : `; ${test.detail}`}`,
+			ran: result.launched,
 		});
 		commandRuns.push({ argv: [...test.argv], cwd: testCwd, exitCode: result.exitCode, durationMs: testDurationMs });
 		const captured = Buffer.concat([
@@ -771,9 +800,9 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 	const capturedText =
 		spawned.captured.toString("utf8") +
 		(spawned.spawnError === null ? "" : `\n${spawned.spawnError}\n`) +
-		(testFiles.notes.length + testFiles.refusals.length === 0
+		(testFiles.notes.length + testFiles.refusals.length + unavailableLines.length === 0
 			? ""
-			: `\n${[...testFiles.refusals, ...testFiles.notes].join("\n")}\n`);
+			: `\n${[...testFiles.refusals, ...unavailableLines, ...testFiles.notes].join("\n")}\n`);
 	const printed = Buffer.from(capturedText, "utf8");
 	const excerpt = tailUtf8(printed, CODE_STEP_EXCERPT_MAX_BYTES, CODE_STEP_TRUNCATION_MARKER);
 	const rendered = argv.join(" ");
@@ -830,5 +859,13 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 		artifactPaths,
 		reportDigest: codeReportDigest(report),
 	};
-	return { report, record, stdout: spawned.stdout.toString("utf8"), output: canonicalCodeReport(report), launched };
+	const unrepairable = unrun.size > 0 && checks.every((check) => check.passed || unrun.has(check));
+	return {
+		report,
+		record,
+		stdout: spawned.stdout.toString("utf8"),
+		output: canonicalCodeReport(report),
+		launched,
+		...(unrepairable ? { unrepairable: true as const } : {}),
+	};
 }

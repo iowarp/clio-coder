@@ -1292,6 +1292,7 @@ async function runFleetHoldingWorkspace(
 					// The runner authored this report itself, so its provenance is
 					// valid by construction; only the command's verdict can be red.
 					integrityValid: true,
+					...(outcome.unrepairable ? { unrepairable: true as const } : {}),
 				};
 			},
 			async decideLoop({ loop, step, attempt, terminalAttempt, result: stepResult }) {

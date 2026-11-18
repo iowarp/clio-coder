@@ -23,6 +23,8 @@ export interface ExecutionStepResult extends ExecutionHandoff {
 	 * its own writes is not a witness.
 	 */
 	boundaryViolated?: boolean;
+	/** A failed check that no repair edit can change, such as a changed test whose runner needs provisioning. */
+	unrepairable?: true;
 	failureReason?: string;
 	gatePathHash?: string;
 	delegationPlanHash?: string;
@@ -355,8 +357,9 @@ export async function executePlan(
 	 *   - A failed verification inside a bounded loop, for that loop's own
 	 *     repair attempt. That edge is the loop's designed failure path, so it
 	 *     carries the red result regardless of the plan's failure policy. Only
-	 *     an integrity-invalid result severs it: a run that cannot be trusted
-	 *     is not evidence of anything.
+	 *     an integrity-invalid result severs it, since a run that cannot be
+	 *     trusted is not evidence of anything, or an unrepairable one, since a
+	 *     repair cannot change its verdict.
 	 *
 	 * An edge out of a verification is answered by the loop, never by the
 	 * verification's own exit status. A gate agent that ran perfectly and
@@ -376,7 +379,8 @@ export async function executePlan(
 		if (loop !== null) {
 			// Inside the loop, only an untrustworthy result severs the chain; the
 			// verdict itself is what the next attempt exists to answer.
-			if (dependent.loop?.loopId === loop.id) return result !== undefined && !result.integrityValid;
+			if (dependent.loop?.loopId === loop.id)
+				return result !== undefined && (!result.integrityValid || result.unrepairable === true);
 			return !loopResolved(loop);
 		}
 		if (result === undefined) return true;
@@ -524,7 +528,7 @@ export async function executePlan(
 	const isPlanFailure = (step: ExecutionPlanStep, result: ExecutionStepResult): boolean => {
 		if (result.boundaryViolated === true) return true;
 		if (result.succeeded && result.integrityValid) return false;
-		if (step.loop?.role !== "check" || !result.integrityValid) return true;
+		if (step.loop?.role !== "check" || !result.integrityValid || result.unrepairable === true) return true;
 		const loop = loopOf(step);
 		// A red verification with attempts left is the loop working as declared.
 		return loop === null || step.loop.attempt >= loop.maxAttempts;
