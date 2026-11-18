@@ -476,7 +476,8 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	const shellWrite = stats.pendingShellWrites.delete(event.toolCallId);
 	// Fold completed child operations into accounting only. The provider and
 	// session history retain the real aggregate call/result pair.
-	for (const child of gatewayChainReceipts(event.toolName, event.result)) {
+	const children = gatewayChainReceipts(event.toolName, event.result);
+	for (const child of children) {
 		const toolCallId = `${event.toolCallId}:${child.id}`;
 		if (child.capability === ToolNames.Verify) stats.pendingVerifyCalls.set(toolCallId, verifyCheckIdentity(child.args));
 		recordToolEnd(stats, {
@@ -488,12 +489,25 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 			...child.admission,
 		} as ChatLoopEvent);
 	}
-	const stat = stats.toolStats.get(tool) ?? blankToolStat(tool);
-	stat.count += 1;
-	const durationMs = durationMsFromEvent(event);
-	if (durationMs !== undefined) stat.totalDurationMs += durationMs;
 	// Registry settlement is authoritative; legacy producers only expose isError.
 	const outcome = (event as { outcome?: unknown }).outcome;
+	// A chain's settled steps were just counted as the calls they are. Counting
+	// the wrapper too made an N-step chain N + 1 calls and one failed step two
+	// errors (bt-14); a chain none of whose steps settled still counts once.
+	if (children.length === 0) {
+		const stat = stats.toolStats.get(tool) ?? blankToolStat(tool);
+		stat.count += 1;
+		const durationMs = durationMsFromEvent(event);
+		if (durationMs !== undefined) stat.totalDurationMs += durationMs;
+		if (outcome === "blocked") stat.blocked += 1;
+		else if (outcome === "error") stat.errors += 1;
+		else if (outcome === "ok") stat.ok += 1;
+		else if (outcome === undefined) {
+			if (event.isError) stat.errors += 1;
+			else stat.ok += 1;
+		}
+		stats.toolStats.set(tool, stat);
+	}
 	if (tool === ToolNames.Verify) {
 		stats.verifyCalls.push({
 			check: stats.pendingVerifyCalls.get(event.toolCallId) ?? null,
@@ -511,14 +525,6 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 		});
 		stats.pendingVerifyCalls.delete(event.toolCallId);
 	}
-	if (outcome === "blocked") stat.blocked += 1;
-	else if (outcome === "error") stat.errors += 1;
-	else if (outcome === "ok") stat.ok += 1;
-	else if (outcome === undefined) {
-		if (event.isError) stat.errors += 1;
-		else stat.ok += 1;
-	}
-	stats.toolStats.set(tool, stat);
 	// Safety bookkeeping mirrors a worker's fold of its own tool
 	// finish events (domains/dispatch/extension.ts), so the two runs carry
 	// the same facts under the same names.
