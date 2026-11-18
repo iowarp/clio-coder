@@ -2,47 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
-import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
-
-type RequestHandler = (params: unknown) => Promise<unknown> | unknown;
-
-/** An in-memory peer: the test plays the client and calls the server's handlers directly. */
-function fakeTransport() {
-	const handlers = new Map<string, RequestHandler>();
-	const notifications: Array<{ method: string; params: unknown }> = [];
-	const closeHandlers: Array<() => void> = [];
-	let closed = false;
-	const transport: AcpJsonRpcPeerTransport = {
-		get closed() {
-			return closed;
-		},
-		request: async () => {
-			throw new Error("the server sends no client requests in this test");
-		},
-		notify: (method, params) => {
-			notifications.push({ method, params });
-		},
-		onNotification: () => () => {},
-		onRequest: (method, handler) => {
-			handlers.set(method, handler);
-			return () => handlers.delete(method);
-		},
-		onClose: (handler) => {
-			closeHandlers.push(handler);
-			return () => {};
-		},
-		close: () => {
-			closed = true;
-			for (const handler of closeHandlers) handler();
-		},
-	};
-	const call = async (method: string, params: unknown): Promise<unknown> => {
-		const handler = handlers.get(method);
-		if (!handler) throw new Error(`no handler registered for ${method}`);
-		return await handler(params);
-	};
-	return { transport, notifications, call };
-}
+import { fakeTransport } from "../harness/acp-fake-transport.js";
 
 const chat: AcpServerChat = {
 	submit: async () => {},

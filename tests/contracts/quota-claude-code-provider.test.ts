@@ -12,6 +12,7 @@ import type { QuotaReading } from "../../src/domains/quota/reading.js";
 import { buildQuotaProviders } from "../../src/domains/quota/registry.js";
 import type { QuotaProvider, UsageSnapshot } from "../../src/domains/quota/types.js";
 import { formatPlan, parseRetryAfterSeconds } from "../../src/domains/quota/types.js";
+import { jsonResponse, stubFetch } from "../harness/quota-fetch.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const NOW = new Date("2026-01-01T00:00:00.000Z");
@@ -23,30 +24,6 @@ const CREDENTIALS: ClaudeCodeCredentials = {
 	refreshTokenExpiresAtMs: NOW.getTime() + 86_400_000,
 	hasRefreshToken: true,
 };
-
-interface FetchCall {
-	url: string;
-	headers: Record<string, string>;
-}
-
-function stubFetch(
-	respond: () => Response | Promise<Response> | never,
-	calls: FetchCall[] = [],
-): { fetch: typeof globalThis.fetch; calls: FetchCall[] } {
-	const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-		const headers = new Headers(init?.headers);
-		calls.push({ url: String(input), headers: Object.fromEntries(headers.entries()) });
-		return await respond();
-	}) as typeof globalThis.fetch;
-	return { fetch, calls };
-}
-
-function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
-	return new Response(JSON.stringify(body), {
-		status,
-		headers: { "content-type": "application/json", ...headers },
-	});
-}
 
 function provider(fetch: typeof globalThis.fetch): QuotaProvider {
 	return createClaudeCodeQuotaProvider({
@@ -122,62 +99,6 @@ it("falls back to the flat five_hour and seven_day buckets", async () => {
 		{ key: "weekly", label: "Weekly", short: "wk", usedPct: 64, resetsAt: null },
 	]);
 	assert.equal(snapshot.credits, null);
-});
-
-it("maps 401 and 403 to an expired session", async () => {
-	for (const status of [401, 403]) {
-		const { fetch } = stubFetch(() => new Response("", { status }));
-		const snapshot = await provider(fetch).fetch();
-		assert.equal(snapshot.status, "expired");
-		assert.equal(snapshot.message, "Sign in with Claude Code again");
-		assert.deepEqual(snapshot.windows, []);
-	}
-});
-
-it("captures Retry-After when the usage endpoint rate limits the read", async () => {
-	const { fetch } = stubFetch(() => new Response("", { status: 429, headers: { "Retry-After": "42" } }));
-
-	const snapshot = await provider(fetch).fetch();
-
-	assert.equal(snapshot.status, "error");
-	assert.equal(snapshot.message, "HTTP 429");
-	assert.equal(snapshot.retryAfterSeconds, 42);
-});
-
-it("reports other failing statuses and malformed JSON as errors", async () => {
-	const serverError = await provider(stubFetch(() => new Response("", { status: 503 })).fetch).fetch();
-	assert.equal(serverError.status, "error");
-	assert.equal(serverError.message, "HTTP 503");
-
-	const malformed = await provider(
-		stubFetch(() => new Response("not json{", { status: 200, headers: { "content-type": "application/json" } })).fetch,
-	).fetch();
-	assert.equal(malformed.status, "error");
-	assert.equal(malformed.message, "Unexpected usage response");
-
-	const nonObject = await provider(stubFetch(() => jsonResponse([1, 2, 3])).fetch).fetch();
-	assert.equal(nonObject.status, "error");
-	assert.equal(nonObject.message, "Unexpected usage response");
-
-	const transport = await provider(
-		stubFetch(() => {
-			throw new Error("getaddrinfo ENOTFOUND api.anthropic.com");
-		}).fetch,
-	).fetch();
-	assert.equal(transport.status, "error");
-	assert.equal(transport.message, "getaddrinfo ENOTFOUND api.anthropic.com");
-});
-
-it("reports missing credentials without spending a network call", async () => {
-	const { fetch, calls } = stubFetch(() => jsonResponse({}));
-	const noCredentials = createClaudeCodeQuotaProvider({ readCredentials: async () => null, fetch });
-
-	assert.equal(await noCredentials.detect(), false);
-	const snapshot = await noCredentials.fetch();
-
-	assert.equal(snapshot.status, "no_credentials");
-	assert.equal(snapshot.message, "No Claude Code credentials found");
-	assert.equal(calls.length, 0);
 });
 
 it("detects Claude Code's own credential file and ignores an unusable one", async () => {

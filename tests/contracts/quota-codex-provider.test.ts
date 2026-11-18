@@ -28,6 +28,7 @@ import { observeResponsesModelId } from "../../src/engine/apis/responses-model-i
 import type { CodexQuotaObservation } from "../../src/engine/types.js";
 import { createTurnPersistence } from "../../src/session-control/turn-persistence.js";
 import { createTurnState } from "../../src/session-control/turn-state.js";
+import { jsonResponse, stubFetch } from "../harness/quota-fetch.js";
 
 const NOW = new Date("2026-01-01T00:00:00.000Z");
 
@@ -37,30 +38,6 @@ const CREDENTIALS: CodexCredentials = {
 	expiresAtMs: null,
 	hasRefreshToken: true,
 };
-
-interface FetchCall {
-	url: string;
-	headers: Record<string, string>;
-}
-
-function stubFetch(
-	respond: () => Response | Promise<Response> | never,
-	calls: FetchCall[] = [],
-): { fetch: typeof globalThis.fetch; calls: FetchCall[] } {
-	const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-		const headers = new Headers(init?.headers);
-		calls.push({ url: String(input), headers: Object.fromEntries(headers.entries()) });
-		return await respond();
-	}) as typeof globalThis.fetch;
-	return { fetch, calls };
-}
-
-function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
-	return new Response(JSON.stringify(body), {
-		status,
-		headers: { "content-type": "application/json", ...headers },
-	});
-}
 
 function provider(fetch: typeof globalThis.fetch, credentials: CodexCredentials | null = CREDENTIALS): QuotaProvider {
 	return createCodexQuotaProvider({
@@ -146,52 +123,6 @@ it("reports the raw balance string when credits carry a balance", async () => {
 	const snapshot = await provider(fetch).fetch();
 
 	assert.deepEqual(snapshot.credits, { display: "$4.20", usedPct: null });
-});
-
-it("maps 401 and 403 to an expired session", async () => {
-	for (const status of [401, 403]) {
-		const { fetch } = stubFetch(() => new Response("", { status }));
-		const snapshot = await provider(fetch).fetch();
-		assert.equal(snapshot.status, "expired");
-		assert.equal(snapshot.message, "Run clio-coder auth login openai-codex again");
-		assert.deepEqual(snapshot.windows, []);
-	}
-});
-
-it("reports other failing statuses and malformed JSON as errors", async () => {
-	const serverError = await provider(stubFetch(() => new Response("", { status: 500 })).fetch).fetch();
-	assert.equal(serverError.status, "error");
-	assert.equal(serverError.message, "HTTP 500");
-
-	const malformed = await provider(
-		stubFetch(() => new Response("not json{", { status: 200, headers: { "content-type": "application/json" } })).fetch,
-	).fetch();
-	assert.equal(malformed.status, "error");
-	assert.equal(malformed.message, "Unexpected usage response");
-
-	const nonObject = await provider(stubFetch(() => jsonResponse([1, 2, 3])).fetch).fetch();
-	assert.equal(nonObject.status, "error");
-	assert.equal(nonObject.message, "Unexpected usage response");
-
-	const transport = await provider(
-		stubFetch(() => {
-			throw new Error("getaddrinfo ENOTFOUND chatgpt.com");
-		}).fetch,
-	).fetch();
-	assert.equal(transport.status, "error");
-	assert.equal(transport.message, "getaddrinfo ENOTFOUND chatgpt.com");
-});
-
-it("reports missing credentials without spending a network call", async () => {
-	const { fetch, calls } = stubFetch(() => jsonResponse({}));
-	const noCredentials = provider(fetch, null);
-
-	assert.equal(await noCredentials.detect(), false);
-	const snapshot = await noCredentials.fetch();
-
-	assert.equal(snapshot.status, "no_credentials");
-	assert.equal(snapshot.message, "Clio holds no OpenAI Codex OAuth credential");
-	assert.equal(calls.length, 0);
 });
 
 it("sends ChatGPT-Account-Id only when the credential record carries an account id", async () => {

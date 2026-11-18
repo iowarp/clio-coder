@@ -3,43 +3,7 @@ import { describe, it } from "node:test";
 import { type AcpCommandHost, acpCommandControl } from "../../src/engine/acp/commands.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
-import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
-
-type RequestHandler = (params: unknown) => Promise<unknown> | unknown;
-
-function fakeTransport() {
-	const handlers = new Map<string, RequestHandler>();
-	const closeHandlers: Array<() => void> = [];
-	let closed = false;
-	const transport: AcpJsonRpcPeerTransport = {
-		get closed() {
-			return closed;
-		},
-		request: async () => {
-			throw new Error("the server sends no client requests in this test");
-		},
-		notify: () => {},
-		onNotification: () => () => {},
-		onRequest: (method, handler) => {
-			handlers.set(method, handler);
-			return () => handlers.delete(method);
-		},
-		onClose: (handler) => {
-			closeHandlers.push(handler);
-			return () => {};
-		},
-		close: () => {
-			closed = true;
-			for (const handler of closeHandlers) handler();
-		},
-	};
-	const call = async (method: string, params: unknown): Promise<unknown> => {
-		const handler = handlers.get(method);
-		if (!handler) throw new Error(`no handler registered for ${method}`);
-		return await handler(params);
-	};
-	return { transport, call, has: (method: string) => handlers.has(method) };
-}
+import { fakeTransport } from "../harness/acp-fake-transport.js";
 
 /** A prompt that never settles, so the test can observe the active-prompt window. */
 function hangingChat(): AcpServerChat & { release: () => void } {

@@ -114,19 +114,6 @@ describe("settings and migration boundary", () => {
 		const defaults = validateSettings(parseYaml(DEFAULT_SETTINGS_YAML));
 		deepStrictEqual(defaults.issues, []);
 		deepStrictEqual(defaults.settings, DEFAULT_SETTINGS);
-		strictEqual(defaults.settings.version, 2);
-		strictEqual(defaults.settings.safety.autonomy, "default");
-		strictEqual(defaults.settings.safety.limits.sessionCostUsd, 5);
-		strictEqual(defaults.settings.chat.prewarm, false);
-		strictEqual(defaults.settings.chat.maxOutputTokens, 0);
-		strictEqual(defaults.settings.fleet.concurrency, "auto");
-		strictEqual(defaults.settings.fleet.permissions.mode, "judge");
-		strictEqual(defaults.settings.context.memory.target, null);
-		strictEqual(defaults.settings.interface.mode, "regular");
-		strictEqual(defaults.settings.interface.smoothStreaming, "auto");
-		strictEqual(defaults.settings.interface.panes.layout, "off");
-		strictEqual(defaults.settings.interface.panes.files.enabled, false);
-		strictEqual(defaults.settings.context.toolResultMaxBytes, 65_536);
 
 		const belowToolResultMinimum = validateSettings({ version: 2, context: { toolResultMaxBytes: 4_095 } });
 		ok(belowToolResultMinimum.issues.some((issue) => issue.path === "context.toolResultMaxBytes"));

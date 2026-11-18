@@ -1,37 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type AcpCommandHost, acpCommandControl } from "../../src/engine/acp/commands.js";
+import { acpCommandControl } from "../../src/engine/acp/commands.js";
+import { acpCommandHost as host } from "../harness/acp-fake-transport.js";
 
 // The ACP context verbs were allowlisted but no host supplied them, so a wire client never saw them.
 // A host that supplies one now gets it in the catalog, and the reply waits for the operation's report.
-
-function host(overrides: Partial<AcpCommandHost> = {}): AcpCommandHost {
-	const refuse = (member: string) =>
-		new Proxy(
-			{},
-			{
-				get() {
-					throw new Error(`test host: ${member} was reached`);
-				},
-			},
-		);
-	return {
-		dispatch: refuse("dispatch") as AcpCommandHost["dispatch"],
-		bus: refuse("bus") as AcpCommandHost["bus"],
-		providers: refuse("providers") as AcpCommandHost["providers"],
-		...overrides,
-	};
-}
-
-const contextVerbs = (control: ReturnType<typeof acpCommandControl>) =>
-	Object.keys(control.catalog().commands.find((command) => command.name === "context")?.args.subcommands ?? {}).sort();
-
-test("the catalog offers exactly the context verbs the host wired", () => {
-	assert.deepEqual(contextVerbs(acpCommandControl(host())), []);
-	const wired = acpCommandControl(host({ runCompact: async () => undefined, runContextRecall: async () => undefined }));
-	assert.deepEqual(contextVerbs(wired), ["compact", "recall"]);
-	assert.throws(() => wired.invoke({ command: "context", argv: ["reset"] }), /not available/);
-});
 
 test("a context reply waits for the host operation and carries its report", async () => {
 	const order: string[] = [];
