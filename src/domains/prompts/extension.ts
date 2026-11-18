@@ -343,7 +343,8 @@ export function createPromptsBundle(
 					...sources.clioRepoAwareness,
 					...selfDevelopmentSkillFragments(sources.clioRepoAwareness.length > 0, sessionInputs, safety),
 					...catalogFragments(sources.catalogs, sessionInputs),
-					...renderCustomizationFragments(sources.customization, cwd, input.workingContextPaths ?? []).fragments,
+					// bt-10: only unconditional rules, so the prefix is the same before and after a file is referenced.
+					...renderCustomizationFragments(sources.customization, cwd, []).fragments,
 				],
 			});
 			return {
@@ -352,6 +353,7 @@ export function createPromptsBundle(
 				projectHandbookFiles,
 				priorSessionFact: compiledPriorSessionFact(sources.sessionContext),
 				sessionContext: sources.sessionContext,
+				scopedRules: scopedRuleBodies(sources.customization, cwd, input.workingContextPaths ?? []),
 			};
 		},
 		async compileWorkerPrompt(input: CompileWorkerPromptInput) {
@@ -514,6 +516,22 @@ function renderCustomizationFragments(
 		// The operator profile is best-effort; a load failure injects nothing.
 	}
 	return { fragments, activeRuleIds, operatorProfileApplied };
+}
+
+/** The path-scoped rules the working context activates; the session prompt leaves them to the turn reminder. */
+function scopedRuleBodies(
+	sources: CustomizationSourceSnapshot,
+	cwd: string,
+	workingContextPaths: ReadonlyArray<string>,
+): string[] {
+	if (workingContextPaths.length === 0) return [];
+	try {
+		const scoped = sources.rules.filter((rule) => rule.paths !== undefined);
+		return selectActiveRules(scoped, normalizeWorkingContextPaths(cwd, workingContextPaths)).map((rule) => rule.body);
+	} catch {
+		// Project rules are best-effort; a load failure must not block compilation.
+		return [];
+	}
 }
 
 function normalizeWorkingContextPaths(cwd: string, paths: ReadonlyArray<string>): string[] {

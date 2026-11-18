@@ -454,6 +454,8 @@ export interface TurnContext {
 	noteNextRunColdReason(reason: ExpectedColdReason): void;
 	/** The tool choice a request sends; `afterRejection` marks the #426 retry of a request the provider rejected. */
 	noteCacheRequestToolChoice(toolChoice: string, afterRejection?: boolean): void;
+	/** Compare the system prompt a request leads with against the session's previous request (bt-10). */
+	noteCacheRequestSystemPrompt?(afterRejection?: boolean): void;
 	/** Consume disturbances since the last settled run (T3.3 honesty). */
 	consumeExpectedColdReasons(runtimeId: string): void;
 	/** Disturbances since the last main request was sent; the journal stamps them on the next one (#434). */
@@ -536,6 +538,21 @@ type LiveBudgetAccounting = Pick<
 >;
 
 const sha256Json = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
+/**
+ * The memory section the active path's last prompt compile recorded, or null when none was recorded since the last
+ * compaction, which unfreezes memory, or memory was off for it (bt-10).
+ */
+function recordedMemorySection(entries: ReadonlyArray<SessionEntry>): string | null {
+	for (let index = entries.length - 1; index >= 0; index -= 1) {
+		const entry = entries[index];
+		if (entry?.kind === "compactionSummary") return null;
+		if (entry?.kind !== "custom" || entry.customType !== "promptRecompiled") continue;
+		const section = (entry.data as { memorySection?: unknown } | null)?.memorySection;
+		return typeof section === "string" ? section : null;
+	}
+	return null;
+}
 
 // #423: five idle minutes warrants a reminder, without claiming a provider cache lifetime.
 const CACHE_REUSE_IDLE_NOTICE_MS = 5 * 60 * 1000;
@@ -722,6 +739,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	let frozenRouteIdentity = "";
 	let thinkingUsesConfigurationUpdate = false;
 	let frozenMemorySessionId = "";
+	// bt-10: the session whose recorded memory section this process already looked up, once per session.
+	let memoryRestoredSessionId: string | null = null;
 	let sessionPromptDelta = "";
 	// The pinned blocks the context lacks at their current value. Read against the messages as they stand, after any
 	// compaction, so a block a summary dropped goes again verbatim and an unchanged one never repeats.
@@ -757,6 +776,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const memoryOrigin = (runtime: AgentRuntime): string =>
 		JSON.stringify([process.cwd(), runtime.targetId, runtime.runtimeId, runtime.wireModelId]);
 	let pendingPromptLogEntry: SessionPromptCompileRecord | null = null;
+	// The memory section that compile froze, recorded beside it so a resumed process compiles the same bytes (bt-10).
+	let pendingPromptLogMemory: string | null = null;
 	let latestPromptCompile: SessionPromptCompileRecord | null = null;
 	// Reuse an empty automatic attempt only for identical ledger and provider
 	// context. Same-turn tool growth or same-length content replacement must
@@ -814,6 +835,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// compares with because the provider rejected the request between them (#434).
 	let sentToolChoice: { route: string; toolChoice: string } | undefined;
 	let priorSentToolChoice: { route: string; toolChoice: string } | undefined;
+	// The same pair for the leading system prompt's hash; a resumed process starts from the ledger's last call (bt-10).
+	let cacheRequestSystemPromptHash: string | undefined;
+	let sentSystemPrompt: { route: string; hash: string } | undefined;
+	let priorSentSystemPrompt: { route: string; hash: string } | undefined;
 	let nextChangedSection: string | undefined;
 	let previousPromptSections: SessionPromptCompileRecord["sections"] | null = null;
 	let idleReuseNoticeStamp: string | null = null;
@@ -868,6 +893,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		"tool_choice_change",
 		"tool_surface_change",
 		"prompt_recompiled",
+		"system_prompt_changed",
 		// The step checkpoint rewrites the history the prefix carried, on every tier.
 		"step_checkpoint",
 	]);
@@ -3106,6 +3132,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// next inherits that freeze, any other session starts its own.
 			if (frozenMemorySessionId === "") frozenMemorySessionId = sessionId;
 			else if (frozenMemorySessionId !== sessionId) frozenMemorySection = null;
+			// bt-10: a resumed process (run --session, ACP session/load, /resume) has no freeze of its own; it takes the
+			// section the session's prompt was last compiled with, so the resumed prompt is byte-identical and a record
+			// approved since rides the reminder as it would have in the original process.
+			if (memoryOn && frozenMemorySection === null && sessionId !== "" && memoryRestoredSessionId !== sessionId) {
+				memoryRestoredSessionId = sessionId;
+				frozenMemorySection = recordedMemorySection(entries);
+			}
 			const frozenMemory = frozenMemorySection ?? liveMemorySection;
 			const withMemory = (section: string): SessionPromptInputs => {
 				const inputs = { ...sessionInputs };
@@ -3136,8 +3169,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				const framedBlock = neutralizeFraming(block);
 				return hostFramedTexts(agentRuntime.agent.state.messages).some((text) => text.includes(framedBlock)) ? "" : block;
 			};
+			// bt-10: a rule a referenced file activates rides the tail once, like the session facts above.
+			const scopedRulesDelta = (compiled: CompiledSessionPrompt | null): string => {
+				const bodies = (compiled?.scopedRules ?? []).filter((body) => undelivered(body).length > 0);
+				return bodies.length === 0 ? "" : ["# Project rules for files in working context", ...bodies].join("\n\n");
+			};
 			const promptDelta = (compiled: CompiledSessionPrompt | null, memory: string): string =>
-				[undelivered(compiled?.sessionContext ?? ""), undelivered(contextOperationUpdate), memoryDelta(memory)]
+				[
+					undelivered(compiled?.sessionContext ?? ""),
+					scopedRulesDelta(compiled),
+					undelivered(contextOperationUpdate),
+					memoryDelta(memory),
+				]
 					.filter((part) => part.length > 0)
 					.join("\n\n");
 			const memoryDelta = (compiled: string): string => {
@@ -3256,6 +3299,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				}
 				setEngineSystemPrompt(agentRuntime.agent, result.systemPrompt, result.pinnedPrefix);
 				if (changed) {
+					pendingPromptLogMemory = memoryOn ? compiledMemory : null;
 					pendingPromptLogEntry = latestPromptCompile = {
 						version: PROMPT_MANIFEST_VERSION,
 						at: compiledAt,
@@ -3358,6 +3402,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						previousHash: entry.previousHash,
 						hash: entry.systemPromptHash,
 						tokenEstimate: entry.tokenEstimate,
+						...(pendingPromptLogMemory === null ? {} : { memorySection: pendingPromptLogMemory }),
 					},
 				});
 				// A resumed process names the session's last recorded hash as previousHash (#249), so
@@ -3638,6 +3683,28 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			sentToolChoice = { route, toolChoice };
 		},
 
+		noteCacheRequestSystemPrompt(afterRejection = false): void {
+			const runtime = state.runtime;
+			if (!runtime) return;
+			const hash = createHash("sha256").update(engineInitialSystemPrompt(runtime.agent)).digest("hex");
+			cacheRequestSystemPromptHash = hash;
+			const route = JSON.stringify([runtime.targetId, runtime.wireModelId]);
+			loadCacheCallBaseline();
+			const recorded = cacheCallBaseline?.requestFingerprint;
+			const previous = afterRejection
+				? priorSentSystemPrompt
+				: (sentSystemPrompt ??
+					(recorded?.systemPromptHash === undefined
+						? undefined
+						: { route: JSON.stringify([recorded.targetId, recorded.modelId]), hash: recorded.systemPromptHash }));
+			// A recompile already names this change; the reason catches a prefix that moved without one.
+			if (previous?.route === route && previous.hash !== hash && !callColdReasons.includes("prompt_recompiled")) {
+				noteColdReason("system_prompt_changed");
+			}
+			if (!afterRejection) priorSentSystemPrompt = sentSystemPrompt;
+			sentSystemPrompt = { route, hash };
+		},
+
 		promptCachePayloadForAssistant(
 			usage: Usage,
 			backend?: BackendCompletionTimings,
@@ -3692,6 +3759,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							thinkingLevel: wireEffort ?? state.runtime.runtimeResolution.effectiveThinkingLevel,
 							toolChoice: cacheRequestToolChoice,
 							...(replayTruncationHash === undefined ? {} : { replayTruncationHash }),
+							...(cacheRequestSystemPromptHash === undefined ? {} : { systemPromptHash: cacheRequestSystemPromptHash }),
 						}
 					: undefined,
 				{
@@ -3837,6 +3905,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			resumedPromptHash = null;
 			sessionWorkingContextPaths.clear();
 			pendingPromptLogEntry = null;
+			pendingPromptLogMemory = null;
+			memoryRestoredSessionId = null;
+			cacheRequestSystemPromptHash = undefined;
+			sentSystemPrompt = undefined;
+			priorSentSystemPrompt = undefined;
 			latestPromptCompile = null;
 			emptyAutoCompactContextKey = null;
 			autoCompactFailures = 0;

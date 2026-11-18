@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { Context, SimpleStreamOptions, StreamOptions } from "@earendil-works/pi-ai";
@@ -33,6 +33,7 @@ import { withCodexConfiguration } from "../../src/engine/apis/codex-configuratio
 import { withCodexPromptItems } from "../../src/engine/apis/codex-prompt-items.js";
 import type { CodexConfiguration } from "../../src/engine/types.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
+import { replayCurrentSession } from "../../src/session-control/session-restore.js";
 import { createTurnContext } from "../../src/session-control/turn-context.js";
 import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
 import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
@@ -171,6 +172,8 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 			policyUpdates?: boolean;
 			memoryOn?: { value: boolean };
 			memoryRecords?: ReadonlyMap<string, MemoryRecord>;
+			/** A fresh process continuing this session, as run --session, ACP session/load and /resume do. */
+			resume?: { state: ReturnType<typeof startSession>; leaf: string | null };
 		} = {},
 	) {
 		const requests: Context[] = [];
@@ -228,8 +231,10 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 		settings.chat.prewarm = false;
 		const { prompts } = await promptsBundle();
 		// A posture update is committed against the persisted user turn, so that path needs a session.
-		const state = options.autonomy ? startSession({ cwd: process.cwd(), target: target.id, model: "chat" }) : undefined;
-		let leaf: string | null = null;
+		const state =
+			options.resume?.state ??
+			(options.autonomy ? startSession({ cwd: process.cwd(), target: target.id, model: "chat" }) : undefined);
+		let leaf: string | null = options.resume?.leaf ?? null;
 		const session = state
 			? ({
 					current: () => state.meta,
@@ -265,7 +270,15 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 				: {}),
 			...(session && state ? { session, readSessionEntries: () => readCurrentEntries(state) } : {}),
 		});
-		return { loop, requests, state };
+		if (options.resume && session && state) {
+			replayCurrentSession(
+				{ session, chat: loop, readEntries: () => readCurrentEntries(state) },
+				state.meta.id,
+				"leaf",
+				leaf,
+			);
+		}
+		return { loop, requests, state, leaf: () => leaf };
 	}
 
 	it("keeps the prefix when the turn scope changes and delivers the new scope in the tail", async () => {
@@ -304,6 +317,49 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 			strictEqual(next.includes("Never edit generated wiki pages."), false, next);
 		} finally {
 			f.loop.dispose();
+		}
+	});
+
+	it("compiles a resumed session's prompt byte-identical and delivers its new memory and path rules in the tail (bt-10)", async () => {
+		mkdirSync(join(process.cwd(), ".clio-coder", "rules"), { recursive: true });
+		writeFileSync(
+			join(process.cwd(), ".clio-coder", "rules", "src.md"),
+			"---\npaths:\n  - src/**\n---\nSCOPED: keep exports named.\n",
+		);
+		mkdirSync(join(process.cwd(), "src"), { recursive: true });
+		writeFileSync(join(process.cwd(), "src", "a.ts"), "export const a = 1;\n");
+		const memory = { section: memorySection(["Run the focused test first."]) };
+		const first = await chatFixture(memory, { autonomy: { level: "default" } });
+		const state = first.state;
+		ok(state);
+		try {
+			await first.loop.submit("tidy src/a.ts", { workingContextPaths: ["src/a.ts"] });
+		} finally {
+			first.loop.dispose();
+		}
+		// Between processes a record is approved; the next process knows only the ledger.
+		memory.section = memorySection(["Run the focused test first.", "Never edit generated wiki pages."]);
+		const resumed = await chatFixture(memory, { resume: { state, leaf: first.leaf() } });
+		try {
+			await resumed.loop.submit("second task");
+			const [original, after] = [first.requests[0], resumed.requests[0]];
+			ok(original && after);
+			strictEqual(compiledSystemText(after), compiledSystemText(original));
+			ok(compiledSystemText(original).includes("Run the focused test first."));
+			strictEqual(compiledSystemText(original).includes("SCOPED: keep exports named."), false);
+			const tail = await assertPrefixKept(original, after);
+			ok(JSON.stringify(original.messages).includes("SCOPED: keep exports named."), "the activated rule rides its turn");
+			strictEqual(tail.includes("SCOPED: keep exports named."), false, tail);
+			ok(tail.includes("# Memory update") && tail.includes("Never edit generated wiki pages."), tail);
+			const settled = readCurrentEntries(state).filter(
+				(entry): entry is Extract<typeof entry, { kind: "message" }> =>
+					entry.kind === "message" && entry.role === "assistant",
+			);
+			const promptCache = (settled.at(-1)?.payload as { promptCache?: { expectedColdReasons?: string[] } }).promptCache;
+			ok(promptCache, "the resumed call must record its cache observation");
+			strictEqual(promptCache.expectedColdReasons, undefined, "a byte-identical resume names no cold reason");
+		} finally {
+			resumed.loop.dispose();
 		}
 	});
 

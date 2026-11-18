@@ -244,6 +244,13 @@ export interface CompiledSessionPrompt {
 	 */
 	sessionContext?: string;
 	/**
+	 * Bodies of the path-scoped project rules the working context activates, in
+	 * load order. They ride the turn reminder rather than the system prompt, so
+	 * a referenced file, or a resume that has not referenced it yet, never
+	 * rewrites the cached prefix (bt-10). Set by `compileSessionPrompt`.
+	 */
+	scopedRules?: string[];
+	/**
 	 * Repo-relative `.clio-coder/rules/**` ids selected into this compile, in
 	 * load order. Set only by `compileWorkerPrompt`, which owns rule
 	 * selection; the pure compiler and `compileSessionPrompt` leave it absent.
@@ -1063,16 +1070,17 @@ function estimatePromptTokens(text: string): number {
 
 /**
  * Layer order: immutable identity/constitution, conditional role/capabilities,
- * harness paths, turn retrieval hints, captured project context and runtime,
- * then customization, and memory last. The current task scope is not
- * compiled; it rides in the turn's reminder (#422). Only identity/constitution
- * are guaranteed stable across every runtime input; stablePrefix measures that
+ * harness paths, retrieval hints, captured project context and runtime, then
+ * customization, and memory last. The current task scope is not compiled; it
+ * rides in the turn's reminder (#422). Only identity/constitution are
+ * guaranteed stable across every runtime input; stablePrefix measures that
  * exact UTF-8 prefix. Everything through harness-awareness depends only on the
  * install, autonomy and tool surface, so two projects on one install share it
- * as a cache prefix (`PROMPT_SECTION_LAYER`). Memory can change between turns,
- * so it renders after the additional fragments and a memory change resends
- * only itself. Changing a tool surface or role instruction invalidates from
- * its first changed byte, as intended.
+ * as a cache prefix (`PROMPT_SECTION_LAYER`). The whole system prompt precedes
+ * the history, so any byte that moves re-bills every message behind it: memory
+ * is frozen per session, a resume included, and later memory changes and
+ * path-scoped rules ride the turn reminder (bt-10). Changing a tool surface or
+ * role instruction invalidates from its first changed byte, as intended.
  */
 export const SESSION_PROMPT_SECTION_ORDER: ReadonlyArray<string> = [
 	"identity",
@@ -1113,13 +1121,13 @@ const V2_HEADLESS_APPROVAL =
  * - pinned: fixed by the install, autonomy level and admitted tool surface;
  *   shared by every session and project on this install.
  * - session: captured once per session (workspace, project handbook, model,
- *   operator profile); stable across that session's turns.
- * - turn: may change between turns of one session (task-scored memory,
- *   path-scoped project rules).
+ *   operator profile, the memory frozen at its first compile, unconditional
+ *   project rules); stable across that session's turns and its resumes.
+ * - turn: may change between turns of one session (the fleet inventory).
  * Anything a turn adds after the system prompt (reminders, skill bodies,
- * gateway results) is outside the compiled prompt and has no layer here. An id
- * missing from the table (a future additional fragment) counts as turn, the
- * conservative reading.
+ * gateway results, memory updates, path-scoped project rules) is outside the
+ * compiled prompt and has no layer here. An id missing from the table (a
+ * future additional fragment) counts as turn, the conservative reading.
  */
 export type PromptSectionLayer = "pinned" | "session" | "turn";
 
@@ -1130,19 +1138,19 @@ export const PROMPT_SECTION_LAYER: Readonly<Record<string, PromptSectionLayer>> 
 	skills: "pinned",
 	safety: "pinned",
 	"tool-contract": "pinned",
-	"retrieval-hints": "turn",
+	"retrieval-hints": "session",
 	"harness-awareness": "pinned",
 	harness: "pinned",
 	operator: "pinned",
 	"project-context": "session",
-	memory: "turn",
+	memory: "session",
 	runtime: "session",
 	"context.workspace-root": "session",
 	"context.clio-repo-awareness": "session",
 	"context.self-development-skills": "session",
 	"context.catalogs": "session",
 	"context.operator-profile": "session",
-	"context.project-rules": "turn",
+	"context.project-rules": "session",
 };
 
 /**

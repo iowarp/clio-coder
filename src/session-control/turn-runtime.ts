@@ -1088,6 +1088,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						};
 						// #423: fingerprint the control this attempt sends, including a #426 recovery retry.
 						context.noteCacheRequestToolChoice?.(JSON.stringify(request.options?.toolChoice ?? "auto"), retry);
+						context.noteCacheRequestSystemPrompt?.(retry);
 						delete localRuntime.lastProviderStatus;
 						const requestOptions = {
 							...request.options,

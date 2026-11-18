@@ -24546,12 +24546,6 @@
 				},
 				"maxItems": 7
 			},
-			"Array_484e994d": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_admission_agent_attempt_fd8922c2"
-				}
-			},
 			"Array_49748387": {
 				"type": "array",
 				"items": {
@@ -24580,6 +24574,12 @@
 					"$ref": "#/components/schemas/Object_absolute_key_passed_b124f622"
 				},
 				"maxItems": 64
+			},
+			"Array_500125b9": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Enum_684094fe"
+				}
 			},
 			"Array_541b9459": {
 				"type": "array",
@@ -24764,6 +24764,12 @@
 				},
 				"maxItems": 256
 			},
+			"Array_a98b2dda": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_admission_agent_attempt_56af7069"
+				}
+			},
 			"Array_ac23550c": {
 				"type": "array",
 				"items": {
@@ -24844,12 +24850,6 @@
 					"maxLength": 4096
 				},
 				"maxItems": 500
-			},
-			"Array_dceec002": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Enum_6f545389"
-				}
 			},
 			"Array_de2d36b0": {
 				"type": "array",
@@ -25032,7 +25032,7 @@
 									"enum": ["hot", "partial", "cold", "small", "unknown"]
 								},
 								"expectedColdReasons": {
-									"$ref": "#/components/schemas/Array_dceec002"
+									"$ref": "#/components/schemas/Array_500125b9"
 								},
 								"firstDivergentSection": {
 									"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
@@ -25181,7 +25181,7 @@
 						"additionalProperties": false
 					},
 					"calls": {
-						"$ref": "#/components/schemas/Array_484e994d"
+						"$ref": "#/components/schemas/Array_a98b2dda"
 					},
 					"matched": {
 						"type": "integer",
@@ -25282,6 +25282,25 @@
 			"Enum_5f1647f2": {
 				"enum": ["never_sent", "sent_unsettled", "settled_no_usage", "settled"]
 			},
+			"Enum_684094fe": {
+				"enum": [
+					"working_set_evict",
+					"compaction",
+					"dispatch",
+					"residency",
+					"thinking_change",
+					"tool_surface_change",
+					"prompt_recompiled",
+					"system_prompt_changed",
+					"background_memory",
+					"model_changed",
+					"transport_reset",
+					"input_changed",
+					"tool_choice_change",
+					"observation_aging",
+					"step_checkpoint"
+				]
+			},
 			"Enum_69ff8598": {
 				"enum": [
 					"vram_capacity_fit_failure",
@@ -25316,24 +25335,6 @@
 			},
 			"Enum_6f2ad7b7": {
 				"enum": ["passed", "failed", "inconclusive", "not_independent", "absent", "unknown", "not_applicable"]
-			},
-			"Enum_6f545389": {
-				"enum": [
-					"working_set_evict",
-					"compaction",
-					"dispatch",
-					"residency",
-					"thinking_change",
-					"tool_surface_change",
-					"prompt_recompiled",
-					"background_memory",
-					"model_changed",
-					"transport_reset",
-					"input_changed",
-					"tool_choice_change",
-					"observation_aging",
-					"step_checkpoint"
-				]
 			},
 			"Enum_7c26d95b": {
 				"enum": ["succeeded", "failed", "timed_out", "stalled", "canceled", "denied_by_policy", "spawn_failed"]
@@ -27373,7 +27374,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_admission_agent_attempt_fd8922c2": {
+			"Object_admission_agent_attempt_56af7069": {
 				"type": "object",
 				"required": [
 					"callId",
@@ -27400,7 +27401,7 @@
 					"responseId"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_72bafdad"
+					"$ref": "#/components/schemas/Shape_cf96c77e"
 				},
 				"additionalProperties": false
 			},
@@ -28910,7 +28911,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_breakUsd_expectedColdReasons_firstDivergentSection_1dd8cbe5": {
+			"Object_breakUsd_expectedColdReasons_firstDivergentSection_395ea4c0": {
 				"type": "object",
 				"required": [
 					"verdict",
@@ -28921,7 +28922,7 @@
 					"breakUsd"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_b8526dc2"
+					"$ref": "#/components/schemas/Shape_80c709dd"
 				},
 				"additionalProperties": false
 			},
@@ -34591,87 +34592,6 @@
 					"$ref": "#/components/schemas/Union_b9574732"
 				}
 			},
-			"Shape_72bafdad": {
-				"callId": {
-					"type": "string",
-					"pattern": "^cal_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-				},
-				"attemptId": {
-					"type": "string",
-					"pattern": "^att_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-				},
-				"attempt": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"agent": {
-					"$ref": "#/components/schemas/Object_id_role_c46a0a00"
-				},
-				"owner": {
-					"$ref": "#/components/schemas/Object_runId_sessionId_turnId_6e913239"
-				},
-				"startedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"settledAt": {
-					"$ref": "#/components/schemas/Union_9d36f13d"
-				},
-				"target": {
-					"$ref": "#/components/schemas/Object_api_reportedModel_requestedModel_5dcab2d5"
-				},
-				"roundKind": {
-					"$ref": "#/components/schemas/Enum_413aacec"
-				},
-				"toolChoice": {
-					"type": "string",
-					"maxLength": 4096
-				},
-				"disposition": {
-					"$ref": "#/components/schemas/Union_f0839e51"
-				},
-				"stop": {
-					"$ref": "#/components/schemas/Union_13e141e9"
-				},
-				"usage": {
-					"$ref": "#/components/schemas/Union_178a3139"
-				},
-				"usd": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"pricedBy": {
-					"enum": ["provider", "target-rates", "catalog", "free", "none"]
-				},
-				"stages": {
-					"$ref": "#/components/schemas/Union_71874828"
-				},
-				"timing": {
-					"$ref": "#/components/schemas/Object_admissionWait_harness_modelTime_8652ac86"
-				},
-				"admission": {
-					"$ref": "#/components/schemas/Union_6872feba"
-				},
-				"transport": {
-					"$ref": "#/components/schemas/Object_connectionReused_continuation_kind_13d8e1ff"
-				},
-				"cache": {
-					"$ref": "#/components/schemas/Object_breakUsd_expectedColdReasons_firstDivergentSection_1dd8cbe5"
-				},
-				"quota": {
-					"$ref": "#/components/schemas/Union_96fc0259"
-				},
-				"responseId": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				}
-			},
 			"Shape_73088e00": {
 				"topology": {
 					"type": "string",
@@ -34812,6 +34732,26 @@
 							"type": "null"
 						}
 					]
+				}
+			},
+			"Shape_80c709dd": {
+				"verdict": {
+					"enum": ["hot", "partial", "cold", "small", "unknown"]
+				},
+				"expectedColdReasons": {
+					"$ref": "#/components/schemas/Array_500125b9"
+				},
+				"firstDivergentSection": {
+					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
+				},
+				"rePrefilled": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"uncachedPrefill": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"breakUsd": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
 				}
 			},
 			"Shape_80e91d79": {
@@ -35320,26 +35260,6 @@
 				},
 				"payload": {
 					"$ref": "#/components/schemas/Object_findingCount_firstPassSuccess_runId_d72f3030"
-				}
-			},
-			"Shape_b8526dc2": {
-				"verdict": {
-					"enum": ["hot", "partial", "cold", "small", "unknown"]
-				},
-				"expectedColdReasons": {
-					"$ref": "#/components/schemas/Array_dceec002"
-				},
-				"firstDivergentSection": {
-					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
-				},
-				"rePrefilled": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"uncachedPrefill": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"breakUsd": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
 				}
 			},
 			"Shape_b8913fc3": {
@@ -35931,6 +35851,87 @@
 				},
 				"retry": {
 					"$ref": "#/components/schemas/Union_4bf0a9b3"
+				}
+			},
+			"Shape_cf96c77e": {
+				"callId": {
+					"type": "string",
+					"pattern": "^cal_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+				},
+				"attemptId": {
+					"type": "string",
+					"pattern": "^att_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+				},
+				"attempt": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"agent": {
+					"$ref": "#/components/schemas/Object_id_role_c46a0a00"
+				},
+				"owner": {
+					"$ref": "#/components/schemas/Object_runId_sessionId_turnId_6e913239"
+				},
+				"startedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"settledAt": {
+					"$ref": "#/components/schemas/Union_9d36f13d"
+				},
+				"target": {
+					"$ref": "#/components/schemas/Object_api_reportedModel_requestedModel_5dcab2d5"
+				},
+				"roundKind": {
+					"$ref": "#/components/schemas/Enum_413aacec"
+				},
+				"toolChoice": {
+					"type": "string",
+					"maxLength": 4096
+				},
+				"disposition": {
+					"$ref": "#/components/schemas/Union_f0839e51"
+				},
+				"stop": {
+					"$ref": "#/components/schemas/Union_13e141e9"
+				},
+				"usage": {
+					"$ref": "#/components/schemas/Union_178a3139"
+				},
+				"usd": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"pricedBy": {
+					"enum": ["provider", "target-rates", "catalog", "free", "none"]
+				},
+				"stages": {
+					"$ref": "#/components/schemas/Union_71874828"
+				},
+				"timing": {
+					"$ref": "#/components/schemas/Object_admissionWait_harness_modelTime_8652ac86"
+				},
+				"admission": {
+					"$ref": "#/components/schemas/Union_6872feba"
+				},
+				"transport": {
+					"$ref": "#/components/schemas/Object_connectionReused_continuation_kind_13d8e1ff"
+				},
+				"cache": {
+					"$ref": "#/components/schemas/Object_breakUsd_expectedColdReasons_firstDivergentSection_395ea4c0"
+				},
+				"quota": {
+					"$ref": "#/components/schemas/Union_96fc0259"
+				},
+				"responseId": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
 				}
 			},
 			"Shape_d129f32f": {
@@ -40300,7 +40301,7 @@
 						]
 					},
 					"lastCalls": {
-						"$ref": "#/components/schemas/Array_484e994d"
+						"$ref": "#/components/schemas/Array_a98b2dda"
 					},
 					"causes": {
 						"type": "array",

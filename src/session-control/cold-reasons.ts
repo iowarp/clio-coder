@@ -22,6 +22,8 @@ export function coldReasonText(reason: string): string {
 			return "a tool list change";
 		case "prompt_recompiled":
 			return "a prompt rebuild";
+		case "system_prompt_changed":
+			return "a system prompt change";
 		case "background_memory":
 			return "a memory step on the server";
 		case "model_changed":

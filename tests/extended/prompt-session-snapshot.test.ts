@@ -196,8 +196,10 @@ describe("session prompt source snapshot", { concurrency: false }, () => {
 			turn.addWorkingContextPaths(["src/feature.ts"]);
 			const workingContextMiss = await turn.ensureSessionPrompt(agentRuntime);
 			strictEqual(compileCalls, 2, "working-context membership must recompile");
-			match(workingContextMiss?.systemPrompt ?? "", /SCOPED_ONE/u);
-			strictEqual(workingContextMiss?.systemPrompt.includes("SCOPED_TWO"), false);
+			// A path-scoped rule rides the turn tail, so the system prompt stays the session's (bt-10).
+			strictEqual(workingContextMiss?.systemPrompt, first?.systemPrompt);
+			match(workingContextMiss?.scopedRules?.join("\n") ?? "", /SCOPED_ONE/u);
+			strictEqual(workingContextMiss?.scopedRules?.join("\n").includes("SCOPED_TWO"), false);
 
 			agentRuntime.wireModelId = "model-two";
 			const unrelatedMiss = await turn.ensureSessionPrompt(agentRuntime);
@@ -221,7 +223,7 @@ describe("session prompt source snapshot", { concurrency: false }, () => {
 			strictEqual(compileCalls, 4);
 			match(invalidated?.systemPrompt ?? "", /HANDBOOK_TWO/u);
 			match(invalidated?.systemPrompt ?? "", /RULE_TWO/u);
-			match(invalidated?.systemPrompt ?? "", /SCOPED_TWO/u);
+			match(invalidated?.scopedRules?.join("\n") ?? "", /SCOPED_TWO/u);
 			match(invalidated?.systemPrompt ?? "", /Response posture: balanced/u);
 			strictEqual(invalidated?.systemPrompt.includes("# Clio Source Tree"), false);
 
@@ -231,7 +233,7 @@ describe("session prompt source snapshot", { concurrency: false }, () => {
 			strictEqual(compileCalls, 5, "a new session identity must capture a new source snapshot");
 			match(nextSession?.systemPrompt ?? "", /HANDBOOK_THREE/u);
 			match(nextSession?.systemPrompt ?? "", /RULE_THREE/u);
-			match(nextSession?.systemPrompt ?? "", /SCOPED_THREE/u);
+			match(nextSession?.scopedRules?.join("\n") ?? "", /SCOPED_THREE/u);
 			match(nextSession?.systemPrompt ?? "", /Response posture: thorough/u);
 		} finally {
 			turn.dispose();
