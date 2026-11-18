@@ -22,6 +22,7 @@ import {
 	createRunResultQuality,
 	deriveRunVerification,
 	settledVerifyCall,
+	typedValidationFactsFromObservedEffects,
 	typedValidationFactsFromVerifyCalls,
 	type VerifyCallOutcome,
 	type VerifyCallStart,
@@ -889,7 +890,10 @@ async function recordHeadlessMainAgentRun(input: {
 	};
 	const toolStats = sortedToolStats(input.stats.toolStats);
 	const checkFreshness = input.stats.runEffects.checkFreshness();
-	const typedValidations = typedValidationFactsFromVerifyCalls(toolStats, input.stats.verifyCalls, checkFreshness);
+	const typedValidations = [
+		...typedValidationFactsFromVerifyCalls(toolStats, input.stats.verifyCalls, checkFreshness),
+		...typedValidationFactsFromObservedEffects(input.stats.runEffects.snapshot()),
+	];
 	const hostVerification = acceptanceHostVerification(input.acceptance ?? [], snapshot.cwd);
 	const verification = deriveRunVerification({ toolStats, typedValidations }, { checkFreshness });
 	const draft: RunResultDraft = {

@@ -1,8 +1,10 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { join } from "node:path";
 import { test } from "node:test";
 import { formatHeadlessObservedLine, observeHeadlessRun } from "../../src/cli/modes/headless-observed.js";
 import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { standingChecksFrom } from "../../src/domains/safety/observed-checks.js";
+import { readRunJournal } from "../harness/run-journal.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const root = process.cwd();
@@ -92,6 +94,7 @@ const WROTE_THEN_FAILED_CHECK: ReadonlyArray<StubCall> = [
 async function headlessRun(
 	mode: "text" | "json",
 	calls: ReadonlyArray<StubCall> = WROTE_THEN_FAILED_CHECK,
+	snapshot: object | null = null,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
 	const entries: object[] = [{ kind: "message", role: "user", payload: {} }];
 	let handler: (event: unknown) => void = () => {};
@@ -126,7 +129,7 @@ async function headlessRun(
 			handler({ type: "agent_end", messages: [answer] });
 		},
 		whenSettled: async () => {},
-		lastRunSnapshot: () => null,
+		lastRunSnapshot: () => snapshot,
 		isStreaming: () => false,
 	};
 	const chat = new Proxy(stub, { get: (target, key) => (key in target ? target[key as string] : undefined) });
@@ -135,6 +138,9 @@ async function headlessRun(
 	const write = process.stdout.write;
 	const writeError = process.stderr.write;
 	process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+		// The test runner reports to its parent over stdout in binary frames; a run that seals a receipt is slow enough
+		// to interleave them.
+		if (typeof chunk !== "string") return write.call(process.stdout, chunk, ...(rest as []));
 		out.push(String(chunk));
 		for (const argument of rest) if (typeof argument === "function") argument();
 		return true;
@@ -226,6 +232,38 @@ test("observed checks follow the receipt's rules on the task board and the headl
 			["b1", "bash", "execute", "ok", { command: "make test; echo EXIT=$?" }],
 		]);
 		match(text.stderr, /1 write · no check observed after the last write/u);
+	} finally {
+		env.restore();
+	}
+});
+
+test("a headless receipt counts a bash check that ran after the last write as a typed validation (x4-6)", async () => {
+	const env = await isolateClioEnv("headless-observed-");
+	try {
+		const run = await headlessRun(
+			"text",
+			[
+				["e1", "edit", "write", "ok", { path: "src/a.py", edits: [] }],
+				["b1", "bash", "execute", "ok", { command: "npm test" }],
+			],
+			{
+				targetId: "fixture",
+				runtimeId: "openai-compat",
+				runtimeKind: "http",
+				wireModelId: "fixture-model",
+				promptSignature: null,
+				toolSignature: null,
+				cwd: env.dir,
+			},
+		);
+		strictEqual(run.code, 0, run.stderr);
+		const settled = readRunJournal(join(env.dir, "state"))?.runs[0]?.settled;
+		ok(settled, run.stderr);
+		deepStrictEqual(settled.verification, { state: "verified", basis: "validation-tool" });
+		deepStrictEqual(
+			settled.quality?.typedValidations.map((fact) => [fact.sourceId, fact.passed]),
+			[["command:npm test", true]],
+		);
 	} finally {
 		env.restore();
 	}
