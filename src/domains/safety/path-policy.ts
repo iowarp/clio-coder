@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import { canonicalizeExistingPath, canonicalizeRawPath, type PathWalkMemo } from "../../core/path-canonical.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 
 export type PathPolicyKind = "zeroAccessPaths" | "readOnlyPaths" | "noWritePaths" | "noDeletePaths";
 export type PathPolicyOperation = "read" | "write" | "delete";
@@ -37,11 +38,13 @@ export type PathPolicyDecision =
 
 const ORDERED_KINDS: readonly PathPolicyKind[] = ["zeroAccessPaths", "readOnlyPaths", "noWritePaths", "noDeletePaths"];
 
-export function isSameOrDescendant(candidatePath: string, policyPath: string): boolean {
-	const candidate = path.resolve(candidatePath);
-	const policy = path.resolve(policyPath);
-	const relative = path.relative(policy, candidate);
-	return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+export function isSameOrDescendant(
+	candidatePath: string,
+	policyPath: string,
+	pathImpl: path.PlatformPath = path,
+): boolean {
+	const relative = pathImpl.relative(policyPath, candidatePath);
+	return !relativePathEscapes(relative, pathImpl);
 }
 
 /**

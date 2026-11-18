@@ -27,6 +27,7 @@ import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy
 import {
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
+	protectedArtifactMutationBlockReason,
 	tokenizeShellLike,
 } from "../../src/domains/safety/protected-artifacts.js";
 import { redactSecretString } from "../../src/domains/safety/redaction.js";
@@ -1271,6 +1272,30 @@ describe("safety gate boundary", () => {
 					strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
 			}
 		}
+	});
+
+	it("keeps a child whose name starts with .. inside its parent", () => {
+		const artifact = (path: string) => ({
+			path,
+			protectedAt: "2026-11-17T00:00:00Z",
+			reason: "fixture",
+			source: "user" as const,
+		});
+		const results = { artifacts: [artifact(join(scratch, "results"))] };
+		for (const [tool, args] of [
+			[ToolNames.Write, { path: "results/..x/a" }],
+			[ToolNames.Bash, { command: "rm -rf results/..x" }],
+		] as const)
+			strictEqual(protectedArtifactMutationBlockReason(results, tool, args) !== null, true, JSON.stringify(args));
+		const data = { artifacts: [artifact(join(scratch, "..data/out.nc"))] };
+		for (const command of [`rm -rf ${scratch}`, "rm -rf ./"])
+			strictEqual(protectedArtifactMutationBlockReason(data, ToolNames.Bash, { command }) !== null, true, command);
+		mkdirSync(join(scratch, "..cache"));
+		const worker = createWorkerSafety({ cwd: scratch });
+		const write = worker.evaluate({ tool: ToolNames.Write, args: { path: "..cache/g", content: "x" } }, "default");
+		strictEqual(write.classification.actionClass, "write");
+		const bash = { tool: ToolNames.Bash, args: { command: "ls", cwd: join(scratch, "..cache") } };
+		strictEqual(worker.evaluate(bash, "default").kind, "allow");
 	});
 
 	it("protects literal ampersand filenames under a shell cwd without treating them as descriptors", () => {

@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { relativePathEscapes } from "../path-containment.js";
 import { ToolNames } from "../tool-names.js";
 import {
 	type SandboxAvailability,
@@ -41,7 +42,7 @@ export interface WorkerSandboxPolicyInput {
 /** True when `candidate` lies strictly below `root`, which may end in a slash. */
 function strictlyInside(root: string, candidate: string): boolean {
 	const rel = path.relative(root, candidate);
-	return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+	return rel !== "" && !relativePathEscapes(rel);
 }
 
 /**

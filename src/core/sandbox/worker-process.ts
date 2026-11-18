@@ -3,6 +3,7 @@ import path from "node:path";
 import { workerSecretPaths } from "../../domains/safety/secret-paths.js";
 import { CLIO_ARTIFACT_DIR, CLIO_PROJECT_DIR } from "../artifact-paths.js";
 import { canonicalizePath } from "../path-canonical.js";
+import { relativePathEscapes } from "../path-containment.js";
 import { clioConfigPath } from "../xdg.js";
 import { sandboxAvailability, sandboxNetworkIsolation } from "./availability.js";
 import { buildSandboxInvocation } from "./invocation.js";
@@ -215,7 +216,7 @@ export function clioConfigDirMask(
 	}
 	const holdsRoot = roots.some((root) => {
 		const rel = path.relative(config, canonicalizePath(root) ?? path.resolve(root));
-		return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+		return !relativePathEscapes(rel);
 	});
 	if (holdsRoot) return null;
 	const reveal: Array<{ source: string; target: string }> = [];

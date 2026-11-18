@@ -7,6 +7,7 @@ import {
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "./git-commit-attribution.js";
+import { relativePathEscapes } from "./path-containment.js";
 import { type MainSandboxPolicy, planMainSandboxSpawn } from "./sandbox/main-session.js";
 import { signalSandboxPayload } from "./sandbox/signal.js";
 import { planSandboxedSpawn } from "./sandbox/worker-process.js";
@@ -459,7 +460,7 @@ export function resolveSafeCwd(cwd: string | undefined, workspaceRoot: string = 
 	const root = path.resolve(workspaceRoot);
 	const resolved = cwd === undefined ? root : path.isAbsolute(cwd) ? path.resolve(cwd) : path.resolve(root, cwd);
 	const rel = path.relative(root, resolved);
-	if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) return resolved;
+	if (!relativePathEscapes(rel)) return resolved;
 	throw new Error(`cwd escapes workspace root: ${resolved}`);
 }
 

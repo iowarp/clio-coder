@@ -9,6 +9,7 @@ import { resolveClioDirs } from "../../core/xdg.js";
 import { expandPath, normalizeToolPath, runScriptCwd } from "../../tools/path-utils.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
 import { inertQuotedMatch, matchesOnlyCommandText } from "./literal-exemption.js";
+import { isSameOrDescendant } from "./path-policy.js";
 import type { CommandPathEvent } from "./protected-artifacts.js";
 import { extractCommandPathWalks } from "./protected-artifacts.js";
 
@@ -313,8 +314,7 @@ function isInsideCwd(abs: string): boolean {
 	const cwd = canonicalizePath(path.resolve(process.cwd()));
 	const candidate = canonicalizePath(abs);
 	if (cwd === null || candidate === null) return false;
-	const rel = path.relative(cwd, candidate);
-	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+	return isSameOrDescendant(candidate, cwd);
 }
 
 function writePathClass(pathArg: string, baseCwd?: string): { cls: "system_modify" | "write"; reason?: string } {
@@ -409,8 +409,7 @@ function tmpDeleteRoots(): string[] {
 }
 
 function isStrictlyUnder(abs: string, root: string): boolean {
-	const rel = path.relative(root, abs);
-	return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+	return path.resolve(abs) !== path.resolve(root) && isSameOrDescendant(abs, root);
 }
 
 /**

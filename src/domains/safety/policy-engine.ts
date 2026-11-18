@@ -5295,8 +5295,7 @@ function isUnderOrSame(child: string, parent: string): boolean {
 	const canonicalParent = canonicalizePath(path.resolve(parent));
 	const canonicalChild = canonicalizePath(path.resolve(child));
 	if (canonicalParent === null || canonicalChild === null) return false;
-	const rel = path.relative(canonicalParent, canonicalChild);
-	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+	return isSameOrDescendant(canonicalChild, canonicalParent);
 }
 
 function commandArg(args: Record<string, unknown> | undefined): string | null {

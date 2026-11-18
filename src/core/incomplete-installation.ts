@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runningBuildId } from "./build-info.js";
 import { resolvePackageRoot } from "./package-root.js";
+import { relativePathEscapes } from "./path-containment.js";
 import { shellQuote } from "./shell-quote.js";
 
 function missingModulePath(message: string): string | null {
@@ -47,7 +48,7 @@ function classifyIncompleteInstallation(
 	const missing = missingModulePath(message);
 	if (!missing) return null;
 	const fromOutput = relative(outputDir, missing);
-	if (fromOutput === "" || fromOutput.startsWith("..") || isAbsolute(fromOutput)) return null;
+	if (fromOutput === "" || relativePathEscapes(fromOutput)) return null;
 	const running = options.runningId === undefined ? runningBuildId : options.runningId;
 	try {
 		const disk = JSON.parse(readFileSync(join(outputDir, "build.json"), "utf8"));

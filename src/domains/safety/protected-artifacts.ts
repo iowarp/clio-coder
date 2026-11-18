@@ -3,6 +3,7 @@ import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
+import { isSameOrDescendant } from "./path-policy.js";
 
 export type ProtectedArtifactSource = "validation" | "middleware" | "user" | "session";
 
@@ -159,7 +160,7 @@ function isProtectedPath(state: ProtectedArtifactState, artifactPath: string): b
 	const candidate = normalizePathKey(artifactPath);
 	if (candidate === null) return false;
 	for (const artifact of normalizedArtifacts(state.artifacts)) {
-		if (isSameOrDescendant(candidate, artifact.key)) return true;
+		if (isSameOrDescendant(candidate, artifact.key, path.posix)) return true;
 	}
 	return false;
 }
@@ -1660,12 +1661,14 @@ function matchesForPaths(
 function pathMatchesArtifact(commandPath: string, artifactKey: string, mode: "target" | "intersects"): boolean {
 	const wildcardRoot = wildcardRootKey(commandPath);
 	if (wildcardRoot !== null) {
-		return isSameOrDescendant(artifactKey, wildcardRoot);
+		return isSameOrDescendant(artifactKey, wildcardRoot, path.posix);
 	}
 	const commandKey = normalizePathKey(commandPath);
 	if (commandKey === null) return false;
-	if (mode === "target") return isSameOrDescendant(commandKey, artifactKey);
-	return isSameOrDescendant(commandKey, artifactKey) || isSameOrDescendant(artifactKey, commandKey);
+	if (mode === "target") return isSameOrDescendant(commandKey, artifactKey, path.posix);
+	return (
+		isSameOrDescendant(commandKey, artifactKey, path.posix) || isSameOrDescendant(artifactKey, commandKey, path.posix)
+	);
 }
 
 /**
@@ -2325,12 +2328,6 @@ function isWindowsAbsolutePath(input: string): boolean {
 
 function toSlashKey(input: string): string {
 	return input.replace(/\\/g, "/");
-}
-
-function isSameOrDescendant(candidate: string, parent: string): boolean {
-	if (candidate === parent) return true;
-	const relative = path.posix.relative(parent, candidate);
-	return relative !== "" && !relative.startsWith("..") && !path.posix.isAbsolute(relative);
 }
 
 function compareMatches(left: ProtectedArtifactCommandMatch, right: ProtectedArtifactCommandMatch): number {
