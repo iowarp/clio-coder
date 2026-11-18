@@ -52,6 +52,19 @@ export interface ModelReplayOptions extends RehydrateChatPanelOptions {
 	 * `uptoTurnId` keeps the live `/tree` meaning, display truncation after the fold.
 	 */
 	cursor?: FoldCursor;
+	/** The clock `continuityBlocks` were resolved at, so a render that reuses them names the time they read (F14). */
+	continuityAtMs?: number;
+}
+
+/**
+ * The clock each replay message list resolved continuity at, keyed by the list a render returned. A note's expiry
+ * reads the clock, so a history installed from a render is verifiable only at that render's time (ContextFold CF-9).
+ */
+const continuityRenderTimes = new WeakMap<ReadonlyArray<AgentMessage>, number>();
+
+/** The clock a replay message list from this module resolved continuity at, if it is one. */
+export function continuityRenderTime(messages: ReadonlyArray<AgentMessage> | undefined): number | undefined {
+	return messages ? continuityRenderTimes.get(messages) : undefined;
 }
 
 /**
@@ -108,7 +121,7 @@ function resolveReplayContinuity(
 		...(context.fork === undefined ? {} : { fork: context.fork }),
 		...(context.historical === undefined ? {} : { historical: context.historical }),
 		...(context.unreadableRecords === undefined ? {} : { unreadableRecords: context.unreadableRecords }),
-		...(context.nowMs === undefined ? {} : { nowMs: context.nowMs }),
+		nowMs: context.nowMs ?? options.continuityAtMs ?? Date.now(),
 	});
 }
 
@@ -131,6 +144,7 @@ export function withContinuityReplay(
 		...options,
 		...(routeTarget ? { routeTarget } : {}),
 		continuity: continuityContextFromSession(session),
+		continuityAtMs: Date.now(),
 	};
 	return { ...merged, continuityBlocks: continuityReplayBlocks(resolveReplayContinuity(turns, merged)) };
 }
@@ -194,11 +208,17 @@ export function renderModelReplay(
 		entries = entries.filter((entry) => entry.kind !== "compactionSummary" || !entry.providerCheckpoint);
 	// A caller that already resolved the projection passes its blocks through,
 	// so the transcript beside this replay renders the identical bytes.
-	const blocks = options.continuityBlocks ?? continuityReplayBlocks(resolveReplayContinuity(entries, options));
+	const continuityAtMs = options.continuity?.nowMs ?? options.continuityAtMs ?? Date.now();
+	const blocks =
+		options.continuityBlocks ?? continuityReplayBlocks(resolveReplayContinuity(entries, { ...options, continuityAtMs }));
 	const projected = projectWorkingSet(entries, foldWorkingSet(entries, activeLeafTurnId), activeLeafTurnId);
-	return renderReplayElements(projected, {
+	const render = renderReplayElements(projected, {
 		...options,
 		skillContextEntries: entries,
 		continuityBlocks: blocks,
 	});
+	// Blocks resolved elsewhere name their own clock, or none.
+	const at = options.continuityBlocks ? options.continuityAtMs : continuityAtMs;
+	if (at !== undefined) continuityRenderTimes.set(render.messages, at);
+	return render;
 }

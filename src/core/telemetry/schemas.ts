@@ -361,6 +361,8 @@ export const CallSettledSchema = Type.Object(
 									closed,
 								),
 							),
+							/** The clock the sent history's continuity was rendered at; the verifier renders at it, not at its own. */
+							continuityAtMs: Type.Optional(count),
 							/** The fold records (evictions, recalls, checkpoints) on the path the cursor renders. */
 							records: Type.Array(ExistingId, { maxItems: 65536 }),
 							/** Native checkpoint identities the request carried, as short digests. */

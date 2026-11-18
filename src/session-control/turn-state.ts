@@ -244,6 +244,8 @@ export interface ChatTurnState {
 	turnPreparationStage: { step: TurnPreparationStep; since: number } | null;
 	/** Provider context rebuilt on session switch, consumed by the next runtime build. */
 	replayedContextMessages: AgentMessage[];
+	/** The clock the installed history's continuity was rendered at, when a ledger render installed it (F14). */
+	continuityAtMs: number | null;
 	/** The user turn id of the in-flight submit; null between turns. */
 	activeUserTurnId: string | null;
 	/**
@@ -389,7 +391,7 @@ export type TurnContextState = TurnStateView<
 	| "lastTurnId"
 	| "runtime"
 	| "streaming",
-	"replayedContextMessages"
+	"continuityAtMs" | "replayedContextMessages"
 >;
 
 /** turn-persistence: owns the ledger cursor, the filed user turn and the interrupt's closing records. */
@@ -435,6 +437,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		turnPreparationSince: 0,
 		turnPreparationStage: null,
 		replayedContextMessages: [],
+		continuityAtMs: null,
 		activeUserTurnId: null,
 		activeInterruptReason: null,
 		activeInterruptByOperator: false,

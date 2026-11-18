@@ -22,6 +22,8 @@ export type AttemptReceipt = NonNullable<CallSettled["cache"]["receipt"]>;
 /** What admission read off the ledger for one request: its cursor, owner, and the fold records it renders. */
 export interface RequestCursor extends FoldCursor {
 	owner?: FoldOwner;
+	/** The clock the request's continuity was rendered at, when a ledger render installed its history. */
+	continuityAtMs?: number;
 	records: string[];
 }
 
@@ -63,6 +65,7 @@ export function requestCursorOf(
 		...(owner.sessionId !== undefined
 			? { owner: { sessionId: owner.sessionId, ...(owner.fork ? { fork: owner.fork } : {}) } }
 			: {}),
+		...(owner.nowMs !== undefined ? { continuityAtMs: owner.nowMs } : {}),
 		records: viewRecords(entries, cursor),
 	};
 }
@@ -139,7 +142,15 @@ function renderedElements(
 ): { elements: string[]; checkpoints: string[] } {
 	const render = renderModelReplay(entries, {
 		cursor: receipt.cursor,
-		...(receipt.owner ? { continuity: receipt.owner } : {}),
+		// A note's expiry reads the clock: render at the time live rendered it, not at the time of the verify.
+		...(receipt.owner || receipt.continuityAtMs !== undefined
+			? {
+					continuity: {
+						...receipt.owner,
+						...(receipt.continuityAtMs !== undefined ? { nowMs: receipt.continuityAtMs } : {}),
+					},
+				}
+			: {}),
 	});
 	const converted = render.messages.filter((message) => LLM_ROLES.has(message.role)) as Message[];
 	const history = providerHistory(converted, receipt.route.images);
