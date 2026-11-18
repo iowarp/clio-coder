@@ -19,6 +19,7 @@ import type { CallJournalRead } from "../telemetry/call-journal.js";
 import { readCallJournal, readCallJournalSync } from "../telemetry/call-journal.js";
 import {
 	isTelemetryJournalFile,
+	telemetryJournalFiles,
 	telemetryJournalPath,
 	telemetryProcessDirectory,
 	telemetryProcessesDirectory,
@@ -490,6 +491,27 @@ export function runTelemetryDirectoryExists(stateDir: string, runId: string): bo
 export function runTelemetryWrittenMs(stateDir: string, runId: string): number | null {
 	assertSafeId(runId, "run");
 	return statStatePathSync(stateDir, telemetryJournalPath(telemetryRunDirectory(stateDir, runId)))?.mtimeMs ?? null;
+}
+
+/**
+ * The run journal's segments by name, inode, size and write time; it changes on every append and on a rotation, so a
+ * fold keyed on it is reused only while the journal is unchanged. Empty when the run has no journal.
+ */
+export function runTelemetryJournalStamp(stateDir: string, runId: string): string {
+	assertSafeId(runId, "run");
+	const directory = telemetryRunDirectory(stateDir, runId);
+	let names: string[];
+	try {
+		names = telemetryJournalFiles(listStateDirectorySync(stateDir, directory));
+	} catch {
+		return "";
+	}
+	return names
+		.map((name) => {
+			const stat = statStatePathSync(stateDir, join(directory, name));
+			return `${name}:${stat?.ino ?? 0}:${stat?.size ?? -1}:${stat?.mtimeMs ?? 0}`;
+		})
+		.join("|");
 }
 
 export function listRunTelemetrySources(

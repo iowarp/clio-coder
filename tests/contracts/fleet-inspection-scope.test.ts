@@ -146,6 +146,48 @@ test("fleet inspection defaults to this project and --all deliberately shows eve
 	}
 });
 
+test("the workers board builds cards only for live runs and the newest finished ones (P3-1)", async () => {
+	const home = await isolateClioEnv("clio-fleet-board-cards-");
+	try {
+		const ledger = openLedger();
+		const create = (task: string) =>
+			ledger.create({
+				agentId: "coder",
+				executionRole: "builder",
+				task,
+				targetId: "local",
+				wireModelId: "model",
+				runtimeId: "openai",
+				runtimeKind: "http",
+				sessionId: null,
+				cwd: process.cwd(),
+			});
+		const live = create("live");
+		ledger.update(live.id, { status: "running" });
+		const baseMs = Date.parse("2026-11-01T00:00:00.000Z");
+		const finished: string[] = [];
+		for (let index = 0; index < 30; index += 1) {
+			const run = create(`finished ${index}`);
+			ledger.update(run.id, {
+				status: "completed",
+				outcome: "succeeded",
+				endedAt: new Date(baseMs + index * 1_000).toISOString(),
+			});
+			finished.unshift(run.id);
+		}
+		await ledger.persist();
+		const source = createBoardSource(clioStateDir());
+		const board = loadBoard(source, null, fleetInspectionScope(true), baseMs + 60_000);
+		strictEqual(board.running.length, 1);
+		strictEqual(board.finished.map((card) => card.runId).join(), finished.slice(0, 24).join());
+		// Each built finished card reads its record and folds its telemetry once; rows past the cap are never read.
+		strictEqual(source.records.size, 24);
+		strictEqual(source.telemetry.size, 24);
+	} finally {
+		home.restore();
+	}
+});
+
 test("the workers board reads a finished run's record again until its seal lands (bt-11)", async () => {
 	const home = await isolateClioEnv("clio-fleet-board-seal-");
 	try {
