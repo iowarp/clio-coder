@@ -100,7 +100,6 @@ import {
 import type { TurnOrigin, TurnToolCall } from "../core/turn-origin.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
-import { physicalFit } from "../domains/context/fold/pressure.js";
 import type { DispatchContract } from "../domains/dispatch/index.js";
 import type { PinnedContextBlock } from "../domains/extensions/pinned-context.js";
 import {
@@ -1739,11 +1738,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				(operator ? estimateAgentMessageTokens(operator) : 0) +
 				estimateAgentMessageTokens({ role: "assistant", content: [{ type: "text", text: note }] }) +
 				512;
-			return physicalFit(floor, view.outputReserveTokens, view.effectiveWindow);
+			return view.effectiveWindow === null || requestFits(floor, view.outputReserveTokens, view.effectiveWindow);
 		},
 		fits: () => {
 			const view = context.refreshLiveBudget();
-			return physicalFit(view.inputTokens, view.outputReserveTokens, view.effectiveWindow);
+			return (
+				view.effectiveWindow === null || requestFits(view.inputTokens, view.outputReserveTokens, view.effectiveWindow)
+			);
 		},
 		inputTokens: () => context.refreshLiveBudget().inputTokens ?? 0,
 		reduce: async (hooks, signal) => {
