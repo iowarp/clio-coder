@@ -1,3 +1,4 @@
+import { GIT_GLOBAL_VALUE_OPTIONS } from "../../core/internal-git.js";
 import { classify } from "./action-classifier.js";
 import { gitCommandArgv } from "./git-command-normalization.js";
 import { scanShellLike, scanShellLikeDeep } from "./protected-artifacts.js";
@@ -53,18 +54,6 @@ const NEUTRAL_GLOBAL_OPTIONS = new Set([
 	"--no-replace-objects",
 	"--literal-pathspecs",
 	"--no-advice",
-]);
-/** Global options Git reads with a separate value word. */
-const GLOBAL_VALUE_OPTIONS = new Set([
-	"-C",
-	"-c",
-	"--git-dir",
-	"--work-tree",
-	"--namespace",
-	"--config-env",
-	"--super-prefix",
-	"--exec-path",
-	"--attr-source",
 ]);
 
 /** Subcommands that only read. Helper-invoking flags still lift them (see {@link helperFlag}). */
@@ -352,7 +341,7 @@ export function splitGitChdir(argv: ReadonlyArray<string>): { dirs: string[]; re
 			index += 2;
 			continue;
 		}
-		const width = GLOBAL_VALUE_OPTIONS.has(word) ? 2 : 1;
+		const width = GIT_GLOBAL_VALUE_OPTIONS.has(word) ? 2 : 1;
 		rest.push(...argv.slice(index, index + width));
 		index += width;
 	}
@@ -380,7 +369,7 @@ export function classifyGitArgv(argv: ReadonlyArray<string>): GitArgvVerdict {
 		}
 		if (word === "-C") chdir = true;
 		else if (!NEUTRAL_GLOBAL_OPTIONS.has(word)) redirect ??= word;
-		index += GLOBAL_VALUE_OPTIONS.has(word) ? 2 : 1;
+		index += GIT_GLOBAL_VALUE_OPTIONS.has(word) ? 2 : 1;
 	}
 	const subcommand = argv[index] ?? null;
 	let verdict: GitArgvVerdict;
