@@ -775,6 +775,15 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	deepStrictEqual(seal("npm test", "cd pkg && npm test 2>&1 | tail -5"), green);
 	// A read-only stdout filter is plumbing too (x3-4).
 	deepStrictEqual(seal("npm test", "npm test 2>&1 | sed -n 1,80p"), green);
+	// A log the check's output lands in is output, not a change, so its green verifies and a red behind it stands (x4-2).
+	deepStrictEqual(seal("npm test 2>&1 | tee /tmp/t.log"), green);
+	deepStrictEqual(seal("npm test > test.log 2>&1"), green);
+	deepStrictEqual(seal("!pytest", "!pytest 2>&1 | tee /tmp/pytest.log", "pytest tests/test_one.py"), [
+		["pytest"],
+		"unverified",
+		["pytest"],
+	]);
+	deepStrictEqual(seal("npm test", "npm test | tee src/a.ts"), stale);
 	// Shell setup changes no tree, so a standing red stands beside a narrower green (x3-1).
 	for (const setup of ["source .venv/bin/activate", "export CI=1"])
 		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [["npm test"], "unverified", ["npm test"]]);
@@ -785,6 +794,18 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	// A check run in another directory is not this workspace's check (x3-5).
 	deepStrictEqual(seal("cd /elsewhere && npm test"), stale);
 	deepStrictEqual(seal("cd pkg/.. && npm test"), green);
+	// A check's own directory option or test path operand can leave the workspace too; root containment decides (x4-4).
+	for (const outside of ["npm test --prefix ../other", "make test -C ../other", "pytest ../other"])
+		deepStrictEqual(seal(outside), stale, outside);
+	deepStrictEqual(seal("npm test --prefix packages/a"), green);
+	// A subshell or pushd cd ends at its `)` or popd, and `) &&` hands its status on, so a red there stands (x4-7).
+	deepStrictEqual(seal("(cd ../lib && make) && npm test"), green);
+	deepStrictEqual(seal("pushd ../lib && make && popd && npm test"), green);
+	deepStrictEqual(seal("npm test", "!(cd ../lib && make) && npm test"), [
+		[],
+		"unverified",
+		["(cd ../lib && make) && npm test"],
+	]);
 	// Its pass settles no outcome, so a red in the workspace still fails a green claim.
 	for (const outside of [{ command: "cd /elsewhere && pytest" }, { command: "pytest", cwd: "/elsewhere" }]) {
 		const recorder = createRunEffectsRecorder(process.cwd());
@@ -833,9 +854,21 @@ it("read-only inspection refuses helpers that write the tree or run another prog
 		"sed 's/a/b/w out' a.ts",
 		"awk '{system(\"sh\")}' a.ts",
 		"sort -o out a.ts",
+		// Long-option abbreviations and a delimiter inside a bracket expression (x4-3).
+		"sort --out=src/a.ts src/a.ts",
+		"sort --out src/a.ts",
+		"sort --compress-prog=sh a.ts",
+		"sed -n 's/[/]/p/w out1' a.ts",
 	])
 		strictEqual(isReadOnlyInspectionCommand(command, false), false, command);
-	for (const command of ["git status", "git diff", "git log -p", "sed -n 1,80p a.ts", "awk '{print $1}' a.ts"])
+	for (const command of [
+		"git status",
+		"git diff",
+		"git log -p",
+		"sed -n 1,80p a.ts",
+		"awk '{print $1}' a.ts",
+		"sort --reverse --key=2 a.ts",
+	])
 		strictEqual(isReadOnlyInspectionCommand(command, false), true, command);
 	// Where git config names a helper program, only log and show with both helpers switched off still count.
 	for (const command of ["git status", "git diff --no-ext-diff --no-textconv", "git log -p"])
