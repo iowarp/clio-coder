@@ -1965,7 +1965,14 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 						"workers dock hidden, still running; the key shows it again, twice quickly closes it",
 						"workers:hide",
 					);
-				} else if (result.status === "unavailable") notify("warning", result.reason, "workers:refused");
+				} else if (result.status === "unavailable") {
+					// A dock that would not open or show (a pane too narrow, a refusing host)
+					// falls back to the Fleet Runs board, the workers surface without a dock.
+					const fallback =
+						origin === "composer" && workers.visibility() !== "visible" && overlayLifecycle.getState() === "closed";
+					if (fallback) toggleDispatchBoardOverlay();
+					notify("warning", fallback ? `Fleet Runs board shown; ${result.reason}` : result.reason, "workers:refused");
+				}
 			},
 			double: async () => {
 				await workers.close();
