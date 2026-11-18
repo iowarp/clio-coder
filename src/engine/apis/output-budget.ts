@@ -205,7 +205,8 @@ export function estimateInputTokensFromContext(input: Context): number {
  * A request's input as its caller already counted and admitted it. A worker's
  * context guard sets `clioInputTokens` to the figure its fit check passed, so
  * admission sizes the request it fitted rather than recounting it another way
- * (A2c). The main loop never sets it and keeps the structural estimate.
+ * (A2c). The main loop sets it only on the request after an overflow fit, to
+ * that fit's A4 count; every other main request keeps the structural estimate.
  */
 export interface PinnedInputTokens {
 	clioInputTokens?: number;

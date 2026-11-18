@@ -11,6 +11,7 @@ import {
 } from "../../src/core/telemetry/forwarder.js";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import type { ContextFoldPayload } from "../../src/core/telemetry/live-events.js";
+import { resultContractRepairMessages } from "../../src/domains/agents/result-contract.js";
 import { parseWorkerContextPolicy } from "../../src/domains/context/worker/contract.js";
 import { createWorkerContextGuard } from "../../src/domains/context/worker/pressure.js";
 import { createWorkerObservationStore } from "../../src/domains/context/worker/recall.js";
@@ -616,6 +617,26 @@ test("drv-cf1h: a request the guard fitted after an eviction reaches the provide
 		process.chdir(previousCwd);
 		env.restore();
 	}
+});
+
+test("drv-cf3a D-B: a result-contract repair round stays anchored on the provider's last count", () => {
+	const guard = createWorkerContextGuard(refuseArchive);
+	const input = { systemPrompt: "worker", tools: [], contextWindow: 32_768, outputReserve: () => 4096 };
+	const task = user(`task ${"x".repeat(4000)}`);
+	guard({ ...input, messages: [task] });
+	// The provider counted the request well above chars/4, as qwen did in b2 request 10.
+	const answer = assistant();
+	if (answer.role === "assistant") answer.usage.input = 20_000;
+	guard({ ...input, messages: [task, answer] });
+	const answered = guard.inputTokens;
+	equal(answered, 20_000);
+	const repair = resultContractRepairMessages(
+		{ contract: { kind: "scout-report" }, reason: "required plan artifact is missing", attempt: 1, anchors: [] },
+		{ provider: "openai", api: "openai-completions", model: "fixture" },
+	).map((message) => message as unknown as AgentMessage);
+	guard({ ...input, messages: [task, answer, ...repair] });
+	// Clio wrote the repair call; its zero usage is no provider count and must not displace the answer's.
+	ok(guard.inputTokens > answered, `repair round counted at ${guard.inputTokens}, answer at ${answered}`);
 });
 
 test("an uncached worker route short of headroom ages the older read of a re-read path and never runs S0 (A2a, D1)", () => {

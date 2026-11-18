@@ -56,6 +56,7 @@ import { tokenRow } from "../../src/interactive/context-operation-view.js";
 import {
 	renderCompactionSummaryEntry,
 	renderCompactionSummaryLine,
+	renderEvictionSkipLine,
 } from "../../src/interactive/renderers/compaction-summary.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { createHostInserts } from "../../src/session-control/host-inserts.js";
@@ -2644,6 +2645,26 @@ describe("compaction cut inside a tool batch", () => {
 			turnStartIndex: 0,
 			isSplitTurn: true,
 		});
+	});
+});
+
+describe("eviction skip line", () => {
+	it("agrees in number with the protected turns", () => {
+		const window = "(protectLastTurns 2, protectLastSteps 4)";
+		for (const [turns, phrase] of [
+			[1, "the 1 turn is"],
+			[2, "all 2 turns are"],
+		] as const)
+			strictEqual(
+				renderEvictionSkipLine({
+					reason: "all-protected",
+					turns,
+					protectLastTurns: 2,
+					protectLastSteps: 4,
+					policyId: "working_set",
+				}),
+				`[context engine] working set: nothing evictable, ${phrase} inside the protected window ${window}; llm_summary runs instead`,
+			);
 	});
 });
 
