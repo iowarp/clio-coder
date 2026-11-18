@@ -115,8 +115,9 @@ test("telemetry insights credits a fork only with the outcomes it verified after
 			};
 		};
 		deepStrictEqual(await insights(), { share: { sessions: 1, known: 2 }, rows: { parent: 2, fork: 0 } });
-		const later = new Date(Date.now() + 60_000).toISOString();
-		appendFileSync(join(bucket, "fork", "current.jsonl"), ledgerRows([passedCheck("fork-fit", later)]));
+		// Position past the turn it forked at makes the pass the fork's own, even stamped by a clock behind its fork row.
+		const own = { ...passedCheck("fork-fit", "2026-11-06T00:02:00.000Z"), turnId: "fork-turn" };
+		appendFileSync(join(bucket, "fork", "current.jsonl"), ledgerRows([own]));
 		deepStrictEqual(await insights(), { share: { sessions: 2, known: 2 }, rows: { parent: 2, fork: 1 } });
 	} finally {
 		env.restore();
