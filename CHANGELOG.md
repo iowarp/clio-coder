@@ -105,6 +105,10 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A check that fails outside the receipt vocabulary, such as `npx tsc --noEmit` or `npx eslint .`, now fails the sealed receipt and the headless line as it already did on the task board, instead of the run sealing verified (x6-1).
+- The receipt and the headless line keep disclosing unclassified commands while a check that ran before them still stands, even after a later check (x6-3).
+- A change that retires every standing check also drops the unclassified-command disclosure, so the receipt and `turn_end.observed` agree (x6-6).
+- Dispatched workers read `safety.scratchRoots` when judging check logs, matching the orchestrator's record of the same run (x6-8).
 - `git --no-pager diff`, `git -P log`, `git -c color.ui=never status`, `git ls-files`, `rev-list`, `describe`, `cat-file -p`, `ls-tree`, `git grep` and `git blame` read as inspection and no longer clear a green check, while `-C`, `--paginate` and helper-naming `-c` keys stay refused (x6-2).
 - `pnpm lint`, `yarn lint`, `pnpm typecheck`, `pnpm --filter web test`, `pnpm -r test` and `yarn workspace web test` count as checks; a selected workspace keeps its selectors in its identity, and `pnpm test -u` or `pnpm --filter web lint:fix` still count as changes (x6-4).
 - A runtime loader (`--import`, `--require`, `--loader`) on `node --test` is refused in either order, and when passed to a package script, so those runs no longer credit a pass (x6-5).
