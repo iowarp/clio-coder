@@ -79,13 +79,14 @@ function silenceLimitMs(firstOutput: boolean, retry: RetrySettings, tier: Runtim
  * The sentence a long silence owes, widest form first, for the row under the footer to fit. It states the age of the
  * last evidence, whether that is unusual for the route, and the limit that will end the wait. The rail beside it keeps
  * the ways out. Null below the third watchdog tier, or while the wait is someone else's: a running tool is outside the
- * stall timer, and an admission reports what it is doing.
+ * stall timer, and an admission reports what it is doing. `history` is read only when a waiting sentence states it,
+ * because the first read on a new view folds every call the session recorded.
  */
 export function silenceNoteForms(
 	status: AgentStatus,
 	now: number,
 	retry: RetrySettings,
-	history: RouteFirstOutput | null,
+	history: RouteFirstOutput | null | (() => RouteFirstOutput | null),
 	tier?: RuntimeTier,
 ): readonly string[] | null {
 	const phase = status.phase === "stuck" ? status.resumePhase : status.phase;
@@ -119,7 +120,7 @@ export function silenceNoteForms(
 		: request?.bytesObservable
 			? `No bytes for ${silent}`
 			: `No output for ${silent}`;
-	const known = usualFirstOutput(history);
+	const known = usualFirstOutput(typeof history === "function" ? history() : history);
 	if (known === null) {
 		return [
 			`${claim}, usual time for this route unknown. ${ends}.`,

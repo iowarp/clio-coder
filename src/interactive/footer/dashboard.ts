@@ -379,7 +379,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 						status,
 						now,
 						normalizeRetrySettings(settings?.chat?.retry),
-						routeFirstOutput(deps.getTelemetry?.(), settings?.chat?.target, settings?.chat?.model),
+						() => routeFirstOutput(deps.getTelemetry?.(), settings?.chat?.target, settings?.chat?.model),
 						routeTier(deps.providers, settings?.chat?.target),
 					)
 				: null,
