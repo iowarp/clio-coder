@@ -57,7 +57,8 @@ pending operation. At this head failure semantics depend on the point:
 | `block` at `before_tool` | Refuses the pending tool call. |
 | `block` at `prompt_submit` | Refuses the submitted prompt. |
 | `block` at `after_tool` | Adds a warning annotation; the tool already ran. |
-| `block` at `turn_start`/`turn_end` | Reports the failure; it does not hard-block the turn. |
+| `block` at `turn_start` | Refuses the turn before its first model request. |
+| `block` at `turn_end` | Refused at load: the hook runs after the turn, so gate at `turn_start`. |
 
 Three consecutive timeouts disable that hook for the runtime generation; its
 failure policy still applies to later matching calls. Reload resets the generation.

@@ -6,7 +6,7 @@ import { parseExtensionCapabilities, resolveExtensionEntrypoint } from "./comman
 import { evaluateClioCompatibility } from "./compatibility.js";
 import { ManifestKeyPolicy, parseIgnorable } from "./ignorable.js";
 import { parseExtensionRuntime } from "./runtime-schema.js";
-import { parseExtensionRuntimeV2, unheldBlockPolicies } from "./runtime-schema-v2.js";
+import { parseExtensionRuntimeV2 } from "./runtime-schema-v2.js";
 import { validateSkin } from "./skin-schema.js";
 import type { ClioExtensionManifest, ExtensionCandidate, ExtensionDiagnostic } from "./types.js";
 
@@ -190,8 +190,6 @@ export function parseExtensionManifest(
 		}
 	}
 	diagnostics.push(...policy.warnings(id, manifestPath));
-	for (const message of unheldBlockPolicies(runtimeV2?.hooks ?? []))
-		diagnostics.push({ type: "warning", message: `extension ${id ?? "<unknown>"} ${message}`, path: manifestPath });
 	if (!id || !name || !version || !description || diagnostics.some((diag) => diag.type === "error")) {
 		return { diagnostics };
 	}

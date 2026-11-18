@@ -69,9 +69,15 @@ export interface TurnMiddleware {
 	/**
 	 * The awaited turn_start phase for extension runtime hooks, run after
 	 * `fireTurnStart` and before the pending reminders are taken. It awaits
-	 * nothing unless an awaited registration matches turn_start.
+	 * nothing unless an awaited registration matches turn_start. A hard
+	 * block_tool there is a closed gate refusing the turn: its reason comes
+	 * back and no other effect of the phase applies. Null lets the turn run.
 	 */
-	awaitTurnStart(agentRuntime: AgentRuntime, promptText: string, pendingSkillRequestCount?: number): Promise<void>;
+	awaitTurnStart(
+		agentRuntime: AgentRuntime,
+		promptText: string,
+		pendingSkillRequestCount?: number,
+	): Promise<string | null>;
 	fireTurnEnd(
 		agentRuntime: AgentRuntime,
 		messages: ReadonlyArray<AgentMessage>,
@@ -433,14 +439,18 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			applyTurnStartEffects(withPluginDiscoveryPass(() => runMiddlewareTurnHook(input)));
 		},
 
-		async awaitTurnStart(agentRuntime, promptText, pendingSkillRequestCount = 0): Promise<void> {
-			if (!deps.middleware?.hasAwaitedHook?.("turn_start") || !deps.middleware.runAwaitedHook) return;
+		async awaitTurnStart(agentRuntime, promptText, pendingSkillRequestCount = 0): Promise<string | null> {
+			if (!deps.middleware?.hasAwaitedHook?.("turn_start") || !deps.middleware.runAwaitedHook) return null;
 			const input = turnStartInput(agentRuntime, promptText, pendingSkillRequestCount, false);
 			try {
-				applyTurnStartEffects((await deps.middleware.runAwaitedHook(input)).effects);
+				const { effects } = await deps.middleware.runAwaitedHook(input);
+				const refusal = effects.find((effect) => effect.kind === "block_tool");
+				if (refusal !== undefined) return refusal.reason;
+				applyTurnStartEffects(effects);
 			} catch (error) {
 				reportHookFailure(input.hook, error);
 			}
+			return null;
 		},
 
 		async fireTurnEnd(agentRuntime, messages, terminalToolResult): Promise<void> {

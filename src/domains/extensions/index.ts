@@ -76,7 +76,6 @@ export {
 	type ParkedInterviewResult,
 } from "./runtime-hook-bridge.js";
 export {
-	blockPolicyHolds,
 	capabilityEnvelope,
 	envelopeDigest,
 	envelopeGrowth,

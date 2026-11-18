@@ -3,7 +3,6 @@ import { isAbsolute, join, relative as relativePath, resolve, sep } from "node:p
 import type { ModelRunInfo } from "../core/model-tier.js";
 import { type TurnOrigin, turnOriginFromMetadata } from "../core/turn-origin.js";
 import {
-	blockPolicyHolds,
 	capabilityEnvelope,
 	type ExtensionContentAccess,
 	type ExtensionEffect,
@@ -340,13 +339,15 @@ function landingFields(
 }
 
 /**
- * A gate that fails closed. Only a call not yet run can be refused, and a
- * result that ran carries the warning; a turn point has no gate to close
- * (`blockPolicyHolds`), so its runner says the turn proceeds instead.
+ * A gate that fails closed. A call or a turn not yet run is refused, and a
+ * result that ran carries the warning. The turn middleware reads a hard
+ * block_tool from the awaited turn_start phase as the turn's refusal; the
+ * manifest parser refuses `block` at turn_end, which runs after the turn.
  */
 function closedGate(point: ToolOrTurnPoint, extensionId: string, reason: string): MiddlewareEffect[] {
 	const message = `extension ${extensionId} ${point} hook ${reason}; the gate fails closed`;
-	if (point === "before_tool") return [{ kind: "block_tool", reason: message, severity: "hard-block" }];
+	if (point === "before_tool" || point === "turn_start")
+		return [{ kind: "block_tool", reason: message, severity: "hard-block" }];
 	if (point === "after_tool") return [{ kind: "annotate_tool_result", message, severity: "warn" }];
 	return [];
 }
@@ -402,10 +403,7 @@ function createRuntimeHookRunner(
 		}
 	};
 	const failed = (reason: string, policy: "pass" | "block", outcome: HookReceipt["outcome"]): RunnerOutcome => {
-		const closed = blockPolicyHolds(point)
-			? "it fails closed"
-			: `its block policy is not enforced at ${point}, so the turn proceeds`;
-		notify(policy === "block" ? `${reason}; ${closed}` : `${reason}; skipped`);
+		notify(policy === "block" ? `${reason}; it fails closed` : `${reason}; skipped`);
 		return { kind: "failed", reason, policy, outcome };
 	};
 	const evaluate = async (
@@ -571,7 +569,11 @@ export function buildExtensionRuntimeHooks(
 			runner.settle(
 				verdict,
 				startedAt,
-				[...effects.map((effect) => effect.kind), ...(pinned ? ["pin_context"] : [])],
+				[
+					// A closed turn_start gate refuses the turn, as a closed prompt gate's receipt says block_prompt.
+					...effects.map((effect) => (point === "turn_start" && effect.kind === "block_tool" ? "block_turn" : effect.kind)),
+					...(pinned ? ["pin_context"] : []),
+				],
 				input.toolName,
 				input.sessionId,
 				input.runId,

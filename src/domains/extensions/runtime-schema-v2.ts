@@ -196,26 +196,6 @@ function parseEvents(
 	return tickMs === undefined ? { events } : { events, tickMs };
 }
 
-/**
- * Whether a failed hook's `block` policy refuses anything at `point`: the
- * prompt, a call not yet run, or the result of one that ran. A turn point has
- * nothing to refuse, so the turn proceeds whatever the policy says.
- */
-export function blockPolicyHolds(point: ExtensionHookPoint): boolean {
-	return point !== "turn_start" && point !== "turn_end";
-}
-
-/** One warning per hook whose declared `block` policy the host cannot apply at its point. */
-export function unheldBlockPolicies(hooks: readonly ExtensionHookDeclaration[]): string[] {
-	return hooks.flatMap((hook, index) => {
-		const keys = (["onTimeout", "onError"] as const).filter((key) => hook[key] === "block");
-		if (keys.length === 0 || blockPolicyHolds(hook.on)) return [];
-		return [
-			`runtime.hooks[${index}] declares ${keys.join(" and ")}: block at ${hook.on}, which a failed hook cannot stop; the host reports the failure and the turn proceeds`,
-		];
-	});
-}
-
 function parseHooks(value: unknown, policy: ManifestKeyPolicy): ExtensionHookDeclaration[] {
 	return list(value, "runtime.hooks", RUNTIME_V2_LIMITS.hooks).map((item, index) => {
 		const path = `runtime.hooks[${index}]`;
@@ -233,6 +213,11 @@ function parseHooks(value: unknown, policy: ManifestKeyPolicy): ExtensionHookDec
 			onTimeout: choice(raw.onTimeout, `${path}.onTimeout`, ["pass", "block"], "pass"),
 			onError: choice(raw.onError, `${path}.onError`, ["pass", "block"], "pass"),
 		};
+		// A turn_end hook runs after the turn did, so a failed one has nothing left to refuse;
+		// the turn that follows is gated at prompt_submit and turn_start, which every continuation fires.
+		for (const key of ["onTimeout", "onError"] as const)
+			if (on === "turn_end" && hook[key] === "block")
+				fail(`${path}.${key}`, "cannot be block at turn_end, which runs after the turn; gate at turn_start");
 		if (raw.tools !== undefined) {
 			if (on !== "before_tool" && on !== "after_tool") fail(`${path}.tools`, "applies only to a tool hook");
 			const tools = list(raw.tools, `${path}.tools`, 32).map((tool, at) =>
