@@ -25,6 +25,7 @@ import {
 	typedValidationFactsFromVerifyCalls,
 	type VerifyCallOutcome,
 	type VerifyCallStart,
+	verificationWithHostVerdict,
 	verifyCallStart,
 } from "../../domains/dispatch/run-findings.js";
 import { finishRunResult } from "../../domains/dispatch/run-settlement.js";
@@ -92,9 +93,19 @@ import {
 import { formatHeadlessObservedLine, observeHeadlessRun } from "./headless-observed.js";
 import { createHeadlessJsonProjector } from "./json-stream.js";
 import { writeFrame } from "./jsonl.js";
-import type { RunJsonMainFrame, RunJsonMainSessionFrame, RunJsonSegmentUsage } from "./run-json-schema.js";
+import type {
+	RunJsonMainFrame,
+	RunJsonMainSessionFrame,
+	RunJsonSegmentUsage,
+	RunJsonVerifyResult,
+} from "./run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "./run-json-schema.js";
-import { formatHeadlessVerifyResult, type HeadlessVerifyOptions, runHeadlessVerifyChecks } from "./run-verify.js";
+import {
+	acceptanceHostVerification,
+	formatHeadlessVerifyResult,
+	type HeadlessVerifyOptions,
+	runHeadlessVerifyChecks,
+} from "./run-verify.js";
 
 export interface HeadlessSamplingOverrides {
 	temperature?: number;
@@ -828,6 +839,8 @@ async function recordHeadlessMainAgentRun(input: {
 	/** The read model's fold of the session calls the run made; null without one. */
 	calls: RunCallUsage | null;
 	costCap?: RunResultCostCap;
+	/** `run --verify` results; they seal as the run's host verdict. */
+	acceptance?: ReadonlyArray<RunJsonVerifyResult> | null;
 }): Promise<void> {
 	const snapshot = input.chat.lastRunSnapshot?.();
 	if (!snapshot) return;
@@ -877,6 +890,8 @@ async function recordHeadlessMainAgentRun(input: {
 	const toolStats = sortedToolStats(input.stats.toolStats);
 	const checkFreshness = input.stats.runEffects.checkFreshness();
 	const typedValidations = typedValidationFactsFromVerifyCalls(toolStats, input.stats.verifyCalls, checkFreshness);
+	const hostVerification = acceptanceHostVerification(input.acceptance ?? [], snapshot.cwd);
+	const verification = deriveRunVerification({ toolStats, typedValidations }, { checkFreshness });
 	const draft: RunResultDraft = {
 		runId: envelope.id,
 		cwd: snapshot.cwd,
@@ -893,7 +908,8 @@ async function recordHeadlessMainAgentRun(input: {
 		...(outcomeCode === undefined ? {} : { outcomeCode }),
 		lineage,
 		// Host checks belong to this run, independently of any worker it dispatched.
-		verification: deriveRunVerification({ toolStats, typedValidations }, { checkFreshness }),
+		verification: hostVerification === null ? verification : verificationWithHostVerdict(verification, hostVerification),
+		...(hostVerification === null ? {} : { hostVerification }),
 		routingIntent: {
 			posture: "manual",
 			maxCostUsd: null,
@@ -1034,7 +1050,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// phase instead of losing the whole run's usage. Whichever caller arrives
 	// first seals; the other awaits that same seal.
 	let sealed: Promise<void> | null = null;
-	const recordRun = (terminal: HeadlessTerminalOutcome): Promise<void> => {
+	const recordRun = (
+		terminal: HeadlessTerminalOutcome,
+		acceptance: ReadonlyArray<RunJsonVerifyResult> | null = null,
+	): Promise<void> => {
 		if (sealed !== null) return sealed;
 		const endedAt = new Date().toISOString();
 		sealed = (async () => {
@@ -1050,6 +1069,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				stats: runStats,
 				calls,
 				...(options.costCap !== undefined ? { costCap: options.costCap } : {}),
+				acceptance,
 			});
 		})().catch((error: unknown) => {
 			process.stderr.write(
@@ -1559,7 +1579,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	}
 
 	await frameChain;
-	await recordRun(terminal);
+	await recordRun(terminal, verify);
 
 	if (stderrMessage !== null) {
 		process.stderr.write(`${stderrMessage}\n`);

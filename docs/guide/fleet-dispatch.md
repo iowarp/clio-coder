@@ -1976,7 +1976,7 @@ policy all consume that same final classification.
 
 Run integrity, host verification, and evidence verification are separate axes. Integrity says
 that the run's sealed scope verifies; evidence verification
-reports whether CLIO Coder observed an applicable validation tool (or marks the
+reports whether CLIO Coder observed a check run through the `verify` tool (or marks the
 basis unknown/not applicable). A read-only Scout can therefore report `run_integrity=verified/seal` alongside
 `evidence_verification=not_applicable/read-only-agent`. Host verification is
 rendered independently as `host_verification=verified|rejected|skipped|not_implicated|not_requested`.
