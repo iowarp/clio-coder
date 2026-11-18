@@ -261,6 +261,55 @@ test("a sandbox escape runs only when the judge finds the operator named it and 
 	deepStrictEqual(named.ran, [false, false]);
 });
 
+// bt-21: a shell write to an outside path the operator named was blocked, and no approval card ever appeared.
+test("a blocked escape whose outside target the operator named goes to the approval card, never runs on its own", async (t) => {
+	const cwd = workspace("clio-escape-target-");
+	const outside = workspace("clio-escape-outside-");
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	const named = join(outside, "log.txt");
+	const session = (attends: boolean) => {
+		const judge = createSafetyJudge({
+			config: () => ({ enabled: true, target: "local", model: "m", environment: [], allow: [], deny: [] }),
+			complete: async () => ({
+				text: JSON.stringify({ verdict: "block", rule: "unsandboxed", reason: "No message asks to leave the sandbox." }),
+			}),
+			operatorMessages: () => [`Append the line \`median fixed\` to ${named} using a shell command.`],
+			session: () => "s",
+			consequences: () => [],
+		});
+		const { registry, ran } = defaultSession(
+			cwd,
+			{ sandbox: true, snapshots: false },
+			{ safetyJudge: judge, operatorAttends: () => attends },
+		);
+		const cards: Array<{ requestId: string; gateReason?: string }> = [];
+		registry.onPermissionRequired((_call, _decision, meta) => cards.push(meta));
+		return { registry, ran, cards };
+	};
+	const append = (target: string) => bash(`printf '%s\\n' 'median fixed' >> ${target}`, { unsandboxed: true });
+
+	const attended = session(true);
+	const pending = attended.registry.invoke(append(named));
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	strictEqual(attended.cards.length, 1);
+	match(attended.cards[0]?.gateReason ?? "", /would block this sandbox escape \(rule unsandboxed\).*name its target/u);
+	attended.registry.cancelParkedCall(attended.cards[0]?.requestId ?? "", "denied", { denied: true });
+	strictEqual((await pending).kind, "blocked");
+	deepStrictEqual(attended.ran, []);
+	// A path the operator never named stays the judge's block, as does a run with nobody to answer.
+	const unnamed = await attended.registry.invoke(append(join(outside, "other.txt")));
+	strictEqual(unnamed.kind, "blocked");
+	if (unnamed.kind === "blocked") match(unnamed.reason, /safety judge blocked this bash call/u);
+	const headless = session(false);
+	const refused = await headless.registry.invoke(append(named));
+	strictEqual(refused.kind, "blocked");
+	if (refused.kind === "blocked") match(refused.reason, /safety judge blocked this bash call/u);
+	deepStrictEqual([...attended.ran, ...headless.ran, ...headless.cards], []);
+	strictEqual(attended.cards.length, 1);
+});
+
 test("with no sandbox backend the default rails still ask", async () => {
 	const cwd = workspace("clio-contained-none-");
 	const session = defaultSession(cwd, { sandbox: false, snapshots: false });

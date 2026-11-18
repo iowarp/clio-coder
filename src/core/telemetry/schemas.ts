@@ -1829,6 +1829,7 @@ export const SafetyJudgedSchema = Type.Object(
 		operatorMessages: Type.Optional(count),
 		screened: Type.Optional(vocabulary(["parked"])),
 		unnamedEscape: Type.Optional(vocabulary(["parked"])),
+		namedTarget: Type.Optional(vocabulary(["parked"])),
 	},
 	closed,
 );

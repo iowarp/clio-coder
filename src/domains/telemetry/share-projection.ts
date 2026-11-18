@@ -439,7 +439,15 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		verification: { passedChecks: "name", acceptance: { check: "name", state: "keep" } },
 	},
 	"safety.judged": {
-		...keep("verdict", "latencyMs", "operatorMessages", "toolDescriptionChars", "screened", "unnamedEscape"),
+		...keep(
+			"verdict",
+			"latencyMs",
+			"operatorMessages",
+			"toolDescriptionChars",
+			"screened",
+			"unnamedEscape",
+			"namedTarget",
+		),
 		tool: "tool",
 		actionClass: "token",
 		workerRunId: "id",

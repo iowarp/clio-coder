@@ -1,4 +1,13 @@
+import { homedir } from "node:os";
+import path from "node:path";
+import { ToolNames } from "../../core/tool-names.js";
 import type { SafetyDecision } from "./contract.js";
+import { isSameOrDescendant } from "./path-policy.js";
+import {
+	extractCommandCdScopedTargets,
+	extractCommandDeleteTargets,
+	extractCommandWriteTargets,
+} from "./protected-artifacts.js";
 
 /** Rule id of the ask for a call the operator's default would contain that sets `unsandboxed: true`. */
 export const SANDBOX_ESCAPE_RULE_ID = "sandbox-escape";
@@ -23,4 +32,49 @@ export function asksToLeaveSandbox(decision: SafetyDecision): boolean {
  */
 export function operatorMentionsSandbox(messages: ReadonlyArray<string>): boolean {
 	return messages.some((text) => /sandbox|unconfined/i.test(text));
+}
+
+/**
+ * The outside-workspace paths an escaping shell call writes or deletes, when
+ * the operator's own text names every one of them; otherwise empty. A command
+ * whose targets cannot be read, or that touches nothing outside the workspace,
+ * names nothing. Naming a path is not consent to leave the sandbox, so the
+ * judge uses this only to hand such a call to the operator instead of a block.
+ */
+export function operatorNamedEscapeTargets(
+	call: { tool: string; args: Readonly<Record<string, unknown>> | undefined },
+	messages: ReadonlyArray<string>,
+	workspace: string = process.cwd(),
+	home: string = homedir(),
+): string[] {
+	if (call.tool !== ToolNames.Bash) return [];
+	const command = call.args?.command;
+	if (typeof command !== "string" || command.length === 0) return [];
+	const cwdArg = call.args?.cwd;
+	const base = path.resolve(workspace, typeof cwdArg === "string" && cwdArg.length > 0 ? cwdArg : ".");
+	const spelled = [
+		...extractCommandWriteTargets(command),
+		...extractCommandDeleteTargets(command),
+		...extractCommandCdScopedTargets(command).map((target) => target.path),
+	];
+	const outside = new Map<string, Set<string>>();
+	for (const raw of spelled) {
+		const resolved = raw === "~" || raw.startsWith("~/") ? path.join(home, raw.slice(1)) : path.resolve(base, raw);
+		if (isSameOrDescendant(resolved, workspace)) continue;
+		const spellings = outside.get(resolved) ?? new Set([resolved]);
+		if (raw.includes("/")) spellings.add(raw.replace(/\/+$/u, ""));
+		if (isSameOrDescendant(resolved, home) && resolved !== home) spellings.add(`~/${path.relative(home, resolved)}`);
+		outside.set(resolved, spellings);
+	}
+	if (outside.size === 0) return [];
+	for (const spellings of outside.values()) {
+		if (![...spellings].some((spelling) => messages.some((text) => namesPath(text, spelling)))) return [];
+	}
+	return [...outside.keys()];
+}
+
+/** True when `text` carries `spelling` as a whole path, not as a prefix or suffix of a longer one. */
+function namesPath(text: string, spelling: string): boolean {
+	const escaped = spelling.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+	return new RegExp(`(?<![\\w.~/-])${escaped}(?![\\w/-]|\\.[\\w])`, "u").test(text);
 }
