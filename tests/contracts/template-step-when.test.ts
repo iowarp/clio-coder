@@ -397,7 +397,7 @@ describe("template turnPolicy when", () => {
 			deepStrictEqual(run.turns[0]?.verdicts, ["ok", "blocked"]);
 			strictEqual(run.turns[0]?.constraints?.turnPolicy?.stepTool, STEP);
 			ok(run.turns[0]?.text.includes("This step policy applies on this route (when: small)."), run.turns[0]?.text);
-			strictEqual(run.continued[0], "tool_budget");
+			strictEqual(run.continued[0], "step");
 		} finally {
 			await run.close();
 		}
@@ -444,7 +444,7 @@ describe("template turnPolicy when", () => {
 				compliant.turns.map((turn) => turn.verdicts),
 				[["ok"], ["ok"], ["ok"]],
 			);
-			deepStrictEqual(compliant.continued, ["tool_budget", "tool_budget"]);
+			deepStrictEqual(compliant.continued, ["step", "step"]);
 			deepStrictEqual(compliant.guardEvents, []);
 			// The finish contract waits on the step turns a continuation follows and assesses the pipeline at its end (bt-12 #4).
 			ok(compliant.firstUserTurnId !== undefined);
@@ -498,7 +498,7 @@ describe("template turnPolicy when", () => {
 				run.turns.map((turn) => turn.verdicts),
 				[["ok"], ["ok"]],
 			);
-			deepStrictEqual(run.continued, ["tool_budget"]);
+			deepStrictEqual(run.continued, ["step"]);
 			deepStrictEqual(run.stepPipeline, { stepTool: STEP, template: "wtfp:advance", done: true });
 		} finally {
 			await run.close();

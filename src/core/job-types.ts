@@ -67,6 +67,7 @@ export type TurnContinuationCause =
 	| "clock"
 	| "failure"
 	| "tool_budget"
+	| "step"
 	| "loop_guard"
 	| "retries_exhausted"
 	| "compaction"

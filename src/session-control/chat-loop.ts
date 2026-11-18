@@ -2093,7 +2093,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const named = template ? `prompt template ${template}` : "its template";
 		const stepTool = state.currentTurnConstraints?.turnPolicy?.stepTool ?? "the step tool";
 		const step = {
-			cause: "tool_budget" as const,
+			cause: "step" as const,
 			reason:
 				stepRun?.carried === true
 					? `it made no ${stepTool} call, and the step pipeline of ${named} has not said it is done`

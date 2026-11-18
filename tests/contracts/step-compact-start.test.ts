@@ -319,7 +319,7 @@ describe("step turns start from a compact state on small or uncached routes", ()
 		const run = await stepDrive({ model: "step-small-model", tier: "small" });
 		try {
 			strictEqual(run.histories.length, 2, "the step stop continues into one more step turn");
-			strictEqual(run.continued[0], "tool_budget");
+			strictEqual(run.continued[0], "step");
 			ok(run.histories[0]?.length !== undefined);
 			const second = run.histories[1] ?? "";
 			ok(second.includes("Step checkpoint."), second);

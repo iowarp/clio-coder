@@ -203,6 +203,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 		clock: "the job's default timeout ended it",
 		failure: "it failed",
 		tool_budget: "it reached the per-turn tool budget",
+		step: "it ran one step of a template that runs one step per turn",
 		loop_guard: "the loop guard locked its tools",
 		retries_exhausted: "provider retries ran out",
 		compaction: "context compaction failed",
