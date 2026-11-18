@@ -1171,12 +1171,14 @@ function dispatchCardBody(
 		);
 	}
 	if (row.writeRecordDowngrade) {
+		// The provider's call id (`toolu_…`) matches nothing the TUI lists, so the card names the call by its tool and run.
 		const warning = describeWriteBoundaryAttributionDowngrade({
 			...row.writeRecordDowngrade,
+			toolCallId: null,
 			runId: row.runId,
 			stepId: row.phase?.stepId ?? null,
 		});
-		// The call id and rule are for the inspector; the fold says only that the changed-files list may be short.
+		// The rule is for the expanded card; the fold says only that the changed-files list may be short.
 		const brief = `changed-files list may be incomplete: ${sanitizeCallTargetText(row.writeRecordDowngrade.tool)} can write paths it does not name`;
 		bodyLines.push(
 			...cardWrappedValueLines(
