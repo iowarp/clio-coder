@@ -57,6 +57,9 @@ export interface ExitSummarySnapshot {
 		 * through the rule the worker card and Fleet read. The card said `2 succeeded` beside Fleet's two failures.
 		 */
 		against?: string;
+		/** Calls kept from running, from the sealed record, so the Workers row says what the collected block says. */
+		refusedCalls?: number;
+		guardedCalls?: number;
 		record: string;
 	}>;
 	permissions: { granted: number; denied: number; expired: number; blocked: number };
@@ -422,11 +425,14 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		const worker = workers.get(runId);
 		if (!worker || record === null) return;
 		receiptsRead.add(runId);
-		const { against: _prior, ...rest } = worker;
+		const { against: _prior, refusedCalls: _refused, guardedCalls: _guarded, ...rest } = worker;
 		const caveat = settledRunCaveat(record);
 		workers.set(runId, {
 			...rest,
 			...(caveat?.kind === "against" ? { against: caveat.words } : {}),
+			...((record.refusedCalls ?? 0) > 0
+				? { refusedCalls: record.refusedCalls, guardedCalls: record.guardedCalls ?? 0 }
+				: {}),
 			record: record.trust ? summarizeTrustStatus(record.trust).verdict : "unknown",
 		});
 		if (record.toolCounts) workerTools.set(runId, record.toolCounts);

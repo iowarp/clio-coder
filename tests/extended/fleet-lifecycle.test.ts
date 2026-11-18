@@ -158,19 +158,24 @@ describe("fleet lifecycle boundary", () => {
 		]);
 	});
 
-	it("explains when a node pin names a profile in execution and preview", () => {
+	it("explains when a node pin names a profile or a target id in execution and preview", () => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.fleet.profiles["worker-luna"] = {
 			target: "openai-codex",
 			model: "gpt-6-luna",
 			thinkingLevel: "off",
 		};
+		settings.targets = [{ id: "openai-codex", runtime: "openai-codex", defaultModel: "gpt-6-luna" }];
 		const deps = { getSettings: () => settings, fleet: undefined };
 		const request = { agentId: "coder", executionRole: "builder", task: "build", node: "worker-luna" } as const;
 		for (const place of [createFleetPlacementResolver(deps), createFleetPlacementPreviewResolver(deps)]) {
 			throws(
 				() => place(request),
 				/unknown fleet node 'worker-luna'; 'worker-luna' is a fleet profile.*Select the profile target\/model/u,
+			);
+			throws(
+				() => place({ ...request, node: "openai-codex" }),
+				/unknown fleet node 'openai-codex'; 'openai-codex' is a target id\..*Put 'openai-codex' in target and omit node\.$/u,
 			);
 			throws(() => place({ ...request, node: "not-configured" }), /unknown fleet node 'not-configured'$/u);
 		}
