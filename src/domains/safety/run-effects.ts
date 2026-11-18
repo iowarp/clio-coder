@@ -14,6 +14,7 @@ import {
 	detectValidationCommand,
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
+	isReadOnlyInspectionCommand,
 	observedValidationCommand,
 	toolMutationPaths,
 	type ValidationCommandScope,
@@ -147,6 +148,8 @@ interface PendingEffects {
 	mutationRevision: number;
 	verificationCommand: string | null;
 	opaque: boolean;
+	/** A bash call made only of read-only inspection ({@link isReadOnlyInspectionCommand}), so it changed no tree. */
+	inspection: boolean;
 	/** The bash command text, or a verify call's resolved argv joined by spaces; null otherwise. */
 	shellCommand: string | null;
 	/** The tool's own outcome, when the call reached it. Stays null when the engine answered instead. */
@@ -336,6 +339,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				mutationRevision,
 				verificationCommand,
 				opaque,
+				inspection: toolName === ToolNames.Bash && isReadOnlyInspectionCommand(commandOf(args) ?? ""),
 				shellCommand: toolName === ToolNames.Bash ? commandOf(args) : verifyCommandOf(toolName, args, base),
 				outcome: null,
 			});
@@ -360,7 +364,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			// A refused call never reached its tool, so it changed nothing and leaves
 			// outcomes standing. A failed call that really ran may have partly written.
 			const refused = failed && effects.outcome !== "error" && effects.outcome !== "ok";
-			if (!refused && (effects.paths.length > 0 || (effects.opaque && effects.validationCommand === null))) {
+			const opaqueMutation = effects.opaque && effects.validationCommand === null && !effects.inspection;
+			if (!refused && (effects.paths.length > 0 || opaqueMutation)) {
 				mutationRevision += 1;
 				validationOutcomes.clear();
 				validationCommands.clear();

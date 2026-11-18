@@ -1224,6 +1224,80 @@ export function extractCommandDeleteTargets(command: string): string[] {
 	return targets.filter(isInterestingWriteTarget);
 }
 
+/** Read-only inspection commands, each with the arguments that would make it write or run something else. */
+const READ_ONLY_INSPECTION_REFUSALS: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
+	["cat", []],
+	["ls", []],
+	["head", []],
+	["tail", []],
+	["wc", []],
+	["pwd", []],
+	["grep", []],
+	["rg", ["--pre"]],
+	["find", ["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"]],
+	["stat", []],
+	["file", []],
+	["which", []],
+	["echo", []],
+	["printf", []],
+]);
+
+const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
+	"status",
+	"diff",
+	"log",
+	"show",
+	"rev-parse",
+	"branch",
+]);
+
+/** `git branch` flags that only list or name branches; any other argument creates, moves or deletes one. */
+const READ_ONLY_GIT_BRANCH_FLAGS: ReadonlySet<string> = new Set([
+	"-a",
+	"--all",
+	"-r",
+	"--remotes",
+	"-l",
+	"--list",
+	"-v",
+	"-vv",
+	"--verbose",
+	"--show-current",
+	"--no-color",
+]);
+
+function readOnlyInspectionStep(argv: ReadonlyArray<string>): boolean {
+	const [executable, ...args] = argv;
+	if (executable === undefined) return false;
+	if (executable === "git") {
+		const [subcommand, ...rest] = args;
+		if (subcommand === undefined || !READ_ONLY_GIT_SUBCOMMANDS.has(subcommand)) return false;
+		if (subcommand === "branch") return rest.every((arg) => READ_ONLY_GIT_BRANCH_FLAGS.has(arg));
+		return !rest.some((arg) => arg.startsWith("--output"));
+	}
+	const refused = READ_ONLY_INSPECTION_REFUSALS.get(executable);
+	if (refused === undefined) return false;
+	return !args.some((arg) => refused.some((option) => arg === option || arg.startsWith(`${option}=`)));
+}
+
+/**
+ * True when every step of a shell command is an exact leading-command match on a small read-only inspection
+ * allowlist (`git diff`, `cat`, `grep`, ...), joined only by `;`, `&&`, `||` or `|`, with no redirect, no
+ * substitution, no inline script and no write or delete target. Run effects read such a call as no workspace
+ * mutation; anything this cannot prove stays one, so the answer fails closed.
+ */
+export function isReadOnlyInspectionCommand(command: string): boolean {
+	const tokens = scanShellLike(command);
+	if (tokens.length === 0) return false;
+	for (const token of tokens) {
+		if (token.operator ? !["&&", "||", ";", "|"].includes(token.value) : token.substitutions !== undefined) return false;
+		if (token.hiddenContent === true || token.unterminated === true) return false;
+	}
+	if (hasUnparsedShellScript(command)) return false;
+	if (extractCommandWriteTargets(command).length > 0 || extractCommandDeleteTargets(command).length > 0) return false;
+	return splitSegments(tokens).every((segment) => readOnlyInspectionStep(shellCommandArguments(segment)));
+}
+
 /**
  * Roots of the `find -delete` calls in a command whose expression filters
  * what goes. The operator's yolo judges such a root by what lies under it, so

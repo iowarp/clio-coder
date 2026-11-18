@@ -31,10 +31,10 @@ const FAILURE: EvidenceFailureFacts = {
 describe("evidence integrity boundary", () => {
 	it("reports host-observed passing validation and recorded completion when a run fails before submitting", () => {
 		const effects = createRunEffectsRecorder("/repo");
-		effects.start("diff", "bash", { command: "git diff" });
-		effects.finish("diff", false);
 		effects.start("pytest", "bash", { command: "python3 -m pytest -q" });
 		effects.finish("pytest", false);
+		effects.start("diff", "bash", { command: "git diff" });
+		effects.finish("diff", false);
 		const typedValidations = typedValidationFactsFromObservedEffects(effects.snapshot());
 		const draft = fixtureReceiptDraft(fixtureEnvelope("failed-validation-evidence"));
 		draft.exitCode = 1;
