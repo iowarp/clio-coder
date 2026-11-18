@@ -190,7 +190,7 @@ export function mutationReportLines(
 	for (const validation of value.validations) {
 		if (typeof validation !== "object" || validation === null) continue;
 		const check = validation as Record<string, unknown>;
-		const name = typeof check.name === "string" ? check.name : "validation";
+		const name = `${typeof check.name === "string" ? check.name : "validation"}${check.baseline === true ? " (baseline before the change)" : ""}`;
 		const glyph = check.passed === true ? GLYPH.ok : check.passed === false ? GLYPH.error : GLYPH.queued;
 		const evidence =
 			typeof check.evidence === "string" && check.evidence.trim().length > 0 ? `: ${check.evidence.trim()}` : "";

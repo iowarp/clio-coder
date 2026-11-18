@@ -5,6 +5,7 @@ import type { InternalHelperResultKind } from "../../src/domains/agents/result-c
 import {
 	INTERNAL_HELPER_RESULT_KINDS,
 	internalHelperResultSchema,
+	mutationReportFailures,
 	resultContractOutputBytes,
 	validateStructuredHelperResult,
 } from "../../src/domains/agents/result-contract.js";
@@ -118,6 +119,21 @@ test("typed mutation reports retain semantic grounding and their authorship and 
 	strictEqual(activity.calls, 0);
 	strictEqual(activity.mutatingSucceeded, false);
 	ok(workerNoWorkDetail({ activity, limitationRecorded: false, mutatedPathCount: 0 }));
+});
+
+// bt-17: a deliberate red baseline before the change is not a failure of the work; an unmarked failure still is.
+test("a mutation report's baseline failure does not fail quality, and an unmarked failure still does", () => {
+	const contract = { kind: "mutation-report" as const };
+	const passed = { name: "python3 -m unittest", passed: true, evidence: "OK" };
+	const red = { name: "python3 -m unittest", passed: false, evidence: "FAILED (failures=1)" };
+	const baseline = { mutatedPaths: [], validations: [{ ...red, baseline: true }, passed] };
+	const result = validateStructuredHelperResult({ ...evidence, contract, data: baseline });
+	strictEqual(result.validation.quality, "pass");
+	deepStrictEqual(result.structured?.data, baseline);
+	deepStrictEqual(mutationReportFailures(contract, JSON.stringify(baseline)), []);
+	const unmarked = { mutatedPaths: [], validations: [red, passed] };
+	strictEqual(validateStructuredHelperResult({ ...evidence, contract, data: unmarked }).validation.quality, "fail");
+	deepStrictEqual(mutationReportFailures(contract, JSON.stringify(unmarked)), ["python3 -m unittest"]);
 });
 
 test("typed Scout submission cannot ground unread lines or smuggle continuation through degraded claims", () => {

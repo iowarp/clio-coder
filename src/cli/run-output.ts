@@ -27,11 +27,13 @@ function records(value: unknown): Record<string, unknown>[] {
 
 /**
  * Failed checks as lines. `ran` selects a code-report's executed failures (true) or its checks that never started
- * (false), counting a check sealed without `ran` as not started; omitted, it selects every failure.
+ * (false), counting a check sealed without `ran` as not started; omitted, it selects every failure. A mutation report's
+ * baseline entry ran before the change, so it is never a failure here.
  */
 function failedChecks(value: unknown, ran?: boolean): string[] {
 	return records(value).flatMap((check) =>
 		check.passed === false &&
+		check.baseline !== true &&
 		typeof check.name === "string" &&
 		(ran === undefined || (ran ? check.ran === true : check.ran !== true))
 			? [`${check.name}: ${typeof check.evidence === "string" ? check.evidence : "did not pass"}`]
