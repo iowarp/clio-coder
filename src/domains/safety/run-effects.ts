@@ -14,6 +14,7 @@ import {
 	detectValidationCommand,
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
+	isReadOnlyInspectionCommand,
 	observedValidationCommand,
 	toolMutationPaths,
 	type ValidationCommandScope,
@@ -55,7 +56,11 @@ export interface RunEffects {
 	 * run's own failed tool result can.
 	 */
 	failedMutationPaths: ReadonlySet<string>;
-	/** Canonical validation commands the run ran to a clean exit. */
+	/**
+	 * Canonical validation commands the run ran to a clean exit since its last workspace mutation. A mutation clears
+	 * them like `validationOutcomes`: a pass on the pre-change tree cannot verify the final one (bt-27b). The run's
+	 * earlier checks stay visible as execution evidence in `verificationCommands` and `executedShellCommands`.
+	 */
 	validationCommands: ReadonlySet<string>;
 	/**
 	 * Outcomes observed since the run's last workspace mutation, keyed by `observedValidationCommand`; observed
@@ -143,6 +148,8 @@ interface PendingEffects {
 	mutationRevision: number;
 	verificationCommand: string | null;
 	opaque: boolean;
+	/** A bash call made only of read-only inspection ({@link isReadOnlyInspectionCommand}), so it changed no tree. */
+	inspection: boolean;
 	/** The bash command text, or a verify call's resolved argv joined by spaces; null otherwise. */
 	shellCommand: string | null;
 	/** The tool's own outcome, when the call reached it. Stays null when the engine answered instead. */
@@ -332,6 +339,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				mutationRevision,
 				verificationCommand,
 				opaque,
+				inspection: toolName === ToolNames.Bash && isReadOnlyInspectionCommand(commandOf(args) ?? ""),
 				shellCommand: toolName === ToolNames.Bash ? commandOf(args) : verifyCommandOf(toolName, args, base),
 				outcome: null,
 			});
@@ -356,9 +364,11 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			// A refused call never reached its tool, so it changed nothing and leaves
 			// outcomes standing. A failed call that really ran may have partly written.
 			const refused = failed && effects.outcome !== "error" && effects.outcome !== "ok";
-			if (!refused && (effects.paths.length > 0 || (effects.opaque && effects.validationCommand === null))) {
+			const opaqueMutation = effects.opaque && effects.validationCommand === null && !effects.inspection;
+			if (!refused && (effects.paths.length > 0 || opaqueMutation)) {
 				mutationRevision += 1;
 				validationOutcomes.clear();
+				validationCommands.clear();
 			}
 			// Only a check that ran can fail. A call the engine answered without
 			// reaching its tool settles with no outcome, so it records nothing.
@@ -389,7 +399,11 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				if (recordWasComplete) options.onWriteRecordDowngraded?.({ ...downgrade });
 			}
 			for (const target of effects.paths) mutatedPaths.add(target);
-			if (effects.validationCommand !== null && effects.checkStatusAttributable)
+			if (
+				effects.validationCommand !== null &&
+				effects.checkStatusAttributable &&
+				effects.mutationRevision === mutationRevision
+			)
 				validationCommands.add(effects.validationCommand);
 			if (effects.verificationCommand !== null) verificationCommands.add(effects.verificationCommand);
 			if (effects.tool === ToolNames.Verify) {

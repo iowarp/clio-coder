@@ -341,7 +341,7 @@ export interface ObservedRunEffects {
 	mutatedPaths: ReadonlySet<string>;
 	/** Absolute paths whose only mutation attempt came back blocked or errored. */
 	failedMutationPaths: ReadonlySet<string>;
-	/** Canonical validation commands the run ran to a clean exit. */
+	/** Canonical validation commands the run ran to a clean exit since its last observed mutation. */
 	validationCommands: ReadonlySet<string>;
 	checksAllBlocked?: boolean;
 	/** Observed failures and final passes since the last mutation, keyed by `observedValidationCommand`. */

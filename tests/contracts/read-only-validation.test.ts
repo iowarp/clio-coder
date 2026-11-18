@@ -560,6 +560,68 @@ it("an observed red judges only the tree it ran on, and respelled runs of one ch
 		],
 	] as const)
 		strictEqual(seal([["fix", "edit"], ...after], [{ ...red, name: after[0][1] }, green]).quality, "fail");
+	// A pass before the last edit never checked the final tree, alone or beside a red the edit cleared (bt-27b).
+	deepStrictEqual(
+		seal(
+			[
+				["pass", "make test"],
+				["fix", "edit"],
+			],
+			[{ ...green, name: "make test" }],
+		),
+		{ quality: "unmeasured", state: "unverified" },
+	);
+	deepStrictEqual(
+		seal(
+			[
+				["lint", "make lint"],
+				["test", "make test", true],
+				["fix", "edit"],
+			],
+			[
+				{ ...green, name: "make lint" },
+				{ ...red, name: "make test" },
+			],
+		),
+		{ quality: "unmeasured", state: "unverified" },
+	);
+	// Read-only inspection after the last check changes no tree, so it neither clears a red nor stales a pass.
+	deepStrictEqual(
+		seal(
+			[
+				["fix", "edit"],
+				["test", "make test", true],
+				["diff", "git diff"],
+			],
+			[{ ...green, name: "make test" }],
+		),
+		{ quality: "fail", state: "unverified" },
+	);
+	deepStrictEqual(
+		seal(
+			[
+				["fix", "edit"],
+				["test", "make test"],
+				["look", "git status && git diff"],
+			],
+			[{ ...green, name: "make test" }],
+		),
+		{ quality: "pass", state: "verified" },
+	);
+	// A redirect is a write, so the inspection it rides on is a mutation.
+	deepStrictEqual(
+		seal(
+			[
+				["test", "make test"],
+				["patch", "git diff > patch.txt"],
+			],
+			[{ ...green, name: "make test" }],
+		),
+		{
+			quality: "unmeasured",
+			state: "unverified",
+		},
+	);
 	// With no observed edit, a reported baseline excuses only its own observed red.
 	strictEqual(seal([["base", "pytest", true]], [{ ...red, name: "pytest" }, green]).quality, "unmeasured");
 	strictEqual(seal([["base", "pytest -q", true]], [{ ...red, name: "pytest" }, green]).quality, "fail");
