@@ -75,13 +75,6 @@ export {
 	type MarketplaceOfferDeps,
 	marketplaceOfferReminder,
 } from "./marketplace-offer.js";
-export {
-	createMemoryInterventionRegistration,
-	MEMORY_INTERVENTION_DEFAULT_MAX_TOKENS,
-	MEMORY_INTERVENTION_DEFAULT_WINDOW_STEPS,
-	MEMORY_INTERVENTION_REGISTRATION_ID,
-	type MemoryInterventionDeps,
-} from "./memory-intervention.js";
 export { announceMemoryStepEndpoint, type MemoryStepEndpointAnnouncerDeps } from "./memory-step-endpoint.js";
 export {
 	createMiddlewareRegistrationTable,

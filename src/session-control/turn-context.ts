@@ -12,7 +12,7 @@ import { telemetryHub } from "../core/telemetry/hub.js";
 import { factKnownValue } from "../core/telemetry/known.js";
 import type { CallMessageObserver } from "../core/telemetry/producer.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
-import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
+import type { MemoryInterventionRegistration } from "../domains/memory/intervention.js";
 import { compactionBudget, getCatalogModelForRuntime } from "../domains/providers/catalog.js";
 import { getLatestContextSnapshot } from "../domains/session/context-history.js";
 import {

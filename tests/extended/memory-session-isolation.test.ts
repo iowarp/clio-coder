@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
 import type { TaskMemoryEntry } from "../../src/domains/memory/task-bank.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import type { TaskMemoryModelResponse } from "../../src/domains/memory/task-memory-policy.js";
@@ -9,7 +10,6 @@ import {
 	type TaskMemoryModelRequest,
 	type TaskMemoryStepUsage,
 } from "../../src/domains/memory/task-memory-policy.js";
-import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { bindTaskMemoryLifecycle } from "../../src/entry/task-memory-lifecycle.js";
 import {

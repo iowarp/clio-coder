@@ -1,5 +1,5 @@
 import type { TelemetryHub } from "../core/telemetry/hub.js";
-import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
+import type { MemoryInterventionRegistration } from "../domains/memory/intervention.js";
 
 /** Saves the bank of a session being parked and hands it back when that session is resumed. */
 export interface TaskMemoryBankPersistence {

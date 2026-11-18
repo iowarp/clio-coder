@@ -7,6 +7,7 @@ import {
 	createBackgroundMemoryModelClient,
 	createBackgroundMemoryRouting,
 } from "../../src/domains/memory/background-route.js";
+import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
 import type { MemoryRouteText } from "../../src/domains/memory/secret-text.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import {
@@ -14,7 +15,6 @@ import {
 	type TaskMemoryModelClient,
 	type TaskMemoryStepUsage,
 } from "../../src/domains/memory/task-memory-policy.js";
-import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
 import { canonicalEndpointKey, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { createProvidersBundle } from "../../src/domains/providers/extension.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";

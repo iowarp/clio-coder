@@ -1,8 +1,8 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import type { TaskMemoryModelResponse } from "../../src/domains/memory/task-memory-policy.js";
-import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
 import { createTurnMiddleware } from "../../src/session-control/turn-middleware.js";
 import { createTurnState } from "../../src/session-control/turn-state.js";
 
