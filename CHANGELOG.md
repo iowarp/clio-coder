@@ -40,6 +40,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- A safety judge block now tells the model to ask the operator for the action, and that the judge hands a call to the operator itself only after repeated blocks (bt-21).
 - P2M-5: memory intervention and guardian are imported from the memory domain directly; the middleware compatibility shims and barrel re-exports are gone.
 - A2: one loop block no longer disables tools for the rest of the turn. The interactive turn locks after three blocks or after the same call is blocked twice, and the other calls of the model response that held the turn's first block still run.
 - B2: an extension hook's `require_tool` naming one of the package's own tools is refused unless the manifest promotes that tool, and the refusal names the `runtime.promote` entry to add. A requirement naming a builtin, an MCP tool or another package's tool behaves as before.
@@ -85,6 +86,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A gateway chain is charged only for its steps against the per-turn tool budget and the worker call cap, so an N-step chain costs N calls instead of N+1, and the budget refusal's by-tool breakdown no longer lists the wrapper (bt-14).
+- A headless run counts a gateway chain as its steps, so the observed tool-call and tool-error counts no longer add the wrapper on top (bt-14).
+- At default autonomy, a sandbox escape the safety judge would block now goes to the operator approval card when an operator message or an operator-answered ask_user round names its outside target. It never runs without the operator's approval; headless runs, contained yolo and worker asks still get the block (bt-21).
 - A yolo step pipeline continues until its step tool says pipelineDone or the continuation cap; headless `run_end` reports `stepPipeline` when it ends unfinished (bt-15).
 - The task-board nudge no longer fires on a step-template turn, the first included (bt-12 #4).
 - The finish.unverified footer names a changed file a later command ran instead of saying nothing ran (bt-12).
