@@ -5,6 +5,7 @@ import type { Fact } from "../../core/telemetry/fact.js";
 import type { PricingBasisSource } from "../../core/telemetry/pricing.js";
 import { pricedUsd, pricingBasis } from "../../core/telemetry/pricing.js";
 import type { CallSettled, CallStarted, CallUsage } from "../../core/telemetry/schemas.js";
+import { terminationPhase } from "../../core/termination-phase.js";
 import { ceilChars, normalizeTokenUsage } from "../../core/token-split.js";
 import type { EffectivePricing } from "../providers/catalog.js";
 import { telemetryCommitment } from "./objects.js";
@@ -133,6 +134,11 @@ export interface InterruptedUsageEstimate {
 	output: number;
 	/** The estimate priced at the route's declared or catalog rates, when it has any. */
 	usd?: number;
+}
+
+/** A side call cut off once shutdown began is the harness's stop, as a main call's is (bt-26 N2c, N2e). */
+export function sideCallShutdownCause(message: unknown): "shutdown" | undefined {
+	return record(message).stopReason === "aborted" && terminationPhase() !== "idle" ? "shutdown" : undefined;
 }
 
 export function callSettlementFromMessage(
