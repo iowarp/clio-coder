@@ -55,11 +55,15 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - Astra r10-6: `/export` shows an "exporting" notice at once and writes the file asynchronously; rendering a long session still holds input briefly.
 - P1-8: turn context shares one compaction budget and trigger helper, one JSON digest and one active-path read; prompt bytes, ledger records and telemetry are unchanged.
 - P1-6: tool registry refusals go through one block builder (rejection text and policy key order unchanged), and a call's success and error paths share one flow-withhold and after_tool step.
+- P2D-2: the dispatch barrel re-exports only the names callers import through it, and ten single-file helpers are no longer exported.
+- P2D-3: the dispatch event pump and the assignment event stream share one bounded drop-oldest tee.
+- P2D-6: reservation tests exercise the async release and lock-held transfer that production uses; the test-only twins and unused path helpers are gone.
 
 ### Removed
 
 - P1-1: the `CLIO_CODER_LEGACY_MASK=1` escape hatch (announced as one-release in 0.3.4) and its destructive stale-observation mask stage; working-set eviction is the only pre-summary stage, and `context.workingSet.enabled: false` turns it off.
 - P1-2: the unread `retrySafety` and `costLatency` tool metadata fields.
+- P2D-4: the unread typed-intent warn codes (`intent_absent_legacy_inference`, `intent_partial_verification_absent`) and the intent retirement constants; the compatibility classifier reports refusals only.
 
 ### Fixed
 
