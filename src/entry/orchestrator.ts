@@ -230,7 +230,6 @@ import { createGitHookDriftGuard, type GitHookDriftGuard, gitHookDriftNotice } f
 import type { AutonomyLevel, FlowRestrictionSet } from "../domains/safety/index.js";
 import {
 	EMPTY_INFORMATION_FLOW_POLICY,
-	flowTransferRefusal,
 	flowUnmediatedAgentRefusal,
 	isFlowRestrictionSet,
 	mergeFlowRestrictions,
@@ -1027,19 +1026,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const flowLedger = createFlowLedger({
 		session: session ?? null,
 		readEntries: readFlowSessionEntries,
-		hasSourceRules: () => (safety?.policy?.informationFlow?.().rules.length ?? 0) > 0,
+		policy: safety?.policy,
 	});
-	// An operator shell line's output joins the context the next request sends,
-	// so a source it names is labeled first, the way a bash tool call is. The
-	// terminal's `!` and ACP's `_clio-coder/session/shell` share this one gate.
-	const labelOperatorCommand = (command: string, cwd: string): string | null => {
-		const unavailable = safety?.policy?.informationFlow?.().refusal ?? null;
-		if (unavailable !== null) return unavailable;
-		const labels = safety?.policy?.flowRestrictionsFor?.({ tool: ToolNames.Bash, args: { command, cwd } }) ?? null;
-		if (labels === null) return null;
-		flowLedger.absorb(labels, { tool: "operator-bash" });
-		return flowLedger.refusal();
-	};
+	// The registry and tool `flow` port, shared so both read the one ledger.
+	const flowPort = { carried: flowLedger.current, refusal: flowLedger.refusal, absorb: flowLedger.absorb };
 	flowRestrictionsForDispatch = () => {
 		// A worker launched while the ledger cannot vouch would carry unlabeled
 		// context; the refusal surfaces at its first model request instead.
@@ -1053,21 +1043,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * descriptor is read at every request, so a URL changed behind the id is
 	 * judged on what it is now.
 	 */
-	const admitModelFlow = (destination: { targetId: string; runtimeId: string; wireModelId: string }): string | null => {
-		const refusal = flowLedger.refusal();
-		if (refusal !== null) return refusal;
-		const target = providers?.getTarget(destination.targetId);
-		return flowTransferRefusal(
-			safety?.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
-			flowLedger.current(),
+	const admitModelFlow = (destination: { targetId: string; runtimeId: string; wireModelId: string }): string | null =>
+		flowLedger.admitDestination(
 			resolveModelDestination({
 				targetId: destination.targetId,
 				runtimeId: destination.runtimeId,
-				url: target?.url ?? null,
+				url: providers?.getTarget(destination.targetId)?.url ?? null,
 				model: destination.wireModelId,
 			}),
 		);
-	};
 	/** The same admission for a round that sends the live agent runtime's context. */
 	const admitRuntimeFlow = (runtime: { targetId: string; runtimeId: string; wireModelId: string }): string | null =>
 		admitModelFlow({ targetId: runtime.targetId, runtimeId: runtime.runtimeId, wireModelId: runtime.wireModelId });
@@ -1955,9 +1939,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		sandboxUnixSockets: () => getCurrentSettings().safety.sandboxUnixSockets,
 		mutationEpoch: (turnId) => loopGuard.mutationEpoch(turnId),
 		flow: {
-			carried: () => flowLedger.current(),
-			refusal: () => flowLedger.refusal(),
-			absorb: (set, origin) => flowLedger.absorb(set, origin),
+			...flowPort,
 			// The gateway is registered after this registry; the lookup runs at call time.
 			mcpTransport: (tool) => toolBootstrap.mcpCapabilities?.transportOf(tool) ?? null,
 		},
@@ -2115,8 +2097,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					mux,
 					getSettings: () => getCurrentSettings(),
 					getDispatchSnapshot: () => dispatch.snapshot(),
-					agentRefusal: () =>
-						flowUnmediatedAgentRefusal(safety?.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY, null),
+					agentRefusal: () => flowUnmediatedAgentRefusal(flowLedger.policy(), null),
 					getCwd: () => process.cwd(),
 					...(music ? { musicState: () => music.state() } : {}),
 				})
@@ -2413,18 +2394,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// before a byte leaves, typed and LLM engines alike. The runner treats a
 		// throw as abstention, so this only ever returns.
 		flowCheck: (request) => {
-			const refusal = flowLedger.refusal();
-			if (refusal !== null) return { allowed: false, reason: refusal };
-			const inherited = isFlowRestrictionSet(request.inherited) ? request.inherited : null;
-			const reason = flowTransferRefusal(
-				safety.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY,
-				mergeFlowRestrictions(inherited, flowLedger.current()),
+			const reason = flowLedger.admitDestination(
 				resolveModelDestination({
 					targetId: request.destination.targetId,
 					runtimeId: request.destination.runtimeId,
 					url: request.destination.url ?? null,
 					model: request.destination.wireModelId,
 				}),
+				isFlowRestrictionSet(request.inherited) ? request.inherited : null,
 			);
 			return reason === null ? { allowed: true } : { allowed: false, reason };
 		},
@@ -2505,11 +2482,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const toolBootstrap = registerAllTools(toolRegistry, {
 		jobTool: jobHost.tool,
 		jobs: jobHost.operations,
-		flow: {
-			carried: () => flowLedger.current(),
-			refusal: () => flowLedger.refusal(),
-			absorb: (set, origin) => flowLedger.absorb(set, origin),
-		},
+		flow: flowPort,
 		...(resolvedSettings.fleet.profiles.vision?.target
 			? {
 					visionSidecar,
@@ -2540,14 +2513,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						// then judges the labels. A throw makes consult send nothing.
 						flowFor: (files) => {
 							// Neither an unusable policy nor an unusable ledger may let evidence leave.
-							const refusal = safety.policy?.informationFlow?.().refusal ?? flowLedger.refusal();
+							const refusal = flowLedger.policy().refusal ?? flowLedger.refusal();
 							if (refusal !== null) throw new Error(refusal);
-							const labels = safety.policy?.flowRestrictionsForPaths?.(files, process.cwd()) ?? null;
-							if (labels !== null) {
-								flowLedger.absorb(labels, { tool: "consult" });
-								const unlabeled = flowLedger.refusal();
-								if (unlabeled !== null) throw new Error(unlabeled);
-							}
+							const labels = flowLedger.labelPaths(files, process.cwd(), "consult");
+							const unlabeled = labels === null ? null : flowLedger.refusal();
+							if (unlabeled !== null) throw new Error(unlabeled);
 							return mergeFlowRestrictions(labels, flowLedger.current());
 						},
 					},
@@ -2671,7 +2641,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					persistCurrentThinkingLevel();
 					taskBoard.snapshot();
 				},
-				hasSourceRules: () => (safety?.policy?.informationFlow?.().rules.length ?? 0) > 0,
+				hasSourceRules: flowLedger.hasSourceRules,
 			},
 			snapshot.version === 2 ? snapshot.source.sessionId : null,
 		);
@@ -3321,10 +3291,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		toolRegistry,
 		admitFlow: admitModelFlow,
 		admitRuntimeFlow,
-		labelReferencedPaths: (paths) => {
-			const labels = safety?.policy?.flowRestrictionsForPaths?.(paths, process.cwd()) ?? null;
-			if (labels !== null) flowLedger.absorb(labels, { tool: "file-reference" });
-		},
+		labelReferencedPaths: (paths) => flowLedger.labelPaths(paths, process.cwd(), "file-reference"),
 		hasAttachedDispatch: () => dispatchBackground.size() > 0,
 		// The pre-warm buys latency for a person about to type the next turn. A
 		// headless `run` submits its one prompt immediately and an unattended boot
@@ -4047,7 +4014,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						}
 					: {}),
 				toolRegistry,
-				labelOperatorCommand,
+				labelOperatorCommand: flowLedger.labelCommand,
 				beforeShellEntryRecorded,
 				hostToolEvents: acpHostToolEvents,
 				...(session
@@ -4572,7 +4539,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
 		gitHookChanges: () => hookDrift.sessionChanges(),
 		autonomy: () => autonomyWindow.report(),
-		labelOperatorCommand,
+		labelOperatorCommand: flowLedger.labelCommand,
 		beforeShellEntryRecorded,
 		getTaskBoard: () => taskBoard.cachedSnapshot(),
 		getDecisionBoard: () => decisionBoard.snapshot(),
