@@ -8082,8 +8082,11 @@ export function createDispatchBundle(
 					// send reports its own failures as a channel failure; the worker then decides the call by its policy.
 				});
 		};
-		const checkoutBefore =
-			lifecycle.runtimeKind === "subprocess" && req.taskWorktree === undefined ? snapshotCheckout(lifecycle.cwd) : null;
+		// Every run in the current checkout keeps its measured delta on the receipt, so a tool runtime's worker whose
+		// write record is incomplete still counts its edits there and in the exit summary (bt-11). The test-removal
+		// check and slate acceptance below keep reading it for a subprocess runtime only.
+		const checkoutBaseline = req.taskWorktree === undefined ? snapshotCheckout(lifecycle.cwd) : null;
+		const checkoutBefore = lifecycle.runtimeKind === "subprocess" ? checkoutBaseline : null;
 		let worker: SpawnedWorker;
 		// A held follower's worker starts after its run row exists; this moves the row onto the real process.
 		let heldFollower = false;
@@ -9940,12 +9943,12 @@ export function createDispatchBundle(
 				const terminal = resolveRunTerminalReason(evidence, outcomeCode);
 				resolvedTerminal = terminal;
 				Object.assign(receiptDraft, runSettlementReceiptFields(terminal, callUsage?.snapshot()));
-				if (checkoutBefore !== null) {
+				if (checkoutBaseline !== null) {
 					const checkoutAfter = snapshotCheckout(lifecycle.cwd);
-					if (checkoutAfter !== null && checkoutAfter.root === checkoutBefore.root) {
+					if (checkoutAfter !== null && checkoutAfter.root === checkoutBaseline.root) {
 						receiptDraft.checkoutChanges = {
-							cwd: checkoutBefore.root,
-							changedPaths: changedCheckoutPaths(checkoutBefore, checkoutAfter),
+							cwd: checkoutBaseline.root,
+							changedPaths: changedCheckoutPaths(checkoutBaseline, checkoutAfter),
 							attribution: "observed-delta",
 						};
 					}
@@ -10005,7 +10008,7 @@ export function createDispatchBundle(
 							? worktreeReceipt?.applied === true
 								? (worktreeReceipt.changedPaths ?? []).map((path) => resolvePath(req.taskWorktree?.root ?? lifecycle.cwd, path))
 								: []
-							: checkoutChanges !== undefined
+							: checkoutChanges !== undefined && checkoutBefore !== null
 								? checkoutChanges.changedPaths.map((path) => resolvePath(checkoutChanges.cwd, path))
 								: [...observedRunEffects.mutatedPaths];
 				if (acceptedPaths.some((path) => path.endsWith(".json"))) {

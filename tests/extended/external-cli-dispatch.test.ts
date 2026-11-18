@@ -702,6 +702,53 @@ test("external edits distinguish current checkout, preserved worktree, and faile
 	}
 });
 
+test("a tool-runtime worker in the current checkout keeps the checkout delta on its receipt too (bt-11)", async () => {
+	execFileSync("git", ["init", "-q", root]);
+	execFileSync("git", [
+		"-C",
+		root,
+		"-c",
+		"user.name=F",
+		"-c",
+		"user.email=f@example.invalid",
+		"commit",
+		"--allow-empty",
+		"-qm",
+		"base",
+	]);
+	// An HTTP worker whose write record goes incomplete (it ran verify or bash) used to leave no changed path anywhere.
+	const bundle = makeDispatchBundle(dispatchStubContext(), {
+		spawnWorker: () => ({
+			pid: null,
+			heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+			abort() {},
+			promise: Promise.resolve({ exitCode: 0, signal: null }),
+			events: (async function* () {
+				writeFileSync(join(root, "changed.txt"), "edited by worker");
+				const content = JSON.stringify({ confirmedFacts: [], missingEvidence: [], nextInspections: [] });
+				yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content } };
+				yield { type: "agent_end" };
+			})(),
+		}),
+	});
+	await bundle.extension.start();
+	try {
+		const handle = await bundle.contract.dispatch({
+			agentId: "scout",
+			executionRole: "researcher",
+			task: "Inspect the fixture.",
+			cwd: root,
+			requestOrigin: "internal",
+			resultContractOverride: { kind: "provenance-report" },
+		});
+		const receipt = await handle.finalPromise;
+		equal(receipt.runtimeKind, "http");
+		deepStrictEqual(receipt.checkoutChanges?.changedPaths, ["changed.txt"]);
+	} finally {
+		await bundle.extension.stop?.();
+	}
+});
+
 test("the shipped coder recipe reaches an explicit Codex CLI target in write mode", { timeout: 20_000 }, async () => {
 	execFileSync("git", ["init", "-q", root]);
 	execFileSync("git", ["-C", root, "config", "user.name", "Fixture"]);
