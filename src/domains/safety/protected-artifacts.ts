@@ -1542,9 +1542,74 @@ function shellSteps(tokens: ReadonlyArray<ShellToken>): ShellStep[] {
 }
 
 function isCheckStep(step: ShellStep): boolean {
-	return (
-		step.index !== null && validationMatch(basenameToken(step.argv[step.index]), step.argv.slice(step.index + 1)) !== null
-	);
+	return step.index !== null && checkStepMatch(basenameToken(step.argv[step.index]), step.argv.slice(step.index + 1));
+}
+
+/**
+ * Whether a command runs a check, in the one vocabulary the run-effects recorder, the task board's replay and
+ * {@link checkCommandShape} share (x5-1): a recognized validation command, a check from the closed read-only set
+ * ({@link readOnlyCheckMatch}). A command outside it that is not read-only inspection counts as a change.
+ */
+export function runsCheckCommand(command: string): boolean {
+	return splitSegments(scanShellLike(command)).some((tokens) => {
+		const segment = shellCommandArguments(tokens);
+		const index = commandTokenIndex(segment);
+		return index !== null && checkStepMatch(basenameToken(segment[index]), segment.slice(index + 1));
+	});
+}
+
+function checkStepMatch(executable: string, args: ReadonlyArray<string>): boolean {
+	return validationMatch(executable, args) !== null || readOnlyCheckMatch(executable, args);
+}
+
+/** Runners that read the tree and write none of it, unless told to update snapshots or fix what they find. */
+const READ_ONLY_RUNNERS: ReadonlySet<string> = new Set(["vitest", "jest", "mocha", "eslint"]);
+
+/**
+ * The closed read-only half of the check vocabulary (x5-1): `tsc --noEmit`, `node --check`, `node --test`, and
+ * vitest, jest, mocha or eslint, bare or behind `npx` or `pnpm exec`. A snapshot update, `--fix`, `node -e` and a
+ * bare `tsc` that emits stay outside it, so they remain changes that retire earlier passes.
+ */
+function readOnlyCheckMatch(executable: string, args: ReadonlyArray<string>): boolean {
+	if (executable === "npx") {
+		if (args.some((arg) => arg === "-c" || arg === "--call" || arg.startsWith("--call="))) return false;
+		const inner = npxInvocation(args);
+		return inner !== null && inner.executable !== "node" && readOnlyCheckMatch(inner.executable, inner.args);
+	}
+	if (executable === "pnpm")
+		return (
+			args[0] === "exec" &&
+			typeof args[1] === "string" &&
+			!args[1].startsWith("-") &&
+			basenameToken(args[1]) !== "node" &&
+			readOnlyCheckMatch(basenameToken(args[1]), args.slice(2))
+		);
+	if (executable === "tsc") return args.some((arg) => arg.toLowerCase() === "--noemit");
+	if (executable === "node")
+		return (
+			args.some((arg) => arg === "--test" || arg === "--check" || arg === "-c") &&
+			!args.some((arg) => isRuntimeLoaderFlag(arg) || arg === "-p" || arg.startsWith("--print") || writesSnapshots(arg))
+		);
+	if (!READ_ONLY_RUNNERS.has(executable)) return false;
+	return !args.some((arg) => writesSnapshots(arg) || arg.startsWith("--fix"));
+}
+
+/** Runtime options that load or evaluate code of their own beside the check they ride on. */
+const RUNTIME_LOADER_FLAGS: ReadonlyArray<string> = [
+	"--import",
+	"--require",
+	"--loader",
+	"--experimental-loader",
+	"--eval",
+];
+
+function isRuntimeLoaderFlag(arg: string): boolean {
+	return arg === "-r" || arg === "-e" || RUNTIME_LOADER_FLAGS.some((flag) => arg === flag || arg.startsWith(`${flag}=`));
+}
+
+/** A test runner's option that rewrites its snapshots: `-u`, `--update*`, node's `--test-update-snapshots`. */
+function writesSnapshots(arg: string): boolean {
+	return arg === "-u" || arg.startsWith("--update") || arg === "--test-update-snapshots";
 }
 
 /**
@@ -1594,9 +1659,9 @@ const W_FLAG_WRITERS: ReadonlySet<string> = new Set(["prettier", "gofmt", "goimp
 
 /**
  * Whether a check command may rewrite the tree it checks (x3-3): a package script, make or just target named as a
- * writer ({@link isWriteCapableScriptName}), `--fix` or `--write`, or a formatter's `-w`. A heuristic on names and
- * flags: a writer spelled otherwise reads as a check, and a read-only script named `format` reads as a change, which
- * only clears passes the run must then earn again.
+ * writer ({@link isWriteCapableScriptName}), `--fix` or `--write`, a formatter's `-w`, or a snapshot update passed to
+ * `node --test`. A heuristic on names and flags: a writer spelled otherwise reads as a check, and a
+ * read-only script named `format` reads as a change, which only clears passes the run must then earn again.
  */
 export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
 	const index = commandTokenIndex(argv);
@@ -1605,6 +1670,7 @@ export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
 	const args = argv.slice(index + 1);
 	if (args.some((arg) => TREE_WRITING_FLAGS.has(arg) || arg.startsWith("--fix="))) return true;
 	if (W_FLAG_WRITERS.has(executable) && args.includes("-w")) return true;
+	if (executable === "node") return args.includes("--test-update-snapshots");
 	if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
 		const script = args[0] === "run" ? args[1] : args[0];
 		return script !== undefined && isWriteCapableScriptName(script);

@@ -225,6 +225,13 @@ test("observed checks follow the receipt's rules on the task board and the headl
 	deepStrictEqual(standing(bash("npm test 2>&1 | tee /tmp/t.log")), [["npm test", true, "test"]]);
 	deepStrictEqual(standing(bash("npm test"), bash("npm test | tee src/a.ts")), []);
 	deepStrictEqual(standing(bash("make test -C ../other")), []);
+	// The recorder's check vocabulary: a read-only check retires nothing, a writer retires every pass and lands none (x5-1).
+	deepStrictEqual(standing(bash("npm test"), bash("npx tsc --noEmit")), [
+		["npm test", true, "test"],
+		["npx tsc --noEmit", true, undefined],
+	]);
+	for (const change of [`node -e "fs.writeFileSync('src/a.ts', '')"`, "tsc", "npx jest -u"])
+		deepStrictEqual(standing(bash("npm test"), bash(change)), [], change);
 	const env = await isolateClioEnv("headless-observed-");
 	try {
 		const text = await headlessRun("text", [

@@ -24,6 +24,7 @@ import {
 	extractCommandWriteTargets,
 	isReadOnlyInspectionCommand,
 	observedValidationCommand,
+	runsCheckCommand,
 	toolMutationPaths,
 	type ValidationCommandScope,
 } from "./protected-artifacts.js";
@@ -177,6 +178,8 @@ interface PendingEffects {
 	toolCallId: string;
 	reading: CallReading;
 	validationCommand: string | null;
+	/** Whether the call runs a check ({@link callRunsCheck}), so it is no change unless its shape says so. */
+	runsCheck: boolean;
 	validationName: string | null;
 	/** False when a bash call's exit status is only its last command's, so it settles nothing about the check. */
 	checkStatusAttributable: boolean;
@@ -262,10 +265,11 @@ export function settleCheckCall(
 	// Only a check that ran can fail. A call the engine answered without
 	// reaching its tool settles with no outcome, so it records nothing.
 	// `pytest | head` exits 0 only when pytest did, but its red may be head's SIGPIPE (x3-2). A pass in another
-	// directory judged another tree, so it settles nothing here and a standing red stays (x3-5).
+	// directory judged another tree, so it settles nothing here and a standing red stays (x3-5). A change that runs no
+	// check (`node -e`, a `tsc` that emits, `npx jest -u`) lands no pass of its own either (x5-1).
 	const settled = failed
 		? outcome === "error" && reading.shell?.failureAttributable !== false
-		: outcome !== "blocked" && fresh && reading.shell?.outsideCwd !== true;
+		: outcome !== "blocked" && fresh && (runsCheck || !mutation) && reading.shell?.outsideCwd !== true;
 	return { mutation, checkedAfterOwnMutation, fresh, settled };
 }
 
@@ -426,6 +430,18 @@ export function validationCommandOf(
 }
 
 /**
+ * Whether a call runs a check, asked by the recorder and the task board alike so both read one vocabulary (x5-1): a
+ * verify call, a typed validation tool, or a bash command {@link runsCheckCommand} accepts. A check changes no tree
+ * unless its own shape says so; an opaque call that runs none is a change.
+ */
+export function callRunsCheck(toolName: string, args: Record<string, unknown> | undefined): boolean {
+	if (toolName === ToolNames.Verify) return true;
+	if (toolName !== ToolNames.Bash) return typedValidationSummary(toolName, { args: args ?? {} }) !== null;
+	const command = commandOf(args);
+	return command !== null && runsCheckCommand(command);
+}
+
+/**
  * The command a receipt names for a validation call. The canonical identity reads a script-family verify id such as
  * `test` as `npm run test`, but verify runs the project catalog's or the toolchain's check of that id first, so where
  * the workspace resolves it to anything but a package script the receipt names the argv that really ran. Grounding a
@@ -579,6 +595,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				toolCallId,
 				reading,
 				validationCommand,
+				runsCheck: callRunsCheck(toolName, args),
 				validationName: command !== null && validationCommand !== null ? observedCheckName(command, base, cwd) : null,
 				checkStatusAttributable: shell?.statusAttributable ?? true,
 				mutationRevision,
@@ -618,7 +635,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			const { reading } = effects;
 			const { mutation, checkedAfterOwnMutation, fresh, settled } = settleCheckCall(
 				reading,
-				effects.tool === ToolNames.Verify || effects.validationCommand !== null,
+				effects.runsCheck,
 				failed,
 				effects.outcome,
 				effects.mutationRevision === mutationRevision,

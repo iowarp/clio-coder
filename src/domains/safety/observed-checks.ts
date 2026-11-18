@@ -4,6 +4,7 @@ import type { ObservedCheck } from "../session/task-board.js";
 import { capabilityEntries, dispatchRunRecordEvidence, validationCheckId } from "./finish-contract.js";
 import {
 	type CallReading,
+	callRunsCheck,
 	checkOutputReader,
 	gitRunsConfiguredHelpers,
 	observedCheckName,
@@ -72,7 +73,7 @@ function trackCall(
 		name,
 		...(check ? { check } : {}),
 		reading,
-		runsCheck: tool === "verify" || canonical !== null,
+		runsCheck: callRunsCheck(tool, args),
 		statusAttributable: reading.shell?.statusAttributable ?? true,
 		revision,
 		dispatch: tool === "dispatch",
