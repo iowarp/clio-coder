@@ -254,7 +254,8 @@ export interface ChatTurnState {
 	activeInterruptReason: string | null;
 	/**
 	 * Whether the operator asked for the interrupt, as opposed to the loop
-	 * guard. Read only while `activeInterruptReason` is set; cancel writes both.
+	 * guard. Read only while `activeInterruptReason` is set; cancel writes both
+	 * and `clearActiveInterrupt` clears both.
 	 */
 	activeInterruptByOperator: boolean;
 	/** Whether steering triage read a queued message as a stop and interrupted to deliver it (bt-41). Written with the reason. */
@@ -469,4 +470,17 @@ export function takeInterruptedCall(state: TurnStateView<never, "interruptedCall
 	const interrupted = state.interruptedCall;
 	state.interruptedCall = null;
 	return interrupted;
+}
+
+/** Clear an interrupt with the actor flags written alongside it, so a later stop never inherits an earlier actor (x7-3). */
+export function clearActiveInterrupt(
+	state: TurnStateView<
+		never,
+		"activeInterruptReason" | "activeInterruptByOperator" | "activeInterruptByTriage" | "activeInterruptByAutonomy"
+	>,
+): void {
+	state.activeInterruptReason = null;
+	state.activeInterruptByOperator = false;
+	state.activeInterruptByTriage = false;
+	state.activeInterruptByAutonomy = false;
 }
