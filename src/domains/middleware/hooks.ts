@@ -383,7 +383,8 @@ export function loadUserHooks(
 
 // --- receipts --------------------------------------------------------------
 
-export type UserHookOutcome = "emitted" | "command-ok" | "command-failed" | "command-timeout" | "skipped";
+/** `skipped` is the trust gate holding a hook back; `failed` is a hook that threw while it ran. */
+export type UserHookOutcome = "emitted" | "command-ok" | "command-failed" | "command-timeout" | "skipped" | "failed";
 
 /** Bounded extension attribution carried on every receipt of an extension hook. */
 export interface HookReceiptExtension {
@@ -414,6 +415,8 @@ export interface HookReceipt {
 	outcome: UserHookOutcome | "runtime-ok" | "runtime-failed" | "runtime-timeout";
 	effectKinds?: string[];
 	durationMs?: number;
+	/** The command hook's own wall-clock limit, so a receipt shows how close a run came to it. */
+	timeoutMs?: number;
 	exitCode?: number;
 	outputChars?: number;
 	toolName?: string;
@@ -457,8 +460,9 @@ function commandEffect(hook: NormalizedCommandHook, output: string): MiddlewareE
 /**
  * Turn one normalized hook into a coded registration that plugs into the
  * existing ordered evaluation path. The registration filters by hook event and
- * tool names exactly like every other registration, emits a receipt on each
- * execution, and never throws into a turn.
+ * tool names exactly like every other registration and emits a receipt on each
+ * execution. A throw is receipted as `failed` and rethrown for the middleware
+ * runtime to isolate, which reports its message and lets the turn continue.
  */
 export function userHookToRegistration(
 	hook: NormalizedUserHook,
@@ -503,13 +507,19 @@ export function userHookToRegistration(
 					return [];
 				}
 				return evaluateHook(hook, deps, baseReceipt(input));
-			} catch {
-				// A hook must never throw into a turn; report a skipped receipt.
-				deps.recordReceipt({ ...baseReceipt(input), outcome: "skipped" });
-				return [];
+			} catch (err) {
+				try {
+					deps.recordReceipt({ ...baseReceipt(input), outcome: "failed" });
+				} catch {
+					// The receipt sink may be what threw; the runtime still reports the error.
+				}
+				// The middleware runtime isolates the throw and reports its message as hook_failed, so the turn continues.
+				throw err;
 			}
 		},
 	};
+	// A command's first run is its costly one (a cold spawn), not in-process warmup.
+	if (hook.spec.kind === "command") registration.spawnsProcess = true;
 	if (hook.tools !== undefined) registration.toolNames = [...hook.tools];
 	return registration;
 }
@@ -540,18 +550,33 @@ function evaluateHook(
 		deps.recordReceipt({ ...base, outcome: "emitted", effectKinds: [hook.spec.effect.kind] });
 		return [hook.spec.effect];
 	}
+	const startedAt = performance.now();
 	const result = deps.runCommand(hook.spec.argv, {
 		timeoutMs: hook.spec.timeoutMs,
 		...(hook.spec.cwd !== undefined ? { cwd: hook.spec.cwd } : {}),
 	});
+	// The run blocks the event loop, and a before_tool or after_tool run is billed to the tool's own duration.
+	const timing = { durationMs: Math.round(performance.now() - startedAt), timeoutMs: hook.spec.timeoutMs };
 	const output = (result.stdout || result.stderr || "").trim();
 	if (result.timedOut) {
-		deps.recordReceipt({ ...base, outcome: "command-timeout", exitCode: result.code ?? -1, outputChars: output.length });
+		deps.recordReceipt({
+			...base,
+			outcome: "command-timeout",
+			exitCode: result.code ?? -1,
+			outputChars: output.length,
+			...timing,
+		});
 		return [];
 	}
 	const outcome: UserHookOutcome = result.code === 0 ? "command-ok" : "command-failed";
-	deps.recordReceipt({ ...base, outcome, exitCode: result.code ?? -1, outputChars: output.length });
-	if (output.length === 0) return [];
-	const effect = commandEffect(hook.spec, output);
-	return [effect];
+	const effect = output.length === 0 ? undefined : commandEffect(hook.spec, output);
+	deps.recordReceipt({
+		...base,
+		outcome,
+		exitCode: result.code ?? -1,
+		outputChars: output.length,
+		...timing,
+		...(effect !== undefined ? { effectKinds: [effect.kind] } : {}),
+	});
+	return effect !== undefined ? [effect] : [];
 }

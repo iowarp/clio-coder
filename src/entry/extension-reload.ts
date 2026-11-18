@@ -180,6 +180,7 @@ function recordHookRan(receipt: HookReceipt, sessionId: string | undefined): voi
 				outcome: receipt.outcome,
 				...(receipt.effectKinds !== undefined ? { effectKinds: receipt.effectKinds.slice(0, 32) } : {}),
 				...(receipt.durationMs !== undefined ? { durationMs: Math.max(0, receipt.durationMs) } : {}),
+				...(receipt.timeoutMs !== undefined ? { timeoutMs: receipt.timeoutMs } : {}),
 				...(receipt.exitCode !== undefined ? { exitCode: receipt.exitCode } : {}),
 				...(receipt.outputChars !== undefined ? { outputChars: receipt.outputChars } : {}),
 				...(receipt.toolName !== undefined ? { tool: receipt.toolName } : {}),
