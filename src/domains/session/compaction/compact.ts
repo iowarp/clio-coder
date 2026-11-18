@@ -1403,9 +1403,11 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	// upstream #9512); summaryOutputBudget sizes it per route.
 	const { maxTokens, summaryRoom } = summaryOutputBudget(input.model, reserveTokens);
 	let memoryOffer: MemoryCompactionOffer | null = null;
-	// Recorded only once the request is actually sent, so a request skipped as a
-	// repeat leaves no offer-used event behind.
+	// Recorded only once a portable request carrying the offer is sent, so a
+	// request skipped as a repeat or replaced by a cheaper live prefix leaves no
+	// offer-used event behind.
 	let commitMemoryOffer: (() => void) | undefined;
+	let declineMemoryOffer: ((reason: string) => void) | undefined;
 	// A summary request sees whole tool results when they fit the summarizer's
 	// window beside its output room, else the largest per-result cap that fits,
 	// never below TOOL_RESULT_MAX_CHARS. The fixed 2000-char cap kept only a long
@@ -1478,6 +1480,9 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		if (use.substitutedInputTokens >= use.originalInputTokens)
 			return declined("no-gain", { proposed: use.substitutedInputTokens, raw: use.originalInputTokens });
 		memoryOffer = offer;
+		declineMemoryOffer = (reason) => {
+			declined(reason, { proposed: use.substitutedInputTokens, raw: use.originalInputTokens });
+		};
 		commitMemoryOffer = () => {
 			offer.onUse?.(use);
 			if (observationTracing())
@@ -1552,12 +1557,11 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		)
 		.digest("hex");
 	if (input.skipSummaryDigest === summaryDigest) return { ...emptyResult("repeat-no-gain"), summaryDigest };
-	commitMemoryOffer?.();
 	const summaryParts: string[] = [];
 	let usage: CompactionUsage | undefined;
 	// T4: on the live main route the summary can be asked inside the cached request prefix, as one call that also
-	// covers a split turn. Memory's substitute is its own content choice and stays portable.
-	const live = memoryOffer === null ? await chooseLivePrefix() : undefined;
+	// covers a split turn. It is priced against the portable texts with memory's substitute already in them.
+	const live = await chooseLivePrefix();
 	let liveCovered = false;
 	if (live) {
 		try {
@@ -1576,6 +1580,10 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 				});
 		}
 	}
+	if (liveCovered) {
+		declineMemoryOffer?.("live-prefix-cheaper");
+		memoryOffer = null;
+	} else commitMemoryOffer?.();
 	if (!liveCovered && historyText !== undefined) {
 		const historySummary = await runSummaryStream(input, historyText, systemPrompt, maxTokens);
 		usage = addCompactionUsage(usage, historySummary.usage);
