@@ -6,8 +6,11 @@ import { afterEach, beforeEach, it } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { withStateFileLock } from "../../src/core/state-file-lock.js";
+import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
-import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
+import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
+import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { readSettledRun, readVerifiedRun } from "../../src/domains/telemetry/index.js";
 import { verifyRunRecordReport } from "../../src/interactive/view/artifacts.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -185,6 +188,116 @@ it("still marks an unfinished worker stale and terminates it when its heartbeat 
 		strictEqual(bundle.contract.getRun(run.runId)?.status, "dead");
 	} finally {
 		controlled.finish();
+		await bundle.extension.stop?.();
+	}
+});
+
+it("persists a live worker's spend to runs.json at most once per ten seconds (P3-2)", async (t) => {
+	t.mock.timers.enable({ apis: ["setInterval"] });
+	const stateDir = process.env.CLIO_CODER_STATE_DIR;
+	ok(stateDir);
+	const queue: Array<"call" | "end"> = [];
+	let wake: (() => void) | null = null;
+	const push = (item: "call" | "end") => {
+		queue.push(item);
+		wake?.();
+	};
+	let monotonic = 0;
+	const bundle = makeDispatchBundle(dispatchStubContext(), {
+		spawnWorker: (spec: WorkerSpec): SpawnedWorker => {
+			let settle!: (result: SpawnedWorkerResult) => void;
+			const promise = new Promise<SpawnedWorkerResult>((resolve) => {
+				settle = resolve;
+			});
+			return {
+				pid: null,
+				promise,
+				heartbeatAt: { current: Date.now(), monotonic: 0 },
+				abort: () => push("end"),
+				events: (async function* () {
+					for (let call = 0; ; call += 1) {
+						while (queue.length === 0) await new Promise<void>((resolve) => (wake = resolve));
+						if (queue.shift() === "end") break;
+						const context = spec.telemetryContext;
+						ok(context);
+						const callId = newCallId();
+						const attemptId = newAttemptId();
+						const message = {
+							role: "assistant",
+							stopReason: "toolUse",
+							content: [],
+							usage: { input: 1000, output: 100, totalTokens: 1100, cost: { total: 0.01 } },
+						};
+						const data = {
+							...{ callId, attemptId, attempt: 0, roundKind: "normal" as const, toolChoice: "auto" as const },
+							target: {
+								...{ targetId: "fixture", runtimeId: "fixture", api: "fixture", requestedModel: "fixture" },
+								reportedModel: { kind: "unknown" as const, reason: "not-observed" as const },
+							},
+							stages: { settle: 1 },
+							...callSettlementFromMessage(message, "target-rates"),
+						};
+						yield {
+							type: "clio_coder_telemetry",
+							record: {
+								...makeTelemetryRecord(
+									"call.settled",
+									data,
+									{ ...context, callId, attemptId },
+									{
+										t: new Date().toISOString(),
+										mono: call,
+									},
+								),
+								origin: { host: "local-worker", pid: 42, birthToken: "fixture", monoEpochWallMs: 0 },
+							},
+						};
+					}
+					const content = JSON.stringify({ confirmedFacts: [], missingEvidence: [], nextInspections: [] });
+					yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content } };
+					settle({ exitCode: 0, signal: null });
+				})(),
+			};
+		},
+		heartbeatIntervalMs: 10,
+		heartbeatSpec: { windowMs: 3_600_000, graceMs: 3_600_000 },
+		monotonicNow: () => monotonic,
+	});
+	await bundle.extension.start();
+	try {
+		const run = await bundle.contract.dispatch(request);
+		const spendIn = (rows: ReadonlyArray<{ id: string; spend: unknown }>) =>
+			JSON.stringify(rows.find((row) => row.id === run.runId)?.spend ?? null);
+		const onDisk = () => spendIn(JSON.parse(readFileSync(join(stateDir, "runs.json"), "utf8")));
+		const inMemory = () => spendIn(bundle.contract.listRuns());
+		const meterMoves = async (from: string) => {
+			await waitFor(() => {
+				t.mock.timers.tick(10);
+				return inMemory() !== from;
+			});
+		};
+		await waitFor(() => onDisk() !== "null");
+		const unspent = inMemory();
+		push("call");
+		await meterMoves(unspent);
+		await waitFor(() => onDisk() === inMemory());
+		const first = onDisk();
+		monotonic = 9_000;
+		push("call");
+		await meterMoves(first);
+		// Ticks inside the interval, long enough for any write still in flight to finish and a new one to land.
+		for (let tick = 0; tick < 20; tick += 1) {
+			t.mock.timers.tick(10);
+			await sleep(10);
+		}
+		strictEqual(onDisk(), first, "a second spend change inside the interval stays in memory");
+		monotonic = 10_000;
+		t.mock.timers.tick(10);
+		await waitFor(() => onDisk() === inMemory());
+		push("end");
+		strictEqual((await run.finalPromise).outcome, "succeeded");
+	} finally {
+		push("end");
 		await bundle.extension.stop?.();
 	}
 });

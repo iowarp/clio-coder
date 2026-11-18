@@ -1,6 +1,7 @@
 import type { OutputStyle } from "../core/defaults.js";
 import { factKnownValue } from "../core/telemetry/known.js";
-import { loadRunTelemetrySource } from "../domains/session/telemetry-source.js";
+import { loadRunTelemetrySource, runTelemetryJournalStamp } from "../domains/session/telemetry-source.js";
+import { sizeCallJournalCache } from "../domains/telemetry/call-journal.js";
 import { runTelemetry } from "../domains/telemetry/read-model.js";
 /**
  * The workers dashboard's model: which workers the board shows and what each
@@ -568,10 +569,19 @@ export interface BoardSource {
 	 */
 	unsealed: Map<string, number>;
 	ledger: { mtimeMs: number; size: number; runs: ReadonlyArray<RunEnvelope> } | null;
+	/** A finished run's telemetry facts, kept while its journal's stamp is unchanged, so a sealed run folds once. */
+	telemetry: Map<string, { stamp: string; facts: CardTelemetry }>;
 }
 
 export function createBoardSource(stateDir: string = clioStateDir()): BoardSource {
-	return { stateDir, folds: createRunFoldCache(stateDir), records: new Map(), unsealed: new Map(), ledger: null };
+	return {
+		stateDir,
+		folds: createRunFoldCache(stateDir),
+		records: new Map(),
+		unsealed: new Map(),
+		ledger: null,
+		telemetry: new Map(),
+	};
 }
 
 /** The ledger rows, re-read only when `runs.json` changed. A torn or failed read keeps the last good copy. */
@@ -626,6 +636,37 @@ function finishedRecord(source: BoardSource, run: RunEnvelope, nowMs: number): R
 	return view;
 }
 
+interface CardTelemetry {
+	toolCalls: number;
+	elapsed: string;
+	toolCallsDisplay: string;
+	tokens: string | undefined;
+	cost: string | null;
+}
+
+/**
+ * A run's telemetry as its card shows it. A finished run's clock stops at the ledger's end, so its facts depend on
+ * its journal alone and are folded again only when the journal's stamp changes; a live run's clock moves every poll.
+ */
+function cardTelemetry(source: BoardSource, run: RunEnvelope, nowMs: number): CardTelemetry {
+	const endedAtMs = run.endedAt === null ? Number.NaN : Date.parse(run.endedAt);
+	const stamp = Number.isFinite(endedAtMs) ? runTelemetryJournalStamp(source.stateDir, run.id) : null;
+	const kept = source.telemetry.get(run.id);
+	if (stamp !== null && kept?.stamp === stamp) return kept.facts;
+	const telemetry = runTelemetry(run.id, loadRunTelemetrySource(source.stateDir, run.id), {
+		now: new Date(stamp !== null ? endedAtMs : nowMs),
+	});
+	const facts: CardTelemetry = {
+		toolCalls: factKnownValue(telemetry.activity.toolCalls.fact),
+		elapsed: telemetry.activity.elapsed.display,
+		toolCallsDisplay: telemetry.activity.toolCalls.display,
+		tokens: telemetry.row.tokens.display,
+		cost: telemetry.row.usd.display,
+	};
+	if (stamp !== null) source.telemetry.set(run.id, { stamp, facts });
+	return facts;
+}
+
 function buildCard(source: BoardSource, run: RunEnvelope, nowMs: number): WorkerCard {
 	const fold = source.folds.fold(run.id);
 	const state = cardState(run);
@@ -634,9 +675,9 @@ function buildCard(source: BoardSource, run: RunEnvelope, nowMs: number): Worker
 	const startedAtMs = Date.parse(run.startedAt);
 	const endedAtMs = run.endedAt === null ? null : Date.parse(run.endedAt);
 	const toolCap = toolCapOf(run);
-	const telemetry = runTelemetry(run.id, loadRunTelemetrySource(source.stateDir, run.id), { now: new Date(nowMs) });
-	const tokens = telemetry.row.tokens.display;
-	const cost = telemetry.row.usd.display;
+	const telemetry = cardTelemetry(source, run, nowMs);
+	const tokens = telemetry.tokens;
+	const cost = telemetry.cost;
 	const lastText = lastProse(fold);
 	const rootRunId = run.lineage?.rootRunId;
 	return {
@@ -648,9 +689,9 @@ function buildCard(source: BoardSource, run: RunEnvelope, nowMs: number): Worker
 		endedAtMs: endedAtMs !== null && Number.isFinite(endedAtMs) ? endedAtMs : null,
 		target: run.targetId,
 		model: run.wireModelId,
-		toolCalls: factKnownValue(telemetry.activity.toolCalls.fact),
-		elapsed: telemetry.activity.elapsed.display,
-		toolCallsDisplay: telemetry.activity.toolCalls.display,
+		toolCalls: telemetry.toolCalls,
+		elapsed: telemetry.elapsed,
+		toolCallsDisplay: telemetry.toolCallsDisplay,
 		...(toolCap !== undefined ? { toolCap } : {}),
 		...(tokens !== undefined ? { tokens } : {}),
 		...(cost !== null ? { cost } : {}),
@@ -670,6 +711,14 @@ export interface BoardModel {
 	finished: WorkerCard[];
 	/** True when the scope came from a session id rather than only the boot instant. */
 	scopedToSession: boolean;
+}
+
+/** Where a finished run sorts on the board: its end, else its start, as its card reads them. */
+function finishedOrderMs(run: RunEnvelope, nowMs: number): number {
+	const endedAtMs = run.endedAt === null ? Number.NaN : Date.parse(run.endedAt);
+	if (Number.isFinite(endedAtMs)) return endedAtMs;
+	const startedAtMs = Date.parse(run.startedAt);
+	return Number.isFinite(startedAtMs) ? startedAtMs : nowMs;
 }
 
 /**
@@ -694,13 +743,19 @@ export function loadBoard(
 		if (sinceMs !== null) return run.sessionId === null || sessionId === null ? started >= sinceMs : false;
 		return sessionId === null;
 	});
-	const cards = mine.map((run) => buildCard(source, run, nowMs));
-	const running = cards.filter((card) => isLive(card.state)).sort((a, b) => b.startedAtMs - a.startedAtMs);
-	const finished = cards
-		.filter((card) => !isLive(card.state))
-		.sort((a, b) => (b.endedAtMs ?? b.startedAtMs) - (a.endedAtMs ?? a.startedAtMs))
+	// Rows are picked before any card is built: the ledger keeps up to a thousand, and each card reads a journal.
+	const live = mine.filter((run) => isLive(cardState(run)));
+	const shown = mine
+		.filter((run) => !isLive(cardState(run)))
+		.sort((a, b) => finishedOrderMs(b, nowMs) - finishedOrderMs(a, nowMs))
 		.slice(0, FINISHED_CARD_LIMIT);
-	source.folds.retain(new Set([...running, ...finished].map((card) => card.runId)));
+	sizeCallJournalCache(live.length + shown.length);
+	const running = live.map((run) => buildCard(source, run, nowMs)).sort((a, b) => b.startedAtMs - a.startedAtMs);
+	const finished = shown.map((run) => buildCard(source, run, nowMs));
+	// A run that leaves the board but stays in the ledger can come back; its fold resumes rather than restarts.
+	const ledgerIds = new Set(runs.map((run) => run.id));
+	source.folds.retain(ledgerIds);
+	for (const runId of source.telemetry.keys()) if (!ledgerIds.has(runId)) source.telemetry.delete(runId);
 	return { running, finished, scopedToSession: sessionId !== null };
 }
 

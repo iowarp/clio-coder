@@ -929,7 +929,16 @@ interface CachedSegment {
 const CACHED_TAIL_BYTES = 64;
 // Directories whose folds this process keeps; each holds the records a cold read would return anyway.
 const CACHED_DIRECTORIES_MAX = 16;
+let cachedDirectoriesMax = CACHED_DIRECTORIES_MAX;
 const journalCache = new Map<string, Map<string, CachedSegment>>();
+
+/**
+ * Keep at least `directories` folds, for a reader that cycles through more journals than the default holds: past the
+ * cap every read misses and folds its journal from the start again.
+ */
+export function sizeCallJournalCache(directories: number): void {
+	cachedDirectoriesMax = Math.max(CACHED_DIRECTORIES_MAX, Math.floor(directories));
+}
 
 function readCachedSegment(path: string, files: Map<string, CachedSegment>, seen: Map<string, CachedSegment>) {
 	let entry: CachedSegment | undefined;
@@ -994,7 +1003,7 @@ export function readCallJournalSync(directory: string): CallJournalRead {
 				journalCache.delete(directory);
 				journalCache.set(directory, seen);
 				for (const oldest of journalCache.keys()) {
-					if (journalCache.size <= CACHED_DIRECTORIES_MAX) break;
+					if (journalCache.size <= cachedDirectoriesMax) break;
 					journalCache.delete(oldest);
 				}
 				return result;

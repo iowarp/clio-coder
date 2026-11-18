@@ -850,6 +850,12 @@ export interface DispatchBundleOptions {
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
+/**
+ * The least time between two persists a live worker's spend alone asks for. Each one rewrites the whole ledger, so a
+ * streaming worker paid that every heartbeat; lifecycle changes and settlement still persist at once, and budget
+ * gates read the in-memory meters, so only another process's view of live spend lags.
+ */
+const LIVE_USAGE_PERSIST_INTERVAL_MS = 10_000;
 const DEFAULT_RESILIENCE_COOLDOWN_MS = 15_000;
 /** The grant broker expires this long before the worker's own escalation timer. */
 const GRANT_DEADLINE_MARGIN_MS = 1_000;
@@ -5520,6 +5526,7 @@ export function createDispatchBundle(
 	 */
 	let liveLedgerWrite: Promise<void> | null = null;
 	let liveUsageDirty = false;
+	let liveUsagePersistedAt = Number.NEGATIVE_INFINITY;
 
 	function checkActiveHeartbeats(): void {
 		if (!ledger) return;
@@ -5527,7 +5534,7 @@ export function createDispatchBundle(
 		const tickMonotonic = monotonicNow();
 		for (const run of active.values()) {
 			if (run.aborted || run.stallKilled || run.sealing === true) continue;
-			const row = ledger.get(run.runId);
+			const row = ledger.peek(run.runId);
 			// Finalizers keep active entries while persisting their sealed receipt.
 			if (!row || row.endedAt !== null) continue;
 			const spend = meterSpend(run.meter);
@@ -5546,9 +5553,6 @@ export function createDispatchBundle(
 				continue;
 			}
 			if (!run.heartbeatAt) continue;
-			// Finalizers retain active entries while awaiting ledger persistence.
-			// Their terminal status is already sealed into the receipt digest.
-			if (ledger.get(run.runId)?.endedAt !== null) continue;
 			const heartbeatMonotonic = heartbeatMonotonicAt(run.heartbeatAt);
 			if (!Number.isFinite(heartbeatMonotonic) || !Number.isFinite(run.heartbeatAt.current)) continue;
 			if (run.runtimeKind === "acp-delegation") {
@@ -5587,10 +5591,15 @@ export function createDispatchBundle(
 				// child may have exited between classification and reap attempt
 			}
 		}
-		// Coalesce all changed runs into one write per tick, with no growing queue.
-		// Retry on the next tick after a write failure or an update during a write.
-		if (liveUsageDirty && liveLedgerWrite === null) {
+		// Coalesce all changed runs into one write per interval, with no growing queue.
+		// Retry on a later tick after a write failure or an update during a write.
+		if (
+			liveUsageDirty &&
+			liveLedgerWrite === null &&
+			tickMonotonic - liveUsagePersistedAt >= LIVE_USAGE_PERSIST_INTERVAL_MS
+		) {
 			liveUsageDirty = false;
+			liveUsagePersistedAt = tickMonotonic;
 			liveLedgerWrite = ledger
 				.persist()
 				.catch((error: unknown) => {

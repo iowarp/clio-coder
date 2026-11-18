@@ -68,6 +68,8 @@ export interface Ledger {
 	create(input: CreateRunInput): RunEnvelope;
 	update(id: string, patch: Partial<RunEnvelope>): RunEnvelope | null;
 	get(id: string): RunEnvelope | null;
+	/** The row itself, uncloned, for a hot read that neither keeps nor mutates it. */
+	peek(id: string): Readonly<RunEnvelope> | null;
 	/** `where` selects rows before they are copied, so a caller after a few rows does not clone the whole ring. */
 	list(opts?: {
 		status?: RunStatus;
@@ -301,12 +303,28 @@ function withRunsLock(target: string, fn: () => Promise<void>): Promise<void> {
 	return run;
 }
 
+/** A file's identity and content stamp; a rename over it changes the inode, an append its size and mtime. */
+function fileStamp(path: string): string | null {
+	try {
+		const stat = statSync(path);
+		return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+	} catch {
+		return null;
+	}
+}
+
 export function openLedger(opts?: LedgerOptions): Ledger {
 	let runs: RunEnvelope[] = readRuns();
 	// Ids this process has written since the last successful persist. See
 	// mergeRunsById: this is what separates our writes from a sibling's rows we
 	// merely read at open time.
 	const dirty = new Set<string>();
+	/**
+	 * The rows this ledger last wrote and the file's stamp right after, taken under the lock. While the file still
+	 * carries that stamp no other writer replaced it, so the next persist merges onto these rows instead of reading
+	 * and parsing the whole file back.
+	 */
+	let lastWrite: { path: string; stamp: string; rows: RunEnvelope[] } | null = null;
 
 	function findIndex(id: string): number {
 		return runs.findIndex((r) => r.id === id);
@@ -372,6 +390,10 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			return envelope ? cloneEnvelope(envelope) : null;
 		},
 
+		peek(id: string): Readonly<RunEnvelope> | null {
+			return runs.find((r) => r.id === id) ?? null;
+		},
+
 		list(opts?: {
 			status?: RunStatus;
 			limit?: number;
@@ -408,12 +430,15 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			const target = runsPath();
 			await withRunsLock(target, async () => {
 				if (stateRootRemoved()) return;
-				const diskRuns = readRuns();
+				const unchanged = lastWrite !== null && lastWrite.path === target && lastWrite.stamp === fileStamp(target);
+				const diskRuns = unchanged && lastWrite !== null ? lastWrite.rows : readRuns();
 				const merged = mergeRunsById(diskRuns, runs, dirty);
 				const capped = capRuns(merged, resolveMaxRuns(opts?.maxRuns));
 				runs = capped;
 				const written = new Map(capped.map((run) => [run.id, run]));
+				const writtenRows = [...capped];
 				const contents = JSON.stringify(capped, null, 2);
+				lastWrite = null;
 				for (let attempt = 0; ; attempt += 1) {
 					if (stateRootRemoved()) return;
 					let skipped = false;
@@ -426,6 +451,8 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 								else commit();
 							},
 						});
+						const stamp = fileStamp(target);
+						if (stamp !== null) lastWrite = { path: target, stamp, rows: writtenRows };
 						break;
 					} catch (error) {
 						if (skipped) return;
