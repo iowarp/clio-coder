@@ -797,7 +797,12 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	const stale = [[], "unverified", []];
 	const green = [["npm test"], "verified", []];
 	// The earlier pass judged a tree the call then changed, whether the check ran before or after the change.
-	deepStrictEqual(seal("npm test", "!git apply fix.patch; npm test"), stale);
+	// The red after `;` is the check's own, since only a known writer ran before it (bt-46 S2).
+	deepStrictEqual(seal("npm test", "!git apply fix.patch; npm test"), [
+		[],
+		"unverified",
+		["git apply fix.patch; npm test"],
+	]);
 	deepStrictEqual(seal("npm test", "npm test && node codemod.mjs"), stale);
 	deepStrictEqual(seal("npm test", "pytest; git stash pop"), stale);
 	deepStrictEqual(seal("npm test", "npm ci | npm test"), stale);
@@ -839,6 +844,12 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	// A here-document body is data no continuation joins, so its quoted terminator still ends it in the check's name (S2).
 	const continued = "cat > /tmp/n.md <<'EOF'\nline one \\\nEOF\nnpm test";
 	strictEqual(classifyCall("bash", { command: continued }, { cwd: process.cwd() }).name, continued);
+	// A write on an earlier line leaves the status of the check ending the command its own; a line that may exit, move
+	// the shell or run another check does not (bt-46 S2).
+	for (const lines of [continued, "echo x > src/b.ts\nnpm test"])
+		deepStrictEqual(seal(lines), [[lines], "verified", []], lines);
+	for (const lines of ["exit 0\nnpm test", "cd pkg\nnpm test", "npm test\nnpm run lint"])
+		strictEqual(seal(lines)[1], "unverified", lines);
 	deepStrictEqual(seal("!npm test", "npm test -- --import ./x.mjs"), red);
 	deepStrictEqual(seal("npm test -- --run"), [["npm test -- --run"], "verified", []]);
 	// Every change ran before the check through `&&`, or the call held only checks, cd and plumbing.
