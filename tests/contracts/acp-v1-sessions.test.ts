@@ -273,6 +273,11 @@ test("ACP stable session list pages SessionInfo and filters cwd", async () => {
 			false,
 		);
 		strictEqual(peer.requests.has("_clio-coder/session/delete"), false);
+		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
+		await rejects(
+			peer.call("session/delete", { sessionId: "session-1" }),
+			(err: AcpRequestError) => err.detail.code === "session_open" && /close it first \(session\/close/u.test(err.message),
+		);
 	} finally {
 		await peer.stop();
 	}
