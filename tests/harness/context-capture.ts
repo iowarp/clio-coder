@@ -23,6 +23,7 @@ import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ModelTier } from "../../src/core/model-tier.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
@@ -54,8 +55,16 @@ export interface ScriptedCall {
 	arguments: Record<string, unknown>;
 }
 
-/** One reply: plain text, or tool calls. */
-export type CaptureReply = { text: string } | { calls: ScriptedCall[] };
+/**
+ * One reply: plain text, tool calls, a reasoning-only reply cut by the output cap (chat completions only), or an
+ * HTTP error with that status and message.
+ */
+export type CaptureReply =
+	| { text: string }
+	| { calls: ScriptedCall[] }
+	| { thinkingOnlyLength: string }
+	| { status: number; error: string };
+type StreamReply = { text: string } | { calls: ScriptedCall[] };
 
 export type CaptureScript = (request: CapturedRequest, index: number) => CaptureReply;
 
@@ -75,13 +84,18 @@ function familyFor(path: string): WireFamily | null {
 
 const USAGE = { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 };
 
-function completionsFrames(reply: CaptureReply, model: string): unknown[] {
+function completionsFrames(reply: StreamReply | { thinkingOnlyLength: string }, model: string): unknown[] {
 	const chunk = (delta: Record<string, unknown>, finish_reason: string | null = null) => ({
 		id: "capture",
 		object: "chat.completion.chunk",
 		model,
 		choices: [{ index: 0, delta, finish_reason }],
 	});
+	if ("thinkingOnlyLength" in reply)
+		return [
+			chunk({ role: "assistant", reasoning_content: reply.thinkingOnlyLength }),
+			{ ...chunk({}, "length"), usage: USAGE },
+		];
 	if ("text" in reply)
 		return [chunk({ role: "assistant", content: reply.text }), { ...chunk({}, "stop"), usage: USAGE }];
 	return [
@@ -98,7 +112,7 @@ function completionsFrames(reply: CaptureReply, model: string): unknown[] {
 	];
 }
 
-function responsesFrames(reply: CaptureReply, model: string): unknown[] {
+function responsesFrames(reply: StreamReply, model: string): unknown[] {
 	const items: Record<string, unknown>[] =
 		"text" in reply
 			? [
@@ -146,7 +160,7 @@ function responsesFrames(reply: CaptureReply, model: string): unknown[] {
 	return frames;
 }
 
-function anthropicFrames(reply: CaptureReply, model: string): unknown[] {
+function anthropicFrames(reply: StreamReply, model: string): unknown[] {
 	const frames: unknown[] = [
 		{
 			type: "message_start",
@@ -210,13 +224,20 @@ export async function startCaptureServer(script: CaptureScript): Promise<Capture
 		const captured: CapturedRequest = { family, path, body };
 		const index = requests.push(captured) - 1;
 		const reply = script(captured, index);
+		if ("status" in reply) {
+			res.writeHead(reply.status, { "content-type": "application/json" });
+			res.end(JSON.stringify({ error: { message: reply.error, type: "invalid_request_error" } }));
+			return;
+		}
 		const model = typeof body.model === "string" ? body.model : "capture";
+		if ("thinkingOnlyLength" in reply && family !== "openai-completions")
+			throw new Error("capture: a reasoning-only reply is scripted for chat completions only");
 		const frames =
 			family === "openai-completions"
 				? completionsFrames(reply, model)
 				: family === "openai-responses"
-					? responsesFrames(reply, model)
-					: anthropicFrames(reply, model);
+					? responsesFrames(reply as StreamReply, model)
+					: anthropicFrames(reply as StreamReply, model);
 		res.writeHead(200, { "content-type": "text/event-stream" });
 		for (const frame of frames) {
 			const type = (frame as { type?: unknown }).type;
@@ -373,6 +394,8 @@ export interface ChatHarnessOptions {
 	pinnedContext?: () => ReadonlyArray<{ extensionId: string; text: string }>;
 	/** Facts that differ on `CAPTURE_TARGET_B`, so a target switch also changes the route. */
 	routeB?: RouteFacts;
+	/** The middleware tool-choice control the loop reads each round. */
+	middlewareToolChoice?: MiddlewareToolChoiceControl;
 }
 
 /**
@@ -461,6 +484,7 @@ export function chatHarness(options: ChatHarnessOptions) {
 		toolRegistry: registry,
 		bus: context.bus,
 		...(options.pinnedContext ? { pinnedContext: options.pinnedContext } : {}),
+		...(options.middlewareToolChoice ? { middlewareToolChoice: options.middlewareToolChoice } : {}),
 		...(options.autoCompact
 			? {
 					autoCompact: createProductionAutoCompact(
