@@ -11,8 +11,10 @@ import {
 	assessFinishContract,
 	FINISH_CONTRACT_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
+	FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE,
 } from "../../src/domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
+import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { builtin } from "../../src/tools/builtin-tool-catalog.js";
 import { limitationTool } from "../../src/tools/limitation.js";
 import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
@@ -232,7 +234,7 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		);
 	});
 
-	it("reports unknown behavior coverage for unrelated or partial passing checks, irrespective of final prose", () => {
+	it("reports unknown behavior coverage for unrelated or partial passing checks, irrespective of final prose", (t) => {
 		for (const command of ["npm run lint", "node --test unrelated.test.mjs", "node --test thing.test.mjs"]) {
 			const assessment = assessFinishContract({
 				sessionEntries: [
@@ -250,6 +252,34 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 			ok(assessment.kind === "ok");
 			strictEqual(assessment.advisory, FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE);
 		}
+		// A red the receipt seals after the last change never reads as "checks passed"; a later pass replaces it (bt-44).
+		const root = mkdtempSync(join(tmpdir(), "finish-red-"));
+		t.after(() => rmSync(root, { recursive: true, force: true }));
+		const tsc = (id: string, exitCode: number) => [
+			toolCall(id, ToolNames.Bash, { command: "npx tsc --noEmit" }),
+			{
+				kind: "message",
+				role: "tool_result",
+				turnId: id,
+				payload: { toolName: ToolNames.Bash, toolCallId: id, isError: exitCode !== 0, result: { details: { exitCode } } },
+			},
+		];
+		const advisory = (...checks: unknown[][]) => {
+			const assessment = assessFinishContract({
+				sessionEntries: [
+					...mutationWindow(),
+					toolCall("bash-1", ToolNames.Bash, { command: "npm run lint" }),
+					toolResult("bash-1", ToolNames.Bash, false),
+					...checks.flat(),
+					assistantMessage("assistant-1", "Done."),
+				],
+				assistantTurnId: "assistant-1",
+				workspaceRoot: root,
+			});
+			return assessment.kind === "ok" ? assessment.advisory : undefined;
+		};
+		strictEqual(advisory(tsc("tsc-1", 2)), FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE);
+		strictEqual(advisory(tsc("tsc-1", 2), tsc("tsc-2", 0)), FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE);
 	});
 
 	it("retains explicitly requested check scope and limitations without turning unknown coverage into a gate", async () => {
@@ -415,6 +445,17 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		strictEqual(passed.reason, "validation_evidence");
 		deepStrictEqual(passed.verificationScope?.passedChecks, ["calc"]);
 		strictEqual(assess("cd . && ./acceptance.sh  --strict && echo done && ls").reason, "validation_evidence");
+		// The recorder reads a declared run through the same classifier, so the receipt files what the gate credits (x7-5).
+		const filed = (command: string, verifiers = sessionVerifiers) => {
+			const recorder = createRunEffectsRecorder(root, { sessionVerifiers: verifiers });
+			recorder.start("sh-1", ToolNames.Bash, { command });
+			recorder.checkOutcome("sh-1", "ok");
+			recorder.finish("sh-1", false);
+			return [...recorder.snapshot().validationOutcomes.keys()];
+		};
+		deepStrictEqual(filed("./acceptance.sh --strict && echo done"), ["./acceptance.sh --strict && echo done"]);
+		deepStrictEqual(filed("./acceptance.sh --strict && echo done", []), []);
+		deepStrictEqual(filed(`python3 -c 'import calc; assert calc.add(2, 3) == 5' && echo OK`, []).length, 1);
 		for (const unproven of [
 			assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5'`, true),
 			assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5'`, false, true),
@@ -458,7 +499,8 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		deepStrictEqual(passedChecks("./acceptance.sh && ./second.sh"), ["run-acceptance", "run-second"]);
 		deepStrictEqual(passedChecks("true && pwd"), ["run-pwd"]);
 		deepStrictEqual(passedChecks("cp before.ts src/thing.ts && ./acceptance.sh"), ["run-acceptance"]);
-		deepStrictEqual(passedChecks("./acceptance.sh && cp before.ts src/thing.ts && ./second.sh"), ["run-second"]);
+		// A check before the call's own change makes it mixed, so the shared classifier settles neither (x7-5).
+		deepStrictEqual(passedChecks("./acceptance.sh && cp before.ts src/thing.ts && ./second.sh"), []);
 		for (const command of [
 			"exit 0 && false",
 			"exec true && false",

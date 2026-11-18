@@ -62,6 +62,7 @@ export interface FinishedRun {
 		| "tools"
 		| "blockedAttempts"
 		| "guardBlockedAttempts"
+		| "permissionRequestedAttempts"
 		| "worktree"
 	>;
 	delivered: RunResultObject | null;

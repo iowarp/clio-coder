@@ -1913,7 +1913,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			session?.appendEntry(entry);
 		},
 		observeChecks: (boardId, taskId) =>
-			standingChecks(activePathEntries(), boardId, taskId, process.cwd(), getCurrentSettings().safety.scratchRoots),
+			standingChecks(activePathEntries(), boardId, taskId, process.cwd(), getCurrentSettings().safety.scratchRoots, [
+				...(options.headless?.verify?.checks ?? []),
+			]),
 	});
 	// Prime the projection once at composition. Interactive repaint paths use
 	// cachedSnapshot() below, so a first paint can never become a ledger read.
