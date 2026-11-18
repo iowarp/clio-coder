@@ -15,20 +15,30 @@ import { join } from "node:path";
 import { after, before, mock, test } from "node:test";
 import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import { isCopilotRefusal } from "../../src/core/copilot-refusal.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createHostPolicyMessage } from "../../src/core/host-policy-message.js";
 import { resolveClioDirs } from "../../src/core/xdg.js";
 import { createCapacityAdmissionController } from "../../src/domains/dispatch/admission.js";
 import { classifyFailure } from "../../src/domains/dispatch/failure-classification.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
+import { prepareListedModelCapabilities } from "../../src/domains/providers/background-model-metadata.js";
+import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import { copilotAuthState, detectCopilotLogin, prepareCopilotSdk } from "../../src/domains/providers/copilot-setup.js";
 import { endpointCapacityFor, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { toContextOverflowError } from "../../src/domains/providers/errors.js";
+import { createProvidersBundle } from "../../src/domains/providers/extension.js";
 import { resolveModelRuntimeCapabilitiesForModel } from "../../src/domains/providers/model-runtime-capabilities.js";
+import { resolveRuntimeTarget } from "../../src/domains/providers/runtime-resolution.js";
 import copilotSdkRuntime from "../../src/domains/providers/runtimes/copilot/copilot-sdk.js";
+import { readTargetModelSnapshot } from "../../src/domains/providers/target-model-cache.js";
 import type { ProbeContext } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
+import type { SessionContract } from "../../src/domains/session/contract.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
+import { AcpRequestError } from "../../src/engine/acp/errors.js";
+import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
+import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { copilotSdkAccount, copilotSdkRestartIdle, listCopilotSdkModels } from "../../src/engine/ai.js";
 import { engineStreamSimple } from "../../src/engine/api-registry.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
@@ -42,6 +52,7 @@ import {
 import { disposeCopilotConversations } from "../../src/engine/copilot/stream.js";
 import { getEngineEnvApiKey } from "../../src/engine/env-api-keys.js";
 import { getEngineOAuthProvider } from "../../src/engine/oauth.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 /**
@@ -608,6 +619,172 @@ test("Copilot's listed reasoning efforts are the model's thinking levels, and ea
 		deepStrictEqual(session.switches, [{ model: "with-none", reasoningEffort: "none" }]);
 	} finally {
 		disposeCopilotConversations("effort-session");
+		models.splice(0, models.length, ...original);
+	}
+});
+
+test("ACP on a cold listing cache offers the account's live models, their listed thinking levels and no silent thinking off", async () => {
+	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
+	const original = [...models];
+	models.push({
+		...original[0],
+		id: "three-levels",
+		capabilities: { supports: { vision: false, reasoningEffort: true }, limits: { max_context_window_tokens: 64000 } },
+		supportedReasoningEfforts: ["low", "medium", "high"],
+	});
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	const target = { id: "copilot-acp", runtime: "copilot-sdk", defaultModel: "fake-model" };
+	settings.targets = [target];
+	settings.chat.target = target.id;
+	settings.chat.model = "fake-model";
+	const providers = createProvidersBundle(dispatchStubContext({ settings }), { getSettings: () => settings });
+	await providers.extension.start();
+	const requests = new Map<string, (params: unknown) => unknown>();
+	let close: () => void = () => {};
+	const transport: AcpJsonRpcPeerTransport = {
+		closed: false,
+		request: async () => ({}) as never,
+		notify: () => {},
+		onRequest: (method, handler) => {
+			requests.set(method, handler);
+			return () => requests.delete(method);
+		},
+		onNotification: () => () => {},
+		onClose: (handler) => {
+			close = handler;
+			return () => {};
+		},
+		close: () => close(),
+	};
+	const cwd = process.cwd();
+	const session = {
+		current: () => null,
+		create: () => ({ id: "acp-copilot", cwd, cwdHash: "hash", createdAt: "2026-10-16T00:00:00.000Z", endedAt: null }),
+		tree: () => ({ leafId: null }),
+		leafId: () => null,
+	} as unknown as SessionContract;
+	const routed: Array<Record<string, unknown>> = [];
+	const done = serveClioAcpAgent({
+		transport,
+		session,
+		cwd,
+		autonomy: () => "default",
+		providers: providers.contract,
+		routing: () => ({ target: target.id, model: "fake-model" }),
+		setSessionRouting: (patch) => routed.push(patch),
+		chat: {
+			submit: async () => {},
+			cancel: () => {},
+			onEvent: () => () => {},
+			isStreaming: () => false,
+			getSessionId: () => "acp-copilot",
+		},
+		readSessionEntries: () => [],
+		buildReplayMessages: () => [],
+	});
+	type Option = { id: string; currentValue: string; notice?: string; options: Array<Record<string, unknown>> };
+	const call = async (method: string, params: unknown) =>
+		(await (requests.get(method) as (params: unknown) => unknown)(params)) as { configOptions: Option[] };
+	const option = (result: { configOptions: Option[] }, id: string) =>
+		result.configOptions.find((row) => row.id === id) as Option;
+	const set = (configId: string, value: string) =>
+		call("session/set_config_option", { sessionId: "acp-copilot", configId, value });
+	try {
+		strictEqual(readTargetModelSnapshot(target), null);
+		await call("initialize", { protocolVersion: 1 });
+		const opened = await call("session/new", { cwd, mcpServers: [] });
+		const choices = option(opened, "model").options;
+		deepStrictEqual(
+			choices.map((choice) => choice.value),
+			["fake-model", "three-levels", "gpt-6-luna"],
+		);
+		deepStrictEqual(choices[1]?.thinkingLevels, ["low", "medium", "high"]);
+		deepStrictEqual(readTargetModelSnapshot(target)?.modelCapabilities?.["three-levels"]?.reasoningLevels, [
+			"low",
+			"medium",
+			"high",
+		]);
+
+		await set("model", "three-levels");
+		const clamped = option(await set("thinkingLevel", "max"), "thinkingLevel");
+		strictEqual(clamped.currentValue, "high");
+		strictEqual(clamped.notice, "This model offers thinking low, medium, high, so Thinking max runs as high.");
+		deepStrictEqual(routed.at(-1), { thinkingLevel: "high" });
+
+		await set("model", "fake-model");
+		await rejects(
+			set("thinkingLevel", "medium"),
+			(error) =>
+				error instanceof AcpRequestError &&
+				error.rpcCode === -32602 &&
+				error.message === "this model cannot run thinking medium; it supports off",
+		);
+	} finally {
+		close();
+		await done;
+		await providers.extension.stop?.();
+		models.splice(0, models.length, ...original);
+	}
+});
+
+test("a Copilot worker resolves the main agent's thinking levels and budgets from a live or persisted listing", async () => {
+	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
+	const original = [...models];
+	models.push({
+		...original[0],
+		id: "worker-levels",
+		capabilities: {
+			supports: { vision: false, reasoningEffort: true },
+			limits: { max_context_window_tokens: 96000, max_output_tokens: 16000 },
+		},
+		supportedReasoningEfforts: ["low", "medium", "high"],
+	});
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	const target = { id: "copilot-worker", runtime: "copilot-sdk", defaultModel: "worker-levels" };
+	settings.targets = [target];
+	const freshProcess = async () => {
+		const bundle = createProvidersBundle(dispatchStubContext({ settings }), { getSettings: () => settings });
+		await bundle.extension.start();
+		return bundle;
+	};
+	const resolve = (providers: ProvidersContract, use: "orchestrator" | "dispatch") => {
+		const resolved = resolveRuntimeTarget(providers, {
+			targetId: target.id,
+			wireModelId: "worker-levels",
+			requestedThinkingLevel: "medium",
+			use,
+			requireOutputBudget: true,
+		});
+		ok(resolved.ok);
+		const { capabilities, effectiveThinkingLevel } = resolved.target;
+		return { capabilities, effectiveThinkingLevel };
+	};
+	const bundles: Array<Awaited<ReturnType<typeof freshProcess>>> = [];
+	try {
+		strictEqual(readTargetModelSnapshot(target), null);
+		const cold = await freshProcess();
+		bundles.push(cold);
+		strictEqual(resolve(cold.contract, "dispatch").capabilities.reasoning, false, "nothing listed yet");
+		await prepareListedModelCapabilities(cold.contract, target.id);
+		const listedLive = resolve(cold.contract, "dispatch");
+
+		const persisted = await freshProcess();
+		bundles.push(persisted);
+		const fromCache = resolve(persisted.contract, "dispatch");
+
+		const main = await freshProcess();
+		bundles.push(main);
+		await main.contract.probeTarget(target.id);
+		const mainAgent = resolve(main.contract, "orchestrator");
+
+		strictEqual(mainAgent.effectiveThinkingLevel, "medium");
+		deepStrictEqual(mainAgent.capabilities.reasoningLevels, ["low", "medium", "high"]);
+		strictEqual(mainAgent.capabilities.contextWindow, 96000);
+		strictEqual(mainAgent.capabilities.maxTokens, 16000);
+		deepStrictEqual(listedLive, mainAgent);
+		deepStrictEqual(fromCache, mainAgent);
+	} finally {
+		for (const bundle of bundles) await bundle.extension.stop?.();
 		models.splice(0, models.length, ...original);
 	}
 });
