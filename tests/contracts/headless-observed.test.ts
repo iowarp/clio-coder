@@ -90,6 +90,26 @@ test("the observed line omits a run with no tool calls and names a write with no
 		writes: 1,
 	});
 	strictEqual(after.unclassifiedAfterLastCheck, 1);
+	// A passing dispatch run record stands on the line as on the task board, until a later write retires it (bt-verify7a).
+	const dispatched = [
+		call("d1", "dispatch", { agent: "coder", task: "fix it" }),
+		{
+			kind: "message",
+			role: "tool_result",
+			timestamp: "t",
+			payload: {
+				toolCallId: "d1",
+				outcome: "ok",
+				isError: false,
+				result: { details: { exitCode: 0, runId: "r1", agentId: "coder" } },
+			},
+		},
+	];
+	const effects = { validationOutcomes: new Map(), checkOutcomes: new Map() };
+	const observe = (entries: object[]) =>
+		observeHeadlessRun({ entries, start: 0, effects, toolCalls: 2, refused: 0, writes: 1, workspaceRoot: root }).checks;
+	deepStrictEqual(observe([...edit, ...dispatched]), [{ name: "run r1 agent coder", passed: true }]);
+	deepStrictEqual(observe([...dispatched, ...edit]), []);
 	match(
 		formatHeadlessObservedLine(after) ?? "",
 		/ · check failed: pytest · 1 unclassified command ran after a standing check$/,

@@ -248,6 +248,28 @@ function pathStartedAt(entries: ReadonlyArray<unknown>): number | undefined {
 	return undefined;
 }
 
+/**
+ * The passing dispatch run records that still stand from `start` on, named as the task board files them: the run-effects
+ * recorder reads a dispatch only as an opaque write, so the headless line takes these from the same fold (bt-verify7a).
+ */
+export function standingDispatchRuns(
+	entries: ReadonlyArray<unknown>,
+	start: number,
+	workspaceRoot: string,
+	scratchRoots: ReadonlyArray<string> = [],
+): string[] {
+	const declared = declaredVerifierCommands(workspaceRoot, []);
+	const fold = foldStanding(
+		entries.slice(start),
+		workspaceRoot,
+		scratchRoots,
+		declared,
+		undefined,
+		pathStartedAt(entries),
+	);
+	return fold.checks.flatMap((check) => (check.passed && fold.dispatchRuns.has(check.name) ? [check.name] : []));
+}
+
 /** What the same fold says of a finished stretch of work, for the finish contract. */
 export interface RunCheckFacts {
 	/**
@@ -280,7 +302,12 @@ function foldStanding(
 	declared: ReadonlyArray<DeclaredVerifierCommand>,
 	cache?: RunReplayCache,
 	startedAt?: number,
-): { checks: ObservedCheck[]; passCalls: Map<string, ObservedCheck>; sealed: Map<string, boolean> } {
+): {
+	checks: ObservedCheck[];
+	passCalls: Map<string, ObservedCheck>;
+	sealed: Map<string, boolean>;
+	dispatchRuns: Set<string>;
+} {
 	const root = path.resolve(workspaceRoot);
 	const gitHelpers = cache?.gitHelpers ?? gitRunsConfiguredHelpers(root);
 	const outputTarget = checkOutputReader(root, process.env, scratchRoots, cache?.gitAnswers, startedAt);
@@ -289,6 +316,7 @@ function foldStanding(
 	const standing = new Map<string, ObservedCheck>();
 	const standingCalls = new Map<string, string>();
 	const sealed = new Map<string, boolean>();
+	const dispatchRuns = new Set<string>();
 	let revision = 0;
 	const settle = (call: TrackedCall, failed: boolean, at: string, key: string): void => {
 		const settlement = settleCheckCall(call.reading, failed, failed ? "error" : "ok", call.revision === revision);
@@ -343,6 +371,7 @@ function foldStanding(
 			const run = summary?.replace(/^dispatch run record passed: /u, "");
 			// Filed under its call id so the finish gate credits the run record only while no later change retired it.
 			if (run) {
+				dispatchRuns.add(run);
 				standingCalls.set(run, id);
 				standing.set(run, { name: run, passed: true, observedAt: at });
 			}
@@ -361,5 +390,5 @@ function foldStanding(
 			return key === undefined ? [] : [[key, item] as const];
 		}),
 	);
-	return { checks, passCalls, sealed };
+	return { checks, passCalls, sealed, dispatchRuns };
 }

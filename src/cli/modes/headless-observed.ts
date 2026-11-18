@@ -2,13 +2,16 @@ import { unclassifiedAfterLastCheck } from "../../domains/dispatch/run-findings.
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { validationCommandOf } from "../../domains/safety/check-classifier.js";
 import { capabilityEntries, verifyFoundNoChecks } from "../../domains/safety/finish-contract.js";
+import { standingDispatchRuns } from "../../domains/safety/observed-checks.js";
 import type { RunEffects } from "../../domains/safety/run-effects.js";
 
 /**
  * What the harness itself saw a headless main-agent run do, beside the model's own account of it: tool calls,
  * refusals, successful writes, and the checks that stand at the end of the run. The checks are the run-effects
  * recorder's own outcomes, the ones the sealed receipt reads, so this line never reports a pass the receipt refuses
- * (x4-1). A check the recorder does not recognise or could not attribute is absent, never invented.
+ * (x4-1). A check the recorder does not recognise or could not attribute is absent, never invented. A passing dispatch
+ * run record still standing joins them from the task board's fold over the same entries, since the recorder reads a
+ * dispatch only as a write (bt-verify7a).
  * `noChecksDeclared` is set when no check stands and a `verify` call found none declared or derivable in the workspace.
  * `unclassifiedAfterLastCheck` counts the calls the check classifier could not read that ran after the oldest check
  * outcome still standing: they neither settled nor cleared it, so the line names them beside it.
@@ -45,6 +48,9 @@ export function observeHeadlessRun(input: {
 	toolCalls: number;
 	refused: number;
 	writes: number;
+	/** The run's workspace and `safety.scratchRoots`, for the dispatch run records; absent, none is read. */
+	workspaceRoot?: string;
+	scratchRoots?: ReadonlyArray<string>;
 }): HeadlessObserved {
 	const own = input.entries.slice(Math.max(0, input.start));
 	const verifyChecks = input.toolCalls > 0 ? verifyCheckIds(own) : new Set<string>();
@@ -59,6 +65,9 @@ export function observeHeadlessRun(input: {
 							: [],
 				)
 			: [];
+	if (input.toolCalls > 0 && input.workspaceRoot !== undefined)
+		for (const run of standingDispatchRuns(input.entries, input.start, input.workspaceRoot, input.scratchRoots))
+			checks.push({ name: run, passed: true });
 	const noChecksDeclared = input.toolCalls > 0 && checks.length === 0 && verifyFoundNoChecks(own);
 	// The receipt's own rule: the recorder lists a call only while an outcome stands, so both surfaces count one list (x6-6).
 	const unclassified = unclassifiedAfterLastCheck(input.effects)?.count ?? 0;
