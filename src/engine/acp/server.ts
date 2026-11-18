@@ -711,6 +711,8 @@ interface ActivePrompt {
 	/** Machine-readable reason from the first admission notice of this turn. */
 	admissionReason?: string;
 	sentAssistantChars: number;
+	/** An assistant message ended after text went out, so the next message's text opens on a blank line (bt-41). */
+	textBreakPending: boolean;
 	sentThinkingChars: number;
 	/** Chunks only append, so URL credentials are settled before they are sent (#446). */
 	textCredentials: UrlCredentialStreamFilter;
@@ -1476,6 +1478,7 @@ function createActivePromptState(toolProgress?: { enabled: boolean; now: () => n
 		toolCallLimitReached: false,
 		errored: false,
 		sentAssistantChars: 0,
+		textBreakPending: false,
 		sentThinkingChars: 0,
 		textCredentials: new UrlCredentialStreamFilter(),
 		thinkingCredentials: new UrlCredentialStreamFilter(),
@@ -1784,6 +1787,18 @@ function sendSafeChunks(
 	if (text.length > 0) sendTextChunks(transport, sessionId, active, sessionUpdate, text);
 }
 
+/** Agent text for the wire only: the separator between two messages never enters the model's history. */
+function sendAssistantText(
+	transport: AcpJsonRpcPeerTransport,
+	sessionId: string,
+	active: ActivePrompt,
+	text: string,
+): void {
+	const lead = active.textBreakPending ? "\n\n" : "";
+	active.textBreakPending = false;
+	sendSafeChunks(transport, sessionId, active, "agent_message_chunk", active.textCredentials.push(lead + text));
+}
+
 /** Send what the filters still hold. A message that did not complete keeps its open URL back. */
 function flushChunkCredentials(
 	transport: AcpJsonRpcPeerTransport,
@@ -1906,7 +1921,7 @@ function handleChatEvent(
 		const text = eventTextDelta(event);
 		if (text.length === 0) return;
 		active.sentAssistantChars += text.length;
-		sendSafeChunks(transport, sessionId, active, "agent_message_chunk", active.textCredentials.push(text));
+		sendAssistantText(transport, sessionId, active, text);
 		return;
 	}
 	if (event.type === "thinking_delta") {
@@ -2071,7 +2086,7 @@ function handleChatEvent(
 		if (text.length > active.sentAssistantChars) {
 			const tail = text.slice(active.sentAssistantChars);
 			active.sentAssistantChars = text.length;
-			sendSafeChunks(transport, sessionId, active, "agent_message_chunk", active.textCredentials.push(tail));
+			sendAssistantText(transport, sessionId, active, tail);
 		}
 		flushChunkCredentials(
 			transport,
@@ -2079,6 +2094,8 @@ function handleChatEvent(
 			active,
 			messageStopCompleted((message as { stopReason?: unknown })?.stopReason),
 		);
+		if (isRecord(message) && message.role === "assistant" && active.sentAssistantChars > 0)
+			active.textBreakPending = true;
 		return;
 	}
 	if (event.type === "agent_start" || event.type === "agent_end") {
