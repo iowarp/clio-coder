@@ -4,7 +4,14 @@
  */
 
 import type { EventPayload } from "../../core/telemetry/events.js";
-import type { RunResultObject, RunSettled } from "../../core/telemetry/schemas.js";
+import {
+	type RunResultObject,
+	type RunSettled,
+	SEALED_CHECK_REPORT_KEYS_MAX,
+	type SealedCheckReport,
+} from "../../core/telemetry/schemas.js";
+import type { NumericDeviation } from "../../tools/verify/numeric.js";
+import type { DeclaredCheckReport } from "../../tools/verify/scripts.js";
 import { RESULT_CONTRACT_REPAIR_LIMIT } from "../agents/result-contract.js";
 import type { RunAssessmentContext } from "../evidence/assessment.js";
 import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
@@ -146,6 +153,73 @@ function escalationsOf(safety: RunResultDraft["safety"]): RunSettled["escalation
 		approved: decisions.escalationApproved ?? 0,
 		denied: decisions.escalationDenied ?? 0,
 		timedOut: decisions.escalationTimedOut ?? 0,
+	};
+}
+
+const REPORT_TEXT_CHARS = 256;
+
+function clipped(value: string): string {
+	return value.length <= REPORT_TEXT_CHARS ? value : `${value.slice(0, REPORT_TEXT_CHARS - 1)}…`;
+}
+
+function sealedKey(
+	key: string,
+	passed: boolean,
+	worst: NumericDeviation | undefined,
+): SealedCheckReport["keys"][number] {
+	return {
+		key: clipped(key),
+		passed,
+		absolute: worst?.absolute ?? null,
+		relative: worst?.relative ?? null,
+		ulp: worst?.ulp ?? null,
+	};
+}
+
+/**
+ * A judged check's verdict as the sealed result keeps it (D3-3): what it judged by, the digests of what it read, and
+ * each key's worst deviation, failing keys first, so a reviewer can audit the verdict without the unsealed logs.
+ */
+function sealedCheckReport(report: DeclaredCheckReport): SealedCheckReport {
+	if (report.kind === "perf-budget") {
+		return {
+			kind: report.kind,
+			passed: report.passed,
+			rule: clipped(
+				`wall time <= ${report.budgetMs}ms (${report.source} ${report.referenceMs}ms, relative tolerance ${report.relative})`,
+			),
+			tolerance: { relative: report.relative },
+			reference: report.baseline ? { path: report.baseline.path, sha256: report.baseline.sha256 } : null,
+			payloadSha256: null,
+			keyCount: 0,
+			failedKeyCount: 0,
+			failedKeys: [],
+			keys: [],
+			measuredMs: report.measuredMs,
+			budgetMs: report.budgetMs,
+		};
+	}
+	const keys =
+		report.kind === "numeric-compare"
+			? report.keys.map((key) => sealedKey(key.key, key.passed, key.worst))
+			: report.metrics.map((metric) => sealedKey(metric.metric, metric.passed, metric.agreement?.worst));
+	const failedKeys = report.kind === "numeric-compare" ? report.failedKeys : report.failedMetrics;
+	const payloadSha256 =
+		report.kind === "numeric-compare" ? (report.actual?.sha256 ?? null) : (report.runs[0]?.payload?.sha256 ?? null);
+	return {
+		kind: report.kind,
+		passed: report.passed,
+		rule: clipped(report.rule),
+		tolerance: { ...report.tolerance },
+		reference: report.reference ? { path: report.reference.path ?? null, sha256: report.reference.sha256 } : null,
+		payloadSha256,
+		keyCount: keys.length,
+		failedKeyCount: failedKeys.length,
+		failedKeys: failedKeys.slice(0, SEALED_CHECK_REPORT_KEYS_MAX).map(clipped),
+		keys: [...keys.filter((key) => !key.passed), ...keys.filter((key) => key.passed)].slice(
+			0,
+			SEALED_CHECK_REPORT_KEYS_MAX,
+		),
 	};
 }
 
@@ -322,6 +396,8 @@ export function settleFinishedRun(
 							evidenceRunId: check.evidenceRunId ?? null,
 							...(check.notRun !== undefined ? { notRun: check.notRun } : {}),
 							baseComparison: check.baseComparison ? { ...check.baseComparison } : null,
+							...(check.report !== undefined ? { report: sealedCheckReport(check.report) } : {}),
+							...(check.tree !== undefined ? { tree: { head: check.tree.head, fingerprint: check.tree.fingerprint } } : {}),
 						})),
 					}
 				: null,

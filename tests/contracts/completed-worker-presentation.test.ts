@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +15,7 @@ import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-e
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import { readWorkerRunResultFactsForReplay } from "../../src/session-control/worker-run-results.js";
 import type { WorkerEntryState } from "../../src/session-control/worker-stream.js";
+import { judgeNumericTexts } from "../../src/tools/verify/scripts.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { settledRunTrust, writeSettledRun } from "../harness/settled-run.js";
 
@@ -435,6 +437,66 @@ test("a host check that never started keeps its not-run reason in sealed evidenc
 			readRunResultFacts("nr1", stateDir)?.validationFailure,
 			"Clio's own check failed: repro did not run: its process could not start",
 		);
+	} finally {
+		rmSync(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("a judged host check seals its bounded report and the tree it judged in the run result", async () => {
+	const stateDir = mkdtempSync(join(tmpdir(), "d3-sealed-report-"));
+	try {
+		const draft = fixtureReceiptDraft(fixtureEnvelope("sr1"));
+		const referenceText = JSON.stringify({ energy: -76.0267, grid: [1, 2] });
+		const report = judgeNumericTexts(
+			JSON.stringify({ energy: -75.9, grid: [1, 2] }),
+			referenceText,
+			{ relative: 1e-6 },
+			"reference '/r/ref.json'",
+			"/r/ref.json",
+		);
+		assert.ok(!(report instanceof Error));
+		const tree = { root: "/r", head: "a".repeat(40), fingerprint: "b".repeat(64) };
+		draft.hostVerification = {
+			status: "rejected",
+			checks: [
+				{
+					check: "energy",
+					argv: ["solve"],
+					cwd: "/r",
+					exitCode: 1,
+					durationMs: 5,
+					memo: false,
+					outputTail: "",
+					report,
+					tree,
+				},
+			],
+		};
+		await writeSettledRun(stateDir, draft);
+		const record = readRunRecord(stateDir, "sr1");
+		const sealed = record?.result?.state === "resolved" ? record.result.value.hostVerification?.checks[0] : undefined;
+		assert.deepEqual(sealed?.tree, { head: tree.head, fingerprint: tree.fingerprint });
+		assert.deepEqual(sealed?.report, {
+			kind: "numeric-compare",
+			passed: false,
+			rule: report.rule,
+			tolerance: { relative: 1e-6 },
+			reference: { path: "/r/ref.json", sha256: createHash("sha256").update(referenceText).digest("hex") },
+			payloadSha256: report.actual?.sha256 ?? null,
+			keyCount: 2,
+			failedKeyCount: 1,
+			failedKeys: ["energy"],
+			keys: [
+				{
+					key: "energy",
+					passed: false,
+					absolute: report.keys[0]?.worst?.absolute ?? null,
+					relative: report.keys[0]?.worst?.relative ?? null,
+					ulp: report.keys[0]?.worst?.ulp ?? null,
+				},
+				{ key: "grid", passed: true, absolute: 0, relative: 0, ulp: 0 },
+			],
+		});
 	} finally {
 		rmSync(stateDir, { recursive: true, force: true });
 	}
