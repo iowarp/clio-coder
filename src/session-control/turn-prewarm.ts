@@ -101,11 +101,6 @@ export interface TurnPrewarmDeps {
 	/** Test seam. Production uses the real provider round. */
 	runPrewarm?: typeof runPrewarmRound;
 	observeDeployment?: typeof observeCacheDeployment;
-	/**
-	 * Whether a submit aborts the round's request. Defaults to the measured
-	 * backend behavior; see {@link ABORT_ROUND_ON_SUBMIT}.
-	 */
-	abortRoundOnSubmit?: boolean;
 }
 
 export interface TurnPrewarm {
@@ -156,7 +151,6 @@ function defaultWarmInputTokens(contextWindow: number): number {
 
 export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 	const round = deps.runPrewarm ?? runPrewarmRound;
-	const abortOnSubmit = deps.abortRoundOnSubmit ?? ABORT_ROUND_ON_SUBMIT;
 	let pendingTrigger: PrewarmTrigger | null = null;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let active: AbortController | null = null;
@@ -468,7 +462,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		const controller = active;
 		if (controller === null) return;
 		detached.add(controller);
-		if (abortOnSubmit) controller.abort();
+		if (ABORT_ROUND_ON_SUBMIT) controller.abort();
 		active = null;
 	};
 

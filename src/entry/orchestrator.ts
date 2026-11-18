@@ -1068,9 +1068,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}),
 		);
 	};
-	/** The same admission for a round that sends the live agent runtime's context. */
-	const admitRuntimeFlow = (runtime: { targetId: string; runtimeId: string; wireModelId: string }): string | null =>
-		admitModelFlow({ targetId: runtime.targetId, runtimeId: runtime.runtimeId, wireModelId: runtime.wireModelId });
 	sessionOriginForDispatch = () => session?.current() ?? null;
 	const prompts = result.getContract("prompts");
 	const agents = result.getContract("agents");
@@ -3333,7 +3330,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			: {}),
 		toolRegistry,
 		admitFlow: admitModelFlow,
-		admitRuntimeFlow,
 		labelReferencedPaths: (paths) => {
 			const labels = safety?.policy?.flowRestrictionsForPaths?.(paths, process.cwd()) ?? null;
 			if (labels !== null) flowLedger.absorb(labels, { tool: "file-reference" });

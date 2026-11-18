@@ -201,7 +201,6 @@ import {
 	type OperatorMemoryStorePort,
 } from "./operator-memory.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
-import type { runPrewarmRound } from "./prewarm.js";
 import { REPETITION_REPROMPT_NOTICE_KEY, repetitionRepromptMessages } from "./repetition-detector.js";
 import { retireActiveUserContextForNextOperator, retiredUserContextWasSent } from "./session-replay-messages.js";
 import { type OutOfTurnRoute, runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./side-question.js";
@@ -998,10 +997,6 @@ export interface CreateChatLoopDeps {
 	 * standing up a provider, exactly as `createAgent` does for a turn.
 	 */
 	runSideQuestion?: typeof runSideQuestion;
-	/** The `/handoff` extraction round. Injectable for the same reason. */
-	runHandoffRound?: typeof runHandoffRound;
-	/** The `/draft` candidate round. Injectable for the same reason. */
-	runDraftRound?: typeof runOutOfTurnRound;
 	/**
 	 * Return the current session's entries for token estimation. The chat-loop
 	 * calls this on every submit so the auto-compaction threshold sees the
@@ -1009,10 +1004,11 @@ export interface CreateChatLoopDeps {
 	 * session or when the session contract is absent.
 	 */
 	readSessionEntries?: () => ReadonlyArray<SessionEntry>;
-	/** Information-flow admission of each model request; see TurnRuntimeDeps.admitFlow. */
+	/**
+	 * Information-flow admission of each model request; see TurnRuntimeDeps.admitFlow. It also admits
+	 * /btw, /draft, /handoff and the pre-warm, which send the live runtime's history.
+	 */
 	admitFlow?: (destination: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
-	/** The same admission for /btw, /draft, /handoff and the pre-warm, which send the live runtime's history. */
-	admitRuntimeFlow?: (runtime: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
 	/** Labels the information-flow sources that `@file` references inlined into a submitted prompt. */
 	labelReferencedPaths?: (paths: ReadonlyArray<string>) => void;
 	/** Why an operator's context-handoff request, with the `@file` paths it inlines, may not run in this session, or null. */
@@ -1120,8 +1116,6 @@ export interface CreateChatLoopDeps {
 	currentOperatorTask?: () => string;
 	/** Typed steering triage when a route is bound. Absent or unbound, triage is the side-model round. */
 	systemOne?: TriageSystemOne;
-	/** Called once when a submitted turn settles, whether it completed, failed or was cancelled. */
-	onTurnSettled?: () => void;
 	getReadySkillCount?: () => number;
 	/** The api 2 extensions' pinned context blocks; only a main session supplies them, so workers never see one. */
 	pinnedContext?: () => ReadonlyArray<PinnedContextBlock>;
@@ -1154,13 +1148,6 @@ export interface CreateChatLoopDeps {
 	 */
 	hasAttachedDispatch?: () => boolean;
 	/**
-	 * True while any dispatched worker run is outstanding, attached or detached.
-	 * The session pre-warm stands down in that state so it never competes for the
-	 * endpoint a worker is already using. Defaults to `hasAttachedDispatch`, which
-	 * is the narrower fact a bare composition has.
-	 */
-	hasActiveDispatch?: () => boolean;
-	/**
 	 * True on a surface where a person is about to type the next turn. The
 	 * orchestrator wires this false for headless `run`: the pre-warm buys latency
 	 * that an unattended run never spends. Defaults to true.
@@ -1168,14 +1155,6 @@ export interface CreateChatLoopDeps {
 	isLatencySurface?: () => boolean;
 	/** An editor draft already owns the next foreground request. */
 	isPrewarmBusy?: () => boolean;
-	/** The session pre-warm round. Injectable for the same reason `runSideQuestion` is. */
-	runPrewarm?: typeof runPrewarmRound;
-	/**
-	 * Whether a submit aborts the in-flight pre-warm's request or only lets go of
-	 * it. Defaults to what the measured local backend does with a cancelled
-	 * request; see `ABORT_ROUND_ON_SUBMIT` in `turn-prewarm.ts`.
-	 */
-	abortPrewarmOnSubmit?: boolean;
 	/**
 	 * Claim one in-flight request on the pre-warm's endpoint for the duration of
 	 * the round. Wired from the endpoint-capacity registry once #250 lands, so a
@@ -1245,8 +1224,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const sessionResetListeners = new Set<() => void>();
 	const createAgent = deps.createAgent ?? createEngineAgent;
 	const sideQuestionRound = deps.runSideQuestion ?? runSideQuestion;
-	const handoffRound = deps.runHandoffRound ?? runHandoffRound;
-	const draftRound = deps.runDraftRound ?? runOutOfTurnRound;
 	const middlewareToolChoice = deps.middlewareToolChoice ?? createMiddlewareToolChoiceControl();
 	const state = createTurnState();
 	const operatorToolLimits = snapshotTurnConstraints(deps.sessionToolLimits);
@@ -2576,11 +2553,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		providers: deps.providers,
 		context,
 		bus: deps.bus,
-		...(deps.admitRuntimeFlow !== undefined ? { admitRuntimeFlow: deps.admitRuntimeFlow } : {}),
+		...(deps.admitFlow !== undefined ? { admitRuntimeFlow: deps.admitFlow } : {}),
 		...(deps.session ? { session: deps.session } : {}),
 		isLatencySurface: () => deps.isLatencySurface?.() !== false,
 		isTurnActive: () => turnActive || deps.isPrewarmBusy?.() === true,
-		hasActiveDispatch: () => (deps.hasActiveDispatch ?? deps.hasAttachedDispatch)?.() === true,
+		hasActiveDispatch: () => deps.hasAttachedDispatch?.() === true,
 		prepareRuntime: async (signal) => {
 			// The same probe a submit awaits, so the pre-warm resolves the model the
 			// next turn will resolve rather than a stale catalog entry.
@@ -2596,8 +2573,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				sessionToolLimits,
 			);
 		},
-		...(deps.runPrewarm ? { runPrewarm: deps.runPrewarm } : {}),
-		...(deps.abortPrewarmOnSubmit === undefined ? {} : { abortRoundOnSubmit: deps.abortPrewarmOnSubmit }),
 		...(deps.registerPrewarmEndpointSlot ? { registerEndpointSlot: deps.registerPrewarmEndpointSlot } : {}),
 	});
 	const unsubscribePrewarmCompaction = subscribePrewarmToCompaction(deps.bus, prewarm);
@@ -2782,15 +2757,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			};
 			// The queued texts carry whatever the operator inlined into them, so the
 			// round is admitted under the session's flow restrictions like any side round.
-			if ((deps.admitRuntimeFlow?.(destination) ?? null) !== null) return;
+			if ((deps.admitFlow?.(destination) ?? null) !== null) return;
 			const endpointKey = modelEndpointKey(resolved.target, resolved.wireModelId);
 			const release = endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
 			const origin = deps.session?.current() ?? null;
 			let result: SideQuestionResult;
 			try {
-				result = await draftRound({
+				result = await runOutOfTurnRound({
 					...sideCallJournal(resolved, "helper", origin),
-					admitFlow: () => deps.admitRuntimeFlow?.(destination) ?? null,
+					admitFlow: () => deps.admitFlow?.(destination) ?? null,
 					model: resolved.model,
 					messages: [],
 					systemPrompt: TRIAGE_SYSTEM_PROMPT,
@@ -4491,7 +4466,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					sideQuestionRound({
 						...sideCallJournal(prepared.runtime, "btw", prepared.origin),
 						beforeRequest: sideCallAdmission(prepared.origin, slot, options.signal),
-						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
+						admitFlow: () => deps.admitFlow?.(prepared.runtime) ?? null,
 						model: prepared.runtime.agent.state.model,
 						// Read-only: the round appends its own message to this copy, so
 						// the live agent's history is untouched.
@@ -4544,10 +4519,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								index,
 								samplingTemperature,
 								(sampling) =>
-									draftRound({
+									runOutOfTurnRound({
 										...sideCallJournal(prepared.runtime, "helper", prepared.origin),
 										beforeRequest: sideCallAdmission(prepared.origin, slot, options.signal),
-										admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
+										admitFlow: () => deps.admitFlow?.(prepared.runtime) ?? null,
 										model: prepared.runtime.agent.state.model,
 										// One snapshot for every candidate, read-only as the side question's is.
 										messages,
@@ -4596,10 +4571,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			let result: SideQuestionResult;
 			try {
 				result = await withEndpointSlot(prepared.runtime, (slot) =>
-					handoffRound({
+					runHandoffRound({
 						...sideCallJournal(prepared.runtime, "handoff", prepared.origin),
 						beforeRequest: sideCallAdmission(prepared.origin, slot, options.signal),
-						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
+						admitFlow: () => deps.admitFlow?.(prepared.runtime) ?? null,
 						model: prepared.runtime.agent.state.model,
 						// Read-only, exactly as the side-question round treats it.
 						messages: prepared.runtime.agent.state.messages,
@@ -4770,11 +4745,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (machinePreparation?.token === preparationToken) machinePreparation = null;
 			turnActive = false;
 			keepalive.cancel();
-			try {
-				deps.onTurnSettled?.();
-			} catch {
-				// Settle hooks are housekeeping and never cost the turn.
-			}
 		});
 		// A steer during a run is a submit that returns at once. Replacing the record with it forgot the
 		// live run, so an interrupt's wait for the cancel to settle returned early and shutdown could stop the writer
