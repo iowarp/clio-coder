@@ -182,6 +182,10 @@ export function createFinishContractRegistration(
 			// An empty final text is not a completion claim. The assessor reads
 			// only ledger receipts, so the text is otherwise unused here.
 			if ((input.text?.trim() ?? "").length === 0) return [];
+			// A step turn runs one pipeline step by contract; while a step continuation follows it, its change waits
+			// for the turn that ends the pipeline, which assesses every step's changes and checks together (bt-12 #4).
+			if (input.metadata?.stepContinues === true) return [];
+			const pipelineStart = input.metadata?.stepPipelineStartTurnId;
 			let entries: ReadonlyArray<unknown> | null;
 			try {
 				entries = options.readSessionEntries();
@@ -201,6 +205,7 @@ export function createFinishContractRegistration(
 				rigor,
 				...(activeAcceptance ? { activeAcceptance } : {}),
 				assistantTurnId: input.turnId ?? null,
+				...(typeof pipelineStart === "string" ? { windowStartTurnId: pipelineStart } : {}),
 			});
 			recordDecision(options, input, assessment, rigor);
 			if (assessment.kind === "ok")

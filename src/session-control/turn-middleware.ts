@@ -56,6 +56,11 @@ export interface TurnMiddlewareDeps {
 	emitOperatorTip?: (message: string, key: string) => void;
 	/** Journals a middleware failure that escaped the runtime, as `middleware.hook_failed`. */
 	bus?: TelemetryHub | undefined;
+	/**
+	 * At turn_end of a step-policy turn, before it settles: whether a step continuation follows it, and the user row
+	 * of the earlier turn that opened the step pipeline it continues (bt-12 #4). Null off a step-policy turn.
+	 */
+	stepTurnEnd?: () => { continues: boolean; startTurnId?: string } | null;
 }
 
 export interface TurnMiddleware {
@@ -509,6 +514,9 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			// tool hooks and turn_end correlate through the initiating user turn.
 			if (state.activeUserTurnId) metadata.userTurnId = state.activeUserTurnId;
 			if (typeof stopReason === "string") metadata.stopReason = stopReason;
+			const step = deps.stepTurnEnd?.() ?? null;
+			if (step?.continues === true) metadata.stepContinues = true;
+			if (step?.startTurnId !== undefined) metadata.stepPipelineStartTurnId = step.startTurnId;
 			const sessionId = deps.session?.current()?.id;
 			const input: MiddlewareHookInput = {
 				hook: "turn_end",

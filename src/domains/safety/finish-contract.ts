@@ -136,6 +136,11 @@ export interface FinishContractInput {
 	sessionVerifiers?: ReadonlyArray<SessionVerifier>;
 	assistantTurnId?: string | null;
 	recentEntryLimit?: number;
+	/**
+	 * The user row a step pipeline began at (bt-12 #4): the window runs from it to the assistant turn, past the
+	 * continuation rows in between and past `recentEntryLimit`, so the turn that ends the pipeline sees every step.
+	 */
+	windowStartTurnId?: string;
 	rigor?: Rigor;
 	activeAcceptance?: UserTaskAcceptance;
 	/** Owning session workspace, supplied by the finish registration. */
@@ -237,7 +242,12 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 function assessMutationFinishContract(input: FinishContractInput): FinishContractAssessment {
 	const sessionEntries = input.sessionEntries ?? [];
 	const assistantTurnId = input.assistantTurnId ?? null;
-	const window = recentEntries(sessionEntries, assistantTurnId, input.recentEntryLimit ?? DEFAULT_RECENT_ENTRY_LIMIT);
+	const window = recentEntries(
+		sessionEntries,
+		assistantTurnId,
+		input.recentEntryLimit ?? DEFAULT_RECENT_ENTRY_LIMIT,
+		input.windowStartTurnId,
+	);
 
 	const { paths: touchedPaths, written } = mutatingReceipts(window);
 	if (touchedPaths.length === 0) {
@@ -878,12 +888,18 @@ export function recentEntries(
 	entries: ReadonlyArray<unknown>,
 	assistantTurnId: string | null,
 	recentEntryLimit: number,
+	startTurnId?: string,
 ): ReadonlyArray<unknown> {
 	const boundedLimit =
 		Number.isFinite(recentEntryLimit) && recentEntryLimit > 0 ? Math.floor(recentEntryLimit) : DEFAULT_RECENT_ENTRY_LIMIT;
 	const assistantIndex =
 		assistantTurnId === null ? -1 : entries.findIndex((entry) => turnIdOf(entry) === assistantTurnId);
 	const endExclusive = assistantIndex >= 0 ? assistantIndex : entries.length;
+	const startIndex =
+		startTurnId === undefined
+			? -1
+			: entries.findIndex((entry, index) => index < endExclusive && turnIdOf(entry) === startTurnId);
+	if (startIndex >= 0 && isUserMessageEntry(entries[startIndex])) return entries.slice(startIndex + 1, endExclusive);
 	let startInclusive = Math.max(0, endExclusive - boundedLimit);
 	for (let index = endExclusive - 1; index >= startInclusive; index -= 1) {
 		if (isUserMessageEntry(entries[index])) {

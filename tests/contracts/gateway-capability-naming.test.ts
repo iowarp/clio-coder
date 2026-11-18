@@ -359,7 +359,7 @@ test("footer tallies count the capability a gateway call ran and each settled ch
 	const noop = (): void => undefined;
 	const handlers: Array<(event: ChatLoopEvent) => void> = [];
 	const starts: string[] = [];
-	const ends: Array<[string, string, boolean]> = [];
+	const ends: Array<[string, string, boolean, boolean]> = [];
 	const projection = createInteractiveEventProjection({
 		bus: createTelemetryHub(),
 		chat: {
@@ -377,7 +377,8 @@ test("footer tallies count the capability a gateway call ran and each settled ch
 		closeAskUserSession: noop,
 		resetAskUserCancellation: noop,
 		recordToolStart: (toolName) => starts.push(toolName),
-		recordToolEnd: (toolName, toolCallId, isError) => ends.push([toolName, toolCallId, isError]),
+		recordToolEnd: (toolName, toolCallId, isError, _truncated, settledAsSteps) =>
+			ends.push([toolName, toolCallId, isError, settledAsSteps]),
 		setLastTurnSummary: noop,
 		startTerminalProgress: noop,
 		stopTerminalProgress: noop,
@@ -403,12 +404,12 @@ test("footer tallies count the capability a gateway call ran and each settled ch
 	emit({ type: "tool_execution_start", toolCallId: "c", toolName: "gateway", args: chainArgs });
 	emit({ type: "tool_execution_end", toolCallId: "c", toolName: "gateway", result: chainResult, isError: true });
 	assert.deepEqual(starts, ["bash", "gateway", "grep", "bash"]);
-	// The chain failed through its bash step, so the failure is counted once, on that step.
+	// The chain counts as its steps: its own tally is withdrawn, and the failure is counted once, on the bash step.
 	assert.deepEqual(ends, [
-		["bash", "g", false],
-		["gateway", "c", false],
-		["grep", "c:a", false],
-		["bash", "c:b", true],
+		["bash", "g", false, false],
+		["gateway", "c", false, true],
+		["grep", "c:a", false, false],
+		["bash", "c:b", true, false],
 	]);
 	projection.dispose();
 });

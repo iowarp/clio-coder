@@ -45,6 +45,9 @@ interface Run {
 	/** Loop-guard blocks and step-policy refusals the run raised. */
 	guardEvents: string[];
 	stepPipeline: ReturnType<NonNullable<ReturnType<typeof createChatLoop>["stepPipeline"]>> | null;
+	/** Each turn_end's step metadata, and the user row of the operator turn the run started with. */
+	turnEnds: { stepContinues?: unknown; stepPipelineStartTurnId?: unknown }[];
+	firstUserTurnId: string | undefined;
 	close(): Promise<void>;
 }
 
@@ -151,8 +154,18 @@ async function drive(
 		},
 	});
 
+	const turnEnds: Run["turnEnds"] = [];
 	const middleware: MiddlewareContract = {
-		runHook: (input) => ({ hook: input.hook, input, effects: [], ruleIds: [] }),
+		runHook: (input) => {
+			if (input.hook === "turn_end") {
+				const { stepContinues, stepPipelineStartTurnId } = input.metadata ?? {};
+				turnEnds.push({
+					...(stepContinues === undefined ? {} : { stepContinues }),
+					...(stepPipelineStartTurnId === undefined ? {} : { stepPipelineStartTurnId }),
+				});
+			}
+			return { hook: input.hook, input, effects: [], ruleIds: [] };
+		},
 		snapshot: () => ({ version: 1, rules: [] }),
 	};
 	const turns: Run["turns"] = [];
@@ -316,6 +329,8 @@ async function drive(
 		continued,
 		guardEvents,
 		stepPipeline: loop.stepPipeline?.() ?? null,
+		turnEnds,
+		firstUserTurnId: entries.find((entry) => entry.kind === "message" && entry.role === "user")?.turnId,
 		close: async () => {
 			loop?.dispose();
 			await loop?.whenSettled();
@@ -382,7 +397,7 @@ describe("template turnPolicy when", () => {
 			deepStrictEqual(run.turns[0]?.verdicts, ["ok", "blocked"]);
 			strictEqual(run.turns[0]?.constraints?.turnPolicy?.stepTool, STEP);
 			ok(run.turns[0]?.text.includes("This step policy applies on this route (when: small)."), run.turns[0]?.text);
-			strictEqual(run.continued[0], "tool_budget");
+			strictEqual(run.continued[0], "step");
 		} finally {
 			await run.close();
 		}
@@ -429,8 +444,15 @@ describe("template turnPolicy when", () => {
 				compliant.turns.map((turn) => turn.verdicts),
 				[["ok"], ["ok"], ["ok"]],
 			);
-			deepStrictEqual(compliant.continued, ["tool_budget", "tool_budget"]);
+			deepStrictEqual(compliant.continued, ["step", "step"]);
 			deepStrictEqual(compliant.guardEvents, []);
+			// The finish contract waits on the step turns a continuation follows and assesses the pipeline at its end (bt-12 #4).
+			ok(compliant.firstUserTurnId !== undefined);
+			deepStrictEqual(compliant.turnEnds, [
+				{ stepContinues: true },
+				{ stepContinues: true, stepPipelineStartTurnId: compliant.firstUserTurnId },
+				{ stepPipelineStartTurnId: compliant.firstUserTurnId },
+			]);
 		} finally {
 			await compliant.close();
 		}
@@ -449,6 +471,19 @@ describe("template turnPolicy when", () => {
 		} finally {
 			await endless.close();
 		}
+		// The last continuation ran no step and ended on its own summary: no step was cut off, the tool just never said done (N1).
+		const unreported = await drive(route, policy, undefined, { calls: [1, 1, 1, 0] });
+		try {
+			strictEqual(unreported.turns.length, 1 + TURN_CONTINUATION_CAP);
+			deepStrictEqual(unreported.stepPipeline, {
+				stepTool: STEP,
+				template: "wtfp:advance",
+				done: false,
+				stoppedBy: "unreported",
+			});
+		} finally {
+			await unreported.close();
+		}
 	});
 
 	it("a step call inside a gateway chain counts as the turn's step, so the pipeline continues to its end (bt-15)", async () => {
@@ -463,7 +498,7 @@ describe("template turnPolicy when", () => {
 				run.turns.map((turn) => turn.verdicts),
 				[["ok"], ["ok"]],
 			);
-			deepStrictEqual(run.continued, ["tool_budget"]);
+			deepStrictEqual(run.continued, ["step"]);
 			deepStrictEqual(run.stepPipeline, { stepTool: STEP, template: "wtfp:advance", done: true });
 		} finally {
 			await run.close();

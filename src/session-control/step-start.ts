@@ -172,18 +172,43 @@ export interface StepRun {
  * left. An operator turn, or a turn without the policy, starts over.
  */
 export function createStepPipeline(): {
-	settle(stepTool: string | undefined, ran: { pipelineDone: boolean } | null, continuation: boolean): StepRun | null;
+	/** `turnId` is the settling turn's user row, kept as the pipeline's start when this turn opens it. */
+	settle(
+		stepTool: string | undefined,
+		ran: { pipelineDone: boolean } | null,
+		continuation: boolean,
+		turnId?: string | null,
+	): StepRun | null;
+	/**
+	 * What `settle` would return for a turn that has not settled yet, without changing the pipeline, and the user
+	 * row of the earlier turn that opened the pipeline this turn continues (bt-12 #4).
+	 */
+	peek(
+		stepTool: string | undefined,
+		ran: { pipelineDone: boolean } | null,
+		continuation: boolean,
+	): { run: StepRun | null; startTurnId?: string };
 } {
-	let open: string | null = null;
+	let open: { stepTool: string; startTurnId: string | null } | null = null;
+	const continued = (stepTool: string | undefined, continuation: boolean) =>
+		stepTool !== undefined && continuation && open?.stepTool === stepTool ? open : null;
+	const outcome = (ran: { pipelineDone: boolean } | null, prior: typeof open): StepRun | null =>
+		ran !== null ? ran : prior === null ? null : { pipelineDone: false, carried: true };
 	return {
-		settle(stepTool, ran, continuation) {
-			if (stepTool === undefined || !continuation || open !== stepTool) open = null;
-			if (stepTool === undefined) return null;
-			if (ran !== null) {
-				open = ran.pipelineDone ? null : stepTool;
-				return ran;
+		settle(stepTool, ran, continuation, turnId) {
+			const prior = continued(stepTool, continuation);
+			if (stepTool === undefined) {
+				open = null;
+				return null;
 			}
-			return open === null ? null : { pipelineDone: false, carried: true };
+			const run = outcome(ran, prior);
+			open = run === null || run.pipelineDone ? null : (prior ?? { stepTool, startTurnId: turnId ?? null });
+			return run;
+		},
+		peek(stepTool, ran, continuation) {
+			const prior = continued(stepTool, continuation);
+			const run = stepTool === undefined ? null : outcome(ran, prior);
+			return prior === null || prior.startTurnId === null ? { run } : { run, startTurnId: prior.startTurnId };
 		},
 	};
 }

@@ -111,6 +111,18 @@ describe("arena stream facts", () => {
 		assert.equal(facts.cost?.usd.measured, 0);
 	});
 
+	it("counts a gateway chain as its steps, not its steps and the wrapper frame", () => {
+		const facts = readArenaStream(
+			frames(
+				{ type: "tool_execution_end", toolCallId: "c1", toolName: "gateway", outcome: "error", isError: true },
+				{ type: "tool_execution_end", toolCallId: "c1:w", parentToolCallId: "c1", actionClass: "write", outcome: "ok" },
+				{ type: "tool_execution_end", toolCallId: "c1:r", parentToolCallId: "c1", outcome: "error", isError: true },
+				{ type: "tool_execution_end", toolCallId: "g2", toolName: "gateway", outcome: "ok" },
+			),
+		);
+		assert.deepEqual([facts.toolCalls, facts.writes, facts.toolErrors], [3, 1, 1]);
+	});
+
 	it("counts a file an extension tool wrote, which the stream reports as execute", () => {
 		const facts = readArenaStream(
 			frames({ type: "tool_execution_end", toolName: "extension_desk__record", actionClass: "execute", outcome: "ok" }),

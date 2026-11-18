@@ -1091,25 +1091,34 @@ function reloadProtectedArtifactsForSession(
  * How the last step pipeline ended, for a headless caller: `done` when its step
  * tool said `pipelineDone`; otherwise `stoppedBy` says whether the yolo
  * continuation cap (`cap`) or the end of a turn nothing continued (`turn`:
- * autonomy below yolo, a cancel, a failure) stopped it (bt-15).
+ * autonomy below yolo, a cancel, a failure) stopped it (bt-15). `unreported`
+ * is a pipeline whose last turn, at the cap, made no step call and ended on
+ * its own summary: no step was cut off, but the step tool never said
+ * `pipelineDone`, so whether every step ran is unknown (N1).
  */
 export interface StepPipelineEnd {
 	stepTool: string;
 	template?: string;
 	done: boolean;
-	stoppedBy?: "cap" | "turn";
+	stoppedBy?: "cap" | "turn" | "unreported";
 }
 
 function stepPipelineEnd(
 	policy: { stepTool: string; template?: string },
 	run: StepRun,
 	capSpent: boolean,
+	settledCleanly: boolean,
 ): StepPipelineEnd {
+	const stoppedBy = !capSpent
+		? ("turn" as const)
+		: run.carried === true && settledCleanly
+			? ("unreported" as const)
+			: ("cap" as const);
 	return {
 		stepTool: policy.stepTool,
 		...(policy.template === undefined ? {} : { template: policy.template }),
 		done: run.pipelineDone,
-		...(run.pipelineDone ? {} : { stoppedBy: capSpent ? ("cap" as const) : ("turn" as const) }),
+		...(run.pipelineDone ? {} : { stoppedBy }),
 	};
 }
 
@@ -1503,6 +1512,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitNotice: (text, level, source) => emitNotice(text, level, undefined, undefined, source),
 		emitFooterNotice,
 		bus: deps.bus,
+		stepTurnEnd: () => stepTurnEnd(),
 	});
 
 	try {
@@ -2034,6 +2044,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const stepStarts = createStepStartTracker();
 	const stepPipeline = createStepPipeline();
 	let lastStepPipeline: StepPipelineEnd | null = null;
+	/** The running submit's runtime, where its own messages start, and whether it is a yolo continuation. */
+	let stepTurnScope: { runtime: AgentRuntime; messageStart: number; continuation: boolean } | null = null;
 	const unsubscribeToolBudgetLock =
 		deps.bus?.subscribe("safety.tool_budget_exceeded", (payload) => {
 			state.toolBudgetLock = true;
@@ -2081,7 +2093,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const named = template ? `prompt template ${template}` : "its template";
 		const stepTool = state.currentTurnConstraints?.turnPolicy?.stepTool ?? "the step tool";
 		const step = {
-			cause: "tool_budget" as const,
+			cause: "step" as const,
 			reason:
 				stepRun?.carried === true
 					? `it made no ${stepTool} call, and the step pipeline of ${named} has not said it is done`
@@ -2114,6 +2126,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			...(stop.cause === "loop_guard" && guardFailure !== null ? [loopGuardContinuationDetail(guardFailure)] : []),
 		];
 		return detail.length === 0 ? stop : { ...stop, detail: detail.join("\n") };
+	};
+
+	/**
+	 * A step turn runs one pipeline step by contract, so the finish contract waits while a step continuation follows
+	 * it and assesses the whole pipeline at the turn that ends it (bt-12 #4). Read at turn_end, before the turn settles.
+	 */
+	const stepTurnEnd = (): { continues: boolean; startTurnId?: string } | null => {
+		const stepTool = state.currentTurnConstraints?.turnPolicy?.stepTool;
+		const scope = stepTurnScope;
+		if (stepTool === undefined || scope === null) return null;
+		const ran = stepTurnOutcome(scope.runtime.agent.state.messages.slice(scope.messageStart), stepTool);
+		const { run, startTurnId } = stepPipeline.peek(stepTool, ran, scope.continuation);
+		const continues = run !== null && yoloContinuationDue(false, null, stepPolicyStop, run)?.step === true;
+		return { continues, ...(startTurnId === undefined ? {} : { startTurnId }) };
 	};
 
 	/**
@@ -3638,6 +3664,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				turnRetryAttempts = 0;
 				providerRetryAttempts = 0;
 				const machineMessageStart = agentRuntime.agent.state.messages.length;
+				stepTurnScope = {
+					runtime: agentRuntime,
+					messageStart: machineMessageStart,
+					continuation: options.yoloContinuation === true,
+				};
 				recovery.noteAttemptStart(machineMessageStart);
 				const priorPendingSkillPolicy = state.currentPendingSkillPolicy;
 				const priorAskUserPolicy = state.currentAskUserPolicy;
@@ -3970,12 +4001,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					const stepStop = stepPolicyStop;
 					stepPolicyStop = null;
 					const stepPolicy = state.currentTurnConstraints?.turnPolicy;
+					stepTurnScope = null;
 					const stepRun = stepPipeline.settle(
 						stepPolicy?.stepTool,
 						stepPolicy
 							? stepTurnOutcome(agentRuntime.agent.state.messages.slice(machineMessageStart), stepPolicy.stepTool)
 							: null,
 						options.yoloContinuation === true,
+						userTurnId,
 					);
 					// Only a step turn that ended on its own text, or that its step policy ended, leaves a state summary
 					// the next step can start from. A failed turn, a loop-guard stop or a real budget crossing stopped
@@ -4000,12 +4033,28 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							: null;
 					if (options.machineTurn === undefined && generation === submitGeneration && continuation === null) {
 						const capSpent = state.continuation.yoloContinuations >= TURN_CONTINUATION_CAP;
-						lastStepPipeline = stepPolicy && stepRun !== null ? stepPipelineEnd(stepPolicy, stepRun, capSpent) : null;
+						// A last turn that made no step call and ended on its own summary did not stop mid-pipeline (N1).
+						const settledCleanly =
+							!canceled &&
+							!interviewDismissed &&
+							state.continuation.stop === null &&
+							!guardStopped &&
+							!state.synthesisToolLock &&
+							!state.toolBudgetLock;
+						lastStepPipeline =
+							stepPolicy && stepRun !== null ? stepPipelineEnd(stepPolicy, stepRun, capSpent, settledCleanly) : null;
+						const named = lastStepPipeline?.template ? `prompt template ${lastStepPipeline.template}` : "this template";
 						if (lastStepPipeline?.stoppedBy === "cap")
 							emitNotice(
-								`The step pipeline of ${lastStepPipeline.template ? `prompt template ${lastStepPipeline.template}` : "this template"} stopped at the continuation cap (${TURN_CONTINUATION_CAP}) before ${lastStepPipeline.stepTool} said it was done.`,
+								`The step pipeline of ${named} stopped at the continuation cap (${TURN_CONTINUATION_CAP}) with a step still running, before ${lastStepPipeline.stepTool} said it was done.`,
 								"warning",
 								"step.incomplete",
+							);
+						else if (lastStepPipeline?.stoppedBy === "unreported")
+							emitNotice(
+								`The step pipeline of ${named} ended on a turn that made no ${lastStepPipeline.stepTool} call; the step tool never reported pipelineDone, so whether every step ran is not known.`,
+								"info",
+								"step.unreported",
 							);
 					}
 					if (

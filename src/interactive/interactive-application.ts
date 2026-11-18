@@ -1211,8 +1211,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			presentation.recordToolStart(toolCallId, toolName);
 			turnObservations?.toolStart(toolCallId);
 		},
-		recordToolEnd: (toolName, toolCallId, isError, truncated) => {
-			presentation.recordToolEnd({ toolCallId, isError, truncated });
+		recordToolEnd: (toolName, toolCallId, isError, truncated, settledAsSteps) => {
+			presentation.recordToolEnd({ toolCallId, isError, truncated, ...(settledAsSteps ? { settledAsSteps } : {}) });
 			turnObservations?.toolEnd(toolName, toolCallId, isError);
 		},
 		setLastTurnSummary: (summary) => {

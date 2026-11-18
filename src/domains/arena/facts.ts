@@ -74,6 +74,9 @@ function assistantText(message: unknown): string {
  * Token and cost sums stay FactSums, so an unpriced route reads as not
  * measured downstream, never as zero. A headless turn may span several agent
  * segments, each closing with its own `agent_end`, so their usage adds up.
+ * A gateway chain's end frame is followed by one frame per settled step, each
+ * naming the chain in `parentToolCallId`; the chain counts as its steps, so the
+ * first step frame takes back what its wrapper frame added.
  */
 export function readArenaStream(ndjson: string): ArenaStreamFacts {
 	const facts: ArenaStreamFacts = {
@@ -88,6 +91,7 @@ export function readArenaStream(ndjson: string): ArenaStreamFacts {
 		finalText: "",
 		autonomy: null,
 	};
+	const wrappers = new Map<string, "blocks" | "toolErrors" | "writes" | null>();
 	for (const line of ndjson.split("\n")) {
 		const trimmed = line.trim();
 		if (!trimmed.startsWith("{")) continue;
@@ -109,11 +113,24 @@ export function readArenaStream(ndjson: string): ArenaStreamFacts {
 				break;
 			}
 			case "tool_execution_end": {
+				const parent = typeof frame.parentToolCallId === "string" ? frame.parentToolCallId : undefined;
+				if (parent !== undefined && wrappers.has(parent)) {
+					const counted = wrappers.get(parent);
+					wrappers.delete(parent);
+					facts.toolCalls -= 1;
+					if (counted) facts[counted] -= 1;
+				}
 				facts.toolCalls += 1;
 				const blocked = frame.decision === "blocked" || frame.decision === "denied" || frame.outcome === "blocked";
-				if (blocked) facts.blocks += 1;
-				else if (frame.isError === true || frame.outcome === "error") facts.toolErrors += 1;
-				else if (frame.actionClass === "write" && frame.outcome === "ok") facts.writes += 1;
+				const counted = blocked
+					? "blocks"
+					: frame.isError === true || frame.outcome === "error"
+						? "toolErrors"
+						: frame.actionClass === "write" && frame.outcome === "ok"
+							? "writes"
+							: null;
+				if (counted) facts[counted] += 1;
+				if (parent === undefined && typeof frame.toolCallId === "string") wrappers.set(frame.toolCallId, counted);
 				break;
 			}
 			case "autonomy": {

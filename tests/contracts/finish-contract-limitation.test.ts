@@ -312,6 +312,40 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		deepStrictEqual(audits[2]?.verificationScope?.acceptance, [{ check: "test", state: "passed" }]);
 	});
 
+	it("waits on a step turn a step continuation follows and assesses the whole pipeline at its end (bt-12 #4)", async () => {
+		const entries = [
+			userMessage("user-1"),
+			toolCall("write-1", ToolNames.Write, { path: "src/clean.py", content: "x" }),
+			toolResult("write-1", ToolNames.Write, false),
+			assistantMessage("assistant-1", "Stage 2/3 clean done."),
+		];
+		const audits: CompletionEvaluationInput[] = [];
+		const registration = createFinishContractRegistration({
+			readSessionEntries: () => entries,
+			recordDecision: (input) => audits.push(input),
+		});
+		const step = await registration.evaluate({
+			hook: "turn_end",
+			text: "Stage 2/3 clean done.",
+			turnId: "assistant-1",
+			metadata: { stepContinues: true },
+		});
+		deepStrictEqual(step, []);
+		strictEqual(audits.length, 0);
+		// The last step turn changed nothing itself; the window from the pipeline's start still holds the first step's change.
+		entries.push(userMessage("user-2"), assistantMessage("assistant-2", "Pipeline complete."));
+		const end = await registration.evaluate({
+			hook: "turn_end",
+			text: "Pipeline complete.",
+			turnId: "assistant-2",
+			metadata: { stepPipelineStartTurnId: "user-1" },
+		});
+		strictEqual(end.length, 1);
+		const [advisory] = end;
+		ok(advisory?.kind === "inject_reminder" && advisory.message.startsWith(FINISH_CONTRACT_ADVISORY_MESSAGE));
+		deepStrictEqual(audits[0]?.mutatedPaths, ["src/clean.py"]);
+	});
+
 	it("accepts a successful native Node test receipt after an edit but not a failed test", () => {
 		for (const isError of [false, true]) {
 			const entries = [
