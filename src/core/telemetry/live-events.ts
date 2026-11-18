@@ -285,9 +285,9 @@ export interface ToolBudgetExceededPayload {
 	tool: string;
 	/** Distinct tool-call attempts observed in the current user turn, this one included. */
 	callsThisTurn: number;
-	/** Soft per-turn budget that triggers the re-plan nudge. */
+	/** Soft per-turn budget: the calls a turn may make before the re-plan refusal. */
 	softBudget: number;
-	/** Hard per-turn ceiling that interrupts the turn. */
+	/** Hard per-turn ceiling: the attempt after it interrupts the turn. */
 	hardCeiling: number;
 	/** True when the hard ceiling is reached and the turn must stop. */
 	interrupted: boolean;

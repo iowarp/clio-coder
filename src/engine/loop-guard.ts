@@ -704,9 +704,9 @@ function parallelStepReason(stepTool: string, template: string | undefined): str
 
 /** Soft/hard per-turn tool-call budget for the interactive orchestrator. */
 export interface OrchTurnToolCallBudget {
-	/** Distinct calls in a turn that trigger the re-plan nudge. */
+	/** Calls a turn may make; the next attempt gets the re-plan refusal. */
 	soft: number;
-	/** Distinct calls in a turn that interrupt the turn. */
+	/** Attempts a turn may make; the next one interrupts the turn. */
 	hard: number;
 }
 
@@ -1429,22 +1429,29 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		}
 		const effectiveTool = effectiveToolCall(input.toolName ?? "unknown", input.toolArgs).toolName;
 		byTool.set(effectiveTool, (byTool.get(effectiveTool) ?? 0) + 1);
-		if (callsThisTurn >= turnBudget.hard) {
+		// `callsThisTurn` counts attempts, this one included. A soft budget of N
+		// admits N calls, so attempt N + 1 is the first refusal; counting the
+		// pending attempt as spent refused the Nth call and a budget of one ran
+		// nothing (Astra r6-4). The stop keeps its margin: hard - soft refused
+		// attempts, then attempt hard + 1 ends the turn.
+		const firstRefusal = turnBudget.soft + 1;
+		const stopAttempt = turnBudget.hard + 1;
+		if (callsThisTurn >= stopAttempt) {
 			// Hard ceiling: interrupt the turn the same way the block budget does.
 			// The bus event drives chat.cancel() in the interactive layer; the
 			// block effect makes the in-flight attempt fail with the same reason.
-			if (callsThisTurn === turnBudget.hard) emitBudgetEvent(input, turnBudget, callsThisTurn, true, now, bound);
+			if (callsThisTurn === stopAttempt) emitBudgetEvent(input, turnBudget, callsThisTurn, true, now, bound);
 			return [
 				{
 					kind: "block_tool",
 					reason:
-						`tool-call budget exhausted: ${callsThisTurn} tool calls in this turn reached the hard ceiling ` +
+						`tool-call budget exhausted: ${callsThisTurn} tool-call attempts in this turn passed the hard ceiling ` +
 						`(${turnBudget.hard}${source}); the turn is being stopped. Summarize what you found and end your reply.`,
 					severity: "hard-block",
 				},
 			];
 		}
-		if (callsThisTurn >= turnBudget.soft) {
+		if (callsThisTurn >= firstRefusal) {
 			// Soft budget: block this attempt and every further one this turn.
 			// The directive must say so plainly — an earlier wording implied a
 			// narrower call could still succeed, which sent even compliant
@@ -1452,12 +1459,12 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// ever run. The operator sees one warn notice per turn (the first
 			// crossing); the model keeps getting the directive on every further
 			// over-budget attempt so it cannot quietly resume spraying calls.
-			if (callsThisTurn === turnBudget.soft) emitBudgetEvent(input, turnBudget, callsThisTurn, false, now, bound);
+			if (callsThisTurn === firstRefusal) emitBudgetEvent(input, turnBudget, callsThisTurn, false, now, bound);
 			return [
 				{
 					kind: "block_tool",
 					reason:
-						`tool-call budget: you have made ${callsThisTurn} tool calls in this turn (soft budget ${turnBudget.soft}${source}). ` +
+						`tool-call budget: this turn has made its ${turnBudget.soft} tool calls (soft budget ${turnBudget.soft}${source}), so this call did not run. ` +
 						`Every further tool call this turn will be blocked, so do not retry this call and do not substitute ` +
 						`another one. Summarize what you have found so far in the required result format, state the single next step you ` +
 						`propose, and end your reply.\n${turnCallsByTool(byTool)}`,

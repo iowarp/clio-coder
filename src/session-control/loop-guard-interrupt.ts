@@ -60,7 +60,7 @@ export function loopBlockedStopReason(evt: LoopBlockedPayload): string {
 /** Operator-facing closing message for a per-turn tool-call ceiling interrupt. */
 export function toolBudgetStopReason(evt: ToolBudgetExceededPayload): string {
 	return (
-		`[Clio Coder] loop guard stopped this turn: ${evt.callsThisTurn} tool calls reached the per-turn ceiling ` +
+		`[Clio Coder] loop guard stopped this turn: ${evt.callsThisTurn} tool-call attempts passed the per-turn ceiling ` +
 		`(${evt.hardCeiling}) without converging. Send one concrete next step, or narrow the request.`
 	);
 }
