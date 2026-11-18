@@ -108,6 +108,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A safety-judge or System One call cut off by shutdown (such as `--timeout`) now settles with the `shutdown` failure cause, as other side calls do (bt-26 N2e).
+- A yolo cap halt's `autonomy.cap_reached` record is journaled when the stop lands and counts the same tool calls as the headless stderr notice. A turn the cap stops at the tool boundary settles with no mid-stream stage, and why-stopped says "at the tool boundary" (bt-26 N2f).
 - A repetition, shutdown or other harness stop no longer reports as `operator_cancel` or `triage_stop` because an earlier turn was stopped with Esc or by triage (x7-3).
 - ACP clients now receive the full text of a later assistant message whose text arrives only on `message_end`, instead of a truncated or missing answer (x7-6).
 - Snapshot and golden update flags on recognised test runners (`go test -update`, `pytest --snapshot-update`/`--force-regen`/`--regen-all`, `bun test -u`/`--update-snapshots`, `--update-goldens`, `cargo insta accept`) now count as tree changes, so a run that regenerated its expectations is no longer credited a passing check (x7-2).
