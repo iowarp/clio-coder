@@ -16,6 +16,9 @@ const DISPATCH_PATH_TOKEN_RE = /\/?(?:[\w.-]+\/)+[\w.-]+|\b[\w-]+\.[A-Za-z0-9]{1
 // `project://paper/background`). `file://` stays visible because its path is a
 // real filesystem path, and a one-letter scheme would swallow `C://` drive text.
 const SCHEME_URI_RE = /\b(?!file:)[A-Za-z][A-Za-z0-9+.-]+:\/\/\S+/giu;
+// A home path (`~/notes/plan.md`) names the operator's home, never a repository path. Left in, the token grammar
+// starts at its slash and reads `/notes/plan.md`, an absolute path the prose never wrote.
+const HOME_PATH_RE = /(?<![\w.~/-])~\/[^\s"'`)]*/gu;
 const POSIX_ABSOLUTE_TOKEN_RE = /(?:^|[\s("'])((?:\/[\w.~+-]+)+)/gu;
 const WINDOWS_ABSOLUTE_TOKEN_RE = /(?:^|[\s("'])([A-Za-z]:[\\/][^\s"']+)/gu;
 const BACKSLASH_PATH_RE = /\b[A-Za-z_.-][\w.-]*\\(?:(?:[\w.-]+\\)+[\w.-]+|[\w-]+\.[A-Za-z0-9]{1,8})\b/gu;
@@ -186,7 +189,8 @@ function inferredPaths(
 	const droppedTokens = new Set<string>();
 	const text = `${req.task}\n${req.briefing ?? ""}`
 		.replace(/^```json[^\n]*\n[\s\S]*?^```[ \t]*$/gmu, "")
-		.replace(SCHEME_URI_RE, "");
+		.replace(SCHEME_URI_RE, "")
+		.replace(HOME_PATH_RE, "");
 	for (const match of text.matchAll(DISPATCH_PATH_TOKEN_RE)) {
 		const inferred = inferredPathToken(match[0], root);
 		if (inferred.kind === "dropped") {
@@ -248,8 +252,14 @@ function inferredPathToken(raw: string, root: string): InferredPathToken {
 		: { kind: "dropped", token };
 }
 
+function withoutNonWorkspaceTokens(text: string): string {
+	return text
+		.replace(SCHEME_URI_RE, (url) => " ".repeat(url.length))
+		.replace(HOME_PATH_RE, (path) => " ".repeat(path.length));
+}
+
 function failMalformedText(text: string, source: "task" | "briefing"): void {
-	const withoutUrls = text.replace(SCHEME_URI_RE, (url) => " ".repeat(url.length));
+	const withoutUrls = withoutNonWorkspaceTokens(text);
 	const absolute = POSIX_ABSOLUTE_TOKEN_RE.exec(withoutUrls)?.[1];
 	POSIX_ABSOLUTE_TOKEN_RE.lastIndex = 0;
 	if (absolute !== undefined) {
@@ -288,7 +298,7 @@ function strictInferredPaths(
 	parentTokens: DispatchInferredParentToken[];
 } {
 	failMalformedText(text, source);
-	const withoutUrls = text.replace(SCHEME_URI_RE, (url) => " ".repeat(url.length));
+	const withoutUrls = withoutNonWorkspaceTokens(text);
 	const evidence: DispatchPathProvenanceEvidence =
 		source === "task"
 			? { provenance: "inferred", source, confidence: "medium", reason: "task_path_token" }

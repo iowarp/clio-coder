@@ -308,7 +308,7 @@ function* loadSession(
 		journal: own,
 		runs,
 		parent: lineage ? { sessionId: lineage.sessionId, turnId: lineage.turnId, at: lineage.at, source: parent } : null,
-		...(forked ? { forkedAt: forked.t } : {}),
+		...(forked?.k === "session.forked" ? { forkTurnId: forked.data.parentTurnId } : {}),
 		...(ledger ? { ledger } : {}),
 	};
 }
@@ -616,7 +616,7 @@ function windowSession(source: SessionSource, from: number, to: number): Session
 		},
 		runs,
 		parent: null,
-		...(source.forkedAt === undefined ? {} : { forkedAt: source.forkedAt }),
+		...(source.forkTurnId === undefined ? {} : { forkTurnId: source.forkTurnId }),
 	};
 }
 

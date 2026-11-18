@@ -147,6 +147,12 @@ export const UNATTENDED_FREE_TEXT_ANSWER = "no answer: proceed with your best ju
  * something is a no, whatever the model listed first.
  */
 export const UNATTENDED_OUTWARD_ANSWER = "no answer: this outward step is not approved; do not take it";
+/**
+ * The answer to a question whose recommended option leaves the workspace or
+ * its sandbox, when nobody answered in time (bt-21). A timeout never approves
+ * an escape, whatever the model marked recommended.
+ */
+export const UNATTENDED_ESCAPE_ANSWER = "no answer: the step outside the workspace is not approved; do not take it";
 
 export interface AskUserCall {
 	action: AskUserAction;
@@ -478,12 +484,21 @@ export function recommendedOptionIndex(question: Pick<AskUserQuestion, "options"
 	);
 }
 
+/** Whether a question's timeout pick would approve leaving the workspace or its sandbox. */
+export function recommendedOptionEscapes(question: Pick<AskUserQuestion, "options">): boolean {
+	const option = question.options?.[recommendedOptionIndex(question)];
+	if (option === undefined) return false;
+	const words = `${option.label} ${option.description ?? ""}`;
+	return /\boutside\b[^.;]*\b(workspace|sandbox|repo|repository|project)\b|\b(escape|unsandboxed)\b/iu.test(words);
+}
+
 /**
  * Answer, for an absent operator, every question the round left open (#421).
  * The prompt contract lists the recommended option first, so a question with
  * options takes that one; a free-text question proceeds on the model's
  * judgment; an outward question is answered no, because a timeout never
- * approves anything that leaves the workspace. Answers the operator committed
+ * approves anything that leaves the workspace, and neither does a recommended
+ * option that steps outside the workspace or sandbox. Answers the operator committed
  * before the window closed are kept as theirs.
  */
 function resolveUnattendedAnswers(
@@ -495,6 +510,8 @@ function resolveUnattendedAnswers(
 		const operator = answered.find((answer) => answer.question === question.question);
 		if (operator !== undefined) return [operator];
 		if (exposure === "outward") return [{ question: question.question, answer: UNATTENDED_OUTWARD_ANSWER, auto: true }];
+		if (recommendedOptionEscapes(question))
+			return [{ question: question.question, answer: UNATTENDED_ESCAPE_ANSWER, auto: true }];
 		const first = question.options?.[recommendedOptionIndex(question)]?.label;
 		if (first === undefined) return [{ question: question.question, answer: UNATTENDED_FREE_TEXT_ANSWER, auto: true }];
 		return [{ question: question.question, answer: first, options: [first], auto: true }];
@@ -793,6 +810,12 @@ function unattendedGuidance(
 		exposure === "outward"
 			? "An outward question nobody answered is a no: do not take that step. Continue with the rest of the task, and name each unanswered outward step as an open decision in your final reply."
 			: "Each unanswered question took its recommended (first) option; a question without options means proceed on your best judgment. These are assumptions, not the operator's decisions: continue the task on them without asking again, and state each assumption in your final reply so the operator can revisit it.",
+		...(exposure !== "outward" &&
+		answers.some((answer) => answer.auto === true && answer.answer === UNATTENDED_ESCAPE_ANSWER)
+			? [
+					"A recommended option that leaves the workspace was declined, not picked: do not take that step, and name it as an open decision in your final reply.",
+				]
+			: []),
 	];
 }
 

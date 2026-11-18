@@ -15,6 +15,36 @@ import { createSessionFileRecorder, sessionFileOutcomeForExitCode } from "../../
 import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 
+test("the session summary counts no failure for a call the output limit cut off (bt-39 a)", () => {
+	const collector = createExitSummaryCollector({
+		bus: createTelemetryHub(),
+		telemetry: {
+			subscribe: () => () => {},
+			read: { live: () => telemetryViewOf("session-1", []), subscribe: () => () => {} },
+		} as unknown as TelemetryContract,
+		dispatch: {},
+		session: { current: () => ({ id: "session-1", hasModelTurn: true }) } as unknown as Pick<SessionContract, "current">,
+		getTurns: () => 1,
+		getToolCounts: () => new Map([["read", 2]]),
+		getModel: () => null,
+	});
+	for (const [id, notRun] of [
+		["cut", "output_limit"],
+		["ran", undefined],
+	] as const) {
+		collector.observeChat({ type: "tool_execution_start", toolCallId: id, toolName: "read", args: {} } as ChatLoopEvent);
+		collector.observeChat({
+			type: "tool_execution_end",
+			toolCallId: id,
+			toolName: "read",
+			isError: true,
+			result: { content: [{ type: "text", text: "failed" }] },
+			...(notRun !== undefined ? { notRun } : {}),
+		} as unknown as ChatLoopEvent);
+	}
+	deepStrictEqual(collector.snapshot()?.tools, [{ tool: "read", count: 2, failures: 1 }]);
+});
+
 test("the session summary counts what Clio answered while the operator was away (#421)", () => {
 	const bus = createTelemetryHub();
 	const telemetry = {
@@ -82,8 +112,17 @@ test("the session summary counts what Clio answered while the operator was away 
 	const verified = { kind: "counted" as const, count: "1", parts: [], tokens: "172,879", cost: "~$0.05 est" };
 	match(
 		renderExitSummary({ ...snapshot, spend: { ...ready, verified } }, "standard", 160, false).join("\n"),
-		/^Verified: 1 outcome · 172,879 session tokens per outcome · ~\$0\.05 est per outcome$/mu,
+		/^Session verified: 1 outcome · 172,879 session tokens per outcome · ~\$0\.05 est per outcome$/mu,
 	);
+	// Every spend row names the session scope, so none reads as this visit's beside the visit's own counts (drv-tui11).
+	for (const style of ["brief", "standard", "report"] as const) {
+		const rows = renderExitSummary({ ...snapshot, spend: { ...ready, verified } }, style, 160, false);
+		ok(!rows.some((row) => /^Verified:/u.test(row)), style);
+		ok(
+			rows.some((row) => /^Session verified: 1 outcome/u.test(row)),
+			style,
+		);
+	}
 	collector.dispose();
 });
 
@@ -401,7 +440,14 @@ test("the exit card divides the session's spend over its distinct verified outco
 	deepStrictEqual(countVerifiedOutcomes(entries, new Set(["run-hidden"])).workers, 0);
 	deepStrictEqual(countVerifiedOutcomes([], new Set(["run-hidden"])).workers, 1);
 	// A fork's ledger copied its parent's passes and done tasks; it counts only what it recorded after it forked (D3b).
-	const copied = [...entries.map((entry, i) => ({ ...entry, timestamp: `2026-11-06T00:0${i}:00.000Z` })), ledger];
+	// The copied rows end at the turn it branched at, and position decides, so a parent clock running ahead and a fork
+	// clock running behind cannot move a pass across the cut (bt-fork-verified limit).
+	const forkPoint = { kind: "message", role: "user", turnId: "turn-1", parentTurnId: null, payload: { content: "go" } };
+	const copied = [
+		...entries.map((entry, i) => ({ ...entry, turnId: `parent-${i}`, timestamp: `2026-11-06T00:0${i + 6}:00.000Z` })),
+		{ ...ledger, turnId: "parent-board" },
+		{ ...forkPoint, timestamp: "2026-11-06T00:04:00.000Z" },
+	];
 	const forkedAt = "2026-11-06T00:05:00.000Z";
 	const forkedRow = makeTelemetryRecord(
 		"session.forked",
@@ -417,7 +463,10 @@ test("the exit card divides the session's spend over its distinct verified outco
 		return spend.verified;
 	};
 	strictEqual(forkCard(copied).kind, "none");
-	const own = forkCard([...copied, { ...passed("reproduce", "repro", "e"), timestamp: "2026-11-06T00:06:00.000Z" }]);
+	const own = forkCard([
+		...copied,
+		{ ...passed("reproduce", "repro", "e"), turnId: "fork-1", timestamp: "2026-11-06T00:03:00.000Z" },
+	]);
 	ok(own.kind === "counted");
 	deepStrictEqual([own.count, own.parts], ["1", ["1 reproduce or numeric-compare pass"]]);
 });

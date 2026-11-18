@@ -25,6 +25,7 @@ test("only integrity-admitted receipt contract facts reach the board and lifecyc
 		trust: verified,
 		contract: "pass",
 		contractKind: "debugger-report",
+		taskWorktree: { branch: "clio/task-aa" },
 	};
 	const bus = createTelemetryHub();
 	const projection = createTelemetryProjection(bus, {
@@ -53,6 +54,7 @@ test("only integrity-admitted receipt contract facts reach the board and lifecyc
 		assert.deepEqual(projection.snapshot().runs[0]?.resultContract, { kind: "debugger-report", conformance: "pass" });
 		store.reconcile();
 		assert.deepEqual(store.rows()[0]?.resultContract, { kind: "debugger-report", conformance: "pass" });
+		assert.deepEqual(store.rows()[0]?.commitPlacement, { branch: "clio/task-aa" });
 		const prior = projection.snapshot();
 		bus.emit("run.started", { ...event, pid: null, assignmentId: "aa-run", attempt: 1 });
 		assert.equal(projection.snapshot().runs[0]?.resultContract, undefined);
@@ -69,9 +71,11 @@ test("only integrity-admitted receipt contract facts reach the board and lifecyc
 		};
 		bus.emit("run.completed", event);
 		assert.deepEqual(projection.snapshot().runs[0]?.resultContract, { kind: "debugger-report", conformance: "fail" });
+		assert.deepEqual(projection.snapshot().runs[0]?.commitPlacement, {});
 		facts = null;
 		bus.emit("run.completed", event);
 		assert.equal(projection.snapshot().runs[0]?.resultContract, undefined);
+		assert.equal(projection.snapshot().runs[0]?.commitPlacement, undefined);
 	} finally {
 		store.unsubscribe();
 		projection.stop();

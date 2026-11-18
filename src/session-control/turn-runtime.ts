@@ -1,3 +1,4 @@
+import { outputLimitCutOffToolCallIds } from "../core/assistant-output.js";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { isHostAuthored, rememberMessageCalls } from "../core/message-accounting.js";
 import { applyModelAdmission, type ModelAdmissionEvent } from "../core/model-admission.js";
@@ -22,7 +23,7 @@ import type { InterruptedUsageEstimate } from "../domains/telemetry/call-facts.j
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../domains/telemetry/session-journals.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
-import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
+import { anchorContextAtInputTokens, estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
 import { resolvedRequestContext } from "../engine/context.js";
 import { hasAssistantGenerationDelta } from "../engine/generation-delta.js";
 import { MODEL_ADMISSION } from "../engine/model-admission.js";
@@ -112,10 +113,12 @@ import {
 } from "./chat-loop-messages.js";
 import { createObservationAging } from "./observation-aging.js";
 import {
+	assessDraftLoop,
 	assessRepetition,
 	assessToolCallFlood,
 	repetitionAbortReason,
 	shouldAssessRepetition,
+	thinkingOverrunReason,
 	toolCallFloodAbortReason,
 } from "./repetition-detector.js";
 import type { ModelRequestFacts, ModelRequestSlots } from "./status-types.js";
@@ -438,6 +441,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			| "unresolved"
 		>
 	>();
+	/** Calls of a response the output token limit cut off: the engine fails each unrun, so they are flagged as not run (bt-39 a). */
+	const cutOffToolCalls = new Set<string>();
 	const toolTelemetry: ToolTelemetry = {
 		onFinish(event) {
 			if (event.toolCallId === undefined) return;
@@ -826,6 +831,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// session's requests stubbed lives in `observationAging`, which outlives this agent.
 		let unjournaledAgedBytes = 0;
 		let admittedHwm: string | null = null;
+		// The input admission passed on after an overflow fold; the provider-bound copy pins it.
+		let pinnedInputTokens: number | null = null;
 		/**
 		 * Cache physics against the previous request on the same key. Every attempt the provider saw advances the
 		 * baseline, hidden #426 retries included, so the ledger's #423 shortfall, which only persisted replies
@@ -1200,9 +1207,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						}
 						// The provider stream runs inside the attempt's context, so the engine seam and every observer below it
 						// find this call; the seam's marks agree with the ones taken here because each keeps its first (#434).
+						// Only the provider-bound copy carries the pin; telemetry and the keepalive replay keep the request as built.
+						const pin = pinnedInputTokens;
+						const providerContext = pin === null ? sent : anchorContextAtInputTokens(sent, pin);
+						const providerOptions = pin === null ? requestOptions : { ...requestOptions, clioInputTokens: pin };
 						const stream = attempt
-							? attempt.withContext(() => engineMainStreamSimple(currentModel, sent, requestOptions))
-							: engineMainStreamSimple(currentModel, sent, requestOptions);
+							? attempt.withContext(() => engineMainStreamSimple(currentModel, providerContext, providerOptions))
+							: engineMainStreamSimple(currentModel, providerContext, providerOptions);
 						// send.end is the handoff to Pi's provider, which owns serialization and the socket under
 						// transport option B. The journal's TTFT is firstToken minus this mark (#434).
 						attempt?.stage("send", "end");
@@ -1317,7 +1328,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					state.synthesisToolLock,
 					middlewareChoice,
 				);
-				const input = Math.max(estimateInputTokensFromContext(actual), view.inputTokens ?? 0);
+				// After an overflow fold that fit, admission and Pi's clamp size the request on its count (A4).
+				const pinned = context.takeOverflowInputPin?.(localRuntime) ?? null;
+				const input = Math.max(estimateInputTokensFromContext(actual), view.inputTokens ?? 0, pinned ?? 0);
+				pinnedInputTokens = pinned === null ? null : input;
 				const output = resolveTurnOutputReserve(localRuntime, input);
 				if (view.effectiveWindow !== null && !requestFits(input, output, view.effectiveWindow))
 					return {
@@ -1772,6 +1786,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			let enrichedEvent = event;
 			if (event.type === "message_end" && event.message.role === "assistant") {
 				requiredToolReminder = middlewareToolChoice.completeRound(event.message);
+				const cutOff = outputLimitCutOffToolCallIds(event.message);
+				for (const id of cutOff) cutOffToolCalls.add(id);
+				// One line states the limit where it applies, instead of one failed call per call (bt-39 a).
+				if (cutOff.length > 0)
+					deps.emitNotice(
+						`[Clio Coder] the response hit the output token limit with ${cutOff.length} tool call${cutOff.length === 1 ? "" : "s"} in it; none ran, since their arguments may be cut off, and the model is asked to re-issue them.`,
+						"warning",
+					);
 			}
 			if (event.type === "tool_execution_start") {
 				toolsInFlight += 1;
@@ -1792,6 +1814,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// (which prints `cancelled 0`) a permission block.
 				const admission = toolOutcomes.get(event.toolCallId);
 				toolOutcomes.delete(event.toolCallId);
+				const notRun = cutOffToolCalls.delete(event.toolCallId);
 				// The registry's own span is the one that means "how long the tool
 				// took": the engine's start-to-end frame also covers the operator,
 				// because a call awaiting a permission decision is parked between
@@ -1803,6 +1826,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					...event,
 					...(durationMs !== undefined ? { durationMs } : {}),
 					resultSummary: toolResultSummary(event.result),
+					...(notRun ? { notRun: "output_limit" } : {}),
 					...(admission === undefined
 						? {}
 						: {
@@ -1900,7 +1924,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							? (state.repetitionAbortReason ?? state.toolProseAbortReason ?? (disposed ? SHUTDOWN_STOP_REASON : null))
 							: null;
 					if (harnessStop !== null) Object.assign(message, { errorMessage: harnessStop, harnessStopped: true });
-					else
+					// An interrupt (the operator's cancel, triage, autonomy) is no route failure either, so it names no route.
+					else if (harnessCause === undefined || harnessCause === "route_moved")
 						Object.assign(message, {
 							failureRoute: {
 								targetId: localRuntime.targetId,
@@ -2048,8 +2073,20 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						if (thinking) repetitionCheck.thinking = streamed.length;
 						else repetitionCheck.text = streamed.length;
 						const repetition = assessRepetition(streamed);
-						if (repetition.kind === "repeating") {
-							state.repetitionAbortReason = repetitionAbortReason(repetition);
+						const drafting = thinking && repetition.kind === "ok" ? assessDraftLoop(streamed) : repetition;
+						// Reasoning only: no text or call yet, on a route whose server enforces no thinking budget (bt-25).
+						const blocks: ReadonlyArray<{ type?: unknown }> = Array.isArray(assistantEvent.partial?.content)
+							? assistantEvent.partial.content
+							: [];
+						const overrun =
+							thinking &&
+							localRuntime.runtimeResolution.modelRuntime.thinking.budgetEnforcement !== "enforced" &&
+							blocks.every((block) => block.type === "thinking")
+								? thinkingOverrunReason(streamed.length, localRuntime.agent.state.model.maxTokens)
+								: null;
+						const stop = drafting.kind === "repeating" ? repetitionAbortReason(drafting) : overrun;
+						if (stop !== null) {
+							state.repetitionAbortReason = stop;
 							deps.emitNotice(state.repetitionAbortReason, "warning");
 							localRuntime.agent.abort();
 						}

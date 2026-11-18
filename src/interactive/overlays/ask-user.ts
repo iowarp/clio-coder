@@ -21,7 +21,12 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import type { AskUserAnswer, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
-import { cancelledAskUserResult, recommendedOptionIndex, unavailableAskUserResult } from "../../tools/ask-user.js";
+import {
+	cancelledAskUserResult,
+	recommendedOptionEscapes,
+	recommendedOptionIndex,
+	unavailableAskUserResult,
+} from "../../tools/ask-user.js";
 import type { ToolInvokeOptions } from "../../tools/registry.js";
 import { CARD_CALLOUT_MAX_WIDTH } from "../card.js";
 import { dockGrowthRows } from "../dock.js";
@@ -632,9 +637,19 @@ class AskUserOverlayView implements Component {
 		return this.questions.some((question) => question.operator_only === true);
 	}
 
+	/** A question whose recommended option leaves the workspace: the timeout declines it instead (bt-21). */
+	private escapes(): boolean {
+		return this.questions.some(recommendedOptionEscapes);
+	}
+
 	private unattendedOutcome(): string {
 		if (this.operatorOnly()) return "closes this choice unanswered";
 		if (this.presentation.tier === "outward") return "declines this outward step";
+		if (this.escapes()) {
+			return this.questions.length === 1
+				? "declines the step outside the workspace"
+				: "declines the step outside the workspace and picks the other recommended options";
+		}
 		const withOptions = this.questions.filter(questionHasOptions).length;
 		if (withOptions === 0) return "leaves this to Clio's judgment";
 		if (withOptions === this.questions.length) {
@@ -646,7 +661,8 @@ class AskUserOverlayView implements Component {
 	/** The same outcome for one narrow row, with its subject: the choice itself when there is only one. */
 	private unattendedOutcomeShort(): string {
 		if (this.operatorOnly()) return "it closes unanswered";
-		if (this.presentation.tier === "outward") return "Clio declines";
+		if (this.presentation.tier === "outward" || (this.escapes() && this.questions.length === 1)) return "Clio declines";
+		if (this.escapes()) return "Clio declines the step outside the workspace";
 		const only = this.questions.length === 1 ? this.questions[0] : undefined;
 		if (only === undefined) return "Clio picks each recommended option";
 		const label = only.options?.[recommendedOptionIndex(only)]?.label;
@@ -656,6 +672,7 @@ class AskUserOverlayView implements Component {
 	/** The option this question's timeout would take, while a timer is part of the round. */
 	private recommendedIndex(question: AskUserQuestion): number {
 		if (this.countdown === null || this.presentation.tier === "outward" || question.operator_only === true) return -1;
+		if (recommendedOptionEscapes(question)) return -1;
 		const index = recommendedOptionIndex(question);
 		const label = question.options?.[index]?.label ?? "";
 		// A label that already says it needs no second word.
@@ -692,7 +709,7 @@ class AskUserOverlayView implements Component {
 				`${GLYPH.warn} ${remaining} left, then ${outcome} · any key holds`,
 				`${GLYPH.warn} ${remaining}, then ${outcome} · key holds`,
 				// The option rows mark the pick as recommended, so the narrowest form can leave the name to them.
-				...(this.presentation.tier === "outward" || this.operatorOnly()
+				...(this.presentation.tier === "outward" || this.operatorOnly() || this.escapes()
 					? []
 					: [`${GLYPH.warn} ${remaining}, then Clio picks · key holds`]),
 			];

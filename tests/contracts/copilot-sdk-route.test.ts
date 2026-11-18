@@ -643,21 +643,29 @@ test("a later process reads each context tier's window from the cached listing, 
 			strictEqual(cached.modelCapabilities?.tiered?.contextWindow, windows[reader], `${writer} -> ${reader}`);
 			strictEqual(later.synthesizeModel(target, "tiered", null).contextWindow, windows[reader]);
 		}
-		// A snapshot written before per-tier windows were kept serves the default tier and re-lists for long context.
+		// The status fallback reads the snapshot itself, and sees the reader's tier, not the writer's.
+		const readBack = (tier: "default" | "long_context") =>
+			readTargetModelSnapshot({ id: "copilot-tier-long_context", runtime: "copilot-sdk", contextTier: tier })
+				?.modelCapabilities?.tiered?.contextWindow;
+		deepStrictEqual([readBack("default"), readBack("long_context")], [200_000, 1_000_000]);
+		// A snapshot written before per-tier windows were kept does not say which tier wrote its one window: here a
+		// long-context writer's. No tier trusts it: the first reader lists afresh and rewrites it with both tiers.
 		const id = "copilot-tier-legacy";
 		recordTargetModelSnapshot({ id, runtime: "copilot-sdk" }, ["tiered"], {
-			modelCapabilities: { tiered: { contextWindow: 200_000 } },
+			modelCapabilities: { tiered: { contextWindow: 1_000_000 } },
 		});
 		strictEqual(
-			(await (await newProcess()).probe({ id, runtime: "copilot-sdk" }, {} as ProbeContext)).modelsSource,
-			"cache",
+			readTargetModelSnapshot({ id, runtime: "copilot-sdk" })?.modelCapabilities?.tiered?.contextWindow,
+			undefined,
 		);
-		const relisted = await (await newProcess()).probe(
-			{ id, runtime: "copilot-sdk", contextTier: "long_context" },
-			{} as ProbeContext,
-		);
-		strictEqual(relisted.modelsSource, undefined);
-		strictEqual(relisted.modelCapabilities?.tiered?.contextWindow, 1_000_000);
+		for (const [tier, source] of [
+			["default", undefined],
+			["long_context", "cache"],
+		] as const) {
+			const read = await (await newProcess()).probe({ id, runtime: "copilot-sdk", contextTier: tier }, {} as ProbeContext);
+			strictEqual(read.modelsSource, source, tier);
+			strictEqual(read.modelCapabilities?.tiered?.contextWindow, windows[tier], tier);
+		}
 	} finally {
 		models.splice(0, models.length, ...original);
 	}
@@ -1036,6 +1044,43 @@ test("a result over the runtime's spill size reaches the model as Clio's own off
 	ok(named, sent.slice(-300));
 	strictEqual(readFileSync(named, "utf8"), full);
 	disposeCopilotConversations("spill-session");
+});
+
+test("the provider dump records each request Clio hands the Copilot runtime (c2b-1)", async () => {
+	disposeCopilotConversations("dump-session");
+	const path = join(env.dir, "copilot-dump.jsonl");
+	process.env.CLIO_CODER_PROVIDER_DUMP_PATH = path;
+	try {
+		const context: Context = { systemPrompt: "You are Clio.", tools: [readTool], messages: [user("please use tool")] };
+		const first = await step(context, "dump-session");
+		await step({ ...context, messages: [...context.messages, first, toolResult("call_1", "file body")] }, "dump-session");
+	} finally {
+		delete process.env.CLIO_CODER_PROVIDER_DUMP_PATH;
+		disposeCopilotConversations("dump-session");
+	}
+	ok(await eventually(() => existsSync(path) && readFileSync(path, "utf8").trim().split("\n").length === 2));
+	const [opened, answered] = readFileSync(path, "utf8")
+		.trim()
+		.split("\n")
+		.map((line) => JSON.parse(line) as { api: string; payloads: Array<Record<string, unknown>> });
+	strictEqual(opened?.api, "copilot-sdk");
+	deepStrictEqual(
+		opened?.payloads.map((payload) => payload.request),
+		["createSession", "send"],
+	);
+	strictEqual(opened?.payloads[0]?.systemMessage, "You are Clio.");
+	deepStrictEqual(
+		(opened?.payloads[0]?.tools as Array<{ name: string }>).map((tool) => tool.name),
+		["read"],
+	);
+	match(String(opened?.payloads[1]?.prompt), /please use tool/);
+	const results = answered?.payloads.map((payload) => payload.results) as Array<Array<Record<string, unknown>>>;
+	deepStrictEqual(
+		answered?.payloads.map((payload) => payload.request),
+		["toolResults"],
+	);
+	strictEqual(results[0]?.[0]?.toolCallId, "call_1");
+	strictEqual(results[0]?.[0]?.textResultForLlm, fake().toolResults.at(-1)?.textResultForLlm);
 });
 
 test("a call to a tool Copilot was never given reseeds the next call instead of waiting on Copilot's own run", async () => {

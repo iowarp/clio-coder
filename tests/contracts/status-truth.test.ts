@@ -40,7 +40,9 @@ import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer
 import {
 	createDispatchBoardView,
 	type DispatchBoardRow,
+	dispatchBoardItems,
 	isDispatchBoardRowSteerable,
+	runTableRows,
 } from "../../src/interactive/dispatch-board.js";
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
 import { besideCardDetail, railDetail } from "../../src/interactive/footer/live-work.js";
@@ -978,6 +980,10 @@ test("a reply that ended on a call to a session tool is told apart from one that
 	deepStrictEqual(read(`Reading both.\n${markup("read")}\n${markup("edit")}`), ["read", "edit"]);
 	deepStrictEqual(read("Let me look.\n<function=read><parameter=path>a</parameter></function>"), ["read"]);
 	deepStrictEqual(read("<tool_call><function=read><parameter=path>a</parameter></function></tool_call>"), ["read"]);
+	// An opener carrying attributes names the tool itself (c2b-2b): haiku ended a turn on this and it sealed succeeded.
+	const attributed = `Part 4 has no FACT 3. Reading part 5 next.\n\n<tool_call id="toolu_part5_read" name="read">{"path":"docs/part5.md","offset":1}</tool_call>`;
+	deepStrictEqual(read(attributed), ["read"]);
+	strictEqual(read(`Another agent uses this.\n<tool_call name="get_weather">{"city":"x"}</tool_call>`), null);
 	// A quote: mid-text, finishing a sentence, inside a fence, not a tool here, or not a call at all.
 	strictEqual(read(`The model wrote ${markup("edit")} here.`), null);
 	strictEqual(read(`The model wrote ${markup("edit")}`), null);
@@ -994,6 +1000,8 @@ test("a reply that ended on a call to a session tool is told apart from one that
 	};
 	const announced = classifyTurnEnding([reply(`I will apply the fix now. ${markup("edit")}`)]);
 	strictEqual(announced?.kind === "no_answer" ? announced.cause : announced?.kind, "tool_call_announced");
+	const fake = classifyTurnEnding([reply(attributed)]);
+	strictEqual(fake?.kind === "no_answer" ? fake.cause : fake?.kind, "tool_call_announced");
 	const answered = reply(`The bug is on line 4, and nothing was changed.\n\n${markup("edit")}`);
 	deepStrictEqual(classifyTurnEnding([answered]), { kind: "call_not_run", toolsRan: 0, writtenTools: ["edit"] });
 	strictEqual(
@@ -1484,6 +1492,20 @@ test("the rail beside a worker's ask states its expiry, and a short rail keeps t
 	match(facts(100) ?? "", /^coder running · approval held by session session-p · denied in 1:59/u);
 	strictEqual((facts(100) ?? "").includes("your approval"), false);
 	match(facts(20) ?? "", /^coder running/u);
+	// /fleet at 64 columns picks the form its activity column holds instead of cutting the long one to `appro…`.
+	const fleetRow = {
+		runId: "run-p",
+		agentId: "coder",
+		status: "running",
+		elapsedMs: 20_000,
+		usage: { kind: "pending" },
+		progress,
+	} as unknown as DispatchBoardRow;
+	const table = runTableRows(dispatchBoardItems([fleetRow]), 64, { now: 0 })
+		.map(stripTerminalSequences)
+		.join("\n");
+	match(table, /running · held by session session-p/u, table);
+	doesNotMatch(table, /appro…/u);
 });
 
 test("the rail names who is working beside the main turn and what a card is not holding up", () => {

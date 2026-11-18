@@ -65,6 +65,8 @@ export interface InteractiveInputRuntimeDeps {
 	hasQueuedMessages?: () => boolean;
 	explainProtectedExit?: () => void;
 	explainEscapeGuard?: () => void;
+	/** Enter under the approval card met this draft and allowed nothing. */
+	explainDraftUnderApproval?: (draft: string) => void;
 	cancelSteerDraft?: () => boolean;
 	hasActiveEditorBash?: () => boolean;
 	explainSearchUnavailable?: () => void;
@@ -556,6 +558,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					confirmPermission: () => deps.overlay.confirmPermission(),
 					stopTurnFromPermission: () => deps.overlay.stopTurnFromPermission(),
 					composerHasDraft: () => deps.editor.getText().length > 0,
+					explainHeldDraft: () => deps.explainDraftUnderApproval?.(deps.editor.getText()),
 					isPermissionSettling: () => deps.overlay.isPermissionSettling?.() ?? false,
 					editComposer: (data) => {
 						deps.editor.handleInput?.(data);

@@ -84,6 +84,8 @@ export interface GlobalCliFlags {
 	toolLimits?: SessionToolLimits;
 	/** `--session-file <path>` before any subcommand, made absolute: where the interactive session keeps its live lane record and writes its exit record. */
 	sessionFile?: string;
+	/** `--max-context-tokens <N>` before any subcommand: the interactive session's planning ceiling, as `run` reads it. */
+	maxContextTokens?: number;
 	/**
 	 * The boot-option flags (`--api-key`, `--skill`, `--no-context-files`/`-nc`,
 	 * `--no-skills`, `--with-panes`) as typed, in order, so a
@@ -165,6 +167,7 @@ export function extractGlobalFlags(
 	let autonomy: AutonomyLevel | undefined;
 	let toolLimits: SessionToolLimits | undefined;
 	let sessionFile: string | undefined;
+	let maxContextTokens: number | undefined;
 	const skillPaths: string[] = [];
 	const bootFlags: string[] = [];
 	const rootFlags: string[] = [];
@@ -269,6 +272,26 @@ export function extractGlobalFlags(
 			i += 1;
 			continue;
 		}
+		if (arg === "--max-context-tokens") {
+			const value = argv[i + 1];
+			const n = value === undefined ? Number.NaN : Number(value);
+			if (!Number.isInteger(n) || n <= 0) {
+				return {
+					noContextFiles,
+					noSkills,
+					skillPaths,
+					bootFlags,
+					rootFlags,
+					rest,
+					error: "--max-context-tokens must be a positive integer",
+					...(apiKey === undefined ? {} : { apiKey }),
+					...(panes === undefined ? {} : { panes }),
+				};
+			}
+			maxContextTokens = n;
+			i += 1;
+			continue;
+		}
 		if (arg === "--api-key" || arg === "--skill") {
 			const value = argv[i + 1];
 			if (value === undefined || value.startsWith("-") || isSubcommand(value)) {
@@ -314,6 +337,7 @@ export function extractGlobalFlags(
 		...(autonomy === undefined ? {} : { autonomy }),
 		...(toolLimits === undefined ? {} : { toolLimits }),
 		...(sessionFile === undefined ? {} : { sessionFile }),
+		...(maxContextTokens === undefined ? {} : { maxContextTokens }),
 		...(demo === undefined ? {} : { demo }),
 	};
 }

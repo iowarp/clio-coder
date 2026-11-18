@@ -119,9 +119,12 @@ test("a prose answer is repaired in a final-only round bound to the contract's s
 	// Work rounds keep their tools and carry no schema.
 	ok((bodies[1]?.tools ?? []).length > 0);
 	strictEqual(bodies[1]?.response_format, undefined);
-	// Item 8: the reminder is the last thing after the read's result, and stays put on later requests.
-	ok(lastToolText(bodies[1]).includes("[result contract: verifier-report]"), lastToolText(bodies[1]));
-	ok(lastToolText(bodies[2]).includes("[result contract: verifier-report]"));
+	// Item 8: the reminder is a host reminder on the tail after the read's result, never inside a tool result (D4).
+	const tail = bodies[1]?.messages.at(-1);
+	strictEqual(tail?.role, "user");
+	ok(JSON.stringify(tail).includes("<system-reminder>\\n[result contract: verifier-report]"), JSON.stringify(tail));
+	ok(!lastToolText(bodies[1]).includes("[result contract:"), lastToolText(bodies[1]));
+	ok(!lastToolText(bodies[2]).includes("[result contract:"), lastToolText(bodies[2]));
 	// Item 7: the repair round ships no tools and binds the reply to the verifier schema.
 	strictEqual((bodies[2]?.tools ?? []).length, 0);
 	strictEqual(bodies[2]?.response_format?.type, "json_schema");
@@ -133,7 +136,7 @@ test("a model without schema support keeps the prompt-only repair with its tools
 	strictEqual(result.exitCode, 0);
 	strictEqual(bodies[2]?.response_format, undefined);
 	ok((bodies[2]?.tools ?? []).length > 0, "an advisory repair keeps its tools");
-	ok(lastToolText(bodies[1]).includes("[result contract: verifier-report]"));
+	ok(JSON.stringify(bodies[1]?.messages.at(-1)).includes("[result contract: verifier-report]"));
 });
 
 test("a server that refuses the schema gets the same round once without it", { timeout: 15_000 }, async () => {

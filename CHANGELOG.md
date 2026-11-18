@@ -12,6 +12,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Added
 
+- Interactive `clio-coder` accepts `--max-context-tokens`, with the same meaning as on `run`. (c16-E)
 - A mutation report's validation may carry `"baseline":true` for a deliberate red run before the change; quality judges only the checks run after the change (bt-17).
 - `models` lists the thinking levels each route offers (`thinkingLevels` in `--json`) (bt-20).
 - The telemetry session read commands accept `--session` (bt-20).
@@ -45,6 +46,12 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- A worker's account of failed attempts is followed by the feed's own attempt counts. (bt-23 #3)
+- A judge-mode dispatch with no seated safety judge raises a worker_judge_withheld notice saying workers run as deny. (N2)
+- Unattended countdowns read m:ss under a minute too (0:59, 0:05). (bt-11 q)
+- The exit card row reads "Session verified" in every style. (drv-tui11)
+- A live worker's spend is kept in `runs/<id>/spend.json`, and runs.json is written only at lifecycle and status transitions. (P3 #2)
+- A lone delete inside a scratch root is recorded as scratch-disposable and no longer needs or claims a workspace snapshot. (N3, conf11h)
 - The finish assessment replays the shared check fold once per turn end instead of up to twice (x8-6).
 - Standard keeps one row of the reasoning before an action instead of a bare Thinking marker (bt-11 b).
 - Each bash command is scanned once per classification and only checks compute their extra facets; the registry and finish contract ask for the verdict alone; task-board replays within one run share git lookups and per-call readings (x6-7).
@@ -112,10 +119,40 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A worker ask that no operator could answer counts as a permission request in the receipt. (bt-readonly residual)
+- A worker call refused before it reached a tool counts in toolStats as an error, and a call cut off by the output token limit is not counted as one. (bt-23 #5)
+- A worker call refused by an approval timeout names that cause in its evidence. (bt-11 t)
+- A headless run whose delegated task never started exits 1 as a no-op. (c16-B)
+- A failed dispatch run that was not retried says why, including at the review gate and a pipeline halt. (D3-c)
+- Enter on a slash draft under an approval card shows a notice naming the card and its keys instead of doing nothing. (bt-11 p)
+- `/fleet` at narrow widths keeps who holds an approval-waiting run. (bt-11 l residual)
+- An unanswered ask_user declines a recommended option that leaves the workspace, and prompts, help, the yolo card and docs say so. (bt-21 residual)
+- The default autonomy banner reads `auto edits · no OS sandbox` on hosts without a shell sandbox. (bt-11 banner wording)
+- The selected workers-dock card wraps its whole task at 45 columns. (bt-tui dock cut)
+- Hiding a dock from inside it returns focus to the herdr pane you came from. (bt-tui herdr focus)
+- The Fleet Runs board says where a coder's proposed commit lands, as the transcript card does. (board commit placement)
+- A Copilot target reads its own context tier's window from the cached listing, and the per-tier record survives the providers re-record. (bt-copilot limit)
+- A dispatch briefing that mentions a `~/` home path is admitted instead of refused as legacy_scope_path_absolute. (bt-11 r)
+- A fork's Verified row, /usage and telemetry insights cut copied parent outcomes by ledger position. (bt-fork-verified limit)
+- A JSON-encoded off-schema dispatch field (candidates, judge, members, review, routing, budget, per-task budget) is decoded when it is that field's valid value, instead of refused. (bt-dispatch-schema limit)
+- CLIO_CODER_PROVIDER_DUMP_PATH records each request Clio hands the Copilot runtime instead of `payloads: []`. (c2b-1)
+- A worker's result-contract reminder arrives as a host reminder after its tool results instead of inside them, so models no longer treat it as an injection. (D4, drv-cf3b)
+- A dispatched task that says not to write files runs read-only and no longer gets the architect plan contract. (D-C)
+- The [Tasks] reminder no longer fires when the request's own words forbid writing files. (bt-22b)
+- The checkout delta sees a same-size rewrite made inside one timestamp tick when it changes a file's first or last 64 KiB. (p3-snapshot)
+- The safety judge is told when an operator message spells a call's outside path, so a requested report file is no longer refused as shared-config. (cw-3)
+- The approval card for a judge-allowed sandbox escape names the word it needs instead of saying the operator never mentioned the sandbox. (bt-24 residual)
+- A dispatch that puts a target id in `node` (for example `node:'openai-codex'`) is told the value is a target id that belongs in `target`, with `node` omitted (bt-45 c16-A).
+- The exit summary's Workers line shows refused worker calls (`· 1 call refused`) in the same words as the collected block (bt-11 s).
+- The dispatch scope notice for `../` briefing paths is one plain sentence naming the paths that were not granted, plus any read from the workspace root (bt-11 u).
 - A `verify` naming an undeclared check ran nothing, so it no longer fails a worker's result quality after the declared check passes (bt-45 c16-C).
 - A worker past its window before eviction no longer loses a tool call to a 32-byte argument ceiling; a worker call cut off by its turn timeout, output cap or tool-argument bound settles with that cause instead of `transport_dropped`; `why stopped` names the stop of each worker run the last turn dispatched; and a dispatch that recovered on a retry reports `recovered=N` and the failed attempt (bt-47 cf1h-D3).
 - The worker context guard evicts older reads before a read the model has not yet seen; such a read leaves last, largest first, and is journaled as `unseen_overflow` (ContextFold A2, bt-47 cf1h-D1).
 - A worker request the context guard fitted after an eviction is no longer refused at admission as leaving too few output tokens; the guard, admission and the output clamp size it by one count (ContextFold A2, bt-47 cf1h-D2).
+- An overflow fold and its requireFit summary now fit, admit and clamp the next main request on one count (the larger of the fold's estimate and Pi's chars/3.5), so a request the fold fitted is not refused and a wedged session resumes (ContextFold A4, bt-47 drv-cf3a D-A).
+- When a protected tool result alone overflows the window after compaction, ContextFold ends the turn once, naming the read and its size, and the session stays usable (bt-47 drv-cf3a D-A).
+- A worker's result-contract repair round, which is never sent, no longer replaces the provider's last count as the context anchor (bt-47 drv-cf3a D-B).
+- The eviction skip line agrees in number ("the 1 turn is") (bt-47 drv-cf3a).
 - The [Collected elsewhere] notice names a forked collection's refused tool calls in the worker card's words (e.g. "succeeded · 1 tool call · 1 call refused"), so the parent model no longer reports a run whose only action was refused as a clean success (bt-11 o).
 - A fork or splice `context` sent JSON-encoded by a grammar-constrained route (llama.cpp) is accepted by dispatch instead of refused as "expected object, got string" (bt-47 cf1h-D4).
 - A fork's Verified row on the exit card, `/usage` and `telemetry insights` counts only the verified outcomes the fork recorded itself, not the passes and done tasks it copied from its parent; the insights share counts a fork as verified only when it verified something itself (bt-47 D3b, c16-D).

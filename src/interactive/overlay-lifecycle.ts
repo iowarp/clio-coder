@@ -479,7 +479,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			appendNotice(
 				"warn",
 				// The question row above already lists each pick marked `chosen by Clio`; this says why and what happens now.
-				`No answer within ${seconds}s, so Clio chose for you on ${open === 1 ? "the open question" : `${open} open questions`}, taking the recommended option where one was offered, and continued. The question row above shows each pick; tell Clio if one is wrong.`,
+				`No answer within ${seconds}s, so Clio chose for you on ${open === 1 ? "the open question" : `${open} open questions`}, taking the recommended option where one was offered unless it left the workspace, and continued. The question row above shows each pick; tell Clio if one is wrong.`,
 				busNoticeSink,
 			);
 		},

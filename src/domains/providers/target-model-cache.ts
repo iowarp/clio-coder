@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioCacheDir, clioCachePath } from "../../core/xdg.js";
 import { type CapabilityFlags, type ThinkingLevel, VALID_THINKING_LEVELS } from "./types/capability-flags.js";
-import type { CopilotContextTier, TargetDescriptor } from "./types/target-descriptor.js";
+import { type CopilotContextTier, copilotContextTierOf, type TargetDescriptor } from "./types/target-descriptor.js";
 
 export const TARGET_MODEL_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 const TARGET_MODEL_CACHE_VERSION = 1;
@@ -188,9 +188,33 @@ function parseSnapshot(value: unknown): TargetModelSnapshot | null {
 	return snapshot;
 }
 
+/**
+ * The listed capabilities as the reading target's context tier sees them. The file is keyed by target id alone, so
+ * `modelCapabilities` holds the writer's tier: each window is replaced by the reader's tier window from the per-tier
+ * record. A Copilot snapshot written before that record existed does not say which tier wrote it, so its windows
+ * are dropped rather than trusted.
+ */
+function projectToReaderTier(
+	snapshot: TargetModelSnapshot,
+	target: Pick<TargetDescriptor, "runtime" | "contextTier">,
+): TargetModelSnapshot {
+	const capabilities = snapshot.modelCapabilities;
+	const windows = snapshot.modelContextWindows;
+	if (!capabilities || (!windows && snapshot.runtimeId !== "copilot-sdk")) return snapshot;
+	const tier = copilotContextTierOf(target);
+	const projected: Record<string, CachedModelCapabilities> = {};
+	for (const [id, caps] of Object.entries(capabilities)) {
+		const { contextWindow: _writersTier, ...rest } = caps;
+		const tiers = windows?.[id];
+		const window = tier === "long_context" ? (tiers?.long_context ?? tiers?.default) : tiers?.default;
+		projected[id] = window !== undefined ? { ...rest, contextWindow: window } : rest;
+	}
+	return { ...snapshot, modelCapabilities: projected };
+}
+
 /** Read a fresh snapshot only when it still describes this target identity. */
 export function readTargetModelSnapshot(
-	target: Pick<TargetDescriptor, "id" | "runtime" | "url">,
+	target: Pick<TargetDescriptor, "id" | "runtime" | "url"> & Partial<Pick<TargetDescriptor, "contextTier">>,
 	options: TargetModelCacheOptions = {},
 ): TargetModelSnapshot | null {
 	const path = targetModelSnapshotPath(target.id, options.cacheDir);
@@ -204,7 +228,7 @@ export function readTargetModelSnapshot(
 		const nowMs = options.nowMs ?? Date.now();
 		const ttlMs = options.ttlMs ?? TARGET_MODEL_CACHE_TTL_MS;
 		if (observedMs > nowMs || nowMs - observedMs >= ttlMs) return null;
-		return snapshot;
+		return projectToReaderTier(snapshot, target);
 	} catch {
 		return null;
 	}
@@ -212,7 +236,7 @@ export function readTargetModelSnapshot(
 
 /** Best-effort atomic replacement of one target's disposable probe snapshot. */
 export function recordTargetModelSnapshot(
-	target: Pick<TargetDescriptor, "id" | "runtime" | "url">,
+	target: Pick<TargetDescriptor, "id" | "runtime" | "url"> & Partial<Pick<TargetDescriptor, "contextTier">>,
 	models: ReadonlyArray<string>,
 	options: Pick<
 		TargetModelCacheOptions,

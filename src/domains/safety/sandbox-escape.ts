@@ -35,28 +35,38 @@ export function operatorMentionsSandbox(messages: ReadonlyArray<string>): boolea
 }
 
 /**
- * The outside-workspace paths an escaping shell call writes or deletes, when
- * the operator's own text names every one of them; otherwise empty. A command
- * whose targets cannot be read, or that touches nothing outside the workspace,
- * names nothing. Naming a path is not consent to leave the sandbox, so the
- * judge uses this only to hand such a call to the operator instead of a block.
+ * The outside-workspace paths a shell call writes or deletes, or a write or
+ * edit call changes, when the operator's own text names every one of them;
+ * otherwise empty. A call whose targets cannot be read, or that touches nothing
+ * outside the workspace, names nothing. Naming a path is not consent to leave
+ * the sandbox, so for an escape the judge uses this only to hand the call to the
+ * operator instead of a block; for any call it tells the judge the path is the operator's.
  */
-export function operatorNamedEscapeTargets(
+export function operatorNamedOutsideTargets(
 	call: { tool: string; args: Readonly<Record<string, unknown>> | undefined },
 	messages: ReadonlyArray<string>,
 	workspace: string = process.cwd(),
 	home: string = homedir(),
 ): string[] {
-	if (call.tool !== ToolNames.Bash) return [];
-	const command = call.args?.command;
-	if (typeof command !== "string" || command.length === 0) return [];
-	const cwdArg = call.args?.cwd;
-	const base = path.resolve(workspace, typeof cwdArg === "string" && cwdArg.length > 0 ? cwdArg : ".");
-	const spelled = [
-		...extractCommandWriteTargets(command),
-		...extractCommandDeleteTargets(command),
-		...extractCommandCdScopedTargets(command).map((target) => target.path),
-	];
+	const spelled: string[] = [];
+	let base = workspace;
+	if (call.tool === ToolNames.Write || call.tool === ToolNames.Edit) {
+		const target = call.args?.path;
+		if (typeof target !== "string" || target.length === 0) return [];
+		spelled.push(target);
+	} else if (call.tool === ToolNames.Bash) {
+		const command = call.args?.command;
+		if (typeof command !== "string" || command.length === 0) return [];
+		const cwdArg = call.args?.cwd;
+		base = path.resolve(workspace, typeof cwdArg === "string" && cwdArg.length > 0 ? cwdArg : ".");
+		spelled.push(
+			...extractCommandWriteTargets(command),
+			...extractCommandDeleteTargets(command),
+			...extractCommandCdScopedTargets(command).map((target) => target.path),
+		);
+	} else {
+		return [];
+	}
 	const outside = new Map<string, Set<string>>();
 	for (const raw of spelled) {
 		const resolved = raw === "~" || raw.startsWith("~/") ? path.join(home, raw.slice(1)) : path.resolve(base, raw);

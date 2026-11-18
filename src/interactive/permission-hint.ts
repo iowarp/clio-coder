@@ -99,6 +99,19 @@ export function permissionHintEntries(
 	];
 }
 
+/**
+ * The notice for Enter on a slash-command draft under the card (bt-11 p). The
+ * card keeps Enter from allowing (#186) and owns the keys, so `/fork` or
+ * `/resume` cannot run until the call is answered; the line names the card and
+ * the keys that close it, after which Enter runs the command the draft keeps.
+ * Null for any other draft.
+ */
+export function slashDraftUnderApprovalNotice(draft: string): string | null {
+	const command = /^\/[A-Za-z][\w-]*/u.exec(draft.trimStart())?.[0];
+	if (command === undefined) return null;
+	return `${command} waits for the approval card: Esc denies the call or ${permissionKeyLabel(PERMISSION_STOP_KEY)} stops the turn, then Enter runs ${command}.`;
+}
+
 /** What the card's Esc backs out of, in the order it does: details, then terms, then the call itself. */
 export interface PermissionEscapeActions {
 	hideDetails(): void;

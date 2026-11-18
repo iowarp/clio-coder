@@ -133,6 +133,7 @@ export const coreTests = [
 	"stale-edit-guard",
 	"replay-unsent-call-usage",
 	"overflow-compaction-fit",
+	"overflow-fit-pin",
 	"compaction-summary-tool-results",
 	"packed-source-directory",
 	"eval-onboarding-rescore",

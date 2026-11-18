@@ -79,22 +79,18 @@ export function copilotTierCapabilities(
 
 /**
  * A cached listing stands in for one this process has not made when it kept every model's capabilities. Each
- * tier's window comes from the snapshot's per-tier record; a snapshot written before that record existed holds
- * one tier, read as the default's, so a long-context target lists afresh instead.
+ * tier's window comes from the snapshot's per-tier record; a snapshot written before that record existed does not
+ * say which tier its one window belongs to, so every target lists afresh instead.
  */
-function adoptCachedCapabilities(snapshot: TargetModelSnapshot | null, target: TargetDescriptor): boolean {
+function adoptCachedCapabilities(snapshot: TargetModelSnapshot | null): boolean {
 	const cached = snapshot?.modelCapabilities;
 	if (!snapshot || !cached || !snapshot.models.every((id) => cached[id] !== undefined)) return false;
 	const windows = snapshot.modelContextWindows;
-	if (!windows && copilotContextTierOf(target) === "long_context") return false;
+	if (!windows) return false;
 	for (const id of snapshot.models) {
 		if (listed.has(id)) continue;
-		const tiers = windows?.[id];
-		if (!tiers) {
-			listed.set(id, { base: { ...cached[id] }, longContext: undefined });
-			continue;
-		}
-		const { contextWindow: _writersTier, ...caps } = cached[id] ?? {};
+		const tiers = windows[id] ?? {};
+		const { contextWindow: _readersTier, ...caps } = cached[id] ?? {};
 		listed.set(id, {
 			base: { ...caps, ...(tiers.default !== undefined ? { contextWindow: tiers.default } : {}) },
 			longContext: tiers.long_context !== undefined ? { ...caps, contextWindow: tiers.long_context } : undefined,
@@ -108,7 +104,7 @@ const adoptedTargets = new Set<string>();
 function listedFor(id: string, target: TargetDescriptor): Partial<CapabilityFlags> | undefined {
 	if (!listed.has(id) && !adoptedTargets.has(target.id)) {
 		adoptedTargets.add(target.id);
-		adoptCachedCapabilities(readTargetModelSnapshot(target), target);
+		adoptCachedCapabilities(readTargetModelSnapshot(target));
 	}
 	const entry = listed.get(id);
 	if (!entry) return undefined;
@@ -126,7 +122,7 @@ async function probeCopilotSdk(
 	if (
 		snapshot &&
 		snapshot.models.length > 0 &&
-		(snapshot.models.every((id) => listed.has(id)) || adoptCachedCapabilities(snapshot, target))
+		(snapshot.models.every((id) => listed.has(id)) || adoptCachedCapabilities(snapshot))
 	) {
 		const modelCapabilities = Object.fromEntries(snapshot.models.map((id) => [id, listedFor(id, target) ?? {}]));
 		const capabilityModelId =
@@ -175,6 +171,7 @@ async function probeCopilotSdk(
 			models,
 			modelLabels,
 			modelCapabilities,
+			modelContextWindows,
 			...(capabilityModelId && discoveredCapabilities ? { capabilityModelId, discoveredCapabilities } : {}),
 		};
 	} catch (err) {

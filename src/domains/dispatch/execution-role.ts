@@ -218,6 +218,7 @@ export interface DispatchResultContractRequest {
 	gate?: { role?: GateTopologyRole } | undefined;
 	resultContractOverride?: ResultContract;
 	resultSummary?: DispatchResultSummaryAllowance;
+	readOnly?: boolean | undefined;
 }
 
 /**
@@ -244,6 +245,8 @@ export function dispatchResultContract(
 	// hold there. Only the topology's own override (the vote ballot) applies.
 	if (req.gate?.role === "member") return req.resultContractOverride;
 	const base = req.resultContractOverride ?? recipe?.resultContract;
+	// A read-only run cannot write the plan file an architect contract demands; its answer is the reply.
+	if (req.readOnly === true && base?.kind === "architect-plan") return undefined;
 	const allowance = req.resultSummary;
 	if (allowance === undefined) return base;
 	if (base?.kind === "mutation-report") return withResultSummaryAllowance(base, allowance.maxBytes);

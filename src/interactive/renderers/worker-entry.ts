@@ -9,6 +9,7 @@ import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { transcriptDetail } from "../transcript-detail.js";
 import { previewBudget, previewRows } from "./preview.js";
 import {
+	commitPlacementOf,
 	councilAnswerGist,
 	councilCollectedWords,
 	councilMemberAnswerLines,
@@ -408,12 +409,9 @@ function bodySourceLines(entry: WorkerEntryState): string[] {
 	if (structured === null) return answerText(entry, entry.text).split("\n");
 	const presented = presentedContractAnswer(entry);
 	if (presented !== null) return presented.lines;
-	const placement = entry.result?.placement;
 	return (
-		mutationReportLines(
-			structured,
-			placement?.mode === "worktree" ? placement.branch : entry.result?.taskWorktree?.branch,
-		) ?? answerText(entry, entry.text).split("\n")
+		mutationReportLines(structured, commitPlacementOf(entry.result ?? {}).branch) ??
+		answerText(entry, entry.text).split("\n")
 	);
 }
 

@@ -297,8 +297,9 @@ export function renderExitSummary(
 	if (!tty) lines.push(`Clio Coder · Session ${style === "report" ? "report" : "summary"} · this visit`);
 	// Session names can be arbitrarily long; keep identity from consuming the page.
 	lines.push(truncateToWidth(paint(`Session: ${sanitizeCallTargetText(session)}`, "Session: ".length), room));
-	// Tokens and cost cover every visit and branch the session paid for, workers included, so their rows say
-	// "Session" under a card headed "this visit"; the visit's own share is its call count (#434 §11.3).
+	// Tokens, cost and verified outcomes cover every visit and branch the session paid for, workers included, so their
+	// rows say "Session" under a card headed "this visit"; the visit's own share is its call count (#434 §11.3). A fork's
+	// visit card otherwise read its visit turns beside an unlabeled whole-fork Verified count (drv-tui11).
 	if (style === "brief") {
 		const model = models.at(-1);
 		add("Model", [
@@ -308,7 +309,7 @@ export function renderExitSummary(
 		]);
 		add("Session tokens", spend.kind === "ready" ? factsOf(spend.tokens) : [SPEND_NOT_AVAILABLE]);
 		add("Session cost", [spend.kind === "ready" ? spend.cost : SPEND_NOT_AVAILABLE, visitTime]);
-		add("Verified", verifiedFacts(spend));
+		add("Session verified", verifiedFacts(spend));
 		// What Clio decided while the operator was away is never folded away.
 		if (unattended !== null) add("Unattended", unattended);
 		// Nor is a hook that runs outside the sandbox on the next git command.
@@ -343,7 +344,7 @@ export function renderExitSummary(
 		]);
 		add("Session tokens", spend.kind === "ready" ? factsOf(spend.breakdown) : [SPEND_NOT_AVAILABLE]);
 		add("Session cost", [spend.kind === "ready" ? spend.cost : SPEND_NOT_AVAILABLE]);
-		add("Verified", verifiedFacts(spend));
+		add("Session verified", verifiedFacts(spend));
 		if (style === "report" && spend.kind === "ready" && spend.cache !== null) {
 			add("Cache", [
 				`${spend.cache.share} of prompt tokens read from cache`,

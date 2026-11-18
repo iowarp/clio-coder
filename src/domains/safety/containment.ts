@@ -967,6 +967,14 @@ export const SNAPSHOT_RECOVERABLE_GIT_RULE_IDS: ReadonlySet<string> = new Set([
 export const SNAPSHOT_RECOVERABLE_REASON_CODE = "snapshot-recoverable";
 
 /**
+ * Reason code of a lone delete the operator's default runs because every
+ * target lies inside a scratch root, whose contents are disposable. No
+ * workspace snapshot covers a scratch root, so it is never recorded as
+ * snapshot-recoverable.
+ */
+export const SCRATCH_DISPOSABLE_REASON_CODE = "scratch-disposable";
+
+/**
  * Rule of a typed file mutation that lands on a git hook, config or git dir
  * pointer of the repository, which the sandbox keeps read-only. The
  * operator's default asks for it in the policy engine; a worker at default
