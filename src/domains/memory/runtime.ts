@@ -538,12 +538,13 @@ export class MemoryRuntime implements MemoryObservationCommands {
 					noGain = true;
 					continue;
 				}
+				// The observer's input alone: a turn appended after the group leaves
+				// it unchanged, so it must not renew the group's two attempts.
 				const revision = observationDigest([
 					source.sessionId,
 					source.branchAnchorTurnId,
 					source.checkpoint,
 					sourceCoverageDigest(group.units),
-					source.units.at(-1)?.digest,
 					infra.settings(),
 				]);
 				if ((this.#attempts.get(revision) ?? 0) >= 2) continue;
