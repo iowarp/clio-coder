@@ -103,6 +103,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A `verify` pass, or a validation tool's passing aggregate, followed by a workspace edit no longer marks the run verified; only checks that ran on the final tree count, a red after the last edit still fails and a fixed, re-run check still passes (bt-27c).
 - `run --json` (full) keeps the checked answer in the final `turn_end.message` when the reply to a citation check only confirms or corrects citations (bt-29).
 - The citation check credits line numbers printed by a bash `grep -n`/`rg -n` for files the command names, so citing them no longer draws a false nudge (bt-29).
 - A dispatched worker now reserves output with the same function the main loop's admission uses, so it no longer refuses with worker_context_exhausted a fork the parent fitted on the same model and window (D1-5).
