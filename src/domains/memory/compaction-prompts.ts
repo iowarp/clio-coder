@@ -11,7 +11,7 @@ export const COMPACTION_SYSTEM_PROMPT = [
 	"Do NOT continue the conversation. Do NOT answer any questions in it.",
 ].join(" ");
 
-export const COMPACTION_USER_PROMPT_TEMPLATE = `The messages above are a conversation to summarize. Create a structured context checkpoint another LLM will use to continue the work.
+export const COMPACTION_USER_PROMPT_TEMPLATE = `The messages above are a conversation to summarize. Create a structured context checkpoint another LLM will use to continue the work. A tool result shown clipped above was read in full by the assistant; do not advise reading it again.
 
 When a <previous-context> block is present, it is the canonical checkpoint and retained suffix from an earlier compaction. Produce one cumulative replacement checkpoint: preserve every still-relevant constraint, decision, active skill, unresolved task, exact identifier, and file-state detail from that block while incorporating the newer conversation.
 
@@ -64,7 +64,7 @@ In addition to that carried-forward context, summarize ONLY the active-turn deta
 
 A count or quantity the assistant worked out itself (helpers in a file, lines, matches, passing or failing tests) is its own tally, not a measurement: write it with "(unverified)" after it so the next turn recounts before relying on it. Clio appends an <exact-facts> block of measured line counts and tool results after the checkpoint; do not write one yourself.
 
-Do NOT answer the user. Do NOT summarize unrelated older history.`;
+Do NOT answer the user. Do NOT summarize unrelated older history. A tool result shown clipped above was read in full by the assistant; do not advise reading it again.`;
 
 function buildPreviousContextPrefix(previousContextText: string): string {
 	const trimmed = previousContextText.trim();

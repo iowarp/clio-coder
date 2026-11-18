@@ -92,7 +92,7 @@ describe("split-turn checkpoint input keeps a whole read the summarizer can fit"
 		const { text } = await summaryInput(200_000);
 		match(text, /x \* 74 \+ 15/);
 		match(text, /x \* 83 \+ 25/);
-		doesNotMatch(text, /more characters truncated/);
+		doesNotMatch(text, /more characters not shown here; the assistant read this result in full/);
 	});
 
 	it("caps a read at what fits a small window, above the floor", async () => {
@@ -101,6 +101,6 @@ describe("split-turn checkpoint input keeps a whole read the summarizer can fit"
 		ok(tokens <= (4000 - 2000) * 0.8, `${tokens} estimated tokens`);
 		match(text, /x \* 74 \+ 15/);
 		doesNotMatch(text, /x \* 83 \+ 25/);
-		match(text, /more characters truncated/);
+		match(text, /more characters not shown here; the assistant read this result in full/);
 	});
 });
