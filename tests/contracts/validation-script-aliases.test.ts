@@ -3,7 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
-import { describeUngroundedValidations, groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
+import {
+	describeUngroundedValidations,
+	groundClaimedValidations,
+} from "../../src/domains/dispatch/validation-grounding.js";
 import { typedValidationSummary } from "../../src/domains/safety/finish-contract.js";
 import { detectValidationCommand } from "../../src/domains/safety/protected-artifacts.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
