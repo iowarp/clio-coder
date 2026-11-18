@@ -2,8 +2,15 @@ import type { ClioSettings } from "../core/config.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
+import { batchesCollectedElsewhere, collectedElsewhereLine } from "../domains/middleware/index.js";
 import type { TurnControlRecord, TurnFacts } from "../domains/turn-control/index.js";
-import { decide, decisionHash, factsDigest, renderCollectedBlock } from "../domains/turn-control/index.js";
+import {
+	decide,
+	decisionHash,
+	factsDigest,
+	renderCollectedBlock,
+	renderCollectedElsewhereBlock,
+} from "../domains/turn-control/index.js";
 import type { MonitorToolDeps } from "../tools/monitor.js";
 import { collectDetachedBatch } from "../tools/monitor-collect.js";
 import type { ToolInvokeOptions } from "../tools/registry.js";
@@ -25,8 +32,33 @@ export interface TurnControlRunnerDeps {
 	emitNotice(text: string): void;
 }
 
-/** Collect detached batches that finished between turns. It is the one thing the harness does before an answer. */
+/**
+ * Collect detached batches that finished between turns. It is the one thing the harness does before an answer.
+ * A batch this session dispatched that a fork collected first is named once in the same block, so the model
+ * stops treating its runs as still in the background.
+ */
 export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnControlRunner {
+	const tellCollectedElsewhere = async (): Promise<string | null> => {
+		const dispatch = deps.monitorDeps?.dispatch ?? deps.dispatch;
+		if (!dispatch) return null;
+		let views: ReturnType<typeof batchesCollectedElsewhere>;
+		try {
+			views = batchesCollectedElsewhere(dispatch, deps.getInvokeOptions?.().sessionId);
+		} catch {
+			return null;
+		}
+		if (views.length === 0) return null;
+		for (const view of views) {
+			try {
+				await dispatch.detached?.markOwnerTold?.(view.id);
+			} catch {
+				/* Best effort: an unrecorded notice is repeated next turn, never lost. */
+			}
+		}
+		return renderCollectedElsewhereBlock(views.map(collectedElsewhereLine));
+	};
+	const withElsewhere = (block: string | null, elsewhere: string | null): string | null =>
+		elsewhere === null ? block : block === null ? elsewhere : `${block}\n\n${elsewhere}`;
 	return {
 		async run(input) {
 			const started = performance.now();
@@ -44,7 +76,8 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 				executed: null,
 			};
 			if (input.signal.aborted) return { block: null, record: { ...record, executed: { refused: "canceled" } } };
-			if (decision.kind !== "collect") return { block: null, record };
+			const elsewhere = await tellCollectedElsewhere();
+			if (decision.kind !== "collect") return { block: elsewhere, record };
 			try {
 				const monitorDeps = deps.monitorDeps ?? (deps.dispatch ? { dispatch: deps.dispatch } : null);
 				if (monitorDeps === null) throw new Error("detached collection is unavailable");
@@ -78,13 +111,16 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 				);
 				deps.emitNotice(`[Collected] ${collectedCount} batch(es)`);
 				return {
-					block,
+					block: withElsewhere(block, elsewhere),
 					record: { ...record, executed: { runIds, blockChars: block.length, durationMs: performance.now() - started } },
 				};
 			} catch (error) {
 				const message = input.signal.aborted ? "canceled" : error instanceof Error ? error.message : String(error);
 				if (!input.signal.aborted) deps.emitNotice(`[Collected] unavailable: ${message}`);
-				return { block: null, record: { ...record, executed: { refused: message } } };
+				return {
+					block: input.signal.aborted ? null : elsewhere,
+					record: { ...record, executed: { refused: message } },
+				};
 			}
 		},
 	};

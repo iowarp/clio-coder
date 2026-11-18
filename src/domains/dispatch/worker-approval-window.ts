@@ -72,6 +72,8 @@ export interface WorkerApprovalWindows {
 	handToOperator(requestId: string): boolean;
 	/** The parent already sent the timeout denial, so an answer now reaches nothing. */
 	isExpired(requestId: string): boolean;
+	/** The current session changed: every open ask states its window again, so its surfaces learn whose it is now. */
+	republish(): void;
 	settle(requestId: string): void;
 	settleRun(runId: string): void;
 	dispose(): void;
@@ -184,6 +186,9 @@ export function createWorkerApprovalWindows(deps: WorkerApprovalWindowsDeps): Wo
 		},
 		isExpired(requestId) {
 			return windows.get(requestId)?.expired === true;
+		},
+		republish() {
+			for (const entry of windows.values()) if (!entry.expired) changed(entry);
 		},
 		settle(requestId) {
 			const entry = windows.get(requestId);

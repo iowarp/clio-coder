@@ -770,11 +770,12 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	deepStrictEqual(seal("npm test && npm run format"), stale);
 	deepStrictEqual(seal("npm test", { check: "format" }), stale);
 	deepStrictEqual(seal("!npm test", { check: "format" }), stale);
-	// One check vocabulary with the task board: a read-only check changes no tree, a writer that runs none is a
+	// One check vocabulary with the task board: a read-only check changes no tree and files its pass under the
+	// classifier's name when no vocabulary labels it (S1), a writer that runs none is a
 	// change (x5-1), and a runner flag after `--` files a check while a loader refuses one that settles nothing (x5-2).
 	const red = [[], "unverified", ["npm test"]];
 	for (const check of ["npx tsc --noEmit", "npx vitest run src/a.test.ts", "npx eslint src", "node --check a.js"])
-		deepStrictEqual(seal("npm test", check), green, check);
+		deepStrictEqual(seal("npm test", check), [["npm test", check], "verified", []], check);
 	deepStrictEqual(seal("npm test", "npm run lint && npx tsc --noEmit"), [["npm test", "npm run lint"], "verified", []]);
 	// A validated runner's own snapshot or golden update rewrites what it compares against (x7-2).
 	for (const change of [
@@ -789,13 +790,16 @@ it("a check sharing its bash call with a change judges the final tree only when 
 		"bun test -u",
 	])
 		deepStrictEqual(seal("npm test", change), stale, change);
-	deepStrictEqual(seal("!npm test", "npx tsc --noEmit"), red);
+	deepStrictEqual(seal("!npm test", "npx tsc --noEmit"), [["npx tsc --noEmit"], "unverified", ["npm test"]]);
 	// A red from a check no receipt vocabulary names still settles under the classifier's name (x6-1).
 	for (const check of ["npx tsc --noEmit", "npx eslint ."])
 		deepStrictEqual(seal("npm test", `!${check}`), [["npm test"], "unverified", [check]], check);
 	deepStrictEqual(seal("!npm test", "npm test -- -t parses"), [["npm test"], "unverified", ["npm test"]]);
 	// A line continuation separates nothing, so the continued check's red stands under its single-line name (x7-4).
 	deepStrictEqual(seal("!npm test \\\n  -- --reporter=dot"), [[], "unverified", ["npm test -- --reporter=dot"]]);
+	// A here-document body is data no continuation joins, so its quoted terminator still ends it in the check's name (S2).
+	const continued = "cat > /tmp/n.md <<'EOF'\nline one \\\nEOF\nnpm test";
+	strictEqual(classifyCall("bash", { command: continued }, { cwd: process.cwd() }).name, continued);
 	deepStrictEqual(seal("!npm test", "npm test -- --import ./x.mjs"), red);
 	deepStrictEqual(seal("npm test -- --run"), green);
 	// Every change ran before the check through `&&`, or the call held only checks, cd and plumbing.
@@ -821,7 +825,13 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	deepStrictEqual(seal("npm test", "npm test | tee src/a.ts"), stale);
 	deepStrictEqual(seal("npm test", "npm test && cat package.json > notes.txt"), stale);
 	// A write that lands only outside the workspace changes no tree; one inside it, an opaque writer or a move out does (x7-1).
-	for (const scratch of ["echo hi > /tmp/x.txt", "cat > /tmp/c.py <<'EOF'\nimport os\nEOF", "rm -rf /tmp/scratch"])
+	// A here-document body is data, so a check it spells neither runs nor retires a pass (S3).
+	for (const scratch of [
+		"echo hi > /tmp/x.txt",
+		"cat > /tmp/c.py <<'EOF'\nimport os\nEOF",
+		"rm -rf /tmp/scratch",
+		"cat > $TMPDIR/c.sh <<'EOF'\npytest\nEOF",
+	])
 		deepStrictEqual(seal("npm test", scratch), green, scratch);
 	for (const change of ["echo hi > notes.txt", "echo hi > /tmp/x && npm ci", "mv src/a.ts /tmp/a.ts"])
 		deepStrictEqual(seal("npm test", change), stale, change);

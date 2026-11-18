@@ -2,6 +2,7 @@ import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/str
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { getDetachedBatch } from "../../src/domains/dispatch/batch-store.js";
@@ -13,9 +14,10 @@ import {
 } from "../../src/domains/dispatch/gate-decisions.js";
 import { dispatchOwnership } from "../../src/domains/dispatch/ownership.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
-import { openDetachedBatchViews } from "../../src/domains/middleware/dispatch-nudge.js";
+import { finishedDetachedBatchIds, openDetachedBatchViews } from "../../src/domains/middleware/dispatch-nudge.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { DispatchArtifactProvider } from "../../src/interactive/view/artifacts.js";
+import { createTurnControlRunner } from "../../src/session-control/turn-control-runner.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
 import { loadVerifiedScoutSource } from "../../src/tools/dispatch-scout-admission.js";
 import { createRegistry, type ToolResult } from "../../src/tools/registry.js";
@@ -225,9 +227,25 @@ describe("dispatch session ownership", () => {
 			);
 			deepStrictEqual(openDetachedBatchViews(parent.contract), [], "the first collect silences every nudge");
 			deepStrictEqual(openDetachedBatchViews(fork.contract), []);
+			// The parent's next turn is told once who collected its batch and how each run ended.
+			const parentTurns = createTurnControlRunner({
+				getSettings: () => DEFAULT_SETTINGS,
+				dispatch: parent.contract,
+				getTurnConstraints: () => undefined,
+				finishedDetachedBatchIds: () => finishedDetachedBatchIds(parent.contract),
+				emitNotice: () => {},
+			});
+			const turn = () => parentTurns.run({ userTurnId: "turn-p", signal: new AbortController().signal });
+			match(
+				(await turn()).block ?? "",
+				new RegExp(
+					`^\\[Collected elsewhere\\][^]*batch batch-p was collected by session session-f: run ${handle.runId} \\(scout\\) succeeded\\. It is settled, not running in the background`,
+				),
+			);
+			strictEqual((await turn()).block, null, "the parent is told once");
 			match(
 				okResult(await parent.call(ToolNames.Monitor, { mode: "collect", batch_id: "batch-p" })).output,
-				/batch batch-p \(already collected\)/,
+				/batch batch-p \(already collected by session session-f\)/,
 			);
 			match(
 				errorMessage(await fork.call(ToolNames.Monitor, { mode: "collect", batch_id: "batch-p" })),

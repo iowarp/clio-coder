@@ -19,3 +19,13 @@ export function renderCollectedBlock(rendered: string): string {
 		rendered.split(/\r?\n/),
 	);
 }
+
+export function renderCollectedElsewhereBlock(lines: ReadonlyArray<string>): string {
+	return block(
+		[
+			"[Collected elsewhere]",
+			"A session forked from this one collected these detached batches this session dispatched, so they will not be collected here.",
+		],
+		[...lines],
+	);
+}
