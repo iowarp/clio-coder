@@ -79,6 +79,31 @@ test("the session summary counts what Clio answered while the operator was away 
 	collector.dispose();
 });
 
+test("the activity row names its visit scope and a worker whose writes went unrecorded (bt-11)", () => {
+	const bus = createTelemetryHub();
+	const collector = createExitSummaryCollector({
+		bus,
+		telemetry: { subscribe: () => () => {} } as unknown as TelemetryContract,
+		dispatch: { observedRunWrites: () => null },
+		session: { current: () => ({ id: "session-1", hasModelTurn: true }) } as unknown as Pick<SessionContract, "current">,
+		getTurns: () => 1,
+		getToolCounts: () => new Map(),
+		getModel: () => null,
+	});
+	for (const runId of ["run-a", "run-b"]) {
+		bus.emit("run.started", { runId, agentId: "coder", targetId: "local", wireModelId: "m" } as never);
+		bus.emit("run.completed", { runId, agentId: "coder", outcome: "completed" } as never);
+	}
+	// run-b's receipt names its checkout changes, so only run-a stays unrecorded.
+	collector.observeRunResult("run-b", { changedPaths: [] } as never);
+	const text = renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n");
+	match(
+		text,
+		/^This visit, workers included: 0 turns · 0 files changed \(1 worker kept no write record\) · 2 workers$/mu,
+	);
+	collector.dispose();
+});
+
 test("the session report states the cached share of the prompt, for the session and its last turn", () => {
 	const view = telemetryViewOf("session-1", [
 		...telemetryCall("session-1", { turnId: "t1", usage: { input: 1000, output: 10 } }),
@@ -179,7 +204,10 @@ test("the exit card divides the session's spend over its distinct verified outco
 	};
 	const call = (usd: number | null, pricedBy?: "target-rates") =>
 		telemetryCall("session-1", { usage: { input: 1000, output: 200 }, usd, ...(pricedBy ? { pricedBy } : {}) });
-	deepStrictEqual(card(call(null), []), { kind: "none", words: "none this session, so no per-outcome figure" });
+	deepStrictEqual(card(call(null), []), {
+		kind: "none",
+		words: "no judged outcome this session; command checks such as unit tests are not counted",
+	});
 	const unpriced = card(call(null), entries);
 	ok(unpriced.kind === "counted");
 	deepStrictEqual(
