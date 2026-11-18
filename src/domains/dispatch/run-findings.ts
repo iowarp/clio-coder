@@ -5,7 +5,7 @@
 
 import { createHash } from "node:crypto";
 import { isVerifyListing } from "../../tools/verify/surface.js";
-import type { RunEffects } from "../safety/run-effects.js";
+import type { CheckFreshness, RunEffects } from "../safety/run-effects.js";
 import type {
 	RunHostVerification,
 	RunResultContractFact,
@@ -48,16 +48,24 @@ export interface CreateRunResultQualityInput {
 	resultContract?: RunResultContractFact | null;
 }
 
+/** Whether the tool's latest executed call ran on the run's final tree, so its aggregate can speak for that tree. */
+function toolRanOnFinalTree(freshness: CheckFreshness, tool: string): boolean {
+	return !freshness.mutationObserved || freshness.tools.has(tool);
+}
+
 /**
  * `verify` is Clio's typed verifier tool. Its sealed aggregate records the
  * tool identity and pass/fail result; observed shell checks enter separately
- * through the run-effects recorder.
+ * through the run-effects recorder. The aggregate cannot tell which call ran
+ * when, so it seals nothing unless the latest executed call ran on the final
+ * tree: then an all-pass aggregate includes a pass of that tree (bt-27c).
  */
 function typedValidationFactsFromToolStats(
 	toolStats: ReadonlyArray<Pick<RunResultDraft["toolStats"][number], "tool" | "count" | "ok" | "errors" | "blocked">>,
+	freshness: CheckFreshness,
 ): RunResultTypedValidationFact[] {
 	return toolStats
-		.filter((stat) => stat.tool === "verify" && stat.count > stat.blocked)
+		.filter((stat) => stat.tool === "verify" && stat.count > stat.blocked && toolRanOnFinalTree(freshness, stat.tool))
 		.map((stat) => ({
 			sourceId: "tool:verify",
 			validatorDigest: createHash("sha256").update(canonicalJson(stat), "utf8").digest("hex"),
@@ -74,6 +82,8 @@ function typedValidationFactsFromToolStats(
  * that only listed the declared checks: whatever its outcome, it ran no check.
  */
 export interface VerifyCallOutcome {
+	/** The engine call id, a chain step as `<call id>:<step id>`, that places the call among the run's mutations. */
+	toolCallId?: string;
 	check: string | null;
 	outcome: "ok" | "error" | "blocked" | "unresolved" | null;
 	listing?: true;
@@ -94,8 +104,14 @@ export function verifyCallStart(args: unknown): VerifyCallStart {
 export function settledVerifyCall(
 	start: VerifyCallStart | undefined,
 	outcome: VerifyCallOutcome["outcome"],
+	toolCallId: string | null,
 ): VerifyCallOutcome {
-	return { check: start?.check ?? null, outcome, ...(start?.listing === true ? { listing: true as const } : {}) };
+	return {
+		...(toolCallId === null ? {} : { toolCallId }),
+		check: start?.check ?? null,
+		outcome,
+		...(start?.listing === true ? { listing: true as const } : {}),
+	};
 }
 
 /**
@@ -162,27 +178,35 @@ function typedVerifyFact(
 /**
  * Typed validation facts for `verify`, one per check the run ran. A check's
  * latest executed outcome decides it: an earlier failure the run fixed and
- * re-ran clean seals as passed, and a pass the run later broke seals as failed
- *. A blocked attempt never ran the check, so it supersedes nothing,
- * and a check with only blocked calls seals no validation fact. A call naming a
- * check that does not exist ran nothing either, and is treated the same way, as
- * is a call that only listed the declared checks.
+ * re-ran clean seals as passed, and a pass the run later broke seals as failed.
+ * Only calls that ran on the final tree count: a pass or a red from before a
+ * later workspace mutation judged a tree that is gone and seals nothing, as an
+ * observed shell check does (bt-27c). A call the recorder cannot place counts
+ * only in a run with no mutation. A blocked attempt never ran the check, so it
+ * supersedes nothing, and a check with only blocked calls seals no validation
+ * fact. A call naming a check that does not exist ran nothing either, and is
+ * treated the same way, as is a call that only listed the declared checks.
  *
  * Calls that cannot be tied to a check share one fact that passes only when
  * every such call passed. When no call can be tied to a check, the result is
- * the per-tool aggregate, excluding checks whose calls were all blocked.
+ * the per-tool aggregate, excluding checks whose calls were all blocked and
+ * any aggregate whose latest executed call predates a later mutation.
  */
 export function typedValidationFactsFromVerifyCalls(
 	toolStats: ReadonlyArray<Pick<RunResultDraft["toolStats"][number], "tool" | "count" | "ok" | "errors" | "blocked">>,
 	calls: ReadonlyArray<VerifyCallOutcome>,
+	freshness: CheckFreshness,
 ): RunResultTypedValidationFact[] {
 	if (!calls.some((call) => call.check !== null && call.outcome !== null)) {
-		return typedValidationFactsFromToolStats(toolStats);
+		return typedValidationFactsFromToolStats(toolStats, freshness);
 	}
 	const byCheck = new Map<string, Array<"ok" | "error">>();
 	const unattributed: Array<string | null> = [];
 	for (const call of calls) {
 		if (call.listing === true || call.outcome === "blocked" || call.outcome === "unresolved") continue;
+		const ranOnFinalTree =
+			!freshness.mutationObserved || (call.toolCallId !== undefined && freshness.verifyCalls.has(call.toolCallId));
+		if (!ranOnFinalTree) continue;
 		if (call.check === null || call.outcome === null) {
 			unattributed.push(call.outcome);
 			continue;
@@ -290,18 +314,20 @@ function ranValidationTool(
  * a check the run fixed and re-ran from one it left failing, nor a check from a
  * call that only listed the checks. Supplied typed facts are therefore the only
  * word for `verify`: none means no check passed. Other validation tools carry no
- * check identity, so their aggregate still decides.
+ * check identity, so their aggregate still decides, and only when the tool's
+ * latest executed call ran on the final tree (bt-27c).
  */
 function hasPassingValidation(
 	toolStats: RunResultDraft["toolStats"],
 	typedValidations: ReadonlyArray<RunResultTypedValidationFact> | undefined,
+	freshness: CheckFreshness | undefined,
 ): boolean {
 	const verifyFacts = (typedValidations ?? []).filter((fact) => fact.sourceId === "tool:verify");
 	return toolStats.some((stat) => {
 		if (!isValidationTool(stat.tool)) return false;
 		if (stat.tool === "verify" && typedValidations !== undefined)
 			return verifyFacts.length > 0 && verifyFacts.every((fact) => fact.passed);
-		return stat.ok > 0 && stat.errors === 0;
+		return stat.ok > 0 && stat.errors === 0 && (freshness === undefined || toolRanOnFinalTree(freshness, stat.tool));
 	});
 }
 
@@ -309,11 +335,13 @@ function hasPassingValidation(
  * Derive the receipt's descriptive evidence-confidence marker without
  * changing execution semantics. ACP agents may validate externally, so lack
  * of Clio-observed validation is unknown rather than a negative assertion.
- * Pass the receipt's typed validations so the marker agrees with them.
+ * Pass the receipt's typed validations so the marker agrees with them, and the
+ * run's check freshness so a validation tool's pass from before a later edit
+ * cannot verify; an ACP peer's tools have no mutation stream to judge by.
  */
 export function deriveRunVerification(
 	draft: Pick<RunResultDraft, "toolStats"> & { typedValidations?: ReadonlyArray<RunResultTypedValidationFact> },
-	context: { capabilityClass?: string | null; acpDelegation?: boolean } = {},
+	context: { capabilityClass?: string | null; acpDelegation?: boolean; checkFreshness?: CheckFreshness } = {},
 ): RunResultVerification {
 	if (context.capabilityClass === "read-only") {
 		return { state: "not_applicable", basis: "read-only-agent" };
@@ -324,7 +352,7 @@ export function deriveRunVerification(
 	if (draft.typedValidations?.some((fact) => fact.passed)) {
 		return { state: "verified", basis: "validation-tool" };
 	}
-	if (hasPassingValidation(draft.toolStats, draft.typedValidations)) {
+	if (hasPassingValidation(draft.toolStats, draft.typedValidations, context.checkFreshness)) {
 		return { state: "verified", basis: "validation-tool" };
 	}
 	// The basis names the claimant that answered and the state carries its

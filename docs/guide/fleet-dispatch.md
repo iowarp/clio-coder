@@ -1986,7 +1986,7 @@ bounded `project_context` provenance are also rendered independently; neither
 hash substitutes for the other.
 
 A worker that runs `verify` more than once is judged by the latest run of each
-check. A check is the call's `check`, `path`, `cwd`, `browser` and `args` taken
+check on its final tree: a run followed by a workspace edit settles nothing. A check is the call's `check`, `path`, `cwd`, `browser` and `args` taken
 together. Re-running `verify(check="test")` after a fix clears the earlier
 failure, and a later failure of a check that passed settles as failed. A narrower
 `verify(check="test", args=[...])` is a different check, so its pass clears

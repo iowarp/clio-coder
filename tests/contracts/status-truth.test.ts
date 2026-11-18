@@ -23,6 +23,7 @@ import { credentialedCallKind, mainCallExposure } from "../../src/domains/safety
 import { outwardShellReason } from "../../src/domains/safety/containment.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
 import { grantEffectDigest } from "../../src/domains/safety/grant-effect.js";
+import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import {
 	DEFAULT_RETRY_SETTINGS,
 	formatStatedWait,
@@ -106,6 +107,8 @@ import { createWorkerStream } from "../../src/session-control/worker-stream.js";
 import { createWorkerStdinDemux } from "../../src/worker/stdin-demux.js";
 
 const STUCK_AFTER_MS = 180_000;
+/** A run with no workspace mutation, where every check ran on the final tree. */
+const unchanged = createRunEffectsRecorder(process.cwd()).checkFreshness();
 
 function reducer(start = 1_000_000) {
 	let now = start;
@@ -1914,21 +1917,32 @@ test("a warning states when it clears and ends within a minute; a pinned notice 
 
 test("a verify call naming an undeclared check ran nothing, so it seals no failing validation fact", () => {
 	const stats = [{ tool: "verify", count: 2, ok: 1, errors: 1, blocked: 0 }];
-	deepStrictEqual(typedValidationFactsFromVerifyCalls(stats, [{ check: "npm test", outcome: "unresolved" }]), []);
-	const mixed = typedValidationFactsFromVerifyCalls(stats, [
-		{ check: "npm test", outcome: "unresolved" },
-		{ check: "test", outcome: "ok" },
-	]);
+	deepStrictEqual(
+		typedValidationFactsFromVerifyCalls(stats, [{ check: "npm test", outcome: "unresolved" }], unchanged),
+		[],
+	);
+	const mixed = typedValidationFactsFromVerifyCalls(
+		stats,
+		[
+			{ check: "npm test", outcome: "unresolved" },
+			{ check: "test", outcome: "ok" },
+		],
+		unchanged,
+	);
 	deepStrictEqual(
 		mixed.map((fact) => fact.passed),
 		[true],
 	);
 	// A declared check that ran and failed still seals a failure.
 	deepStrictEqual(
-		typedValidationFactsFromVerifyCalls(stats, [
-			{ check: "npm test", outcome: "unresolved" },
-			{ check: "test", outcome: "error" },
-		]).map((fact) => fact.passed),
+		typedValidationFactsFromVerifyCalls(
+			stats,
+			[
+				{ check: "npm test", outcome: "unresolved" },
+				{ check: "test", outcome: "error" },
+			],
+			unchanged,
+		).map((fact) => fact.passed),
 		[false],
 	);
 });
@@ -2679,10 +2693,14 @@ test("a chained verify step naming no declared check seals no failed validation 
 	const [ranAndFailed] = gatewayChainReceipts("gateway", chained(false));
 	strictEqual(ranAndFailed?.admission.unresolved, undefined);
 	const stats = [{ tool: "verify", count: 2, ok: 1, errors: 1, blocked: 0 }];
-	const facts = typedValidationFactsFromVerifyCalls(stats, [
-		{ check: "lint", outcome: "ok" },
-		{ check: "nosuch-check", outcome: unknown?.admission.unresolved === true ? "unresolved" : "error" },
-	]);
+	const facts = typedValidationFactsFromVerifyCalls(
+		stats,
+		[
+			{ check: "lint", outcome: "ok" },
+			{ check: "nosuch-check", outcome: unknown?.admission.unresolved === true ? "unresolved" : "error" },
+		],
+		unchanged,
+	);
 	deepStrictEqual(
 		facts.map((fact) => fact.passed),
 		[true],

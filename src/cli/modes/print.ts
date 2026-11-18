@@ -56,6 +56,11 @@ import {
 import { CITATION_CHECK_PREFIX } from "../../domains/safety/citation-grounding.js";
 import { extractCommandWriteTargets } from "../../domains/safety/protected-artifacts.js";
 import { redactFinalUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
+import {
+	createRunEffectsRecorder,
+	type RunEffectsRecorder,
+	recordToolExecutionEffects,
+} from "../../domains/safety/run-effects.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import { formatStatedWait } from "../../domains/session/retry.js";
 import { telemetryRunDirectory } from "../../domains/telemetry/paths.js";
@@ -240,6 +245,8 @@ interface HeadlessMainAgentRunStats {
 	/** Bash calls in flight whose command names a write target. */
 	pendingShellWrites: Set<string>;
 	verifyCalls: VerifyCallOutcome[];
+	/** The run's workspace mutations, so a check is judged against the tree it ran on (bt-27c). */
+	runEffects: RunEffectsRecorder;
 	skillActivations: SkillActivation[];
 	/** Every call the run made, as its settlement states it; the run's spend folds these (#434). */
 	calls: Parameters<typeof runUsageFromCalls>[0][number][];
@@ -494,6 +501,14 @@ function durationMsFromEvent(event: ChatLoopEvent): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
+/** Fold one tool event into the run's effects; a headless finish carries its registry outcome on the end event. */
+function recordRunEffect(recorder: RunEffectsRecorder, event: ChatLoopEvent): void {
+	const outcome = (event as { outcome?: unknown }).outcome;
+	if (event.type === "tool_execution_end" && (outcome === "ok" || outcome === "error" || outcome === "blocked"))
+		recorder.checkOutcome(event.toolCallId, outcome);
+	recordToolExecutionEffects(recorder, event);
+}
+
 function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): void {
 	if (event.type === "tool_execution_start") {
 		const call = effectiveToolCall(event.toolName, event.args);
@@ -556,6 +571,7 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 								? "error"
 								: "ok"
 							: null,
+				event.toolCallId,
 			),
 		);
 		stats.pendingVerifyCalls.delete(event.toolCallId);
@@ -859,7 +875,8 @@ async function recordHeadlessMainAgentRun(input: {
 		toolSignature: snapshot.toolSignature,
 	};
 	const toolStats = sortedToolStats(input.stats.toolStats);
-	const typedValidations = typedValidationFactsFromVerifyCalls(toolStats, input.stats.verifyCalls);
+	const checkFreshness = input.stats.runEffects.checkFreshness();
+	const typedValidations = typedValidationFactsFromVerifyCalls(toolStats, input.stats.verifyCalls, checkFreshness);
 	const draft: RunResultDraft = {
 		runId: envelope.id,
 		cwd: snapshot.cwd,
@@ -876,7 +893,7 @@ async function recordHeadlessMainAgentRun(input: {
 		...(outcomeCode === undefined ? {} : { outcomeCode }),
 		lineage,
 		// Host checks belong to this run, independently of any worker it dispatched.
-		verification: deriveRunVerification({ toolStats, typedValidations }),
+		verification: deriveRunVerification({ toolStats, typedValidations }, { checkFreshness }),
 		routingIntent: {
 			posture: "manual",
 			maxCostUsd: null,
@@ -997,6 +1014,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		pendingVerifyCalls: new Map(),
 		pendingShellWrites: new Set(),
 		verifyCalls: [],
+		runEffects: createRunEffectsRecorder(process.cwd()),
 		skillActivations: [],
 		calls: [],
 		seenAttempts: new Set(),
@@ -1238,6 +1256,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		}
 		if (event.type === "notice" && unreportedUsage === null && isUnreportedUsageNotice(event.text))
 			unreportedUsage = event.text;
+		recordRunEffect(runStats.runEffects, event);
 		recordToolEnd(runStats, event);
 		if (event.type === "message_end") {
 			if (event.message.role === "assistant") runStats.toolRounds.push(...readToolRounds(event.message));
