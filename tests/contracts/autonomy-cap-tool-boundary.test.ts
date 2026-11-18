@@ -50,8 +50,8 @@ afterEach(() => {
 	env.restore();
 });
 
-/** The first `toolRounds` requests each ask for one tool call; any later request answers with text. */
-function transport(toolRounds = 1) {
+/** The first `toolRounds` requests each ask for one tool call; any later request answers with `reply`. */
+function transport(toolRounds = 1, reply = "PONG") {
 	let calls = 0;
 	const fetch: typeof globalThis.fetch = async () => {
 		calls += 1;
@@ -72,7 +72,7 @@ function transport(toolRounds = 1) {
 										{ index: 0, id: `record-${calls}`, type: "function", function: { name: "read", arguments: "{}" } },
 									],
 								}
-							: { role: "assistant", content: "PONG" },
+							: { role: "assistant", content: reply },
 					),
 				);
 				controller.enqueue(chunk({}, first ? "tool_calls" : "stop"));
@@ -86,7 +86,11 @@ function transport(toolRounds = 1) {
 }
 
 /** A real engine and session journal over the fixture wire, with `run` standing in for the read tool. */
-function fixture(toolRounds: number, run: (loop: ChatLoop, signal: AbortSignal | undefined) => Promise<void>) {
+function fixture(
+	toolRounds: number,
+	run: (loop: ChatLoop, signal: AbortSignal | undefined) => Promise<void>,
+	reply?: string,
+) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	settings.chat.target = target.id;
@@ -104,7 +108,7 @@ function fixture(toolRounds: number, run: (loop: ChatLoop, signal: AbortSignal |
 	const safety = context.getContract("safety");
 	ok(safety);
 	const registry = createRegistry({ safety, autonomy: () => "yolo" });
-	const wire = transport(toolRounds);
+	const wire = transport(toolRounds, reply);
 	const journals = createSessionJournals(clioStateDir(), () => {
 		throw new Error("fixture journal unavailable");
 	});
@@ -240,6 +244,40 @@ it("a headless --timeout during a tool after a steer settles the turn on shutdow
 		deepStrictEqual(
 			turns.map((turn) => [turn.stopReason, turn.terminal.cause, turn.terminal.callIds]),
 			[["aborted", "shutdown", calls.map((call) => call.callId)]],
+		);
+	} finally {
+		await f.close();
+	}
+});
+
+it("a turn that keeps writing its tool call as text settles failed with the reason, and why-stopped names it", {
+	timeout: 10_000,
+}, async () => {
+	// bt-session-res J1: past the re-prompt cap the run fails on tool-call markup; why-stopped read "ended normally".
+	const f = fixture(
+		0,
+		async () => {},
+		'Reading part 5 next. <tool_call id="x" name="read">{"path": "notes.txt"}</tool_call>',
+	);
+	try {
+		await f.loop.submit("Read the notes.");
+		await f.loop.whenSettled();
+		strictEqual(f.wire.calls(), 4);
+		const { sessionId, turns } = await f.journal();
+		deepStrictEqual(
+			turns.map((turn) => [turn.stopReason, turn.terminal.cause, turn.terminal.noAnswer]),
+			[["stop", null, "tool_call_announced"]],
+		);
+		const source = loadSessionTelemetrySource(clioStateDir(), sessionId);
+		ok(source);
+		const why = whyStopped(source);
+		strictEqual(why.lastTurn?.noAnswer, "tool_call_announced");
+		ok(!why.findings.some((line) => line.includes("ended normally")), why.findings.join("\n"));
+		ok(
+			why.findings.includes(
+				"The last turn failed without an answer (stop, tool_call_announced): the model said what it would do next and wrote the call as plain text (tool-call markup), so nothing ran.",
+			),
+			why.findings.join("\n"),
 		);
 	} finally {
 		await f.close();

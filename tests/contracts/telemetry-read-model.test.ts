@@ -495,6 +495,24 @@ test("a session's lifetime tells a clean close, an open owner, an abnormal end a
 	);
 	const ended = whyStopped({ ...source, journal: { ...source.journal, records: [...imported.records, turnEnd] } }, now);
 	ok(ended.findings.includes("The last turn ended normally (stop)."), ended.findings.join("\n"));
+	// bt-session-res J1: a normal stop that answered nothing failed the run; why-stopped says so, never "normally".
+	const markupEnd = {
+		...turnEnd,
+		data: { ...turnEnd.data, terminal: { ...turnEnd.data.terminal, noAnswer: "tool_call_as_text" as const } },
+	} as TelemetryRecord;
+	const failed = whyStopped(
+		{ ...source, journal: { ...source.journal, records: [...imported.records, markupEnd] } },
+		{ ...now, alive: () => true },
+	);
+	strictEqual(failed.lastTurn?.noAnswer, "tool_call_as_text");
+	ok(
+		failed.findings.includes(
+			"The last turn failed without an answer (stop, tool_call_as_text): the model wrote its tool call as plain text (tool-call markup), so nothing ran.",
+		),
+		failed.findings.join("\n"),
+	);
+	ok(!failed.findings.some((line) => line.includes("ended normally")), failed.findings.join("\n"));
+	ok(Value.Check(WhyStoppedSchema, failed));
 	// cf1h-D3: the worker that turn dispatched settles in its own run journal; why-stopped names its stop too.
 	const turnCtx = {
 		sessionId: source.sessionId,

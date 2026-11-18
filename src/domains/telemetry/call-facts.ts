@@ -1,5 +1,5 @@
 import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
-import type { FailureCause } from "../../core/telemetry/enums.js";
+import type { FailureCause, TurnNoAnswerCause } from "../../core/telemetry/enums.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import type { PricingBasisSource } from "../../core/telemetry/pricing.js";
@@ -346,6 +346,7 @@ export function turnSettlementFromCalls(
 	calls: readonly CallSettled[],
 	retries: number,
 	fallbackCause?: FailureCause,
+	noAnswer?: TurnNoAnswerCause,
 ): EventPayload<"turn.settled"> {
 	const reason = (
 		typeof stopReason === "string" && STOP_REASONS.has(stopReason) ? stopReason : "error"
@@ -377,6 +378,8 @@ export function turnSettlementFromCalls(
 										: null,
 			retries: Math.max(0, Math.trunc(retries)),
 			callIds: [...new Set(calls.map((call) => call.callId))],
+			// Only a turn that stopped normally can answer nothing; a stop with its own cause is read by that cause.
+			...(noAnswer !== undefined && reason === "stop" && cause === null ? { noAnswer } : {}),
 		},
 	};
 }

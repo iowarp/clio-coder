@@ -18,7 +18,7 @@ import {
 	telemetryContext,
 	toolCallBatchId,
 } from "../core/telemetry/context.js";
-import type { FailureCause } from "../core/telemetry/enums.js";
+import type { FailureCause, TurnNoAnswerCause } from "../core/telemetry/enums.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { pricesCalls, pricingBasisFields } from "../core/telemetry/pricing.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
@@ -168,6 +168,7 @@ import {
 	extractText,
 	isOperatorCancelReason,
 	isThinkingOnlyLengthStop,
+	classifyTurnEnding,
 	nameMissingCredentialRemedy,
 	notConfiguredNotice,
 	noticeMessage,
@@ -2441,6 +2442,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		stopReason: unknown,
 		retries: number,
 		fallbackCause?: FailureCause,
+		noAnswer?: TurnNoAnswerCause,
 	): Promise<void> => {
 		const calls = turnRuntime.takeSettledCalls(userTurnId);
 		const origin = deps.session?.current();
@@ -2451,7 +2453,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				telemetryHub().emit(
 					"turn.settled",
-					turnSettlementFromCalls(stopReason, calls, retries, fallbackCause),
+					turnSettlementFromCalls(stopReason, calls, retries, fallbackCause, noAnswer),
 					lease.context,
 				);
 			} finally {
@@ -2489,6 +2491,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			stopReason: unknown;
 			retries: number;
 			cause: FailureCause | undefined;
+			noAnswer?: TurnNoAnswerCause | undefined;
 			runIds: ReadonlyArray<string>;
 			missing: ReadonlyArray<string>;
 		},
@@ -2496,7 +2499,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const parentTurnId = state.lastTurnId;
 		deps.session?.appendEntry({ kind: "custom", customType: "turnOutcome", parentTurnId, display: false, data: record });
 		outcomeCollector.seedClarificationStreak(record.conversation.clarificationStreak);
-		await recordTurnSettled(record.turnId, settle.stopReason, settle.retries, settle.cause);
+		await recordTurnSettled(record.turnId, settle.stopReason, settle.retries, settle.cause, settle.noAnswer);
 		workerReceipts.amendLate({ turnId: record.turnId, parentTurnId, runIds: settle.runIds, missing: settle.missing });
 	};
 
@@ -4024,10 +4027,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 												: "error",
 								durationMs: Math.max(0, performance.now() - submittedAt),
 							});
+							// The reading every surface fails the run on, so why-stopped names it too (bt-session-res J1).
+							const ending = canceled ? null : classifyTurnEnding(agentRuntime.agent.state.messages);
 							await writeTurnOutcome(record, {
 								stopReason: record.stopReason,
 								retries: turnRetryAttempts + providerRetryAttempts,
 								cause: canceled ? "operator_cancel" : autonomyStopped ? "autonomy_stop" : undefined,
+								noAnswer: ending?.kind === "no_answer" ? ending.cause : undefined,
 								runIds: workerRunIds,
 								missing: missingReceipts,
 							});

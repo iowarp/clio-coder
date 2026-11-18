@@ -10,6 +10,7 @@ import {
 	RunTerminalReason,
 	StopReason,
 	TransportKind,
+	TurnNoAnswerCause,
 	vocabulary,
 } from "./enums.js";
 import { FactSumSchema, factSchema } from "./fact.js";
@@ -1313,6 +1314,8 @@ export const WhyStoppedSchema = Type.Object(
 					stage: Type.Union([text, Type.Null()]),
 					retries: count,
 					callIds: Type.Array(CallIdSchema),
+					/** Why a turn that stopped normally answered nothing; absent when it answered. */
+					noAnswer: Type.Optional(TurnNoAnswerCause),
 				},
 				closed,
 			),
