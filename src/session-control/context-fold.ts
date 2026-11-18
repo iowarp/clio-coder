@@ -31,7 +31,13 @@ import { selectVisibleEntries } from "../domains/context/working-set/visible.js"
 import type { ContextCompactionVerdict } from "../domains/session/compaction/auto.js";
 import type { ContextSnapshot } from "../domains/session/context-accounting.js";
 import type { SessionContract } from "../domains/session/contract.js";
-import type { CompactionTrigger, EvictionRoute, EvictionTrigger, SessionEntry } from "../domains/session/entries.js";
+import type {
+	CompactionTrigger,
+	EvictionAnchor,
+	EvictionRoute,
+	EvictionTrigger,
+	SessionEntry,
+} from "../domains/session/entries.js";
 import { activePath } from "../domains/session/tree/active-path.js";
 import { replaceEngineMessages } from "../engine/agent.js";
 import { renderEvictionSkipLine } from "./compaction-lines.js";
@@ -64,7 +70,14 @@ export interface ContextFoldPort {
 	state: TurnContextState;
 	syncCodexConfiguration(runtime: AgentRuntime): void;
 	liveContextEstimate(agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate;
-	reconciledHistoryTokens(agentRuntime: AgentRuntime): number | null;
+	/** `commit` seeds a live anchor from a replayed usage when none exists, so the carry has a figure (§4 Commit). */
+	reconciledHistoryTokens(agentRuntime: AgentRuntime, commit?: boolean): number | null;
+	/** What the carry will leave behind, stored on the eviction record; undefined with no live anchor (§4). */
+	evictionAnchor(
+		agentRuntime: AgentRuntime,
+		historyTokens: number | null,
+		tokensRemoved: number,
+	): EvictionAnchor | undefined;
 	carryReconciledAnchorThroughProjection(
 		agentRuntime: AgentRuntime,
 		historyTokens: number | null,
@@ -391,7 +404,9 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		const stage = superseded ? "superseded" : "working_set";
 		let committed = false;
 		try {
-			const historyTokens = port.reconciledHistoryTokens(agentRuntime);
+			const historyTokens = port.reconciledHistoryTokens(agentRuntime, true);
+			const tokensRemoved = planned.tokensBefore - planned.tokensAfter;
+			const anchor = port.evictionAnchor(agentRuntime, historyTokens, tokensRemoved);
 			const evictionEntry = session.appendEntry({
 				...buildEvictionFields(planned, {
 					trigger: superseded ? "superseded" : ("pressure" satisfies EvictionTrigger),
@@ -399,6 +414,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 					snapshotIdBefore: input.beforeSnapshotId,
 				}),
 				...(input.route !== undefined ? { route: input.route } : {}),
+				...(anchor !== undefined ? { anchor } : {}),
 				// appendEntry does not infer this anchor; the interactive
 				// cursor is the leaf the next message will extend.
 				parentTurnId: state.lastTurnId,
@@ -414,7 +430,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			port.resetCacheCallBaseline();
 			port.noteColdReason(superseded ? "observation_aging" : "working_set_evict");
 			refreshAgentMessagesFromSession(agentRuntime);
-			port.carryReconciledAnchorThroughProjection(agentRuntime, historyTokens, planned.tokensBefore - planned.tokensAfter);
+			port.carryReconciledAnchorThroughProjection(agentRuntime, historyTokens, tokensRemoved);
 
 			const postEvictionSnapshot = port.captureRuntimeContextSnapshot(
 				agentRuntime,
