@@ -1,6 +1,15 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, it } from "node:test";
@@ -16,6 +25,7 @@ import {
 	workspaceChangeSnapshot,
 	writeCommitBaseline,
 } from "../../src/domains/dispatch/code-step.js";
+import { changedCheckoutPaths, snapshotCheckoutSince, takeCheckoutBaseline } from "../../src/tools/checkout-changes.js";
 import { resolveTestFileChecks } from "../../src/tools/verify/test-files.js";
 
 const roots: string[] = [];
@@ -328,4 +338,29 @@ it("stages everything since the last commit point, including an ignored required
 	);
 	strictEqual(git("status", "--porcelain"), "?? operator-scratch.txt\n");
 	match(outcome.report.checks[0]?.evidence ?? "", /1 other change\(s\) left out of this commit: operator-scratch\.txt/);
+});
+
+it("a run's checkout delta reads only files whose stat moved, and concurrent spawns share one baseline", async () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-checkout-delta-"));
+	roots.push(root);
+	execFileSync("git", ["-C", root, "init", "-q"]);
+	const large = Buffer.alloc(1024 * 1024 + 1, 7);
+	for (const name of ["same-size.txt", "touched.txt"]) writeFileSync(join(root, name), "aaaa\n");
+	for (const name of ["large-kept.bin", "large-rewritten.bin"]) writeFileSync(join(root, name), large);
+	const shared = [takeCheckoutBaseline(root), takeCheckoutBaseline(root), takeCheckoutBaseline(root)];
+	const [before, ...peers] = await Promise.all(shared);
+	if (!before) throw new Error("the fixture is a git workspace");
+	for (const peer of peers) strictEqual(peer, before);
+	notStrictEqual(await takeCheckoutBaseline(root), before);
+	const later = new Date(Date.now() + 60_000);
+	// Same size, new bytes: read again because its stat moved.
+	writeFileSync(join(root, "same-size.txt"), "bbbb\n");
+	// Same bytes rewritten: read again and found unchanged.
+	writeFileSync(join(root, "touched.txt"), "aaaa\n");
+	// Same bytes over 1 MiB: never read, so its stat tuple is the identity and it counts as changed.
+	writeFileSync(join(root, "large-rewritten.bin"), large);
+	for (const name of ["same-size.txt", "touched.txt", "large-rewritten.bin"]) utimesSync(join(root, name), later, later);
+	const after = await snapshotCheckoutSince(before, root);
+	if (!after) throw new Error("the fixture is a git workspace");
+	deepStrictEqual(changedCheckoutPaths(before, after), ["large-rewritten.bin", "same-size.txt"]);
 });
