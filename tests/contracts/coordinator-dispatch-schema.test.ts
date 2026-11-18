@@ -12,6 +12,7 @@ import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { validateEngineToolArguments } from "../../src/engine/ai.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
+import { dispatchRequestsFromArgs } from "../../src/tools/dispatch-arguments.js";
 import {
 	buildDispatchParameters,
 	COORDINATOR_DISPATCH_ARGUMENTS,
@@ -136,6 +137,13 @@ describe("compact coordinator dispatch contract", () => {
 			ok(Value.Check(canonical, { [field]: value }), `canonical ${field}`);
 			ok(Value.Check(compact, { task: "", [field]: value }), `compact ${field}`);
 		}
+		// worktree:false is admitted and parsed the same as omitted (bt-23).
+		ok(Value.Check(canonical, { worktree: false }) && Value.Check(compact, { task: "", worktree: false }));
+		const parsed = dispatchRequestsFromArgs(
+			{ agent: "coder", tasks: ["edit x"], worktree: false },
+			{ auto: { approvedAuthorities: ["read-only", "workspace-edit"], authorityBasis: "yolo-policy" } },
+		);
+		ok(parsed.ok && parsed.requests[0]?.worktree === undefined, JSON.stringify(parsed));
 		for (const intent of [ordinary.intent, { relevant_paths: ["src/x.ts"], verification: [{ check: "test" }] }]) {
 			for (const args of [
 				{ intent },
@@ -161,7 +169,7 @@ describe("compact coordinator dispatch contract", () => {
 			{ list: "yes" },
 			{ briefing: [] },
 			{ mode: [] },
-			{ worktree: false },
+			{ worktree: "false" },
 			{ detach: {} },
 			{ intent: "paths" },
 			{ intent: { read_roots: "src" } },

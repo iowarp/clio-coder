@@ -103,7 +103,8 @@ export function coordinatorDispatchParameters() {
 					"parallel: independent tasks; sequential: ordered tasks; pipeline: tasks consuming the previous result. compete, council and review: gateway describe dispatch.",
 			}),
 		),
-		worktree: Type.Optional(Type.Literal(true)),
+		// false is accepted as omitted: a model told "expected true" spent a round on it (bt-23).
+		worktree: Type.Optional(Type.Boolean()),
 		apply: Type.Optional(
 			StringEnum(["merge", "preserve"], { description: "With worktree: merge (default) or keep the branch." }),
 		),
@@ -355,7 +356,9 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 						target: Type.Optional(Type.String()),
 						model: Type.Optional(Type.String()),
 						node: Type.Optional(Type.String({ description: "Fleet node pin: local or a fleet.nodes id." })),
-						worktree: Type.Optional(Type.Literal(true, { description: "Run this writer in an isolated git worktree." })),
+						worktree: Type.Optional(
+							Type.Boolean({ description: "true runs this writer in an isolated git worktree; false works in place." }),
+						),
 						tags: Type.Optional(DispatchStoreTagsSchema),
 						intent: Type.Optional(DispatchIntentSchema),
 						gate: Type.Optional(Type.String({ description: "One declared check id, shorthand for intent.verification." })),
@@ -389,7 +392,9 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 			Type.Literal(1, { description: "Serialize writer admission in task order while readers run concurrently." }),
 		),
 		worktree: Type.Optional(
-			Type.Literal(true, { description: "Run a singular writer task in an isolated git worktree." }),
+			Type.Boolean({
+				description: "true runs a singular writer task in an isolated git worktree; false or omitted works in place.",
+			}),
 		),
 		tags: Type.Optional(DispatchStoreTagsSchema),
 		apply: Type.Optional(
