@@ -96,6 +96,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- The gateway accepts an empty `parameters` object on a call and names the exact `args` rewrite for a non-empty one (bt-23).
+- A gateway chain whose `steps` sit inside `args` is refused with the top-level shape instead of a generic error (bt-23).
+- A step-template pipeline that stopped at the continuation cap or without `pipelineDone` is journaled (`step_pipeline.settled`, `run.settled.stepPipeline`), so `telemetry why-stopped`, `usage` and `evidence inspect` report it instead of a plain success (bt-20).
 - A step-template pipeline no longer gets `finish.unverified` on each step turn; the finish check assesses the whole pipeline when it ends (bt-12).
 - A pipeline whose step tool never reports `pipelineDone` ends with a `step.unreported` note instead of the continuation-cap warning (bt-15).
 - Step continuations journal `turn.continued` with cause `step`, not `tool_budget` (bt-15).
