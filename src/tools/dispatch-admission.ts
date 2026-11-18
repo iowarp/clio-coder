@@ -382,6 +382,8 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				deps.getAgentSpecs().some((spec) => spec.id === id && id === "scout" && spec.capabilityClass === "read-only"),
 			...(deps.getAgentRoleFacts ? { resolveFacts: deps.getAgentRoleFacts } : {}),
 			hasAgent: (id) => deps.getAgentSpecs().some((spec) => spec.id === id),
+			writesArtifact: (id) =>
+				deps.getAgentSpecs().some((spec) => spec.id === id && spec.capabilityClass === "artifact-write"),
 			auto: {
 				approvedAuthorities: ["read-only", "verification", "artifact-write", "workspace-edit"],
 				authorityBasis: deps.getAutonomy?.() === "yolo" ? "yolo-policy" : "operator-plan-approval",

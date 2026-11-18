@@ -26,7 +26,6 @@ import { dispatchResultContract } from "../../src/domains/dispatch/execution-rol
 import type { SettledRunRecord } from "../../src/domains/telemetry/index.js";
 import { readVerifiedRun } from "../../src/domains/telemetry/index.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
-import { dispatchRequestsFromArgs } from "../../src/tools/dispatch-arguments.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
 import { PRODUCER_INTEGRITY, runEvidenceLabels } from "../../src/tools/worker-evidence.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
@@ -144,22 +143,6 @@ it("parses the allowance from recipe frontmatter and the wire, rejecting out-of-
 		/admits only kind and maxSummaryBytes/u,
 	);
 	throws(() => parseResultContract({ kind: "scout-report", maxSummaryBytes: 1 }, "r.md"), /unknown keys/u);
-});
-
-it("a task that forbids writing files runs read-only and drops the architect plan contract", () => {
-	const architect = { resultContract: { kind: "architect-plan" as const, path: ".clio-coder/artifacts/PLAN.md" } };
-	const auto = { approvedAuthorities: ["read-only" as const], authorityBasis: "yolo-policy" as const };
-	const parse = (task: string) => {
-		const parsed = dispatchRequestsFromArgs({ agent: "architect", tasks: [task] }, { auto });
-		if (!parsed.ok || parsed.requests[0] === undefined) throw new Error(JSON.stringify(parsed));
-		return parsed.requests[0];
-	};
-	const forbidden = parse("Design the cache split. Do not write any files and do not call the artifact tool.");
-	strictEqual(forbidden.readOnly, true);
-	strictEqual(dispatchResultContract(forbidden, architect), undefined);
-	const scoped = parse("Design the cache split. Do not modify files outside src/.");
-	strictEqual(scoped.readOnly, undefined);
-	deepStrictEqual(dispatchResultContract(scoped, architect), architect.resultContract);
 });
 
 it("resolves one applied contract from recipe default, task override, and topology ownership", () => {

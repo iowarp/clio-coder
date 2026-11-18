@@ -87,6 +87,8 @@ export interface DispatchArgumentParserOptions {
 	/** Host workspace used for repository-relative intent and Scout admission (#433). */
 	workspaceRoot?: string;
 	isReadOnlyScout?: (id: string) => boolean;
+	/** True for an agent whose deliverable is a written artifact (capability class artifact-write). */
+	writesArtifact?: (id: string) => boolean;
 	resolveFacts?: AgentRoleFactsResolver;
 	/** Installed recipe ids, so an `auto` baseline never names an agent this install lacks. */
 	hasAgent?: (id: string) => boolean;
@@ -378,15 +380,13 @@ function dispatchRequestFromArgs(
 			return { ok: false, message: error instanceof Error ? error.message : String(error) };
 		}
 	}
-	// A task whose own words forbid writing any file runs read-only, so a recipe contract that writes an
-	// artifact cannot outrank it. One that asks for a worktree, a write root or a host check still writes.
-	if (
-		forbidsFileWrites(task) &&
-		request.worktree !== true &&
-		(request.writeRoots?.length ?? 0) === 0 &&
-		(request.resolvedVerification?.length ?? 0) === 0
-	)
-		request.readOnly = true;
+	// An agent whose deliverable is a written artifact cannot honor a task that forbids writing any file (D-C).
+	if (forbidsFileWrites(task) && options.writesArtifact?.(agentId) === true)
+		return {
+			ok: false,
+			reason: "task_forbids_writes",
+			message: `task_forbids_writes: the task forbids writing any file, but ${agentId} delivers a written artifact. Dispatch a read-only agent (scout, oracle, researcher) or drop the no-write wording.`,
+		};
 	return { ok: true, request };
 }
 
