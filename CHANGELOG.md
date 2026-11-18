@@ -104,6 +104,11 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- The /fork picker lists one row per prompt and forks after that turn's last reply (bt-11 #3).
+- The resume picker explains its ● and ◌ markers in a legend row (bt-11 #4).
+- Enter sends a typed /thinking level as typed instead of a sibling that only matches its letters (bt-11).
+- A narrow turn receipt keeps `cached` beside the token amounts instead of dropping it alone (bt-11).
+- The workers takeover shows a worker's sealed report in words, not as raw JSON (bt-11).
 - A bash call that runs a check alongside a change (`fix; npm test`, `npm test && codemod`) now counts as a mutation, so a pass from before the change no longer seals verified/pass; `npm ci && npm test` still counts its check (x1-1).
 - Read-only inspection no longer exempts `rg --hostname-bin` or `file`, and `git status`, `git diff`, `git log` and `git show` lose it when the repository's git config sets a `core.fsmonitor` hook, `diff.external` or a diff driver command or textconv, so a helper that writes the tree clears earlier passes (x1-3).
 - Step checkpoints carry the last summarized checkpoint once, with only the current step lead, and an oversized carry drops its oldest text instead of the newest (x2-1).
