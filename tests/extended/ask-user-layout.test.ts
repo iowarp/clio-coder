@@ -497,6 +497,24 @@ test("an unanswered round shows its countdown and closes as timed out; any key h
 	deepStrictEqual((await waitsPending).answers[0]?.options, ["Merge"]);
 });
 
+test("a round whose recommended option leaves the workspace says the timeout declines it (bt-21)", () => {
+	const clock = manualTimers();
+	const view = createAskUserViewForTesting({ rows: 40 });
+	void view.ask(
+		[
+			{
+				question: "Append to ~/notes.txt?",
+				options: [{ label: "Append outside workspace · recommended" }, { label: "Skip" }],
+			},
+		],
+		undefined,
+		{ unattended: { windowMs: 5_000, timers: clock.timers } },
+	);
+	const text = plain(view.render(100)).join("\n");
+	match(text, /No answer in 0:05 declines the step outside the workspace and Clio continues/);
+	doesNotMatch(text, /picks the recommended option/);
+});
+
 test("a harness round drops Enter inside its input guard, takes Esc, and answers after the guard", async () => {
 	const guarded = createAskUserViewForTesting({ rows: 40 });
 	const guardedPending = guarded.ask([{ ...SAFE_DEFAULT_ROUND, defaultOption: 1 }], undefined, {
