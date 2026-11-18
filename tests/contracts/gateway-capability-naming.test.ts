@@ -403,13 +403,24 @@ test("footer tallies count the capability a gateway call ran and each settled ch
 	});
 	emit({ type: "tool_execution_start", toolCallId: "c", toolName: "gateway", args: chainArgs });
 	emit({ type: "tool_execution_end", toolCallId: "c", toolName: "gateway", result: chainResult, isError: true });
-	assert.deepEqual(starts, ["bash", "gateway", "grep", "bash"]);
+	// A call the output limit cut off never ran: its tally is withdrawn like a chain's, and it is no error (bt-39 a).
+	emit({ type: "tool_execution_start", toolCallId: "x", toolName: "read", args: { path: "a.ts" } });
+	emit({
+		type: "tool_execution_end",
+		toolCallId: "x",
+		toolName: "read",
+		result: { content: [{ type: "text", text: "not executed" }] },
+		isError: true,
+		notRun: "output_limit",
+	});
+	assert.deepEqual(starts, ["bash", "gateway", "grep", "bash", "read"]);
 	// The chain counts as its steps: its own tally is withdrawn, and the failure is counted once, on the bash step.
 	assert.deepEqual(ends, [
 		["bash", "g", false, false],
 		["gateway", "c", false, true],
 		["grep", "c:a", false, false],
 		["bash", "c:b", true, false],
+		["read", "x", false, true],
 	]);
 	projection.dispose();
 });

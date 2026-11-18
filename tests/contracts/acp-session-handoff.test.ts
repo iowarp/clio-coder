@@ -155,6 +155,10 @@ async function peer(
 	};
 }
 
+function checkpointReason(agent: Awaited<ReturnType<typeof peer>>, sessionId: string): string | null | undefined {
+	return agent.contract.history().find((meta) => meta.id === sessionId)?.lastCheckpointReason;
+}
+
 async function openWithHistory(agent: Awaited<ReturnType<typeof peer>>): Promise<string> {
 	await agent.call("session/new", { cwd: agent.cwd, mcpServers: [] });
 	agent.contract.append({
@@ -220,6 +224,7 @@ test("ACP handoff drafts without writing, commits the reviewed edit once, and fo
 			document: "  \n",
 		});
 		deepStrictEqual([empty.status, empty.code], ["refused", "empty"]);
+		strictEqual(checkpointReason(agent, fromId), undefined, "an empty review closes nothing");
 
 		const reviewed = `${draft.document}\n\nReviewer note: keep the figures in SI units.\n`;
 		const committed = await agent.call("_clio-coder/session/handoff/commit", {
@@ -238,6 +243,7 @@ test("ACP handoff drafts without writing, commits the reviewed edit once, and fo
 		);
 		match(String((seed as { data?: { document?: string } } | undefined)?.data?.document), /SI units/);
 		ok(customTypes(fromId).includes(HANDOFF_NOTE_CUSTOM_TYPE), "the old session names where the work went");
+		strictEqual(checkpointReason(agent, fromId), "handoff", "the source is checkpointed before its ledger closes");
 		deepStrictEqual(agent.resets.at(-1)?.leaf, null);
 		ok((agent.resets.at(-1)?.messages ?? 0) > 0, "the successor's model context carries the seed");
 

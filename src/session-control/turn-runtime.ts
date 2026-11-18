@@ -1,3 +1,4 @@
+import { outputLimitCutOffToolCallIds } from "../core/assistant-output.js";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { isHostAuthored, rememberMessageCalls } from "../core/message-accounting.js";
 import { applyModelAdmission, type ModelAdmissionEvent } from "../core/model-admission.js";
@@ -111,10 +112,12 @@ import {
 } from "./chat-loop-messages.js";
 import type { HostInserts } from "./host-inserts.js";
 import {
+	assessDraftLoop,
 	assessRepetition,
 	assessToolCallFlood,
 	repetitionAbortReason,
 	shouldAssessRepetition,
+	thinkingOverrunReason,
 	toolCallFloodAbortReason,
 } from "./repetition-detector.js";
 import type { ModelRequestFacts, ModelRequestSlots } from "./status-types.js";
@@ -430,6 +433,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			| "unresolved"
 		>
 	>();
+	/** Calls of a response the output token limit cut off: the engine fails each unrun, so they are flagged as not run (bt-39 a). */
+	const cutOffToolCalls = new Set<string>();
 	const toolTelemetry: ToolTelemetry = {
 		onFinish(event) {
 			if (event.toolCallId === undefined) return;
@@ -1795,6 +1800,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			let enrichedEvent = event;
 			if (event.type === "message_end" && event.message.role === "assistant") {
 				requiredToolReminder = middlewareToolChoice.completeRound(event.message);
+				const cutOff = outputLimitCutOffToolCallIds(event.message);
+				for (const id of cutOff) cutOffToolCalls.add(id);
+				// One line states the limit where it applies, instead of one failed call per call (bt-39 a).
+				if (cutOff.length > 0)
+					deps.emitNotice(
+						`[Clio Coder] the response hit the output token limit with ${cutOff.length} tool call${cutOff.length === 1 ? "" : "s"} in it; none ran, since their arguments may be cut off, and the model is asked to re-issue them.`,
+						"warning",
+					);
 			}
 			if (event.type === "tool_execution_start") {
 				toolsInFlight += 1;
@@ -1815,6 +1828,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// (which prints `cancelled 0`) a permission block.
 				const admission = toolOutcomes.get(event.toolCallId);
 				toolOutcomes.delete(event.toolCallId);
+				const notRun = cutOffToolCalls.delete(event.toolCallId);
 				// The registry's own span is the one that means "how long the tool
 				// took": the engine's start-to-end frame also covers the operator,
 				// because a call awaiting a permission decision is parked between
@@ -1826,6 +1840,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					...event,
 					...(durationMs !== undefined ? { durationMs } : {}),
 					resultSummary: toolResultSummary(event.result),
+					...(notRun ? { notRun: "output_limit" } : {}),
 					...(admission === undefined
 						? {}
 						: {
@@ -1923,7 +1938,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							? (state.repetitionAbortReason ?? state.toolProseAbortReason ?? (disposed ? SHUTDOWN_STOP_REASON : null))
 							: null;
 					if (harnessStop !== null) Object.assign(message, { errorMessage: harnessStop, harnessStopped: true });
-					else
+					// An interrupt (the operator's cancel, triage, autonomy) is no route failure either, so it names no route.
+					else if (harnessCause === undefined || harnessCause === "route_moved")
 						Object.assign(message, {
 							failureRoute: {
 								targetId: localRuntime.targetId,
@@ -2071,8 +2087,20 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						if (thinking) repetitionCheck.thinking = streamed.length;
 						else repetitionCheck.text = streamed.length;
 						const repetition = assessRepetition(streamed);
-						if (repetition.kind === "repeating") {
-							state.repetitionAbortReason = repetitionAbortReason(repetition);
+						const drafting = thinking && repetition.kind === "ok" ? assessDraftLoop(streamed) : repetition;
+						// Reasoning only: no text or call yet, on a route whose server enforces no thinking budget (bt-25).
+						const blocks: ReadonlyArray<{ type?: unknown }> = Array.isArray(assistantEvent.partial?.content)
+							? assistantEvent.partial.content
+							: [];
+						const overrun =
+							thinking &&
+							localRuntime.runtimeResolution.modelRuntime.thinking.budgetEnforcement !== "enforced" &&
+							blocks.every((block) => block.type === "thinking")
+								? thinkingOverrunReason(streamed.length, localRuntime.agent.state.model.maxTokens)
+								: null;
+						const stop = drafting.kind === "repeating" ? repetitionAbortReason(drafting) : overrun;
+						if (stop !== null) {
+							state.repetitionAbortReason = stop;
 							deps.emitNotice(state.repetitionAbortReason, "warning");
 							localRuntime.agent.abort();
 						}

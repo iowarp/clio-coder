@@ -482,8 +482,8 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 		active = null;
 		await session.close();
 		// Closing the dock the operator was looking at would otherwise leave
-		// focus wherever herdr puts it after a close, which is not the composer.
-		await deps.mux?.focusSelf();
+		// focus wherever herdr puts it after a close, not where they came from.
+		await deps.mux?.focusReturn();
 		return true;
 	};
 

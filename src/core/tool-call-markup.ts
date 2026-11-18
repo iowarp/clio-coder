@@ -3,12 +3,13 @@
  * because the runtime did not parse it into a structured call, so nothing runs. Measured on a local model target,
  * roughly one locked turn in three answered the forced text-only round this way. Complete blocks are stripped wherever
  * they appear; unterminated trailing blocks (a length stop mid-markup) are stripped only when followed by a call body
- * (`<function=` or a JSON opener), so prose that merely quotes the "<tool_call>" phrase survives.
+ * (`<function=` or a JSON opener), so prose that merely quotes the "<tool_call>" phrase survives. The opener may carry
+ * attributes, as in `<tool_call id="x" name="read">{...}</tool_call>`.
  */
 const DEAD_TOOL_CALL_MARKUP_PATTERNS: ReadonlyArray<RegExp> = [
-	/<tool_call>[\s\S]*?<\/tool_call>/gi,
+	/<tool_call(?:\s[^<>]*)?>[\s\S]*?<\/tool_call>/gi,
 	/<function=[\w.-]+>[\s\S]*?<\/function>/gi,
-	/<tool_call>\s*(?:<function=|[{[])[\s\S]*$/i,
+	/<tool_call(?:\s[^<>]*)?>\s*(?:<function=|[{[])[\s\S]*$/i,
 	/<function=[\w.-]+>[\s\S]*$/i,
 ];
 
@@ -22,8 +23,11 @@ export function stripDeadToolCallMarkup(text: string): string {
 }
 
 function writtenCallNames(block: string): string[] | null {
+	const opener = /^<tool_call(\s[^<>]*)?>\s*/iu.exec(block);
+	// An opener that names the tool takes the JSON body as that call's arguments (c2b-2b).
+	const named = /\bname\s*=\s*["']([\w.-]+)["']/iu.exec(opener?.[1] ?? "")?.[1];
 	const inner = block
-		.replace(/^<tool_call>\s*/iu, "")
+		.slice(opener?.[0].length ?? 0)
 		.replace(/\s*<\/tool_call>$/iu, "")
 		.trim();
 	const fn = /^<function=([\w.-]+)>/iu.exec(inner);
@@ -39,6 +43,8 @@ function writtenCallNames(block: string): string[] | null {
 		// Text that only resembles a call is a quote.
 		return null;
 	}
+	if (named !== undefined)
+		return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? [named] : null;
 	const calls = Array.isArray(parsed) ? parsed : [parsed];
 	const names: string[] = [];
 	for (const call of calls) {
@@ -52,9 +58,10 @@ function writtenCallNames(block: string): string[] | null {
 
 /** Where the last call block starts, taking a `<function=` that a `<tool_call>` wraps as that block's opener. */
 function lastCallBlockStart(text: string): number {
-	const tag = text.toLowerCase().lastIndexOf("<tool_call>");
+	let tag = -1;
+	for (const match of text.matchAll(/<tool_call(?=[\s>])/giu)) tag = match.index;
 	const fn = text.toLowerCase().lastIndexOf("<function=");
-	if (fn > tag && !/<tool_call>\s*$/iu.test(text.slice(0, fn))) return fn;
+	if (fn > tag && !/<tool_call(?:\s[^<>]*)?>\s*$/iu.test(text.slice(0, fn))) return fn;
 	return tag;
 }
 

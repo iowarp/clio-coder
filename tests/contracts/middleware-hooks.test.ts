@@ -175,7 +175,7 @@ describe("middleware hook boundary", () => {
 			outcomes.push([
 				seen[0]?.metadata?.validationCommand as string | undefined,
 				seen[0]?.metadata?.validationExitCode as number | undefined,
-				snapshot.validationCommands.has("pytest"),
+				snapshot.validationCommands.has(command),
 				snapshot.validationOutcomes.get(command),
 			]);
 		}

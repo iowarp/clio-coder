@@ -18,6 +18,7 @@ import {
 	extractCommandCdTargets,
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
+	finalListAfterPlainSteps,
 	joinLineContinuations,
 	observedValidationCommand,
 	shellCommandVerdict,
@@ -75,7 +76,10 @@ const NO_OUTPUT_TARGET: CheckOutputReader = Object.assign(() => () => false, {
 
 /** What a bash command's own text says about the check it runs. */
 export interface ShellCheckReading {
-	/** False when the call's exit status is only a later command's ({@link shellExitSpeaksForCommand}). */
+	/**
+	 * False when the call's exit status is only a later command's ({@link shellExitSpeaksForCommand}). A write on an
+	 * earlier line leaves it true when the check's list ends the command ({@link finalListAfterPlainSteps}).
+	 */
 	statusAttributable: boolean;
 	/** False when a stage piped after the check can fail a green check ({@link checkFailureAttributable}). */
 	failureAttributable: boolean;
@@ -254,7 +258,10 @@ function shellCheckReading(
 	let outsideCwd: boolean | undefined;
 	return {
 		get statusAttributable() {
-			statusAttributable ??= shellExitSpeaksForCommand(command);
+			if (statusAttributable === undefined) {
+				const tail = shellExitSpeaksForCommand(command) ? command : finalListAfterPlainSteps(command, declaredSteps);
+				statusAttributable = tail !== null && shellExitSpeaksForCommand(tail);
+			}
 			return statusAttributable;
 		},
 		get failureAttributable() {

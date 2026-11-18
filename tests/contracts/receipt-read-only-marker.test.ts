@@ -10,17 +10,23 @@
  * names the restriction itself. The marker is optional and absent on runs that
  * could write, so their receipts keep the exact shape and digest they had.
  */
-import { equal, ok } from "node:assert/strict";
+import { equal, match, ok } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 
 import type { RunResult } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
+import { formatDispatchOutput } from "../../src/tools/dispatch-runner.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
-async function sealedReceipt(request: Partial<DispatchRequest>): Promise<RunResult> {
+const READ_ONLY_FEED = [{ type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok", durationMs: 1 } }];
+
+async function sealedReceipt(
+	request: Partial<DispatchRequest>,
+	feed: ReadonlyArray<Record<string, unknown>> = READ_ONLY_FEED,
+): Promise<RunResult> {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;
 	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
@@ -34,7 +40,7 @@ async function sealedReceipt(request: Partial<DispatchRequest>): Promise<RunResu
 				abort: () => {},
 				send: () => true,
 				events: (async function* () {
-					yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok", durationMs: 1 } };
+					yield* feed;
 					yield {
 						type: "message_end",
 						message: { role: "assistant", stopReason: "stop", content: "Read lib/math.js." },
@@ -87,5 +93,25 @@ describe("a read-only run names its restriction in the receipt (BT-016)", () => 
 		const receipt = await sealedReceipt({});
 		ok(receipt.safety);
 		ok(!("readOnly" in receipt.safety));
+	});
+
+	it("counts an ask no operator could answer as a permission request, not a block (bt-readonly)", async () => {
+		const reason =
+			"permission denied by policy: bash raised an operator-authority ask and no operator can answer worker asks for this dispatch";
+		const receipt = await sealedReceipt({ readOnly: true }, [
+			{
+				type: "clio_coder_tool_finish",
+				payload: { tool: "bash", outcome: "blocked", decision: "blocked", deniedPark: true, reason, durationMs: 1 },
+			},
+		]);
+		equal(receipt.safety?.blockedAttempts.length, 0);
+		equal(receipt.safety?.decisions.blocked, 0);
+		equal(receipt.safety?.decisions.permissionRequested, 1);
+		equal(receipt.safety?.permissionRequestedAttempts?.[0]?.tool, "bash");
+		const summary = { count: 0, types: [], lastAssistantText: "", terminalAttemptRunId: receipt.runId };
+		match(
+			formatDispatchOutput("single", [{ receipt, summary }], 8192),
+			/verification_limited \S+: 1 worker call \(bash\)/u,
+		);
 	});
 });

@@ -136,7 +136,8 @@ export type DispatchScopeNoticePayload =
 			 * Write scope changes the tools available for this dispatch, or the
 			 * worker sandbox leaves its admitted MCP servers without network, or a
 			 * run in another repository left out handbook rules its tree cannot check,
-			 * or ran before that repository's first compile landed.
+			 * or ran before that repository's first compile landed, or a dispatch set
+			 * to the judge permission mode runs with the deny permit.
 			 */
 			code:
 				| "write_root_dot_unconfined"
@@ -144,7 +145,8 @@ export type DispatchScopeNoticePayload =
 				| "write_roots_overlap"
 				| "mcp_sandbox_no_network"
 				| "sister_handbook_untrusted"
-				| "sister_handbook_pending";
+				| "sister_handbook_pending"
+				| "worker_judge_withheld";
 			level: "warning";
 			message: string;
 	  }

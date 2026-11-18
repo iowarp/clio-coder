@@ -342,6 +342,7 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 
 	function settleFromRunResult(summary: RunEntry): void {
 		delete summary.resultContract;
+		delete summary.commitPlacement;
 		delete summary.validationFailure;
 		delete summary.completion;
 		try {
@@ -363,6 +364,9 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 			if (facts?.trust !== undefined) summary.trust = summarizeTrustStatus(facts.trust);
 			if (facts?.validationFailure !== undefined) summary.validationFailure = facts.validationFailure;
 			if (facts !== null && facts !== undefined) {
+				// The transcript card's rule: a worktree placement's branch, else the task worktree's.
+				const branch = facts.placement?.mode === "worktree" ? facts.placement.branch : facts.taskWorktree?.branch;
+				summary.commitPlacement = branch !== undefined ? { branch } : {};
 				summary.completion = {
 					...(facts.toolCalls !== undefined ? { toolCalls: facts.toolCalls } : {}),
 					...(facts.refusedCalls !== undefined ? { refusedCalls: facts.refusedCalls } : {}),

@@ -7,7 +7,7 @@ import { it } from "node:test";
 import type { OutputStyle } from "../../src/core/defaults.js";
 import { createMuxRuntime, type MuxPaneOpenFailure } from "../../src/domains/mux/contract.js";
 import { createMuxClient, type MuxClient } from "../../src/domains/mux/socket-client.js";
-import { MuxError } from "../../src/domains/mux/types.js";
+import { MuxError, type MuxEvent } from "../../src/domains/mux/types.js";
 import { createWatchPaneController } from "../../src/interactive/watch-pane.js";
 
 function fixture() {
@@ -423,4 +423,49 @@ it("does not adopt a dock whose owning Clio is still running", async () => {
 	});
 	const adopted = await runtime.contract.adoptPane({ purpose: "watch", label: "watch" });
 	strictEqual(adopted?.paneId, "orphan");
+});
+
+it("hides a dock from inside it back to the operator's own pane, not Clio's (bt-tui herdr focus)", async () => {
+	const focused: string[] = [];
+	let emit: (event: MuxEvent) => void = () => undefined;
+	const client = {
+		async subscribe(_kinds: unknown, handler: (event: MuxEvent) => void) {
+			emit = handler;
+			return { close() {} };
+		},
+		async paneFocus(paneId: string) {
+			focused.push(paneId);
+		},
+	} as unknown as MuxClient;
+	const runtime = createMuxRuntime({
+		client,
+		detection: {
+			mode: "guest",
+			socketPath: null,
+			server: { version: "0.8.2", protocol: 21 },
+			self: { paneId: "self", tabId: "t1", workspaceId: "w1" },
+			candidates: [],
+			reason: "fixture",
+			refused: false,
+		},
+	});
+	runtime.registry.record({
+		ref: { paneId: "dock", tabId: "t1", workspaceId: "w1" },
+		purpose: "watch",
+		label: "workers",
+		openedAt: 0,
+	});
+	await runtime.start();
+	// The operator works in their editor pane, then steps into the dock; a pane
+	// in another workspace never counts.
+	emit({ kind: "pane.focused", paneId: "editor", workspaceId: "w1" });
+	emit({ kind: "pane.focused", paneId: "dock", workspaceId: "w1" });
+	emit({ kind: "pane.focused", paneId: "elsewhere", workspaceId: "w2" });
+	strictEqual(await runtime.contract.focusReturn(), true);
+	emit({ kind: "pane.focused", paneId: "self", workspaceId: "w1" });
+	strictEqual(await runtime.contract.focusReturn(), true);
+	emit({ kind: "pane.focused", paneId: "editor", workspaceId: "w1" });
+	emit({ kind: "pane.closed", paneId: "editor", workspaceId: "w1" });
+	strictEqual(await runtime.contract.focusReturn(), true);
+	deepStrictEqual(focused, ["editor", "self", "self"]);
 });

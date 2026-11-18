@@ -16,6 +16,7 @@
  * the read model's, which the footer reads beside this line.
  */
 
+import { outputLimitCutOffToolCallIds } from "../core/assistant-output.js";
 import { type ResponseModelIdObservation, responseModelIdObservationFromRecord } from "../core/response-model-id.js";
 import { rawDurationMs } from "../core/timers.js";
 import type { MessageEntry, SessionEntry, SessionUsageDefaults } from "../domains/session/index.js";
@@ -125,6 +126,8 @@ export function lastTurnSummaryFromLedger(
 	let failure: TurnSummary["failure"];
 	let toolCount = 0;
 	let toolErrorCount = 0;
+	// The calls of a reply the output limit cut off, which never ran and count as no call and no error (bt-39 a).
+	let notRun = new Set<string>();
 	let targetId = turn.targetId;
 	let modelId = turn.modelId;
 	let responseModelIdObservation: ResponseModelIdObservation = {
@@ -137,9 +140,11 @@ export function lastTurnSummaryFromLedger(
 		// The live tally counts a tool by its result, so a call still in flight
 		// when the branch was left contributes nothing here either.
 		if (row.role === "tool_result") {
-			toolCount += 1;
 			const failed = record?.isError === true || record?.error === true;
-			if (failed) toolErrorCount += 1;
+			if (typeof record?.toolCallId !== "string" || !notRun.has(record.toolCallId)) {
+				toolCount += 1;
+				if (failed) toolErrorCount += 1;
+			}
 			const result = payloadRecord(record?.result);
 			settled.push({
 				role: "toolResult",
@@ -155,6 +160,7 @@ export function lastTurnSummaryFromLedger(
 		if (record.terminalToolResult === true) continue;
 		sawAssistant = true;
 		settled.push({ role: "assistant", ...record } as unknown as AgentMessage);
+		notRun = new Set(outputLimitCutOffToolCallIds(record));
 		const reason = stopReasonOf(record.stopReason);
 		if (reason && reason !== "stop") stopReason = reason;
 		failure = turnFailureFacts(record);

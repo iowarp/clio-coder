@@ -5,6 +5,7 @@ import { writeDiagnostic } from "../core/diagnostics.js";
 import { detectNewerHome, initializeClioHome, type NewerHome, recordHomeDowngrade } from "../core/init.js";
 import { readClioVersion } from "../core/package-root.js";
 import { isRestartHandoff } from "../core/restart-status.js";
+import { withRunOverrides } from "../core/run-overrides.js";
 import { formatSettingsLayerWarning } from "../core/settings-layer-diagnostics.js";
 import { readLayeredSettings, readStrictLayeredSettings } from "../core/settings-layers.js";
 import type { BootOptions } from "../entry/boot-options.js";
@@ -290,12 +291,17 @@ export async function runClioCommand(
 			const { preloadStage1 } = await import("../entry/stage1-preload.js");
 			await preloadStage1(terminalLease.abortSignal);
 		}
-		const result = await deps.bootOrchestrator({
-			...options,
-			...(startupSettings ? { startupSettings } : {}),
-			...(trustCardNotices !== undefined ? { trustCardNotices } : {}),
-			...(terminalLease ? { terminalLease } : {}),
-		});
+		// The same run-overrides transport `run` uses (c16-E), so workers inherit the ceiling too.
+		const result = await withRunOverrides(
+			options.maxContextTokens === undefined ? {} : { maxContextTokens: options.maxContextTokens },
+			() =>
+				deps.bootOrchestrator({
+					...options,
+					...(startupSettings ? { startupSettings } : {}),
+					...(trustCardNotices !== undefined ? { trustCardNotices } : {}),
+					...(terminalLease ? { terminalLease } : {}),
+				}),
+		);
 		return result.exitCode;
 	} catch (error) {
 		// Ctrl+C or a signal closed the lease while Stage 1 was hydrating, and boot

@@ -118,7 +118,7 @@ export interface MuxSnapshot {
 }
 
 /** Lifecycle event kinds the pane layer can subscribe to. */
-export type MuxEventKind = "pane.closed" | "pane.exited" | "pane.moved" | "layout.updated";
+export type MuxEventKind = "pane.closed" | "pane.exited" | "pane.moved" | "pane.focused" | "layout.updated";
 
 /**
  * One pushed lifecycle event. A discriminated union because the payloads
@@ -129,6 +129,7 @@ export type MuxEventKind = "pane.closed" | "pane.exited" | "pane.moved" | "layou
 export type MuxEvent =
 	| { kind: "pane.closed" | "pane.exited"; paneId: string; workspaceId: string }
 	| { kind: "pane.moved"; paneId: string; previousPaneId: string; tabId: string; workspaceId: string }
+	| { kind: "pane.focused"; paneId: string; workspaceId: string }
 	| { kind: "layout.updated"; geometry: MuxTabGeometry };
 
 /** One rectangle in terminal cells, as herdr's layout snapshots report them. */

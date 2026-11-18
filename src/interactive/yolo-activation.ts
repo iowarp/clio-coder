@@ -28,7 +28,7 @@ function yoloAcceptanceQuestion(): AskUserQuestion {
 		header: "Yolo",
 		question: [
 			"Turn on yolo? It runs long jobs without approval stops:",
-			"- No approval cards: a call that would need your approval is refused back to Clio instead. Clio still asks you questions (interviews, plan closes, choices only you can make); one nobody answers in time takes its recommended option.",
+			"- No approval cards: a call that would need your approval is refused back to Clio instead. Clio still asks you questions (interviews, plan closes, choices only you can make); one nobody answers in time takes its recommended option unless that option leaves the workspace.",
 			"- Commands stay in the OS sandbox: the workspace and scratch roots are writable, credentials and secret files are hidden. Risky calls (leaving the sandbox, writes outside the workspace, destructive git, pushes and publishes) go to the safety judge, which allows only what your request asked for.",
 			"- The floor still blocks deleting /, your home directory or a system tree, mkfs, writes to a block device, fork bombs, and writes into Clio's own state. Rules in an approved .clio-coder/safety.yaml hold.",
 			"- Workspace snapshots and the telemetry journals stay on, so /rewind can restore files. Yolo is refused as root outside a container.",

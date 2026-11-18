@@ -18,7 +18,7 @@ import {
 	createOverlayPermissionLifecycle,
 	type OverlayPermissionLifecycle,
 } from "../../src/interactive/overlay-permission-lifecycle.js";
-import { permissionHintEntries } from "../../src/interactive/permission-hint.js";
+import { permissionHintEntries, slashDraftUnderApprovalNotice } from "../../src/interactive/permission-hint.js";
 import {
 	type ApprovalRequestView,
 	createPermissionOverlayBody,
@@ -259,6 +259,25 @@ test("Alt+T folds the terms while the card owns the keys and yields while the mu
 	ok(calls.includes("confirm"));
 });
 
+test("Enter on a /fork draft under the card allows nothing and names the card and its keys (bt-11 p)", () => {
+	const calls: string[] = [];
+	const deps = {
+		cancelPermission: () => calls.push("cancel"),
+		confirmPermission: () => calls.push("confirm"),
+		stopTurnFromPermission: () => calls.push("stop"),
+		composerHasDraft: () => true,
+		explainHeldDraft: () => calls.push("explain"),
+	};
+	ok(routeOverlayKey("\r", "permission-confirm", deps as never, () => false));
+	deepStrictEqual(calls, ["explain"]);
+	const notice = slashDraftUnderApprovalNotice("/fork");
+	match(
+		notice ?? "",
+		/^\/fork waits for the approval card: Esc denies the call or .+ stops the turn, then Enter runs \/fork\.$/u,
+	);
+	strictEqual(slashDraftUnderApprovalNotice("please fork it"), null);
+});
+
 test("local invocation inspection scrolls complete redacted arguments without adding them to the shared approval view", () => {
 	const view: ApprovalRequestView = { ...WRITE_VIEW, tool: "bash", actionClass: "unknown", target: "preview" };
 	delete view.mutation;
@@ -409,8 +428,16 @@ test("a card nobody answers denies its call after the window, and the turn conti
 		);
 		match(
 			card.join(" "),
-			/No answer in 5 s denies this call and Clio continues without it\.\s+Any key\s+holds the card\./u,
+			/No answer in 0:05 denies this call and Clio continues without it\.\s+Any\s+key\s+holds the card\./u,
 		);
+		// The clock keeps one m:ss shape across the minute (bt-11 q).
+		for (const [ms, shown] of [
+			[61_000, "1:01"],
+			[59_000, "0:59"],
+		] as const) {
+			const at = plain(createPermissionOverlayBody(WRITE_VIEW, undefined, undefined, undefined, () => ms).render(76));
+			match(at.join(" "), new RegExp(`No answer in ${shown} denies this call`, "u"));
+		}
 		f.clock.advance(5_000);
 		const settled = await verdict;
 		strictEqual(settled.kind, "blocked");

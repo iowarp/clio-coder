@@ -287,6 +287,11 @@ interface HeadlessMainAgentRunStats {
 	/** Blocked action classes not followed by successful substantive work of that class. */
 	unresolvedBlocks: Set<string>;
 	/**
+	 * Why the last dispatch call failed before any worker ran, until a later dispatch starts one or other substantive
+	 * work succeeds. The delegated task never started, so it is as unmet as a blocked call (c16-B).
+	 */
+	unstartedDispatch: string | null;
+	/**
 	 * Whether the task asked for a change. Only an explicit `--turn-mode answer`
 	 * or `proposal` says it did not; the no-op verdict applies only when it did.
 	 */
@@ -548,6 +553,11 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	const tool = stats.pendingCapabilities.get(event.toolCallId) ?? event.toolName ?? "tool";
 	stats.pendingCapabilities.delete(event.toolCallId);
 	const shellWrite = stats.pendingShellWrites.delete(event.toolCallId);
+	// A call the output limit cut off never ran: its run's one notice states it, and it is no tool error (bt-39 a).
+	if ((event as { notRun?: unknown }).notRun !== undefined) {
+		stats.pendingVerifyCalls.delete(event.toolCallId);
+		return;
+	}
 	// Fold completed child operations into accounting only. The provider and
 	// session history retain the real aggregate call/result pair.
 	const children = gatewayChainReceipts(event.toolName, event.result);
@@ -693,6 +703,7 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 			(plane === "observe" || plane === "retrieve" || plane === "execute" || plane === "mutate")
 		) {
 			stats.unresolvedBlocks.delete(action);
+			stats.unstartedDispatch = null;
 			// A read may be useful progress after a denied command, but cannot
 			// attest that command's requirement (for example a test) was met.
 			// An independent task verifier can accept an alternate workflow;
@@ -705,6 +716,12 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	else if (outcome === "ok" && shellWrite) stats.mutatingSucceeded += 1;
 	if (outcome === "ok" && tool === ToolNames.Dispatch)
 		stats.mergedTaskWorktrees += mergedTaskWorktreeCount(event.result);
+	if (tool === ToolNames.Dispatch) {
+		const runs = (event.result as { details?: { runs?: unknown } } | undefined)?.details?.runs;
+		if (outcome === "ok" || (outcome === undefined && !event.isError) || (Array.isArray(runs) && runs.length > 0))
+			stats.unstartedDispatch = null;
+		else if (outcome === "error" || outcome === undefined) stats.unstartedDispatch = dispatchFailureReason(event);
+	}
 	if (tool === ToolNames.Context) {
 		const rawTurnId = (event as { turnId?: unknown }).turnId;
 		const turnId = typeof rawTurnId === "string" ? rawTurnId : undefined;
@@ -728,7 +745,7 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 function headlessNoop(stats: HeadlessMainAgentRunStats): boolean {
 	if (!stats.changeAsked) return false;
 	const totals = toolTotals(stats.toolStats);
-	if (stats.unresolvedBlocks.size > 0 && !changedWorkspace(stats)) return true;
+	if (unmetWithoutChange(stats)) return true;
 	return totals.calls > 0 && totals.succeeded === 0;
 }
 
@@ -749,6 +766,25 @@ function mergedTaskWorktreeCount(result: unknown): number {
 
 function changedWorkspace(stats: HeadlessMainAgentRunStats): boolean {
 	return stats.mutatingSucceeded > 0 || stats.mergedTaskWorktrees > 0;
+}
+
+/** A blocked call or a dispatch that started no worker remains, and nothing changed the workspace. */
+function unmetWithoutChange(stats: HeadlessMainAgentRunStats): boolean {
+	return (stats.unresolvedBlocks.size > 0 || stats.unstartedDispatch !== null) && !changedWorkspace(stats);
+}
+
+/** The first line of a failed dispatch's reason, bounded, for the run's failure message. */
+function dispatchFailureReason(event: ChatLoopEvent): string {
+	const reason = (event as { reason?: unknown }).reason;
+	const content = (event as { result?: { content?: unknown } }).result?.content;
+	const text =
+		typeof reason === "string"
+			? reason
+			: Array.isArray(content)
+				? content.map((block) => (typeof block?.text === "string" ? block.text : "")).join("")
+				: "";
+	const line = (text.split("\n").find((part) => part.trim().length > 0) ?? "").trim();
+	return line.length > 200 ? `${line.slice(0, 199)}…` : line;
 }
 
 function toolTotals(stats: Map<string, ToolCallStat>): { calls: number; succeeded: number; blocked: number } {
@@ -783,7 +819,9 @@ function noopFailureMessage(stats: HeadlessMainAgentRunStats, failOnNoop: boolea
 	const cause =
 		stats.unresolvedBlocks.size > 0 && !changedWorkspace(stats)
 			? `${totals.blocked} tool call${totals.blocked === 1 ? " was" : "s were"} blocked without recovery and no write succeeded`
-			: `${totals.calls} tool call${totals.calls === 1 ? "" : "s"} ran and none succeeded`;
+			: stats.unstartedDispatch !== null && !changedWorkspace(stats)
+				? `the delegated task never started (${stats.unstartedDispatch || "dispatch failed"}) and no write succeeded`
+				: `${totals.calls} tool call${totals.calls === 1 ? "" : "s"} ran and none succeeded`;
 	return `clio-coder run: no-op${failOnNoop ? " under --fail-on-noop" : ""}: ${cause}`;
 }
 
@@ -1081,6 +1119,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		mutatingSucceeded: 0,
 		mergedTaskWorktrees: 0,
 		unresolvedBlocks: new Set<string>(),
+		unstartedDispatch: null,
 		changeAsked: options.constraints?.mode !== "answer" && options.constraints?.mode !== "proposal",
 	};
 	// The ledger row is this run's accounting, so it has to exist on the costly
@@ -1438,6 +1477,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 					toolCalls: countToolStats(runStats.toolStats),
 					refused: toolTotals(runStats.toolStats).blocked,
 					writes: runStats.mutatingSucceeded,
+					workspaceRoot: process.cwd(),
+					scratchRoots: options.scratchRoots ?? [],
 				})
 			: null;
 	const endedAt = new Date().toISOString();
@@ -1524,8 +1565,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		// block with no applied change. Judge settled tool outcomes, not prose
 		// or the presence of a validation contract. Recovered failures may succeed.
 		const limited = (runStats.toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0;
-		const blockedWithoutChange =
-			runStats.changeAsked && runStats.unresolvedBlocks.size > 0 && !changedWorkspace(runStats);
+		const blockedWithoutChange = runStats.changeAsked && unmetWithoutChange(runStats);
 		if (limited || blockedWithoutChange || (options.failOnNoop === true && headlessNoop(runStats))) {
 			const failureMessage = limited
 				? "clio-coder run: the agent recorded an explicit limitation; the task is incomplete"

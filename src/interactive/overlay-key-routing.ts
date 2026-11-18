@@ -55,6 +55,8 @@ export interface PermissionOverlayKeyDeps {
 	 * resolves away from "allow". Absent means an empty composer.
 	 */
 	composerHasDraft?: () => boolean;
+	/** Enter met a draft and allowed nothing: say why, so a typed `/fork` is not silently dropped (bt-11 p). */
+	explainHeldDraft?: () => void;
 	/**
 	 * Whether the card opened too recently for Enter to be an answer to it. A
 	 * key already on its way (a double tap, two Enters in one read, an Enter
@@ -176,7 +178,8 @@ function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps)
 		// Consumed either way: with a draft the press changes nothing, and the
 		// composer rail says what clears it. Letting it fall through would hand
 		// Enter to the editor, which is the send path this guard exists to block.
-		if (!(deps.composerHasDraft?.() ?? false) && !(deps.isPermissionSettling?.() ?? false)) deps.confirmPermission();
+		if (deps.composerHasDraft?.() ?? false) deps.explainHeldDraft?.();
+		else if (!(deps.isPermissionSettling?.() ?? false)) deps.confirmPermission();
 		return true;
 	}
 	const edit = DRAFT_EDITS.find(([key]) => matchesKey(data, key));

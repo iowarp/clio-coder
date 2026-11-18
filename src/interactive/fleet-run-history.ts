@@ -8,7 +8,7 @@ import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { readRunRecord } from "../domains/telemetry/index.js";
 import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
 import type { DispatchBoardRow, DispatchBoardStatus, DispatchRunUsage } from "./dispatch-board.js";
-import { presentSettledWorkerAnswer } from "./renderers/worker-answer.js";
+import { commitPlacementOf, presentSettledWorkerAnswer } from "./renderers/worker-answer.js";
 
 /** Worker runs a restarted board shows. The ledger holds every run the machine kept. */
 const DURABLE_RUN_LIMIT = 12;
@@ -46,7 +46,13 @@ export function recordedRunAnswerLines(runId: string, text: string, stateDir = c
 			? { kind: facts.contractKind, conformance: facts.contract }
 			: undefined;
 	const verified = facts?.trust?.artifactIntegrity.state === "verified";
-	const presented = presentSettledWorkerAnswer(text, contract, verified, true);
+	const presented = presentSettledWorkerAnswer(
+		text,
+		contract,
+		verified,
+		true,
+		facts ? commitPlacementOf(facts) : undefined,
+	);
 	return presented && [...(presented.footer ? [presented.footer] : []), ...presented.lines].map(sanitizeCallTargetText);
 }
 
@@ -90,6 +96,7 @@ function historyRow(run: RunEnvelope, status: DispatchBoardStatus): DispatchBoar
 				}
 			: {}),
 		...contract,
+		...(facts !== null ? { commitPlacement: commitPlacementOf(facts) } : {}),
 		lastContextTokens: null,
 		runRecordId: run.id,
 		currentTool: null,

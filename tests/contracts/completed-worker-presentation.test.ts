@@ -127,16 +127,21 @@ test("a settled coder's mutation report reads as words on the fleet board as on 
 	// A mutation report is no presented contract kind, so only the sealed record admits it.
 	delete entry.result.contractKind;
 	const transcript = plain(renderWorkerEntryLines(entry, 120, { detail: transcriptDetail("standard") }));
-	const fleet = plain(board(entry, 120, { trust: summarizeTrustStatus(trust) }));
+	const fleet = plain(board(entry, 120, { trust: summarizeTrustStatus(trust), commitPlacement: {} }));
 	assert.match(plain(board(entry, 120)), /"mutatedPaths"/);
 	for (const text of [transcript, fleet]) {
 		assert.match(text, /changed textutil\/slug\.py/);
 		assert.match(text, /python-unittest: 4 tests passed/);
 		assert.doesNotMatch(text, /"mutatedPaths"/);
 	}
-	assert.match(transcript, /proposed commit message, not committed: fix slug/);
-	// The board does not know where the commit landed, so it claims neither.
-	assert.match(fleet, /commit message: fix slug/);
+	// With the run's placement on its row, the board says where the commit lands as the card does.
+	for (const text of [transcript, fleet]) assert.match(text, /proposed commit message, not committed: fix slug/);
+	const onBranch = { trust: summarizeTrustStatus(trust), commitPlacement: { branch: "clio/task-7" } };
+	assert.match(plain(board(entry, 120, onBranch)), /commit on clio\/task-7: fix slug/);
+	// A row whose result was never read claims neither.
+	const unread = plain(board(entry, 120, { trust: summarizeTrustStatus(trust) }));
+	assert.match(unread, /commit message: fix slug/);
+	assert.doesNotMatch(unread, /not committed|commit on/);
 });
 
 test("live, failed-contract, partial, malformed and unknown answers never acquire a contract summary", () => {

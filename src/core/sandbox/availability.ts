@@ -171,6 +171,11 @@ export function sandboxAvailability(
 	return detected.availability;
 }
 
+/** The host answer once a probe has landed, else null. Never probes, so a render path can read it. */
+export function probedSandboxAvailability(): SandboxAvailability | null {
+	return cached;
+}
+
 /**
  * Null when bubblewrap can also isolate the network (`--unshare-net`), which
  * a network-off sandbox needs; else why not. Cached like the base probe, a

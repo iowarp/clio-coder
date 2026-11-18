@@ -58,6 +58,8 @@ import type { fleetInspectionScope } from "./fleet-project-scope.js";
 /** Poll cadence, matching the monitor tool and the feed's coalescing window. */
 const POLL_MS = 250;
 const TIMER_WIDTH = 7;
+/** The most rows a selected card gives a task the header could not hold. */
+const TASK_ROWS = 3;
 const NAME_MAX = 16;
 const SEPARATOR = " · ";
 const RULE = "─";
@@ -326,8 +328,19 @@ function activityText(paint: BoardPaint, card: WorkerCard, width: number): strin
 	return paint.fg("activity", `${glyph} ${words}`);
 }
 
-/** One card: the aligned header, the facts, and the live or verdict row. */
-function renderCard(
+/** Rows of a task too long for the header, at most three, the last cut with an ellipsis. */
+function taskRows(paint: BoardPaint, task: string, width: number): string[] {
+	const rows = wrapTextWithAnsi(task, width);
+	const shown =
+		rows.length > TASK_ROWS ? [...rows.slice(0, TASK_ROWS - 1), cut(rows.slice(TASK_ROWS - 1).join(" "), width)] : rows;
+	return shown.map((row) => `  ${paint.fg("body", row)}`);
+}
+
+/**
+ * One card: the aligned header, the facts, and the live or verdict row. The dock's share leaves the header about 20
+ * cells for the task, so the selected card spells a longer task out below it instead of cutting it there.
+ */
+export function renderCard(
 	paint: BoardPaint,
 	card: WorkerCard,
 	width: number,
@@ -342,15 +355,18 @@ function renderCard(
 	const head = `${stateGlyph(paint, card)} ${paint.fg(options.selected ? "selectedOption" : "workerIdentity", shownName, options.selected)}${" ".repeat(Math.max(0, nameWidth - visibleWidth(shownName)))} ${paint.fg("toolMetadata", timer)}`;
 	const taskRoom = inner - visibleWidth(head) - 2;
 	const task = clean(card.task);
-	const first = taskRoom >= 4 && task.length > 0 ? `${head}  ${paint.fg("body", cut(task, taskRoom))}` : head;
+	const spelled = options.selected && options.style !== "compact" && visibleWidth(task) > taskRoom;
+	const first =
+		!spelled && taskRoom >= 4 && task.length > 0 ? `${head}  ${paint.fg("body", cut(task, taskRoom))}` : head;
+	const below = spelled ? taskRows(paint, task, inner - 2) : [];
 	const attempt = card.attempt > 0 ? `↻${card.attempt + 1} ` : "";
 	const facts = `  ${paint.fg("toolMetadata", `${attempt}${factsText(card, inner - 2 - attempt.length)}`)}`;
 	const activity = `  ${cut(activityText(paint, card, inner - 2), inner - 2)}`;
 	const lines =
 		options.style === "detailed"
-			? [first, facts, activity]
+			? [first, ...below, facts, activity]
 			: options.style === "standard"
-				? [first, activity]
+				? [first, ...below, activity]
 				: [`${head} ${activityText(paint, card, inner - visibleWidth(head) - 1)}`];
 	return lines.map((row) => cut(`${gutter}${cut(row, inner)}`, width));
 }

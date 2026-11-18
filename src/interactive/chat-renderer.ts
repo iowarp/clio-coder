@@ -14,6 +14,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { outputLimitCutOffToolCallIds } from "../core/assistant-output.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, readContextOperation } from "../core/context-operation.js";
 import type { PackageActivity } from "../core/package-activity.js";
 import { EXTENSION_ACTIVITY, PLUGIN_RESOURCE_USE, packageActivityText } from "../core/package-activity.js";
@@ -769,6 +770,8 @@ function replayEntries(
 ): void {
 	chatPanel.replayRoute?.(options.routeTarget ?? null);
 	const pendingToolIds: string[] = [];
+	// The calls of replies the output limit cut off; their rows read as not run, as they did live (bt-39 a).
+	const cutOffToolIds = new Set<string>();
 	let runAssistantMessages: AgentMessage[] = [];
 	// What the live receipt measured, recovered from the ledger: the run's
 	// duration from its prompt's timestamp to its last answer's, and the reasons
@@ -884,6 +887,7 @@ function replayEntries(
 					// answer; its original timestamp still owns the duration (flywheel r4/5).
 					runStartedAtMs = runStarts.get(entry.turnId) ?? runStartedAtMs;
 					runTurnId = runTurns.get(entry.turnId) ?? runTurnId;
+					for (const id of outputLimitCutOffToolCallIds(entry.payload)) cutOffToolIds.add(id);
 					const text = chatMessageText(entry);
 					const failure = messageFailure(entry);
 					const richMessage = richMessageFromEntry(entry, Number.POSITIVE_INFINITY);
@@ -982,9 +986,11 @@ function replayEntries(
 				}
 				if (entry.role === "tool_result") {
 					const result = extractToolResult(entry);
+					const cutOff = result.id !== null && cutOffToolIds.delete(result.id);
 					// The settlement reads the run's work as it did live.
 					runAssistantMessages.push({
 						role: "toolResult",
+						...(result.id !== null ? { toolCallId: result.id } : {}),
 						toolName: result.name,
 						isError: result.isError,
 					} as unknown as AgentMessage);
@@ -1007,6 +1013,7 @@ function replayEntries(
 							...(result.actionClass !== undefined ? { actionClass: result.actionClass } : {}),
 							...(result.autoApproved !== undefined ? { autoApproved: result.autoApproved } : {}),
 							...(evictedReason !== undefined ? { evictedReason } : {}),
+							...(cutOff ? { notRun: "output_limit" } : {}),
 						} as ChatLoopEvent);
 					} else {
 						chatPanel.appendReplayBlock((width, detail, unbounded) =>

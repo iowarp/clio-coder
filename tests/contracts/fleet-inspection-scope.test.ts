@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { verdictText } from "../../src/cli/fleet-board.js";
+import { renderCard, verdictText } from "../../src/cli/fleet-board.js";
 import { createBoardSource, loadBoard, loadTakeover, type WorkerCard } from "../../src/cli/fleet-board-model.js";
 import { fleetInspectionScope } from "../../src/cli/fleet-project-scope.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -234,6 +234,41 @@ test("a finished card's row keeps its refusal and seal whole and drops the least
 	// Only the outcome is ever cut.
 	const narrow = verdictText(paint, card, 8);
 	ok(narrow.startsWith("✓ succe") && narrow.includes("…"), narrow);
+});
+
+test("the selected dock card spells out a task its header cuts at the 0.34 share (bt-tui dock cut)", () => {
+	const paint = { fg: (_role: unknown, text: string) => text, dim: (text: string) => text };
+	const task = "Implement slugify in textutil/slug.py and add unit tests for unicode, punctuation and empty input";
+	const card = {
+		runId: "r1",
+		agentId: "coder",
+		task,
+		state: "running",
+		elapsed: "12s",
+		phase: "thinking",
+		current: null,
+		last: null,
+		record: null,
+		attempt: 0,
+		toolCalls: 0,
+		target: "local",
+		model: "model",
+		startedAtMs: 0,
+		endedAtMs: null,
+	} as unknown as WorkerCard;
+	const options = { nameWidth: 5, nowMs: 0, style: "standard" as const };
+	// 45 cells is the dock's share of a 132-column terminal.
+	const idle = renderCard(paint, card, 45, { ...options, selected: false });
+	strictEqual(idle.length, 2, "an unselected card keeps one header row");
+	ok(idle[0]?.includes("…"), idle[0]);
+	const selected = renderCard(paint, card, 45, { ...options, selected: true });
+	ok(selected.every((row) => row.length <= 45));
+	const words = selected
+		.slice(1, -1)
+		.map((row) => row.replace(/^▌\s*/u, "").trim())
+		.join(" ");
+	strictEqual(words, task);
+	ok(!selected[0]?.includes("Implement"), "the header carries no cut copy of the task");
 });
 
 test("the workers takeover reads a sealed report in words, never as its JSON (bt-11 dock-detail)", async () => {

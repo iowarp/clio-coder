@@ -1,3 +1,4 @@
+import { outputLimitCutOffToolCallIds } from "../../core/assistant-output.js";
 import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
 import type { AgentMessage } from "../../engine/types.js";
 import {
@@ -70,6 +71,10 @@ export function turnFailureFacts(message: unknown): TurnFailureFacts | undefined
 
 export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage): RunTally {
 	if (message.role === "toolResult") {
+		// A call the output limit cut off never ran: the run's one notice states it, and it is no call and no error.
+		const callId = (message as { toolCallId?: unknown }).toolCallId;
+		if (typeof callId === "string" && tally.notRunToolCallIds?.includes(callId) === true)
+			return { ...tally, settledMessages: tally.settledMessages + 1 };
 		return {
 			...tally,
 			settledMessages: tally.settledMessages + 1,
@@ -80,10 +85,12 @@ export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage):
 	if (message.role !== "assistant") return tally;
 	const folded = sumRunUsage([message]);
 	const failure = turnFailureFacts(message);
-	const { failure: _earlier, ...unfailed } = tally;
+	const notRun = outputLimitCutOffToolCallIds(message);
+	const { failure: _earlier, notRunToolCallIds: _earlierNotRun, ...unfailed } = tally;
 	return {
 		...unfailed,
 		...(failure !== undefined ? { failure } : {}),
+		...(notRun.length > 0 ? { notRunToolCallIds: notRun } : {}),
 		settledMessages: tally.settledMessages + 1,
 		responseModelIdObservation: folded.hadUsage
 			? folded.lastResponseModelIdObservation

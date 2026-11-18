@@ -517,15 +517,47 @@ const OPERATOR_UNAVAILABLE_DENIAL =
  * worker reports does not cover what those calls would have checked (bt-23).
  */
 function operatorUnavailableLine(receipt: RunResult): string | null {
-	const denied = (receipt.safety?.blockedAttempts ?? []).filter((attempt) =>
-		OPERATOR_UNAVAILABLE_DENIAL.test(attempt.reason ?? ""),
-	);
+	// The denied ask is a permission request; an older record listed it as blocked.
+	const denied = [
+		...(receipt.safety?.permissionRequestedAttempts ?? []),
+		...(receipt.safety?.blockedAttempts ?? []),
+	].filter((attempt) => OPERATOR_UNAVAILABLE_DENIAL.test(attempt.reason ?? ""));
 	if (denied.length === 0) return null;
 	const tools = [...new Set(denied.map((attempt) => attempt.tool))].join(", ");
 	return (
 		`verification_limited ${receipt.runId}: ${denied.length} worker ${denied.length === 1 ? "call" : "calls"} (${tools}) ` +
 		"needed operator approval that no one can give a worker in this dispatch, so they did not run; " +
 		"run any check they covered yourself before relying on the worker's verification."
+	);
+}
+
+// A sentence of the worker's own account that says a call of its went wrong.
+const FAILED_WORDS = /\b(?:malformed|rejected|refused|denied|failed|errored|blocked|invalid)\b/iu;
+const ATTEMPT_WORDS = /\b(?:attempts?|calls?|tries|tried|retried|edits?|writes?|commands?)\b/iu;
+
+/**
+ * When the worker's answer describes calls of its own that failed or were refused, one line with what the host feed
+ * recorded for them. A worker has reported a malformed attempt the feed never saw and more denials than happened, and
+ * the parent repeated the worker's account (bt-23).
+ */
+function attemptFactsLine(receipt: RunResult): string | null {
+	if (receipt.externalTelemetry?.toolTelemetry === "unavailable") return null;
+	const text = receipt.output?.text ?? "";
+	const claims = text.split(/[.!?\n]+/u).some((sentence) => FAILED_WORDS.test(sentence) && ATTEMPT_WORDS.test(sentence));
+	if (!claims) return null;
+	let errored = 0;
+	let refused = 0;
+	const tools: string[] = [];
+	for (const stat of receipt.toolStats) {
+		errored += stat.errors;
+		refused += stat.blocked;
+		if (stat.errors + stat.blocked > 0) tools.push(stat.tool);
+	}
+	const named = tools.length > 0 ? ` (${tools.join(", ")})` : "";
+	return (
+		`attempts ${receipt.runId}: the worker's answer describes failed or refused calls; the host feed recorded ` +
+		`${receipt.toolCalls} ${receipt.toolCalls === 1 ? "call" : "calls"}, ${errored} errored and ${refused} refused${named}. ` +
+		"Report these counts, not the worker's account of its attempts."
 	);
 }
 
@@ -543,6 +575,8 @@ interface CompletedRun {
 	pendingGate?: PendingGateDecisionHandle;
 	/** Earlier attempts of this assignment that failed before the recovery whose receipt this is, oldest first. */
 	failedAttempts?: ReadonlyArray<FailedAttempt>;
+	/** Why the assignment settled on this failed attempt with no further attempt, such as a suppressed retry. */
+	notRetried?: string;
 }
 
 interface FailedAttempt {
@@ -575,6 +609,33 @@ function earlierFailedAttempts(deps: DispatchToolDeps, start: RunEnvelope["linea
 		lineage = prior.lineage;
 	}
 	return failed;
+}
+
+/**
+ * A failed run's assignment states why no further attempt ran; the sealed receipt cannot, since that decision follows
+ * it. Settlement lands with the durable writes, so they are flushed first (D3-c). A settlement with no detail is a
+ * policy decision, so the line names the policy: retries off, the budget spent, or an outcome not retried.
+ */
+async function withNotRetried(deps: DispatchToolDeps, runs: readonly CompletedRun[]): Promise<CompletedRun[]> {
+	if (!runs.some((run) => run.receipt.exitCode !== 0)) return [...runs];
+	await deps.dispatch.assignments?.flushWrites?.();
+	return runs.map((run) => {
+		if (run.receipt.exitCode === 0) return run;
+		const rootRunId = deps.dispatch.getRun(run.receipt.runId)?.lineage?.rootRunId ?? run.receipt.runId;
+		const assignment = deps.dispatch.assignments?.get(rootRunId);
+		if (assignment?.status !== "failed") return run;
+		const detail = assignment.outcomeDetail;
+		if (detail) return { ...run, notRetried: detail.length > 240 ? `${detail.slice(0, 239)}…` : detail };
+		const { maxRetries } = assignment.policy;
+		const used = Math.max(0, assignment.attempts.length - 1);
+		const policy =
+			maxRetries === 0
+				? "retries are off (maxRetries 0)"
+				: used >= maxRetries
+					? `the retry budget is spent (${used} of maxRetries ${maxRetries})`
+					: `the host does not retry this ${run.receipt.outcome} run automatically${run.receipt.outcomeCode ? ` (${run.receipt.outcomeCode})` : ""}`;
+		return { ...run, notRetried: policy };
+	});
 }
 
 function recoveredAttemptLines(run: CompletedRun): string[] {
@@ -731,6 +792,7 @@ export function formatDispatchOutput(
 					mcpSandboxNoNetworkNotice(run.receipt),
 					...routeWarningLines(run.receipt),
 					operatorUnavailableLine(run.receipt),
+					attemptFactsLine(run.receipt),
 				])
 				.filter((action): action is string => action !== null),
 		),
@@ -747,6 +809,7 @@ export function formatDispatchOutput(
 		`dispatch (${mode}) total=${runs.length} failed=${failed.length}${recovered.length > 0 ? ` recovered=${recovered.length}` : ""}`,
 		`runs=${runs.map((run) => run.receipt.runId).join(", ")}`,
 		...recovered.flatMap(recoveredAttemptLines),
+		...runs.flatMap((run) => (run.notRetried ? [`not_retried ${run.receipt.runId}: ${run.notRetried}`] : [])),
 		`batch observed_tool_calls=${batch.observedToolCalls} cost=${batch.cost}${batch.unobservableToolRuns > 0 ? ` unobservable_tool_runs=${batch.unobservableToolRuns}` : ""}`,
 		...hostActions,
 		...(needsSpotCheck ? [SPOT_CHECK_GUIDANCE] : []),
@@ -2165,12 +2228,13 @@ async function runApplyWinner(
 	};
 }
 
-function reviewGateResult(
+async function reviewGateResult(
 	deps: DispatchToolDeps,
-	outcome: GateRunOutcome,
+	gated: GateRunOutcome,
 	maxOutputBytes: number,
 	form: DispatchResultForm,
-): ToolResult {
+): Promise<ToolResult> {
+	const outcome = { ...gated, runs: await withNotRetried(deps, gated.runs) };
 	const body = formatDispatchOutput("review", outcome.runs, maxOutputBytes, null, form);
 	const details: ToolResultDetails = {
 		...dispatchDetails(deps, "review", outcome.runs),
@@ -3089,7 +3153,7 @@ export async function runDispatchTool(
 			}
 			try {
 				const outcome = await runReviewGated(deps, requests[0], review, timeoutMs, options?.signal, gateTelemetry);
-				return reviewGateResult(deps, outcome, maxOutputBytes, resultForm);
+				return await reviewGateResult(deps, outcome, maxOutputBytes, resultForm);
 			} catch (err) {
 				return { kind: "error", message: dispatchErrorMessage(err) };
 			}
@@ -3113,6 +3177,7 @@ export async function runDispatchTool(
 				runs = batch.runs;
 				board = batch.board;
 			}
+			runs = await withNotRetried(deps, runs);
 			const output = [externalFailures, formatDispatchOutput(mode, runs, maxOutputBytes, board, resultForm)]
 				.filter(Boolean)
 				.join("\n\n");
@@ -3129,11 +3194,12 @@ export async function runDispatchTool(
 			}
 			if (err instanceof PipelineHaltError) {
 				const haltMessage = `dispatch: ${err.message}`;
-				const output = formatDispatchOutput("pipeline", err.runs, maxOutputBytes, null, resultForm);
+				const haltRuns = await withNotRetried(deps, err.runs);
+				const output = formatDispatchOutput("pipeline", haltRuns, maxOutputBytes, null, resultForm);
 				return {
 					kind: "error",
 					message: `${haltMessage}\n\n${output}`,
-					details: dispatchDetails(deps, "pipeline", err.runs),
+					details: dispatchDetails(deps, "pipeline", haltRuns),
 				};
 			}
 			return { kind: "error", message: dispatchErrorMessage(err) };

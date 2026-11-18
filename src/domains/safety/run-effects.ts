@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ObservedProof } from "../../core/hoare.js";
@@ -57,7 +58,8 @@ export interface RunEffects {
 	failedMutationPaths: ReadonlySet<string>;
 	/**
 	 * The checks the run ran to a clean exit since its last workspace mutation, each named as the receipt files it: a
-	 * declared check under its id, else its vocabulary label, else the classifier's name (S1). A mutation clears
+	 * declared check under its id, else a bash check under its full command as the board files it, else its vocabulary
+	 * label, else the classifier's name (S1, x8-2). A mutation clears
 	 * them like `validationOutcomes`: a pass on the pre-change tree cannot verify the final one (bt-27b). The run's
 	 * earlier checks stay visible as execution evidence in `verificationCommands` and `executedShellCommands`.
 	 */
@@ -192,7 +194,8 @@ interface PendingEffects {
 /**
  * The names a receipt files a check call's pass under. The classifier's verdict alone says the call ran a check, as the
  * gate and the board read it, so every check names at least one (S1): each declared check it ran whole under its id,
- * then the vocabulary's label, else the classifier's own name for it.
+ * then the vocabulary's label, else the classifier's own name for it. A bash check's label is its full command, the
+ * name the board and a red file it under, so `pytest -q` is not `pytest` on the receipt alone (x8-2).
  */
 function receiptValidationCommands(
 	toolName: string,
@@ -200,7 +203,8 @@ function receiptValidationCommands(
 	reading: CallClassification,
 ): string[] {
 	if (reading.verdict !== "check") return [];
-	const label = receiptValidationLabel(toolName, args, reading.base);
+	const vocabulary = receiptValidationLabel(toolName, args, reading.base);
+	const label = vocabulary !== null && toolName === ToolNames.Bash && reading.name !== null ? reading.name : vocabulary;
 	const names = [...reading.declared, ...(label === null ? [] : [label])];
 	return names.length > 0 || reading.name === null ? names : [reading.name];
 }
@@ -271,7 +275,9 @@ export type { CheckOutputReader };
  * git-ignored. `outside` asks only of any write whether it leaves `cwd` (x7-1): a temp dir or scratch root inside the
  * workspace holds output but is not outside it (x8-4). `$TMPDIR`, `$HOME` and `~` expand from the run's env first
  * (x5-4). A check log the call's check pipeline writes (`npm test > out.txt`) to a path git does not track and the run did not change is output too.
- * A tracked source path stays a change, and a target this cannot resolve is one too. Shared by the recorder and the
+ * A tracked source path stays a change, and a target this cannot resolve is one too. So is an untracked file born before
+ * `startedAt`, the run's start, which the log would clobber (bt-verify8b); a file system that keeps no birth time
+ * cannot say, so there the log stays output. Shared by the recorder and the
  * task board's replay, so a check logged through `tee` keeps its outcome on both (x4-1).
  */
 export function checkOutputReader(
@@ -280,6 +286,7 @@ export function checkOutputReader(
 	configuredScratchRoots: ReadonlyArray<string> = [],
 	/** Git's ignore and tracking answers, shared by every reader of one run and never kept past it (x6-7). */
 	gitAnswers = new Map<string, boolean>(),
+	startedAt?: number,
 ): CheckOutputReader {
 	const git = (args: string[], target: string, answer: (status: number | null) => boolean): boolean => {
 		const key = `${args[0]}\0${target}`;
@@ -301,6 +308,15 @@ export function checkOutputReader(
 	const untracked = (target: string) => git(["ls-files", "--error-unmatch"], target, (status) => status === 1);
 	let scratch: string[] | undefined;
 	const changedByRun = new Set<string>();
+	const predatesRun = (resolved: string): boolean => {
+		if (startedAt === undefined) return false;
+		try {
+			const born = statSync(resolved).birthtimeMs;
+			return born > 0 && born < startedAt;
+		} catch {
+			return false;
+		}
+	};
 	const expand = (target: string): string | null => {
 		const expanded = target
 			.replace(/^~(?=\/|$)/u, "$HOME")
@@ -322,7 +338,7 @@ export function checkOutputReader(
 		const resolved = path.resolve(base, expanded);
 		if (landsOutside(resolved, true)) return true;
 		if (gitIgnores(resolved)) return true;
-		return logs?.has(target) === true && !changedByRun.has(resolved) && untracked(resolved);
+		return logs?.has(target) === true && !changedByRun.has(resolved) && untracked(resolved) && !predatesRun(resolved);
 	};
 	return Object.assign(reader, {
 		changed(paths: Iterable<string>) {
@@ -345,7 +361,7 @@ export function checkOutputReader(
 export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorderOptions = {}): RunEffectsRecorder {
 	const pending = new Map<string, PendingEffects>();
 	const gitHelpers = gitRunsConfiguredHelpers(cwd, options.env);
-	const outputTarget = checkOutputReader(cwd, options.env, options.scratchRoots);
+	const outputTarget = checkOutputReader(cwd, options.env, options.scratchRoots, undefined, Date.now());
 	const declaredChecks = declaredVerifierCommands(cwd, options.sessionVerifiers);
 	const mutatedPaths = new Set<string>();
 	const failedMutationPaths = new Set<string>();

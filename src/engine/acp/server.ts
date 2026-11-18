@@ -719,6 +719,8 @@ interface ActivePrompt {
 	messageAssistantChars: number;
 	/** An assistant message ended after text went out, so the next message's text opens on a blank line (bt-41). */
 	textBreakPending: boolean;
+	/** The content index of the current message's last streamed text block; a new one opens on a blank line. */
+	messageTextBlock?: number | undefined;
 	/** Thinking sent for the current assistant message, reset at its boundaries like `messageAssistantChars`. */
 	sentThinkingChars: number;
 	/** Chunks only append, so URL credentials are settled before they are sent (#446). */
@@ -1531,13 +1533,35 @@ function assistantText(message: unknown): string {
 	return contentText(message.content);
 }
 
-/** Text blocks joined as their deltas stream and a load replays them: no separator, so a `message_end` tail lines up (x8-3). */
-function assistantStreamedText(message: unknown): string {
+/**
+ * The text of an assistant message that its deltas did not carry. `streamed` counts delta characters, without the
+ * blank lines put between blocks, so the tail starts where the deltas stopped (x8-3). A block the deltas never
+ * reached opens on a blank line after earlier text, as a streamed one does (bt-acp-tail).
+ */
+function assistantTextTail(message: unknown, streamed: number): string {
 	if (!isRecord(message) || message.role !== "assistant" || !Array.isArray(message.content))
-		return assistantText(message);
-	return message.content
-		.map((block) => (isRecord(block) && block.type === "text" && typeof block.text === "string" ? block.text : ""))
-		.join("");
+		return assistantText(message).slice(streamed);
+	let offset = 0;
+	let tail = "";
+	for (const block of message.content) {
+		if (!isRecord(block) || block.type !== "text" || typeof block.text !== "string" || block.text.length === 0) continue;
+		const start = offset;
+		offset += block.text.length;
+		if (offset <= streamed) continue;
+		tail += start >= streamed && start > 0 ? `\n\n${block.text}` : block.text.slice(streamed - start);
+	}
+	return tail;
+}
+
+/** The text blocks of one message, a blank line between them as the live stream sends them (bt-acp-tail). */
+function separatedTextBlocks(blocks: ReadonlyArray<string>): string[] {
+	return blocks.filter((text) => text.length > 0).map((text, index) => (index === 0 ? text : `\n\n${text}`));
+}
+
+function eventContentIndex(event: AcpEventRecord): number | undefined {
+	const assistantEvent = isRecord(event.assistantMessageEvent) ? event.assistantMessageEvent : null;
+	const index = event.contentIndex ?? assistantEvent?.contentIndex;
+	return typeof index === "number" ? index : undefined;
 }
 
 function assistantThinking(message: unknown): string {
@@ -1947,9 +1971,16 @@ function handleChatEvent(
 	if (event.type === "text_delta") {
 		const text = eventTextDelta(event);
 		if (text.length === 0) return;
+		const block = eventContentIndex(event);
+		const newBlock =
+			block !== undefined &&
+			active.messageTextBlock !== undefined &&
+			block !== active.messageTextBlock &&
+			active.messageAssistantChars > 0;
+		if (block !== undefined) active.messageTextBlock = block;
 		active.sentAssistantChars += text.length;
 		active.messageAssistantChars += text.length;
-		sendAssistantText(transport, sessionId, active, text);
+		sendAssistantText(transport, sessionId, active, newBlock ? `\n\n${text}` : text);
 		return;
 	}
 	if (event.type === "thinking_delta") {
@@ -2088,6 +2119,7 @@ function handleChatEvent(
 	}
 	if (event.type === "message_start") {
 		active.messageAssistantChars = 0;
+		active.messageTextBlock = undefined;
 		active.sentThinkingChars = 0;
 		return;
 	}
@@ -2125,9 +2157,8 @@ function handleChatEvent(
 			active.sentThinkingChars = thinking.length;
 			sendSafeChunks(transport, sessionId, active, "agent_thought_chunk", active.thinkingCredentials.push(tail));
 		}
-		const text = assistantStreamedText(message);
-		if (text.length > active.messageAssistantChars) {
-			const tail = text.slice(active.messageAssistantChars);
+		const tail = assistantTextTail(message, active.messageAssistantChars);
+		if (tail.length > 0) {
 			active.sentAssistantChars += tail.length;
 			sendAssistantText(transport, sessionId, active, tail);
 		}
@@ -2140,6 +2171,7 @@ function handleChatEvent(
 		if (isRecord(message) && message.role === "assistant") {
 			// A runtime that emits no message_start still opens the next message at offset zero.
 			active.messageAssistantChars = 0;
+			active.messageTextBlock = undefined;
 			active.sentThinkingChars = 0;
 			if (active.sentAssistantChars > 0) active.textBreakPending = true;
 		}
@@ -2592,7 +2624,7 @@ function prepareAcpReplay(
 			// Stored text ends where the live stream did, and a message that stopped short can end inside a URL (#446).
 			const completed = messageStopCompleted(payload?.stopReason);
 			replayMessageChunks(current.frames, "agent_thought_chunk", blocks.thinking, completed);
-			replayMessageChunks(current.frames, "agent_message_chunk", blocks.text, completed);
+			replayMessageChunks(current.frames, "agent_message_chunk", separatedTextBlocks(blocks.text), completed);
 			continue;
 		}
 		if (entry.role === "tool_call") {
@@ -4095,6 +4127,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 						close: {},
 						...(features.session ? { list: {}, delete: {} } : {}),
 						...(canLoadSession ? { resume: {} } : {}),
+						...(features.branches ? { fork: {} } : {}),
 					},
 					auth: { logout: {} },
 					// Clio mediates every tool through its own safety policy. Extensions
@@ -5291,6 +5324,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		});
 		return resolved.ok ? resolved.target.modelRuntime.thinking : null;
 	};
+	const sessionModelChoices = (session: AcpServerSession, current: string): string[] => {
+		const status = options.providers?.list().find((item) => item.target.id === session.target);
+		const models = status === undefined ? [] : safeTargetModels(status);
+		if (!models.includes(current)) models.unshift(current);
+		return models.slice(0, ACP_TARGET_MODEL_LIMIT);
+	};
 	const configOptions = (session: AcpServerSession) => {
 		const optionsList: Array<Record<string, unknown>> = [
 			{
@@ -5323,9 +5362,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			});
 		}
 		if (session.model !== null) {
-			const status = options.providers?.list().find((item) => item.target.id === session.target);
-			const models = status === undefined ? [] : safeTargetModels(status);
-			if (!models.includes(session.model)) models.unshift(session.model);
+			const models = sessionModelChoices(session, session.model);
 			const fallback = session.target === null ? undefined : listingFallbacks.get(session.target);
 			optionsList.push({
 				id: "model",
@@ -5334,7 +5371,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				type: "select",
 				currentValue: session.model,
 				...(fallback !== undefined ? { description: `Configured models only: ${fallback}.` } : {}),
-				options: models.slice(0, ACP_TARGET_MODEL_LIMIT).map((model) => {
+				options: models.map((model) => {
 					const thinking = sessionThinking(session, model);
 					return { value: model, name: model, ...(thinking ? { thinkingLevels: thinking.supportedLevels } : {}) };
 				}),
@@ -5434,6 +5471,18 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	};
 	const sessionConfig = (session: AcpServerSession) => ({
 		modes: modeState(session),
+		// The ACP models block, for a client that picks the model through session/set_model rather than configOptions.
+		...(session.model !== null
+			? {
+					models: {
+						currentModelId: session.model,
+						availableModels: sessionModelChoices(session, session.model).map((model) => ({
+							modelId: model,
+							name: model,
+						})),
+					},
+				}
+			: {}),
 		configOptions: configOptions(session),
 	});
 	// The catalog is rebuilt from `commandReference()` on every call and a
@@ -5690,6 +5739,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				replay = replayToClient ? prepareAcpReplay(restored.entries, restored.leafTurnId, id, stored.target) : undefined;
 			} catch {
 				await options.mcpCapabilities?.detachClientServers();
+				// The session never loaded: nothing was bound or appended, so there is no boundary to checkpoint.
 				if (options.session.current()?.id === id) {
 					try {
 						await options.session.close();
@@ -5902,6 +5952,26 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32602, `cannot ${action} during an active prompt`, { code: "prompt_active" });
 		}
 	};
+	/**
+	 * A path that stops hosting a live, loaded session checkpoints it first, so meta.json records why its ledger
+	 * closed, as shutdown records its own. A failed checkpoint is reported and the close goes on.
+	 */
+	const checkpointBeforeClose = async (sessionId: string, reason: "close" | "fork" | "handoff"): Promise<void> => {
+		const durable = options.session;
+		if (durable?.current()?.id !== sessionId) return;
+		await durable.checkpoint(reason).catch((err: unknown) => {
+			process.stderr.write(
+				`[clio-coder:acp] ${reason} checkpoint failed: ${err instanceof Error ? err.message : String(err)}\n`,
+			);
+		});
+	};
+	/** The checkpoint yields, so a request that arrived meanwhile may have closed or started work on the session. */
+	const requireStillIdle = (session: AcpServerSession, action: string): void => {
+		if (sessions.get(session.id) !== session || closingSessions.has(session.id)) {
+			throw new AcpRequestError(-32002, "unknown ACP session", { code: "session_unknown" });
+		}
+		requireIdle(session, action);
+	};
 	const selectableTurn = (contract: SessionContract, sessionId: string, value: unknown): string => {
 		const turnId = requireBoundedClientString(value, "turnId", ACP_MAX_SESSION_ID_BYTES);
 		let kind: string | undefined;
@@ -6100,15 +6170,26 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	// /fork: a new session carrying the branch up to the chosen turn. The
 	// process follows the new session, as the terminal does, and the parent is
 	// closed on disk. Workspace files are never rewound.
-	options.transport.onRequest(ACP_SESSION_FORK_METHOD, (params) => {
-		requireInitialized();
-		requireAuthenticated();
-		const request = assertParamKeys(params, new Set(["sessionId", "turnId"]));
+	/**
+	 * Forks the bound session at `turnId` and hosts the child in its place. The extension method replays the child's
+	 * branch to the client; standard session/fork does not, since the client already holds that conversation.
+	 */
+	const forkBoundSession = async (
+		request: Record<string, unknown>,
+		chooseTurn: "request" | "leaf",
+		replayToClient: boolean,
+	) => {
 		const { session, resetForSession, readEntries, buildMessages } = requireBranches();
 		const bound = getSession(request);
 		requireIdle(bound, "fork");
 		const ceiling = successorCeiling(bound, request);
-		const turnId = selectableTurn(session, bound.id, request.turnId);
+		const requested = chooseTurn === "request" ? request.turnId : session.leafId(bound.id);
+		if (requested === null)
+			throw new AcpRequestError(-32602, "the session has no turn to fork from", { code: "turn_unknown" });
+		const turnId = selectableTurn(session, bound.id, requested);
+		// The fork closes the parent's ledger.
+		await checkpointBeforeClose(bound.id, "fork");
+		requireStillIdle(bound, "fork");
 		let meta: SessionMeta;
 		try {
 			meta = session.fork(turnId);
@@ -6151,7 +6232,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				turnId,
 			);
 			forkLeaf = restored.leafTurnId;
-			replay = prepareAcpReplay(restored.entries, restored.leafTurnId, meta.id, meta.target);
+			if (replayToClient) replay = prepareAcpReplay(restored.entries, restored.leafTurnId, meta.id, meta.target);
 		} catch (error) {
 			options.diagnostics?.(`fork replay failed: ${acpErrorMessage(error)}`);
 			resetForSession(forkLeaf, []);
@@ -6176,6 +6257,21 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				},
 			},
 		};
+	};
+	options.transport.onRequest(ACP_SESSION_FORK_METHOD, (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		return forkBoundSession(assertParamKeys(params, new Set(["sessionId", "turnId"])), "request", true);
+	});
+	// Standard ACP fork: the whole active branch, at its leaf. Client MCP servers the parent attached stay attached.
+	options.transport.onRequest("session/fork", (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId", "cwd", "mcpServers", "additionalDirectories"]));
+		assertNoAdditionalDirectories(request.additionalDirectories);
+		canonicalSessionCwd(request.cwd);
+		parseClientMcpServers(request.mcpServers, false);
+		return forkBoundSession(request, "leaf", false);
 	});
 
 	const handoffRefusal = (level: "warn" | "error", code: string, reason: string) => ({
@@ -6255,7 +6351,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	// /handoff, second half: seed the successor with the reviewed document and
 	// move the process binding to it, the same way a fork does.
-	options.transport.onRequest(ACP_HANDOFF_COMMIT_METHOD, (params): AcpHandoffCommitResult => {
+	options.transport.onRequest(ACP_HANDOFF_COMMIT_METHOD, async (params): Promise<AcpHandoffCommitResult> => {
 		requireInitialized();
 		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId", "handoffId", "document"]));
@@ -6267,6 +6363,18 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const document = handoffDocument(request.document);
 		const pending = pendingHandoff;
 		if (pending === null || pending.handoffId !== handoffId || pending.sessionId !== bound.id) {
+			return handoffRefusal(
+				"warn",
+				"stale",
+				"this document no longer describes the conversation; draw it up again. Nothing was written",
+			);
+		}
+		// The successor replaces the bound session, whose ledger closes. An empty review changes nothing.
+		if (document.trim().length > 0) {
+			await checkpointBeforeClose(bound.id, "handoff");
+			requireStillIdle(bound, "hand off");
+		}
+		if (pendingHandoff !== pending) {
 			return handoffRefusal(
 				"warn",
 				"stale",
@@ -6818,7 +6926,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return { _meta: trustResultMeta(session.cwd) };
 	});
 
-	options.transport.onRequest("session/set_config_option", async (params) => {
+	const setConfigOption = async (params: unknown) => {
 		requireInitialized();
 		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId", "configId", "value", "type"]));
@@ -6924,6 +7032,16 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				throw new AcpRequestError(-32602, "unknown configuration option", { code: "invalid_params" });
 		}
 		return { configOptions: configOptions(session) };
+	};
+	options.transport.onRequest("session/set_config_option", setConfigOption);
+	options.transport.onRequest("session/set_model", async (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId", "modelId"]));
+		if (typeof request.modelId !== "string")
+			throw new AcpRequestError(-32602, "invalid model id", { code: "invalid_params" });
+		await setConfigOption({ sessionId: request.sessionId, configId: "model", value: request.modelId });
+		return {};
 	});
 
 	options.transport.onRequest(ACP_SETTINGS_GET_SAFE_METHOD, (params) => {
@@ -7688,7 +7806,10 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			// The aborted line still appends its entry; the ledger must outlive that write.
 			if (activeShell?.sessionId === session.id) await activeShell.settled;
 			if (aside !== null) await settleAcpWork([aside.settled]);
-			if (options.session?.current()?.id === session.id) await options.session.close();
+			if (options.session?.current()?.id === session.id) {
+				await checkpointBeforeClose(session.id, "close");
+				await options.session.close();
+			}
 			await options.mcpCapabilities?.detachClientServers();
 			sessions.delete(session.id);
 			if (boundSessionId === session.id) boundSessionId = null;

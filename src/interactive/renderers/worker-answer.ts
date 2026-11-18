@@ -212,6 +212,23 @@ export function mutationReportLines(
 	return lines.map(safeWorkerAnswerText);
 }
 
+/** Where a settled run's proposed commit lands, as its sealed facts state it; see {@link CommitPlacement}. */
+export function commitPlacementOf(facts: {
+	placement?: { mode: string; branch?: string };
+	taskWorktree?: { branch: string };
+}): CommitPlacement {
+	const branch = facts.placement?.mode === "worktree" ? facts.placement.branch : facts.taskWorktree?.branch;
+	return branch !== undefined ? { branch } : {};
+}
+
+/**
+ * Where a settled run's proposed commit lands, read from its sealed facts: the branch of the worktree it worked in,
+ * and no branch when it worked in the checkout and nothing commits it. A surface without the facts has none of these.
+ */
+export interface CommitPlacement {
+	branch?: string;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -278,18 +295,20 @@ export function presentWorkerContractAnswer(
 
 /**
  * A settled run's answer in words, admitted as the Fleet Runs card admits it: a presented contract kind, else a
- * coder's mutation report once the sealed record verifies. The reader cannot tell where a proposed commit landed.
+ * coder's mutation report once the sealed record verifies. Without `commit`, the report cannot say where a proposed
+ * commit landed.
  */
 export function presentSettledWorkerAnswer(
 	text: string,
 	contract: { kind: string; conformance: string } | undefined,
 	sealVerified: boolean,
 	complete: boolean,
+	commit?: CommitPlacement,
 ): PresentedContractAnswer | null {
 	const presented = presentWorkerContractAnswer(text, contract, complete, true);
 	if (presented !== null || !complete || !sealVerified) return presented;
 	const value = exactWorkerAnswerObject(text);
-	const lines = value === null ? null : mutationReportLines(value, null);
+	const lines = value === null ? null : mutationReportLines(value, commit === undefined ? null : commit.branch);
 	return lines === null ? null : { lines };
 }
 

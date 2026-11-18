@@ -705,8 +705,9 @@ export interface SafetySettings {
 	/**
 	 * Seconds an attended permission card or ask_user round waits for the
 	 * operator before Clio resolves it and the turn continues: a parked call is
-	 * denied, an unanswered question takes its recommended option. 0 waits
-	 * forever. Read only from the operator's own settings file.
+	 * denied, an unanswered question takes its recommended option unless that
+	 * option leaves the workspace. 0 waits forever. Read only from the
+	 * operator's own settings file.
 	 */
 	unattendedAfterSeconds: number;
 	/**
@@ -1156,7 +1157,8 @@ safety:
   snapshots: auto
   # Seconds a permission card or ask_user question waits for you before Clio
   # resolves it and keeps working: the call is denied, the question takes its
-  # recommended option. 0 waits forever. Honored only in this file.
+  # recommended option unless that option leaves the workspace. 0 waits
+  # forever. Honored only in this file.
   unattendedAfterSeconds: 300
   # Set by the one-time card that turns yolo on interactively. Honored only in
   # this file.

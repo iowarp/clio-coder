@@ -13,6 +13,10 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Added
 
+- ACP session openers return a models block, and `session/set_model` is served. (ACP low 1)
+- Standard ACP `session/fork`, advertised in sessionCapabilities when branching is on. (ACP low 2)
+- `campaign run --dry-run` validates every entry and prints its plan without creating anything. (bt-20 p4)
+- Interactive `clio-coder` accepts `--max-context-tokens`, with the same meaning as on `run`. (c16-E)
 - A mutation report's validation may carry `"baseline":true` for a deliberate red run before the change; quality judges only the checks run after the change (bt-17).
 - `models` lists the thinking levels each route offers (`thinkingLevels` in `--json`) (bt-20).
 - The telemetry session read commands accept `--session` (bt-20).
@@ -51,6 +55,13 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- Calls the output limit cuts off are stated once, read as not run, and count as no call and no tool error on any surface. (bt-39 a)
+- A test pins ACP compaction failure lines as reply text. (c2b-3)
+- A worker's account of failed attempts is followed by the feed's own attempt counts. (bt-23 #3)
+- A judge-mode dispatch with no seated safety judge raises a worker_judge_withheld notice saying workers run as deny. (N2)
+- Unattended countdowns read m:ss under a minute too (0:59, 0:05). (bt-11 q)
+- The exit card row reads "Session verified" in every style. (drv-tui11)
+- A live worker's spend is kept in `runs/<id>/spend.json`, and runs.json is written only at lifecycle and status transitions. (P3 #2)
 - A lone delete inside a scratch root is recorded as scratch-disposable and no longer needs or claims a workspace snapshot. (N3, conf11h)
 - The finish assessment replays the shared check fold once per turn end instead of up to twice (x8-6).
 - Standard keeps one row of the reasoning before an action instead of a bare Thinking marker (bt-11 b).
@@ -121,6 +132,38 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Telemetry insights counts a fork's own verified outcomes after its own check, so the verified share moves with it. (c16-D, bt-fork-verified, drv-n3)
+- `telemetry why-stopped` names a dispatched worker's stop on the parent session, in text and in `--json` `workerStops`. (D3-b, drv-n2a)
+- A dispatched architect task that forbids writing files no longer carries the plan/artifact recipe, the artifact tool or an artifact-write permit; it returns its plan in the reply. (D-C residue, drv-n5)
+- Read-only inline python (`python -c`, heredoc) and jq no longer retire a standing check; a body that may write still reads as a change. (c17-a, verify3)
+- A bash check's pass is filed on the receipt under its full command. (x8-2)
+- A check after a known write on an earlier line or after `;` is credited. (bt-46 S2)
+- A heredoc-written script that a later step may run is read as code. (bt-low1 heredoc limit)
+- A check log that clobbers a file older than the run counts as a change. (bt-verify8b limit a)
+- The headless observed line names a standing dispatch run-record pass. (bt-verify7a limit)
+- A `<tool_call …>` opener with attributes is read as a written call. (c2b-2b/m2a-4)
+- An operator's cancel no longer names a failure route. (operator-cancel failureRoute)
+- A response that rewrites one file five times is stopped by the flood check. (bt-39 b)
+- Reasoning that re-drafts the same lines, or reaches 75% of the output cap with nothing but thinking, is stopped on routes without an enforced thinking budget. (bt-25 fix 2)
+- ACP checkpoints a live session before session/close, a fork or a handoff closes it. (ACP low 3)
+- ACP keeps an assistant message's text blocks apart with a blank line, live and on replay. (bt-acp-tail)
+- A worker ask that no operator could answer counts as a permission request in the receipt. (bt-readonly residual)
+- A worker call refused before it reached a tool counts in toolStats as an error, and a call cut off by the output token limit is not counted as one. (bt-23 #5)
+- A worker call refused by an approval timeout names that cause in its evidence. (bt-11 t)
+- A headless run whose delegated task never started exits 1 as a no-op. (c16-B)
+- A failed dispatch run that was not retried says why, including at the review gate and a pipeline halt. (D3-c)
+- Enter on a slash draft under an approval card shows a notice naming the card and its keys instead of doing nothing. (bt-11 p)
+- `/fleet` at narrow widths keeps who holds an approval-waiting run. (bt-11 l residual)
+- An unanswered ask_user declines a recommended option that leaves the workspace, and prompts, help, the yolo card and docs say so. (bt-21 residual)
+- The default autonomy banner reads `auto edits · no OS sandbox` on hosts without a shell sandbox. (bt-11 banner wording)
+- The selected workers-dock card wraps its whole task at 45 columns. (bt-tui dock cut)
+- Hiding a dock from inside it returns focus to the herdr pane you came from. (bt-tui herdr focus)
+- The Fleet Runs board says where a coder's proposed commit lands, as the transcript card does. (board commit placement)
+- A Copilot target reads its own context tier's window from the cached listing, and the per-tier record survives the providers re-record. (bt-copilot limit)
+- A dispatch briefing that mentions a `~/` home path is admitted instead of refused as legacy_scope_path_absolute. (bt-11 r)
+- A fork's Verified row, /usage and telemetry insights cut copied parent outcomes by ledger position. (bt-fork-verified limit)
+- A JSON-encoded off-schema dispatch field (candidates, judge, members, review, routing, budget, per-task budget) is decoded when it is that field's valid value, instead of refused. (bt-dispatch-schema limit)
+- CLIO_CODER_PROVIDER_DUMP_PATH records each request Clio hands the Copilot runtime instead of `payloads: []`. (c2b-1)
 - A worker's result-contract reminder arrives as a host reminder after its tool results instead of inside them, so models no longer treat it as an injection. (D4, drv-cf3b)
 - A dispatched task that says not to write files runs read-only and no longer gets the architect plan contract. (D-C)
 - The [Tasks] reminder no longer fires when the request's own words forbid writing files. (bt-22b)

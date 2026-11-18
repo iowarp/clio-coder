@@ -466,6 +466,8 @@ type ToolSegment = {
 	 * claiming a past-tense edit. Cleared when a late end event brings a result.
 	 */
 	notRun?: boolean | undefined;
+	/** Why a settled call did not run when that is no failure: the output limit cut off the reply that made it. */
+	notRunCause?: "output_limit" | undefined;
 	/**
 	 * The admission verdict's short reason, present only on a settlement the
 	 * registry actually rejected. A blocked row without it states that something
@@ -2422,6 +2424,7 @@ function renderToolSegmentLines(
 		resultSummary: seg.resultSummary,
 		outcome: seg.settlement,
 		notRun: seg.notRun,
+		notRunCause: seg.notRunCause,
 		blockReason: seg.blockReason,
 		evictedReason: seg.evictedReason,
 		...(seg.cardsCancelled === true ? { cardsCancelled: true } : {}),
@@ -2486,6 +2489,7 @@ function finishedCall(seg: ToolSegment, nameRequester = true): ToolExecutionFini
 		durationMs: seg.durationMs,
 		outcome: seg.settlement,
 		notRun: seg.notRun,
+		notRunCause: seg.notRunCause,
 		blockReason: seg.blockReason,
 		evictedReason: seg.evictedReason,
 		resultSummary: seg.resultSummary,
@@ -4767,7 +4771,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					// The true result replaces a synthetic settle; from here on the
 					// segment is model-finished and immutable to later end events.
 					tool.settledWithoutResult = undefined;
-					tool.notRun = undefined;
+					// A call the output limit cut off reads as not run, not as a failed call (bt-39 a).
+					const cutOff = (enriched as { notRun?: unknown }).notRun === "output_limit";
+					tool.notRun = cutOff ? true : undefined;
+					tool.notRunCause = cutOff ? "output_limit" : undefined;
 					if (typeof enriched.durationMs === "number" && Number.isFinite(enriched.durationMs)) {
 						tool.durationMs = enriched.durationMs;
 					} else if (tool.startedAtMs !== undefined && replayStampMs === undefined) {
