@@ -776,13 +776,25 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	for (const check of ["npx tsc --noEmit", "npx vitest run src/a.test.ts", "npx eslint src", "node --check a.js"])
 		deepStrictEqual(seal("npm test", check), green, check);
 	deepStrictEqual(seal("npm test", "npm run lint && npx tsc --noEmit"), [["npm test", "npm run lint"], "verified", []]);
-	for (const change of [`node -e "fs.writeFileSync('src/a.ts', '')"`, "tsc", "npx jest -u", "npm test -- -u"])
+	// A validated runner's own snapshot or golden update rewrites what it compares against (x7-2).
+	for (const change of [
+		`node -e "fs.writeFileSync('src/a.ts', '')"`,
+		"tsc",
+		"npx jest -u",
+		"npm test -- -u",
+		"go test ./... -update",
+		"pytest --snapshot-update",
+		"python -m pytest --force-regen",
+		"bun test -u",
+	])
 		deepStrictEqual(seal("npm test", change), stale, change);
 	deepStrictEqual(seal("!npm test", "npx tsc --noEmit"), red);
 	// A red from a check no receipt vocabulary names still settles under the classifier's name (x6-1).
 	for (const check of ["npx tsc --noEmit", "npx eslint ."])
 		deepStrictEqual(seal("npm test", `!${check}`), [["npm test"], "unverified", [check]], check);
 	deepStrictEqual(seal("!npm test", "npm test -- -t parses"), [["npm test"], "unverified", ["npm test"]]);
+	// A line continuation separates nothing, so the continued check's red stands under its single-line name (x7-4).
+	deepStrictEqual(seal("!npm test \\\n  -- --reporter=dot"), [[], "unverified", ["npm test -- --reporter=dot"]]);
 	deepStrictEqual(seal("!npm test", "npm test -- --import ./x.mjs"), red);
 	deepStrictEqual(seal("npm test -- --run"), green);
 	// Every change ran before the check through `&&`, or the call held only checks, cd and plumbing.
