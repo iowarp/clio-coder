@@ -43,9 +43,15 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - Astra r8-2: telemetry reuses the prepared prompt-structure and tool-schema bytes for an unchanged request surface and still verifies the stored object on disk.
 - Astra r8-1: `run --session <id>` resolves the id or prefix from session metadata instead of parsing every transcript in the workspace, so a named resume no longer slows as other conversations grow.
 - Astra r8-3: shipped YAML (prompt fragments, damage-control rules, the bundled model catalog, model profiles) is parsed at build time and digest-verified at load, which removes about 45 ms of parsing from each CLI start and about 40 ms from each native worker start. Overlays still parse at runtime.
+- Astra r9-2: cache keepalive stops once its refreshes for one awaited request cost as much as the miss they prevent, stops after a refresh that read nothing from the cache, and uses the 30-minute lifetime Pi's adapter requests in OpenAI explicit cache mode.
+- Astra r9-5: with no `cache.warm.maxInputTokens` set, the pre-warm input budget is 16,384 tokens, capped at the model's window (8,192 when the window is unknown), so the first attended prompt warms.
+- Astra r9-6: the repetition detector resets on each streamed message instead of each partial object, so a long reply is checked about a hundredth as often.
+- Astra r9-3: the attached gateway schema shows a known edit and its verify as one chain, which saves a round when the model uses it.
 
 ### Fixed
 
+- Astra r9-1: a failed `/context` operation no longer rewrites the system prompt and breaks the prompt cache; the fact arrives once in the turn reminder.
+- Astra r9-4: a completed task that left no command receipt or read excerpt settles its lesson retention without a model call, so headless exit no longer waits on one.
 - A1 (F-C13 residual): a successful call that may have changed state resets the identical-call count of every other call, so read, write, read of a desk record is admitted while three reads with nothing between are still blocked. Write, edit, any bash command that is not a plain read, and any extension tool not declared read-only count.
 - A3: a verifier-report whose fail verdict no executed check produced is labelled `review verdict: fail (N findings)` in dispatch and collect results, not "validation failed; a check ran and did not pass". A check that ran and failed keeps the validation wording.
 - B2: a pinned round (`require_tool` or a terminal handoff) on openai-codex and openai-responses keeps the full tool list and names the tool with the Responses function choice, so it reuses the prompt cache instead of missing it.
