@@ -108,6 +108,10 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A fork no longer shows or answers the approval of a worker its parent dispatched. It prints a notice naming the owner and how to answer, and the card returns on `/resume` of that session (bt-11 f).
+- A fork's worker card shows elapsed time for a worker its parent dispatched, instead of "—" (bt-11 g).
+- The exit card's Tools row counts only the current session's own tool calls, not those of a session visited earlier in the process (bt-11 h).
+- A cut reasoning excerpt keeps its "Thinking ·" label on the row that says how many rows were cut (bt-11 i).
 - An ask denied before the operator decided is listed in `safety.permissionRequestedAttempts`, matching its `permissionRequested` count, instead of in `blockedAttempts`. Older records keep such asks in `blockedAttempts` (bt-15 c13a).
 - `run --help` and the read-only docs now say `--read-only` runs shell commands in a read-only sandbox and runs delegations read-only, instead of claiming it denies every command and delegation (bt-15 c13b).
 - A write that lands outside the workspace (tmp, a scratch root, or outside the cwd) no longer retires standing checks on the receipt or the task board (x7-1).
