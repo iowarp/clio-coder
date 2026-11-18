@@ -120,7 +120,7 @@ import {
 } from "./read-scope.js";
 import { formatRejection, type RejectionMessage } from "./rejection-feedback.js";
 import { ROUTING_PIN_HINT } from "./routing-settings.js";
-import { getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
+import { getCachedBaseRuleset } from "./rule-pack-loader.js";
 import { SANDBOX_ESCAPE_REASON, SANDBOX_ESCAPE_RULE_ID } from "./sandbox-escape.js";
 import { effectiveScratchRoots } from "./scratch-roots.js";
 import {
@@ -345,7 +345,6 @@ export interface SafetyPolicyEngine {
 
 export interface SafetyPolicyEngineOptions {
 	cwd?: string;
-	rulePacks?: RulePacks;
 	projectPolicy?: LoadedProjectSafetyPolicy;
 	/**
 	 * Absolute path boundaries a write-class tool call is confined to for this run.
@@ -816,7 +815,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		...readScopeExemptRoots(cwd),
 		...(options.readExemptRoots ?? []).map((root) => ({ path: root, operatorOwned: false })),
 	];
-	const packs = options.rulePacks ?? getCachedDefaultRulePacks();
+	const baseRules = getCachedBaseRuleset();
 	const projectPolicy = options.projectPolicy ?? gateProjectSafetyPolicy(cwd, loadProjectSafetyPolicy(cwd));
 	const projectPolicyRoot =
 		projectPolicy.path === null ? cwd : path.dirname(path.dirname(path.resolve(projectPolicy.path)));
@@ -901,7 +900,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	// Base pack rules apply at every posture, so they are sourced once at
 	// construction. Building the array inside evaluate() re-allocated it on
 	// every admission for no behavioral gain.
-	const sourcedRules: SourcedRule[] = packs.base.rules.map((rule) => ({ rule, source: "damage-control:base" }));
+	const sourcedRules: SourcedRule[] = baseRules.rules.map((rule) => ({ rule, source: "damage-control:base" }));
 	/**
 	 * The trust, settings, skill, dev-root, protected-path and zero-access rails,
 	 * in the order a top-level call meets them.
@@ -2075,8 +2074,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		metadata() {
 			return {
 				version: 1,
-				rulePackHash: rulePackHash(packs),
-				rulePackVersion: packs.base.version,
+				rulePackHash: rulePackHash(baseRules.rules),
+				rulePackVersion: baseRules.version,
 				activeRuleIds: sourcedRules.map((entry) => entry.rule.id),
 				projectPolicyPath: projectPolicy.path,
 				projectPolicyHash: projectPolicy.hash,
@@ -5666,15 +5665,9 @@ function serializeArgs(args?: Record<string, unknown>): string {
 	return parts.join(" ");
 }
 
-function rulePackHash(packs: RulePacks): string {
-	const payload: Record<PackId, Array<Record<string, unknown>>> = {
-		base: packPayload(packs.base.rules),
-	};
-	return createHash("sha256").update(JSON.stringify(payload), "utf8").digest("hex");
-}
-
-function packPayload(rules: ReadonlyArray<DamageControlRule>): Array<Record<string, unknown>> {
-	return rules.map((rule) => ({
+/** Hashes the `{ base: [...] }` payload persisted run records already carry, so the hash stays byte-identical. */
+function rulePackHash(rules: ReadonlyArray<DamageControlRule>): string {
+	const base = rules.map((rule) => ({
 		id: rule.id,
 		description: rule.description,
 		pattern: rule.pattern.source,
@@ -5682,6 +5675,7 @@ function packPayload(rules: ReadonlyArray<DamageControlRule>): Array<Record<stri
 		block: rule.block,
 		...(rule.ask !== undefined ? { ask: rule.ask } : {}),
 	}));
+	return createHash("sha256").update(JSON.stringify({ base }), "utf8").digest("hex");
 }
 
 function invokesTrustMutation(command: string): boolean {
