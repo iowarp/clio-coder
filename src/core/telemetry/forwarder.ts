@@ -112,7 +112,9 @@ export function createTelemetryForwarder(
 	const enqueue = (record: PendingTelemetry): boolean => {
 		if (closed || telemetryOwner(record.ctx) !== telemetryOwner(context)) return false;
 		if (!scheduled) scheduled = setImmediate(flush);
-		if (pending.length >= capacity) {
+		// A fold decision is a fact the parent's verifier reconciles by record id; a full queue drops other kinds and
+		// reports the gap, never a decision (F14).
+		if (pending.length >= capacity && record.kind !== "context.fold") {
 			dropped += 1;
 			return false;
 		}

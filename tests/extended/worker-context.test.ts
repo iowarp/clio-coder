@@ -462,15 +462,23 @@ test("only unseen reads can make room: the largest leaves first as unseen_overfl
 	]);
 	const run = { sessionId: null, runId: "unseen-run", agent: { role: "worker" as const, id: "unseen-run" } };
 	const frames: WorkerTelemetryFrame[] = [];
+	// A queue of one under output backpressure drops the second process fact and reports it, never the decision.
 	const forwarder = createTelemetryForwarder(
 		run,
 		{ host: "worker", pid: 1, birthToken: "unseen-birth", monoEpochWallMs: 0 },
 		(frame) => void frames.push(frame),
+		1,
 	);
-	ok(telemetryHub().emit("context.fold", decision as ContextFoldPayload, run));
+	telemetryHub().emit("process.started", {}, run);
+	telemetryHub().emit("process.started", {}, run);
+	telemetryHub().emit("context.fold", decision as ContextFoldPayload, run);
 	forwarder.close();
 	deepStrictEqual(
-		(readWorkerTelemetryFrame(frames[0], run)?.data as ContextFoldPayload | undefined)?.stages.at(-1)?.reason,
+		frames.map((frame) => frame.record.k),
+		["process.started", "context.fold", "journal.gap"],
+	);
+	deepStrictEqual(
+		(readWorkerTelemetryFrame(frames[1], run)?.data as ContextFoldPayload | undefined)?.stages.at(-1)?.reason,
 		"unseen_overflow",
 	);
 
