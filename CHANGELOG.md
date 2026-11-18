@@ -44,6 +44,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- A dispatched run in the current checkout no longer blocks the event loop to measure its checkout delta. Spawn and settle snapshots run asynchronously, re-read only files whose stat moved (up to 1 MiB; a larger file is identified by its stat), and runs spawned together share one baseline, so a wide fan-out on a dirty checkout no longer freezes the TUI (P3).
 - `context index --json` drops `codewikiPath`, which always repeated `codemapPath`; read `codemapPath` (bt-20).
 - A safety judge block now tells the model to ask the operator for the action, and that the judge hands a call to the operator itself only after repeated blocks (bt-21).
 - P2M-5: memory intervention and guardian are imported from the memory domain directly; the middleware compatibility shims and barrel re-exports are gone.
