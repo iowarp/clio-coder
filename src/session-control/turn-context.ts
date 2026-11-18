@@ -407,11 +407,11 @@ export interface TurnContext {
 	 */
 	refreshLiveBudget(pendingUserText?: string): LiveBudgetView;
 	/**
-	 * After an overflow fold that fit, the input the next main request pins
-	 * (A4), recomputed on the request about to go out; null otherwise. The call
-	 * that reads it disarms it.
+	 * Disarm the A4 pin an overflow fold that fit armed. While armed, the
+	 * published view's `inputTokens` is the A4 count; the main request that
+	 * carries it disarms it.
 	 */
-	takeOverflowInputPin?(agentRuntime: AgentRuntime): number | null;
+	takeOverflowInputPin?(): void;
 	/**
 	 * The A4 count of the request these messages and the pending ask make: the
 	 * larger of Clio's estimate and Pi's chars/3.5 count. Window-fit gates that
@@ -671,6 +671,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	let promptDigest: { prompt: string | null; digest: string } | null = null;
 	// Armed by an overflow fold that fit; the next main request pins the A4 count.
 	let overflowInputPin: { sessionId: string | undefined } | null = null;
+	const overflowPinArmed = (): boolean =>
+		overflowInputPin !== null && overflowInputPin.sessionId === deps.session?.current()?.id;
 	let reconciledAnchor: {
 		tokens: number;
 		anchoredMessages: ReadonlyArray<AgentMessage>;
@@ -1599,6 +1601,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	): LiveBudgetAccounting => {
 		const estimate = computed ?? liveContextEstimate(agentRuntime, pendingUserText, undefined, history);
 		const details = agentRuntime.runtimeResolution.contextWindowDetails;
+		// After an overflow fold that fit, the view publishes the A4 count it fitted, so the card, admission and Pi's
+		// clamp read one figure until the request that carries it goes out.
+		const inputTokens = overflowPinArmed()
+			? Math.max(estimate.tokens, overflowFitTokens(agentRuntime, pendingUserText))
+			: estimate.tokens;
 		return {
 			targetId: agentRuntime.targetId,
 			runtimeId: agentRuntime.runtimeId,
@@ -1608,12 +1615,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			windowSource: details.contextWindowSource,
 			estimatedInputTokens: estimate.estimatedTokens,
 			anchoredInputTokens: estimate.reconciledTokens,
-			inputTokens: estimate.tokens,
+			inputTokens,
 			inputSource: estimate.reconciledTokens === null ? "estimated" : "anchored-plus-estimated-tail",
 			historical: false,
 			breakdown: { ...estimate.breakdown },
 			breakdownSource: "live",
-			outputReserveTokens: resolveFitOutputReserve(agentRuntime, estimate.tokens),
+			outputReserveTokens: resolveFitOutputReserve(agentRuntime, inputTokens),
 		};
 	};
 
@@ -1758,11 +1765,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	};
 
 	/** `estimate`, when given, is `liveContextEstimate` of the same runtime and `history` with no pending text. */
+	/** The pending text of the reduction in flight, if it was given one. */
+	let reductionPendingText: string | undefined;
+	// A republish while a reduction runs (the summary stage reading the view) prices the request the fold prices,
+	// so the card, the record and every usage frame state one figure (bt-47 D1).
 	const refreshLiveBudget = (
 		pendingUserText?: string,
 		history?: MessageListDigests,
 		estimate?: LiveContextEstimate,
-	): LiveBudgetView => budgetProducer.publish(liveBudgetInput(pendingUserText, history, estimate));
+	): LiveBudgetView =>
+		budgetProducer.publish(
+			liveBudgetInput(pendingUserText ?? (estimate === undefined ? reductionPendingText : undefined), history, estimate),
+		);
 
 	/**
 	 * A working-set projection removes tokens from messages the attestation
@@ -2708,6 +2722,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		operationArgs[6] = args[6] ? AbortSignal.any([args[6], controller.signal]) : controller.signal;
 		lastCompactionCardSettled = false;
 		foldDecision = null;
+		reductionPendingText = args[4];
 		const operation = performAutoCompact(...operationArgs)
 			.then(
 				(changed) => {
@@ -2744,6 +2759,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				},
 			)
 			.finally(() => {
+				reductionPendingText = undefined;
 				foldDecision?.close();
 				foldDecision = null;
 				compactionOperation = null;
@@ -3132,11 +3148,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		liveContextEstimate,
 
 		refreshLiveBudget,
-		takeOverflowInputPin(runtime: AgentRuntime): number | null {
-			const armed = overflowInputPin;
+		takeOverflowInputPin(): void {
 			overflowInputPin = null;
-			if (armed === null || armed.sessionId !== deps.session?.current()?.id) return null;
-			return overflowFitTokens(runtime);
 		},
 		overflowFitTokens,
 		oversizedResult: (runtime: AgentRuntime, pendingUserText?: string) =>
