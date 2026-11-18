@@ -8,7 +8,6 @@ import { canonicalJson, sha256 } from "../../src/domains/prompts/hash.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
-import type { AgentMessage } from "../../src/engine/types.js";
 import { buildReplayAgentMessagesFromTurns } from "../../src/interactive/chat-renderer.js";
 import { toolSignatureFromState } from "../../src/session-control/chat-loop-messages.js";
 import {
@@ -17,11 +16,7 @@ import {
 	type MainPromptCacheIdentityInput,
 	mainPromptCacheIdentity,
 } from "../../src/session-control/prompt-cache-identity.js";
-import {
-	retiredUserContextWasSent,
-	stringifyPreview,
-	truncateReplayText,
-} from "../../src/session-control/session-replay-messages.js";
+import { stringifyPreview, truncateReplayText } from "../../src/session-control/session-replay-messages.js";
 import { createTurnContext } from "../../src/session-control/turn-context.js";
 import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
 import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
@@ -515,17 +510,6 @@ describe("session replay prefix stability", () => {
 			ledgerEntry(8, "tool_result", toolResult("call-d", "d body")),
 		];
 		deepStrictEqual(toolCallIds(buildReplayAgentMessagesFromTurns(orphaned)), ["call-a", "call-b", "call-c", "call-d"]);
-	});
-
-	it("rewrites sent history only when a reply followed the retired instructions (#434)", () => {
-		const text = (role: "user" | "assistant", body: string, timestamp: number) =>
-			({ role, content: [{ type: "text", text: body }], timestamp }) as unknown as AgentMessage;
-		const kept = text("assistant", "kept from before the checkpoint", 1);
-		const block = text("user", "Active user instructions (verbatim):\nship it", 5);
-		const operator = text("user", "next request", 9);
-		strictEqual(retiredUserContextWasSent([kept, block, operator], [kept, operator]), false);
-		const replied = text("assistant", "answered after the checkpoint", 7);
-		strictEqual(retiredUserContextWasSent([kept, block, replied, operator], [kept, replied, operator]), true);
 	});
 });
 

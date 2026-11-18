@@ -254,7 +254,7 @@ describe("compaction working-set provider boundary", () => {
 		strictEqual(result.userContext, undefined);
 	});
 
-	it("retires an active checkpoint request at the next operator turn without another compaction", () => {
+	it("retires an unsent checkpoint request at the next operator turn and keeps one a reply carried (bt-40)", () => {
 		const entries = chain([
 			message("old-user", "user", { text: "Fix the seed." }),
 			message("old-answer", "assistant", { text: "Seed fix complete." }),
@@ -269,16 +269,18 @@ describe("compaction working-set provider boundary", () => {
 				messagesSummarized: 1,
 				userContext: { turnId: "old-user", text: "Fix the seed." },
 			},
-			message("tail", "assistant", { text: "Checkpoint carried forward." }),
 		]);
 		const live = buildModelReplayAgentMessagesFromTurns(entries);
 		match(JSON.stringify(live), /Active user instructions \(verbatim\):\\nFix the seed/);
-		const synthetic = { ...message("middleware", "user", { text: "Continue.", synthetic: true }), parentTurnId: "tail" };
+		const synthetic = {
+			...message("middleware", "user", { text: "Continue.", synthetic: true }),
+			parentTurnId: "checkpoint",
+		};
 		match(
 			JSON.stringify(buildModelReplayAgentMessagesFromTurns([...entries, synthetic])),
 			/Active user instructions \(verbatim\):\\nFix the seed/,
 		);
-		const next = { ...message("next-user", "user", { text: "Review the screenshot." }), parentTurnId: "tail" };
+		const next = { ...message("next-user", "user", { text: "Review the screenshot." }), parentTurnId: "checkpoint" };
 		doesNotMatch(
 			JSON.stringify(retireActiveUserContextForNextOperator(live, [...entries, next])),
 			/Active user instructions \(verbatim\):\\nFix the seed/,
@@ -287,9 +289,15 @@ describe("compaction working-set provider boundary", () => {
 			JSON.stringify(buildModelReplayAgentMessagesFromTurns([...entries, next])),
 			/Active user instructions \(verbatim\):\\nFix the seed/,
 		);
+		// A reply after the checkpoint means a request carried the block: it is sent history now, live and on resume.
+		const replied = [...entries, { ...message("tail", "assistant", { text: "Carried." }), parentTurnId: "checkpoint" }];
+		const repliedLive = buildModelReplayAgentMessagesFromTurns(replied);
+		const after = [...replied, { ...next, parentTurnId: "tail" }];
+		deepStrictEqual(retireActiveUserContextForNextOperator(repliedLive, after), repliedLive);
+		deepStrictEqual(buildModelReplayAgentMessagesFromTurns(after).slice(0, repliedLive.length), repliedLive);
 		const ledger = [...entries];
 		const state = {
-			lastTurnId: "tail",
+			lastTurnId: "checkpoint",
 			runtime: {
 				agent: { state: { messages: [...live], systemPrompt: "", tools: [] } },
 				runtimeResolution: { modelRuntime: { thinking: {} }, effectiveThinkingLevel: "off" },

@@ -201,7 +201,7 @@ import {
 } from "./operator-memory.js";
 import { resolveTurnOutputReserve, turnAdmissionRemedy } from "./output-reserve.js";
 import { REPETITION_REPROMPT_NOTICE_KEY, repetitionRepromptMessages } from "./repetition-detector.js";
-import { retireActiveUserContextForNextOperator, retiredUserContextWasSent } from "./session-replay-messages.js";
+import { retireActiveUserContextForNextOperator } from "./session-replay-messages.js";
 import { type OutOfTurnRoute, runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./side-question.js";
 import type { AgentStatusEvent, ModelRequestFacts } from "./status-types.js";
 import {
@@ -1750,7 +1750,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		removeQueuedMirrorEntry: (text) => queues.acknowledgeInjected(text)?.origin,
 		promptCachePayloadForAssistant: (usage, backend, anthropicResponse, transport) =>
 			context.promptCachePayloadForAssistant(usage, backend, anthropicResponse, transport),
-		noteNextRunColdReason: (reason) => context.noteNextRunColdReason(reason),
 		telemetry: deps.telemetry,
 	});
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
@@ -3685,11 +3684,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					const retired = retireActiveUserContextForNextOperator(prior, deps.readSessionEntries(), {
 						...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
 					});
-					if (retired.length < prior.length) {
-						replaceEngineMessages(agentRuntime.agent, retired);
-						// Retiring replayed instructions a request already carried rewrites the history it sent (#434).
-						if (retiredUserContextWasSent(prior, retired)) context.noteColdReason("input_changed");
-					}
+					// Only an unsent block retires, so no request's history is rewritten (bt-40).
+					if (retired.length < prior.length) replaceEngineMessages(agentRuntime.agent, retired);
 				}
 				terminalTurnFailure = undefined;
 				turnRetryAttempts = 0;
