@@ -66,6 +66,7 @@ export function runEvidence(
 	if (verified && settled?.escalations) provenance = { ...(provenance ?? {}), escalation: { ...settled.escalations } };
 	const tools = verified && settled ? settled.tools : [];
 	const grounding = verified ? settled?.validationGrounding : null;
+	const unclassified = verified ? settled?.unclassifiedAfterLastCheck : undefined;
 	return {
 		runId,
 		sessionId: record?.row.sessionId ?? null,
@@ -96,6 +97,9 @@ export function runEvidence(
 		provenance: provenance !== null && Object.keys(provenance).length > 0 ? provenance : null,
 		decisions,
 		ungroundedClaims: grounding ? Math.max(0, grounding.claimed - grounding.grounded) : 0,
+		...(unclassified
+			? { unclassifiedAfterLastCheck: { count: unclassified.count, commands: [...unclassified.commands] } }
+			: {}),
 		quality: verified ? storedQuality(record) : null,
 		totals:
 			record === null || !verified || settled === null

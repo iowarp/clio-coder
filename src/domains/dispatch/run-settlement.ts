@@ -33,7 +33,14 @@ import type { RunUsageFacts } from "./run-call-usage.js";
 import { unobservedRunUsageFacts } from "./run-call-usage.js";
 import { labelledRunHashes, undeclaredRunHashes } from "./run-hashes.js";
 import { runGatewayRoutingLabel, runResponseModelIdObservationLabel } from "./run-upstream.js";
-import type { RunEnvelope, RunOutcome, RunPhaseDurations, RunResult, RunResultDraft } from "./types.js";
+import type {
+	RunEnvelope,
+	RunOutcome,
+	RunPhaseDurations,
+	RunResult,
+	RunResultDraft,
+	SafetyBlockedAttempt,
+} from "./types.js";
 
 /** The facts and the object a run settles with; the journal adds the object's reference as `result`. */
 export interface RunSettlement {
@@ -253,6 +260,16 @@ function sealedCheckReport(report: DeclaredCheckReport): SealedCheckReport {
 	};
 }
 
+/** Blocked attempts as the sealed record keeps them: by tool, class and rule, never the reason prose. */
+function settledBlockedAttempts(attempts: ReadonlyArray<SafetyBlockedAttempt>): RunSettled["blockedAttempts"] {
+	return attempts.slice(0, 64).map((attempt) => ({
+		tool: attempt.tool,
+		actionClass: attempt.actionClass ?? null,
+		ruleId: attempt.ruleId ?? null,
+		reasonCode: attempt.reasonCode ?? null,
+	}));
+}
+
 /** The settlement of a run whose worker finished, from what its finalization sealed (#434). */
 export function settleFinishedRun(
 	receipt: RunResultDraft,
@@ -330,12 +347,10 @@ export function settleFinishedRun(
 				responseModelIds: diagnostic(runResponseModelIdObservationLabel(receipt)),
 				gatewayRoutes: diagnostic(runGatewayRoutingLabel(receipt)),
 			},
-			blockedAttempts: (receipt.safety?.blockedAttempts ?? []).slice(0, 64).map((attempt) => ({
-				tool: attempt.tool,
-				actionClass: attempt.actionClass ?? null,
-				ruleId: attempt.ruleId ?? null,
-				reasonCode: attempt.reasonCode ?? null,
-			})),
+			blockedAttempts: settledBlockedAttempts(receipt.safety?.blockedAttempts ?? []),
+			...(receipt.safety?.guardBlockedAttempts?.length
+				? { guardBlockedAttempts: settledBlockedAttempts(receipt.safety.guardBlockedAttempts) }
+				: {}),
 			escalations: escalationsOf(receipt.safety),
 			flowRestrictions: receipt.safety?.flowRestrictions
 				? {
@@ -359,6 +374,14 @@ export function settleFinishedRun(
 			validationGrounding: receipt.validationGrounding
 				? { ...receipt.validationGrounding, ungrounded: [...receipt.validationGrounding.ungrounded] }
 				: null,
+			...(receipt.unclassifiedAfterLastCheck
+				? {
+						unclassifiedAfterLastCheck: {
+							count: receipt.unclassifiedAfterLastCheck.count,
+							commands: receipt.unclassifiedAfterLastCheck.commands.slice(0, 5),
+						},
+					}
+				: {}),
 			worktree: receipt.worktree
 				? { apply: receipt.worktree.apply, applied: receipt.worktree.applied, snapshot: receipt.worktree.snapshot ?? null }
 				: null,
