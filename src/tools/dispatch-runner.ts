@@ -569,6 +569,8 @@ interface CompletedRun {
 	pendingGate?: PendingGateDecisionHandle;
 	/** Earlier attempts of this assignment that failed before the recovery whose receipt this is, oldest first. */
 	failedAttempts?: ReadonlyArray<FailedAttempt>;
+	/** Why the assignment settled on this failed attempt with no further attempt, such as a suppressed retry. */
+	notRetried?: string;
 }
 
 interface FailedAttempt {
@@ -601,6 +603,22 @@ function earlierFailedAttempts(deps: DispatchToolDeps, start: RunEnvelope["linea
 		lineage = prior.lineage;
 	}
 	return failed;
+}
+
+/**
+ * A failed run's assignment states why no further attempt ran; the sealed receipt cannot, since that decision follows
+ * it. Settlement lands with the durable writes, so they are flushed first (D3-c).
+ */
+async function withNotRetried(deps: DispatchToolDeps, runs: CompletedRun[]): Promise<CompletedRun[]> {
+	if (!runs.some((run) => run.receipt.exitCode !== 0)) return runs;
+	await deps.dispatch.assignments?.flushWrites?.();
+	return runs.map((run) => {
+		if (run.receipt.exitCode === 0) return run;
+		const assignment = deps.dispatch.assignments?.get(run.receipt.runId);
+		const detail = assignment?.status === "failed" ? assignment.outcomeDetail : null;
+		if (!detail) return run;
+		return { ...run, notRetried: detail.length > 240 ? `${detail.slice(0, 239)}…` : detail };
+	});
 }
 
 function recoveredAttemptLines(run: CompletedRun): string[] {
@@ -774,6 +792,7 @@ export function formatDispatchOutput(
 		`dispatch (${mode}) total=${runs.length} failed=${failed.length}${recovered.length > 0 ? ` recovered=${recovered.length}` : ""}`,
 		`runs=${runs.map((run) => run.receipt.runId).join(", ")}`,
 		...recovered.flatMap(recoveredAttemptLines),
+		...runs.flatMap((run) => (run.notRetried ? [`not_retried ${run.receipt.runId}: ${run.notRetried}`] : [])),
 		`batch observed_tool_calls=${batch.observedToolCalls} cost=${batch.cost}${batch.unobservableToolRuns > 0 ? ` unobservable_tool_runs=${batch.unobservableToolRuns}` : ""}`,
 		...hostActions,
 		...(needsSpotCheck ? [SPOT_CHECK_GUIDANCE] : []),
@@ -3034,6 +3053,7 @@ export async function runDispatchTool(
 				runs = batch.runs;
 				board = batch.board;
 			}
+			runs = await withNotRetried(deps, runs);
 			const output = [externalFailures, formatDispatchOutput(mode, runs, maxOutputBytes, board, resultForm)]
 				.filter(Boolean)
 				.join("\n\n");

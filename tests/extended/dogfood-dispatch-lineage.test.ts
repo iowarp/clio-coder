@@ -417,6 +417,39 @@ for (const hosted of [false, true]) {
 	});
 }
 
+it("a killed worker whose retry is suppressed says why it was not retried (D3-c)", { timeout: 15_000 }, async () => {
+	let spawns = 0;
+	const f = await fixture(true, () => {
+		spawns++;
+		return {
+			pid: null,
+			promise: Promise.resolve({
+				exitCode: null,
+				signal: "SIGKILL",
+				evidenceIncomplete: "the worker was killed before its event stream ended",
+			}),
+			heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+			abort() {},
+			events: (async function* () {})(),
+		};
+	});
+	try {
+		const result = await f.tool.run({ agent: "coder", task: "Fix input.txt", cwd: process.cwd() });
+		ok(result.kind === "error");
+		strictEqual(spawns, 1, "the retry is suppressed");
+		const runId = (result.details as { runs?: Array<{ runId?: string }> } | undefined)?.runs?.[0]?.runId;
+		ok(typeof runId === "string", JSON.stringify(result.details).slice(0, 400));
+		ok(
+			result.message.includes(
+				`not_retried ${runId}: automatic retry suppressed because incomplete tool telemetry cannot prove`,
+			),
+			result.message.slice(0, 1500),
+		);
+	} finally {
+		await f.bundle.extension.stop?.();
+	}
+});
+
 function controlledWorker() {
 	let finish!: (result: SpawnedWorkerResult) => void;
 	let aborts = 0;
