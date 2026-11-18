@@ -352,7 +352,7 @@ test("startup and live tier changes share one bounded welcome policy", () => {
 							ok(!/██|\/help|Awareness/u.test(text));
 						} else if (style === "standard") {
 							ok(lines.length <= 8);
-							match(text, /Default · reviewed approvals/u);
+							match(text, /Default · auto in workspace/u);
 							ok(!text.includes("██"));
 						} else ok(text.includes("██"));
 					}

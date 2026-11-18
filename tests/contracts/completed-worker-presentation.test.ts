@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { readRunResultFacts, runEvidenceOf } from "../../src/domains/dispatch/run-result-facts.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+import { summarizeTrustStatus } from "../../src/domains/evidence/trust-projection.js";
 import { adaptRunTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import { readRunRecord, telemetryRunDirectory } from "../../src/domains/telemetry/index.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
@@ -55,7 +56,7 @@ function worker(
 		result: { trust, outcome: "succeeded", contract: "pass", contractKind: kind },
 	};
 }
-function board(entry: WorkerEntryState, width: number): string[] {
+function board(entry: WorkerEntryState, width: number, extra: Partial<DispatchBoardRow> = {}): string[] {
 	const contract = entry.result?.contract;
 	const kind = entry.result?.contractKind;
 	const row: DispatchBoardRow = {
@@ -81,6 +82,7 @@ function board(entry: WorkerEntryState, width: number): string[] {
 			recentActions: [],
 			toolNames: [],
 		},
+		...extra,
 	};
 	const view = createDispatchBoardView(
 		() => [row],
@@ -110,6 +112,31 @@ test("recognized settled debugger reports share diagnosis and reproduction truth
 		}
 		assert.match(plain(fleet), /\/view/);
 	}
+});
+
+test("a settled coder's mutation report reads as words on the fleet board as on its card", () => {
+	const entry = worker(
+		JSON.stringify({
+			mutatedPaths: ["textutil/slug.py"],
+			validations: [{ name: "python-unittest", passed: true, evidence: "4 tests passed" }],
+			commitMessage: "fix slug",
+		}),
+	);
+	const trust = entry.result?.trust;
+	assert.ok(entry.result && trust);
+	// A mutation report is no presented contract kind, so only the sealed record admits it.
+	delete entry.result.contractKind;
+	const transcript = plain(renderWorkerEntryLines(entry, 120, { detail: transcriptDetail("standard") }));
+	const fleet = plain(board(entry, 120, { trust: summarizeTrustStatus(trust) }));
+	assert.match(plain(board(entry, 120)), /"mutatedPaths"/);
+	for (const text of [transcript, fleet]) {
+		assert.match(text, /changed textutil\/slug\.py/);
+		assert.match(text, /python-unittest: 4 tests passed/);
+		assert.doesNotMatch(text, /"mutatedPaths"/);
+	}
+	assert.match(transcript, /proposed commit message, not committed: fix slug/);
+	// The board does not know where the commit landed, so it claims neither.
+	assert.match(fleet, /commit message: fix slug/);
 });
 
 test("live, failed-contract, partial, malformed and unknown answers never acquire a contract summary", () => {
