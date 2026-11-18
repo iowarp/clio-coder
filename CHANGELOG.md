@@ -133,7 +133,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
-- A headless no-op line for a failed sequential or parallel dispatch names the failed run instead of the batch header. (H6)
+- A headless no-op line for a failed sequential or parallel dispatch names the failed run, with its outcome and detail, instead of the batch header. (H6)
 - `run --json` on a resumed session reports the active target and model in its session frame, not the creation-time route.
 - ACP session/load of a session written by a newer Clio returns -32602 `session_format` with the upgrade text (no path) instead of a generic load failure.
 - ACP and terminal `/context compact` no longer streams the once-per-session thinking notice into its reply; it lands on the next real turn.

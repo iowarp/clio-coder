@@ -753,7 +753,7 @@ function dispatchStartedRuns(event: ChatLoopEvent): boolean {
 
 /**
  * The first line of a failed dispatch's reason, bounded, for the run's failure message. A batch's header only counts
- * its runs, so its first failed run's line stands in for it (B-56).
+ * its runs, so its first failed run's line, less its target through trust attributes, stands in for it (B-56).
  */
 function dispatchFailureReason(event: ChatLoopEvent): string {
 	const reason = (event as { reason?: unknown }).reason;
@@ -763,7 +763,7 @@ function dispatchFailureReason(event: ChatLoopEvent): string {
 		.map((part) => part.trim())
 		.filter((part) => part.length > 0);
 	const failedRun = lines[0]?.startsWith("dispatch (") ? lines.find((part) => /^- .*\boutcome=/u.test(part)) : undefined;
-	const line = failedRun?.slice(2) ?? lines[0] ?? "";
+	const line = failedRun?.slice(2).replace(/ target=.*?(?= outcome=)/u, "") ?? lines[0] ?? "";
 	return line.length > 200 ? `${line.slice(0, 199)}…` : line;
 }
 
