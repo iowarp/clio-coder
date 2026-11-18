@@ -1,4 +1,4 @@
-import { deepStrictEqual, notDeepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, notDeepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -14,6 +14,7 @@ import { engineModels } from "../../src/engine/models.js";
 import { createRequestStructures } from "../../src/engine/request-structure.js";
 import { openSession } from "../../src/engine/session.js";
 import type { AgentMessage } from "../../src/engine/types.js";
+import { lastToolCallOf } from "../../src/session-control/continuation-tool-call.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
 import {
 	agedToolCallIdsFromEntries,
@@ -22,7 +23,9 @@ import {
 	OBSERVATION_AGING_CUSTOM_TYPE,
 	observationAgingRecord,
 } from "../../src/session-control/observation-aging.js";
+import { RunEvidenceLog } from "../../src/session-control/run-evidence.js";
 import { createStepStartTracker, stepTurnOutcome } from "../../src/session-control/step-start.js";
+import { recoveryAttemptHasOutput } from "../../src/session-control/turn-recovery.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import {
@@ -162,7 +165,7 @@ describe("W6 (F7 -> CF-7): the worker guard's target and band", () => {
 		};
 	}
 
-	it("a worker at threshold does not evict again on the next small round", { todo: "F7 -> CF-7" }, () => {
+	it("a worker at threshold does not evict again on the next small round", () => {
 		const archived: string[] = [];
 		const guard = createWorkerContextGuard((ref) => {
 			archived.push(ref);
@@ -405,7 +408,7 @@ describe("W11 (F2, F5 -> CF-5): a v6 aging record meets the fold", () => {
 });
 
 describe("W9 (F12 -> CF-3): a run judges its own evidence, not the projected array", () => {
-	it("the step outcome survives a cut inside the submit", { todo: "F12 -> CF-3" }, () => {
+	it("the step outcome survives a cut inside the submit", () => {
 		const STEP = "extension_wtfp__next_step";
 		const entries: SessionEntry[] = [
 			message("u1", null, "user", { text: "/wtfp:advance" }),
@@ -430,10 +433,102 @@ describe("W9 (F12 -> CF-3): a run judges its own evidence, not the projected arr
 				firstKeptTurnId: "a2",
 			} as SessionEntry,
 		];
-		// The chat loop slices the rebuilt array from the submit's start index (chat-loop.ts:4075, :4087). After the
-		// cut that array no longer holds the step call. CF-3 adds the submit-keyed run log and reads the outcome from it.
+		// The submit's runs settled these messages before the cut; the cut rebuilds only the projected array.
+		const log = new RunEvidenceLog();
+		const submit = log.beginSubmit();
+		log.beginAttempt();
+		for (const settled of buildModelReplayAgentMessagesFromTurns(entries.slice(0, 5))) log.record(settled);
 		const projected = buildModelReplayAgentMessagesFromTurns(entries);
-		deepStrictEqual(stepTurnOutcome(projected, STEP), { pipelineDone: false }, "the submit ran its step");
+		strictEqual(lastToolCallOf(projected)?.tool, READ);
+		strictEqual(stepTurnOutcome(projected, STEP), null, "the projection lost the step call");
+		deepStrictEqual(stepTurnOutcome(submit.messages(), STEP), { pipelineDone: false }, "the submit ran its step");
+		// A later attempt that fails before any output judges only itself; the submit still holds the step.
+		log.beginAttempt();
+		log.record({ role: "assistant", content: [], stopReason: "error", errorMessage: "Connection error." } as never);
+		strictEqual(recoveryAttemptHasOutput(log.attempt()), false);
+		ok(recoveryAttemptHasOutput(submit.messages()));
+	});
+
+	it("a machine turn retries a later run that dropped before output and counts each call once", {
+		timeout: 30_000,
+	}, async (t) => {
+		// A tool round, a reply cut off while thinking (dropped from the array and re-run), a connection dropped
+		// before output on that re-run, then the answer.
+		const server = await startCaptureServer((_request, index) =>
+			index === 0
+				? { calls: [{ id: "c1", name: READ, arguments: { path: "src/intro.md" } }] }
+				: index === 1
+					? { thinkingOnlyLength: "deliberating" }
+					: index === 2
+						? { drop: true }
+						: { text: "intro drafted" },
+		);
+		t.after(() => server.close());
+		const harness = chatHarness({ server });
+		harness.settings.chat.retry = { ...harness.settings.chat.retry, baseDelayMs: 0, maxDelayMs: 0 };
+		try {
+			const sessionId = harness.session.create({ cwd: process.cwd() }).id;
+			const result = await harness.loop.submitMachineTurn?.({
+				jobId: "job-1",
+				executionId: "run-1",
+				text: "draft the intro",
+				origin: "job job-1 run-1",
+				sessionId,
+				isAdmissionCurrent: () => true,
+				signal: new AbortController().signal,
+				onStarting: () => true,
+			});
+			strictEqual(server.requests.length, 4, "the dropped re-run was retried");
+			ok(harness.events.some((event) => event.type === "retry_status"));
+			strictEqual(result?.status, "succeeded", result?.reason);
+			strictEqual(result?.text, "intro drafted");
+			// Three calls answered at 12 tokens each, the cut-off reply among them though the array dropped it, and the
+			// dropped call unmeasured.
+			strictEqual(result?.usage?.tokens.measured, 36);
+			strictEqual(result?.usage?.tokens.unknownCount, 1);
+		} finally {
+			await harness.close();
+		}
+	});
+
+	it("a machine turn whose ladder is exhausted settles on the failed attempt, not an earlier round's text (#445)", {
+		timeout: 30_000,
+	}, async (t) => {
+		// A tool round with text, a reply cut off while thinking (re-run), then two drops before output against one retry.
+		const server = await startCaptureServer((_request, index) =>
+			index === 0
+				? { text: "Reading the intro first.", calls: [{ id: "c1", name: READ, arguments: { path: "src/intro.md" } }] }
+				: index === 1
+					? { thinkingOnlyLength: "deliberating" }
+					: { drop: true },
+		);
+		t.after(() => server.close());
+		const harness = chatHarness({ server });
+		harness.settings.chat.retry = { ...harness.settings.chat.retry, maxRetries: 1, baseDelayMs: 0, maxDelayMs: 0 };
+		try {
+			const sessionId = harness.session.create({ cwd: process.cwd() }).id;
+			const result = await harness.loop.submitMachineTurn?.({
+				jobId: "job-1",
+				executionId: "run-1",
+				text: "draft the intro",
+				origin: "job job-1 run-1",
+				sessionId,
+				isAdmissionCurrent: () => true,
+				signal: new AbortController().signal,
+				onStarting: () => true,
+			});
+			strictEqual(server.requests.length, 4, "the dropped re-run was retried once, then the ladder gave up");
+			match(JSON.stringify(server.requests[1]), /Reading the intro first\./u, "an earlier round has text");
+			ok(harness.events.some((event) => event.type === "retry_status" && event.status.phase === "exhausted"));
+			strictEqual(result?.status, "failed");
+			match(result?.reason ?? "", /^Connection error\./u);
+			// The final message is the failed attempt, though the exhausted ladder pruned it from the array.
+			strictEqual(result?.text, "");
+			// The job summary (job-runtime.ts) is the reply text or else the reason: here the reason.
+			strictEqual(result?.text || result?.reason, result?.reason);
+		} finally {
+			await harness.close();
+		}
 	});
 });
 

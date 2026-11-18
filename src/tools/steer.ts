@@ -1,5 +1,5 @@
 import type { DispatchContract } from "../domains/dispatch/contract.js";
-import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
+import { dispatchOwnerOf, dispatchOwnership, owningSessionPhrase } from "../domains/dispatch/ownership.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { steerToolSurface } from "./steer-surface.js";
@@ -40,16 +40,9 @@ function foreignRunError(
 	if (owned !== null) {
 		const ownership = dispatchOwnership(dispatchOwnerOf(deps.dispatch, options?.sessionId));
 		if (ownership.ownsRun(owned)) return null;
-		// A fork reads its parent's runs, so a bare "another session" reads as this one; naming the owner says where to act.
-		const owner =
-			owned.sessionId === null
-				? "another session"
-				: ownership.inherits(owned)
-					? `session ${owned.sessionId}, which this session was forked from`
-					: `session ${owned.sessionId}`;
 		return {
 			kind: "error",
-			message: `steer: run '${runId}' belongs to ${owner}; only the session that dispatched it can steer or cancel it`,
+			message: `steer: run '${runId}' belongs to ${owningSessionPhrase(ownership, owned.sessionId)}; only the session that dispatched it can steer or cancel it`,
 		};
 	}
 	const holder = assignment?.status === "running" ? assignment.processOwner : undefined;

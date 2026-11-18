@@ -202,6 +202,7 @@ import {
 } from "./operator-memory.js";
 import { resolveTurnOutputReserve, turnAdmissionRemedy } from "./output-reserve.js";
 import { REPETITION_REPROMPT_NOTICE_KEY, repetitionRepromptMessages } from "./repetition-detector.js";
+import type { SubmitEvidence } from "./run-evidence.js";
 import { retireActiveUserContextForNextOperator } from "./session-replay-messages.js";
 import { type OutOfTurnRoute, runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./side-question.js";
 import type { AgentStatusEvent, ModelRequestFacts } from "./status-types.js";
@@ -2061,7 +2062,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const stepPipeline = createStepPipeline();
 	let lastStepPipeline: StepPipelineEnd | null = null;
 	/** The running submit's runtime, where its own messages start, and whether it is a yolo continuation. */
-	let stepTurnScope: { runtime: AgentRuntime; messageStart: number; continuation: boolean } | null = null;
+	let stepTurnScope: { evidence: SubmitEvidence; continuation: boolean } | null = null;
 	const unsubscribeToolBudgetLock =
 		deps.bus?.subscribe("safety.tool_budget_exceeded", (payload) => {
 			state.toolBudgetLock = true;
@@ -2152,7 +2153,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const stepTool = state.currentTurnConstraints?.turnPolicy?.stepTool;
 		const scope = stepTurnScope;
 		if (stepTool === undefined || scope === null) return null;
-		const ran = stepTurnOutcome(scope.runtime.agent.state.messages.slice(scope.messageStart), stepTool);
+		const ran = stepTurnOutcome(scope.evidence.messages(), stepTool);
 		const { run, startTurnId } = stepPipeline.peek(stepTool, ran, scope.continuation);
 		const continues = run !== null && yoloContinuationDue(false, null, stepPolicyStop, run)?.step === true;
 		return { continues, ...(startTurnId === undefined ? {} : { startTurnId }) };
@@ -3710,13 +3711,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				terminalTurnFailure = undefined;
 				turnRetryAttempts = 0;
 				providerRetryAttempts = 0;
-				const machineMessageStart = agentRuntime.agent.state.messages.length;
-				stepTurnScope = {
-					runtime: agentRuntime,
-					messageStart: machineMessageStart,
-					continuation: options.yoloContinuation === true,
-				};
-				recovery.noteAttemptStart(machineMessageStart);
+				const evidence = state.runEvidence.beginSubmit();
+				stepTurnScope = { evidence, continuation: options.yoloContinuation === true };
 				const priorPendingSkillPolicy = state.currentPendingSkillPolicy;
 				const priorAskUserPolicy = state.currentAskUserPolicy;
 				state.currentPendingSkillPolicy = pendingSkillPolicy;
@@ -3847,12 +3843,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							// watchdog's abort retries and an operator cancel still does not.
 							const failure = reclassifyStallAbort(state, settled);
 							recovery.ensureFailureVisibleAndPersisted(failure);
-							await recovery.runTransientRetryChain(
-								agentRuntime,
-								runtimePromptText,
-								failure,
-								agentRuntime.agent.state.messages.slice(machineMessageStart),
-							);
+							await recovery.runTransientRetryChain(agentRuntime, runtimePromptText, failure, state.runEvidence.attempt());
 						}
 					}
 				} catch (err) {
@@ -3867,7 +3858,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							message,
 							runtimeId: agentRuntime.runtimeId,
 							contextOverflow: false,
-							hasAttemptOutput: recoveryAttemptHasOutput(agentRuntime.agent.state.messages.slice(machineMessageStart)),
+							hasAttemptOutput: recoveryAttemptHasOutput(state.runEvidence.attempt()),
 							cause: err,
 							...(typeof err === "object" && err !== null && "status" in err ? { status: err.status } : {}),
 						});
@@ -4055,7 +4046,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// Runs on every exit path (normal settle, catch-arm returns) so
 					// a steer the engine never drained still reaches the model.
 					if (options.machineTurn !== undefined) {
-						const messages = agentRuntime.agent.state.messages.slice(machineMessageStart);
+						const messages = evidence.messages();
 						const finalMessage = [...messages].reverse().find((message) => message.role === "assistant");
 						const failure = detectTerminalFailureFromState(agentRuntime.agent);
 						const usage = sumRunUsage(messages);
@@ -4094,9 +4085,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					stepTurnScope = null;
 					const stepRun = stepPipeline.settle(
 						stepPolicy?.stepTool,
-						stepPolicy
-							? stepTurnOutcome(agentRuntime.agent.state.messages.slice(machineMessageStart), stepPolicy.stepTool)
-							: null,
+						stepPolicy ? stepTurnOutcome(evidence.messages(), stepPolicy.stepTool) : null,
 						options.yoloContinuation === true,
 						userTurnId,
 					);
@@ -4107,7 +4096,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					if (generation === submitGeneration)
 						stepStarts.settle(
 							state.currentTurnConstraints,
-							lastAssistantText(agentRuntime.agent.state.messages.slice(machineMessageStart)),
+							lastAssistantText(evidence.messages()),
 							!canceled &&
 								!interviewDismissed &&
 								state.continuation.stop === null &&
@@ -4158,7 +4147,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						if (state.continuation.requested) await queues.resubmitRequestContinuation();
 						else if (continuation !== null) {
 							// Read before the resubmit appends anything: the stopped turn's own last call.
-							const lastToolCall = lastToolCallOf(agentRuntime.agent.state.messages.slice(machineMessageStart));
+							const lastToolCall = lastToolCallOf(evidence.messages());
 							await continueStoppedTurn(continuation, generation, options.constraints, lastToolCall);
 						}
 					}
@@ -4289,6 +4278,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return captureWorkerContext(
 				{ sessionId: meta.id, leafTurnId: state.lastTurnId, cwd: meta.cwd },
 				state.runtime?.agent.state.messages ?? state.replayedContextMessages,
+				deps.readSessionEntries?.(),
 			);
 		},
 

@@ -123,6 +123,15 @@ test("a run's verified seal is walked once, and an open run's scope read once pe
 	// A new view may hold new journal facts, so it reads the open run's scope again.
 	strictEqual(telemetryView(source, scope, verified).run("running")?.seal?.status, "unsealed");
 	deepStrictEqual(reads, { sealed: 1, running: 2 });
+	// A fork reads the runs its parent linked, so a worker card it inherited keeps its clock (bt-11 g).
+	const fork = {
+		sessionId: "ses_fork",
+		journal: present,
+		runs: new Map(),
+		parent: { sessionId: "ses_frames", turnId: "t1", at: "2026-01-01T00:00:00.000Z", source },
+	} as never;
+	strictEqual(telemetryView(fork, scope, verified).run("running")?.seal?.status, "unsealed");
+	strictEqual(telemetryView(fork, scope, verified).run("absent"), null);
 });
 
 test("a verified run cache follows a reopened and resealed journal", async () => {

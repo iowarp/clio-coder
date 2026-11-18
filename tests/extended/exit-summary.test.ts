@@ -182,8 +182,17 @@ test("a /resume mid-visit keeps the visit's turns, files and workers on the exit
 	strictEqual(snapshot?.sessionId, "session-2");
 	const card = renderExitSummary(snapshot, "standard", 160, false).join("\n");
 	match(card, /^This visit, workers included: 4 turns · 2 files changed · 1 worker · 2 sessions$/mu);
-	// The parked session's calls stay in the tally, and a tool no call ran is no `verify 0` row.
-	match(card, /^Tools: bash 3 · read 4$/mu);
+	// Tools are the named session's own calls, so the parked one's `bash 2` stays out (bt-11 h), and a tool no call ran
+	// is no `verify 0` row.
+	match(card, /^Tools: bash 1 · read 4$/mu);
+	// Resumed back, a session keeps the calls it made before it was parked.
+	bus.emit("session.parked", { sessionId: "session-2", reason: "resume_other", at: 0 });
+	current = { id: "session-1", hasModelTurn: true };
+	bus.emit("session.reattached", { sessionId: "session-1", via: "resume" } as never);
+	footerTools.clear();
+	collector.sessionChanged();
+	footerTools.set("bash", 1);
+	match(renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n"), /^Tools: bash 3 · read 4$/mu);
 	collector.dispose();
 });
 

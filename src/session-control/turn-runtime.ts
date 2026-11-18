@@ -1737,11 +1737,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// Per streamed assistant message: how far each block was last checked for repetition. The prose filter
 		// hands every delta a fresh partial object, so the counters reset on the message lifecycle, not identity.
 		const repetitionCheck = { text: 0, thinking: 0 };
-		// state.messages length when this run started; agent state appends every
-		// message of the run (prompts, assistant, tool results) via message_end,
-		// so the slice from here is the run's real message window.
-		let runStartMessageCount = 0;
-
 		const onAgentEvent = async (event: AgentEvent): Promise<void> => {
 			if (event.type === "agent_start") {
 				runIdentity = deps.turnIdentity?.();
@@ -1754,6 +1749,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				clearStallTimer();
 				return;
 			}
+			// The run's own events, before any reader of this one: an attempt is one run (agent_start to agent_end).
+			if (event.type === "agent_start") state.runEvidence.beginAttempt();
+			if (event.type === "message_end") state.runEvidence.record(event.message);
 			if (event.type === "turn_start") {
 				// The last request's facts say nothing about this turn's until its own request goes out.
 				state.modelRequest = null;
@@ -1826,10 +1824,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// The engine's failure path (an abort or a thrown provider error)
 				// replaces the run's message window with one synthetic zero-usage
 				// failure message, which zeroed token usage, tool counts, and cache
-				// records for every aborted turn. Rebuild the real window from agent
-				// state, which already holds all of this run's messages plus that
+				// records for every aborted turn. Rebuild the real window from the
+				// run evidence log, which holds all of this run's messages plus that
 				// failure message.
-				const runMessages = localRuntime.agent.state.messages.slice(runStartMessageCount);
+				const runMessages = state.runEvidence.attempt();
 				if (runMessages.length > event.messages.length) {
 					enrichedEvent = { ...event, messages: runMessages } as typeof event;
 				}
@@ -1959,7 +1957,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (publicEvent?.type === "agent_start") {
 				turnEndFiredFor = null;
 				state.continuation.clearInRun();
-				runStartMessageCount = localRuntime.agent.state.messages.length;
 				apiCallStartedAt = null;
 				apiCallFirstDeltaAt = null;
 				preInvocationStage = "transform";
