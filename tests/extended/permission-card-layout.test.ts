@@ -428,8 +428,16 @@ test("a card nobody answers denies its call after the window, and the turn conti
 		);
 		match(
 			card.join(" "),
-			/No answer in 5 s denies this call and Clio continues without it\.\s+Any key\s+holds the card\./u,
+			/No answer in 0:05 denies this call and Clio continues without it\.\s+Any\s+key\s+holds the card\./u,
 		);
+		// The clock keeps one m:ss shape across the minute (bt-11 q).
+		for (const [ms, shown] of [
+			[61_000, "1:01"],
+			[59_000, "0:59"],
+		] as const) {
+			const at = plain(createPermissionOverlayBody(WRITE_VIEW, undefined, undefined, undefined, () => ms).render(76));
+			match(at.join(" "), new RegExp(`No answer in ${shown} denies this call`, "u"));
+		}
 		f.clock.advance(5_000);
 		const settled = await verdict;
 		strictEqual(settled.kind, "blocked");

@@ -469,7 +469,7 @@ test("an unanswered round shows its countdown and closes as timed out; any key h
 	const idlePending = idle.ask([SAFE_DEFAULT_ROUND], undefined, {
 		unattended: { windowMs: 5_000, timers: clock.timers },
 	});
-	match(plain(idle.render(100)).join("\n"), /No answer in 5 s picks the recommended option and Clio continues/);
+	match(plain(idle.render(100)).join("\n"), /No answer in 0:05 picks the recommended option and Clio continues/);
 	clock.advance(5_000);
 	deepStrictEqual(await idlePending, { answers: [], timedOut: { afterSeconds: 5 } });
 
