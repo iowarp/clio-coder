@@ -48,7 +48,7 @@ import {
 	renderModelReplay,
 } from "./model-session-replay.js";
 import { legacyAgingOnPath } from "./observation-aging.js";
-import { resolveTurnOutputReserve } from "./output-reserve.js";
+import { resolveFitOutputReserve } from "./output-reserve.js";
 import { createReplayMessageConverter } from "./session-replay-messages.js";
 import type { ExpectedColdReason, LiveContextEstimate, TurnContext, TurnContextDeps } from "./turn-context.js";
 import type { AgentRuntime, TurnContextState } from "./turn-state.js";
@@ -523,7 +523,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			const policy = structural ? resolveWorkingSetPolicy(workingSet.policy) : null;
 			if (policy !== null) policyId = policy.id;
 			const fitShare = () =>
-				Math.max(0, 1 - resolveTurnOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow);
+				Math.max(0, 1 - resolveFitOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow);
 			// S1's figures (ContextFold A3); S0's selection reads neither, so its floor and gate are unchanged.
 			const pressure = evictionPressure({
 				automatic: trigger === "auto" && !requiredFit,
@@ -606,7 +606,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		});
 		const after = port.liveContextEstimate(agentRuntime, pendingUserText);
 		const fit = requiredFit
-			? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
+			? requestFits(after.tokens, resolveFitOutputReserve(agentRuntime, after.tokens), after.contextWindow)
 			: !input.shouldCompact(after.tokens).shouldCompact;
 		return { acted: !alone, committed: true, fit, skipNotice: alone && structural ? structuralSkip() : skipNotice };
 	};
