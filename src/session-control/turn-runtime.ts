@@ -896,11 +896,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				? "route_moved"
 				: state.activeInterruptByOperator
 					? "operator_cancel"
-					: state.repetitionAbortReason !== null
-						? "repetition"
-						: disposed
-							? "shutdown"
-							: undefined;
+					: state.activeInterruptByTriage
+						? "triage_stop"
+						: state.repetitionAbortReason !== null
+							? "repetition"
+							: disposed
+								? "shutdown"
+								: undefined;
 		const settleModelCall = async (
 			message: AgentMessage,
 			unreported: InterruptedUsageEstimate | null = null,
@@ -965,7 +967,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			journalLease = undefined;
 			attemptRequest = undefined;
 			if (call) {
-				recordSettledCall(call.abandon(state.activeInterruptByOperator ? "operator_cancel" : "internal"), lease?.context);
+				recordSettledCall(
+					call.abandon(
+						state.activeInterruptByOperator ? "operator_cancel" : state.activeInterruptByTriage ? "triage_stop" : "internal",
+					),
+					lease?.context,
+				);
 			}
 			await lease?.release();
 		};

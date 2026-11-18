@@ -4225,6 +4225,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.activeInterruptReason =
 					requestedReason && requestedReason.length > 0 ? requestedReason : OPERATOR_CANCEL_REASON;
 				state.activeInterruptByOperator = (options?.source ?? "stream_cancel") === "stream_cancel";
+				state.activeInterruptByTriage = options?.source === "triage";
 				// An Esc is reported once, by the turn's Cancelled outcome. The footer
 				// carries only an interruption the operator did not ask for.
 				if (!isOperatorCancelReason(state.activeInterruptReason))
