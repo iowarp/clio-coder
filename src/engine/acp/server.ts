@@ -7683,7 +7683,15 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			// The aborted line still appends its entry; the ledger must outlive that write.
 			if (activeShell?.sessionId === session.id) await activeShell.settled;
 			if (aside !== null) await settleAcpWork([aside.settled]);
-			if (options.session?.current()?.id === session.id) await options.session.close();
+			if (options.session?.current()?.id === session.id) {
+				// A client's close is a durable boundary: meta.json records it, as shutdown records its own.
+				await options.session.checkpoint("close").catch((err: unknown) => {
+					process.stderr.write(
+						`[clio-coder:acp] close checkpoint failed: ${err instanceof Error ? err.message : String(err)}\n`,
+					);
+				});
+				await options.session.close();
+			}
 			await options.mcpCapabilities?.detachClientServers();
 			sessions.delete(session.id);
 			if (boundSessionId === session.id) boundSessionId = null;

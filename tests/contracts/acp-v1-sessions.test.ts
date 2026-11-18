@@ -102,6 +102,9 @@ function fixture(
 			if (current) current.endedAt = timestamp;
 			current = null;
 		},
+		checkpoint: async (reason?: string) => {
+			if (current) current.lastCheckpointReason = reason ?? null;
+		},
 		tree: () => ({ leafId: null }),
 		leafId: () => null,
 		setName: (name: string, id: string) => {
@@ -343,6 +346,8 @@ test("ACP close cancels and waits for an active prompt", async () => {
 		deepStrictEqual(await peer.call("session/close", { sessionId: opened.sessionId }), {});
 		strictEqual(peer.cancelled, true);
 		strictEqual(((await prompt) as { stopReason: string }).stopReason, "cancelled");
+		const closed = peer.history.find((meta) => meta.id === opened.sessionId);
+		strictEqual(closed?.lastCheckpointReason, "close", "the close is checkpointed before the session is released");
 	} finally {
 		await peer.stop();
 	}
