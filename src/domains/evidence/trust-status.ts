@@ -500,13 +500,13 @@ function runValidationArtifacts(facts: RunTrustFacts): TrustArtifactReference[] 
 	return uniqueBoundedReferences(artifacts);
 }
 
-function settledQualityFails(quality: RunTrustFacts["quality"]): boolean {
+export function settledQualityFails(quality: RunTrustFacts["quality"]): boolean {
 	if (quality === null) return false;
 	if (quality.typedValidations.some((fact) => !fact.passed)) return true;
 	return quality.resultContract?.conformance === "fail" || quality.resultContract?.quality === "fail";
 }
 
-function settledQualityValidates(quality: RunTrustFacts["quality"]): boolean {
+export function settledQualityValidates(quality: RunTrustFacts["quality"]): boolean {
 	if (quality === null) return false;
 	if (quality.typedValidations.some((fact) => fact.passed)) return true;
 	return quality.resultContract?.quality === "pass";

@@ -134,7 +134,7 @@ CLIO Coder classifies every run using a closed set of 22 canonical tags (`EVIDEN
 | `escalation` | Precaution | A worker permission escalation timed out or was denied. |
 | `external-bypass` | Security | An external runner used its own permissions outside CLIO Coder policy. |
 | `external-approximation` | Historical | Reserved in the vocabulary. Current builds do not emit it. |
-| `independent-review` | Validation | The canonical independent-review axis: a failed or correlated review is a warning; an inconclusive review, or a successful run with no review at all, is an info row saying its result rests on its own record. |
+| `independent-review` | Validation | The canonical independent-review axis: a failed or correlated review is a warning; an inconclusive review is an info row. A run no review judged carries no row; its trust line says it was not independently reviewed. |
 | `context-provenance` | Provenance | The canonical context-provenance axis read `invalid`, or a cited decision ref resolved (info) or did not resolve (warning). |
 | `completion-evidence` | Validation | The canonical completion-evidence axis: a mutation that finished without validation evidence at the completion boundary is a warning; an explicit limitation is an info row. |
 | `run-seal` | Security | The run's seal did not verify. A seal that was checked and rejected is a warning; a run scope not yet sealed is an info row. |
