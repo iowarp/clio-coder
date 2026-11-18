@@ -670,9 +670,8 @@ it("a check judges only the tree it ran on, sealed per verify call or from a too
 	strictEqual(seal("red edit pass"), "verified");
 	// A listing ran no check, so it changes no tree either.
 	strictEqual(seal("edit pass list"), "verified");
-	// An opaque validation tool's own run is not a later mutation of what it checked, but an edit after it is.
-	strictEqual(seal("edit pass", "run_tests"), "verified");
-	strictEqual(seal("pass edit", "run_tests"), "unverified");
+	// A tool named like a check is not one: only `verify` runs a check (x1-2).
+	strictEqual(seal("edit pass", "run_tests"), "unverified");
 });
 
 it("the review gate reads a verifier report that closes prose containing braces, and nothing weaker", () => {

@@ -252,19 +252,13 @@ export function createRunResultQuality(input: CreateRunResultQualityInput): RunR
 	};
 }
 
-const VALIDATION_TOOL_NEEDLES = [
-	"pytest",
-	"ctest",
-	"jest",
-	"vitest",
-	"test",
-	"lint",
-	"typecheck",
-	"check",
-	"ci",
-	"validate",
-	"verify",
-] as const;
+/**
+ * Tools whose result is a check result. Identity is explicit, never a name
+ * heuristic: bookkeeping tools such as `decide` or `tasks`, and gateway
+ * capabilities named like checks, run no check (x1-2). Observed shell checks
+ * enter through the run-effects recorder instead.
+ */
+const VALIDATION_TOOLS: ReadonlySet<string> = new Set(["verify"]);
 
 export const OBSERVED_COMMAND_PREFIX = "command:";
 
@@ -289,8 +283,7 @@ export function typedValidationFactsFromObservedEffects(
 }
 
 function isValidationTool(tool: string): boolean {
-	const name = tool.toLowerCase();
-	return VALIDATION_TOOL_NEEDLES.some((needle) => name.includes(needle));
+	return VALIDATION_TOOLS.has(tool);
 }
 
 /**
@@ -313,9 +306,9 @@ function ranValidationTool(
  * facts when the receipt has them, because the per-tool aggregate cannot tell
  * a check the run fixed and re-ran from one it left failing, nor a check from a
  * call that only listed the checks. Supplied typed facts are therefore the only
- * word for `verify`: none means no check passed. Other validation tools carry no
- * check identity, so their aggregate still decides, and only when the tool's
- * latest executed call ran on the final tree (bt-27c).
+ * word for `verify`: none means no check passed. Without typed facts its
+ * aggregate decides, and only when its latest executed call ran on the final
+ * tree (bt-27c).
  */
 function hasPassingValidation(
 	toolStats: RunResultDraft["toolStats"],
