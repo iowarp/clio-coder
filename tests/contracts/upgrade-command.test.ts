@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { mock, test } from "node:test";
-import { runUpgradeCommand } from "../../src/cli/upgrade.js";
+import { runUpgradeCommand, type UpgradeDependencies } from "../../src/cli/upgrade.js";
 import { detectNewerHome, initializeClioHome } from "../../src/core/init.js";
 import { readClioVersion } from "../../src/core/package-root.js";
 import { processBirthToken } from "../../src/core/process-identity.js";
+import { resetXdgCache } from "../../src/core/xdg.js";
 import { runDoctor } from "../../src/domains/lifecycle/doctor.js";
 import {
 	inspectInstallation,
@@ -91,13 +92,67 @@ function installedFixture() {
 			},
 		);
 	}
+	// run() in this process, for tests of the plan and its output rather than of the relaunch through the real parser.
+	async function call(args: string[], extra: Partial<UpgradeDependencies> = {}, env: NodeJS.ProcessEnv = {}) {
+		const scope = await isolateClioEnv("clio-upgrade-call-");
+		Object.assign(process.env, home.env, {
+			HOME: home.dir,
+			npm_config_cache: join(home.dir, "npm-cache"),
+			PATH: `${bin}:${process.env.PATH}`,
+			CALL_LOG: log,
+			...env,
+		});
+		resetXdgCache();
+		try {
+			const {
+				value: status,
+				stdout,
+				stderr,
+			} = await captureOutput(() =>
+				runUpgradeCommand(args, {
+					inspectInstallation: () => inspectInstallation(entry),
+					lookUpAvailableVersion: async () => ({ asked: true, version: "99.0.0" }),
+					runPending: async () => ({ applied: [], allApplied: [], available: [] }),
+					...extra,
+				}),
+			);
+			return { status, stdout, stderr };
+		} finally {
+			scope.restore();
+		}
+	}
 	const calls = () =>
 		readFileSync(log, "utf8")
 			.trim()
 			.split("\n")
 			.map((line) => JSON.parse(line));
-	return { home, prefix, root, entry, run, calls };
+	return { home, prefix, root, entry, log, run, call, calls };
 }
+
+async function captureOutput<T>(run: () => Promise<T>): Promise<{ value: T; stdout: string; stderr: string }> {
+	let stdout = "";
+	let stderr = "";
+	// The test runner reports through stdout as binary frames; only the command's own text is captured.
+	const forward = process.stdout.write.bind(process.stdout) as (chunk: string | Uint8Array) => boolean;
+	const out = mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
+		if (typeof chunk !== "string") return forward(chunk);
+		stdout += chunk;
+		return true;
+	});
+	const err = mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+		stderr += String(chunk);
+		return true;
+	});
+	try {
+		const value = await run();
+		return { value, stdout, stderr };
+	} finally {
+		out.mock.restore();
+		err.mock.restore();
+	}
+}
+
+const logLine = (log: string, row: Record<string, unknown>) => appendFileSync(log, `${JSON.stringify(row)}\n`);
 
 test("npm layout preserves a custom prefix through launcher symlinks and shell quoting", (t) => {
 	const f = installedFixture();
@@ -146,26 +201,31 @@ test("upgrade updates the same prefix and runs checks with the exact installed e
 	]);
 });
 
-test("a successful upgrade asks the installed CLI to restart an idle background app once", (t) => {
+test("a successful upgrade asks the installed CLI to restart an idle background app once", async (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
 	const background = join(f.home.dir, "state/gui/background");
 	mkdirSync(background, { recursive: true });
 	writeFileSync(join(background, "owner.json"), "{}\n");
-	const restart = `runBackgroundRestart: async (installation) => {
-			const { appendFileSync } = await import("node:fs");
-			appendFileSync(process.env.CALL_LOG, JSON.stringify({ backgroundEntry: installation.entry }) + "\\n");
+	const restart: Partial<UpgradeDependencies> = {
+		runBackgroundRestart: async (installation) => {
+			logLine(f.log, { backgroundEntry: installation.entry });
 			return "Clio Coder background app was left running because it is busy.";
-		},`;
-	const result = f.run(["--json"], restart);
+		},
+	};
+	const result = await f.call(["--json"], restart);
 	assert.equal(result.status, 0, result.stderr + result.stdout);
 	assert.deepEqual(f.calls().at(-1), { backgroundEntry: f.entry });
 	assert.match(result.stdout, /background app was left running because it is busy/);
 
 	// The post-install run an upgrade starts leaves the restart to it, so an idle app restarts once.
-	const child = f.run(
+	const child = await f.call(
 		["--post-install", "--skip-migrations", "--json"],
-		`runBackgroundRestart: async () => { throw new Error("must not run under an upgrade"); },`,
+		{
+			runBackgroundRestart: async () => {
+				throw new Error("must not run under an upgrade");
+			},
+		},
 		{ CLIO_CODER_UPGRADE_PARENT: "1" },
 	);
 	assert.equal(child.status, 0, child.stderr + child.stdout);
@@ -173,23 +233,24 @@ test("a successful upgrade asks the installed CLI to restart an idle background 
 	assert.deepEqual(f.calls().at(-1), { backgroundEntry: f.entry });
 
 	// A post-install the installer runs on its own restarts the app itself.
-	const installer = f.run(["--post-install", "--skip-migrations", "--json"], restart);
+	const installer = await f.call(["--post-install", "--skip-migrations", "--json"], restart);
 	assert.equal(installer.status, 0, installer.stderr + installer.stdout);
 	assert.equal(f.calls().filter((call) => call.backgroundEntry === f.entry).length, 2);
 	assert.match(installer.stdout, /background app was left running because it is busy/);
 });
 
-test("post-install moves a background app another installation owns and names the installer root it left", (t) => {
+test("post-install moves a background app another installation owns and names the installer root it left", async (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
 	const background = join(f.home.dir, "state/gui/background");
 	mkdirSync(background, { recursive: true });
 	writeFileSync(join(background, "owner.json"), "{}\n");
-	const handover = `runBackgroundHandover: async (installation) => {
-			const { appendFileSync } = await import("node:fs");
-			appendFileSync(process.env.CALL_LOG, JSON.stringify({ handoverEntry: installation.entry }) + "\\n");
+	const handover: Partial<UpgradeDependencies> = {
+		runBackgroundHandover: async (installation) => {
+			logLine(f.log, { handoverEntry: installation.entry });
 			return "Background app now runs from this installation.";
-		},`;
+		},
+	};
 	const installRoot = join(f.home.dir, "old-install");
 	const oldPrefix = join(installRoot, "versions", "0.6.2");
 	const oldPackage = join(oldPrefix, "lib/node_modules/@iowarp/clio-coder");
@@ -210,7 +271,7 @@ test("post-install moves a background app another installation owns and names th
 	writeFileSync(launcher, `#!/bin/sh\n# clio-coder-installer launcher\nexec "${oldPrefix}/bin/x"\n`, { mode: 0o755 });
 	writeFileSync(join(background, "server.json"), JSON.stringify({ packageRoot: oldPackage }));
 	const env = { CLIO_CODER_INSTALL_DIR: installRoot, PATH: `${shadowDir}:${process.env.PATH}` };
-	const moved = f.run(["--post-install", "--skip-migrations"], handover, env);
+	const moved = await f.call(["--post-install", "--skip-migrations"], handover, env);
 	assert.equal(moved.status, 0, moved.stderr + moved.stdout);
 	assert.deepEqual(f.calls().at(-1), { handoverEntry: f.entry });
 	assert.match(moved.stdout, /now runs from this installation/);
@@ -221,9 +282,13 @@ test("post-install moves a background app another installation owns and names th
 
 	// A newer version of the same installation restarts the app and never hands over.
 	writeFileSync(join(background, "server.json"), JSON.stringify({ packageRoot: f.root }));
-	const same = f.run(
+	const same = await f.call(
 		["--post-install", "--skip-migrations"],
-		`runBackgroundHandover: async () => { throw new Error("must not hand over"); },`,
+		{
+			runBackgroundHandover: async () => {
+				throw new Error("must not hand over");
+			},
+		},
 		env,
 	);
 	assert.equal(same.status, 0, same.stderr + same.stdout);
@@ -231,7 +296,7 @@ test("post-install moves a background app another installation owns and names th
 	assert.deepEqual(f.calls().at(-1)?.args, ["gui", "background", "restart", "--if-idle"]);
 });
 
-test("an installer post-install under --no-gui leaves the desktop app, its handover and its shortcut alone (F-C17)", (t) => {
+test("an installer post-install under --no-gui leaves the desktop app, its handover and its shortcut alone (F-C17)", async (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
 	const background = join(f.home.dir, "state/gui/background");
@@ -239,9 +304,15 @@ test("an installer post-install under --no-gui leaves the desktop app, its hando
 	writeFileSync(join(background, "owner.json"), "{}\n");
 	// Another installation owns the app, so a post-install would otherwise hand it over and rewrite its shortcut.
 	writeFileSync(join(background, "server.json"), JSON.stringify({ packageRoot: join(f.home.dir, "elsewhere") }));
-	const untouched = `runBackgroundHandover: async () => { throw new Error("must not hand over"); },
-		runBackgroundRestart: async () => { throw new Error("must not restart"); },`;
-	const declined = f.run(["--post-install", "--skip-migrations"], untouched, { CLIO_CODER_INSTALL_GUI: "0" });
+	const untouched: Partial<UpgradeDependencies> = {
+		runBackgroundHandover: async () => {
+			throw new Error("must not hand over");
+		},
+		runBackgroundRestart: async () => {
+			throw new Error("must not restart");
+		},
+	};
+	const declined = await f.call(["--post-install", "--skip-migrations"], untouched, { CLIO_CODER_INSTALL_GUI: "0" });
 	assert.equal(declined.status, 0, declined.stderr + declined.stdout);
 	assert.doesNotMatch(declined.stdout + declined.stderr, /must not (hand over|restart)/);
 	assert.match(declined.stdout, /Left the desktop app as it was/);
@@ -265,34 +336,36 @@ test("restart follows successful checks, relaunches with argv the real parser ac
 	);
 });
 
-test("a failed relaunch names /resume, never the refused --continue flag", (t) => {
+test("a failed relaunch names /resume, never the refused --continue flag", async (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
-	const relaunchFailed = f.run(
-		["--restart"],
-		"isInteractive: () => true, runRestart: async () => { throw new Error('spawn failed'); },",
-	);
+	const relaunchFailed = await f.call(["--restart"], {
+		isInteractive: () => true,
+		runRestart: async () => {
+			throw new Error("spawn failed");
+		},
+	});
 	assert.equal(relaunchFailed.status, 1);
 	assert.match(relaunchFailed.stderr, /\/resume/);
 	assert.doesNotMatch(relaunchFailed.stdout + relaunchFailed.stderr, /--continue/);
 });
 
-test("failed checks never relaunch and recovery points to migrations", (t) => {
+test("failed checks never relaunch and recovery points to migrations", async (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
-	const result = f.run(["--restart"], "isInteractive: () => true,", { POST_CODE: "1" });
+	const result = await f.call(["--restart"], { isInteractive: () => true }, { POST_CODE: "1" });
 	assert.equal(result.status, 1, result.stderr + result.stdout);
 	assert.equal(f.calls().length, 2);
 	assert.match(result.stdout, /upgrade --post-install/);
 });
 
-test("post-install initializes integrity without running environment repairs", (t) => {
+test("post-install initializes integrity without running environment repairs", async (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
 	const state = join(f.home.dir, "state");
 	mkdirSync(state);
 	writeFileSync(join(state, "home.json"), JSON.stringify({ version: readClioVersion() }));
-	const result = f.run(["--post-install", "--skip-migrations", "--json"]);
+	const result = await f.call(["--post-install", "--skip-migrations", "--json"]);
 	assert.equal(result.status, 0, result.stderr + result.stdout);
 	assert.throws(f.calls, /ENOENT/, "post-install no longer invokes environment doctor repair");
 });
@@ -313,25 +386,24 @@ test("restart rejects automation and conflicting flags before changing the insta
 	assert.deepEqual(readdirSync(home.dir), before);
 });
 
-test("manual package managers get instructions without replacement and dry runs never restart", (t) => {
+test("manual package managers get instructions without replacement and dry runs never restart", async (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
-	const result = f.run(
-		["--json"],
-		`inspectInstallation: () => ({ ...inspectInstallation(${JSON.stringify(f.entry)}), kind: 'pnpm' }),`,
-	);
+	const result = await f.call(["--json"], {
+		inspectInstallation: () => ({ ...inspectInstallation(f.entry), kind: "pnpm" }),
+	});
 	assert.equal(result.status, 1, result.stderr + result.stdout);
 	assert.match(result.stdout, /pnpm add -g/);
-	const preview = f.run(["--dry-run", "--restart"]);
+	const preview = await f.call(["--dry-run", "--restart"]);
 	assert.equal(preview.status, 0, preview.stderr + preview.stdout);
 	assert.match(preview.stdout, /Would relaunch/);
 	assert.throws(f.calls, /ENOENT/);
 });
 
-test("an older dist-tag never downgrades the installed package", (t) => {
+test("an older dist-tag never downgrades the installed package", async (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
-	const result = f.run(["--json"], "lookUpAvailableVersion: async () => ({ asked: true, version: '0.0.1' }),");
+	const result = await f.call(["--json"], { lookUpAvailableVersion: async () => ({ asked: true, version: "0.0.1" }) });
 	assert.equal(result.status, 0, result.stderr + result.stdout);
 	assert.throws(f.calls, /ENOENT/, "post-install no longer invokes environment doctor repair");
 	assert.match(result.stdout, /keeping it/);
@@ -361,22 +433,22 @@ test("a retired migration id in the manifest is not evidence of a newer Clio", a
 	assert.equal(detectNewerHome(), null);
 });
 
-test("post-install integrity rejects malformed settings with useful details", (t) => {
+test("post-install integrity rejects malformed settings with useful details", async (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
 	mkdirSync(join(f.home.dir, "config"));
 	writeFileSync(join(f.home.dir, "config/settings.yaml"), "broken: [\n");
-	const result = f.run(["--post-install", "--skip-migrations", "--json"]);
+	const result = await f.call(["--post-install", "--skip-migrations", "--json"]);
 	assert.equal(result.status, 1, result.stdout + result.stderr);
 	assert.match(result.stdout, /settings.yaml|YAML|parse/i);
 	assert.throws(f.calls, /ENOENT/, "doctor --fix was not invoked");
 	assert.equal(readFileSync(join(f.home.dir, "config/settings.yaml"), "utf8"), "broken: [\n");
 });
 
-test("rollback refuses manager-owned installs before any child command", (t) => {
+test("rollback refuses manager-owned installs before any child command", async (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
-	const result = f.run(["--rollback", "--json"]);
+	const result = await f.call(["--rollback", "--json"]);
 	assert.equal(result.status, 2, result.stdout + result.stderr);
 	assert.match(result.stdout, /native installer/i);
 	assert.match(result.stdout, /@iowarp\/clio-coder@<version>/);
@@ -388,7 +460,7 @@ test("rollback refuses manager-owned installs before any child command", (t) => 
 		join(f.home.dir, "state/home.json"),
 		JSON.stringify({ version: "0.7.1-dev", upgradedFrom: "0.6.9", platform: "linux", nodeVersion: "v24" }),
 	);
-	const named = f.run(["--rollback"]);
+	const named = await f.call(["--rollback"]);
 	assert.equal(named.status, 2, named.stdout + named.stderr);
 	assert.match(named.stdout, /previous version, 0\.6\.9/);
 	assert.match(named.stdout, /npm install -g --prefix .* @iowarp\/clio-coder@0\.6\.9/);
@@ -407,17 +479,8 @@ async function rollBackTo(
 	writeFileSync(join(pkg, "dist/cli/index.js"), distSource);
 	mkdirSync(join(root, "scripts"), { recursive: true });
 	writeFileSync(join(root, "scripts", "install.sh"), "echo '[install] switched'\n");
-	const written: string[] = [];
-	// The test runner reports through stdout as binary frames; only the command's own text is captured.
-	const forward = process.stdout.write.bind(process.stdout) as (chunk: string | Uint8Array) => boolean;
-	const write = mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
-		if (typeof chunk !== "string") return forward(chunk);
-		written.push(chunk);
-		return true;
-	});
-	let code: number;
-	try {
-		code = await runUpgradeCommand(["--rollback", "--json"], {
+	const { value: code, stdout } = await captureOutput(() =>
+		runUpgradeCommand(["--rollback", "--json"], {
 			inspectInstallation: () => ({
 				kind: "installer",
 				root,
@@ -434,11 +497,9 @@ async function rollBackTo(
 					channel: "latest",
 				},
 			}),
-		});
-	} finally {
-		write.mock.restore();
-	}
-	const report = JSON.parse(written.join("")) as { steps?: Array<{ message: string }> };
+		}),
+	);
+	const report = JSON.parse(stdout) as { steps?: Array<{ message: string }> };
 	return {
 		code,
 		stamped: JSON.parse(readFileSync(join(homeDir, "state", "home.json"), "utf8")),
