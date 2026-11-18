@@ -6,15 +6,6 @@ This page covers how prompt templates and skills are discovered, ranked, trusted
 
 Source of truth: `src/domains/resources/`, `src/domains/plugins/`, `src/domains/interop/registry.ts`, `src/domains/share/`, [share.ts](../../src/cli/share.ts), and [skills.ts](../../src/cli/skills.ts).
 
-> [!NOTE]
-> The `count`, template budget, model-tier `variants` and conditional
-> `turnPolicy.when` behavior on this page is from the `0.8.4-dev` checkout
-> (`package.json`; `src/core/turn-constraints.ts`,
-> `src/domains/resources/prompts/loader.ts` and `src/tools/count.ts`).
-> The public site pins `0.8.3` in `site/product.json` and
-> `site/content/docs-manifest.json`; 0.8.x tags do not all carry these
-> contracts.
-
 ---
 
 ## Quick start

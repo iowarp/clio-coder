@@ -1,14 +1,13 @@
 # System One
 
-System One is an experimental way to bring a fast decision model to CLIO Coder. You opt in with one setting, and the main agent gets one tool, `consult`, that asks the model typed questions or screens a long list of things the agent has not read. Two harness uses come with it: a screen beside the safety judge and typed steering triage. Its own consumers return typed advice: `consult` and the point readers have no edit operation and the judge screen can only tighten a verdict. This is not an external-provider isolation guarantee; a hosted route receives the bounded/redacted content each request names.
+System One is an experimental way to bring a fast decision model to CLIO Coder. You opt in with one setting, and the main agent gets one tool, `consult`, that asks the model typed questions or screens a long list of things the agent has not read. Two harness uses come with it: a screen beside the safety judge and typed steering triage. System One returns typed advice only: `consult` and the decision points that read its answers have no edit operation, and the judge screen can only tighten a verdict. A hosted route still receives the bounded, redacted content each request names.
 
-Direct anchors are
-[factory.ts](../../src/domains/system-one/factory.ts),
+Source: [factory.ts](../../src/domains/system-one/factory.ts),
 [runner.ts](../../src/domains/system-one/runner.ts),
 [consult.ts](../../src/tools/consult.ts) and
-[safety-judge-host.ts](../../src/entry/safety-judge-host.ts); focused coverage
-is in [consult-tool.test.ts](../../tests/contracts/consult-tool.test.ts) and
-[judge-screen.test.ts](../../tests/contracts/judge-screen.test.ts).
+[safety-judge-host.ts](../../src/entry/safety-judge-host.ts). Tests:
+`tests/contracts/consult-tool.test.ts` and
+`tests/contracts/judge-screen.test.ts`.
 
 Experimental means that the keys and the tool may change between releases. Every surface that shows System One says so.
 
@@ -52,12 +51,8 @@ A named route does more than answer the tool. It also drives the judge screen an
 
 Off is the default. With no named route, the tool registry, gateway listing and
 prompt omit `consult`, no System One point sends a request, and doctor has no
-System One error. The exact exercised absence is covered by
-[consult-tool.test.ts](../../tests/contracts/consult-tool.test.ts) and the
-unbound judge screen case in
-[judge-screen.test.ts](../../tests/contracts/judge-screen.test.ts).
-`systemOne.use: null`, an empty list and `off` all select this mode; this
-wording does not claim that unrelated build output is byte-identical.
+System One error. `systemOne.use: null`, an empty list and `off` all select
+this mode.
 
 ## What it is honest about
 

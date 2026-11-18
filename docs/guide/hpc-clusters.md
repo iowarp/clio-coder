@@ -5,15 +5,14 @@ or 20 through `module load nodejs`, run an old glibc (RHEL and CentOS 7 ship
 2.17, while official Node 22 and 24 builds need 2.28), sit behind a proxy, or
 have no internet at all. The installer handles each of these without root.
 
-Source anchors for this page: installer selection and verification are in
-[`scripts/install.sh`](../../scripts/install.sh); provider/proxy setup is in
+Source: installer selection and verification are in
+[`scripts/install.sh`](../../scripts/install.sh); provider and proxy setup are in
 `src/domains/providers/` and [`proxy-env.ts`](../../src/core/proxy-env.ts);
 scheduler classification is in
 [`policy-engine.ts`](../../src/domains/safety/policy-engine.ts) and
-[`containment.ts`](../../src/domains/safety/containment.ts). Focused coverage
-includes
-[`doctor-hpc.test.ts`](../../tests/contracts/doctor-hpc.test.ts) and
-[`doctor-slurm-controller.test.ts`](../../tests/contracts/doctor-slurm-controller.test.ts).
+[`containment.ts`](../../src/domains/safety/containment.ts). Tests:
+`tests/contracts/doctor-hpc.test.ts` and
+`tests/contracts/doctor-slurm-controller.test.ts`.
 
 ## Quick start on a login node
 
@@ -226,8 +225,7 @@ sandbox is then decided by
 [`containment.ts`](../../src/domains/safety/containment.ts); under
 `safety.sandbox: required`, only the narrow listed literal forms leave, and
 clients outside that list remain inside without the daemon credentials they
-need. This page therefore should not be read as a promise that every
-scheduler spelling always runs outside. A script
+need. A script
 that calls `sbatch` itself stays inside the sandbox and fails there, so submit
 from the command line the agent runs rather than from a wrapper script. A
 workspace script named like a client (`./sbatch`, `bin/ssh`) is not one and

@@ -10,16 +10,6 @@ An extension declares its capabilities in `clio-coder-extension.yaml`, `.yml`, o
 
 Source: `src/domains/extensions/`, [harness-extensions.ts](../../src/tools/harness-extensions.ts), [extension-runtime-tools.ts](../../src/tools/extension-runtime-tools.ts), [slash-commands.ts](../../src/session-control/slash-commands.ts), and [extensions.ts](../../src/cli/extensions.ts).
 
-> [!NOTE]
-> Promotion, compact `summary` results and `detail_ref` storage described here
-> are `0.8.4-dev` HEAD behavior (`package.json`;
-> `src/domains/extensions/runtime-schema-v2.ts`,
-> `src/tools/extension-runtime-tools.ts` and
-> `src/domains/session/tool-details.ts`). The public site still records
-> `0.8.3` in `site/product.json` and `site/content/docs-manifest.json`.
-> Check the running version rather than treating every 0.8.x tag as
-> interchangeable.
-
 ## Package manifest
 
 An extension root contains one manifest, found in the order `clio-coder-extension.yaml`, `clio-coder-extension.yml`, `clio-coder-extension.json`. Any other top-level key is an error unless the manifest lists it under `ignorable`.
@@ -119,12 +109,12 @@ The `runtime` block of an api 2 manifest is the capability envelope: the part of
 The operator reviews the envelope in words before an install and before an update:
 
 - `clio-coder extensions install <path>` prints what the package would be allowed to do, then installs and records the envelope digest it printed.
-- The Library review (`/library install extension:<name>`, `/library update extension:<name>`, or the `clio-coder library` CLI) shows the same lines. On an update it first lists what the new envelope reaches beyond the installed copy, such as new commands, new tools, newly promoted tools, a faster timer, wider file roots, or a gate that may now refuse calls.
+- The Library review (`/library install extension:<name>`, `/library update extension:<name>`, or the `clio-coder library` CLI) shows the same lines. On an update it first lists what the new envelope reaches beyond the installed copy, such as new commands, new tools, newly promoted tools, a faster timer, wider file roots, or a gate that may now refuse calls. A changed `actionClass` on an approved tool counts as growth in either direction, because each class meets a different admission rule, and so does another copy of an approved hook, because every declared hook runs.
 - `clio-coder extensions validate <path>` prints the envelope and its digest for a package you are writing.
 
 The install applies only the envelope that was reviewed. If the manifest changes between review and apply, the install refuses with `extension capability envelope differs from the one reviewed; review a fresh plan`. The digest is recorded in the extension's `state.json` entry. CLIO Coder checks it again every time it loads the installed package: a manifest whose envelope no longer matches the recorded digest stays visible and inactive with the diagnostic `installed extension capability envelope differs from the one recorded at install`, and an install made before envelopes were recorded reads `has no recorded capability envelope; reinstall to review what it may do`.
 
-Bytes can change freely inside an approved envelope, which is what lets a dev folder reload on every save. A wider envelope asks again. The full package digest still pins every file for installed packages.
+Bytes can change freely inside an approved envelope, which is what lets a dev folder reload on every save. A wider envelope, including a changed tool `actionClass` or a duplicated hook, asks again. The full package digest still pins every file for installed packages.
 
 ## Runtime api 2
 
@@ -375,7 +365,7 @@ An extension may also declare model-callable command tools in `capabilities.tool
 id: local-analysis
 name: Local Analysis
 version: 1.0.0
-description: Local analysis capabilities for Clio Coder.
+description: Local analysis capabilities for CLIO Coder.
 compatibility:
   clio: ">=0.6.2"
 capabilities:
@@ -429,7 +419,7 @@ Admission judges a command tool as the `bash` call it projects to. When admissio
 | Surface | Gate |
 | --- | --- |
 | Command tool | Every model-visible command tool is an execution action and runs sequentially. Packages cannot declare themselves read-only. The registry evaluates both the qualified capability call and its fixed executable command through CLIO Coder's safety policy, autonomy, approval, and middleware rules. A read-only dispatch restriction blocks commands, and workers with explicit write confinement cannot execute an unconfined extension command. |
-| Runtime tool | A tool declared `execute` goes through the same approval and autonomy rules as any execution action. A tool declared `write` is admitted as a workspace write. A tool declared `read` skips that approval, which is why `read` is refused in a package that may run programs or write beyond its store, and why narrowing `execute` to `read` is listed as growth on update. |
+| Runtime tool | A tool declared `execute` goes through the same approval and autonomy rules as any execution action. A tool declared `write` is admitted as a workspace write. A tool declared `read` skips that approval, which is why `read` is refused in a package that may run programs or write beyond its store, and why any change to an approved tool's `actionClass`, in either direction, is listed as growth on update and on a dev reload. |
 | Runtime | Runs in a disposable Node child under the Node permission flags and, when one exists, the OS sandbox. It starts in an interactive session, a headless `clio-coder run`, an ACP session, `clio-coder fleet run`, `clio-coder run --agent`, or through `extensions run`, and never inside a native worker. Workspaces, skins and docks stay terminal-only. |
 | Hook | A hook can request blocking or rewriting within what the safety policy allows, and cannot grant what the policy denies. Declarative hooks in `hooks.yaml` and runtime hooks both run behind the middleware. |
 | Installation | A package is admitted only when its tree matches the digest recorded in `state.json` and, for api 2, its envelope matches the recorded envelope digest. A project package is admitted only while the operator has also approved the project's `.clio-coder/extensions/state.json` for the workspace, because the digest proves integrity and not consent. A user package needs no workspace approval. |
