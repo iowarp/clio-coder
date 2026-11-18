@@ -8,7 +8,8 @@ import { printError } from "./shared.js";
 const HELP = `clio-coder usage report [--repo <path>] [--days <n>] [--json]
 
 Read-only telemetry report over the selected window. Tool decisions, approvals,
-settled runs, tokens and spend come from the telemetry read model.
+settled runs, tokens and spend come from the telemetry read model. Input is
+the whole prompt, cached and fresh, as telemetry tokens counts it.
 
   --repo <path>   restrict the window to one repository
   --days <n>      window in days (default 30)
@@ -110,7 +111,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		`permission decisions: ${approvals.requested.display} requested, ${approvals.granted.display} granted, ${approvals.denied.display} denied, ${approvals.expired.display} expired; approval rate ${approvals.rate.display}`,
 	);
 	out(
-		`tokens: ${report.tokens.total.display} (input ${report.tokens.input.display}, output ${report.tokens.output.display})`,
+		`tokens: ${report.tokens.total.display} (input ${report.tokens.prompt.display} incl. cached ${report.tokens.cacheRead.display}, output ${report.tokens.output.display})`,
 	);
 	for (const cost of report.cost) {
 		out(`spend by ${cost.groupBy}: ${cost.total.usd.display}`);
