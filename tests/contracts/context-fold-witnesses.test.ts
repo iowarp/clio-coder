@@ -297,6 +297,61 @@ describe("W7 (F8 -> CF-8): the step chain lives in the stream", () => {
 			const leaf5 = stepTurn("s5", leaf3, "continue", said("Stopped mid-step."));
 			dirty.settle(constraints, "Stopped mid-step.", false, at(leaf5), "s5-u");
 			strictEqual(createStepStartTracker(store).begin(constraints, "continue", true, at(leaf5)), null);
+
+			/** A live tracker that just settled step `id` after step three. */
+			const settledStep = (id: string) => {
+				const tracker = createStepStartTracker(store);
+				ok(tracker.begin(constraints, "continue", true, at(leaf3)));
+				const leaf = stepTurn(id, leaf3, "continue", said(`Step ${id} ran.`));
+				tracker.settle(constraints, `Step ${id} ran.`, true, at(leaf), `${id}-u`);
+				return { tracker, leaf };
+			};
+			/** What a reopen does first: replay the session onto its leaf. */
+			const reopen = (leaf: string) => {
+				const tracker = createStepStartTracker(store);
+				tracker.reset({ sessionId, leafTurnId: null }, leaf);
+				return tracker;
+			};
+			// m2b-D1: /tree away from a settled step leaf and back runs on full history, live and after a reopen alike.
+			const awayAndBack = (tracker: ReturnType<typeof createStepStartTracker>, leaf: string) => {
+				tracker.reset(at(leaf), leaf1);
+				tracker.reset(at(leaf1), leaf);
+				return tracker.begin(constraints, "continue", true, at(leaf));
+			};
+			const settled = settledStep("s6");
+			const reopenedLeaf = settledStep("s7").leaf;
+			deepStrictEqual(
+				[awayAndBack(settled.tracker, settled.leaf), awayAndBack(reopen(reopenedLeaf), reopenedLeaf)],
+				[null, null],
+			);
+
+			// A session switch writes nothing into the session left: returning resumes its chain, as a reopen does.
+			const switchedLeaf = settledStep("s8").leaf;
+			const switched = reopen(switchedLeaf);
+			// chat-loop resets after the switch: the session is already the new one, the leaf still the one left.
+			switched.reset({ sessionId: "other-session", leafTurnId: switchedLeaf }, "other-leaf");
+			switched.reset({ sessionId, leafTurnId: "other-leaf" }, switchedLeaf);
+			const resumed = switched.begin(constraints, "continue", true, at(switchedLeaf));
+			ok(resumed?.includes("Step s8 ran."));
+			strictEqual(reopen(switchedLeaf).begin(constraints, "continue", true, at(switchedLeaf)), resumed);
+
+			// /tree draws a step checkpoint on the path it compacted, not as a sibling of the next step's turn.
+			const checkpointId = "s9-checkpoint";
+			session.appendEntry({
+				kind: "compactionSummary",
+				turnId: checkpointId,
+				parentTurnId: reopenedLeaf,
+				summary: "Step checkpoint.",
+				tokensBefore: 100,
+				firstKeptTurnId: "",
+				messagesSummarized: 4,
+				isSplitTurn: false,
+				trigger: "step",
+			} as SessionEntryInput);
+			stepTurn("s9", reopenedLeaf, "continue", said("Step nine ran."));
+			const tree = session.tree();
+			deepStrictEqual(tree.nodesById[reopenedLeaf]?.children, [checkpointId]);
+			strictEqual(tree.nodesById["s9-u"]?.parentId, checkpointId);
 		} finally {
 			await session.close();
 		}

@@ -119,8 +119,10 @@ export interface StepStartTracker {
 		turnId?: string | null,
 	): void;
 	/**
-	 * The session changed or navigated: no later step continues this chain. `position` is where the session stood;
-	 * a navigation within it to another leaf clears the chain on the leaf being left.
+	 * The session changed or navigated to `nextLeafTurnId`. `position` is where the session stood; a navigation within
+	 * it to another leaf clears the chain on the leaf being left. A reopen, a session change or a reset in place holds
+	 * the chain recorded on the leaf arrived at, as the live tracker held it there, so a session left by a switch
+	 * resumes its chain on return exactly as a reopen of it does.
 	 */
 	reset(position?: StepPosition, nextLeafTurnId?: string | null): void;
 }
@@ -132,6 +134,32 @@ export interface StepStartTracker {
  */
 export function createStepStartTracker(store?: StepChainStore): StepStartTracker {
 	let chain: StepChain | null = null;
+	/** The session of the position the tracker last stood at; a reset into another one is a session change. */
+	let standing: string | null | undefined;
+	/**
+	 * The chain the live tracker holds between turns at `position`: this session's newest record on its path, settled
+	 * on exactly this leaf. A reopen restores it eagerly, so leaving the leaf clears it as live use would.
+	 */
+	const load = (position: StepPosition): StepChain | null => {
+		if (store === undefined || position.sessionId === null || position.leafTurnId === null) return null;
+		const record = store.read(position.leafTurnId);
+		if (
+			record === null ||
+			"cleared" in record ||
+			record.sessionId !== position.sessionId ||
+			record.settledLeaf !== position.leafTurnId
+		)
+			return null;
+		return {
+			sessionId: record.sessionId,
+			template: record.template,
+			stepTool: record.stepTool,
+			body: record.body,
+			bodyTurnId: record.bodyTurnId,
+			finalText: record.finalText,
+			settledLeaf: record.settledLeaf,
+		};
+	};
 	/** Drop the live chain, writing a clear on each leaf where its state was readable. */
 	const drop = (position: StepPosition): void => {
 		const dropped = chain;
@@ -146,34 +174,18 @@ export function createStepStartTracker(store?: StepChainStore): StepStartTracker
 	};
 	/** The durable chain at `position`, when it continues `template` and `stepTool` from exactly this leaf. */
 	const restore = (position: StepPosition, template: string, stepTool: string): StepChain | null => {
-		if (store === undefined || position.sessionId === null || position.leafTurnId === null) return null;
-		const record = store.read(position.leafTurnId);
-		if (
-			record === null ||
-			"cleared" in record ||
-			record.sessionId !== position.sessionId ||
-			record.settledLeaf !== position.leafTurnId ||
-			record.template !== template ||
-			record.stepTool !== stepTool
-		)
-			return null;
-		return {
-			sessionId: record.sessionId,
-			template,
-			stepTool,
-			body: record.body,
-			bodyTurnId: record.bodyTurnId,
-			finalText: record.finalText,
-			settledLeaf: record.settledLeaf,
-		};
+		const loaded = load(position);
+		return loaded !== null && loaded.template === template && loaded.stepTool === stepTool ? loaded : null;
 	};
 	return {
 		begin(constraints, text, continuation, position) {
 			const policy = constraints?.turnPolicy;
 			if (policy === undefined) {
+				standing = position.sessionId;
 				drop(position);
 				return null;
 			}
+			standing = position.sessionId;
 			const template = policy.template ?? "";
 			if (chain === null) chain = restore(position, template, policy.stepTool);
 			const same =
@@ -197,6 +209,9 @@ export function createStepStartTracker(store?: StepChainStore): StepStartTracker
 		},
 		settle(constraints, finalText, clean, position, turnId) {
 			const policy = constraints?.turnPolicy;
+			// A new session is created at its first submit, after this turn began: the chain belongs to it.
+			if (chain !== null && chain.sessionId === null && standing === null) chain.sessionId = position.sessionId;
+			standing = position.sessionId;
 			if (
 				chain === null ||
 				policy === undefined ||
@@ -230,11 +245,20 @@ export function createStepStartTracker(store?: StepChainStore): StepStartTracker
 				);
 		},
 		reset(position, nextLeafTurnId) {
-			if (position === undefined || nextLeafTurnId === position.leafTurnId) {
+			if (position === undefined) {
 				chain = null;
+				standing = undefined;
 				return;
 			}
-			drop(position);
+			const arrived = { sessionId: position.sessionId, leafTurnId: nextLeafTurnId ?? null };
+			if (position.sessionId === standing && nextLeafTurnId !== position.leafTurnId) {
+				// A navigation within the session clears the chain on the leaf it leaves; it arrives with none.
+				drop(position);
+			} else {
+				// A reopen, a session change or a reset in place stands where the session stands: the leaf's own chain.
+				chain = load(arrived);
+			}
+			standing = position.sessionId;
 		},
 	};
 }
