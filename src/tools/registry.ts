@@ -412,8 +412,8 @@ export interface RegistryDeps {
 	onUnattendedRefusal?: (call: ClassifierCall, decision: SafetyDecision, kind: OpenDecisionKind, rule?: string) => void;
 	/**
 	 * Observes each ask_user round the operator answered themselves, never one
-	 * Clio answered for an absent operator. The main session feeds the answers
-	 * to the safety judge as operator words and reopens the autonomy window.
+	 * Clio answered for an absent operator. The main session reopens the
+	 * autonomy window; the safety judge reads the answers from the ledger.
 	 */
 	onOperatorAnswered?: (
 		answers: ReadonlyArray<{ question: string; answer: string }>,
