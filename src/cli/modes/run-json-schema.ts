@@ -233,7 +233,10 @@ export interface RunJsonTerminalTurnEndFrame {
 	/** Machine-readable failure detail such as `noop` or `limitation`. */
 	outcomeDetail?: string;
 	/** The run's safety summary; a `permissionRequired` attempt needed an approval the run could not give. */
-	safety?: Pick<NonNullable<RunResult["safety"]>, "decisions" | "blockedAttempts" | "blockedAttemptsTruncated">;
+	safety?: Pick<
+		NonNullable<RunResult["safety"]>,
+		"decisions" | "blockedAttempts" | "blockedAttemptsTruncated" | "guardBlockedAttempts"
+	>;
 	/** A yolo run's window, its halt and the calls it left for the operator (ob-yolo D7). */
 	autonomy?: AutonomyReport;
 	/** `run --verify`: each check as the run ran it after the turn, in flag order. */

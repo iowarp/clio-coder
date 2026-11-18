@@ -259,6 +259,8 @@ export interface ChatTurnState {
 	activeInterruptByOperator: boolean;
 	/** Whether steering triage read a queued message as a stop and interrupted to deliver it (bt-41). Written with the reason. */
 	activeInterruptByTriage: boolean;
+	/** Whether the autonomy window halted the run at a cap or a judge streak (bt-26 N2d). Written with the reason. */
+	activeInterruptByAutonomy: boolean;
 	/** The provider's nonempty aborted message closes this interrupt without a synthetic second assistant. */
 	interruptedAssistantMessage: AgentMessage | null;
 	/** Accounting for the hollow call carried by the interrupt's closing turn (#430). */
@@ -334,6 +336,7 @@ type TurnStateView<Reads extends keyof ChatTurnState, Writes extends keyof ChatT
 export type TurnRuntimeState = TurnStateView<
 	| "activeInterruptByOperator"
 	| "activeInterruptByTriage"
+	| "activeInterruptByAutonomy"
 	| "activeInterruptReason"
 	| "activeUserTurnId"
 	| "continuation"
@@ -431,6 +434,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		activeInterruptReason: null,
 		activeInterruptByOperator: false,
 		activeInterruptByTriage: false,
+		activeInterruptByAutonomy: false,
 		interruptedAssistantMessage: null,
 		interruptedCall: null,
 		synthesisToolLock: false,

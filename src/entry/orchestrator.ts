@@ -210,7 +210,7 @@ import {
 } from "../domains/safety/index.js";
 import { workerFlowPolicyInput } from "../domains/safety/information-flow.js";
 import { createInternalGitPolicy } from "../domains/safety/internal-git-policy.js";
-import { standingChecks } from "../domains/safety/observed-checks.js";
+import { createStandingChecks } from "../domains/safety/observed-checks.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import { SAFETY_JUDGE_CONSECUTIVE_BLOCKS, type SafetyJudgeSeat } from "../domains/safety/safety-judge.js";
@@ -1902,6 +1902,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const askUserBridge: AskUserHandler = async (questions, invokeOptions) =>
 		askUserHandler ? await askUserHandler(questions, invokeOptions) : cancelledAskUserResult();
 	const userTasks = createUserTasksStore({ cwd: process.cwd() });
+	const standingChecks = createStandingChecks();
 	// One task board per orchestrator: the tasks tool mutates it, the turn-end
 	// open-tasks nudge reads it, and the footer/overlay render it. Keyed on the
 	// current session id so resume/fork/new refolds it from taskLedger entries.

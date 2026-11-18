@@ -1123,7 +1123,7 @@ function foldAssistantCall(
 
 /**
  * Counts one finished tool call's safety decision, a tool guard's block apart from a safety refusal, and records it as
- * a blocked attempt when it was refused.
+ * a blocked attempt when it was refused, a guard's block in its own list.
  */
 function foldToolDecision(
 	payload: {
@@ -1138,9 +1138,11 @@ function foldToolDecision(
 	tool: string,
 	counts: { allowed: number; blocked: number; guardBlocked: number; permissionRequested: number },
 	blockedAttempts: SafetyBlockedAttempt[],
+	guardBlockedAttempts: SafetyBlockedAttempt[],
 ): void {
+	const guardBlock = payload.decision === "blocked" && payload.reasonCode === TOOL_GUARD_REASON_CODE;
 	if (payload.decision === "allowed") counts.allowed += 1;
-	else if (payload.decision === "blocked" && payload.reasonCode === TOOL_GUARD_REASON_CODE) counts.guardBlocked += 1;
+	else if (guardBlock) counts.guardBlocked += 1;
 	else if (payload.decision === "blocked") counts.blocked += 1;
 	else if (payload.decision === "permission_requested") counts.permissionRequested += 1;
 	if (payload.outcome !== "blocked" && payload.decision !== "blocked") return;
@@ -1150,7 +1152,7 @@ function foldToolDecision(
 	if (payload.reasonCode !== undefined) attempt.reasonCode = payload.reasonCode;
 	if (payload.policySource !== undefined) attempt.policySource = payload.policySource;
 	if (payload.reason !== undefined) attempt.reason = payload.reason;
-	blockedAttempts.push(attempt);
+	(guardBlock ? guardBlockedAttempts : blockedAttempts).push(attempt);
 }
 
 const CALL_STOP_REASONS: ReadonlySet<string> = new Set(["stop", "length", "toolUse", "error", "aborted"]);
@@ -6921,6 +6923,7 @@ export function createDispatchBundle(
 		const tokenMeter: RunTokenMeter = {};
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, guardBlocked: 0, permissionRequested: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
+		const guardBlockedAttempts: SafetyBlockedAttempt[] = [];
 		const toolStats = new Map<string, ToolCallStat>();
 		const inFlightTools = new Map<string, number>();
 		let toolTelemetryIngestionErrors = 0;
@@ -7036,7 +7039,7 @@ export function createDispatchBundle(
 			if (event.type === "clio_coder_tool_finish" && event.payload && typeof event.payload.tool === "string") {
 				recordToolCompletion(inFlightTools, event.payload);
 				recordToolFinish(toolStats, event.payload);
-				foldToolDecision(event.payload, event.payload.tool, safetyDecisionCounts, blockedAttempts);
+				foldToolDecision(event.payload, event.payload.tool, safetyDecisionCounts, blockedAttempts, guardBlockedAttempts);
 			}
 		};
 
@@ -7315,6 +7318,7 @@ export function createDispatchBundle(
 				safety: {
 					decisions: safetyDecisionCounts,
 					blockedAttempts,
+					...(guardBlockedAttempts.length > 0 ? { guardBlockedAttempts } : {}),
 					requestedActions: lifecycle.admission.requestedActions,
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),
 					...(req.readOnly === true ? { readOnly: true as const } : {}),
@@ -7870,6 +7874,7 @@ export function createDispatchBundle(
 		const escalationCounts = { requested: 0, approved: 0, denied: 0, timedOut: 0 };
 		let escalationDeniedBy: "operator" | "main agent" | "safety judge" | undefined;
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
+		const guardBlockedAttempts: SafetyBlockedAttempt[] = [];
 		// Phase D: a main-authority permit binds every grant to this attempt.
 		// The token is a host secret: it rides the spec and each decision frame
 		// and never reaches a model or a display.
@@ -8569,13 +8574,14 @@ export function createDispatchBundle(
 							tool: child.capability,
 							outcome: child.admission.outcome,
 						});
+						const guardBlock =
+							child.admission.decision === "blocked" && child.admission.reasonCode === TOOL_GUARD_REASON_CODE;
 						if (child.admission.decision === "allowed") safetyDecisionCounts.allowed += 1;
-						else if (child.admission.decision === "blocked" && child.admission.reasonCode === TOOL_GUARD_REASON_CODE)
-							safetyDecisionCounts.guardBlocked += 1;
+						else if (guardBlock) safetyDecisionCounts.guardBlocked += 1;
 						else if (child.admission.decision === "blocked") safetyDecisionCounts.blocked += 1;
 						else safetyDecisionCounts.permissionRequested += 1;
 						if (child.admission.outcome === "blocked") {
-							blockedAttempts.push({
+							(guardBlock ? guardBlockedAttempts : blockedAttempts).push({
 								tool: child.capability,
 								actionClass: child.admission.actionClass,
 								...(child.admission.ruleId ? { ruleId: child.admission.ruleId } : {}),
@@ -8824,7 +8830,7 @@ export function createDispatchBundle(
 				if (isSkillActivation(event.payload.skillActivation)) {
 					skillActivations.push(event.payload.skillActivation);
 				}
-				foldToolDecision(event.payload, tool, safetyDecisionCounts, blockedAttempts);
+				foldToolDecision(event.payload, tool, safetyDecisionCounts, blockedAttempts, guardBlockedAttempts);
 			}
 		};
 
@@ -9297,6 +9303,7 @@ export function createDispatchBundle(
 								}
 							: safetyDecisionCounts,
 					blockedAttempts,
+					...(guardBlockedAttempts.length > 0 ? { guardBlockedAttempts } : {}),
 					...(grantAttempt !== undefined ? receiptGrantAudit(grantBroker.list({ runId: envelope.id }), envelope.id) : {}),
 					requestedActions: lifecycle.admission.requestedActions,
 					...(lifecycle.admission.toolProfile !== undefined ? { toolProfile: lifecycle.admission.toolProfile } : {}),

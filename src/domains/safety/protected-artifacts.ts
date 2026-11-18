@@ -2986,8 +2986,25 @@ function decodeAnsiCQuote(command: string, open: number): { value: string; end: 
 	return { value: hidden ? command.slice(open + 1, end) : value, end, hidden };
 }
 
-/** Literal shell words and operators only; no expansion or script execution. */
+/** The most recent scans, so the many readers of one call's command tokenize it once (x6-7). */
+const recentScans = new Map<string, ReadonlyArray<ShellToken>>();
+const RECENT_SCAN_LIMIT = 8;
+
+/**
+ * Literal shell words and operators only; no expansion or script execution. A scan is a pure function of the text, so
+ * the last few are kept and each caller gets its own array over the shared tokens, which no reader writes to.
+ */
 export function scanShellLike(command: string): ShellToken[] {
+	let tokens = recentScans.get(command);
+	if (tokens === undefined) {
+		tokens = scanShellText(command);
+		if (recentScans.size >= RECENT_SCAN_LIMIT) recentScans.delete(recentScans.keys().next().value as string);
+	} else recentScans.delete(command);
+	recentScans.set(command, tokens);
+	return [...tokens];
+}
+
+function scanShellText(command: string): ShellToken[] {
 	const tokens: ShellToken[] = [];
 	let current = "";
 	let wordStart: number | null = null;
