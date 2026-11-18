@@ -126,6 +126,8 @@ describe("boot plugin discovery fs calls", () => {
 		const baseline = project(0);
 		const single = project(PLUGINS);
 		const double = project(PLUGINS * 2);
+		// Count settled trees only: verified-tree.ts hashes a tree until its newest ctime is 3 s old, and utimes cannot backdate ctime.
+		await new Promise((settle) => setTimeout(settle, 3_100));
 		// One uncounted discovery loads lazily imported modules and fills
 		// settings caches, so each counted window measures discovery alone.
 		await counted(baseline);
