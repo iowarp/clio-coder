@@ -41,6 +41,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - A1, B2 (0.8.4 adoption): an extension manifest may list field paths under a top-level `ignorable` (dotted from the manifest root, list elements unindexed, at most 32 entries). A host that meets a key it does not know skips it when its path is listed and warns once per path naming the extension, in `extensions validate`, `discover`, `install` and `list`. An unlisted unknown key still fails, and a key the host knows is parsed and enforced whether or not it is listed. The rule is the same in every manifest object: the root, `compatibility`, `capabilities.tools` and `runtime` at api 1 and api 2. Skipped keys and the list itself stay out of the capability envelope digest, so adding `ignorable` to an installed manifest asks for no new consent. Hosts before 0.8.4 refuse `ignorable` itself, so a package that uses it keeps `compatibility.clio` at `>=0.8.4-0`; from 0.8.4 on, a new optional field needs an `ignorable` entry instead of a new floor.
 - C5 (0.8.4 adoption): a prompt template's `turnPolicy` takes `when`, a list of `small`, `standard`, `frontier` and `uncached`. The step policy then applies only on a turn whose session chat route matches a token: its model tier, with a `models.<id>.tier` override honoured, or a route that does not cache prompts. On any other route the turn runs with no step refusal, text-only lock, step continuation, parallel step refusal or step checkpoint. The route is judged again at every turn the template starts, yolo step continuations included, so a model switch takes effect on the next turn. The turn scope reminder says whether the policy applies on the current route; the system prompt and tool schemas do not change. Without `when` the policy applies on every route, and a malformed `when` makes the template unavailable.
 - Turn receipts close with the local time the turn ended (`✓ Done · 1m4s · 18:42`), with the date when that was another day; a replayed session shows each turn's recorded end time.
+- ContextFold CF-1: a `context.fold` decision event records each fold checkpoint's stages (S1 working-set eviction, S2 step checkpoint, S3 summary) with their outcome and committed record id.
 
 ### Changed
 
@@ -100,6 +101,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - P2D-2: the dispatch barrel re-exports only the names callers import through it, and ten single-file helpers are no longer exported.
 - P2D-3: the dispatch event pump and the assignment event stream share one bounded drop-oldest tee.
 - P2D-6: reservation tests exercise the async release and lock-held transfer that production uses; the test-only twins and unused path helpers are gone.
+- A run now reads its own evidence from a submit-keyed log (ContextFold CF-3, F12). A compaction or recovery edit mid-submit no longer loses the step call or miscounts a machine turn's usage; retry eligibility after a reprompt or compact-and-retry run judges only that run; `agent_end.messages` and the json-stream `messageCount` no longer count in-run host inserts; a machine turn whose recovery ladder is exhausted reports the failure reason, not an earlier round's text (#445).
 
 ### Removed
 
@@ -379,6 +381,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - An api 2 extension hook at `turn_start` declared `onTimeout` or `onError: block` refuses the turn before its first model request when it times out, throws or has no running runtime; `block` at `turn_end`, which runs after the turn, is refused at load (Astra r6-1).
 - A bash command that only searches for, prints or writes a word such as `sudo`, `pip install` or `systemctl` (`rg sudo README.md`, `git log --grep doas`, `echo "pip install x" >> notes.md`) is no longer classified as a system change, and a search for a blocked phrase piped into `head` is no longer hard-blocked; every command that can run the word still is (Astra r2-8).
 - A worker that locks into synthesis carries the synthesis directive on the request tail instead of its system prompt, and a Codex worker's locked round keeps its tool declarations under `tool_choice: none` and its reasoning level, so the locked round reads the cached prefix (Astra r1-4a, r1-6).
+- A render at a past position and a fork at an earlier message no longer show an eviction or recall written after that point (ContextFold CF-2, F11).
+- Request admission prices the synthesis directive whenever the sent request carries it, including a middleware text lock sent as `auto` (ContextFold CF-2, F15).
+- The worker context guard commits ContextFold records with `r<N>` aliases, the working-set target and rearm band, journals `context.fold` under the run, and refuses recall of parent aliases (ContextFold CF-7, F7).
 
 ## 0.8.3 - 2026-11-16
 
