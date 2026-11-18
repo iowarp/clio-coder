@@ -136,6 +136,36 @@ describe("evidence tool", () => {
 		ok(inspected.findings.some((finding) => finding.tag === "proxy-validation"));
 	});
 
+	it("states the stored result-contract quality and the validations the result reported as failed", async () => {
+		const validations = [
+			{ name: "unit tests before implementation", passed: false, evidence: "red" },
+			{ name: "unit tests", passed: true, evidence: "green" },
+		];
+		await fixture(false, undefined, {
+			quality: {
+				version: 1,
+				typedValidations: [],
+				responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+				resultContract: {
+					sourceId: "agent-result-contract:mutation-report:fixture",
+					validatorDigest: "a".repeat(64),
+					conformance: "pass",
+					quality: "fail",
+				},
+			} as RunResultDraft["quality"],
+			output: {
+				state: "final",
+				text: JSON.stringify({ validations }),
+				bytes: 0,
+				truncated: false,
+				structured: { version: 1, kind: "mutation-report", data: { mutatedPaths: [], validations } },
+			},
+		});
+		const run = await inspectRunEvidence(clioStateDir(), "fixture");
+		deepStrictEqual(run.quality, { verdict: "fail", failedValidations: ["unit tests before implementation"] });
+		deepStrictEqual((await evidenceDetailSnapshot("fixture")).quality, { verdict: "fail", failedValidations: 1 });
+	});
+
 	it("reports agent-managed delegation from a verified run", async () => {
 		await fixture(false, undefined, {
 			delegation: { toolGovernance: "agent-managed" } as NonNullable<RunResultDraft["delegation"]>,

@@ -116,6 +116,10 @@ function renderEvidence(evidence: RunEvidence): void {
 		write(`cost: ${evidence.totals.usd.display}`);
 	}
 	if (evidence.firstPassSuccess !== null) write(`first pass: ${evidence.firstPassSuccess ? "yes" : "no"}`);
+	if (evidence.quality !== null) {
+		write(`quality: ${evidence.quality.verdict}`);
+		for (const name of evidence.quality.failedValidations) write(`  failed validation: ${name}`);
+	}
 	write(`tags: ${formatList(evidence.tags)}`);
 	// The compact projection answers the trust questions; the canonical axis line beneath it is the drill-down, in the
 	// same form the dispatch tool and monitor print.

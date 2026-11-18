@@ -49,6 +49,7 @@ function run(runId: string, fields: Fields = {}): RunEvidence {
 		provenance: null,
 		decisions: [],
 		ungroundedClaims: fields.ungroundedClaims ?? 0,
+		quality: null,
 		totals: null,
 	};
 }

@@ -6,6 +6,7 @@
 
 import { listStateDirectory } from "../../core/state-boundary.js";
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
+import { sanitizeCallTargetText } from "../safety/call-target.js";
 import { isDecisionRecord } from "../session/entries.js";
 import { telemetryRunsDirectory } from "../telemetry/paths.js";
 import { readRunRecordAsync } from "../telemetry/run-record.js";
@@ -92,6 +93,7 @@ export function runEvidence(
 		provenance: provenance !== null && Object.keys(provenance).length > 0 ? provenance : null,
 		decisions,
 		ungroundedClaims: grounding ? Math.max(0, grounding.claimed - grounding.grounded) : 0,
+		quality: verified ? storedQuality(record) : null,
 		totals:
 			record === null || !verified || settled === null
 				? null
@@ -105,6 +107,29 @@ export function runEvidence(
 						wallTimeMs: Math.max(0, Date.parse(settled.endedAt) - Date.parse(settled.startedAt) || 0),
 					},
 	};
+}
+
+const VALIDATION_NAME_MAX_CHARS = 200;
+
+/**
+ * The quality verdict the run settled and the validation names its result object reports as failed. Both are read as
+ * stored; nothing here judges the result again.
+ */
+function storedQuality(record: RunTelemetryV1 | null): RunEvidence["quality"] {
+	const quality = record?.settled?.quality ?? null;
+	if (quality === null) return null;
+	const contract = quality.resultContract;
+	const reported =
+		record?.result?.state === "resolved" ? record.result.value.output?.structured?.data.validations : null;
+	const failedValidations: string[] = [];
+	if (Array.isArray(reported))
+		for (const entry of reported) {
+			if (entry === null || typeof entry !== "object") continue;
+			const { name, passed } = entry as { name?: unknown; passed?: unknown };
+			if (passed === false && typeof name === "string" && name.trim().length > 0)
+				failedValidations.push(sanitizeCallTargetText(name).slice(0, VALIDATION_NAME_MAX_CHARS));
+		}
+	return { verdict: contract === null ? "unmeasured" : contract.quality, failedValidations };
 }
 
 /** One run's evidence read from its run scope beneath the state root, with the review gates decided about it. */

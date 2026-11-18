@@ -87,6 +87,14 @@ export interface RunEvidence {
 	decisions: EvidenceDecision[];
 	/** Claims of validation the run made without a matching command, from its settled record. */
 	ungroundedClaims: number;
+	/**
+	 * The result contract's stored quality verdict and the validations the result reported as failed, by name. Null
+	 * unless the seal verifies and the run settled a quality block.
+	 */
+	quality: {
+		verdict: "pass" | "fail" | "unmeasured";
+		failedValidations: string[];
+	} | null;
 	/** Null unless the seal verifies: an unauthenticated record states no totals. */
 	totals: {
 		toolCalls: number;
