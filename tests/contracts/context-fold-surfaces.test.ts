@@ -459,7 +459,7 @@ describe("surface capture", () => {
 		const server = await startCaptureServer((request) => {
 			if (!Array.isArray(request.body.tools)) return { text: syntheticCompactionSummary("read the notes") };
 			const elements = wireElements(request);
-			const opened = elements.findLastIndex((element) => element.startsWith("user:"));
+			const opened = elements.length - 1 - [...elements].reverse().findIndex((element) => element.startsWith("user:"));
 			const first = elements[opened]?.includes("read the notes") === true;
 			const next = first ? files[elements.slice(opened + 1).filter((e) => e.startsWith("result:")).length] : undefined;
 			return next
