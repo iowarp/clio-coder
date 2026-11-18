@@ -2244,6 +2244,8 @@ const COUNCIL_BRIEFING_MAX_BYTES = 8 * 1024;
 /** The notice for an excerpt whose whole answer the recipient cannot reach: it says what was omitted. */
 const councilBriefingNotice = (omitted: number, total: number): string =>
 	`\n[clio: ${omitted} of ${total} bytes omitted from this excerpt]\n`;
+const COUNCIL_FAILURE_CAUSE_MAX_CHARS = 300;
+
 /**
  * A seat's excerpt notice. The council profile's `read` reaches run scopes (readScopeExemptRoots), so when the peer's
  * result object exists the notice names it; otherwise it states only what was omitted.
@@ -2260,6 +2262,18 @@ function councilExcerptNotice(receipt: RunResult): BriefingNotice {
 		? councilBriefingNotice
 		: (omitted, total) =>
 				`\n[clio: ${omitted} of ${total} bytes omitted from this excerpt; read output.text in ${path} for the whole answer]\n`;
+}
+
+/** Why a seat failed, on one bounded line: the receipt's detail (the provider's cause) after its outcome. */
+function councilFailureCause(receipt: RunResult): string {
+	const outcome = pipelineFailureReason(receipt);
+	const detail = Array.from((receipt.outcomeDetail ?? "").replace(/\s+/gu, " ").trim());
+	if (detail.length === 0) return outcome;
+	const line =
+		detail.length > COUNCIL_FAILURE_CAUSE_MAX_CHARS
+			? `${detail.slice(0, COUNCIL_FAILURE_CAUSE_MAX_CHARS - 1).join("")}…`
+			: detail.join("");
+	return `${outcome}: ${line}`;
 }
 
 /**
@@ -2368,8 +2382,14 @@ async function runCouncil(
 					for (const peer of council.members) {
 						if (peer.label === member.label) continue;
 						const previous = prior.get(peer.label);
-						if (previous === undefined || isPipelineStepFailure(previous.receipt)) {
+						if (previous === undefined) {
 							peerParts.push({ kind: "evidence", lead: `[${peer.label}] failed in prior round; no answer contributed.` });
+						} else if (isPipelineStepFailure(previous.receipt)) {
+							peerParts.push({
+								kind: "evidence",
+								lead: `[${peer.label}] failed in prior round; no answer contributed. Reason: `,
+								body: councilFailureCause(previous.receipt),
+							});
 						} else {
 							peerParts.push({
 								kind: "evidence",
@@ -2491,7 +2511,7 @@ async function runCouncil(
 					: {
 							kind: "evidence",
 							lead: `[${member.label}] failed; no final answer contributed. Reason: `,
-							body: member.failed.reason,
+							body: receipt === undefined ? member.failed.reason : councilFailureCause(receipt),
 						};
 			}),
 		);
