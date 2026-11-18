@@ -111,13 +111,30 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 	 * turns; a compaction and a returned-from branch are ledger entries with
 	 * their own turn ids and parent pointers, and /tree showed neither, so a
 	 * session that had been compacted looked exactly like one that had not.
-	 * Their previews carry the facts already on the entry.
+	 * Their previews carry the facts already on the entry. A compaction sits on
+	 * the path it compacted: turns appended under its parent after it hang from
+	 * it, so the step checkpoint written before a step's user turn reads as a
+	 * row of that path, not as a sibling branch. `reparented` maps such a turn
+	 * to the compaction it now follows.
 	 */
-	function structuralTreeNodes(entries: ReadonlyArray<SessionEntry>, previews: Map<string, string>): TreeInputNode[] {
+	function structuralTreeNodes(
+		entries: ReadonlyArray<SessionEntry>,
+		previews: Map<string, string>,
+		reparented: Map<string, string>,
+	): TreeInputNode[] {
 		const nodes: TreeInputNode[] = [];
+		// The newest compaction under each parent turn so far, in ledger order.
+		const tails = new Map<string, string>();
 		for (const entry of entries) {
+			if (entry.kind === "message") {
+				const tail = entry.parentTurnId === null ? undefined : tails.get(entry.parentTurnId);
+				if (tail !== undefined) reparented.set(entry.turnId, tail);
+				continue;
+			}
 			if (entry.kind === "compactionSummary") {
-				nodes.push({ id: entry.turnId, parentId: entry.parentTurnId, at: entry.timestamp, kind: "compaction" });
+				const parentId = entry.parentTurnId === null ? null : (tails.get(entry.parentTurnId) ?? entry.parentTurnId);
+				if (entry.parentTurnId !== null) tails.set(entry.parentTurnId, entry.turnId);
+				nodes.push({ id: entry.turnId, parentId, at: entry.timestamp, kind: "compaction" });
 				const summarized = entry.messagesSummarized === undefined ? "history" : `${entry.messagesSummarized} entries`;
 				const after = entry.tokensAfter === undefined ? "" : ` -> ~${entry.tokensAfter}`;
 				previews.set(entry.turnId, `${summarized} summarized, ~${entry.tokensBefore}${after} tokens`);
@@ -146,17 +163,19 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		// happens only when the overlay opens.
 		const previews = new Map<string, string>();
 		let structural: TreeInputNode[] = [];
+		const reparented = new Map<string, string>();
 		try {
 			for (const entry of bundle.entries) {
 				if (entry.kind !== "message") continue;
 				const text = buildTurnPreview({ kind: entry.role, payload: entry.payload });
 				if (text.length > 0) previews.set(entry.turnId, text);
 			}
-			structural = structuralTreeNodes(bundle.entries, previews);
+			structural = structuralTreeNodes(bundle.entries, previews, reparented);
 		} catch {
 			// Best-effort: if the on-disk transcript cannot be read, fall back
 			// to a previewless snapshot. The overlay handles missing previews
 			// gracefully via its kind-label fallback.
+			reparented.clear();
 		}
 		const persistedLeaf =
 			bundle.meta.pinnedLeafTurnId && bundle.nodes.some((node) => node.id === bundle.meta.pinnedLeafTurnId)
@@ -164,7 +183,13 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				: computeLeafId(bundle.nodes);
 		return buildTreeSnapshot({
 			meta,
-			nodes: [...bundle.nodes, ...structural],
+			nodes: [
+				...bundle.nodes.map((node) => {
+					const parentId = reparented.get(node.id);
+					return parentId === undefined ? node : { ...node, parentId };
+				}),
+				...structural,
+			],
 			labels: bundle.labels,
 			previews,
 			// The leaf is the next append point, so it is computed over turn nodes

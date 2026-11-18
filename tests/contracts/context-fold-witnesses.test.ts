@@ -335,6 +335,23 @@ describe("W7 (F8 -> CF-8): the step chain lives in the stream", () => {
 			ok(resumed?.includes("Step s8 ran."));
 			strictEqual(reopen(switchedLeaf).begin(constraints, "continue", true, at(switchedLeaf)), resumed);
 
+			// /tree draws a step checkpoint on the path it compacted, not as a sibling of the next step's turn.
+			const checkpointId = "s9-checkpoint";
+			session.appendEntry({
+				kind: "compactionSummary",
+				turnId: checkpointId,
+				parentTurnId: reopenedLeaf,
+				summary: "Step checkpoint.",
+				tokensBefore: 100,
+				firstKeptTurnId: "",
+				messagesSummarized: 4,
+				isSplitTurn: false,
+				trigger: "step",
+			} as SessionEntryInput);
+			stepTurn("s9", reopenedLeaf, "continue", said("Step nine ran."));
+			const tree = session.tree();
+			deepStrictEqual(tree.nodesById[reopenedLeaf]?.children, [checkpointId]);
+			strictEqual(tree.nodesById["s9-u"]?.parentId, checkpointId);
 		} finally {
 			await session.close();
 		}
