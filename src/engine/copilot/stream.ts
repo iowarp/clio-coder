@@ -8,7 +8,8 @@
  * which resolve the parked handlers, and Copilot continues the same run.
  *
  * One Copilot session is reused while Clio's transcript strictly extends what that session has seen.
- * Compaction, undo or any rewrite of earlier history is a divergence: the session is disposed and a fresh
+ * Compaction, undo, a tool result the working set stubbed or cut, or any rewrite of earlier history is a
+ * divergence: the session is disposed and a fresh
  * one is seeded with Clio's current transcript. Side calls on the same Clio session (a side question, a
  * summarizer) match no live conversation and get their own, so they never disturb the main one.
  *
@@ -129,9 +130,14 @@ function imagesOf(content: Message["content"]): ImageContent[] {
 
 type CoreMessage = Exclude<Message, { role: "system" }>;
 
+const HOST_NOTES = /(?:^|\n+)\[middleware:[a-z-]+\][\s\S]*$/u;
+
 /**
  * Transcript identity of one message. Assistant text is not part of it: Clio may filter what the stream
- * produced before storing it, while the tool call ids it answered with are stable.
+ * produced before storing it, while the tool call ids it answered with are stable. A tool result's content is:
+ * Copilot keeps every result it was handed, so a result the working set later stubs or cuts must not match its
+ * synced form, or the next step continues over the full body Clio no longer counts (bt-47 drv-r4a). Host notes
+ * trailing a result are left out, as a request-only note on the last result must not reseed the next step.
  */
 function fingerprint(message: CoreMessage): string | null {
 	switch (message.role) {
@@ -145,8 +151,11 @@ function fingerprint(message: CoreMessage): string | null {
 			const ids = message.content.filter((block): block is ToolCall => block.type === "toolCall").map((call) => call.id);
 			return `a:${ids.join(",")}`;
 		}
-		case "toolResult":
-			return `r:${message.toolCallId}`;
+		case "toolResult": {
+			const text = textOf(message.content).replace(HOST_NOTES, "");
+			const images = imagesOf(message.content).map((image) => hash(image.data));
+			return `r:${message.toolCallId}:${message.isError ? "e" : "o"}:${hash(text)}:${images.join(",")}`;
+		}
 	}
 }
 

@@ -7,6 +7,7 @@ import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { resolveClioDirs } from "../../src/core/xdg.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
@@ -148,7 +149,11 @@ function transport(paths: ReadonlyArray<string>) {
 function harness(
 	wire: ReturnType<typeof transport>,
 	files: Record<string, string> = FILES,
-	{ window = WINDOW, protectLastSteps = 3 }: { window?: number; protectLastSteps?: number } = {},
+	{
+		window = WINDOW,
+		protectLastSteps = 3,
+		api,
+	}: { window?: number; protectLastSteps?: number; api?: "copilot-sdk" } = {},
 ) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
@@ -165,7 +170,14 @@ function harness(
 		...litellm,
 		auth: "none",
 		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: window, maxTokens: window },
-		synthesizeModel: () => ({ ...model, reasoning: true, input: ["text"], contextWindow: window, maxTokens: window }),
+		synthesizeModel: () => ({
+			...model,
+			...(api ? { api, provider: api } : {}),
+			reasoning: true,
+			input: ["text"],
+			contextWindow: window,
+			maxTokens: window,
+		}),
 	};
 	const context = dispatchStubContext({ settings, runtime });
 	const session = createSessionBundle(context).contract;
@@ -688,3 +700,147 @@ for (const count of [8, 12]) {
 		}
 	});
 }
+
+/**
+ * A stand-in for @github/copilot-sdk whose sessions keep, as the live server does, every prompt and tool result
+ * they were handed. Each model call reports that held history at 3.3 characters a token, reads the next path of
+ * the script and ends with "done"; `__clioCopilotHeld` records what each call saw.
+ */
+const HELD_HISTORY_SDK = String.raw`
+import { EventEmitter } from "node:events";
+const state = (globalThis.__clioCopilotHeld ??= { calls: [], script: [], next: 0 });
+class Session {
+	constructor(config) {
+		this.sessionId = config.sessionId;
+		this.config = config;
+		this.handlers = new Set();
+		this.tools = new Map((config.tools ?? []).map((tool) => [tool.name, tool]));
+		this.held = config.systemMessage?.content ?? "";
+		this.held += JSON.stringify((config.tools ?? []).map((tool) => [tool.name, tool.description, tool.parameters]));
+		this.rpc = { usage: { getMetrics: async () => ({ totalPremiumRequestCost: 0, totalNanoAiu: 0 }) } };
+	}
+	on(handler) { this.handlers.add(handler); return () => this.handlers.delete(handler); }
+	emit(type, data) { for (const handler of [...this.handlers]) handler({ type, data, id: "e", parentId: null, timestamp: "" }); }
+	async setModel() {}
+	async setTools(tools) { this.tools = new Map(tools.map((tool) => [tool.name, tool])); }
+	async abort() {}
+	async disconnect() {}
+	async send(options) {
+		this.held += options.prompt;
+		setTimeout(() => void this.run(), 0);
+		return "m";
+	}
+	async run() {
+		for (;;) {
+			state.calls.push({ sessionId: this.sessionId, held: this.held });
+			const inputTokens = Math.ceil(this.held.length / 3.3);
+			const path = state.script[state.next];
+			this.emit("assistant.usage", { model: "m3a", inputTokens, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 });
+			if (path === undefined) {
+				this.emit("assistant.message", { messageId: "done", content: "done" });
+				this.emit("session.idle", {});
+				return;
+			}
+			state.next += 1;
+			const toolCallId = "call_" + state.next;
+			this.emit("assistant.message", { messageId: toolCallId, content: "", toolRequests: [{ toolCallId, name: "read", arguments: { path } }] });
+			let result;
+			try {
+				result = await this.tools.get("read").handler({ path }, { toolCallId, sessionId: this.sessionId, toolName: "read", arguments: { path } });
+			} catch {
+				return;
+			}
+			this.held += result.textResultForLlm;
+		}
+	}
+}
+export class CopilotClient {
+	constructor(options) {
+		this.options = options;
+		this.state = "disconnected";
+		// The private 1.0.26 layout Clio's client watches.
+		const handle = () => Object.assign(new EventEmitter(), { ref() {}, unref() {} });
+		this.cliProcess = Object.assign(handle(), { stdin: handle(), stdout: handle(), stderr: handle() });
+		this.cliStartTimeout = null;
+	}
+	async start() { this.state = "connected"; }
+	async stop() { this.state = "disconnected"; return []; }
+	async forceStop() { this.state = "disconnected"; }
+	async getAuthStatus() { return { isAuthenticated: true, login: "octo", host: "https://github.com" }; }
+	async listModels() { return []; }
+	async deleteSession() {}
+	async createSession(config) { return new Session(config); }
+	async resumeSession() { throw new Error("Session not found"); }
+}
+`;
+
+it("drv-r4a: on copilot-sdk cut and evicted reads leave the provider's held input, and the 12-read turn finishes (bt-47)", {
+	timeout: 60_000,
+}, async () => {
+	const dir = path.join(
+		resolveClioDirs().data,
+		"components",
+		"copilot-sdk",
+		"1.0.26",
+		"node_modules",
+		"@github",
+		"copilot-sdk",
+	);
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(
+		path.join(dir, "package.json"),
+		JSON.stringify({ name: "@github/copilot-sdk", type: "module", exports: "./index.js" }),
+	);
+	writeFileSync(path.join(dir, "index.js"), HELD_HISTORY_SDK);
+	const files: Record<string, string> = {};
+	M3A_SIZES.forEach((size, index) => {
+		files[`docs/part${index + 1}.md`] = body(`Design note part ${index + 1}`, size);
+	});
+	const reads = Object.keys(files);
+	const held = { calls: [] as Array<{ held: string }>, script: reads, next: 0 };
+	(globalThis as { __clioCopilotHeld?: unknown }).__clioCopilotHeld = held;
+	const reasons = new Set<string>();
+	// drv-m3a's protected window cuts every read; with one protected step the age horizon evicts some first.
+	for (const protectLastSteps of [8, 1]) {
+		held.calls = [];
+		held.next = 0;
+		const live = harness(transport([]), files, { window: 28_000, protectLastSteps, api: "copilot-sdk" });
+		try {
+			await live.loop.submit(
+				`Read ${reads.join(", ")} in order, one read per round, each in full, then say done.\n\n${"Read guidance for the design notes. ".repeat(M3A_PAD)}`,
+			);
+			await live.loop.whenSettled();
+			ok(!live.notices().some((text) => text.includes("post-tool context guard")), "no guard stop");
+			strictEqual(live.summaries(), 0, "the provider honored every cut, so no overflow summary was paid");
+			strictEqual(held.calls.length, reads.length + 1, "every read answered, then the answer");
+			const entries = live.session.readEntries();
+			const answer = entries.at(-2);
+			strictEqual(answer?.kind === "message" ? (answer.payload as { text?: string }).text : undefined, "done");
+			const callIds = new Map(
+				entries.flatMap((entry) =>
+					entry.kind === "message" && entry.role === "tool_result"
+						? [[entry.turnId, String((entry.payload as { toolCallId?: string }).toolCallId)] as const]
+						: [],
+				),
+			);
+			const taken = entries
+				.flatMap((entry) => (entry.kind === "contextEviction" ? entry.evicted : []))
+				.filter((item) => callIds.has(item.ref.entry));
+			ok(taken.length > 0);
+			// What the Copilot server holds for the answer has none of the bodies the working set took out.
+			const last = held.calls.at(-1)?.held ?? "";
+			for (const item of taken) {
+				reasons.add(item.reason);
+				const part = String(callIds.get(item.ref.entry)).replace("call_", "");
+				ok(!last.includes(`# Design note part ${part}\n`), `part ${part} (${item.reason}) is still held`);
+			}
+		} finally {
+			await live.close();
+		}
+	}
+	ok(reasons.has("step_overflow"), "a read was cut");
+	ok(
+		[...reasons].some((reason) => reason !== "step_overflow"),
+		"a read was evicted",
+	);
+});
