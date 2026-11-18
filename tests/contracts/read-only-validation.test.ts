@@ -706,32 +706,38 @@ it("a check judges only the tree it ran on, sealed per verify call or from a too
 	strictEqual(seal("edit pass", "run_tests"), "unverified");
 });
 
-it("a check sharing its bash call with a change judges the final tree only when every change ran first (x1-1)", () => {
-	const seal = (command: string, failed = false) => {
+it("a check sharing its bash call with a change judges the final tree only when every change ran first (x1-1, x3)", () => {
+	// After an edit, each call runs in order: a string is a bash command (red when it starts with `!`), an object a verify call.
+	const seal = (...calls: Array<string | Record<string, unknown>>) => {
 		const recorder = createRunEffectsRecorder(process.cwd());
-		for (const [id, tool, args, red] of [
-			["fix", "edit", { path: "src/a.ts" }, false],
-			["test", "bash", { command: "npm test" }, false],
-			["mixed", "bash", { command }, failed],
-		] as const) {
-			recorder.start(id, tool, args);
-			recorder.checkOutcome(id, red ? "error" : "ok");
-			recorder.finish(id, red);
+		for (const [index, call] of [{ path: "src/a.ts" }, ...calls].entries()) {
+			const red = typeof call === "string" && call.startsWith("!");
+			const [tool, args] =
+				typeof call === "string"
+					? ["bash", { command: red ? call.slice(1) : call }]
+					: [index === 0 ? "edit" : "verify", call];
+			recorder.start(`call-${index}`, tool, args);
+			recorder.checkOutcome(`call-${index}`, red ? "error" : "ok");
+			recorder.finish(`call-${index}`, red);
 		}
 		const effects = recorder.snapshot();
 		const typedValidations = typedValidationFactsFromObservedEffects(effects);
 		return [[...effects.validationCommands], deriveRunVerification({ toolStats: [], typedValidations }).state];
 	};
 	const stale = [[], "unverified"];
+	const green = [["npm test"], "verified"];
 	// The earlier pass judged a tree the call then changed, whether the check ran before or after the change.
-	deepStrictEqual(seal("git apply fix.patch; npm test", true), stale);
-	deepStrictEqual(seal("npm test && node codemod.mjs"), stale);
-	deepStrictEqual(seal("pytest; git stash pop"), stale);
-	deepStrictEqual(seal("npm ci | npm test"), stale);
-	deepStrictEqual(seal("npm test > log.txt"), stale);
+	deepStrictEqual(seal("npm test", "!git apply fix.patch; npm test"), stale);
+	deepStrictEqual(seal("npm test", "npm test && node codemod.mjs"), stale);
+	deepStrictEqual(seal("npm test", "pytest; git stash pop"), stale);
+	deepStrictEqual(seal("npm test", "npm ci | npm test"), stale);
+	deepStrictEqual(seal("npm test", "npm test > log.txt"), stale);
 	// Every change ran before the check through `&&`, or the call held only checks, cd and plumbing.
-	deepStrictEqual(seal("npm ci && npm test"), [["npm test"], "verified"]);
-	deepStrictEqual(seal("cd pkg && npm test 2>&1 | tail -5"), [["npm test"], "verified"]);
+	deepStrictEqual(seal("npm test", "npm ci && npm test"), green);
+	deepStrictEqual(seal("npm test", "cd pkg && npm test 2>&1 | tail -5"), green);
+	// Shell setup changes no tree, so a standing red stands beside a narrower green (x3-1).
+	for (const setup of ["source .venv/bin/activate", "export CI=1"])
+		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [["npm test"], "unverified"]);
 });
 
 it("read-only inspection refuses helpers that write the tree or run another program (x1-3)", () => {

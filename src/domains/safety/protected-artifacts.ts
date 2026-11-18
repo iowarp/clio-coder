@@ -1313,17 +1313,31 @@ export function isReadOnlyInspectionCommand(command: string, gitHelpersConfigure
 
 /**
  * How a shell command that runs a recognized check stands against the tree it leaves (x1-1). `pure`: every step is
- * that check, read-only inspection, `cd` or output plumbing, so the command changed no tree. `after-change`: every
- * step that may change the tree runs before every check, the last of them hands over through `&&`, and nothing but
- * `&&` and `|` joins the steps, so the check judged the changed tree (`npm ci && npm test`). `mixed`: anything else
- * (`git apply x.patch; npm test`, `npm test && node codemod.mjs`), whose check cannot speak for the tree the command
- * left. Null when no step is a recognized check.
+ * that check, read-only inspection, shell setup (`cd`, `source`, `.`, `export`, `set`, a bare assignment) or output
+ * plumbing, so the command changed no tree. `after-change`: every step that may change the tree runs before every
+ * check, the last of them hands over through `&&`, and nothing but `&&` and `|` joins the steps, so the check judged
+ * the changed tree (`npm ci && npm test`). `mixed`: anything else (`git apply x.patch; npm test`, `npm test && node
+ * codemod.mjs`), whose check cannot speak for the tree the command left. Null when no step is a recognized check.
  */
 export type CheckCommandShape = "pure" | "after-change" | "mixed";
 
-export function checkCommandShape(command: string, gitHelpersConfigured: boolean): CheckCommandShape | null {
-	const tokens = scanShellLike(command);
-	const steps: Array<{ check: boolean; changes: boolean; joinedBy: string | null }> = [];
+/**
+ * Shell setup that changes the shell, not the tree (x3-1). `source` and `.` run a script, but the one sourced before a
+ * check is an environment activation by convention; reading it as a change would let `source .venv/bin/activate &&
+ * pytest tests/one.py` clear a standing red.
+ */
+const SHELL_SETUP_STEPS: ReadonlySet<string> = new Set(["cd", "source", ".", "export", "set"]);
+
+interface ShellStep {
+	tokens: ShellToken[];
+	argv: string[];
+	index: number | null;
+	/** The separator joining this step to the next; `""` where two separators meet, null for the last step. */
+	joinedBy: string | null;
+}
+
+function shellSteps(tokens: ReadonlyArray<ShellToken>): ShellStep[] {
+	const steps: ShellStep[] = [];
 	let current: ShellToken[] = [];
 	let separator: string | null = null;
 	const endStep = () => {
@@ -1332,13 +1346,7 @@ export function checkCommandShape(command: string, gitHelpersConfigured: boolean
 		if (previous !== undefined) previous.joinedBy = separator;
 		separator = null;
 		const argv = shellCommandArguments(current);
-		const index = commandTokenIndex(argv);
-		const writes: string[] = [];
-		collectRedirectTargets(current, writes);
-		const check = index !== null && validationMatch(basenameToken(argv[index]), argv.slice(index + 1)) !== null;
-		const readOnly =
-			index === null || check || argv[index] === "cd" || readOnlyInspectionStep(argv.slice(index), gitHelpersConfigured);
-		steps.push({ check, changes: !readOnly || writes.some(isInterestingWriteTarget), joinedBy: null });
+		steps.push({ tokens: current, argv, index: commandTokenIndex(argv), joinedBy: null });
 		current = [];
 	};
 	for (const token of tokens) {
@@ -1351,6 +1359,29 @@ export function checkCommandShape(command: string, gitHelpersConfigured: boolean
 		current.push(token);
 	}
 	endStep();
+	return steps;
+}
+
+function isCheckStep(step: ShellStep): boolean {
+	return (
+		step.index !== null && validationMatch(basenameToken(step.argv[step.index]), step.argv.slice(step.index + 1)) !== null
+	);
+}
+
+export function checkCommandShape(command: string, gitHelpersConfigured: boolean): CheckCommandShape | null {
+	const tokens = scanShellLike(command);
+	const steps = shellSteps(tokens).map((step) => {
+		const writes: string[] = [];
+		collectRedirectTargets(step.tokens, writes);
+		const check = isCheckStep(step);
+		const argv = step.index === null ? [] : step.argv.slice(step.index);
+		const readOnly =
+			step.index === null ||
+			check ||
+			SHELL_SETUP_STEPS.has(argv[0] ?? "") ||
+			readOnlyInspectionStep(argv, gitHelpersConfigured);
+		return { check, changes: !readOnly || writes.some(isInterestingWriteTarget), joinedBy: step.joinedBy };
+	});
 	if (!steps.some((step) => step.check)) return null;
 	const opaque =
 		tokens.some((token) => token.substitutions !== undefined || token.hiddenContent === true || token.unterminated) ||
