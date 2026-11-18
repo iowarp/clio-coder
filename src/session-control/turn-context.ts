@@ -131,7 +131,6 @@ import {
 	hostCheckpointSummary,
 } from "../domains/session/compaction/compact.js";
 import { DEFAULT_KEEP_RECENT_TOKENS } from "../domains/session/compaction/defaults.js";
-import { maskStaleObservations } from "../domains/session/compaction/mask-observations.js";
 import { summaryOutputReserve } from "../domains/session/compaction/summary-output.js";
 import { createTokenEstimator } from "../domains/session/compaction/tokens.js";
 import {
@@ -1824,9 +1823,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			(autoCompactFailures >= AUTO_COMPACT_FAILURE_LIMIT ||
 				(triggerOverride !== "overflow" && summaryRearm !== null && tokens < summaryRearm.tokensAfter + summaryRearm.band));
 		const preSummaryStageAvailable =
-			pressureEstimate !== null &&
-			Boolean(deps.session?.current()) &&
-			((process.env.CLIO_CODER_LEGACY_MASK === "1" && !handoff) || settings.context.workingSet.enabled);
+			pressureEstimate !== null && Boolean(deps.session?.current()) && settings.context.workingSet.enabled;
 		if (!force && !preSummaryStageAvailable && summaryHeld(pressureEstimate?.tokens ?? 0)) return false;
 		// The hysteresis band. A checkpoint runs before every request, so without
 		// it a policy with unconditional rungs fires an event per step and
@@ -1835,13 +1832,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// forces a fit, and the request-fit admission remains the safety net. The
 		// replay runner gates identically. It holds before the operation exists, so
 		// a held checkpoint shows no rail activity and records no operation (#422).
-		if (
-			pressureEstimate &&
-			!requiredFit &&
-			deps.session?.current() &&
-			!(process.env.CLIO_CODER_LEGACY_MASK === "1" && !handoff) &&
-			settings.context.workingSet.enabled
-		) {
+		if (pressureEstimate && !requiredFit && deps.session?.current() && settings.context.workingSet.enabled) {
 			let held = false;
 			try {
 				const entries = deps.readSessionEntries() ?? [];
@@ -1954,84 +1945,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const estimate = pressureEstimate;
 			const verdict = shouldCompact(estimate.tokens, compactionThreshold, compactionWindow, summaryReserve);
 
-			// One-release compatibility escape hatch. This is the destructive
-			// pre-stage that working-set eviction replaces; keep it byte-for-byte
-			// reachable only when explicitly requested.
 			if (deps.session?.current()) {
 				const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
-				if (process.env.CLIO_CODER_LEGACY_MASK === "1" && !handoff) {
-					let masked: ReturnType<typeof maskStaleObservations>;
-					try {
-						masked = maskStaleObservations(deps.readSessionEntries() ?? [], 6);
-					} catch (error) {
-						middleware.fireCompactionHook("mask_observations", trigger, estimate.tokens);
-						emitCompactionActivity("started", "compacting context (mask stage)");
-						emitCompactionActivity("failed", compactionFailureMessage(error));
-						throw error;
-					}
-					if (masked.changed) {
-						preSummaryStageActed = true;
-						middleware.fireCompactionHook("mask_observations", trigger, estimate.tokens);
-						emitCompactionActivity("started", "compacting context (mask stage)");
-						deps.session.replaceEntries(masked.entries);
-						resetCacheCallBaseline();
-						refreshAgentMessagesFromSession(agentRuntime);
-						// The masked history is not the one the provider counted.
-						reconciledAnchor = null;
-
-						const postMaskSnapshot = captureRuntimeContextSnapshot(
-							agentRuntime,
-							state.activeUserTurnId || "compaction",
-							compactionThreshold,
-						);
-						currentContextSnapshot = postMaskSnapshot;
-						persistContextSnapshot(postMaskSnapshot);
-
-						const tokensAfterMask = snapshotInputTokens(postMaskSnapshot);
-						lastCompactionEvent = {
-							stage: "mask_observations",
-							tokensBefore: estimate.tokens,
-							tokensAfter: tokensAfterMask,
-							trigger,
-						};
-						deps.bus?.emit(
-							"context.pruned",
-							{
-								stage: "mask_observations",
-								pressure: verdict.pressure,
-								tokensBefore: estimate.tokens,
-								tokensAfter: tokensAfterMask,
-								maskedObservations: masked.maskedObservations,
-								maskedThinkingBlocks: masked.maskedThinkingBlocks,
-								maskedThinkingChars: masked.maskedThinkingChars,
-								trigger,
-								snapshotIdBefore: beforeSnapshotId,
-								snapshotIdAfter: postMaskSnapshot.snapshotId,
-								at: Date.now(),
-							} satisfies ContextPrunedPayload,
-							sessionTelemetryContext(originSession),
-						);
-						compactionFacts.push({ kind: "omitted", unit: "observations", count: masked.maskedObservations });
-						compactionTokens = { before: estimate.tokens, after: tokensAfterMask, basis: "runtime-estimate" };
-						emitCompactionActivity("completed", `${masked.maskedObservations} observations masked`);
-						const thinkingNote =
-							masked.maskedThinkingBlocks > 0
-								? `, ${masked.maskedThinkingBlocks} thinking blocks dropped (~${masked.maskedThinkingChars} chars)`
-								: "";
-						deps.emitNotice(
-							`[context engine] mask_observations: ${masked.maskedObservations} observations masked${thinkingNote}; ~${estimate.tokens} tokens -> ~${tokensAfterMask} tokens`,
-						);
-
-						refreshLiveBudget(pendingUserText);
-						const after = liveContextEstimate(agentRuntime, pendingUserText);
-						if (
-							requiredFit
-								? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
-								: !shouldCompact(after.tokens, compactionThreshold, compactionWindow, summaryReserve).shouldCompact
-						)
-							return true;
-					}
-				} else if (settings.context.workingSet.enabled) {
+				if (settings.context.workingSet.enabled) {
 					let planned: ReturnType<typeof planEviction>;
 					let visibleEntries: ReadonlyArray<SessionEntry> = [];
 					let policyId = settings.context.workingSet.policy;

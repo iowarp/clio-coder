@@ -21,7 +21,7 @@ Source of truth is `src/domains/context/working-set/` (`contract.ts`, `fold.ts`,
 
 ## Eviction is a projection, not a rewrite
 
-Eviction never rewrites the ledger. The legacy destructive stage, `maskStaleObservations`, is reachable only with `CLIO_CODER_LEGACY_MASK=1` (see [Environment variables](../guide/environment-variables.md)). It walks the entries, replaces observation bodies with a masked-out string, and calls `session.replaceEntries`. That destroys the only copy: after a mask, `/resume`, `/tree`, `/fork`, and the HTML export all show the placeholder, and the content is gone for the operator as well as the model.
+Eviction never rewrites the ledger. The retired destructive stage, `maskStaleObservations`, walked the entries, replaced observation bodies with a masked-out string, and called `session.replaceEntries`. That destroyed the only copy: after a mask, `/resume`, `/tree`, `/fork`, and the HTML export all showed the placeholder, and the content was gone for the operator as well as the model.
 
 The working-set layer separates the two audiences. What leaves is recorded as a `contextEviction` entry, appended like any other. `refreshAgentMessagesFromSession` folds those entries into a `WorkingSetView` and applies `projectWorkingSet` before `buildReplayAgentMessagesFromTurns` runs, so only the messages bound for the provider carry markers. Every reader that shows the session to a human reads the raw ledger and sees the full bodies.
 
@@ -219,9 +219,7 @@ context:
 | `context.workingSet.rearmFraction` | `0.1` | number ≥ 0 and < 1 | Required projected growth as a fraction of the window before another automatic reduction. |
 | `context.workingSet.minEvictableTokens` | `200` | integer ≥ 0 | Results below this body estimate are never evicted. The default protects low-yield bodies; marker break-even is enforced separately. |
 
-Changes to any `context.*` key apply on the next turn (`src/domains/config/classify.ts`). The retired `context.compaction.excludeLastTurns` key (version 1: `compaction.excludeLastTurns`) is ignored when a file still carries it: `clio-coder doctor` names it and `doctor --fix` removes it. The temporary legacy mask uses a compiled six-turn fallback; working-set protection uses `context.workingSet.protectLastTurns`. Settings validation is strict, so an unknown key under this block fails startup with its exact path.
-
-`CLIO_CODER_LEGACY_MASK=1` enables the legacy stale-observation stage for compatibility. That stage rewrites the ledger rather than projecting a working set.
+Changes to any `context.*` key apply on the next turn (`src/domains/config/classify.ts`). The retired `context.compaction.excludeLastTurns` key (version 1: `compaction.excludeLastTurns`) is ignored when a file still carries it: `clio-coder doctor` names it and `doctor --fix` removes it. Working-set protection uses `context.workingSet.protectLastTurns`. Settings validation is strict, so an unknown key under this block fails startup with its exact path.
 
 ## What the operator sees
 
