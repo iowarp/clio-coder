@@ -471,6 +471,19 @@ describe("template turnPolicy when", () => {
 		} finally {
 			await endless.close();
 		}
+		// The last continuation ran no step and ended on its own summary: no step was cut off, the tool just never said done (N1).
+		const unreported = await drive(route, policy, undefined, { calls: [1, 1, 1, 0] });
+		try {
+			strictEqual(unreported.turns.length, 1 + TURN_CONTINUATION_CAP);
+			deepStrictEqual(unreported.stepPipeline, {
+				stepTool: STEP,
+				template: "wtfp:advance",
+				done: false,
+				stoppedBy: "unreported",
+			});
+		} finally {
+			await unreported.close();
+		}
 	});
 
 	it("a step call inside a gateway chain counts as the turn's step, so the pipeline continues to its end (bt-15)", async () => {

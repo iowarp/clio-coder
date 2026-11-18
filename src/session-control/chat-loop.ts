@@ -1091,25 +1091,34 @@ function reloadProtectedArtifactsForSession(
  * How the last step pipeline ended, for a headless caller: `done` when its step
  * tool said `pipelineDone`; otherwise `stoppedBy` says whether the yolo
  * continuation cap (`cap`) or the end of a turn nothing continued (`turn`:
- * autonomy below yolo, a cancel, a failure) stopped it (bt-15).
+ * autonomy below yolo, a cancel, a failure) stopped it (bt-15). `unreported`
+ * is a pipeline whose last turn, at the cap, made no step call and ended on
+ * its own summary: no step was cut off, but the step tool never said
+ * `pipelineDone`, so whether every step ran is unknown (N1).
  */
 export interface StepPipelineEnd {
 	stepTool: string;
 	template?: string;
 	done: boolean;
-	stoppedBy?: "cap" | "turn";
+	stoppedBy?: "cap" | "turn" | "unreported";
 }
 
 function stepPipelineEnd(
 	policy: { stepTool: string; template?: string },
 	run: StepRun,
 	capSpent: boolean,
+	settledCleanly: boolean,
 ): StepPipelineEnd {
+	const stoppedBy = !capSpent
+		? ("turn" as const)
+		: run.carried === true && settledCleanly
+			? ("unreported" as const)
+			: ("cap" as const);
 	return {
 		stepTool: policy.stepTool,
 		...(policy.template === undefined ? {} : { template: policy.template }),
 		done: run.pipelineDone,
-		...(run.pipelineDone ? {} : { stoppedBy: capSpent ? ("cap" as const) : ("turn" as const) }),
+		...(run.pipelineDone ? {} : { stoppedBy }),
 	};
 }
 
@@ -4024,12 +4033,28 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							: null;
 					if (options.machineTurn === undefined && generation === submitGeneration && continuation === null) {
 						const capSpent = state.continuation.yoloContinuations >= TURN_CONTINUATION_CAP;
-						lastStepPipeline = stepPolicy && stepRun !== null ? stepPipelineEnd(stepPolicy, stepRun, capSpent) : null;
+						// A last turn that made no step call and ended on its own summary did not stop mid-pipeline (N1).
+						const settledCleanly =
+							!canceled &&
+							!interviewDismissed &&
+							state.continuation.stop === null &&
+							!guardStopped &&
+							!state.synthesisToolLock &&
+							!state.toolBudgetLock;
+						lastStepPipeline =
+							stepPolicy && stepRun !== null ? stepPipelineEnd(stepPolicy, stepRun, capSpent, settledCleanly) : null;
+						const named = lastStepPipeline?.template ? `prompt template ${lastStepPipeline.template}` : "this template";
 						if (lastStepPipeline?.stoppedBy === "cap")
 							emitNotice(
-								`The step pipeline of ${lastStepPipeline.template ? `prompt template ${lastStepPipeline.template}` : "this template"} stopped at the continuation cap (${TURN_CONTINUATION_CAP}) before ${lastStepPipeline.stepTool} said it was done.`,
+								`The step pipeline of ${named} stopped at the continuation cap (${TURN_CONTINUATION_CAP}) with a step still running, before ${lastStepPipeline.stepTool} said it was done.`,
 								"warning",
 								"step.incomplete",
+							);
+						else if (lastStepPipeline?.stoppedBy === "unreported")
+							emitNotice(
+								`The step pipeline of ${named} ended on a turn that made no ${lastStepPipeline.stepTool} call; the step tool never reported pipelineDone, so whether every step ran is not known.`,
+								"info",
+								"step.unreported",
 							);
 					}
 					if (
