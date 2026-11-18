@@ -115,9 +115,19 @@ describe("adapter capture", () => {
 				strictEqual(reply.stopReason, "stop", reply.errorMessage);
 				strictEqual(server.requests.length, 1);
 				strictEqual(tap.contexts.length, 1, "the tap saw the one request");
-				strictEqual(tap.contexts[0]?.systemPrompt, "Fixture system.");
+				const context = tap.contexts[0];
+				ok(context);
+				// Pi 1.5 folds the system prompt into a leading system message before the provider sees the context.
+				const messages = context.messages as ReadonlyArray<{ role: string; content?: unknown }>;
 				deepStrictEqual(
-					tap.contexts[0]?.messages.map((message) => message.role),
+					[
+						...(context.systemPrompt === undefined ? [] : [context.systemPrompt]),
+						...messages.filter((message) => message.role === "system").map((message) => message.content),
+					],
+					["Fixture system."],
+				);
+				deepStrictEqual(
+					messages.filter((message) => message.role !== "system").map((message) => message.role),
 					["user", "assistant", "toolResult"],
 				);
 				const [request] = server.requests;
