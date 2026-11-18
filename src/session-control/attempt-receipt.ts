@@ -9,6 +9,7 @@ import { providerHistory } from "../engine/agent.js";
 import { withLockedSynthesisDirective } from "../engine/loop-guard.js";
 import { createRequestStructures } from "../engine/request-structure.js";
 import type { EngineModel } from "../engine/types.js";
+import { codexEffortGeneration, codexEffortUpdates } from "./codex-effort.js";
 import { type ContinuityReplayContext, renderModelReplay } from "./model-session-replay.js";
 
 /**
@@ -169,6 +170,28 @@ function sameList(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
 	return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
+/**
+ * The Codex effort history the receipt's cursor implies, derived the way the live sync derives it. Null when the
+ * ledger does not name an effort the derivation needs: live then read the model's level map, which is not recorded.
+ */
+function derivedCodexEffort(
+	entries: ReadonlyArray<SessionEntry>,
+	cursor: AttemptReceipt["cursor"],
+): NonNullable<AttemptReceipt["codex"]> | null {
+	const path = activePath(cursorEntries(entries, cursor.hwm), cursor.leaf ?? undefined);
+	const generation = codexEffortGeneration(path);
+	const baseline = generation.find((entry) => entry.kind === "thinkingLevelChange" && entry.configurationInitial);
+	const initialEffort = baseline?.kind === "thinkingLevelChange" ? baseline.effectiveEffort : undefined;
+	if (initialEffort === undefined) return null;
+	const changes = generation.filter((entry) => entry.kind === "thinkingLevelChange" && !entry.configurationInitial);
+	if (changes.some((entry) => entry.kind === "thinkingLevelChange" && entry.effectiveEffort === undefined)) return null;
+	const users = new Set(
+		generation.filter((entry) => entry.kind === "message" && entry.role === "user").map((entry) => entry.turnId),
+	);
+	const updates = codexEffortUpdates(generation, initialEffort, users, (entry) => entry.effectiveEffort ?? "");
+	return { initialEffort, updates };
+}
+
 function verifyReceipt(
 	entries: ReadonlyArray<SessionEntry>,
 	receipt: AttemptReceipt,
@@ -185,6 +208,15 @@ function verifyReceipt(
 		return unverifiable("native checkpoint unavailable");
 	if (!sameList(viewRecords(entries, receipt.cursor), receipt.records))
 		return { status: "mismatch", reason: "fold records differ" };
+	if (receipt.codex) {
+		const codex = derivedCodexEffort(entries, receipt.cursor);
+		if (codex === null) return unverifiable("codex effort not on the ledger");
+		const flat = (value: NonNullable<AttemptReceipt["codex"]>) => [
+			value.initialEffort,
+			...value.updates.map((update) => `${update.position}=${update.effort}`),
+		];
+		if (!sameList(flat(codex), flat(receipt.codex))) return { status: "mismatch", reason: "codex effort differs" };
+	}
 	if (sameList(rendered.elements, sent)) return { status: "verified" };
 	let index = 0;
 	while (index < sent.length && rendered.elements[index] === sent[index]) index += 1;

@@ -29,7 +29,11 @@ import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
-import { type ReceiptJournalRecord, verifyAttemptReceipts } from "../../src/session-control/attempt-receipt.js";
+import {
+	type AttemptReceipt,
+	type ReceiptJournalRecord,
+	verifyAttemptReceipts,
+} from "../../src/session-control/attempt-receipt.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import { type CaptureScript, chatHarness, startCaptureServer, wireElements } from "../harness/context-capture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -349,6 +353,35 @@ test("the receipt verifier reports each attempt kind and reconciles fold decisio
 				: record,
 		);
 	const earlier = calls.slice(0, -1).map(() => "verified");
+	// Codex: an effort baseline and a change sit on the path just before the last user turn, which carries the update.
+	const third = [...entries].reverse().find((entry) => entry.kind === "message" && entry.role === "user");
+	ok(third);
+	const effort = (turnId: string, parentTurnId: string | null, level: string, initial: boolean): SessionEntry =>
+		({
+			kind: "thinkingLevelChange",
+			turnId,
+			parentTurnId,
+			timestamp: third.timestamp,
+			thinkingLevel: level,
+			effectiveEffort: level,
+			...(initial ? { configurationInitial: true } : {}),
+		}) as SessionEntry;
+	const efforted = entries.flatMap((entry) =>
+		entry === third
+			? [
+					effort("effort-base", third.parentTurnId, "high", true),
+					effort("effort-low", "effort-base", "low", false),
+					{ ...third, parentTurnId: "effort-low" },
+				]
+			: [entry],
+	);
+	const withCodex = (codex: NonNullable<AttemptReceipt["codex"]>) =>
+		rewritten((record) =>
+			record.k === "call.settled"
+				? { ...record, data: { ...last, cache: { ...last.cache, receipt: { ...last.cache.receipt, codex } } } }
+				: record,
+		);
+	const lowered = { initialEffort: "high", updates: [{ position: third.turnId, effort: "low" }] };
 	const table: ReadonlyArray<[string, Partial<Parameters<typeof verifyAttemptReceipts>[0]>, string[]]> = [
 		["every main attempt matches the receipt taken at its send", {}, [...earlier, "verified"]],
 		["a prewarm", { records: relabelled("prewarm") }, [...earlier, "not-verifiable (prewarm)"]],
@@ -375,6 +408,21 @@ test("the receipt verifier reports each attempt kind and reconciles fold decisio
 				),
 			},
 			[...earlier, "not-verifiable (native checkpoint unavailable)"],
+		],
+		[
+			"a Codex effort the ledger re-derives",
+			{ entries: efforted, records: withCodex(lowered) },
+			[...earlier, "verified"],
+		],
+		[
+			"a Codex effort the ledger does not imply",
+			{ entries: efforted, records: withCodex({ ...lowered, updates: [] }) },
+			[...earlier, "mismatch (codex effort differs)"],
+		],
+		[
+			"a Codex effort the ledger does not name",
+			{ records: withCodex(lowered) },
+			[...earlier, "not-verifiable (codex effort not on the ledger)"],
 		],
 		[
 			"a peer-owned call",
