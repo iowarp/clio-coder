@@ -47,7 +47,6 @@ import type {
 } from "../../domains/dispatch/types.js";
 import { readToolRounds } from "../../domains/dispatch/types.js";
 import { describeMissing, missingFromFailedCall } from "../../domains/lifecycle/setup-status.js";
-import type { ActionClass } from "../../domains/safety/action-classifier.js";
 import {
 	AUTONOMOUS_CAP_EXIT_CODE,
 	AUTONOMOUS_CAP_REASON,
@@ -59,7 +58,6 @@ import {
 } from "../../domains/safety/autonomy-window.js";
 import { CITATION_CHECK_PREFIX } from "../../domains/safety/citation-grounding.js";
 import { standingDispatchRuns } from "../../domains/safety/observed-checks.js";
-import { extractCommandWriteTargets } from "../../domains/safety/protected-artifacts.js";
 import { redactFinalUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
 import {
 	createRunEffectsRecorder,
@@ -83,6 +81,7 @@ import {
 	turnNoAnswerSentence,
 } from "../../session-control/chat-loop-messages.js";
 import { TOOL_PLANES } from "../../tools/policy.js";
+import { toolResultText } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from "../run-answers.js";
@@ -259,8 +258,6 @@ interface HeadlessMainAgentRunStats {
 	toolStats: Map<string, ToolCallStat>;
 	pendingCapabilities: Map<string, string>;
 	pendingVerifyCalls: Map<string, VerifyCallStart>;
-	/** Bash calls in flight whose command names a write target. */
-	pendingShellWrites: Set<string>;
 	verifyCalls: VerifyCallOutcome[];
 	/** The run's workspace mutations, so a check is judged against the tree it ran on (bt-27c). */
 	runEffects: RunEffectsRecorder;
@@ -282,8 +279,8 @@ interface HeadlessMainAgentRunStats {
 	guardBlockedAttempts: SafetyBlockedAttempt[];
 	/** The blocked calls `decisions.permissionRequested` counts, up to `BLOCKED_ATTEMPTS_LIMIT`. */
 	permissionRequestedAttempts: SafetyBlockedAttempt[];
-	/** Successful calls the registry classified as `MUTATING_ACTION_CLASS`. */
-	mutatingSucceeded: number;
+	/** Paths a terminating result wrote: the turn's answer as a file, not a workspace change. */
+	reportPaths: Set<string>;
 	/** Dispatched runs whose task worktree merged into this workspace. */
 	mergedTaskWorktrees: number;
 	/** Blocked action classes not followed by successful substantive work of that class. */
@@ -299,19 +296,6 @@ interface HeadlessMainAgentRunStats {
 	 */
 	changeAsked: boolean;
 }
-
-/**
- * The registry action class a successful call must carry to count as a
- * mutation for the no-op rule. It is the class autonomy `default` runs
- * without asking (`mapAutonomy` in domains/safety/autonomy.ts): write, edit,
- * and an outward web_fetch. The class comes from the registry's own admission
- * of each call, so an extension tool that declares a write base class counts
- * too. `execute` is left out on purpose: a shell command's class says that it
- * ran, not that it wrote, and counting it would let one successful
- * `git status` after a denied write hide the no-op this rule exists to catch.
- * A terminating result is left out too (see `recordToolEnd`).
- */
-const MUTATING_ACTION_CLASS: ActionClass = "write";
 
 /**
  * Bounds on `safety.blockedAttempts`. A model retrying a denied call appends
@@ -354,23 +338,6 @@ function assistantText(message: AgentMessage | undefined): string {
 		.filter((item): item is { type: "text"; text: string } => item?.type === "text" && typeof item.text === "string")
 		.map((item) => item.text)
 		.join("");
-}
-
-/** The text blocks of a tool result, which is what the tool told the model. */
-function toolResultText(content: unknown): string {
-	if (!Array.isArray(content)) return "";
-	return content
-		.filter((item): item is { type: "text"; text: string } => {
-			return (
-				typeof item === "object" &&
-				item !== null &&
-				(item as { type?: unknown }).type === "text" &&
-				typeof (item as { text?: unknown }).text === "string"
-			);
-		})
-		.map((item) => item.text)
-		.join("")
-		.trim();
 }
 
 export function assistantError(message: AgentMessage | undefined): string | null {
@@ -546,15 +513,11 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 		const call = effectiveToolCall(event.toolName, event.args);
 		stats.pendingCapabilities.set(event.toolCallId, call.toolName);
 		if (call.toolName === ToolNames.Verify) stats.pendingVerifyCalls.set(event.toolCallId, verifyCallStart(call.args));
-		const command = call.toolName === ToolNames.Bash ? call.args?.command : undefined;
-		if (typeof command === "string" && extractCommandWriteTargets(command).length > 0)
-			stats.pendingShellWrites.add(event.toolCallId);
 		return;
 	}
 	if (event.type !== "tool_execution_end") return;
 	const tool = stats.pendingCapabilities.get(event.toolCallId) ?? event.toolName ?? "tool";
 	stats.pendingCapabilities.delete(event.toolCallId);
-	const shellWrite = stats.pendingShellWrites.delete(event.toolCallId);
 	// A call the output limit cut off never ran: its run's one notice states it, and it is no tool error (bt-39 a).
 	if ((event as { notRun?: unknown }).notRun !== undefined) {
 		stats.pendingVerifyCalls.delete(event.toolCallId);
@@ -712,10 +675,8 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 			// this event fold has no authority to infer semantic substitution.
 		}
 	}
-	if (outcome === "ok" && actionClass === MUTATING_ACTION_CLASS && !terminating) stats.mutatingSucceeded += 1;
-	// A clean shell redirect wrote its target as surely as an edit did (rcsmoke mini N2: an operator-named
-	// unsandboxed `echo > file` landed, yet a later refused command sealed the run as a no-op).
-	else if (outcome === "ok" && shellWrite) stats.mutatingSucceeded += 1;
+	const reported = (event.result as { details?: { paths?: unknown } } | undefined)?.details?.paths;
+	if (terminating && Array.isArray(reported)) for (const target of reported) stats.reportPaths.add(String(target));
 	if (outcome === "ok" && tool === ToolNames.Dispatch)
 		stats.mergedTaskWorktrees += mergedTaskWorktreeCount(event.result);
 	if (tool === ToolNames.Dispatch) {
@@ -765,8 +726,13 @@ function mergedTaskWorktreeCount(result: unknown): number {
 	}).length;
 }
 
+/** Distinct paths the run's successful calls wrote, an edit or a shell redirect alike (rcsmoke mini N2), less its report. */
+function writtenPaths(stats: HeadlessMainAgentRunStats): number {
+	return [...stats.runEffects.snapshot().mutatedPaths].filter((target) => !stats.reportPaths.has(target)).length;
+}
+
 function changedWorkspace(stats: HeadlessMainAgentRunStats): boolean {
-	return stats.mutatingSucceeded > 0 || stats.mergedTaskWorktrees > 0;
+	return writtenPaths(stats) > 0 || stats.mergedTaskWorktrees > 0;
 }
 
 /** A blocked call or a failed dispatch remains, and nothing changed the workspace. */
@@ -782,23 +748,22 @@ function dispatchStartedRuns(event: ChatLoopEvent): boolean {
 	const result = (event as { result?: { details?: { runs?: unknown }; content?: unknown } }).result;
 	const runs = result?.details?.runs;
 	if (Array.isArray(runs) && runs.length > 0) return true;
-	const content = result?.content;
-	if (!Array.isArray(content)) return false;
-	const text = content.map((block) => (typeof block?.text === "string" ? block.text : "")).join("");
-	return /^runs=\S/mu.test(text);
+	return /^runs=\S/mu.test(toolResultText(result?.content));
 }
 
-/** The first line of a failed dispatch's reason, bounded, for the run's failure message. */
+/**
+ * The first line of a failed dispatch's reason, bounded, for the run's failure message. A batch's header only counts
+ * its runs, so its first failed run's line stands in for it (B-56).
+ */
 function dispatchFailureReason(event: ChatLoopEvent): string {
 	const reason = (event as { reason?: unknown }).reason;
 	const content = (event as { result?: { content?: unknown } }).result?.content;
-	const text =
-		typeof reason === "string"
-			? reason
-			: Array.isArray(content)
-				? content.map((block) => (typeof block?.text === "string" ? block.text : "")).join("")
-				: "";
-	const line = (text.split("\n").find((part) => part.trim().length > 0) ?? "").trim();
+	const lines = (typeof reason === "string" ? reason : toolResultText(content))
+		.split("\n")
+		.map((part) => part.trim())
+		.filter((part) => part.length > 0);
+	const failedRun = lines[0]?.startsWith("dispatch (") ? lines.find((part) => /^- .*\boutcome=/u.test(part)) : undefined;
+	const line = failedRun?.slice(2) ?? lines[0] ?? "";
 	return line.length > 200 ? `${line.slice(0, 199)}…` : line;
 }
 
@@ -1122,7 +1087,6 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		toolStats: new Map<string, ToolCallStat>(),
 		pendingCapabilities: new Map(),
 		pendingVerifyCalls: new Map(),
-		pendingShellWrites: new Set(),
 		verifyCalls: [],
 		runEffects: createRunEffectsRecorder(process.cwd(), {
 			scratchRoots: options.scratchRoots ?? [],
@@ -1136,7 +1100,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		blockedAttemptsTruncated: 0,
 		guardBlockedAttempts: [],
 		permissionRequestedAttempts: [],
-		mutatingSucceeded: 0,
+		reportPaths: new Set(),
 		mergedTaskWorktrees: 0,
 		unresolvedBlocks: new Set<string>(),
 		failedDispatch: null,
@@ -1501,7 +1465,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 					effects: runStats.runEffects.snapshot(),
 					toolCalls: countToolStats(runStats.toolStats),
 					refused: toolTotals(runStats.toolStats).blocked,
-					writes: runStats.mutatingSucceeded,
+					writes: writtenPaths(runStats),
 					workspaceRoot: process.cwd(),
 					scratchRoots: options.scratchRoots ?? [],
 				})

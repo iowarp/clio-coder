@@ -1,5 +1,6 @@
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
+import { toolResultText } from "../tools/result-disposition.js";
 import type { RunningDispatchRef } from "./editor-steer.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 
@@ -65,13 +66,7 @@ function carriesSteer(event: unknown, text: string): boolean {
 	const { type, message } = event as { type?: unknown; message?: { role?: unknown; content?: unknown } };
 	if (type !== "message_end" || message?.role !== "user") return false;
 	const content = message.content;
-	const words =
-		typeof content === "string"
-			? content
-			: Array.isArray(content)
-				? content.map((block) => (typeof block?.text === "string" ? block.text : "")).join("\n")
-				: "";
-	return words.includes(text.trim());
+	return (typeof content === "string" ? content : toolResultText(content)).includes(text.trim());
 }
 
 /**
