@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
-import { runCli } from "../harness/headless-run.js";
+import { runCli, sealedReceipt } from "../harness/headless-run.js";
 import {
 	closeServer,
 	type OpenAICompatToolCallScript,
@@ -81,7 +81,7 @@ test("run --read-only answers in full after a shell write and leaves the workspa
 test("a headless run reports an ask it could not put to anyone as a permission request", {
 	timeout: 30_000,
 }, async (t) => {
-	const { code, end } = await terminalFrame(
+	const { code, end, dir } = await terminalFrame(
 		t,
 		{ name: "bash", arguments: { command: "curl -X POST http://127.0.0.1:9/never" } },
 		[],
@@ -91,8 +91,21 @@ test("a headless run reports an ask it could not put to anyone as a permission r
 	const safety = end.safety as {
 		decisions: { permissionRequested: number };
 		blockedAttempts: Array<Record<string, unknown>>;
+		permissionRequestedAttempts?: Array<Record<string, unknown>>;
 	};
+	// bt-15 c13a: the refused ask is listed where decisions counts it, never as a safety refusal.
 	strictEqual(safety.decisions.permissionRequested, 1);
-	strictEqual(safety.blockedAttempts[0]?.tool, "bash");
-	strictEqual(safety.blockedAttempts[0]?.permissionRequired, true);
+	deepStrictEqual(safety.blockedAttempts, []);
+	deepStrictEqual(
+		safety.permissionRequestedAttempts?.map(({ tool, permissionRequired }) => ({ tool, permissionRequired })),
+		[{ tool: "bash", permissionRequired: true }],
+	);
+	// The sealed record lists the same ask, and its tools row does not count it as a blocked call (bt-15 c14a).
+	const { receipt } = sealedReceipt(join(dir, "state"));
+	deepStrictEqual(receipt.settled.blockedAttempts, []);
+	deepStrictEqual(
+		receipt.settled.permissionRequestedAttempts?.map(({ tool }) => tool),
+		[safety.permissionRequestedAttempts?.[0]?.tool],
+	);
+	strictEqual(receipt.settled.tools.find((row) => row.tool === "bash")?.blocked, 0);
 });
