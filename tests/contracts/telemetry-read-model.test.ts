@@ -466,6 +466,35 @@ test("a session's lifetime tells a clean close, an open owner, an abnormal end a
 	);
 	const ended = whyStopped({ ...source, journal: { ...source.journal, records: [...imported.records, turnEnd] } }, now);
 	ok(ended.findings.includes("The last turn ended normally (stop)."), ended.findings.join("\n"));
+	// bt-26 N2a, N2b: a shutdown that cut off a streaming reply reads as a stop while streaming, never as a failure.
+	const [cutStarted, cutSettled] = telemetryCall(source.sessionId, { at: "2026-10-29T00:00:01.000Z" });
+	if (cutSettled?.k !== "call.settled" || !cutStarted) throw new Error("fixture call missing");
+	const cut: TelemetryRecord = {
+		...cutSettled,
+		data: { ...cutSettled.data, stop: { reason: "aborted", failure: "shutdown" } },
+	};
+	const shutdownEnd = makeTelemetryRecord(
+		"turn.settled",
+		{
+			stopReason: "aborted",
+			terminal: { cause: "shutdown", stage: "streaming", retries: 0, callIds: [cutSettled.data.callId] },
+		},
+		{ sessionId: source.sessionId, agent: { role: "main", id: source.sessionId } },
+		{ t: "2026-10-29T00:00:02.000Z", mono: 0 },
+	);
+	const stopped = whyStopped(
+		{ ...source, journal: { ...source.journal, records: [...imported.records, cutStarted, cut, shutdownEnd] } },
+		now,
+	);
+	ok(
+		stopped.findings.includes("The last turn stopped (aborted) on shutdown while streaming."),
+		stopped.findings.join("\n"),
+	);
+	ok(
+		stopped.findings.some((line) => line.startsWith("Stopped on shutdown: 1 attempt(s)")),
+		stopped.findings.join("\n"),
+	);
+	ok(!stopped.findings.some((line) => line.startsWith("Failed on shutdown")), stopped.findings.join("\n"));
 	// bt-20 P-B: a step pipeline stalled at the cap is decisive even though its last turn ended normally.
 	const stalled = makeTelemetryRecord(
 		"step_pipeline.settled",

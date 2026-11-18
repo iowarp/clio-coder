@@ -1088,6 +1088,11 @@ it("a reply cut off by shutdown is the harness's stop and names no route", { tim
 		ok(closing, JSON.stringify(f.entries()));
 		strictEqual(closing.failureRoute, undefined);
 		match(String(closing.errorMessage), /Clio Coder shut down/u);
+		// The persisted failure names the harness's cause, not a transport abort (bt-26 N2a).
+		deepStrictEqual(
+			[recordValue(closing.failure)?.stage, recordValue(closing.failure)?.errorClass],
+			["harness", "shutdown"],
+		);
 	} finally {
 		await f.close();
 	}

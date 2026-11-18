@@ -1,7 +1,8 @@
 /** Shared, content-free failure evidence for model-call accounting (#430). */
 export interface CallFailureRecord {
 	invoked: boolean;
-	stage: "auth" | "admission" | "transport" | "provider";
+	/** `harness` is a stop Clio made itself; its errorClass is the harness's failure cause, never a route's (bt-26 N2a). */
+	stage: "auth" | "admission" | "transport" | "provider" | "harness";
 	httpStatus: number | null;
 	errorClass: string;
 	retryAttempts?: number;
@@ -174,7 +175,8 @@ export function readCallFailure(value: unknown): CallFailureRecord | undefined {
 		(record.stage !== "auth" &&
 			record.stage !== "admission" &&
 			record.stage !== "transport" &&
-			record.stage !== "provider") ||
+			record.stage !== "provider" &&
+			record.stage !== "harness") ||
 		(record.httpStatus !== null &&
 			!(
 				typeof record.httpStatus === "number" &&

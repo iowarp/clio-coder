@@ -3612,6 +3612,15 @@ function stepPipelineIncomplete(end: NonNullable<WhyStoppedV1["stepPipeline"]>):
 	}
 }
 
+/** Causes where Clio or its operator stopped the call; why-stopped words them as stops, never failures (bt-26 N2b). */
+const HARNESS_STOP_CAUSES: ReadonlySet<string> = new Set([
+	"operator_cancel",
+	"parent_cancel",
+	"route_moved",
+	"repetition",
+	"shutdown",
+]);
+
 export function whyStopped(source: SessionSource, options: ReadOptions = {}): WhyStoppedV1 {
 	const view: View = { session: source };
 	const analysis = analyze(source);
@@ -3715,7 +3724,10 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 	const findings: string[] = [];
 	if (state === "no-turns") findings.push("No turn has settled in this session's journal.");
 	else if (terminal) {
-		const stage = terminal.terminal.stage ? ` at ${terminal.terminal.stage}` : "";
+		const reached = terminal.terminal.stage;
+		// A call that produced output was cut off mid-stream, not at a gate; older journals wrote that as firstToken.
+		const stage =
+			reached === "streaming" || reached === "firstToken" ? " while streaming" : reached ? ` at ${reached}` : "";
 		const retries =
 			terminal.terminal.retries > 0
 				? ` after ${renderCount(terminal.terminal.retries)} ${terminal.terminal.retries === 1 ? "retry" : "retries"}`
@@ -3767,7 +3779,9 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 	for (const row of waitRows)
 		findings.push(`Admission held on ${row.on}: ${row.calls.display} attempt(s), ${row.waited.display} waited.`);
 	for (const row of causeRows)
-		findings.push(`Failed on ${row.cause}: ${row.calls.display} attempt(s), the last at ${row.lastAt}.`);
+		findings.push(
+			`${HARNESS_STOP_CAUSES.has(row.cause) ? "Stopped" : "Failed"} on ${row.cause}: ${row.calls.display} attempt(s), the last at ${row.lastAt}.`,
+		);
 	findings.push(`Spend: ${spend.usd.display} over ${spend.tokens.display} tokens.`);
 	findings.push(`Re-prefilled tokens: ${cache.rePrefilled.display}; cache-break bill: ${cache.breakUsd.display}.`);
 	const rounds = roundTrips.rounds.fact;
