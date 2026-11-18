@@ -41,6 +41,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - Astra r8-5: the live budget's handoff and outcome fields share one continuity resolution and reuse the active-branch selection until the ledger or the leaf changes.
 - Astra r8-6: prompt-cache structure recording rehashes only the wire entries whose fields changed.
 - Astra r8-2: telemetry reuses the prepared prompt-structure and tool-schema bytes for an unchanged request surface and still verifies the stored object on disk.
+- Astra r8-1: `run --session <id>` resolves the id or prefix from session metadata instead of parsing every transcript in the workspace, so a named resume no longer slows as other conversations grow.
+- Astra r8-3: shipped YAML (prompt fragments, damage-control rules, the bundled model catalog, model profiles) is parsed at build time and digest-verified at load, which removes about 45 ms of parsing from each CLI start and about 40 ms from each native worker start. Overlays still parse at runtime.
 
 ### Fixed
 
