@@ -558,7 +558,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 					latencyMs,
 					refusal: safetyJudgeRefusal(subject.tool, parsed, after.escalated),
 					allowedBy:
-						"the operator must name this action in a message of their own, or approve it when the judge hands a call to them; take a route inside the workspace and scratch roots instead.",
+						"an operator message must name this action, so ask the operator for it in your reply; the judge hands a call to the operator itself only after repeated blocks.",
 				};
 			};
 			return consult();
