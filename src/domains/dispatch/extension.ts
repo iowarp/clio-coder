@@ -181,6 +181,7 @@ import {
 	type AgentAudience,
 	type AgentCapabilityClass,
 	type AgentProjectContextTier,
+	type AgentSpec,
 	agentSpecFingerprint,
 	assertAgentSpecPolicy,
 	isUserVisibleAgent,
@@ -2771,6 +2772,13 @@ function assertWriteRootsEnforceable(runtime: RuntimeDescriptor, writeRoots: Rea
 	throw new Error(
 		`dispatch: runtime '${runtime.id}' cannot enforce writeRoots: subprocess workers run their own tool surface without Clio per-tool mediation. Dispatch to a native or claude-sdk worker.`,
 	);
+}
+
+/** An external CLI runs its own tool surface, so a per-tool deny list cannot reach it. */
+function assertDenyToolsEnforceable(runtime: RuntimeDescriptor, denyTools: ReadonlyArray<string> | undefined): void {
+	if (runtime.kind === "subprocess" && denyTools !== undefined && denyTools.length > 0) {
+		throw new Error("dispatch: denyTools cannot be enforced on an external CLI target; use a native worker");
+	}
 }
 
 /**
@@ -5984,16 +5992,15 @@ export function createDispatchBundle(
 		}
 	}
 
-	async function resolveLifecycle(
+	/**
+	 * Refuses a recipe the request may not run, before any route is resolved, and answers the capability mismatch it
+	 * only flags. Dispatch and preview share it, so a plan never shows a run admission refuses.
+	 */
+	function assertRecipeAdmissible(
 		req: DispatchRequest,
+		recipe: AgentRecipe,
 		settings: EffectiveSettings,
-		metadataDeadlineAt: number,
-		signal?: AbortSignal,
-	): Promise<DispatchLifecycleStage> {
-		const recipe = agents.get(req.agentId);
-		if (!recipe) {
-			throw new Error(`dispatch: unknown agent recipe: ${req.agentId}`);
-		}
+	): { spec: AgentSpec; capabilityMismatch: CapabilityMismatch | null } {
 		// Resolve the applied contract once here so a caller's summary allowance
 		// on a recipe that carries no summary fails before any model boots.
 		dispatchResultContract(req, recipe);
@@ -6029,6 +6036,20 @@ export function createDispatchBundle(
 						intent: req.intent ?? null,
 					});
 		if (capabilityMismatch?.verdict === "refuse") throw new Error(capabilityMismatch.detail);
+		return { spec, capabilityMismatch };
+	}
+
+	async function resolveLifecycle(
+		req: DispatchRequest,
+		settings: EffectiveSettings,
+		metadataDeadlineAt: number,
+		signal?: AbortSignal,
+	): Promise<DispatchLifecycleStage> {
+		const recipe = agents.get(req.agentId);
+		if (!recipe) {
+			throw new Error(`dispatch: unknown agent recipe: ${req.agentId}`);
+		}
+		const { spec, capabilityMismatch } = assertRecipeAdmissible(req, recipe, settings);
 		const pathScope = withStoreGrantBoundaries(req, resolveDispatchPathScope(req));
 		publishDispatchPathScope(req, pathScope);
 		const admission = resolveDispatchAdmissionStage(req, recipe, safety, pathScope);
@@ -6097,9 +6118,7 @@ export function createDispatchBundle(
 			spec.capabilityClass === "read-only" ||
 			isHoareResultContract(dispatchResultContract(req, recipe));
 		await assertStoreGrantAdmissible(req, readOnly);
-		if (target.runtime.kind === "subprocess" && req.denyTools && req.denyTools.length > 0) {
-			throw new Error("dispatch: denyTools cannot be enforced on an external CLI target; use a native worker");
-		}
+		assertDenyToolsEnforceable(target.runtime, req.denyTools);
 		const writeConfined = pathScope.writeBoundaries.length > 0 && !osSandboxConfinesWrites(target.runtime.kind, settings);
 		const effectiveTools = withLedgerToolNarrowing(
 			effectiveToolNames(
@@ -7629,29 +7648,7 @@ export function createDispatchBundle(
 			return handle;
 		};
 		if (req.delegationAgentId) {
-			assertPlannedNodeIdentity(req, { id: "local", kind: "local" });
-			assertTurnConstraintCompatibility(req, [], false);
-			assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
-			const flowPolicy = options?.getFlowPolicy?.();
-			if (flowPolicy !== undefined) {
-				const refusal = flowUnmediatedAgentRefusal(compileWorkerFlowPolicy(flowPolicy), null);
-				if (refusal !== null) throw new Error(refusal);
-			}
-			assertFlowHandoffMediated("acp-delegation", options?.getFlowRestrictions?.() ?? null);
-			assertAcpDelegationUnhooked(req.delegationAgentId);
-			if (req.responseSchema !== undefined) {
-				throw new UnsupportedResponseSchemaError(
-					"dispatch: responseSchema requires the native llamacpp runtime and cannot be enforced by an ACP delegation target",
-				);
-			}
-			// An external ACP agent runs its own tool loop, so Clio cannot mediate
-			// per-tool writes and cannot honor write-root confinement. Fail closed
-			// rather than accept a guarantee we cannot keep.
-			if (req.writeRoots !== undefined && req.writeRoots.length > 0) {
-				throw new Error(
-					"dispatch: writeRoots cannot be enforced on an ACP delegation target; the external agent runs its own tool surface. Dispatch to a native or claude-sdk worker.",
-				);
-			}
+			assertAcpDelegationAdmissible(req, req.delegationAgentId, protectedArtifactState);
 			await rebindReservationSlot(req, "local", null, UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD, settings);
 			routeObservation = observeShadowRoute(req, undefined, settings);
 			const delegated = await dispatchAcpDelegation(
@@ -10484,6 +10481,40 @@ export function createDispatchBundle(
 	// An external ACP agent runs its own tools where no extension tool hook
 	// reaches, so any blocking hook refuses it whatever tools the hook names.
 	// Preview shares it so a plan never shows a delegation dispatch refuses.
+	/**
+	 * Refuses an ACP delegation whose guarantees the external agent cannot keep. Dispatch admission and preview share
+	 * it, so a plan never shows a delegation dispatch refuses.
+	 */
+	function assertAcpDelegationAdmissible(
+		req: DispatchRequest,
+		agentId: string,
+		protectedArtifactState: ProtectedArtifactState,
+	): void {
+		assertPlannedNodeIdentity(req, { id: "local", kind: "local" });
+		assertTurnConstraintCompatibility(req, [], false);
+		assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
+		const flowPolicy = options?.getFlowPolicy?.();
+		if (flowPolicy !== undefined) {
+			const refusal = flowUnmediatedAgentRefusal(compileWorkerFlowPolicy(flowPolicy), null);
+			if (refusal !== null) throw new Error(refusal);
+		}
+		assertFlowHandoffMediated("acp-delegation", options?.getFlowRestrictions?.() ?? null);
+		assertAcpDelegationUnhooked(agentId);
+		if (req.responseSchema !== undefined) {
+			throw new UnsupportedResponseSchemaError(
+				"dispatch: responseSchema requires the native llamacpp runtime and cannot be enforced by an ACP delegation target",
+			);
+		}
+		// An external ACP agent runs its own tool loop, so Clio cannot mediate
+		// per-tool writes and cannot honor write-root confinement. Fail closed
+		// rather than accept a guarantee we cannot keep.
+		if (req.writeRoots !== undefined && req.writeRoots.length > 0) {
+			throw new Error(
+				"dispatch: writeRoots cannot be enforced on an ACP delegation target; the external agent runs its own tool surface. Dispatch to a native or claude-sdk worker.",
+			);
+		}
+	}
+
 	function assertAcpDelegationUnhooked(agentId: string): void {
 		const gates = [...(options?.workerHooks?.declarations() ?? []), ...(options?.workerHooks?.dropped?.() ?? [])].filter(
 			isBlockingHook,
@@ -10551,26 +10582,11 @@ export function createDispatchBundle(
 		req = validation.restore(validated.spec);
 
 		if (req.delegationAgentId) {
-			const protectedArtifactState = getProtectedArtifactState();
-			assertTurnConstraintCompatibility(req, [], false);
-			assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
-			const flowPolicy = options?.getFlowPolicy?.();
-			if (flowPolicy !== undefined) {
-				const refusal = flowUnmediatedAgentRefusal(compileWorkerFlowPolicy(flowPolicy), null);
-				if (refusal !== null) throw new Error(refusal);
-			}
-			assertFlowHandoffMediated("acp-delegation", options?.getFlowRestrictions?.() ?? null);
-			assertAcpDelegationUnhooked(req.delegationAgentId);
-			if (req.responseSchema !== undefined) {
-				throw new UnsupportedResponseSchemaError(
-					"dispatch: responseSchema requires the native llamacpp runtime and cannot be enforced by an ACP delegation target",
-				);
-			}
-			if (req.writeRoots !== undefined && req.writeRoots.length > 0) {
-				throw new Error(
-					"dispatch: writeRoots cannot be enforced on an ACP delegation target; the external agent runs its own tool surface. Dispatch to a native or claude-sdk worker.",
-				);
-			}
+			assertAcpDelegationAdmissible(
+				req,
+				req.delegationAgentId,
+				protectedArtifactStateForRequest(getProtectedArtifactState(), req),
+			);
 			const lifecycle = resolveAcpDelegationLifecycle(req, settings);
 			const delegationRecipe = agents.get(req.agentId);
 			const resolution: DispatchPlanTaskResolution = {
@@ -10596,13 +10612,7 @@ export function createDispatchBundle(
 
 		const recipe = agents.get(req.agentId);
 		if (!recipe) throw new Error(`dispatch: unknown agent recipe: ${req.agentId}`);
-		const agentSpec = normalizeAgentSpec(recipe);
-		if (req.requestOrigin === "user" && !isUserVisibleAgent(agentSpec)) {
-			throw new Error(userOriginAudienceRefusal(agentSpec, admissibleShadowStandIn(req, settings)));
-		}
-		if (hasCallerPersonaOverride(req) && (agentSpec.audience === "shadow" || agentSpec.audience === "internal")) {
-			throw new Error(`dispatch: persona overrides are not allowed for ${agentSpec.audience} agent '${req.agentId}'`);
-		}
+		const { spec: agentSpec } = assertRecipeAdmissible(req, recipe, settings);
 		const pathScope = withStoreGrantBoundaries(req, resolveDispatchPathScope(req));
 		const admission = resolveDispatchAdmissionStage(req, recipe, safety, pathScope);
 		const targets = readWorkerTargets(settings);
@@ -10619,6 +10629,7 @@ export function createDispatchBundle(
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
 		const mcpRuntimeRefusal = workerMcpRuntimeRefusal(req.agentId, admission.allowedTools, target.runtime);
 		if (mcpRuntimeRefusal !== null) throw new Error(mcpRuntimeRefusal);
+		assertDenyToolsEnforceable(target.runtime, req.denyTools);
 		const writeConfined = pathScope.writeBoundaries.length > 0 && !osSandboxConfinesWrites(target.runtime.kind, settings);
 		const effectiveTools = withLedgerToolNarrowing(
 			effectiveToolNames(
