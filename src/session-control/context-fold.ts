@@ -50,6 +50,10 @@ export interface ContextFoldPort {
 	/** Tool results the next request carries as aging stubs; null when nothing is stubbed. */
 	agedHistory(agentRuntime: AgentRuntime, observed: MessageListDigests): { saved: ReadonlyArray<{ id: string }> } | null;
 	liveContextEstimate(agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate;
+	/** The overflow path's one count (A4): the live estimate or Pi's chars/3.5 count, whichever is larger. */
+	overflowFitTokens(agentRuntime: AgentRuntime, pendingUserText?: string): number;
+	/** An overflow fold fit: the next main request pins the same count. */
+	armOverflowInputPin(): void;
 	reconciledHistoryTokens(agentRuntime: AgentRuntime): number | null;
 	carryReconciledAnchorThroughProjection(
 		agentRuntime: AgentRuntime,
@@ -275,6 +279,11 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 				}),
 			};
 		}
+		// An overflow fold must leave Pi's clamp the output floor too, so it plans and fits on the A4 count (cf-q15).
+		const fitTokens = (): number =>
+			requiredFit
+				? port.overflowFitTokens(agentRuntime, pendingUserText)
+				: port.liveContextEstimate(agentRuntime, pendingUserText).tokens;
 		let planned: ReturnType<typeof planEviction>;
 		let visibleEntries: ReadonlyArray<SessionEntry> = [];
 		let policyId = settings.context.workingSet.policy;
@@ -287,6 +296,11 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			// Results the next request carries as aging stubs: the pressure figure and the anchor hold only
 			// the stub, so crediting their ledger bodies would end the plan short of the target (D1-1).
 			const aged = new Set(port.agedHistory(agentRuntime, port.observeHistory(agentRuntime))?.saved.map(({ id }) => id));
+			const tokens = fitTokens();
+			const fitCeiling = Math.max(
+				0,
+				1 - resolveTurnOutputReserve(agentRuntime, Math.max(tokens, estimate.tokens)) / estimate.contextWindow,
+			);
 			const prices = createFoldPriceBook(
 				visibleEntries,
 				createReplayMessageConverter(entries, {
@@ -299,20 +313,10 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 				cwd: session.current()?.cwd ?? null,
 				settings: settings.context.workingSet,
 				pressure: {
-					tokens: port.liveContextEstimate(agentRuntime, pendingUserText).tokens,
+					tokens,
 					contextWindow: compactionWindow,
-					threshold: requiredFit
-						? Math.min(
-								compactionThreshold,
-								Math.max(0, 1 - resolveTurnOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow),
-							)
-						: compactionThreshold,
-					target: requiredFit
-						? Math.min(
-								workingSetTarget,
-								Math.max(0, 1 - resolveTurnOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow),
-							)
-						: workingSetTarget,
+					threshold: requiredFit ? Math.min(compactionThreshold, fitCeiling) : compactionThreshold,
+					target: requiredFit ? Math.min(workingSetTarget, fitCeiling) : workingSetTarget,
 					...(requiredFit ? { forced: true } : {}),
 				},
 				estimateTokens: prices.tokens,
@@ -414,9 +418,12 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			const after = port.liveContextEstimate(agentRuntime, pendingUserText);
 			decision.measure(after.tokens);
 			port.recordCompactionTokens({ before: estimate.tokens, after: after.tokens, basis: "runtime-estimate" });
-			const fit = requiredFit
-				? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
-				: !input.shouldCompact(after.tokens).shouldCompact;
+			let fit: boolean;
+			if (requiredFit) {
+				const fitAfter = fitTokens();
+				fit = requestFits(fitAfter, resolveTurnOutputReserve(agentRuntime, fitAfter), after.contextWindow);
+				if (fit) port.armOverflowInputPin();
+			} else fit = !input.shouldCompact(after.tokens).shouldCompact;
 			return { acted: true, fit, skipNotice: null };
 		} catch (error) {
 			if (!committed) decision.stage({ stage: "working_set", outcome: "failed", reason: "error" });

@@ -1,10 +1,11 @@
-import type { AssistantMessage, Context, Usage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context, Message, Usage } from "@earendil-works/pi-ai";
 import {
 	createAssistantMessageEventStream,
 	createInitialSystemMessage,
 	getSystemMessageText,
 	toToolDeclaration,
 } from "@earendil-works/pi-ai";
+import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { createHostPolicyMessage, isHostPolicyMessage } from "../core/host-policy-message.js";
 import { ProviderCompactionError, providerCheckpointFromMessage } from "../core/provider-checkpoint-handle.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
@@ -486,6 +487,23 @@ export function engineInitialSystemPrompt(agent: Agent): string {
 			? ""
 			: getSystemMessageText(initial)
 		: agent.state.systemPrompt;
+}
+
+const PI_REQUEST_ROLES: ReadonlySet<string> = new Set(["system", "user", "assistant", "toolResult"]);
+
+/**
+ * Pi's own count of the request these messages make when no usage anchors it:
+ * the initial system message with its tool declarations, then every message the
+ * provider receives, at Pi's chars/3.5. The overflow fit takes the larger of
+ * this and Clio's chars/4 count (A4), so a fold that fits leaves Pi's clamp the
+ * output floor too.
+ */
+export function estimateEngineRequestTokens(agent: Agent, messages: ReadonlyArray<AgentMessage>): number {
+	const initial = createInitialSystemMessage(engineInitialSystemPrompt(agent), agent.state.tools.map(toToolDeclaration));
+	let tokens = initial ? estimateMessageTokens(initial) : 0;
+	for (const message of messages)
+		if (PI_REQUEST_ROLES.has(message.role)) tokens += estimateMessageTokens(message as Message);
+	return tokens;
 }
 
 export function replaceEngineMessages(
