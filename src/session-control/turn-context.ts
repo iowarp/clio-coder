@@ -196,7 +196,7 @@ import { coldCacheNoticeText } from "./cold-reasons.js";
 import { footerTokens, renderCompactionSummaryLine } from "./compaction-lines.js";
 import type { HostInserts } from "./host-inserts.js";
 import { buildModelReplayAgentMessagesFromTurns, continuityContextFromSession } from "./model-session-replay.js";
-import { resolveTurnOutputReserve } from "./output-reserve.js";
+import { resolveFitOutputReserve, resolveTurnOutputReserve } from "./output-reserve.js";
 import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
 import { extractTurnText } from "./session-replay-messages.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
@@ -1384,7 +1384,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			historical: false,
 			breakdown: { ...estimate.breakdown },
 			breakdownSource: "live",
-			outputReserveTokens: resolveTurnOutputReserve(agentRuntime, estimate.tokens),
+			outputReserveTokens: resolveFitOutputReserve(agentRuntime, estimate.tokens),
 		};
 	};
 
@@ -2166,7 +2166,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			budget = { ...budget, pendingOperatorTurn: true };
 		if (useRequestBudget) {
 			const estimate = liveContextEstimate(agentRuntime, pendingUserText);
-			const output = resolveTurnOutputReserve(agentRuntime, estimate.tokens);
+			const output = resolveFitOutputReserve(agentRuntime, estimate.tokens);
 			const inputTarget = knownWindow
 				? Math.min(compactionWindow * compactionThreshold, estimate.contextWindow - output)
 				: economic.ceilingTokens;

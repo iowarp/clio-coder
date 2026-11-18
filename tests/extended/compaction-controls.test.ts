@@ -1599,6 +1599,85 @@ describe("production compaction controls", () => {
 		}
 	});
 
+	it("fits a 28K uncapped route against the admissible reserve, so the guard's pass stays automatic and the turn goes on (bt3 m2a-1, m2a-2, m2a-3, ContextFold A5)", async () => {
+		// An uncapped route reserves half the window, 14,000, for the turn and the trigger. Fit counted it too, so the
+		// guard took every pass as overflow. Twelve reads (~18K) put four outside protectLastSteps; eight (~16K, m2a-2)
+		// leave nothing to evict or summarize, and the old guard stopped the turn at input + 14,000 > 28,000.
+		for (const reads of [12, 8]) {
+			const f = fixture(false, false);
+			let leaf = appendEntry(f.state, {
+				kind: "message",
+				role: "user",
+				parentTurnId: null,
+				payload: { text: "active: read the modules" },
+			}).turnId;
+			const active = leaf;
+			for (let i = 0; i < reads; i++) {
+				const read = { path: `src/m${i}.ts` };
+				const id = `call-${i}`;
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "assistant",
+					parentTurnId: leaf,
+					payload: { text: "", content: [{ type: "toolCall", id, name: "read", arguments: read }] },
+				}).turnId;
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "tool_call",
+					parentTurnId: leaf,
+					payload: { toolCallId: id, name: "read", args: read },
+				}).turnId;
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "tool_result",
+					parentTurnId: leaf,
+					payload: {
+						toolCallId: id,
+						toolName: "read",
+						isError: false,
+						result: { content: [{ type: "text", text: `${i} ${"y".repeat(reads === 12 ? 6000 : 7600)}` }] },
+					},
+				}).turnId;
+			}
+			f.pinLeaf(leaf);
+			const pressures: Array<{ threshold: number; forced?: boolean }> = [];
+			const notices: string[] = [];
+			const { state, runtime, context, bus } = automaticContext(f, f.run, {
+				emitNotice: (text) => notices.push(text),
+				planEviction: (policy, input) => {
+					pressures.push({ threshold: input.pressure.threshold, ...(input.pressure.forced ? { forced: true } : {}) });
+					return planEviction(policy, input);
+				},
+			});
+			state.activeUserTurnId = active;
+			f.settings.context.compaction.threshold = 0.8;
+			runtime.runtimeResolution.contextWindowDetails.effectiveContextWindow = 28_000;
+			Object.assign(runtime.runtimeResolution.capabilityDecisions, { maxTokens: 64_000 });
+			runtime.agent.state.model = { ...runtime.agent.state.model, contextWindow: 28_000, maxTokens: 64_000 };
+			const folds: ContextFoldPayload[] = [];
+			bus.subscribe("context.fold", (event) => {
+				folds.push(event);
+			});
+			const before = context.refreshLiveBudget();
+			strictEqual(before.outputReserveTokens, 8_192, `${reads}: fit counts 4,096 + Pi's 4,096 margin`);
+			const input = before.inputTokens ?? 0;
+			ok(input > 14_000 && input + 14_000 > 28_000 && input + 8_192 <= 28_000, `${reads}: ${input}`);
+			await context.postToolContinuationGuard(runtime);
+			const stages = folds.flatMap((fold) => fold.stages.map(({ stage, outcome }) => [stage, outcome]));
+			strictEqual(f.calls.length, 0, `${reads}: no paid summary`);
+			ok(!pressures.some((pressure) => pressure.forced), `${reads}: automatic, not overflow`);
+			if (reads === 12) {
+				deepStrictEqual(pressures, [{ threshold: 0.5 }], "S1 takes the trigger's fraction");
+				deepStrictEqual(stages, [["working_set", "committed"]], "S1 evicts, no summary");
+			} else {
+				deepStrictEqual(stages.at(-1), ["llm_summary", "none"], "the summary is skipped");
+				ok(!notices.some((text) => text.includes("llm_summary")), "a skipped pass names no summary (m2a-3)");
+			}
+			const after = context.refreshLiveBudget();
+			ok((after.inputTokens ?? Infinity) + (after.outputReserveTokens ?? 0) <= 28_000, `${reads}: admitted`);
+		}
+	});
+
 	it("routes a configured dedicated summary model through the production callback", async () => {
 		const f = fixture(false, true, true);
 		f.settings.context.compaction.model = "summary-target/summary";
@@ -2455,9 +2534,14 @@ describe("compaction trigger output reservation", () => {
 		strictEqual(effectiveCompactionThreshold(0.9, 0, 26_214), 0.9);
 	});
 
-	it("bounds a reasoning route's summary reserve at half a known window, and S1 follows the trigger under 52,428 (bt-47 cf1j-b, D6, ContextFold A1, A3)", async () => {
+	it("bounds a reasoning route's summary reserve at half a known window, S1 follows the trigger and fit sits above it under 52,428 (bt-47 cf1j-b, D6, bt3 m2a, ContextFold A1, A3, A5)", async () => {
 		const { effectiveCompactionThreshold } = await import("../../src/domains/session/compaction/auto.js");
-		const { evictionPressure, foldTriggerReserve } = await import("../../src/domains/context/fold/pressure.js");
+		const { evictionPressure, fitOutputReserve, foldTriggerReserve } = await import(
+			"../../src/domains/context/fold/pressure.js"
+		);
+		const { ADMISSIBLE_OUTPUT_RESERVE, requestOutputReserve, setGlobalDefaultMaxOutputTokens } = await import(
+			"../../src/engine/apis/output-budget.js"
+		);
 		const { summaryOutputReserve } = await import("../../src/domains/session/compaction/summary-output.js");
 		// A reasoning chat route with no observed summary share reserves ceil(0.8 x 16,384 / 0.5) = 26,214; the turn
 		// reserve sits below it. Old trigger: min(0.8, 1 - 26,214 / window) x window. S1 kept the raw 0.8 gate and 0.6
@@ -2493,6 +2577,40 @@ describe("compaction trigger output reservation", () => {
 			if (window >= 52_428 || route === small)
 				deepStrictEqual(auto, { threshold: 0.8, target: 0.6 }, `${window}: S1 inputs as today`);
 			deepStrictEqual(s1(false), { threshold: 0.8, target: 0.6 }, `${window}: a forced pass keeps S1's inputs`);
+		}
+		// The fit line on an uncapped route, whose turn reserve is min(32,768, W / 2) (bt3 m2a, ContextFold A5). Under
+		// 52,428 fit counts 4,096 + Pi's 4,096 margin, so it sits above the trigger; from there both are as today.
+		const uncapped = { ...model, id: "a5-uncapped", api: "anthropic-messages", maxTokens: 64_000 };
+		const fitTable: Array<[window: number, trigger: number, fitLine: number, configured?: number]> = [
+			[28_000, 14_000, 28_000 - 8_192], // the fit line was 14,000
+			[32_768, 16_384, 32_768 - 8_192], // was 16,384
+			[40_000, 20_000, 40_000 - 8_192], // was 20,000
+			[28_000, 8_000, 8_000, 20_000], // a configured chat.maxOutputTokens stays a hard reserve, trigger and fit
+			[64_000, 32_000, 32_000],
+			[128_000, 128_000 - 32_768, 128_000 - 32_768],
+			[200_000, 0.8 * 200_000, 200_000 - 32_768],
+		];
+		for (const [window, expected, fitLine, configured] of fitTable) {
+			setGlobalDefaultMaxOutputTokens(configured ?? 0);
+			const turnReserve = requestOutputReserve(uncapped, uncapped.maxTokens, window, 0);
+			setGlobalDefaultMaxOutputTokens(0);
+			strictEqual(turnReserve, configured ?? Math.min(32_768, window / 2), `${window}: turn reserve`);
+			const reserve = foldTriggerReserve({
+				window,
+				summaryReserve: () => summaryOutputReserve(uncapped, { summaryOnChatRoute: true }),
+				turnReserve: () => turnReserve,
+			});
+			const trigger = effectiveCompactionThreshold(0.8, window, reserve) * window;
+			ok(Math.abs(trigger - expected) < 1e-6, `${window}: ${trigger}`);
+			const fit = fitOutputReserve({
+				window,
+				turnReserve,
+				admissibleReserve: ADMISSIBLE_OUTPUT_RESERVE,
+				hardReserve: configured !== undefined,
+			});
+			strictEqual(window - fit, fitLine, `${window}: fit line`);
+			if (window < 52_428 && configured === undefined) ok(window - fit > trigger, `${window}: fit above the trigger`);
+			else strictEqual(fit, turnReserve, `${window}: fit counts the turn reserve, as today`);
 		}
 		deepStrictEqual(
 			evictionPressure({ automatic: true, window: 0, threshold: 0.8, target: 0.6, triggerFraction: () => 0.5 }),

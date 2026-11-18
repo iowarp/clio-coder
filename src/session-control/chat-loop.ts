@@ -201,7 +201,7 @@ import {
 	type OperatorMemoryCommands,
 	type OperatorMemoryStorePort,
 } from "./operator-memory.js";
-import { resolveTurnOutputReserve, turnAdmissionRemedy } from "./output-reserve.js";
+import { resolveFitOutputReserve, turnAdmissionRemedy } from "./output-reserve.js";
 import { REPETITION_REPROMPT_NOTICE_KEY, repetitionRepromptMessages } from "./repetition-detector.js";
 import type { SubmitEvidence } from "./run-evidence.js";
 import { retireActiveUserContextForNextOperator } from "./session-replay-messages.js";
@@ -1898,7 +1898,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return { kind: "images" };
 		const inputTokens = context.refreshLiveBudget().inputTokens ?? 0;
 		const window = resolution.contextWindowDetails.effectiveContextWindow;
-		const outputTokens = resolveTurnOutputReserve(
+		const outputTokens = resolveFitOutputReserve(
 			{ runtimeResolution: resolution, agent: { state: { model: candidate.model } } },
 			inputTokens,
 		);
