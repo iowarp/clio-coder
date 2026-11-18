@@ -209,6 +209,8 @@ export function createStepStartTracker(store?: StepChainStore): StepStartTracker
 		},
 		settle(constraints, finalText, clean, position, turnId) {
 			const policy = constraints?.turnPolicy;
+			// A new session is created at its first submit, after this turn began: the chain belongs to it.
+			if (chain !== null && chain.sessionId === null && standing === null) chain.sessionId = position.sessionId;
 			standing = position.sessionId;
 			if (
 				chain === null ||
