@@ -12,6 +12,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Added
 
+- D3-6: judged checks (numeric-compare, reproduce) record declared input hashes (an input that changes while the check runs fails it), provenance probe output and the untracked file count in their reports.
+- D3-7: numeric-compare and reproduce accept an opt-in `repeat` (at most 5) under a seed and report failed runs and per-key spread; a single run says "n=1, determinism not checked".
 - Extension tools (api 2) can return `pipelineDone: true` to end a yolo step-template pipeline.
 - D3-3: a run's sealed result keeps each judged host check's bounded report (rule, tolerance, reference and payload digests, worst deviation per key) and the tree it judged.
 - A1: an api 2 extension tool may declare `readOnly: true` and `idempotent: true` in `clio-coder-extension.yaml`. Only a tool declared one or the other counts toward the loop guard's identical-call repeats; a `read` tool is read-only by default, and a `write` tool cannot claim it.
@@ -81,6 +83,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- D3-1: a reproduce reference is sealed at admission, so a run that rewrites its reference fails. D3-5: a reproduce tolerance key that no run reports fails instead of passing unchecked.
 - bt-10: a session resumed with `run --session`, ACP `session/load` or `/resume` compiles the same system prompt as its last turn, so the provider prompt cache survives. Path-scoped project rules ride the turn reminder, the frozen memory section is restored from the ledger, and a new `system_prompt_changed` cold reason names any remaining drift. The copilot-sdk route is not covered yet.
 - bt-13: `--max-context-tokens` below about 41K no longer refuses every request. With no configured output budget the reserved output is at most half the window, auto-compaction counts the same reserve as the admission check, and a refusal names `chat.maxOutputTokens` or `--max-context-tokens` when one of them is the cause.
 - bt-11: the welcome banner's default autonomy row reads `Default · auto in workspace` instead of `reviewed approvals`, matching what default runs without a prompt; `/fleet` shows a coder's sealed mutation report as changed paths, checks and commit message instead of raw JSON.
