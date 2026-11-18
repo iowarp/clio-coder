@@ -507,6 +507,7 @@ export const EVENTS = {
 		project: ({ warning }: ContextWarningPayload) => ({ state: warning === null ? "cleared" : "raised" }),
 	}),
 	"context.pruned": journal(S.ContextPrunedSchema, { tier: "operational", cc: "structural", scope: "session" }),
+	"context.fold": journal(S.ContextFoldSchema, { tier: "operational", cc: "structural", scope: "session" }),
 	"context.recalled": journal(S.ContextRecalledSchema, { tier: "operational", cc: "structural", scope: "session" }),
 	"memory.step_completed": journal(S.MemoryStepCompletedSchema, { tier: "operational", cc: "structural" }),
 	"memory.step_decided": journal(S.MemoryStepDecidedSchema, { tier: "accountability", cc: "structural" }),
