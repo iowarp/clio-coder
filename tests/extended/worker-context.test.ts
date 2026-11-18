@@ -1,5 +1,8 @@
 import { deepStrictEqual, equal, match, notEqual, ok, throws } from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { ContextFoldPayload } from "../../src/core/telemetry/live-events.js";
 import { parseWorkerContextPolicy } from "../../src/domains/context/worker/contract.js";
@@ -10,14 +13,18 @@ import { captureWorkerContext, completeHistoryLength, contextHash } from "../../
 import { persistWorkerContextSeed } from "../../src/domains/context/worker/store.js";
 import { renderMarker } from "../../src/domains/context/working-set/marker.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
+import { LOCAL_CONTEXT_OVERFLOW_PREFIX } from "../../src/engine/apis/output-budget.js";
 import type { AgentMessage } from "../../src/engine/types.js";
+import { startWorkerRun, type WorkerRunHandle } from "../../src/engine/worker-runtime.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { createDispatchAdmissionController } from "../../src/tools/dispatch-admission.js";
 import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT } from "../../src/tools/dispatch-plan.js";
 import { parseWorkerContextSeed, seededWorkerMessages, seedRecallLineage } from "../../src/worker/context-seed.js";
+import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 import { settledRunTrust } from "../harness/settled-run.js";
@@ -464,6 +471,94 @@ test("only unseen reads can make room: the largest leaves first as unseen_overfl
 			["5", "unseen_overflow"],
 		],
 	);
+});
+
+test("drv-cf1h: a request the guard fitted after an eviction reaches the provider without an admission refusal (A2c)", {
+	timeout: 20_000,
+}, async () => {
+	const env = await isolateClioEnv("clio-coder-worker-guard-admission-");
+	const requests: Array<Record<string, unknown>> = [];
+	// The third answer reports the provider's own count, well above Clio's: that usage anchors the next request.
+	const script = [
+		{ read: "a.txt", promptTokens: 1000 },
+		{ read: "b.txt", promptTokens: 6000 },
+		{ read: "c.txt", promptTokens: 21_000 },
+	];
+	const server = createServer(async (req, res) => {
+		const body = JSON.parse(await readRequestBody(req)) as { messages?: Array<{ role?: string }> };
+		requests.push(body);
+		const step = script[(body.messages ?? []).filter((message) => message.role === "tool").length];
+		const frame = (data: unknown) => `data: ${JSON.stringify({ model: "dynamo/qwen3.8-27b", ...(data as object) })}\n\n`;
+		const usage = { prompt_tokens: step?.promptTokens ?? 21_000, completion_tokens: 20 };
+		res.setHeader("content-type", "text/event-stream");
+		res.end(
+			(step
+				? frame({
+						choices: [
+							{
+								index: 0,
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: `call-${step.read}`,
+											type: "function",
+											function: { name: "read", arguments: JSON.stringify({ path: step.read }) },
+										},
+									],
+								},
+								finish_reason: "tool_calls",
+							},
+						],
+						usage,
+					})
+				: frame({ choices: [{ index: 0, delta: { content: "Complete." }, finish_reason: "stop" }], usage })) +
+				"data: [DONE]\n\n",
+		);
+	});
+	let worker: WorkerRunHandle | undefined;
+	const previousCwd = process.cwd();
+	try {
+		// Worker tools resolve paths against the process, as a spawned worker's would against its cwd.
+		process.chdir(env.dir);
+		for (const name of ["a.txt", "b.txt", "c.txt"])
+			writeFileSync(join(env.dir, name), `${name} ${"pump output line of forty characters.\n".repeat(400)}`);
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const events: unknown[] = [];
+		worker = startWorkerRun(
+			{
+				agentId: "guard-admission-fixture",
+				systemPrompt: "Read the files, then reply Complete.",
+				task: "Read a.txt, b.txt and c.txt.",
+				target: { id: "fixture", runtime: "litellm", url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` },
+				runtime: litellm,
+				wireModelId: "dynamo/qwen3.8-27b",
+				apiKey: "fixture",
+				modelCapabilities: { contextWindow: 32_768, maxTokens: 32_768, tools: true },
+				allowedTools: ["read"],
+				budget: { mode: "advisory", toolCalls: 40, readReserve: 0, synthesis: true, hardCap: 60 },
+				product: "orientation",
+				noSkills: true,
+				cwd: env.dir,
+			},
+			(event) => void events.push(event),
+		);
+		const outcome = await worker.promise;
+		const text = JSON.stringify(events);
+		ok(!text.includes(LOCAL_CONTEXT_OVERFLOW_PREFIX), "no admission refusal after the guard's eviction");
+		equal(outcome.exitCode, 0);
+		equal(requests.length, 4);
+		const last = JSON.stringify(requests[3]);
+		match(last, /\[evicted ref=r1 reason=age_horizon tool=read path=a\.txt /);
+		ok(last.includes("c.txt pump output"), "the fresh read reached the provider");
+		ok(Number(requests[3]?.max_tokens) >= 4096, `max_tokens ${requests[3]?.max_tokens}`);
+	} finally {
+		worker?.abort();
+		await worker?.promise;
+		await closeServer(server);
+		process.chdir(previousCwd);
+		env.restore();
+	}
 });
 
 test("capture follows the active branch and preserves existing eviction projection", () => {

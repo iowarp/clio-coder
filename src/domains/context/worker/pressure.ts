@@ -21,6 +21,12 @@ export interface WorkerPressureInput {
 	 * same reserve the main loop admits a turn against (D1-5).
 	 */
 	outputReserve: (inputTokens: number) => number;
+	/**
+	 * Tokens the request carries at send time beyond these messages, such as the
+	 * result-contract reminders. They ride fixed positions, so projection never
+	 * changes them, but the fit check must price the request that is sent.
+	 */
+	overheadTokens?: number;
 	/** The economic trigger as a share of the window. */
 	threshold?: number;
 	/** `context.workingSet.target`: where a batch over the trigger stops. */
@@ -91,6 +97,12 @@ export interface WorkerContextGuard {
 	 */
 	recover(input: WorkerPressureInput): AgentMessage[] | null;
 	readonly records: ReadonlyArray<WorkerEvictionRecord>;
+	/**
+	 * The input the last admitted request was counted at, the figure its fit
+	 * check passed. Admission and the output clamp size that request from it,
+	 * so a request the guard fitted is never refused for a different count (A2c).
+	 */
+	readonly inputTokens: number;
 }
 
 type StageEntry = ContextFoldPayload["stages"][number];
@@ -122,6 +134,7 @@ export function createWorkerContextGuard(
 	let anchorKey = "";
 	let anchorUsage = 0;
 	let anchorFootprint = 0;
+	let admittedTokens = 0;
 
 	const checkpointAt = (input: WorkerPressureInput, checkpoint: FoldCheckpoint): AgentMessage[] | null => {
 		const recovering = checkpoint === "overflow";
@@ -140,7 +153,8 @@ export function createWorkerContextGuard(
 			return unit !== undefined && unit.digest === contextHash(message) ? unit.message : message;
 		});
 		const breakdown = estimateAgentContextBreakdown({ systemPrompt: input.systemPrompt, tools: input.tools, messages });
-		let structural = Object.values(breakdown).reduce((sum, value) => sum + value, 0);
+		let structural =
+			Object.values(breakdown).reduce((sum, value) => sum + value, 0) + Math.max(0, input.overheadTokens ?? 0);
 
 		// Parent usage never anchors a child. Only a response to this worker's own request can do so.
 		if (calls === 0) firstInputLength = input.messages.length;
@@ -188,6 +202,7 @@ export function createWorkerContextGuard(
 			close();
 			calls++;
 			lastRequestTokens = structural;
+			admittedTokens = Math.max(0, Math.round(count()));
 			return messages;
 		};
 		const fail = (message: string): never => {
@@ -389,12 +404,11 @@ export function createWorkerContextGuard(
 		stages.push({ stage: "working_set", outcome: "committed", reason: "evicted", recordId: record.id });
 		return accept();
 	};
-	return Object.assign(
-		(input: WorkerPressureInput): AgentMessage[] =>
-			checkpointAt(input, calls === 0 ? "submit" : "tool_batch") as AgentMessage[],
-		{
-			recover: (input: WorkerPressureInput): AgentMessage[] | null => checkpointAt(input, "overflow"),
-			records,
-		},
-	);
+	const guard = (input: WorkerPressureInput): AgentMessage[] =>
+		checkpointAt(input, calls === 0 ? "submit" : "tool_batch") as AgentMessage[];
+	return Object.defineProperties(guard, {
+		recover: { value: (input: WorkerPressureInput): AgentMessage[] | null => checkpointAt(input, "overflow") },
+		records: { value: records },
+		inputTokens: { get: () => admittedTokens },
+	}) as WorkerContextGuard;
 }
