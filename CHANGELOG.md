@@ -112,6 +112,10 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- The [Collected elsewhere] notice names a forked collection's refused tool calls in the worker card's words (e.g. "succeeded · 1 tool call · 1 call refused"), so the parent model no longer reports a run whose only action was refused as a clean success (bt-11 o).
+- A fork or splice `context` sent JSON-encoded by a grammar-constrained route (llama.cpp) is accepted by dispatch instead of refused as "expected object, got string" (bt-47 cf1h-D4).
+- A fork's Verified row on the exit card, `/usage` and `telemetry insights` counts only the verified outcomes the fork recorded itself, not the passes and done tasks it copied from its parent (bt-47 D3b).
+- A fork's exit card counts only the compactions the fork ran, not its parent's (bt-47 D3).
 - Over ACP, context engine status lines (working set, observation aging, compaction rows) cross as `session_info_update` notices (`_meta["clio-coder/notice"] = {level, text}`), not as assistant reply text (bt-47 cf1j-d).
 - `isort --check-only`/`-c` (also `python -m isort`) no longer reads as a writer that retires passes, and `black --check`, `ruff format --check`, `cargo fmt --check` (also `-- --check`) and `rustfmt --check` now read as checks (x10-2).
 - `cargo nextest run` reads as a check labeled `cargo test`, and `golangci-lint run` (a writer with `--fix`) and `staticcheck` read as read-only checks (x10-3).

@@ -397,6 +397,26 @@ test("the exit card divides the session's spend over its distinct verified outco
 	// A run whose checks the ledger does not show counts only when there is no counted pass it could repeat.
 	deepStrictEqual(countVerifiedOutcomes(entries, new Set(["run-hidden"])).workers, 0);
 	deepStrictEqual(countVerifiedOutcomes([], new Set(["run-hidden"])).workers, 1);
+	// A fork's ledger copied its parent's passes and done tasks; it counts only what it recorded after it forked (D3b).
+	const copied = [...entries.map((entry, i) => ({ ...entry, timestamp: `2026-11-06T00:0${i}:00.000Z` })), ledger];
+	const forkedAt = "2026-11-06T00:05:00.000Z";
+	const forkedRow = makeTelemetryRecord(
+		"session.forked",
+		{ parentSessionId: "session-1", parentCwdHash: "cwd", parentTurnId: "turn-1", parentTurnAt: at },
+		{ sessionId: "fork-1", agent: { role: "main", id: "fork-1" } },
+		{ t: forkedAt, mono: 0 },
+	);
+	const forkCard = (ledgerRows: unknown[]) => {
+		const forkCall = telemetryCall("fork-1", { usage: { input: 1000, output: 200 }, usd: null, at: forkedAt });
+		const parent = { sessionId: "session-1", records: call(null), turnId: "turn-1", at };
+		const spend = exitSpend(telemetryViewOf("fork-1", [forkedRow, ...forkCall], new Map(), parent), at, ledgerRows);
+		ok(spend.kind === "ready");
+		return spend.verified;
+	};
+	strictEqual(forkCard(copied).kind, "none");
+	const own = forkCard([...copied, { ...passed("reproduce", "repro", "e"), timestamp: "2026-11-06T00:06:00.000Z" }]);
+	ok(own.kind === "counted");
+	deepStrictEqual([own.count, own.parts], ["1", ["1 reproduce or numeric-compare pass"]]);
 });
 
 test("--session-file writes one atomic 0600 record from the exit snapshot, whichever exit path arrives first", () => {

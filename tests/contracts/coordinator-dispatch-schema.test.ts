@@ -112,6 +112,18 @@ describe("compact coordinator dispatch contract", () => {
 		deepStrictEqual(restore({ task: "Add sub", tasks: ["Add sub"] }), { tasks: ["Add sub"] });
 		deepStrictEqual(restore({ task: "Add sub", tasks: ["Other"] }), { task: "Add sub", tasks: ["Other"] });
 		deepStrictEqual(restore({ task: "Add sub" }), { task: "Add sub" });
+		// context is off the attached schema, so a grammar-constrained parser sends it JSON-encoded (bt-47 cf1h-D4).
+		const canonical = buildDispatchParameters();
+		const fork = restore({ task: "Recall r1", context: '{"mode": "fork"}' });
+		deepStrictEqual(fork, { task: "Recall r1", context: { mode: "fork" } });
+		ok(Value.Check(canonical, fork));
+		const splice = { mode: "splice", refs: ["tool:t1"], max_tokens: 512 };
+		deepStrictEqual(restore({ task: "x", context: JSON.stringify(splice) }).context, splice);
+		for (const garbage of ["fork", '{"mode":"clone"}', '["fork"]', '{"mode":"fork"']) {
+			const kept = restore({ task: "x", context: garbage });
+			strictEqual(kept.context, garbage, garbage);
+			strictEqual(Value.Check(canonical, kept), false, garbage);
+		}
 	});
 
 	it("admits every shared ordinary field with its canonical type", () => {
