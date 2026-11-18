@@ -109,6 +109,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Elapsed clocks (worker cards, run_script progress, /view wall time) carry a rounded second into the minute and never read `2m60s` (bt-11 j).
+- A fork words a parent session's held worker approval as held by that session ("approval held by session <id>") and keeps "coder running" in the rail, instead of "waiting for your approval" (bt-11 l).
+- When a fork collects a detached batch, the dispatching session is told once, in its next turn, that the batch was collected and how each run ended, so it no longer says the work is still in the background (bt-11 m).
 - `clio telemetry cost --run` and `calls --run` now break a main run's cost down by model and role from the session calls its settlement names, instead of printing an empty breakdown (bt-45 E).
 - A receipt whose only passing check was a host-observed bash command now reports verification basis `host-observed-command` instead of `validation-tool` (bt-45 F).
 - A dispatched worker's `context(scope="workspace")` now returns a snapshot of its own working directory instead of refusing for lack of a bound session (bt-45 G).
