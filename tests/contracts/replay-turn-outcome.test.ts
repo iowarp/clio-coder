@@ -1199,3 +1199,69 @@ test("a narrow receipt keeps the cached share beside the amounts it is part of (
 	// mark says they were cut, so the call count is not read as the whole spend (bt-11 i22-d).
 	assert.equal(receipt(40), "✓ Done · 0ms · 2 calls · … · 00:00");
 });
+
+test("a replayed receipt says the turn ended with workers still running when their receipts place them past its end (bt-11 a)", (t) => {
+	pinZone(t, "UTC");
+	const answer = (text: string) => ({ role: "assistant", content: [{ type: "text", text }], stopReason: "stop", usage });
+	const ledger = [
+		{
+			kind: "message",
+			role: "user",
+			turnId: "u1",
+			parentTurnId: null,
+			timestamp: "2026-09-17T11:00:00.000Z",
+			payload: "Go",
+		},
+		{
+			kind: "workerRun",
+			turnId: "w1",
+			parentTurnId: "u1",
+			timestamp: "2026-09-17T11:00:01.000Z",
+			assignmentId: "run-a",
+			runId: "run-a",
+			origin: "agent",
+			agentId: "coder",
+			runtime: { kind: "clio", targetId: "local", wireModelId: "worker-model" },
+		},
+		{
+			kind: "message",
+			role: "assistant",
+			turnId: "a1",
+			parentTurnId: "w1",
+			timestamp: "2026-09-17T11:00:03.000Z",
+			payload: answer("Dispatched"),
+		},
+		{
+			kind: "message",
+			role: "user",
+			turnId: "u2",
+			parentTurnId: "a1",
+			timestamp: "2026-09-17T11:01:00.000Z",
+			payload: "And?",
+		},
+		{
+			kind: "message",
+			role: "assistant",
+			turnId: "a2",
+			parentTurnId: "u2",
+			timestamp: "2026-09-17T11:01:02.000Z",
+			payload: answer("It finished"),
+		},
+	] as SessionEntry[];
+	const receipts = (durationMs: number) => {
+		const panel = createChatPanel({ getOutputStyle: () => "standard" });
+		rehydrateChatPanelFromTurns(panel, ledger, {
+			readWorkerRunResult: () => ({ outcome: "succeeded", durationMs }) as WorkerRunResultFacts,
+		});
+		return panel
+			.render(120)
+			.map(stripTerminalSequences)
+			.filter((line) => /^(✓|⇲) /u.test(line));
+	};
+	// The worker ran 30s from 11:00:01, past the first turn's end at 11:00:03 and settled before the second's.
+	const [first, second] = receipts(30_000);
+	assert.match(first ?? "", /^⇲ Turn ended · 1 worker running · /u);
+	assert.match(second ?? "", /^✓ Done · /u);
+	// One that settled before the turn ended leaves it Done.
+	assert.match(receipts(1_000)[0] ?? "", /^✓ Done · /u);
+});

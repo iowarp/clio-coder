@@ -233,6 +233,8 @@ export interface ReplayedRunFacts {
 	humanWaitMs?: number;
 	/** Epoch ms of the run's terminal ledger entry; absent when the ledger recorded no usable time. */
 	endedAtMs?: number;
+	/** Workers whose start entry and receipt place them still running at `endedAtMs`. */
+	workersRunning?: number;
 }
 
 /** What one Markdown layout of the open reply cost and how long the reply was then. */
@@ -3571,9 +3573,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const coldReasons = replayed !== undefined ? (replayed.coldReasons ?? []) : runColdReasons;
 				const callIds = runCallIds(messages);
 				// Workers a turn detached keep running past its end, so the turn ended but the work is not done. A replay
-				// cannot know which of them were still running then.
+				// counts the ones its ledger and their receipts place still running then.
 				const workersRunning =
-					replayed === undefined ? [...workerEntries.values()].filter((entry) => entry.state.pending).length : 0;
+					replayed === undefined
+						? [...workerEntries.values()].filter((entry) => entry.state.pending).length
+						: (replayed.workersRunning ?? 0);
 				const humanWaitMs = replayed === undefined ? (options.getHumanWaitMs?.() ?? 0) : (replayed.humanWaitMs ?? 0);
 				if (replayed === undefined && humanWaitMs > 0 && turnId !== undefined) {
 					options.recordTurnHumanWait?.({ turnId, humanWaitMs });
