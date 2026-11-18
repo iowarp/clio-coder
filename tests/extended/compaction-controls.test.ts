@@ -1108,20 +1108,24 @@ describe("production compaction controls", () => {
 		strictEqual(await compactAt(179_000, undefined), 1);
 	});
 
-	it("lands each automatic summary near the same target below the trigger at a 40K window (bt-18)", async (t) => {
+	it("holds each mid-turn automatic cut near the same target as the checkpoint grows at a 40K window (bt-18)", async (t) => {
 		const f = fixture(false, false, true);
 		f.settings.context.workingSet.enabled = false;
-		faux.setResponses(Array.from({ length: 40 }, () => f.respond));
-		// A cumulative summarizer: each checkpoint carries every note the previous context held and adds one.
+		faux.setResponses(Array.from({ length: 80 }, () => f.respond));
+		// A cumulative summarizer, as live: each checkpoint carries every note of the previous context and adds four,
+		// and it keeps to the room a request states by dropping its oldest notes.
 		const note = `noted step ${"carried detail ".repeat(30)}`;
 		f.response.beforeReturn = () => {
 			const user = f.calls.at(-1)?.user ?? "";
 			const previous = user.slice(user.indexOf("<previous-context>"), user.indexOf("</previous-context>"));
-			const carried = user.includes("<previous-context>") ? previous.split("noted step").length - 1 : 0;
-			f.response.text = syntheticCompactionSummary(`${"carried state ".repeat(200)}\n${note.repeat(carried + 1)}`);
+			let notes = (user.includes("<previous-context>") ? previous.split("noted step").length - 1 : 0) + 4;
+			const room = Number(/\((\d+) tokens\) in a small context window/.exec(user)?.[1] ?? Number.POSITIVE_INFINITY);
+			const write = () => syntheticCompactionSummary(note.repeat(notes));
+			while (notes > 0 && write().length / 4 > room) notes--;
+			f.response.text = write();
 		};
 		// A reasoning chat route reserves 26,214 summary tokens, so on a 40K window the trigger sits near 13.8K,
-		// and an 8K static prefix leaves about 5.5K of history below it (the bt-18 run).
+		// and an 8K static prefix leaves about 5.8K of history below it (the bt-18 run).
 		const runtime = {
 			targetId: "chat-target",
 			runtimeId: "fixture",
@@ -1142,13 +1146,12 @@ describe("production compaction controls", () => {
 			},
 		} as unknown as AgentRuntime;
 		let leaf: string | null = null;
-		const summarized: number[] = [];
 		const cycles: Array<{ turn: number; summary: number; suffix: number; tokensAfter: number; headroom: number }> = [];
-		for (let turn = 1; turn <= 30; turn++) {
-			// Each `clio-coder run` turn is a fresh process, so no in-memory rearm band carries over.
+		for (let turn = 1; turn <= 16; turn++) {
+			// Each `clio-coder run` turn is a fresh process; the post-tool guard compacts inside the turn, so the cut
+			// splits it and keeps the newest tool batch whole.
 			const state = createTurnState("off");
 			state.runtime = runtime;
-			state.lastTurnId = leaf;
 			const context = createTurnContext({
 				state,
 				session: f.session,
@@ -1159,10 +1162,52 @@ describe("production compaction controls", () => {
 				middleware: { fireCompactionHook: () => {} } as unknown as TurnMiddleware,
 				emitNotice: () => {},
 			});
-			context.refreshAgentMessagesFromSession(runtime);
-			const prompt = `turn ${turn}: continue the change`;
-			if (await context.runAutoCompact(runtime, false, undefined, undefined, prompt)) {
-				summarized.push(turn);
+			const user = appendEntry(f.state, {
+				kind: "message",
+				role: "user",
+				parentTurnId: leaf,
+				payload: { text: `turn ${turn}: continue the change` },
+			});
+			leaf = user.turnId;
+			state.activeUserTurnId = user.turnId;
+			for (let step = 1; step <= 2; step++) {
+				const id = `call-${turn}-${step}`;
+				const read = { path: `src/module-${turn}-${step}.ts` };
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "assistant",
+					parentTurnId: leaf,
+					payload: {
+						text: `Reading module ${turn}.${step}.`,
+						content: [
+							{ type: "text", text: `Reading module ${turn}.${step}.` },
+							{ type: "toolCall", id, name: "read", arguments: read },
+						],
+					},
+				}).turnId;
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "tool_call",
+					parentTurnId: leaf,
+					payload: { toolCallId: id, name: "read", args: read },
+				}).turnId;
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "tool_result",
+					parentTurnId: leaf,
+					payload: {
+						toolCallId: id,
+						toolName: "read",
+						isError: false,
+						result: {
+							content: [{ type: "text", text: `export const step${step} = ${turn};\n`.repeat(step === 1 ? 40 : 260) }],
+						},
+					},
+				}).turnId;
+				f.pinLeaf(leaf);
+				state.lastTurnId = leaf;
+				context.refreshAgentMessagesFromSession(runtime);
+				if (!(await context.runAutoCompact(runtime, false, undefined, "auto"))) continue;
 				const [checkpoint, ...suffix] = runtime.agent.state.messages
 					.filter((message) => message.role !== "system")
 					.map((message) => estimateAgentContextBreakdown({ systemPrompt: "", messages: [message] }).messageTokens);
@@ -1175,44 +1220,35 @@ describe("production compaction controls", () => {
 					tokensAfter,
 					headroom: 0,
 				});
+				leaf = state.lastTurnId ?? leaf;
 			}
-			const user = appendEntry(f.state, { kind: "message", role: "user", parentTurnId: leaf, payload: { text: prompt } });
-			leaf = user.turnId;
-			for (let step = 1; step <= 4; step++)
-				leaf = appendEntry(f.state, {
-					kind: "message",
-					role: "assistant",
-					parentTurnId: leaf,
-					payload: { text: `turn ${turn} step ${step} ${"edited and verified ".repeat(55)}` },
-				}).turnId;
-			f.pinLeaf(leaf);
 		}
-		const settled = (await f.journalOutcomes()).map((row) => row.data as { outcome: string; headroomTokens?: number });
+		const outcomes = (await f.journalOutcomes()).map((row) => row.data as { outcome: string; headroomTokens?: number });
 		deepStrictEqual(
-			settled.map((row) => row.outcome),
-			summarized.map(() => "committed"),
+			outcomes.map((row) => row.outcome),
+			cycles.map(() => "committed"),
 		);
-		for (const [index, row] of settled.entries()) {
+		for (const [index, row] of outcomes.entries()) {
 			const cycle = cycles[index];
 			if (cycle) cycle.headroom = row.headroomTokens ?? 0;
 		}
 		for (const cycle of cycles) t.diagnostic(JSON.stringify(cycle));
-		// Before bt-18 this run summarized on turns 9, 10, 13 and 16, and the first cut stayed 3,361 tokens above the
-		// trigger. Later each split-turn checkpoint carried the previous one twice and the suffix ignored its size, so
-		// headroom fell every cycle (2038, 1577, 655, -1189) until the cut landed above the trigger.
-		ok(summarized.length >= 4, `summarized on turns ${summarized.join(", ")}`);
-		for (let index = 1; index < summarized.length; index++)
-			ok((summarized[index] ?? 0) - (summarized[index - 1] ?? 0) >= 3, `summarized on turns ${summarized.join(", ")}`);
-		const first = cycles[0];
-		const last = cycles.at(-1);
-		ok(first && last && last.headroom >= first.headroom - 300, JSON.stringify(cycles));
-		for (const cycle of cycles) {
-			// The design target keeps 60% of the history space below the trigger. The tolerance covers a cut that
-			// snaps to a message boundary plus one cycle of checkpoint growth.
+		// Before this fix the checkpoint outgrew its share each cycle while the kept batch could not shrink, so headroom
+		// fell 2790, 2287, 1242, 213, -750 and the cut landed above the trigger (live: 3336, 1398, 1644 and an overflow).
+		ok(cycles.length >= 3, JSON.stringify(cycles));
+		// The first checkpoint has no previous context to carry, so headroom is measured from the second cut on.
+		const settled = cycles[1]?.headroom ?? 0;
+		for (const cycle of cycles.slice(2)) ok(cycle.headroom >= settled - 300, JSON.stringify(cycles));
+		for (const [index, cycle] of cycles.entries()) {
+			// The design target keeps 60% of the history space below the trigger, checkpoint and kept batch together.
 			const trigger = cycle.tokensAfter + cycle.headroom;
 			const fixed = cycle.tokensAfter - cycle.summary - cycle.suffix;
 			const target = fixed + 0.6 * (trigger - fixed);
-			ok(cycle.headroom > 0 && cycle.tokensAfter <= target + 0.1 * (trigger - fixed), JSON.stringify({ target, cycles }));
+			const band = 0.1 * (trigger - fixed);
+			ok(
+				cycle.tokensAfter <= target + band && (index === 0 || cycle.tokensAfter >= target - band),
+				JSON.stringify({ target, cycles }),
+			);
 		}
 	});
 

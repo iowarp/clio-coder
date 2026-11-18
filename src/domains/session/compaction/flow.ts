@@ -51,6 +51,7 @@ export type CompactionFlowBudget = Pick<
 	| "providerFallbackReason"
 	| "providerReplayFallback"
 	| "keepRecentTokens"
+	| "retainedTargetTokens"
 	| "requireFit"
 	| "preserveUserTurnId"
 	| "pendingOperatorTurn"
