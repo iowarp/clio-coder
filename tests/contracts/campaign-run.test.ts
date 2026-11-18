@@ -116,6 +116,58 @@ describe("campaign run folds one fixture across a roster", { timeout: 240_000 },
 		scratch.cleanup();
 	});
 
+	it("--dry-run validates the inputs and prints the plan without starting or writing anything (bt-20 p4)", async () => {
+		const out = join(scratch.root, "out-dry");
+		const args = [
+			"campaign",
+			"run",
+			"--fixture",
+			fixture,
+			"--roster",
+			join(scratch.root, "roster.yaml"),
+			"--answers",
+			join(scratch.root, "answers.yaml"),
+			"--prompt",
+			"say done",
+			"--out",
+			out,
+			"--dry-run",
+		];
+		const planned = await cli([...args, "--json"], { env: scratch.env, cwd: scratch.root });
+		strictEqual(planned.status, 0, planned.stderr);
+		deepStrictEqual(JSON.parse(planned.stdout), {
+			dryRun: true,
+			out,
+			autonomy: "default",
+			entries: [
+				{
+					dir: "01-mock",
+					label: "mock",
+					target: "mock-chat",
+					model: "mock-model",
+					thinking: null,
+					targetConfigured: true,
+				},
+				{
+					dir: "02-absent-target-nope-low",
+					label: "absent-target/nope@low",
+					target: "absent-target",
+					model: "nope",
+					thinking: "low",
+					targetConfigured: false,
+				},
+			],
+		});
+		const text = await cli(args, { env: scratch.env, cwd: scratch.root });
+		strictEqual(text.status, 0, text.stderr);
+		ok(text.stdout.includes("absent-target/nope@low: target absent-target is not configured"), text.stdout);
+		ok(text.stdout.includes("nothing was started or written"), text.stdout);
+		strictEqual(existsSync(out), false, "a dry run creates no --out");
+		strictEqual(chat.requests.length, 0, "a dry run sends no model request");
+		const refused = await cli([...args.slice(0, -3), "--dry-run"], { env: scratch.env, cwd: scratch.root });
+		strictEqual(refused.status, 2, "a dry run still refuses what a run refuses");
+	});
+
 	it("reports a row per entry with every metric field, a failing entry as failed, and leaves the fixture alone", async () => {
 		const out = join(scratch.root, "out");
 		const credentials = readFileSync(join(scratch.configDir, "credentials.yaml"), "utf8");

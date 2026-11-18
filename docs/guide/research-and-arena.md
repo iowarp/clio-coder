@@ -280,6 +280,8 @@ The roster is a mapping with one key, `roster`, a non-empty list of entries with
 80 letters, digits and `. _ @ / : + -`, starting with a letter or digit. The answers file is a
 [`run --answers`](commands-and-modes.md#script-the-author-with---answers) file. Both are validated before anything
 starts, and so is `--out`, which must be absent or empty and must not lie inside the fixture.
+`--dry-run` stops after that validation and prints the plan: per entry its directory, label, target, model and
+thinking, and whether the target is configured. It starts no entry and writes nothing, not even `--out`.
 
 Entries run one at a time. Each gets a fresh copy of the fixture under `<out>/<NN>-<label>/project` and its own empty
 CLIO Coder data, state and cache under `<out>/<NN>-<label>/home`, so entries share no sessions or memory. `<NN>` is the entry's position from `01`, and the label's characters other than
