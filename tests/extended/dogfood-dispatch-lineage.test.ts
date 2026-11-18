@@ -1,4 +1,4 @@
-import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -428,7 +428,9 @@ function killedWorker(onSpawn: () => void): SpawnedWorker {
 		}),
 		heartbeatAt: { current: Date.now(), monotonic: performance.now() },
 		abort() {},
-		events: (async function* () {})(),
+		events: (async function* () {
+			yield { type: "clio_coder_tool_start", payload: { tool: "bash", toolCallId: "call-killed" } };
+		})(),
 	};
 }
 
@@ -473,6 +475,7 @@ for (const hosted of [false, true]) {
 				),
 				result.message.slice(0, 1500),
 			);
+			match(result.message, /work=calls:0 .* unfinished:1/u);
 		} finally {
 			await f.bundle.extension.stop?.();
 		}
@@ -488,7 +491,7 @@ for (const hosted of [false, true]) {
 			const runId = notRetriedRunId(result);
 			ok(
 				result.message.includes(
-					`not_retried ${runId}: the host does not retry this failed run automatically (worker_turn_timeout)`,
+					`not_retried ${runId}: the host did not retry this failed run (worker_turn_timeout); 0 of maxRetries`,
 				),
 				result.message.slice(0, 1500),
 			);
@@ -557,7 +560,7 @@ for (const hosted of [false, true]) {
 			strictEqual(spawns, 1, "a deterministic failure is not retried");
 			const runId = notRetriedRunId(result);
 			ok(
-				result.message.includes(`not_retried ${runId}: the host does not retry this failed run automatically`),
+				result.message.includes(`not_retried ${runId}: the host did not retry this failed run`),
 				result.message.slice(0, 1500),
 			);
 		} finally {

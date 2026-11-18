@@ -531,20 +531,13 @@ function operatorUnavailableLine(receipt: RunResult): string | null {
 	);
 }
 
-// A sentence of the worker's own account that says a call of its went wrong.
-const FAILED_WORDS = /\b(?:malformed|rejected|refused|denied|failed|errored|blocked|invalid)\b/iu;
-const ATTEMPT_WORDS = /\b(?:attempts?|calls?|tries|tried|retried|edits?|writes?|commands?)\b/iu;
-
 /**
- * When the worker's answer describes calls of its own that failed or were refused, one line with what the host feed
- * recorded for them. A worker has reported a malformed attempt the feed never saw and more denials than happened, and
- * the parent repeated the worker's account (bt-23).
+ * When the host feed recorded calls that errored or were refused, one line with its counts. A worker has reported a
+ * malformed attempt the feed never saw and more denials than happened, and the parent repeated the worker's account
+ * (bt-23).
  */
 function attemptFactsLine(receipt: RunResult): string | null {
 	if (receipt.externalTelemetry?.toolTelemetry === "unavailable") return null;
-	const text = receipt.output?.text ?? "";
-	const claims = text.split(/[.!?\n]+/u).some((sentence) => FAILED_WORDS.test(sentence) && ATTEMPT_WORDS.test(sentence));
-	if (!claims) return null;
 	let errored = 0;
 	let refused = 0;
 	const tools: string[] = [];
@@ -553,11 +546,10 @@ function attemptFactsLine(receipt: RunResult): string | null {
 		refused += stat.blocked;
 		if (stat.errors + stat.blocked > 0) tools.push(stat.tool);
 	}
-	const named = tools.length > 0 ? ` (${tools.join(", ")})` : "";
+	if (tools.length === 0) return null;
 	return (
-		`attempts ${receipt.runId}: the worker's answer describes failed or refused calls; the host feed recorded ` +
-		`${receipt.toolCalls} ${receipt.toolCalls === 1 ? "call" : "calls"}, ${errored} errored and ${refused} refused${named}. ` +
-		"Report these counts, not the worker's account of its attempts."
+		`attempts ${receipt.runId}: the host feed recorded ${receipt.toolCalls} ${receipt.toolCalls === 1 ? "call" : "calls"}, ` +
+		`${errored} errored and ${refused} refused (${tools.join(", ")}). Report these counts, not the worker's account of its attempts.`
 	);
 }
 
@@ -614,7 +606,7 @@ function earlierFailedAttempts(deps: DispatchToolDeps, start: RunEnvelope["linea
 /**
  * A failed run's assignment states why no further attempt ran; the sealed receipt cannot, since that decision follows
  * it. Settlement lands with the durable writes, so they are flushed first (D3-c). A settlement with no detail is a
- * policy decision, so the line names the policy: retries off, the budget spent, or an outcome not retried.
+ * policy decision, so the line states the outcome and the retries used against maxRetries.
  */
 async function withNotRetried(deps: DispatchToolDeps, runs: readonly CompletedRun[]): Promise<CompletedRun[]> {
 	if (!runs.some((run) => run.receipt.exitCode !== 0)) return [...runs];
@@ -627,15 +619,12 @@ async function withNotRetried(deps: DispatchToolDeps, runs: readonly CompletedRu
 		if (assignment?.status !== "failed") return run;
 		const detail = assignment.outcomeDetail;
 		if (detail) return { ...run, notRetried: detail.length > 240 ? `${detail.slice(0, 239)}…` : detail };
-		const { maxRetries } = assignment.policy;
 		const used = Math.max(0, assignment.attempts.length - 1);
-		const policy =
-			maxRetries === 0
-				? "retries are off (maxRetries 0)"
-				: used >= maxRetries
-					? `the retry budget is spent (${used} of maxRetries ${maxRetries})`
-					: `the host does not retry this ${run.receipt.outcome} run automatically${run.receipt.outcomeCode ? ` (${run.receipt.outcomeCode})` : ""}`;
-		return { ...run, notRetried: policy };
+		const code = run.receipt.outcomeCode ? ` (${run.receipt.outcomeCode})` : "";
+		return {
+			...run,
+			notRetried: `the host did not retry this ${run.receipt.outcome} run${code}; ${used} of maxRetries ${assignment.policy.maxRetries} retries used`,
+		};
 	});
 }
 
