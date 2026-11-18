@@ -1926,10 +1926,12 @@ export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
 	if (W_FLAG_WRITERS.has(executable) && args.includes("-w")) return true;
 	if (executable === "node") return args.includes("--test-update-snapshots");
 	if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
-		const script = args[0] === "run" ? args[1] : args[0];
+		const run = packageScriptRun(executable, args);
+		const script = run?.script ?? (args[0] === "run" ? args[1] : args[0]);
 		const separator = args.indexOf("--");
-		// `npm test -- -u` is a check that rewrites its snapshots (x5-2).
+		// `npm test -- -u` is a check that rewrites its snapshots (x5-2); pnpm and yarn hand `pnpm test -u` the flag too.
 		if (separator >= 0 && args.slice(separator + 1).some(writesSnapshots)) return true;
+		if ((executable === "pnpm" || executable === "yarn") && run?.forwarded.some(writesSnapshots) === true) return true;
 		return script !== undefined && isWriteCapableScriptName(script);
 	}
 	if (executable === "make" || executable === "just")
@@ -2665,7 +2667,7 @@ export type ValidationCommandLabel = (typeof VALIDATION_COMMAND_LABELS)[number];
 function validationMatch(
 	executable: string,
 	args: ReadonlyArray<string>,
-): ValidationCommandLabel | `${"npm" | "pnpm" | "yarn" | "bun"} run ${string}` | null {
+): ValidationCommandLabel | PackageScriptLabel | null {
 	if (executable === "node" && args[0] === "--test") return "node --test";
 	const script = packageScriptMatch(executable, args);
 	if (script !== null) {
@@ -2698,16 +2700,123 @@ function validationMatch(
 	return null;
 }
 
-function packageScriptMatch(
+type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
+
+/** A package-script check's identity: `<pm> test` or `<pm> run <script>`, with any workspace selectors before it. */
+type PackageScriptLabel = `${PackageManager} ${string}`;
+
+function packageScriptMatch(executable: string, args: ReadonlyArray<string>): PackageScriptLabel | null {
+	const run = packageScriptRun(executable, args);
+	if (run === null) return null;
+	// A selected workspace's run is not the root's check, so its selectors stay in its identity.
+	const scope = run.selectors.map((selector) => `${selector} `).join("");
+	if (run.script === "test") return `${run.manager} ${scope}test`;
+	if (isVerificationScriptName(run.script)) return `${run.manager} ${scope}run ${run.script}`;
+	return null;
+}
+
+/**
+ * pnpm and yarn commands that a bare word names before any package script of that name (x6-4), so `pnpm ci` or
+ * `yarn check` is never read as the project's `ci` or `check` script.
+ */
+const PACKAGE_MANAGER_BUILTINS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+	[
+		"pnpm",
+		new Set([
+			...PACKAGE_WRITES,
+			"exec",
+			"dlx",
+			"publish",
+			"pack",
+			"store",
+			"why",
+			"outdated",
+			"audit",
+			"config",
+			"set",
+			"env",
+			"list",
+			"ls",
+			"root",
+			"bin",
+			"licenses",
+			"deploy",
+			"fetch",
+			"setup",
+			"server",
+			"doctor",
+		]),
+	],
+	[
+		"yarn",
+		new Set([
+			...PACKAGE_WRITES,
+			"exec",
+			"dlx",
+			"publish",
+			"pack",
+			"why",
+			"outdated",
+			"audit",
+			"config",
+			"set",
+			"env",
+			"list",
+			"info",
+			"bin",
+			"cache",
+			"global",
+			"licenses",
+			"workspaces",
+			"check",
+			"node",
+			"constraints",
+			"plugin",
+		]),
+	],
+]);
+
+/** pnpm workspace selectors before a script; `--filter` and `-F` take a value. */
+const PNPM_SELECTOR_FLAGS: ReadonlySet<string> = new Set(["-r", "--recursive", "-w", "--workspace-root"]);
+
+/**
+ * The package script a package manager runs: `<pm> test`, `<pm> run <script>`, or for pnpm and yarn a bare script
+ * name, past pnpm's `--filter <v>`, `-F <v>`, `-r` and `-w` or yarn's `workspace <name>` (x6-4). `forwarded` are the
+ * arguments after the script name. Null for anything else.
+ */
+function packageScriptRun(
 	executable: string,
 	args: ReadonlyArray<string>,
-): ValidationCommandLabel | `${"npm" | "pnpm" | "yarn" | "bun"} run ${string}` | null {
+): { manager: PackageManager; selectors: string[]; script: string; forwarded: ReadonlyArray<string> } | null {
 	if (executable !== "npm" && executable !== "pnpm" && executable !== "yarn" && executable !== "bun") return null;
-	if (args[0] === "test") return `${executable} test`;
-	const script = args[0] === "run" && typeof args[1] === "string" ? args[1] : null;
-	if (script === "test") return `${executable} test`;
-	if (script !== null && isVerificationScriptName(script)) return `${executable} run ${script}`;
-	return null;
+	const selectors: string[] = [];
+	let index = 0;
+	if (executable === "pnpm") {
+		for (let arg = args[index]; arg !== undefined; arg = args[index]) {
+			if (arg === "--filter" || arg === "-F") {
+				const value = args[index + 1];
+				if (value === undefined) return null;
+				selectors.push(arg, value);
+				index += 2;
+			} else if (arg.startsWith("--filter=") || PNPM_SELECTOR_FLAGS.has(arg)) {
+				selectors.push(arg);
+				index += 1;
+			} else break;
+		}
+	} else if (executable === "yarn" && args[0] === "workspace" && args[1] !== undefined && !args[1].startsWith("-")) {
+		selectors.push("workspace", args[1]);
+		index = 2;
+	}
+	const first = args[index];
+	if (first === undefined) return null;
+	if (first === "test") return { manager: executable, selectors, script: first, forwarded: args.slice(index + 1) };
+	if (first === "run") {
+		const script = args[index + 1];
+		return script === undefined ? null : { manager: executable, selectors, script, forwarded: args.slice(index + 2) };
+	}
+	if (executable !== "pnpm" && executable !== "yarn") return null;
+	if (first.startsWith("-") || PACKAGE_MANAGER_BUILTINS.get(executable)?.has(first) === true) return null;
+	return { manager: executable, selectors, script: first, forwarded: args.slice(index + 1) };
 }
 
 /**

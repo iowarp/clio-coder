@@ -885,6 +885,13 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 		["pytest -q", "check"],
 		["cd lib && make test", "check"],
 		["npm test && node codemod.mjs", "check"],
+		// pnpm and yarn run a check-named script bare and past workspace selectors (x6-4).
+		["pnpm lint", "check"],
+		["yarn lint", "check"],
+		["pnpm typecheck", "check"],
+		["pnpm --filter web test", "check"],
+		["pnpm -r test", "check"],
+		["yarn workspace web test", "check"],
 		["git status", "inspection"],
 		["git diff", "inspection"],
 		["git log -p", "inspection"],
@@ -948,8 +955,17 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 		["source env.sh", "unknown"],
 		["echo $(npm test)", "unknown"],
 		["black --check src", "unknown"],
+		// A builtin, not the project's script (x6-4).
+		["yarn check", "unknown"],
+		["pnpm dev", "unknown"],
 	];
 	for (const [command, expected] of table) strictEqual(bash(command), expected, command);
+	// A check-named script that fixes or updates snapshots still rewrites the tree it checks (x6-4).
+	for (const command of ["pnpm lint --fix", "pnpm --filter web lint:fix", "pnpm test -u", "yarn workspace web format"])
+		strictEqual(classifyCall("bash", { command }, { cwd }).shape, "mixed", command);
+	// A selected workspace's run keeps its selectors, so it never stands for the root's `pnpm test`.
+	strictEqual(classifyCall("bash", { command: "pnpm --filter web test" }, { cwd }).check, "pnpm --filter web test");
+	strictEqual(classifyCall("bash", { command: "pnpm lint" }, { cwd }).check, "pnpm run lint");
 	strictEqual(verdict("read", { path: "a.ts" }), "inspection");
 	strictEqual(verdict("edit", { path: "src/a.ts" }), "mutation");
 	strictEqual(verdict("verify", { check: "test" }), "check");
