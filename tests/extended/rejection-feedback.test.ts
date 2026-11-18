@@ -65,10 +65,16 @@ describe("formatModelRejection composes the model-facing blocked text", () => {
 		const remedy =
 			"shell variables, unparsed shell scripts or interpreter source hide which paths it touches from the safety net, so each such command needs your approval";
 		const reason = `permission denied by policy: bash \`${heredoc}…\` refused by rule bash-hidden-content; dispatched workers run non-interactively (fleet.permissions.mode=deny); bash requires execute confirmation. redirection \`<< EOF\` is recognized only to /dev/null or between descriptors ${remedy}`;
-		const lines = formatModelRejection(reason).split("\n");
+		// A parked call's answer restates the reason as its detail; the heredoc copy must fold and deduplicate.
+		const answered = { short: "bash blocked: execute was not approved", detail: reason, hints: [] };
+		const lines = formatModelRejection(reason, answered).split("\n");
 		for (const line of lines) ok(line.length <= 300, `line within the cap: ${line}`);
 		const text = lines.join("\n");
 		ok(text.includes(`${remedy}`), `the remedy survives whole: ${text}`);
+		strictEqual(text.split("verify_slug_edge.py").length, 2, `the refusal reads once: ${text}`);
+		const cap = `permission refusal limit reached: 1) bash \`${heredoc}…\` refused by rule r; 2) bash \`${heredoc}…\` refused by rule r`;
+		const capText = formatModelRejection(cap, { ...answered, detail: cap });
+		strictEqual(capText.split("2) bash").length, 2, `each capped refusal reads once: ${capText}`);
 		ok(text.includes("redirection `<< EOF` is recognized only to /dev/null"), text);
 		ok(text.startsWith("permission denied by policy: bash `cat > verify_slug_edge.py << EOF ⏎ print("), text);
 		ok(lines.length <= 4, `the heredoc body stays on its line: ${text}`);
