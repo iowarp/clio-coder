@@ -624,8 +624,10 @@ describe("dispatch admission boundary", () => {
 			const notice = inferredScopeParentTokenNotice(scope);
 			ok(notice, "a reinterpreted prose token is named in the scope notice");
 			ok(notice.message.startsWith("[dispatch scope] "), notice.message);
-			ok(notice.message.includes("../src/store.js -> src/store.js"), notice.message);
-			ok(notice.message.includes("../src/absent.js -> dropped"), notice.message);
+			strictEqual(
+				notice.message,
+				"[dispatch scope] Paths outside the workspace were not granted: ../src/absent.js. Read from the workspace root: ../src/store.js as src/store.js.",
+			);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -677,7 +679,7 @@ describe("dispatch admission boundary", () => {
 			deepStrictEqual(collides.writeBoundaries, []);
 			deepStrictEqual(collides.parentTokens, [{ token: "../../../etc/passwd", resolved: "etc/passwd", source: "task" }]);
 			ok(
-				inferredScopeParentTokenNotice(collides)?.message.includes("../../../etc/passwd -> etc/passwd"),
+				inferredScopeParentTokenNotice(collides)?.message.includes("../../../etc/passwd as etc/passwd"),
 				"the rewrite the operator would otherwise never see is named",
 			);
 		} finally {

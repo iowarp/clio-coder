@@ -102,13 +102,16 @@ test("the activity row names its visit scope and a worker whose writes went unre
 		bus.emit("run.started", { runId, agentId: "coder", targetId: "local", wireModelId: "m" } as never);
 		bus.emit("run.completed", { runId, agentId: "coder", outcome: "completed" } as never);
 	}
-	// run-b's receipt names its checkout changes, so only run-a stays unrecorded.
-	collector.observeRunResult("run-b", { changedPaths: [] } as never);
+	match(renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n"), /^Workers: 2 completed$/mu);
+	// run-b's receipt names its checkout changes, so only run-a stays unrecorded. Its refused call reaches the
+	// Workers row in the collected block's words (bt-11 s).
+	collector.observeRunResult("run-b", { changedPaths: [], refusedCalls: 1 } as never);
 	const text = renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n");
 	match(
 		text,
 		/^This visit, workers included: 0 turns · 0 files changed \(1 worker kept no write record\) · 2 workers$/mu,
 	);
+	match(text, /^Workers: 2 completed · 1 call refused$/mu);
 	collector.dispose();
 });
 

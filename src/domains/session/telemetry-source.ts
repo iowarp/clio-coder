@@ -308,6 +308,7 @@ function* loadSession(
 		journal: own,
 		runs,
 		parent: lineage ? { sessionId: lineage.sessionId, turnId: lineage.turnId, at: lineage.at, source: parent } : null,
+		...(forked ? { forkedAt: forked.t } : {}),
 		...(ledger ? { ledger } : {}),
 	};
 }
@@ -590,6 +591,7 @@ function windowRecords(records: readonly TelemetryRecord[], from: number, to: nu
 /**
  * A session as the window sees it: its in-window records, the runs with in-window accounting or settlement (or no
  * accounting but an in-window reference), and no ancestor, since an ancestor in the window is one of its own sessions.
+ * A fork keeps its start, which scopes its verified outcomes and adds no ancestor to a lineage or cost fold.
  */
 function windowSession(source: SessionSource, from: number, to: number): SessionSource {
 	const records = windowRecords(source.journal.records, from, to);
@@ -614,6 +616,7 @@ function windowSession(source: SessionSource, from: number, to: number): Session
 		},
 		runs,
 		parent: null,
+		...(source.forkedAt === undefined ? {} : { forkedAt: source.forkedAt }),
 	};
 }
 

@@ -3579,9 +3579,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 				let turnSnapshot = captureTurnSnapshot("pending");
 				let admission = context.refreshLiveBudget(submittedText);
+				// The window-fit gate reads the A4 count, so a request Pi's clamp would refuse compacts first.
+				const fitInput = (view: typeof admission): number | null =>
+					view.inputTokens === null
+						? null
+						: Math.max(view.inputTokens, context.overflowFitTokens?.(agentRuntime, submittedText) ?? 0);
 				if (
 					admission.effectiveWindow !== null &&
-					!requestFits(admission.inputTokens, admission.outputReserveTokens, admission.effectiveWindow)
+					!requestFits(fitInput(admission), admission.outputReserveTokens, admission.effectiveWindow)
 				) {
 					const paintOverflow = prepareCompactionPaint();
 					setTurnPreparation("compacting");
@@ -3624,12 +3629,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					if (!admissionCurrent()) return;
 					submittedText = composeSubmittedText();
 					admission = context.refreshLiveBudget(submittedText);
+					const admittedInput = fitInput(admission);
 					if (
 						admission.effectiveWindow !== null &&
-						!requestFits(admission.inputTokens, admission.outputReserveTokens, admission.effectiveWindow)
+						!requestFits(admittedInput, admission.outputReserveTokens, admission.effectiveWindow)
 					) {
+						const oversize = context.oversizedResult?.(agentRuntime, submittedText);
 						emitAdmissionNotice(
-							`[Clio Coder] Request exceeds the available context window (input ${admission.inputTokens ?? "unknown"} + output ${admission.outputReserveTokens ?? "unknown"}, window ${admission.effectiveWindow ?? "unknown"}).${failure ? ` ${failure}` : ""} ${turnAdmissionRemedy(agentRuntime, admission.inputTokens ?? 0)}`,
+							`[Clio Coder] Request exceeds the available context window (input ${admittedInput ?? "unknown"} + output ${admission.outputReserveTokens ?? "unknown"}, window ${admission.effectiveWindow ?? "unknown"}).${failure ? ` ${failure}` : ""}${oversize ? ` ${oversize}` : ""} ${turnAdmissionRemedy(agentRuntime, admittedInput ?? 0)}`,
 							"context-window-exceeded",
 							"error",
 						);

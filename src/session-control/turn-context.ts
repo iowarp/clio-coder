@@ -21,6 +21,7 @@ import {
 	engineCodexConfiguration,
 	engineCodexUserTurn,
 	engineInitialSystemPrompt,
+	estimateEngineRequestTokens,
 	replaceEngineMessages,
 	setEngineCodexConfiguration,
 	setEngineCodexUserTurn,
@@ -404,6 +405,21 @@ export interface TurnContext {
 	 */
 	refreshLiveBudget(pendingUserText?: string): LiveBudgetView;
 	/**
+	 * After an overflow fold that fit, the input the next main request pins
+	 * (A4), recomputed on the request about to go out; null otherwise. The call
+	 * that reads it disarms it.
+	 */
+	takeOverflowInputPin?(agentRuntime: AgentRuntime): number | null;
+	/**
+	 * The A4 count of the request these messages and the pending ask make: the
+	 * larger of Clio's estimate and Pi's chars/3.5 count. Window-fit gates that
+	 * open the overflow path read it, so Pi's clamp never refuses a request
+	 * they passed.
+	 */
+	overflowFitTokens?(agentRuntime: AgentRuntime, pendingUserText?: string): number;
+	/** Null while the request fits on the A4 count; otherwise the sentence naming the largest result it carries. */
+	oversizedResult?(agentRuntime: AgentRuntime, pendingUserText?: string): string | null;
+	/**
 	 * The published live budget view. A pure getter for renderers and tools:
 	 * it never rescans the conversation or reprices the footer. The first call
 	 * of a session publishes once, because a view has to exist before it can be
@@ -651,6 +667,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			agentRuntime.agent.state.messages.filter((message) => message.role !== "system" || isHostPolicyMessage(message)),
 		);
 	let promptDigest: { prompt: string | null; digest: string } | null = null;
+	// Armed by an overflow fold that fit; the next main request pins the A4 count.
+	let overflowInputPin: { sessionId: string | undefined } | null = null;
 	let reconciledAnchor: {
 		tokens: number;
 		anchoredMessages: ReadonlyArray<AgentMessage>;
@@ -1407,6 +1425,74 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		};
 	};
 
+	/**
+	 * The overflow path's one count (A4): the live estimate or Pi's chars/3.5
+	 * count of the same request, whichever is larger. The fold evicts until it
+	 * fits and the next main request pins it, so admission and Pi's clamp size
+	 * the request the fold fitted.
+	 */
+	const overflowFitTokens = (agentRuntime: AgentRuntime, pendingUserText?: string): number => {
+		const observed = observeHistory(agentRuntime);
+		const live = liveContextEstimate(agentRuntime, pendingUserText, undefined, observed);
+		const pending: AgentMessage[] = [];
+		if (pendingUserText !== undefined) {
+			pending.push({
+				role: "user",
+				content: [{ type: "text", text: pendingUserText }, ...pendingUserImages],
+				timestamp: 0,
+			} as AgentMessage);
+			const policy = pendingPolicyText();
+			if (policy !== null) pending.push({ role: "user", content: policy, timestamp: 0 });
+		}
+		const pi = estimateEngineRequestTokens(agentRuntime.agent, [...observed.messages, ...pending]);
+		return Math.max(live.tokens, pi);
+	};
+
+	/**
+	 * Null while the request fits on the A4 count. Otherwise what the overflow fold and the requireFit summary could
+	 * not clear: the A4 count, and the sentence naming the largest tool result the request still carries and its size,
+	 * left empty unless that result alone is larger than the overflow.
+	 */
+	const overflowOversize = (
+		agentRuntime: AgentRuntime,
+		pendingUserText?: string,
+	): { tokens: number; reserve: number; window: number; largest: string } | null => {
+		const window = liveContextEstimate(agentRuntime, pendingUserText).contextWindow;
+		if (!(window > 0)) return null;
+		const tokens = overflowFitTokens(agentRuntime, pendingUserText);
+		const reserve = resolveFitOutputReserve(agentRuntime, tokens);
+		if (requestFits(tokens, reserve, window)) return null;
+		const messages = agentRuntime.agent.state.messages;
+		let largest: { id: string; tool: string; chars: number } | null = null;
+		for (const message of messages) {
+			if (message.role !== "toolResult") continue;
+			const chars = message.content.reduce((sum, block) => sum + (block.type === "text" ? block.text.length : 0), 0);
+			if (largest === null || chars > largest.chars) largest = { id: message.toolCallId, tool: message.toolName, chars };
+		}
+		if (largest === null || Math.ceil(largest.chars / 3.5) < tokens + reserve - window)
+			return { tokens, reserve, window, largest: "" };
+		const call = messages
+			.flatMap((message) => (message.role === "assistant" ? message.content : []))
+			.find((block) => block.type === "toolCall" && block.id === largest.id);
+		const target = call?.type === "toolCall" && typeof call.arguments.path === "string" ? ` ${call.arguments.path}` : "";
+		return {
+			tokens,
+			reserve,
+			window,
+			largest: `The ${largest.tool}${target} result alone is ${largest.chars} characters (about ${Math.ceil(largest.chars / 3.5)} tokens); ask for a narrower ${largest.tool} (an offset and limit).`,
+		};
+	};
+
+	/**
+	 * The turn's last word once the overflow fold and the requireFit summary are spent and one tool result is what
+	 * still overflows. Phrased so overflow recovery does not read it as a provider overflow and compact again.
+	 */
+	const overflowStop = (agentRuntime: AgentRuntime): string | null => {
+		const over = overflowOversize(agentRuntime);
+		if (over === null || !over.largest) return null;
+		return `[Clio Coder] This turn stopped: after compaction about ${over.tokens} input tokens plus ${over.reserve} reserved for the reply do not fit the ${over.window}-token window. ${over.largest} The session stays usable; send a smaller request.`;
+	};
+
 	/** The system prompt rarely changes between publications; hash it again only when it does. */
 	const systemPromptDigest = (prompt: string | null): string => {
 		if (promptDigest?.prompt !== prompt) promptDigest = { prompt, digest: sha256Json(prompt) };
@@ -1880,6 +1966,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		state,
 		syncCodexConfiguration: (runtime) => syncCodexConfiguration(runtime),
 		liveContextEstimate: (runtime, pendingUserText) => liveContextEstimate(runtime, pendingUserText),
+		overflowFitTokens: (runtime, pendingUserText) => overflowFitTokens(runtime, pendingUserText),
+		armOverflowInputPin: () => {
+			overflowInputPin = { sessionId: deps.session?.current()?.id };
+		},
 		reconciledHistoryTokens: (runtime, commit) => reconciledHistoryTokens(runtime, undefined, commit),
 		evictionAnchor: (runtime, historyTokens, tokensRemoved) => evictionAnchor(runtime, historyTokens, tokensRemoved),
 		carryReconciledAnchorThroughProjection: (runtime, historyTokens, tokensRemoved) =>
@@ -1941,6 +2031,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	): Promise<boolean> => {
 		bindProviderCompaction(agentRuntime);
 		lastCompactionNoGain = false;
+		overflowInputPin = null;
 		if (!deps.readSessionEntries) return false;
 		// A fresh prompt has no history to shrink; request admission reports its budget (#438).
 		if (deps.session && !deps.session.current()) return false;
@@ -2589,6 +2680,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				isSplitTurn: result.isSplitTurn,
 			}),
 		);
+		// The requireFit summary cleared what the fold could not: the next main request pins the same A4 count.
+		if (requiredFit) {
+			const fitAfter = overflowFitTokens(agentRuntime, pendingUserText);
+			const window = liveContextEstimate(agentRuntime, pendingUserText).contextWindow;
+			if (requestFits(fitAfter, resolveFitOutputReserve(agentRuntime, fitAfter), window))
+				overflowInputPin = { sessionId: deps.session?.current()?.id };
+		}
 		refreshLiveBudget(pendingUserText);
 		return true;
 	};
@@ -3032,6 +3130,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		liveContextEstimate,
 
 		refreshLiveBudget,
+		takeOverflowInputPin(runtime: AgentRuntime): number | null {
+			const armed = overflowInputPin;
+			overflowInputPin = null;
+			if (armed === null || armed.sessionId !== deps.session?.current()?.id) return null;
+			return overflowFitTokens(runtime);
+		},
+		overflowFitTokens,
+		oversizedResult: (runtime: AgentRuntime, pendingUserText?: string) =>
+			overflowOversize(runtime, pendingUserText)?.largest || null,
 		refreshAgentMessagesFromSession,
 		runAutoCompact,
 		runStepCheckpoint,
@@ -3719,31 +3826,49 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			let compacted = false;
 			// Eviction rebuilds the messages before the summary call, so a failed summary can still leave them changed.
 			const messagesBefore = agentRuntime.agent.state.messages;
-			const mustFit =
-				knownWindow && !requestFits(beforeView.inputTokens, beforeView.outputReserveTokens, beforeView.effectiveWindow);
+			// The A4 count (overflowFitTokens) decides whether the request fits; the fit line's reserve is A5's.
+			const a4Fits = (view: LiveBudgetView): boolean =>
+				requestFits(
+					Math.max(view.inputTokens ?? 0, overflowFitTokens(agentRuntime)),
+					view.outputReserveTokens,
+					view.effectiveWindow,
+				);
+			// An automatic pass the trigger asks for runs first (A5); the A4 count then decides the overflow pass.
+			let mustFit =
+				knownWindow &&
+				(!requestFits(beforeView.inputTokens, beforeView.outputReserveTokens, beforeView.effectiveWindow) ||
+					(!verdict.shouldCompact && !a4Fits(beforeView)));
 			// S0 commits under the trigger on an uncached route, so the guard asks there too (SPEC §3.4).
 			const attempted = mustFit || verdict.shouldCompact || supersededStageApplies(agentRuntime.runtimeResolution);
-			if (attempted) {
+			const compact = async (requireFit: boolean): Promise<void> => {
 				try {
-					compacted = await runAutoCompact(
+					const done = await runAutoCompact(
 						agentRuntime,
-						mustFit,
+						requireFit,
 						undefined,
-						mustFit ? "overflow" : "auto",
+						requireFit ? "overflow" : "auto",
 						undefined,
 						undefined,
 						signal,
 					);
+					compacted = compacted || done;
 				} catch (err) {
 					const reason = err instanceof Error ? err.message : String(err);
 					const aborted = signal?.aborted || (err instanceof Error && err.name === "AbortError");
-					if (mustFit || aborted)
+					const oversize = requireFit && !aborted ? overflowStop(agentRuntime) : null;
+					if (oversize !== null) throw new Error(oversize);
+					if (requireFit || aborted)
 						throw new Error(`[Clio Coder] post-tool context guard could not compact before continuation: ${reason}`);
 					// Optional compaction: the request still fits, so the run goes on and the fit check below stays the stop.
 					deps.emitNotice(
 						`[Clio Coder] automatic compaction failed: ${reason.replace(/[.\s]+$/u, "")}. This turn goes on without it.`,
 					);
 				}
+			};
+			if (attempted) await compact(mustFit);
+			if (attempted && !mustFit && knownWindow && !a4Fits(refreshLiveBudget())) {
+				mustFit = true;
+				await compact(true);
 			}
 
 			// The mid-run settled tool-batch boundary: whatever the guard did or
@@ -3751,6 +3876,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// a compaction attempt the guard never yielded or touched the messages,
 			// so the first publication already describes it.
 			const afterView = attempted ? refreshLiveBudget() : beforeView;
+			const oversize = mustFit ? overflowStop(agentRuntime) : null;
+			if (oversize !== null) throw new Error(oversize);
 			if (knownWindow && !requestFits(afterView.inputTokens, afterView.outputReserveTokens, afterView.effectiveWindow)) {
 				throw new Error(
 					`[Clio Coder] post-tool context guard stopped continuation before provider call: estimated input ${afterView.inputTokens} plus reserved output ${afterView.outputReserveTokens} tokens does not fit context window ${afterView.effectiveWindow}. Use /context compact, narrower reads, or a follow-up turn with smaller observations.`,
