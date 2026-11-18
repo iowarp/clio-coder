@@ -1828,8 +1828,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				// coverage, EOF streaks, recovery and mutation epochs); letting the
 				// aggregate record them would overwrite the streak its steps built,
 				// which is how a wrapped grep escaped stagnation (#F4). The wrapper
-				// keeps its own call charge and its success memory for a verbatim
-				// repeat of the whole plan.
+				// keeps only its success memory for a verbatim repeat of the whole plan.
 				recordSuccessfulResult(input);
 				return [];
 			}
@@ -1942,8 +1941,23 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			const callKey = input.toolCallId === undefined ? undefined : `${turnKey}\0${input.toolCallId}`;
 			// A rewrite's second judgement: only the checks that read the arguments run again.
 			const rejudge = callKey !== undefined && admittedCalls.has(callKey);
-			const turnBudgetEffects = (): ReadonlyArray<MiddlewareEffect> =>
-				rejudge ? [] : (evaluateTurnBudget(input, now) ?? []);
+			// Every step of a chain is judged and charged as the capability it runs
+			// (the gateway invokes each one with nested: false), so the wrapper is
+			// not charged too: an N-step chain spends N units of the worker cap and
+			// the turn budget, as N plain calls do, where charging the wrapper made
+			// it N + 1 and ran chain-heavy turns into the soft budget (bt-14). The
+			// wrapper still passes every lockout, the repeat detector for a verbatim
+			// repeat of the whole plan, and the turn budget once that is spent, where
+			// a refused wrapper is an attempt like any other refused call.
+			const chainWrapper = isGatewayChain(hookInput.toolName ?? "", hookInput.toolArgs);
+			const turnBudgetEffects = (): ReadonlyArray<MiddlewareEffect> => {
+				if (rejudge) return [];
+				if (chainWrapper) {
+					const soft = resolveTurnBudget(input)?.budget.soft;
+					if (soft === undefined || (callsByTurn.get(turnKey) ?? 0) < soft) return [];
+				}
+				return evaluateTurnBudget(input, now) ?? [];
+			};
 			const decide = (): ReadonlyArray<MiddlewareEffect> => {
 				// DF-10: startup failures belong to the entry, not to its test arguments or cwd.
 				let check = typeof input.toolArgs?.check === "string" ? input.toolArgs.check.trim() : "";
@@ -2101,9 +2115,9 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					];
 				}
 
-				if (!rejudge) count += 1;
+				if (!rejudge && !chainWrapper) count += 1;
 				reserveDenials = { denials: 0 };
-				if (softLimit !== undefined && !rejudge) {
+				if (softLimit !== undefined && !rejudge && !chainWrapper) {
 					softAdmittedCount += 1;
 					if (softReadReserveThreshold !== null && softAdmittedCount >= softReadReserveThreshold) enterSoftReadReserve();
 					if (softAdmittedCount >= softLimit) {
