@@ -1364,8 +1364,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		agentRuntime: AgentRuntime,
 		pendingUserText: string | undefined,
 		history?: MessageListDigests,
+		computed?: LiveContextEstimate,
 	): LiveBudgetAccounting => {
-		const estimate = liveContextEstimate(agentRuntime, pendingUserText, undefined, history);
+		const estimate = computed ?? liveContextEstimate(agentRuntime, pendingUserText, undefined, history);
 		const details = agentRuntime.runtimeResolution.contextWindowDetails;
 		return {
 			targetId: agentRuntime.targetId,
@@ -1427,7 +1428,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * Assemble one publication from the live runtime, or from the persisted
 	 * capture when this process has not built a runtime yet.
 	 */
-	const liveBudgetInput = (pendingUserText?: string, capturedHistory?: MessageListDigests): LiveBudgetInput => {
+	const liveBudgetInput = (
+		pendingUserText?: string,
+		capturedHistory?: MessageListDigests,
+		estimate?: LiveContextEstimate,
+	): LiveBudgetInput => {
 		const settings = deps.getSettings();
 		const agentRuntime = state.runtime;
 		const history = agentRuntime ? (capturedHistory ?? observeHistory(agentRuntime)) : undefined;
@@ -1459,7 +1464,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// the resolved anchor, cap, and reservation are part of that request even
 		// when not a byte of the conversation moved.
 		const accounting = agentRuntime
-			? liveRuntimeAccounting(agentRuntime, pendingUserText, history)
+			? liveRuntimeAccounting(agentRuntime, pendingUserText, history, estimate)
 			: historicalAccounting(snapshot, settings);
 		const economic = compactionBudget(
 			accounting.effectiveWindow ?? 0,
@@ -1521,8 +1526,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		};
 	};
 
-	const refreshLiveBudget = (pendingUserText?: string, history?: MessageListDigests): LiveBudgetView =>
-		budgetProducer.publish(liveBudgetInput(pendingUserText, history));
+	/** `estimate`, when given, is `liveContextEstimate` of the same runtime and `history` with no pending text. */
+	const refreshLiveBudget = (
+		pendingUserText?: string,
+		history?: MessageListDigests,
+		estimate?: LiveContextEstimate,
+	): LiveBudgetView => budgetProducer.publish(liveBudgetInput(pendingUserText, history, estimate));
 
 	/**
 	 * A working-set projection removes tokens from messages the attestation
@@ -3503,9 +3512,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const reminder = contextChanged ? agentRuntime.agent.state.messages.at(-1) : undefined;
 			// The tool batch appended results the last publication predates, and the
 			// guard is about to decide on them. Publish before that inspection, not
-			// after it.
-			const beforeView = refreshLiveBudget();
-			const before = liveContextEstimate(agentRuntime);
+			// after it, from the same history observation and estimate it decides on.
+			const history = observeHistory(agentRuntime);
+			const before = liveContextEstimate(agentRuntime, undefined, undefined, history);
+			const beforeView =
+				agentRuntime === state.runtime ? refreshLiveBudget(undefined, history, before) : refreshLiveBudget();
 			const settings = deps.getSettings();
 			const economic = compactionBudget(
 				before.contextWindow,
@@ -3527,7 +3538,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const messagesBefore = agentRuntime.agent.state.messages;
 			const mustFit =
 				knownWindow && !requestFits(beforeView.inputTokens, beforeView.outputReserveTokens, beforeView.effectiveWindow);
-			if (mustFit || verdict.shouldCompact) {
+			const attempted = mustFit || verdict.shouldCompact;
+			if (attempted) {
 				try {
 					compacted = await runAutoCompact(
 						agentRuntime,
@@ -3554,8 +3566,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				agentRuntime.agent.state.messages.push(reminder);
 			}
 			// The mid-run settled tool-batch boundary: whatever the guard did or
-			// declined to do, this is the context the continuation will send.
-			const afterView = refreshLiveBudget();
+			// declined to do, this is the context the continuation will send. Without
+			// a compaction attempt the guard never yielded or touched the messages,
+			// so the first publication already describes it.
+			const afterView = attempted ? refreshLiveBudget() : beforeView;
 			if (knownWindow && !requestFits(afterView.inputTokens, afterView.outputReserveTokens, afterView.effectiveWindow)) {
 				throw new Error(
 					`[Clio Coder] post-tool context guard stopped continuation before provider call: estimated input ${afterView.inputTokens} plus reserved output ${afterView.outputReserveTokens} tokens does not fit context window ${afterView.effectiveWindow}. Use /context compact, narrower reads, or a follow-up turn with smaller observations.`,
