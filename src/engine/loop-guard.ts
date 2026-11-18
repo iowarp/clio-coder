@@ -415,12 +415,14 @@ const LOCKED_SYNTHESIS_PHASE = "Current execution phase: final synthesis";
 const LOCKED_SYNTHESIS_DIRECTIVE =
 	"Tools are disabled for the rest of this run. Earlier instructions to use tools apply only to the completed tool phase. Do not emit tool calls or tool-call markup. Return the final result now using the evidence already observed; preserve all safety rules and the required result format. Do not invent missing evidence.";
 
-/** Preserve the task and safety contract while retiring the earlier tool-use phase. */
-export function lockedSynthesisSystemPrompt(systemPrompt: string, requiredResult?: string): string {
+/**
+ * The final-synthesis directive. It retires the earlier tool-use phase while
+ * preserving the task and safety contract; a worker's locked round names its
+ * required terminal result.
+ */
+export function lockedSynthesisDirective(requiredResult?: string): string {
 	return [
-		systemPrompt,
-		`# ${LOCKED_SYNTHESIS_PHASE}`,
-		LOCKED_SYNTHESIS_DIRECTIVE,
+		`${LOCKED_SYNTHESIS_PHASE}. ${LOCKED_SYNTHESIS_DIRECTIVE}`,
 		...(requiredResult ? [`Required terminal result: ${requiredResult}`] : []),
 	].join("\n\n");
 }
@@ -428,16 +430,19 @@ export function lockedSynthesisSystemPrompt(systemPrompt: string, requiredResult
 type RequestMessage = { role: string; content?: unknown; timestamp?: unknown };
 
 /**
- * The main loop's locked round: the synthesis directive rides the tail of the
- * outgoing copy, so the system prompt and every earlier message keep the bytes
+ * A locked round, in the main loop or a worker: the synthesis directive rides
+ * the tail of the outgoing copy, so the system prompt and every earlier message keep the bytes
  * an unlocked round sends and a prefix cache survives entering and leaving the
  * round. A trailing tool result, the usual last message after a tool batch,
  * gets it as a host note; a trailing user message gets a `<system-reminder>`
  * block; anything else gets a reminder user message at the end. The copy is
  * request-only and the same on every attempt; the caller never persists it.
  */
-export function withLockedSynthesisDirective<C extends { messages: ReadonlyArray<unknown> }>(context: C): C {
-	const directive = `${LOCKED_SYNTHESIS_PHASE}. ${LOCKED_SYNTHESIS_DIRECTIVE}`;
+export function withLockedSynthesisDirective<C extends { messages: ReadonlyArray<unknown> }>(
+	context: C,
+	requiredResult?: string,
+): C {
+	const directive = lockedSynthesisDirective(requiredResult);
 	const messages = [...context.messages] as RequestMessage[];
 	let index = messages.length - 1;
 	while (index >= 0 && messages[index]?.role === "system") index -= 1;

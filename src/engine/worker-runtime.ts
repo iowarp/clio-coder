@@ -164,11 +164,12 @@ import {
 	createLoopGuardRegistration,
 	isLockedSynthesisFallbackOnly,
 	isLoopGuardSynthesisBackstopReason,
+	lockedSynthesisDirective,
 	lockedSynthesisFallbackText,
 	lockedSynthesisRepromptMessages,
-	lockedSynthesisSystemPrompt,
 	resolveDeliveryTools,
 	sanitizeLockedSynthesisMessage,
+	withLockedSynthesisDirective,
 	workerLoopBlockBudget,
 } from "./loop-guard.js";
 import { registerClioOAuthProviders } from "./oauth.js";
@@ -1400,19 +1401,22 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				helperExposedThisRound || helperDeclaredFromStart
 					? `${currentContext.systemPrompt ?? ""}\n\n# Internal helper protocol\nReturn the result by calling ${INTERNAL_HELPER_RESULT_TOOL} alone with the result object as arguments. Successful submission ends the run; no narrative report is needed.${!helperDeclaredFromStart && (synthesisToolLock || helperTerminalPhase) ? " Work tools are disabled. Earlier tool-use instructions apply only to the completed work phase; only the terminal handoff remains available. Do not invent missing evidence." : ""}`
 					: currentContext.systemPrompt;
-			const systemPrompt =
-				helperExposedThisRound || helperDeclaredFromStart
-					? helperPrompt
-					: synthesisToolLock
-						? lockedSynthesisSystemPrompt(
-								currentContext.systemPrompt ?? "",
-								input.resultContract ? resultContractShape(input.resultContract) : undefined,
-							)
-						: currentContext.systemPrompt;
+			const systemPrompt = helperExposedThisRound || helperDeclaredFromStart ? helperPrompt : currentContext.systemPrompt;
+			// A synthesis lock without the helper handoff carries its directive on the
+			// request tail, so the system prompt keeps the work phase's bytes and a
+			// prefix cache survives the lock.
+			const synthesisDirective =
+				synthesisToolLock && !(helperExposedThisRound || helperDeclaredFromStart)
+					? { requiredResult: input.resultContract ? resultContractShape(input.resultContract) : undefined }
+					: undefined;
 			const window = input.runtimeResolution?.capabilities.contextWindow ?? currentModel.contextWindow;
 			const pressure = {
 				messages: currentContext.messages,
-				systemPrompt: systemPrompt ?? "",
+				// Priced with the tail directive the round will carry; only the estimate sees it here.
+				systemPrompt:
+					synthesisDirective === undefined
+						? (systemPrompt ?? "")
+						: `${systemPrompt ?? ""}\n\n${lockedSynthesisDirective(synthesisDirective.requiredResult)}`,
 				tools: currentContext.tools ?? [],
 				contextWindow: window,
 				threshold: compactionBudget(
@@ -1574,11 +1578,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 								? { responseFormat: "json-schema" as const }
 								: {}),
 						});
-						const resolvedAttempt = resolvedRequestContext(attempt.context);
+						// Every attempt of a locked round carries the same tail directive, as does the "auto" form of a
+						// middleware text lock; the system prompt and earlier messages keep their bytes.
 						const attemptContext =
-							middlewareChoice.kind === "none" && attempt.options?.toolChoice === "auto"
-								? { ...resolvedAttempt, systemPrompt: lockedSynthesisSystemPrompt(resolvedAttempt.systemPrompt ?? "") }
-								: attempt.context;
+							synthesisDirective !== undefined
+								? withLockedSynthesisDirective(attempt.context, synthesisDirective.requiredResult)
+								: middlewareChoice.kind === "none" && attempt.options?.toolChoice === "auto"
+									? withLockedSynthesisDirective(attempt.context)
+									: attempt.context;
 						const fetchImpl = attempt.options?.fetch ?? ((url, init) => globalThis.fetch(url, init));
 						const tracking = trackCallFetch(fetchImpl);
 						callTracking = tracking;

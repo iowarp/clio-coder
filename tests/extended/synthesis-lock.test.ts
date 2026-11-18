@@ -10,8 +10,8 @@ import {
 	LOCKED_SYNTHESIS_REPROMPT_TOOL,
 	lockedSynthesisFallbackText,
 	lockedSynthesisRepromptMessages,
-	lockedSynthesisSystemPrompt,
 	sanitizeLockedSynthesisMessage,
+	withLockedSynthesisDirective,
 } from "../../src/engine/loop-guard.js";
 import { applyToolRounds, type ToolRound } from "../../src/engine/provider-payload.js";
 import type { AgentMessage, EngineModel } from "../../src/engine/types.js";
@@ -98,11 +98,13 @@ describe("worker synthesis lock", () => {
 	it("retires earlier tool-use guidance without replacing task or safety instructions", () => {
 		const original = "Honor read-only authority. Use read for citations.";
 		const shape = '{"findings":[],"needsSplit":false,"proposedSubtasks":[]}';
-		const prompt = lockedSynthesisSystemPrompt(original, shape);
-		ok(prompt.startsWith(original));
-		ok(prompt.includes("Earlier instructions to use tools apply only to the completed tool phase"));
-		ok(prompt.includes("Do not invent missing evidence"));
-		ok(prompt.endsWith(`Required terminal result: ${shape}`));
+		const sent = withLockedSynthesisDirective({ systemPrompt: original, messages: readHistory }, shape);
+		strictEqual(sent.systemPrompt, original, "the system prompt keeps the work phase's bytes");
+		deepStrictEqual(sent.messages.slice(0, -1), readHistory.slice(0, -1));
+		const tail = JSON.stringify(sent.messages.at(-1));
+		ok(tail.includes("Earlier instructions to use tools apply only to the completed tool phase"));
+		ok(tail.includes("Do not invent missing evidence"));
+		ok(tail.includes(`Required terminal result: ${JSON.stringify(shape).slice(1, -1)}`));
 	});
 
 	it("does not reopen a repeated-call lock for a preauthorized contract revision", () => {
