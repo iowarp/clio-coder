@@ -1,9 +1,15 @@
 import path from "node:path";
 import { isRefusalToolResultError } from "../../tools/result-disposition.js";
 import type { ObservedCheck } from "../session/task-board.js";
-import { classify } from "./action-classifier.js";
 import { capabilityEntries, dispatchRunRecordEvidence, validationCheckId } from "./finish-contract.js";
-import { mutationTargets, validationCommandOf } from "./run-effects.js";
+import {
+	type CallReading,
+	gitRunsConfiguredHelpers,
+	observedCheckName,
+	readCall,
+	settleCheckCall,
+	validationCommandOf,
+} from "./run-effects.js";
 
 /**
  * The checks standing behind one task, folded from the session path. A note can
@@ -11,6 +17,12 @@ import { mutationTargets, validationCommandOf } from "./run-effects.js";
  * nothing and counts for nothing. A later call that could have written retires
  * earlier passes, since they no longer describe the tree, and a failure stands
  * until the same check passes again.
+ *
+ * Each call is read and settled by the run-effects recorder's own rules, so a pass
+ * the sealed receipt refuses never stands here (x4-1): a check sharing its call
+ * with a change, a status that is a later command's, a red a later pipe stage can
+ * cause, and a pass outside the workspace settle nothing, and a bash check is
+ * filed under its full command, so a narrower pass never answers a wider red.
  *
  * Only the task's own stretch of work counts: from when it became active, or for
  * a task closed without a start, from the board's last change. A check run for
@@ -20,7 +32,12 @@ import { mutationTargets, validationCommandOf } from "./run-effects.js";
 interface TrackedCall {
 	name: string | null;
 	check?: string;
-	mutates: boolean;
+	reading: CallReading;
+	runsCheck: boolean;
+	/** False when a bash call's exit status is only a later command's. */
+	statusAttributable: boolean;
+	/** The count of changes already settled when the call started. */
+	revision: number;
 	dispatch: boolean;
 }
 
@@ -34,21 +51,28 @@ function text(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function callCanWrite(tool: string, args: Record<string, unknown> | undefined): boolean {
-	if (mutationTargets(tool, args).length > 0) return true;
-	const actionClass = classify({ tool, ...(args ? { args } : {}) }).actionClass;
-	return actionClass !== "read";
-}
-
-function trackCall(tool: string, args: Record<string, unknown> | undefined, root: string): TrackedCall {
-	const name = validationCommandOf(tool, args, "grounding");
-	const dir = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(root, args.cwd) : root;
-	const check = dir === root && name !== null ? validationCheckId(name) : undefined;
+function trackCall(
+	tool: string,
+	args: Record<string, unknown> | undefined,
+	root: string,
+	gitHelpers: boolean,
+	revision: number,
+): TrackedCall {
+	const canonical = validationCommandOf(tool, args, "grounding");
+	const reading = readCall(tool, args, root, gitHelpers);
+	const command = reading.shell === null ? null : reading.shellCommand;
+	const name = canonical === null ? null : command === null ? canonical : observedCheckName(command, reading.base, root);
+	const check =
+		canonical !== null && reading.base === root && reading.shell?.outsideCwd !== true
+			? validationCheckId(canonical)
+			: undefined;
 	return {
-		name: name !== null && dir !== root ? `${name} in ${path.relative(root, dir) || dir}` : name,
+		name,
 		...(check ? { check } : {}),
-		// Running a check is not a write, and a dispatched worker may have written anything.
-		mutates: tool === "dispatch" || (name === null && callCanWrite(tool, args)),
+		reading,
+		runsCheck: tool === "verify" || canonical !== null,
+		statusAttributable: reading.shell?.statusAttributable ?? true,
+		revision,
 		dispatch: tool === "dispatch",
 	};
 }
@@ -110,17 +134,36 @@ export function standingChecks(
 	return standingChecksFrom(entries, start, workspaceRoot);
 }
 
-/** The same fold over any stretch of the session path, from `start` on: a headless run folds its own turn. */
+/** The same fold over any stretch of the session path, from `start` on. */
 export function standingChecksFrom(
 	entries: ReadonlyArray<unknown>,
 	start: number,
 	workspaceRoot: string,
 ): ReadonlyArray<ObservedCheck> {
 	const root = path.resolve(workspaceRoot);
+	const gitHelpers = gitRunsConfiguredHelpers(root);
 	const calls = new Map<string, TrackedCall>();
 	const standing = new Map<string, ObservedCheck>();
-	const retirePasses = (): void => {
-		for (const [name, item] of standing) if (item.passed) standing.delete(name);
+	let revision = 0;
+	const settle = (call: TrackedCall, failed: boolean, at: string): void => {
+		const settlement = settleCheckCall(
+			call.reading,
+			call.runsCheck,
+			failed,
+			failed ? "error" : "ok",
+			call.revision === revision,
+		);
+		if (settlement.mutation) {
+			revision += 1;
+			for (const [name, item] of standing) if (item.passed) standing.delete(name);
+		}
+		if (call.name === null || !call.statusAttributable || !settlement.settled) return;
+		standing.set(call.name, {
+			name: call.name,
+			...(call.check ? { check: call.check } : {}),
+			passed: !failed,
+			observedAt: at,
+		});
 	};
 	for (const entry of capabilityEntries(entries.slice(start))) {
 		const item = record(entry);
@@ -128,17 +171,8 @@ export function standingChecksFrom(
 		if (item?.kind === "bashExecution") {
 			const command = text(item.command);
 			if (command === null || item.cancelled === true || typeof item.exitCode !== "number") continue;
-			const call = trackCall("bash", { command, ...(text(item.cwd) ? { cwd: item.cwd } : {}) }, root);
-			if (call.name === null) {
-				if (call.mutates) retirePasses();
-				continue;
-			}
-			standing.set(call.name, {
-				name: call.name,
-				...(call.check ? { check: call.check } : {}),
-				passed: item.exitCode === 0,
-				observedAt: at,
-			});
+			const args = { command, ...(text(item.cwd) ? { cwd: item.cwd } : {}) };
+			settle(trackCall("bash", args, root, gitHelpers, revision), item.exitCode !== 0, at);
 			continue;
 		}
 		if (item?.kind !== "message") continue;
@@ -148,7 +182,7 @@ export function standingChecksFrom(
 		if (id === null) continue;
 		if (item.role === "tool_call") {
 			const tool = text(payload.name) ?? text(payload.toolName) ?? text(payload.tool);
-			if (tool !== null) calls.set(id, trackCall(tool, record(payload.args) ?? undefined, root));
+			if (tool !== null) calls.set(id, trackCall(tool, record(payload.args) ?? undefined, root, gitHelpers, revision));
 			continue;
 		}
 		if (item.role !== "tool_result") continue;
@@ -157,15 +191,7 @@ export function standingChecksFrom(
 		calls.delete(id);
 		const outcome = resultStanding(payload);
 		if (outcome === "refused") continue;
-		if (call.mutates) retirePasses();
-		if (call.name !== null) {
-			standing.set(call.name, {
-				name: call.name,
-				...(call.check ? { check: call.check } : {}),
-				passed: outcome === "passed",
-				observedAt: at,
-			});
-		}
+		settle(call, outcome === "failed", at);
 		if (call.dispatch && outcome === "passed") {
 			const summary = dispatchRunRecordEvidence(
 				{ ...item, payload: { ...payload, toolName: "dispatch" } },
@@ -175,5 +201,11 @@ export function standingChecksFrom(
 			if (run) standing.set(run, { name: run, passed: true, observedAt: at });
 		}
 	}
-	return [...standing.values()];
+	// Commands filed apart can still run one check id: a red among them answers for it, never a narrower green.
+	const red = new Set([...standing.values()].flatMap((item) => (!item.passed && item.check ? [item.check] : [])));
+	return [...standing.values()].map((item) =>
+		item.passed && item.check !== undefined && red.has(item.check)
+			? { name: item.name, passed: item.passed, observedAt: item.observedAt }
+			: item,
+	);
 }

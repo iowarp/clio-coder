@@ -173,26 +173,92 @@ interface PendingEffects {
 	proofCheck: string | null;
 	tool: string;
 	toolCallId: string;
-	paths: ReadonlyArray<string>;
+	reading: CallReading;
 	validationCommand: string | null;
 	validationName: string | null;
 	/** False when a bash call's exit status is only its last command's, so it settles nothing about the check. */
 	checkStatusAttributable: boolean;
-	/** False when a stage piped after the check can fail a green check ({@link checkFailureAttributable}). */
-	checkFailureAttributable: boolean;
-	/** The check ran outside the run's cwd ({@link checkRunsOutside}), so its pass is not this workspace's. */
-	checkOutsideCwd: boolean;
 	mutationRevision: number;
 	verificationCommand: string | null;
-	opaque: boolean;
-	/** A bash call made only of read-only inspection ({@link isReadOnlyInspectionCommand}), so it changed no tree. */
-	inspection: boolean;
-	/** Where the call's check stands against its own changes ({@link checkCommandShape}); null when it runs none. */
-	checkShape: CheckCommandShape | null;
-	/** The bash command text, or a verify call's resolved argv joined by spaces; null otherwise. */
-	shellCommand: string | null;
 	/** The tool's own outcome, when the call reached it. Stays null when the engine answered instead. */
 	outcome: "ok" | "error" | "blocked" | null;
+}
+
+/**
+ * What a bash command's own text says about the check it runs, read once at the call's start. The live recorder and
+ * the task board's replay over session entries both read a command through this, so neither can credit a pass the
+ * other refuses (x4-1). `base` is the directory the command started in, `cwd` the run's workspace.
+ */
+export interface ShellCheckReading {
+	/** False when the call's exit status is only a later command's ({@link shellExitSpeaksForCommand}). */
+	statusAttributable: boolean;
+	/** False when a stage piped after the check can fail a green check ({@link checkFailureAttributable}). */
+	failureAttributable: boolean;
+	/** The check ran outside `cwd` ({@link checkRunsOutside}), so its pass is not this workspace's. */
+	outsideCwd: boolean;
+	/** Only read-only inspection ({@link isReadOnlyInspectionCommand}), so it changed no tree. */
+	inspection: boolean;
+	/** Where its check stands against its own changes ({@link checkCommandShape}); null when it runs none. */
+	shape: CheckCommandShape | null;
+}
+
+function readShellCheck(command: string, base: string, cwd: string, gitHelpers: boolean): ShellCheckReading {
+	return {
+		statusAttributable: shellExitSpeaksForCommand(command),
+		failureAttributable: checkFailureAttributable(command),
+		outsideCwd: checkRunsOutside(command, base, cwd),
+		inspection: isReadOnlyInspectionCommand(command, gitHelpers),
+		shape: checkCommandShape(command, gitHelpers),
+	};
+}
+
+/** The name a bash check's outcome is filed under: its full observed command, prefixed with its directory off `cwd`. */
+export function observedCheckName(command: string, base: string, cwd: string): string {
+	return `${base === cwd ? "" : `cwd=${base}: `}${observedValidationCommand(command)}`;
+}
+
+export interface CheckCallSettlement {
+	/** The call counts as a workspace change, so no earlier pass stands on the tree it left. */
+	mutation: boolean;
+	/** Its check ran after its own change, so it judged the tree that change left. */
+	checkedAfterOwnMutation: boolean;
+	/** Its check judged the tree as it now stands. */
+	fresh: boolean;
+	/** Its outcome settles its check: a red that is the check's own, or a fresh green in this workspace. */
+	settled: boolean;
+}
+
+/**
+ * How one finished call bears on the outcomes standing before it, shared by the recorder and the task board's replay
+ * (x4-1). `startedOnCurrentTree` says no other call's change landed while it ran. A refused call never reached its
+ * tool, so it changed nothing and settles nothing. A failed call that really ran may have partly written.
+ */
+export function settleCheckCall(
+	reading: CallReading,
+	runsCheck: boolean,
+	failed: boolean,
+	outcome: "ok" | "error" | "blocked" | null,
+	startedOnCurrentTree: boolean,
+): CheckCallSettlement {
+	const refused = failed && outcome !== "error" && outcome !== "ok";
+	// A verify call is a check, as a recognized validation command is: even a bare listing changes no tree. Its
+	// argv is one simple command (a catalog refuses shell executables, a task gate takes bare words). A bash
+	// check that shares its call with steps that may change the tree is still a mutation, and it judged the
+	// final tree only when every such step ran first (x1-1). A check that rewrites the tree, bash or verify, is a
+	// change too, so no earlier pass stands on code it reformatted (x3-3).
+	const checkChangedTree = reading.shape === "after-change" || reading.shape === "mixed";
+	const opaqueMutation = reading.opaque && reading.shell?.inspection !== true && (checkChangedTree || !runsCheck);
+	const mutation = !refused && (reading.paths.length > 0 || opaqueMutation);
+	const checkedAfterOwnMutation = mutation && reading.shape !== "mixed" && reading.shape !== "pure";
+	const fresh = startedOnCurrentTree && (!mutation || checkedAfterOwnMutation);
+	// Only a check that ran can fail. A call the engine answered without
+	// reaching its tool settles with no outcome, so it records nothing.
+	// `pytest | head` exits 0 only when pytest did, but its red may be head's SIGPIPE (x3-2). A pass in another
+	// directory judged another tree, so it settles nothing here and a standing red stays (x3-5).
+	const settled = failed
+		? outcome === "error" && reading.shell?.failureAttributable !== false
+		: outcome !== "blocked" && fresh && reading.shell?.outsideCwd !== true;
+	return { mutation, checkedAfterOwnMutation, fresh, settled };
 }
 
 /**
@@ -272,6 +338,42 @@ export function mutationTargets(toolName: string, args: Record<string, unknown> 
 	return [...extractCommandWriteTargets(command), ...extractCommandDeleteTargets(command), ...gitPathOperands(command)];
 }
 
+/** One call as the outcome fold reads it at its start, by the recorder and by the task board's replay alike (x4-1). */
+export interface CallReading {
+	/** Where the call ran: the run's cwd, re-based by a bash call's own cwd argument. */
+	base: string;
+	/** Absolute paths the call's arguments aim a mutation at. */
+	paths: string[];
+	/** The bash command text, or a verify call's resolved argv joined by spaces; null otherwise. */
+	shellCommand: string | null;
+	/** A bash command read for its check; null for any other call. */
+	shell: ShellCheckReading | null;
+	opaque: boolean;
+	shape: CheckCommandShape | null;
+}
+
+export function readCall(
+	toolName: string,
+	args: Record<string, unknown> | undefined,
+	cwd: string,
+	gitHelpers: boolean,
+): CallReading {
+	const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
+	const command = toolName === ToolNames.Bash ? commandOf(args) : null;
+	const shell = command === null ? null : readShellCheck(command, base, cwd, gitHelpers);
+	const shellCommand = command ?? verifyCommandOf(toolName, args, base);
+	return {
+		base,
+		paths: mutationTargets(toolName, args).map((target) => path.resolve(base, target)),
+		shellCommand,
+		shell,
+		opaque: toolWritesOpaquely(toolName),
+		// A verify check whose argv rewrites the tree (`npm run format`) is a change, as in bash (x3-3).
+		shape:
+			shell !== null ? shell.shape : shellCommand !== null && checkWritesTree(shellCommand.split(" ")) ? "mixed" : null,
+	};
+}
+
 /**
  * The canonical identity of a call's check under one scope. A typed
  * verification tool carries the same identity under both scopes: the scope only
@@ -334,7 +436,7 @@ const GIT_CONFIG_BOOLEAN = /^(?:true|false|yes|no|on|off|1|0|)$/iu;
  * (x1-3). Read once per run; planting such config later is a mutation of its own. No match, no git and no `cwd`
  * all answer false, because then no git command can run a helper there. Any other failure answers true.
  */
-function gitRunsConfiguredHelpers(cwd: string, env: NodeJS.ProcessEnv = process.env): boolean {
+export function gitRunsConfiguredHelpers(cwd: string, env: NodeJS.ProcessEnv = process.env): boolean {
 	let listing: string;
 	try {
 		listing = execFileSync("git", ["config", "--get-regexp", GIT_HELPER_KEYS], {
@@ -396,46 +498,35 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				latestProofCalls.set(proofCheck, toolCallId);
 			}
 			inFlight.set(toolCallId, { tool: toolName, revision: mutationRevision, outcome: null });
-			const paths = mutationTargets(toolName, args);
-			// A bash call may re-base its relative paths with its own cwd argument.
-			const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
+			const reading = readCall(toolName, args, cwd, gitHelpers);
+			const { base, shell } = reading;
 			const validationCommand = receiptValidationCommand(toolName, args, base);
 			const verificationCommand = validationCommandOf(toolName, args, "grounding");
-			const opaque = toolWritesOpaquely(toolName);
-			const command = toolName === ToolNames.Bash ? commandOf(args) : null;
-			const shellCommand = command ?? verifyCommandOf(toolName, args, base);
+			const command = shell === null ? null : reading.shellCommand;
 			// A listing names no check and runs none, so it is not a checking call (bt-19).
 			if ((toolName === ToolNames.Verify && !isVerifyListing(args)) || verificationCommand !== null)
 				checkingCalls.set(toolCallId, null);
 			// An opaque call is tracked even when it exposed no path and no
 			// command, because the fact that it ran at all is the finding.
 			const chain = toolName === "gateway" && args?.op === "chain";
-			if (!chain && !opaque && paths.length === 0 && validationCommand === null && verificationCommand === null) return;
+			if (
+				!chain &&
+				!reading.opaque &&
+				reading.paths.length === 0 &&
+				validationCommand === null &&
+				verificationCommand === null
+			)
+				return;
 			pending.set(toolCallId, {
 				proofCheck,
 				tool: toolName,
 				toolCallId,
-				paths: paths.map((target) => path.resolve(base, target)),
+				reading,
 				validationCommand,
-				validationName:
-					toolName === ToolNames.Bash && validationCommand !== null
-						? `${base === cwd ? "" : `cwd=${base}: `}${observedValidationCommand(commandOf(args) ?? "")}`
-						: null,
-				checkStatusAttributable: toolName !== ToolNames.Bash || shellExitSpeaksForCommand(commandOf(args) ?? ""),
-				checkFailureAttributable: command === null || checkFailureAttributable(command),
-				checkOutsideCwd: command !== null && checkRunsOutside(command, base, cwd),
+				validationName: command !== null && validationCommand !== null ? observedCheckName(command, base, cwd) : null,
+				checkStatusAttributable: shell?.statusAttributable ?? true,
 				mutationRevision,
 				verificationCommand,
-				opaque,
-				inspection: command !== null && isReadOnlyInspectionCommand(command, gitHelpers),
-				// A verify check whose argv rewrites the tree (`npm run format`) is a change, as in bash (x3-3).
-				checkShape:
-					command !== null
-						? checkCommandShape(command, gitHelpers)
-						: shellCommand !== null && checkWritesTree(shellCommand.split(" "))
-							? "mixed"
-							: null,
-				shellCommand,
 				outcome: null,
 			});
 		},
@@ -468,53 +559,38 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			}
 			// An outcome before a later mutation judged a tree that is gone: a pass
 			// cannot settle the final tree and a red baseline cannot fail it (bt-27).
-			// A refused call never reached its tool, so it changed nothing and leaves
-			// outcomes standing. A failed call that really ran may have partly written.
-			const refused = failed && effects.outcome !== "error" && effects.outcome !== "ok";
-			// A verify call is a check, as a recognized validation command is: even a bare listing changes no tree. Its
-			// argv is one simple command (a catalog refuses shell executables, a task gate takes bare words). A bash
-			// check that shares its call with steps that may change the tree is still a mutation, and it judged the
-			// final tree only when every such step ran first (x1-1). A check that rewrites the tree, bash or verify, is a
-			// change too, so no earlier pass stands on code it reformatted (x3-3).
-			const checkChangedTree = effects.checkShape === "after-change" || effects.checkShape === "mixed";
-			const opaqueMutation =
-				effects.opaque &&
-				!effects.inspection &&
-				(checkChangedTree || (effects.tool !== ToolNames.Verify && effects.validationCommand === null));
-			const mutation = !refused && (effects.paths.length > 0 || opaqueMutation);
+			const { reading } = effects;
+			const { mutation, checkedAfterOwnMutation, fresh, settled } = settleCheckCall(
+				reading,
+				effects.tool === ToolNames.Verify || effects.validationCommand !== null,
+				failed,
+				effects.outcome,
+				effects.mutationRevision === mutationRevision,
+			);
 			if (mutation) {
 				mutationRevision += 1;
 				validationOutcomes.clear();
 				checkOutcomes.clear();
 				validationCommands.clear();
 			}
-			const checkedAfterOwnMutation = mutation && effects.checkShape !== "mixed" && effects.checkShape !== "pure";
-			const checkedRevision = effects.mutationRevision + (checkedAfterOwnMutation ? 1 : 0);
 			settleRan(checkedAfterOwnMutation);
-			// Only a check that ran can fail. A call the engine answered without
-			// reaching its tool settles with no outcome, so it records nothing.
 			// `pytest; echo done` ran the check, but its status is echo's, so the outcome stays unknown either way.
-			// `pytest | head` exits 0 only when pytest did, but its red may be head's SIGPIPE (x3-2). A pass in another
-			// directory judged another tree, so it settles nothing here and a standing red stays (x3-5).
-			const settled = failed
-				? effects.outcome === "error" && effects.checkFailureAttributable
-				: effects.outcome !== "blocked" && checkedRevision === mutationRevision && !effects.checkOutsideCwd;
 			if (effects.validationName !== null && effects.checkStatusAttributable && settled) {
 				validationOutcomes.set(effects.validationName, !failed);
 				checkOutcomes.set(effects.validationName, !failed);
 			}
 			if (effects.proofCheck !== null && effects.proofCheck.length > 0 && settled) {
 				checkOutcomes.set(effects.proofCheck, !failed);
-				if (effects.shellCommand !== null) checkOutcomes.set(observedValidationCommand(effects.shellCommand), !failed);
+				if (reading.shellCommand !== null) checkOutcomes.set(observedValidationCommand(reading.shellCommand), !failed);
 			}
 			if (failed) {
-				for (const target of effects.paths) failedMutationPaths.add(target);
+				for (const target of reading.paths) failedMutationPaths.add(target);
 				return;
 			}
 			// Success-gated on purpose. A shell command the safety policy blocked,
 			// or one that came back an error, never reached the filesystem, so it
 			// leaves the record closed.
-			if (effects.opaque) {
+			if (reading.opaque) {
 				const downgrade: WriteRecordDowngrade = {
 					reason: "opaque_tool_succeeded",
 					tool: effects.tool,
@@ -524,12 +600,12 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				writeRecordDowngrades.set(effects.toolCallId, downgrade);
 				if (recordWasComplete) options.onWriteRecordDowngraded?.({ ...downgrade });
 			}
-			for (const target of effects.paths) mutatedPaths.add(target);
+			for (const target of reading.paths) mutatedPaths.add(target);
 			if (
 				effects.validationCommand !== null &&
 				effects.checkStatusAttributable &&
-				checkedRevision === mutationRevision &&
-				!effects.checkOutsideCwd
+				fresh &&
+				reading.shell?.outsideCwd !== true
 			)
 				validationCommands.add(effects.validationCommand);
 			if (effects.verificationCommand !== null)
@@ -540,26 +616,26 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				verificationCommands.add("tool:verify");
 				// The check ran its resolved command, so that command grounds as the same text run through bash would.
 				const ran =
-					effects.shellCommand === null || effects.outcome === "blocked" || effects.outcome === "error"
+					reading.shellCommand === null || effects.outcome === "blocked" || effects.outcome === "error"
 						? null
-						: validationCommandOf(ToolNames.Bash, { command: effects.shellCommand }, "grounding");
+						: validationCommandOf(ToolNames.Bash, { command: reading.shellCommand }, "grounding");
 				if (ran !== null) verificationCommands.add(ran);
 				if (
 					effects.proofCheck !== null &&
 					effects.proofCheck.length > 0 &&
-					effects.shellCommand !== null &&
+					reading.shellCommand !== null &&
 					effects.outcome !== "blocked" &&
 					effects.outcome !== "error" &&
 					call !== undefined
 				)
 					passedVerifyRuns.set(toolCallId, {
 						check: effects.proofCheck,
-						command: effects.shellCommand,
+						command: reading.shellCommand,
 						revision: call.revision,
 					});
 			}
-			if (effects.shellCommand !== null && effects.outcome !== "blocked" && effects.outcome !== "error")
-				executedShellCommands.push(effects.shellCommand);
+			if (reading.shellCommand !== null && effects.outcome !== "blocked" && effects.outcome !== "error")
+				executedShellCommands.push(reading.shellCommand);
 		},
 		checkOutcome(toolCallId, outcome) {
 			const effects = pending.get(toolCallId);

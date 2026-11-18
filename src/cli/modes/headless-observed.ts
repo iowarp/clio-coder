@@ -1,11 +1,12 @@
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
-import { verifyFoundNoChecks } from "../../domains/safety/finish-contract.js";
-import { standingChecksFrom } from "../../domains/safety/observed-checks.js";
+import { capabilityEntries, verifyFoundNoChecks } from "../../domains/safety/finish-contract.js";
+import { type RunEffects, validationCommandOf } from "../../domains/safety/run-effects.js";
 
 /**
  * What the harness itself saw a headless main-agent run do, beside the model's own account of it: tool calls,
- * refusals, successful writes, and the checks that stand at the end of the run's own stretch of the session.
- * It reads only what the tools recorded; a check the fold does not recognise is absent, never invented.
+ * refusals, successful writes, and the checks that stand at the end of the run. The checks are the run-effects
+ * recorder's own outcomes, the ones the sealed receipt reads, so this line never reports a pass the receipt refuses
+ * (x4-1). A check the recorder does not recognise or could not attribute is absent, never invented.
  * `noChecksDeclared` is set when no check stands and a `verify` call found none declared or derivable in the workspace.
  */
 export interface HeadlessObserved {
@@ -19,23 +20,41 @@ export interface HeadlessObserved {
 const NAME_LIMIT = 80;
 const NAMES_SHOWN = 3;
 
+/** The check ids the run's `verify` calls named, as the recorder files their outcomes. */
+function verifyCheckIds(entries: ReadonlyArray<unknown>): Set<string> {
+	const ids = new Set<string>();
+	for (const entry of capabilityEntries(entries)) {
+		const item = entry as { kind?: unknown; role?: unknown; payload?: { name?: unknown; args?: { check?: unknown } } };
+		if (item?.kind !== "message" || item.role !== "tool_call" || item.payload?.name !== "verify") continue;
+		const check = item.payload.args?.check;
+		if (typeof check === "string" && check.trim().length > 0) ids.add(check.trim());
+	}
+	return ids;
+}
+
 export function observeHeadlessRun(input: {
 	entries: ReadonlyArray<unknown>;
 	start: number;
-	workspaceRoot: string;
+	/** The run's recorded effects: bash checks under their full command, verify checks under their id (x4-1). */
+	effects: Pick<RunEffects, "validationOutcomes" | "checkOutcomes">;
 	toolCalls: number;
 	refused: number;
 	writes: number;
 }): HeadlessObserved {
+	const own = input.entries.slice(Math.max(0, input.start));
+	const verifyChecks = input.toolCalls > 0 ? verifyCheckIds(own) : new Set<string>();
+	// A verify outcome is also filed under the command it resolved to; its id names it once.
 	const checks =
 		input.toolCalls > 0
-			? standingChecksFrom(input.entries, Math.max(0, input.start), input.workspaceRoot).map((check) => ({
-					name: check.name,
-					passed: check.passed,
-				}))
+			? [...input.effects.checkOutcomes].flatMap(([key, passed]) =>
+					input.effects.validationOutcomes.has(key)
+						? [{ name: key, passed }]
+						: verifyChecks.has(key)
+							? [{ name: validationCommandOf("verify", { check: key }, "grounding") ?? `verify ${key}`, passed }]
+							: [],
+				)
 			: [];
-	const noChecksDeclared =
-		input.toolCalls > 0 && checks.length === 0 && verifyFoundNoChecks(input.entries.slice(Math.max(0, input.start)));
+	const noChecksDeclared = input.toolCalls > 0 && checks.length === 0 && verifyFoundNoChecks(own);
 	return {
 		toolCalls: input.toolCalls,
 		refused: input.refused,

@@ -1387,7 +1387,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			? observeHeadlessRun({
 					entries: options.readEntries(),
 					start: entriesBefore,
-					workspaceRoot: process.cwd(),
+					effects: runStats.runEffects.snapshot(),
 					toolCalls: countToolStats(runStats.toolStats),
 					refused: toolTotals(runStats.toolStats).blocked,
 					writes: runStats.mutatingSucceeded,

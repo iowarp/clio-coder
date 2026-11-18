@@ -56,10 +56,11 @@ test("a run whose verify call found no check in the workspace is observed as no 
 			payload: { toolCallId: "v1", outcome: "ok", isError: false, result: { details: { noChecksDeclared: true } } },
 		},
 	];
+	const effects = { validationOutcomes: new Map(), checkOutcomes: new Map() };
 	const observed = observeHeadlessRun({
 		entries: [...edit, ...noChecks],
 		start: 0,
-		workspaceRoot: root,
+		effects,
 		toolCalls: 2,
 		refused: 0,
 		writes: 1,
@@ -73,7 +74,7 @@ test("a run whose verify call found no check in the workspace is observed as no 
 		observeHeadlessRun({
 			entries: [...noChecks, ...edit],
 			start: 2,
-			workspaceRoot: root,
+			effects,
 			toolCalls: 1,
 			refused: 0,
 			writes: 1,
@@ -84,8 +85,8 @@ test("a run whose verify call found no check in the workspace is observed as no 
 
 type StubCall = readonly [string, string, string, string, Record<string, unknown>?];
 const WROTE_THEN_FAILED_CHECK: ReadonlyArray<StubCall> = [
-	["e1", "edit", "write", "ok"],
-	["b1", "bash", "execute", "error"],
+	["e1", "edit", "write", "ok", { path: "src/a.py", edits: [] }],
+	["b1", "bash", "execute", "error", { command: "python3 -B -m unittest discover -v" }],
 ];
 
 async function headlessRun(
@@ -110,7 +111,15 @@ async function headlessRun(
 			handler({ type: "agent_start" });
 			for (const [id, tool, actionClass, outcome, args] of calls) {
 				handler({ type: "tool_execution_start", toolCallId: id, toolName: tool, args: args ?? {} });
-				handler({ type: "tool_execution_end", toolCallId: id, toolName: tool, actionClass, outcome, result: {} });
+				handler({
+					type: "tool_execution_end",
+					toolCallId: id,
+					toolName: tool,
+					actionClass,
+					outcome,
+					isError: outcome !== "ok",
+					result: {},
+				});
 			}
 			entries.push(...edit, ...failingCheck);
 			handler({ type: "message_end", message: answer });
@@ -178,16 +187,42 @@ test("a headless run that wrote and then ran a failing check says so on stderr a
 	}
 });
 
-test("a scoped unittest pass does not replace a full-suite unittest failure", () => {
-	const scoped = [call("b3", "bash", { command: "python3 -m unittest test_stats -v 2>&1" }), result("b3", 0)];
-	const checks = standingChecksFrom([...edit, ...failingCheck, ...scoped], 0, root);
-	deepStrictEqual(
-		checks.map((check) => [check.name, check.passed]),
-		[
-			["python -m unittest discover", false],
-			["python -m unittest test_stats", true],
-		],
-	);
+test("observed checks follow the receipt's rules on the task board and the headless line (x4-1)", async () => {
+	let id = 0;
+	const bash = (command: string, exitCode = 0): object[] => {
+		id += 1;
+		return [call(`p${id}`, "bash", { command }), result(`p${id}`, exitCode)];
+	};
+	const standing = (...steps: object[][]) =>
+		standingChecksFrom([...edit, ...steps.flat()], 0, root).map((check) => [check.name, check.passed, check.check]);
+	deepStrictEqual(standing(bash("make test; echo EXIT=$?")), []);
+	deepStrictEqual(standing(bash("npm test && git apply fix.patch")), []);
+	deepStrictEqual(standing(bash("npm test"), bash("npm run format")), []);
+	deepStrictEqual(standing(bash("cd ../other && npm test")), []);
+	deepStrictEqual(standing(bash("pytest", 1), bash("pytest tests/one.py")), [
+		["pytest", false, undefined],
+		["pytest tests/one.py", true, undefined],
+	]);
+	deepStrictEqual(standing(failingCheck, bash("python3 -m unittest test_stats -v 2>&1")), [
+		["python3 -B -m unittest discover -v", false, undefined],
+		["python3 -m unittest test_stats -v", true, undefined],
+	]);
+	// A narrower green under the same check id never answers that id's acceptance row.
+	deepStrictEqual(standing(bash("npm test -- tests/one.test.js"), bash("npm test", 1)), [
+		["npm test -- tests/one.test.js", true, undefined],
+		["npm test", false, "test"],
+	]);
+	deepStrictEqual(standing(bash("npm ci && npm test")), [["npm ci && npm test", true, "test"]]);
+	const env = await isolateClioEnv("headless-observed-");
+	try {
+		const text = await headlessRun("text", [
+			["e1", "edit", "write", "ok", { path: "src/a.py", edits: [] }],
+			["b1", "bash", "execute", "ok", { command: "make test; echo EXIT=$?" }],
+		]);
+		match(text.stderr, /1 write · no check observed after the last write/u);
+	} finally {
+		env.restore();
+	}
 });
 
 test("a bash write that succeeded is a workspace change, so a later refused command does not make the run a no-op", async () => {
