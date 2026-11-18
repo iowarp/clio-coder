@@ -133,6 +133,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A read-only worker's authority line now says workspace edits are not permitted in this run. It no longer says "workspace edits and recognized commands run". Other workers' prompts are byte-identical (D-C).
+- Headless `run`: a killed or timed-out worker that is not retried now prints its not_retried line, as interactive does, including under the review gate and a pipeline halt. A delegated task whose workers started and then failed reads "failed (...)" instead of "never started" (D3-c, H6).
 - ask_user: a timed-out question that names writing outside the workspace now declines a recommended option that affirms it ("Yes, run it"). Before, only the option's own words were checked. A recommended option that declines is still picked (bt-21).
 - `telemetry why-stopped` now reports a turn that stopped normally without answering, such as one that wrote a tool call as text, as a failed turn naming the cause. Before, it read "ended normally". turn.settled carries an optional content-free `terminal.noAnswer` (J1).
 - An output-limit cut with tool calls shows only its warning notice, without a second red "[stopped: length]" row (J4).
