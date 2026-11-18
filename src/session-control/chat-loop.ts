@@ -1608,6 +1608,37 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				...(report.chip ? { memory: report.chip } : {}),
 			}),
 	});
+	/**
+	 * The continuity fold both live-budget fields read. A publication asks for both at once, so they share one
+	 * resolution at one clock reading, and the active branch is reselected only when the frozen ledger snapshot or
+	 * the explicit leaf changes: a tree switch moves the leaf without appending (Astra r8-5).
+	 */
+	let budgetBranch: { entries: ReadonlyArray<SessionEntry>; leaf: string | undefined; path: SessionEntry[] } | null =
+		null;
+	let budgetFold: {
+		path: SessionEntry[];
+		sessionId: string;
+		nowMs: number;
+		current: ReturnType<typeof resolveContinuityProjection>["current"];
+	} | null = null;
+	const budgetContinuity = (): ReturnType<typeof resolveContinuityProjection>["current"] => {
+		const sessionId = deps.session?.current()?.id;
+		if (!sessionId) return null;
+		const entries = deps.readSessionEntries?.() ?? [];
+		const leaf = state.lastTurnId ?? undefined;
+		if (!Object.isFrozen(entries) || budgetBranch?.entries !== entries || budgetBranch.leaf !== leaf)
+			budgetBranch = { entries, leaf, path: filterEntriesToActivePath(entries, leaf) };
+		const path = budgetBranch.path;
+		const nowMs = Date.now();
+		if (budgetFold?.path !== path || budgetFold.sessionId !== sessionId || budgetFold.nowMs !== nowMs)
+			budgetFold = {
+				path,
+				sessionId,
+				nowMs,
+				current: resolveContinuityProjection({ entries: path, sessionId, nowMs }).current,
+			};
+		return budgetFold.current;
+	};
 	const context = createTurnContext({
 		isTurnActive: () => turnActive,
 		turnSignal: () => submitOwner?.signal,
@@ -1639,12 +1670,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		...(deps.pinnedContext ? { pinnedContext: deps.pinnedContext } : {}),
 		...(deps.getRouteSources ? { getRouteSources: deps.getRouteSources } : {}),
 		getPendingHandoff: () => {
-			const sessionId = deps.session?.current()?.id;
-			if (!sessionId) return null;
-			const fold = resolveContinuityProjection({
-				entries: filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined),
-				sessionId,
-			}).current;
+			const fold = budgetContinuity();
 			return fold?.identity && fold.phase !== "acknowledged"
 				? {
 						id: fold.identity.handoffId,
@@ -1654,12 +1680,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				: null;
 		},
 		getLastOutcome: () => {
-			const sessionId = deps.session?.current()?.id;
-			if (!sessionId) return null;
-			const fold = resolveContinuityProjection({
-				entries: filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined),
-				sessionId,
-			}).current;
+			const fold = budgetContinuity();
 			return fold?.identity ? { outcome: fold.phase, at: null, detail: fold.commit?.outcome ?? null } : null;
 		},
 		middleware,
