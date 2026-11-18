@@ -4,12 +4,6 @@
 
 CLIO Coder can reduce a long native session while preserving the assistant's exact handoff note and the original task. Open `/context` to inspect the next request's input, output reservation, headroom, and pending handoff. The model can read the same accounting with `context(scope="budget")`.
 
-> [!NOTE]
-> The local-clock reminders below are in the `0.8.4-dev` checkout
-> (`package.json`, `src/domains/middleware/local-clock-reminder.ts`). The
-> public site still pins `0.8.3` in `site/product.json` and
-> `site/content/docs-manifest.json`.
-
 ## Date and clock context
 
 The Runtime block gives the main model the operator's local date, weekday and
@@ -22,8 +16,9 @@ the new date and time; a nested gateway call does not duplicate it
 [format-time.ts](../../src/core/format-time.ts)).
 
 This is an orientation aid, not a timer or scheduling authority. It keeps
-date-sensitive ids, archives and prose on the operator's calendar and can
-cause a one-day change in the compiled prompt. It does not rewrite prior
+date-sensitive ids, archives and prose on the operator's calendar. Because
+the Runtime block carries the date, the system prompt changes once a day, and
+a turn submitted after local midnight recompiles it. It does not rewrite prior
 messages, move a deadline, or replace provider/telemetry timestamps. A resumed
 session receives a new turn-start clock reminder for the current local time;
 workers do not receive this main-session middleware reminder.

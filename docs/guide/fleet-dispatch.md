@@ -1196,16 +1196,33 @@ read-only, and credentials and secret files are hidden, including the secret
 files of the checkout a task worktree was cut from. `safety.sandbox: off`
 runs the checks bare, as does `auto` on a host with no backend; `required`
 without a backend records each check as `spawn-failed`. Logs are written
-under the run artifact directory. Successful evidence is memoized by the
+under the run artifact directory. A successful command check is memoized by the
 workspace fingerprint, resolved argv, cwd, and allowed environment values. A
-memo hit names the run that produced the original evidence. A changed tree is a
-miss. An unsuccessful worker records `hostVerification.status="skipped"` with
+memo hit counts only when the run it names sealed a passing execution of that
+check on the same tree; it names that run, and a changed tree, a forged entry or
+an unsealed run is a miss. Judged `numeric-compare` and `perf-budget` checks and
+sealed `reproduce` runs are never memoized, so their verdict is always judged
+afresh. Admission seals the SHA-256 of a numeric reference or perf baseline,
+and a check fails with `reference '<path>' changed since admission` (or
+`baseline ...`) when that file changed before it was judged. A lint or format
+check under whose cwd the task changed no file is not run and records
+`notRun: "nothing-changed"` with the tail `not run: nothing changed under it`.
+An unsuccessful worker records `hostVerification.status="skipped"` with
 `reason="worker_not_successful"`; a failed host check records `rejected` with
 its exit code, bounded output tail, and artifact path. A check whose process never
 started also records `notRun`: `refused` when a reproduce check's precondition refused
 it before launch, `unconfigured` when a sealed check carries no parameters, or
 `spawn-failed` when no process could be created. The sealed run-result object keeps that fact, so a check
-that never ran does not read as a plain failing exit
+that never ran does not read as a plain failing exit. Each sealed check also
+keeps the tree head and fingerprint it judged and, for a judged check, a bounded
+report: the rule, tolerance, reference or baseline digest, payload digest, key
+counts, up to 64 failed key names and 64 keys with their worst deviation
+(failing keys first), or the measured and
+budget milliseconds for `perf-budget`. A `verified` status validates the run's
+trust only when every check executed for it: any reused memo pass leaves the run
+`unknown` under `host-verification-reused`, a run whose every check was skipped
+under `host-verification-skipped`, and a `nothing-changed` skip beside executed
+passes neither validates nor blocks
 ([host-verification.ts](../../src/domains/dispatch/host-verification.ts),
 [types.ts](../../src/domains/dispatch/types.ts)). Worker-reported command
 success never populates this status. In a parallel batch each distinct check runs
@@ -1901,7 +1918,7 @@ step's success.
 
 ### Inspect worker runs
 
-Inspect a worker run with `clio-coder fleet view <runId> --json`, or open the dispatch runs in `/view` ([/view](../architecture/observability.md)). A run's record states the worker's outcome, route, usage, cost and evidence; `/view verify <runId>` and `clio-coder fleet verify <runId> --json` check its seal. The [fleet CLI viewer](#inspect-fleet-runs-from-the-cli) also shows the run's ledger row and available transcript. Headless `clio-coder run --agent` prints a `Not verified:` block from the sealed result's own typed fields, such as declared checks that did not run and failed checks, and prints the sealed result itself when the worker wrote no prose; [exit-codes-and-output.md](exit-codes-and-output.md) describes that output ([run-output.ts](../../src/cli/run-output.ts)).
+Inspect a worker run with `clio-coder fleet view <runId> --json`, or open the dispatch runs in `/view` ([/view](../architecture/observability.md)). A run's record states the worker's outcome, route, usage, cost and evidence; `/view verify <runId>` and `clio-coder fleet verify <runId> --json` check its seal. The [fleet CLI viewer](#inspect-fleet-runs-from-the-cli) also shows the run's ledger row and available transcript. Headless `clio-coder run --agent` reads the sealed result's own typed fields: a `Failed checks:` block lists the checks a verifier or code step ran that failed, a `Not verified:` block lists declared checks that never ran and other stated limits, and the command prints the sealed result itself when the worker wrote no prose; [exit-codes-and-output.md](exit-codes-and-output.md) describes that output ([run-output.ts](../../src/cli/run-output.ts)).
 
 ### Run record integrity and fields
 

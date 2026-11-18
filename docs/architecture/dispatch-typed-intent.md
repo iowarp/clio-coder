@@ -43,8 +43,9 @@ segments and does not interpret or reject glob characters. Each list is
 normalized, deduplicated, and sorted by
 code point, holds at most 32 entries, and each entry is at most 512 UTF-8 bytes.
 `verification` holds at most 8 entries, each carrying only `check` and an optional `timeout_ms`, and every
-`check` is a declared id resolved from package scripts or
-`.clio-coder/verifiers.yaml`, never a shell command. A `timeout_ms` is raised to at least 1000 ms and clamped to the declared check's own timeout; when omitted the check's own timeout applies. The one exception is
+`check` is an id `verify` lists, resolved from package scripts,
+`.clio-coder/verifiers.yaml`, or an available check derived from the toolchain
+files (such as `python-unittest`), never a shell command. A `timeout_ms` is raised to at least 1000 ms and clamped to the declared check's own timeout; when omitted the check's own timeout applies. The one exception is
 `{ "check": "none" }`, which models write to mean "no verification"; it
 normalizes to an empty list instead of costing a refused round unless the
 workspace actually declares a verifier whose id is `none`.
@@ -226,10 +227,11 @@ environmental. [dispatch-admission.test.ts](https://github.com/iowarp/clio-coder
 normalization and compatibility boundary.
 
 The one input that is legitimately environmental is the *verification catalog*:
-`check` ids resolve from the project's `package.json` scripts and
-`.clio-coder/verifiers.yaml`, which are properties of the workspace, not of the
+`check` ids resolve from the project's `package.json` scripts,
+`.clio-coder/verifiers.yaml`, and the checks `verify` derives from the
+workspace's toolchain files, which are properties of the workspace, not of the
 CLIO Coder installation. An undeclared id fails closed with
-`verification_check_undeclared` naming both sources.
+`verification_check_undeclared` naming all three sources.
 
 ---
 
