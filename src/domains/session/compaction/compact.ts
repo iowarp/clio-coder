@@ -1522,7 +1522,12 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 					false,
 				)
 			: undefined;
-	const prefixText = turnPrefix.length > 0 ? represent(turnPrefix, rawTurnPrefix, previousContextText, true) : undefined;
+	// The previous context rides only one request. When the history summary carries it, a split-turn summary that
+	// carried it too wrote the prior checkpoint twice, so each checkpoint grew by a copy of the last (bt-18).
+	const prefixText =
+		turnPrefix.length > 0
+			? represent(turnPrefix, rawTurnPrefix, historyText === undefined ? previousContextText : "", true)
+			: undefined;
 	// T4: the live request is chosen only when its cached price is below the portable requests' plain input, and it
 	// fits the window with the whole transcript in it.
 	const chooseLivePrefix = async (): Promise<{ port: LivePrefixSummary; tail: string } | undefined> => {
