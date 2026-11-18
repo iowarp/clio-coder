@@ -1452,7 +1452,62 @@ const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
 	"show",
 	"rev-parse",
 	"branch",
+	"ls-files",
+	"rev-list",
+	"describe",
+	"cat-file",
+	"ls-tree",
+	"grep",
+	"blame",
 ]);
+
+/** Read-only git subcommands that only read objects and refs, so no configured helper program can run under them. */
+const HELPER_FREE_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set(["rev-parse", "rev-list", "ls-tree", "cat-file"]);
+
+/**
+ * Git global options that take no value and change neither the repository git reads nor a program it runs (x6-2).
+ * `-C`, `--git-dir` and `--work-tree` stay outside: helper config is read at the recorder's cwd only.
+ */
+const READ_ONLY_GIT_GLOBALS: ReadonlySet<string> = new Set([
+	"--no-pager",
+	"-P",
+	"--no-optional-locks",
+	"--literal-pathspecs",
+	"--glob-pathspecs",
+	"--noglob-pathspecs",
+	"--icase-pathspecs",
+	"--no-replace-objects",
+	"--no-lazy-fetch",
+	"--no-advice",
+]);
+
+/**
+ * Config keys a `git -c key=value` may set on a read-only step: display settings that name no program. Any other key
+ * (`core.pager`, `alias.*`, `diff.external`, `*.textconv`, `core.fsmonitor`, `credential.*`, `include.path`) may run
+ * one, so it is refused.
+ */
+const READ_ONLY_GIT_CONFIG_KEY =
+	/^(?:color\.[^=]+|advice\.[^=.]+|column\.ui|core\.quotepath|core\.abbrev|diff\.(?:noprefix|mnemonicprefix|relative|renames|renamelimit|algorithm|indentheuristic|context|interhunkcontext|statgraphwidth)|log\.(?:decorate|abbrevcommit|date|follow)|status\.(?:short|branch|showuntrackedfiles|relativepaths)|grep\.(?:linenumber|patterntype|extendedregexp|column|fullname))$/u;
+
+/** The git subcommand and its arguments past the read-only global options; null when a global may run or relocate. */
+function gitSubcommand(args: ReadonlyArray<string>): { subcommand: string; rest: ReadonlyArray<string> } | null {
+	let index = 0;
+	for (; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		if (READ_ONLY_GIT_GLOBALS.has(arg)) continue;
+		if (arg !== "-c") break;
+		const setting = args[index + 1] ?? "";
+		const key = setting.split("=", 1)[0] ?? "";
+		if (!READ_ONLY_GIT_CONFIG_KEY.test(key.toLowerCase()) || setting.includes("!")) return null;
+		index += 1;
+	}
+	const subcommand = args[index];
+	if (subcommand === undefined || subcommand.startsWith("-")) return null;
+	return { subcommand, rest: args.slice(index + 1) };
+}
+
+/** `git cat-file` modes that print an object, its type or its size; `--textconv`, `--filters` and batches stay out. */
+const READ_ONLY_CAT_FILE_FLAGS: ReadonlySet<string> = new Set(["-p", "-t", "-s", "-e"]);
 
 /**
  * Where the repository's git config names a helper program (x1-3), `git status` and `git diff` refresh the index
@@ -1480,11 +1535,21 @@ function readOnlyInspectionStep(argv: ReadonlyArray<string>, gitHelpersConfigure
 	const [executable, ...args] = argv;
 	if (executable === undefined) return false;
 	if (executable === "git") {
-		const [subcommand, ...rest] = args;
-		if (subcommand === undefined || !READ_ONLY_GIT_SUBCOMMANDS.has(subcommand)) return false;
+		const invocation = gitSubcommand(args);
+		if (invocation === null || !READ_ONLY_GIT_SUBCOMMANDS.has(invocation.subcommand)) return false;
+		const { subcommand, rest } = invocation;
 		if (subcommand === "branch") return rest.every((arg) => READ_ONLY_GIT_BRANCH_FLAGS.has(arg));
 		if (subcommand === "rev-parse") return true;
 		if (rest.some((arg) => arg.startsWith("--output") || arg === "--ext-diff" || arg === "--textconv")) return false;
+		if (subcommand === "cat-file")
+			return (
+				rest.some((arg) => READ_ONLY_CAT_FILE_FLAGS.has(arg)) &&
+				rest.every((arg) => !arg.startsWith("-") || READ_ONLY_CAT_FILE_FLAGS.has(arg))
+			);
+		// `-O`/`--open-files-in-pager` hands the matches to a program, bundled (`-nOvim`) or not.
+		if (subcommand === "grep" && rest.some((arg) => /^-[^-]*O/u.test(arg) || arg.startsWith("--open-files-in-pager")))
+			return false;
+		if (HELPER_FREE_GIT_SUBCOMMANDS.has(subcommand)) return true;
 		if (!gitHelpersConfigured) return true;
 		return (subcommand === "log" || subcommand === "show") && GIT_HELPER_OPT_OUTS.every((flag) => rest.includes(flag));
 	}
@@ -1861,10 +1926,12 @@ export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
 	if (W_FLAG_WRITERS.has(executable) && args.includes("-w")) return true;
 	if (executable === "node") return args.includes("--test-update-snapshots");
 	if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
-		const script = args[0] === "run" ? args[1] : args[0];
+		const run = packageScriptRun(executable, args);
+		const script = run?.script ?? (args[0] === "run" ? args[1] : args[0]);
 		const separator = args.indexOf("--");
-		// `npm test -- -u` is a check that rewrites its snapshots (x5-2).
+		// `npm test -- -u` is a check that rewrites its snapshots (x5-2); pnpm and yarn hand `pnpm test -u` the flag too.
 		if (separator >= 0 && args.slice(separator + 1).some(writesSnapshots)) return true;
+		if ((executable === "pnpm" || executable === "yarn") && run?.forwarded.some(writesSnapshots) === true) return true;
 		return script !== undefined && isWriteCapableScriptName(script);
 	}
 	if (executable === "make" || executable === "just")
@@ -2600,14 +2667,15 @@ export type ValidationCommandLabel = (typeof VALIDATION_COMMAND_LABELS)[number];
 function validationMatch(
 	executable: string,
 	args: ReadonlyArray<string>,
-): ValidationCommandLabel | `${"npm" | "pnpm" | "yarn" | "bun"} run ${string}` | null {
-	if (executable === "node" && args[0] === "--test") return "node --test";
+): ValidationCommandLabel | PackageScriptLabel | null {
+	// A runtime loader (`--import`, `--require`) runs code beside the check, so wherever it appears the run is not the
+	// project's check (x6-5).
+	if (executable === "node") return args[0] === "--test" && !args.some(isRuntimeLoaderFlag) ? "node --test" : null;
 	const script = packageScriptMatch(executable, args);
 	if (script !== null) {
-		// A runtime loader after `--` (`--import`, `--require`) runs code beside the script, so it is not the project's
-		// check. A runner's own flag (`--run`, `-t name`) is, filed under its full command (x5-2).
-		const separator = args.indexOf("--");
-		return separator >= 0 && args.slice(separator + 1).some(isRuntimeLoaderFlag) ? null : script;
+		// The same holds for one handed to the script; a runner's own flag (`--run`, `-t name`) is filed under its
+		// full command (x5-2).
+		return packageScriptRun(executable, args)?.forwarded.some(isRuntimeLoaderFlag) === true ? null : script;
 	}
 	if (executable === "uv") {
 		const invocation = args.join(" ");
@@ -2633,16 +2701,123 @@ function validationMatch(
 	return null;
 }
 
-function packageScriptMatch(
+type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
+
+/** A package-script check's identity: `<pm> test` or `<pm> run <script>`, with any workspace selectors before it. */
+type PackageScriptLabel = `${PackageManager} ${string}`;
+
+function packageScriptMatch(executable: string, args: ReadonlyArray<string>): PackageScriptLabel | null {
+	const run = packageScriptRun(executable, args);
+	if (run === null) return null;
+	// A selected workspace's run is not the root's check, so its selectors stay in its identity.
+	const scope = run.selectors.map((selector) => `${selector} `).join("");
+	if (run.script === "test") return `${run.manager} ${scope}test`;
+	if (isVerificationScriptName(run.script)) return `${run.manager} ${scope}run ${run.script}`;
+	return null;
+}
+
+/**
+ * pnpm and yarn commands that a bare word names before any package script of that name (x6-4), so `pnpm ci` or
+ * `yarn check` is never read as the project's `ci` or `check` script.
+ */
+const PACKAGE_MANAGER_BUILTINS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+	[
+		"pnpm",
+		new Set([
+			...PACKAGE_WRITES,
+			"exec",
+			"dlx",
+			"publish",
+			"pack",
+			"store",
+			"why",
+			"outdated",
+			"audit",
+			"config",
+			"set",
+			"env",
+			"list",
+			"ls",
+			"root",
+			"bin",
+			"licenses",
+			"deploy",
+			"fetch",
+			"setup",
+			"server",
+			"doctor",
+		]),
+	],
+	[
+		"yarn",
+		new Set([
+			...PACKAGE_WRITES,
+			"exec",
+			"dlx",
+			"publish",
+			"pack",
+			"why",
+			"outdated",
+			"audit",
+			"config",
+			"set",
+			"env",
+			"list",
+			"info",
+			"bin",
+			"cache",
+			"global",
+			"licenses",
+			"workspaces",
+			"check",
+			"node",
+			"constraints",
+			"plugin",
+		]),
+	],
+]);
+
+/** pnpm workspace selectors before a script; `--filter` and `-F` take a value. */
+const PNPM_SELECTOR_FLAGS: ReadonlySet<string> = new Set(["-r", "--recursive", "-w", "--workspace-root"]);
+
+/**
+ * The package script a package manager runs: `<pm> test`, `<pm> run <script>`, or for pnpm and yarn a bare script
+ * name, past pnpm's `--filter <v>`, `-F <v>`, `-r` and `-w` or yarn's `workspace <name>` (x6-4). `forwarded` are the
+ * arguments after the script name. Null for anything else.
+ */
+function packageScriptRun(
 	executable: string,
 	args: ReadonlyArray<string>,
-): ValidationCommandLabel | `${"npm" | "pnpm" | "yarn" | "bun"} run ${string}` | null {
+): { manager: PackageManager; selectors: string[]; script: string; forwarded: ReadonlyArray<string> } | null {
 	if (executable !== "npm" && executable !== "pnpm" && executable !== "yarn" && executable !== "bun") return null;
-	if (args[0] === "test") return `${executable} test`;
-	const script = args[0] === "run" && typeof args[1] === "string" ? args[1] : null;
-	if (script === "test") return `${executable} test`;
-	if (script !== null && isVerificationScriptName(script)) return `${executable} run ${script}`;
-	return null;
+	const selectors: string[] = [];
+	let index = 0;
+	if (executable === "pnpm") {
+		for (let arg = args[index]; arg !== undefined; arg = args[index]) {
+			if (arg === "--filter" || arg === "-F") {
+				const value = args[index + 1];
+				if (value === undefined) return null;
+				selectors.push(arg, value);
+				index += 2;
+			} else if (arg.startsWith("--filter=") || PNPM_SELECTOR_FLAGS.has(arg)) {
+				selectors.push(arg);
+				index += 1;
+			} else break;
+		}
+	} else if (executable === "yarn" && args[0] === "workspace" && args[1] !== undefined && !args[1].startsWith("-")) {
+		selectors.push("workspace", args[1]);
+		index = 2;
+	}
+	const first = args[index];
+	if (first === undefined) return null;
+	if (first === "test") return { manager: executable, selectors, script: first, forwarded: args.slice(index + 1) };
+	if (first === "run") {
+		const script = args[index + 1];
+		return script === undefined ? null : { manager: executable, selectors, script, forwarded: args.slice(index + 2) };
+	}
+	if (executable !== "pnpm" && executable !== "yarn") return null;
+	if (first.startsWith("-") || PACKAGE_MANAGER_BUILTINS.get(executable)?.has(first) === true) return null;
+	return { manager: executable, selectors, script: first, forwarded: args.slice(index + 1) };
 }
 
 /**
@@ -2653,8 +2828,9 @@ function packageScriptMatch(
  */
 function groundingMatch(executable: string, args: ReadonlyArray<string>): string | null {
 	if (executable === "git") {
-		if (args[0] === "diff") return "git diff";
-		if (args[0] === "status") return "git status";
+		const subcommand = gitSubcommand(args)?.subcommand;
+		if (subcommand === "diff") return "git diff";
+		if (subcommand === "status") return "git status";
 		return null;
 	}
 	if (executable === "node") {
