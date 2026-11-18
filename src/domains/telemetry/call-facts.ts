@@ -102,6 +102,7 @@ function failureCause(failure: Record<string, unknown>): FailureCause | undefine
 		case "operator_cancel":
 		case "route_moved":
 		case "triage_stop":
+		case "autonomy_stop":
 		case "repetition":
 		case "shutdown":
 			return failure.stage === "harness" ? failure.errorClass : undefined;

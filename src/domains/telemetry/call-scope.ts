@@ -5,6 +5,7 @@ import { pricingBasisFields } from "../../core/telemetry/pricing.js";
 import type { TelemetryCall } from "../../core/telemetry/producer.js";
 import { beginCall, processTelemetryContext } from "../../core/telemetry/producer.js";
 import type { CallSettled, CallStarted } from "../../core/telemetry/schemas.js";
+import { terminationPhase } from "../../core/termination-phase.js";
 import type { EffectivePricing } from "../providers/catalog.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "./call-facts.js";
 import type { TelemetryContract } from "./contract.js";
@@ -80,8 +81,14 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 		},
 		settle(message: unknown): CallSettled | undefined {
 			if (!call || !options) return undefined;
+			// A side call cut off by shutdown is the harness's stop, as a main call's is (bt-26 N2c).
+			const shutdown =
+				(message as { stopReason?: unknown } | null)?.stopReason === "aborted" && terminationPhase() !== "idle";
 			return settled(
-				call.settle(callSettlementFromMessage(message, pricingBasisFields(options)), reportedModelFromMessage(message)),
+				call.settle(
+					callSettlementFromMessage(message, pricingBasisFields(options), shutdown ? "shutdown" : undefined),
+					reportedModelFromMessage(message),
+				),
 			);
 		},
 		/** Time a gate as the current attempt's admission stage, so a wait reads as admission and never as a stall. */

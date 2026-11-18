@@ -44,6 +44,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- Each bash command is scanned once per classification and only checks compute their extra facets; the registry and finish contract ask for the verdict alone; task-board replays within one run share git lookups and per-call readings (x6-7).
+- Tool guard blocks are listed under `safety.guardBlockedAttempts` (receipts, turn_end/run_end, run.settled), no longer under `safety.blockedAttempts`, matching `decisions.guardBlocked`. Receipts and journals written earlier keep guard blocks in `blockedAttempts` (bt-15 c12b).
 - Run records and the headless terminal frame report tool guard blocks as safety.decisions.guardBlocked, and decisions.blocked counts safety refusals only. Run records written earlier keep the mixed count under blocked (bt-15 T3).
 - `run --agent` exits 1 when the run's sealed result-contract quality is `fail` (a check red after its last edit), as a verifier fail verdict already does; the outcome stays `succeeded`, and a baseline red before any edit stays exit 0 (x1-5).
 - The citation-check nudge asks for the full answer again with corrected citations instead of "keep the rest of the answer as it is" (bt-29).
@@ -105,6 +107,10 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- An autonomy cap or judge halt now settles its turn with the named harness cause `autonomy_stop` instead of null (bt-26 N2d).
+- A side call (memory, compaction, side question) cut off by shutdown now settles with the shutdown cause main calls get (bt-26 N2c).
+- ACP `agent_message_chunk` text from consecutive assistant messages is now separated by a blank line (bt-41).
+- The sealed run.settled record and `evidence inspect` now carry a run's `unclassifiedAfterLastCheck` (count plus up to 5 redacted commands), for main-agent headless runs as well as dispatched ones (bt-15 c12a).
 - A check that fails outside the receipt vocabulary, such as `npx tsc --noEmit` or `npx eslint .`, now fails the sealed receipt and the headless line as it already did on the task board, instead of the run sealing verified (x6-1).
 - The receipt and the headless line keep disclosing unclassified commands while a check that ran before them still stands, even after a later check (x6-3).
 - A change that retires every standing check also drops the unclassified-command disclosure, so the receipt and `turn_end.observed` agree (x6-6).

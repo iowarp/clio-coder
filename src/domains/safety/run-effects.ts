@@ -177,8 +177,6 @@ interface PendingEffects {
 	reading: CallClassification;
 	validationCommand: string | null;
 	validationName: string | null;
-	/** False when a bash call's exit status is only its last command's, so it settles nothing about the check. */
-	checkStatusAttributable: boolean;
 	mutationRevision: number;
 	verificationCommand: string | null;
 	/** The tool's own outcome, when the call reached it. Stays null when the engine answered instead. */
@@ -257,8 +255,9 @@ export function checkOutputReader(
 	cwd: string,
 	env: NodeJS.ProcessEnv = process.env,
 	configuredScratchRoots: ReadonlyArray<string> = [],
+	/** Git's ignore and tracking answers, shared by every reader of one run and never kept past it (x6-7). */
+	gitAnswers = new Map<string, boolean>(),
 ): CheckOutputReader {
-	const gitAnswers = new Map<string, boolean>();
 	const git = (args: string[], target: string, answer: (status: number | null) => boolean): boolean => {
 		const key = `${args[0]}\0${target}`;
 		let known = gitAnswers.get(key);
@@ -374,7 +373,6 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				reading,
 				validationCommand,
 				validationName,
-				checkStatusAttributable: shell?.statusAttributable ?? true,
 				mutationRevision,
 				verificationCommand,
 				outcome: null,
@@ -410,6 +408,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			// An outcome before a later mutation judged a tree that is gone: a pass
 			// cannot settle the final tree and a red baseline cannot fail it (bt-27).
 			const { reading } = effects;
+			// False when a bash call's exit status is only its last command's, so it settles nothing about the check.
+			const statusAttributable = () => reading.shell?.statusAttributable !== false;
 			const { mutation, checkedAfterOwnMutation, fresh, settled } = settleCheckCall(
 				reading,
 				failed,
@@ -433,7 +433,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				outcomeSequence.set(key, sequence);
 			};
 			// `pytest; echo done` ran the check, but its status is echo's, so the outcome stays unknown either way.
-			if (effects.validationName !== null && effects.checkStatusAttributable && settled) {
+			if (effects.validationName !== null && settled && statusAttributable()) {
 				validationOutcomes.set(effects.validationName, !failed);
 				settleOutcome(effects.validationName);
 			}
@@ -469,17 +469,10 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				if (recordWasComplete) options.onWriteRecordDowngraded?.({ ...downgrade });
 			}
 			for (const target of reading.paths) mutatedPaths.add(target);
-			if (
-				effects.validationCommand !== null &&
-				effects.checkStatusAttributable &&
-				fresh &&
-				reading.shell?.outsideCwd !== true
-			)
+			if (effects.validationCommand !== null && fresh && statusAttributable() && reading.shell?.outsideCwd !== true)
 				validationCommands.add(effects.validationCommand);
 			if (effects.verificationCommand !== null)
-				(effects.checkStatusAttributable ? verificationCommands : unattributableVerificationCommands).add(
-					effects.verificationCommand,
-				);
+				(statusAttributable() ? verificationCommands : unattributableVerificationCommands).add(effects.verificationCommand);
 			if (effects.tool === ToolNames.Verify) {
 				verificationCommands.add("tool:verify");
 				// The check ran its resolved command, so that command grounds as the same text run through bash would.

@@ -3916,6 +3916,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 					recovery.settleOpenForecast();
 					const canceled = state.activeInterruptReason !== null && state.activeInterruptByOperator;
+					const autonomyStopped = state.activeInterruptReason !== null && state.activeInterruptByAutonomy;
 					// Esc on an interview resolves it as cancelled and the tool ends the turn
 					// itself, so no interrupt is raised and `canceled` stays false. The turn
 					// still ended on the operator's say-so, which the outcome has to show.
@@ -4026,7 +4027,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							await writeTurnOutcome(record, {
 								stopReason: record.stopReason,
 								retries: turnRetryAttempts + providerRetryAttempts,
-								cause: canceled ? "operator_cancel" : undefined,
+								cause: canceled ? "operator_cancel" : autonomyStopped ? "autonomy_stop" : undefined,
 								runIds: workerRunIds,
 								missing: missingReceipts,
 							});
@@ -4226,6 +4227,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					requestedReason && requestedReason.length > 0 ? requestedReason : OPERATOR_CANCEL_REASON;
 				state.activeInterruptByOperator = (options?.source ?? "stream_cancel") === "stream_cancel";
 				state.activeInterruptByTriage = options?.source === "triage";
+				state.activeInterruptByAutonomy = options?.source === "autonomy";
 				// An Esc is reported once, by the turn's Cancelled outcome. The footer
 				// carries only an interruption the operator did not ask for.
 				if (!isOperatorCancelReason(state.activeInterruptReason))
