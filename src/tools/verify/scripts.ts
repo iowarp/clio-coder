@@ -391,6 +391,32 @@ function readCheckFile(workspaceRoot: string, relative: string, label: string): 
 	}
 }
 
+/** The digest of a repository-relative check file as `readCheckFile` reads it; null when it cannot be read. */
+function checkFileSha256(workspaceRoot: string, relative: string): string | null {
+	const text = readCheckFile(workspaceRoot, relative, "check file");
+	return text instanceof Error ? null : sha256(text);
+}
+
+/**
+ * Read a sealed judged-check file (a numeric reference or perf baseline) by
+ * absolute path under the same cap and regular-file rule as `readCheckFile`.
+ * Undefined when it is absent or cannot be read. Admission digests what this
+ * returns and host verification judges it, so both see the same bytes.
+ */
+export function readJudgedFile(absolutePath: string): string | undefined {
+	try {
+		const read = readRegularFileText(absolutePath, JUDGED_CHECK_MAX_OUTPUT_BYTES);
+		return read.ok ? read.text : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** The sha256 of a judged check file's text, null when it is absent: the digest a judged report records for it. */
+export function judgedFileSha256(text: string | undefined): string | null {
+	return text === undefined ? null : sha256(text);
+}
+
 /**
  * Judge a numeric-compare command's stdout against reference text already
  * read from disk. Pure. The report records the identity of both texts it
@@ -532,6 +558,15 @@ async function runJudgedCheck(
 ): Promise<ToolResult> {
 	// Read before the command runs, so it names the tree the command saw rather than one the command left behind.
 	const checkout = check.kind === "numeric-compare" ? await checkoutState(cwd) : null;
+	const workspaceRoot = options?.workspaceRoot ?? process.cwd();
+	// The reference or baseline as it stood before the command ran, so a command that rewrites it cannot pass.
+	const judgedPath =
+		check.kind === "numeric-compare"
+			? check.numeric?.reference
+			: check.kind === "perf-budget"
+				? check.perf?.baseline
+				: undefined;
+	const judgedBefore = judgedPath === undefined ? undefined : checkFileSha256(workspaceRoot, judgedPath);
 	let result: SafeCommandResult;
 	try {
 		result = await runCommandVector(file, vector, {
@@ -567,11 +602,20 @@ async function runJudgedCheck(
 	}
 	const report =
 		check.kind === "numeric-compare" && check.numeric !== undefined
-			? judgeNumericCompare(result.stdout, check.numeric, options?.workspaceRoot ?? process.cwd())
+			? judgeNumericCompare(result.stdout, check.numeric, workspaceRoot)
 			: check.kind === "perf-budget" && check.perf !== undefined
-				? judgePerfBudget(result.durationMs, check.perf, options?.workspaceRoot ?? process.cwd())
+				? judgePerfBudget(result.durationMs, check.perf, workspaceRoot)
 				: new Error(`declared check '${check.id}' has kind ${check.kind} without its parameters`);
 	if (report instanceof Error) return { kind: "error", message: `verify: ${report.message}`, details: facts };
+	const judgedAfter = report.kind === "numeric-compare" ? report.reference?.sha256 : report.baseline?.sha256;
+	if (judgedPath !== undefined && judgedAfter !== undefined && judgedAfter !== judgedBefore) {
+		const label = report.kind === "numeric-compare" ? "reference" : "baseline";
+		return {
+			kind: "error",
+			message: `verify: ${report.kind} ${label} '${judgedPath}' changed while the check ran (${judgedBefore ?? "absent"}→${judgedAfter})`,
+			details: facts,
+		};
+	}
 	const rendered = report.kind === "numeric-compare" ? renderNumericReport(report) : report.summary;
 	const details = {
 		...facts,

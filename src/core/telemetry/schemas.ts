@@ -949,6 +949,13 @@ export const RunSettledSchema = Type.Object(
 					failed: count,
 					/** Failing checks that also failed on the task base, so they cannot show the change caused them. */
 					failedOnBase: count,
+					/**
+					 * How the checks were answered: run for this run, a pass reused from another run's memo, or not run.
+					 * Only a verdict every check of which executed validates the run. Absent on runs settled before them.
+					 */
+					executed: Type.Optional(count),
+					reused: Type.Optional(count),
+					skipped: Type.Optional(count),
 				},
 				closed,
 			),
@@ -964,6 +971,58 @@ export const RunSettledSchema = Type.Object(
 	closed,
 );
 export type RunSettled = Static<typeof RunSettledSchema>;
+
+/** A number as a judged report writes it: JSON has no spelling for NaN or the infinities, so they are named. */
+const reportedNumber = Type.Union([Type.Number(), vocabulary(["NaN", "Infinity", "-Infinity"])]);
+/** Keys and failed keys a sealed judged report keeps; `keyCount` and `failedKeyCount` say how many there were. */
+export const SEALED_CHECK_REPORT_KEYS_MAX = 64;
+/**
+ * The bounded verdict of a numeric-compare, perf-budget or reproduce check as the run's sealed result keeps it: the
+ * rule and tolerance it judged by, the digests of the reference and payload it read, and each key's worst deviation.
+ * Perf-budget has no keys; it carries its measurement and bound instead.
+ */
+const SealedCheckReportSchema = Type.Object(
+	{
+		kind: vocabulary(["numeric-compare", "perf-budget", "reproduce"]),
+		passed: Type.Boolean(),
+		rule: text,
+		tolerance: Type.Object(
+			{
+				relative: Type.Optional(Type.Number()),
+				absolute: Type.Optional(Type.Number()),
+				ulp: Type.Optional(Type.Number()),
+				combine: Type.Optional(text),
+				nonFinite: Type.Optional(text),
+			},
+			closed,
+		),
+		/** The reference (perf-budget: the baseline) the judgement read; null when it read none. */
+		reference: nullable(Type.Object({ path: nullable(Type.String()), sha256: Type.String() }, closed)),
+		/** Digest of the payload text extracted from the command's stdout; null when there is none. */
+		payloadSha256: nullable(Type.String()),
+		keyCount: count,
+		failedKeyCount: count,
+		failedKeys: Type.Array(text, { maxItems: SEALED_CHECK_REPORT_KEYS_MAX }),
+		/** Failing keys first, each with its worst deviation; null where a deviation is undefined or nothing compared. */
+		keys: Type.Array(
+			Type.Object(
+				{
+					key: text,
+					passed: Type.Boolean(),
+					absolute: nullable(reportedNumber),
+					relative: nullable(reportedNumber),
+					ulp: nullable(reportedNumber),
+				},
+				closed,
+			),
+			{ maxItems: SEALED_CHECK_REPORT_KEYS_MAX },
+		),
+		measuredMs: Type.Optional(duration),
+		budgetMs: Type.Optional(duration),
+	},
+	closed,
+);
+export type SealedCheckReport = Static<typeof SealedCheckReportSchema>;
 
 /** The `run-result` object a run.settled names: what the run delivered, redacted when it is stored (#434). */
 /** A count with the first paths it covers, the bound a worktree receipt keeps its file lists to. */
@@ -1029,7 +1088,7 @@ export const RunResultObjectSchema = Type.Object(
 								outputTail: Type.String(),
 								evidenceRunId: nullable(Type.String()),
 								/** Why the check ran nothing (refused, unconfigured, or its executable never started); absent when it ran. */
-								notRun: Type.Optional(vocabulary(["refused", "unconfigured", "spawn-failed"])),
+								notRun: Type.Optional(vocabulary(["refused", "unconfigured", "spawn-failed", "nothing-changed"])),
 								/** The same check replayed on the task base; null when it was not compared. */
 								baseComparison: nullable(
 									Type.Object(
@@ -1042,6 +1101,10 @@ export const RunResultObjectSchema = Type.Object(
 										closed,
 									),
 								),
+								/** The judged verdict, bounded; absent for a command check and on results sealed before it existed. */
+								report: Type.Optional(SealedCheckReportSchema),
+								/** The checkout the verdict judged; absent outside Git and on results sealed before it existed. */
+								tree: Type.Optional(Type.Object({ head: Type.String(), fingerprint: Type.String() }, closed)),
 							},
 							closed,
 						),

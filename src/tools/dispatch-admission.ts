@@ -62,6 +62,7 @@ import type {
 import type { HostEffectCall, ToolSpec } from "./registry.js";
 import { gitCheckoutRoot, gitHeadIsUnborn, WORKTREE_UNBORN_HEAD_MESSAGE } from "./task-worktree.js";
 import { discoverDeclaredChecksAtRoot } from "./verify/discovery.js";
+import { judgedFileSha256, readJudgedFile } from "./verify/scripts.js";
 
 /**
  * The six identity-sensitive stores which bind synchronous admission to the
@@ -419,15 +420,17 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 							argv: [...check.command],
 							cwd: resolve(workspaceRoot, check.cwd),
 							timeoutMs: entry.timeoutMs,
-							// A judged check seals its kind and absolute file paths here, so
-							// host verification judges against what the catalog declared at
-							// admission rather than whatever the file says at run time.
+							// A judged check seals its kind, absolute file paths and the digest of
+							// each reference or baseline here. Host verification reads the file
+							// again at run time and fails the check when it no longer matches
+							// the digest, so a run that rewrites its own reference cannot pass.
 							...(check.kind !== "command" ? { kind: check.kind } : {}),
 							...(check.numeric !== undefined
 								? {
 										numeric: {
 											reference: resolve(workspaceRoot, check.numeric.reference),
 											tolerance: { ...check.numeric.tolerance },
+											referenceSha256: judgedFileSha256(readJudgedFile(resolve(workspaceRoot, check.numeric.reference))),
 										},
 									}
 								: {}),
@@ -435,7 +438,12 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 								? {
 										perf: {
 											...(check.perf.budget !== undefined ? { budget: structuredClone(check.perf.budget) } : {}),
-											...(check.perf.baseline !== undefined ? { baseline: resolve(workspaceRoot, check.perf.baseline) } : {}),
+											...(check.perf.baseline !== undefined
+												? {
+														baseline: resolve(workspaceRoot, check.perf.baseline),
+														baselineSha256: judgedFileSha256(readJudgedFile(resolve(workspaceRoot, check.perf.baseline))),
+													}
+												: {}),
 											...(check.perf.tolerance !== undefined ? { tolerance: { ...check.perf.tolerance } } : {}),
 										},
 									}

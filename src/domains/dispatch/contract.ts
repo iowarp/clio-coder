@@ -42,10 +42,18 @@ export interface ResolvedVerificationCheck {
 	timeoutMs: number;
 	/** Absent means `command`, the exit-code check every receipt carried before kinds existed. */
 	kind?: DeclaredCheckKind;
-	/** Sealed at admission with the reference as an absolute path. */
-	numeric?: { reference: string; tolerance: NumericTolerance };
-	/** Sealed at admission with the baseline as an absolute path. */
-	perf?: { budget?: PerfBudgetSpec; baseline?: string; tolerance?: { relative?: number } };
+	/**
+	 * Sealed at admission with the reference as an absolute path and the sha256 of its text then; null when it was
+	 * absent. Host verification fails the check when the reference no longer matches. Absent on older requests.
+	 */
+	numeric?: { reference: string; tolerance: NumericTolerance; referenceSha256?: string | null };
+	/** Sealed at admission with the baseline as an absolute path and its digest, as `numeric` seals its reference. */
+	perf?: {
+		budget?: PerfBudgetSpec;
+		baseline?: string;
+		tolerance?: { relative?: number };
+		baselineSha256?: string | null;
+	};
 	/**
 	 * Sealed at admission with paths kept repository-relative and the declared
 	 * cwd beside them, so host verification derives the root from `cwd` and

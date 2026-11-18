@@ -67,7 +67,16 @@ test("host check labels distinguish actual execution from reused evidence and wo
 				hostVerification: {
 					status: "verified",
 					checks: [
-						{ check: "test", argv: ["npm", "test"], cwd: "/fixture", exitCode: 0, durationMs: 1, memo, outputTail: "pass" },
+						{
+							check: "test",
+							argv: ["npm", "test"],
+							cwd: "/fixture",
+							exitCode: 0,
+							durationMs: 1,
+							memo,
+							outputTail: "pass",
+							...(memo ? { evidenceRunId: "earlier" } : {}),
+						},
 					],
 				},
 			},
@@ -79,6 +88,6 @@ test("host check labels distinguish actual execution from reused evidence and wo
 			PRODUCER_INTEGRITY,
 		).join("\n");
 		match(labels, /Host check evidence is separate from the worker report/);
-		match(labels, memo ? /reused prior host result; exit 0/ : /executed after the worker; exit 0/);
+		match(labels, memo ? /reused a pass from run earlier; exit 0/ : /executed after the worker; exit 0/);
 	}
 });

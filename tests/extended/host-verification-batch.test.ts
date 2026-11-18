@@ -263,7 +263,7 @@ describe("host verification judgment identity", () => {
 	}
 
 	for (const kind of ["numeric-compare", "perf-budget"] as const) {
-		it(`invalidates ${kind} evidence when an ignored reference or baseline changes`, async () => {
+		it(`never reuses a ${kind} pass and judges a changed ignored reference or baseline afresh`, async () => {
 			const scratch = makeScratch();
 			writeFileSync(join(scratch.project, ".gitignore"), "measurements/\n");
 			mkdirSync(join(scratch.project, "measurements"));
@@ -280,10 +280,10 @@ describe("host verification judgment identity", () => {
 			ok(fingerprint);
 			const first = await verify(scratch, "original", resolved);
 			strictEqual(first?.status, "verified");
-			const reused = await verify(scratch, "identical", structuredClone(resolved));
-			strictEqual(reused?.checks[0]?.memo, true);
-			strictEqual(reused?.checks[0]?.evidenceRunId, "original");
-			deepStrictEqual(reused?.checks[0]?.report, first?.checks[0]?.report);
+			const again = await verify(scratch, "identical", structuredClone(resolved));
+			strictEqual(again?.status, "verified");
+			strictEqual(again?.checks[0]?.memo, false);
+			strictEqual(again?.checks[0]?.evidenceRunId, undefined);
 			writeFileSync(path, kind === "numeric-compare" ? '{"value":1}' : '{"version":1,"wallTimeMs":0.001}');
 			strictEqual(
 				workspaceFingerprint(scratch.project),
@@ -297,7 +297,7 @@ describe("host verification judgment identity", () => {
 			const missing = await verify(scratch, "missing", resolved);
 			strictEqual(missing?.status, "rejected");
 			strictEqual(missing?.checks[0]?.memo, false);
-			strictEqual(runCount(scratch), 3);
+			strictEqual(runCount(scratch), 4);
 		});
 	}
 
@@ -1025,6 +1025,7 @@ describe("lint and format checks scoped to the task's changed files", () => {
 			stateDir: scratch.stateDir,
 		});
 		strictEqual(verification?.status, "verified");
+		strictEqual(verification?.checks[0]?.notRun, "nothing-changed");
 		strictEqual(existsSync(linter.log), false);
 	});
 
