@@ -8,7 +8,8 @@ export interface CompileSessionPromptInput {
 	cwd?: string;
 	/**
 	 * Files already present in the session's working context. Project rules with
-	 * `paths:` frontmatter are selected from this set.
+	 * `paths:` frontmatter are selected from this set into `scopedRules`, never
+	 * into the system prompt.
 	 */
 	workingContextPaths?: ReadonlyArray<string>;
 	/**

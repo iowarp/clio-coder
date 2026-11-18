@@ -272,6 +272,7 @@ export const CallSettledSchema = Type.Object(
 						"thinking_change",
 						"tool_surface_change",
 						"prompt_recompiled",
+						"system_prompt_changed",
 						"background_memory",
 						"model_changed",
 						"transport_reset",

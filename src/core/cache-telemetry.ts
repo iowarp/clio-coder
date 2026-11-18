@@ -125,6 +125,8 @@ export interface CacheRequestFingerprint {
 	thinkingLevel: string;
 	toolChoice: string;
 	replayTruncationHash?: string;
+	/** SHA-256 of the compiled system prompt the request led with, so a resumed process can compare it (bt-10). */
+	systemPromptHash?: string;
 }
 
 export interface CacheCallBaseline {
@@ -154,6 +156,7 @@ export function buildCacheCallObservation(
 		thinking_change: "reasoning_changed",
 		tool_surface_change: "tools_changed",
 		prompt_recompiled: "prompt_recompiled",
+		system_prompt_changed: "prompt_recompiled",
 		compaction: "compaction",
 		// A step-boundary checkpoint replaces the history like a compaction does (WTF-P 0.8.3 C5).
 		step_checkpoint: "compaction",
@@ -169,13 +172,17 @@ export function buildCacheCallObservation(
 		prior && requestFingerprint
 			? prior.targetId !== requestFingerprint.targetId || prior.modelId !== requestFingerprint.modelId
 				? "model_changed"
-				: prior.thinkingLevel !== requestFingerprint.thinkingLevel
-					? "reasoning_changed"
-					: prior.replayTruncationHash !== requestFingerprint.replayTruncationHash
-						? "input_changed"
-						: prior.toolChoice !== requestFingerprint.toolChoice
-							? "tool_choice_changed"
-							: undefined
+				: prior.systemPromptHash !== undefined &&
+						requestFingerprint.systemPromptHash !== undefined &&
+						prior.systemPromptHash !== requestFingerprint.systemPromptHash
+					? "prompt_recompiled"
+					: prior.thinkingLevel !== requestFingerprint.thinkingLevel
+						? "reasoning_changed"
+						: prior.replayTruncationHash !== requestFingerprint.replayTruncationHash
+							? "input_changed"
+							: prior.toolChoice !== requestFingerprint.toolChoice
+								? "tool_choice_changed"
+								: undefined
 			: undefined;
 	const reason = hostColdReasons.find((candidate) => hostCauses[candidate] !== undefined);
 	const hostCause = fingerprintCause ?? (reason === undefined ? undefined : hostCauses[reason]);

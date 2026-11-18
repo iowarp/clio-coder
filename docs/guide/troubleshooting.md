@@ -179,7 +179,7 @@ Refused tool calls start with `Refused by Clio policy`, `Refused by operator app
 
 Use `/context` to inspect cache hit telemetry, compiled-prompt reuse, and prefill timing. If CLIO Coder knows why the prefix went cold, `/context` displays it (e.g., `last cache-affecting events: working-set eviction (reuse measured separately)`).
 
-For finished runs, inspect `current.jsonl` under the session store (`clio-coder paths`): check `promptCache.expectedColdReasons` (`working_set_evict`, `compaction`, `dispatch`, `residency`, `thinking_change`, `tool_surface_change`, `prompt_recompiled`, `background_memory`, `model_changed`, `transport_reset`, `input_changed`, `tool_choice_change`, `observation_aging`, `step_checkpoint`), `promptCache.backendVerdict`, and `promptCache.backend`. Run summaries via:
+For finished runs, inspect `current.jsonl` under the session store (`clio-coder paths`): check `promptCache.expectedColdReasons` (`working_set_evict`, `compaction`, `dispatch`, `residency`, `thinking_change`, `tool_surface_change`, `prompt_recompiled`, `system_prompt_changed`, `background_memory`, `model_changed`, `transport_reset`, `input_changed`, `tool_choice_change`, `observation_aging`, `step_checkpoint`), `promptCache.backendVerdict`, and `promptCache.backend`. Run summaries via:
 
 ```bash
 clio-coder doctor
