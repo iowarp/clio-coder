@@ -833,9 +833,21 @@ it("read-only inspection refuses helpers that write the tree or run another prog
 		"sed 's/a/b/w out' a.ts",
 		"awk '{system(\"sh\")}' a.ts",
 		"sort -o out a.ts",
+		// Long-option abbreviations and a delimiter inside a bracket expression (x4-3).
+		"sort --out=src/a.ts src/a.ts",
+		"sort --out src/a.ts",
+		"sort --compress-prog=sh a.ts",
+		"sed -n 's/[/]/p/w out1' a.ts",
 	])
 		strictEqual(isReadOnlyInspectionCommand(command, false), false, command);
-	for (const command of ["git status", "git diff", "git log -p", "sed -n 1,80p a.ts", "awk '{print $1}' a.ts"])
+	for (const command of [
+		"git status",
+		"git diff",
+		"git log -p",
+		"sed -n 1,80p a.ts",
+		"awk '{print $1}' a.ts",
+		"sort --reverse --key=2 a.ts",
+	])
 		strictEqual(isReadOnlyInspectionCommand(command, false), true, command);
 	// Where git config names a helper program, only log and show with both helpers switched off still count.
 	for (const command of ["git status", "git diff --no-ext-diff --no-textconv", "git log -p"])

@@ -1256,14 +1256,13 @@ const READ_ONLY_FILTERS: ReadonlyMap<string, (args: ReadonlyArray<string>) => bo
 	["awk", awkOnlyReads],
 	[
 		"sort",
+		// GNU sort takes any unambiguous prefix of a long option, so `--out=x` is `--output=x` (x4-3).
 		(args: ReadonlyArray<string>) =>
-			!args.some(
-				(arg) =>
-					arg === "--output" ||
-					arg.startsWith("--output=") ||
-					arg.startsWith("--compress-program") ||
-					(/^-[^-]/u.test(arg) && arg.includes("o")),
-			),
+			!args.some((arg) => {
+				const long = /^--([^=]+)/u.exec(arg)?.[1];
+				if (long !== undefined) return "output".startsWith(long) || "compress-program".startsWith(long);
+				return /^-[^-]/u.test(arg) && arg.includes("o");
+			}),
 	],
 	["uniq", uniqOnlyReads],
 ]);
@@ -1307,9 +1306,11 @@ function sedOnlyReads(args: ReadonlyArray<string>): boolean {
 
 /**
  * A sed script made only of commands that print, edit the pattern space or branch. `w`, `W`, `e`, `r`, `R`, an `s`
- * flagged `w` or `e`, and anything this cannot parse answer false.
+ * flagged `w` or `e`, and anything this cannot parse answer false. A bracket expression may hold the delimiter
+ * (`s/[/]/x/w out`), which the delimiter scan below does not model, so any `[` answers false (x4-3).
  */
 function sedScriptOnlyReads(script: string): boolean {
+	if (script.includes("[")) return false;
 	let index = 0;
 	const at = () => script[index] ?? "";
 	const skip = (pattern: RegExp) => {
