@@ -2,7 +2,8 @@
  * Citation grounding, packaged as an after_tool + turn_end hook registration.
  *
  * A `path:line` citation is grounded only when a tool printed that line number:
- * a `read` with `line_numbers: true`, or a grep match. A model that read a file
+ * a `read` with `line_numbers: true`, a grep match, or a bash `grep -n` /
+ * `rg -n` line the bash tool could pair with a file it named (bt-29). A model that read a file
  * without the gutter and then cites physical ranges has counted or recalled
  * them, and on small local models those ranges drift by dozens of lines (DF-1:
  * `env_cache.py:327-350` for a function at 375, after a whole-file read). Prompt
@@ -18,9 +19,9 @@
  * Deliberate gaps, each of which can only miss a flag, never invent one:
  * a file the session never read through `read` is not judged (a resumed or
  * compacted session would otherwise be flagged for reads it cannot see), a file
- * the session mutated is skipped (its line numbers moved), and bash output such
- * as `grep -n` is invisible to the hook. `code_nav` symbol lines are also
- * invisible, so a citation of a definition line found only through `code_nav`
+ * the session mutated is skipped (its line numbers moved), and bash output the
+ * bash tool cannot pair with a file (`sed -n`, `nl`, a compound command) is
+ * invisible to the hook. `code_nav` symbol lines are also invisible, so a citation of a definition line found only through `code_nav`
  * in a file read without numbers is flagged.
  */
 
@@ -77,7 +78,7 @@ function finiteCount(value: unknown): number | null {
 /**
  * Fold one settled tool call into the evidence. `details` is the tool result's
  * structured details: `observation.shownCount`/`totalCount` for read, and
- * `observedLines` (absolute path to line list) for grep.
+ * `observedLines` (absolute path to line list) for grep and bash.
  */
 function recordCitationEvidence(
 	evidence: CitationEvidence,
@@ -110,14 +111,15 @@ function recordCitationEvidence(
 		addNumbered(evidence, file, start, start + shown - 1);
 		return;
 	}
-	if (toolName === ToolNames.Grep) {
+	if (toolName === ToolNames.Grep || toolName === ToolNames.Bash) {
 		const observed = details?.observedLines;
-		if (observed === null || typeof observed !== "object" || Array.isArray(observed)) return;
-		for (const [file, lines] of Object.entries(observed as Record<string, unknown>)) {
-			if (!Array.isArray(lines)) continue;
-			for (const line of lines) if (Number.isInteger(line) && line > 0) addNumbered(evidence, file, line, line);
+		if (observed !== null && typeof observed === "object" && !Array.isArray(observed)) {
+			for (const [file, lines] of Object.entries(observed as Record<string, unknown>)) {
+				if (!Array.isArray(lines)) continue;
+				for (const line of lines) if (Number.isInteger(line) && line > 0) addNumbered(evidence, file, line, line);
+			}
 		}
-		return;
+		if (toolName === ToolNames.Grep) return;
 	}
 	for (const raw of mutationPathsForTool(toolName, args as Record<string, unknown> | undefined)) {
 		evidence.mutated.add(resolveReadPath(raw, cwd));
@@ -226,8 +228,8 @@ function buildCitationGroundingMessage(unbacked: ReadonlyArray<LineCitation>): s
 		`${CITATION_CHECK_PREFIX} ${named}${rest > 0 ? ` and ${rest} more` : ""} cite line numbers no tool printed; ` +
 		"those files were read without line numbers, so the ranges were counted or recalled. Before answering, " +
 		"re-read each cited region with read line_numbers=true (grep the symbol first to find its offset) and correct " +
-		"the ranges, or cite the symbol name without a line number. Keep the rest of the answer as it is; this check " +
-		"asks for no new analysis."
+		"the ranges, or cite the symbol name without a line number. Then write the full answer again with the corrected " +
+		"citations, not only the corrections; this check asks for no new analysis."
 	);
 }
 
@@ -257,8 +259,13 @@ export function createCitationGroundingRegistration(
 		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
 			forSession(input.sessionId);
 			if (input.hook === "after_tool") {
-				if (input.metadata?.resultKind !== "ok" || input.toolName === undefined) return [];
-				recordCitationEvidence(evidence, input.toolName, input.toolArgs, input.toolResultDetails, cwd());
+				if (input.toolName === undefined) return [];
+				if (input.metadata?.resultKind === "ok") {
+					recordCitationEvidence(evidence, input.toolName, input.toolArgs, input.toolResultDetails, cwd());
+				} else if (input.toolName === ToolNames.Bash) {
+					// `grep -n … | head` exits nonzero under pipefail once head closes the pipe; the lines still printed.
+					recordCitationEvidence(evidence, input.toolName, undefined, input.toolResultDetails, cwd());
+				}
 				return [];
 			}
 			if (input.hook !== "turn_end") return [];

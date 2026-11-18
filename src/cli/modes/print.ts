@@ -394,6 +394,31 @@ function answerAfterCitationCheck(checked: string | null, reply: string): string
 	return `${checked}\n\n${reply}`;
 }
 
+/**
+ * A full stream's answer turn_end, carrying the checked answer by the same rule as stdout and the terminal turn_end:
+ * a reply of only "citations confirmed" otherwise left scripts reading `turn_end.message` without the answer (bt-29).
+ */
+function turnEndAfterCitationCheck(frame: RunJsonMainFrame, checked: string | null): RunJsonMainFrame {
+	if (checked === null || frame.type !== "turn_end" || !("message" in frame) || frame.message.role !== "assistant")
+		return frame;
+	const content = frame.message.content;
+	if (content.some((block) => block.type === "toolCall")) return frame;
+	const texts = content.flatMap((block) =>
+		block.type === "text" && typeof block.text === "string" ? [block.text] : [],
+	);
+	const reply = texts.join("").trimEnd();
+	const answer = answerAfterCitationCheck(checked, reply);
+	if (answer === reply || !answer.endsWith(reply)) return frame;
+	const prefix = answer.slice(0, answer.length - reply.length);
+	const first = content.findIndex((block) => block.type === "text" && typeof block.text === "string");
+	const merged = content.map((block, index) => {
+		if (index !== first || block.type !== "text") return block;
+		const text = `${prefix}${block.text ?? ""}`;
+		return { ...block, text, textLength: text.length };
+	});
+	return { ...frame, message: { ...frame.message, content: merged } };
+}
+
 function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult): HeadlessMainAgentResult {
 	if (event.type === "tool_execution_end") {
 		const result = event.result as { terminate?: boolean; content?: unknown } | undefined;
@@ -1181,7 +1206,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		writeTextSessionId();
 		if (mode === "json") {
 			const messages = event.type === "agent_end" ? event.messages : [];
-			const frames = jsonProjector.project(event).map((frame) => segmentFrame(frame, messages));
+			const frames = jsonProjector
+				.project(event)
+				.map((frame) => segmentFrame(turnEndAfterCitationCheck(frame, result.citationCheckedAnswer), messages));
 			if (jsonEvents === "terminal") {
 				writeTerminalTurnStart();
 				writeJsonHeader(true);

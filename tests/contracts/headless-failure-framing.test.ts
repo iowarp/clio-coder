@@ -29,7 +29,7 @@ const answerMessage = (text: string): object => ({
 async function stdoutAfterCitationCheck(
 	answer: string,
 	reply: string,
-	mode: "text" | "json",
+	mode: "text" | "json" | "json-full",
 	stderr: string[] = [],
 ): Promise<string> {
 	let handler: (event: unknown) => void = () => {};
@@ -42,6 +42,7 @@ async function stdoutAfterCitationCheck(
 		submit: async () => {
 			handler({ type: "agent_start" });
 			handler({ type: "message_end", message: answerMessage(answer) });
+			handler({ type: "turn_end", message: answerMessage(answer), toolResults: [] });
 			handler({
 				type: "notice",
 				level: "warning",
@@ -50,6 +51,7 @@ async function stdoutAfterCitationCheck(
 				text: `${CITATION_CHECK_PREFIX} README.md:2 cite line numbers no tool printed; Before answering, re-read each cited region with read line_numbers=true.`,
 			});
 			handler({ type: "message_end", message: answerMessage(reply) });
+			handler({ type: "turn_end", message: answerMessage(reply), toolResults: [] });
 			handler({ type: "agent_end", messages: [answerMessage(answer), answerMessage(reply)] });
 		},
 		whenSettled: async () => {},
@@ -74,7 +76,7 @@ async function stdoutAfterCitationCheck(
 			chat as never,
 			{
 				prompt: "x",
-				mode,
+				mode: mode === "text" ? "text" : "json",
 				...(mode === "json" ? { jsonEvents: "terminal" as const } : {}),
 				shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
 			} as never,
@@ -94,13 +96,17 @@ test("a reply to a citation check that holds only corrections keeps the answer i
 		const text = await stdoutAfterCitationCheck(answer, reply, "text");
 		ok(text.includes(answer), text);
 		ok(text.includes(reply), text);
-		const terminal = await stdoutAfterCitationCheck(answer, reply, "json");
-		const end = terminal
-			.split("\n")
-			.filter(Boolean)
-			.map((line) => JSON.parse(line))
-			.find((frame) => frame.type === "turn_end");
+		const frames = (stdout: string) =>
+			stdout
+				.split("\n")
+				.filter(Boolean)
+				.map((line) => JSON.parse(line))
+				.filter((frame) => frame.type === "turn_end");
+		const [end] = frames(await stdoutAfterCitationCheck(answer, reply, "json"));
 		strictEqual(end.text, `${answer}\n\n${reply}`);
+		// Full mode's last turn_end.message is where its answer lives (bt-29).
+		const full = frames(await stdoutAfterCitationCheck(answer, reply, "json-full")).at(-1);
+		strictEqual(full.message.content[0].text, `${answer}\n\n${reply}`);
 	} finally {
 		env.restore();
 	}
