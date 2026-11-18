@@ -23,6 +23,7 @@ import { createSessionJournals } from "../../src/domains/telemetry/session-journ
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { lockedSynthesisRepromptMessages } from "../../src/engine/loop-guard.js";
+import { createSideRequestAdmission } from "../../src/entry/side-request-admission.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { runOutOfTurnRound } from "../../src/session-control/side-question.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -329,7 +330,7 @@ it("a side call times its admission gate as its admission stage and names the ce
 	}
 });
 
-it("a side call cut off by shutdown settles with the shutdown cause a main call gets (bt-26 N2c)", async () => {
+it("a side call cut off by shutdown settles with the shutdown cause a main call gets (bt-26 N2c, N2e)", async () => {
 	const env = await isolateClioEnv("clio-coder-call-stages-");
 	const journals = createSessionJournals(clioStateDir(), () => {});
 	const origin = { id: "side-shutdown", cwdHash: "sidehash" };
@@ -347,14 +348,42 @@ it("a side call cut off by shutdown settles with the shutdown cause a main call 
 			await scope.close();
 		}
 	};
+	// The safety judge and System One settle through their request admission, not a call scope.
+	const admit = createSideRequestAdmission({
+		providers: { getTarget: () => ({ id: "t", runtime: "fixture" }) },
+		telemetry: {
+			acquireTelemetrySession: journals.acquire,
+			settledSessionSpend: async () => ({ usd: 0 }),
+		} as unknown as TelemetryContract,
+		getCeilingUsd: () => 0,
+		currentSession: () => origin.id,
+		repoIdentity: () => origin.cwdHash,
+		role: "safety-judge",
+	});
+	const abortedAdmittedCall = async (phase: TerminationPhase): Promise<void> => {
+		const account = await admit({ targetId: "t", model: "side", signal: new AbortController().signal });
+		setTerminationPhase(phase);
+		try {
+			account(null, { callOutcome: "aborted" });
+		} finally {
+			setTerminationPhase("idle");
+		}
+	};
 	try {
 		await abortedSideCall("idle");
 		await abortedSideCall("draining");
+		await abortedAdmittedCall("idle");
+		await abortedAdmittedCall("terminating");
 		await journals.closeAll();
 		const settled = (await readCallJournal(telemetrySessionDirectory(clioStateDir(), origin.id))).records.flatMap(
 			({ record }) => (record.k === "call.settled" ? [record.data.stop] : []),
 		);
-		deepStrictEqual(settled, [{ reason: "aborted" }, { reason: "aborted", failure: "shutdown" }]);
+		deepStrictEqual(settled, [
+			{ reason: "aborted" },
+			{ reason: "aborted", failure: "shutdown" },
+			{ reason: "aborted" },
+			{ reason: "aborted", failure: "shutdown" },
+		]);
 	} finally {
 		await journals.closeAll();
 		env.restore();

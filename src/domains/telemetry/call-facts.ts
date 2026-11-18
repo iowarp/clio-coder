@@ -5,6 +5,7 @@ import type { Fact } from "../../core/telemetry/fact.js";
 import type { PricingBasisSource } from "../../core/telemetry/pricing.js";
 import { pricedUsd, pricingBasis } from "../../core/telemetry/pricing.js";
 import type { CallSettled, CallStarted, CallUsage } from "../../core/telemetry/schemas.js";
+import { terminationPhase } from "../../core/termination-phase.js";
 import { ceilChars, normalizeTokenUsage } from "../../core/token-split.js";
 import type { EffectivePricing } from "../providers/catalog.js";
 import { telemetryCommitment } from "./objects.js";
@@ -133,6 +134,11 @@ export interface InterruptedUsageEstimate {
 	output: number;
 	/** The estimate priced at the route's declared or catalog rates, when it has any. */
 	usd?: number;
+}
+
+/** A side call cut off once shutdown began is the harness's stop, as a main call's is (bt-26 N2c, N2e). */
+export function sideCallShutdownCause(message: unknown): "shutdown" | undefined {
+	return record(message).stopReason === "aborted" && terminationPhase() !== "idle" ? "shutdown" : undefined;
 }
 
 export function callSettlementFromMessage(
@@ -326,24 +332,29 @@ export function turnSettlementFromCalls(
 	) as EventPayload<"turn.settled">["stopReason"];
 	const last = calls.at(-1);
 	const stages = last?.stages;
+	const cause = (reason === "error" || reason === "aborted" ? last?.stop.failure : undefined) ?? fallbackCause ?? null;
+	// A stop that landed after the final call ended, at its tool boundary, struck no stage of that call (bt-26 N2f).
+	const betweenCalls =
+		cause !== null && last !== undefined && last.stop.reason !== "aborted" && last.stop.reason !== "error";
 	return {
 		stopReason: reason,
 		terminal: {
-			cause: (reason === "error" || reason === "aborted" ? last?.stop.failure : undefined) ?? fallbackCause ?? null,
+			cause,
 			// A call that streamed thinking or text reached past its first token, so it settles as streaming (bt-26 N2a).
-			stage: !stages
-				? null
-				: stages.firstToken !== undefined
-					? "streaming"
-					: stages.send
-						? "send"
-						: stages.admission
-							? "admission"
-							: stages.auth
-								? "auth"
-								: stages.transform
-									? "transform"
-									: null,
+			stage:
+				!stages || betweenCalls
+					? null
+					: stages.firstToken !== undefined
+						? "streaming"
+						: stages.send
+							? "send"
+							: stages.admission
+								? "admission"
+								: stages.auth
+									? "auth"
+									: stages.transform
+										? "transform"
+										: null,
 			retries: Math.max(0, Math.trunc(retries)),
 			callIds: [...new Set(calls.map((call) => call.callId))],
 		},
