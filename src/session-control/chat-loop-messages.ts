@@ -230,6 +230,24 @@ export function isLengthStopAssistantMessage(message: AgentMessage | undefined):
 }
 
 /**
+ * A reply cut off by the output cap while it was still thinking: thinking, but
+ * no text and no tool call. The chat loop recovers from the first one in an
+ * operator turn and a headless run fails on the next one, so both ask this.
+ */
+export function isThinkingOnlyLengthStop(message: AgentMessage | undefined): boolean {
+	return (
+		isLengthStopAssistantMessage(message) &&
+		extractThinking(message).trim().length > 0 &&
+		extractText(message).trim().length === 0 &&
+		!hasStructuredToolCall(message)
+	);
+}
+
+/** Why a turn ended on a second thinking-only length stop, and what changes the outcome. */
+export const THINKING_LENGTH_STOP_REASON =
+	"[Clio Coder] the model spent its whole output budget thinking and stopped before acting or answering, twice in this turn. Lower --thinking or raise the output cap (chat.maxOutputTokens) and resume.";
+
+/**
  * An aborted assistant message with no text, thinking, or structured tool
  * call. Only a hollow abort needs a synthetic closing record; streamed
  * thinking belongs to the same durable assistant as any partial answer.

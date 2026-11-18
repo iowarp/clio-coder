@@ -66,6 +66,7 @@ const FAILURE_WORDS: Record<Failure, string> = {
 	route_moved: "you moved it to another route",
 	operator_cancel: "you stopped it",
 	parent_cancel: "its parent run stopped it",
+	repetition: "stopped for repeating itself",
 	internal: "Clio failed internally",
 };
 

@@ -905,7 +905,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								? "route_moved"
 								: state.activeInterruptByOperator
 									? "operator_cancel"
-									: undefined
+									: state.repetitionAbortReason !== null
+										? "repetition"
+										: undefined
 							: undefined,
 						interrupted,
 					),
@@ -1809,18 +1811,25 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								: failure,
 					});
 					Object.assign(message, { callInvoked: failure.invoked });
-					Object.assign(message, {
-						failureRoute: {
-							targetId: localRuntime.targetId,
-							...(localRuntime.runtimeResolution.target.url !== undefined
-								? { url: localRuntime.runtimeResolution.target.url }
-								: {}),
-							// What the failure was and what reached the screen decide the remedy, and a replay has only this record.
-							stage: failure.stage,
-							errorClass: failure.errorClass,
-							partialReply: extractText(message).length > 0,
-						},
-					});
+					// The harness, not the route, stopped this reply: it carries the harness's reason and names no route.
+					const harnessStop =
+						terminal.stopReason === "aborted" && state.activeInterruptReason === null
+							? (state.repetitionAbortReason ?? state.toolProseAbortReason)
+							: null;
+					if (harnessStop !== null) Object.assign(message, { errorMessage: harnessStop, harnessStopped: true });
+					else
+						Object.assign(message, {
+							failureRoute: {
+								targetId: localRuntime.targetId,
+								...(localRuntime.runtimeResolution.target.url !== undefined
+									? { url: localRuntime.runtimeResolution.target.url }
+									: {}),
+								// What the failure was and what reached the screen decide the remedy, and a replay has only this record.
+								stage: failure.stage,
+								errorClass: failure.errorClass,
+								partialReply: extractText(message).length > 0,
+							},
+						});
 					const retryAfterMs = callTracking?.retryAfterMs();
 					if (retryAfterMs !== null && retryAfterMs !== undefined) Object.assign(message, { retryAfterMs });
 				} else {

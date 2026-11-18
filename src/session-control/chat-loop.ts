@@ -166,12 +166,14 @@ import {
 	explainInterruptedAssistant,
 	extractText,
 	isOperatorCancelReason,
+	isThinkingOnlyLengthStop,
 	nameMissingCredentialRemedy,
 	notConfiguredNotice,
 	noticeMessage,
 	OPERATOR_CANCEL_REASON,
 	pendingSkillRequestPreamble,
 	sumRunUsage,
+	THINKING_LENGTH_STOP_REASON,
 	terminalFailureFromAssistantMessage,
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
@@ -225,6 +227,12 @@ import {
 	type StepRun,
 	stepTurnOutcome,
 } from "./step-start.js";
+import {
+	lowerThinkingLevel,
+	THINKING_LENGTH_RECOVERY_NOTICE_KEY,
+	THINKING_LENGTH_STOP_NOTICE_KEY,
+	thinkingLengthRecoveryMessages,
+} from "./thinking-length-recovery.js";
 import type { LiveContextUsage, TurnContextDeps } from "./turn-context.js";
 import { createTurnContext } from "./turn-context.js";
 import { createTurnKeepalive } from "./turn-keepalive.js";
@@ -3728,8 +3736,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// The repetition check stopped a looping stream. Once per operator
 					// turn the model gets the stopped reply replaced by a nudge and one
 					// more run; an operator's Esc in the same window wins.
+					// The stopped reply already carries the reason (turn-runtime), so a second stop ends the turn on it.
 					if (admissionCurrent() && state.repetitionAbortReason !== null && state.activeInterruptReason === null) {
-						const reason = state.repetitionAbortReason;
 						const turnId = state.activeUserTurnId;
 						if (turnId !== null && state.repetitionRepromptTurnId !== turnId) {
 							state.repetitionRepromptTurnId = turnId;
@@ -3747,10 +3755,49 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							await agentRuntime.agent.prompt([
 								...repetitionRepromptMessages({ provider: model.provider, api: model.api, model: model.id }),
 							]);
-						} else {
-							const last = agentRuntime.agent.state.messages.at(-1);
-							if (last?.role === "assistant") (last as { errorMessage?: string }).errorMessage = reason;
 						}
+					}
+					// The output cap ran out while the model was still thinking. Once per
+					// operator turn the cut-off reply is replaced by a reminder and the
+					// model runs again one thinking step lower; a second such stop ends
+					// the turn naming the cause and the fix.
+					if (
+						admissionCurrent() &&
+						state.activeInterruptReason === null &&
+						isThinkingOnlyLengthStop(agentRuntime.agent.state.messages.at(-1))
+					) {
+						const turnId = state.activeUserTurnId;
+						if (turnId !== null && state.thinkingLengthRecoveryTurnId !== turnId) {
+							state.thinkingLengthRecoveryTurnId = turnId;
+							// The cut-off reply is in the ledger; replaying it would resend the deliberation.
+							agentRuntime.agent.state.messages = agentRuntime.agent.state.messages.slice(0, -1);
+							const priorLevel = agentRuntime.agent.state.thinkingLevel;
+							const recoveryLevel = lowerThinkingLevel(priorLevel, agentRuntime.runtimeResolution.modelRuntime.thinking);
+							emitNotice(
+								recoveryLevel === priorLevel
+									? "[Clio Coder] The model ran out of output while thinking; asking it once to act or answer."
+									: `[Clio Coder] The model ran out of output while thinking; asking it once to act or answer, with thinking ${recoveryLevel} instead of ${priorLevel}.`,
+								"warning",
+								THINKING_LENGTH_RECOVERY_NOTICE_KEY,
+							);
+							if (recoveryLevel !== priorLevel && !context.thinkingUsesConfigurationUpdate())
+								context.noteColdReason("thinking_change");
+							const model = agentRuntime.agent.state.model;
+							agentRuntime.agent.state.thinkingLevel = recoveryLevel;
+							try {
+								await agentRuntime.agent.prompt([
+									...thinkingLengthRecoveryMessages({ provider: model.provider, api: model.api, model: model.id }),
+								]);
+							} finally {
+								agentRuntime.agent.state.thinkingLevel = priorLevel;
+							}
+						}
+						if (
+							admissionCurrent() &&
+							state.activeInterruptReason === null &&
+							isThinkingOnlyLengthStop(agentRuntime.agent.state.messages.at(-1))
+						)
+							emitNotice(THINKING_LENGTH_STOP_REASON, "error", THINKING_LENGTH_STOP_NOTICE_KEY);
 					}
 					// pi-agent-core does NOT throw on provider failures:
 					// it pushes an assistant message with stopReason="error" and
