@@ -68,7 +68,7 @@ export function dropUnpricedHead(
 		const index = indexOf.get(candidate.ref.entry);
 		const entry = index === undefined ? undefined : entries[index];
 		if (index === undefined || entry === undefined) return candidates;
-		placed.push({ candidate, index, freed: tokensFreedByEviction(estimateTokens, entry, candidate, callPaths) });
+		placed.push({ candidate, index, freed: tokensFreedByEviction(input, entry, candidate, callPaths) });
 	}
 	placed.sort((a, b) => a.index - b.index);
 	const projected = projectWorkingSet(entries, input.view);

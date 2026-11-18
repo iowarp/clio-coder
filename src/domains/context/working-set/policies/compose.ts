@@ -134,7 +134,7 @@ export function composePolicy(
 		select(raw: PolicyInput): ReadonlyArray<EvictionCandidate> {
 			const profile = options.profile ?? resolveWorkingSetProfile(raw.settings);
 			const input: PolicyInput = { ...raw, settings: settingsUnderProfile(raw.settings, profile) };
-			const { entries, view, estimateTokens } = input;
+			const { entries, view } = input;
 			const index = buildPathIndex(entries, { cwd: input.cwd });
 			const callPaths = callPathsByToolCallId(entries);
 			const cutoffIndex = protectionCutoffIndex(entries, input.settings);
@@ -174,7 +174,7 @@ export function composePolicy(
 					earned = settled;
 				}
 				const candidate: EvictionCandidate = { ref: { entry: turnId }, ...earned };
-				const tokens = tokensFreedByEviction(estimateTokens, entry, candidate, callPaths);
+				const tokens = tokensFreedByEviction(input, entry, candidate, callPaths);
 				// Priced here for the same reason `planEviction` refuses it: a unit
 				// whose marker is as long as its body frees nothing, and the age
 				// rung's headroom must not count it.

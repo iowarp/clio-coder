@@ -258,19 +258,22 @@ describe("failed command rerun", () => {
 
 	it("lets the pressure path supersede a failed run once the same command reran", () => {
 		const entries = [message("u1", null, "user"), ...failedRun("test1", "u1"), ...failedRun("test2", "test1")];
-		const plan = planEviction(structuralV2Policy, {
+		const input = {
 			entries,
 			view: EMPTY_WORKING_SET_VIEW,
 			cwd: "/repo",
 			settings: { ...DEFAULT_WORKING_SET_SETTINGS, protectLastTurns: 1, protectLastSteps: 1 },
 			pressure: { tokens: 90_000, contextWindow: 100_000, threshold: 0.8, target: 0.6 },
-			estimateTokens: (entry) => Math.ceil(JSON.stringify(entry).length / 4),
-		});
+			estimateTokens: (entry: SessionEntry) => Math.ceil(JSON.stringify(entry).length / 4),
+		};
+		const plan = planEviction(structuralV2Policy, input);
 		ok(plan);
 		deepStrictEqual(
 			plan.items.map((item) => [item.ref.entry, item.reason]),
 			[["test1", "superseded_call"]],
 		);
+		// D1-1: a result the request already carries as an aging stub frees nothing the pressure figure holds.
+		strictEqual(planEviction(structuralV2Policy, { ...input, aged: new Set(["test1"]) }), null);
 	});
 
 	it("keeps a cheap stale unit whose eviction would re-write a long cached span, unless the fit is forced", () => {

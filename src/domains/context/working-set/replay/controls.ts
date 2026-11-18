@@ -38,7 +38,7 @@ function takeToTarget(input: PolicyInput, entries: ReadonlyArray<SessionEntry>):
 	for (const entry of entries) {
 		const candidate: EvictionCandidate = { ref: { entry: entry.turnId }, reason: "age_horizon" };
 		selected.push(candidate);
-		tokensNeeded -= tokensFreedByEviction(input.estimateTokens, entry, candidate, callPaths);
+		tokensNeeded -= tokensFreedByEviction(input, entry, candidate, callPaths);
 		if (tokensNeeded <= 0) break;
 	}
 	return selected;
