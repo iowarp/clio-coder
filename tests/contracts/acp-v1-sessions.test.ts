@@ -409,26 +409,31 @@ test("ACP reports a turn the loop guard stopped as max_turn_requests, not cancel
 });
 
 for (const [second, streamed] of [
-	[["It's Wednesday."], ["It's Wednesday."]],
+	[["It's Wednesday."], [["It's Wednesday.", 0]]],
 	// A later message whose text arrives only on message_end opens at its own offset, not the prompt's (x7-6).
 	[["Done."], []],
 	[["Fixed it; tests pass now."], []],
-	// Text blocks stream with no separator, so the tail starts where the deltas stopped (x8-3).
+	// The tail starts where the deltas stopped (x8-3), and a message's text blocks part on a blank line (bt-acp-tail).
 	[
 		["Plan:", "Done."],
-		["Plan:", "Do"],
+		[
+			["Plan:", 0],
+			["Do", 1],
+		],
 	],
+	[["Plan:", "Done."], [["Plan:", 0]]],
+	[["Plan:", "Done."], []],
 ] as const) {
-	test(`ACP separates two assistant messages' text on a blank line without touching their content (bt-41): ${second.join("")}`, async () => {
+	test(`ACP separates assistant messages and their text blocks on a blank line without touching their content (bt-41): ${second.join("|")} after ${streamed.length} deltas`, async () => {
 		const first = "Let me look at the file.";
 		const peer = fixture([], (emit) => {
 			emit({ type: "agent_start", turnId: "turn-1" });
 			for (const [blocks, deltas] of [
-				[[first], [first]],
+				[[first], [[first, 0]]],
 				[second, streamed],
 			] as const) {
 				// No message_start: the assistant message_end alone resets the offset.
-				for (const text of deltas) emit({ type: "text_delta", text });
+				for (const [text, contentIndex] of deltas) emit({ type: "text_delta", text, contentIndex });
 				const content = blocks.map((text) => ({ type: "text", text }));
 				emit({ type: "message_end", message: { role: "assistant", content } });
 			}
@@ -442,12 +447,45 @@ for (const [second, streamed] of [
 				.filter((params) => (params.update as { sessionUpdate?: string }).sessionUpdate === "agent_message_chunk")
 				.map((params) => (params.update as { content: { text: string } }).content.text)
 				.join("");
-			strictEqual(text, `${first}\n\n${second.join("")}`);
+			strictEqual(text, `${first}\n\n${second.join("\n\n")}`);
 		} finally {
 			await peer.stop();
 		}
 	});
 }
+
+test("ACP replay parts one message's text blocks on a blank line, as the live stream does (bt-acp-tail)", async () => {
+	const timestamp = "2026-09-25T12:00:00.000Z";
+	const peer = fixture([
+		{ kind: "message", role: "user", turnId: "u1", parentTurnId: null, timestamp, payload: "status?" },
+		{
+			kind: "message",
+			role: "assistant",
+			turnId: "a1",
+			parentTurnId: "u1",
+			timestamp,
+			payload: {
+				content: [
+					{ type: "text", text: "Plan:" },
+					{ type: "text", text: "" },
+					{ type: "text", text: "Done." },
+				],
+				stopReason: "stop",
+			},
+		},
+	]);
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
+		const text = peer.updates
+			.filter((params) => (params.update as { sessionUpdate?: string }).sessionUpdate === "agent_message_chunk")
+			.map((params) => (params.update as { content: { text: string } }).content.text)
+			.join("");
+		strictEqual(text, "Plan:\n\nDone.");
+	} finally {
+		await peer.stop();
+	}
+});
 
 test("ACP load streams the complete active history beyond the former 64 turn limit", async () => {
 	const timestamp = "2026-09-25T12:00:00.000Z";

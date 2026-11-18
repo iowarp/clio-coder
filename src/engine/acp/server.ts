@@ -717,6 +717,8 @@ interface ActivePrompt {
 	messageAssistantChars: number;
 	/** An assistant message ended after text went out, so the next message's text opens on a blank line (bt-41). */
 	textBreakPending: boolean;
+	/** The content index of the current message's last streamed text block; a new one opens on a blank line. */
+	messageTextBlock?: number | undefined;
 	/** Thinking sent for the current assistant message, reset at its boundaries like `messageAssistantChars`. */
 	sentThinkingChars: number;
 	/** Chunks only append, so URL credentials are settled before they are sent (#446). */
@@ -1529,13 +1531,35 @@ function assistantText(message: unknown): string {
 	return contentText(message.content);
 }
 
-/** Text blocks joined as their deltas stream and a load replays them: no separator, so a `message_end` tail lines up (x8-3). */
-function assistantStreamedText(message: unknown): string {
+/**
+ * The text of an assistant message that its deltas did not carry. `streamed` counts delta characters, without the
+ * blank lines put between blocks, so the tail starts where the deltas stopped (x8-3). A block the deltas never
+ * reached opens on a blank line after earlier text, as a streamed one does (bt-acp-tail).
+ */
+function assistantTextTail(message: unknown, streamed: number): string {
 	if (!isRecord(message) || message.role !== "assistant" || !Array.isArray(message.content))
-		return assistantText(message);
-	return message.content
-		.map((block) => (isRecord(block) && block.type === "text" && typeof block.text === "string" ? block.text : ""))
-		.join("");
+		return assistantText(message).slice(streamed);
+	let offset = 0;
+	let tail = "";
+	for (const block of message.content) {
+		if (!isRecord(block) || block.type !== "text" || typeof block.text !== "string" || block.text.length === 0) continue;
+		const start = offset;
+		offset += block.text.length;
+		if (offset <= streamed) continue;
+		tail += start >= streamed && start > 0 ? `\n\n${block.text}` : block.text.slice(streamed - start);
+	}
+	return tail;
+}
+
+/** The text blocks of one message, a blank line between them as the live stream sends them (bt-acp-tail). */
+function separatedTextBlocks(blocks: ReadonlyArray<string>): string[] {
+	return blocks.filter((text) => text.length > 0).map((text, index) => (index === 0 ? text : `\n\n${text}`));
+}
+
+function eventContentIndex(event: AcpEventRecord): number | undefined {
+	const assistantEvent = isRecord(event.assistantMessageEvent) ? event.assistantMessageEvent : null;
+	const index = event.contentIndex ?? assistantEvent?.contentIndex;
+	return typeof index === "number" ? index : undefined;
 }
 
 function assistantThinking(message: unknown): string {
@@ -1945,9 +1969,16 @@ function handleChatEvent(
 	if (event.type === "text_delta") {
 		const text = eventTextDelta(event);
 		if (text.length === 0) return;
+		const block = eventContentIndex(event);
+		const newBlock =
+			block !== undefined &&
+			active.messageTextBlock !== undefined &&
+			block !== active.messageTextBlock &&
+			active.messageAssistantChars > 0;
+		if (block !== undefined) active.messageTextBlock = block;
 		active.sentAssistantChars += text.length;
 		active.messageAssistantChars += text.length;
-		sendAssistantText(transport, sessionId, active, text);
+		sendAssistantText(transport, sessionId, active, newBlock ? `\n\n${text}` : text);
 		return;
 	}
 	if (event.type === "thinking_delta") {
@@ -2086,6 +2117,7 @@ function handleChatEvent(
 	}
 	if (event.type === "message_start") {
 		active.messageAssistantChars = 0;
+		active.messageTextBlock = undefined;
 		active.sentThinkingChars = 0;
 		return;
 	}
@@ -2123,9 +2155,8 @@ function handleChatEvent(
 			active.sentThinkingChars = thinking.length;
 			sendSafeChunks(transport, sessionId, active, "agent_thought_chunk", active.thinkingCredentials.push(tail));
 		}
-		const text = assistantStreamedText(message);
-		if (text.length > active.messageAssistantChars) {
-			const tail = text.slice(active.messageAssistantChars);
+		const tail = assistantTextTail(message, active.messageAssistantChars);
+		if (tail.length > 0) {
 			active.sentAssistantChars += tail.length;
 			sendAssistantText(transport, sessionId, active, tail);
 		}
@@ -2138,6 +2169,7 @@ function handleChatEvent(
 		if (isRecord(message) && message.role === "assistant") {
 			// A runtime that emits no message_start still opens the next message at offset zero.
 			active.messageAssistantChars = 0;
+			active.messageTextBlock = undefined;
 			active.sentThinkingChars = 0;
 			if (active.sentAssistantChars > 0) active.textBreakPending = true;
 		}
@@ -2590,7 +2622,7 @@ function prepareAcpReplay(
 			// Stored text ends where the live stream did, and a message that stopped short can end inside a URL (#446).
 			const completed = messageStopCompleted(payload?.stopReason);
 			replayMessageChunks(current.frames, "agent_thought_chunk", blocks.thinking, completed);
-			replayMessageChunks(current.frames, "agent_message_chunk", blocks.text, completed);
+			replayMessageChunks(current.frames, "agent_message_chunk", separatedTextBlocks(blocks.text), completed);
 			continue;
 		}
 		if (entry.role === "tool_call") {

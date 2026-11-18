@@ -294,7 +294,7 @@ A live prompt streams `session/update` notifications of these kinds:
 
 | `sessionUpdate` | Content |
 | --- | --- |
-| `agent_message_chunk`, `agent_thought_chunk` | Text, at most 16 KiB per chunk. A longer delta splits across consecutive chunks and nothing is dropped. No split falls inside a code point. |
+| `agent_message_chunk`, `agent_thought_chunk` | Text, at most 16 KiB per chunk. A longer delta splits across consecutive chunks and nothing is dropped. No split falls inside a code point. Agent text opens on a blank line after earlier text when a new assistant message or a new text block of the same message starts, live and on replay. |
 | `tool_call`, `tool_call_update` | Tool lifecycle with `name`, `title`, `kind`, `status`, `rawInput`, `rawOutput`, `locations`, `content`. See [Bounds](#bounds). |
 | `usage_update`, `plan` | Pushed telemetry. See [Live telemetry](#live-telemetry-usage-plan-and-workspace). |
 | `session_info_update` | A new `title`, the workspace snapshot, the memory guardian's state, the active conversation eggs, a startup notice, or a context engine status line. |
