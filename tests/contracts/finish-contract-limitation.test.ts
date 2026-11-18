@@ -456,6 +456,22 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		deepStrictEqual(filed("./acceptance.sh --strict && echo done"), ["./acceptance.sh --strict && echo done"]);
 		deepStrictEqual(filed("./acceptance.sh --strict && echo done", []), []);
 		deepStrictEqual(filed(`python3 -c 'import calc; assert calc.add(2, 3) == 5' && echo OK`, []).length, 1);
+		// A declared pass after the last edit is the receipt's typed fact under its declared id, as board and gate read it (S1).
+		const sealed = (command: string, verifiers = sessionVerifiers) => {
+			const recorder = createRunEffectsRecorder(root, { sessionVerifiers: verifiers });
+			for (const [id, tool, args] of [
+				["e-1", ToolNames.Edit, { path: "calc.py" }],
+				["sh-1", ToolNames.Bash, { command }],
+			] as const) {
+				recorder.start(id, tool, args);
+				recorder.checkOutcome(id, "ok");
+				recorder.finish(id, false);
+			}
+			return [...recorder.snapshot().validationCommands];
+		};
+		deepStrictEqual(sealed("./acceptance.sh --strict && echo done"), ["run-acceptance"]);
+		deepStrictEqual(sealed(`python3 -c 'import calc; assert calc.add(2, 3) == 5' && echo OK`), ["calc"]);
+		deepStrictEqual(sealed("git diff --check", [{ id: "diff-check", command: "git diff --check" }]), ["diff-check"]);
 		for (const unproven of [
 			assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5'`, true),
 			assess(`python3 -c 'import calc; assert calc.add(2, 3) == 5'`, false, true),
