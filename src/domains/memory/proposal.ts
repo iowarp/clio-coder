@@ -53,12 +53,12 @@ export async function proposeMemoryFromEvidence(
 	return insertMemoryRecordIfAbsent(dataDir, memoryRecordFromEvidence(evidence, context, selection));
 }
 
-export function memoryIdFromEvidence(runId: string): string {
+function memoryIdFromEvidence(runId: string): string {
 	const digest = createHash("sha256").update(runId, "utf8").digest("hex").slice(0, 16);
 	return `mem-${digest}`;
 }
 
-export function memoryRecordFromEvidence(
+function memoryRecordFromEvidence(
 	evidence: RunEvidence,
 	context: EvidenceRunContext,
 	selection?: MemoryScopeSelection,

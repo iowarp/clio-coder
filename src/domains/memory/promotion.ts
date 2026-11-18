@@ -13,9 +13,6 @@ import type {
 } from "./types.js";
 import { assertValidMemoryRecord, validNamedIdentityKey, validSourceValue } from "./validate.js";
 
-export const MEMORY_PROMOTION_SCOPES = ["repo", "global", "runtime", "agent"] as const;
-export type MemoryPromotionScope = (typeof MEMORY_PROMOTION_SCOPES)[number];
-
 export type MemoryScopeSelection =
 	| { scope: "repo"; repository: MemoryRepositoryIdentity }
 	| { scope: "global"; acknowledgeGlobal: true }

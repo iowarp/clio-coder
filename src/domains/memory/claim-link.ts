@@ -56,7 +56,7 @@ export interface ClaimMemorySource {
 	at: string;
 }
 
-export function memoryIdFromClaim(claimId: string): string {
+function memoryIdFromClaim(claimId: string): string {
 	return `mem-${createHash("sha256").update(`claim\n${claimId}`, "utf8").digest("hex").slice(0, 16)}`;
 }
 
@@ -65,7 +65,7 @@ export function memoryIdFromClaim(claimId: string): string {
  * reaches it, and it waits for `clio-coder memory approve` like any proposal: the guardian gate approves only
  * task-bank lessons, so nothing here approves on its own.
  */
-export function memoryRecordFromClaim(source: ClaimMemorySource): MemoryRecord {
+function memoryRecordFromClaim(source: ClaimMemorySource): MemoryRecord {
 	const repository = canonicalMemoryRepositoryIdentity(source.project);
 	if (repository === null) throw new Error(`claim project ${source.project} is not a usable repository path`);
 	const lesson = `Recorded claim: ${source.text}`;

@@ -3,7 +3,6 @@ import {
 	MEMORY_OBSERVATION_KINDS,
 	MEMORY_OBSERVATIONS_MAX,
 	MEMORY_SCOPES,
-	MEMORY_VERSION,
 	type MemoryAgentIdentity,
 	type MemoryApproval,
 	type MemoryObservation,
@@ -14,7 +13,6 @@ import {
 	type MemoryRepositoryIdentity,
 	type MemoryRuntimeIdentity,
 	type MemoryScope,
-	type MemoryStoreValidationResult,
 	type MemoryValidationIssue,
 	OPERATOR_STATED_KINDS,
 	type OperatorStatedKind,
@@ -51,25 +49,6 @@ export function assertValidMemoryRecord(value: unknown, label: string): MemoryRe
 	throw new Error(
 		`${label} memory record invalid: ${validated.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`,
 	);
-}
-
-export function validateMemoryStore(value: unknown, source = "$"): MemoryStoreValidationResult {
-	const issues: MemoryValidationIssue[] = [];
-	if (!isRecord(value)) return { valid: false, issues: [{ path: source, message: "expected object" }] };
-	rejectUnexpectedFields(value, source, ["version", "records"], issues);
-	if (value.version !== MEMORY_VERSION) issues.push({ path: `${source}.version`, message: "expected 1" });
-	const rawRecords = value.records;
-	if (!Array.isArray(rawRecords)) {
-		issues.push({ path: `${source}.records`, message: "expected array" });
-		return { valid: false, issues };
-	}
-	const records: MemoryRecord[] = [];
-	for (let index = 0; index < rawRecords.length; index += 1) {
-		const record = readMemoryRecord(rawRecords[index], `${source}.records[${index}]`, issues);
-		if (record !== null) records.push(record);
-	}
-	if (issues.length > 0) return { valid: false, issues };
-	return { valid: true, store: { version: MEMORY_VERSION, records } };
 }
 
 function readMemoryRecord(value: unknown, path: string, issues: MemoryValidationIssue[]): MemoryRecord | null {
