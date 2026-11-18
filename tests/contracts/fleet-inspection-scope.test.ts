@@ -1,14 +1,15 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { verdictText } from "../../src/cli/fleet-board.js";
-import { createBoardSource, loadBoard, type WorkerCard } from "../../src/cli/fleet-board-model.js";
+import { createBoardSource, loadBoard, loadTakeover, type WorkerCard } from "../../src/cli/fleet-board-model.js";
 import { fleetInspectionScope } from "../../src/cli/fleet-project-scope.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { gateDecisionsDirectory, stagePendingGateDecision } from "../../src/domains/dispatch/gate-decisions.js";
+import { runFeedPath } from "../../src/domains/dispatch/run-feed.js";
 import { openLedger, writeFleetRun } from "../../src/domains/dispatch/state.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -233,4 +234,73 @@ test("a finished card's row keeps its refusal and seal whole and drops the least
 	// Only the outcome is ever cut.
 	const narrow = verdictText(paint, card, 8);
 	ok(narrow.startsWith("✓ succe") && narrow.includes("…"), narrow);
+});
+
+test("the workers takeover reads a sealed report in words, never as its JSON (bt-11 dock-detail)", async () => {
+	const home = await isolateClioEnv("clio-fleet-board-report-");
+	try {
+		const ledger = openLedger();
+		const run = ledger.create({
+			agentId: "coder",
+			executionRole: "builder",
+			task: "Implement slugify",
+			targetId: "local",
+			wireModelId: "model",
+			runtimeId: "openai",
+			runtimeKind: "http",
+			sessionId: null,
+			cwd: process.cwd(),
+		});
+		const endedAt = new Date();
+		ledger.update(run.id, { status: "completed", outcome: "succeeded", endedAt: endedAt.toISOString() });
+		await ledger.persist();
+		const data = {
+			mutatedPaths: ["textutil/slug.py"],
+			validations: [{ name: "python-unittest", passed: true, evidence: "4 tests, OK" }],
+			summary: "Implemented slugify (bash-hidden-content rail).",
+		};
+		const text = JSON.stringify(data);
+		await writeSettledRun(clioStateDir(), {
+			...fixtureReceiptDraft({ ...fixtureEnvelope(run.id), sessionId: null }),
+			output: {
+				state: "final",
+				text,
+				bytes: Buffer.byteLength(text),
+				truncated: false,
+				structured: { version: 1, kind: "mutation-report", data },
+			},
+		});
+		// The report streams as prose; its last delta lands after the host accepted it.
+		const at = endedAt.toISOString();
+		const events = [
+			{ kind: "open", runId: run.id, agentId: "coder" },
+			{ kind: "event", type: "text", detail: "Done." },
+			{ kind: "event", type: "message_end" },
+			{ kind: "event", type: "text", detail: text.slice(0, 40) },
+			{ kind: "event", type: "clio_coder_helper_result" },
+			{ kind: "event", type: "text", detail: text.slice(40) },
+			{ kind: "event", type: "message_end" },
+		];
+		const feed = runFeedPath(run.id, clioStateDir());
+		mkdirSync(dirname(feed), { recursive: true });
+		writeFileSync(
+			feed,
+			events.map((event, index) => `${JSON.stringify({ v: 1, seq: index + 1, at, ...event })}\n`).join(""),
+		);
+		const takeover = loadTakeover(createBoardSource(clioStateDir()), run.id, endedAt.getTime() + 2_000);
+		ok(takeover !== null);
+		deepStrictEqual(
+			takeover.fold.rows.map((row) => [row.kind, row.text]),
+			[
+				["text", "Done."],
+				["note", "result submitted"],
+			],
+		);
+		strictEqual(
+			takeover.card.record?.answer,
+			"Implemented slugify (bash-hidden-content rail).\nchanged: textutil/slug.py",
+		);
+	} finally {
+		home.restore();
+	}
 });

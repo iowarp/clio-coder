@@ -134,9 +134,19 @@ function limitationLine(item: string): string {
  */
 function sealedResultAnswer(receipt: RunResult): string {
 	const output = receipt.output;
-	if (output?.state !== "final") return "";
-	const structured = output.structured;
-	if (structured === undefined) return output.text.trim();
+	return output?.state === "final" ? sealedReportAnswer(output.text, output.structured) : "";
+}
+
+/**
+ * A sealed report in the words it holds, or `text` as it is when nothing sealed it. `changed: false` leaves out the
+ * report's changed paths for a surface that already lists the run's own.
+ */
+export function sealedReportAnswer(
+	text: string,
+	structured: { kind: string; data: Record<string, unknown> } | undefined,
+	options: { changed?: boolean } = {},
+): string {
+	if (structured === undefined) return text.trim();
 	const data = structured.data;
 	const claims = (value: unknown): string[] =>
 		records(value).flatMap((finding) => {
@@ -158,7 +168,7 @@ function sealedResultAnswer(receipt: RunResult): string {
 			lines = [
 				...strings([data.summary]),
 				...bullets(data.observations),
-				...(changed.length > 0 ? [`changed: ${changed.join(", ")}`] : []),
+				...(changed.length > 0 && options.changed !== false ? [`changed: ${changed.join(", ")}`] : []),
 			];
 			break;
 		}
@@ -178,7 +188,7 @@ function sealedResultAnswer(receipt: RunResult): string {
 		default:
 			lines = [];
 	}
-	return lines.length > 0 ? lines.join("\n") : output.text.trim();
+	return lines.length > 0 ? lines.join("\n") : text.trim();
 }
 
 /** The human answer, settled evidence limits, and the run result line in that order. */

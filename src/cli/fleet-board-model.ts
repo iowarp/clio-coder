@@ -39,6 +39,7 @@ import { HOST_VERIFICATION_EVENT, type VerificationSlotState } from "../domains/
 import { trustStateWord, trustVerdictWord, validationClause } from "../domains/evidence/trust-projection.js";
 
 import type { fleetInspectionScope } from "./fleet-project-scope.js";
+import { sealedReportAnswer } from "./run-output.js";
 
 /** Stream rows a run keeps; the head goes first, as in a terminal's scrollback. */
 const STREAM_ROW_LIMIT = 600;
@@ -159,6 +160,8 @@ interface FoldCursor {
 	pendingById: Map<string, StreamRow>;
 	/** The next prose delta starts a new row rather than continuing the last one. */
 	paragraphBreak: boolean;
+	/** The prose row the worker's accepted report streamed into; its last deltas can land after the acceptance. */
+	reportRow: StreamRow | null;
 	fold: RunFold;
 }
 
@@ -185,6 +188,7 @@ function newCursor(path: string): FoldCursor {
 		skipFirst: false,
 		pendingById: new Map(),
 		paragraphBreak: true,
+		reportRow: null,
 		fold: emptyFold(),
 	};
 }
@@ -231,6 +235,24 @@ function appendText(cursor: FoldCursor, at: string, text: string): void {
 	}
 	cursor.paragraphBreak = false;
 	fold.phase = "writing";
+}
+
+/**
+ * Once its message ends, the accepted report's prose row becomes a note: the JSON repeats the run record, which reads
+ * the same report in words. A row holding more than the one object stays the prose it is.
+ */
+function settleReportRow(cursor: FoldCursor): void {
+	const row = cursor.reportRow;
+	cursor.reportRow = null;
+	if (row?.kind !== "text") return;
+	try {
+		const value: unknown = JSON.parse(row.text);
+		if (value === null || typeof value !== "object" || Array.isArray(value)) return;
+	} catch {
+		return;
+	}
+	row.kind = "note";
+	row.text = "result submitted";
 }
 
 function applyEvent(cursor: FoldCursor, line: Extract<RunFeedLine, { kind: "event" }>): void {
@@ -289,6 +311,7 @@ function applyEvent(cursor: FoldCursor, line: Extract<RunFeedLine, { kind: "even
 			return;
 		}
 		case "message_end":
+			settleReportRow(cursor);
 			cursor.paragraphBreak = true;
 			// Only a message that streamed no prose carries its text here (an ACP peer).
 			if (detail.length > 0) {
@@ -313,6 +336,11 @@ function applyEvent(cursor: FoldCursor, line: Extract<RunFeedLine, { kind: "even
 		case "clio_coder_run_outcome":
 			pushRow(cursor, { at: line.at, kind: "error", text: detail, ...(line.reason ? { reason: line.reason } : {}) });
 			return;
+		case "clio_coder_helper_result": {
+			const last = fold.rows[fold.rows.length - 1];
+			cursor.reportRow = last?.kind === "text" ? last : null;
+			return;
+		}
 		case "clio_coder_helper_result_rejected":
 			pushRow(cursor, {
 				at: line.at,
@@ -328,6 +356,7 @@ function applyEvent(cursor: FoldCursor, line: Extract<RunFeedLine, { kind: "even
 			fold.phase = "starting";
 			return;
 		case "agent_end":
+			settleReportRow(cursor);
 			fold.current = null;
 			fold.phase = "waiting";
 			return;
@@ -360,6 +389,7 @@ function applyLine(cursor: FoldCursor, line: RunFeedLine): void {
 		case "result":
 			return;
 		case "terminal":
+			settleReportRow(cursor);
 			fold.terminal =
 				line.detail === undefined ? { outcome: line.outcome } : { outcome: line.outcome, detail: line.detail };
 			for (const row of fold.rows) {
@@ -479,6 +509,8 @@ function runRecordView(runId: string, stateDir: string): RunRecordView | null {
 	const facts = readRunResultFacts(runId, stateDir);
 	if (facts === null) return null;
 	const integrity = facts.trust?.artifactIntegrity;
+	const changedPaths =
+		facts.changedPaths !== undefined && facts.changedPaths.length > 0 ? facts.changedPaths : undefined;
 	return {
 		outcome: facts.outcome,
 		...(facts.outcomeCode !== undefined ? { outcomeCode: facts.outcomeCode } : {}),
@@ -489,8 +521,11 @@ function runRecordView(runId: string, stateDir: string): RunRecordView | null {
 			: {}),
 		...(facts.failureMessage !== undefined ? { failure: facts.failureMessage } : {}),
 
-		...(facts.text !== undefined && facts.text.trim().length > 0 ? { answer: facts.text } : {}),
-		...(facts.changedPaths !== undefined && facts.changedPaths.length > 0 ? { changedPaths: facts.changedPaths } : {}),
+		// A sealed report reads in its own words, as the transcript card reads it; its changed paths are already listed.
+		...(facts.text !== undefined && facts.text.trim().length > 0
+			? { answer: sealedReportAnswer(facts.text, facts.structured, { changed: changedPaths === undefined }) }
+			: {}),
+		...(changedPaths !== undefined ? { changedPaths } : {}),
 		...(facts.refusedCalls !== undefined && facts.refusedCalls > 0
 			? { refused: refusedCallsWords(facts.refusedCalls, facts.guardedCalls ?? 0) }
 			: {}),
