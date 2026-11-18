@@ -1,7 +1,8 @@
 /**
  * The autonomous window (ob-yolo D6): how far yolo runs on its own before it
- * pauses for the operator. It counts tool calls, active turn time and tokens
- * since the operator last spoke, across every continuation Clio sends itself,
+ * pauses for the operator. It counts tool calls, active turn time and cap tokens
+ * (cache reads at one tenth, `settledCallTokens`) since the operator last spoke,
+ * across every continuation Clio sends itself,
  * and latches a halt when one passes its cap or the safety judge escalates.
  * The latch holds until the operator speaks or resumes; until then every
  * automatic continuation is refused.
@@ -41,6 +42,7 @@ export interface AutonomousCaps {
 export interface AutonomyUsage {
 	toolCalls: number;
 	activeMs: number;
+	/** Cap tokens: cache reads weighted as `settledCallTokens` weighs them, so not the tokens processed. */
 	tokens: number;
 }
 
@@ -345,7 +347,16 @@ export function autonomousCaps(
 	return { toolCalls: limits.autonomousToolCalls, minutes: limits.autonomousMinutes, tokens: limits.autonomousTokens };
 }
 
-/** Tokens one settled call spent: the provider's total when it gave one, else input, cache and output. */
+/**
+ * The weight of one cache-read token in the autonomous token cap (cw-2). A cached prefix is read again on every call,
+ * so at full weight it, not new work, would trip the cap; input, cache writes and output count at 1.
+ */
+const CACHE_READ_CAP_WEIGHT = 0.1;
+
+/**
+ * Cap tokens one settled call spent: input, cache writes and output in full and cache reads at
+ * `CACHE_READ_CAP_WEIGHT`, rounded to a whole token. The provider's total is used only when no breakdown came with it.
+ */
 export function settledCallTokens(usage: unknown): number {
 	if (usage === null || typeof usage !== "object") return 0;
 	const value = (field: string): number => {
@@ -353,8 +364,11 @@ export function settledCallTokens(usage: unknown): number {
 		const n = fact !== null && typeof fact === "object" ? (fact as { value?: unknown }).value : undefined;
 		return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
 	};
-	const total = value("total");
-	return total > 0 ? total : value("input") + value("cacheRead") + value("cacheWrite") + value("output");
+	const full = value("input") + value("cacheWrite") + value("output");
+	const cacheRead = value("cacheRead");
+	if (full > 0 || cacheRead > 0) return Math.round(full + cacheRead * CACHE_READ_CAP_WEIGHT);
+	// A total alone says nothing of how much of it was cache reads, so it cannot be weighted and counts in full.
+	return Math.round(value("total"));
 }
 
 /** Name a refused call for the operator: credentials scrubbed by key and by value shape, then clipped to 200 characters. */
@@ -422,7 +436,7 @@ export function autonomyHaltNotice(
 ): string {
 	const left = openDecisionsClause(open, halt.kind === "judge");
 	const used = halt.usage;
-	const spent = `${used.toolCalls} tool calls, ${Math.round(used.activeMs / MINUTE_MS)} min, ${formatFooterTokens(used.tokens)} tokens`;
+	const spent = `${used.toolCalls} tool calls, ${Math.round(used.activeMs / MINUTE_MS)} min, ${formatFooterTokens(used.tokens)} cap tokens`;
 	if (surface === "headless") {
 		const what =
 			halt.kind === "judge"
@@ -437,7 +451,7 @@ export function autonomyHaltNotice(
 		halt.kind === "calls"
 			? `another ${halt.limit} calls`
 			: halt.kind === "tokens"
-				? `another ${formatFooterTokens(halt.limit ?? 0)} tokens`
+				? `another ${formatFooterTokens(halt.limit ?? 0)} cap tokens`
 				: `another ${halt.limit} minutes`;
 	return `yolo paused: ${halt.detail} (${spent}). Enter on an empty prompt continues for ${again}; a new message also continues.${left}`;
 }
