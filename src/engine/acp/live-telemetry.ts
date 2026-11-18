@@ -240,6 +240,8 @@ export interface AcpLiveTelemetry {
 	turnStarted(turn: AcpPromptTurn): void;
 	/** A model response landed; one `usage_update` follows once the burst settles. */
 	modelResponded(): void;
+	/** A fold committed; one `usage_update` follows, reading the figure the fold published (bt-47 D1). */
+	contextFolded(): void;
 	/** A tool call settled; `mayWrite` re-probes the workspace. */
 	toolSettled(mayWrite: boolean): void;
 	/**
@@ -321,6 +323,14 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 		if (signature === usageSignature) return;
 		usageSignature = signature;
 		if (emit) send(frame);
+	};
+
+	const scheduleUsage = (): void => {
+		if (pendingUsage !== null || deps.contextLedger === undefined || disposed) return;
+		pendingUsage = setImmediate(() => {
+			pendingUsage = null;
+			flushUsage(true);
+		});
 	};
 
 	const flushPlan = (emit: boolean): void => {
@@ -444,14 +454,14 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 			turn = started;
 		},
 		modelResponded() {
-			if (pendingUsage !== null || deps.contextLedger === undefined) return;
 			// The chat reconciles its context snapshot in its own message_end
 			// listener; reading after the burst sees that and folds several
 			// responses landing in one tick into one frame.
-			pendingUsage = setImmediate(() => {
-				pendingUsage = null;
-				flushUsage(true);
-			});
+			scheduleUsage();
+		},
+		contextFolded() {
+			// The fold publishes its view after the event, in the same tick.
+			scheduleUsage();
 		},
 		toolSettled(mayWrite) {
 			flushPlan(true);

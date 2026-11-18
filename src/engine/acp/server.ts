@@ -4696,6 +4696,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	if (options.bus !== undefined) {
 		const bus = options.bus;
 		unsubscribeEvents.push(
+			bus.subscribe("context.pruned", () => telemetry.contextFolded()),
 			bus.subscribe("session.eggs_changed", (payload) => {
 				const sessionId = activeSessionId ?? boundSessionId;
 				if (!handshake.initialized || sessionId === null || payload.sessionId !== sessionId) return;

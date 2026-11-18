@@ -1765,11 +1765,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	};
 
 	/** `estimate`, when given, is `liveContextEstimate` of the same runtime and `history` with no pending text. */
+	/** The pending text of the reduction in flight, if it was given one. */
+	let reductionPendingText: string | undefined;
+	// A republish while a reduction runs (the summary stage reading the view) prices the request the fold prices,
+	// so the card, the record and every usage frame state one figure (bt-47 D1).
 	const refreshLiveBudget = (
 		pendingUserText?: string,
 		history?: MessageListDigests,
 		estimate?: LiveContextEstimate,
-	): LiveBudgetView => budgetProducer.publish(liveBudgetInput(pendingUserText, history, estimate));
+	): LiveBudgetView =>
+		budgetProducer.publish(
+			liveBudgetInput(pendingUserText ?? (estimate === undefined ? reductionPendingText : undefined), history, estimate),
+		);
 
 	/**
 	 * A working-set projection removes tokens from messages the attestation
@@ -2715,6 +2722,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		operationArgs[6] = args[6] ? AbortSignal.any([args[6], controller.signal]) : controller.signal;
 		lastCompactionCardSettled = false;
 		foldDecision = null;
+		reductionPendingText = args[4];
 		const operation = performAutoCompact(...operationArgs)
 			.then(
 				(changed) => {
@@ -2751,6 +2759,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				},
 			)
 			.finally(() => {
+				reductionPendingText = undefined;
 				foldDecision?.close();
 				foldDecision = null;
 				compactionOperation = null;
