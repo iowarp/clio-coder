@@ -723,7 +723,7 @@ interface ActivePrompt {
 	 * Lines a slash command run inside this prompt already sent as reply notices. Its result repeats what its host
 	 * heard, so those lines are not sent a second time (bt-session-res J10). Null outside such a command.
 	 */
-	commandNoticeLines?: string[] | null;
+	commandNoticeLines?: Set<string> | null;
 	/** The content index of the current message's last streamed text block; a new one opens on a blank line. */
 	messageTextBlock?: number | undefined;
 	/** Thinking sent for the current assistant message, reset at its boundaries like `messageAssistantChars`. */
@@ -1567,15 +1567,13 @@ function commandResultLines(text: string): string[] {
 		.filter((line) => line.length > 0);
 }
 
-/** A command result's lines less the ones already sent, each sent line cancelling one copy. */
-function withoutSentLines(lines: ReadonlyArray<string>, sent: ReadonlyArray<string>): string[] {
-	const pending = [...sent];
-	return lines.filter((line) => {
-		const index = pending.indexOf(line);
-		if (index < 0) return true;
-		pending.splice(index, 1);
-		return false;
-	});
+/** A failed load. A format error says how to fix it, less the session's path: an ACP message carries none. */
+function loadFailure(error: unknown): AcpRequestError {
+	const message = acpErrorMessage(
+		String(error instanceof Error ? error.message : error).replace(/\): .*\. (?=Upgrade|Remove)/su, "). "),
+	);
+	if (/format version/u.test(message)) return new AcpRequestError(-32602, message, { code: "session_format" });
+	return new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
 }
 
 /**
@@ -2045,7 +2043,7 @@ function handleChatEvent(
 				return;
 			}
 			const shown = safeStoredString(event.text, ACP_MAX_CHUNK_BYTES - 2);
-			if (active.commandNoticeLines) active.commandNoticeLines.push(...commandResultLines(shown));
+			if (active.commandNoticeLines) for (const line of commandResultLines(shown)) active.commandNoticeLines.add(line);
 			sendUpdate(
 				transport,
 				sessionId,
@@ -5758,8 +5756,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				entries = options.readSessionEntries(id);
 				const leaf = options.session.leafId(id);
 				replay = replayToClient ? prepareAcpReplay(entries, leaf, id, stored.target) : undefined;
-			} catch {
-				throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
+			} catch (error) {
+				throw loadFailure(error);
 			}
 			const recordedRoute = resumedSessionRoute(stored, entries);
 			await attachClientMcpServers(clientMcpServers, ceiling);
@@ -5774,7 +5772,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					id,
 				);
 				replay = replayToClient ? prepareAcpReplay(restored.entries, restored.leafTurnId, id, stored.target) : undefined;
-			} catch {
+			} catch (error) {
 				await options.mcpCapabilities?.detachClientServers();
 				// The session never loaded: nothing was bound or appended, so there is no boundary to checkpoint.
 				if (options.session.current()?.id === id) {
@@ -5790,7 +5788,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				if (heldElsewhere(id)) {
 					throw new AcpRequestError(-32602, "session may already be open", { code: "session_open" });
 				}
-				throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
+				throw loadFailure(error);
 			}
 
 			const autonomy = options.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
@@ -8095,7 +8093,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					argv = words.tokens;
 				}
 				if (options.commands !== undefined) assertCommandWithinCeiling(options.commands, command, argv);
-				const noticed: string[] = [];
+				const noticed = new Set<string>();
 				active.commandNoticeLines = noticed;
 				let result: Awaited<ReturnType<NonNullable<typeof options.commands>["invoke"]>> | undefined;
 				try {
@@ -8109,7 +8107,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					active.commandNoticeLines = null;
 				}
 				// A notice the command raised already went out as reply text; the result does not say it again.
-				const unsent = result === undefined ? [] : withoutSentLines(result.lines, noticed);
+				const unsent = result === undefined ? [] : result.lines.filter((line) => !noticed.has(line.trimEnd()));
 				if (unsent.length > 0)
 					sendTextChunks(
 						options.transport,
