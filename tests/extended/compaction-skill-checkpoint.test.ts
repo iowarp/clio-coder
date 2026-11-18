@@ -314,6 +314,9 @@ describe("mandatory request-fit compaction", () => {
 			settings.chat.model = "source";
 			settings.chat.maxOutputTokens = 8192;
 			settings.chat.prewarm = false;
+			// A resume now builds the prompt it will send before the first submit, as live does, so the automatic
+			// pass would see the grown prompt first. This contract is about the overflow route alone.
+			settings.context.compaction.auto = false;
 			const capabilities = {
 				chat: true,
 				tools: true,
