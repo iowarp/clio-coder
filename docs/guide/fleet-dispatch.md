@@ -2174,7 +2174,7 @@ A `--with-panes` session ([Panes and the Files Pane](panes-and-files.md)) can ke
 
 | State | Single tap |
 | --- | --- |
-| No dock | Opens the dock on the board and moves the keyboard into it. |
+| No dock | Opens the dock on the board and moves the keyboard into it. When the dock cannot open (a pane narrower than 80 columns, a host that refuses the split), opens the Fleet Runs board instead and says why. |
 | Dock parked | Shows it at its remembered share, on whatever it was showing, and moves the keyboard into it. |
 | Dock visible | Parks it. The dashboard keeps running with its state. |
 | No pane host | Opens or closes the Fleet Runs board overlay. |
