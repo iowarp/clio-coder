@@ -124,6 +124,7 @@ import {
 	turnCallsNotRunSentence,
 	turnNoAnswerSentence,
 } from "../../session-control/chat-loop-messages.js";
+import { COMPACTION_LINE_LEAD } from "../../session-control/compaction-lines.js";
 import {
 	clampThinkingLevel,
 	replayCurrentSession,
@@ -903,6 +904,16 @@ const ACP_ADMISSION_REASONS = new Set([
 const ACP_VISIBLE_ADMISSION_REASONS = new Set(["handoff-skill-refused"]);
 
 const ACP_ADMISSION_FALLBACK_REASON = "admission-failed";
+
+/**
+ * Context engine status lines: the ones the terminal sends to its footer (working set, aging, the compaction row) and
+ * the no-gain compaction line `turn-context.ts` emits. They report Clio's own housekeeping, so they are not reply text.
+ */
+const ACP_CONTEXT_STATUS_LEADS = ["[context engine] ", COMPACTION_LINE_LEAD, "compaction would not reduce context;"];
+
+function isContextStatusNotice(level: unknown, text: string): boolean {
+	return level === "info" && ACP_CONTEXT_STATUS_LEADS.some((lead) => text.startsWith(lead));
+}
 
 function admissionReason(raw: string): string {
 	return ACP_ADMISSION_REASONS.has(raw) ? raw : ACP_ADMISSION_FALLBACK_REASON;
@@ -1959,6 +1970,16 @@ function handleChatEvent(
 			typeof event.text === "string" &&
 			event.text.length > 0
 		) {
+			// A context status line crosses the way startup notices do, so a client that ignores `_meta` shows a reply
+			// carrying only the model's text.
+			if (isContextStatusNotice(event.level, event.text)) {
+				const notice = { level: "info", text: safeStoredString(event.text, ACP_MAX_CHUNK_BYTES) };
+				sendUpdate(transport, sessionId, active, {
+					sessionUpdate: "session_info_update",
+					_meta: { [ACP_NOTICE_META_KEY]: notice },
+				});
+				return;
+			}
 			sendUpdate(
 				transport,
 				sessionId,
