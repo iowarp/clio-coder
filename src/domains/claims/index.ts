@@ -1,3 +1,5 @@
+export type { ClaimSealBinding } from "./binding.js";
+export { claimSealReader } from "./binding.js";
 export type { SealedHostCheck } from "./capture.js";
 export {
 	canonicalClaimJson,

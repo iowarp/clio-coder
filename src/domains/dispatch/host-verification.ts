@@ -40,6 +40,7 @@ import {
 import { PLAYBOOK_COMMAND_BASE_ENV, type PlaybookCommand } from "../agents/playbook-commands.js";
 import { redactCommandOutputSecrets } from "../evidence/redact.js";
 import { effectiveScratchRoots } from "../safety/scratch-roots.js";
+import { readVerifiedRun } from "../telemetry/run-record.js";
 import { CODE_STEP_CAPTURE_MAX_BYTES, runCodeStep } from "./code-step.js";
 import type { DispatchRequest } from "./contract.js";
 import { BASE_PREFLIGHT_EXIT, BASE_PREFLIGHT_SCRIPT, baseModulesLinks } from "./host-verification-base.js";
@@ -149,6 +150,37 @@ function storeMemoEntry(stateDir: string, entry: MemoEntry): void {
 		memo.entries = [entry, ...memo.entries.filter((candidate) => candidate.key !== entry.key)].slice(0, 512);
 		writeMemo(stateDir, memo);
 	});
+}
+
+/**
+ * Whether a memo entry's evidence run sealed an execution of this very check on this tree (D3-2). The memo file is
+ * plain state any writer of the state directory can edit, so a hit counts only when `runId` names a run whose seal
+ * verifies and whose sealed checks hold this check (same id, argv, cwd and tree fingerprint) passing with exit 0, run
+ * there rather than reused. A forged or dangling entry, or one whose run has not sealed yet, is a miss and the check
+ * runs.
+ */
+function memoEvidenceSealed(stateDir: string, entry: MemoEntry, check: string, fingerprint: string): boolean {
+	let run: ReturnType<typeof readVerifiedRun>;
+	try {
+		run = readVerifiedRun(stateDir, entry.runId);
+	} catch {
+		// An entry whose run id is not a safe id names no run.
+		return false;
+	}
+	const sealed = run?.result?.state === "resolved" ? run.result.value.hostVerification?.checks : undefined;
+	return (sealed ?? []).some(
+		(candidate) =>
+			candidate.check === check &&
+			entry.check.check === check &&
+			candidate.exitCode === 0 &&
+			!candidate.memo &&
+			candidate.evidenceRunId === null &&
+			candidate.notRun === undefined &&
+			candidate.cwd === entry.check.cwd &&
+			candidate.argv.length === entry.check.argv.length &&
+			candidate.argv.every((part, index) => part === entry.check.argv[index]) &&
+			candidate.tree?.fingerprint === fingerprint,
+	);
 }
 
 function memoKey(command: PlaybookCommand, judgment: string, fingerprint: string, env: NodeJS.ProcessEnv): string {
@@ -993,15 +1025,20 @@ async function runResolvedCheck(
 	const judgmentKey = checkDedupeKey(resolvedCheck);
 	const tree = checkedTree(resolvedCheck.cwd) ?? undefined;
 	const fingerprint = tree?.fingerprint ?? null;
-	// A judged verdict is never memoized: the memo is not authenticated, and a stored pass would stand in for a
-	// judgement against a reference or baseline the fingerprint does not cover.
+	// A judged verdict is never memoized: a memo hit is authenticated only as a sealed exit 0, and a stored pass would
+	// stand in for a judgement against a reference or baseline the fingerprint does not cover.
 	const memoable = resolvedCheck.kind !== "numeric-compare" && resolvedCheck.kind !== "perf-budget";
 	const key = fingerprint === null || !memoable ? null : memoKey(command, judgmentKey, fingerprint, input.env);
 	const memoHit = (): { check: RunHostVerificationCheck; outputExcerpt: string } | undefined => {
 		const hit =
-			key === null
+			key === null || fingerprint === null
 				? undefined
-				: readMemo(input.stateDir).entries.find((entry) => entry.key === key && entry.check.exitCode === 0);
+				: readMemo(input.stateDir).entries.find(
+						(entry) =>
+							entry.key === key &&
+							entry.check.exitCode === 0 &&
+							memoEvidenceSealed(input.stateDir, entry, resolvedCheck.check, fingerprint),
+					);
 		if (hit === undefined) return undefined;
 		// A memo hit is always a pass, so no caller ever needs its output for
 		// attribution; the empty excerpt says the fresh output does not exist.

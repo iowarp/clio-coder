@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, posix, relative } from "node:path";
 import { containsInstructionMarkers } from "../../core/untrusted-content.js";
-import type { NumericCompareReport } from "../../tools/verify/numeric.js";
+import type { NumericCompareReport, NumericFailureReason } from "../../tools/verify/numeric.js";
 import type { ReproduceReport } from "../../tools/verify/reproduce.js";
 import { judgedPayloadKey } from "../evidence/index.js";
 import {
@@ -250,8 +250,23 @@ function judgedReport(value: unknown): ReproduceReport | NumericCompareReport | 
 	if (!isRecord(value) || typeof value.passed !== "boolean") return null;
 	if (value.kind === "reproduce" && isRecord(value.conditions) && Array.isArray(value.metrics))
 		return value as unknown as ReproduceReport;
-	if (value.kind === "numeric-compare" && Array.isArray(value.keys)) return value as unknown as NumericCompareReport;
+	if (value.kind === "numeric-compare" && Array.isArray(value.keys)) {
+		const report = value as unknown as NumericCompareReport;
+		return unjudgeableNumeric(report) ? null : report;
+	}
 	return null;
+}
+
+/**
+ * A failed numeric-compare report that compared nothing: an empty reference, whose every key reads as missing from
+ * it, or failing keys whose arrays were all empty. It concluded neither agreement nor disagreement, so it is no claim
+ * and cannot overturn an agreement under the same pins.
+ */
+function unjudgeableNumeric(report: NumericCompareReport): boolean {
+	if (report.passed) return false;
+	const failed = report.keys.filter((key) => !key.passed);
+	const only = (reason: NumericFailureReason) => failed.every((key) => key.failed.every((cause) => cause === reason));
+	return (failed.length === report.keys.length && only("missing-reference")) || only("unjudgeable");
 }
 
 /**

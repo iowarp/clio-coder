@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
-import { claimsProjectRoot, readClaims } from "../domains/claims/index.js";
+import { claimSealReader, claimsProjectRoot, readClaims } from "../domains/claims/index.js";
 import { inspectRunFlowProvenance } from "../domains/evidence/index.js";
 import {
 	approveMemoryRecord,
@@ -454,6 +454,12 @@ async function proposeFromClaim(dataDir: string, prefix: string): Promise<number
 				? `no claim in ${project} has an id starting '${prefix}'`
 				: `'${prefix}' matches ${matches.length} claims; give more of the id`,
 		);
+		return 1;
+	}
+	// A host-verification claim its cited run's seal does not hold is a log line, not evidence (D3-4).
+	const seal = claimSealReader()(claim);
+	if (seal.state === "unverified") {
+		printError(`claim ${claim.id.slice(0, 12)} is unverified: ${seal.reason}; nothing was proposed`);
 		return 1;
 	}
 	const source = claim.source;

@@ -6,9 +6,11 @@ import {
 	type ClaimDisputeRecord,
 	type ClaimImportRecord,
 	type ClaimRecord,
+	type ClaimSealBinding,
 	type ClaimStatus,
 	type ClaimsLogRead,
 	claimCheckLabel,
+	claimSealReader,
 	claimStatuses,
 	claimsProjectRoot,
 	compactClaimsLog,
@@ -44,6 +46,13 @@ and the checkout it merges into share one log, a lane's claims supersede only
 claims from the same worktree, and opposite verdicts at equal pinned conditions
 contradict wherever they ran. A checkout whose .git pointer claims a worktree
 the main repository does not record records nothing.
+
+Each claim's seal line (--json: seal) says how it stands against the sealed
+run it cites. A host verification claim is verified when that run's seal
+verifies and its sealed result holds the check with the claim's verdict and
+digests; one that cites a run with no verifying seal, another settlement or no
+such check reads as unverified and cannot back memory. A verify claim from the
+main thread cites no run, so it is not bound to a sealed check.
 
 Edges are derived when a claim is recorded, from the check id and recorded
 conditions only. A claim that reaches the opposite verdict with the same
@@ -110,6 +119,16 @@ interface LogView {
 	statuses: Map<string, ClaimStatus>;
 	hypotheses: Map<string, HypothesisState>;
 	read: ClaimsLogRead;
+	/** How each claim stands against the sealed run it cites (D3-4). */
+	seal: (claim: ClaimRecord) => ClaimSealBinding;
+}
+
+function sealLine(claim: ClaimRecord, view: LogView): string {
+	const binding = view.seal(claim);
+	if (binding.state === "verified") return `verified against the sealed result of run ${binding.runId}`;
+	return binding.state === "unverified"
+		? `unverified: ${binding.reason}; do not treat it as grounded`
+		: `not bound to a sealed check: ${binding.reason}`;
 }
 
 function short(id: string): string {
@@ -176,6 +195,7 @@ function listLines(claim: ClaimRecord, view: LogView): string[] {
 		`${short(claim.id)}  ${claim.at}  ${claim.verdict.padEnd(9)}  ${status.padEnd(10)}  ${claim.kind.padEnd(15)}  ${claimCheckLabel(claim)}${claim.flagged !== undefined ? "  [flagged: instruction-shaped text]" : ""}`,
 		`  ${claim.text}`,
 		`  source: ${sourceLine(claim)}`,
+		`  seal: ${sealLine(claim, view)}`,
 		...(staleBecause(claim, view) !== null ? [`  stale: ${staleBecause(claim, view)}`] : []),
 		...relationLines(claim, view).map((line) => `  ${line}`),
 	];
@@ -197,6 +217,7 @@ function showLines(claim: ClaimRecord, view: LogView): string[] {
 		`command: ${JSON.stringify(claim.keys.command)}`,
 		...(claim.keys.paths.length > 0 ? [`paths: ${claim.keys.paths.join(", ")}`] : []),
 		`source: ${sourceLine(claim)}`,
+		`seal: ${sealLine(claim, view)}`,
 		...relationLines(claim, view),
 		"conditions:",
 		...JSON.stringify(claim.conditions, null, 2)
@@ -233,6 +254,7 @@ function relatedJson(claim: ClaimRecord, view: LogView): Record<string, unknown>
 		...claim,
 		status: view.statuses.get(claim.id) ?? "standing",
 		stale: staleBecause(claim, view) !== null,
+		seal: view.seal(claim),
 		edges: view.read.edges.filter((edge) => edge.from === claim.id || edge.to === claim.id),
 		regressions: view.read.regressions.filter((regression) => regression.from === claim.id),
 		hypothesisTests: view.read.hypothesisTests.filter((test) => test.claim === claim.id),
@@ -463,6 +485,7 @@ export async function runClaimsCommand(args: string[]): Promise<number> {
 		read,
 		statuses: claimStatuses(read.records, read.edges),
 		hypotheses: hypothesisStatuses(read.hypotheses, read.hypothesisTests),
+		seal: claimSealReader(),
 	};
 	if (action === "list") {
 		let check: string | undefined;
