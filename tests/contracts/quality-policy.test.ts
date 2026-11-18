@@ -6,6 +6,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { it, mock } from "node:test";
 import { stringify } from "yaml";
+import type { TurnConstraints } from "../../src/core/turn-constraints.js";
 import type { CompletionEvaluationInput } from "../../src/domains/safety/decision-events.js";
 import {
 	assessFinishContract,
@@ -319,6 +320,29 @@ it("keeps normal-rigor advisories, requests scoped high-rigor recovery and audit
 		strictEqual(
 			limitationOnly.some((effect) => effect.kind === "request_continuation"),
 			false,
+		);
+	}));
+
+it("does not re-prompt a step-template turn for validation, but still does when the step policy is dormant (bt-12)", async () =>
+	project(async () => {
+		const entries = mutation();
+		const policy = { mode: "step", stepTool: "next_step", when: ["frontier"] } as const;
+		const gate = (constraints: TurnConstraints) =>
+			createFinishContractRegistration({
+				readSessionEntries: () => entries,
+				resolveRigor: () => "high",
+				getTurnConstraints: () => constraints,
+			}).evaluate({ hook: "turn_end", text: "Ran the clean step." });
+		const step = await gate({ turnPolicy: policy });
+		deepStrictEqual(
+			step.map((effect) => effect.kind),
+			["inject_reminder"],
+		);
+		match(JSON.stringify(step), /does not permit automatic validation recovery; report the change as unverified/u);
+		const dormant = await gate({ dormantTurnPolicy: policy });
+		strictEqual(
+			dormant.some((effect) => effect.kind === "request_continuation"),
+			true,
 		);
 	}));
 
