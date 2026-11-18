@@ -104,6 +104,11 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- `cd`, `source`, `export` or `set` before a check no longer clears a standing red as if the tree changed (x3-1).
+- A red check piped into `head`, `grep` or another stage that can mask its exit no longer settles a failure (x3-2).
+- A check that rewrites the tree (`--fix`, `--write`, a format or fix script) counts as a change, and its green is not credited (x3-3).
+- A check piped through read-only `sed`, `awk`, `sort` or `uniq` keeps its own green (x3-4).
+- A check run outside the run cwd, by `cd` or the bash cwd, no longer seals the run verified or settles a standing red (x3-5).
 - `in` now means the uncached input everywhere: /usage, the exit card, the turn receipt and the footer show it beside the cache read, and whole-prompt figures (footer live chip, worker cards and table) are labelled `prompt` (bt-11).
 - A streaming edit's row no longer shows `+N -M` counts guessed from partial arguments; the applied row's diff is the only count (bt-11).
 - A check whose exit status a later command overwrote (`; echo`, `||`) no longer grounds a passed claim; grounding reports "unattributable-status" (bt-9).
