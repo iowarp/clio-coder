@@ -1320,6 +1320,11 @@ export const WhyStoppedSchema = Type.Object(
 		]),
 		/** The settled attempts the last turn named, in settlement order. */
 		lastCalls: Type.Array(CallRowSchema),
+		/**
+		 * Each worker run the last turn dispatched whose final settled call stopped on a cause, read from the run's own
+		 * journal (D3-b). Absent when none did.
+		 */
+		workerStops: Type.Optional(Type.Array(Type.Object({ runId: ExistingId, cause: FailureCause }, closed))),
 		causes: Type.Array(Type.Object({ cause: FailureCause, calls: QuantitySchema, lastAt: UtcSchema }, closed)),
 		waits: Type.Array(
 			Type.Object(

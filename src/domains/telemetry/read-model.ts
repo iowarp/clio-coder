@@ -305,6 +305,11 @@ interface Growth {
 	callAttempts: Map<string, Set<string>>;
 	/** The first session record referencing each run. */
 	references: Map<string, TelemetryRecord>;
+	/**
+	 * The turn that dispatched each run, from the parent's `run.enqueued`: a dispatched worker's `call.linked` carries the
+	 * worker's context, which has no turn, and its parent writes no `run.linked` (D3-b).
+	 */
+	enqueuedTurns: Map<string, string>;
 	/** A gap other than policy was folded. */
 	gapRecord: boolean;
 	head: readonly TelemetryRecord[];
@@ -443,9 +448,11 @@ const POLICY_GAPS: ReadonlySet<string> = new Set(["mode-filtered", "research-cap
 
 /** A run journal reads the same until the live model swaps its source, so each source is folded once. */
 const runAnalyses = new WeakMap<JournalSource, Run>();
-function analyzeRun(runId: string, source: JournalSource, reference?: TelemetryRecord): Run {
+function analyzeRun(runId: string, source: JournalSource, reference?: TelemetryRecord, enqueuedTurnId?: string): Run {
+	const turnId = reference?.ctx.turnId ?? enqueuedTurnId ?? null;
 	const cached = runAnalyses.get(source);
-	if (cached && cached.runId === runId && cached.reference === (reference ?? null)) return cached;
+	if (cached && cached.runId === runId && cached.reference === (reference ?? null) && cached.turnId === turnId)
+		return cached;
 	const fold = foldRunJournal(source.records, READ_MODEL_FOLD);
 	const attempts = attemptsOf(source.records, fold.calls.attempts);
 	let settled: Run["settled"] = null;
@@ -471,7 +478,7 @@ function analyzeRun(runId: string, source: JournalSource, reference?: TelemetryR
 		firstAt,
 		lastAt,
 		sessionId: source.records[0]?.ctx.sessionId ?? reference?.ctx.sessionId ?? null,
-		turnId: reference?.ctx.turnId ?? null,
+		turnId,
 		referencedAt: reference?.t ?? null,
 		gap: !source.present || source.skipped > 0 || source.damaged > 0 || source.seeding ? 1 : 0,
 	};
@@ -493,6 +500,8 @@ function grow(growth: Growth, record: TelemetryRecord): readonly string[] {
 	if (toolCall !== null) return [...(growth.callAttempts.get(toolCall) ?? [])];
 	if ((record.k === "run.linked" || record.k === "call.linked") && !growth.references.has(record.data.runId))
 		growth.references.set(record.data.runId, record);
+	if (record.k === "run.enqueued" && record.ctx.turnId && !growth.enqueuedTurns.has(record.data.runId))
+		growth.enqueuedTurns.set(record.data.runId, record.ctx.turnId);
 	// A mode-filtered or research-cap gap is policy: only research or content kinds go uncaptured, never
 	// accountability, so neither makes a total partial (#434, R10).
 	if (record.k === "journal.gap" && !POLICY_GAPS.has(record.data.reason)) growth.gapRecord = true;
@@ -504,7 +513,15 @@ function settleRuns(analysis: Analysis, runSources: ReadonlyMap<string, JournalS
 	analysis.gap = gap + (growth.gapRecord ? 1 : 0);
 	const runs = new Map<string, Run>();
 	for (const runId of [...new Set([...growth.references.keys(), ...runSources.keys()])].sort())
-		runs.set(runId, analyzeRun(runId, runSources.get(runId) ?? unavailable, growth.references.get(runId)));
+		runs.set(
+			runId,
+			analyzeRun(
+				runId,
+				runSources.get(runId) ?? unavailable,
+				growth.references.get(runId),
+				growth.enqueuedTurns.get(runId),
+			),
+		);
 	analysis.runs = runs;
 }
 
@@ -523,6 +540,7 @@ function buildAnalysis(
 		tools: new Map(),
 		callAttempts: new Map(),
 		references: new Map(),
+		enqueuedTurns: new Map(),
 		gapRecord: false,
 		head,
 		span: { first: null, last: null, lifecycle: null },
@@ -3751,6 +3769,7 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 		tax: quantity(view, own(id, "roundTripTax", main)),
 	};
 	const findings: string[] = [];
+	const workerStops: NonNullable<WhyStoppedV1["workerStops"]> = [];
 	if (state === "no-turns") findings.push("No turn has settled in this session's journal.");
 	else if (terminal) {
 		const reached = terminal.terminal.stage;
@@ -3783,15 +3802,17 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 					: `The last turn stopped (${terminal.stopReason})${stage}${retries}.`,
 		);
 		// A worker that turn dispatched settles in its own run journal, so its stop is named here too (cf1h-D3).
+		const lastTurnId = last?.record.ctx.turnId;
 		for (const run of analysis.runs.values()) {
 			const stop =
-				run.turnId === last?.record.ctx.turnId
+				lastTurnId !== undefined && run.turnId === lastTurnId
 					? run.attempts.filter((attempt) => attempt.settled).at(-1)?.settled?.stop
 					: null;
-			if (stop?.failure)
-				findings.push(
-					`Worker run ${run.runId} ${HARNESS_STOP_CAUSES.has(stop.failure) ? "stopped" : "failed"}: ${stop.failure}.`,
-				);
+			if (!stop?.failure) continue;
+			workerStops.push({ runId: run.runId, cause: stop.failure });
+			findings.push(
+				`Worker run ${run.runId} ${HARNESS_STOP_CAUSES.has(stop.failure) ? "stopped" : "failed"}: ${stop.failure}.`,
+			);
 		}
 	}
 	const incomplete = stepPipeline !== null ? stepPipelineIncomplete(stepPipeline) : null;
@@ -3858,6 +3879,7 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 				}
 			: null,
 		lastCalls,
+		...(workerStops.length > 0 ? { workerStops } : {}),
 		...(autonomy !== undefined ? { autonomy } : {}),
 		...(stepPipeline !== null ? { stepPipeline } : {}),
 		causes: causeRows,

@@ -527,6 +527,45 @@ test("a session's lifetime tells a clean close, an open owner, an abnormal end a
 	);
 	ok(withWorker.findings.includes("The last turn ended normally (stop)."), withWorker.findings.join("\n"));
 	ok(withWorker.findings.includes("Worker run run-cut stopped: turn_timeout."), withWorker.findings.join("\n"));
+	// D3-b: a real dispatch writes no run.linked. The parent's run.enqueued carries the turn, and the call.linked that
+	// links the worker's call carries the worker's context, which has no turn.
+	const workerCtx = { sessionId: source.sessionId, agent: { role: "worker" as const, id: "run-real" } };
+	const dispatched = whyStopped(
+		{
+			...source,
+			journal: {
+				...source.journal,
+				records: [
+					...imported.records,
+					makeTelemetryRecord(
+						"run.enqueued",
+						{
+							runId: "run-real",
+							agentId: "debugger",
+							requestOrigin: "agent",
+							targetId: "fixture",
+							wireModelId: "fixture-model",
+							runtimeId: "fixture",
+							runtimeKind: "http",
+						},
+						turnCtx,
+						{ t: "2026-10-28T00:00:00.000Z", mono: 0 },
+					),
+					makeTelemetryRecord("call.linked", { runId: "run-real", callId: workerSettled.data.callId }, workerCtx, {
+						t: "2026-10-28T00:00:00.500Z",
+						mono: 0,
+					}),
+					{ ...turnEnd, ctx: turnCtx },
+				],
+			},
+			runs: new Map([["run-real", { ...source.journal, records: [workerStarted, workerCut as TelemetryRecord] }]]),
+		},
+		now,
+	);
+	ok(dispatched.findings.includes("Worker run run-real stopped: turn_timeout."), dispatched.findings.join("\n"));
+	deepStrictEqual(dispatched.workerStops, [{ runId: "run-real", cause: "turn_timeout" }]);
+	ok(Value.Check(WhyStoppedSchema, dispatched));
+	strictEqual(ended.workerStops, undefined);
 	// bt-26 N2a, N2b: a shutdown that cut off a streaming reply reads as a stop while streaming, never as a failure.
 	const [cutStarted, cutSettled] = telemetryCall(source.sessionId, { at: "2026-10-29T00:00:01.000Z" });
 	if (cutSettled?.k !== "call.settled" || !cutStarted) throw new Error("fixture call missing");
