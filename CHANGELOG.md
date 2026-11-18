@@ -111,6 +111,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Over ACP, context engine status lines (working set, observation aging, compaction rows) cross as `session_info_update` notices (`_meta["clio-coder/notice"] = {level, text}`), not as assistant reply text (bt-47 cf1j-d).
 - `isort --check-only`/`-c` (also `python -m isort`) no longer reads as a writer that retires passes, and `black --check`, `ruff format --check`, `cargo fmt --check` (also `-- --check`) and `rustfmt --check` now read as checks (x10-2).
 - `cargo nextest run` reads as a check labeled `cargo test`, and `golangci-lint run` (a writer with `--fix`) and `staticcheck` read as read-only checks (x10-3).
 - A writer behind `pnpm|yarn <bin>` (`pnpm prettier -w .`, an emitting `pnpm tsc`) reads as a writer, as its `exec` spelling does (x10-4).
