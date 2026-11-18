@@ -4,7 +4,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { createBoardSource, loadBoard } from "../../src/cli/fleet-board-model.js";
+import { verdictText } from "../../src/cli/fleet-board.js";
+import { createBoardSource, loadBoard, type WorkerCard } from "../../src/cli/fleet-board-model.js";
 import { fleetInspectionScope } from "../../src/cli/fleet-project-scope.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { gateDecisionsDirectory, stagePendingGateDecision } from "../../src/domains/dispatch/gate-decisions.js";
@@ -216,4 +217,20 @@ test("the workers board reads a finished run's record again until its seal lands
 	} finally {
 		home.restore();
 	}
+});
+
+test("a finished card's row keeps its refusal and seal whole and drops the least important fact first (bt-11)", () => {
+	const paint = { fg: (_role: unknown, text: string) => text, dim: (text: string) => text };
+	const card = {
+		state: "succeeded",
+		toolCalls: 4,
+		record: { outcome: "succeeded", contract: "pass", seal: "seal unchecked", refused: "2 calls refused" },
+	} as unknown as WorkerCard;
+	strictEqual(verdictText(paint, card, 80), "✓ succeeded · 2 calls refused · seal unchecked · contract met");
+	// The dock's row once ended in `seal unche…` and never named the refusal.
+	strictEqual(verdictText(paint, card, 50), "✓ succeeded · 2 calls refused · seal unchecked");
+	strictEqual(verdictText(paint, card, 40), "✓ succeeded · 2 calls refused");
+	// Only the outcome is ever cut.
+	const narrow = verdictText(paint, card, 8);
+	ok(narrow.startsWith("✓ succe") && narrow.includes("…"), narrow);
 });

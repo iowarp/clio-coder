@@ -25,6 +25,7 @@ import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { clioStateDir } from "../core/xdg.js";
+import { refusedCallsWords } from "../domains/dispatch/failure-headline.js";
 import {
 	RUN_FEED_READ_TAIL_BYTES,
 	type RunFeedLine,
@@ -462,6 +463,8 @@ export interface RunRecordView {
 	failure?: string;
 	answer?: string;
 	changedPaths?: ReadonlyArray<string>;
+	/** The calls kept from running, in words that say who stopped them (`2 calls refused`), as the worker card says. */
+	refused?: string;
 }
 
 /** Whether a record's seal has been checked, verified or broken; before then its words are provisional. */
@@ -488,6 +491,9 @@ function runRecordView(runId: string, stateDir: string): RunRecordView | null {
 
 		...(facts.text !== undefined && facts.text.trim().length > 0 ? { answer: facts.text } : {}),
 		...(facts.changedPaths !== undefined && facts.changedPaths.length > 0 ? { changedPaths: facts.changedPaths } : {}),
+		...(facts.refusedCalls !== undefined && facts.refusedCalls > 0
+			? { refused: refusedCallsWords(facts.refusedCalls, facts.guardedCalls ?? 0) }
+			: {}),
 	};
 }
 
