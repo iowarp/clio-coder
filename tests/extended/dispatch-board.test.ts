@@ -695,6 +695,20 @@ describe("dispatch quality presentation", () => {
 			76,
 		).map(stripTerminalSequences);
 		doesNotMatch(single.join(" "), /\bok\b|quality/u);
+		// The card shows only the recovery's success, so the row keeps the failed attempt before it (cf1h-D3).
+		const recovered = renderToolSubline(
+			{
+				...finished,
+				args: { agent: "scout", task: "map callers" },
+				result: { details: { runCount: 1, failedCount: 0, recoveredCount: 1, runs: [{ trust: trusts[0] }] } },
+				cardAttached: true,
+			},
+			76,
+		)
+			.map(stripTerminalSequences)
+			.join(" ")
+			.replace(/\s+/gu, " ");
+		match(recovered, /1 ok · 1 recovered after a failed attempt/u);
 		// Wrapped action rows hang in the content column, so rows join on any run of whitespace.
 		const historical = renderToolSubline({ ...finished, result: { details: { runCount: 3, failedCount: 1 } } }, 76)
 			.map(stripTerminalSequences)

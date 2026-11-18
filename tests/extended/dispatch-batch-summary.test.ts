@@ -92,7 +92,7 @@ test("dispatch batch shows sealed tool calls and provenance-aware cost without i
 	);
 });
 
-test("parallel dispatch returns scheduler assignments on a board with no worker posts", async () => {
+test("parallel dispatch returns scheduler assignments on a board with no worker posts and keeps a recovered attempt visible", async () => {
 	const { isolateClioEnv } = await import("../harness/scratch-env.js");
 	const { runDispatchTool } = await import("../../src/tools/dispatch-runner.js");
 	const { describeDispatchPlan } = await import("../../src/tools/dispatch-plan.js");
@@ -103,7 +103,19 @@ test("parallel dispatch returns scheduler assignments on a board with no worker 
 			executionRole: "researcher" as const,
 			task,
 		}));
-		const envelopes: ReturnType<typeof fixtureEnvelope>[] = [];
+		// The second assignment succeeds on attempt 1 after attempt 0 was cut off (cf1h-D3).
+		const lineage = { rootRunId: "board-1-first", parentRunId: "board-1-first", depth: 0, attempt: 1 };
+		const envelopes: ReturnType<typeof fixtureEnvelope>[] = [
+			{
+				...fixtureEnvelope("board-1-first"),
+				status: "failed",
+				outcome: "failed",
+				outcomeCode: "worker_final_output_missing",
+				outcomeDetail: "worker loop ended without a final assistant output (stopReason=aborted, cause=generation_guard)",
+				exitCode: 1,
+				lineage: { rootRunId: "board-1-first", parentRunId: "dispatcher", depth: 0, attempt: 0 },
+			},
+		];
 		const dispatch = {
 			async dispatchBatch(ledgered: ReadonlyArray<import("../../src/domains/dispatch/contract.js").DispatchRequest>) {
 				const receipts = await Promise.all(
@@ -112,6 +124,7 @@ test("parallel dispatch returns scheduler assignments on a board with no worker 
 							...fixtureEnvelope(`board-${index}`),
 							agentId: request.agentId,
 							task: request.task,
+							...(index === 1 ? { lineage } : {}),
 							projection: {
 								version: 1 as const,
 								ledgerId: request.ledger?.id ?? null,
@@ -137,7 +150,7 @@ test("parallel dispatch returns scheduler assignments on a board with no worker 
 				);
 				return {
 					batchId: "attached",
-					assignmentIds: envelopes.map((run) => run.id),
+					assignmentIds: receipts.map((receipt) => receipt.runId),
 					events: (async function* () {})(),
 					finalPromise: Promise.resolve(receipts),
 				};
@@ -170,6 +183,12 @@ test("parallel dispatch returns scheduler assignments on a board with no worker 
 		});
 		const result = await runDispatchTool({ dispatch, getAgentSpecs: () => [], getAutonomy: () => "yolo" }, state, args);
 		ok(result.kind === "ok", JSON.stringify(result));
+		match(result.output, /^dispatch \(parallel\) total=2 failed=0 recovered=1$/mu);
+		match(
+			result.output,
+			/^recovered board-1 after attempt 0 board-1-first failed: worker_final_output_missing \(.*cause=generation_guard\)\)$/mu,
+		);
+		deepStrictEqual([result.details?.failedCount, result.details?.recoveredCount], [0, 1]);
 		match(String(result.details?.agentLedgerBoard), /Assignments:[\s\S]*Inspect entry points[\s\S]*Inspect boundaries/u);
 		const detailRuns = result.details?.runs as ReadonlyArray<{ runtimeResolution?: { wireModelId?: string } }>;
 		deepStrictEqual(

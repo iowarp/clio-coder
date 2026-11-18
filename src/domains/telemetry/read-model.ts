@@ -3638,6 +3638,10 @@ const HARNESS_STOP_CAUSES: ReadonlySet<string> = new Set([
 	"triage_stop",
 	"autonomy_stop",
 	"repetition",
+	"generation_guard",
+	"turn_timeout",
+	"output_cap",
+	"loop_guard",
 	"shutdown",
 ]);
 
