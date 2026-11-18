@@ -3,6 +3,8 @@ import type { ClioSettings } from "../core/config.js";
 import { DEFAULT_SETTINGS, outputStyleLabel } from "../core/defaults.js";
 import { readHarnessProfile } from "../core/harness-profile.js";
 import type { JobRecord } from "../core/job-types.js";
+import { probedSandboxAvailability, sandboxAvailability } from "../core/sandbox/availability.js";
+import { mainShellContained } from "../core/sandbox/main-session.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { CompactionPayload } from "../core/telemetry/live-events.js";
 import { motionEnabled } from "../core/terminal-preferences.js";
@@ -410,6 +412,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		requestRender();
 	});
 	const settings = deps.getSettings?.() ?? structuredClone(DEFAULT_SETTINGS);
+	let sandboxProbeScheduled = false;
 	// Read per render, so a limit changed in /settings is the one a silent worker's words name.
 	bindWorkerResponseLimit(() => {
 		const seconds = (deps.getSettings?.() ?? settings).safety.limits.workerResponseSeconds;
@@ -478,6 +481,21 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		// Subscription usage is read lazily off the render path and cached, so the
 		// banner reads a string and never awaits a provider.
 		getQuotaSummary: () => quotaSummary.peek(),
+		getShellContained: () => {
+			const mode = (deps.getSettings?.() ?? settings).safety.sandbox;
+			if (mode === "off") return false;
+			const known = probedSandboxAvailability();
+			if (known !== null) return mainShellContained(mode, known);
+			// The probe spawns the backend once, so it runs after this frame and asks for another.
+			if (!sandboxProbeScheduled) {
+				sandboxProbeScheduled = true;
+				setTimeout(() => {
+					sandboxAvailability();
+					requestRender();
+				}, 0).unref();
+			}
+			return null;
+		},
 		...(deps.getProjectConfigReminder ? { getProjectConfigReminder: deps.getProjectConfigReminder } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});

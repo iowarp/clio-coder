@@ -4,7 +4,7 @@
  * approval card or an ask_user question. After `safety.unattendedAfterSeconds`
  * with no keystroke, at any autonomy level, Clio answers the wait itself and the turn continues: a
  * parked call is denied, never approved, and an unanswered question takes its
- * recommended option. Every such answer is recorded so the operator can see
+ * recommended option unless that option leaves the workspace. Every such answer is recorded so the operator can see
  * what Clio decided while they were away.
  */
 

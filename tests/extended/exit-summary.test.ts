@@ -82,8 +82,17 @@ test("the session summary counts what Clio answered while the operator was away 
 	const verified = { kind: "counted" as const, count: "1", parts: [], tokens: "172,879", cost: "~$0.05 est" };
 	match(
 		renderExitSummary({ ...snapshot, spend: { ...ready, verified } }, "standard", 160, false).join("\n"),
-		/^Verified: 1 outcome · 172,879 session tokens per outcome · ~\$0\.05 est per outcome$/mu,
+		/^Session verified: 1 outcome · 172,879 session tokens per outcome · ~\$0\.05 est per outcome$/mu,
 	);
+	// Every spend row names the session scope, so none reads as this visit's beside the visit's own counts (drv-tui11).
+	for (const style of ["brief", "standard", "report"] as const) {
+		const rows = renderExitSummary({ ...snapshot, spend: { ...ready, verified } }, style, 160, false);
+		ok(!rows.some((row) => /^Verified:/u.test(row)), style);
+		ok(
+			rows.some((row) => /^Session verified: 1 outcome/u.test(row)),
+			style,
+		);
+	}
 	collector.dispose();
 });
 

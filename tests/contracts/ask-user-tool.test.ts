@@ -14,6 +14,7 @@ import { createAskUserToolPolicy } from "../../src/session-control/chat-loop-mes
 import {
 	type AskUserQuestion,
 	type AskUserResult,
+	UNATTENDED_ESCAPE_ANSWER,
 	UNATTENDED_FREE_TEXT_ANSWER,
 	UNATTENDED_OUTWARD_ANSWER,
 } from "../../src/tools/ask-user.js";
@@ -326,6 +327,17 @@ describe("ask_user tool", () => {
 		const decision = (interview.decisions as Array<Record<string, unknown>>)[0];
 		strictEqual(decision?.source, "agent", "the board records Clio's choice as Clio's");
 		deepStrictEqual(decision?.alternatives, ["Node id"]);
+	});
+
+	it("declines, not picks, a recommended option that leaves the workspace when nobody answers (bt-21)", async () => {
+		const f = fixture([{ answers: [], timedOut: { afterSeconds: 300 } }]);
+		const question = "Append the line to ~/notes.txt?";
+		const result = await f.call({
+			questions: [{ question, options: [{ label: "Append outside workspace (Recommended)" }, { label: "Skip it" }] }],
+		});
+		deepStrictEqual(interviewOf(result).latest_answers, [{ question, answer: UNATTENDED_ESCAPE_ANSWER, auto: true }]);
+		if (result.kind !== "ok") throw new Error("expected ok");
+		match(result.output, /leaves the workspace was declined, not picked: do not take that step/);
 	});
 
 	it("ends the turn unapproved on a plan card asked after Clio answered for an absent operator", async () => {

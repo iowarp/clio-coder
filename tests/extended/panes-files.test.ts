@@ -86,6 +86,10 @@ function fakeMux(options: { available?: boolean; reason?: string } = {}) {
 			calls.push("focus:self");
 			return true;
 		},
+		async focusReturn() {
+			calls.push("focus:return");
+			return true;
+		},
 		async unzoomSelf() {
 			calls.push("unzoom:self");
 			return false;
@@ -411,7 +415,7 @@ describe("contracts/files pane bridge", () => {
 		deepStrictEqual(again, { status: "opened", mode: "companion", paneId: "p1", existing: true });
 		strictEqual(host.records.length, 1);
 		ok(await wired.bridge.close());
-		strictEqual(host.calls.at(-1), "focus:self");
+		strictEqual(host.calls.at(-1), "focus:return");
 		strictEqual(wired.bridge.isOpen(), false);
 		strictEqual(host.records.length, 0);
 	});

@@ -99,6 +99,7 @@ import { interopOverlaySurface } from "./overlays/interop.js";
 import { paneWatchDecision } from "./pane-policy.js";
 import { describePanesLeftBehind } from "./panes-runtime.js";
 import type { createPeerInbox } from "./peer-inbox.js";
+import { slashDraftUnderApprovalNotice } from "./permission-hint.js";
 import { suspendProcessUntilContinued } from "./process-suspend.js";
 import { projectShadowNotice } from "./project-shadow-notice.js";
 import { createProjectTrustSession } from "./project-trust-session.js";
@@ -1066,7 +1067,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 						);
 					}
 				} else if (result.status === "hidden") {
-					if (origin === "dock") await deps.mux?.focusSelf();
+					if (origin === "dock") await deps.mux?.focusReturn();
 					notify("info", "files pane hidden, still running; the key shows it again, twice quickly closes it", "files:hide");
 				} else if (result.status === "closed") notify("info", "files pane closed", "files:close");
 				else if (result.status === "missing-binary") notify("warning", result.detail, "files:missing");
@@ -1074,7 +1075,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			},
 			double: async () => {
 				await panes.files("close");
-				if (origin === "dock") await deps.mux?.focusSelf();
+				if (origin === "dock") await deps.mux?.focusReturn();
 				notify("info", "files pane closed", "files:close");
 			},
 		});
@@ -1096,12 +1097,12 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		void dockKeys.press("music", {
 			single: async () => {
 				const result = await music.toggle();
-				if (origin === "dock" && result.status === "hidden") await deps.mux?.focusSelf();
+				if (origin === "dock" && result.status === "hidden") await deps.mux?.focusReturn();
 				report(result);
 			},
 			double: async () => {
 				const result = await music.off();
-				if (origin === "dock") await deps.mux?.focusSelf();
+				if (origin === "dock") await deps.mux?.focusReturn();
 				report(result);
 			},
 		});
@@ -1962,7 +1963,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			single: async () => {
 				const result = await workers.toggle();
 				if (result.status === "hidden") {
-					if (origin === "dock") await mux.focusSelf();
+					if (origin === "dock") await mux.focusReturn();
 					notify(
 						"info",
 						"workers dock hidden, still running; the key shows it again, twice quickly closes it",
@@ -1979,7 +1980,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			},
 			double: async () => {
 				await workers.close();
-				await mux.focusSelf();
+				await mux.focusReturn();
 				notify("info", "workers dock closed", "workers:close");
 			},
 		});
@@ -1991,7 +1992,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		}
 		// q in the dashboard: park it and hand the keyboard back, without arming
 		// a double tap on the workers key.
-		void watchPane.hide().then(() => mux?.focusSelf());
+		void watchPane.hide().then(() => mux?.focusReturn());
 	});
 	// Boot composition per `interface.panes.layout`: `workers` opens the workers
 	// dock on its board; `cockpit` adds the files dock. Fire and
@@ -2204,6 +2205,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				ttlMs: 2_500,
 			}),
 		hasActiveEditorBash: () => editorSubmit.hasActiveEditorBash(),
+		explainDraftUnderApproval: (draft) => {
+			const notice = slashDraftUnderApprovalNotice(draft);
+			if (notice !== null) notify("info", notice, "permission:slash-draft");
+		},
 		cancelSteerDraft: () => {
 			const agent = editor.dropSteerTarget();
 			if (agent === null) return false;

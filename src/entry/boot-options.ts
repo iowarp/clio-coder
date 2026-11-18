@@ -63,6 +63,8 @@ export interface BootOptions {
 	toolLimits?: SessionToolLimits;
 	/** Global `--session-file <path>` (absolute): the interactive session writes its exit record there. */
 	sessionFile?: string;
+	/** Global `--max-context-tokens <N>`: the interactive session's planning ceiling, carried like `run`'s flag. */
+	maxContextTokens?: number;
 	headless?: {
 		/** `run --systemone`: the one setting for this run, an engine name or `off`. */
 		systemOne?: string;
