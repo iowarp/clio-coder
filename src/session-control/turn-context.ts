@@ -407,11 +407,11 @@ export interface TurnContext {
 	 */
 	refreshLiveBudget(pendingUserText?: string): LiveBudgetView;
 	/**
-	 * After an overflow fold that fit, the input the next main request pins
-	 * (A4), recomputed on the request about to go out; null otherwise. The call
-	 * that reads it disarms it.
+	 * Whether the published view carries the A4 pin an overflow fold that fit
+	 * armed: its `inputTokens` is then the count the next main request pins.
+	 * The call that reads it disarms it.
 	 */
-	takeOverflowInputPin?(agentRuntime: AgentRuntime): number | null;
+	takeOverflowInputPin?(): boolean;
 	/**
 	 * The A4 count of the request these messages and the pending ask make: the
 	 * larger of Clio's estimate and Pi's chars/3.5 count. Window-fit gates that
@@ -671,6 +671,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	let promptDigest: { prompt: string | null; digest: string } | null = null;
 	// Armed by an overflow fold that fit; the next main request pins the A4 count.
 	let overflowInputPin: { sessionId: string | undefined } | null = null;
+	const overflowPinArmed = (): boolean =>
+		overflowInputPin !== null && overflowInputPin.sessionId === deps.session?.current()?.id;
 	let reconciledAnchor: {
 		tokens: number;
 		anchoredMessages: ReadonlyArray<AgentMessage>;
@@ -1599,6 +1601,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	): LiveBudgetAccounting => {
 		const estimate = computed ?? liveContextEstimate(agentRuntime, pendingUserText, undefined, history);
 		const details = agentRuntime.runtimeResolution.contextWindowDetails;
+		// After an overflow fold that fit, the view publishes the A4 count it fitted, so the card, admission and Pi's
+		// clamp read one figure until the request that carries it goes out.
+		const inputTokens = overflowPinArmed()
+			? Math.max(estimate.tokens, overflowFitTokens(agentRuntime, pendingUserText))
+			: estimate.tokens;
 		return {
 			targetId: agentRuntime.targetId,
 			runtimeId: agentRuntime.runtimeId,
@@ -1608,12 +1615,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			windowSource: details.contextWindowSource,
 			estimatedInputTokens: estimate.estimatedTokens,
 			anchoredInputTokens: estimate.reconciledTokens,
-			inputTokens: estimate.tokens,
+			inputTokens,
 			inputSource: estimate.reconciledTokens === null ? "estimated" : "anchored-plus-estimated-tail",
 			historical: false,
 			breakdown: { ...estimate.breakdown },
 			breakdownSource: "live",
-			outputReserveTokens: resolveFitOutputReserve(agentRuntime, estimate.tokens),
+			outputReserveTokens: resolveFitOutputReserve(agentRuntime, inputTokens),
 		};
 	};
 
@@ -3132,11 +3139,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		liveContextEstimate,
 
 		refreshLiveBudget,
-		takeOverflowInputPin(runtime: AgentRuntime): number | null {
-			const armed = overflowInputPin;
+		takeOverflowInputPin(): boolean {
+			const armed = overflowPinArmed();
 			overflowInputPin = null;
-			if (armed === null || armed.sessionId !== deps.session?.current()?.id) return null;
-			return overflowFitTokens(runtime);
+			return armed;
 		},
 		overflowFitTokens,
 		oversizedResult: (runtime: AgentRuntime, pendingUserText?: string) =>

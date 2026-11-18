@@ -1331,10 +1331,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					state.synthesisToolLock,
 					middlewareChoice,
 				);
-				// After an overflow fold that fit, admission and Pi's clamp size the request on its count (A4).
-				const pinned = context.takeOverflowInputPin?.(localRuntime) ?? null;
-				const input = Math.max(estimateInputTokensFromContext(actual), view.inputTokens ?? 0, pinned ?? 0);
-				pinnedInputTokens = pinned === null ? null : input;
+				// After an overflow fold that fit, the view publishes its A4 count; admission and Pi's clamp size the request on it.
+				const pinned = context.takeOverflowInputPin?.() ?? false;
+				const input = Math.max(estimateInputTokensFromContext(actual), view.inputTokens ?? 0);
+				pinnedInputTokens = pinned ? input : null;
 				const output = resolveFitOutputReserve(localRuntime, input);
 				if (view.effectiveWindow !== null && !requestFits(input, output, view.effectiveWindow))
 					return {

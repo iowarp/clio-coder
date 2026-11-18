@@ -182,6 +182,8 @@ function harness(wire: ReturnType<typeof transport>, files: Record<string, strin
 	});
 	const events: ChatLoopEvent[] = [];
 	const piCounts: number[] = [];
+	const published: Array<number | null> = [];
+	let publishedInput: () => number | null = () => null;
 	const providers = context.getContract("providers") as ProvidersContract;
 	const loop = createChatLoop({
 		getSettings: () => settings,
@@ -205,6 +207,7 @@ function harness(wire: ReturnType<typeof transport>, files: Record<string, strin
 				...options,
 				transcriptStreamFn: (requestModel, requestContext, requestOptions) => {
 					piCounts.push(requestContext.messages.reduce((sum, m) => sum + estimateMessageTokens(m as never), 0));
+					published.push(publishedInput());
 					return (
 						options?.transcriptStreamFn ??
 						(() => {
@@ -218,6 +221,7 @@ function harness(wire: ReturnType<typeof transport>, files: Record<string, strin
 				},
 			}),
 	});
+	publishedInput = () => loop.liveBudget().inputTokens;
 	loop.onEvent((event) => {
 		events.push(event);
 	});
@@ -228,7 +232,7 @@ function harness(wire: ReturnType<typeof transport>, files: Record<string, strin
 		await loop.whenSettled();
 		await session.close();
 	};
-	return { settings, session, loop, events, notices, close, piCounts };
+	return { settings, session, loop, events, notices, close, piCounts, published };
 }
 
 const A1_ASK = `Read ${READS.join(", ")} in order, one read per round, each in full, then say done.\n\n${"Read guidance for the station fixture. ".repeat(700)}`;
@@ -243,14 +247,22 @@ const B1_ASK = [
 	"Do not read files yourself. When the worker returns, reply with its full report verbatim.",
 ].join("\n");
 
-/** Every request the provider saw left the 4096-token output floor, and the last one is the request Pi counts. */
-function assertAdmitted(wire: ReturnType<typeof transport>, piCounts: ReadonlyArray<number>): number {
+/**
+ * Every request the provider saw left the 4096-token output floor, the last one is the request Pi counts, and the
+ * published view priced it on that same figure (CF-6 r2 item 2).
+ */
+function assertAdmitted(
+	wire: ReturnType<typeof transport>,
+	piCounts: ReadonlyArray<number>,
+	published: ReadonlyArray<number | null>,
+): number {
 	for (const request of wire.requests) ok(request.maxTokens >= OUTPUT_SAFETY, `max_tokens ${request.maxTokens}`);
 	const last = wire.requests.at(-1);
 	ok(last);
 	// Below the model ceiling the wire's max_tokens is the window less the input Pi's clamp read and its 4096 margin.
 	const pinned = WINDOW - OUTPUT_SAFETY - last.maxTokens;
 	strictEqual(pinned, piCounts.at(-1), "Pi's clamp sized the answer on the one A4 figure");
+	strictEqual(published.at(-1), pinned, "the published view showed the figure admission and Pi's clamp read");
 	ok(pinned + 8_192 <= WINDOW, `admitted input ${pinned} fits the window with the reserve`);
 	return pinned;
 }
@@ -273,7 +285,7 @@ it("drv-cf3a D-A: an overflow fit admits the next request on the figure it fitte
 			"the requireFit summary cleared what the fold left",
 		);
 		strictEqual(wire.requests.length, READS.length + 1);
-		assertAdmitted(wire, live.piCounts);
+		assertAdmitted(wire, live.piCounts, live.published);
 		const entries = live.session.readEntries();
 		strictEqual(entries.filter((entry) => JSON.stringify(entry).includes("admission_refused")).length, 0);
 		const answer = entries.at(-2);
@@ -502,7 +514,7 @@ it("drv-cf3a D-A: a session the old build wedged resumes and is admitted on the 
 			"the overflow fold ran before the request",
 		);
 		strictEqual(wire.requests.length, 1, "one request, no retry");
-		assertAdmitted(wire, second.piCounts);
+		assertAdmitted(wire, second.piCounts, second.published);
 		const added = second.session.readEntries().slice(sliced.length + tail.length);
 		strictEqual(added.filter((entry) => JSON.stringify(entry).includes("admission_refused")).length, 0);
 	} finally {
