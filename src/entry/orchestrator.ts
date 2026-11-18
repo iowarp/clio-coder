@@ -246,7 +246,7 @@ import {
 } from "../domains/session/skill-activation-recording.js";
 import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { writeTranscriptExport } from "../domains/session/transcript-export.js";
-import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import { activePath } from "../domains/session/tree/active-path.js";
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { probeWorkspaceAsync } from "../domains/session/workspace/index.js";
 import { archiveCommandHost, ShareDomainModule } from "../domains/share/index.js";
@@ -1178,14 +1178,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	};
 	const dispatchDedup = createDispatchDedupRegistration();
 	middlewareRegistrar.registerHook(dispatchDedup.registration);
-	// Folding through filterEntriesToActivePath (not the raw file) is what
+	// Folding through the active path (not the raw file) is what
 	// keeps a /resume from picking up whichever branch happened to write its
 	// taskLedger entry last in file order; the task board's readEntries used to
 	// skip that filter entirely (issue #94).
 	const activePathEntries = () => {
 		const meta = session?.current();
 		if (!session || !meta) return [];
-		return filterEntriesToActivePath(session.readEntries(), session.leafId(meta.id) ?? undefined);
+		return activePath(session.readEntries(), session.leafId(meta.id) ?? undefined);
 	};
 	middlewareRegistrar.registerHook(
 		createStaleEditGuardRegistration({ readEntries: activePathEntries, cwd: () => process.cwd() }),

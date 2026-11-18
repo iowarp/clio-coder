@@ -167,7 +167,7 @@ import {
 	readPromptCompileRecords,
 	type SessionPromptCompileRecord,
 } from "../domains/session/prompt-manifest.js";
-import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import { activePath, findLastEntry } from "../domains/session/tree/active-path.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
 import { cacheLifetimeSeconds } from "../engine/cache-keepalive.js";
 import type {
@@ -608,8 +608,7 @@ function recordContextSnapshot(sessionId: string, snapshot: ContextSnapshot): vo
 
 export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const { state, middleware } = deps;
-	const activeEntries = () =>
-		filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+	const activeEntries = () => activePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
 	const compactionTrigger = new AutoCompactionTrigger<CompactResult | null>();
 	let compactionController: AbortController | null = null;
 	let disposed = false;
@@ -1856,7 +1855,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			Math.max(0.08 * compactionWindow, 2 * Math.ceil(summaryChars / 4));
 		if (originSession !== undefined && summaryRearmSeededFor !== originSession) {
 			summaryRearmSeededFor = originSession;
-			const checkpoint = [...activeEntries()].reverse().find((entry) => entry.kind === "compactionSummary");
+			const checkpoint = findLastEntry(activeEntries(), (entry) => entry.kind === "compactionSummary");
 			if (summaryRearm === null && checkpoint?.kind === "compactionSummary" && checkpoint.tokensAfter !== undefined)
 				summaryRearm = { tokensAfter: checkpoint.tokensAfter, band: rearmBand(checkpoint.summary.length) };
 		}
@@ -2220,7 +2219,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const historyBudget = belowTrigger > 0 ? belowTrigger : inputTarget - fixedTokens;
 			// A cumulative checkpoint grows each cycle, so a fixed 30% suffix let the cut creep toward the trigger. The
 			// suffix gives back what the current checkpoint takes past its 30%, down to 10%, to hold the cut near 60%.
-			const checkpoint = [...activeEntries()].reverse().find((entry) => entry.kind === "compactionSummary");
+			const checkpoint = findLastEntry(activeEntries(), (entry) => entry.kind === "compactionSummary");
 			const checkpointShare = checkpoint && historyBudget > 0 ? estimateTokens(checkpoint) / historyBudget : 0.3;
 			const suffixShare = Math.min(0.3, Math.max(0.1, 0.6 - checkpointShare));
 			budget = {
@@ -2387,7 +2386,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			await deps.session.checkpoint("context-summary");
 			if (originSession !== deps.session.current()?.id || originNavigation !== navigationEpoch)
 				throw new Error("Context ownership changed during checkpoint.");
-			const summary = [...deps.readSessionEntries()].reverse().find((entry) => entry.kind === "compactionSummary");
+			const summary = findLastEntry(deps.readSessionEntries(), (entry) => entry.kind === "compactionSummary");
 			if (summary) notifyMemoryCommit(summary.turnId, "summary", "summarized");
 		}
 
@@ -2531,7 +2530,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const active = activeEntries();
 		const visible = compactionCut(active).visible;
 		const messagesSummarized = visible.filter((entry) => entry.kind === "message").length;
-		const cutCursor = [...active].reverse().find((entry) => entry.kind === "message")?.turnId;
+		const cutCursor = findLastEntry(active, (entry) => entry.kind === "message")?.turnId;
 		if (messagesSummarized === 0 || cutCursor === undefined) return false;
 		// Throws when a skill an earlier checkpoint carried no longer verifies, as native compaction does.
 		const skills = checkpointSkillContext(
@@ -2635,9 +2634,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const bridge = deps.memoryCommitBridge;
 		if (!bridge || !bindMemoryScope()) return false;
 		const entries = activeEntries();
-		const latest = [...entries]
-			.reverse()
-			.find((entry) => entry.kind === "continuityCommit" || entry.kind === "compactionSummary");
+		const latest = findLastEntry(
+			entries,
+			(entry) => entry.kind === "continuityCommit" || entry.kind === "compactionSummary",
+		);
 		const currentState =
 			latest?.kind === "continuityCommit"
 				? { kind: "handoff" as const, text: latest.continuity.accepted.note }
@@ -2699,7 +2699,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const navigation = navigationEpoch;
 		const signal = deps.turnSignal?.();
 		const active = activeEntries();
-		const checkpoint = [...active].reverse().find((entry) => entry.kind === "compactionSummary");
+		const checkpoint = findLastEntry(active, (entry) => entry.kind === "compactionSummary");
 		if (checkpoint?.kind !== "compactionSummary" || !checkpoint.providerCheckpoint) {
 			refreshAgentMessagesFromSession(runtime);
 			return;
@@ -2952,7 +2952,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (!current()) return null;
 			// A route switch materializes portable context only when it is first needed (#423).
 			const active = activeEntries();
-			const checkpoint = [...active].reverse().find((entry) => entry.kind === "compactionSummary");
+			const checkpoint = findLastEntry(active, (entry) => entry.kind === "compactionSummary");
 			if (
 				!skipProviderFallback &&
 				checkpoint?.kind === "compactionSummary" &&
@@ -3392,7 +3392,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			pendingPosture = null;
 			if (!pending || !postureGeneration || !deps.session?.current() || !deps.prompts?.renderSessionPostureUpdate) return;
 			const autonomy = deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy ?? "default";
-			const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], userTurnId);
+			const entries = activePath(deps.readSessionEntries?.() ?? [], userTurnId);
 			if (effectivePosture(entries, postureGeneration) === autonomy) return;
 			const text = deps.prompts.renderSessionPostureUpdate(autonomy, pending.inputs);
 			const entry = deps.session.appendEntry({
