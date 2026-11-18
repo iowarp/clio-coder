@@ -1231,9 +1231,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				summaryReserve,
 				turnReserve: () => resolveTurnOutputReserve(agentRuntime, tokens),
 			});
+		/** The fraction of the trigger window at which the automatic trigger fires, counting the reserve for `tokens`. */
+		const triggerFraction = (tokens: number): number =>
+			effectiveCompactionThreshold(economic.threshold, economic.triggerWindow, triggerReserve(tokens));
 		return {
 			economic,
 			triggerReserve,
+			triggerFraction,
 			shouldCompact: (tokens: number) =>
 				economicPressure({
 					tokens,
@@ -1242,11 +1246,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					reserve: triggerReserve(tokens),
 				}),
 			/** The context size at which the automatic trigger fires, counting the reserve for `tokens`. */
-			triggerTokens: (tokens: number) =>
-				Math.floor(
-					effectiveCompactionThreshold(economic.threshold, economic.triggerWindow, triggerReserve(tokens)) *
-						economic.triggerWindow,
-				),
+			triggerTokens: (tokens: number) => Math.floor(triggerFraction(tokens) * economic.triggerWindow),
 		};
 	};
 
@@ -2044,6 +2044,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					pendingUserText,
 					handoff,
 					shouldCompact: route.shouldCompact,
+					triggerFraction: route.triggerFraction,
 				});
 				if (stage.acted) preSummaryStageActed = true;
 				if (stage.fit) return true;
