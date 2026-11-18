@@ -2122,10 +2122,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// Started lazily, in beforeSummaryCall, for forced runs too. Starting it here
 		// made a forced compaction with no older history fire the llm_summary hook
 		// and end its activity rail on a success tick labelled complete (p8/B2).
-		// Said before the summary call, not after it: the operator is about to wait
+		// Said in beforeSummaryCall, not earlier or after: the operator is about to wait
 		// on a destructive stage, and the reason the cheap one was skipped is only
-		// useful ahead of it.
-		if (evictionSkipNotice) deps.emitNotice(evictionSkipNotice);
+		// useful ahead of it. A pass that skips the summary says nothing (bt3 m2a-3).
 		let result: CompactResult | null = null;
 		let summaryRecordId: string | undefined;
 		// Compare full runtime estimates on both sides. The current snapshot and
@@ -2280,6 +2279,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						},
 						beforeSummaryCall: async (hold) => {
 							await (handoff?.beforeSummaryCall ?? budget?.beforeSummaryCall)?.(hold);
+							if (evictionSkipNotice) deps.emitNotice(evictionSkipNotice);
+							evictionSkipNotice = null;
 							if (!summaryLifecycleStarted) startSummaryLifecycle();
 							// Nothing is measurable while the summarizer reads, so the rail
 							// stays indeterminate and says what it is waiting for.

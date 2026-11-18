@@ -1499,6 +1499,8 @@ describe("production compaction controls", () => {
 				label,
 			);
 			ok(!notices.some((text) => text.includes("usage recorded")), label);
+			// A skipped pass names no summary that never runs (bt3 m2a-3).
+			ok(!notices.some((text) => text.includes("llm_summary")), label);
 		}
 	});
 
