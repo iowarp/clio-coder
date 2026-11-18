@@ -108,6 +108,8 @@ export interface CallClassification {
 	 * else {@link check}. The recorder and the task board both key on it, so neither drops a check the other keeps (x6-1).
 	 */
 	name: string | null;
+	/** The ids of the declared checks a bash call runs whole ({@link ClassifierContext.declaredChecks}). */
+	declared: string[];
 }
 
 /** The name a bash check's outcome is filed under: its full observed command, prefixed with its directory off `cwd`. */
@@ -309,9 +311,8 @@ export function classifyCall(
 	const targets = mutationTargets(toolName, args);
 	const paths = targets.map((target) => path.resolve(base, target));
 	// The steps that run a declared check are check steps, so the call is a check whose shape places them (x7-5).
-	const declaredSteps = new Set(
-		command === null ? [] : declaredCheckRuns(command, base, declaredChecks).flatMap((run) => run.steps),
-	);
+	const declaredRuns = command === null ? [] : declaredCheckRuns(command, base, declaredChecks);
+	const declaredSteps = new Set(declaredRuns.flatMap((run) => run.steps));
 	const verdict = declaredSteps.size > 0 ? "check" : callVerdict(toolName, args, gitHelpers);
 	// A bash command has a shape exactly when it runs a check, so only a check reads where its output lands.
 	const isOutput = command !== null && verdict === "check" ? outputTarget(base, checkLogTargets(command)) : () => false;
@@ -350,6 +351,7 @@ export function classifyCall(
 		shape,
 		check,
 		name: verdict === "check" && command !== null ? observedCheckName(command, base, cwd) : check,
+		declared: [...new Set(declaredRuns.map((run) => run.check.id))],
 	};
 }
 
