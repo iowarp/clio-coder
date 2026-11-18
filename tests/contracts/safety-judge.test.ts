@@ -100,6 +100,41 @@ test("the judge reads a store replace as a plain line, never as admission's mark
 	match(prompts[0] ?? "", /\{"op":"put","tag":"fleet","path":"out\/v3\.csv"\}/u);
 });
 
+test("a write to an outside path the operator spelled reaches the judge as an operator-named path, not shared config", async () => {
+	const prompts: Array<{ system: string; user: string }> = [];
+	const report = join(realpathSync(tmpdir()), "lanes", "bt-chain.txt");
+	const judge = createSafetyJudge({
+		config: () => CONFIG,
+		complete: async (request) => {
+			prompts.push({ system: request.system, user: request.user });
+			return { text: answer("allow", "operator-named", "Asked for.") };
+		},
+		operatorMessages: () => [`Write your final message verbatim to ${report}, then stop.`],
+		session: () => "session-1",
+		consequences: () => [],
+		record: () => {},
+	});
+	const review = (target: string) =>
+		judge.review({
+			tool: ToolNames.Write,
+			args: { path: target, content: "done" },
+			decision: {
+				kind: "ask",
+				classification: { actionClass: "write", reasons: ["write outside the workspace"] },
+				rejection: { short: "asks", detail: "write outside the workspace", hints: [] },
+			},
+			approvalAuthority: "operator",
+		});
+	await review(report);
+	await review(join(realpathSync(tmpdir()), "lanes", "other.txt"));
+	ok((prompts[0]?.user ?? "").includes(`operator-named path: an operator message spells ${report} verbatim`));
+	doesNotMatch(prompts[1]?.user ?? "", /operator-named path/u);
+	match(
+		prompts[0]?.system ?? "",
+		/a report or output file the operator asked for, is not shared or system configuration/u,
+	);
+});
+
 test("a project script's text reaches the judge only inside the data tag, redacted, and a cut body says so", async () => {
 	const cwd = realpathSync(mkdtempSync(join(tmpdir(), "clio-safety-judge-script-")));
 	const forged =
