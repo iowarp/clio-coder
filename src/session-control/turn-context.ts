@@ -3195,7 +3195,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					);
 				}
 			}
-			sessionInputs.contextOperationUpdate = contextOperationAwareness(deps.readSessionEntries?.() ?? [], sessionId, cwd);
+			// Operator context-operation facts are turn reminder text, not prompt input, so a failed recall keeps the cached prefix.
+			const contextOperationUpdate = contextOperationAwareness(deps.readSessionEntries?.() ?? [], sessionId, cwd);
 			// #423: the memory section this session's prompt was compiled with stays
 			// put. A record approved later reaches the model as a reminder on the
 			// next turn; recompiling for it re-billed the whole conversation.
@@ -3229,14 +3230,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// S-85: per-session facts ride in the first user message, not the system
 			// prompt; they go again only once no message in context carries them,
 			// as after a compaction that summarized the first turn away.
-			const sessionContextDelta = (compiled: CompiledSessionPrompt | null): string => {
-				const block = compiled?.sessionContext ?? "";
+			const undelivered = (block: string): string => {
 				if (block.length === 0) return "";
 				const framedBlock = neutralizeFraming(block);
 				return hostFramedTexts(agentRuntime.agent.state.messages).some((text) => text.includes(framedBlock)) ? "" : block;
 			};
 			const promptDelta = (compiled: CompiledSessionPrompt | null, memory: string): string =>
-				[sessionContextDelta(compiled), memoryDelta(memory)].filter((part) => part.length > 0).join("\n\n");
+				[undelivered(compiled?.sessionContext ?? ""), undelivered(contextOperationUpdate), memoryDelta(memory)]
+					.filter((part) => part.length > 0)
+					.join("\n\n");
 			const memoryDelta = (compiled: string): string => {
 				if (!memoryOn) return "";
 				const framed = hostFramedTexts(agentRuntime.agent.state.messages);

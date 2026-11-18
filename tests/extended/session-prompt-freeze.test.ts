@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { Context, SimpleStreamOptions, StreamOptions } from "@earendil-works/pi-ai";
+import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../../src/core/context-operation.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
@@ -264,7 +265,7 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 				: {}),
 			...(session && state ? { session, readSessionEntries: () => readCurrentEntries(state) } : {}),
 		});
-		return { loop, requests };
+		return { loop, requests, state };
 	}
 
 	it("keeps the prefix when the turn scope changes and delivers the new scope in the tail", async () => {
@@ -378,6 +379,36 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 			ok(text(policy).includes("Autonomy: yolo."), tail);
 			ok(text(policy).includes("The operator turned on yolo"), tail);
 			strictEqual(items.at(-1)?.role, "user");
+		} finally {
+			f.loop.dispose();
+		}
+	});
+
+	it("keeps the prefix when a /context recall fails and delivers the operation fact in the tail once", async () => {
+		const f = await chatFixture({ section: "" }, { autonomy: { level: "default" } });
+		try {
+			await f.loop.submit("first task");
+			const state = f.state;
+			ok(state);
+			const recall = createContextOperation(
+				{ kind: "context-recall", sessionId: state.meta.id, cwd: process.cwd(), origin: "operator", reason: "recall" },
+				() => {},
+			);
+			appendEntry(state, {
+				kind: "custom",
+				customType: CONTEXT_OPERATION_CUSTOM_TYPE,
+				parentTurnId: null,
+				data: recall.finish("failed", "no retained observation"),
+			});
+			await f.loop.submit("second task");
+			await f.loop.submit("third task");
+			strictEqual(f.requests.length, 3);
+			strictEqual(systemText(f.requests[1]), systemText(f.requests[0]));
+			const tail = await assertPrefixKept(f.requests[0] as Context, f.requests[1] as Context);
+			ok(tail.includes('\\"operation\\":\\"context-recall\\",\\"outcome\\":\\"failed\\"'), tail);
+			// History already carries the fact, so the next turn does not repeat it.
+			const next = await assertPrefixKept(f.requests[1] as Context, f.requests[2] as Context);
+			strictEqual(next.includes("context-recall"), false, next);
 		} finally {
 			f.loop.dispose();
 		}
