@@ -161,6 +161,8 @@ describe("test runner vocabulary (#377)", () => {
 	it("runs the project's test command unattended at default and yolo", () => {
 		for (const command of [
 			"python3 -m unittest -q test_solver",
+			"python3 -B -m unittest -q test_solver",
+			"python3 -Bu -X dev -W error::DeprecationWarning -m pytest -q",
 			"ctest --output-on-failure",
 			"node --test sum.test.mjs",
 			"npm run test -- tests/x.test.ts",
@@ -215,6 +217,14 @@ describe("test runner vocabulary (#377)", () => {
 		// A quoted argument leaves the bare-word charset, so the command is
 		// unrecognized bash again: the autonomy level decides, as before #377.
 		strictEqual(disposition(policy, "python3 -m unittest 'test solver'", "default"), "ask");
+		// An interpreter flag that runs code or writes outside the runner keeps the ask.
+		for (const command of [
+			"python3 -c 1 -m unittest",
+			"python3 -X pycache_prefix=/etc -m unittest",
+			"python3 -W error::evil.Warning -m unittest",
+		]) {
+			strictEqual(disposition(policy, command, "default"), "ask", command);
+		}
 		strictEqual(disposition(policy, 'pnpm run test:file -- "$X"', "default"), "ask");
 	});
 
