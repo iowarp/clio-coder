@@ -143,7 +143,15 @@ describe("typed validation follows each check's latest run (BT-017)", () => {
 			]);
 			deepStrictEqual(verdicts(receipt), [true, true]);
 			deepStrictEqual(receipt.verification, { state: "verified", basis: "validation-tool" });
-			if (viaGateway === "chain") equal(receipt.toolStats.find((stat) => stat.tool === "verify")?.count, 3);
+			// Three chained checks are three calls; the chain wrapper adds none (bt-14).
+			if (viaGateway === "chain") {
+				equal(receipt.toolStats.find((stat) => stat.tool === "verify")?.count, 3);
+				equal(
+					receipt.toolStats.find((stat) => stat.tool === "gateway"),
+					undefined,
+				);
+				equal(receipt.toolCalls, 3);
+			}
 		});
 	}
 

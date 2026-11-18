@@ -491,6 +491,7 @@ import {
 	snapshotToolStats,
 	snapshotUnfinishedTools,
 	summarizeToolActivity,
+	type ToolFinishPayload,
 	workerNoWorkDetail,
 	workerPartialWorkDetail,
 	zeroSuccessfulToolNote,
@@ -8290,6 +8291,9 @@ export function createDispatchBundle(
 		const finishContractEntries: unknown[] = [];
 		const verifyCalls: VerifyCallLog = { pending: new Map(), calls: [] };
 		const pendingCapabilities = new Map<string, string>();
+		// A gateway wrapper's finish waits for its result: a chain's settled steps count as the calls they are, so the
+		// wrapper counts only when none settled. Counting both made an N-step chain N + 1 calls (bt-14).
+		const gatewayFinishes = new Map<string, ToolFinishPayload>();
 		let runIdForPermissionAudit: string | null = null;
 		// The worker's own tool calls, folded into what this run changed and what
 		// it validated. The sealed mutation-report contract is measured against
@@ -8498,7 +8502,11 @@ export function createDispatchBundle(
 				recordWorkerRunEffect(runEffects, event);
 				recordWorkerVerifyCall(verifyCalls, event);
 				if (event.type === "tool_execution_end") {
-					for (const child of gatewayChainReceipts(String(event.toolName), event.result)) {
+					const children = gatewayChainReceipts(String(event.toolName), event.result);
+					const wrapper = gatewayFinishes.get(event.toolCallId ?? "");
+					gatewayFinishes.delete(event.toolCallId ?? "");
+					if (wrapper !== undefined && children.length === 0) recordToolFinish(toolStats, wrapper);
+					for (const child of children) {
 						recordToolFinish(toolStats, {
 							tool: child.capability,
 							outcome: child.admission.outcome,
@@ -8742,7 +8750,9 @@ export function createDispatchBundle(
 				recordToolCompletion(inFlightTools, event.payload);
 				const tool = pendingCapabilities.get(event.payload.toolCallId ?? "") ?? event.payload.tool;
 				pendingCapabilities.delete(event.payload.toolCallId ?? "");
-				recordToolFinish(toolStats, { ...event.payload, tool });
+				if (tool === ToolNames.Gateway && event.payload.toolCallId)
+					gatewayFinishes.set(event.payload.toolCallId, { ...event.payload, tool });
+				else recordToolFinish(toolStats, { ...event.payload, tool });
 				if (isSkillActivation(event.payload.skillActivation)) {
 					skillActivations.push(event.payload.skillActivation);
 				}
@@ -9090,6 +9100,9 @@ export function createDispatchBundle(
 				status === "dead" || status === "interrupted" || (status === "failed" && result.exitCode === 0)
 					? 1
 					: (result.exitCode ?? 1);
+			// A wrapper whose result never arrived still counts once.
+			for (const wrapper of gatewayFinishes.values()) recordToolFinish(toolStats, wrapper);
+			gatewayFinishes.clear();
 			const toolActivity = summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass);
 			// A run that exits 0 with zero successful tool calls keeps its
 			// succeeded outcome (the harness cannot judge semantic completion),
