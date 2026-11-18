@@ -132,6 +132,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Copilot route: host reminders that follow tool results, such as the result-contract reminder, now go in Copilot's immediate send before the next model request. They are never appended inside a tool result, which models read as an injection (D4).
 - Telemetry insights counts a fork's own verified outcomes after its own check, so the verified share moves with it. (c16-D, bt-fork-verified, drv-n3)
 - `telemetry why-stopped` names a dispatched worker's stop on the parent session, in text and in `--json` `workerStops`. (D3-b, drv-n2a)
 - A dispatched architect task that forbids writing files no longer carries the plan/artifact recipe, the artifact tool or an artifact-write permit; it returns its plan in the reply. (D-C residue, drv-n5)
