@@ -1233,23 +1233,23 @@ const READ_ONLY_INSPECTION_REFUSALS: ReadonlyMap<string, ReadonlyArray<string>> 
 	["wc", []],
 	["pwd", []],
 	["grep", []],
-	["rg", ["--pre"]],
+	// `--hostname-bin` runs the named program even with no hyperlink format and stdout piped (x1-3).
+	["rg", ["--pre", "--hostname-bin"]],
 	["find", ["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"]],
 	["stat", []],
-	["file", []],
 	["which", []],
 	["echo", []],
 	["printf", []],
 ]);
 
-const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
-	"status",
-	"diff",
-	"log",
-	"show",
-	"rev-parse",
-	"branch",
-]);
+/**
+ * Git subcommands that never consult the work tree. `git status` and `git diff` refresh the index, which runs a
+ * configured `core.fsmonitor` program that the command text cannot rule out, so neither is listed (x1-3).
+ */
+const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set(["log", "show", "rev-parse", "branch"]);
+
+/** `git log` and `git show` run a configured external diff or textconv driver unless both are switched off (x1-3). */
+const GIT_HELPER_OPT_OUTS: ReadonlyArray<string> = ["--no-ext-diff", "--no-textconv"];
 
 /** `git branch` flags that only list or name branches; any other argument creates, moves or deletes one. */
 const READ_ONLY_GIT_BRANCH_FLAGS: ReadonlySet<string> = new Set([
@@ -1273,7 +1273,11 @@ function readOnlyInspectionStep(argv: ReadonlyArray<string>): boolean {
 		const [subcommand, ...rest] = args;
 		if (subcommand === undefined || !READ_ONLY_GIT_SUBCOMMANDS.has(subcommand)) return false;
 		if (subcommand === "branch") return rest.every((arg) => READ_ONLY_GIT_BRANCH_FLAGS.has(arg));
-		return !rest.some((arg) => arg.startsWith("--output"));
+		if (subcommand === "rev-parse") return true;
+		return (
+			GIT_HELPER_OPT_OUTS.every((flag) => rest.includes(flag)) &&
+			!rest.some((arg) => arg.startsWith("--output") || arg === "--ext-diff" || arg === "--textconv")
+		);
 	}
 	const refused = READ_ONLY_INSPECTION_REFUSALS.get(executable);
 	if (refused === undefined) return false;
@@ -1282,9 +1286,9 @@ function readOnlyInspectionStep(argv: ReadonlyArray<string>): boolean {
 
 /**
  * True when every step of a shell command is an exact leading-command match on a small read-only inspection
- * allowlist (`git diff`, `cat`, `grep`, ...), joined only by `;`, `&&`, `||` or `|`, with no redirect, no
- * substitution, no inline script and no write or delete target. Run effects read such a call as no workspace
- * mutation; anything this cannot prove stays one, so the answer fails closed.
+ * allowlist (`cat`, `grep`, `git log --no-ext-diff --no-textconv`, ...), joined only by `;`, `&&`, `||` or `|`,
+ * with no redirect, no substitution, no inline script and no write or delete target. Run effects read such a call
+ * as no workspace mutation; anything this cannot prove stays one, so the answer fails closed.
  */
 export function isReadOnlyInspectionCommand(command: string): boolean {
 	const tokens = scanShellLike(command);

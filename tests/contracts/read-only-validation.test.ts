@@ -18,6 +18,7 @@ import {
 	verifyCallStart,
 } from "../../src/domains/dispatch/run-findings.js";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
+import { isReadOnlyInspectionCommand } from "../../src/domains/safety/protected-artifacts.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { clearTaskGates, configureTaskGates } from "../../src/tools/verify/task-gates.js";
 
@@ -597,7 +598,7 @@ it("an observed red judges only the tree it ran on, and respelled runs of one ch
 			[
 				["fix", "edit"],
 				["test", "make test", true],
-				["diff", "git diff"],
+				["look", "cat src/calc.c"],
 			],
 			[{ ...green, name: "make test" }],
 		),
@@ -608,7 +609,7 @@ it("an observed red judges only the tree it ran on, and respelled runs of one ch
 			[
 				["fix", "edit"],
 				["test", "make test"],
-				["look", "git status && git diff"],
+				["look", "ls src && grep -n sub src/calc.c"],
 			],
 			[{ ...green, name: "make test" }],
 		),
@@ -644,7 +645,7 @@ it("a check judges only the tree it ran on, sealed per verify call or from a too
 				step === "edit"
 					? ["edit", { path: "src/calc.c" }]
 					: step === "diff"
-						? ["bash", { command: "git diff" }]
+						? ["bash", { command: "cat src/calc.c" }]
 						: [tool, step === "list" ? {} : { check: "test" }];
 			const outcome = step === "red" ? "error" : "ok";
 			recorder.start(id, name, args);
@@ -701,6 +702,20 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	// Every change ran before the check through `&&`, or the call held only checks, cd and plumbing.
 	deepStrictEqual(seal("npm ci && npm test"), [["npm test"], "verified"]);
 	deepStrictEqual(seal("cd pkg && npm test 2>&1 | tail -5"), [["npm test"], "verified"]);
+});
+
+it("read-only inspection refuses helpers that write the tree or run another program (x1-3)", () => {
+	for (const command of [
+		"file -C -m mymagic",
+		"rg --hostname-bin=./x.sh foo",
+		"git status",
+		"git diff --no-ext-diff --no-textconv",
+		"git log -p",
+		"git show --no-ext-diff --no-textconv --textconv",
+	])
+		strictEqual(isReadOnlyInspectionCommand(command), false, command);
+	for (const command of ["rg foo src", "git log -p --no-ext-diff --no-textconv", "git rev-parse HEAD"])
+		strictEqual(isReadOnlyInspectionCommand(command), true, command);
 });
 
 it("the review gate reads a verifier report that closes prose containing braces, and nothing weaker", () => {

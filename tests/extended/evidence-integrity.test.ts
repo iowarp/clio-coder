@@ -33,7 +33,7 @@ describe("evidence integrity boundary", () => {
 		const effects = createRunEffectsRecorder("/repo");
 		effects.start("pytest", "bash", { command: "python3 -m pytest -q" });
 		effects.finish("pytest", false);
-		effects.start("diff", "bash", { command: "git diff" });
+		effects.start("diff", "bash", { command: "cat README.md" });
 		effects.finish("diff", false);
 		const typedValidations = typedValidationFactsFromObservedEffects(effects.snapshot());
 		const draft = fixtureReceiptDraft(fixtureEnvelope("failed-validation-evidence"));
