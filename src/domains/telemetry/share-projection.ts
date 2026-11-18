@@ -217,6 +217,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		capabilityMismatch: { agentId: "name", suggestedAgentId: "name", capabilityClass: "token", taskType: "token" },
 		context: { ...keep("briefingBytes", "worker"), project: { ...keep("tier", "chars"), sections: "token" } },
 		blockedAttempts: { tool: "tool", actionClass: "token", ruleId: "name", reasonCode: "token" },
+		guardBlockedAttempts: { tool: "tool", actionClass: "token", ruleId: "name", reasonCode: "token" },
 		hashes: { ...keep("label", "function", "canonicalization", "subject", "store"), field: "token", hash: "id" },
 		// What a run said about itself, its budget wording and its validation claims are the worker's own prose.
 		outcomeDetail: "withhold",

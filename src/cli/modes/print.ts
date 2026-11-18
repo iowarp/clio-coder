@@ -269,10 +269,15 @@ interface HeadlessMainAgentRunStats {
 	seenAttempts: Set<string>;
 	/** The decision axis, counted the way a worker's settled run counts it. */
 	decisions: RunResultSafetySummary["decisions"] & { guardBlocked: number };
-	/** Every call whose outcome was blocked, in a worker's settled shape, up to `BLOCKED_ATTEMPTS_LIMIT`. */
+	/**
+	 * Every call whose outcome was blocked, except a tool guard's block, in a worker's settled shape, up to
+	 * `BLOCKED_ATTEMPTS_LIMIT`.
+	 */
 	blockedAttempts: SafetyBlockedAttempt[];
 	/** Blocked attempts past `BLOCKED_ATTEMPTS_LIMIT`, counted but not listed. */
 	blockedAttemptsTruncated: number;
+	/** The calls `decisions.guardBlocked` counts, up to `BLOCKED_ATTEMPTS_LIMIT`; the count stays exact. */
+	guardBlockedAttempts: SafetyBlockedAttempt[];
 	/** Successful calls the registry classified as `MUTATING_ACTION_CLASS`. */
 	mutatingSucceeded: number;
 	/** Dispatched runs whose task worktree merged into this workspace. */
@@ -616,9 +621,10 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	// denied call with its own guidance. `decisions.blocked` keeps meaning a
 	// hard block by a rule, and a tool guard's block counts as `guardBlocked`.
 	const deniedAsk = decision === "blocked" && detail.deniedPark === true;
+	const guardBlock = decision === "blocked" && !deniedAsk && detail.reasonCode === "guard_block";
 	if (decision === "allowed") stats.decisions.allowed += 1;
 	else if (decision === "permission_requested" || deniedAsk) stats.decisions.permissionRequested += 1;
-	else if (decision === "blocked" && detail.reasonCode === "guard_block") stats.decisions.guardBlocked += 1;
+	else if (guardBlock) stats.decisions.guardBlocked += 1;
 	else if (decision === "blocked") stats.decisions.blocked += 1;
 	const actionClass = (event as { actionClass?: unknown }).actionClass;
 	if (outcome === "blocked" || decision === "blocked") {
@@ -631,7 +637,10 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 		if (deniedAsk) attempt.permissionRequired = true;
 		const layer = detail.denial?.layer;
 		if (layer === "clio_policy" || layer === "operator_approval" || layer === "mcp_server_policy") attempt.layer = layer;
-		recordBlockedAttempt(stats, attempt);
+		// A guard's block lists apart from the safety refusals, the way `decisions` counts it (bt-15 c12b).
+		if (guardBlock)
+			recordBlockedAttempt({ blockedAttempts: stats.guardBlockedAttempts, blockedAttemptsTruncated: 0 }, attempt);
+		else recordBlockedAttempt(stats, attempt);
 	}
 	// A terminating result (the artifact tool's plan, review, or report) is the
 	// turn's answer written to a file, not the workspace change the task asked
@@ -959,6 +968,9 @@ async function recordHeadlessMainAgentRun(input: {
 			...(input.stats.blockedAttemptsTruncated > 0
 				? { blockedAttemptsTruncated: input.stats.blockedAttemptsTruncated }
 				: {}),
+			...(input.stats.guardBlockedAttempts.length > 0
+				? { guardBlockedAttempts: [...input.stats.guardBlockedAttempts] }
+				: {}),
 		},
 		noop: headlessNoop(input.stats),
 		...(unclassified !== null ? { unclassifiedAfterLastCheck: unclassified } : {}),
@@ -1050,6 +1062,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		decisions: { allowed: 0, blocked: 0, guardBlocked: 0, permissionRequested: 0 },
 		blockedAttempts: [],
 		blockedAttemptsTruncated: 0,
+		guardBlockedAttempts: [],
 		mutatingSucceeded: 0,
 		mergedTaskWorktrees: 0,
 		unresolvedBlocks: new Set<string>(),
@@ -1162,6 +1175,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			decisions: { ...runStats.decisions },
 			blockedAttempts: [...runStats.blockedAttempts],
 			...(runStats.blockedAttemptsTruncated > 0 ? { blockedAttemptsTruncated: runStats.blockedAttemptsTruncated } : {}),
+			...(runStats.guardBlockedAttempts.length > 0 ? { guardBlockedAttempts: [...runStats.guardBlockedAttempts] } : {}),
 		},
 	});
 	// A full stream's last line says whether the run succeeded, which the model's own turn_end cannot (S-51).
