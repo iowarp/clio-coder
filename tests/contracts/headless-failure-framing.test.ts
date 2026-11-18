@@ -218,7 +218,7 @@ test("a dispatch whose worker started and failed is not reported as never starte
 		strictEqual(started.code, 1, started.stderr);
 		match(
 			started.stderr,
-			/no-op: the delegated task failed \(dispatch \(sequential\) total=1 failed=1\) and no write succeeded/u,
+			/no-op: the delegated task failed \(1hj006g52rl9 agent=debugger exit=1 outcome=failed detail=worker process signal: SIGKILL\) and no write succeeded/u,
 		);
 		doesNotMatch(started.stderr, /never started/u);
 
