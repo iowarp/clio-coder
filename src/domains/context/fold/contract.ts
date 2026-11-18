@@ -15,10 +15,13 @@ export interface FoldCursor {
 	leaf: string | null;
 }
 
-/** Whose ledger a fold reads: the session, and the fork when it is one. */
+/**
+ * Whose ledger a fold reads: the session, and the fork binding when it is one, as
+ * `continuityContextFromSession` derives both from the session meta.
+ */
 export interface FoldOwner {
 	sessionId: string;
-	fork?: string;
+	fork?: { parentSessionId: string; parentTurnId: string };
 }
 
 /**
