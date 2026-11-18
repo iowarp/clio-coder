@@ -40,7 +40,6 @@ import {
 	type MuxAgentState,
 	MuxError,
 	type MuxEvent,
-	type MuxEventKind,
 	type MuxLog,
 	type MuxMode,
 	type MuxNotificationSound,
@@ -193,15 +192,6 @@ export interface MuxContract extends DomainContract {
 	 */
 	focusSelf(): Promise<boolean>;
 	/**
-	 * Hand the keyboard back after a key pressed inside a Clio dock hid or
-	 * closed it: to the pane the operator last focused in Clio's workspace that
-	 * Clio did not create, which is Clio's own pane unless the operator came
-	 * from one of theirs. The one foreign focus Clio performs, because it
-	 * returns focus the operator had there a moment ago. Falls back to
-	 * `focusSelf` when that pane is unknown, gone, or refuses focus.
-	 */
-	focusReturn(): Promise<boolean>;
-	/**
 	 * Leave zoom on the tab that hosts Clio, so a dock split from the anchor is
 	 * visible again. A zoomed tab hides every pane but one; opening or focusing
 	 * the files pane behind a zoom would report success for a pane the operator
@@ -320,8 +310,6 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 	const now = options.now ?? Date.now;
 	const registry = createPaneRegistry();
 	const anchorPaneId = detection.self.paneId;
-	/** The last pane the operator focused in Clio's workspace that Clio did not create; see `focusReturn`. */
-	let operatorPaneId: string | null = null;
 	/**
 	 * The managed dock tier needs an anchor to split from and the protocol-17
 	 * layout methods to converge with. Absent either, dock requests degrade to
@@ -430,17 +418,11 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 	};
 
 	const onEvent = (event: MuxEvent): void => {
-		if (event.kind === "pane.focused") {
-			const sameWorkspace = detection.self.workspaceId === null || event.workspaceId === detection.self.workspaceId;
-			if (sameWorkspace && !registry.owns(event.paneId)) operatorPaneId = event.paneId;
-			return;
-		}
 		if (event.kind === "layout.updated") {
 			docks?.noteLayoutUpdated(event.geometry);
 			return;
 		}
 		if (event.kind === "pane.moved") {
-			if (event.previousPaneId === operatorPaneId) operatorPaneId = event.paneId;
 			// herdr rewrites the pane id on a move; the registry and dock state
 			// follow it so ownership is not lost to the user reorganizing.
 			const held = registry.forget(event.previousPaneId);
@@ -450,7 +432,6 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			}
 			return;
 		}
-		if (event.paneId === operatorPaneId) operatorPaneId = null;
 		docks?.notePaneGone(event.paneId);
 		failedUtilityPanes.delete(event.paneId);
 		const dropped = registry.forget(event.paneId);
@@ -785,23 +766,6 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 			);
 		},
 
-		async focusReturn(): Promise<boolean> {
-			const target = operatorPaneId;
-			if (target === null || target === anchorPaneId || registry.owns(target)) return await contract.focusSelf();
-			if (!muxSupportsMethod(detection.server, "pane.focus")) return false;
-			const returned = await attempt(
-				"focusReturn",
-				async (live) => {
-					await live.paneFocus(target);
-					return true;
-				},
-				false,
-			);
-			if (returned) return true;
-			operatorPaneId = null;
-			return await contract.focusSelf();
-		},
-
 		async unzoomSelf(): Promise<boolean> {
 			if (anchorPaneId === null || !muxSupportsMethod(detection.server, "pane.zoom")) return false;
 			return await attempt(
@@ -1025,15 +989,14 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 	const start = async (): Promise<void> => {
 		if (detection.mode === "none" || client === null) return;
 		try {
-			const kinds: MuxEventKind[] = ["pane.closed", "pane.exited"];
-			if (docks) kinds.push("pane.moved", "pane.focused", "layout.updated");
+			const kinds: ("pane.closed" | "pane.exited" | "pane.moved" | "layout.updated")[] = ["pane.closed", "pane.exited"];
+			if (docks) kinds.push("pane.moved", "layout.updated");
 			subscription = await client.subscribe(kinds, onEvent, {
 				onResync: (snapshot) => {
 					// A reconnect means events were missed. The snapshot is the authority
 					// on which panes still exist, so anything Clio thinks it owns that is
 					// absent from it is gone.
 					const dropped = registry.reconcile(snapshot.panes.map((pane) => pane.paneId));
-					if (!snapshot.panes.some((pane) => pane.paneId === operatorPaneId)) operatorPaneId = null;
 					for (const record of dropped) docks?.notePaneGone(record.ref.paneId);
 					if (dropped.length > 0) {
 						log("info", `mux reconciled ${dropped.length} pane(s) closed while the socket was down`);

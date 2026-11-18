@@ -4,7 +4,7 @@ import { parseToolLimitList, toolLimitConstraints } from "../core/tool-limit-fla
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { type AutonomyLevel, autonomyFromUserInput } from "../domains/safety/autonomy.js";
-import { globalFlagPositionHint } from "./argv.js";
+import { globalFlagPositionHint, parseMaxContextTokens } from "./argv.js";
 
 export interface CliArgDiagnostic {
 	type: "warning" | "error";
@@ -269,14 +269,9 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--max-context-tokens") {
 			const value = need(arg);
-			if (value !== null) {
-				const n = Number(value);
-				if (Number.isInteger(n) && n > 0) {
-					parsed.maxContextTokens = n;
-				} else {
-					parsed.diagnostics.push({ type: "error", message: "--max-context-tokens must be a positive integer" });
-				}
-			}
+			const n = value === null ? null : parseMaxContextTokens(value);
+			if (typeof n === "number") parsed.maxContextTokens = n;
+			else if (n !== null) parsed.diagnostics.push({ type: "error", message: n.error });
 			continue;
 		}
 		if (arg === "--session") {

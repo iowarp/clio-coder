@@ -133,6 +133,12 @@ export function globalFlagPositionHint(arg: string, command: string): string | n
 	return `${arg} is a global option and must come before the subcommand: clio-coder ${usage} ${command} ...`;
 }
 
+/** `--max-context-tokens <N>` as both `run` and the interactive session read it: N, or the error both print. */
+export function parseMaxContextTokens(value: string | undefined): number | { error: string } {
+	const n = Number(value);
+	return Number.isInteger(n) && n > 0 ? n : { error: "--max-context-tokens must be a positive integer" };
+}
+
 /**
  * Extract every global startup flag in one order-independent pass. Only flags
  * before the first positional command are global; later occurrences belong to
@@ -171,6 +177,17 @@ export function extractGlobalFlags(
 	const skillPaths: string[] = [];
 	const bootFlags: string[] = [];
 	const rootFlags: string[] = [];
+	const failed = (error: string): GlobalCliFlags => ({
+		noContextFiles,
+		noSkills,
+		skillPaths,
+		bootFlags,
+		rootFlags,
+		rest,
+		error,
+		...(apiKey === undefined ? {} : { apiKey }),
+		...(panes === undefined ? {} : { panes }),
+	});
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
 		if (arg === undefined) continue;
@@ -216,19 +233,7 @@ export function extractGlobalFlags(
 		}
 		if (arg === "--autonomy") {
 			const value = argv[i + 1];
-			if (value !== "default" && value !== "yolo") {
-				return {
-					noContextFiles,
-					noSkills,
-					skillPaths,
-					bootFlags,
-					rootFlags,
-					rest,
-					error: "--autonomy must be default|yolo",
-					...(apiKey === undefined ? {} : { apiKey }),
-					...(panes === undefined ? {} : { panes }),
-				};
-			}
+			if (value !== "default" && value !== "yolo") return failed("--autonomy must be default|yolo");
 			autonomy = value;
 			i += 1;
 			continue;
@@ -236,94 +241,36 @@ export function extractGlobalFlags(
 		if (arg === "--allow-tools" || arg === "--delegate-tools") {
 			const value = argv[i + 1];
 			const names = value === undefined || isSubcommand(value) ? null : parseToolLimitList(arg, value);
-			if (names === null || "error" in names) {
-				return {
-					noContextFiles,
-					noSkills,
-					skillPaths,
-					bootFlags,
-					rootFlags,
-					rest,
-					error: names?.error ?? `${arg} requires a value`,
-					...(apiKey === undefined ? {} : { apiKey }),
-					...(panes === undefined ? {} : { panes }),
-				};
-			}
+			if (names === null || "error" in names) return failed(names?.error ?? `${arg} requires a value`);
 			toolLimits = { ...toolLimits, ...toolLimitConstraints(arg, names) };
 			i += 1;
 			continue;
 		}
 		if (arg === "--session-file") {
 			const value = argv[i + 1];
-			if (value === undefined || value.trim() === "" || value.startsWith("-") || isSubcommand(value)) {
-				return {
-					noContextFiles,
-					noSkills,
-					skillPaths,
-					bootFlags,
-					rootFlags,
-					rest,
-					error: "--session-file requires a path",
-					...(apiKey === undefined ? {} : { apiKey }),
-					...(panes === undefined ? {} : { panes }),
-				};
-			}
+			if (value === undefined || value.trim() === "" || value.startsWith("-") || isSubcommand(value))
+				return failed("--session-file requires a path");
 			sessionFile = resolve(value);
 			i += 1;
 			continue;
 		}
 		if (arg === "--max-context-tokens") {
-			const value = argv[i + 1];
-			const n = value === undefined ? Number.NaN : Number(value);
-			if (!Number.isInteger(n) || n <= 0) {
-				return {
-					noContextFiles,
-					noSkills,
-					skillPaths,
-					bootFlags,
-					rootFlags,
-					rest,
-					error: "--max-context-tokens must be a positive integer",
-					...(apiKey === undefined ? {} : { apiKey }),
-					...(panes === undefined ? {} : { panes }),
-				};
-			}
+			const n = parseMaxContextTokens(argv[i + 1]);
+			if (typeof n !== "number") return failed(n.error);
 			maxContextTokens = n;
 			i += 1;
 			continue;
 		}
 		if (arg === "--api-key" || arg === "--skill") {
 			const value = argv[i + 1];
-			if (value === undefined || value.startsWith("-") || isSubcommand(value)) {
-				return {
-					noContextFiles,
-					noSkills,
-					skillPaths,
-					bootFlags,
-					rootFlags,
-					rest,
-					error: `${arg} requires a value`,
-					...(apiKey === undefined ? {} : { apiKey }),
-					...(panes === undefined ? {} : { panes }),
-				};
-			}
+			if (value === undefined || value.startsWith("-") || isSubcommand(value)) return failed(`${arg} requires a value`);
 			if (arg === "--api-key") apiKey = value;
 			else skillPaths.push(value);
 			bootFlags.push(arg);
 			i += 1;
 			continue;
 		}
-		return {
-			noContextFiles,
-			noSkills,
-			skillPaths,
-			bootFlags,
-			rootFlags,
-			rest,
-			error: unknownGlobalOptionError(arg),
-			...(apiKey === undefined ? {} : { apiKey }),
-			...(panes === undefined ? {} : { panes }),
-		};
+		return failed(unknownGlobalOptionError(arg));
 	}
 	return {
 		noContextFiles,

@@ -272,7 +272,7 @@ When Herdr declines a move, the notice names the reason (`the files pane did not
 
 **Zoomed tab.** Herdr refuses to move a pane into or out of a zoomed tab. CLIO Coder does not leave zoom ahead of a move. After that refusal it runs `pane.zoom off` on the session pane, which focuses it, and retries the move once.
 
-**Keys inside the dock.** A program inside a dock pane receives keyboard input, so the session's key handler does not receive Alt+E or Alt+A there. The files and music docks forward the key to CLIO Coder, as the workers dashboard does with `Alt+W` and `q`. CLIO Coder hides the pane and returns keyboard focus to the pane you came to the dock from: the composer, or a Herdr pane of your own in the same workspace. That return is the only time CLIO Coder focuses a pane it did not create. The double-tap window stays CLIO Coder's, so a quick second press closes the dock.
+**Keys inside the dock.** A program inside a dock pane receives keyboard input, so the session's key handler does not receive Alt+E or Alt+A there. The files and music docks forward the key to CLIO Coder, which hides the pane and returns keyboard focus to the composer. The double-tap window stays CLIO Coder's, so a quick second press closes the dock.
 
 - Alt+E inside Yazi: the managed profile binds `<A-e>` to a `clio-coder-dock` event published with `ya pub-to`. The event carries the session's pick token, and CLIO Coder ignores a line with another token (counted in the `dropped` figure of `/panes`). This applies to the companion pane on `interface.panes.files.profile: managed`. The `user` profile has no CLIO Coder keymap.
 - Alt+A inside cliamp: a generated cliamp plugin appends a line to a tap file under CLIO Coder's state directory. See [Music](music.md).
