@@ -234,6 +234,12 @@ export interface CompactInput extends SideCallAuth {
 	 * input cannot produce a different verdict, and each repeat is paid (#422).
 	 */
 	skipSummaryDigest?: string;
+	/**
+	 * An automatic threshold pass, neither `/compact` nor overflow recovery. It makes no summary call when the span it
+	 * would compress, outside the kept suffix and the preserved user turn, prices below the summary room, since the
+	 * summary may take as much as it replaces (bt-47 cf1j-d).
+	 */
+	automatic?: boolean;
 }
 
 /**
@@ -254,7 +260,12 @@ export interface LivePrefixSummary {
 }
 
 /** Why a pass returned without a summary and without calling the summarizer. */
-export type CompactEmptyReason = "protected-recent" | "protected-skill" | "repeat-no-gain";
+export type CompactEmptyReason =
+	| "protected-recent"
+	| "protected-skill"
+	| "repeat-no-gain"
+	| "nothing-to-summarize"
+	| "below-summary-room";
 
 export interface CompactResult {
 	/** Journal calls belonging to this checkpoint attempt, including retries (#434). */
@@ -1457,6 +1468,26 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	});
 	if (pre.length === 0 && turnPrefix.length === 0 && !summarizePriorSuffix) {
 		return emptyResult(cut === rawCut ? "protected-recent" : "protected-skill");
+	}
+	if (input.automatic === true && input.requireFit !== true) {
+		// The preserved turn rides verbatim whether or not it is cut, so it compresses nothing.
+		const preservedTurnId = input.pendingOperatorTurn
+			? undefined
+			: (input.preserveUserTurnId ??
+				[...entries]
+					.reverse()
+					.find(
+						(entry) =>
+							entry.kind === "message" &&
+							entry.role === "user" &&
+							(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
+					)?.turnId);
+		const span = (summarizePriorSuffix ? priorSuffix : [...pre, ...turnPrefix]).filter(
+			(entry) => entry.turnId !== preservedTurnId,
+		);
+		if (!hasConversation(span)) return emptyResult("nothing-to-summarize");
+		if (span.reduce((tokens, entry) => tokens + estimateTokens(entry), 0) < summaryRoomTokens(reserveTokens))
+			return { ...emptyResult("below-summary-room"), noGain: true };
 	}
 
 	// The instructions also ride verbatim as an operator note, so they survive
