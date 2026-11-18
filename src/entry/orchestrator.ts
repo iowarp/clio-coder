@@ -1283,15 +1283,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	};
 	const dispatchDedup = createDispatchDedupRegistration();
 	middlewareRegistrar.registerHook(dispatchDedup.registration);
+	// Folding through filterEntriesToActivePath (not the raw file) is what
+	// keeps a /resume from picking up whichever branch happened to write its
+	// taskLedger entry last in file order; the task board's readEntries used to
+	// skip that filter entirely (issue #94).
+	const activePathEntries = () => {
+		const meta = session?.current();
+		if (!session || !meta) return [];
+		return filterEntriesToActivePath(session.readEntries(), session.leafId(meta.id) ?? undefined);
+	};
 	middlewareRegistrar.registerHook(
-		createStaleEditGuardRegistration({
-			readEntries: () => {
-				const meta = session?.current();
-				if (!session || !meta) return [];
-				return filterEntriesToActivePath(session.readEntries(), session.leafId(meta.id) ?? undefined);
-			},
-			cwd: () => process.cwd(),
-		}),
+		createStaleEditGuardRegistration({ readEntries: activePathEntries, cwd: () => process.cwd() }),
 	);
 	// Observers run after the guards; they emit no effects and their sinks are
 	// best-effort (session ledger, codewiki refresh).
@@ -2021,16 +2023,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// One task board per orchestrator: the tasks tool mutates it, the turn-end
 	// open-tasks nudge reads it, and the footer/overlay render it. Keyed on the
 	// current session id so resume/fork/new refolds it from taskLedger entries.
-	// Folding through filterEntriesToActivePath (not the raw file) is what
-	// keeps a /resume from picking up whichever branch happened to write its
-	// taskLedger entry last in file order; readEntries here used to skip that
-	// filter entirely (issue #94).
-	const activePathEntries = (): ReadonlyArray<unknown> => {
-		const meta = session?.current();
-		if (!session || !meta) return [];
-		const leafTurnId = session?.leafId(meta.id) ?? undefined;
-		return filterEntriesToActivePath(session.readEntries(), leafTurnId);
-	};
 	const taskBoard = createTaskBoardStore({
 		getSessionId: () => session?.current()?.id ?? null,
 		readEntries: activePathEntries,
@@ -2044,12 +2036,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	taskBoard.snapshot();
 	const decisionBoard = createDecisionBoardStore({
 		getSessionId: () => session?.current()?.id ?? null,
-		readEntries: () => {
-			const meta = session?.current();
-			if (!session || !meta) return [];
-			const leafTurnId = session?.leafId(meta.id) ?? undefined;
-			return filterEntriesToActivePath(session.readEntries(), leafTurnId);
-		},
+		readEntries: activePathEntries,
 		getActiveLeafTurnId: () => {
 			const meta = session?.current();
 			return meta ? (session?.leafId(meta.id) ?? null) : null;
