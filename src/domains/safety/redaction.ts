@@ -414,6 +414,7 @@ function quotedSecretLeadStart(text: string): number | null {
 	return waits === null ? open.lead : Math.min(open.lead, waits);
 }
 
+// A rule that can match across a line break needs certifiedThinkingBreak (chat-panel.ts) and RAIL_FAMILIES (url-userinfo-hold.test.ts) updated.
 function redactPlainSecretString(value: string): string {
 	return redactTokenShapes(
 		redactSecretFlags(

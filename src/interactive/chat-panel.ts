@@ -2072,11 +2072,14 @@ const THINKING_STREAM_STEP = 2048;
 const THINKING_STREAM_TRIES = 16;
 // A redaction pattern crosses a line break only after a name, flag, `:`, `=`, quote or scheme word leads into a value, or
 // from a curl or docker command into the flag on the next line. A break after none of those, ahead of a token that holds no
-// `:`, `=` or quote, splits no secret and no match, so the text on each side redacts as it would whole.
+// `:`, `=` or quote, splits no secret and no match, so the text on each side redacts as it would whole. RAIL_FAMILIES in
+// tests/contracts/url-userinfo-hold.test.ts samples every redaction rule and compares each frame with the whole render.
 const STREAM_LEAD_TOKEN_RE =
 	/^-|[:="'`]|pass|pwd|secret|token|key|auth|credential|bearer|basic|cookie|login|sshpass|docker|curl/iu;
 const STREAM_LEAD_LINE_RE = /curl|docker/iu;
 const STREAM_HEAD_TOKEN_RE = /[:="']/u;
+/** A secret word on a line of its own, which leads a tail into the quoted-value rules and redacts nothing itself. */
+const THINKING_WORD_PROBE = "key\n";
 
 function certifiedThinkingBreak(before: string, after: string): boolean {
 	const body = before.trimEnd();
@@ -2114,7 +2117,13 @@ function advanceThinkingStream(stream: ThinkingStream, tail: string, width: numb
 }
 
 /** The rail {@link renderThinkingRail} draws for open, bounded reasoning, reusing what earlier deltas certified. */
-function streamThinkingRail(stream: ThinkingStream, thinking: string, width: number, limit: number): string[] {
+function streamThinkingRail(
+	stream: ThinkingStream,
+	thinking: string,
+	width: number,
+	limit: number,
+	step = THINKING_STREAM_STEP,
+): string[] {
 	const prose = stream.prose.project(thinking, false, true);
 	const layout = `${width}|${limit}`;
 	if (stream.layout !== layout || !prose.startsWith(stream.head)) {
@@ -2124,15 +2133,22 @@ function streamThinkingRail(stream: ThinkingStream, thinking: string, width: num
 		stream.headTail = [];
 		stream.retryAt = 0;
 	}
-	if (prose.length - stream.head.length >= THINKING_STREAM_STEP && prose.length >= stream.retryAt) {
+	if (prose.length - stream.head.length >= step && prose.length >= stream.retryAt) {
 		const before = stream.head.length;
 		advanceThinkingStream(stream, prose.slice(before), width, limit);
-		stream.retryAt = stream.head.length === before ? prose.length + THINKING_STREAM_STEP : 0;
+		stream.retryAt = stream.head.length === before ? prose.length + step : 0;
 	}
 	if (stream.head.length === 0) return renderProseThinkingRail(prose, width, limit, false, true);
-	const tail = stripThinkingEmphasis(
-		redactStreamingSecretString(escapeTerminalControls(prose.slice(stream.head.length)), false),
-	).replace(/\s+$/u, "");
+	const rest = escapeTerminalControls(prose.slice(stream.head.length));
+	const redacted = redactStreamingSecretString(rest, false);
+	// Quoted values redact only in text that holds a secret word anywhere, and `sig: 'a b'` names none, so the head can
+	// decide them. A tail whose quotes redact differently once a word leads it takes the whole path.
+	if (
+		/["']/u.test(rest) &&
+		redactStreamingSecretString(`${THINKING_WORD_PROBE}${rest}`, false) !== `${THINKING_WORD_PROBE}${redacted}`
+	)
+		return renderProseThinkingRail(prose, width, limit, false, true);
+	const tail = stripThinkingEmphasis(redacted).replace(/\s+$/u, "");
 	// A held value can leave the tail blank, and then the whole text's trim reaches back into the head.
 	if (tail.length === 0) return renderProseThinkingRail(prose, width, limit, false, true);
 	const tailRows = thinkingStreamRows(tail, width);
@@ -2148,6 +2164,31 @@ function streamThinkingRail(stream: ThinkingStream, thinking: string, width: num
 		PROSE_GUTTER_WIDTH,
 		() => `${total - (limit - 1)} rows`,
 	);
+}
+
+/**
+ * An open, bounded rail fed the reasoning so far on each call: what {@link streamThinkingRail} draws, what
+ * {@link renderThinkingRail} draws from the whole text, and how much of it the stream has certified. A short `step` looks
+ * for a break far more often than a live rail does, so a short text puts many breaks to the certification.
+ */
+export function openThinkingRailForTesting(
+	width: number,
+	limit: number,
+	step: number,
+): (thinking: string) => { streamed: string[]; whole: () => string[]; head: number } {
+	const stream: ThinkingStream = {
+		prose: new AssistantProseProjection(),
+		layout: "",
+		head: "",
+		headRows: 0,
+		headTail: [],
+		retryAt: 0,
+	};
+	return (thinking) => ({
+		streamed: streamThinkingRail(stream, thinking, width, limit, step),
+		whole: () => renderThinkingRail(thinking, width, limit, false, true),
+		head: stream.head.length,
+	});
 }
 
 /**
