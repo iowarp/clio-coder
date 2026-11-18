@@ -10,6 +10,7 @@ import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import { readRetention, retentionPath } from "../../src/domains/memory/completion-retention.js";
 import type { CompletedLessonSource } from "../../src/domains/memory/history-review.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
+import { lessonEvidence } from "../../src/domains/memory/lesson-evidence.js";
 import { MemoryLessonFeedback } from "../../src/domains/memory/lesson-feedback.js";
 import { rejectMemoryRecord } from "../../src/domains/memory/operations.js";
 import { MemoryRuntime } from "../../src/domains/memory/runtime.js";
@@ -649,4 +650,36 @@ test("a rewording of a rejected lesson is held even once its command is verified
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("a wrapper's success is judged by the command it runs, and an unreadable wrapper grounds no lesson", () => {
+	const evidence = (command: string) =>
+		lessonEvidence(
+			new TaskMemoryBank().saveKnowledge(`Validate this project with \`${command}\`.`, {
+				durable: true,
+				evidenceCommand: command,
+			}),
+			{ succeededCommands: new Set([command]), observedReads: new Map(), workspaceRoot: tmpdir() },
+		);
+	for (const command of [
+		"env true",
+		"env -i -u HOME FOO=1 true",
+		"/usr/bin/env -- echo ok",
+		"env FOO=1 npm help",
+		"env -S 'node x.mjs'",
+		"env -C sub node x.mjs",
+		"env --frob node x.mjs",
+		"nice -n 5 true",
+		"nohup true",
+		"time -p true",
+		"timeout -k 5 30s env true",
+		"timeout 30 npm version",
+		"command true",
+		"command -v node",
+		"exec true",
+		"builtin echo ok",
+	])
+		strictEqual(evidence(command), null, command);
+	for (const command of [COMMAND, `env -i FOO=1 ${COMMAND}`, `timeout 30 nice ${COMMAND}`, `command ${COMMAND}`])
+		strictEqual(evidence(command), "command", command);
 });
