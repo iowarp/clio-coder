@@ -28,7 +28,7 @@ import { MODEL_ADMISSION } from "../engine/model-admission.js";
 import { createRequestStructures } from "../engine/request-structure.js";
 import { firstTokenStallLimitMs } from "./chat-loop-policy.js";
 import type { ContinuityController } from "./continuity-controller.js";
-import { resolveTurnOutputReserve } from "./output-reserve.js";
+import { resolveTurnOutputReserve, turnAdmissionRemedy } from "./output-reserve.js";
 import { prefixBlocksOf } from "./prefix-blocks.js";
 /**
  * Turn runtime ownership: orchestrator target resolution, model synthesis,
@@ -1243,7 +1243,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (view.effectiveWindow !== null && !requestFits(input, output, view.effectiveWindow))
 					return {
 						block: true,
-						reason: `Context window exceeded: input ${input} + output ${output}, window ${view.effectiveWindow ?? "unknown"}.`,
+						reason: `Context window exceeded: input ${input} + output ${output}, window ${view.effectiveWindow ?? "unknown"}. ${turnAdmissionRemedy(localRuntime, input)}`,
 					};
 				if (
 					deps.scheduling &&

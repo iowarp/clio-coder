@@ -62,15 +62,17 @@ export function recommendedOutputTokens(model: unknown, servingWindow?: number):
 	// serve far less: qwen3.8-27b recommends 131072 and LM Studio loads it at
 	// 131072, which leaves no room for input (D5). Bound the recommendation by the
 	// window actually served.
-	const bound =
-		servingWindow !== undefined && Number.isFinite(servingWindow) && servingWindow > 0
-			? Math.max(1, Math.floor(servingWindow * MAX_RECOMMENDED_OUTPUT_SHARE))
-			: Number.POSITIVE_INFINITY;
-	return Math.min(Math.floor(value), bound);
+	return Math.min(Math.floor(value), windowOutputBound(servingWindow));
 }
 
-/** Largest share of the serving window a profile recommendation may claim for output. */
+/** Largest share of the serving window a profile recommendation or the product default may claim for output. */
 const MAX_RECOMMENDED_OUTPUT_SHARE = 0.5;
+
+function windowOutputBound(servingWindow: number | undefined): number {
+	return servingWindow !== undefined && Number.isFinite(servingWindow) && servingWindow > 0
+		? Math.max(1, Math.floor(servingWindow * MAX_RECOMMENDED_OUTPUT_SHARE))
+		: Number.POSITIVE_INFINITY;
+}
 
 /**
  * Largest share of the serving window the worker pressure guard reserves for
@@ -96,7 +98,7 @@ export function resolvePressureOutputReserve(
 	request: { api: string; contextWindow: number },
 	recommendedTokens?: number,
 ): number {
-	const ceiling = resolveReservedOutputTokens(maxOutputTokens, undefined, recommendedTokens);
+	const ceiling = outputCeiling(maxOutputTokens, recommendedTokens, request.contextWindow);
 	if (!clampsOutputAtWire(request.api) || !Number.isFinite(request.contextWindow) || request.contextWindow <= 0) {
 		return ceiling;
 	}
@@ -104,9 +106,37 @@ export function resolvePressureOutputReserve(
 }
 
 /**
+ * The output ceiling a reserve starts from. A configured chat.maxOutputTokens
+ * is the operator's choice and is held as is, up to the model's cap, even when
+ * the window cannot hold it, so admission refuses it by name instead of
+ * shrinking it silently. Without one, the profile recommendation or the product
+ * default may claim at most half the serving window: a 40K window capped by
+ * --max-context-tokens would otherwise reserve 32768 and refuse every request
+ * (bt-13).
+ */
+function outputCeiling(
+	maxOutputTokens: number | null | undefined,
+	recommendedTokens: number | undefined,
+	window?: number,
+) {
+	const limit =
+		typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens > 0
+			? maxOutputTokens
+			: Number.POSITIVE_INFINITY;
+	if (globalDefaultMaxOutputTokens > 0) return Math.min(limit, globalDefaultMaxOutputTokens);
+	return Math.min(limit, recommendedTokens ?? DEFAULT_MAX_OUTPUT_TOKENS, windowOutputBound(window));
+}
+
+/** The operator's chat.maxOutputTokens, or null when unset. */
+export function configuredMaxOutputTokens(): number | null {
+	return globalDefaultMaxOutputTokens > 0 ? globalDefaultMaxOutputTokens : null;
+}
+
+/**
  * Tokens a preflight context check should hold back for the response: the
  * smaller of the model's advertised output limit and the configured output
  * budget, falling back to the product default when no budget is configured.
+ * The default never claims more than half of the request's window.
  * The safety margin is not added to the full allowance: at request time
  * {@link remainingContextMaxTokens} subtracts it from the window and degrades
  * the output budget gracefully, so a hard preflight reservation of
@@ -119,13 +149,7 @@ export function resolveReservedOutputTokens(
 	request?: { api: string; contextWindow: number; inputTokens: number },
 	recommendedTokens?: number,
 ): number {
-	const requested =
-		globalDefaultMaxOutputTokens > 0 ? globalDefaultMaxOutputTokens : (recommendedTokens ?? DEFAULT_MAX_OUTPUT_TOKENS);
-	const limit =
-		typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens > 0
-			? maxOutputTokens
-			: Number.POSITIVE_INFINITY;
-	const ceiling = Math.min(limit, requested);
+	const ceiling = outputCeiling(maxOutputTokens, recommendedTokens, request?.contextWindow);
 	// These Clio transports already reduce the wire ceiling to remaining room.
 	// Preflight must use that same allocation, rather than demanding room for
 	// the entire configured maximum (which may equal the context window).
