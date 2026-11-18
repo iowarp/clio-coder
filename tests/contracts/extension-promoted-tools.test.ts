@@ -380,3 +380,21 @@ test("a requirement for a promoted tool reaches the session's turn and never a d
 	// The worker runs in its own process with none of the session's runtime tools, so it is never asked for one.
 	deepStrictEqual(await worker(input), []);
 });
+
+test("one approved hook covers one reloaded hook, and the narrowest cover is taken first", () => {
+	// Astra r6-5: every copy of one approved declaration matched it, so sixteen serial copies reloaded without an ask.
+	const hooks = (...entries: Array<Record<string, unknown>>) => capabilityEnvelope(runtime({ hooks: entries }));
+	const turn = { on: "turn_start" };
+	deepStrictEqual(envelopeGrowth(hooks(turn), hooks(turn, turn, turn)), [
+		"hook turn_start (250 ms)",
+		"hook turn_start (250 ms)",
+	]);
+	const broad = { on: "before_tool", timeoutMs: 1000 };
+	const narrow = { on: "before_tool", tools: ["gate"] };
+	const approved = hooks(broad, narrow, turn);
+	deepStrictEqual(envelopeGrowth(approved, hooks(turn, narrow, broad)), []);
+	deepStrictEqual(envelopeGrowth(approved, hooks(narrow, { on: "before_tool", tools: ["status"] }, turn)), []);
+	deepStrictEqual(envelopeGrowth(approved, hooks(narrow, narrow, narrow)), [
+		"hook before_tool on gate (250 ms; can refuse the call)",
+	]);
+});

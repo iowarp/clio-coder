@@ -548,15 +548,47 @@ export function hookPowers(hook: ExtensionHookDeclaration, access: readonly stri
 	return [];
 }
 
-function hookCovered(approved: readonly ExtensionHookDeclaration[], hook: ExtensionHookDeclaration): boolean {
-	return approved.some(
-		(prior) =>
-			prior.on === hook.on &&
-			(prior.tools === undefined || hook.tools?.every((tool) => prior.tools?.includes(tool) === true) === true) &&
-			(prior.onTimeout === "block" || hook.onTimeout === "pass") &&
-			(prior.onError === "block" || hook.onError === "pass") &&
-			hook.timeoutMs <= prior.timeoutMs,
+function hookCovers(prior: ExtensionHookDeclaration, hook: ExtensionHookDeclaration): boolean {
+	return (
+		prior.on === hook.on &&
+		(prior.tools === undefined || hook.tools?.every((tool) => prior.tools?.includes(tool) === true) === true) &&
+		(prior.onTimeout === "block" || hook.onTimeout === "pass") &&
+		(prior.onError === "block" || hook.onError === "pass") &&
+		hook.timeoutMs <= prior.timeoutMs
 	);
+}
+
+/** How much a hook asks for: tool scope, then blocking failure policies, then its deadline. */
+function hookReach(hook: ExtensionHookDeclaration): number[] {
+	const blocks = Number(hook.onTimeout === "block") + Number(hook.onError === "block");
+	return [hook.tools?.length ?? Number.POSITIVE_INFINITY, blocks, hook.timeoutMs];
+}
+
+function compareReach(left: ExtensionHookDeclaration, right: ExtensionHookDeclaration): number {
+	const [a, b] = [hookReach(left), hookReach(right)];
+	const at = a.findIndex((value, index) => value !== b[index]);
+	return at === -1 ? 0 : (a[at] ?? 0) < (b[at] ?? 0) ? -1 : 1;
+}
+
+/**
+ * Every hook runs, so one approved declaration covers one candidate. The most
+ * demanding candidate claims first and takes the narrowest approved hook that
+ * covers it, which leaves broad ones for what only they cover; a reordered or
+ * narrowed manifest therefore finds no growth.
+ */
+function uncoveredHooks(
+	approved: readonly ExtensionHookDeclaration[],
+	next: readonly ExtensionHookDeclaration[],
+): ExtensionHookDeclaration[] {
+	const free = [...approved].sort(compareReach);
+	const unmatched = new Set<number>();
+	const order = next.map((hook, index) => ({ hook, index })).sort((left, right) => compareReach(right.hook, left.hook));
+	for (const { hook, index } of order) {
+		const at = free.findIndex((prior) => hookCovers(prior, hook));
+		if (at === -1) unmatched.add(index);
+		else free.splice(at, 1);
+	}
+	return next.filter((_, index) => unmatched.has(index));
 }
 
 /**
@@ -582,8 +614,7 @@ export function envelopeGrowth(approved: ExtensionCapabilityEnvelope, next: Exte
 	else if (next.tickMs !== undefined && approved.tickMs !== undefined && next.tickMs < approved.tickMs)
 		growth.push(`a faster timer (${next.tickMs / 1000}s, approved ${approved.tickMs / 1000}s)`);
 	push("new watched paths", added(approved.watch, next.watch));
-	for (const hook of next.hooks) {
-		if (hookCovered(approved.hooks, hook)) continue;
+	for (const hook of uncoveredHooks(approved.hooks, next.hooks)) {
 		const scope = hook.tools ? ` on ${hook.tools.join(", ")}` : "";
 		const powers = hookPowers(hook, next.access);
 		growth.push(`hook ${hook.on}${scope} (${[`${hook.timeoutMs} ms`, ...powers].join("; ")})`);
