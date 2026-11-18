@@ -52,6 +52,12 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - Astra r1-6: cache telemetry marks a cache-read count as sent or omitted from the same fields the provider adapter normalizes. DeepSeek `prompt_cache_hit_tokens` and a top-level `cached_tokens` count as reported, and an OpenAI Responses or Codex usage without `input_tokens_details.cached_tokens` reads as unknown instead of cold.
 - Astra r1-7: the argument shapes block for a turn's scoped capabilities fits its 1,600-byte budget as a whole, with a count for the capabilities left out, and is sent again only after a compaction or step checkpoint dropped the earlier copy.
 - Astra r1-8: the `step_checkpoint` cold-cache reason is recorded only when the step checkpoint was written.
+- Astra r2-1: a bash check whose exit status is only a later command's (`pytest; echo done`) no longer records a pass on a protected artifact or in a worker's run effects. The check is named and its outcome stays unknown.
+- Astra r2-3: a `before_tool` hook that rewrites a step tool's arguments no longer makes the turn's one step call refuse itself as a parallel sibling, and the loop guard's second judgement of any rewritten call no longer charges the worker cap, the soft budget or the turn tool budget a second time.
+- Astra r2-4: the loop guard counts a typed git `add` or `commit`, direct or through the gateway, as a state change, so the status read after staging is fresh. A bash git command counts as a read only for inspection subcommands, and plain shell inspections such as `pwd`, `whoami`, `date` and `echo` count as reads, so alternating two of them reaches the repeat limit.
+- Astra r2-5: parallel `read`, `code_nav` and `clio_library` calls charge the turn observation pool before they await, so one batch can no longer spend the same budget several times over.
+- Astra r2-6: a required capability called through the gateway shorthand without an explicit `op` counts as called, so the follow-up no longer asks for it again. Tool rows, telemetry facets, the judge screen and safety descriptors read the shorthand as the call the gateway ran.
+- Astra r2-7: a gateway chain keeps every step whole when the aggregate fits its 32 KiB budget, gives unused shares to oversized steps, and keeps the head and tail of a failed step that must be cut, so the assertion survives.
 
 ## 0.8.3 - 2026-11-16
 
