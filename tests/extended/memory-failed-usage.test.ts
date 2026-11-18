@@ -20,12 +20,12 @@ import {
 	createBackgroundMemoryModelClient,
 	createBackgroundMemoryRouting,
 } from "../../src/domains/memory/background-route.js";
+import { createMemoryGuardian } from "../../src/domains/memory/guardian.js";
+import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
 import { createTaskMemoryTelemetrySink } from "../../src/domains/memory/memory-events.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import type { TaskMemoryStepUsage } from "../../src/domains/memory/task-memory-policy.js";
 import { readTaskMemorySpendSummary } from "../../src/domains/memory/task-memory-spend.js";
-import { createMemoryGuardian } from "../../src/domains/middleware/memory-guardian.js";
-import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
 import { canonicalEndpointKey, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";

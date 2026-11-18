@@ -114,7 +114,7 @@ flowchart LR
 The task bank is in `src/domains/memory/` and belongs to one live session. It is
 separate from both durable approved lessons and the regenerable repository
 context engine. The registration is `observer.memory-intervention` in
-`src/domains/middleware/memory-intervention.ts`; it hooks `before_tool`,
+`src/domains/memory/intervention.ts`; it hooks `before_tool`,
 `after_tool`, `turn_start`, `turn_end` and `on_compaction`.
 
 - **Private status** is the memory policy's short progress model. Inspect it
@@ -157,7 +157,7 @@ or a labeled prompt section, never a tool or a permission.
 
 | Channel | When | Content | Source |
 | --- | --- | --- | --- |
-| Tool-result annotation | The second identical failure in the bounded trajectory, at most once per operation per turn | One cited `Memory:` line appended to the failing tool's own result | `annotateRepeatedFailure` in `src/domains/middleware/memory-intervention.ts` |
+| Tool-result annotation | The second identical failure in the bounded trajectory, at most once per operation per turn | One cited `Memory:` line appended to the failing tool's own result | `annotateRepeatedFailure` in `src/domains/memory/intervention.ts` |
 | Deferred or turn-end reminder | At a native tool-batch boundary while the turn runs, at turn end for the rules tier, or on the next accepted prompt for a finished background step | A `Memory:` block inside `<system-reminder>`, recorded in the session ledger | `src/session-control/turn-middleware.ts` |
 | Post-compaction restoration | After a durable continuity or summary commit is installed | Status (when no handoff note or summary already carries current state), knowledge and procedural entries, labeled unverified | `src/domains/memory/restoration.ts`, `src/session-control/turn-context.ts` |
 | Approved durable memory | Selected at every prepared operator turn and compiled into the system prompt, then held until a completed compaction or a session switch. A later approval or revision arrives in the turn's reminder as a `# Memory update` block, and a rejection or deletion as a withdrawn line | A `# Memory` section of at most 5 approved records within 400 estimated tokens, each naming whether an operator approved it or the evidence gate retained it | `src/domains/memory/prompt-section.ts`, selection rules in the [evidence and memory contract](../architecture/evidence-and-memory.md#prompt-injection-rules) |

@@ -2,9 +2,9 @@ import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:as
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
-import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { readTool } from "../../src/tools/read.js";

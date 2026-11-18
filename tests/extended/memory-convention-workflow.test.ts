@@ -1,8 +1,8 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import { runTaskMemoryPolicy } from "../../src/domains/memory/task-memory-policy.js";
-import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
 import { compile } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 

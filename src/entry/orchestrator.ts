@@ -105,6 +105,7 @@ import {
 	prepareBackgroundMemoryModel,
 } from "../domains/memory/background-route.js";
 import { withDispatchMemory } from "../domains/memory/dispatch-section.js";
+import type { MemoryGuardian } from "../domains/memory/guardian.js";
 import { createGuardianStatePublisher } from "../domains/memory/guardian-state.js";
 import { createHistoryReviewSource } from "../domains/memory/history-review.js";
 import {
@@ -125,6 +126,7 @@ import {
 	taskMemoryBankSize,
 	taskMemoryHandoffSeedOffer,
 } from "../domains/memory/index.js";
+import { MEMORY_INTERVENTION_ACTIVITY_LIMIT } from "../domains/memory/intervention.js";
 import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
 import {
 	createMemoryRecallUseRegistration,
@@ -157,8 +159,6 @@ import {
 	writeMiddlewareDiagnosticToStderr,
 } from "../domains/middleware/index.js";
 import { createLocalClockReminderRegistration } from "../domains/middleware/local-clock-reminder.js";
-import type { MemoryGuardian } from "../domains/middleware/memory-guardian.js";
-import { MEMORY_INTERVENTION_ACTIVITY_LIMIT } from "../domains/middleware/memory-intervention.js";
 import { createPlanCloseRegistration } from "../domains/middleware/plan-close.js";
 import { createStaleBuildReminderRegistration } from "../domains/middleware/stale-build-reminder.js";
 import { createTaskBoardReminderRegistration } from "../domains/middleware/task-board-reminder.js";
