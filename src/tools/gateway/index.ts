@@ -1,4 +1,5 @@
 import { Type } from "typebox";
+import { normalizeGatewayArguments } from "../../core/gateway-envelope.js";
 import { discoveryScore } from "../../core/harness-discovery.js";
 import type { CatalogRanker, PrecomputedRanking } from "../../core/precomputed-rank.js";
 import { rankByPrecomputedScore } from "../../core/precomputed-rank.js";
@@ -164,36 +165,6 @@ function withMisplacedFieldHint(message: string, hint: string | null): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * Accept the weak-model shapes: `args` as a JSON string, `name`/`tool` for
- * `capability`, and a missing `op` inferred from what else was given.
- */
-function prepareGatewayArguments(args: Record<string, unknown>): Record<string, unknown> {
-	const out: Record<string, unknown> = { ...args };
-	if (typeof out.capability !== "string") {
-		const alias = out.name ?? out.tool;
-		if (typeof alias === "string") out.capability = alias;
-	}
-	if (typeof out.args === "string") {
-		try {
-			const parsed: unknown = JSON.parse(out.args);
-			if (isRecord(parsed)) out.args = parsed;
-		} catch {
-			// The body reports the unparseable string.
-		}
-	}
-	// Arguments only ever belong to a call. A request carrying them without a
-	// capability is a call whose envelope was nested inside `args`; reading it
-	// as find answered a mis-wrapped call with a successful discovery listing,
-	// and the model took that as the call having run.
-	if (typeof out.op !== "string") {
-		if (out.args !== undefined) out.op = "call";
-		else if (typeof out.capability === "string") out.op = "describe";
-		else out.op = "find";
-	}
-	return out;
 }
 
 /** The correction for a call whose op or capability went inside `args`. */
@@ -945,9 +916,9 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 
 	return {
 		...gatewayToolSurface,
-		prepareArguments: prepareGatewayArguments,
+		prepareArguments: normalizeGatewayArguments,
 		async run(rawArgs, options): Promise<ToolResult> {
-			const args = prepareGatewayArguments(rawArgs);
+			const args = normalizeGatewayArguments(rawArgs);
 			const op = typeof args.op === "string" ? args.op : "";
 			// Discovery scope belongs to find alone. Accepting it elsewhere would
 			// read as a way to launch a server from describe or call, which is

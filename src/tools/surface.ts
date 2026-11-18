@@ -11,9 +11,10 @@
  * a gateway call back to that capability through {@link effectiveToolCall}.
  *
  * Pure module: no I/O, no registry construction. Imported by the prompt
- * compiler and by ledger consumers, so it depends on core/tool-names only.
+ * compiler and by ledger consumers, so it depends on core leaves only.
  */
 
+import { normalizeGatewayArguments } from "../core/gateway-envelope.js";
 import {
 	type BuiltinToolName,
 	isBuiltinToolName,
@@ -311,7 +312,8 @@ export function gatewayChainReceipts(toolName: string, result: unknown): Gateway
  *
  * The capability comes from the result details when they are present (the
  * gateway stamps `details.capability` on every call result) and from the
- * call arguments (`op: "call"`, `capability`) otherwise. Find, describe and
+ * call arguments otherwise, read through `normalizeGatewayArguments` so an
+ * `args`-only shorthand the gateway ran as a call reads as that call. Find, describe and
  * chain records stay `gateway`. A chain that loaded a skill stamps
  * `capability: "context"` on its aggregate details for activation telemetry;
  * the aggregate is still the chain, and its children speak for themselves
@@ -322,11 +324,12 @@ export function effectiveToolCall(toolName: string, args: unknown, details?: unk
 	if (toolName !== ToolNames.Gateway) return { toolName, args: record, viaGateway: false };
 	if (record?.op === "chain" || (isRecord(details) && details.op === "chain"))
 		return { toolName, args: record, viaGateway: false };
+	const envelope = record === undefined ? undefined : normalizeGatewayArguments(record);
 	const fromDetails = isRecord(details) && typeof details.capability === "string" ? details.capability : null;
-	const fromArgs = record?.op === "call" && typeof record.capability === "string" ? record.capability : null;
+	const fromArgs = envelope?.op === "call" && typeof envelope.capability === "string" ? envelope.capability : null;
 	const capability = (fromDetails ?? fromArgs)?.trim() ?? "";
 	if (capability.length === 0 || capability === ToolNames.Gateway) return { toolName, args: record, viaGateway: false };
-	return { toolName: capability, args: isRecord(record?.args) ? record.args : undefined, viaGateway: true };
+	return { toolName: capability, args: isRecord(envelope?.args) ? envelope.args : undefined, viaGateway: true };
 }
 
 /**

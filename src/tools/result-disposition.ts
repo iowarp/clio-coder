@@ -315,7 +315,11 @@ function rawResultExcerpt(text: string, maxBytes: number, bias: ToolResultExcerp
 }
 
 /** A deterministic, UTF-8-safe excerpt of already redacted text whose total bytes never exceed maxBytes. */
-function boundedToolResultExcerpt(text: string, maxBytes: number, bias: ToolResultExcerptBias = "head-tail"): string {
+export function boundedToolResultExcerpt(
+	text: string,
+	maxBytes: number,
+	bias: ToolResultExcerptBias = "head-tail",
+): string {
 	if (maxBytes <= 0) return "";
 	if (byteLength(text) <= maxBytes) return text;
 	if (bias === "tail") return utf8WordSuffix(text, maxBytes);

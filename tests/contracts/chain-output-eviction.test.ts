@@ -162,6 +162,39 @@ describe("chain aggregate output", () => {
 		deepStrictEqual(verdict.result.details?.steps, [{ id: "src", capability: "read", kind: "ok", truncated: false }]);
 	});
 
+	it("keeps every step whole when the aggregate fits and a cut failure keeps its diagnostic tail", async () => {
+		const run = (testOutput: string, readBytes: number) =>
+			runGatewayChain(
+				[
+					...["a", "b", "c"].map((id) => ({ id, capability: "read", args: { path: `${id}.ts` } })),
+					{ id: "test", capability: "bash", args: { command: "npm test" }, after: ["a", "b", "c"] },
+				],
+				{
+					getSpec: () => undefined,
+					call: async (capability, args) =>
+						capability === "read"
+							? { kind: "ok", output: `${String(args.path)}\n${"r".repeat(readBytes)}` }
+							: { kind: "error", message: testOutput },
+				},
+			);
+		const assertion = "AssertionError: expected 3 to equal 4 at tests/unit/sum.test.ts:42";
+		const fits = await run(`${"log line\n".repeat(1300)}${assertion}`, 64);
+		const fitsText = fits.kind === "error" ? fits.message : "";
+		ok(fitsText.includes(`${"log line\n".repeat(1300)}${assertion}`), "the 12 KiB failure reaches the model whole");
+		deepStrictEqual(
+			(fits.details?.steps as Array<{ truncated: boolean }>).map((step) => step.truncated),
+			[false, false, false, false],
+		);
+
+		const over = await run(`${"log line\n".repeat(5000)}${assertion}`, 12 * 1024);
+		const steps = (over.details?.chainResults as Array<{ result: { content: Array<{ text: string }> } }>).map(
+			(step) => step.result.content[0]?.text ?? "",
+		);
+		ok(steps[3]?.endsWith(assertion), "the cut failure keeps the assertion at its end");
+		ok(steps[0]?.endsWith("[chain output truncated]"), "an oversized ok step keeps its prefix");
+		ok(steps.reduce((sum, text) => sum + Buffer.byteLength(text), 0) <= 32 * 1024, "the aggregate budget holds");
+	});
+
 	it("keeps a chained skill load provable for compaction's skill context", async () => {
 		const body = "Follow the scientific workflow step by step.\n".repeat(900);
 		const activation = {

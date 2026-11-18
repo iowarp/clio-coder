@@ -6,9 +6,9 @@ import {
 import { skillActivationFromToolDetails } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "../registry.js";
-import { toolResultContextText } from "../result-disposition.js";
+import { boundedToolResultExcerpt, toolResultContextText } from "../result-disposition.js";
 import { CHAIN_OUTPUT_TRUNCATED_MARKER } from "../surface.js";
-import { truncateUtf8 } from "../truncate-utf8.js";
+import { byteLength, truncateUtf8 } from "../truncate-utf8.js";
 
 export const CHAIN_MAX_STEPS = 16;
 const CHAIN_RESULT_BYTES = 32 * 1024;
@@ -26,6 +26,25 @@ export interface ChainDeps {
 }
 
 export type ChainStatus = "complete" | "paused" | "failed";
+
+/**
+ * Each step's byte allowance from the aggregate budget, by max-min fairness:
+ * a step under an equal share of what is left keeps its whole text and its
+ * unused bytes go to the larger steps. Every step fits whole when the sizes
+ * sum within the budget, and the allowances never sum past it.
+ */
+function chainStepAllowances(sizes: ReadonlyArray<number>, budget: number): number[] {
+	const allowances = [...sizes];
+	const order = sizes.map((_, index) => index).sort((a, b) => (sizes[a] ?? 0) - (sizes[b] ?? 0) || a - b);
+	let remaining = budget;
+	order.forEach((index, rank) => {
+		const share = Math.floor(remaining / (order.length - rank));
+		const allowance = Math.min(sizes[index] ?? 0, share);
+		allowances[index] = allowance;
+		remaining -= allowance;
+	});
+	return allowances;
+}
 
 /** One settled step as the model reads it: raw output under its header, never JSON-escaped. */
 export interface ChainStepRow {
@@ -258,13 +277,28 @@ export async function runGatewayChain(
 		if (parallel(first)) await Promise.all(ready.filter(parallel).slice(0, 4).map(execute));
 		else await execute(first);
 	}
-	const allowance = Math.floor(CHAIN_RESULT_BYTES / Math.max(1, results.size));
+	// The context tool already budgets activation instructions. Preserve that
+	// projection so it can be read before another operation; the other settled
+	// steps share the aggregate budget, measured before anything is cut.
+	const exempt = (step: Step, result: ToolResult): boolean =>
+		step.capability === ToolNames.Context && activationDetails === result.details;
+	const budgeted = steps.flatMap((step) => {
+		const result = results.get(step.id);
+		return result === undefined || exempt(step, result) ? [] : [step.id];
+	});
+	const allowances = chainStepAllowances(
+		budgeted.map((id) => byteLength(toolResultContextText(results.get(id) as ToolResult))),
+		CHAIN_RESULT_BYTES,
+	);
+	const allowanceOf = new Map(budgeted.map((id, index) => [id, allowances[index] ?? 0]));
+	const markerBytes = byteLength(CHAIN_OUTPUT_TRUNCATED_MARKER);
 	const projectedOutput = (step: Step, result: ToolResult): string => {
 		const output = toolResultContextText(result);
-		// The context tool already budgets activation instructions. Preserve
-		// that projection so it can be read before another operation.
-		if (step.capability === ToolNames.Context && activationDetails === result.details) return output;
-		return truncateUtf8(output, allowance, CHAIN_OUTPUT_TRUNCATED_MARKER);
+		const allowance = allowanceOf.get(step.id);
+		if (allowance === undefined || byteLength(output) <= allowance) return output;
+		// A failure's diagnostic (the assertion, the file and line) sits at its end.
+		if (result.kind === "error") return boundedToolResultExcerpt(output, allowance);
+		return truncateUtf8(output, Math.max(0, allowance - markerBytes), CHAIN_OUTPUT_TRUNCATED_MARKER);
 	};
 	const rows = steps.flatMap((step): ChainStepRow[] => {
 		const result = results.get(step.id);
