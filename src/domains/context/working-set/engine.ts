@@ -41,6 +41,10 @@ const NO_CALL_PATHS: CallPaths = new Map();
  */
 const PENDING_EVENT_TURN_ID = "";
 
+/** The main fold's overflow cut (ContextFold A4 addendum) tells the model how to take the read again. */
+const STEP_OVERFLOW_ADVICE =
+	"This read did not fit the model's context window. Read only the part you need, with offset and limit.";
+
 /**
  * The stub that replaces this unit's body, or null when there is nothing to
  * evict. Thinking eviction renders no marker at all: the reasoning simply
@@ -57,7 +61,7 @@ function markerFor(
 	if (entry.role !== "tool_result") return null;
 	const payload = toolResultPayload(entry.payload);
 	const toolCallId = typeof payload.obj.toolCallId === "string" ? payload.obj.toolCallId : undefined;
-	return renderMarker({
+	const marker = renderMarker({
 		ref: candidate.ref,
 		...(alias === undefined ? {} : { alias }),
 		reason: candidate.reason,
@@ -67,6 +71,7 @@ function markerFor(
 		offloadPath: offloadPathOf(payload),
 		path: primaryPathOf(payload) ?? (toolCallId === undefined ? undefined : callPaths.get(toolCallId)),
 	});
+	return candidate.reason === "step_overflow" ? `${marker} ${STEP_OVERFLOW_ADVICE}` : marker;
 }
 
 function pendingState(candidate: EvictionCandidate, marker: string, policyId: string): EvictedState {

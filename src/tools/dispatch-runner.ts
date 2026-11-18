@@ -59,9 +59,11 @@ import {
 	REVIEWER_GATE_PROMPT,
 	renderCouncilVoteMemberTask,
 } from "../domains/dispatch/gate-role-prompts.js";
-import { narrowDispatchIntentToReadOnly } from "../domains/dispatch/intent.js";
+import type { DispatchIntent } from "../domains/dispatch/intent.js";
+import { declaredScopeIntent, narrowDispatchIntentToReadOnly } from "../domains/dispatch/intent.js";
 import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
+import { resolveDispatchPathScope } from "../domains/dispatch/path-scope.js";
 import { explainRouteDecision } from "../domains/dispatch/routing-intent.js";
 import { newRunId } from "../domains/dispatch/state.js";
 import type {
@@ -2277,6 +2279,22 @@ function councilFailureCause(receipt: RunResult): string {
 }
 
 /**
+ * The scope a later council round and the judge declare (bt-47 drv-m3b CF-a, CF-b). Their briefings carry host text
+ * (peer answers, failure causes such as an endpoint path, the notice naming a result object) that legacy inference
+ * would refuse or read as the worker's scope. The convening intent, narrowed read-only, holds when the call declared
+ * one; otherwise the paths inferred from the operator's own task and briefing, which round 1 ran with, are declared.
+ * An inference over the intent path cap declares no paths: those paths only select project rules, never authority.
+ */
+function councilScopeIntent(base: DispatchRequest): DispatchIntent {
+	if (base.intent !== undefined) return narrowDispatchIntentToReadOnly(base.intent);
+	const declared = declaredScopeIntent({ relevantPaths: resolveDispatchPathScope(base).workingContextPaths });
+	if (declared.ok) return declared.intent;
+	const empty = declaredScopeIntent({});
+	if (!empty.ok) throw new Error(`dispatch: council scope: ${empty.message}`);
+	return empty.intent;
+}
+
+/**
  * The verdict a council answer casts, lower-cased.
  *
  * A tally groups by the exact string, so folding case is the difference
@@ -2319,6 +2337,11 @@ async function runCouncil(
 	const runs: CompletedRun[] = [];
 	let prior = new Map<string, CompletedRun>();
 	const timedOut = new Set<string>();
+	let scopeIntent: DispatchIntent | undefined;
+	const councilIntent = (): DispatchIntent => {
+		scopeIntent ??= councilScopeIntent(base);
+		return scopeIntent;
+	};
 	const runMember = async (request: DispatchRequest, briefing?: BuiltBriefing): Promise<CompletedRun> => {
 		if (signal?.aborted) throw new Error("council dispatch aborted");
 		const handle = await deps.dispatch.dispatch(request);
@@ -2422,8 +2445,10 @@ async function runCouncil(
 					// below carries that narrowed intent in. Repeat it here so the
 					// no-plan fallback path lands on the same request: a member spread
 					// from `base` would otherwise inherit a write scope its read-only
-					// autonomy cannot grant, and the two paths would disagree.
-					...(base.intent === undefined ? {} : { intent: narrowDispatchIntentToReadOnly(base.intent) }),
+					// autonomy cannot grant, and the two paths would disagree. A later
+					// round declares its scope even for an undeclared call, so the host
+					// text in its briefing is never inferred as scope (bt-47 CF-b).
+					...(round > 1 || base.intent !== undefined ? { intent: councilIntent() } : {}),
 					// A vote is a majority over the members' verdict fields, so a vote
 					// council asks each member for one and seals the ballot it asked
 					// for. The seated recipe is untouched: the ask is a task suffix and
@@ -2522,6 +2547,8 @@ async function runCouncil(
 			executionRole: "judge",
 			task: `Synthesize the council answers for this task:\n\n${base.task}`,
 			briefing: judgeBriefing.text,
+			// The seats' answers and failure causes are evidence, not scope (bt-47 CF-a).
+			intent: councilIntent(),
 			systemPrompt: COUNCIL_JUDGE_PROMPT,
 			readOnly: true,
 			toolProfile: "council-read-only",

@@ -1,11 +1,14 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 import { Type } from "typebox";
 import { validateSettings } from "../../src/core/config.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../../src/core/headless-permission.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
+import { resolveDispatchPathScope } from "../../src/domains/dispatch/path-scope.js";
+import type { RunResultDraft } from "../../src/domains/dispatch/types.js";
 import { createWorkerProgressFold } from "../../src/domains/telemetry/worker-progress.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { dispatchCouncilThroughRegistry } from "../../src/interactive/council-dispatch.js";
@@ -14,6 +17,8 @@ import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { COUNCIL_DEFAULT_AGENT_ID } from "../../src/tools/dispatch-arguments.js";
 import { applyToolProfile } from "../../src/tools/profiles.js";
 import { createRegistry } from "../../src/tools/registry.js";
+import { runResultPath } from "../../src/tools/worker-evidence.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
 /**
  * `/council` invokes dispatch with no turn. The turn's denial memory must not
@@ -275,4 +280,66 @@ test("a council with one answer and one failed member reports partial, not faile
 	} as never;
 	const outcome = await dispatchCouncilThroughRegistry(registry, { mode: "council" });
 	deepStrictEqual(outcome.status === "error" ? outcome.partial : outcome, { answered: 1, total: 2, failed: ["broken"] });
+});
+
+test("a judge council admits round 2 and the judge when host text names an endpoint or a result object (bt-47 CF-a, CF-b)", async () => {
+	const seated: DispatchRequest[] = [];
+	let next = 0;
+	const tool = createDispatchTool({
+		dispatch: {
+			dispatch: async (request: DispatchRequest) => {
+				// Admission resolves the scope before anything runs; a refusal throws here as it does there.
+				resolveDispatchPathScope(request);
+				seated.push(request);
+				next += 1;
+				const label = request.council?.label ?? "member";
+				const runId = `run-${next}-${label}`;
+				const failed = label === "dead";
+				const answer = `${label} answers: ${"x".repeat(9_000)}`;
+				const receipt = {
+					...fixtureReceiptDraft(fixtureEnvelope(runId)),
+					agentId: request.agentId,
+					exitCode: failed ? 1 : 0,
+					outcome: failed ? "failed" : "succeeded",
+					outcomeDetail: failed ? "provider answered http 400 from /chat/completions: model not found" : null,
+					...(request.council ? { council: request.council } : {}),
+					...(request.gate ? { gate: request.gate } : {}),
+				} as RunResultDraft;
+				if (!failed) {
+					const resultPath = runResultPath(receipt);
+					mkdirSync(path.dirname(resultPath), { recursive: true });
+					writeFileSync(resultPath, JSON.stringify({ output: { text: answer } }));
+				}
+				const events = (async function* () {
+					yield { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: answer }] } };
+				})();
+				return { runId, events, finalPromise: Promise.resolve(receipt) };
+			},
+			abort() {},
+			getRun: () => undefined,
+		} as unknown as DispatchContract,
+		getAgentSpecs: () => [{ id: "scout" }] as never,
+		getAutonomy: () => "yolo",
+	});
+	const args = {
+		mode: "council",
+		members: ["a", "b", "dead"].map((label) => ({ label, target: "mini" })),
+		rounds: 2,
+		synthesis: "judge",
+		task: "Does src/core/clock.ts own the clock?",
+	};
+	await tool.run(args, {} as never);
+	const judge = seated.find((request) => request.gate?.role === "synthesis");
+	ok(judge !== undefined, "the judge is admitted");
+	match(judge.briefing ?? "", /Reason: outcome=failed: provider answered http 400 from \/chat\/completions/u);
+	match(judge.briefing ?? "", /read output\.text in \/\S+ for the whole answer/u);
+	const second = seated.filter((request) => request.council?.round === 2 && request.gate?.role === "member");
+	strictEqual(second.length, 3, "every seat is admitted to round 2");
+	// The declared scope is the operator's own: what round 1 inferred from the task, nothing from the host text.
+	for (const request of [...second, judge]) deepStrictEqual(request.intent?.relevantPaths, ["src/core/clock.ts"]);
+	// An absolute path the operator wrote is still refused.
+	seated.length = 0;
+	const refused = await tool.run({ ...args, briefing: "The clock lives in /etc/clock.conf." }, {} as never);
+	deepStrictEqual(seated, []);
+	match(JSON.stringify(refused), /legacy_scope_path_absolute/u);
 });

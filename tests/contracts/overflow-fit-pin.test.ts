@@ -144,23 +144,27 @@ function transport(paths: ReadonlyArray<string>) {
 	return { fetch, requests };
 }
 
-function harness(wire: ReturnType<typeof transport>, files: Record<string, string> = FILES) {
+function harness(
+	wire: ReturnType<typeof transport>,
+	files: Record<string, string> = FILES,
+	{ window = WINDOW, protectLastSteps = 3 }: { window?: number; protectLastSteps?: number } = {},
+) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	settings.chat.target = target.id;
 	settings.chat.model = model.id;
 	settings.chat.thinkingLevel = "low";
-	settings.context.workingSet.protectLastSteps = 3;
+	settings.context.workingSet.protectLastSteps = protectLastSteps;
 	settings.context.workingSet.target = 0.6;
 	settings.context.compaction.threshold = 0.8;
 	settings.targets = [
-		{ ...target, defaultModel: model.id, capabilities: { contextWindow: WINDOW } },
+		{ ...target, defaultModel: model.id, capabilities: { contextWindow: window } },
 	] as typeof settings.targets;
 	const runtime: RuntimeDescriptor = {
 		...litellm,
 		auth: "none",
-		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: WINDOW, maxTokens: WINDOW },
-		synthesizeModel: () => ({ ...model, reasoning: true, input: ["text"], contextWindow: WINDOW, maxTokens: WINDOW }),
+		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: window, maxTokens: window },
+		synthesizeModel: () => ({ ...model, reasoning: true, input: ["text"], contextWindow: window, maxTokens: window }),
 	};
 	const context = dispatchStubContext({ settings, runtime });
 	const session = createSessionBundle(context).contract;
@@ -184,6 +188,7 @@ function harness(wire: ReturnType<typeof transport>, files: Record<string, strin
 	const piCounts: number[] = [];
 	const published: Array<number | null> = [];
 	let publishedInput: () => number | null = () => null;
+	let summaries = 0;
 	const providers = context.getContract("providers") as ProvidersContract;
 	const loop = createChatLoop({
 		getSettings: () => settings,
@@ -198,9 +203,10 @@ function harness(wire: ReturnType<typeof transport>, files: Record<string, strin
 			() => settings,
 			providers,
 			undefined,
-			async () => ({
-				text: syntheticCompactionSummary("checkpoint"),
-			}),
+			async () => {
+				summaries += 1;
+				return { text: syntheticCompactionSummary("checkpoint") };
+			},
 		),
 		createAgent: (options) =>
 			createEngineAgent({
@@ -232,7 +238,7 @@ function harness(wire: ReturnType<typeof transport>, files: Record<string, strin
 		await loop.whenSettled();
 		await session.close();
 	};
-	return { settings, session, loop, events, notices, close, piCounts, published };
+	return { settings, session, loop, events, notices, close, piCounts, published, summaries: () => summaries };
 }
 
 const A1_ASK = `Read ${READS.join(", ")} in order, one read per round, each in full, then say done.\n\n${"Read guidance for the station fixture. ".repeat(700)}`;
@@ -261,10 +267,40 @@ function assertAdmitted(
 	ok(last);
 	// Below the model ceiling the wire's max_tokens is the window less the input Pi's clamp read and its 4096 margin.
 	const pinned = WINDOW - OUTPUT_SAFETY - last.maxTokens;
-	strictEqual(pinned, piCounts.at(-1), "Pi's clamp sized the answer on the one A4 figure");
+	// A4 pins max(fold count, Pi's count): after a cut the fold's carried anchor can be the larger of the two.
+	ok(pinned >= (piCounts.at(-1) ?? Number.POSITIVE_INFINITY), `Pi's clamp read ${pinned}, below Pi's own count`);
 	strictEqual(published.at(-1), pinned, "the published view showed the figure admission and Pi's clamp read");
 	ok(pinned + 8_192 <= WINDOW, `admitted input ${pinned} fits the window with the reserve`);
 	return pinned;
+}
+
+const MANUAL_MARKER =
+	/\[evicted ref=r\d+ reason=step_overflow tool=read path=bignotes\/manual\.md [^\]]*\] This read did not fit the model's context window\. Read only the part you need, with offset and limit\./;
+
+/** The overflow fold cut manual.md as `step_overflow`, the request after it carried the marker, and no summary ran. */
+function assertManualCut(live: ReturnType<typeof harness>, wire: ReturnType<typeof transport>): void {
+	strictEqual(live.summaries(), 0, "no summary call");
+	ok(!live.notices().some((text) => text.startsWith("Clio compacted")), "no summary notice");
+	ok(live.notices().some((text) => /working set: 1 protected read cut to fit the window/.test(text)));
+	const manual = live.session
+		.readEntries()
+		.find(
+			(entry) =>
+				entry.kind === "message" &&
+				entry.role === "tool_result" &&
+				(entry.payload as { toolCallId?: string }).toolCallId === `call_${READS.length}`,
+		);
+	ok(manual);
+	const cut = live.session
+		.readEntries()
+		.flatMap((entry) => (entry.kind === "contextEviction" ? entry.evicted : []))
+		.filter((item) => item.reason === "step_overflow");
+	deepStrictEqual(
+		cut.map((item) => item.ref.entry),
+		[manual.turnId],
+		"the manual, and only it, is journaled step_overflow",
+	);
+	ok(MANUAL_MARKER.test(wire.requests.at(-1)?.body ?? ""), "the next request carries the recall marker");
 }
 
 const refusals = (notices: ReadonlyArray<string>) =>
@@ -280,10 +316,8 @@ it("drv-cf3a D-A: an overflow fit admits the next request on the figure it fitte
 		await live.loop.whenSettled();
 		deepStrictEqual(refusals(live.notices()), [], "no refusal and no retry");
 		ok(live.notices().some((text) => /working set: \d+ items evicted/.test(text)));
-		ok(
-			live.notices().some((text) => text.startsWith("Clio compacted")),
-			"the requireFit summary cleared what the fold left",
-		);
+		// The A4 addendum on format 7: the fold cuts the protected manual itself, so no summary is paid.
+		assertManualCut(live, wire);
 		strictEqual(wire.requests.length, READS.length + 1);
 		assertAdmitted(wire, live.piCounts, live.published);
 		const entries = live.session.readEntries();
@@ -298,6 +332,48 @@ it("drv-cf3a D-A: an overflow fit admits the next request on the figure it fitte
 		for (const request of wire.requests) ok(request.maxTokens >= OUTPUT_SAFETY, `max_tokens ${request.maxTokens}`);
 	} finally {
 		await live.close();
+	}
+});
+
+it("drv-cf3a A4 addendum: the format 7 ledger reopens with the cut's marker and sends the same next request (bt-47)", {
+	timeout: 30_000,
+}, async () => {
+	const first = transport(READS);
+	const live = harness(first);
+	let id: string | undefined;
+	try {
+		await live.loop.submit(A1_ASK);
+		await live.loop.whenSettled();
+		assertManualCut(live, first);
+		id = live.session.current()?.id;
+	} finally {
+		await live.close();
+	}
+	ok(id);
+	const header = JSON.parse(readFileSync(sessionCurrentPath(id), "utf8").split("\n")[0] as string) as Row;
+	strictEqual(header.version, 7);
+
+	const wire = transport([]);
+	const second = harness(wire);
+	try {
+		second.session.resume(id);
+		replayCurrentSession(
+			{ session: second.session, chat: second.loop, readEntries: () => second.session.readEntries() },
+			id,
+		);
+		await second.loop.submit("Say done.");
+		await second.loop.whenSettled();
+		strictEqual(second.summaries(), 0);
+		deepStrictEqual(refusals(second.notices()), []);
+		strictEqual(wire.requests.length, 1, "one request, nothing refused or retried");
+		const toolMessages = (body: string) =>
+			(JSON.parse(body) as { messages: Array<{ role: string }> }).messages.filter((m) => m.role === "tool");
+		const before = toolMessages(first.requests.at(-1)?.body ?? "{}");
+		const after = toolMessages(wire.requests[0]?.body ?? "{}");
+		deepStrictEqual(after, before, "the resumed request replays the observations the live one sent, marker and all");
+		ok(MANUAL_MARKER.test(wire.requests[0]?.body ?? ""));
+	} finally {
+		await second.close();
 	}
 });
 
@@ -563,3 +639,41 @@ it("drv-cf3a D-A: a protected read larger than the window ends the turn once, na
 		await live.close();
 	}
 });
+
+/**
+ * drv-m3a: one turn at a 28000-token window reads 8 or 12 design notes of about 8.1 KB, one per round, every read
+ * inside the protected window (protectLastSteps 8). The ask's guidance stands in for the copilot route's system
+ * prompt and tools, so the automatic pass first sees about 16.9k, as the run did.
+ */
+const M3A_SIZES = [8_102, 8_066, 8_010, 8_097, 8_006, 8_104, 8_109, 8_053, 8_084, 8_133, 8_086, 8_173];
+const M3A_PAD = 1_550;
+for (const count of [8, 12]) {
+	it(`drv-m3a: a ${count}-read turn at 28000 cuts protected reads instead of paying overflow summaries (bt-47)`, {
+		timeout: 60_000,
+	}, async () => {
+		const files: Record<string, string> = {};
+		M3A_SIZES.slice(0, count).forEach((size, index) => {
+			files[`docs/part${index + 1}.md`] = body(`Design note part ${index + 1}`, size);
+		});
+		const reads = Object.keys(files);
+		const wire = transport(reads);
+		const live = harness(wire, files, { window: 28_000, protectLastSteps: 8 });
+		try {
+			await live.loop.submit(
+				`Read ${reads.join(", ")} in order, one read per round, each in full, then say done.\n\n${"Read guidance for the design notes. ".repeat(M3A_PAD)}`,
+			);
+			await live.loop.whenSettled();
+			ok(live.summaries() <= 1, `${live.summaries()} paid summaries in one turn`);
+			const cuts = live.notices().filter((text) => /protected reads? cut to fit the window/.test(text));
+			ok(cuts.length >= 3, `${cuts.length} overflow cuts`);
+			ok(!live.notices().some((text) => text.includes("post-tool context guard")), "no guard stop");
+			strictEqual(wire.requests.length, count + 1, "every read answered, then the answer");
+			const entries = live.session.readEntries();
+			strictEqual(entries.filter((entry) => entry.kind === "message" && entry.role === "tool_result").length, count);
+			const answer = entries.at(-2);
+			strictEqual(answer?.kind === "message" ? (answer.payload as { text?: string }).text : undefined, "done");
+		} finally {
+			await live.close();
+		}
+	});
+}
