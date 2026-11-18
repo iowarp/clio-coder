@@ -14,6 +14,7 @@ import {
 	FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE,
 } from "../../src/domains/safety/finish-contract.js";
 import { createFinishContractRegistration } from "../../src/domains/safety/finish-contract-registration.js";
+import { runCheckFacts } from "../../src/domains/safety/observed-checks.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { builtin } from "../../src/tools/builtin-tool-catalog.js";
 import { limitationTool } from "../../src/tools/limitation.js";
@@ -580,7 +581,7 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		}
 	});
 
-	it("requires verified and validated canonical dispatch evidence, not just a zero exit code", () => {
+	it("requires verified and validated canonical dispatch evidence, not just a zero exit code", (t) => {
 		const trusted = composeTrustStatus({
 			artifactIntegrity: {
 				state: "verified",
@@ -638,6 +639,47 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 			const assessment = assessFinishContract({ sessionEntries: entries, assistantTurnId: "assistant-1" });
 			strictEqual(assessment.reason, passed ? "validation_evidence" : "unvalidated_mutation", JSON.stringify(details));
 		}
+		// The run record stands in the shared fold only until a later change retires it, like any check (x9-1).
+		const root = mkdtempSync(join(tmpdir(), "finish-dispatch-"));
+		t.after(() => rmSync(root, { recursive: true, force: true }));
+		const edit = mutationWindow().slice(1);
+		const dispatched = [
+			toolCall("dispatch-1", ToolNames.Dispatch, { agent_id: "verifier", task: "Verify the edit" }),
+			{
+				kind: "message",
+				role: "tool_result",
+				payload: { toolName: "dispatch", toolCallId: "dispatch-1", result: { details: run } },
+			},
+		];
+		const bashCheck = [
+			toolCall("sh-1", ToolNames.Bash, { command: "npm test" }),
+			toolResult("sh-1", ToolNames.Bash, false),
+		];
+		const assess = (steps: unknown[], rigor: "normal" | "high" = "normal") =>
+			assessFinishContract({
+				sessionEntries: [userMessage("user-1"), ...steps, assistantMessage("assistant-1", "Done.")],
+				assistantTurnId: "assistant-1",
+				workspaceRoot: root,
+				rigor,
+				activeAcceptance: { expectedOutputs: [], verification: [{ check: "test", timeoutMs: 60_000 }] },
+			});
+		strictEqual(assess([...dispatched, ...edit]).reason, "unvalidated_mutation");
+		deepStrictEqual(
+			assess([...edit, ...dispatched]).evidence.map((item) => item.kind),
+			["dispatch_run_record"],
+		);
+		deepStrictEqual(
+			assess([...dispatched, ...edit, ...bashCheck]).evidence.map((item) => item.kind),
+			["validation_command"],
+		);
+		// A standing run record is no declared or acceptance check: it seals no outcome and passes no required check.
+		const facts = runCheckFacts([...edit, ...dispatched], root, []);
+		deepStrictEqual(
+			[...facts.passCalls].map(([id, item]) => [id, item.check]),
+			[["dispatch-1", undefined]],
+		);
+		deepStrictEqual(facts.failing, []);
+		strictEqual(assess([...edit, ...dispatched], "high").reason, "unvalidated_mutation");
 	});
 
 	it("projects the limitation kind onto the completion-evidence tag", () => {

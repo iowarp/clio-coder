@@ -896,9 +896,9 @@ function collectValidationEvidence(
 	const shellCalls = new Map<string, string | null>();
 	const seen = new Set<string>();
 	const entries = capabilityEntries(recent);
-	// A check run through the shell, `verify` or an operator's `!` counts only where the shared classifier settled its
-	// pass and no later change retired it, read by the same fold the task board and the recorder's change sequence use
-	// (x7-5, x8-1). `standing` keys a call by its id and a `!` run by `#<index>` into these same entries.
+	// A check run through the shell, `verify`, an operator's `!` or a dispatch run record counts only where the shared
+	// fold settled its pass and no later change retired it, the same fold the task board and the recorder's change
+	// sequence use (x7-5, x8-1). `standing` keys a call by its id and a `!` run by `#<index>` into these same entries.
 
 	for (const [index, entry] of entries.entries()) {
 		const protectedArtifact = protectedArtifactEvidence(entry);
@@ -938,14 +938,13 @@ function collectValidationEvidence(
 
 		const resultId = successfulToolResultId(entry);
 		if (resultId !== null) {
-			const dispatchCandidate = dispatchCalls.get(resultId);
-			const dispatchRunRecord = dispatchRunRecordEvidence(entry, dispatchCandidate);
+			const pass = standing.get(resultId);
+			if (pass === undefined) continue;
+			const dispatchRunRecord = dispatchRunRecordEvidence(entry, dispatchCalls.get(resultId));
 			if (dispatchRunRecord !== null) {
 				pushEvidence(evidence, seen, dispatchRunRecord);
 				continue;
 			}
-			const pass = standing.get(resultId);
-			if (pass === undefined) continue;
 			const candidate = toolCalls.get(resultId);
 			if (candidate !== undefined) pushEvidence(evidence, seen, validationEvidence(candidate, entry));
 			for (const declaredCandidate of declaredRuns.get(resultId) ?? [])

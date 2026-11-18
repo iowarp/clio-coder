@@ -244,7 +244,8 @@ export interface RunCheckFacts {
 	/**
 	 * The calls whose passing check still stands: a model call by its id, an operator's `!` run as `#<index>` into
 	 * `capabilityEntries(entries)`, each with the check it settled. A declared check is credited only through it, so the
-	 * gate and the receipt read one change sequence (x7-5).
+	 * gate and the receipt read one change sequence (x7-5). A passing dispatch run record stands here by its call id
+	 * too, with no `check`, so a later change retires it as it retires a check.
 	 */
 	passCalls: ReadonlyMap<string, ObservedCheck>;
 	/**
@@ -330,8 +331,9 @@ function foldStanding(
 				undefined,
 			)?.summary;
 			const run = summary?.replace(/^dispatch run record passed: /u, "");
+			// Filed under its call id so the finish gate credits the run record only while no later change retired it.
 			if (run) {
-				standingCalls.delete(run);
+				standingCalls.set(run, id);
 				standing.set(run, { name: run, passed: true, observedAt: at });
 			}
 		}
