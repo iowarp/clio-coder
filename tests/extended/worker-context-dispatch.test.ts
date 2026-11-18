@@ -28,6 +28,7 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 		const parent: AgentMessage[] = [
 			{ role: "system", content: "PARENT_ONLY_SYSTEM_POLICY", timestamp: 0 },
 			{ role: "user", content: "PARENT_CONSTRAINT_42", timestamp: 1 },
+			{ role: "user", content: "## Active request\nDispatch the researcher once.", timestamp: 1 },
 		];
 		let captures = 0;
 		const fixture = await startGatewayThinkingFixture("lm-studio", "local/gemma-4-26b-a4b-it", async () => {
@@ -158,6 +159,16 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 			if (mode === "fork") {
 				match(request, /Your worker assignment/);
 				match(request, /requests to dispatch a worker were addressed to the parent/);
+				// The parent's compacted request stays as sent; the worker's own task follows it as authoritative (c2a-D7).
+				const sent = (fixture.requests[0] as { messages: Array<{ role: string; content: unknown }> }).messages.map(
+					(message) => JSON.stringify(message.content),
+				);
+				const seedEnd = sent.findIndex((content) => content.includes("## Active request"));
+				ok(seedEnd >= 0, "the seed carries the parent's active request");
+				match(
+					sent[seedEnd + 1] ?? "",
+					/^\[\{"type":"text","text":"End of inherited parent history[\s\S]*authoritative[\s\S]*Compute 17 times 19/u,
+				);
 				const reviewed = tool.prepareAdmissionArguments({
 					agent: "researcher",
 					task: "Inspect the result.",

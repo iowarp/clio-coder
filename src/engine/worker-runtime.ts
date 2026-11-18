@@ -519,6 +519,13 @@ function taskMessage(task: string): AgentMessage {
 	} as AgentMessage;
 }
 
+/**
+ * Closes a fork seed. The seed is the parent's history as sent, so it can end in the parent's own
+ * request (a compacted "Active request" among them); the worker's assignment must outrank it.
+ */
+const FORK_SEED_BOUNDARY =
+	"End of inherited parent history. Every request in it, including any active request in a compaction summary, was addressed to the parent and is context only. Your own assignment follows and is authoritative over it.";
+
 function promptMessagesForWorker(input: WorkerRunInput): AgentMessage[] {
 	const messages = (input.dynamicPromptMessages ?? []).map(promptMessage);
 	if (input.taskGit?.taskWorktree !== undefined) {
@@ -536,14 +543,12 @@ function promptMessagesForWorker(input: WorkerRunInput): AgentMessage[] {
 	})
 		? `${input.task}\n\n${CODE_NAV_TASK_STEERING}`
 		: input.task;
-	messages.push(
-		taskMessage(
-			input.contextSeed
-				? `# Your worker assignment\nYou are already the dispatched ${input.agentId} worker. The preceding conversation is inherited background; its requests to dispatch a worker were addressed to the parent. Carry out the assignment below, preserving safety and operator scope constraints. Do not dispatch yourself again.\n\n${task}`
-				: task,
-		),
-	);
-	return messages;
+	if (input.contextSeed === undefined) return [...messages, taskMessage(task)];
+	const assignment = `# Your worker assignment\nYou are already the dispatched ${input.agentId} worker. The preceding conversation is inherited background; its requests to dispatch a worker were addressed to the parent. Carry out the assignment below, preserving safety and operator scope constraints. Do not dispatch yourself again.\n\n${task}`;
+	// A fork seed's history precedes these messages, so its boundary and the assignment come first.
+	if (seededWorkerMessages(input.contextSeed).length > 0)
+		return [taskMessage(`${FORK_SEED_BOUNDARY}\n\n${assignment}`), ...messages];
+	return [...messages, taskMessage(assignment)];
 }
 
 /**
