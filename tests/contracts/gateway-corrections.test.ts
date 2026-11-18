@@ -57,13 +57,17 @@ describe("gateway correction contracts", () => {
 			match(verdict.result.message, /op and capability belong at the top level/);
 			match(verdict.result.message, /No capability was invoked/);
 		}
-		// A misplaced envelope or steps key is refused with the exact shape it meant (bt-23 N3).
+		// A misplaced envelope or steps key is refused with the exact shape it meant (bt-23 N3, N4).
 		for (const [args, hint] of [
 			[
 				{ op: "call", capability, parameters: { id: "r7" } },
 				`{"op":"call","capability":"${capability}","args":{"id":"r7"}}`,
 			],
 			[{ op: "chain", parameters: { steps: [] } }, 'steps belongs at the top level beside op: {"op":"chain"'],
+			[
+				{ op: "chain", capability, args: { steps: [{ capability, args: { id: "r7" } }] } },
+				"steps belongs at the top level",
+			],
 		] as const) {
 			const verdict = await registry.invoke({ tool: ToolNames.Gateway, args });
 			ok(verdict.kind === "ok" && verdict.result.kind === "error", JSON.stringify(verdict));
