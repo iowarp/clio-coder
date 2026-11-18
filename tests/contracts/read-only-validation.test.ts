@@ -785,6 +785,14 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	// A check run in another directory is not this workspace's check (x3-5).
 	deepStrictEqual(seal("cd /elsewhere && npm test"), stale);
 	deepStrictEqual(seal("cd pkg/.. && npm test"), green);
+	// A subshell or pushd cd ends at its `)` or popd, and `) &&` hands its status on, so a red there stands (x4-7).
+	deepStrictEqual(seal("(cd ../lib && make) && npm test"), green);
+	deepStrictEqual(seal("pushd ../lib && make && popd && npm test"), green);
+	deepStrictEqual(seal("npm test", "!(cd ../lib && make) && npm test"), [
+		[],
+		"unverified",
+		["(cd ../lib && make) && npm test"],
+	]);
 	// Its pass settles no outcome, so a red in the workspace still fails a green claim.
 	for (const outside of [{ command: "cd /elsewhere && pytest" }, { command: "pytest", cwd: "/elsewhere" }]) {
 		const recorder = createRunEffectsRecorder(process.cwd());

@@ -1491,7 +1491,7 @@ export type CheckCommandShape = "pure" | "after-change" | "mixed";
  * check is an environment activation by convention; reading it as a change would let `source .venv/bin/activate &&
  * pytest tests/one.py` clear a standing red.
  */
-const SHELL_SETUP_STEPS: ReadonlySet<string> = new Set(["cd", "source", ".", "export", "set"]);
+const SHELL_SETUP_STEPS: ReadonlySet<string> = new Set(["cd", "pushd", "popd", "source", ".", "export", "set"]);
 
 interface ShellStep {
 	tokens: ShellToken[];
@@ -1499,24 +1499,37 @@ interface ShellStep {
 	index: number | null;
 	/** The separator joining this step to the next; `""` where two separators meet, null for the last step. */
 	joinedBy: string | null;
+	/** Subshells `(` opened right before this step, and closed `)` right after it. */
+	opens: number;
+	closes: number;
 }
 
 function shellSteps(tokens: ReadonlyArray<ShellToken>): ShellStep[] {
 	const steps: ShellStep[] = [];
 	let current: ShellToken[] = [];
 	let separator: string | null = null;
+	let opens = 0;
 	const endStep = () => {
 		if (current.length === 0) return;
 		const previous = steps.at(-1);
 		if (previous !== undefined) previous.joinedBy = separator;
 		separator = null;
 		const argv = shellCommandArguments(current);
-		steps.push({ tokens: current, argv, index: commandTokenIndex(argv), joinedBy: null });
+		steps.push({ tokens: current, argv, index: commandTokenIndex(argv), joinedBy: null, opens, closes: 0 });
+		opens = 0;
 		current = [];
 	};
 	for (const token of tokens) {
 		if (token.operator && COMMAND_SEPARATORS.has(token.value)) {
 			endStep();
+			// A subshell's status is its last command's, so `(cd lib && make) && npm test` joins `make` to the check by `&&`.
+			if (token.value === "(") opens += 1;
+			else if (token.value === ")") {
+				const last = steps.at(-1);
+				if (opens > 0) opens -= 1;
+				else if (last !== undefined) last.closes += 1;
+			}
+			if (token.value === "(" || token.value === ")") continue;
 			// Two separators in a row (`) ;`) join no simple pair, so neither can hand a change to a check.
 			separator = separator === null && steps.length > 0 ? token.value : "";
 			continue;
@@ -1637,19 +1650,31 @@ export function shellStatusMasked(command: string): boolean {
 
 /**
  * Whether a recognized check in the command runs outside `root` (x3-5). Its directory starts at `base` and follows
- * each `cd` before it; a `cd` this cannot resolve (home, `-`, a variable) leaves the directory unknown, which counts
- * as outside, so a sibling checkout's green never stands for this workspace.
+ * each `cd` and `pushd` before it, back out of a subshell at its `)` and back along the stack at a `popd` (x4-7). A
+ * directory this cannot resolve (home, `-`, a variable, an unbalanced `)` or `popd`) is unknown, which counts as
+ * outside, so a sibling checkout's green never stands for this workspace.
  */
 export function checkRunsOutside(command: string, base: string, root: string): boolean {
 	let directory: string | null = base;
+	let pushed: Array<string | null> = [];
+	const subshells: Array<{ directory: string | null; pushed: Array<string | null> }> = [];
 	for (const step of shellSteps(scanShellLike(command))) {
+		for (let open = 0; open < step.opens; open += 1) subshells.push({ directory, pushed: [...pushed] });
+		const executable = step.index === null ? "" : basenameToken(step.argv[step.index]);
+		const target = cdTarget(step.argv);
 		if (isCheckStep(step)) {
 			if (directory === null || !isSameOrDescendant(directory, root)) return true;
-			continue;
+		} else if (executable === "popd")
+			directory = step.argv.length > (step.index ?? 0) + 1 ? null : (pushed.pop() ?? null);
+		else if (target !== null) {
+			if (executable === "pushd") pushed.push(directory);
+			directory = directory === null || /^[~+]|[$`]/u.test(target) ? null : path.resolve(directory, target);
 		}
-		const target = cdTarget(step.argv);
-		if (target !== null)
-			directory = directory === null || /^~|[$`]/u.test(target) ? null : path.resolve(directory, target);
+		for (let close = 0; close < step.closes; close += 1) {
+			const outer = subshells.pop();
+			directory = outer?.directory ?? null;
+			pushed = outer?.pushed ?? [];
+		}
 	}
 	return false;
 }
