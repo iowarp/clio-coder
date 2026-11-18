@@ -43,15 +43,18 @@ function windowFixture(initial: AutonomousCaps | null) {
 	let clock = 0;
 	let session = "s1";
 	const halts: AutonomyHalt[] = [];
+	const events: Array<{ name: string; payload: Record<string, unknown> }> = [];
 	const window = createAutonomyWindow({
 		caps: () => caps,
 		onHalt: (halt) => halts.push(halt),
 		session: () => session,
 		now: () => clock,
+		emit: (name, payload) => events.push({ name, payload: payload as Record<string, unknown> }),
 	});
 	return {
 		window,
 		halts,
+		events,
 		advance: (ms: number) => {
 			clock += ms;
 		},
@@ -382,7 +385,7 @@ test("a pending judge halt is dropped when its turn settles, the operator speaks
 	strictEqual(fx.halts.length, 2, "a worker's escalation halts at once");
 });
 
-test("the headless halt notice counts the call that crossed the line, as the report does", () => {
+test("the headless halt notice and the journaled halt count the call that crossed the line, as the report does", () => {
 	const fx = windowFixture({ toolCalls: 0, minutes: 0, tokens: 0 });
 	fx.window.turnStarted();
 	fx.window.toolCall();
@@ -392,8 +395,15 @@ test("the headless halt notice counts the call that crossed the line, as the rep
 	fx.window.toolCall();
 	const [halt] = fx.halts;
 	ok(halt !== undefined);
+	// The journal records the halt once the stop lands, counting what the run's report and notice count (bt-26 N2f).
+	strictEqual(fx.events.filter((event) => event.name === "autonomy.cap_reached").length, 0);
+	fx.window.turnSettled();
 	const report = fx.window.report(true);
 	strictEqual(report?.usage.toolCalls, 3);
+	deepStrictEqual(
+		fx.events.filter((event) => event.name === "autonomy.cap_reached").map((event) => event.payload.toolCalls),
+		[3],
+	);
 	match(headlessHaltNotice(halt, report), /after 3 tool calls,/u);
 	match(headlessHaltNotice(halt, null), /after 2 tool calls,/u);
 });

@@ -14,7 +14,11 @@ import { LlmAdmissionRefused } from "../domains/providers/one-shot.js";
 import { SessionCostCeilingError, sessionCeilingReached } from "../domains/scheduling/budget.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { noteSystemOneCall } from "../domains/system-one/index.js";
-import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
+import {
+	callSettlementFromMessage,
+	reportedModelFromMessage,
+	sideCallShutdownCause,
+} from "../domains/telemetry/call-facts.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
 
 export function createSideRequestAdmission(deps: {
@@ -74,7 +78,10 @@ export function createSideRequestAdmission(deps: {
 			if (settled) return;
 			settled = true;
 			try {
-				call?.settle(callSettlementFromMessage(message, pricing), reportedModelFromMessage(message));
+				call?.settle(
+					callSettlementFromMessage(message, pricing, sideCallShutdownCause(message)),
+					reportedModelFromMessage(message),
+				);
 			} finally {
 				void lease?.release();
 			}
