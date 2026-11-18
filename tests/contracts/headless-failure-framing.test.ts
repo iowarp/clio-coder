@@ -148,3 +148,88 @@ test("a citation check reaches the operator's stderr as one line, not the model'
 		env.restore();
 	}
 });
+
+/** Exit code and stderr of a headless change run whose one dispatch call failed with `text` and dropped details. */
+async function failedDispatchRun(text: string): Promise<{ code: number; stderr: string }> {
+	let handler: (event: unknown) => void = () => {};
+	const reply = answerMessage("The delegated change did not land.");
+	const stub: Record<string, unknown> = {
+		onEvent: (next: (event: unknown) => void) => {
+			handler = next;
+			return () => {};
+		},
+		getSessionId: () => null,
+		submit: async () => {
+			handler({ type: "agent_start" });
+			handler({ type: "tool_execution_start", toolCallId: "call-dispatch", toolName: "dispatch", args: {} });
+			// A thrown tool error reaches the transcript with its details replaced by {}.
+			handler({
+				type: "tool_execution_end",
+				toolCallId: "call-dispatch",
+				toolName: "dispatch",
+				result: { content: [{ type: "text", text }], details: {} },
+				isError: true,
+				outcome: "error",
+				actionClass: "dispatch",
+				decision: "allowed",
+			});
+			handler({ type: "message_end", message: reply });
+			handler({ type: "turn_end", message: reply, toolResults: [] });
+			handler({ type: "agent_end", messages: [reply] });
+		},
+		whenSettled: async () => {},
+		lastRunSnapshot: () => null,
+		isStreaming: () => false,
+	};
+	const chat = new Proxy(stub, { get: (target, key) => (key in target ? target[key as string] : undefined) });
+	const stderr: string[] = [];
+	const write = process.stdout.write;
+	const writeError = process.stderr.write;
+	process.stdout.write = ((_chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+		for (const argument of rest) if (typeof argument === "function") argument();
+		return true;
+	}) as typeof process.stdout.write;
+	process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+		stderr.push(String(chunk));
+		return true;
+	}) as typeof process.stderr.write;
+	try {
+		const code = await runHeadlessMainAgent(
+			chat as never,
+			{
+				prompt: "Apply the change.",
+				mode: "text",
+				shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
+			} as never,
+		);
+		return { code, stderr: stderr.join("") };
+	} finally {
+		process.stdout.write = write;
+		process.stderr.write = writeError;
+	}
+}
+
+test("a dispatch whose worker started and failed is not reported as never started (bt-45 H6)", async () => {
+	const env = await isolateClioEnv("headless-dispatch-failed-");
+	try {
+		const started = await failedDispatchRun(
+			"dispatch (sequential) total=1 failed=1\nruns=1hj006g52rl9\nbatch observed_tool_calls=2 cost=not measured\n\n- 1hj006g52rl9 agent=debugger exit=1 outcome=failed detail=worker process signal: SIGKILL",
+		);
+		strictEqual(started.code, 1, started.stderr);
+		match(
+			started.stderr,
+			/no-op: the delegated task failed \(dispatch \(sequential\) total=1 failed=1\) and no write succeeded/u,
+		);
+		doesNotMatch(started.stderr, /never started/u);
+
+		// c16-B: a dispatch refused before any worker ran keeps its wording and its exit 1 no-op.
+		const unstarted = await failedDispatchRun("dispatch: admission denied: unknown fleet node 'no-such-node'");
+		strictEqual(unstarted.code, 1, unstarted.stderr);
+		match(
+			unstarted.stderr,
+			/no-op: the delegated task never started \(dispatch: admission denied: unknown fleet node 'no-such-node'\) and no write succeeded/u,
+		);
+	} finally {
+		env.restore();
+	}
+});
