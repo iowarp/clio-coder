@@ -152,7 +152,7 @@ export interface TelemetryView {
 	cache(): CacheReportV1;
 	timeline(range?: { from: string; to: string } | null): TimelineV1;
 	runs(): RunRowV1[];
-	/** A run this session references; null for any other run. */
+	/** A run this session or its fork lineage references; null for any other run. */
 	run(runId: string): RunTelemetryV1 | null;
 	/** How a referenced run was enqueued, the only record of its agent and route when it never settled; null if unseen. */
 	runEnqueued(runId: string): EnqueuedRun | null;
