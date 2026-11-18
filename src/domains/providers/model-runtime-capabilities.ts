@@ -10,7 +10,12 @@ import {
 	thinkingBudgetFromMap,
 	thinkingEffortFromMap,
 } from "./thinking-control-policy.js";
-import { availableThinkingLevels, type CapabilityFlags, type ThinkingLevel } from "./types/capability-flags.js";
+import {
+	availableThinkingLevels,
+	type CapabilityFlags,
+	type ThinkingLevel,
+	VALID_THINKING_LEVELS,
+} from "./types/capability-flags.js";
 import type { KnowledgeBase, KnowledgeBaseHit } from "./types/knowledge-base.js";
 import {
 	extractLocalModelQuirks,
@@ -147,6 +152,7 @@ interface ClioRuntimeMetadata {
 		family?: string;
 		thinkingControlRuntime?: CapabilityFlags["thinkingControlRuntime"];
 		reasoningLevels?: CapabilityFlags["reasoningLevels"];
+		reasoningDefaultLevel?: CapabilityFlags["reasoningDefaultLevel"];
 		quirks?: LocalModelQuirks;
 	};
 	compat?: {
@@ -415,7 +421,8 @@ export function thinkingLevelFromChoiceLabel(value: string): ThinkingLevel | nul
 		value === "low" ||
 		value === "medium" ||
 		value === "high" ||
-		value === "xhigh"
+		value === "xhigh" ||
+		value === "max"
 	) {
 		return value;
 	}
@@ -470,6 +477,32 @@ function resolveQuirks(input: ResolveRuntimeCapabilitiesInput): LocalModelQuirks
 	return input.quirks ?? extractLocalModelQuirks(input.kbHit?.entry.quirks);
 }
 
+/** Copilot's listing names the `reasoningEffort` values a model takes, so its levels are efforts, never a switch. */
+function listsEffortValues(input: Pick<ResolveRuntimeCapabilitiesInput, "apiFamily">): boolean {
+	return input.apiFamily === "copilot-sdk";
+}
+
+/**
+ * The listed level that serves a requested one. A listed level serves itself. Off without a listed off runs at
+ * the listed default, else at the lowest listed level; any other level never resolves to off and takes the
+ * nearest listed level, the lower one on a tie.
+ */
+function listedEffortLevel(
+	requested: ThinkingLevel,
+	listed: ReadonlyArray<ThinkingLevel>,
+	preset: ThinkingLevel | undefined,
+): ThinkingLevel {
+	if (listed.includes(requested)) return requested;
+	if (requested === "off" && preset !== undefined && preset !== "off" && listed.includes(preset)) return preset;
+	const candidates: ThinkingLevel[] = listed.filter((level) => level !== "off");
+	const rank = (level: ThinkingLevel) => VALID_THINKING_LEVELS.indexOf(level);
+	let best = candidates[0] ?? listed[0] ?? "off";
+	for (const level of candidates) {
+		if (Math.abs(rank(level) - rank(requested)) < Math.abs(rank(best) - rank(requested))) best = level;
+	}
+	return best;
+}
+
 function isOnOffLevels(levels: ReadonlyArray<ThinkingLevel>): boolean {
 	return levels.includes("low") && levels.every((level) => level === "off" || level === "low");
 }
@@ -488,6 +521,7 @@ function resolveMechanism(
 ): ThinkingMechanism {
 	if (!input.capabilities.reasoning) return "none";
 	const live = input.capabilities.reasoningLevels;
+	if (live && listsEffortValues(input)) return "effort-levels";
 	if (live && isOnOffLevels(live)) return "on-off";
 	const declared = quirks?.thinking?.mechanism;
 	if (declared && declared !== "none") return declared;
@@ -526,7 +560,11 @@ function resolveThinkingCapability(
 		liveLevels && !harmony && mechanism !== "none" && mechanism !== "always-on"
 			? liveLevels
 			: restrictThinkingLevelsByMechanism(baseLevels, mechanism, quirks, { harmony });
-	const effectiveLevel = effectiveThinkingLevel(configuredLevel, supportedLevels);
+	const listedEfforts = liveLevels && mechanism === "effort-levels" && listsEffortValues(input) ? liveLevels : undefined;
+	const listedDefault = input.capabilities.reasoningDefaultLevel;
+	const effectiveLevel = listedEfforts
+		? listedEffortLevel(configuredLevel, listedEfforts, listedDefault)
+		: effectiveThinkingLevel(configuredLevel, supportedLevels);
 	let applied = applyThinkingMechanism(quirks, effectiveLevel, hints, mechanism);
 
 	if (harmony) {
@@ -544,6 +582,14 @@ function resolveThinkingCapability(
 				"applied",
 			);
 		}
+	} else if (listedEfforts && configuredLevel !== effectiveLevel) {
+		applied = appendNotice(
+			applied,
+			configuredLevel === "off"
+				? `This model cannot turn thinking off, so Thinking off runs at ${effectiveLevel === listedDefault ? "its default level, " : ""}${effectiveLevel}.`
+				: `This model offers thinking ${listedEfforts.join(", ")}, so Thinking ${configuredLevel} runs as ${effectiveLevel}.`,
+			"applied",
+		);
 	} else if (mechanism === "on-off" && configuredLevel !== effectiveLevel) {
 		applied = {
 			...applied,
@@ -797,6 +843,7 @@ function capabilitiesFromModel(model: Model<Api> & ClioRuntimeMetadata): Capabil
 	const format = model.compat?.thinkingFormat ?? thinkingFormatFromModelApi(model.api);
 	const controlRuntime = model.clioCoder?.thinkingControlRuntime;
 	const reasoningLevels = model.clioCoder?.reasoningLevels;
+	const reasoningDefaultLevel = model.clioCoder?.reasoningDefaultLevel;
 	const caps: CapabilityFlags = {
 		chat: true,
 		tools: true,
@@ -810,6 +857,7 @@ function capabilitiesFromModel(model: Model<Api> & ClioRuntimeMetadata): Capabil
 		maxTokens: model.maxTokens,
 		...(controlRuntime ? { thinkingControlRuntime: controlRuntime } : {}),
 		...(reasoningLevels ? { reasoningLevels } : {}),
+		...(reasoningDefaultLevel ? { reasoningDefaultLevel } : {}),
 	};
 	if (
 		format === "qwen-chat-template" ||

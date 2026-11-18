@@ -118,6 +118,9 @@ export interface LiveProbeOptions {
 	signal?: AbortSignal;
 }
 
+/** How long one target's metadata probe may take; a caller that must not wait longer bounds its wait by this. */
+export const PROVIDER_PROBE_TIMEOUT_MS = 5_000;
+
 export interface ProvidersContract {
 	/** All configured targets with readiness + health + capabilities. */
 	list(): ReadonlyArray<TargetStatus>;

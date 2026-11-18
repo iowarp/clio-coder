@@ -27,6 +27,7 @@ import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import { buildDispatchMemorySection } from "../domains/memory/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
+import { prepareListedModelCapabilities } from "../domains/providers/background-model-metadata.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import { runtimeNotRegistered } from "../domains/providers/retired-runtimes.js";
 import { loadSkills, ResourcesDomainModule } from "../domains/resources/index.js";
@@ -782,6 +783,20 @@ async function runDispatch(
 		);
 	}
 	if (memorySection.length > 0) dispatchReq.memorySection = memorySection;
+
+	// A worker resolves its model's thinking levels and budgets from the provider
+	// status, which a fresh process builds from the listing cache. A runtime that
+	// lists per-model capabilities lists live first when that cache has none.
+	const runProviders = loaded.getContract("providers");
+	if (runProviders) {
+		let workerTargetId = dispatchReq.target;
+		try {
+			workerTargetId = dispatch.preview?.(dispatchReq).targetId ?? workerTargetId;
+		} catch {
+			// Admission reports the refusal itself when the run starts.
+		}
+		if (workerTargetId !== undefined) await prepareListedModelCapabilities(runProviders, workerTargetId);
+	}
 
 	// Narrower than the writer's parameter so a frame built here is checked
 	// against the agent-mode stream, not the main-agent one.

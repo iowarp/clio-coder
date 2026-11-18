@@ -6,13 +6,15 @@
  * GitHub CLI's `gh auth login`, or a `copilot login` kept in the system keychain. The SDK's `empty` mode
  * Clio runs in turns the keychain off; a process where an operator can answer a keychain prompt
  * (`src/core/copilot-keychain.ts`) turns it back on and keeps every other empty-mode setting. GitHub token
- * variables are removed from the runtime's environment so an ambient `GH_TOKEN` cannot stand in for a login.
+ * variables are removed from the runtime's environment so an ambient `GH_TOKEN` cannot stand in for a login,
+ * and the variables a parent Copilot CLI exports are removed so the SDK always starts its own bundled runtime.
  * The SDK identifies itself to GitHub with its own client identity plus `clientName`; Clio sets no request
  * headers of its own.
  */
 import type { ChildProcess } from "node:child_process";
 import type { CopilotClient, ModelInfo } from "@github/copilot-sdk";
 import { COPILOT_HEADLESS_LOGIN_FIX, copilotKeychainAllowed } from "../../core/copilot-keychain.js";
+import type { ThinkingLevel } from "../../core/defaults.js";
 import { type CopilotSdkModule, loadCopilotSdk } from "./sdk-module.js";
 import { copilotSessionFsConfig } from "./session-fs.js";
 
@@ -41,6 +43,46 @@ const TOKEN_ENV_VARS = [
 	"GITHUB_ENTERPRISE_TOKEN",
 ] as const;
 
+/**
+ * Variables a parent Copilot CLI exports to its children. Pinned SDK 1.0.26 launches `COPILOT_CLI_PATH` in
+ * place of its bundled runtime (`client.js` `conn.path ?? effectiveEnv.COPILOT_CLI_PATH`), so an inherited
+ * value would start the parent's Copilot CLI, whose protocol the pinned SDK may not speak. The rest describe
+ * the parent's loader and session, not the runtime Clio starts.
+ */
+const HOST_RUNTIME_ENV_VARS = [
+	"COPILOT_CLI_PATH",
+	"COPILOT_CLI",
+	"COPILOT_CLI_RESOLVED_DIST_DIR",
+	"COPILOT_CLI_BINARY_VERSION",
+	"COPILOT_LOADER_PID",
+	"COPILOT_AGENT_SESSION_ID",
+] as const;
+
+const PROTOCOL_MISMATCH = /SDK protocol version mismatch/;
+
+/** The runtime Clio started speaks a protocol the pinned SDK does not; updating the SDK is not the operator's fix. */
+export class CopilotRuntimeMismatchError extends Error {
+	readonly code = "COPILOT_RUNTIME_MISMATCH";
+	constructor(detail: string) {
+		super(
+			`The GitHub Copilot runtime that started speaks a different protocol version than Clio's pinned @github/copilot-sdk, so it is not the runtime bundled with that SDK. The likely cause is an inherited or foreign Copilot CLI runtime, such as another Copilot CLI install the SDK resolved in place of its own. Reinstall the component with \`clio-coder tools install copilot-sdk\` and retry. (${detail})`,
+		);
+		this.name = "CopilotRuntimeMismatchError";
+	}
+}
+
+/** Start a client, naming a protocol mismatch for what it is. */
+async function startClient(client: CopilotClient): Promise<void> {
+	try {
+		await client.start();
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		if (PROTOCOL_MISMATCH.test(message))
+			throw new CopilotRuntimeMismatchError(message.replace(/\.? Please update .*$/, ""));
+		throw err;
+	}
+}
+
 export class CopilotLoginRequiredError extends Error {
 	readonly code = "COPILOT_LOGIN_REQUIRED";
 	constructor(detail?: string, keychainClosed = false) {
@@ -53,9 +95,10 @@ export class CopilotLoginRequiredError extends Error {
 	}
 }
 
+/** The runtime's environment: no token that could stand in for a login, nothing pointing at a parent's Copilot CLI. */
 function runtimeEnvironment(): Record<string, string | undefined> {
 	const env: Record<string, string | undefined> = { ...process.env };
-	for (const name of TOKEN_ENV_VARS) delete env[name];
+	for (const name of [...TOKEN_ENV_VARS, ...HOST_RUNTIME_ENV_VARS]) delete env[name];
 	return env;
 }
 
@@ -223,7 +266,7 @@ export async function copilotClient(): Promise<CopilotClient> {
 			// Read once per runtime start: a surface opts in before its first Copilot use.
 			const keychain = copilotKeychainAllowed();
 			const client = createCopilotClient(sdk, keychain);
-			const started = client.start().then(() => {
+			const started = startClient(client).then(() => {
 				watchRuntime(client);
 				setRuntimeReferenced(client, holds > 0);
 			});
@@ -275,7 +318,7 @@ export interface CopilotSignInStatus {
 export async function probeCopilotSignIn(keychain: boolean): Promise<CopilotSignInStatus> {
 	const client = createCopilotClient(await loadCopilotSdk(), keychain);
 	try {
-		await client.start();
+		await startClient(client);
 		const status = await client.getAuthStatus();
 		return {
 			signedIn: status.isAuthenticated && Boolean(status.login),
@@ -306,6 +349,13 @@ export interface CopilotModelRow {
 	maxOutputTokens: number | undefined;
 	vision: boolean;
 	reasoning: boolean;
+	/**
+	 * The effort values the listing names for this model (`supportedReasoningEfforts`) in Clio's vocabulary,
+	 * `none` read as `off`; absent when the model takes no effort.
+	 */
+	reasoningLevels?: ThinkingLevel[];
+	/** The listing's `defaultReasoningEffort`, when it names one. */
+	reasoningDefaultLevel?: ThinkingLevel;
 	/** The tier the window and prices were read for; `default` unless the target opted into `long_context`. */
 	contextTier: CopilotContextTier;
 	prices: CopilotModelPrices | undefined;
@@ -358,6 +408,24 @@ function tierPrices(model: ModelInfo, tier: CopilotContextTier): CopilotModelPri
 	};
 }
 
+const EFFORT_ORDER: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** A listed effort value in Clio's vocabulary; the runtime's `none` is Clio's `off`. */
+function listedLevel(effort: string | undefined): ThinkingLevel | undefined {
+	if (effort === "none") return "off";
+	return EFFORT_ORDER.find((level) => level !== "off" && level === effort);
+}
+
+/** The listing's effort set, ordered and deduplicated, for a model that takes an effort. */
+function listedReasoning(model: ModelInfo): Pick<CopilotModelRow, "reasoningLevels" | "reasoningDefaultLevel"> {
+	if (model.capabilities?.supports?.reasoningEffort !== true) return {};
+	const listed = new Set((model.supportedReasoningEfforts ?? []).map((effort) => listedLevel(effort)));
+	const levels = EFFORT_ORDER.filter((level) => listed.has(level));
+	if (levels.length === 0) return {};
+	const preset = listedLevel(model.defaultReasoningEffort);
+	return { reasoningLevels: levels, ...(preset && levels.includes(preset) ? { reasoningDefaultLevel: preset } : {}) };
+}
+
 /** One listing row read for a tier; the contract test feeds it a faked listing row. */
 export function copilotModelRow(model: ModelInfo, contextTier: CopilotContextTier = "default"): CopilotModelRow {
 	const long = model.billing?.tokenPrices?.longContext;
@@ -368,6 +436,7 @@ export function copilotModelRow(model: ModelInfo, contextTier: CopilotContextTie
 		maxOutputTokens: model.capabilities?.limits?.max_output_tokens,
 		vision: model.capabilities?.supports?.vision === true,
 		reasoning: model.capabilities?.supports?.reasoningEffort === true,
+		...listedReasoning(model),
 		contextTier,
 		prices: tierPrices(model, contextTier),
 		...(long

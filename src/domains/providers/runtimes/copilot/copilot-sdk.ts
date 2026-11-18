@@ -1,7 +1,12 @@
 import { listCopilotSdkModels } from "../../../../engine/ai.js";
 import type { Api, Model } from "../../../../engine/types.js";
 import { synthesizeCatalogBackedModel } from "../../catalog.js";
-import { readTargetModelSnapshot, recordTargetModelSnapshot } from "../../target-model-cache.js";
+import { applyModelCapabilityPatch } from "../../model-capabilities.js";
+import {
+	readTargetModelSnapshot,
+	recordTargetModelSnapshot,
+	type TargetModelSnapshot,
+} from "../../target-model-cache.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
@@ -41,6 +46,8 @@ type ListedRow = {
 	maxOutputTokens: number | undefined;
 	vision: boolean;
 	reasoning: boolean;
+	reasoningLevels?: CapabilityFlags["reasoningLevels"];
+	reasoningDefaultLevel?: CapabilityFlags["reasoningDefaultLevel"];
 	longContext?: { contextWindow: number | undefined };
 };
 
@@ -48,6 +55,9 @@ function rowCapabilities(row: ListedRow, contextWindow = row.contextWindow): Par
 	return {
 		vision: row.vision,
 		reasoning: row.reasoning,
+		// The listed effort values are the model's levels: Copilot takes each as `reasoningEffort`.
+		...(row.reasoningLevels ? { reasoningLevels: row.reasoningLevels } : {}),
+		...(row.reasoningDefaultLevel ? { reasoningDefaultLevel: row.reasoningDefaultLevel } : {}),
 		...(contextWindow !== undefined ? { contextWindow } : {}),
 		...(row.maxOutputTokens !== undefined ? { maxTokens: row.maxOutputTokens } : {}),
 	};
@@ -66,7 +76,23 @@ export function copilotTierCapabilities(
 		: rowCapabilities(row);
 }
 
+/** A cached listing stands in for one this process has not made when it kept every model's capabilities. */
+function adoptCachedCapabilities(snapshot: TargetModelSnapshot | null): boolean {
+	const cached = snapshot?.modelCapabilities;
+	if (!snapshot || !cached || !snapshot.models.every((id) => cached[id] !== undefined)) return false;
+	for (const id of snapshot.models) {
+		if (!listed.has(id)) listed.set(id, { base: { ...cached[id] }, longContext: undefined });
+	}
+	return true;
+}
+
+const adoptedTargets = new Set<string>();
+
 function listedFor(id: string, target: TargetDescriptor): Partial<CapabilityFlags> | undefined {
+	if (!listed.has(id) && !adoptedTargets.has(target.id)) {
+		adoptedTargets.add(target.id);
+		adoptCachedCapabilities(readTargetModelSnapshot(target));
+	}
 	const entry = listed.get(id);
 	if (!entry) return undefined;
 	return copilotContextTierOf(target) === "long_context" && entry.longContext ? entry.longContext : entry.base;
@@ -79,8 +105,12 @@ async function probeCopilotSdk(
 ): Promise<ProbeResult> {
 	ctx.signal?.throwIfAborted();
 	const snapshot = readTargetModelSnapshot(target);
-	// The cached listing is used only once this process has the capabilities that go with it.
-	if (snapshot && snapshot.models.length > 0 && snapshot.models.every((id) => listed.has(id))) {
+	// The cached listing is used only with the capabilities that go with it: this process's, else the cache's own.
+	if (
+		snapshot &&
+		snapshot.models.length > 0 &&
+		(snapshot.models.every((id) => listed.has(id)) || adoptCachedCapabilities(snapshot))
+	) {
 		const modelCapabilities = Object.fromEntries(snapshot.models.map((id) => [id, listedFor(id, target) ?? {}]));
 		const capabilityModelId =
 			target.defaultModel && listed.has(target.defaultModel) ? target.defaultModel : snapshot.models[0];
@@ -115,7 +145,7 @@ async function probeCopilotSdk(
 				longContext: row.longContext ? rowCapabilities(row, row.longContext.contextWindow) : undefined,
 			});
 		}
-		recordTargetModelSnapshot(target, models, { modelLabels });
+		recordTargetModelSnapshot(target, models, { modelLabels, modelCapabilities });
 		const capabilityModelId = target.defaultModel && listed.has(target.defaultModel) ? target.defaultModel : models[0];
 		const discoveredCapabilities = capabilityModelId ? modelCapabilities[capabilityModelId] : undefined;
 		return {
@@ -157,6 +187,7 @@ const copilotSdkRuntime = {
 	defaultCapabilities: copilotCapabilities,
 	// The runtime's listing omits models the account can call (Gemini 3.8 Flash on runtime 1.0.26).
 	servesUnlistedModels: true,
+	listsModelCapabilities: true,
 	defaultModel: COPILOT_SDK_DEFAULT_MODEL,
 	probe: probeCopilotSdk,
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
@@ -171,6 +202,12 @@ const copilotSdkRuntime = {
 			provider: "copilot-sdk",
 			defaultBaseUrl: "copilot-sdk://local",
 		});
+		// The engine reads the listed effort levels off the model it streams with, as a probed turn's patch does.
+		if (discovered?.reasoningLevels)
+			applyModelCapabilityPatch(model, {
+				reasoningLevels: discovered.reasoningLevels,
+				...(discovered.reasoningDefaultLevel ? { reasoningDefaultLevel: discovered.reasoningDefaultLevel } : {}),
+			});
 		// The engine reads the tier off the model it streams with: session create and model switch pass it on.
 		return copilotContextTierOf(target) === "long_context"
 			? (Object.assign(model, { copilotContextTier: "long_context" }) as Model<Api>)

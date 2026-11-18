@@ -35,6 +35,8 @@ export interface CapabilityFlags {
 	 * so its presence means the server answered and `["off", "low"]` means on/off.
 	 */
 	reasoningLevels?: ReadonlyArray<ThinkingLevel>;
+	/** The level the server runs at when no effort is sent, when it names one (Copilot `defaultReasoningEffort`). */
+	reasoningDefaultLevel?: ThinkingLevel;
 	structuredOutputs?: StructuredOutputMode;
 	vision: boolean;
 	audio: boolean;
