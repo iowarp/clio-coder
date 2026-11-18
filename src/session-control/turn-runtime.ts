@@ -891,12 +891,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (!currentRun()) return;
 		};
 		// Who stopped an aborted reply when the route did not: its message and its call settlement name the same cause.
+		// An actor flag counts only while its reason is live, so a later harness stop never inherits an earlier Esc (x7-3).
 		const harnessAbortCause = (): FailureCause | undefined =>
 			state.routeMove !== null
 				? "route_moved"
-				: state.activeInterruptByOperator
+				: state.activeInterruptReason !== null && state.activeInterruptByOperator
 					? "operator_cancel"
-					: state.activeInterruptByTriage
+					: state.activeInterruptReason !== null && state.activeInterruptByTriage
 						? "triage_stop"
 						: state.activeInterruptReason !== null && state.activeInterruptByAutonomy
 							? "autonomy_stop"
@@ -971,9 +972,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (call) {
 				recordSettledCall(
 					call.abandon(
-						state.activeInterruptByOperator
+						state.activeInterruptReason !== null && state.activeInterruptByOperator
 							? "operator_cancel"
-							: state.activeInterruptByTriage
+							: state.activeInterruptReason !== null && state.activeInterruptByTriage
 								? "triage_stop"
 								: state.activeInterruptReason !== null && state.activeInterruptByAutonomy
 									? "autonomy_stop"
