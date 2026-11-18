@@ -81,6 +81,10 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- bt-11: the welcome banner's default autonomy row reads `Default · auto in workspace` instead of `reviewed approvals`, matching what default runs without a prompt; `/fleet` shows a coder's sealed mutation report as changed paths, checks and commit message instead of raw JSON.
+- bt-11: Alt+W in a pane too narrow for the workers dock, or under a host that refuses the split, opens the Fleet Runs board and says why, instead of leaving a truncated "cannot open the watch pane" toast.
+- bt-11: the context meter no longer jumps after `/fork` or reads high after `/resume` (tool schemas were counted twice once the live anchor was dropped). `/fork` names the new and original session ids, and `/resume` says which session it opened.
+- bt-11: the exit summary's visit row names its scope ("This visit", workers included when they ran) and flags workers whose file writes were not recorded. An empty Verified row says command checks are not counted.
 - bt-6: under yolo, a step-mode template whose model runs one step and then summarizes now continues to the next step. It stops at a turn without a step call, a `pipelineDone` result, or the continuation cap (at most 4 step turns per operator prompt, the refusal path included).
 - bt-12: the high-rigor finish gate no longer re-prompts a step-template turn for validation; the summary reports the change as unverified instead.
 - bt-3: `campaign run` entries resolve the copilot-sdk and claude-sdk components the operator installed (read-only, never installing into an entry's throwaway home), and a missing one names the operator's directory, so Copilot and Claude SDK routes run in a campaign.
@@ -100,7 +104,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - P2D-5: plan preview refuses what dispatch admission refuses for ACP delegations, harness-origin writers, pinned read-only recipes on mutating tasks and denyTools on external CLIs.
 - bt-7: dispatch `intent.verification` accepts the toolchain-derived checks verify lists (such as `python-unittest`) and seals the argv verify runs, so Python, C/C++ and Fortran projects with no package.json or verifiers.yaml no longer get "declared ids: none".
 - bt-8: gateway chains accept a step's `args` sent as a JSON-object string, number id-less steps `s1`, `s2`, ... when nothing depends on them, and name the step index and field in every shape error.
-- bt-4: api-2 extension `turn_end` hook events carry the id of the user turn that the same turn's `before_tool` and `after_tool` events name, instead of the final assistant entry's id.
+- bt-4: api-2 extension `turn_start` and `turn_end` hook events carry the id of the user turn that the same turn's `before_tool` and `after_tool` events name (`turn_start` used to send an empty id, and `turn_end` the final assistant entry's id), on every path (TUI, `run`, ACP). Each continuation has its own id.
 - D3-1: a numeric-compare or perf-budget host check fails when its reference or baseline changed since dispatch admission or while the check ran.
 - D3-2: host verification validates a run only when every check that applied ran for it: a pass reused from another run's memo, a run whose every check was skipped, and a record without the executed/reused/skipped counts read as unknown; numeric-compare and perf-budget verdicts are never memoized.
 - D3-5: `numeric-compare` checks accept per-key `tolerance.keys` bounds (an entry replaces the check-level bounds for its key; an entry naming a key the reference lacks fails), and a reference with no keys or a key whose arrays are both empty is unjudgeable and fails instead of passing.

@@ -51,6 +51,8 @@ import {
 	councilSynthesisLines,
 	exactWorkerAnswerObject,
 	liveWorkerAnswerText,
+	mutationReportLines,
+	type PresentedContractAnswer,
 	presentWorkerContractAnswer,
 } from "./renderers/worker-answer.js";
 import type { ClioTheme, ClioToken } from "./theme/index.js";
@@ -596,9 +598,24 @@ export function renderDispatchActivity(row: DispatchBoardRow, width: number): st
 		lines.push(...wrapTextWithAnsi(`${theme.fg("annotation", "Recent")}  ${actionPhrase(action, "finished")}`, width));
 	if (progress.tailText.trim()) {
 		lines.push(theme.fg("annotation", progress.settled ? "Worker output" : "Live response · provisional"));
-		lines.push(...progressAnswerLines(theme, progress, row.runId, width, row.resultContract, 3));
+		lines.push(...progressAnswerLines(theme, progress, row.runId, width, row, 3));
 	}
 	return lines;
+}
+
+/**
+ * A coder's sealed mutation report in its transcript card's words, admitted as that card admits it: by the sealed
+ * record, not a presented contract kind. The board cannot tell where the proposed commit landed.
+ */
+function sealedMutationReport(
+	progress: WorkerProgressSnapshot,
+	trust: DispatchBoardRow["trust"],
+	complete: boolean,
+): PresentedContractAnswer | null {
+	if (!progress.settled || !complete || trust?.axes.artifactIntegrity !== "verified") return null;
+	const value = exactWorkerAnswerObject(progress.tailText);
+	const lines = value === null ? null : mutationReportLines(value, null);
+	return lines === null ? null : { lines };
 }
 
 /**
@@ -613,18 +630,16 @@ function progressAnswerLines(
 	progress: WorkerProgressSnapshot,
 	runId: string,
 	contentWidth: number,
-	contract: TelemetryRunSummary["resultContract"],
+	run: Pick<DispatchBoardRow, "resultContract" | "trust">,
 	maxRows = WORKER_PROGRESS_CARD_ROWS,
 ): string[] {
 	if (progress.tailText.length === 0) return [];
 	const gutter = CARD_KV_KEY_WIDTH + 1;
 	const railWidth = Math.max(1, contentWidth - gutter - 2);
-	const presented = presentWorkerContractAnswer(
-		progress.tailText,
-		contract,
-		progress.droppedLines === 0 && progress.droppedBytes === 0,
-		progress.settled,
-	);
+	const complete = progress.droppedLines === 0 && progress.droppedBytes === 0;
+	const presented =
+		presentWorkerContractAnswer(progress.tailText, run.resultContract, complete, progress.settled) ??
+		sealedMutationReport(progress, run.trust, complete);
 	const source = presented
 		? [...(presented.footer ? [presented.footer] : []), ...presented.lines]
 		: liveWorkerAnswerText(progress.tailText, progress.completed === true).split("\n");
@@ -1059,7 +1074,7 @@ function dispatchCardBody(
 		const doing = progressActionLine(theme, row.progress, contentWidth, row.routeFirstOutput ?? null);
 		if (doing !== null) bodyLines.push(doing);
 		if (options.expanded === true)
-			bodyLines.push(...progressAnswerLines(theme, row.progress, row.runId, contentWidth, row.resultContract));
+			bodyLines.push(...progressAnswerLines(theme, row.progress, row.runId, contentWidth, row));
 	}
 	// Live tool activity: the executing tool (worker telemetry carries names,
 	// never arguments, across the stdout seam) and the recent-tool trail.

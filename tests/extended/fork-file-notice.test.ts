@@ -73,7 +73,8 @@ for (const succeeds of [true, false]) {
 		await picker.onFork("fork-point");
 		strictEqual(sessionId, succeeds ? "child-session" : "parent-session");
 		strictEqual(resets, succeeds ? 1 : 0);
-		if (succeeds) match(notices.join("\n"), /Conversation forked.*files were not rewound.*edits remain/);
+		if (succeeds)
+			match(notices.join("\n"), /forked into new session child-session; the original parent-session .*edits remain/);
 		else {
 			match(notices.join("\n"), /fork failed/);
 			strictEqual(

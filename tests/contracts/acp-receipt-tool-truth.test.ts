@@ -1,5 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
@@ -76,6 +77,9 @@ it("records ACP tool kinds, completed spans, mutations, and only mediated safety
 // One native and one ACP run, each sealed and each failing finalization, against a
 // golden capture of their receipts, ledger rows and bus events. Both runtimes share
 // one finalizer, so a change to it must leave every persisted byte as it was.
+// Each run works in a fixed scratch project, and normalizeGolden masks the scratch
+// home, the node binary, host and user, and timings, so the capture holds in any checkout and in CI.
+// `CLIO_DISPATCH_GOLDEN=update` rewrites the fixture; run biome format on it after.
 const GOLDEN = new URL("../fixtures/dispatch-finalizer-golden.json", import.meta.url);
 
 const REPORT = JSON.stringify({ confirmedFacts: [], missingEvidence: [], nextInspections: [] });
@@ -111,6 +115,10 @@ async function goldenRun(kind: "native" | "acp", fail: boolean): Promise<unknown
 	settings.integrations.externalAgents.entries = [
 		{ id: "golden-peer", command: process.execPath, args: ["-e", ""], toolGovernance: "clio-coder-policy" },
 	];
+	// The workspace message lists the cwd's top level, so the checkout's untracked files would leak in.
+	const cwd = join(process.env.CLIO_CODER_HOME ?? "", "project");
+	mkdirSync(cwd, { recursive: true });
+	writeFileSync(join(cwd, "README.md"), "golden\n");
 	const context = dispatchStubContext({ settings });
 	const events: Array<{ name: string; payload: unknown }> = [];
 	const emit = context.bus.emit.bind(context.bus);
@@ -163,6 +171,7 @@ async function goldenRun(kind: "native" | "acp", fail: boolean): Promise<unknown
 		const run = await bundle.contract.dispatch({
 			agentId: kind === "acp" ? "golden-peer" : "scout",
 			task: "Inspect the fixture.",
+			cwd,
 			executionRole: "researcher",
 			requestOrigin: "internal",
 			...(kind === "native" ? { resultContractOverride: { kind: "provenance-report" as const } } : {}),
@@ -191,10 +200,19 @@ function normalizeGolden(value: unknown, runId: string): unknown {
 	const home = process.env.CLIO_CODER_HOME ?? "\u0000";
 	const walk = (node: unknown, key: string | null): unknown => {
 		if (key !== null && VOLATILE.has(key)) return node === null || node === undefined ? node : "<volatile>";
+		if (key === "identity" && node !== null && typeof node === "object") {
+			return walk({ ...node, host: "<host>", user: "<user>" }, null);
+		}
+		// Route scoring over every builtin agent is the router's output, copied verbatim by the finalizer.
+		if (key === "evaluations" && Array.isArray(node) && node.length > 1) return "<agent-evaluations>";
+		// The workspace message names its root once; count it as if it read `<home>`.
+		if (key === "chars" && typeof node === "number") return node - home.length + "<home>".length;
 		if (typeof node === "string") {
 			return node
 				.split(runId)
 				.join("<run>")
+				.split(process.execPath)
+				.join("<node>")
 				.split(home)
 				.join("<home>")
 				.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/gu, "<ts>")
@@ -217,5 +235,7 @@ it("seals native and ACP runs, and their failed finalizations, byte for byte as 
 		actual[`${kind}-finalization-failure`] = await goldenRun(kind, true);
 	}
 	// Re-serializing the parsed fixture keeps its key order, so a reordered receipt, row or event still fails.
-	strictEqual(JSON.stringify(actual, null, "\t"), JSON.stringify(JSON.parse(readFileSync(GOLDEN, "utf8")), null, "\t"));
+	const text = JSON.stringify(actual, null, "\t");
+	if (process.env.CLIO_DISPATCH_GOLDEN === "update") writeFileSync(GOLDEN, `${text}\n`);
+	strictEqual(text, JSON.stringify(JSON.parse(readFileSync(GOLDEN, "utf8")), null, "\t"));
 });

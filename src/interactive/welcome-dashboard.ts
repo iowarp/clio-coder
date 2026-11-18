@@ -480,7 +480,7 @@ function gitSummary(stats: WelcomeDashboardStats): string {
 }
 
 function autonomySummary(stats: WelcomeDashboardStats): string {
-	if (stats.autonomy !== "yolo") return `Default ${GLYPH.dot} reviewed approvals`;
+	if (stats.autonomy !== "yolo") return `Default ${GLYPH.dot} auto in workspace`;
 	return stats.yoloConfinement === "unconfined"
 		? `YOLO ${GLYPH.dot} UNCONFINED ${GLYPH.dot} never asks`
 		: `YOLO ${GLYPH.dot} contained ${GLYPH.dot} never waits`;

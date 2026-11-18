@@ -145,16 +145,15 @@ describe("live measured context anchor", () => {
 		f.runtime.agent.state.messages.push(tail);
 		const raw = structuredClone(f.runtime.agent.state.messages);
 		const expected = 20342 + estimateAgentMessageTokens(tail);
-		ok(
-			estimateAgentContextTokens(f.runtime.agent.state) + 8192 > 32768 * 0.95,
-			"legacy duplicate schema charge crosses pressure threshold",
-		);
 		strictEqual(f.context.liveContextEstimate(f.runtime).tokens, expected);
 		strictEqual(f.context.liveContextEstimate(f.runtime, "pending text").tokens, expected + 20);
 		ok(expected + 8192 < 32768 * 0.95);
 		strictEqual(await f.context.runAutoCompact(f.runtime, false), false);
 		strictEqual(f.summaries(), 0);
 		deepStrictEqual(f.runtime.agent.state.messages, raw);
+		// /fork and /resume drop the live anchor; the replayed usage must not charge the schema a second time.
+		f.context.resetForSession();
+		strictEqual(f.context.contextUsage().tokens, expected);
 	});
 
 	it("prices independent positive schema and system growth without netting shrinkage or recharging on fresh usage", () => {

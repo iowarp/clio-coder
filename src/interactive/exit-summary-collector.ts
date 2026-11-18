@@ -41,6 +41,11 @@ export interface ExitSummarySnapshot {
 	tools: ReadonlyArray<{ tool: string; count: number; failures: number }>;
 	files: ReadonlyArray<string>;
 	fileChanges: ReadonlyArray<{ path: string; count: number }>;
+	/**
+	 * Workers this visit whose writes no record observed, so `files` cannot hold them. The card counts worker calls,
+	 * and a bare `0 files changed` beside them read as a worker that edited nothing.
+	 */
+	unrecordedWorkerFiles: number;
 	workers: ReadonlyArray<{
 		runId: string;
 		agent: string;
@@ -332,6 +337,8 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 	const models = new Map<string, { target: string; model: string }>();
 	const files = new Map<string, number>();
 	const workerPaths = new Map<string, Set<string>>();
+	const workersWithoutWriteRecord = new Set<string>();
+	const workersWithReceiptPaths = new Set<string>();
 	const failures = new Map<string, number>();
 	/** A settled run's entry names its run, so its words are read from the run's record when the snapshot is taken. */
 	const timeline: Array<{ elapsedMs: number; text: string; runId?: string }> = [];
@@ -378,6 +385,8 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		models.clear();
 		files.clear();
 		workerPaths.clear();
+		workersWithoutWriteRecord.clear();
+		workersWithReceiptPaths.clear();
 		failures.clear();
 		timeline.length = 0;
 		timelineOmitted = 0;
@@ -394,7 +403,9 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		if (!worker) return;
 		workers.set(run.runId, { ...worker, outcome: run.outcome });
 		highlight(`${run.agentId} ${plainOutcomeLabel(run.outcome)}`, run.runId);
-		noteFiles(deps.dispatch.observedRunWrites?.(run.runId) ?? [], process.cwd(), workerPaths.get(run.runId));
+		const writes = deps.dispatch.observedRunWrites?.(run.runId);
+		if (writes === null) workersWithoutWriteRecord.add(run.runId);
+		noteFiles(writes ?? [], process.cwd(), workerPaths.get(run.runId));
 	};
 	// Like the git hook line, this account is the process's, never reset with the visit.
 	const internalGit = new Map<
@@ -565,6 +576,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				record: record.trust ? summarizeTrustStatus(record.trust).verdict : "unknown",
 			});
 			if (record.toolCounts) workerTools.set(runId, record.toolCounts);
+			if (record.changedPaths !== undefined) workersWithReceiptPaths.add(runId);
 			noteFiles(record.changedPaths ?? [], process.cwd(), workerPaths.get(runId));
 		},
 		observeLocalEntry(entry: unknown): void {
@@ -607,6 +619,9 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 					.sort((a, b) => a.tool.localeCompare(b.tool)),
 				files: [...files.keys()].sort(),
 				fileChanges: [...files].map(([path, count]) => ({ path, count })).sort((a, b) => a.path.localeCompare(b.path)),
+				unrecordedWorkerFiles: [...workersWithoutWriteRecord].filter(
+					(runId) => workers.has(runId) && !workersWithReceiptPaths.has(runId),
+				).length,
 				permissions: { ...permissions },
 				unattended: { ...unattended },
 				timeline: timeline.map(({ elapsedMs, text, runId }) => {

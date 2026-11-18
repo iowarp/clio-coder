@@ -289,8 +289,9 @@ export function estimateAgentContextTokens(input: AgentContextEstimateInput): nu
 	}
 	let saved = 0;
 	for (const saving of input.attestedSavings ?? []) if (saving.index < usage.index) saved += saving.tokens;
-	const anchored =
-		Math.max(0, usage.tokens - saved) + trailingTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
+	// The provider's count already carries the system prompt and tool schemas; adding them again inflated
+	// every meter read after /fork or /resume dropped the live anchor.
+	const anchored = Math.max(0, usage.tokens - saved) + trailingTokens + breakdown.pendingUserTokens;
 	return Math.max(projection, anchored);
 }
 
