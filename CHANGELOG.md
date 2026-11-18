@@ -58,6 +58,12 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - Astra r2-5: parallel `read`, `code_nav` and `clio_library` calls charge the turn observation pool before they await, so one batch can no longer spend the same budget several times over.
 - Astra r2-6: a required capability called through the gateway shorthand without an explicit `op` counts as called, so the follow-up no longer asks for it again. Tool rows, telemetry facets, the judge screen and safety descriptors read the shorthand as the call the gateway ran.
 - Astra r2-7: a gateway chain keeps every step whole when the aggregate fits its 32 KiB budget, gives unused shares to oversized steps, and keeps the head and tail of a failed step that must be cut, so the assertion survives.
+- Astra r3-1: a targeted jest or vitest run of a changed test passes `--passWithNoTests=false`, so a changed test the configuration excludes can no longer earn a passing check with zero tests run. When the runner reports an empty selection, the check's evidence says the changed test did not run.
+- Astra r3-2: a changed test whose known runner cannot start, such as pytest in a uv project with `uv.lock` and no `.venv`, fails the code check with the reason and the provisioning command instead of dropping to a note. A fleet loop does not attempt to repair it, since no edit makes the runner start.
+- Astra r3-3: a reporting worker whose locked synthesis reply and its one re-prompt held only tool-call markup fails as `worker_final_output_missing` instead of reporting success with the runtime notice.
+- Astra r3-4: sealed run evidence keeps a host check's `notRun` reason, so `/view`, the failure line, worker evidence and the GUI say that a refused, unconfigured or spawn-failed check did not run instead of quoting an exit code.
+- Astra r3-5: headless output lists a code check that ran and failed under `Failed checks:` and counts it in `failed_checks=`. `Not verified:` and `not_verified=` keep only the checks that never ran. A code report sealed before this release prints as before.
+- Astra r6-4: a per-turn tool-call budget of N, from a template `budget.toolCalls` or from `safety.limits.chatToolCallsPerTurn`, admits N calls and refuses the next one, so a budget of one no longer refuses the first step. The default budget admits 60 calls where it admitted 59. The turn still stops 15 refused attempts after the first refusal.
 
 ## 0.8.3 - 2026-11-16
 
