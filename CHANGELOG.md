@@ -84,6 +84,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- ACP `session/list` reports a session's current model after a mid-session model switch (bt-5).
+- Dispatch results hand the worker's route warnings (e.g. coerced thinking) to the dispatching model, and dispatch tool details carry each worker's runtime resolution (bt-5).
+- Validation grounding reports basis "grounded" when every claimed check matched (bt-9).
 - `telemetry tokens` charges compaction and memory calls to the turn they ran in and counts them in its totals, labelled by role (bt-12 #10).
 - The compaction notice counts the messages it summarized as the context snapshot does, in provider messages, not ledger entries (bt-12 #11).
 - The exit summary's `in` is the whole prompt, matching the turn receipt, footer and usage report (bt-12 #2 follow-up).
