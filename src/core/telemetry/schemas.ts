@@ -951,6 +951,13 @@ export const RunSettledSchema = Type.Object(
 				closed,
 			),
 		),
+		/**
+		 * Calls the check classifier could not read that ran after the run's oldest standing check outcome, as the
+		 * receipt discloses them: the count and up to 5 redacted commands. Absent when none ran and in older journals.
+		 */
+		unclassifiedAfterLastCheck: Type.Optional(
+			Type.Object({ count, commands: Type.Array(diagnostic, { maxItems: 5 }) }, closed),
+		),
 		/** The isolated writer checkout's verdict; its path, branch and changed paths are in the result object. */
 		worktree: nullable(
 			Type.Object(

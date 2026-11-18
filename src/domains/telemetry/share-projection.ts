@@ -236,6 +236,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 			resultContract: { sourceId: "path", validatorDigest: "id", conformance: "keep", quality: "keep" },
 		},
 		validationGrounding: { claimed: "keep", grounded: "keep", ungrounded: "withhold", basis: "keep" },
+		unclassifiedAfterLastCheck: { count: "keep", commands: "withhold" },
 		stepPipeline: STEP_PIPELINE,
 	},
 	"run.feed_appended": {

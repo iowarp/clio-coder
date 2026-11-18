@@ -359,6 +359,14 @@ export function settleFinishedRun(
 			validationGrounding: receipt.validationGrounding
 				? { ...receipt.validationGrounding, ungrounded: [...receipt.validationGrounding.ungrounded] }
 				: null,
+			...(receipt.unclassifiedAfterLastCheck
+				? {
+						unclassifiedAfterLastCheck: {
+							count: receipt.unclassifiedAfterLastCheck.count,
+							commands: receipt.unclassifiedAfterLastCheck.commands.slice(0, 5),
+						},
+					}
+				: {}),
 			worktree: receipt.worktree
 				? { apply: receipt.worktree.apply, applied: receipt.worktree.applied, snapshot: receipt.worktree.snapshot ?? null }
 				: null,

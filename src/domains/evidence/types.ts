@@ -91,6 +91,11 @@ export interface RunEvidence {
 	/** Claims of validation the run made without a matching command, from its settled record. */
 	ungroundedClaims: number;
 	/**
+	 * Calls the check classifier could not read that ran after the run's oldest standing check outcome, from its settled
+	 * record. Absent unless the seal verifies and the record carries them.
+	 */
+	unclassifiedAfterLastCheck?: { count: number; commands: string[] };
+	/**
 	 * The result contract's stored quality verdict, or for a run no contract judged its sealed typed checks' verdict,
 	 * and the validations the result reported as failed, by name. Null unless the seal verifies and the run settled a
 	 * quality block.
