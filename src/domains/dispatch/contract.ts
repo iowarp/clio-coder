@@ -607,6 +607,13 @@ export interface DispatchContract {
 	resolveWorkerPermission?(runId: string, requestId: string, decision: "approve" | "deny"): void;
 
 	/**
+	 * Why this session may not answer a worker's ask, or null when it may. Like cancel and steer, an approval answer
+	 * belongs to the exact session that dispatched the run: a fork that inherits its parent's history still leaves the
+	 * parent's worker asks to the parent. resolveWorkerPermission refuses with the same words.
+	 */
+	workerPermissionRefusal?(runId: string, requestId: string): string | null;
+
+	/**
 	 * The window this process runs for a worker's ask, or null when it runs none
 	 * (a main-routed ask, or a request that already settled). Only an ask with a
 	 * window can be held.

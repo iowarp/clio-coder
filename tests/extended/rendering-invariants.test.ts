@@ -350,6 +350,12 @@ describe("Clio rendering invariants", () => {
 		const long = thinkingTurn("standard", [[`Plan first.\n\nI will read ${"the module ".repeat(20)}`, "read"]]);
 		match(long, /\n│ Thinking · I will read the module the module .*…\n\n▸ read/u);
 		match(rendered, /│ Thinking · summarize the cause\n\n✦ The jitter was real randomness\./u);
+		// A cut stretch after an action keeps its label on the hint row that replaced its first row (bt-11 i).
+		const cut = thinkingTurn("standard", [
+			["read the module", "read"],
+			[Array.from({ length: 12 }, (_, line) => `step ${line} of the plan`).join("\n"), null],
+		]);
+		match(cut, /\n│ Thinking · … \d+ rows · \/view\n│ step/u);
 		const detailed = thinkingTurn("detailed", [["read the module", "read"]]);
 		match(detailed, /│ Thinking · read the module\n\n▸ read src\/retry\.js/u);
 	});

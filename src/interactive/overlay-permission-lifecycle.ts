@@ -82,6 +82,7 @@ export interface OverlayPermissionLifecycleDeps {
 	dispatch: Pick<
 		DispatchContract,
 		| "resolveWorkerPermission"
+		| "workerPermissionRefusal"
 		| "workerPermissionWindow"
 		| "holdWorkerPermission"
 		| "restartWorkerPermission"
@@ -296,6 +297,12 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	const announcedWorkerRequestIds = new Set<string>();
 	/** Expiry notices already printed, including a decision that lost the terminal-state race. */
 	const expiredWorkerRequestIds = new Set<string>();
+	/**
+	 * Asks of workers another session dispatched (a fork sees its parent's), by request id. They wait off the card,
+	 * because only the dispatching session may answer them (bt-11 f), and return to it when that session is current.
+	 */
+	const foreignWorkers = new Map<string, WorkerEscalationEntry>();
+	const foreignNoticeIds = new Set<string>();
 	let confirmed = false;
 	let denied = false;
 	let stopping = false;
@@ -465,9 +472,47 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		denied = false;
 		return true;
 	};
+	const refusalOf = (entry: WorkerEscalationEntry): string | null =>
+		deps.dispatch.workerPermissionRefusal?.(entry.runId, entry.requestId) ?? null;
+	const holdForeignWorker = (entry: WorkerEscalationEntry, refusal: string): void => {
+		foreignWorkers.set(entry.requestId, entry);
+		if (!markPermissionRequestSurfaced(foreignNoticeIds, entry.requestId)) return;
+		const after = entry.fallback === "fail" ? ", and the worker run fails" : "";
+		deps.appendNotice(
+			"warn",
+			`${entry.agentId}'s ${entry.tool} call needs approval, but ${refusal}. Unanswered, it is denied when its window ends${after}. /view dispatch:${entry.runId}`,
+		);
+	};
 	const maybeOpenWorker = (): void => {
+		for (let index = workerQueue.length - 1; index >= 0; index -= 1) {
+			const entry = workerQueue[index];
+			const refusal = entry === undefined ? null : refusalOf(entry);
+			if (entry === undefined || refusal === null) continue;
+			workerQueue.splice(index, 1);
+			holdForeignWorker(entry, refusal);
+		}
 		const next = workerQueue[0];
 		if (next && openWorker(next)) workerQueue.shift();
+	};
+	/** The current session changed: its own held asks return to the card, and asks it no longer owns leave it. */
+	const reconsiderWorkerOwnership = (): void => {
+		for (const [requestId, entry] of foreignWorkers) {
+			if (refusalOf(entry) !== null) continue;
+			foreignWorkers.delete(requestId);
+			foreignNoticeIds.delete(requestId);
+			deps.onOperatorParked?.();
+			workerQueue.push(entry);
+		}
+		const shown = pendingWorker;
+		if (shown !== null && refusalOf(shown) !== null) {
+			pendingWorker = null;
+			confirmed = false;
+			withdrawingWorker = true;
+			workerQueue.unshift(shown);
+			// The close re-runs the queue, which holds the withdrawn ask and opens the next one this session owns.
+			deps.closeOverlay();
+		} else maybeOpenWorker();
+		deps.requestRender();
 	};
 	const retryPending = (): void => {
 		maybeOpenWorker();
@@ -515,7 +560,9 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		fallback?: "deny" | "fail",
 	): void => {
 		const active = pendingWorker !== null && matches(pendingWorker) ? pendingWorker : null;
-		const expired = [...(active === null ? [] : [active]), ...removeQueuedWorkers(matches)];
+		const held = [...foreignWorkers.values()].filter(matches);
+		for (const entry of held) foreignWorkers.delete(entry.requestId);
+		const expired = [...(active === null ? [] : [active]), ...removeQueuedWorkers(matches), ...held];
 		if (expired.length === 0) return;
 		if (active !== null) {
 			pendingWorker = null;
@@ -602,16 +649,27 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		const entry = workerEscalationEntry(payload, deps.getAutonomy());
 		if (!entry) return;
 		if (!markPermissionRequestSurfaced(announcedWorkerRequestIds, entry.requestId)) return;
-		deps.onOperatorParked?.();
 		armWorkerCountdown(entry);
+		const refusal = refusalOf(entry);
+		if (refusal !== null) {
+			holdForeignWorker(entry, refusal);
+			return;
+		}
+		deps.onOperatorParked?.();
 		workerQueue.push(entry);
 		maybeOpenWorker();
 	});
+	const unsubscribeSessionReattached = deps.bus.subscribe("session.reattached", reconsiderWorkerOwnership);
+	const unsubscribeSessionCreated = deps.bus.subscribe("session.created", reconsiderWorkerOwnership);
 	const unsubscribeWorkerResolution = deps.bus.subscribe("approval.resolved", (payload) => {
 		if (typeof payload.requestId !== "string") return;
 		// A brokered request the owner revoked (turn cancel, session end) leaves
 		// the card the same way an expired one does.
-		if (payload.decidedBy !== "timeout" && payload.decidedBy !== "revoked" && payload.status !== "expired") return;
+		if (payload.decidedBy !== "timeout" && payload.decidedBy !== "revoked" && payload.status !== "expired") {
+			// A held ask its owner answered leaves silently; this session never showed it.
+			if (foreignWorkers.delete(payload.requestId)) dropWorkerCountdown(payload.requestId);
+			return;
+		}
 		const fallback = payload.fallback === "fail" ? "fail" : "deny";
 		withdrawWorkers(
 			(entry) => entry.requestId === payload.requestId,
@@ -662,6 +720,9 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		dropCountdown(permission?.meta?.requestId);
 		if (wasTimedOut !== null && permission?.meta !== undefined) {
 			denyUnattended(permission.meta.requestId, wasTimedOut);
+		} else if (worker !== null && refusalOf(worker) !== null) {
+			// The session changed under the open card: the answer is not this session's to give.
+			workerQueue.unshift(worker);
 		} else if (worker) {
 			dropWorkerCountdown(worker.requestId);
 			try {
@@ -801,12 +862,15 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			workerCountdowns.clear();
 			dispatchWindows.clear();
 			heldWorkerCeilings.clear();
+			foreignWorkers.clear();
 			unsubscribePermission();
 			unsubscribeAdmissionReview();
 			unsubscribeWorker();
 			unsubscribeWorkerResolution();
 			unsubscribeWorkerCompleted();
 			unsubscribeWorkerFailed();
+			unsubscribeSessionReattached();
+			unsubscribeSessionCreated();
 		},
 	};
 }
