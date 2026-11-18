@@ -4,6 +4,7 @@ import type { ClassifierCall } from "../domains/safety/action-classifier.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
+import { WORKER_REFUSAL_LIMIT_PREFIX } from "../worker/spec-contract.js";
 
 /**
  * Execute refusals a non-interactive worker absorbs before its run ends. The
@@ -58,8 +59,19 @@ export function formatWorkerRefusal(refusal: WorkerRefusal): string {
 	return `${refusal.tool} \`${refusal.command}\` refused by rule ${refusal.rule}`;
 }
 
+/**
+ * The native worker's last reply after the limit: the capped call's tool result ends with this, at the message tail,
+ * so finished work still reports while the session's tool schema set stays as it was (#423).
+ */
+export const WORKER_REFUSAL_REPORT_DIRECTIVE =
+	"Tools are unavailable for the rest of this run. Reply now with your final report in the form your task asked for: what you changed, what you verified, and what the refused commands blocked. A tool call ends the run without a report.";
+
+/** Every tool call in that last reply gets this instead of running. */
+export const WORKER_REFUSAL_REPORT_BLOCK =
+	"The permission refusal limit was reached, so no tool runs in this run; reply with your final report instead.";
+
 /** Final reason once the limit is reached; it names every refused command for the receipt. */
 export function workerRefusalLimitReason(refusals: ReadonlyArray<WorkerRefusal>): string {
 	const listed = refusals.map((refusal, index) => `${index + 1}) ${formatWorkerRefusal(refusal)}`).join("; ");
-	return `permission refusal limit reached: the worker ended after ${refusals.length} refused commands with no approval route: ${listed}`;
+	return `${WORKER_REFUSAL_LIMIT_PREFIX} the worker ended after ${refusals.length} refused commands with no approval route: ${listed}`;
 }

@@ -512,7 +512,8 @@ export function createClaudeWorkerBudgetGate(
 /**
  * CLB-5: an ask with no responder ends the run under `fail`. Under `deny` an
  * execute refusal returns to the model, which may take another route, and only
- * the WORKER_REFUSAL_LIMIT-th ends the run, as in the native worker.
+ * the WORKER_REFUSAL_LIMIT-th ends the run. The native worker gets one more
+ * reply there, with tools refused, to write its report; this one does not.
  */
 function endsPermissionRun(decision: ClaudeToolPermissionDecision, input: PermissionGateInput): boolean {
 	return (

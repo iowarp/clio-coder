@@ -99,9 +99,11 @@ export function runStatusForOutcome(outcome: RunOutcome): RunStatus {
  * Whether a declared result contract was ever due for this attempt.
  *
  * A postcondition is only an applicable correctness check once the run reached
- * the point of producing a terminal result. Two termination shapes qualify:
- * the worker finished its own execution normally, or the worker itself
- * validated a terminal result and exhausted its bounded repair rounds.
+ * the point of producing a terminal result. Three termination shapes qualify:
+ * the worker finished its own execution normally, the worker itself
+ * validated a terminal result and exhausted its bounded repair rounds, or a
+ * worker past its execute refusal limit replied with its report. That last run
+ * stays failed; its report is judged so finished work keeps its evidence.
  *
  * Everything else left the contract unevaluated: an operator abort, a crash
  * before the first token, a target that could not load the model, a stall
@@ -110,8 +112,12 @@ export function runStatusForOutcome(outcome: RunOutcome): RunStatus {
  * route history as correctness evidence about a model that never ran. Measured
  * against real history, that inflated the Scout failure count by 8 of 16.
  */
-export function resultContractWasDue(outcome: RunOutcome, outcomeCode: RunOutcomeCode | null): boolean {
-	return outcome === "succeeded" || outcomeCode === "result_contract_exhausted";
+export function resultContractWasDue(
+	outcome: RunOutcome,
+	outcomeCode: RunOutcomeCode | null,
+	reportedAfterRefusalLimit = false,
+): boolean {
+	return outcome === "succeeded" || outcomeCode === "result_contract_exhausted" || reportedAfterRefusalLimit;
 }
 
 export interface ResolvedTerminalReason {

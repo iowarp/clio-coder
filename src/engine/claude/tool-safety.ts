@@ -91,8 +91,8 @@ export interface EmitClaudeToolPermissionInput extends EvaluateClaudeToolPermiss
 	/**
 	 * The run's execute refusals so far, appended to here. A deny-posture execute
 	 * refusal returns to the model, and the WORKER_REFUSAL_LIMIT-th ends the run
-	 * naming every refused command, as the native worker does. Absent means no
-	 * count is kept.
+	 * naming every refused command, as the native worker does after its report
+	 * reply. Absent means no count is kept.
 	 */
 	executeRefusals?: WorkerRefusal[];
 }

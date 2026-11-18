@@ -76,6 +76,9 @@ export const WORKER_PROTECTED_ARTIFACT_STATE_VERSION = 1;
  */
 export const WORKER_EXIT_PERMISSION_REQUIRED = 3;
 
+/** Leads every refusal-limit reason, so dispatch can tell the cap from an ordinary refusal. */
+export const WORKER_REFUSAL_LIMIT_PREFIX = "permission refusal limit reached:";
+
 /**
  * Stderr prefix a native worker writes, followed by the status code, when its
  * run ends on a provider error after an HTTP error answer. The dispatch retry

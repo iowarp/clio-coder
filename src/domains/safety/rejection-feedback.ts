@@ -72,11 +72,75 @@ export function formatRejection(ctx: RejectionContext): RejectionMessage {
  * the standing pivot instruction, which always closes the message. Output is
  * enforced-bounded: lines cap at 300 characters and the message at 16 lines,
  * because reason strings interpolate caller data (paths, commands) verbatim.
+ * An overlong line breaks at sentence ends and then gives up quoted text, so
+ * the remedy clause after a long command survives (`boundLine`).
  */
 const MODEL_REJECTION_PIVOT =
 	"Do not retry this action through another tool or a respelled command (other flags, quoting, or a wrapper) unless a hint above names one; pivot or report the blocker.";
 const MODEL_REJECTION_MAX_LINES = 16;
 const MODEL_REJECTION_MAX_LINE_CHARS = 300;
+const QUOTED_SPAN = /`[^`]*`/g;
+/** Characters a shortened quoted span keeps, enough to recognize the command. */
+const QUOTED_SPAN_KEEP_CHARS = 60;
+
+/** A quoted heredoc stays one span on its line instead of spending the line budget on its body. */
+function foldQuotedLineBreaks(text: string): string {
+	return text.replace(QUOTED_SPAN, (span) => (span.includes("\n") ? span.replace(/\s*\n\s*/g, " ⏎ ") : span));
+}
+
+/** Split after a sentence end (". " or "; ") outside a quoted span. */
+function sentences(line: string): string[] {
+	const parts: string[] = [];
+	let quoted = false;
+	let start = 0;
+	for (let index = 0; index < line.length; index++) {
+		const char = line[index];
+		if (char === "`") quoted = !quoted;
+		else if (!quoted && (char === "." || char === ";") && line[index + 1] === " ") {
+			parts.push(line.slice(start, index + 1));
+			start = index + 2;
+		}
+	}
+	parts.push(line.slice(start));
+	return parts.filter((part) => part.length > 0);
+}
+
+/** Shorten the longest quoted spans (commands, paths) until the text fits or none is long enough to give. */
+function shortenQuoted(text: string): string {
+	const max = MODEL_REJECTION_MAX_LINE_CHARS;
+	let shortened = text;
+	while (shortened.length > max) {
+		let longest: RegExpExecArray | undefined;
+		for (const span of shortened.matchAll(QUOTED_SPAN)) {
+			const length = span[0].length;
+			if (length > QUOTED_SPAN_KEEP_CHARS + 3 && length > (longest?.[0].length ?? 0)) longest = span;
+		}
+		if (longest === undefined) break;
+		const inner = longest[0].slice(1, -1);
+		const keep = Math.max(QUOTED_SPAN_KEEP_CHARS, inner.length - (shortened.length - max) - 1);
+		const head = shortened.slice(0, longest.index);
+		shortened = `${head}\`${inner.slice(0, keep)}…\`${shortened.slice(longest.index + longest[0].length)}`;
+	}
+	return shortened;
+}
+
+/**
+ * Bound one line: pack whole sentences into lines under the cap, shorten quoted text in a sentence still over it,
+ * and cut only what quoting cannot explain.
+ */
+function boundLine(line: string): string[] {
+	const max = MODEL_REJECTION_MAX_LINE_CHARS;
+	if (line.length <= max) return [line];
+	const lines: string[] = [];
+	for (const sentence of sentences(line)) {
+		const fitted = shortenQuoted(sentence);
+		const bounded = fitted.length > max ? `${fitted.slice(0, max)}…` : fitted;
+		const last = lines.length - 1;
+		if (last >= 0 && (lines[last]?.length ?? 0) + 1 + bounded.length <= max) lines[last] = `${lines[last]} ${bounded}`;
+		else lines.push(bounded);
+	}
+	return lines;
+}
 
 /**
  * A blocked call's result as an operator reads it. The closing instruction and an operator-approval remedy are
@@ -100,16 +164,16 @@ export function formatModelRejection(
 	const lines: string[] = [];
 	const seen = new Set<string>();
 	const push = (line: string): void => {
-		const bounded =
-			line.length > MODEL_REJECTION_MAX_LINE_CHARS ? `${line.slice(0, MODEL_REJECTION_MAX_LINE_CHARS)}…` : line;
-		const trimmed = bounded.trim();
-		if (trimmed.length === 0) return;
-		const normalized = trimmed.replace(/^-\s+/, "");
-		if (seen.has(normalized) || normalized === MODEL_REJECTION_PIVOT) return;
-		seen.add(normalized);
-		lines.push(trimmed);
+		for (const bounded of boundLine(line)) {
+			const trimmed = bounded.trim();
+			if (trimmed.length === 0) continue;
+			const normalized = trimmed.replace(/^-\s+/, "");
+			if (seen.has(normalized) || normalized === MODEL_REJECTION_PIVOT) continue;
+			seen.add(normalized);
+			lines.push(trimmed);
+		}
 	};
-	for (const line of reason.split("\n")) push(line);
+	for (const line of foldQuotedLineBreaks(reason).split("\n")) push(line);
 	// The structured refusal account (`denialLines`) follows the reason so the
 	// line budget below never elides who refused and what would allow it.
 	for (const line of account ?? []) push(line);

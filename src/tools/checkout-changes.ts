@@ -188,6 +188,16 @@ export function changedCheckoutPaths(before: CheckoutSnapshot, after: CheckoutSn
 		.sort();
 }
 
+/** Files `after` holds untracked that `before` did not list at all: what the run created and left outside git. */
+export function addedUntrackedPaths(before: CheckoutSnapshot, after: CheckoutSnapshot): string[] {
+	const stats = observedStats.get(after);
+	if (stats === undefined || before.root !== after.root) return [];
+	return [...stats]
+		.filter(([name, tuple]) => tuple.startsWith("??:") && !before.paths.has(name))
+		.map(([name]) => name)
+		.sort();
+}
+
 /**
  * `git diff HEAD` over the paths this checkout changed between `before` and `after` that
  * `include` admits, or "" when nothing qualifies or git fails. A path the

@@ -90,10 +90,20 @@ describe("worker execute refusals", () => {
 		strictEqual(recovered.toolResults.length, 1);
 		ok(/permission denied by policy/u.test(recovered.toolResults[0] ?? ""), recovered.toolResults[0]);
 
-		const stuck = await runDenyWorker([[mark("one")], [mark("two")], [mark("three")], [mark("four")]]);
+		const stuck = await runDenyWorker([[mark("one")], [mark("two")], [mark("three")], [mark("four")], { text: "x" }]);
 		strictEqual(stuck.result.exitCode, WORKER_EXIT_PERMISSION_REQUIRED);
-		strictEqual(stuck.requests, 3, "the third refusal ends the run before another model request");
-		strictEqual(stuck.resolved.length, 3);
+		strictEqual(stuck.requests, 4, "the third refusal leaves one reply to report, and a tool call there ends the run");
+		ok(stuck.toolResults[2]?.includes("Reply now with your final report"), stuck.toolResults[2]);
+		strictEqual(stuck.resolved.length, 3, "the call in the report reply never reaches the permission gate");
+		const reported = await runDenyWorker([
+			[mark("one")],
+			[mark("two")],
+			[mark("three")],
+			{ text: "Changed a.py; tests pass." },
+		]);
+		strictEqual(reported.result.exitCode, WORKER_EXIT_PERMISSION_REQUIRED, "a report does not lift the cap");
+		strictEqual(reported.requests, 4);
+		ok(JSON.stringify(reported.result.messages.at(-1)).includes("Changed a.py; tests pass."));
 		const final = stuck.resolved.at(-1) ?? "";
 		ok(final.startsWith("permission refusal limit reached"), final);
 		deepStrictEqual(

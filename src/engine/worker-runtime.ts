@@ -190,6 +190,8 @@ import {
 	formatWorkerRefusal,
 	outsideWorkspaceHint,
 	WORKER_REFUSAL_LIMIT,
+	WORKER_REFUSAL_REPORT_BLOCK,
+	WORKER_REFUSAL_REPORT_DIRECTIVE,
 	workerRefusalLimitReason,
 } from "./worker-refusals.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
@@ -837,6 +839,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// loop guard counts synthesis-lock noncompliance by model round, preventing
 	// one wide parallel batch from consuming the entire denial backstop.
 	let workerModelRound = 0;
+	// The model round that may only report: the one after the refusal limit tripped.
+	let refusalReportRound: number | null = null;
 	const loopGuardRegistration = createLoopGuardRegistration({
 		safety,
 		readResultMaxBytes: workerSettings.context.toolResultMaxBytes,
@@ -1309,6 +1313,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			return { block: true, reason };
 		},
 		beforeToolCall: async ({ assistantMessage, toolCall }) => {
+			if (refusalReportRound !== null && toolCall.name !== INTERNAL_HELPER_RESULT_TOOL)
+				return { block: true, reason: WORKER_REFUSAL_REPORT_BLOCK };
 			if (helperSchema === null) return undefined;
 			if (acceptedHelperResult !== null || workerBoundFailure !== null)
 				return { block: true, reason: "The helper result is sealed.", terminate: true };
@@ -1333,6 +1339,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// Run from a `turn_end` subscriber, the exhausted bound arrived after the
 		// decision and cost one extra provider request.
 		finishTurn: ({ message, toolResults }) => {
+			if (refusalReportRound !== null && workerModelRound >= refusalReportRound) return { action: "end" };
 			if (
 				helperSchema !== null &&
 				acceptedHelperResult === null &&
@@ -1749,6 +1756,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	synthesisTimer?.unref();
 	const repairHelperResult = (reason: string): void => {
 		if (!input.resultContract || acceptedHelperResult !== null || workerBoundFailure !== null) return;
+		if (refusalReportRound !== null) return;
 		helperTerminalPhase = true;
 		synthesisToolLock = true;
 		if (resultContractRepairsStarted >= RESULT_CONTRACT_REPAIR_LIMIT) {
@@ -1807,7 +1815,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			event.type === "message_end" &&
 			isAssistantMessage(event.message) &&
 			!synthesisToolLock &&
-			workerBoundFailure === null
+			workerBoundFailure === null &&
+			refusalReportRound === null
 		) {
 			const reminder = middlewareToolChoice.completeRound(event.message);
 			if (reminder !== null) {
@@ -1925,7 +1934,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// the same message and the run then ran out of repairs on a later
 		// grounding violation).
 		let repromptedThisMessage = false;
-		if (workerBoundFailure === null && synthesisToolLock && !helperToolAvailable && event.type === "message_end") {
+		if (
+			workerBoundFailure === null &&
+			refusalReportRound === null &&
+			synthesisToolLock &&
+			!helperToolAvailable &&
+			event.type === "message_end"
+		) {
 			const stripped = sanitizeLockedSynthesisMessage(event.message);
 			// A model that calls a tool anyway hands its markup back as text and
 			// the sanitizer leaves only the fallback notice: the training habit
@@ -1955,7 +1970,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// well-behaved runs it exists to save. The orchestrator validates the
 		// same contract against the sealed receipt; this is the only point at
 		// which the model can still act on the validator's reason.
-		const contract = input.resultContract;
+		// The report after the refusal limit gets no repair round; dispatch judges it as it stands.
+		const contract = refusalReportRound === null ? input.resultContract : undefined;
 		if (
 			helperSchema !== null &&
 			!mutationResult &&
@@ -2206,11 +2222,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		executeRefusals.push(refusal);
 		return executeRefusals.length >= WORKER_REFUSAL_LIMIT ? workerRefusalLimitReason(executeRefusals) : null;
 	};
+	/**
+	 * The run still exits permission_required, but finished work keeps its report: the next model round may only
+	 * reply (beforeToolCall refuses every tool), and finishTurn ends the run after it.
+	 */
 	const endAtRefusalLimit = (reason: string): void => {
 		permissionFailure = true;
-		registry.cancelParkedCalls(reason);
+		refusalReportRound = workerModelRound + 1;
+		registry.cancelParkedCalls(`${reason}\n${WORKER_REFUSAL_REPORT_DIRECTIVE}`);
 		process.stderr.write(`[worker] ${reason}\n`);
-		agent.abort();
 	};
 	const emitGrantExecution = (active: ActiveEscalation, event: GrantExecutionEvent): void => {
 		emit({
@@ -2578,7 +2598,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// A refused command reaches the model as a tool result and the turn goes
 		// on, so it can take another route (P1 mode B ended at its first refused
 		// verify). Changing the command still cannot create an absent execute
-		// approval route, so the third refusal ends the run as permission_required.
+		// approval route, so the third refusal ends the work: one last reply may
+		// report, then the run exits permission_required.
 		const refusal = onPermission !== "fail" && actionClass === "execute" ? describeWorkerRefusal(call, decision) : null;
 		if (refusal !== null) executeRefusals.push(refusal);
 		// The refusal names the command and its rule: "outside the no-prompt set"
@@ -2604,14 +2625,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				reason,
 			},
 		} as ClioWorkerEvent);
-		if (onPermission === "fail" || refusalLimitReached) {
+		if (onPermission === "fail") {
 			permissionFailure = true;
 			registry.cancelParkedCalls(reason);
 			process.stderr.write(`[worker] ${reason}\n`);
 			agent.abort();
 			return;
 		}
-		registry.cancelParkedCalls(reason);
+		if (refusalLimitReached) endAtRefusalLimit(reason);
+		else registry.cancelParkedCalls(reason);
 	});
 
 	const workerTelemetry = input.telemetryContext

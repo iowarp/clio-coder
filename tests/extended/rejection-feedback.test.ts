@@ -60,6 +60,20 @@ describe("formatModelRejection composes the model-facing blocked text", () => {
 		strictEqual(lines[lines.length - 1], PIVOT_LINE, "the pivot closes the bounded message");
 	});
 
+	it("shortens a long quoted command, never the remedy after it", () => {
+		const heredoc = `cat > verify_slug_edge.py << EOF\n${"print(slugify('a b'))\n".repeat(12)}EOF`.slice(0, 200);
+		const remedy =
+			"shell variables, unparsed shell scripts or interpreter source hide which paths it touches from the safety net, so each such command needs your approval";
+		const reason = `permission denied by policy: bash \`${heredoc}…\` refused by rule bash-hidden-content; dispatched workers run non-interactively (fleet.permissions.mode=deny); bash requires execute confirmation. redirection \`<< EOF\` is recognized only to /dev/null or between descriptors ${remedy}`;
+		const lines = formatModelRejection(reason).split("\n");
+		for (const line of lines) ok(line.length <= 300, `line within the cap: ${line}`);
+		const text = lines.join("\n");
+		ok(text.includes(`${remedy}`), `the remedy survives whole: ${text}`);
+		ok(text.includes("redirection `<< EOF` is recognized only to /dev/null"), text);
+		ok(text.startsWith("permission denied by policy: bash `cat > verify_slug_edge.py << EOF ⏎ print("), text);
+		ok(lines.length <= 4, `the heredoc body stays on its line: ${text}`);
+	});
+
 	it("keeps the pivot line last and single even when the detail pre-seeds it", () => {
 		const rejection = formatRejection({
 			tool: "bash",
