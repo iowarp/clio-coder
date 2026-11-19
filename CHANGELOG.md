@@ -2,7 +2,7 @@
 
 Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.8.4 - 2026-11-19
 
 CLIO Coder 0.8.4 lets an extension-driven pipeline, such as a multi-step writing or review desk, run on the model you have: a small local model, a mid-tier cloud route or a frontier one. Prompt templates can run one step per turn, pick a body per model tier and bound their own budgets, a headless run can be scripted end to end from an answers file, and context stays accurate on small windows instead of compacting every turn. Long sessions also cost less: a resume keeps the provider's prompt cache, superseded tool output leaves uncached requests, and you can see where every input token went.
 
