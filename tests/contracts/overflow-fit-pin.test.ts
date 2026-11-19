@@ -928,7 +928,7 @@ it("drv-r4a: on copilot-sdk evicted reads leave the provider's held input, and t
 	writeFileSync(path.join(dir, "index.js"), HELD_HISTORY_SDK);
 	const files: Record<string, string> = {};
 	M3A_SIZES.forEach((size, index) => {
-		files[`docs/part${index + 1}.md`] = body(`Design note part ${index + 1}`, size);
+		files[`docs/part${index + 1}.md`] = body(`Design note part ${index + 1}`, Math.round(size * M3A_LARGE.scale));
 	});
 	const reads = Object.keys(files);
 	const held = { calls: [] as Array<{ held: string }>, script: reads, next: 0 };
@@ -937,7 +937,7 @@ it("drv-r4a: on copilot-sdk evicted reads leave the provider's held input, and t
 	const live = harness(transport([]), files, { window: 64_000, protectLastSteps: 1, api: "copilot-sdk" });
 	try {
 		await live.loop.submit(
-			`Read ${reads.join(", ")} in order, one read per round, each in full, then say done.\n\n${"Read guidance for the design notes. ".repeat(M3A_PAD)}`,
+			`Read ${reads.join(", ")} in order, one read per round, each in full, then say done.\n\n${"Read guidance for the design notes. ".repeat(M3A_LARGE.pad)}`,
 		);
 		await live.loop.whenSettled();
 		ok(!live.notices().some((text) => text.includes("post-tool context guard")), "no guard stop");

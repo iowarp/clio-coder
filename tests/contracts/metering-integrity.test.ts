@@ -425,6 +425,23 @@ describe("contracts/metering integrity", () => {
 		strictEqual(resolveReservedOutputTokens(128_000, request), 32_768);
 		setGlobalDefaultMaxOutputTokens(0);
 	});
+
+	it("bounds a constant reserve at max(16,384, W/4) from 52,428 tokens, a wire clamp and a configured budget unchanged (bt-48-12)", () => {
+		setGlobalDefaultMaxOutputTokens(0);
+		const at = (api: string, contextWindow: number, recommended?: number): number =>
+			resolveReservedOutputTokens(128_000, { api, contextWindow, inputTokens: 8_429 }, recommended);
+		for (const [window, reserve, profiled] of [
+			[65_536, 16_384, 16_384],
+			[98_304, 24_576, 24_576],
+			[131_072, 32_768, 32_768],
+			[200_000, 32_768, 50_000],
+		] as const)
+			deepStrictEqual([at("copilot-sdk", window), at("anthropic", window, 65_536)], [reserve, profiled], `${window}`);
+		strictEqual(at("openai-completions", 65_536), 32_768);
+		setGlobalDefaultMaxOutputTokens(32_768);
+		strictEqual(at("copilot-sdk", 65_536), 32_768);
+		setGlobalDefaultMaxOutputTokens(0);
+	});
 });
 
 describe("canonical monetary presentation (#434)", () => {
