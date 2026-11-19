@@ -77,6 +77,27 @@ test("new commit revokes old offers and only exact current issued offer can cons
 	strictEqual(state.prepareRestoration({ ...render, scope, generation: 0 }), null);
 });
 
+test("eviction-only folds advance the epoch but offer no restoration of their own", () => {
+	const state = new MemoryCommitState(scope, 0);
+	const evict = (id: string) => state.notifyContextCommitted(commit(id, { kind: "summary", outcome: "evicted" }), 0);
+	let installs = 0;
+	for (const id of ["S", "E1", "E2", "E3"]) {
+		if (id === "S") state.notifyContextCommitted(commit(id, { kind: "summary" }), 0);
+		else strictEqual(evict(id), "accepted");
+		const offer = state.prepareRestoration({ ...render, scope, generation: 0 });
+		if (offer && state.acknowledgeRestoration(offer, scope, 0)) installs += 1;
+	}
+	strictEqual(installs, 1, "the reminder installs once, not once per eviction");
+	state.notifyContextCommitted(commit("T", { kind: "summary" }), 0);
+	const held = state.prepareRestoration({ ...render, scope, generation: 0 });
+	ok(held);
+	strictEqual(evict("E4"), "accepted");
+	strictEqual(state.acknowledgeRestoration(held, scope, 0), false, "eviction still revokes buffered text");
+	strictEqual(state.capture().commitEpoch, 6);
+	const pending = state.prepareRestoration({ ...render, scope, generation: 0 });
+	strictEqual(pending?.commitId, "T", "a summary pending before an eviction is still offered");
+});
+
 test("replacement planning keeps stable bytes but revokes the previous issued offer", () => {
 	const state = new MemoryCommitState(scope, 0);
 	state.notifyContextCommitted(commit("A"), 0);
