@@ -2579,8 +2579,12 @@ export function invokesClioSkillMutation(command: string, excludeLibrary = false
 			args = args.slice(flag === "--skill" || flag === "--api-key" ? 2 : 1);
 		}
 		if (rootHelp) continue;
-		// `clio-coder import` is the alias of `clio-coder share import`.
+		// `clio-coder dev share` dispatches to `clio-coder share`.
+		if (args[0] === "dev" && args[1] === "share") args = args.slice(1);
+		// `clio-coder import` is the alias of `clio-coder share import`, and
+		// `clio-coder ext` runs the `clio-coder extensions` handler.
 		if (args[0] === "import") args = ["share", ...args];
+		if (args[0] === "ext") args = ["extensions", ...args.slice(1)];
 		if (
 			args[0] !== "skills" &&
 			args[0] !== "library" &&

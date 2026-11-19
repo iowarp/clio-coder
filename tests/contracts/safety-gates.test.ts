@@ -920,6 +920,7 @@ describe("safety gate boundary", () => {
 			"clio-coder plugins enable example",
 			"clio-coder plugins pin example",
 			"clio-coder extensions install ./draft-extension --user",
+			"clio-coder ext install ./draft-extension --yes",
 			"clio-coder library update plugin:example",
 			"clio-coder library remove plugin:example",
 			"clio-coder library pin plugin:example",
@@ -1071,6 +1072,7 @@ describe("safety gate boundary", () => {
 		for (const command of [
 			"clio-coder share import ./archive.json",
 			"clio-coder import ./archive.json",
+			"clio-coder dev share import ./archive.json",
 			"clio-coder extensions test ./draft-extension",
 			"clio-coder extensions validate ./draft-extension",
 		]) {
