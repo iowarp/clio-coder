@@ -28,7 +28,7 @@ function foundName(candidate: Candidate<TargetDescriptor>): string {
 export async function nextStepLines(
 	probe: { readJson?: (url: string, signal: AbortSignal) => Promise<unknown> } = {},
 ): Promise<string[]> {
-	const lines = [`Clio Coder ${readClioVersion()} is installed.`, "Next:  cd <your project> && clio-coder"];
+	const lines = [`CLIO Coder ${readClioVersion()} is installed.`, "Next:  cd <your project> && clio-coder"];
 	let settings: ReturnType<typeof readSettings>;
 	try {
 		settings = readSettings();

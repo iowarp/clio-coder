@@ -1591,7 +1591,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const overflowStop = (agentRuntime: AgentRuntime): string | null => {
 		const over = overflowOversize(agentRuntime);
 		if (over === null || !over.largest) return null;
-		return `[Clio Coder] This turn stopped: after compaction about ${over.tokens} input tokens plus ${over.reserve} reserved for the reply do not fit the ${over.window}-token window. ${over.largest} The session stays usable; send a smaller request.`;
+		return `[CLIO Coder] This turn stopped: after compaction about ${over.tokens} input tokens plus ${over.reserve} reserved for the reply do not fit the ${over.window}-token window. ${over.largest} The session stays usable; send a smaller request.`;
 	};
 
 	/** The system prompt rarely changes between publications; hash it again only when it does. */
@@ -3563,7 +3563,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					if (memorySection.length > 0) sessionInputs.memorySection = memorySection;
 				} catch (err) {
 					deps.emitNotice(
-						`[Clio Coder] memory load failed; continuing without memory injection: ${err instanceof Error ? err.message : String(err)}`,
+						`[CLIO Coder] memory load failed; continuing without memory injection: ${err instanceof Error ? err.message : String(err)}`,
 					);
 				}
 			}
@@ -3794,7 +3794,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				// The engine keeps the prompt it already had.
 				noteCacheReuse?.(false);
 				deps.emitNotice(
-					`[Clio Coder] prompt compile failed; using fallback identity: ${err instanceof Error ? err.message : String(err)}`,
+					`[CLIO Coder] prompt compile failed; using fallback identity: ${err instanceof Error ? err.message : String(err)}`,
 				);
 				return null;
 			}
@@ -3955,10 +3955,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					const oversize = requireFit && !aborted ? overflowStop(agentRuntime) : null;
 					if (oversize !== null) throw new Error(oversize);
 					if (requireFit || aborted)
-						throw new Error(`[Clio Coder] post-tool context guard could not compact before continuation: ${reason}`);
+						throw new Error(`[CLIO Coder] post-tool context guard could not compact before continuation: ${reason}`);
 					// Optional compaction: the request still fits, so the run goes on and the fit check below stays the stop.
 					deps.emitNotice(
-						`[Clio Coder] automatic compaction failed: ${reason.replace(/[.\s]+$/u, "")}. This turn goes on without it.`,
+						`[CLIO Coder] automatic compaction failed: ${reason.replace(/[.\s]+$/u, "")}. This turn goes on without it.`,
 					);
 				}
 			};
@@ -3978,7 +3978,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const after = fitFigures(afterView);
 			if (knownWindow && !requestFits(after.input, after.reserve, afterView.effectiveWindow)) {
 				throw new Error(
-					`[Clio Coder] post-tool context guard stopped continuation before provider call: estimated input ${after.input} plus reserved output ${after.reserve} tokens does not fit context window ${afterView.effectiveWindow}. Use /context compact, narrower reads, or a follow-up turn with smaller observations.`,
+					`[CLIO Coder] post-tool context guard stopped continuation before provider call: estimated input ${after.input} plus reserved output ${after.reserve} tokens does not fit context window ${afterView.effectiveWindow}. Use /context compact, narrower reads, or a follow-up turn with smaller observations.`,
 				);
 			}
 			return compacted || agentRuntime.agent.state.messages !== messagesBefore

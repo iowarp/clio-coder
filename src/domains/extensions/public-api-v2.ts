@@ -191,7 +191,7 @@ export type ExtensionTurnOrigin = Omit<TurnOrigin, "lastToolCall">;
 
 /**
  * The last tool call the stopped turn made, on a continuation's prompt_submit
- * (Clio Coder 0.8.4 and later). `tool` is the tool as before_tool names it,
+ * (CLIO Coder 0.8.4 and later). `tool` is the tool as before_tool names it,
  * `outcome` how it settled (`unfinished` when the turn stopped before it
  * returned). `args` are redacted and clipped (long strings and arrays cut, with
  * a note of what was), and cross only with `access: tool-args`.

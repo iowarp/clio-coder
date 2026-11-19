@@ -45,7 +45,7 @@ export function createToolProseRegistration(): MiddlewareHookRegistration {
 			return [
 				{
 					kind: "inject_reminder",
-					message: `[Clio Coder] Aborted local model turn: ${assessment.reason}.`,
+					message: `[CLIO Coder] Aborted local model turn: ${assessment.reason}.`,
 					severity: "hard-block",
 				},
 			];

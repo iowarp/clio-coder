@@ -43,7 +43,7 @@ import { readRunJournal } from "../harness/run-journal.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 
-const PARTIAL = "[Clio Coder] CANCEL_PARTIAL_ONCE";
+const PARTIAL = "[CLIO Coder] CANCEL_PARTIAL_ONCE";
 const THOUGHT = "CANCEL_THINKING_ONCE";
 const SKILL_REQUEST = { name: "context-handoff", args: "", source: "slash-command", installed: true } as const;
 const target = { id: "cancellation-fixture", runtime: "litellm", url: "http://fixture.invalid:4000" };
@@ -498,7 +498,7 @@ it("loop-guard interruption keeps its own reason on the single partial assistant
 	try {
 		f.loop.onEvent((event) => {
 			if (event.type === "text_delta")
-				f.loop.cancel({ source: "loop_guard", reason: "[Clio Coder] loop guard stopped repeated calls." });
+				f.loop.cancel({ source: "loop_guard", reason: "[CLIO Coder] loop guard stopped repeated calls." });
 		});
 		await f.loop.submit("Start");
 		const assistants = f.entries().filter((entry) => entry.kind === "message" && entry.role === "assistant");
@@ -578,7 +578,7 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 			const pending = f.loop.submit("Start streaming");
 			await started;
 			if (source === "stream_cancel") f.loop.cancel();
-			else f.loop.cancel({ source, reason: "[Clio Coder] loop guard stopped repeated calls." });
+			else f.loop.cancel({ source, reason: "[CLIO Coder] loop guard stopped repeated calls." });
 			await pending;
 			const assistants = f.entries().filter((entry) => entry.kind === "message" && entry.role === "assistant");
 			strictEqual(assistants.length, 1);
@@ -673,7 +673,7 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 			const oldReplay = historical.render(120).map(stripTerminalSequences).join("\n");
 			match(
 				oldReplay,
-				source === "loop_guard" ? /✦ \[Clio Coder\] loop guard stopped/u : /✦ Cancelled at your request\./u,
+				source === "loop_guard" ? /✦ \[CLIO Coder\] loop guard stopped/u : /✦ Cancelled at your request\./u,
 			);
 		} finally {
 			await f.close();
@@ -730,7 +730,7 @@ it("a reply the repetition guard stops twice fails the headless run on the guard
 		strictEqual(code, 1);
 		strictEqual(f.wire().calls(), 2);
 		const envelope = [...(readRunJournal(join(env.dir, "state"))?.envelopes.values() ?? [])][0];
-		match(envelope?.outcomeDetail ?? "", /^\[Clio Coder\] stopped a model response that kept repeating itself/u);
+		match(envelope?.outcomeDetail ?? "", /^\[CLIO Coder\] stopped a model response that kept repeating itself/u);
 		doesNotMatch(stderr.join(""), /target 'cancellation-fixture'|Request was aborted/u);
 	} finally {
 		process.stderr.write = write;
@@ -1121,7 +1121,7 @@ it("a reply cut off by the operator's Esc or by shutdown is the harness's stop a
 		strictEqual(recordValue(cancelled.failure)?.errorClass, "operator_cancel");
 		strictEqual(cancelled.failureRoute, undefined, "an operator's cancel names no route");
 		strictEqual(closing.failureRoute, undefined);
-		match(String(closing.errorMessage), /Clio Coder shut down/u);
+		match(String(closing.errorMessage), /CLIO Coder shut down/u);
 		// The persisted failure names the harness's cause, not a transport abort (bt-26 N2a).
 		deepStrictEqual(
 			[recordValue(closing.failure)?.stage, recordValue(closing.failure)?.errorClass],
@@ -1137,7 +1137,7 @@ it("a reply steering triage cuts off to deliver a stop persists triage's cause, 
 }, async () => {
 	const f = fixture("partial");
 	f.loop.onEvent((event) => {
-		if (event.type === "text_delta") f.loop.cancel({ source: "triage", reason: "[Clio Coder] triage stop." });
+		if (event.type === "text_delta") f.loop.cancel({ source: "triage", reason: "[CLIO Coder] triage stop." });
 	});
 	try {
 		await f.loop.submit("Start");

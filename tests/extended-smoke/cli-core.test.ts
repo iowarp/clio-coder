@@ -338,8 +338,8 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			// The version stays alone on line one; the pinned herdr credit follows it (69ba19993).
 			const [versionLine, ...rest] = version.stdout.split("\n");
 			if (/-dev(?:[.+]|$)/.test(VERSION))
-				match(versionLine ?? "", new RegExp(`^Clio Coder ${VERSION.replaceAll(".", "\\.")} \\(unreleased · [^)]+\\)$`));
-			else strictEqual(versionLine, `Clio Coder ${VERSION}`);
+				match(versionLine ?? "", new RegExp(`^CLIO Coder ${VERSION.replaceAll(".", "\\.")} \\(unreleased · [^)]+\\)$`));
+			else strictEqual(versionLine, `CLIO Coder ${VERSION}`);
 			const herdr = findPinnedTool("herdr");
 			const credit = herdr === null ? [] : [`Panes powered by herdr ${herdr.version} (${herdr.license})`];
 			deepStrictEqual(rest, [...credit, ""]);

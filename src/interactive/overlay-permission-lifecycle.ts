@@ -838,8 +838,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			deps.closeOverlay();
 			deps.stopActiveTurn(
 				tool === undefined
-					? "[Clio Coder] turn stopped at the approval card; the tool call did not run."
-					: `[Clio Coder] turn stopped at the approval card; ${tool} did not run.`,
+					? "[CLIO Coder] turn stopped at the approval card; the tool call did not run."
+					: `[CLIO Coder] turn stopped at the approval card; ${tool} did not run.`,
 			);
 		},
 		notePresence: () => {

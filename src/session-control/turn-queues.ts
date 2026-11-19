@@ -118,7 +118,7 @@ export interface QueuedMessagesSnapshot {
 /** The surface-neutral wording; the TUI replaces it with one naming its bound keys. */
 export function heldQueueNotice(count: number): string {
 	const subject = count === 1 ? "1 queued message is" : `${count} queued messages are`;
-	return `[Clio Coder] ${subject} held and nothing was sent. A new prompt takes the queue at its first slot; clearing the queue returns it.`;
+	return `[CLIO Coder] ${subject} held and nothing was sent. A new prompt takes the queue at its first slot; clearing the queue returns it.`;
 }
 
 export interface TurnQueuesDeps {
@@ -324,7 +324,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	const retire = (entries: ReadonlyArray<QueuedChatMessage>, why: string): void => {
 		removed(entries, "cancelled");
 		for (const entry of entries) {
-			deps.emitNotice(`[Clio Coder] ${entry.origin} was accepted into the queue and dropped unrun: ${why}.`);
+			deps.emitNotice(`[CLIO Coder] ${entry.origin} was accepted into the queue and dropped unrun: ${why}.`);
 		}
 	};
 	const fromMachine = (entry: QueuedChatMessage): boolean => entry.origin !== undefined;
@@ -334,7 +334,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		removed(entries, "cancelled");
 		const texts = entries.map((entry) => entry.text);
 		if (deps.emitQueueDropped) deps.emitQueueDropped(texts);
-		else deps.emitNotice(`[Clio Coder] the session changed; not sent: ${texts.join(" | ")}`);
+		else deps.emitNotice(`[CLIO Coder] the session changed; not sent: ${texts.join(" | ")}`);
 	};
 
 	const reportHeld = (why: QueueHoldReason): void => {
@@ -578,10 +578,10 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			emitQueueUpdate();
 			deps.emitNotice(
 				afterStop
-					? `[Clio Coder] the run has stopped; sending the message typed after the stop as a new prompt.${riding > 0 ? ` ${riding} held ${riding === 1 ? "message lands" : "messages land"} at its first slot.` : ""}`
+					? `[CLIO Coder] the run has stopped; sending the message typed after the stop as a new prompt.${riding > 0 ? ` ${riding} held ${riding === 1 ? "message lands" : "messages land"} at its first slot.` : ""}`
 					: first.constraints !== undefined
-						? `[Clio Coder] the run ended; starting the queued ${first.display?.text.split(/\s+/u)[0] ?? "prompt template"} as its own turn.`
-						: "[Clio Coder] steering arrived as the run ended; resubmitting as a fresh prompt.",
+						? `[CLIO Coder] the run ended; starting the queued ${first.display?.text.split(/\s+/u)[0] ?? "prompt template"} as its own turn.`
+						: "[CLIO Coder] steering arrived as the run ended; resubmitting as a fresh prompt.",
 			);
 			// The resubmit's own user echo is suppressed (markPersistedUserEcho), so
 			// this is the only place the first text can enter the transcript; the

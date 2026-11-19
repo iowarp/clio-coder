@@ -9,6 +9,10 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 - `clio-coder run --max-context-tokens=N` is accepted like `--max-context-tokens N`, with the same positive-integer error for an invalid value, instead of failing as an unknown option.
 - Parallel reads with a small `limit` or `tail` hold only their requested range of the per-turn observation budget, so siblings in one batch are no longer refused as exhausted, and a refusal counts bytes reserved by sibling calls apart from bytes already returned.
 
+### Changed
+
+- The version banner, notice prefixes and upgrade messages name the product CLIO Coder; the `clio-coder` command, package and paths are unchanged.
+
 ## 0.8.4 - 2026-11-19
 
 CLIO Coder 0.8.4 lets an extension-driven pipeline, such as a multi-step writing or review desk, run on the model you have: a small local model, a mid-tier cloud route or a frontier one. Prompt templates can run one step per turn, pick a body per model tier and bound their own budgets, a headless run can be scripted end to end from an answers file, and context stays accurate on small windows instead of compacting every turn. Long sessions also cost less: a resume keeps the provider's prompt cache, superseded tool output leaves uncached requests, and you can see where every input token went.

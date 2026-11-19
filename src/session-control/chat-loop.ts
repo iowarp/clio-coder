@@ -549,16 +549,16 @@ interface EndpointSlot {
 const LOCAL_SIDE_QUESTION_API_KEY = "clio-coder-local-target";
 
 /** Closing notice an operator interrupt leaves in the transcript and the ledger. */
-const INTERRUPT_CANCEL_REASON = "[Clio Coder] run interrupted by operator; delivering the new message now.";
+const INTERRUPT_CANCEL_REASON = "[CLIO Coder] run interrupted by operator; delivering the new message now.";
 /** The same redirect when triage read a queued message as a stop; no operator cancelled anything. */
 const TRIAGE_INTERRUPT_REASON =
-	"[Clio Coder] run interrupted because triage read the new message as a stop; delivering it now.";
+	"[CLIO Coder] run interrupted because triage read the new message as a stop; delivering it now.";
 const isRedirectReason = (reason: string | null | undefined): boolean =>
 	reason === INTERRUPT_CANCEL_REASON || reason === TRIAGE_INTERRUPT_REASON;
 const ENGINE_ACTIVE_PROMPT_ERROR =
 	"Agent is already processing a prompt. Use steer() or followUp() to queue messages, or wait for completion.";
 const ACTIVE_PROMPT_NOTICE =
-	"[Clio Coder] another response was already active, so this response could not start. Wait for it to finish, then submit again.";
+	"[CLIO Coder] another response was already active, so this response could not start. Wait for it to finish, then submit again.";
 
 function operatorFacingEngineError(message: string): string {
 	return message.includes(ENGINE_ACTIVE_PROMPT_ERROR) ? ACTIVE_PROMPT_NOTICE : message;
@@ -1416,10 +1416,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			};
 			emitNotice(
 				policy?.allowListAdvisory === true && current.length === 0
-					? `[Clio Coder] Skill activated: ${activated.join(", ")}. Its allowed-tools list is guidance in yolo; explicit disallowed-tools still apply.`
+					? `[CLIO Coder] Skill activated: ${activated.join(", ")}. Its allowed-tools list is guidance in yolo; explicit disallowed-tools still apply.`
 					: current.length > 0
-						? `[Clio Coder] Skill activated: ${activated.join(", ")}. Its tool surface stays armed across your next turns until another skill replaces it or you run /skill off.`
-						: `[Clio Coder] Skill activated: ${activated.join(", ")}. It declares no tool narrowing.`,
+						? `[CLIO Coder] Skill activated: ${activated.join(", ")}. Its tool surface stays armed across your next turns until another skill replaces it or you run /skill off.`
+						: `[CLIO Coder] Skill activated: ${activated.join(", ")}. It declares no tool narrowing.`,
 				"info",
 				undefined,
 				change !== null && change.state !== "cleared" ? change : loaded,
@@ -1427,13 +1427,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 		if (change?.state === "cleared") {
 			emitNotice(
-				`[Clio Coder] Skill tool surface cleared: ${previous}. The full tool surface is back.`,
+				`[CLIO Coder] Skill tool surface cleared: ${previous}. The full tool surface is back.`,
 				"info",
 				undefined,
 				change,
 			);
 		} else if (change?.state === "replaced" && activated.length === 0) {
-			emitNotice(`[Clio Coder] Skill tool surface replaced: ${previous} by ${current}.`, "info", undefined, change);
+			emitNotice(`[CLIO Coder] Skill tool surface replaced: ${previous} by ${current}.`, "info", undefined, change);
 		}
 	};
 
@@ -1514,7 +1514,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				type: "notice",
 				level: "warning",
 				surface: "transcript",
-				text: `[Clio Coder] the session changed; not sent: ${texts.join(" | ")}`,
+				text: `[CLIO Coder] the session changed; not sent: ${texts.join(" | ")}`,
 				queueDropped: { texts },
 			}),
 		emitQueuedUserTurn: (entry) =>
@@ -2259,7 +2259,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (disposed || generation !== submitGeneration || state.activeUserTurnId !== null || state.streaming) return;
 		if (await queues.resubmitStranded()) return;
 		await api.submit(
-			`[Clio Coder] The previous turn stopped: ${stop.reason}. ${stop.next ?? "Its work and tool results are above. Continue from where it stopped, and if the work is already finished, say so and stop."}${counted ? ` This is continuation ${attempt} of ${TURN_CONTINUATION_CAP}.` : ""}${stop.detail === undefined ? "" : `\n${stop.detail}`}`,
+			`[CLIO Coder] The previous turn stopped: ${stop.reason}. ${stop.next ?? "Its work and tool results are above. Continue from where it stopped, and if the work is already finished, say so and stop."}${counted ? ` This is continuation ${attempt} of ${TURN_CONTINUATION_CAP}.` : ""}${stop.detail === undefined ? "" : `\n${stop.detail}`}`,
 			{
 				origin: `yolo continuation ${attempt}`,
 				yoloContinuation: true,
@@ -2903,7 +2903,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				const taken = queues.removeEntry(entry.id, "sent-now");
 				if (taken === null) continue;
 				const preview = taken.text.replace(/\s+/g, " ").slice(0, 60);
-				emitNotice(`[Clio Coder] triage read "${preview}" as a stop; interrupting the run to deliver it now.`, "warning");
+				emitNotice(`[CLIO Coder] triage read "${preview}" as a stop; interrupting the run to deliver it now.`, "warning");
 				void submitTracked(taken.text, {
 					steering: "interrupt",
 					triageInterrupt: true,
@@ -2938,7 +2938,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (disposed || state.streaming || state.activeUserTurnId !== null) return false;
 			autonomy.operatorSpoke();
 			void api.submit(
-				"[Clio Coder] The operator resumed yolo after it paused. Continue from where the previous turn stopped, and if the work is already finished, say so and stop.",
+				"[CLIO Coder] The operator resumed yolo after it paused. Continue from where the previous turn stopped, and if the work is already finished, say so and stop.",
 				{ origin: "yolo resume", yoloContinuation: true },
 			);
 			return true;
@@ -3018,7 +3018,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					refusal = interruptRefusalReason();
 					if (refusal !== null) {
 						if (!constrained)
-							emitNotice(`[Clio Coder] interrupt refused: ${refusal}. Queued for the next slot instead.`, "warning");
+							emitNotice(`[CLIO Coder] interrupt refused: ${refusal}. Queued for the next slot instead.`, "warning");
 						mode = "next-slot";
 						front = true;
 					} else {
@@ -3048,7 +3048,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							// continuation resubmit); do not fight it, deliver at the next slot.
 							if (!constrained)
 								emitNotice(
-									"[Clio Coder] a run restarted before the interrupt landed. Queued for the next slot instead.",
+									"[CLIO Coder] a run restarted before the interrupt landed. Queued for the next slot instead.",
 									"warning",
 								);
 							mode = "next-slot";
@@ -3115,7 +3115,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						queuedForTriage(entry);
 						return;
 					}
-					emitNotice("[Clio Coder] response already in progress. Press Esc to cancel the active run.");
+					emitNotice("[CLIO Coder] response already in progress. Press Esc to cancel the active run.");
 					return;
 				}
 			}
@@ -3275,7 +3275,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						const sidecar = deps.visionSidecar;
 						const controller = owner;
 						pendingVisionSidecar = controller;
-						emitNotice(`[Clio Coder] Processing image with ${sidecar.label() ?? "vision sidecar"}...`);
+						emitNotice(`[CLIO Coder] Processing image with ${sidecar.label() ?? "vision sidecar"}...`);
 						try {
 							const question = operatorText.trim() || "Describe the attached image and any visible text.";
 							markPreparationStep("images");
@@ -3283,13 +3283,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							if (controller.signal.aborted || !admissionCurrent()) return;
 							sidecarObservation = visionObservationText(analysis);
 							text = [operatorText, sidecarObservation].filter(Boolean).join("\n\n");
-							emitNotice(`[Clio Coder] Image processed with ${analysis.model}.`);
+							emitNotice(`[CLIO Coder] Image processed with ${analysis.model}.`);
 						} catch (err) {
 							if (controller.signal.aborted) {
-								emitAdmissionNotice("[Clio Coder] Image processing cancelled.", "vision-sidecar-cancelled", "info");
+								emitAdmissionNotice("[CLIO Coder] Image processing cancelled.", "vision-sidecar-cancelled", "info");
 							} else {
 								const reason = err instanceof Error ? err.message : String(err);
-								emitAdmissionNotice(`[Clio Coder] Image processing failed: ${reason}`, "vision-sidecar-failed", "error");
+								emitAdmissionNotice(`[CLIO Coder] Image processing failed: ${reason}`, "vision-sidecar-failed", "error");
 							}
 							return;
 						} finally {
@@ -3319,7 +3319,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					if (key !== lastHistoricalImageNoticeKey) {
 						lastHistoricalImageNoticeKey = key;
 						emitNotice(
-							`[Clio Coder] ${historicalImages} earlier image${historicalImages === 1 ? "" : "s"} omitted from requests to text-only ${route.targetId}/${route.wireModelId}. The original images remain in session history for a vision-capable model.`,
+							`[CLIO Coder] ${historicalImages} earlier image${historicalImages === 1 ? "" : "s"} omitted from requests to text-only ${route.targetId}/${route.wireModelId}. The original images remain in session history for a vision-capable model.`,
 							"warning",
 							undefined,
 							undefined,
@@ -3502,7 +3502,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						await context.runStepCheckpoint(agentRuntime, stepLead, pendingSkillPolicy);
 					} catch (err) {
 						emitNotice(
-							`[Clio Coder] step checkpoint failed: ${err instanceof Error ? err.message : String(err)}. This step turn keeps the full history.`,
+							`[CLIO Coder] step checkpoint failed: ${err instanceof Error ? err.message : String(err)}. This step turn keeps the full history.`,
 							"warning",
 						);
 					}
@@ -3545,11 +3545,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// A failure here does not stop the turn, which goes out without a summary. A settled card already states a cancel.
 					if (!aborted) {
 						emitNotice(
-							`[Clio Coder] auto-compaction failed${size}. ${compactionFailureReason(err)}. This turn goes on without it; /context compact tries again; /model picks another route to summarize on.`,
+							`[CLIO Coder] auto-compaction failed${size}. ${compactionFailureReason(err)}. This turn goes on without it; /context compact tries again; /model picks another route to summarize on.`,
 							"warning",
 						);
 					} else if (!context.lastCompactionCardSettled()) {
-						emitNotice(`[Clio Coder] auto-compaction cancelled${size}`);
+						emitNotice(`[CLIO Coder] auto-compaction cancelled${size}`);
 					}
 					if (aborted) {
 						await recordCanceledBeforeAdmission({
@@ -3651,7 +3651,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					) {
 						const oversize = context.oversizedResult?.(agentRuntime, submittedText);
 						emitAdmissionNotice(
-							`[Clio Coder] Request exceeds the available context window (input ${admittedInput ?? "unknown"} + output ${admittedReserve ?? "unknown"}, window ${admission.effectiveWindow ?? "unknown"}).${failure ? ` ${failure}` : ""}${oversize ? ` ${oversize}` : ""} ${turnAdmissionRemedy(agentRuntime, admittedInput ?? 0)}`,
+							`[CLIO Coder] Request exceeds the available context window (input ${admittedInput ?? "unknown"} + output ${admittedReserve ?? "unknown"}, window ${admission.effectiveWindow ?? "unknown"}).${failure ? ` ${failure}` : ""}${oversize ? ` ${oversize}` : ""} ${turnAdmissionRemedy(agentRuntime, admittedInput ?? 0)}`,
 							"context-window-exceeded",
 							"error",
 						);
@@ -3845,7 +3845,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// Deliver the pair atomically. The normal follow-up queue drains one
 						// message at a time; queuing these separately creates an extra round
 						// with an unanswered synthetic tool call.
-						emitNotice("[Clio Coder] Recovering a final answer once; tools remain disabled.");
+						emitNotice("[CLIO Coder] Recovering a final answer once; tools remain disabled.");
 						const model = agentRuntime.agent.state.model;
 						await agentRuntime.agent.prompt(
 							recordRecovery(
@@ -3874,7 +3874,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								last?.role === "assistant" && (last as { stopReason?: unknown }).stopReason === "aborted" ? last : undefined;
 							if (stopped) agentRuntime.agent.state.messages = agentRuntime.agent.state.messages.slice(0, -1);
 							emitNotice(
-								"[Clio Coder] Asking the model once to act or answer instead of repeating.",
+								"[CLIO Coder] Asking the model once to act or answer instead of repeating.",
 								"warning",
 								REPETITION_REPROMPT_NOTICE_KEY,
 							);
@@ -3907,9 +3907,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							const recoveryLevel = lowerThinkingLevel(priorLevel, agentRuntime.runtimeResolution.modelRuntime.thinking);
 							emitNotice(
 								recoveryLevel === priorLevel
-									? "[Clio Coder] The model ran out of output while thinking; asking it once to act or answer."
+									? "[CLIO Coder] The model ran out of output while thinking; asking it once to act or answer."
 									: // The operator's level, not the route's clamp of it: an on/off route runs "high" as "low".
-										`[Clio Coder] The model ran out of output while thinking; asking it once to act or answer, with thinking ${recoveryLevel} instead of ${agentRuntime.runtimeResolution.requestedThinkingLevel}.`,
+										`[CLIO Coder] The model ran out of output while thinking; asking it once to act or answer, with thinking ${recoveryLevel} instead of ${agentRuntime.runtimeResolution.requestedThinkingLevel}.`,
 								"warning",
 								THINKING_LENGTH_RECOVERY_NOTICE_KEY,
 							);
@@ -4042,7 +4042,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							);
 						} catch (error) {
 							emitNotice(
-								`[Clio Coder] interview decisions could not be persisted: ${error instanceof Error ? error.message : String(error)}`,
+								`[CLIO Coder] interview decisions could not be persisted: ${error instanceof Error ? error.message : String(error)}`,
 								"warning",
 								`decision-ledger:${askUserPolicy.id}`,
 							);

@@ -282,13 +282,13 @@ it("keeps compaction failure lines in the reply, where context status does not g
 		{
 			level: "warning",
 			text:
-				"[Clio Coder] auto-compaction failed; context at 28.6K tokens. 401 invalid api key. This turn goes on without it; /context compact tries again; /model picks another route to summarize on.",
+				"[CLIO Coder] auto-compaction failed; context at 28.6K tokens. 401 invalid api key. This turn goes on without it; /context compact tries again; /model picks another route to summarize on.",
 		},
 		{
 			level: "info",
-			text: "[Clio Coder] automatic compaction failed: the summary came back empty. This turn goes on without it.",
+			text: "[CLIO Coder] automatic compaction failed: the summary came back empty. This turn goes on without it.",
 		},
-		{ level: "info", text: "[Clio Coder] compact-on-overflow failed: compaction stream failed: 429" },
+		{ level: "info", text: "[CLIO Coder] compact-on-overflow failed: compaction stream failed: 429" },
 		{
 			level: "error",
 			text:

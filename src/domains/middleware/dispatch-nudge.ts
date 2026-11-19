@@ -53,7 +53,7 @@ interface ExplorationTurnState {
 }
 
 export function buildReadOnlyExplorationMessage(): string {
-	return `[Clio Coder] This turn used ${READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD}+ read-only exploration calls without a successful Scout dispatch; delegate broad repository reconnaissance to Scout when more exploration is needed. If Scout already failed, confirm its useful leads with focused reads and synthesize; do not repeat its entire search.`;
+	return `[CLIO Coder] This turn used ${READ_ONLY_EXPLORATION_NUDGE_CALL_THRESHOLD}+ read-only exploration calls without a successful Scout dispatch; delegate broad repository reconnaissance to Scout when more exploration is needed. If Scout already failed, confirm its useful leads with focused reads and synthesize; do not repeat its entire search.`;
 }
 
 function isNonRepositoryContextCall(input: MiddlewareHookInput): boolean {
@@ -265,7 +265,7 @@ export function claimsWorkerResults(text: string | undefined): boolean {
 }
 
 export function buildUnbackedWorkerClaimMessage(): string {
-	return "[Clio Coder] No dispatch ran this turn; worker results named above are not backed by a run record. Dispatch the work or state plainly that you did it inline.";
+	return "[CLIO Coder] No dispatch ran this turn; worker results named above are not backed by a run record. Dispatch the work or state plainly that you did it inline.";
 }
 
 /**
@@ -516,7 +516,7 @@ export function buildDetachedBatchesMessage(
 	const runningNote =
 		running.length > 0 ? `\n${running.length} other detached batch(es) are still running; leave those for later.` : "";
 	return (
-		`[Clio Coder] ${ready.length} detached dispatch batch(es) finished and are uncollected:\n` +
+		`[CLIO Coder] ${ready.length} detached dispatch batch(es) finished and are uncollected:\n` +
 		`${rows.join("\n")}\n` +
 		`Collect each with monitor mode="collect" batch_id=<id> before final synthesis and act on the results. ` +
 		`A batch stays open (and keeps nudging) until it is collected.${runningNote}`

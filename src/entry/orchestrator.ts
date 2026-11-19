@@ -1693,7 +1693,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const prefix = halt.kind === "judge" ? JUDGE_STREAK_REASON : AUTONOMOUS_CAP_REASON;
 			// Synchronous, inside the call that crossed the line: the cancel can only reach the turn that halted.
 			chat.cancel({
-				reason: `[Clio Coder] ${autonomyHaltNotice(
+				reason: `[CLIO Coder] ${autonomyHaltNotice(
 					halt,
 					options.headless !== undefined ? "headless" : "interactive",
 					autonomyWindow.openDecisions(true),

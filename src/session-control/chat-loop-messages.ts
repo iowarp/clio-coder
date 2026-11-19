@@ -61,10 +61,10 @@ export interface RuntimeResolutionView {
 export function notConfiguredNotice(chat: { target?: string | null; model?: string | null } = {}): string {
 	const target = chat.target?.trim();
 	if (target && !chat.model?.trim()) {
-		return `[Clio Coder] ${describeMissing({ kind: "model", target }).sentence}`;
+		return `[CLIO Coder] ${describeMissing({ kind: "model", target }).sentence}`;
 	}
 	return [
-		"[Clio Coder] No model target is configured; run `clio-coder configure` to choose one.",
+		"[CLIO Coder] No model target is configured; run `clio-coder configure` to choose one.",
 		"Without a terminal: clio-coder configure --id <id> --runtime <runtime> --url <url> --model <model> --set-orchestrator",
 		`(chat.target and chat.model live in ${settingsPath()})`,
 	].join("\n");
@@ -245,7 +245,7 @@ export function isThinkingOnlyLengthStop(message: AgentMessage | undefined): boo
 
 /** Why a turn ended on a second thinking-only length stop, and what changes the outcome. */
 export const THINKING_LENGTH_STOP_REASON =
-	"[Clio Coder] the model spent its whole output budget thinking and stopped before acting or answering, twice in this turn. Lower --thinking or raise the output cap (chat.maxOutputTokens) and resume.";
+	"[CLIO Coder] the model spent its whole output budget thinking and stopped before acting or answering, twice in this turn. Lower --thinking or raise the output cap (chat.maxOutputTokens) and resume.";
 
 /**
  * An aborted assistant message with no text, thinking, or structured tool
@@ -325,14 +325,14 @@ export type TurnEnding =
 /** The notice key the status surface reads as the one re-prompt for a written-out tool call starting. */
 export const TOOL_MARKUP_REPROMPT_NOTICE_KEY = "turn.tool-markup-reprompt";
 export const TOOL_MARKUP_REPROMPT_NOTICE =
-	"[Clio Coder] The model wrote its tool call as text, so it did not run. Clio asked it to make the call properly.";
+	"[CLIO Coder] The model wrote its tool call as text, so it did not run. Clio asked it to make the call properly.";
 export const TOOL_MARKUP_REPROMPT =
 	"<system-reminder>Your last reply wrote a tool call as text, so it did not run and nothing happened. Calls written as text never run. If the work still needs a tool, make the call through the tool interface now. Otherwise answer in plain prose and say plainly what was not done.</system-reminder>";
 
 /** The notice key for the re-prompt after a reply that held neither an answer nor a tool call. */
 export const EMPTY_ANSWER_REPROMPT_NOTICE_KEY = "turn.empty-answer-reprompt";
 export const EMPTY_ANSWER_REPROMPT_NOTICE =
-	"[Clio Coder] The model ended its reply with no answer and no tool call. Clio asked it to continue.";
+	"[CLIO Coder] The model ended its reply with no answer and no tool call. Clio asked it to continue.";
 export const EMPTY_ANSWER_REPROMPT =
 	"<system-reminder>Your last reply was empty: it held no answer and no tool call, so nothing happened and the operator saw nothing. Act now: if the work still needs a tool, make the call through the tool interface; otherwise write your answer in plain prose and say plainly what was not done.</system-reminder>";
 

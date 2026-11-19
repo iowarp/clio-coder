@@ -813,7 +813,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			const version = await run(bin, ["--version"], foreign, isolatedEnv(home));
 			strictEqual(version.code, 0, version.stderr);
 			// A development tree packs as `0.6.0-dev (unreleased · <commit>)`; a release packs as the bare version.
-			match(version.stdout, /^Clio Coder \d+\.\d+\.\d+(?:-[\w.]+)?(?: \(unreleased · [0-9a-f]+(?:-dirty)?\))?$/mu);
+			match(version.stdout, /^CLIO Coder \d+\.\d+\.\d+(?:-[\w.]+)?(?: \(unreleased · [0-9a-f]+(?:-dirty)?\))?$/mu);
 
 			// Ordinary npm consumers receive a pi-tui that lacks the editor and search
 			// seams. The built application must carry that implementation itself, and

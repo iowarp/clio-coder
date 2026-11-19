@@ -34,7 +34,7 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 
 const target = { id: "cap-boundary-fixture", runtime: "litellm", url: "http://fixture.invalid:4000" };
 const model = litellm.synthesizeModel(target, "cap-boundary-model", null) as Model<"openai-completions">;
-const CAP_REASON = "[Clio Coder] yolo paused: the 5M-token cap was reached.";
+const CAP_REASON = "[CLIO Coder] yolo paused: the 5M-token cap was reached.";
 
 let env: IsolatedClioEnv;
 let previousCwd: string;

@@ -89,7 +89,7 @@ export function assessDraftLoop(thinking: string): RepetitionAssessment {
  * reasoning is stopped and re-prompted once, as a repeating one is, instead of running into the cap.
  */
 const THINKING_OVERRUN_SHARE = 0.75;
-const THINKING_OVERRUN_REASON_PREFIX = "[Clio Coder] stopped a model response whose reasoning";
+const THINKING_OVERRUN_REASON_PREFIX = "[CLIO Coder] stopped a model response whose reasoning";
 
 /** The stop reason once `thinkingChars` of reasoning (about four characters a token) reach the share of `outputCap`. */
 export function thinkingOverrunReason(thinkingChars: number, outputCap: number | undefined): string | null {
@@ -101,7 +101,7 @@ export function thinkingOverrunReason(thinkingChars: number, outputCap: number |
 
 export function repetitionAbortReason(assessment: Extract<RepetitionAssessment, { kind: "repeating" }>): string {
 	const unit = assessment.unit.length > 80 ? `${assessment.unit.slice(0, 79)}…` : assessment.unit;
-	return `[Clio Coder] stopped a model response that kept repeating itself ("${unit}" ${assessment.repeats} times in its last stretch).`;
+	return `[CLIO Coder] stopped a model response that kept repeating itself ("${unit}" ${assessment.repeats} times in its last stretch).`;
 }
 
 /**
@@ -116,7 +116,7 @@ export function repetitionAbortReason(assessment: Extract<RepetitionAssessment, 
  */
 const FLOOD_MIN_REPEATS = 5;
 const FLOOD_ARGUMENT_CHARS = 200;
-const TOOL_CALL_FLOOD_REASON_PREFIX = "[Clio Coder] stopped a model response that kept repeating one tool call";
+const TOOL_CALL_FLOOD_REASON_PREFIX = "[CLIO Coder] stopped a model response that kept repeating one tool call";
 
 export type ToolCallFloodAssessment =
 	| { kind: "ok" }

@@ -78,7 +78,7 @@ describe("global startup flags before a subcommand", () => {
 		for (const args of [["-v"], ["--version", "paths"]]) {
 			const result = cli(args);
 			equal(result.status, 0, result.stderr);
-			match(result.stdout, /^Clio Coder /u);
+			match(result.stdout, /^CLIO Coder /u);
 		}
 		for (const [args, refusal] of [
 			[["paths", "-v"], /unknown flag: -v/u],
@@ -87,12 +87,12 @@ describe("global startup flags before a subcommand", () => {
 		] as const) {
 			const result = cli(args);
 			equal(result.status, 2, `${args.join(" ")}: ${result.stdout}`);
-			doesNotMatch(result.stdout, /Clio Coder /u);
+			doesNotMatch(result.stdout, /CLIO Coder /u);
 			match(result.stderr, refusal);
 		}
 		// After "--" a -v is the task text: neither the version nor a refused option.
 		const task = cli(["run", "--", "-v"]);
-		doesNotMatch(task.stdout, /^Clio Coder /u);
+		doesNotMatch(task.stdout, /^CLIO Coder /u);
 		doesNotMatch(task.stderr, /unknown option/u);
 	});
 

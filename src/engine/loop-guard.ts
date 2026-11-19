@@ -599,7 +599,7 @@ function workerDeliveryOnlyDirective(limit: number, deliveryTools: ReadonlyArray
  */
 export function lockedSynthesisFallbackText(): string {
 	return (
-		"[Clio Coder] loop guard: tool calls were disabled for the rest of this turn, but the reply contained only " +
+		"[CLIO Coder] loop guard: tool calls were disabled for the rest of this turn, but the reply contained only " +
 		"tool-call markup, which cannot run and was removed. The turn stopped without a usable answer."
 	);
 }

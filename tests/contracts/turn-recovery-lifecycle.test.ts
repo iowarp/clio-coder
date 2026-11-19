@@ -227,9 +227,9 @@ test("the overflow notice says Clio refused when its own guard stopped the reque
 	const local = `${LOCAL_CONTEXT_OVERFLOW_PREFIX}: the request would leave 1 output tokens of a 28000-token window (estimated input 27999), below the usable minimum of 3500.`;
 	await recovery.runCompactAndRetry(runtime, "request", new ContextOverflowError(local, new Error(local)));
 	await recovery.runCompactAndRetry(runtime, "request", new ContextOverflowError("maximum context length exceeded"));
-	ok(notices[0]?.startsWith("[Clio Coder] Clio refused this request before sending it"), notices[0]);
+	ok(notices[0]?.startsWith("[CLIO Coder] Clio refused this request before sending it"), notices[0]);
 	ok(!notices[0]?.includes("Server rejected"), notices[0]);
-	ok(notices[1]?.startsWith("[Clio Coder] Server rejected this request"), notices[1]);
+	ok(notices[1]?.startsWith("[CLIO Coder] Server rejected this request"), notices[1]);
 });
 
 test("an OAuth rejection refreshes the sent token once, then retries or ends with the login remedy (#427)", async (t) => {

@@ -398,10 +398,10 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			const refusedLocally = overflow.message.startsWith(LOCAL_CONTEXT_OVERFLOW_PREFIX);
 			deps.emitNotice(
 				refusedLocally
-					? "[Clio Coder] Clio refused this request before sending it: it would leave too little of the context window for a reply; compacting and retrying once."
+					? "[CLIO Coder] Clio refused this request before sending it: it would leave too little of the context window for a reply; compacting and retrying once."
 					: windowUnknown
-						? "[Clio Coder] Server rejected this request for exceeding its context window. The serving limit is unknown; compacting and retrying once. Probe the target or configure its deployment limit to enable proactive compaction."
-						: "[Clio Coder] Server rejected this request for exceeding its context window; compacting and retrying once.",
+						? "[CLIO Coder] Server rejected this request for exceeding its context window. The serving limit is unknown; compacting and retrying once. Probe the target or configure its deployment limit to enable proactive compaction."
+						: "[CLIO Coder] Server rejected this request for exceeding its context window; compacting and retrying once.",
 			);
 			let compacted = false;
 			try {
@@ -416,13 +416,13 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 					reason: compactErr instanceof Error ? compactErr.message : String(compactErr),
 				});
 				deps.emitNotice(
-					`[Clio Coder] compact-on-overflow failed: ${compactErr instanceof Error ? compactErr.message : String(compactErr)}`,
+					`[CLIO Coder] compact-on-overflow failed: ${compactErr instanceof Error ? compactErr.message : String(compactErr)}`,
 				);
 			}
 			if (cancelled()) return;
 			if (!compacted) {
 				deps.emitNotice(
-					`[Clio Coder] context overflow could not be compacted: ${overflow.message}. Use /context compact or reduce the request.`,
+					`[CLIO Coder] context overflow could not be compacted: ${overflow.message}. Use /context compact or reduce the request.`,
 				);
 				return;
 			}
@@ -447,7 +447,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				if (cancelled()) return;
 				const stillOverflowed = detectOverflowFromState(agentRuntime.agent);
 				if (stillOverflowed) {
-					deps.emitNotice(`[Clio Coder] context overflow persisted after compaction: ${stillOverflowed.message}`);
+					deps.emitNotice(`[CLIO Coder] context overflow persisted after compaction: ${stillOverflowed.message}`);
 				} else {
 					sizeAccepted = true;
 				}
@@ -455,7 +455,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				if (cancelled()) return;
 				sizeAccepted = toContextOverflowError(retryErr) === null;
 				deps.emitNotice(
-					`[Clio Coder] context overflow persisted after compaction: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
+					`[CLIO Coder] context overflow persisted after compaction: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
 				);
 			}
 		} finally {

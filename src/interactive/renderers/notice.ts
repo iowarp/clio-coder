@@ -30,7 +30,7 @@ const theme = clioTheme();
 // capturing the whole tag (including inner spaces like `[file read]`) and the
 // remainder as the message body.
 const LEADING_TAG = /^(\[[^\]]+\])([\s\S]*)$/u;
-const PRODUCT_TAG = /^\s*\[Clio Coder\]\s*/u;
+const PRODUCT_TAG = /^\s*\[(?:CLIO|Clio) Coder\]\s*/u;
 
 export type NoticeMark = "info" | "success" | "warning" | "error" | "retry" | "cancelled";
 

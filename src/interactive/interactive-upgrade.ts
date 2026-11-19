@@ -119,7 +119,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 				}
 				if (plan.status === "current") {
 					deps.dismissUpdateHint();
-					deps.notify("success", `Clio Coder ${plan.current} is current.`, "lifecycle:upgrade-current");
+					deps.notify("success", `CLIO Coder ${plan.current} is current.`, "lifecycle:upgrade-current");
 					return;
 				}
 				if (!deps.isIdle()) {
@@ -136,7 +136,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 					const first = prepare(plan);
 					const manager = first?.manager ?? plan.installation.kind;
 					const pendingNotice = () => {
-						const text = `A Clio Coder update for this ${manager} install is already pending; it installs after every session of it quits. Nothing new was started.`;
+						const text = `A CLIO Coder update for this ${manager} install is already pending; it installs after every session of it quits. Nothing new was started.`;
 						deps.notify("info", text, "lifecycle:upgrade-pending");
 						deps.record?.("info", text);
 					};
@@ -145,7 +145,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 						{
 							header: "Upgrade",
 							question:
-								`Upgrade Clio Coder ${plan.current} → ${plan.available}? ` +
+								`Upgrade CLIO Coder ${plan.current} → ${plan.available}? ` +
 								`${manager} replaces this install in place, so it runs only after this session and every other session of this install quit. ` +
 								"Settings, credentials, memory, evidence, and session history stay in their current directories.",
 							options: [
@@ -169,7 +169,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 						others === 0
 							? "No other session of this install is running."
 							: `${others} other session${others === 1 ? " is" : "s are"} still running (${deferred.sessions.join(", ")}); it waits for ${others === 1 ? "it" : "them"} too.`;
-					const text = `Clio Coder ${plan.available} installs with ${manager} after you quit. ${waits}`;
+					const text = `CLIO Coder ${plan.available} installs with ${manager} after you quit. ${waits}`;
 					deps.notify("success", text, "lifecycle:upgrade-deferred");
 					deps.record?.("info", text);
 					return;
@@ -184,7 +184,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 					{
 						header: "Upgrade",
 						question:
-							`Upgrade Clio Coder ${plan.current} → ${plan.available}? ` +
+							`Upgrade CLIO Coder ${plan.current} → ${plan.available}? ` +
 							replacement +
 							"Settings, credentials, memory, evidence, and session history stay in their current directories. " +
 							"After replacement Clio runs pending lifecycle checks, then asks you to restart.",
@@ -208,7 +208,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 				}
 				deps.notify(
 					"info",
-					`Upgrading Clio Coder to ${plan.available}; do not close this process while the package manager is running.`,
+					`Upgrading CLIO Coder to ${plan.available}; do not close this process while the package manager is running.`,
 					"lifecycle:upgrade-running",
 				);
 				const result = await (deps.run ?? runApprovedSelfUpgrade)({
@@ -218,13 +218,13 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 				});
 				deps.signal.throwIfAborted();
 				deps.dismissUpdateHint();
-				const restartNotice = `Clio Coder ${result.to} is installed. Restart before the next turn; your current session is saved and available through /resume.`;
+				const restartNotice = `CLIO Coder ${result.to} is installed. Restart before the next turn; your current session is saved and available through /resume.`;
 				deps.notify("warning", restartNotice, "lifecycle:restart-required", 0);
 				deps.record?.("warn", restartNotice);
 				const restart = await deps.openAskUser([
 					{
 						header: "Restart",
-						question: `Clio Coder ${result.to} installed successfully. Exit now so you can restart on the new version?`,
+						question: `CLIO Coder ${result.to} installed successfully. Exit now so you can restart on the new version?`,
 						options: [
 							{ label: EXIT_NOW, description: "Save and exit; run clio-coder again, then /resume." },
 							{ label: LATER, description: "Keep this process open; the footer keeps the restart notice." },

@@ -30,7 +30,7 @@ import {
 import type { Rigor } from "./rigor.js";
 
 export const FINISH_CONTRACT_ADVISORY_MESSAGE =
-	"[Clio Coder] finish-contract advisory: you changed files this turn without recording validation evidence or a limitation receipt. Report the change as unverified. Run checks only within the operator's authorized scope; this advisory does not authorize tests, scripts, or additional tools.";
+	"[CLIO Coder] finish-contract advisory: you changed files this turn without recording validation evidence or a limitation receipt. Report the change as unverified. Run checks only within the operator's authorized scope; this advisory does not authorize tests, scripts, or additional tools.";
 
 /**
  * Appended to the advisory when the workspace declares checks the turn did not
@@ -49,14 +49,14 @@ export const FINISH_CONTRACT_RUN_CHECKS_PREFIX = " Run checks: ";
 export const FINISH_CONTRACT_RAN_CHANGED_PREFIX = " Ran after the edit: ";
 
 export const FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE =
-	"[Clio Coder] finish-contract advisory: checks passed; behavior coverage unverified. Passing receipts establish the recorded checks, not every changed behavior. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
+	"[CLIO Coder] finish-contract advisory: checks passed; behavior coverage unverified. Passing receipts establish the recorded checks, not every changed behavior. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
 
 /** Checks passed, but a check's last outcome since the last change is red, as the receipt seals it (bt-44). */
 export const FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE =
-	"[Clio Coder] finish-contract advisory: a check failed after the last change; behavior coverage unverified. Its red outcome stands in the receipt beside any passing check. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
+	"[CLIO Coder] finish-contract advisory: a check failed after the last change; behavior coverage unverified. Its red outcome stands in the receipt beside any passing check. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
 
 export const FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE =
-	"[Clio Coder] finish-contract advisory: validation evidence recorded; behavior coverage unverified. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
+	"[CLIO Coder] finish-contract advisory: validation evidence recorded; behavior coverage unverified. This is a reporting advisory; finish without automatically running additional checks. It grants no additional authority.";
 
 /**
  * The recent-window cap (entries since the last user message). Exported so a
@@ -359,7 +359,7 @@ function assessMutationFinishContract(input: FinishContractInput, scope: Assessm
 			return {
 				kind: "engage",
 				reason: "unvalidated_mutation",
-				message: `[Clio Coder] quality policy cannot be assessed: ${loaded.reason}. Report the change as unverified; this notice grants no additional authority.`,
+				message: `[CLIO Coder] quality policy cannot be assessed: ${loaded.reason}. Report the change as unverified; this notice grants no additional authority.`,
 				evidence: [...evidence, ...limitations],
 				mutatedPaths,
 			};
@@ -370,7 +370,7 @@ function assessMutationFinishContract(input: FinishContractInput, scope: Assessm
 			return {
 				kind: "engage",
 				reason: "unvalidated_mutation",
-				message: `[Clio Coder] project quality policy has outstanding checks: ${outstanding.map((finding) => `${finding.rule}/${finding.check}: ${finding.state} (${finding.message})`).join("; ")}. Run checks only within the operator's authorized scope; this notice grants no additional authority.`,
+				message: `[CLIO Coder] project quality policy has outstanding checks: ${outstanding.map((finding) => `${finding.rule}/${finding.check}: ${finding.state} (${finding.message})`).join("; ")}. Run checks only within the operator's authorized scope; this notice grants no additional authority.`,
 				evidence: [...evidence, ...limitations],
 				mutatedPaths,
 				quality,
@@ -389,7 +389,7 @@ function assessMutationFinishContract(input: FinishContractInput, scope: Assessm
 			return {
 				kind: "engage",
 				reason: "unvalidated_mutation",
-				message: `[Clio Coder] High-rigor finish gate: operator acceptance still requires passing validation for: ${missing.join(", ")}. Run each named check or include its exact id in limitation.paths.`,
+				message: `[CLIO Coder] High-rigor finish gate: operator acceptance still requires passing validation for: ${missing.join(", ")}. Run each named check or include its exact id in limitation.paths.`,
 				evidence: [...evidence, ...limitations],
 				mutatedPaths,
 				...(quality.length ? { quality } : {}),

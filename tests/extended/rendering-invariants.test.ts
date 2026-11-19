@@ -2293,15 +2293,15 @@ describe("transcript block grammar", () => {
 		const panel = createChatPanel({ now: () => 1_000 });
 		const notice = (level: "info" | "success" | "warning" | "error", text: string) =>
 			panel.applyEvent({ type: "notice", level, surface: "transcript", text } as never);
-		notice("info", "[Clio Coder] interrupt refused: a dispatch is attached. Queued for the next slot instead.");
+		notice("info", "[CLIO Coder] interrupt refused: a dispatch is attached. Queued for the next slot instead.");
 		notice("warning", "[/context compact] auto-compaction failed: the summary exceeded its budget");
-		notice("error", "[Clio Coder] context overflow persisted after compaction");
+		notice("error", "[CLIO Coder] context overflow persisted after compaction");
 		notice("success", "session saved");
 		// A footer notice is the footer's; the transcript never shows it.
 		panel.applyEvent({ type: "notice", level: "info", surface: "footer", text: "cache may be cold" } as never);
 		const rows = panel.render(40).map(stripTerminalSequences);
 		const plain = rows.join("\n");
-		doesNotMatch(plain, /\[Clio Coder\]|cache may be cold/u);
+		doesNotMatch(plain, /\[CLIO Coder\]|cache may be cold/u);
 		match(plain, /^i interrupt refused: a dispatch is/mu);
 		match(plain, /^! \[\/context compact\] auto-compaction/mu, "a subsystem tag stays");
 		match(plain, /^✗ context overflow persisted after/mu);

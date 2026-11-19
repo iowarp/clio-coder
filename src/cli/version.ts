@@ -40,6 +40,6 @@ export async function runVersionCommand(args: ReadonlyArray<string> = []): Promi
 	const { findPinnedTool } = await import("../domains/toolchain/registry.js");
 	const herdr = findPinnedTool("herdr");
 	const credit = herdr === null ? "" : `Panes powered by herdr ${herdr.version} (${herdr.license})\n`;
-	process.stdout.write(`Clio Coder ${readClioVersionLabel()}\n${credit}`);
+	process.stdout.write(`CLIO Coder ${readClioVersionLabel()}\n${credit}`);
 	return 0;
 }

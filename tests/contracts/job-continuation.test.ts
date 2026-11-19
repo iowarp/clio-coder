@@ -752,7 +752,7 @@ describe("job continuation at yolo (#445)", () => {
 		strictEqual(requests.length, 4);
 		const [first, afterBudget, afterGuard, afterSecondBudget] = requests;
 		strictEqual(first?.notice, undefined);
-		ok(!first?.text.includes("[Clio Coder]"));
+		ok(!first?.text.includes("[CLIO Coder]"));
 		match(afterBudget?.text ?? "", /stopped: it reached the per-turn tool budget/u);
 		ok(!afterBudget?.text.includes("This is continuation"));
 		ok(!afterBudget?.notice?.includes(" of 3"));

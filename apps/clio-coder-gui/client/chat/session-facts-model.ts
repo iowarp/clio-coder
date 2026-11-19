@@ -8,7 +8,7 @@ export function sessionFacts(
 ): { model: string[]; context: string[]; other: string[] } {
 	const facts = { model: [] as string[], context: [] as string[], other: [] as string[] };
 	for (const raw of [...items.filter((item) => item.kind === "notice").map((item) => item.text), ...notices]) {
-		const text = raw.replace(/^\[Clio Coder\]\s*/u, "").trim();
+		const text = raw.replace(/^\[(?:CLIO|Clio) Coder\]\s*/u, "").trim();
 		if (!text) continue;
 		const bucket = /^(?:thinking |This model .*thinking)/iu.test(text)
 			? facts.model

@@ -32,7 +32,7 @@ function describeNewerHome(newer: NewerHome): string {
 		newer.unknownMigrations.length > 0
 			? ` with migrations this build does not know (${newer.unknownMigrations.join(", ")})`
 			: "";
-	return `This home was last used by Clio Coder ${newer.version}${unknown}; you are running ${readClioVersion()} (${process.argv[1] ?? process.execPath}). Run the newer one, or continue at your own risk.`;
+	return `This home was last used by CLIO Coder ${newer.version}${unknown}; you are running ${readClioVersion()} (${process.argv[1] ?? process.execPath}). Run the newer one, or continue at your own risk.`;
 }
 
 /** Whether the user settings name a chat target, read without creating or migrating the home. */
@@ -314,7 +314,7 @@ export async function runClioCommand(
 			// Preserve the established boot failure as the primary error. The lease
 			// has already attempted every restoration step and reached `closed`.
 			process.stderr.write(
-				`Clio Coder: terminal cleanup also failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}\n`,
+				`CLIO Coder: terminal cleanup also failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}\n`,
 			);
 		}
 		throw error;

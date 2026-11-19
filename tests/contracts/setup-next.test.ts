@@ -42,7 +42,7 @@ test("setup --next: nothing found, a key found, and a ready route; it writes not
 	t.after(() => home.restore());
 	signedOutCopilot(home.dir);
 	clearProviderKeys();
-	const head = [`Clio Coder ${readClioVersion()} is installed.`, "Next:  cd <your project> && clio-coder"];
+	const head = [`CLIO Coder ${readClioVersion()} is installed.`, "Next:  cd <your project> && clio-coder"];
 
 	assert.deepEqual(await nextStepLines(noServers), [...head, "       The first launch sets up a model."]);
 	assert.equal(existsSync(settingsPath()), false, "setup --next must not create the home's settings");

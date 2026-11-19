@@ -602,7 +602,7 @@ describe("engine lifecycle: prepareNextTurn runs only before another assistant t
 	it("closes a run through agent_end when preparation throws", async () => {
 		const run = buildRun([toolTurn("call-1", { value: "one" }), finalTurn()], {
 			prepare: () => {
-				throw new Error("[Clio Coder] post-tool context guard stopped continuation before provider call");
+				throw new Error("[CLIO Coder] post-tool context guard stopped continuation before provider call");
 			},
 		});
 		await run.agent.prompt("go");

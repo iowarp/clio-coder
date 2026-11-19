@@ -734,7 +734,7 @@ it("drv-cf3a D-A: a protected read larger than the window ends the turn once, na
 		);
 		strictEqual(stops.length, 1, "one stop, no retry");
 		ok(
-			/^\[Clio Coder\] This turn stopped: .*The read bignotes\/manual\.md result alone is 140000 characters/.test(
+			/^\[CLIO Coder\] This turn stopped: .*The read bignotes\/manual\.md result alone is 140000 characters/.test(
 				stops[0] ?? "",
 			),
 			stops[0],

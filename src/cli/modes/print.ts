@@ -1345,7 +1345,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			// A reminder is written to the model; the operator gets the one-line gist the TUI shows.
 			const text =
 				event.source === "reminder"
-					? `reminder to the model: ${reminderGist(event.text.replace(/^\s*\[Clio Coder\]\s*/u, ""))}`
+					? `reminder to the model: ${reminderGist(event.text.replace(/^\s*\[(?:CLIO|Clio) Coder\]\s*/u, ""))}`
 					: event.text;
 			process.stderr.write(`clio-coder run: ${redactUrlCredentials(text)}\n`);
 		}

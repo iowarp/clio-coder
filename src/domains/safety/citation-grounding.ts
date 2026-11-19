@@ -37,7 +37,7 @@ import { mutationPathsForTool } from "./finish-contract.js";
 
 export const CITATION_GROUNDING_REGISTRATION_ID = "assessor.citation-grounding";
 /** Opens the check's reminder, which also reaches the transcript as a notice. */
-export const CITATION_CHECK_PREFIX = "[Clio Coder] Citation check:";
+export const CITATION_CHECK_PREFIX = "[CLIO Coder] Citation check:";
 
 /** How many unbacked citations one nudge names before it counts the rest. */
 const NAMED_CITATION_LIMIT = 8;

@@ -98,7 +98,7 @@ function buildDetachedBatchWakeMessage(
 	running: ReadonlyArray<DetachedBatchNudgeView>,
 	decisions: ReadonlyArray<DetachedBatchDecision> = [],
 ): string {
-	const parts = ["[Clio Coder] Detached dispatch work changed while this session was idle."];
+	const parts = ["[CLIO Coder] Detached dispatch work changed while this session was idle."];
 	if (ready.length > 0)
 		parts.push(
 			`${ready.length} batch(es) settled:\n` +

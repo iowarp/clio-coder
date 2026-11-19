@@ -570,7 +570,7 @@ test("a replayed receipt states the duration, cold-cache reasons and end time th
 });
 
 test("a middleware reminder reads the same live and on replay, and a skill activation adds no line", () => {
-	const message = "[Clio Coder] This turn used 9+ read-only exploration calls without a successful Scout dispatch.";
+	const message = "[CLIO Coder] This turn used 9+ read-only exploration calls without a successful Scout dispatch.";
 	const rows = (panel: ReturnType<typeof createChatPanel>) =>
 		panel
 			.render(60)

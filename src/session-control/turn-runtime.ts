@@ -129,7 +129,7 @@ import type { AgentRuntime, ChatLoopTarget, PreInvocationStage, TurnRuntimeState
 
 const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
 /** The reason a reply cut off by shutdown carries in place of the transport's abort text (bt-26). */
-const SHUTDOWN_STOP_REASON = "[Clio Coder] stopped the request because Clio Coder shut down before it finished.";
+const SHUTDOWN_STOP_REASON = "[CLIO Coder] stopped the request because CLIO Coder shut down before it finished.";
 type StreamAdmission = NonNullable<NonNullable<Parameters<typeof createEngineAgent>[0]>["beforeStreamRequest"]>;
 type AdmissionHold = { waitedOn?: "budget"; inputTokens?: number; anchored?: boolean };
 type MiddlewareChoice = ReturnType<MiddlewareToolChoiceControl["current"]>;
@@ -262,13 +262,13 @@ function coldModelNotice(
 	if (residency === "loading") {
 		return {
 			key: `${targetId}|${wireModelId}|loading`,
-			message: `[Clio Coder] ${wireModelId} is still loading on ${targetId}; the first reply waits for it.`,
+			message: `[CLIO Coder] ${wireModelId} is still loading on ${targetId}; the first reply waits for it.`,
 		};
 	}
 	if (residency !== "absent") return null;
 	return {
 		key: `${targetId}|${wireModelId}|unloaded`,
-		message: `[Clio Coder] ${wireModelId} is not resident on ${targetId}; the first request loads it, which can take a minute.`,
+		message: `[CLIO Coder] ${wireModelId} is not resident on ${targetId}; the first request loads it, which can take a minute.`,
 	};
 }
 
@@ -496,7 +496,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		if (!resolved.ok) {
 			const failure = resolved.diagnostics.find((entry) => entry.severity === "error") ?? resolved.diagnostics[0];
 			throw new TurnAdmissionError(
-				`[Clio Coder] ${failure?.message ?? "orchestrator target resolution failed"}`,
+				`[CLIO Coder] ${failure?.message ?? "orchestrator target resolution failed"}`,
 				failure?.code ?? "admission-failed",
 			);
 		}
@@ -519,7 +519,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			const key = `${targetId}|${wireModelId}|${message}`;
 			if (announcedResolutionWarnings.has(key)) continue;
 			announcedResolutionWarnings.add(key);
-			deps.emitNotice(`[Clio Coder] ${message}`);
+			deps.emitNotice(`[CLIO Coder] ${message}`);
 		}
 		return {
 			target: resolved.target.target,
@@ -673,7 +673,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		try {
 			cleanupEngineSessionResources(sessionId);
 		} catch (err) {
-			deps.emitNotice(`[Clio Coder] session resource cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
+			deps.emitNotice(`[CLIO Coder] session resource cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	};
 
@@ -717,7 +717,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			context.emitContextWindowWarningTransition(target.runtimeResolution?.contextWindowDetails?.warning ?? null);
 		if (!deps.knownTargets().has(target.target.id)) {
 			throw new TurnAdmissionError(
-				`[Clio Coder] orchestrator target=${target.target.id} unknown. Run \`clio-coder targets\` to see configured targets.`,
+				`[CLIO Coder] orchestrator target=${target.target.id} unknown. Run \`clio-coder targets\` to see configured targets.`,
 				"target-unknown",
 			);
 		}
@@ -1814,7 +1814,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// One line states the limit where it applies, instead of one failed call per call (bt-39 a).
 				if (cutOff.length > 0)
 					deps.emitNotice(
-						`[Clio Coder] the response hit the output token limit with ${cutOff.length} tool call${cutOff.length === 1 ? "" : "s"} in it; none ran, since their arguments may be cut off, and the model is asked to re-issue them.`,
+						`[CLIO Coder] the response hit the output token limit with ${cutOff.length} tool call${cutOff.length === 1 ? "" : "s"} in it; none ran, since their arguments may be cut off, and the model is asked to re-issue them.`,
 						"warning",
 					);
 			}
@@ -1987,7 +1987,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					gatewayRouting !== null &&
 					((gatewayRouting.attemptedFallbacks ?? 0) > 0 || (gatewayRouting.attemptedRetries ?? 0) > 0)
 				) {
-					deps.emitNotice(`[Clio Coder] ${gatewayRoutingObservationLabel(gatewayRouting)}`);
+					deps.emitNotice(`[CLIO Coder] ${gatewayRoutingObservationLabel(gatewayRouting)}`);
 				}
 				// The estimate goes to the call's settlement, where the read model folds it; it never rides on the message,
 				// so no reader sums it beside the provider's usage (#423, #430, #434).
@@ -2165,7 +2165,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							hasStructuredToolCall: hasStructuredToolCall(assistantEvent.partial),
 						});
 						if (assessment.kind === "loop") {
-							state.toolProseAbortReason = `[Clio Coder] aborted local model turn: ${assessment.reason}.`;
+							state.toolProseAbortReason = `[CLIO Coder] aborted local model turn: ${assessment.reason}.`;
 							localRuntime.agent.abort();
 							deps.emitNotice(state.toolProseAbortReason);
 						}

@@ -242,7 +242,7 @@ describe("surface capture", () => {
 			const requests = server.requests.map(wireElements);
 			// The system prompt is recompiled per process; the conversation is what the ledger rebuilds.
 			const conversation = requests.map((elements) => elements.filter((element) => !element.startsWith("system:")));
-			const isInsert = (element: string) => element.startsWith("user:<system-reminder>\n[Clio Coder] Task board");
+			const isInsert = (element: string) => element.startsWith("user:<system-reminder>\n[CLIO Coder] Task board");
 			const liveAt = conversation.findIndex((elements) => elements.some(isInsert));
 			ok(liveAt > 0, "the nudge's insert reached the live request");
 			const live = conversation[liveAt] ?? [];
