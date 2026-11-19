@@ -1430,7 +1430,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	const rawTurnPrefix = turnPrefix.length > 0 ? input.entries.slice(...prefixRange) : [];
 	const previousContextEntries = priorCompactionContextEntries(entries, prevCompactionIndex);
 	const rawPriorSuffix = priorCompactionContextEntries(input.entries, prevCompactionIndex).slice(1);
-	const previousContextText = serializeConversation(previousContextEntries);
+	const previousContextText = serializeConversation(previousContextEntries, seenBy(entries, previousContextEntries));
 	const compactedEntries = [
 		...priorCompactionContextEntries(input.entries, prevCompactionIndex),
 		...input.entries.slice(boundaryStart, cut.firstKeptEntryIndex),
@@ -1576,11 +1576,12 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			? Math.floor((summaryWindow - Math.min(maxTokens ?? summaryRoom, Math.floor(summaryWindow / 2))) * 0.8)
 			: 0;
 	const serializeWithinBudget = (slice: readonly SessionEntry[], build: (text: string) => string): string => {
-		const capped = serializeConversation(slice);
+		const seen = seenBy(entries, slice);
+		const capped = serializeConversation(slice, seen);
 		if (summaryInputBudget <= 0) return capped;
 		const price = (text: string) =>
 			estimateAgentContextTokens({ systemPrompt, messages: [buildUserMessage(build(text))] });
-		const whole = serializeConversation(slice, { toolResultMaxChars: Number.POSITIVE_INFINITY });
+		const whole = serializeConversation(slice, { ...seen, toolResultMaxChars: Number.POSITIVE_INFINITY });
 		if (price(whole) <= summaryInputBudget) return whole;
 		if (whole === capped || price(capped) >= summaryInputBudget) {
 			// Smallest tool-result cap still does not fit: one oversized user or
@@ -1590,7 +1591,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			let clipped = capped;
 			while (messageMaxChars > MESSAGE_MIN_CHARS) {
 				messageMaxChars = Math.max(MESSAGE_MIN_CHARS, Math.floor(messageMaxChars / 2));
-				clipped = serializeConversation(slice, { messageMaxChars });
+				clipped = serializeConversation(slice, { ...seen, messageMaxChars });
 				if (price(clipped) <= summaryInputBudget) return clipped;
 			}
 			return clipped;
@@ -1599,10 +1600,10 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		let over = whole.length;
 		while (over - fits > 1) {
 			const cap = Math.floor((fits + over) / 2);
-			if (price(serializeConversation(slice, { toolResultMaxChars: cap })) <= summaryInputBudget) fits = cap;
+			if (price(serializeConversation(slice, { ...seen, toolResultMaxChars: cap })) <= summaryInputBudget) fits = cap;
 			else over = cap;
 		}
-		return serializeConversation(slice, { toolResultMaxChars: fits });
+		return serializeConversation(slice, { ...seen, toolResultMaxChars: fits });
 	};
 	const represent = (
 		slice: readonly SessionEntry[],
@@ -1827,6 +1828,17 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		...(usage !== undefined ? { usage } : {}),
 		...(skillContext !== undefined ? { skillContext } : {}),
 		...(userContext !== undefined ? { userContext } : {}),
+	};
+}
+
+/** A slice cut before the assistant message that followed it still holds results a model call read. */
+function seenBy(
+	entries: ReadonlyArray<SessionEntry>,
+	slice: ReadonlyArray<SessionEntry>,
+): { assistantFollows: boolean } {
+	const last = slice.length > 0 ? entries.lastIndexOf(slice[slice.length - 1] as SessionEntry) : -1;
+	return {
+		assistantFollows: last >= 0 && entries.slice(last + 1).some((e) => e.kind === "message" && e.role === "assistant"),
 	};
 }
 

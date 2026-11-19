@@ -103,4 +103,28 @@ describe("split-turn checkpoint input keeps a whole read the summarizer can fit"
 		doesNotMatch(text, /x \* 83 \+ 25/);
 		match(text, /more characters not shown here; the assistant read this result in full/);
 	});
+
+	// bt3 RV-G: one oversized read was summarized before any model call saw it, under a marker
+	// and template saying the assistant read it in full, and the answer was made up.
+	it("marks a read no assistant message followed as clipped before it was read", async () => {
+		const resolved = faux.getModel("summary");
+		ok(resolved);
+		let text = "";
+		await compact({
+			entries: chain([
+				message("ask", "user", { text: "Read src/mod_c.ts in full." }),
+				...read("c", "mod_c", modC.repeat(60)),
+				{ kind: "custom", turnId: "note", parentTurnId: null, timestamp, customType: "fixture-note" },
+			]),
+			model: { ...resolved, contextWindow: 65_536, maxTokens: 4096 },
+			keepRecentTokens: 1000,
+			requireFit: true,
+			summarize: async ({ userText }) => {
+				text += userText;
+				return { text: syntheticCompactionSummary("Read mod_c") };
+			},
+		});
+		match(text, /more characters not shown here; clipped before the assistant read it, so a narrow re-read is expected/);
+		doesNotMatch(text, /read this result in full|was read in full by the assistant/);
+	});
 });
