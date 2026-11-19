@@ -30,7 +30,7 @@ export function foldTriggerReserve(input: FoldTriggerReserveInput): number {
 }
 
 /** Twice a reasoning route's default 26,214 summary reserve: below this known window A1 bounds the trigger's share. */
-const SMALL_WINDOW_TOKENS = 52_428;
+export const SMALL_WINDOW_TOKENS = 52_428;
 
 export interface EvictionPressureInput {
 	/** The automatic checkpoint; `/compact`, overflow recovery and the worker guard are not. */

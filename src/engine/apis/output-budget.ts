@@ -2,6 +2,7 @@ import type { Api, AssistantMessage, Context, Model, StreamOptions } from "@eare
 import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
 import { estimateMessageTokens, estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { CLIO_MIN_MAX_OUTPUT_TOKENS } from "../../core/context-floor.js";
+import { SMALL_WINDOW_TOKENS } from "../../domains/context/fold/pressure.js";
 import { ceilChars, estimateAgentMessageTokens, toolSchemaChars } from "../../domains/session/context-accounting.js";
 import { normalizeContext, resolvedRequestContext } from "../context.js";
 
@@ -140,7 +141,9 @@ export function configuredMaxOutputTokens(): number | null {
  * Tokens a preflight context check should hold back for the response: the
  * smaller of the model's advertised output limit and the configured output
  * budget, falling back to the product default when no budget is configured.
- * The default never claims more than half of the request's window.
+ * The default never claims more than half of the request's window, and on a
+ * transport that does not clamp at the wire it is bounded further by
+ * {@link constantReserveBound}.
  * The safety margin is not added to the full allowance: at request time
  * {@link remainingContextMaxTokens} subtracts it from the window and degrades
  * the output budget gracefully, so a hard preflight reservation of
@@ -158,7 +161,25 @@ export function resolveReservedOutputTokens(
 	// Preflight must use that same allocation, rather than demanding room for
 	// the entire configured maximum (which may equal the context window).
 	// Other transports retain their existing reservation contract.
-	return request && clampsOutputAtWire(request.api) ? admissionReserve(ceiling, request) : ceiling;
+	if (request && clampsOutputAtWire(request.api)) return admissionReserve(ceiling, request);
+	return globalDefaultMaxOutputTokens > 0 ? ceiling : Math.min(ceiling, constantReserveBound(request?.contextWindow));
+}
+
+/** The floor of {@link constantReserveBound}: half of the 32,768 product default. */
+const MIN_BOUNDED_RESERVE_TOKENS = 16_384;
+
+/**
+ * The most an unconfigured reserve claims on a transport that does not clamp at
+ * the wire, from 52,428 tokens up: a quarter of the window, never under 16,384.
+ * Half a 64K window held for output put the trigger and the fit line at 32,768,
+ * so autocompact ran on almost every turn (bt-48-12). The wire still asks for the
+ * room left, so a request admitted against this reserve is never sent asking for
+ * more than the window holds. Smaller windows keep the A5 rules.
+ */
+function constantReserveBound(window: number | undefined): number {
+	return window !== undefined && Number.isFinite(window) && window >= SMALL_WINDOW_TOKENS
+		? Math.max(MIN_BOUNDED_RESERVE_TOKENS, Math.floor(window / 4))
+		: Number.POSITIVE_INFINITY;
 }
 
 /** Smallest share of the serving window a wire-clamped request must still leave for the response. */

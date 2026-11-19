@@ -2806,23 +2806,25 @@ describe("compaction trigger output reservation", () => {
 				strictEqual(history.threshold, auto.threshold);
 			}
 		}
-		// The fit line on an uncapped route, whose turn reserve is min(32,768, W / 2) (bt3 m2a, ContextFold A5). Under
-		// 52,428 fit counts 4,096 + Pi's 4,096 margin, so it sits above the trigger; from there both are as today.
+		// The fit line on an uncapped route, whose turn reserve is min(32,768, W / 2) (bt3 m2a, ContextFold A5), and from
+		// 52,428 at most max(16,384, W / 4) (bt-48-12). Under 52,428 fit counts 4,096 + Pi's 4,096 margin, so it sits
+		// above the trigger; from there fit counts the turn reserve.
 		const uncapped = { ...model, id: "a5-uncapped", api: "anthropic-messages", maxTokens: 64_000 };
 		const fitTable: Array<[window: number, trigger: number, fitLine: number, configured?: number]> = [
 			[28_000, 14_000, 28_000 - 8_192], // the fit line was 14,000
 			[32_768, 16_384, 32_768 - 8_192], // was 16,384
 			[40_000, 20_000, 40_000 - 8_192], // was 20,000
 			[28_000, 8_000, 8_000, 20_000], // a configured chat.maxOutputTokens stays a hard reserve, trigger and fit
-			[64_000, 32_000, 32_000],
-			[128_000, 128_000 - 32_768, 128_000 - 32_768],
+			[64_000, 64_000 - 26_214, 64_000 - 16_384], // trigger and fit line were 32,000
+			[128_000, 96_000, 96_000], // were 128,000 - 32,768
 			[200_000, 0.8 * 200_000, 200_000 - 32_768],
 		];
 		for (const [window, expected, fitLine, configured] of fitTable) {
 			setGlobalDefaultMaxOutputTokens(configured ?? 0);
 			const turnReserve = requestOutputReserve(uncapped, uncapped.maxTokens, window, 0);
 			setGlobalDefaultMaxOutputTokens(0);
-			strictEqual(turnReserve, configured ?? Math.min(32_768, window / 2), `${window}: turn reserve`);
+			const bound = window < 52_428 ? window / 2 : Math.max(16_384, window / 4);
+			strictEqual(turnReserve, configured ?? Math.min(32_768, bound), `${window}: turn reserve`);
 			const reserve = foldTriggerReserve({
 				window,
 				summaryReserve: () => summaryOutputReserve(uncapped, { summaryOnChatRoute: true }),
