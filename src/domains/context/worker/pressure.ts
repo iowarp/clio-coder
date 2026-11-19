@@ -4,8 +4,7 @@ import type { AgentMessage } from "../../../engine/types.js";
 import { effectiveToolCall } from "../../../tools/surface.js";
 import { estimateAgentContextBreakdown, estimateAgentMessageTokens } from "../../session/context-accounting.js";
 import type { EvictedItem } from "../../session/entries.js";
-import type { FoldCheckpoint, FoldRouteFacts } from "../fold/contract.js";
-import { supersededStageApplies } from "../fold/contract.js";
+import type { FoldCheckpoint } from "../fold/contract.js";
 import { withinRearmBand } from "../working-set/checkpoint.js";
 import { DEFAULT_WORKING_SET_SETTINGS } from "../working-set/defaults.js";
 import type { MarkerReason } from "../working-set/marker.js";
@@ -53,12 +52,6 @@ const OBSERVATION_FLOOR_CHARS = 1000;
 const STEP_OVERFLOW_ADVICE =
 	"This step's results did not fit the model's context window. Read only the part you need, with offset and limit, one large source per step.";
 
-/** D1: the superseded stage stays off on workers; enabled, it would still need an uncached worker route. */
-const WORKER_SUPERSEDED_STAGE = false;
-function workerSupersededStageApplies(route: FoldRouteFacts): boolean {
-	return WORKER_SUPERSEDED_STAGE && supersededStageApplies(route);
-}
-
 export type WorkerEvictionReason = Extract<
 	MarkerReason,
 	"age_horizon" | "thinking_turn_closed" | "step_overflow" | "unseen_overflow"
@@ -69,8 +62,6 @@ export type WorkerEvictedItem = Omit<EvictedItem, "reason"> & { reason: WorkerEv
 export interface WorkerEvictionRecord {
 	id: string;
 	checkpoint: FoldCheckpoint;
-	/** The stage id: `step_overflow` when the record took a protected read for fit, seen or unseen. */
-	policyId: "working_set" | "step_overflow";
 	evicted: WorkerEvictedItem[];
 	tokensBefore: number;
 	tokensAfter: number;
@@ -81,7 +72,8 @@ export interface WorkerGuardOptions {
 	aliasFloor?: number;
 	/** Where `archive` keeps a message: the marker's `offload` pointer, readable without the context tool. */
 	archivePath?: (message: AgentMessage) => string;
-	route?: FoldRouteFacts;
+	/** The route facts the `context.fold` event names; the guard reads nothing else from them. */
+	route?: ContextFoldPayload["route"];
 	onDecision?: (decision: ContextFoldPayload) => void;
 }
 
@@ -124,10 +116,7 @@ export function createWorkerContextGuard(
 ): WorkerContextGuard {
 	const projected = new Map<number, { digest: string; message: AgentMessage }>();
 	const records: WorkerEvictionRecord[] = [];
-	const route: ContextFoldPayload["route"] = {
-		...(options.route?.modelTier !== undefined ? { modelTier: options.route.modelTier } : {}),
-		...(options.route?.promptCaching !== undefined ? { promptCaching: options.route.promptCaching } : {}),
-	};
+	const route = options.route ?? {};
 	let aliasSequence = options.aliasFloor ?? 0;
 	let calls = 0;
 	let firstInputLength = 0;
@@ -356,9 +345,7 @@ export function createWorkerContextGuard(
 				return null;
 			}
 		} else {
-			// S0 would select first where its gate admits it; D1 holds it off, so no worker record gains a superseded item.
-			if (workerSupersededStageApplies(options.route ?? {}))
-				stages.push({ stage: "superseded", outcome: "none", reason: "unavailable" });
+			// D1: the superseded stage (S0) stays off on workers, so no worker record gains a superseded item.
 			const estimate = count();
 			const held =
 				estimate > trigger &&
@@ -390,9 +377,6 @@ export function createWorkerContextGuard(
 		const record: WorkerEvictionRecord = {
 			id: `eviction-${records.length + 1}`,
 			checkpoint,
-			policyId: items.some((item) => item.reason === "step_overflow" || item.reason === "unseen_overflow")
-				? "step_overflow"
-				: "working_set",
 			evicted: items,
 			tokensBefore: Math.max(0, Math.round(tokensBefore)),
 			tokensAfter: Math.max(0, Math.round(measure())),
