@@ -1123,34 +1123,13 @@ describe("W1 and W2 (F6 -> CF-4): host inserts are records", () => {
 		return start < 0 || end < start ? [] : elements.slice(start, end + 1);
 	};
 
-	it("W1: mid-turn inserts survive a rebuild and a reopen", { timeout: 60_000 }, async (t) => {
-		const server = await startCaptureServer(script);
-		t.after(() => server.close());
-		const { harness, pins, id } = await liveTurn(server);
-		const live = inserts(server.requests.at(-1));
-		strictEqual(live.length, 2, "the live history holds both inserts");
-		try {
-			await rebuild(harness);
-		} finally {
-			await harness.close();
-		}
-		deepStrictEqual(inserts(server.requests.at(-1)), live, "a rebuild keeps both");
-		const reopened = chatHarness({ server, pinnedContext: () => pins });
-		try {
-			reopened.reopen(id);
-			await reopened.submit("after a reopen");
-		} finally {
-			await reopened.close();
-		}
-		deepStrictEqual(inserts(server.requests.at(-1)), live, "a reopen keeps both");
-	});
-
-	it("W2: the kept element sequence with inserts is the same live, rebuilt and reopened", {
+	it("W1, W2: the kept element sequence with both inserts is the same live, rebuilt and reopened", {
 		timeout: 60_000,
 	}, async (t) => {
 		const server = await startCaptureServer(script);
 		t.after(() => server.close());
 		const { harness, pins, id } = await liveTurn(server);
+		strictEqual(inserts(server.requests.at(-1)).length, 2, "the live history holds both inserts");
 		const expected = kept(server.requests.at(-1));
 		ok(expected.length > 4, "the live request carries the insert turn");
 		try {

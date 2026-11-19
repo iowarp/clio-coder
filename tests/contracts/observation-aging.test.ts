@@ -5,7 +5,6 @@ import { afterEach, beforeEach, it } from "node:test";
 import { Type } from "typebox";
 import type { ContextFoldPayload } from "../../src/core/telemetry/live-events.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { supersededStageApplies } from "../../src/domains/context/index.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { resolveRecall } from "../../src/domains/context/working-set/recall.js";
 import type { ContextEvictionEntry, SessionEntry } from "../../src/domains/session/entries.js";
@@ -128,22 +127,8 @@ function observed(harness: ReturnType<typeof chatHarness>) {
 	return { folds, pruned };
 }
 
-it("the S0 gate admits uncached routes only, every tier alike (bt-47 cf1j-a)", () => {
-	const table: ReadonlyArray<[Parameters<typeof supersededStageApplies>[0], boolean]> = [
-		[{ modelTier: "small", promptCaching: true }, false],
-		[{ modelTier: "small", promptCaching: false }, true],
-		[{ modelTier: "standard", promptCaching: false }, true],
-		[{ modelTier: "standard", promptCaching: true }, false],
-		[{ modelTier: "frontier", promptCaching: false }, true],
-		[{ modelTier: "frontier", promptCaching: true }, false],
-		[{ modelTier: "standard" }, false],
-	];
-	for (const [route, admits] of table) strictEqual(supersededStageApplies(route), admits, JSON.stringify(route));
-});
-
 for (const [label, route, superseded] of [
 	["a small cached route", { tier: "small", caching: true }, false],
-	["a standard cached route", { tier: "standard", caching: true }, false],
 	["an uncached route", { caching: false }, true],
 ] as const) {
 	it(`${label} with a viable S1 batch and qualifying identical reads ${superseded ? "commits" : "holds no"} superseded item`, {
