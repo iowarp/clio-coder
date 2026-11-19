@@ -13,7 +13,6 @@
  * broke either drops S0 and plans S1 alone, once.
  */
 
-import { createHash } from "node:crypto";
 import type {
 	EvictedState,
 	EvictionCandidate,
@@ -133,26 +132,4 @@ export function planFold(input: FoldPlanInput): FoldPlan {
 		superseded: { outcome: "planned", items: kept.length, bytes: keptBytes },
 		structural: kept.length < items.length,
 	};
-}
-
-export interface FoldAttemptFacts {
-	turn: string | null;
-	leaf: string | null;
-	view: WorkingSetView;
-	/** The live history's digest: what the request carries, without its rows. */
-	history: string;
-	[key: string]: unknown;
-}
-
-/**
- * The identity of what a checkpoint was asked: the turn and leaf, the view's eviction state, the live history's
- * digest, and whatever else the caller names (estimate, settings, pending prompt). Equal keys plan the same record.
- */
-export function foldAttemptKey(facts: FoldAttemptFacts): string {
-	const { view, ...rest } = facts;
-	const identity = {
-		...rest,
-		view: [[...view.evicted.keys()], view.evictionEvents, view.lastEvictionTurnId, view.recalls],
-	};
-	return createHash("sha256").update(JSON.stringify(identity)).digest("hex");
 }

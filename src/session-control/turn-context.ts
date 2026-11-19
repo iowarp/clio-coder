@@ -97,7 +97,6 @@ import { foldTriggerReserve } from "../domains/context/fold/pressure.js";
 import { withinRearmBand } from "../domains/context/working-set/checkpoint.js";
 import type { planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
-import { foldAttemptKey } from "../domains/context/working-set/plan.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
 import type { ClassifyCall } from "../domains/context/working-set/superseded.js";
 import { compactionCut } from "../domains/context/working-set/visible.js";
@@ -2101,25 +2100,35 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 			return openedDecision;
 		};
+		// The fields the eviction stage and the legacy adoption share; `superseded` stays explicit at each call.
+		const foldInput = (session: SessionContract, estimate: LiveContextEstimate) => ({
+			agentRuntime,
+			decision: openDecision(),
+			session,
+			settings,
+			compactionThreshold,
+			estimate,
+			beforeSnapshotId: currentContextSnapshot?.snapshotId ?? null,
+			trigger,
+			originSession,
+			pendingUserText,
+			handoff,
+			classify: classifyCall,
+		});
+		const stageRoute = {
+			compactionWindow,
+			workingSetTarget,
+			shouldCompact: route.shouldCompact,
+			triggerFraction: route.triggerFraction,
+		};
 		/** A v6 session's aging stubs, met once per session at its first checkpoint (SPEC §1.5). */
 		const adoptOnce = (estimate: LiveContextEstimate): void => {
 			const session = deps.session;
 			if (originSession === undefined || legacyCheckedFor === originSession || !session?.current()) return;
 			legacyCheckedFor = originSession;
 			contextFold.adoptLegacyAging({
-				agentRuntime,
-				decision: openDecision(),
-				session,
-				settings,
-				compactionThreshold,
+				...foldInput(session, estimate),
 				superseded: supersededStageApplies(agentRuntime.runtimeResolution),
-				estimate,
-				beforeSnapshotId: currentContextSnapshot?.snapshotId ?? null,
-				trigger,
-				originSession,
-				pendingUserText,
-				handoff,
-				classify: classifyCall,
 			});
 		};
 		/** S0 alone, where the checkpoint goes no further: it commits once its floor is met, under the trigger too. */
@@ -2134,34 +2143,21 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			};
 			adoptOnce(current);
 			if (!supersededApplies) return settle();
-			const key = foldAttemptKey({
-				turn: state.activeUserTurnId || null,
-				leaf: state.lastTurnId ?? null,
-				view: foldWorkingSet(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined),
-				history: observeHistory(agentRuntime).digest(),
-			});
+			// What this checkpoint was asked; an equal key plans the same record, so a declined one is not re-planned.
+			const view = foldWorkingSet(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+			const key = sha256Json([
+				state.activeUserTurnId || null,
+				state.lastTurnId ?? null,
+				[[...view.evicted.keys()], view.evictionEvents, view.lastEvictionTurnId, view.recalls],
+				observeHistory(agentRuntime).digest(),
+			]);
 			if (key === supersededAttemptKey) return settle();
 			const stage = contextFold.runEvictionStage({
-				agentRuntime,
-				decision: openDecision(),
-				session,
-				settings,
-				estimate: current,
-				verdict: route.shouldCompact(current.tokens),
-				beforeSnapshotId: currentContextSnapshot?.snapshotId ?? null,
+				...foldInput(session, current),
+				...stageRoute,
 				requiredFit: false,
-				compactionWindow,
-				compactionThreshold,
-				workingSetTarget,
-				trigger,
-				originSession,
-				pendingUserText,
-				handoff,
-				shouldCompact: route.shouldCompact,
 				structural: false,
 				superseded: true,
-				classify: classifyCall,
-				triggerFraction: route.triggerFraction,
 			});
 			if (!stage.committed) supersededAttemptKey = key;
 			return settle();
@@ -2313,32 +2309,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		if (pressureEstimate) {
 			const estimate = pressureEstimate;
-			const verdict = route.shouldCompact(estimate.tokens);
 			const session = deps.session;
 
 			if (session?.current()) {
 				adoptOnce(estimate);
 				const stage = contextFold.runEvictionStage({
-					agentRuntime,
-					decision,
-					session,
-					settings,
-					estimate,
-					verdict,
-					beforeSnapshotId: currentContextSnapshot?.snapshotId ?? null,
+					...foldInput(session, estimate),
+					...stageRoute,
 					requiredFit,
-					compactionWindow,
-					compactionThreshold,
-					workingSetTarget,
-					trigger,
-					originSession,
-					pendingUserText,
-					handoff,
-					shouldCompact: route.shouldCompact,
 					structural: true,
 					superseded: supersededApplies,
-					classify: classifyCall,
-					triggerFraction: route.triggerFraction,
 				});
 				if (stage.acted) preSummaryStageActed = true;
 				else if (stage.committed) compactionConclusion = "superseded tool results evicted";
