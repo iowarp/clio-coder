@@ -70,7 +70,7 @@ export function createMusicSession(options: MusicSessionOptions): MusicOperation
 		// Off is the default, so the remedy names where to turn it on, not only the key.
 		if (!options.getSettings().enabled)
 			missing.push(
-				"it is off; turn on Music pane in /settings (Appearance, Panes) or set integrations.music.enabled: true",
+				"it is off; turn on Music pane in /settings (Workspace, Panes) or set integrations.music.enabled: true",
 			);
 		if (!options.mux.available()) {
 			missing.push(`herdr panes are not available (${options.mux.detection().reason})`);
