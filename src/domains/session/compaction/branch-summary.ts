@@ -32,6 +32,8 @@ export interface SerializeConversationOptions {
 	toolResultMaxChars?: number;
 	/** Per-message char cap for user and assistant text; unset keeps every message whole. */
 	messageMaxChars?: number;
+	/** An assistant message follows these entries on the path, so a call already read every tool result in them. */
+	assistantFollows?: boolean;
 }
 
 export interface PreparedBranchEntries {
@@ -41,9 +43,12 @@ export interface PreparedBranchEntries {
 	post: SessionEntry[];
 }
 
-function truncate(text: string, max: number): string {
+function truncate(text: string, max: number, seen: boolean): string {
 	if (text.length <= max) return text;
-	return `${text.slice(0, max)}\n\n[... ${text.length - max} more characters not shown here; the assistant read this result in full]`;
+	const read = seen
+		? "the assistant read this result in full"
+		: "clipped before the assistant read it, so a narrow re-read is expected";
+	return `${text.slice(0, max)}\n\n[... ${text.length - max} more characters not shown here; ${read}]`;
 }
 
 /** Keeps a message's head and tail around an omission marker; the ledger keeps the raw turn. */
@@ -163,8 +168,12 @@ export function serializeConversation(
 	const bodyMax = options.toolResultMaxChars ?? TOOL_RESULT_MAX_CHARS;
 	const messageMax = options.messageMaxChars;
 	const renderedCalls = assistantCallIds(entries);
+	// A result after the last assistant message reached no model call, unless the caller knows one follows the slice.
+	const seenBefore = options.assistantFollows
+		? entries.length
+		: entries.map((entry) => entry.kind === "message" && entry.role === "assistant").lastIndexOf(true);
 	const parts: string[] = [];
-	for (const entry of entries) {
+	for (const [index, entry] of entries.entries()) {
 		if (entry.kind === "message") {
 			const text = messageText(entry).trim();
 			switch (entry.role) {
@@ -187,7 +196,7 @@ export function serializeConversation(
 					break;
 				}
 				case "tool_result":
-					parts.push(`[Tool result]: ${truncate(toolResultText(entry).trim(), bodyMax)}`);
+					parts.push(`[Tool result]: ${truncate(toolResultText(entry).trim(), bodyMax, index < seenBefore)}`);
 					break;
 				case "system":
 					if (text.length === 0) break;
@@ -204,7 +213,7 @@ export function serializeConversation(
 			// entry remains available to transcript replay, but neither its command
 			// nor its output may cross a model boundary through compaction.
 			if (entry.excludeFromContext === true) continue;
-			parts.push(`[Bash]: $ ${entry.command}\n${truncate(entry.output, bodyMax)}`);
+			parts.push(`[Bash]: $ ${entry.command}\n${truncate(entry.output, bodyMax, index < seenBefore)}`);
 			continue;
 		}
 		if (entry.kind === "branchSummary") {
