@@ -7,9 +7,9 @@ CLIO Coder reads, edits, and runs checks in your repository. It records what pas
 - Install on macOS, Linux, or WSL: `curl -fsSL https://coder.iowarp.ai/install.sh | sh`
 - Install with npm (Node.js 22.19 or newer): `npm install -g @iowarp/clio-coder`
 - Connect a model in a project: `clio-coder configure`; then run `clio-coder` for the terminal or `clio-coder gui --open` for the desktop alpha.
-- Current release: v0.8.3. Source: https://github.com/iowarp/clio-coder. License: Apache 2.0.
+- Current release: v0.8.4. Source: https://github.com/iowarp/clio-coder. License: Apache 2.0.
 
-This file holds the public CLIO Coder guides (documentation for v0.8.3), tutorials, and research pages as Markdown. Each section names the page it comes from.
+This file holds the public CLIO Coder guides (documentation for v0.8.4), tutorials, and research pages as Markdown. Each section names the page it comes from.
 
 ---
 
@@ -43,7 +43,7 @@ On a cluster, read [Install on a cluster](https://coder.iowarp.ai/docs/guide/hpc
 
 ### PowerShell
 
-Native Windows is best effort, so use the current stable release. Install, repair, rollback and uninstall were checked by hand on an earlier release, on one x64 machine with PowerShell 5.1. An optional release job boots the package on Windows and runs only `--version` and `--help`, and no automated check covers the native install. The install needs no administrator rights. WSL with the macOS, Linux and WSL command is the better-tested route.
+Native Windows is best effort, so use the current stable release. No automated check covers the native install, and WSL with the macOS, Linux and WSL command is the better-tested route. The install needs no administrator rights, brings its own Node.js 24, and adds the launcher to your user `PATH`.
 
 ```powershell
 irm https://coder.iowarp.ai/install.ps1 | iex
@@ -129,7 +129,7 @@ The installer keeps the previous version. `clio-coder upgrade --rollback` makes 
 
 If an upgrade is refused over a setting the installed version cannot repair, the installer prints the new version's own `doctor --fix` command to run.
 
-`clio-coder uninstall` removes your settings, credentials, sessions and caches, the launcher, the desktop app's background service, and for an installer install the managed Node and every package version. It previews what it will delete and asks first, and it stops with exit 1 while a session is open on this state directory. Add `--keep-binary` to keep the program, `--keep-config` to keep settings and credentials, or `--dry-run` to only look. Removing the program with npm or bun keeps those files. Project `.clio-coder/` directories are never removed.
+`clio-coder uninstall` removes your settings, credentials, sessions and caches, the launcher, the desktop app's background service, the managed Node and every package version of an installer install, and the package of an npm global install. It previews what it will delete and asks first, and it stops with exit 1 while a session is open on this state directory. Add `--keep-binary` to keep the program, `--keep-config` to keep settings and credentials, or `--dry-run` to only look. Removing the program with npm or bun keeps those files. Project `.clio-coder/` directories are never removed.
 
 If coder.iowarp.ai is unreachable, the latest GitHub release carries the full installer, at `https://github.com/iowarp/clio-coder/releases/latest/download/install.sh`.
 
@@ -189,9 +189,9 @@ Keep results out of Git with `clio-coder store put results run-042.h5`; every ch
 
 ## Old glibc, proxies, and quotas
 
-The installer picks a Node build for the host. Official builds cover Linux with glibc 2.28 or newer, macOS, and Alpine on x64. An unofficial build covers x64 hosts with glibc 2.17 to 2.27, the RHEL and CentOS 7 class. Linux arm64 with an older glibc has no build; use conda-forge Node and npm instead.
+The installer picks a Node build for the host. Official builds cover Linux with glibc 2.28 or newer, macOS, and Alpine on x64. Unofficial builds cover x64 hosts with glibc 2.17 to 2.27, the RHEL and CentOS 7 class, and Alpine on arm64. Linux arm64 with an older glibc has no build; use conda-forge Node and npm instead.
 
-Export `https_proxy` before running the installer behind a proxy. Node adds about 210 MB to a version, and the optional Claude Agent SDK is about 224 MB. The installer refuses to start with under about 732 MB free at the install root. On a small home quota, move the install root:
+Export `https_proxy` before running the installer behind a proxy. Node adds about 210 MB to a version, and the Claude Agent SDK, installed only with `--include-claude-sdk`, adds about 224 MB. The installer refuses to start with under about 732 MB free at the install root. On a small home quota, move the install root:
 
 ```sh
 curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --install-dir /project/$USER/clio-coder
@@ -205,7 +205,7 @@ A mirror without a signature file still installs on the checksum. Set `CLIO_CODE
 
 ## Airgapped sites and your own Node
 
-Point `CLIO_CODER_NODE_MIRROR` at a mirror laid out like nodejs.org/dist, `CLIO_CODER_NODE_UNOFFICIAL_MIRROR` at one for the glibc 2.17 build, and `npm_config_registry` at a registry mirror for the package's dependencies. A Node mirror can be a `file://` URL on a shared filesystem.
+Point `CLIO_CODER_NODE_MIRROR` at a mirror laid out like nodejs.org/dist, `CLIO_CODER_NODE_UNOFFICIAL_MIRROR` at one for the unofficial builds, and `npm_config_registry` at a registry mirror for the package's dependencies. A Node mirror can be a `file://` URL on a shared filesystem.
 
 If the site already provides Node 22.19 or newer, you can install with its npm instead: `npm install -g @iowarp/clio-coder`. When an older `node` comes first on `PATH`, set `CLIO_CODER_NODE` to the newer binary.
 
@@ -266,18 +266,18 @@ If setup fails, check credentials, the endpoint address, and whether the local m
 
 ## Servers without a built-in runtime
 
-Every connection names a runtime, which fixes how CLIO Coder talks to the server. `clio-coder configure --list` prints the runtime ids you can choose.
+Every connection names a runtime, which fixes how CLIO Coder talks to the server. `clio-coder configure --list` prints the runtime ids you can choose. Amazon Bedrock is no longer offered there, though an existing `bedrock` connection still runs.
 
 | Kind of server | Runtimes |
 | --- | --- |
 | Local model servers | `lmstudio`, `ollama`, `llamacpp`, `vllm`, `sglang`, `lemonade` |
-| Cloud providers | `openai`, `anthropic`, `google`, `mistral`, `groq`, `deepseek`, `openrouter`, `bedrock`, and others |
+| Cloud providers | `openai`, `anthropic`, `google`, `mistral`, `groq`, `deepseek`, `openrouter`, and others |
 | Any compatible endpoint | `openai-compat`, `anthropic-compat`, `litellm` |
 | Another agent's login | `claude-code`, `codex-cli`, `opencode-cli`, `pi-cli`, and others; workers only |
 
-A server that speaks the OpenAI or Anthropic API but has no runtime of its own usually works through `openai-compat` or `anthropic-compat`, or through a LiteLLM gateway. Local runtimes probe the server, report the loaded models, and price usage as free; the compatible runtimes make no local-server assumptions and never price as free.
+A server that speaks the OpenAI or Anthropic API but has no runtime of its own usually works through `openai-compat` or `anthropic-compat`, or through a LiteLLM gateway. Local runtimes probe the server, report the loaded models, and price usage as free; the compatible runtimes make no local-server assumptions and are priced as free only when the connection declares it.
 
-When none of these fits, a developer can add a runtime as a plugin: a JavaScript file in the `runtimes/` folder of CLIO Coder's config directory, or an npm package listed under `integrations.runtimePlugins`, which takes effect after a restart. A broken plugin is reported on stderr and never stops startup. The [provider adapter cookbook](https://github.com/iowarp/clio-coder/blob/f7c15144937cf81de0321a3875ba57148a7f9834/docs/architecture/provider-adapter-cookbook.md) describes the runtime descriptor a plugin exports.
+When none of these fits, a developer can add a runtime as a plugin: a JavaScript file in the `runtimes/` folder of CLIO Coder's config directory, or an npm package listed under `integrations.runtimePlugins`, which takes effect after a restart. A broken plugin is reported on stderr and never stops startup. The [provider adapter cookbook](https://github.com/iowarp/clio-coder/blob/0175e4f9ef4d00fe4f77ce41b5801bf2463b8058/docs/architecture/provider-adapter-cookbook.md) describes the runtime descriptor a plugin exports.
 
 ---
 
@@ -304,7 +304,7 @@ For a single task without the interactive interface:
 clio-coder run "Explain this project's test setup. Do not change files." --cwd /path/to/project
 ```
 
-Add `--json` when you need machine-readable events. A request to avoid edits is task guidance; use the tool restrictions in the full guide when execution must be constrained.
+Add `--json` when you need machine-readable events. A request to avoid edits is task guidance. When execution must be constrained, add `--read-only` or limit tools with `--allow-tools <names>`.
 
 ## Everyday terminal commands
 
@@ -320,7 +320,7 @@ Add `--json` when you need machine-readable events. A request to avoid edits is 
 | `/rewind` | Preview and restore this session's file snapshots |
 | `/rename [name]` | Name the session so `/resume` can find it |
 | `/fork [name]` | Fork from an assistant turn into a new session, optionally named |
-| `/loop <interval> <task>` | Run a task as a fresh turn on a schedule while the session is idle |
+| `/loop <interval> <task>` | Repeat a task on an interval as a bounded job; bare `/loop` lists jobs and `/loop stop` ends one |
 | `/reload` | Reload settings, Library resources, and extension runtimes |
 | `/restart` | Save the session and restart into it |
 | `/resume` | Previous conversations; `/resume <id>` reopens one directly |
@@ -349,11 +349,11 @@ Alt+letter runs a CLIO Coder action, and **Ctrl+G** then the same letter runs it
 | Alt+W | Open Workers: the Fleet Runs board, or the workers dock in a session with panes |
 | Alt+U | Open or close the one-page dashboard |
 
-Ctrl+C closes an active overlay, cancels a running turn, or clears an idle draft. When idle with an empty draft and no queued messages, two presses within about 1.2 seconds exit.
+Ctrl+C closes an active overlay or cancels a running turn. When idle with no queued messages, two presses within 3 seconds exit; the first press keeps your draft.
 
-For a course correction, type it in the composer and press **Alt+S** (or **Ctrl+G s**). Work already completed remains in the session record. In the queue, `t` moves a message to the end of the turn.
+For a course correction, type it in the composer and press **Alt+S** (or **Ctrl+G s**). Work already completed remains in the session record. In the queue, `t` switches a message between the next pause and the end of the turn.
 
-A clean exit prints a summary of the session and the `/resume <id>` line that reopens it. Sessions are resumed from inside the app, not with a command-line flag.
+A clean exit prints a summary of the session and the `/resume <id>` line that reopens it. Interactive sessions are resumed from inside the app, not with a command-line flag.
 
 ---
 
@@ -407,7 +407,7 @@ Tool results are bounded. Each reading tool has a size cap per call, and all of 
 
 Run `clio-coder --allow-tools read,grep,find,ls` to limit the main agent to those tools, and `--delegate-tools` to limit its workers. Both take a comma-separated list or `none`. A prompt, skill or worker recipe can narrow these limits but never widen them. `/view` shows what the tools produced, a cut result in full included.
 
-The full guide lists every tool and its limits. Developers can read [how the prompt and tool surface are assembled](https://github.com/iowarp/clio-coder/blob/f7c15144937cf81de0321a3875ba57148a7f9834/docs/architecture/prompt-envelope-and-tools.md).
+The full guide lists every tool and its limits. Developers can read [how the prompt and tool surface are assembled](https://github.com/iowarp/clio-coder/blob/0175e4f9ef4d00fe4f77ce41b5801bf2463b8058/docs/architecture/prompt-envelope-and-tools.md).
 
 ---
 
@@ -470,6 +470,8 @@ Open `/context` to inspect context usage, output reservation, remaining headroom
 ```
 
 For a fresh session with a stated goal, use `/handoff <goal>`. When moving work between agents, make sure the handoff includes evidence and unresolved questions, then review what the receiving agent does.
+
+To keep a session well under the model's window, start it with `clio-coder --max-context-tokens <N>`. `clio-coder run` takes the same flag. It caps the context budget and never enlarges the server's window.
 
 ## Recover an interrupted handoff
 
@@ -559,7 +561,7 @@ Attach files and open companion terminal panes.
 
 The terminal can open a files pane, a live workers dashboard, logs, a shell, music, or an installed coding peer beside the conversation.
 
-Bare `clio-coder` in an interactive terminal opens its own private pane host with no question to answer. The host is a pinned copy of **Herdr** that the installer provisions. When it cannot start, CLIO Coder says so in one line and runs in the plain terminal.
+Bare `clio-coder` in an interactive terminal opens its own private pane host with no question to answer. The host is a pinned copy of **Herdr** that the installer provisions. When the host is not installed, CLIO Coder starts in the plain terminal without a notice, and `/panes`, `/files`, and Alt+E name `clio-coder panes install`.
 
 After an npm or bun install, add the pane host yourself. The file browser is a separate install either way:
 
@@ -634,7 +636,7 @@ The installer offers the same step. The background app listens on port 4343, or 
 
 Launching again brings the open CLIO Coder window forward under WSL, when the app is installed through Chrome or Edge, and on a Linux desktop with `wmctrl`, `xdotool` or sway when the background app is running. Otherwise it opens a new browser tab. Open a second window on purpose with **Open in new window** in a task's menu.
 
-Any number of tasks can be open. Up to four turns run at once by default, and the `interface.guiTurnCapacity` setting allows 1 to 16. A further turn shows **Waiting for a slot** and starts when one frees. A task with no running turn that no window has shown for five minutes is paused. Its conversation stays readable, and **Resume session** continues it.
+Any number of tasks can be open. Up to four turns run at once by default, and the `interface.guiTurnCapacity` setting allows 1 to 16. A further turn shows **Waiting for a slot** and starts when one frees. A task with no running turn that no window has shown for five minutes is paused. Its conversation stays readable, and **Resume task** continues it.
 
 ## Read the Session column
 
@@ -646,7 +648,7 @@ Type `/` in the composer for session commands such as `/context`, `/usage`, `/tr
 
 With **Ask first**, reads, edits, and recognized commands run, and unrecognized shell commands, large dispatch plans, and anything that publishes outside the project wait on a card. The card states what the call is, what allowing it authorizes, and what it can affect. Choose **Allow once** or **Reject**.
 
-**Run without asking** stops the cards for one task after a second confirmation. By default the sandbox, snapshots, and safety judge stay on, and a call that would have waited for you is refused back to CLIO Coder. It lasts until the task closes or is paused.
+**Run without approvals** stops the cards for one task after a second confirmation. By default the sandbox, snapshots, and safety judge stay on, and a call that would have waited for you is refused back to CLIO Coder. It lasts until the task closes or is paused.
 
 If a project carries settings, hooks, safety rules, extensions, or plugins you have not approved, the app lists the ignored files above the conversation with the command that reviews them.
 
@@ -673,7 +675,7 @@ In the terminal, `/run <agent-id> <task>` starts a worker. The same command with
 
 ## Follow the work
 
-Open **Workers** with Alt+W to inspect active runs. Select a running worker and use the displayed steer or cancel action. In a session with panes, Alt+W opens a live dashboard beside the conversation instead. You can also send an addressed message:
+Alt+W opens the **Fleet Runs** board to inspect active runs. Select a running worker and use the displayed steer or cancel action. In a session with panes, Alt+W opens the workers dock instead, a live dashboard beside the conversation. You can also send an addressed message:
 
 ```text
 @<agentId-or-runId-prefix> Focus on empty input and report the existing tests.
@@ -687,7 +689,7 @@ Native workers run their shell, script, and verification commands in an OS sandb
 
 Your own session's shell commands run in the same kind of sandbox at `default` and at contained `yolo`, which is yolo's default. At unconfined `yolo` they do not, and workers keep theirs. A worker's ordinary asks go to the safety judge by default (`fleet.permissions.mode: judge`).
 
-When a worker's task branch would merge with a failing or unrun check, the terminal asks first with a **Merge task branch?** card showing the branch, changed paths, and the check. The card opens on **Keep branch**. Headless and ACP runs always keep the branch. `clio-coder fleet land` lists the branches finished runs kept, previews one, and lands it.
+When a worker's task branch would merge with a failing or unrun check, the terminal asks first with a **Merge task branch?** card showing the branch, changed paths, and the check. The card opens on **Keep branch**. Headless runs keep the branch, and so do ACP sessions whose client cannot answer questions. `clio-coder fleet land` lists the branches finished runs kept, previews one, and lands it.
 
 ## Run a playbook when you need one
 
@@ -701,7 +703,7 @@ A playbook combines workers into a workflow such as a review gate, competing sol
 
 ## Give workers MCP tools
 
-A recipe names exact `mcp_<id>__<tool>` capabilities, and admission refuses an untrusted or stale server. Check a server with `clio-coder mcp test <id>` and grant one project server with `clio-coder mcp trust <id>`. Add `--network` to allow it network inside the worker sandbox.
+A recipe names exact `mcp_<id>__<tool>` capabilities, and admission refuses an untrusted or stale server. Grant one project server with `clio-coder mcp trust <id>`, then check it with `clio-coder mcp test <id>`, which launches only a trusted server. Add `--network` to `mcp trust` to allow it network inside the worker sandbox.
 
 ## Run workers on another machine
 
@@ -722,7 +724,7 @@ Some failures retry automatically and some never do:
 - No attempt retries automatically after it ran a state-changing call, or when its records cannot prove the checkout unchanged.
 - Backoff starts at 500 ms, doubles, and stops at 60 seconds.
 
-A remote node that fails its channel twice in a row is marked offline. Its in-flight runs settle as `stalled` and retry without that node, and each reroute is recorded on the run. Read the stop reason in **Workers** or with `clio-coder fleet status` before retrying by hand. The [dispatch mechanics reference](https://github.com/iowarp/clio-coder/blob/f7c15144937cf81de0321a3875ba57148a7f9834/docs/architecture/worker-dispatch-mechanics.md) gives the full failure taxonomy and exit codes.
+A remote node that fails its channel twice in a row is marked offline. Its in-flight runs settle as `stalled` and retry without that node, and each reroute is recorded on the run. Read the stop reason in **Workers** or with `clio-coder fleet status` before retrying by hand. The [dispatch mechanics reference](https://github.com/iowarp/clio-coder/blob/0175e4f9ef4d00fe4f77ce41b5801bf2463b8058/docs/architecture/worker-dispatch-mechanics.md) gives the full failure taxonomy and exit codes.
 
 ---
 
@@ -827,7 +829,7 @@ clio-coder library install plugin:materio
 
 The catalog ships with CLIO Coder, but its content is not installed automatically. Add `--project` to keep a package in the current workspace; otherwise installation uses user scope.
 
-Project packages load only in a workspace you have approved. Your own first project install approves it. After that, a change to the project's package set, including one that arrives with a clone or a pull, stays listed but unloaded until you review it with `clio-coder config trust plugins` and run the approval command it prints.
+Project packages load only in a workspace you have approved. A project install you run approves the packages it writes. Any other change to the project's package set, including one that arrives with a clone or a pull, stays listed but unloaded until you review it with `clio-coder config trust plugins` and run the approval command it prints.
 
 A local bundle uses the same review flow:
 
@@ -850,7 +852,7 @@ In the terminal, open **Library → Plugins** to browse members and review lifec
 
 ## Choose the right kind of extension
 
-A plugin carries content. An extension is code that runs in its own process, declares everything it may do, and loads only after you approve those capabilities; manage it with `clio-coder extensions`. The runtime is sandboxed where the host has a backend. Project extensions also need `clio-coder config trust extensions`. See [the extension tutorial](https://coder.iowarp.ai/tutorials/write-an-extension-with-declared-capabilities.html). Adding tool schemas requires a new session; recipe reload does not change those schemas.
+A plugin carries content. An extension is code that runs in its own process, declares everything it may do, and loads only after you approve those capabilities; manage it with `clio-coder extensions`. The runtime is sandboxed where the host has a backend. Project extensions also need `clio-coder config trust extensions`. See [the extension tutorial](https://coder.iowarp.ai/tutorials/write-an-extension-with-declared-capabilities.html). Adding or changing an extension's command tool needs a restart; `/reload library` refreshes plugin content and never changes tool schemas.
 
 See [skills and resources](https://coder.iowarp.ai/docs/guide/resource-library.html) for everyday Library controls. The full plugin guide covers private catalogs and package authoring.
 
@@ -881,6 +883,7 @@ clio-coder extensions remove <id>
 | --- | --- |
 | `init <id> [--template <name>]` | Scaffold a manifest, entrypoint, and test |
 | `validate <path>` | Check the manifest; print the envelope and its digest |
+| `test <path>` | Run the package's `*.test.ts` files |
 | `install <path> [--user\|--project]` | Review and install; user scope by default |
 | `enable`, `disable`, `remove <id>` | Change one installed copy |
 | `run <id> <command>` | Run one extension command headlessly |
@@ -900,7 +903,7 @@ The first is a read-only review; the second approves it. Until then a project co
 
 ## What an extension can add
 
-Hooks at prompt submit and around tool calls, runtime tools the model can call, status lines, panels, and work on a timer. A `before_tool` hook can refuse a call. The runtime runs inside bubblewrap on Linux or Seatbelt on macOS when a backend exists; without one, it runs with your permissions.
+Hooks at prompt submit and around tool calls, runtime tools the model can call, status lines, panels, and work on a timer. A `before_tool` hook can refuse a call. At `api: 2`, a hook can pin one small context block that stays in the conversation, a tool can return a short `summary` with a `detail_ref` the model pages through on demand, and `runtime.promote` attaches up to four of the package's tools to every request. The runtime runs inside bubblewrap on Linux or Seatbelt on macOS when a backend exists; without one, it runs with your permissions.
 
 Approval covers the manifest's `runtime` block, the capability envelope: commands, hooks, tools with their action class, interface slots, content the runtime may see (`prompt`, `tool-args`, `tool-results`, `assistant-text`), file roots, and whether it may run programs or use the network.
 
@@ -946,7 +949,7 @@ clio-coder interop inspect --json
 clio-coder configure --interop
 ```
 
-In the terminal, `/library interop` shows available connections. Supported managed modes vary by peer: Claude Code, Codex, and OpenCode have ACP recipes; other peers may use a headless CLI or a pane.
+In the terminal, `/library interop` shows available connections. Supported managed modes vary by peer: Claude Code, Codex, OpenCode, and GitHub Copilot have ACP recipes; other peers may use a headless CLI or a pane.
 
 - `/run <agent-id> <task>` uses a configured ACP connection; `/run acp:<id> <task>` names one explicitly.
 - `/run --target <target> <agent> <task>` uses a configured headless target.
@@ -960,11 +963,11 @@ A peer that runs its own tool loop is refused write-capable work unless you trus
 
 The Library can discover supported foreign resources and review their origin, scope, trust, and actual availability before adoption. It identifies unsupported components rather than treating an entire foreign package as compatible.
 
-Open `/library`, then use its local-agent discovery action. Inspect the proposed resources and approve the ones you want in your user or project library.
+Run `clio-coder interop adopt <host> --dry-run`, for example with `claude-code`, `codex`, or `copilot`, to see the plan. Run it again without `--dry-run` to approve it into your user library, or add `--project`. In the terminal, `o` in `/library` opens the same review.
 
 ## Connect an ACP frontend
 
-To use CLIO Coder from an editor that speaks the Agent Client Protocol (ACP), point the editor's ACP agent entry at `clio-coder acp`. The editor then exchanges JSON-RPC with that process over stdio, with session listing, resume, modes, and model options.
+To use CLIO Coder from an editor that speaks the Agent Client Protocol (ACP), point the editor's ACP agent entry at `clio-coder acp`. The editor then exchanges JSON-RPC with that process over stdio, with session listing, resume, fork, modes, and model selection.
 
 ```sh
 clio-coder acp --cwd /path/to/project
@@ -975,18 +978,19 @@ clio-coder acp --cwd /path/to/project
 | Option | Effect |
 | --- | --- |
 | `--cwd PATH` | Pins the workspace. Without it, the editor's first session request selects it. |
-| `--permission-timeout MS` | Longest wait, in milliseconds, for one permission answer from the editor; 120000 by default. |
+| `--permission-timeout MS` | Longest wait, in milliseconds, for one permission answer from the editor; defaults to `integrations.externalAgents.defaults.permissionTimeoutMs`, 120000. |
+| `--autonomy LEVEL` | The highest autonomy any session may use, `default` or `yolo`; it never raises your configured level. |
 | `--allow-tools NAMES` | Limits the session's tools to these comma-separated names, as `clio-coder run` does; `none` disables all. |
 | `--delegate-tools NAMES` | Limits the tools the session's dispatched workers may hold. |
 | `--read-only` | Holds every session at the read-only ceiling. No file outside CLIO Coder's own home changes. |
 
-`clio-coder acp auth login` opens the interactive Quick Connect setup, so an editor's terminal sign-in step can create a connection. Stdout carries only protocol messages; diagnostics go to stderr. The [ACP protocol reference](https://github.com/iowarp/clio-coder/blob/f7c15144937cf81de0321a3875ba57148a7f9834/docs/architecture/acp.md) covers capabilities, authentication, permissions, and telemetry in detail. Consult the full guide for peer-specific setup and for installing CLIO Coder's portable library in other agents.
+`clio-coder acp auth login` opens the interactive Quick Connect setup, so an editor's terminal sign-in step can create a connection. Stdout carries only protocol messages; diagnostics go to stderr. The [ACP protocol reference](https://github.com/iowarp/clio-coder/blob/0175e4f9ef4d00fe4f77ce41b5801bf2463b8058/docs/architecture/acp.md) covers capabilities, authentication, permissions, and telemetry in detail. Consult the full guide for peer-specific setup and for installing CLIO Coder's portable library in other agents.
 
 ## Built on the Pi SDK
 
-CLIO Coder's model connections, agent loop, and terminal interface are built on the Pi SDK. Version 0.8.0 pins the Pi 1.5.2 packages to exact versions and bundles the one terminal package it patches, so an npm install needs no patch step. CLIO Coder owns everything above that layer: permissions, workers, sessions, run records, and its own handling for local model servers.
+CLIO Coder's model connections, agent loop, and terminal interface are built on the Pi SDK. CLIO Coder pins the Pi 1.5.2 packages to exact versions and bundles the one terminal package it patches, so an npm install needs no patch step. CLIO Coder owns everything above that layer: permissions, workers, sessions, run records, and its own handling for local model servers.
 
-Pi's coding agent is also a delegation peer. With the `pi` command installed and signed in, a target on the `pi-cli` runtime runs headless worker tasks under Pi's own login. Like other peers that run their own tool loop, it needs `trustedUnmediated: true` on the target before it may take write-capable work. Developers upgrading the SDK can read the [Pi SDK boundary](https://github.com/iowarp/clio-coder/blob/f7c15144937cf81de0321a3875ba57148a7f9834/docs/architecture/pi-boundary.md).
+Pi's coding agent is also a delegation peer. With the `pi` command installed and signed in, a target on the `pi-cli` runtime runs headless worker tasks under Pi's own login. Like other peers that run their own tool loop, it needs `trustedUnmediated: true` on the target before it may take write-capable work. Developers upgrading the SDK can read the [Pi SDK boundary](https://github.com/iowarp/clio-coder/blob/0175e4f9ef4d00fe4f77ce41b5801bf2463b8058/docs/architecture/pi-boundary.md).
 
 ---
 
@@ -1045,7 +1049,7 @@ The skill submits once, polls through the MCP server, and reports the outcome. I
 
 ## Choose approvals deliberately
 
-With the server declared as `slurm`, CLIO Coder classifies the `mcp_slurm__` tools by name:
+With the server declared as `slurm` in your user `mcp.yaml`, CLIO Coder classifies the `mcp_slurm__` tools by name. A project declaration gets the class you approve with `clio-coder mcp trust slurm`, and the submit and cancel confirmation applies to it as well:
 
 | Capability | Class | At `default` | At `yolo` |
 | --- | --- | --- | --- |
@@ -1058,7 +1062,7 @@ A `toolActionClasses` entry in `mcp.yaml` can reclassify one tool, but submissio
 
 ## Run a parameter sweep
 
-The `hpc-sweep` skill in the `hpc` plugin runs a sweep as one job array:
+The `hpc-sweep` skill in the `hpc` plugin runs a sweep as one job array by default:
 
 ```sh
 clio-coder library install plugin:hpc --project
@@ -1066,7 +1070,7 @@ clio-coder library install plugin:hpc --project
 
 Run `/reload library`, then `/skill hpc-sweep dry run sweeps/decay.yaml`. The sweep file names `parameters`, a `mode` (`grid` or `sample`), a run `template`, `resources`, a `concurrency` cap, and a verify `check`. The skill submits only on your word, checks each run, and writes verdicts to `sweeps/<name>/results.md`.
 
-For this release, this path was checked against fake Slurm clients only, not a live controller.
+The sweep path has been tested against simulated Slurm clients only, not a live controller.
 
 ---
 
@@ -1116,7 +1120,7 @@ The first row, `chat`, says whether chat can run and what to run when it cannot.
 | --- | --- | --- |
 | `settings.yaml` | Invalid keys, named in the row | Edit those keys |
 | `credentials` | `credentials.yaml` is missing or not `0600` | `clio-coder doctor --fix` |
-| `lifecycle migrations` | Migrations are pending after an update | `clio-coder upgrade` |
+| `lifecycle migrations` | Migrations are pending after an update | `clio-coder upgrade --post-install` |
 | `connection <id>` | Missing credential or no endpoint answer | Check the target and sign-in |
 | `model <id>` | The role model is missing from a live list | Pick a listed model |
 | `external tool <id>` | A pinned helper is missing | `clio-coder tools install <id>` |
@@ -1214,8 +1218,9 @@ Every `clio-coder` command uses the same exit codes, so a script can tell why a 
 | `0` | Success, including `--help`, `--version`, and a `--dry-run`. |
 | `1` | Operational failure: an unreachable model, unresolved doctor findings, or a worker whose changes were withheld or who did no work. |
 | `2` | Usage error: an unknown command, flag, target, or agent, or a global flag placed after the subcommand. |
-| `3` | A dispatched worker was stopped by its permission refusal limit (`permission_required`). |
-| `4` | The priced spend ceiling was reached: `safety.limits.sessionCostUsd` (5 USD by default) or `run --max-cost-usd`. |
+| `3` | A dispatched worker was stopped by its permission refusal limit (`permission_required`), or a headless yolo run ended after too many safety-judge blocks (`judge-streak`). |
+| `4` | The priced spend ceiling was reached: `safety.limits.sessionCostUsd` (5 USD by default) or `run --max-cost-usd`. A headless yolo run that reaches its autonomous tool-call, time or token cap also exits 4. |
+| `5` | `clio-coder run --answers <file.yaml>` met an author question the file does not script. |
 | `75` | An install or upgrade is busy; nothing changed, so retry later. |
 | `124` | `clio-coder run --timeout` elapsed. |
 | `141` | The reader of a `clio-coder run` stdout closed, as in `clio-coder run ... \| head -1`. |
@@ -1339,7 +1344,7 @@ Campaigns live in `.clio-coder/research/<id>/` and arena matches in `.clio-coder
 
 ```sh
 clio-coder arena run --check unit \
-  --contender copilot/claude-haiku-5.5 --contender litellm/mini/qwen3.8-27b-iq4r-v4 \
+  --contender copilot/claude-haiku-5.5 --contender ollama/qwen3-coder \
   -- "Fix the bug in calc.py so test_calc.py passes."
 clio-coder arena show <match-id>
 clio-coder arena vote <match-id> A --note "smaller diff"
@@ -1347,6 +1352,8 @@ clio-coder arena show <match-id> --reveal
 ```
 
 Before a vote, `show` hides each target, model, cost, and duration, and `--reveal` is refused. Vote with a label, `tie`, or `both-bad`; `--replace` changes your vote.
+
+To run one seeded project against several models, `clio-coder campaign run --fixture <dir> --roster <roster.yaml> --answers <answers.yaml> --prompt <text> --out <dir>` runs it once per roster entry and reports how each run ended, its tokens, and its wall time.
 
 Research and the arena are new in 0.7.0. With `--autonomy yolo` both run contained yolo: the sandbox, the safety judge, and your autonomous caps stay on, and unconfined yolo is refused. `clio-coder research resume <id>` continues a stopped campaign from its journal with the same spec and budget.
 
@@ -1393,7 +1400,7 @@ Dispatched workers read the store. They write only into the tags their dispatch 
 - `put` copies bytes, and no backend keeps earlier versions of a blob.
 - `clio-coder reset --data`, `reset --all` and `uninstall` without `--keep-data` delete the store for good.
 - The store has been exercised on Linux only.
-- The clio-core backend is experimental in 0.8.0 and needs a clio-core build from source. The full guide covers choosing it.
+- The clio-core backend is experimental and needs a clio-core build from source; `clio-coder store backend` shows which backend is in use. The full guide covers choosing it.
 
 ---
 
@@ -1422,7 +1429,8 @@ Nobody is there to approve anything, so a request that would ask you is denied, 
 | `1` | The task failed, including a run that changed nothing because its actions were refused. |
 | `2` | A usage error: an unknown flag, target or agent, or a refused admission or capability request. |
 | `3` | A worker was stopped by permission refusals, or the safety judge kept blocking. |
-| `4` | A spend ceiling stopped the run. |
+| `4` | A spend ceiling stopped the run, or a `yolo` run reached its autonomous tool-call, time, or token cap. |
+| `5` | A `--answers` file did not script a question only the author may answer. |
 | `124` | `--timeout` ran out. |
 | `129`, `130`, `143` | A signal stopped the run (SIGHUP, SIGINT, SIGTERM). |
 
@@ -1433,6 +1441,7 @@ The full guide lists the codes other commands use.
 - `--timeout <seconds>` stops the run and exits 124.
 - `--max-cost-usd <n>` caps what the run may spend on priced models.
 - `--read-only` leaves every file outside CLIO Coder's own folders unchanged.
+- `--answers <file.yaml>` answers the questions only the author may answer, such as extension interview steps; any other question is still refused.
 - `--autonomy yolo` lets an unattended job continue without waiting. It stays contained by default, and a call that would ask you is refused back to CLIO Coder, which continues without it.
 
 ## Read structured output
@@ -1474,7 +1483,7 @@ Find the resolved locations on your machine:
 clio-coder paths --json
 ```
 
-`safety.sandbox` (`auto`, `required`, `off`) and `safety.sandboxNetwork` control the OS sandbox for dispatched native workers' commands and for your own session's shell commands at `default`. Objects merge by key; arrays and scalars replace the lower layer. Credential-bearing keys in project settings are ignored. Project saves require trusted project settings.
+`safety.sandbox` (`auto`, `required`, `off`) controls the OS sandbox for dispatched native workers' commands and for your own session's shell commands at `default`. `safety.sandboxNetwork` lets sandboxed worker commands reach the network; the session sandbox keeps network access. Objects merge by key; arrays and scalars replace the lower layer. Credential-bearing keys in project settings are ignored. Project saves require trusted project settings.
 
 Saved routes seed a new session. A settings write from another process does not redirect a conversation already running; use that session's model controls.
 
@@ -1547,11 +1556,11 @@ Supported providers can read their conventional credential variables, such as `O
 | `OPENAI_API_KEY` | OpenAI |
 | `ANTHROPIC_API_KEY` | Anthropic |
 | `OPENROUTER_API_KEY` | OpenRouter |
-| `GEMINI_API_KEY` | Gemini |
-| `AWS_*` | Bedrock credentials |
+| `GEMINI_API_KEY` or `GOOGLE_API_KEY` | Gemini |
+| `AWS_*` | Credentials for an existing Amazon Bedrock connection |
 | `OLLAMA_API_KEY` | An Ollama target at `https://ollama.com` |
 
-Google Vertex uses its application credentials. The managed alternative is `clio-coder auth`, with `auth login` and `auth status` per target.
+The managed alternative is `clio-coder auth`, with `auth login` and `auth status` per target.
 
 `HTTPS_PROXY`, `HTTP_PROXY`, and their lowercase forms apply to model requests, discovery probes, sign-in refreshes, and web fetches. `localhost` and `127.0.0.1` always go direct; name any other local model server in `NO_PROXY`. `clio-coder doctor` shows the proxy in effect.
 
@@ -1770,7 +1779,7 @@ Each term below in a sentence or two, with the guide that explains it. The full 
 | Term | What it means |
 | --- | --- |
 | Skill | Written instructions for a procedure, in a `SKILL.md` file, that the agent loads when the task needs it. |
-| Prompt template | A saved prompt you run as a slash command, such as `/bugfix`. |
+| Prompt template | A saved prompt you run as a slash command, such as `/hoare:review` from the `hoare` plugin. |
 | Library | The installable packages CLIO Coder knows about, browsed with `/library`. See [Library packages](https://coder.iowarp.ai/docs/guide/resource-library.html). |
 | Plugin | A package of content only: skills, prompts, agents and playbooks. Installing one never runs code. See [Plugins](https://coder.iowarp.ai/docs/guide/plugins.html). |
 | Extension | A package of code that changes CLIO Coder itself. It runs in its own process, after you review what it may do. See [Extensions](https://coder.iowarp.ai/docs/guide/harness-extensions.html). |
@@ -1810,7 +1819,7 @@ Follow [the tutorial](https://coder.iowarp.ai/tutorials/semantic-context-and-rec
 
 ```sh
 clio-coder semantic configure \
-  --target litellm --model mini/embeddinggemma-2-q8 \
+  --target embeddings --model embeddinggemma-300m \
   --asset-identity sha256:<gguf-sha256> \
   --modality text --modality image \
   --qualify
@@ -1859,7 +1868,7 @@ clio-coder agents validate
 clio-coder run --agent coder "<task>"
 ```
 
-`clio-coder agents` lists the agents you can run, including `architect`, `coder`, `debugger`, `documenter`, `git-master`, `tester`, and `verifier`. `/run` dispatches one from a session. Add `--read-only` to deny writes, commands, and delegation for one dispatch.
+`clio-coder agents` lists the agents you can run, including `architect`, `coder`, `debugger`, `documenter`, `git-master`, `tester`, and `verifier`. `/run` dispatches one from a session. Add `--read-only` to keep one dispatch from changing anything; work it delegates is read-only too.
 
 Helper agents such as Scout are dispatched by the main agent, and `clio-coder agents --all` lists them. You cannot start them directly.
 
@@ -4171,7 +4180,7 @@ Native workers check each model request. Coding agents that make their own model
 **Next steps**
 
 - [Tools and permissions](https://coder.iowarp.ai/docs/guide/tool-usage.html)
-- [Information flow guide in the repository](https://github.com/iowarp/clio-coder/blob/f7c15144937cf81de0321a3875ba57148a7f9834/docs/guide/information-flow.md)
+- [Information flow guide in the repository](https://github.com/iowarp/clio-coder/blob/0175e4f9ef4d00fe4f77ce41b5801bf2463b8058/docs/guide/information-flow.md)
 - [Choose a model for your project](https://coder.iowarp.ai/tutorials/choose-model-for-your-project.html)
 
 ---
@@ -5032,7 +5041,7 @@ TARGET/MODEL                    VOTES  WINS  LOSSES  TIES  BOTH-BAD  ELO
 anthropic-max/claude-haiku-5-5  1      0     0       1     0         n/a (<5 votes)
 openai-codex/gpt-6-luna         1      0     0       1     0         n/a (<5 votes)
 
-1 voted of 1 matches in suite speed. These are your recorded votes; Clio does not judge.
+1 voted of 1 matches in suite speed. These are your recorded votes; CLIO Coder does not judge.
 ```
 
 That is the inconclusive result, reported as it is. Two models gave the same code, and one tie says nothing about either. A rating appears once a model has 5 votes, and one vote is one person's judgment on one prompt. A match that pits a model against itself is never counted in standings.

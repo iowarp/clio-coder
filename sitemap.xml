@@ -1,35 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://coder.iowarp.ai/</loc><lastmod>2026-11-16T08:52:34-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs.html</loc><lastmod>2026-11-12T11:22:34-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/hpc-clusters.html</loc><lastmod>2026-11-12T17:09:46-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/configuration-and-targets.html</loc><lastmod>2026-11-12T17:09:46-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/commands-and-modes.html</loc><lastmod>2026-11-12T12:18:49-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/</loc><lastmod>2026-11-19T05:20:47-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/hpc-clusters.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/configuration-and-targets.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/commands-and-modes.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/tool-usage.html</loc><lastmod>2026-11-12T17:09:46-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/sandbox-and-safety.html</loc><lastmod>2026-11-12T17:09:46-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/context-continuity.html</loc><lastmod>2026-11-12T11:01:17-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/context-continuity.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/proactive-memory.html</loc><lastmod>2026-11-12T17:09:46-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/panes-and-files.html</loc><lastmod>2026-11-12T11:01:17-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/gui.html</loc><lastmod>2026-11-12T12:18:49-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/fleet-dispatch.html</loc><lastmod>2026-11-12T17:09:46-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/panes-and-files.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/gui.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/fleet-dispatch.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/resource-library.html</loc><lastmod>2026-11-12T17:09:46-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/plugins.html</loc><lastmod>2026-11-12T11:01:17-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/harness-extensions.html</loc><lastmod>2026-11-12T11:01:17-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/interop.html</loc><lastmod>2026-11-12T11:22:34-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/slurm.html</loc><lastmod>2026-11-12T15:21:33-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/doctor.html</loc><lastmod>2026-11-12T17:09:46-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/troubleshooting.html</loc><lastmod>2026-11-12T17:09:46-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/plugins.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/harness-extensions.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/interop.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/slurm.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/doctor.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/troubleshooting.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/quality-policy.html</loc><lastmod>2026-11-12T11:22:34-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/research-and-arena.html</loc><lastmod>2026-11-12T15:21:33-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/store.html</loc><lastmod>2026-11-12T17:09:46-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/exit-codes-and-output.html</loc><lastmod>2026-11-12T15:21:33-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/configuration-reference.html</loc><lastmod>2026-11-12T11:01:17-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/environment-variables.html</loc><lastmod>2026-11-12T11:01:17-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/research-and-arena.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/store.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/exit-codes-and-output.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/configuration-reference.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/environment-variables.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/system-one.html</loc><lastmod>2026-11-12T11:01:17-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/docs/guide/information-flow.html</loc><lastmod>2026-11-12T11:01:17-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/glossary.html</loc><lastmod>2026-11-12T17:09:46-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/semantic-context.html</loc><lastmod>2026-11-12T11:01:17-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/docs/guide/built-in-agents.html</loc><lastmod>2026-11-12T11:01:17-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/glossary.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/semantic-context.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/docs/guide/built-in-agents.html</loc><lastmod>2026-11-19T05:20:55-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/tutorials/first-session.html</loc><lastmod>2026-11-14T20:56:15-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/tutorials/desktop-and-terminal.html</loc><lastmod>2026-11-14T20:56:15-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html</loc><lastmod>2026-11-14T20:56:15-06:00</lastmod></url>
@@ -54,7 +54,7 @@
   <url><loc>https://coder.iowarp.ai/tutorials/keep-results-in-the-project-store.html</loc><lastmod>2026-11-14T20:56:15-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/tutorials/set-up-a-lab-from-one-setup-file.html</loc><lastmod>2026-11-14T20:56:15-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/tutorials/share-a-folder-with-a-teammate-or-a-second-terminal.html</loc><lastmod>2026-11-14T20:56:15-06:00</lastmod></url>
-  <url><loc>https://coder.iowarp.ai/tutorials/run-a-research-campaign-and-a-blind-arena.html</loc><lastmod>2026-11-14T20:56:15-06:00</lastmod></url>
+  <url><loc>https://coder.iowarp.ai/tutorials/run-a-research-campaign-and-a-blind-arena.html</loc><lastmod>2026-11-19T05:05:09-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/tutorials/report-a-problem-without-leaking-your-machine.html</loc><lastmod>2026-11-14T20:56:15-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/tutorials/ask-several-agents-at-once.html</loc><lastmod>2026-11-14T20:56:15-06:00</lastmod></url>
   <url><loc>https://coder.iowarp.ai/research/system-one-decisions.html</loc><lastmod>2026-11-12T12:18:49-06:00</lastmod></url>
