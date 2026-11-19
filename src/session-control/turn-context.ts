@@ -424,9 +424,12 @@ export interface TurnContext {
 	 * The A4 count of the request these messages and the pending ask make: the
 	 * larger of Clio's estimate and Pi's chars/3.5 count. Window-fit gates that
 	 * open the overflow path read it, so Pi's clamp never refuses a request
-	 * they passed.
+	 * they passed. With a provider-measured anchor on this route it is the
+	 * anchored count instead, and `floor` (the caller's own count) is ignored.
 	 */
-	overflowFitTokens?(agentRuntime: AgentRuntime, pendingUserText?: string): number;
+	overflowFitTokens?(agentRuntime: AgentRuntime, pendingUserText?: string, floor?: number): number;
+	/** The anchored count `overflowFitTokens` takes when this route has a provider-measured anchor, else null. */
+	anchoredInputTokens?(agentRuntime: AgentRuntime): number | null;
 	/** Null while the request fits on the A4 count; otherwise the sentence naming the largest result it carries. */
 	oversizedResult?(agentRuntime: AgentRuntime, pendingUserText?: string): string | null;
 	/**
@@ -701,6 +704,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		wireModelId: string;
 		systemPromptTokens: number;
 		toolSchemaTokens: number;
+		/** A provider count of this prefix, not a figure carried through an eviction or rehydrated from its record. */
+		measured: boolean;
 	} | null = null;
 	let lastCompactionNoGain = false;
 	let lastCompactionEvent: { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null = null;
@@ -1250,6 +1255,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			wireModelId: agentRuntime.wireModelId,
 			systemPromptTokens: record.anchor.sys,
 			toolSchemaTokens: record.anchor.tools,
+			measured: false,
 		};
 		return true;
 	};
@@ -1279,6 +1285,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			wireModelId: agentRuntime.wireModelId,
 			systemPromptTokens: breakdown.systemPromptTokens,
 			toolSchemaTokens: breakdown.toolSchemaTokens,
+			// Seeded only for the carry that follows, from a usage whose route this does not check.
+			measured: false,
 		};
 	};
 
@@ -1433,12 +1441,89 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	};
 
 	/**
+	 * The provider-measured anchor of this route under `observed`, or null. The live anchor counts when
+	 * `reconciledHistoryTokens` (route, prefix identity and digest) kept it and a call measured it: a figure carried
+	 * through an eviction or rehydrated from its record priced its tail at chars/4 and does not count (bt-47 D-A).
+	 * With no live anchor, as on a resumed session, the newest usable usage counts when the same model, provider and
+	 * API reported it; an eviction or masking since stamped it unusable.
+	 */
+	const measuredAnchor = (
+		agentRuntime: AgentRuntime,
+		observed: MessageListDigests,
+	): { tokens: number; covered: number; systemPromptTokens: number; toolSchemaTokens: number } | null => {
+		if (reconciledHistoryTokens(agentRuntime, observed) !== null) {
+			const anchor = reconciledAnchor;
+			return anchor?.measured
+				? {
+						tokens: anchor.tokens,
+						covered: anchor.anchoredMessages.length,
+						systemPromptTokens: anchor.systemPromptTokens,
+						toolSchemaTokens: anchor.toolSchemaTokens,
+					}
+				: null;
+		}
+		if (reconciledAnchor) return null;
+		const usage = latestUsableAssistantUsage(observed.messages);
+		const message = usage
+			? (observed.messages[usage.index] as { api?: unknown; provider?: unknown; model?: unknown })
+			: null;
+		const model = agentRuntime.agent.state.model;
+		if (!usage || !message || !model) return null;
+		if (message.api !== model.api || message.provider !== model.provider || message.model !== model.id) return null;
+		// The usage already covers the system prompt and tools it was sent with; with no record of their size then, none counts as growth.
+		const statics = estimateAgentContextBreakdown({
+			systemPrompt: engineInitialSystemPrompt(agentRuntime.agent),
+			messages: [],
+			tools: agentRuntime.agent.state.tools,
+		});
+		return {
+			tokens: usage.tokens,
+			covered: usage.index + 1,
+			systemPromptTokens: statics.systemPromptTokens,
+			toolSchemaTokens: statics.toolSchemaTokens,
+		};
+	};
+
+	/**
+	 * The request priced at this route's measured anchor (bt3 drv-rv5): the anchor, the messages after it and the
+	 * pending ask with its policy text each at max(fold estimate, Pi's chars/3.5), and positive growth of the system
+	 * prompt and tool schemas, as the reconciled count prices it. Null without a measured anchor.
+	 */
+	const anchoredFitCount = (
+		agentRuntime: AgentRuntime,
+		observed: MessageListDigests,
+		live: LiveContextEstimate,
+		pending: ReadonlyArray<AgentMessage>,
+	): number | null => {
+		const anchor = measuredAnchor(agentRuntime, observed);
+		if (!anchor) return null;
+		let foldTail = 0;
+		for (let index = anchor.covered; index < observed.messages.length; index += 1)
+			foldTail += observed.messageTokens[index] ?? 0;
+		// Pi's count of the bare system message and tools, subtracted so only the messages are priced.
+		const statics = estimateEngineRequestTokens(agentRuntime.agent, []);
+		const piTail = estimateEngineRequestTokens(agentRuntime.agent, observed.messages.slice(anchor.covered)) - statics;
+		const piPending = estimateEngineRequestTokens(agentRuntime.agent, pending) - statics;
+		const { breakdown } = live;
+		return (
+			anchor.tokens +
+			Math.max(foldTail, piTail) +
+			Math.max(breakdown.pendingUserTokens, piPending) +
+			Math.max(0, breakdown.systemPromptTokens - anchor.systemPromptTokens) +
+			Math.max(0, breakdown.toolSchemaTokens - anchor.toolSchemaTokens)
+		);
+	};
+
+	/**
 	 * The overflow path's one count (A4): the live estimate or Pi's chars/3.5
 	 * count of the same request, whichever is larger. The fold evicts until it
 	 * fits and the next main request pins it, so admission and Pi's clamp size
-	 * the request the fold fitted.
+	 * the request the fold fitted. With a provider-measured anchor on this
+	 * route the count is the anchored one instead, and neither the chars/4
+	 * floor over the measured prefix nor the caller's `floor` applies; without
+	 * one it is max(floor, A4).
 	 */
-	const overflowFitTokens = (agentRuntime: AgentRuntime, pendingUserText?: string): number => {
+	const overflowFitTokens = (agentRuntime: AgentRuntime, pendingUserText?: string, floor = 0): number => {
 		const observed = observeHistory(agentRuntime);
 		const live = liveContextEstimate(agentRuntime, pendingUserText, undefined, observed);
 		const pending: AgentMessage[] = [];
@@ -1451,8 +1536,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const policy = pendingPolicyText();
 			if (policy !== null) pending.push({ role: "user", content: policy, timestamp: 0 });
 		}
+		const anchored = anchoredFitCount(agentRuntime, observed, live, pending);
+		if (anchored !== null) return anchored;
 		const pi = estimateEngineRequestTokens(agentRuntime.agent, [...observed.messages, ...pending]);
-		return Math.max(live.tokens, pi);
+		return Math.max(floor, live.tokens, pi);
+	};
+
+	/** The anchored count of the next request with nothing pending, or null when this route has no measured anchor. */
+	const anchoredInputTokens = (agentRuntime: AgentRuntime): number | null => {
+		const observed = observeHistory(agentRuntime);
+		const live = liveContextEstimate(agentRuntime, undefined, undefined, observed);
+		return anchoredFitCount(agentRuntime, observed, live, []);
 	};
 
 	/**
@@ -1607,7 +1701,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// After an overflow fold that fit, the view publishes the A4 count it fitted, so the card, admission and Pi's
 		// clamp read one figure until the request that carries it goes out.
 		const inputTokens = overflowPinArmed()
-			? Math.max(estimate.tokens, overflowFitTokens(agentRuntime, pendingUserText))
+			? overflowFitTokens(agentRuntime, pendingUserText, estimate.tokens)
 			: estimate.tokens;
 		return {
 			targetId: agentRuntime.targetId,
@@ -1830,6 +1924,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// content identity is retaken here. Keeping the old digest would fail
 			// the next validation and discard the attestation this preserves.
 			contentDigest: history.digest(),
+			// The carry prices the unmeasured tail and the removed bodies at chars/4 (bt-47 D-A).
+			measured: false,
 		};
 	};
 
@@ -3121,6 +3217,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			overflowInputPin = null;
 		},
 		overflowFitTokens,
+		anchoredInputTokens,
 		oversizedResult: (runtime: AgentRuntime, pendingUserText?: string) =>
 			overflowOversize(runtime, pendingUserText)?.largest || null,
 		refreshAgentMessagesFromSession,
@@ -3194,6 +3291,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					wireModelId: runtime.wireModelId,
 					systemPromptTokens: breakdown.systemPromptTokens,
 					toolSchemaTokens: breakdown.toolSchemaTokens,
+					measured: true,
 				};
 			}
 			if (!currentContextSnapshot) {
@@ -3820,15 +3918,23 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const messagesBefore = agentRuntime.agent.state.messages;
 			// The A4 count (overflowFitTokens) decides whether the request fits; the fit line's reserve is A5's, read at that count.
 			const a4Fits = (view: LiveBudgetView): boolean => {
-				const input = Math.max(view.inputTokens ?? 0, overflowFitTokens(agentRuntime));
+				const input = overflowFitTokens(agentRuntime, undefined, view.inputTokens ?? 0);
 				const reserve = view.outputReserveTokens === null ? null : resolveFitOutputReserve(agentRuntime, input);
 				return requestFits(input, reserve, view.effectiveWindow);
 			};
+			// The view's figures, or with a measured anchor the anchored count admission sends on (bt3 drv-rv5).
+			const fitFigures = (view: LiveBudgetView): { input: number | null; reserve: number | null } => {
+				const anchored = anchoredInputTokens(agentRuntime);
+				if (anchored === null) return { input: view.inputTokens, reserve: view.outputReserveTokens };
+				const reserve = view.outputReserveTokens === null ? null : resolveFitOutputReserve(agentRuntime, anchored);
+				return { input: anchored, reserve };
+			};
+			const viewFits = (view: LiveBudgetView): boolean => {
+				const { input, reserve } = fitFigures(view);
+				return requestFits(input, reserve, view.effectiveWindow);
+			};
 			// An automatic pass the trigger asks for runs first (A5); the A4 count then decides the overflow pass.
-			let mustFit =
-				knownWindow &&
-				(!requestFits(beforeView.inputTokens, beforeView.outputReserveTokens, beforeView.effectiveWindow) ||
-					(!verdict.shouldCompact && !a4Fits(beforeView)));
+			let mustFit = knownWindow && (!viewFits(beforeView) || (!verdict.shouldCompact && !a4Fits(beforeView)));
 			// S0 commits under the trigger on an uncached route, so the guard asks there too (SPEC §3.4).
 			const attempted = mustFit || verdict.shouldCompact || supersededStageApplies(agentRuntime.runtimeResolution);
 			const compact = async (requireFit: boolean): Promise<void> => {
@@ -3869,9 +3975,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const afterView = attempted ? refreshLiveBudget() : beforeView;
 			const oversize = mustFit ? overflowStop(agentRuntime) : null;
 			if (oversize !== null) throw new Error(oversize);
-			if (knownWindow && !requestFits(afterView.inputTokens, afterView.outputReserveTokens, afterView.effectiveWindow)) {
+			const after = fitFigures(afterView);
+			if (knownWindow && !requestFits(after.input, after.reserve, afterView.effectiveWindow)) {
 				throw new Error(
-					`[Clio Coder] post-tool context guard stopped continuation before provider call: estimated input ${afterView.inputTokens} plus reserved output ${afterView.outputReserveTokens} tokens does not fit context window ${afterView.effectiveWindow}. Use /context compact, narrower reads, or a follow-up turn with smaller observations.`,
+					`[Clio Coder] post-tool context guard stopped continuation before provider call: estimated input ${after.input} plus reserved output ${after.reserve} tokens does not fit context window ${afterView.effectiveWindow}. Use /context compact, narrower reads, or a follow-up turn with smaller observations.`,
 				);
 			}
 			return compacted || agentRuntime.agent.state.messages !== messagesBefore
