@@ -516,6 +516,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - A summary that clips a large tool result to fit its request no longer tells the next turn to read it again: the clip marker and both summary templates say the assistant read the result in full (bt-47 drv-f1y).
 - A checkpoint's exact-facts block now carries each hidden read's recall ref and lists other hidden results under `refs:`, replacing the separate `<recallable-refs>` preview that a resumed model ignored (bt3 drv-f4).
 - A Copilot full reseed after a working-set rewrite keeps already-delivered host reminders in place and attaches retained image tool results at their positions, instead of dropping both.
+- A compaction that summarizes a recovered turn's user row no longer replays the discarded reply and an unanswered recovery call.
+- Selecting a user turn in /tree keeps the memory restoration its original request carried.
 
 ## 0.8.3 - 2026-11-16
 
