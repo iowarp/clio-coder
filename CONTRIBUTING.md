@@ -176,97 +176,105 @@ checks remain part of explicit qualification. `pnpm run test:list` lists every s
 file and every contract/GUI file reserved for full investigation. Redundant
 prose and appearance-specific tests are retired with maintainer approval. `test:full`, `test:gui:full`, and maintenance checks stay manual.
 
-Release with one resumable command in a visible terminal:
+Release with one command in a visible terminal:
 
 ```bash
-pnpm run release:next status      # read-only: where the release stands
-pnpm run release:next --rehearse  # full non-public rehearsal, about 20 minutes
-pnpm run release:next             # the release, about 4 minutes from a commit with a green ci.yml run
-pnpm run release:next --local     # also qualify on local Node 22 and 24 before the push
+pnpm run release -- --check      # read-only readiness report; needs no terminal and writes nothing
+pnpm run release                 # the release
+pnpm run release -- --platforms  # the release, with Windows and macOS boots added to its CI run
 ```
 
-Each run reads git, GitHub and npm, prints every position with what proves it
-and its expected wall time, and performs the next step until it needs the
-owner, finishes or fails. Interrupting is safe; the next run resumes from the
-real state. One release command runs per clone at a time: a lock and a receipt
-live in `$(git rev-parse --git-common-dir)/clio-release/`, and every remote
-write asks for a typed phrase such as `push v080` or `publish 0.8.0`.
-Qualification and packing refuse `/tmp` and long `TMPDIR` paths; export a short
+`scripts/release.mjs` is the only release driver. It never pushes before every
+local gate is green, and every remote write asks for a typed phrase such as
+`push v084` or `publish @iowarp/clio-coder@0.8.4`. One release command runs per
+clone at a time, under a lock in
+`$(git rev-parse --git-common-dir)/clio-release/`. Qualification and packing
+refuse `/tmp` and `TMPDIR` paths longer than 40 characters; export a short
 private one such as `TMPDIR=$HOME/.cache/cr`.
 
-To cut a release:
+Before releasing, set the agreed version consistently in `package.json`, the GUI
+manifest, `assets/acp-registry/agent.json`, and both `version` and
+`publishedVersion` in `site/product.json`. Add dated release notes in
+`CHANGELOG.md` and update version references such as the README source-install
+command. Commit the candidate on the version branch. The command refuses a dirty
+tree or inconsistent versions; it does not invent release notes or bump versions.
 
-1. Set the agreed version consistently in `package.json`, the GUI manifest,
-   `assets/acp-registry/agent.json`, and both `version` and `publishedVersion`
-   in `site/product.json`. Add dated release
-   notes in `CHANGELOG.md` and update version references such as the README
-   source-install command. Commit the candidate on the version branch. The
-   command refuses a dirty tree or inconsistent versions; it does not invent
-   release notes or silently bump versions.
-2. CI qualifies the exact commit. The command reuses any green `ci.yml` run of
-   that commit, a rehearsal's included, whose `prepare`, `ci (22)` and
-   `ci (24)` jobs passed and whose artifacts are still live; it then skips
-   straight to the release. Without one it dispatches its own run, about
-   8 minutes. Local qualification is opt-in: `--local` qualifies on Node 22
-   and 24 at once before the push, each in its own detached worktree, so no
-   checkout's `dist/` is replaced, and is skipped when CI is already green. A
-   passed Node major is reused. Qualification uses `nvm`'s newest install of
-   each major unless `release-candidate.mjs qualify` gets `--node22`/`--node24`.
-3. Rehearse. `--rehearse` pushes a temporary `rehearse/*` branch and dispatches
-   one `ci.yml` run with the publisher's rehearsal and the macOS boot (add
-   `--windows` for the Windows boot; Windows is otherwise proven on a native
-   clone). It then runs `release.yml` in `check` mode (the real preflight and
-   finish check, never the release job). It creates, verifies and deletes a
-   never-published draft release `rehearse-<nonce>`, prints the exact
-   `npm publish` with a dry run, cancels its runs and deletes the branch. It
-   changes nothing public. The release reuses this `ci.yml` run, so a
-   candidate is qualified in CI once.
-4. Release. The command pushes the version branch and dispatches `release.yml`.
-   Its preflight verifies the qualification and runs every finishing step in
-   read form: the release-notes length, the draft decision, the main
-   fast-forward and the website diff. Only when that is green and the release
-   job awaits approval does the command offer the owner's `npm publish` of the
-   qualified tarball, in the terminal so npm's two-factor prompt works. Its
-   acceptance is recorded, so the publish is never offered twice while npm
-   propagates. **The owner approves the protected `release` environment in
-   GitHub.** Agents leave the npm publish and this approval to the owner. The
-   release job waits up to 40 minutes for npm to serve the exact bytes.
-5. The release job creates or repairs the draft, pins it to the candidate,
-   uploads the versioned tarball and four installers, and publishes the
-   tag/release. Stable releases become Latest. It fast-forwards `main`, commits
-   the prepared site to `gh-pages`, verifies npm, GitHub, main and the website,
-   and deletes the remote version branch.
-6. The command then offers to forward the `beta` and `dev` dist-tags, and runs
-   the post-release checklist: local `main` and branches, the next version
-   branch, the ACP registry, the local install and fixed issues.
+The command then runs these steps in order:
 
-For retries, run the command again. Matching bytes already on npm are reused;
-a failed release job is rerun; draft GitHub assets are repaired. If a
-release-tooling bug appears after npm accepted the version, commit the fix to
-the version branch: once npm serves the candidate, `release.yml` may finish
-from a head that adds only release-tooling files (`scripts/release*.mjs`,
-`scripts/release/`, `release.yml`, `tests/contracts/release-*.test.ts`). The
-tag, tarball and website still come from the candidate. If the version branch
-moved on with other commits after npm accepted the version, the command
-dispatches `release.yml` with `mode: finish` for the published candidate
-instead of asking for a force push: that mode requires npm to already serve
-the exact qualified bytes and the candidate to be an ancestor of the version
-branch head, finishes only the tag, GitHub release, main and website steps that
-have not completed, never republishes to npm, and leaves the version branch and
-its later commits in place. A different npm
-integrity or tag commit stops the operation. If an artifact expires, prepare a
-new candidate commit; do not rebuild a previously qualified commit.
-Prereleases use npm `beta` and a GitHub prerelease, and keep the development
-branch, stable `main`, and stable site.
+1. Readiness, in seconds. `pnpm run preflight -- --release` checks versions, the
+   dated changelog heading and nonempty notes, release readiness, the size
+   budgets the source tree decides, and the local tools. The command then checks
+   that `gh` is authenticated, that `npm whoami` answers, that `origin/main` is
+   an ancestor of the candidate, and that tag `v<version>` is free or already at
+   the candidate. Every problem is listed at once and nothing has been built or
+   pushed. `--check` stops here after printing whether a local qualification
+   and a `ci.yml` run already exist for the commit.
+2. Local qualification, without confirmation because it writes nothing remote.
+   `scripts/release-candidate.mjs qualify` builds and packs once, then tests the
+   package and boots an installed copy on Node 22 and 24 at once, under the same
+   time zone, locale and pinned `rg` and `fd` as CI. A passed qualification of
+   the same commit is reused. It uses this process's Node for its own major and
+   `nvm`'s newest install of the other. This step is skipped when a `ci.yml`
+   run of the commit already exists.
+3. Push and CI. After the phrase `push <branch>`, the command pushes the version
+   branch and dispatches one `ci.yml` run for the exact commit, then watches it.
+   An existing run of the commit is used instead: an unfinished one is watched,
+   a failed one has its failed jobs rerun on confirmation, and a successful one
+   is reused if its `candidate-<sha>`, `results-<sha>` and `results24-<sha>`
+   artifacts are still live.
+4. Verification of the CI artifact. The command downloads the three artifacts,
+   runs `release-publish.mjs verify` against the run, and runs npm's own dry
+   run of the qualified tarball under the release's dist-tag. The published
+   bytes are always the CI artifact, never a local pack.
+5. npm, by the owner. After the phrase `publish <name>@<version>`, the command
+   runs `npm publish` on the qualified tarball in the terminal so npm's
+   two-factor prompt works. If npm already serves the same bytes it publishes
+   nothing; different bytes stop the release. An accepted publish is recorded,
+   so it is never offered twice while npm propagates.
+6. GitHub, with the owner's approval. After the phrase `release v<version>`, the
+   command dispatches `release.yml` and watches it. **The owner approves the
+   protected `release` environment in GitHub.** Agents leave the npm publish
+   and this approval to the owner. The release job waits for npm to serve the
+   exact bytes, creates or repairs the draft, pins it to the candidate, uploads
+   the versioned tarball and four installers, and publishes the tag and release.
+   A stable release becomes Latest, fast-forwards `main`, commits the prepared
+   site to `gh-pages`, and deletes the remote version branch.
+7. Closeout. The command offers to forward the npm dist-tags that fell behind
+   (`beta` and `dev` after a stable release, `dev` after a prerelease), then to
+   fast-forward local `main` and, when `origin/main` is the candidate, delete
+   the finished local version branch.
 
-To check the command without CI, `release:next status --record <file>` saves
-every GitHub and npm read, and `release:next --replay <file>` decides the next
-step from that file offline and writes nothing. The release contract tests walk
-every rehearse and release position this way.
+A version with a prerelease suffix, such as `0.8.4-rc.0`, goes to npm's `beta`
+dist-tag and a GitHub prerelease that is not Latest; the suffix alone selects
+this. Its approval covers only the tag and prerelease, so `main`, the site and
+the version branch stay as they are. A stable version goes to `latest`.
 
-`pnpm run release` and `pnpm run release:rehearse` remain as the previous
-interactive flow and use the same hardened publisher. Prove Windows changes on
-a native Windows clone with `core.autocrlf=false` before pushing them.
+For retries, run the command again. Readiness is checked again, the `ci.yml`
+run of the commit and the qualified bytes on npm are reused, and a new
+`release.yml` run is dispatched, whose job repairs draft GitHub assets and
+completes only the steps still open. If an artifact expires, prepare a new
+candidate commit; do not rebuild a previously qualified commit. A different npm
+integrity or tag commit stops the operation.
+
+The command always releases the checked-out head. If a release-tooling bug
+appears after npm accepted the version, the owner finishes by dispatching
+`release.yml` by hand for the published candidate. Once npm serves it, the
+workflow may finish from a version-branch head that adds only release-tooling
+files (`scripts/release*.mjs`, `scripts/release/`, `release.yml`,
+`tests/contracts/release-*.test.ts`). With other later commits, `mode: finish`
+requires npm to already serve the exact qualified bytes and the candidate to be
+an ancestor of the branch head, completes only the tag, GitHub release, main
+and website steps still open, never republishes, and leaves the version branch
+in place. The tag, tarball and website still come from the candidate.
+
+`pnpm run release:rehearse` is optional and not part of a routine release. Use
+it after changing release tooling or workflows. It qualifies locally, pushes
+the commit to a temporary `rehearse/*` branch after a typed phrase, runs one
+`ci.yml` run with the publisher's rehearsal jobs (`--platforms` adds the
+Windows and macOS boots), then cancels its unfinished runs and deletes the
+branch. It starts from a version branch, accepts a development version and an
+`Unreleased` changelog, and changes no package, tag, `main` or site. Prove Windows changes on a native Windows clone with
+`core.autocrlf=false` before pushing them.
 
 #### Owner configuration
 
@@ -274,7 +282,7 @@ On npm, a GitHub Actions trusted publisher is configured for
 `iowarp/clio-coder`, workflow filename `release.yml`, environment `release`.
 Its OIDC exchange currently returns 404, so CI neither publishes nor writes
 dist-tags. The owner publishes with npm two-factor authentication inside
-`pnpm run release:next`, and those versions carry no provenance. Dev snapshots are
+`pnpm run release`, and those versions carry no provenance. Dev snapshots are
 refused until trusted publishing works, because their bytes exist only inside
 CI. A rehearsal cannot prove npm's authorization without publishing a new
 version. Do not claim it is verified by `npm publish --dry-run`.
@@ -304,7 +312,7 @@ split it so the App bypasses creation restrictions only. Likewise isolate a
 main pull-request requirement from structural protections before granting the
 App a release-promotion bypass. Preserve `ci (22)` and `ci (24)` as required
 checks. The release promotion does not satisfy them on main: the owner publishes
-the qualified tarball to npm inside `pnpm run release:next`, `release.yml` verifies
+the qualified tarball to npm inside `pnpm run release`, `release.yml` verifies
 that npm serves those exact bytes and that the manual qualification run passed
 `ci (22)` and `ci (24)` on the commit, and the App then fast-forwards main
 through its ruleset bypass.
