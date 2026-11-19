@@ -83,10 +83,25 @@ const DEFAULT_DEPENDENCIES: ClioCommandDependencies = {
 };
 
 export async function runClioCommand(
-	options: BootOptions = {},
+	requested: BootOptions = {},
 	dependencies: Partial<ClioCommandDependencies> = {},
 ): Promise<number> {
 	const deps = { ...DEFAULT_DEPENDENCIES, ...dependencies };
+	let options = requested;
+	// `--resume <id|prefix>` resolves with `/resume`'s own resolver before any prompt or the shell takes the terminal,
+	// so a miss or an ambiguous prefix ends the launch with exit 2; the orchestrator then receives the full id.
+	if (options.resume?.kind === "id" && !options.headless && !options.acp) {
+		const [{ resolveSessionTarget }, { listSessionsForCwd }] = await Promise.all([
+			import("../domains/session/names.js"),
+			import("../domains/session/history.js"),
+		]);
+		const match = resolveSessionTarget(listSessionsForCwd(process.cwd()), options.resume.id);
+		if ("miss" in match) {
+			process.stderr.write(`clio-coder: ${match.miss}\n`);
+			return 2;
+		}
+		options = { ...options, resume: { kind: "id", id: match.id } };
+	}
 	// Bare `clio` (no subcommand) boots interactive mode implicitly, but only
 	// when stdin is a real TTY. Piped or /dev/null stdin (used by verify.ts,
 	// CI runners, and non-interactive scripts) should fall through to the

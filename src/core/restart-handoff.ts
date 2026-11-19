@@ -25,7 +25,7 @@ export function restartFallbackAdvice(
 		return null;
 	}
 	rmSync(restartIntentPath(stateDir), { force: true });
-	const resume = typeof sessionId === "string" ? `, then /resume ${sessionId}` : "";
+	const resume = typeof sessionId === "string" ? ` --resume ${sessionId}` : "";
 	return `Restart failed: the new build exited with code ${code} before it resumed the session. Run clio-coder${resume}.\n`;
 }
 

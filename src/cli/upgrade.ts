@@ -58,8 +58,8 @@ Flags:
   --skip-migrations     skip migrations after the install step
   --post-install        apply local checks after a package-manager update; skip reinstall
   --rollback            native installs: restore the previous working version, disable background updates
-  --restart             after success, launch the installed CLI in this project; type /resume there
-                        to pick up the last session
+  --restart             after success, launch the installed CLI in this project as a fresh session;
+                        clio-coder --continue picks up the last session instead
   --json                emit machine-readable JSON output
   --help, -h            show this message
 `;
@@ -68,12 +68,12 @@ Flags:
 const SOURCE_UPGRADE_LEAD = "To update the checkout itself (choose a release tag after fetching):";
 
 /**
- * Sessions are resumed from inside the app (#191): the startup parser refuses
- * `--continue`, so every hint names the picker and the relaunch is bare.
+ * A session is resumed at startup with `clio-coder --continue` (the last one) or `clio-coder --resume [id]`
+ * (#191), so every hint names the flag. The `--restart` relaunch itself stays bare, a fresh session.
  */
-const RESUME_HINT = "start clio-coder in this project and type /resume";
+const RESUME_HINT = "run clio-coder --continue in this project";
 const RELAUNCH_PREVIEW =
-	"Would relaunch the installed CLI in this project after success; type /resume there to pick up the last session.";
+	"Would relaunch the installed CLI in this project after success as a fresh session; clio-coder --continue picks up the last session instead.";
 
 interface UpgradeOptions {
 	dryRun: boolean;
@@ -652,7 +652,9 @@ export async function runUpgradeCommand(
 			presenter.note(
 				`${previousVersion} opens this home without asking and accepts the migrations it does not know: ${downgrade.accepted.join(", ")}.`,
 			);
-		presenter.note(`Sessions already running keep ${before}; ${RESUME_HINT} to continue one on ${previousVersion}.`);
+		presenter.note(
+			`Sessions already running keep ${before}; run clio-coder --resume in this project to pick one up on ${previousVersion}.`,
+		);
 		presenter.done("Done");
 		return 0;
 	}
@@ -737,8 +739,8 @@ export async function runUpgradeCommand(
 		presenter.note(`Package: ${installation.root}`);
 		presenter.commandAdvice("Update with the original package manager and its original global directory:", updateCommand);
 		presenter.commandAdvice(
-			"Then apply migrations, start clio-coder, and type /resume to pick up the last session:",
-			"clio-coder upgrade --post-install\nclio-coder",
+			"Then apply migrations and start clio-coder on the last session:",
+			"clio-coder upgrade --post-install\nclio-coder --continue",
 		);
 		if (opts.dryRun) presenter.warn("Dry run: no changes made");
 		else presenter.fail("This installation needs a package-manager update; no package was replaced.");

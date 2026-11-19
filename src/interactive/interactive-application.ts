@@ -316,6 +316,8 @@ export interface InteractiveDeps {
 	 * with history is not topped by fresh-start onboarding.
 	 */
 	startsResumed?: boolean;
+	/** `clio-coder --resume` without an id: the `/resume` picker opens once the first frame is out. */
+	opensResumePicker?: boolean;
 	/**
 	 * Persist a thinking level set by `/thinking <level>` or `/model <pattern>:<level>`.
 	 * Scope "session" leaves settings.yaml alone; omitted means the historical
@@ -2639,6 +2641,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				// Dev copies are taken before the startup reload lists packages.
 				devSession?.start();
 				void operatorExtensions.reload("startup").finally(finishExtensionStartup);
+			});
+		if (deps.opensResumePicker)
+			afterPaint(() => {
+				if (!startupAbort.signal.aborted) openResumeOverlayState();
 			});
 		if (frame === null) return;
 		// Project agents and playbooks load without trust; a copy that replaces

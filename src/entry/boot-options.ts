@@ -39,6 +39,9 @@ export interface HeadlessRunDeadline {
 	remainingMs?(): number;
 }
 
+/** The session an interactive boot opens on: one id, the latest with a model turn, or the `/resume` picker. */
+export type StartupResume = { kind: "id"; id: string } | { kind: "latest" } | { kind: "picker" };
+
 export interface BootOptions {
 	/** Interactive demo guidance override for this session. */
 	demo?: boolean;
@@ -65,6 +68,11 @@ export interface BootOptions {
 	sessionFile?: string;
 	/** Global `--max-context-tokens <N>`: the interactive session's planning ceiling, carried like `run`'s flag. */
 	maxContextTokens?: number;
+	/**
+	 * Global `--resume`/`--continue` of the interactive session. `clio-coder` resolves an id or prefix before
+	 * boot, so the orchestrator receives the full id; `latest` with nothing to continue starts a fresh session.
+	 */
+	resume?: StartupResume;
 	headless?: {
 		/** `run --systemone`: the one setting for this run, an engine name or `off`. */
 		systemOne?: string;

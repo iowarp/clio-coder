@@ -301,7 +301,7 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 					return {
 						kind: "replaced",
 						key: `replaced:${runningVersion}:${disk.version}:${entry.mtimeMs}`,
-						text: "Installation changed · /quit, restart clio-coder, then /resume",
+						text: "Installation changed · /quit, then run clio-coder --continue",
 					};
 				}
 			}

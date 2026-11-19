@@ -61,6 +61,18 @@ describe("global startup flags before a subcommand", () => {
 		});
 	}
 
+	it("refuses --resume or --continue before a subcommand, and the two together, with exit 2", () => {
+		for (const [args, refusal] of [
+			[["--resume", "abc", "paths"], /--resume and --continue apply to the interactive session only/u],
+			[["-c", "run", "hello"], /clio-coder run --continue/u],
+			[["--resume", "abc", "--continue"], /--resume and --continue cannot be combined/u],
+		] as const) {
+			const result = cli(args);
+			equal(result.status, 2, `${args.join(" ")}: ${result.stderr}`);
+			match(result.stderr, refusal);
+		}
+	});
+
 	it("names an unknown run option without repeating the command the caller prefixes", () => {
 		const parsed = parseRunCliArgs(["--bogus", "hello"]);
 		const message = parsed.diagnostics.map((entry) => entry.message).join(" ");

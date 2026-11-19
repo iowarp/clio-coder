@@ -135,7 +135,7 @@ test("a restarted child that dies early without resuming gets the manual resume 
 		writeRestartIntent(home, "s1");
 		assert.equal(restartFallbackAdvice(home, 0, 100), null);
 		assert.equal(restartFallbackAdvice(home, 1, 20_000), null);
-		assert.match(restartFallbackAdvice(home, 1, 100) ?? "", /code 1 .*\/resume s1/u);
+		assert.match(restartFallbackAdvice(home, 1, 100) ?? "", /code 1 .*Run clio-coder --resume s1\./u);
 		assert.equal(existsSync(restartIntentPath(home)), false);
 		assert.equal(restartFallbackAdvice(home, 1, 100), null);
 	} finally {

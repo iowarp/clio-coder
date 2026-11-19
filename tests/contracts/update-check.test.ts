@@ -163,9 +163,9 @@ test("detects replacement and same-version rebuilds without consulting the regis
 	await writeFile(join(f.root, "package.json"), '{"name":"@iowarp/clio-coder","version":"0.5.5"}');
 	const replaced = await check.probe(controller.signal);
 	assert.equal(replaced?.kind, "replaced");
-	// The startup parser refuses --continue (#191); the hint names the picker.
-	assert.match(replaced?.text ?? "", /\/resume/);
-	assert.doesNotMatch(replaced?.text ?? "", /--continue/);
+	// The hint names the startup flag that reopens the last session (#191), not a picker step inside the app.
+	assert.match(replaced?.text ?? "", /clio-coder --continue/);
+	assert.doesNotMatch(replaced?.text ?? "", /\/resume/);
 	await writeFile(join(f.root, "package.json"), '{"name":"@iowarp/clio-coder","version":"0.5.4"}');
 	await utimes(f.entry, new Date(), new Date());
 	assert.equal((await check.probe(controller.signal))?.kind, "replaced");

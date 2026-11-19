@@ -69,6 +69,8 @@ Usage:
   clio-coder --delegate-tools <names>  limit the tools this session's workers may hold
   clio-coder --max-context-tokens <N>  cap this interactive session's context budget, as for clio-coder run
   clio-coder --session-file <path>     keep this session's live state (working, idle, awaiting) in a JSON file; the exit record lands there too
+  clio-coder --resume, -r [id]    open on a session by id or unique id prefix; without one, open the session picker
+  clio-coder --continue, -c       open on this project's most recent session
   clio-coder configure            interactive first-run/configuration wizard
   clio-coder targets              list configured targets, health, auth, and capabilities
   clio-coder targets add          add a target interactively or via flags
@@ -238,6 +240,7 @@ async function main(argv: string[]): Promise<number> {
 		toolLimits,
 		sessionFile,
 		maxContextTokens,
+		resume,
 		bootFlags,
 		rootFlags,
 		rest,
@@ -296,6 +299,14 @@ async function main(argv: string[]): Promise<number> {
 		printError("--session-file applies to the interactive session only; start clio-coder without a subcommand.");
 		return 2;
 	}
+	if (resume !== undefined && subcommand) {
+		printError(
+			subcommand === "run"
+				? "--resume and --continue apply to the interactive session only; for a headless turn use: clio-coder run --session <id> or clio-coder run --continue"
+				: "--resume and --continue apply to the interactive session only; start clio-coder without a subcommand.",
+		);
+		return 2;
+	}
 	if (maxContextTokens !== undefined && subcommand) {
 		printError(
 			subcommand === "run"
@@ -321,6 +332,7 @@ async function main(argv: string[]): Promise<number> {
 			...(toolLimits === undefined ? {} : { toolLimits }),
 			...(sessionFile === undefined ? {} : { sessionFile }),
 			...(maxContextTokens === undefined ? {} : { maxContextTokens }),
+			...(resume === undefined ? {} : { resume }),
 		});
 	}
 

@@ -87,7 +87,7 @@ Use your project's real test name. Read the diff and the check output yourself b
 
 In the terminal, `/help` lists commands, `/model` selects a model, `/settings` opens the settings center, and `/config` opens your connections, where **Add a target** runs setup again without leaving the session.
 
-When you quit, CLIO Coder prints a summary of the session and a `/resume <id>` line. Start `clio-coder` again and type that line to return to the conversation, or use `/resume` alone to pick from a list.
+When you quit, CLIO Coder prints a summary of the session and a `clio-coder --resume <id>` line. Run that line to return to the conversation, `clio-coder --continue` to reopen the most recent one, or `clio-coder --resume` alone to pick from a list.
 
 The [commands guide](/docs/guide/commands-and-modes.html) covers shortcuts and session controls. The [tools guide](/docs/guide/tool-usage.html) explains the repository tools and their permissions.
 

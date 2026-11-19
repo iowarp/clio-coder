@@ -1012,14 +1012,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		termination.onDrain(unbindActivity);
 		termination.onDrain(bus.subscribe("session.reattached", () => flushPackageActivities()));
 	}
-	// A headless `--session`/`--continue` resolves here, where the session
-	// domain exists. It is a hard requirement rather than a hint: a caller that
-	// asked to continue a conversation must not receive an answer written
-	// without that conversation's history.
-	const requestedResume = options.headless?.resumeSession;
+	// A headless `--session`/`--continue`, or the interactive `--resume <id>`/`--continue`, resolves here, where the
+	// session domain exists. Headless it is a hard requirement: a caller that asked to continue a conversation must not
+	// receive an answer written without that conversation's history. Interactive, a miss opens a fresh session.
+	const requestedResume = options.headless ? options.headless.resumeSession : options.resume;
 	let headlessResumeFailure: string | null = null;
 	let resolvedResumeId: string | undefined;
-	if (requestedResume !== undefined) {
+	if (requestedResume !== undefined && requestedResume.kind !== "picker") {
 		if (!session) {
 			headlessResumeFailure = "session continuation requires the session domain, which is not loaded";
 		} else if (requestedResume.kind === "id") {
@@ -1043,10 +1042,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		} catch (err) {
 			const detail = err instanceof Error ? err.message : String(err);
 			if (requestedResume !== undefined) headlessResumeFailure = `failed to resume session ${resumeId}: ${detail}`;
-			else bootStderr(`Clio Coder: failed to resume session ${resumeId}: ${detail}\n`);
+			else bootStderr(`CLIO Coder: failed to resume session ${resumeId}: ${detail}\n`);
 		}
 	}
-	if (headlessResumeFailure !== null) {
+	if (headlessResumeFailure !== null && !options.headless)
+		initialNotices.push(`Nothing resumed: ${headlessResumeFailure}. This is a fresh session.`);
+	else if (headlessResumeFailure !== null) {
 		writeRunDiagnostic(`clio-coder run: ${headlessResumeFailure}\n`);
 		await termination.shutdown(2);
 		return { exitCode: 2, bootTimeMs: timer.snapshot().totalMs };
@@ -4125,6 +4126,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// A boot-time resume opens onto an existing conversation, so the welcome
 		// header starts collapsed rather than offering fresh-start onboarding.
 		...(resumedSessionAtBoot ? { startsResumed: true } : {}),
+		...(options.resume?.kind === "picker" ? { opensResumePicker: true } : {}),
 		...(session ? { getSessionId: () => session.current()?.id ?? null } : {}),
 		...(contextDomain
 			? {

@@ -226,7 +226,7 @@ export function createInteractiveUpgradeFlow(deps: InteractiveUpgradeFlowDeps): 
 						header: "Restart",
 						question: `CLIO Coder ${result.to} installed successfully. Exit now so you can restart on the new version?`,
 						options: [
-							{ label: EXIT_NOW, description: "Save and exit; run clio-coder again, then /resume." },
+							{ label: EXIT_NOW, description: "Save and exit; run clio-coder --continue to pick it up." },
 							{ label: LATER, description: "Keep this process open; the footer keeps the restart notice." },
 						],
 					},

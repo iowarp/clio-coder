@@ -13,6 +13,7 @@ import { colorDisabled } from "../core/terminal-preferences.js";
 import type { SessionToolLimits } from "../core/tool-limit-flags.js";
 import { parseToolLimitList, toolLimitConstraints } from "../core/tool-limit-flags.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import type { StartupResume } from "../entry/boot-options.js";
 
 // Chalk reads only FORCE_COLOR, so a terminal asking for no color still got cyan rails and markers from every CLI
 // presenter (first-run configure, select lists). The CLI follows the same rule the TUI theme does.
@@ -86,6 +87,8 @@ export interface GlobalCliFlags {
 	sessionFile?: string;
 	/** `--max-context-tokens <N>` before any subcommand: the interactive session's planning ceiling, as `run` reads it. */
 	maxContextTokens?: number;
+	/** `--resume [id]`/`-r` or `--continue`/`-c` before any subcommand: the session the interactive app opens on. */
+	resume?: StartupResume;
 	/**
 	 * The boot-option flags (`--api-key`, `--skill`, `--no-context-files`/`-nc`,
 	 * `--no-skills`, `--with-panes`) as typed, in order, so a
@@ -147,19 +150,6 @@ export function parseMaxContextTokens(value: string | undefined): number | { err
  * for the command boundary, so `--skill path --api-key SECRET paths` treated
  * SECRET as a subcommand and printed it in an error.
  */
-/**
- * Sessions are resumed from the interactive picker, not from a flag, and the
- * flag every other agent CLI spells `--resume` or `--continue` fails closed
- * here. The failure names the picker so the habit lands somewhere (#191).
- */
-function unknownGlobalOptionError(arg: string): string {
-	const bare = arg.replace(/=.*$/u, "");
-	if (bare === "--resume" || bare === "--continue" || bare === "-r" || bare === "-c") {
-		return `unknown global option: ${arg}. Sessions are resumed from inside the app: start clio-coder, then type /resume to pick one.`;
-	}
-	return `unknown global option: ${arg}`;
-}
-
 export function extractGlobalFlags(
 	argv: ReadonlyArray<string>,
 	isSubcommand: (token: string) => boolean = () => false,
@@ -174,6 +164,7 @@ export function extractGlobalFlags(
 	let toolLimits: SessionToolLimits | undefined;
 	let sessionFile: string | undefined;
 	let maxContextTokens: number | undefined;
+	let resume: StartupResume | undefined;
 	const skillPaths: string[] = [];
 	const bootFlags: string[] = [];
 	const rootFlags: string[] = [];
@@ -262,6 +253,22 @@ export function extractGlobalFlags(
 			if (!inline) i += 1;
 			continue;
 		}
+		// The interactive app opens on a session the way every other agent CLI spells it (#191): `--resume <id|prefix>`
+		// resolves like `/resume <id|prefix>`, a bare `--resume` opens the picker, and `--continue` takes the latest.
+		if (arg === "--resume" || arg === "-r" || arg.startsWith("--resume=") || arg === "--continue" || arg === "-c") {
+			if (resume !== undefined) return failed("--resume and --continue cannot be combined");
+			const value = arg.startsWith("--resume=") ? arg.slice("--resume=".length) : undefined;
+			const next = argv[i + 1];
+			if (value === "") return failed("--resume= requires a session id");
+			if (arg === "--continue" || arg === "-c") resume = { kind: "latest" };
+			else if (value !== undefined) resume = { kind: "id", id: value };
+			else if (next === undefined || next.startsWith("-") || isSubcommand(next)) resume = { kind: "picker" };
+			else {
+				resume = { kind: "id", id: next };
+				i += 1;
+			}
+			continue;
+		}
 		if (arg === "--api-key" || arg === "--skill") {
 			const value = argv[i + 1];
 			if (value === undefined || value.startsWith("-") || isSubcommand(value)) return failed(`${arg} requires a value`);
@@ -271,7 +278,7 @@ export function extractGlobalFlags(
 			i += 1;
 			continue;
 		}
-		return failed(unknownGlobalOptionError(arg));
+		return failed(`unknown global option: ${arg}`);
 	}
 	return {
 		noContextFiles,
@@ -286,6 +293,7 @@ export function extractGlobalFlags(
 		...(toolLimits === undefined ? {} : { toolLimits }),
 		...(sessionFile === undefined ? {} : { sessionFile }),
 		...(maxContextTokens === undefined ? {} : { maxContextTokens }),
+		...(resume === undefined ? {} : { resume }),
 		...(demo === undefined ? {} : { demo }),
 	};
 }

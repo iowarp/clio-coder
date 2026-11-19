@@ -258,7 +258,7 @@ export function renderExitSummary(
 ): string[] {
 	if (snapshot === null) return [];
 	const style = resolveExitSummaryStyle(preference, outputStyle);
-	const resume = `To resume: clio-coder, then /resume ${sanitizeCallTargetText(snapshot.sessionId)}`;
+	const resume = `To resume: clio-coder --resume ${sanitizeCallTargetText(snapshot.sessionId)}`;
 	if (style === "off") return [resume];
 	const theme = tty ? clioTheme() : null;
 	const room = Math.max(1, Math.floor(width) - (tty ? 4 : 0));
@@ -286,12 +286,12 @@ export function renderExitSummary(
 	const internalGit = internalGitSummary(snapshot);
 	const autonomy = autonomySummary(snapshot, style !== "brief");
 	const session = snapshot.sessionName ? `${snapshot.sessionName} · ${snapshot.sessionId}` : snapshot.sessionId;
-	// The command and its id are one thing to type, so a narrow card breaks before `/resume`, never between them (E7).
-	const resumeCommand = `/resume ${sanitizeCallTargetText(snapshot.sessionId)}`;
+	// The command and its id are one thing to type, so a narrow card breaks before the command, never inside it (E7).
+	const resumeCommand = `clio-coder --resume ${sanitizeCallTargetText(snapshot.sessionId)}`;
 	const resumeRows =
 		!tty || visibleWidth(resume) <= room
 			? [resume]
-			: ["To resume: clio-coder, then", resumeCommand].flatMap((row) => wrapTextWithAnsi(row, room));
+			: ["To resume:", resumeCommand].flatMap((row) => wrapTextWithAnsi(row, room));
 	const resumeLines = resumeRows.map((row) => theme?.fg("commandHint", row) ?? row);
 	const visitTime = `${formatCompactMs(snapshot.wallMs)} this visit`;
 	if (!tty) lines.push(`Clio Coder · Session ${style === "report" ? "report" : "summary"} · this visit`);

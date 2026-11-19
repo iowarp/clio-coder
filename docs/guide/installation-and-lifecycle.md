@@ -766,10 +766,9 @@ clio-coder upgrade --restart
 ```
 
 Relaunch happens only after successful installation and checks. It starts the
-installed CLI in the current directory with no arguments, because sessions are
-resumed from inside the app: type `/resume` there to pick up the last
-conversation. `--restart` requires a terminal (exit 2 with
-`--restart requires an interactive terminal; after upgrading, start clio-coder in this project and type /resume`)
+installed CLI in the current directory with no arguments, as a fresh session;
+`clio-coder --continue` picks up the last conversation instead. `--restart` requires a terminal (exit 2 with
+`--restart requires an interactive terminal; after upgrading, run clio-coder --continue in this project`)
 and cannot combine with `--json`, `--post-install` or `--rollback`. A dry run never installs or relaunches.
 If the relaunch itself fails the command exits 1 after reporting that the upgrade completed.
 

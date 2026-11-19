@@ -4,6 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, symli
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { mock, test } from "node:test";
+import { extractGlobalFlags } from "../../src/cli/argv.js";
 import { runUpgradeCommand, type UpgradeDependencies } from "../../src/cli/upgrade.js";
 import { detectNewerHome, initializeClioHome } from "../../src/core/init.js";
 import { readClioVersion } from "../../src/core/package-root.js";
@@ -34,7 +35,7 @@ function installedFixture() {
 	mkdirSync(bin);
 	writeFileSync(join(root, "package.json"), '{"name":"@iowarp/clio-coder","version":"0.5.4","type":"module"}');
 	// The relaunch is judged by the real startup parser, not by the fixture: a
-	// fake that accepted any argv is how a refused `--continue` relaunch stayed
+	// fake that accepted any argv is how a refused relaunch once stayed
 	// green. The post-install and doctor children are recognized by their verb.
 	writeFileSync(
 		entry,
@@ -336,7 +337,7 @@ test("restart follows successful checks, relaunches with argv the real parser ac
 	);
 });
 
-test("a failed relaunch names /resume, never the refused --continue flag", async (t) => {
+test("a failed relaunch names clio-coder --continue, which the startup parser accepts", async (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
 	const relaunchFailed = await f.call(["--restart"], {
@@ -346,8 +347,9 @@ test("a failed relaunch names /resume, never the refused --continue flag", async
 		},
 	});
 	assert.equal(relaunchFailed.status, 1);
-	assert.match(relaunchFailed.stderr, /\/resume/);
-	assert.doesNotMatch(relaunchFailed.stdout + relaunchFailed.stderr, /--continue/);
+	assert.match(relaunchFailed.stderr, /run clio-coder --continue in this project/);
+	assert.doesNotMatch(relaunchFailed.stdout + relaunchFailed.stderr, /\/resume/);
+	assert.equal(extractGlobalFlags(["--continue"]).error, undefined);
 });
 
 test("failed checks never relaunch and recovery points to migrations", async (t) => {

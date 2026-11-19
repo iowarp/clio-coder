@@ -4,6 +4,10 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
+### Added
+
+- `clio-coder --resume <id or prefix>` opens CLIO Coder on an earlier session, a bare `clio-coder --resume` opens the session picker, and `clio-coder --continue` opens the most recent session for the project; the exit summary and upgrade hints now name these flags.
+
 ### Fixed
 
 - `clio-coder run --max-context-tokens=N` is accepted like `--max-context-tokens N`, with the same positive-integer error for an invalid value, instead of failing as an unknown option.
