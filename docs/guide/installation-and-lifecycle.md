@@ -414,7 +414,11 @@ credentials; reinstalling the package alone does not reset them.
 A launch never downloads the pane host into a home that never had it, which is
 what an npm, pnpm or Bun install sees on its first launch. Bare `clio-coder` runs in
 the plain terminal without a launch notice until you run `clio-coder panes install`;
-`/panes`, `/files` and `clio-coder doctor` name that command meanwhile.
+`/panes`, `/files`, Alt+E and `clio-coder doctor` name that command meanwhile.
+When an upgrade moves the pane host pin in a home that had panes, the next launch
+installs the new pin once (`Clio Coder: setting up terminal panes (one time)...`).
+If that fails, it says so once, continues in the terminal, and does not try again
+for 24 hours; `clio-coder panes install` retries at any time.
 
 A returning user whose home already exists but has no saved chat route is not
 sent back through configure when a route can be detected; the contract is in
@@ -687,7 +691,7 @@ Source: `src/cli/upgrade.ts` and `scripts/install.sh`.
 
 On a pinned install, `upgrade` prints `Pinned version: <X>` in place of the
 `Available version` and `Channel` lines, then
-`This install is pinned to <X>, so upgrade and background updates leave it there.`
+`This install is pinned to <X> since <date> (<origin>); release with clio-coder upgrade --channel <channel>. Upgrade and background updates leave it there.`
 and the installer command that follows the recorded channel again:
 `sh <root>/scripts/install.sh --version <channel> --auto-update --install-dir <dir> --bin-dir <dir>`,
 or `powershell ... -File <root>\scripts\install.ps1 -Version <channel> -AutoUpdate ...`
@@ -712,7 +716,10 @@ and typing `/resume` continues one on the restored version. When the restored ve
 than the one `home.json` records, a successful rollback also records it there as an accepted
 downgrade, so the older version opens the home the newer one used without the newer-version prompt
 and without `CLIO_CODER_ALLOW_OLDER=1` for headless runs and ACP, and a note lists the applied
-migrations the restored version does not know. A rollback to a newer version (the second rollback
+migrations the restored version does not know. Sessions are not converted back: 0.8.4 writes
+session format 7 and restamps a format 6 session to 7 when it resumes it, so 0.8.3 refuses a
+session that 0.8.4 has resumed and asks for an upgrade. A session 0.8.4 has listed but not
+resumed stays at format 6. A rollback to a newer version (the second rollback
 returning to the version just replaced) leaves `home.json` as it is, and that version's next start
 records the upgrade. If the record cannot be written, a warning says the restored version will ask
 first. A failed installer run exits 1 with
@@ -745,7 +752,7 @@ will wait for. A second `/upgrade` while an update is pending reports that one i
 already pending and starts nothing.
 
 `/upgrade` leaves a pinned installer install alone. It prints
-`This install is pinned to <X>, so /upgrade leaves it there. To follow its channel again, run:`
+`This install is pinned to <X> since <date> (<origin>); release with clio-coder upgrade --channel <channel>, so /upgrade leaves it there. To follow its channel again, run:`
 followed by the same installer command `upgrade` prints. A source checkout is told
 `This source checkout updates through git, not the package registry. Run:` with its
 git steps. Homebrew, winget, repository-local, unknown, and any pnpm or Bun installation whose prefix

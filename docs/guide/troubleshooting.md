@@ -21,12 +21,13 @@ Run `clio-coder doctor` first ([doctor.md](doctor.md)): its `chat` row identifie
 
 - **`clio-coder requires Node.js >=22.19.0; this is <version>.`** (exit `1`, or npm `EBADENGINE` warnings on older Node such as Node 18) — Install with the managed runtime (`curl -fsSL https://coder.iowarp.ai/install.sh | sh`) or point CLIO Coder at a supported runtime with `CLIO_CODER_NODE=/path/to/node/bin/node`. See [HPC clusters](hpc-clusters.md).
 - **`No model target is configured.` / `No usable default target is configured.`** — Bare `clio-coder` found no saved or detected chat route and launches `clio-coder configure`. Finish setup or run `clio-coder targets use <id> --model <model>`.
-- **`Target '<id>' has no chat model configured.` / `Target '<id>' runs on '<runtime>', which cannot drive the main agent.`** (exit `2`) — Saved chat route cannot run the orchestrator (`Your saved chat route is kept and no other target is used.`). Repair via `clio-coder configure` or `clio-coder targets use <id> --model <model>`.
-- **`Chat: <target> / <model> is unavailable: <what is missing>. Your saved chat route is kept; fix the connection with /config.`** — Opens the TUI with credentials missing. Fix in `/config`, set the named env var, or run `clio-coder auth login <target>`.
+- **`Target '<id>' has no chat model. Run: clio-coder targets use <id> --model <model>` / `Target '<id>' runs on '<runtime>', which cannot drive the main agent.`** (exit `2`) — Saved chat route cannot run the orchestrator (`Your saved chat route is kept and no other target is used.`). Repair via `clio-coder configure` or `clio-coder targets use <id> --model <model>`.
+- **`Chat: <target> / <model> is unavailable. <what is missing> Your saved chat route is kept.`** — Opens the TUI with credentials missing. Fix in `/config`, set the named env var, or run the printed `clio-coder auth login <provider>`.
 - **``configuration cancelled; no target saved. Run `clio-coder configure` when you are ready.``** (exit `130`) — Setup aborted before saving; rerun `clio-coder configure`.
 - **`This home was last used by Clio Coder <newer>; you are running <version> (<path>).`** (exit `2` on decline or headless) — Older binary on a newer home. Run the newer binary (`clio-coder doctor` `state metadata` lists `clio-coder` copies on `PATH`), confirm interactively, or set `CLIO_CODER_ALLOW_OLDER=1` for headless `run` or ACP.
 - **`clio-coder: a task on stdin needs a subcommand; use: clio-coder run "<task>"`** (exit `2`) — Piped non-empty stdin into bare `clio-coder` without `CLIO_CODER_INTERACTIVE=1`. Pass `clio-coder run "<task>"` or pipe into `clio-coder run`.
 - **`Clio Coder: terminal panes unavailable (...). Continuing in this terminal.`** — Pane host socket path exceeded 100 bytes or no writable owner-only directory was found (`$XDG_RUNTIME_DIR/clio-coder`, `TMPDIR`, `<state>/mux/run`, `<cache>/run`, `/run/user/<uid>/clio-coder`, `/tmp`). Session continues single-pane; export a shorter `XDG_RUNTIME_DIR` or `TMPDIR` as named after `to fix,`.
+- **``Clio Coder: terminal panes unavailable (<why>). Continuing in this terminal; run `clio-coder panes install` to retry.``** — After an upgrade moved the pane host pin, launch tried to install the new pin and failed. Launch does not retry for 24 hours; run `clio-coder panes install` to retry now.
 
 ### Installer and update errors
 
@@ -54,7 +55,7 @@ Run `clio-coder doctor` first ([doctor.md](doctor.md)): its `chat` row identifie
 | `[install] warning: the desktop app runs as a login service on Linux only; start it here with: clio-coder gui` | `--gui` / `CLIO_CODER_INSTALL_GUI=1` on non-Linux | Run `clio-coder gui` in your session. |
 | `[install] warning: the desktop app was not set up. Retry with: clio-coder doctor --fix` | Missing systemd user session or active background service handover | Finish active work, ensure a systemd user session exists, run `clio-coder doctor --fix`. |
 | `[install] error: no installer manifest at <root>/install.json; nothing to roll back` | `--rollback` on non-installer root | Pass the matching `--install-dir` or reinstall. |
-| `This install is pinned to <X>, so upgrade and background updates leave it there.` | Pinned by `--version` or `--package` | Run the printed installer command (`--version <channel> --auto-update`) to unpin. |
+| `This install is pinned to <version> since <date> (<origin>); release with clio-coder upgrade --channel <channel>. Upgrade and background updates leave it there.` | Pinned by `--version` or `--package` | Run the printed installer command (`--version <channel> --auto-update`) to unpin. |
 
 ## Lifecycle commands
 
@@ -72,7 +73,7 @@ Run `clio-coder doctor` first ([doctor.md](doctor.md)): its `chat` row identifie
 - **`Another native session (pid <N>) is still running; close it before uninstalling`** / **`Native installation is locked; retry after the installer exits`** — Stop the listed PID or wait for `.install-lock`.
 - **`Reset stopped; Clio state was preserved.` / `Could not stop the graphical installation; Clio state was preserved.`** — Run `clio-coder gui background uninstall && clio-coder gui launcher uninstall`, then retry.
 - **`Background service belongs to another installation; Clio state was left unchanged.`** (`reset`/`uninstall`, exit `1`) — Run `reset`/`uninstall` (or `clio-coder gui background uninstall`) from the owning installation.
-- **`Clio Coder background app is running an older version that this one cannot verify, so it was left running. Run: clio-coder gui background restart`** — Run `clio-coder gui background restart` once after upgrading past 0.7.0.
+- **`Clio Coder background app is running but did not prove it is this installation's app, so it was left running. See clio-coder gui background status.`** (`gui background restart --if-idle`) — Check `clio-coder gui background status`, then run `clio-coder gui background restart` once active work is finished.
 - **`<N> path(s) could not be removed:`** — Fix file permissions or close processes holding handles, then rerun the printed command.
 
 ## Claude Agent SDK
@@ -168,6 +169,8 @@ Refused tool calls start with `Refused by Clio policy`, `Refused by operator app
 
 - **`unsealed <path>: no bundle.json (live or never sealed)`** (`telemetry verify`, exit `1`) — Process still live or crashed before sealing. Re-verify once exited; `clio-coder telemetry doctor` summarizes live vs sealed scopes.
 - **`failed <path>: <mismatch>`** (`telemetry verify` / `telemetry doctor`, exit `1`) — Post-seal modification detected; treat scope as untrusted.
+- **`session was written by a newer Clio (format version <N>, this build reads version 7): <path>. Upgrade clio-coder to resume this session.`** — The session was written or resumed by a newer CLIO Coder. Since 0.8.4 sessions use format 7: a format 6 session opens unchanged and is restamped to 7 when it is resumed, after which 0.8.3 refuses it. Upgrade, or resume the session with the newer version. ACP `session/load` returns the same text without the path as error `-32602` with `code: "session_format"`.
+- **`session metadata has an unsupported format version (expected version 7, got <N>): <path>. Remove the session directory to start a new session.`** — The session predates format 3, the oldest format this build reads. Start a new session.
 - **`the session recorded no working directory` / `no longer exists` / `is not a directory`** (`/resume`) — Recorded path missing; pick **Continue here** or cancel.
 - **`Copy unconfirmed: <reasons>; OSC 52 sent` / `Sent to terminal clipboard (OSC 52)`** — Terminal clipboard integration used OSC 52 fallback (expected over non-X11 SSH). Locally on Linux, install `wl-copy`, `xclip`, or `xsel`, or enable X11 forwarding/OSC 52 in your terminal/multiplexer.
 - **LM Studio notices**:
@@ -178,7 +181,7 @@ Refused tool calls start with `Refused by Clio policy`, `Refused by operator app
 
 ## Reading a cold cache
 
-Use `/context` to inspect cache hit telemetry, compiled-prompt reuse, and prefill timing. If CLIO Coder knows why the prefix went cold, `/context` displays it (e.g., `last cache-affecting events: working-set eviction (reuse measured separately)`).
+Use `/context` to inspect cache hit telemetry, compiled-prompt reuse, and prefill timing. If CLIO Coder knows why the prefix went cold, `/context` displays it (e.g., `prompt read again after trimmed tool output (reuse measured separately)`).
 
 For finished runs, inspect `current.jsonl` under the session store (`clio-coder paths`): check `promptCache.expectedColdReasons` (`working_set_evict`, `compaction`, `dispatch`, `residency`, `thinking_change`, `tool_surface_change`, `prompt_recompiled`, `system_prompt_changed`, `background_memory`, `model_changed`, `transport_reset`, `input_changed`, `tool_choice_change`, `observation_aging`, `step_checkpoint`), `promptCache.backendVerdict`, and `promptCache.backend`. Run summaries via:
 
