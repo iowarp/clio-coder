@@ -649,6 +649,29 @@ it("drv-cf3a D-A: a session the old build wedged resumes and is admitted on the 
 	}
 });
 
+// Astra #1: at 65,536 with a 32,768 ceiling, 160,000 characters cost 40,000 tokens in Clio and 45,715 in Pi. At
+// Pi's count the wire reserve is 15,725 and the request fits; the reserve read at Clio's count (21,440) refused it.
+for (const via of ["submit", "post-tool guard"] as const) {
+	it(`Astra #1: the ${via} fit check resolves the output reserve at the count it chose`, {
+		timeout: 30_000,
+	}, async () => {
+		const text = body("Field survey", 160_000);
+		const wire = transport(via === "submit" ? [] : ["notes/survey.md"]);
+		const live = harness(wire, { "notes/survey.md": text }, { window: 65_536 });
+		live.settings.context.toolResultMaxBytes = 262_144;
+		try {
+			await live.loop.submit(via === "submit" ? text : "Read notes/survey.md in full, then say done.");
+			await live.loop.whenSettled();
+			deepStrictEqual(refusals(live.notices()), []);
+			strictEqual(live.summaries(), 0, "nothing compacts a request that fits");
+			strictEqual(wire.requests.length, via === "submit" ? 1 : 2);
+			ok(wire.requests.at(-1)?.body.includes(JSON.stringify(text).slice(1, -1)), "the last request carries the text");
+		} finally {
+			await live.close();
+		}
+	});
+}
+
 it("drv-cf3a D-A: a protected read larger than the window ends the turn once, naming it, and the session goes on (bt-47)", {
 	timeout: 30_000,
 }, async () => {

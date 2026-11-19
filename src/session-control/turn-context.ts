@@ -3816,13 +3816,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			let compacted = false;
 			// Eviction rebuilds the messages before the summary call, so a failed summary can still leave them changed.
 			const messagesBefore = agentRuntime.agent.state.messages;
-			// The A4 count (overflowFitTokens) decides whether the request fits; the fit line's reserve is A5's.
-			const a4Fits = (view: LiveBudgetView): boolean =>
-				requestFits(
-					Math.max(view.inputTokens ?? 0, overflowFitTokens(agentRuntime)),
-					view.outputReserveTokens,
-					view.effectiveWindow,
-				);
+			// The A4 count (overflowFitTokens) decides whether the request fits; the fit line's reserve is A5's, read at that count.
+			const a4Fits = (view: LiveBudgetView): boolean => {
+				const input = Math.max(view.inputTokens ?? 0, overflowFitTokens(agentRuntime));
+				const reserve = view.outputReserveTokens === null ? null : resolveFitOutputReserve(agentRuntime, input);
+				return requestFits(input, reserve, view.effectiveWindow);
+			};
 			// An automatic pass the trigger asks for runs first (A5); the A4 count then decides the overflow pass.
 			let mustFit =
 				knownWindow &&
