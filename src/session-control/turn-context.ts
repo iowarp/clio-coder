@@ -3147,10 +3147,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					status: "unavailable",
 					reason: "No native runtime descriptor is resolved. Inspection does not initialize a runtime.",
 				};
+			const live = state.runtime;
 			return {
 				status: "available",
 				capability: "native",
 				view: refreshLiveBudget(),
+				...(live ? { outputReserveAt: (tokens: number) => resolveFitOutputReserve(live, tokens) } : {}),
 				...(sessionPrompt
 					? { promptSections: sessionPrompt.sections.map((section) => ({ id: section.id, tokens: section.tokenEstimate })) }
 					: {}),

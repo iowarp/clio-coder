@@ -766,7 +766,8 @@ const recallRoomSpent = new Map<string, number>();
 
 interface RecallRoom {
 	input: number;
-	reserve: number;
+	/** The fit output reserve at a request's input; it shrinks as the batch's input grows (Astra #7). */
+	reserve(input: number): number;
 	window: number;
 	spent(): number;
 	charge(tokens: number): void;
@@ -776,7 +777,8 @@ interface RecallRoom {
  * The room a recall may fill under the fit line: the live view's input estimate and fit output reserve (A5)
  * against its window, the same three figures the post-tool guard's stop hands to `requestFits`. A parallel
  * batch runs before any of its results reach the request, so its recalls read the same figures and share one
- * tally, first come first served; a result that has landed moves the figures and starts a fresh tally. Null
+ * tally, first come first served; a result that has landed moves the figures and starts a fresh tally. The
+ * reserve is resolved at the input the recall would leave, as the next request's admission resolves it. Null
  * without a native live budget (workers, external registries, no known window), where recall is unchanged
  * (bt-47 drv-f1r).
  */
@@ -786,9 +788,10 @@ function recallRoom(deps: ContextToolDeps, options: ToolInvokeOptions | undefine
 	const { inputTokens: input, outputReserveTokens: reserve, effectiveWindow: window } = budget.view;
 	if (input === null || reserve === null || window === null) return null;
 	const key = [options?.sessionId ?? "", options?.turnId ?? "", window, reserve, input].join(":");
+	const reserveAt = budget.outputReserveAt;
 	return {
 		input,
-		reserve,
+		reserve: (tokens) => reserveAt?.(tokens) ?? reserve,
 		window,
 		spent: () => recallRoomSpent.get(key) ?? 0,
 		charge: (tokens) => {
@@ -888,7 +891,8 @@ function runRecallScope(
 	});
 	const room = recallRoom(deps, options);
 	const cost = estimateAgentMessageTokens({ role: "toolResult", content: [{ type: "text", text: truncation.content }] });
-	if (room !== null && !requestFits(room.input + room.spent() + cost, room.reserve, room.window)) {
+	const carried = room === null ? 0 : room.input + room.spent() + cost;
+	if (room !== null && !requestFits(carried, room.reserve(carried), room.window)) {
 		// Nothing was readmitted, so no contextRecall entry and no recalled event. The stub still lands in the
 		// request, so later siblings see its cost.
 		room.charge(estimateAgentMessageTokens({ role: "toolResult", content: [{ type: "text", text: RECALL_NO_ROOM }] }));
