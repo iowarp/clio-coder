@@ -47,8 +47,8 @@ and command-running `verify` calls run inside the sandbox. A contained command
 can read the filesystem, use the network and write only to:
 
 - the workspace;
-- the scratch roots: the temp directories (`$TMPDIR`, `/tmp` and `/var/tmp`)
-  and any directory listed in `safety.scratchRoots`;
+- the scratch roots: the temp directories (`$TMPDIR`, `/tmp`, `/var/tmp`, and
+  `/var/folders` on macOS) and any directory listed in `safety.scratchRoots`;
 - a private tool cache that `XDG_CACHE_HOME`, `npm_config_cache`,
   `PIP_CACHE_DIR`, `UV_CACHE_DIR` and `PLAYWRIGHT_BROWSERS_PATH` point at;
 - the repository's git directories, so `git commit`, `fetch` and `checkout`
@@ -100,11 +100,14 @@ safety judge has reviewed them:
 - batch scheduler clients: Slurm (`sbatch`, `srun`, `squeue`, `scancel` and
   the rest), PBS (`qsub`, `qstat`), LSF (`bsub`, `bjobs`) and Flux;
 - publishing, such as `npm publish`, `cargo publish` or `docker push`;
-- network writes, such as `curl` with a body or a method other than GET.
+- network writes, such as `curl` with a body or a method other than GET or
+  HEAD.
 
 A name that may point at something else is not read as that CLI, so the line
 stays contained: a relative path such as `./sbatch`, a name the line defines
-as an alias or function, or any name on a line that sets `PATH`. Under
+as an alias or function, or any name on a line that sets `PATH` or a
+variable that makes a program load other code (`LD_PRELOAD`, `NODE_OPTIONS`,
+`PYTHONPATH`, `GIT_SSH_COMMAND` and the like). Under
 `safety.sandbox: required` at unconfined yolo, an outward command leaves the
 sandbox only in the narrow cases described in
 [Make the sandbox stricter or looser](#make-the-sandbox-stricter-or-looser).
@@ -129,7 +132,11 @@ Submit from the command the agent runs rather than from a wrapper script. See
 | headless `clio-coder run` at `default` | The judge decides from your prompt. Anything it does not allow is denied, since nobody can answer a card. |
 
 An approval card nobody answers within `safety.unattendedAfterSeconds` (300
-seconds by default) is denied, and the turn continues.
+seconds by default) is denied, and the turn continues. An unanswered question
+takes its recommended option, unless that option leaves the workspace. `0`
+waits forever, except that a question at `yolo` waits 300 seconds at most.
+Once a question lapses with no key pressed since, later questions wait at most
+30 seconds. A question only you may answer never times out.
 
 ## Make the sandbox stricter or looser
 
@@ -189,10 +196,18 @@ than your user settings:
 - It can lower `safety.autonomy` to `default`, never raise it to `yolo`.
 - It can tighten `safety.sandbox` (`off`, then `auto`, then `required`), never
   loosen it.
-- It can lower limits such as `safety.limits`, never raise them.
-- It can switch the review watchdog on, never off.
+- It can lower limits such as `safety.limits` and `fleet.limits`, never raise
+  or switch them off. It can lower a prompt-template budget ceiling
+  (`safety.limits.templateToolCallsPerTurnMax`,
+  `templateObservationBytesPerTurnMax`) that your user settings set, but
+  cannot set one you left unset.
+- It can switch the review watchdog on or make it check more often, never
+  switch it off or slow it.
+- It can lower telemetry capture, never raise it.
 - It cannot carry credentials, add scratch roots, pass variables into the
-  sandbox, change the judge's rules or switch it off, or accept yolo for you.
+  sandbox, open Unix sockets in it, change the unattended timeout, change the
+  judge's rules or switch it off, or set yolo's confinement or accept yolo for
+  you.
   It may point the judge at another target your user settings declare.
 
 An ignored key is reported as a settings issue. A project `safety.yaml` can
@@ -206,7 +221,9 @@ unconfined yolo. See
 In a Git work tree, CLIO Coder writes a private snapshot of your files before
 the first change of each turn and before every destructive step, at both
 levels. `/rewind` lists the snapshots, previews what a restore would change,
-and restores files only; it never moves your branches. See
+and restores files only; it never moves your branches. A lone delete whose
+every target lies inside a scratch root takes no snapshot: scratch contents
+are disposable, so at `default` it runs without asking. See
 [Undoing file changes with /rewind](commands-and-modes.md#undoing-file-changes-with-rewind).
 
 ## Workers

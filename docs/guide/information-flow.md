@@ -1,6 +1,6 @@
 # Information flow
 
-Information flow keeps named content, such as files under `secrets/`, away from destinations the operator did not choose. CLIO Coder labels content when a source rule matches and checks its restrictions before bytes leave for a model or a mediated outbound tool. A model-request refusal holds at `yolo` as well as `default`. At `yolo` a mediated outbound tool call is not checked against the labels; see [What is checked before bytes leave](#what-is-checked-before-bytes-leave). With no source rules and no carried restrictions, ordinary behavior is unchanged.
+Information flow keeps named content, such as files under `secrets/`, away from destinations the operator did not choose. CLIO Coder labels content when a source rule matches and checks its restrictions before bytes leave for a model or a mediated outbound tool. A model-request refusal holds at every autonomy level. Contained `yolo`, the default form of `yolo`, checks outbound tool calls as `default` does; only at unconfined `yolo` is a mediated outbound tool call not checked against the labels; see [What is checked before bytes leave](#what-is-checked-before-bytes-leave). With no source rules and no carried restrictions, ordinary behavior is unchanged.
 
 This controls where observed content may go. The [safety model](../architecture/safety-model.md) still decides whether a read or tool call may run; allowing a recipient does not grant access to a protected file.
 
@@ -68,7 +68,7 @@ Writes do not carry labels. A file a restricted session writes is unlabeled, and
 
 Every send that carries session context is judged against the labels the session holds: main-turn model requests, compaction summaries, memory steps, `/btw`, `/draft`, `/handoff`, context-bearing pre-warm requests and System One engine requests, plus mediated outbound tools (`web_fetch`, `web_read` and MCP tools). A request with an empty context, such as the wake request, is not a send. A policy that cannot vouch for its provenance refuses every transfer, even before anything restricted is carried. The destination of a model request is the configured target as it is now, so changing the URL behind a target id is judged on the new URL. The safety judge's own review request is judged the same way, and a refused one counts as the judge giving no verdict.
 
-At `yolo`, the operator's skip-permissions mode, the main session and any worker that inherited it do not refuse a mediated outbound tool call (`web_fetch`, `web_read` or an MCP tool) on a label, nor a source read while the policy is unavailable. The labels are still absorbed, so the session keeps its provenance and every model request is still checked.
+At unconfined `yolo` (`safety.yoloConfinement: unconfined`, the skip-permissions mode), the main session and any worker that inherited it do not refuse a mediated outbound tool call (`web_fetch`, `web_read` or an MCP tool) on a label, nor a source read while the policy is unavailable. The labels are still absorbed, so the session keeps its provenance and every model request is still checked.
 
 ## Workers and other agents
 
@@ -92,4 +92,4 @@ A policy refusal names the rule, source path or tool, and requested destination.
 | Restriction cannot be persisted | Restore session persistence; transfer remains refused until the label is written. |
 | Approved flow snapshot is unavailable or unwritable | Restore the named state file or state-directory access. Re-approve with `clio-coder config trust safety` when the refusal says the trust record does not approve the snapshot. |
 
-Changing policy, switching models or choosing `yolo` does not clear a session's provenance. Use a new session when the refusal calls for leaving earlier content behind.
+Changing policy, switching models or choosing either form of `yolo` does not clear a session's provenance. Use a new session when the refusal calls for leaving earlier content behind.
