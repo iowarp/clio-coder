@@ -49,6 +49,7 @@ import {
 	sessionStepChainStore,
 	stepTurnOutcome,
 } from "../../src/session-control/step-start.js";
+import { thinkingLengthRecoveryMessages } from "../../src/session-control/thinking-length-recovery.js";
 import { recoveryAttemptHasOutput } from "../../src/session-control/turn-recovery.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
@@ -1232,11 +1233,13 @@ describe("W2 (F6 -> CF-4): the full element sequence with inserts", () => {
 		};
 		const live = () => flat(runtime.agent.state.messages);
 		const rebuilt = () => render(session.readEntries());
+		const selected = (turnId: string) =>
+			flat(buildModelReplayAgentMessagesFromTurns(session.readEntries(), { uptoTurnId: turnId }));
 		const reopened = async () => {
 			await session.close();
 			return render(openSession(id).turns() as SessionEntry[]);
 		};
-		return { inserts, runtime, row, write, checkpoint, live, rebuilt, reopened };
+		return { inserts, runtime, row, write, checkpoint, live, rebuilt, selected, reopened };
 	}
 	const assistant = (turnId: string, parent: string, text: string) =>
 		message(turnId, parent, "assistant", { content: [{ type: "text", text }], stopReason: "stop" });
@@ -1292,6 +1295,43 @@ describe("W2 (F6 -> CF-4): the full element sequence with inserts", () => {
 		strictEqual(rebuilt[once(rebuilt, RESTORATION) + 1], "user:second", "a kept submit keeps its restoration");
 		strictEqual(rebuilt[once(rebuilt, REMINDER) + 1], "user:also check b");
 		deepStrictEqual(await l.reopened(), rebuilt, "a reopen renders the same");
+	});
+
+	it("a /tree selection of a user row keeps the restoration its request carried", () => {
+		const l = ledger();
+		l.row(user("u1", null, "first"), assistant("a1", "u1", "one"));
+		const prompt = user("u2", "a1", "second");
+		l.write(prompt);
+		l.inserts.insert(l.runtime, "memory-restoration", [RESTORATION], { before: "u2" });
+		l.runtime.agent.state.messages.push(...buildModelReplayAgentMessagesFromTurns([prompt]));
+		const sent = l.live();
+		l.inserts.dispatched();
+		l.row(assistant("a2", "u2", "two"));
+		deepStrictEqual(l.selected("u2"), sent, "the selection renders what the request at u2 carried, ending at u2");
+	});
+
+	it("a cut that keeps a recovered reply but not its user row drops the reply and the exchange together", () => {
+		const l = ledger();
+		l.row(user("u1", null, "first"), assistant("a1", "u1", "one"));
+		l.row(user("u2", "a1", "second"));
+		l.write(
+			message("t", "u2", "assistant", { content: [{ type: "thinking", thinking: "deliberating" }], stopReason: "length" }),
+		);
+		const exchange = thinkingLengthRecoveryMessages({ provider: "p", api: "openai-completions", model: "m" });
+		const call = exchange[0] as AgentMessage;
+		const callRow = l.inserts.reserveRowId(call);
+		l.inserts.record("thinking-length-recovery", exchange, { replaces: ["t", callRow], exclude: ["t"] });
+		l.inserts.dispatched();
+		l.write(message(callRow, "t", "assistant", { ...call }), assistant("f", callRow, "final"));
+		const answered = (elements: string[]) =>
+			elements.filter((element) => element.startsWith("assistant:") && element.includes("clio_thinking_length_reprompt"))
+				.length === elements.filter((element) => element.startsWith("toolResult:")).length;
+		ok(answered(l.rebuilt()), "before the cut the call is answered");
+		l.checkpoint("t");
+		const rebuilt = l.rebuilt();
+		ok(answered(rebuilt), "after the cut the call and its result are kept or dropped together");
+		ok(!rebuilt.some((element) => element.includes("deliberating")), "the discarded reply stays discarded");
+		strictEqual(rebuilt.at(-1), "assistant:final");
 	});
 });
 
