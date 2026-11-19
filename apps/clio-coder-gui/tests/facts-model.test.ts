@@ -37,7 +37,8 @@ test("absent and zero are different facts, and the key chooses the unit", () => 
 	assert.equal(scalarText("runId", "abc").mono, true);
 	assert.equal(scalarText("note", "a".repeat(64)).mono, true, "a long hex string reads as a digest");
 	assert.equal(scalarText("note", "plain words").mono, undefined);
-	assert.match(scalarText("startedAt", "2026-09-20T10:11:12.000Z").text, /^2026-09-20 \d{2}:\d{2}:\d{2}$/);
+	// Rendered in the viewer's zone: the day is the 19th west of UTC-10 and the 21st east of UTC+13.
+	assert.match(scalarText("startedAt", "2026-09-20T10:11:12.000Z").text, /^2026-09-(?:19|20|21) \d{2}:\d{2}:12$/);
 	assert.equal(scalarText("note", "x".repeat(2000)).text.length, FACT_LIMITS.text);
 });
 

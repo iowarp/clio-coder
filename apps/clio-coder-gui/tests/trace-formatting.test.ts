@@ -8,7 +8,8 @@ test("trace formatting keeps missing counts distinct from zero and adopts server
 	assert.equal(countText(null), "not recorded");
 	assert.equal(countText(0), "0");
 	assert.equal(countText(1234567), "1,234,567");
-	assert.match(formatTime("2026-09-11T12:00:00Z"), /^2026-09-11 \d{2}:\d{2}:\d{2}$/);
+	// Rendered in the viewer's zone: noon UTC is still the 11th at UTC-12 and already the 12th at UTC+14.
+	assert.match(formatTime("2026-09-11T12:00:00Z"), /^2026-09-1[12] \d{2}:\d{2}:00$/);
 	let now = 10000;
 	const clock = serverClock(() => now);
 	clock.adopt(null);
