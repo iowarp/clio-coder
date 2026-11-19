@@ -39,13 +39,13 @@ declared, under the conditions recorded with it (commit, inputs, seed,
 platform). It does not establish that a result is scientifically right.
 
 Claims are captured from verify results on the main thread and from host
-verification of worker runs. The log is append-only and lives in Clio's state
-directory, keyed by the repository root, so every subdirectory of a repository
-reads the same claims. A linked worktree folds into its main checkout: a lane
-and the checkout it merges into share one log, a lane's claims supersede only
-claims from the same worktree, and opposite verdicts at equal pinned conditions
-contradict wherever they ran. A checkout whose .git pointer claims a worktree
-the main repository does not record records nothing.
+verification of worker runs. The log is append-only and lives in CLIO Coder's
+state directory, keyed by the repository root, so every subdirectory of a
+repository reads the same claims. A linked worktree folds into its main
+checkout: a lane and the checkout it merges into share one log, a lane's claims
+supersede only claims from the same worktree, and opposite verdicts at equal
+pinned conditions contradict wherever they ran. A checkout whose .git pointer
+claims a worktree the main repository does not record records nothing.
 
 Each claim's seal line (--json: seal) says how it stands against the sealed
 run it cites. A host verification claim is verified when that run's seal

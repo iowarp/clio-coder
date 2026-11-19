@@ -55,7 +55,7 @@ science. CLIO stands for Context Layer for Input/Output, named for the Greek mus
 
 Usage:
   clio-coder                      start interactive repository chat
-  clio-coder acp                  serve Clio as an ACP v1 agent over stdio
+  clio-coder acp                  serve CLIO Coder as an ACP v1 agent over stdio
   clio-coder --acp                alias for clio-coder acp
   clio-coder run [flags] <task>   run one headless main-agent turn
   clio-coder --version, -v        print the Clio Coder version
@@ -63,7 +63,7 @@ Usage:
   clio-coder --no-context-files, -nc  skip main-session project context preload
   clio-coder --skill <path>       make one explicit skill available for this session, repeatable
   clio-coder --no-skills          disable skill discovery while still honoring --skill
-  clio-coder --with-panes         join the current pane host as a guest instead of opening Clio's own
+  clio-coder --with-panes         join the current pane host as a guest instead of opening CLIO Coder's own
   clio-coder --autonomy <level>   start this interactive session at default|yolo
   clio-coder --allow-tools <names>     limit this interactive session's tools; none disables all
   clio-coder --delegate-tools <names>  limit the tools this session's workers may hold
@@ -90,7 +90,7 @@ Usage:
   clio-coder context reset [--all] [--yes]  clear accumulated project context artifacts
   clio-coder context index [--json]  build the codemap index without model calls
   clio-coder context map [--out <path>] [--json]  create a native interactive HTML codebase map
-  clio-coder context replay --sessions <path>...  compare working-set policies over Clio ledgers
+  clio-coder context replay --sessions <path>...  compare working-set policies over CLIO Coder ledgers
   clio-coder context working-set --session <id|path>  inspect one session's working-set state
   clio-coder context working-set --verify <id|path>  verify each attempt against the receipt taken at send
   clio-coder uninstall            remove Clio Coder: its state, settings and launcher
@@ -121,9 +121,9 @@ Usage:
   clio-coder store tags|ls|stat|history|verify|put|get|rm-tag|adopt|where  inspect, verify and manage this project's store
   clio-coder tasks                list, add, hand, finish, or drop project operator tasks
   clio-coder verifiers            discover, inspect, author, validate, edit, or dry-run project checks
-  clio-coder tools list|status|install|remove <id>  pinned external programs Clio can drive
+  clio-coder tools list|status|install|remove <id>  pinned external programs CLIO Coder can drive
   clio-coder interop inspect --json  detected external coding agents and how far each one is wired
-  clio-coder panes install|theme  repair Clio's pane host (herdr) or print Clio's theme as a herdr block
+  clio-coder panes install|theme  repair CLIO Coder's pane host (herdr) or print CLIO Coder's theme as a herdr block
   clio-coder dev <command>        harness instruments and power-user surfaces; run 'clio-coder dev' for the list
   clio-coder --demo|--no-demo      full welcome and guidance, or compact startup for this session
   clio-coder --help, -h           this message
@@ -143,7 +143,7 @@ Usage:
 const DEV_COMMANDS: ReadonlyArray<{ name: string; summary: string }> = [
 	{ name: "components", summary: "list, snapshot, or diff harness components" },
 	{ name: "evolve", summary: "create, validate, or summarize change manifests" },
-	{ name: "share", summary: "export or import Clio project/resource archives" },
+	{ name: "share", summary: "export or import CLIO Coder project/resource archives" },
 	{ name: "gui", summary: "start the opt-in alpha graphical application" },
 	{ name: "flywheel", summary: "print the maintainers' ranked backlog from shared usage" },
 ];

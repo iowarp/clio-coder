@@ -26,7 +26,7 @@ Serve Clio Coder as an Agent Client Protocol v1 agent over stdio.
                            capabilities, as clio-coder run does; none disables all.
   --delegate-tools NAMES   Limit the tools the session's dispatched workers may hold.
   --read-only              Hold every session to the read-only ceiling: no file
-                           outside the Clio home changes.
+                           outside the CLIO Coder home changes.
   auth login               Open interactive Quick Connect for terminal ACP authentication.
 
 This command is intended for ACP frontends to spawn. Interactive delegation remains

@@ -14,7 +14,7 @@ import { printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder share <command>
 
-Export and import portable Clio project/resource archives.
+Export and import portable CLIO Coder project/resource archives.
 
 Commands:
   clio-coder share export --out <path> [--project|--user|--both] [--context] [--prompts] [--skills] [--agents] [--playbooks] [--settings] [--extensions] [--all] [--dry-run] [--json]

@@ -17,13 +17,13 @@ const HELP = `clio-coder fleet nodes <command>
   discover [--json]                     list Tailscale peers and which ones are registered nodes
   install <id> [--yes]                  preview a user-level install of this exact client; --yes executes
   tools install <id> <tool> [--yes]     preview a user-level remote install of asciinema, copilot-sdk or
-                                        claude-sdk pinned by the node's Clio; --yes executes
+                                        claude-sdk pinned by the node's CLIO Coder; --yes executes
   list [--json]                         show recorded readiness for this project and check age
   remove <id>                           remove a node without deleting remote files
   test <id> [--record] [--json]         probe without remote writes; --record updates local eligibility
 
 A registered node needs a passing recorded check before dispatch.
-Exact Clio builds and project paths must match; a -dev version must match its build too. Independent checkouts must share clean Git history and commit; independent-checkout mutations require worktree: true and return commits through SSH into guarded application. Labels are operator declarations.
+Exact CLIO Coder builds and project paths must match; a -dev version must match its build too. Independent checkouts must share clean Git history and commit; independent-checkout mutations require worktree: true and return commits through SSH into guarded application. Labels are operator declarations.
 `;
 
 function parse(

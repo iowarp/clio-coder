@@ -18,10 +18,10 @@ import { formatColumns, printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder tools <command>
 
-Manage the external terminal programs Clio can drive. Every one of them is
-optional: Clio works without them and only uses one when it is present. Each is
-pinned to an exact upstream version and checksum, and a copy already on PATH
-wins over Clio's own as long as it clears the pinned minimum.
+Manage the external terminal programs CLIO Coder can drive. Every one of them is
+optional: CLIO Coder works without them and only uses one when it is present.
+Each is pinned to an exact upstream version and checksum, and a copy already on
+PATH wins over CLIO Coder's own as long as it clears the pinned minimum.
 
 Commands:
   clio-coder tools list [--json]           the pinned table and where each resolves

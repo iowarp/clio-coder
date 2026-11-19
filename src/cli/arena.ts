@@ -30,9 +30,10 @@ const HELP = `Usage:
   clio-coder arena list [--suite <name>] [--json]
   clio-coder arena standings [--suite <name>] [--json]
 
-Runs one prompt on 2 to ${ARENA_MAX_CONTENDERS} contenders side by side, shows their work under
-blind labels, and records which one you preferred. Clio records results and
-never judges: no model grades a contender, and standings come from your votes.
+Runs one prompt on 2 to ${ARENA_MAX_CONTENDERS} contenders side by side, shows
+their work under blind labels, and records which one you preferred. CLIO Coder
+records results and never judges: no model grades a contender, and standings
+come from your votes.
 
 run options:
   --contender <target>/<model>  a contender; split at the first "/", repeat 2 to ${ARENA_MAX_CONTENDERS} times
@@ -387,7 +388,7 @@ function standingsCommand(args: string[]): number {
 		]),
 	];
 	process.stdout.write(
-		`${formatColumns(table)}\n${standings.votedMatches} voted of ${standings.matches} matches${standings.suite ? ` in suite ${standings.suite}` : ""}. These are your recorded votes; Clio does not judge.\n`,
+		`${formatColumns(table)}\n${standings.votedMatches} voted of ${standings.matches} matches${standings.suite ? ` in suite ${standings.suite}` : ""}. These are your recorded votes; CLIO Coder does not judge.\n`,
 	);
 	return 0;
 }

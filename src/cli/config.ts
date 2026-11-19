@@ -10,8 +10,8 @@ skills, prompts, agents, playbooks, extensions, safety, memory, hooks, and the o
 profile loaded, from where, with what precedence, trust, reload class, and
 context cost. Read-only; nothing is created.
 
-This is the "why is Clio behaving this way" surface. Parse the --json form in
-scripts instead of the table.
+This is the "why is CLIO Coder behaving this way" surface. Parse the --json form
+in scripts instead of the table.
 
 Trust previews show the captured project files and their digest. Approve only
 the reviewed digest with --hash, or remove a surface's approval with --revoke.

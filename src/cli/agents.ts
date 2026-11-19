@@ -13,7 +13,7 @@ List user-facing agent specs from built-in, plugin, user, and project recipes.
 
 Flags:
   --json   emit specs as JSON instead of the formatted table
-  --all    include shadow/internal specs reserved for Clio orchestration
+  --all    include shadow/internal specs reserved for CLIO Coder orchestration
 
 validate checks this repository's harness: project and user agent recipes,
 project and user skills, and the fleet bindings in .clio-coder/settings.local.yaml.

@@ -14,8 +14,8 @@
  * that has the keyboard is not Clio's.
  *
  * The workers key (Alt+W) treats the pane like the other docks: a first tap
- * opens or shows it and moves the keyboard in, or hides it when it is in the
- * layout; hiding parks the dashboard with its state intact, and only a close
+ * opens or shows it and leaves the keyboard in Clio, or hides it when it is in
+ * the layout; hiding parks the dashboard with its state intact, and only a close
  * ends it. Pane creation stays operator-pulled: nothing here opens a pane
  * because a worker started.
  *

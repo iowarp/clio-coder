@@ -34,7 +34,7 @@ const HELP = `Usage:
 Hill climbs an objective metric within a budget. The objective is one key of
 the JSON payload a check in .clio-coder/verifiers.yaml prints (a perf-budget
 check's wall_ms falls back to its measured duration). Each iteration runs
-Clio's own agent (clio-coder run, no dispatch) at --autonomy in a fresh
+CLIO Coder's own agent (clio-coder run, no dispatch) at --autonomy in a fresh
 worktree under .clio-coder/worktrees/ at the current best commit, measures the
 change against that commit with interleaved trials, and keeps it only when
 the median moves by at least --min-improvement and a bootstrap 95% interval

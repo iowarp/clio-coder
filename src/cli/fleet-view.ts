@@ -69,7 +69,7 @@ provenance, and the label the route settled with.
                live takeover of one (Enter, Esc back). The selection file asks
                for a takeover and scopes the board to a session. This is the
                process the workers dock (Alt+W) runs.
-  --dock-taps  where the dashboard reports q (hide the dock) and Alt+W to Clio;
+  --dock-taps  where the dashboard reports q (hide the dock) and Alt+W to CLIO Coder;
                without it q quits
   --all        allow inspection across every project (default: this project)
 

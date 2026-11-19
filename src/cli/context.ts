@@ -29,7 +29,7 @@ Project context commands:
   clio-coder context reset        clear accumulated project context artifacts
   clio-coder context index        build the codemap index without model calls
   clio-coder context map          create a native interactive HTML codebase map
-  clio-coder context replay       compare working-set policies over Clio ledgers
+  clio-coder context replay       compare working-set policies over CLIO Coder ledgers
   clio-coder context working-set  inspect one session's working-set fold and path index, or verify its attempt receipts
 `;
 

@@ -47,7 +47,7 @@ JSON responses (--json):
     call whose request gets no answer is recorded as {tool, error} and ends
     the calls; a JSON-RPC error answer is that call's error.
     An untrusted or stale declaration is never launched. The supported seam for external
-    integration checks; nothing outside Clio needs to import its source.
+    integration checks; nothing outside CLIO Coder needs to import its source.
   trust: {ok: true, record: {projectRoot, id, digest, actionClass, trustedAt, network?,
     entryScriptHashes?}, entry: [...]}
     entry lists the project files the record binds: an absolute command,
