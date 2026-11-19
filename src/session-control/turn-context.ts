@@ -214,6 +214,14 @@ import type { TurnMiddleware } from "./turn-middleware.js";
 import type { AgentRuntime, TurnContextState } from "./turn-state.js";
 
 const AUTO_COMPACT_FAILURE_LIMIT = 3;
+/** A summary that came back empty, by its empty reason: the `context.fold` stage reason and the card's conclusion. */
+const EMPTY_SUMMARY = {
+	"repeat-no-gain": ["repeat_no_gain", "same history as the last summary without gain; no call made"],
+	"protected-skill": ["protected_skill", "nothing older than the protected skill turn to summarize"],
+	"protected-recent": ["protected_recent", "nothing older than the protected recent window to summarize"],
+	"nothing-to-summarize": ["nothing_to_summarize", "nothing to summarize"],
+	"below-summary-room": ["nothing_to_summarize", "nothing to summarize"],
+} as const;
 /** The summarizer streams a delta every few milliseconds; the rail needs a few redraws a second. */
 const SUMMARY_PROGRESS_INTERVAL_MS = 250;
 
@@ -2560,14 +2568,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			decision.stage({
 				stage: "llm_summary",
 				outcome: "none",
-				reason:
-					result?.emptyReason === "repeat-no-gain"
-						? "repeat_no_gain"
-						: result?.emptyReason === "protected-skill"
-							? "protected_skill"
-							: result?.emptyReason === "protected-recent"
-								? "protected_recent"
-								: "nothing_to_summarize",
+				reason: EMPTY_SUMMARY[result?.emptyReason ?? "nothing-to-summarize"][0],
 			});
 		else {
 			const recordId = result.checkpointId ?? summaryRecordId;
@@ -2613,15 +2614,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				emitCompactionActivity("completed", "nothing to compact");
 				settleWithoutSummary(null);
 			} else {
-				settleWithoutSummary(
-					result?.emptyReason === "repeat-no-gain"
-						? "same history as the last summary without gain; no call made"
-						: result?.emptyReason === "protected-skill"
-							? "nothing older than the protected skill turn to summarize"
-							: result?.emptyReason === "protected-recent"
-								? "nothing older than the protected recent window to summarize"
-								: "nothing to summarize",
-				);
+				settleWithoutSummary(EMPTY_SUMMARY[result?.emptyReason ?? "nothing-to-summarize"][1]);
 				rememberEmptyAutomaticAttempt();
 			}
 			return false;

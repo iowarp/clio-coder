@@ -10,7 +10,7 @@ import { withLockedSynthesisDirective } from "../engine/loop-guard.js";
 import { createRequestStructures } from "../engine/request-structure.js";
 import type { EngineModel } from "../engine/types.js";
 import { codexEffortGeneration, codexEffortUpdates } from "./codex-effort.js";
-import { type ContinuityReplayContext, renderModelReplay } from "./model-session-replay.js";
+import { type ContinuityReplayContext, renderModelReplay, throughHwm } from "./model-session-replay.js";
 
 /**
  * Attempt receipts and their verifier (ContextFold CF-9, F14). The live send path takes a receipt beside the
@@ -39,15 +39,9 @@ const short = (digest: string) => digest.slice(0, 16);
 type Context = Parameters<ReturnType<typeof createRequestStructures>>[1];
 type Message = Parameters<typeof providerHistory>[0][number];
 
-function cursorEntries(entries: ReadonlyArray<SessionEntry>, hwm: string | null): ReadonlyArray<SessionEntry> {
-	if (hwm === null) return [];
-	const end = entries.findIndex((entry) => entry.turnId === hwm);
-	return end < 0 ? entries : entries.slice(0, end + 1);
-}
-
 /** The fold records on the path a cursor renders: rows through `hwm`, the path to `leaf`. */
 function viewRecords(entries: ReadonlyArray<SessionEntry>, cursor: FoldCursor): string[] {
-	const truncated = cursorEntries(entries, cursor.hwm);
+	const truncated = throughHwm(entries, cursor.hwm);
 	if (truncated.length === 0) return [];
 	return activePath(truncated, cursor.leaf ?? undefined)
 		.filter((entry) => FOLD_RECORD_KINDS.has(entry.kind))
@@ -178,7 +172,7 @@ function derivedCodexEffort(
 	entries: ReadonlyArray<SessionEntry>,
 	cursor: AttemptReceipt["cursor"],
 ): NonNullable<AttemptReceipt["codex"]> | null {
-	const path = activePath(cursorEntries(entries, cursor.hwm), cursor.leaf ?? undefined);
+	const path = activePath(throughHwm(entries, cursor.hwm), cursor.leaf ?? undefined);
 	const generation = codexEffortGeneration(path);
 	const baseline = generation.find((entry) => entry.kind === "thinkingLevelChange" && entry.configurationInitial);
 	const initialEffort = baseline?.kind === "thinkingLevelChange" ? baseline.effectiveEffort : undefined;
