@@ -1190,6 +1190,12 @@ async function runSummaryRequest(
 			outcome = "success";
 			return { text: response.text.trim(), usage };
 		}
+		// The stream is bounded by its summary budget: a route that ignores the output cap, or reasons without end, is
+		// stopped at twice what the summary may write instead of streaming unbounded. A summary under it is untouched.
+		const outputBound = 2 * (maxTokens ?? input.reserveTokens ?? DEFAULT_RESERVE_TOKENS);
+		const bound = new AbortController();
+		const streamSignal = input.signal ? AbortSignal.any([input.signal, bound.signal]) : bound.signal;
+		options.signal = streamSignal;
 		// Summarization requests thinking off, as its resolver does. Bare stream
 		// infers an active level from model.reasoning and would undo that choice.
 		// The live prefix instead keeps the turn's own thinking: a change there
@@ -1197,7 +1203,7 @@ async function runSummaryRequest(
 		const events = prefix
 			? prefix.stream(userText, {
 					...(maxTokens !== undefined ? { maxTokens } : {}),
-					...(input.signal !== undefined ? { signal: input.signal } : {}),
+					signal: streamSignal,
 					fetch: tracking.fetch,
 				})
 			: streamSimple(
@@ -1207,12 +1213,18 @@ async function runSummaryRequest(
 				);
 		let writtenChars = 0;
 		for await (const event of events) {
-			if (input.onSummaryOutput && (event.type === "text_delta" || event.type === "thinking_delta")) {
+			if (event.type === "text_delta" || event.type === "thinking_delta") {
 				writtenChars += event.delta.length;
-				input.onSummaryOutput({
+				input.onSummaryOutput?.({
 					tokens: ceilChars(writtenChars),
 					...(maxTokens !== undefined ? { limit: maxTokens } : {}),
 				});
+				if (ceilChars(writtenChars) > outputBound) {
+					bound.abort();
+					throw new Error(
+						`compaction summary passed its output bound of ${outputBound} tokens; incomplete checkpoint was not saved`,
+					);
+				}
 			}
 			// Some transports throw after yielding a partial response. Retain the
 			// last reported usage even without a terminal error message.

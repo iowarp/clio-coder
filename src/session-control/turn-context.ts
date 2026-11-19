@@ -2564,6 +2564,33 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					`automatic compaction paused after ${AUTO_COMPACT_FAILURE_LIMIT} consecutive failures; run /compact to retry`,
 				);
 		};
+		// A refused or failed overflow summary does not end the turn: the eviction stage runs once more with only the
+		// newest step protected, and the turn goes on when that alone fits the request, with no summary written.
+		const fitWithoutSummary = (error: unknown): boolean => {
+			const session = deps.session;
+			if (!requiredFit || !session?.current() || !settings.context.workingSet.enabled) return false;
+			const workingSet = { ...settings.context.workingSet, protectLastSteps: 1 };
+			let fit = false;
+			try {
+				fit = contextFold.runEvictionStage({
+					...foldInput(session, liveContextEstimate(agentRuntime, pendingUserText)),
+					...stageRoute,
+					settings: { ...settings, context: { ...settings.context, workingSet } },
+					requiredFit: true,
+					structural: true,
+					superseded: false,
+				}).fit;
+			} catch {
+				return false;
+			}
+			if (!fit) return false;
+			const reason = (error instanceof Error ? error.message : String(error)).replace(/[.\s]+$/u, "");
+			deps.emitNotice(
+				`[CLIO Coder] overflow summary failed (${reason}); the request was fitted by evicting older observations instead, without a summary.`,
+			);
+			settleWithoutSummary("summary failed; request fitted by eviction only");
+			return true;
+		};
 		try {
 			result = await compactionTrigger.fire(async () => {
 				summarySignal = signal;
@@ -2657,6 +2684,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			emitCompactionActivity("failed", compactionFailureMessage(error));
 			summarySignal?.throwIfAborted();
 			countAutomaticFailure();
+			if (fitWithoutSummary(error)) return true;
 			throw error;
 		}
 		if (result?.noGain) decision.stage({ stage: "llm_summary", outcome: "none", reason: "no_gain" });

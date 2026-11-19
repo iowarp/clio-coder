@@ -178,7 +178,8 @@ function harness(
 		protectLastSteps = 3,
 		api,
 		recall = false,
-	}: { window?: number; protectLastSteps?: number; api?: "copilot-sdk"; recall?: boolean } = {},
+		summaryError,
+	}: { window?: number; protectLastSteps?: number; api?: "copilot-sdk"; recall?: boolean; summaryError?: string } = {},
 ) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
@@ -279,6 +280,7 @@ function harness(
 			undefined,
 			async () => {
 				summaries += 1;
+				if (summaryError !== undefined) throw new Error(summaryError);
 				return { text: syntheticCompactionSummary("checkpoint") };
 			},
 		),
@@ -384,6 +386,30 @@ it("drv-cf3a D-A: an overflow fit admits the next request on the figure it fitte
 		await live.loop.whenSettled();
 		deepStrictEqual(refusals(live.notices()), [], "the next ask is not refused");
 		strictEqual(wire.requests.length, READS.length + 2);
+		for (const request of wire.requests) ok(request.maxTokens >= OUTPUT_SAFETY, `max_tokens ${request.maxTokens}`);
+	} finally {
+		await live.close();
+	}
+});
+
+it("a refused overflow summary falls back to an eviction-only fit and the turn finishes, naming why", {
+	timeout: 30_000,
+}, async () => {
+	const wire = transport(READS);
+	const live = harness(wire, FILES, {
+		summaryError: "Invalid prompt: your prompt was flagged as potentially violating our usage policy",
+	});
+	try {
+		await live.loop.submit(A1_ASK);
+		await live.loop.whenSettled();
+		strictEqual(live.summaries(), 1, "the overflow summary was asked for once and refused");
+		ok(
+			live.notices().some((text) => /overflow summary failed \(.*usage policy\); .*without a summary/.test(text)),
+			"a notice names the refusal",
+		);
+		const answer = live.session.readEntries().at(-2);
+		strictEqual(answer?.kind === "message" ? (answer.payload as { text?: string }).text : undefined, "done");
+		strictEqual(wire.requests.length, READS.length + 1);
 		for (const request of wire.requests) ok(request.maxTokens >= OUTPUT_SAFETY, `max_tokens ${request.maxTokens}`);
 	} finally {
 		await live.close();
