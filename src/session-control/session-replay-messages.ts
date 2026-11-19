@@ -124,7 +124,7 @@ export function activeEntriesBeforeCompactionCut(
 	truncateAtSelection = true,
 ): SessionEntry[] {
 	const active = filterEntriesToActivePath(turns, options.activeLeafTurnId ?? options.uptoTurnId);
-	return truncateAtSelection ? truncateAtTurn(active, options.uptoTurnId) : active;
+	return truncateAtSelection ? truncateAtTurn(active, options.uptoTurnId, turns) : active;
 }
 
 export function extractTurnText(payload: unknown): string {
@@ -621,11 +621,25 @@ export function extractToolResult(entry: MessageEntry): ReplayToolResult {
 	};
 }
 
-function truncateAtTurn(entries: ReadonlyArray<SessionEntry>, uptoTurnId?: string): SessionEntry[] {
+/**
+ * The path through the selected row. Host-insert records written after it and before the next message row describe the
+ * request that carried it, such as a restoration placed before it, so they stay for render to place by their anchors.
+ */
+function truncateAtTurn(
+	entries: ReadonlyArray<SessionEntry>,
+	uptoTurnId: string | undefined,
+	turns: ReadonlyArray<SessionEntry>,
+): SessionEntry[] {
 	if (!uptoTurnId) return [...entries];
 	const index = entries.findIndex((entry) => entry.turnId === uptoTurnId);
 	if (index < 0) return [...entries];
-	return entries.slice(0, index + 1);
+	const written = new Set<string>();
+	for (let at = turns.findIndex((entry) => entry.turnId === uptoTurnId) + 1; at > 0 && at < turns.length; at += 1) {
+		const entry = turns[at];
+		if (entry?.kind === "message") break;
+		if (entry?.kind === "custom" && entry.customType === HOST_INSERT_CUSTOM_TYPE) written.add(entry.turnId);
+	}
+	return [...entries.slice(0, index + 1), ...entries.slice(index + 1).filter((entry) => written.has(entry.turnId))];
 }
 
 function toolCallIdsInEntry(entry: SessionEntry): string[] {
@@ -704,7 +718,7 @@ export function selectReplayEntries(
 	options: RehydrateChatPanelOptions = {},
 ): SessionEntry[] {
 	const active = filterEntriesToActivePath(turns, options.activeLeafTurnId ?? options.uptoTurnId);
-	const entries = truncateAtTurn(active, options.uptoTurnId);
+	const entries = truncateAtTurn(active, options.uptoTurnId, turns);
 	// The cut itself is the working-set layer's definition of "what the model
 	// can see", shared with the eviction policy input so the two cannot drift.
 	const cut = compactionCut(entries);

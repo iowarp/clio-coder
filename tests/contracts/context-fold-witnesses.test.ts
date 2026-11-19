@@ -1233,11 +1233,13 @@ describe("W2 (F6 -> CF-4): the full element sequence with inserts", () => {
 		};
 		const live = () => flat(runtime.agent.state.messages);
 		const rebuilt = () => render(session.readEntries());
+		const selected = (turnId: string) =>
+			flat(buildModelReplayAgentMessagesFromTurns(session.readEntries(), { uptoTurnId: turnId }));
 		const reopened = async () => {
 			await session.close();
 			return render(openSession(id).turns() as SessionEntry[]);
 		};
-		return { inserts, runtime, row, write, checkpoint, live, rebuilt, reopened };
+		return { inserts, runtime, row, write, checkpoint, live, rebuilt, selected, reopened };
 	}
 	const assistant = (turnId: string, parent: string, text: string) =>
 		message(turnId, parent, "assistant", { content: [{ type: "text", text }], stopReason: "stop" });
@@ -1293,6 +1295,19 @@ describe("W2 (F6 -> CF-4): the full element sequence with inserts", () => {
 		strictEqual(rebuilt[once(rebuilt, RESTORATION) + 1], "user:second", "a kept submit keeps its restoration");
 		strictEqual(rebuilt[once(rebuilt, REMINDER) + 1], "user:also check b");
 		deepStrictEqual(await l.reopened(), rebuilt, "a reopen renders the same");
+	});
+
+	it("a /tree selection of a user row keeps the restoration its request carried", () => {
+		const l = ledger();
+		l.row(user("u1", null, "first"), assistant("a1", "u1", "one"));
+		const prompt = user("u2", "a1", "second");
+		l.write(prompt);
+		l.inserts.insert(l.runtime, "memory-restoration", [RESTORATION], { before: "u2" });
+		l.runtime.agent.state.messages.push(...buildModelReplayAgentMessagesFromTurns([prompt]));
+		const sent = l.live();
+		l.inserts.dispatched();
+		l.row(assistant("a2", "u2", "two"));
+		deepStrictEqual(l.selected("u2"), sent, "the selection renders what the request at u2 carried, ending at u2");
 	});
 
 	it("a cut that keeps a recovered reply but not its user row drops the reply and the exchange together", () => {
