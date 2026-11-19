@@ -16,9 +16,11 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { runTests } from "./ci-tests.mjs";
+import { ensureSearchTools, withSearchTools } from "./ci-tools.mjs";
+import { pinGateEnv } from "./gate-env.mjs";
+import { pnpmArgv } from "./pnpm.mjs";
 import { tmpdirProblem } from "./release/plan.mjs";
 import { acquireLock } from "./release/receipt.mjs";
-import { releaseVersionErrors } from "./release-version-policy.mjs";
 import { creditsSection } from "./report-credits.mjs";
 
 export const root = fileURLToPath(new URL("..", import.meta.url));
@@ -31,11 +33,14 @@ export function run(command, args, options = {}) {
 		args = [join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"), ...args];
 		command = process.execPath;
 	}
+	// Agent shells carry corepack and no pnpm shim; scripts/pnpm.mjs resolves either.
+	const viaPnpm = command === "pnpm";
+	if (viaPnpm) [command, args] = pnpmArgv(args);
 	return execFileSync(command, args, {
 		cwd: root,
 		stdio: "inherit",
 		...options,
-		shell: process.platform === "win32" && /^(?:npm|pnpm)$/u.test(command),
+		shell: process.platform === "win32" && (viaPnpm || command === "npm"),
 	});
 }
 export const git = (...args) => run("git", args, { encoding: "utf8", stdio: "pipe" }).trim();
@@ -101,33 +106,45 @@ function prepareWebsite(directory, commit, version) {
 	}
 }
 
-/** `credits` is the JSON `scripts/report-credits.mjs` printed for this release; without it the notes are unchanged. */
-export async function prepare(directory, credits) {
+/** Runs one pnpm script to completion with its output inherited. */
+function pnpmScript(step) {
+	return new Promise((resolve, reject) => {
+		const [command, args] = pnpmArgv(["run", step]);
+		const child = spawn(command, args, { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
+		child.once("error", reject);
+		child.once("close", (code) => (code === 0 ? resolve() : reject(new Error(`${step} failed (exit ${code})`))));
+	});
+}
+
+/**
+ * `credits` is the JSON `scripts/report-credits.mjs` printed for this release; without it the notes are unchanged.
+ * `preflighted` skips the preflight when the caller ran it on this commit moments ago.
+ */
+export async function prepare(directory, credits, { preflighted = false } = {}) {
 	const commit = source();
 	const pkg = json(join(root, "package.json"));
 	const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
-	const errors = releaseVersionErrors({ version: pkg.version, changelog, releaseContext: false });
-	if (
-		json(join(root, "assets/acp-registry/agent.json")).version !== pkg.version ||
-		json(join(root, "apps/clio-coder-gui/package.json")).version !== pkg.version
-	)
-		errors.push("CLI, GUI, and ACP registry versions must agree.");
-	if (errors.length) throw new Error(errors.join("\n"));
+	// Versions, changelog, website pins, docs snapshot and source size budgets, before the minutes below.
+	if (!preflighted) {
+		const { requirePreflight } = await import("./preflight.mjs");
+		await requirePreflight({ release: false, tools: false });
+	}
 	mkdirSync(directory, { recursive: true });
 	rmSync(join(directory, "candidate.json"), { force: true });
-	const checks = await Promise.allSettled(
-		["typecheck:compare", "lint", "check:gui"].map(
-			(step) =>
-				new Promise((resolve, reject) => {
-					const child = spawn("pnpm", ["run", step], { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
-					child.once("error", reject);
-					child.once("close", (code) => (code === 0 ? resolve() : reject(new Error(`${step} failed (exit ${code})`))));
-				}),
-		),
-	);
+	// The checks read src/, tests/ and apps/ and never dist/ (gitignored, outside every tsconfig and biome
+	// scope), so they run as child processes beside the build instead of before it.
+	const checking = Promise.allSettled(["typecheck:compare", "lint", "check:gui"].map(pnpmScript));
+	let buildFailure;
+	try {
+		// A clean build, so no chunk a development build retained for a running process ships.
+		run("pnpm", ["run", "build:release"]);
+	} catch (error) {
+		buildFailure = error;
+	}
+	// Always collected, so a failed build leaves no check running behind the error.
+	const checks = await checking;
+	if (buildFailure) throw new Error(`build:release failed: ${buildFailure.message}`);
 	for (const check of checks) if (check.status === "rejected") throw check.reason;
-	// A clean build, so no chunk a development build retained for a running process ships.
-	run("pnpm", ["run", "build:release"]);
 	// Build metadata is qualification evidence, excluded from the npm package.
 	// It lets the Stage 0 budget check inspect the chunks extracted from the archive.
 	writeFileSync(join(directory, "metafile-esm.json"), readFileSync(join(root, "dist/metafile-esm.json")));
@@ -186,8 +203,12 @@ export async function testCandidate(directory, commit, results = "test-results.j
 	run("tar", ["-xzf", receipt.tarball, "--strip-components=1", "-C", root, "package/dist"]);
 	writeFileSync(join(root, "dist/metafile-esm.json"), readFileSync(join(directory, "metafile-esm.json")));
 	process.env.CLIO_CODER_RELEASE_TARBALL = receipt.tarball;
+	// The same rg and fd on every machine: a missing one skips the search contracts without failing.
+	const tools = await ensureSearchTools(join(releaseState(), "tools"));
+	process.env.PATH = withSearchTools(process.env, tools).PATH;
 	const tiers = ["core", "gui", "package"];
-	const outcomes = await Promise.allSettled(tiers.map(runTests));
+	const skipped = {};
+	const outcomes = await Promise.allSettled(tiers.map((tier) => runTests(tier, { skipped })));
 	for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
 	const counts = Object.fromEntries(outcomes.map((outcome, index) => [tiers[index], outcome.value]));
 	const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
@@ -197,9 +218,12 @@ export async function testCandidate(directory, commit, results = "test-results.j
 	if (source() !== commit) throw new Error("Source changed while testing the candidate.");
 	writeFileSync(
 		join(directory, results),
-		`${JSON.stringify({ commit, sha256: receipt.files[basename(receipt.tarball)], counts, total }, null, 2)}\n`,
+		`${JSON.stringify({ commit, sha256: receipt.files[basename(receipt.tarball)], counts, total, skipped, environment: { node: process.version, tz: process.env.TZ, locale: process.env.LC_ALL ?? null, tools: tools.versions, toolSource: tools.source } }, null, 2)}\n`,
 	);
-	console.log(`Qualification tests: ${total} (${JSON.stringify(counts)})`);
+	// Skips are how an environment difference hides: compare this line between a local leg and its CI job.
+	console.log(
+		`Qualification tests: ${total} (${JSON.stringify(counts)}), skipped ${JSON.stringify(skipped)}, rg ${tools.versions.rg}, fd ${tools.versions.fd} (${tools.source}), TZ ${process.env.TZ}`,
+	);
 }
 
 export function smokeCandidate(directory, commit) {
@@ -299,6 +323,11 @@ async function qualify(values) {
 	const problem = tmpdirProblem(tmpdir());
 	if (problem) throw new Error(problem);
 	const commit = source();
+	// Seconds of checks before worktrees, installs, a build and two test legs.
+	if (!values["skip-preflight"]) {
+		const { requirePreflight } = await import("./preflight.mjs");
+		await requirePreflight({ release: false });
+	}
 	const state = resolve(values.state ?? releaseState());
 	const directory = resolve(values.directory ?? join(state, `c-${commit.slice(0, 12)}`));
 	const nodes = Object.fromEntries(QUALIFIED_MAJORS.map((major) => [major, nodeBinary(major, values[`node${major}`])]));
@@ -318,7 +347,8 @@ async function qualify(values) {
 				if (existsSync(tree)) run("git", ["worktree", "remove", "--force", tree]);
 				run("git", ["worktree", "add", "--quiet", "--detach", tree, commit]);
 				const env = { ...process.env, PATH: `${dirname(nodes[major])}:${process.env.PATH}` };
-				await runLogged("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], { cwd: tree, env, log });
+				const [pnpm, installArgs] = pnpmArgv(["install", "--frozen-lockfile", "--prefer-offline"]);
+				await runLogged(pnpm, installArgs, { cwd: tree, env, log });
 				return { tree, env, log };
 			})();
 			return ready[major];
@@ -336,7 +366,7 @@ async function qualify(values) {
 			console.log(`Packing ${commit.slice(0, 12)} on Node 24...`);
 			// Installing the Node 22 tree overlaps the pack; a failure there surfaces in its leg.
 			setup("22").catch(() => {});
-			await leg("24", [["prepare"]]);
+			await leg("24", [["prepare", "--skip-preflight"]]);
 		}
 		const receipt = verifyCandidate(directory, commit);
 		const sha = receipt.files[basename(receipt.tarball)];
@@ -356,14 +386,14 @@ async function qualify(values) {
 					`${JSON.stringify({ commit, sha256: sha, node: version, platform, total, counts }, null, 2)}\n`,
 				);
 				console.log(
-					`Node ${major}: ${total} tests and install boot passed (${Math.round((Date.now() - legStarted) / 60_000)} min)`,
+					`Node ${major}: ${total} tests and install boot passed (${Math.round((Date.now() - legStarted) / 1000)} s)`,
 				);
 			}),
 		);
 		const failed = outcomes.filter((outcome) => outcome.status === "rejected");
 		if (failed.length) throw new Error(failed.map((outcome) => outcome.reason.message).join("\n"));
 		console.log(
-			`QUALIFIED ${commit} on Node ${QUALIFIED_MAJORS.join(" and ")} (${process.platform}-${process.arch}) in ${Math.round((Date.now() - started) / 60_000)} min: ${directory}`,
+			`QUALIFIED ${commit} on Node ${QUALIFIED_MAJORS.join(" and ")} (${process.platform}-${process.arch}) in ${Math.round((Date.now() - started) / 1000)} s: ${directory}`,
 		);
 	} finally {
 		for (const tree of trees) if (existsSync(tree)) run("git", ["worktree", "remove", "--force", tree]);
@@ -373,6 +403,8 @@ async function qualify(values) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	// Preparation, tests and the install boot all run under one zone and locale, here and in CI.
+	pinGateEnv();
 	try {
 		const { values, positionals } = parseArgs({
 			options: {
@@ -383,13 +415,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 				node24: { type: "string" },
 				state: { type: "string" },
 				credits: { type: "string" },
+				"skip-preflight": { type: "boolean" },
 			},
 			allowPositionals: true,
 		});
 		const commit = values.sha ?? git("rev-parse", "HEAD");
 		const directory = resolve(values.directory ?? join(releaseState(), `c-${commit.slice(0, 12)}`));
 		const mode = positionals[0];
-		if (mode === "prepare") await prepare(directory, values.credits);
+		if (mode === "prepare") await prepare(directory, values.credits, { preflighted: values["skip-preflight"] });
 		else if (mode === "test") {
 			if (values.results !== undefined && !/^test-results(?:-\d+)?\.json$/u.test(values.results))
 				throw new Error("--results names test-results.json or test-results-<node major>.json.");

@@ -11,6 +11,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { pinGateEnv } from "./gate-env.mjs";
+import { pnpmCommand } from "./pnpm.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -70,11 +72,7 @@ export function selectLaneTests({ changed, added, importsOf, lists }) {
 	return { affected: [...affected].sort(), unlisted };
 }
 
-/** `pnpm` when `env.PATH` runs it, else `corepack pnpm` (pinned by `packageManager`) for corepack-only shells. */
-export function pnpmCommand(env = process.env) {
-	const probe = spawnSync("pnpm", ["--version"], { env, stdio: "ignore" });
-	return probe.error === undefined && probe.status === 0 ? ["pnpm"] : ["corepack", "pnpm"];
-}
+export { pnpmCommand };
 
 let pnpmPrefix;
 function pnpm() {
@@ -270,7 +268,12 @@ async function main() {
 			if (files.length === 0) continue;
 			const args = ["--import", "tsx", ...preloads.flatMap((p) => ["--import", p]), "--test", ...files];
 			console.log(`\n── test:file (${version}) ${files.join(" ")}`);
-			const result = spawnSync(node, args, { cwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+			const result = spawnSync(node, args, {
+				cwd,
+				encoding: "utf8",
+				maxBuffer: 256 * 1024 * 1024,
+				env: pinGateEnv({ ...process.env }),
+			});
 			process.stdout.write(result.stdout ?? "");
 			process.stderr.write(result.stderr ?? "");
 			const count = (name) => Number(new RegExp(`(?:ℹ|#) ${name} (\\d+)`, "u").exec(result.stdout ?? "")?.[1] ?? 0);

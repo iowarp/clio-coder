@@ -14,10 +14,11 @@
  * inside it, whether or not the call site knows this file exists. Removing the
  * root at exit collects all of them, including the ones nobody cleaned up.
  *
- * Loaded with `--import` from the test scripts in package.json. It runs in the
- * runner and again in each test child, and the child inherits the root through
- * the environment, so the run has exactly one root and only the process that
- * created it removes it.
+ * Loaded with `--import` from the test scripts in package.json. `node --test`
+ * runs a preload in each test child and not in the runner (Node 22.22 and
+ * 24.22), so each test file gets its own root. A process that test file starts
+ * inherits the root through the environment, and only the process that created
+ * a root removes it.
  */
 import {
 	lstatSync,
@@ -33,9 +34,15 @@ import {
 import { tmpdir, userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { isMainThread } from "node:worker_threads";
+import { pinGateEnv } from "../../scripts/gate-env.mjs";
 
 const ROOT_ENV = "CLIO_CODER_TEST_TMP_ROOT";
 
+// One time zone and one locale for every test process, here and in CI. A fixture dated midnight UTC rendered
+// "Jan 1" on the runners and "Dec 31" in America/Chicago, so the suite passed locally and failed both CI legs.
+// Assigning TZ takes effect in this process at once. The default locale is fixed at process start, so the
+// launchers in scripts/ set it in the environment they spawn (see scripts/gate-env.mjs).
+pinGateEnv(process.env);
 // Color-control variables inherited from the shell must not choose the shared
 // theme every styling contract sees. Node's test runner can inject FORCE_COLOR
 // for its reporter, while developer and agent shells commonly carry NO_COLOR;

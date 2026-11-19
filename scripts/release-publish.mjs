@@ -21,7 +21,7 @@ import { DEV_VERSION, publishTagErrors, releaseVersionErrors, snapshotVersion } 
 
 const repository = "iowarp/clio-coder";
 // GitHub refuses a release body longer than this many characters.
-const RELEASE_BODY_LIMIT = 125_000;
+export const RELEASE_BODY_LIMIT = 125_000;
 const NPM_WAIT_MINUTES = 40;
 export function publicationPlan(receipt, branch, mode = "release") {
 	if (!isVersionBranch(branch)) throw new Error("Public releases must come from a version branch such as v062.");

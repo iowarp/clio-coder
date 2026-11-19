@@ -5,6 +5,7 @@ import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
+import { pinGateEnv } from "./gate-env.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -259,11 +260,16 @@ export const fullTests = ["contracts", "extended", "smoke", "extended-smoke"].fl
 // deadline tests past their limits in ci (22), so small hosts keep two.
 const rootConcurrency = availableParallelism() >= 8 ? 4 : 2;
 
-export async function runTests(tier) {
+/** `skipped`, when given, receives the tier's skipped-test count: skips are how a missing tool or sandbox hides. */
+export async function runTests(tier, { skipped } = {}) {
 	const gui = tier === "gui";
 	const cwd = gui ? join(root, "apps/clio-coder-gui") : root;
 	const files = { core: coreTests, gui: guiTests, package: packageTests, full: fullTests }[tier];
 	if (!files) throw new Error(`Unknown test tier: ${tier}`);
+	// The code-map contracts load tree-sitter from the built package directory. A checkout that was never built
+	// failed 81 of them with ENOENT; qualification extracts dist/ from the candidate before it gets here.
+	if ((tier === "core" || tier === "full") && !existsSync(join(root, "dist/assets/grammars/tree-sitter.wasm")))
+		throw new Error(`${tier} tests read dist/assets/grammars; run \`pnpm run build\` once in this checkout first`);
 	const preloads = [join(root, "tests/harness/tmp-root.ts"), ...(gui ? ["./tests/harness/no-network.ts"] : [])];
 	// GUI tests that launch the server use the client build the tier already has: the app's own build, or the package's
 	// dist/gui/client that qualification extracts from the tarball. With neither, the tier supplies one static fixture for
@@ -288,7 +294,8 @@ export async function runTests(tier) {
 			`--test-concurrency=${tier === "core" || tier === "full" ? rootConcurrency : 2}`,
 			...files,
 		],
-		{ cwd, stdio: ["inherit", "pipe", "pipe"] },
+		// A test child's default locale is fixed when it starts, so the runner that spawns it starts pinned.
+		{ cwd, stdio: ["inherit", "pipe", "pipe"], env: pinGateEnv({ ...process.env }) },
 	);
 	let transcript = "";
 	for (const stream of [child.stdout, child.stderr])
@@ -305,10 +312,12 @@ export async function runTests(tier) {
 	const plain = stripVTControlCharacters(transcript);
 	const count = Number(/(?:ℹ|#) tests (\d+)/u.exec(plain)?.[1]);
 	if (!Number.isSafeInteger(count) || count < 1) throw new Error(`Missing ${tier} test count`);
+	const skips = Number(/(?:ℹ|#) skipped (\d+)/u.exec(plain)?.[1] ?? 0);
+	if (skipped) skipped[tier] = skips;
 	if (process.env.CLIO_CODER_TEST_SUMMARY)
 		appendFileSync(
 			process.env.CLIO_CODER_TEST_SUMMARY,
-			`${JSON.stringify({ tier, tests: count, passed: code === 0, files: files.length })}\n`,
+			`${JSON.stringify({ tier, tests: count, skipped: skips, passed: code === 0, files: files.length })}\n`,
 		);
 	if (code !== 0) throw new Error(`${tier} tests failed (exit ${code})`);
 	return count;

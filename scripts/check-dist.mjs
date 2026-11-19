@@ -6,12 +6,14 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { pnpmArgv } from "./pnpm.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const dist = join(root, "dist");
 
 if (!existsSync(join(dist, "cli", "index.js")) || !existsSync(join(dist, "metafile-esm.json"))) {
-	execFileSync("pnpm", ["run", "build"], { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
+	const [pnpm, args] = pnpmArgv(["run", "build"]);
+	execFileSync(pnpm, args, { cwd: root, stdio: "inherit", shell: process.platform === "win32" });
 	process.exit(0);
 }
 

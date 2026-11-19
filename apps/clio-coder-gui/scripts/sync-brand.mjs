@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { pnpmArgv } from "../../../scripts/pnpm.mjs";
 
 const file = (path) => new URL(path, import.meta.url);
 const source = await readFile(file("../../../site/design-system.json"));
@@ -62,7 +63,8 @@ ${theme("dark")}
 }
 `;
 const target = file("../client/design/brand.css");
-const formatted = execFileSync("pnpm", ["exec", "biome", "format", "--stdin-file-path", fileURLToPath(target)], {
+const [pnpm, formatArgs] = pnpmArgv(["exec", "biome", "format", "--stdin-file-path", fileURLToPath(target)]);
+const formatted = execFileSync(pnpm, formatArgs, {
 	input: css,
 	encoding: "utf8",
 	cwd: fileURLToPath(file("../")),
