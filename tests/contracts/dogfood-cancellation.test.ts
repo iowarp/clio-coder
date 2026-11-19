@@ -291,7 +291,9 @@ function fixture(
 	settings.chat.prewarm = false;
 	settings.chat.target = target.id;
 	settings.chat.model = model.id;
-	settings.chat.thinkingLevel = initialMode === "overthink" || initialMode === "overthink-always" ? "low" : "off";
+	// "high" on this on/off route runs as "low"; the recovery notice names the level the operator chose (RV-2).
+	settings.chat.thinkingLevel =
+		initialMode === "overthink" ? "high" : initialMode === "overthink-always" ? "low" : "off";
 	settings.targets = [{ ...target, defaultModel: model.id }];
 	if (visionCapable && settings.targets[0]) settings.targets[0].capabilities = { vision: true };
 	const runtime: RuntimeDescriptor = {
@@ -1295,7 +1297,8 @@ it("a reply cut off while thinking is dropped and re-run once, one thinking step
 		const resent = JSON.stringify(second?.messages);
 		doesNotMatch(resent, new RegExp(THOUGHT, "u"));
 		match(resent, /hit the output limit while still thinking/u);
-		ok(f.events.some((event) => event.type === "notice" && event.key === "turn.thinking-length-recovery"));
+		const notice = f.events.find((event) => event.type === "notice" && event.key === "turn.thinking-length-recovery");
+		match(notice?.type === "notice" ? notice.text : "", /with thinking off instead of high\.$/u);
 		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
 	} finally {
 		await f.close();

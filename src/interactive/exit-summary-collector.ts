@@ -350,7 +350,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 	 */
 	let reopenedSessionId = deps.session?.current()?.id ?? null;
 	/**
-	 * Compactions each session ran this visit, by the session the event names. The card counts the named session's own,
+	 * Committed folds each session ran this visit, by the session the event names. The card counts the named session's own,
 	 * so a fork never shows the parent's `Compactions: 11` (bt-47 D3), as its Tools row never shows the parent's calls.
 	 */
 	const compactions = new Map<string, number>();
@@ -484,7 +484,10 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			for (const [tool, count] of deps.getToolCounts()) parked.set(tool, (parked.get(tool) ?? 0) + count);
 			parkedTools.set(sessionId, parked);
 		}),
-		deps.bus.subscribe("context.pruned", (_event, context) => {
+		// One fold is one compaction however many of its stages committed; a fold that failed or gained nothing is none.
+		// Counting `context.pruned` counted each committed stage, so an eviction plus a summary read as two.
+		deps.bus.subscribe("context.fold", (fold, context) => {
+			if (context?.agent?.role === "worker" || !fold.stages.some((stage) => stage.outcome === "committed")) return;
 			const sessionId = context?.sessionId ?? deps.session?.current()?.id ?? "";
 			compactions.set(sessionId, (compactions.get(sessionId) ?? 0) + 1);
 			highlight("Context compacted");

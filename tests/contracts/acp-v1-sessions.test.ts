@@ -1,10 +1,14 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { test } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { TelemetryHub } from "../../src/core/telemetry/hub.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { clioStateDir } from "../../src/core/xdg.js";
+import { createProvidersBundle } from "../../src/domains/providers/extension.js";
 import { suggestedSessionCostCeilingUsd } from "../../src/domains/scheduling/budget.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
@@ -16,7 +20,9 @@ import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import type { AcpUsageMeta } from "../../src/engine/acp/types.js";
 import { budgetAlertNotice } from "../../src/interactive/bus-notices.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 import { writeSettledRun } from "../harness/settled-run.js";
 import { readModelOf, telemetryCall } from "../harness/telemetry-view.js";
 
@@ -249,6 +255,105 @@ test("ACP session/new carries the models block and session/set_model selects thr
 		await rejects(peer.call("session/set_model", { sessionId: opened.sessionId, model: "model-a" }), /invalid/u);
 	} finally {
 		await peer.stop();
+	}
+});
+
+test("ACP re-sends the thinking option once the live probe finds the reasoning a cold cache lacked", async () => {
+	const env = await isolateClioEnv("clio-acp-thinking-probe-");
+	const stub = createServer((req, res) => {
+		const path = (req.url ?? "").split("?")[0] ?? "";
+		const body = path.endsWith("/model/info")
+			? {
+					data: [
+						{
+							model_name: "fake/m",
+							litellm_params: { model: "openai/m" },
+							model_info: { max_input_tokens: 131072, max_output_tokens: 32768, supports_reasoning: true },
+						},
+					],
+				}
+			: path.endsWith("/models")
+				? { data: [{ id: "fake/m", object: "model" }] }
+				: { status: "ok" };
+		res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(body));
+	});
+	await new Promise<void>((resolve) => stub.listen(0, "127.0.0.1", resolve));
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	const url = `http://127.0.0.1:${(stub.address() as AddressInfo).port}`;
+	settings.targets = [{ id: "litellm", runtime: "litellm", url, defaultModel: "fake/m" }];
+	settings.chat = { ...settings.chat, target: "litellm", model: "fake/m", thinkingLevel: "low" };
+	const providers = createProvidersBundle(dispatchStubContext({ settings }), { getSettings: () => settings });
+	await providers.extension.start();
+	const requests = new Map<string, (params: unknown) => unknown>();
+	const updates: Array<{ sessionUpdate: string; configOptions?: Array<Record<string, unknown>> }> = [];
+	let close: () => void = () => {};
+	const cwd = process.cwd();
+	const done = serveClioAcpAgent({
+		transport: {
+			closed: false,
+			request: async () => ({}) as never,
+			notify: (method, params) => {
+				if (method === "session/update") updates.push((params as { update: (typeof updates)[number] }).update);
+			},
+			onRequest: (method, handler) => {
+				requests.set(method, handler);
+				return () => requests.delete(method);
+			},
+			onNotification: () => () => {},
+			onClose: (handler) => {
+				close = handler;
+				return () => {};
+			},
+			close: () => close(),
+		},
+		session: {
+			current: () => null,
+			create: () => ({ id: "acp-probe", cwd, cwdHash: "hash", createdAt: "2026-10-16T00:00:00.000Z", endedAt: null }),
+			tree: () => ({ leafId: null }),
+			leafId: () => null,
+		} as unknown as SessionContract,
+		cwd,
+		autonomy: () => "default",
+		providers: providers.contract,
+		settings: {
+			read: () => ({ target: "litellm", model: "fake/m", thinkingLevel: "low", autonomy: "default" }),
+			commit: () => {
+				throw new Error("unused");
+			},
+		},
+		routing: () => ({ target: "litellm", model: "fake/m" }),
+		chat: {
+			submit: async () => {},
+			cancel: () => {},
+			onEvent: () => () => {},
+			isStreaming: () => false,
+			getSessionId: () => "acp-probe",
+		},
+		readSessionEntries: () => [],
+		buildReplayMessages: () => [],
+	});
+	const thinkingOption = (rows: Array<Record<string, unknown>> | undefined) =>
+		rows?.find((row) => row.id === "thinkingLevel") as { currentValue: string; notice?: string } | undefined;
+	try {
+		await requests.get("initialize")?.({ protocolVersion: 1 });
+		const opened = (await requests.get("session/new")?.({ cwd, mcpServers: [] })) as {
+			configOptions: Array<Record<string, unknown>>;
+		};
+		strictEqual(thinkingOption(opened.configOptions)?.notice, "low was ignored because thinking is unsupported");
+		const deadline = Date.now() + 5_000;
+		while (!updates.some((update) => update.sessionUpdate === "config_option_update") && Date.now() < deadline)
+			await new Promise((resolve) => setTimeout(resolve, 20));
+		const refreshed = thinkingOption(
+			updates.find((update) => update.sessionUpdate === "config_option_update")?.configOptions,
+		);
+		strictEqual(refreshed?.currentValue, "low");
+		strictEqual(refreshed?.notice, undefined);
+	} finally {
+		close();
+		await done;
+		await providers.extension.stop?.();
+		await new Promise((resolve) => stub.close(resolve));
+		env.restore();
 	}
 });
 

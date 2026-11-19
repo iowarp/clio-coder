@@ -3908,7 +3908,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							emitNotice(
 								recoveryLevel === priorLevel
 									? "[Clio Coder] The model ran out of output while thinking; asking it once to act or answer."
-									: `[Clio Coder] The model ran out of output while thinking; asking it once to act or answer, with thinking ${recoveryLevel} instead of ${priorLevel}.`,
+									: // The operator's level, not the route's clamp of it: an on/off route runs "high" as "low".
+										`[Clio Coder] The model ran out of output while thinking; asking it once to act or answer, with thinking ${recoveryLevel} instead of ${agentRuntime.runtimeResolution.requestedThinkingLevel}.`,
 								"warning",
 								THINKING_LENGTH_RECOVERY_NOTICE_KEY,
 							);

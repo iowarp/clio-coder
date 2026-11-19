@@ -250,8 +250,21 @@ test("a fork's exit card counts only the compactions the fork ran, not its paren
 		getToolCounts: () => new Map(),
 		getModel: () => null,
 	});
-	const pruned = { stage: "llm_summary", tokensBefore: 2, tokensAfter: 1, at: 0 } as never;
-	for (let i = 0; i < 3; i += 1) bus.emit("context.pruned", pruned, { sessionId: "parent" } as never);
+	const fold = (...stages: Array<[string, string, string]>) =>
+		({
+			checkpoint: "tool_batch",
+			route: {},
+			stages: stages.map(([stage, outcome, reason]) => ({ stage, outcome, reason })),
+			tokensBefore: 2,
+			tokensAfter: 1,
+		}) as never;
+	const pruned = fold(["working_set", "committed", "evicted"], ["llm_summary", "committed", "summarized"]);
+	for (let i = 0; i < 3; i += 1) bus.emit("context.fold", pruned, { sessionId: "parent" } as never);
+	// A fold is one compaction however many stages committed; one that failed or gained nothing is none.
+	bus.emit("context.fold", fold(["working_set", "none", "no_candidates"], ["llm_summary", "failed", "error"]), {
+		sessionId: "parent",
+	} as never);
+	bus.emit("context.fold", fold(["llm_summary", "none", "no_gain"]), { sessionId: "parent" } as never);
 	strictEqual(collector.snapshot()?.compactions, 3);
 	bus.emit("session.parked", { sessionId: "parent", reason: "fork", at: 0 });
 	current = { id: "fork", hasModelTurn: true };
@@ -259,7 +272,7 @@ test("a fork's exit card counts only the compactions the fork ran, not its paren
 	strictEqual(collector.snapshot()?.compactions, 0);
 	doesNotMatch(renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n"), /Compactions/u);
 	// An event that names no session counts for the current one.
-	bus.emit("context.pruned", pruned);
+	bus.emit("context.fold", pruned);
 	match(renderExitSummary(collector.snapshot(), "standard", 160, false).join("\n"), /^Compactions: 1$/mu);
 	collector.dispose();
 });
