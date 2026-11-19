@@ -127,12 +127,40 @@ the terminal and ACP clients show identical local times. Each function accepts a
 | --- | --- | --- |
 | `clockLocal(instant)` | `HH:MM:SS` through `en-GB` with a 24-hour cycle | Local time of day |
 | `dateLocal(instant)` | `YYYY-MM-DD` through `en-CA` | Local calendar date |
+| `stampLocal(instant, now)` | `HH:MM:SS` on today's local date, otherwise `YYYY-MM-DD HH:MM:SS` | Exact time on an operator surface |
+| `wallClockLocal(instant, now)` | `HH:MM` on today's local date, `Nov 16 HH:MM` on another day this year, `Nov 16 2025 HH:MM` in another year | Turn receipt end time |
 | `relative(instant, now)` | `just now` under 5 s, then `Ns ago`, `Nm ago`, `Nh ago`, `yesterday`, `Nd ago` under 7 days, `Nw ago` under 30 days, then `dateLocal` | Coarse recency |
+| `operatorCalendar(instant)` | Local date, weekday, `HH:MM`, and the zone with its UTC offset, such as `America/Chicago (UTC-06:00)` | The model's view of the operator's calendar |
 
 An absent or unparseable instant renders as `—`. The module keeps its
 `Intl.DateTimeFormat` instances at module scope and rebuilds them, with the zone
 passed explicitly, when `process.env.TZ` changes. Machine-readable surfaces such as
 structured logs, session records, and telemetry records bypass these formatters.
+
+A turn receipt closes with the local time the turn ended, through
+`wallClockLocal` (`✓ Done · 1m4s · 18:42`), and carries the date when the turn
+ended on another day. A replayed session shows each turn's recorded end time
+([chat-panel.ts](../../src/interactive/chat-panel.ts)).
+
+### The model's calendar
+
+Models otherwise date ids and records from their training prior, so the model
+is told the operator's calendar through `operatorCalendar`. The zone is `TZ`
+when set, else the zone `Intl` resolves for the process.
+
+- The session prompt states the operator's local date, weekday and time zone,
+  and tells the model to take any date it writes from that date
+  ([compiler.ts](../../src/domains/prompts/compiler.ts)). It carries the date
+  only, so the cached prefix changes at most once a day; a turn submitted after
+  the local date changed recompiles it
+  ([turn-context.ts](../../src/session-control/turn-context.ts)).
+- The `observer.local-clock` middleware registration
+  ([local-clock-reminder.ts](../../src/domains/middleware/local-clock-reminder.ts))
+  states the local date, weekday, `HH:MM` and zone in a `[Clock]` reminder at
+  every turn start, continuations included. That reminder rides the uncached
+  request tail.
+- When the local date changes inside a long turn, the first tool result after
+  the change is annotated with the new date and time.
 
 ---
 

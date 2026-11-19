@@ -215,11 +215,12 @@ else, `src/interactive/**` included, reaches Pi through engine re-exports such a
 (`EngineModel`, `Api`, `Model`) from [types.ts](../../src/engine/types.ts) and [ai.ts](../../src/engine/ai.ts).
 
 [check-boundaries.ts](https://github.com/iowarp/clio-coder/blob/main/tests/boundaries/check-boundaries.ts) enforces this statically over the import
-graph as rule 1 of nine. The other rules cover the worker's domain imports, domain
+graph as rule 1 of nine import rules. The other import rules cover the worker's domain imports, domain
 extension access, tools staying independent of `src/interactive/**`, the chat loop
 in `src/session-control/` never importing `src/entry/**`, turn-control purity,
 the Stage 0 closure (rule 6), and the ban on both session-control and engine
-imports into terminal rendering (rules 8 and 9). [engine-lifecycle.test.ts](https://github.com/iowarp/clio-coder/blob/main/tests/contracts/engine-lifecycle.test.ts)
+imports into terminal rendering (rules 8 and 9). Rules 10 to 17 hold money and
+token displays, the composition root, turn state and owner capabilities. [engine-lifecycle.test.ts](https://github.com/iowarp/clio-coder/blob/main/tests/contracts/engine-lifecycle.test.ts)
 covers agent-loop ordering, reset, tool-argument normalization, the keybinding
 table and alt-screen render seams; [tool-boundaries.test.ts](https://github.com/iowarp/clio-coder/blob/main/tests/contracts/tool-boundaries.test.ts)
 covers tool schema admission and execution isolation across runtimes.

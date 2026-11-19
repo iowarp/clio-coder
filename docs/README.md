@@ -79,11 +79,11 @@ the [GUI guide](guide/gui.md) covers the browser interface.
 | Settings keys with defaults, the version 1 to 2 key map, retired keys, project files, local stdio MCP trust, and CLI flag and tool argument contracts | [Configuration Reference](guide/configuration-reference.md) |
 | Runtime discovery, model capabilities, local overlays, and field notes | [Model Catalog](architecture/model-catalog.md) |
 | Argonne ALCF Sophia and Metis targets over Globus OAuth | [ALCF Provider](architecture/alcf-provider.md) |
-| Context windows, token accounting, compaction against a window threshold and a token ceiling, prefix caching, project handbooks, and the codemap | [Context Engine](architecture/context-engine.md) |
+| Context windows, output reserves and request fit, compaction against a window threshold and a token ceiling, fold stages, small-window rules and step checkpoints, prefix caching, project handbooks, and the codemap | [Context Engine](architecture/context-engine.md) |
 | Codemap, bounded orientation, current project evidence, and artifact compatibility | [Project Context](architecture/project-context.md) |
 | Choose compaction and recover interrupted handoffs | [Context Continuity](guide/context-continuity.md) |
 | Index code, scientific artifacts, memory, evidence, and recorded work by meaning | [Semantic Context Beta](guide/semantic-context.md) |
-| Non-destructive working-set eviction, markers, and recall | [Context Working Set](architecture/context-working-set.md) |
+| Non-destructive working-set eviction, markers, recall and its room bound, and the session-format records they write | [Context Working Set](architecture/context-working-set.md) |
 | Session ledgers, branches, checkpoints, resume, and recovery | [Session Lifecycle](architecture/session-lifecycle.md) |
 | Proactive task memory, interventions, and handoffs | [Proactive Memory](guide/proactive-memory.md) |
 | The project claims ledger: judged reproduce and numeric-compare verdicts, hypotheses and their status, and contradiction edges | [Claims Ledger](architecture/evidence-and-memory.md#claims-ledger) |
@@ -150,7 +150,7 @@ reference data, and review define the acceptance criteria for a change.
 | --- | --- |
 | Agent Client Protocol in both directions: the stdio server, capability negotiation, extension methods, permission mediation, and outbound delegation to peers | [ACP](architecture/acp.md) |
 | Which fragments each prompt tier carries, how they are selected, substitutions, and the dynamic sections | [Prompt Compilation](architecture/prompt-compilation.md) |
-| Prompt-envelope reuse, provider tool delivery, and bounded results | [Prompt Envelope and Tools](architecture/prompt-envelope-and-tools.md) |
+| Prompt-envelope reuse, the builtin tool planes and their placement, promoted extension tools and pinned context, provider tool delivery, and bounded results | [Prompt Envelope and Tools](architecture/prompt-envelope-and-tools.md) |
 | Built-in tool contracts, operating boundaries, and core workflows | [Tool Usage](guide/tool-usage.md) |
 | Read-only HDF5, NetCDF and Parquet inspection through the `data` tool | [Data Tool](guide/tool-usage.md#data-inspect-structured-files-through-the-gateway) |
 | Implementing a runtime or inference-server adapter | [Provider Adapter Cookbook](architecture/provider-adapter-cookbook.md) |

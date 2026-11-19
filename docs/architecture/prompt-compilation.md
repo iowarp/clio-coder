@@ -29,6 +29,7 @@ Fragments are Markdown files under `src/domains/prompts/fragments/`, loaded by `
 - A file name does not have to match its id. `identity/clio-worker.md` carries `identity.clio-coder-worker`.
 - A missing or malformed frontmatter block fails the whole load with a path-qualified error, so the compiler never sees a partial table. If the first load fails, the domain starts with an empty table and every compile throws `prompts: no fragments loaded`; the chat reports `prompt compile failed; using fallback identity`.
 - Fragments are read at runtime from the package's own `src/` directory, resolved through `resolvePackageRoot`. The npm package ships `src/**` for this reason, and fragment text is not bundled into `dist/`.
+- The frontmatter goes through `parsePackagedYaml` in `src/core/packaged-yaml.ts`. The build (`scripts/build-preparsed-yaml.ts`) records each shipped fragment's parse in `dist/assets/preparsed-yaml.json`, keyed by the SHA-256 of the exact frontmatter text, and the loader uses a recorded parse only when that digest matches. An edited fragment, a missing asset or a source checkout that never built one parses its YAML at runtime, so the raw text stays authoritative.
 - `contentHash` is the SHA-256 of the raw file text, frontmatter included. It feeds the fragment manifest.
 - The table reloads on a plugin reload, on `/reload prompts`, and when a config hot-reload diff names a path containing `prompt` or `fragment`. Each reload advances the fragment epoch inside `inputEpoch()`.
 - A fragment that teaches a tool renders only when that tool is reachable. Guidance for an operator belongs in an attended-only fragment, never in a shared one.
@@ -245,7 +246,7 @@ The turn's scope (mode, delegation, skills, read-only, allowed tools and delegat
 
 ### Memory in the prompt
 
-The compiled `# Memory` section stays in the prompt until a completed compaction, a session switch or a recompile forced by another input. A resumed process restores it from the session's last `promptRecompiled` entry rather than selecting afresh. A record approved or revised later reaches the model in the next turn's reminder as a `# Memory update` block, and a record rejected or deleted since arrives as a withdrawn line. A record that only dropped out of the ranking is not withdrawn. See [Evidence and Memory](evidence-and-memory.md).
+The compiled `# Memory` section stays in the prompt until a completed compaction, a session switch or a recompile forced by another input. A resumed process restores it from the session's last `promptRecompiled` entry rather than selecting afresh. A record approved or revised later reaches the model in the next turn's reminder as a `# Memory update` block, and a record rejected or deleted since arrives as a withdrawn line. A record that only dropped out of the ranking is not withdrawn. Operator-stated records are carried first and bypass the turn's relevance gate, and statements the operator pinned to this session join the same section as `[note-…]` entries, tracked by the update block like stored records. See [Evidence and Memory](evidence-and-memory.md#operator-stated-memory).
 
 ### Mid-session autonomy changes
 
@@ -257,7 +258,7 @@ The prompts extension captures the project handbook once per session through the
 
 ### Operator notes
 
-Operator notes are not part of the compiled system prompt. They live in the compaction summary, as an `<operator-notes>` block. It carries the operator sentences that begin with `remember`, `keep in mind` or `don't forget` (the latest 30, each cut at 400 characters) and, verbatim, the text of any `/compact` instruction. A `/compact` instruction also reaches the summarizer through an `<operator-instructions>` block. Compaction mechanics are in [Context Continuity](../guide/context-continuity.md).
+Operator notes are not part of the compiled system prompt. They live in the compaction summary, as an `<operator-notes>` block. It carries the operator sentences that begin with `remember`, `keep in mind` or `don't forget` (the latest 30, each cut at 400 characters) and the text of any `/compact` instruction, cut at 8,000 characters. A `/compact` instruction also reaches the summarizer through an `<operator-instructions>` block. Compaction mechanics are in [Context Continuity](../guide/context-continuity.md).
 
 ## Hashing and caching
 

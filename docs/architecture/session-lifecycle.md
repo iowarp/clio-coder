@@ -22,6 +22,7 @@ Sessions are persisted durably on disk under the platform state root (`clioState
 - `<cwdHash>`: First 16 hexadecimal characters of SHA-256 of the absolute resolved working-directory path (`createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 16)`).
 - `<sessionId>`: UUIDv7 generated at session initialization.
 - Per-turn token accounting and prompt compiles are not session files. Each turn's context snapshot is a `context.snapshotted` record and each prompt compile a `prompt.compiled` record in the session's telemetry journal, `<stateDir>/telemetry/sessions/<sessionId>/journal.jsonl` ([Telemetry](telemetry.md#journals), [Context Engine](context-engine.md#token-accounting--ledger-snapshots)). A prompt compile records prompt hashes, section token estimates, fragment content hashes and the thinking level ([prompt-manifest.ts](../../src/domains/session/prompt-manifest.ts)), never prompt text.
+- Each main model attempt journals a receipt of what it sent on its `call.settled` record in the same journal: the ledger cursor (high-water mark and leaf), the owning session and any fork parent, route facts, the tool choice and the request tail, with element digests rather than provider bytes ([attempt-receipt.ts](../../src/session-control/attempt-receipt.ts)). `clio-coder context working-set --verify <id|path>` renders the session at each receipt's cursor and owner, compares it with the receipt, reports each attempt as verified, not-verifiable (with the reason), external or mismatch, reconciles fold decisions against the fold records on the ledger, and exits 1 when any attempt mismatches (`src/cli/context-working-set.ts`).
 - Session directories are created mode `0700` and `meta.json`, `current.jsonl` and `tree.json` mode `0600`, whatever the umask. Boot also closes CLIO Coder's existing state subdirectories that are open to group or other users.
 - Deleting a session removes the directory. `deleteSession` with `keepFiles` keeps `current.jsonl` and `tree.json` and renames `meta.json` to `meta.deleted.json`, which drops the session from listings. The open session cannot be deleted. A delete takes the same lock on `meta.json` that a resume takes, and refuses a session that has not ended or whose owner process is still alive; ACP `session/delete` reports that refusal as `session_open`.
 
@@ -46,7 +47,7 @@ export interface ClioSessionMeta {
   piMonoVersion: string;
   platform: string;
   nodeVersion: string;
-  sessionFormatVersion?: number; // CURRENT_SESSION_FORMAT_VERSION = 6
+  sessionFormatVersion?: number; // CURRENT_SESSION_FORMAT_VERSION = 7
   owner?: { pid: number; host: string; birth: string | null };
 }
 ```
@@ -55,18 +56,30 @@ export interface ClioSessionMeta {
 
 The session domain extends the same file with `parentSessionId` and `parentTurnId` (set on forks), `lastCheckpointAt` and `lastCheckpointReason`, `pinnedLeafTurnId`, the workspace snapshot captured at session start, and the ordered `skillActivations`. The picker fields `name`, `labels`, `firstMessagePreview`, `messageCount`, `hasModelTurn` and `lastActivityAt` are derived from the ledger when sessions are listed ([history.ts](../../src/domains/session/history.ts)) and are not authoritative on disk.
 
-New sessions use format `CURRENT_SESSION_FORMAT_VERSION = 6`
-([session.ts](../../src/engine/session.ts)). The reader accepts versions 3–6.
-Opening version 3, 4, or 5 restamps metadata as version 6 without transforming
-the existing ledger or tree. Version 4 adds `contextEviction` and `contextRecall`;
-version 5 adds `handoffTransaction`, `continuityCommit`, and optional continuity
-payloads on compaction summaries; version 6 adds eviction reasons, the `reread`
-recall trigger, and optional evicted-body content hashes.
+New sessions use format `CURRENT_SESSION_FORMAT_VERSION = 7`
+([session.ts](../../src/engine/session.ts)). The reader accepts versions 3–7
+(`OLDEST_READABLE_SESSION_FORMAT_VERSION = 3` in `src/domains/session/migrations/index.ts`).
+The versions form one additive chain, so an older ledger is read exactly as it
+stands. Version 4 adds `contextEviction` and `contextRecall`; version 5 adds
+`handoffTransaction`, `continuityCommit`, and optional continuity payloads on
+compaction summaries; version 6 adds eviction reasons, the `reread` recall
+trigger, and optional evicted-body content hashes; version 7 adds the
+`clio-coder.host-insert` and `clio-coder.step-chain` custom records, the
+`step_overflow`, `skill_retired` and `refused_prompt_bound` eviction reasons, the
+`superseded` eviction trigger, and an eviction's optional route and measured
+`anchor`.
+
+Listing or opening a version 3 to 6 session leaves its metadata alone. Resuming
+it restamps `meta.json` as version 7 in the same atomic write that reopens it
+(`resumeSessionState` in `src/domains/session/manager.ts`); the bytes of
+`current.jsonl` and `tree.json`, header line included, stay as they were. A build
+that reads only an older format then refuses that session, so upgrade every
+client before resuming a shared session.
 
 A missing format or a version below 3 is refused with guidance to remove the
-incompatible session directory. Versions above 6 require a newer CLIO Coder. Older
-binaries may refuse a session after its metadata is restamped; upgrade clients
-before reopening shared sessions.
+incompatible session directory. A version above 7 is refused before anything is
+written, with the reader's message `session was written by a newer Clio (format version <n>, this build reads version 7): <path>. Upgrade clio-coder to resume this session.`
+ACP load and resume report it as `session_format` without the path ([ACP](acp.md#error-envelope)).
 
 Session admission checks metadata format before any recovering ledger read. It
 validates replay entries before parking the current session. Required headerless
@@ -75,7 +88,7 @@ a refused candidate leaves the current session usable. Reopening a closed sessio
 
 ### Checkpoints
 
-`performCheckpoint` ([checkpoint.ts](../../src/domains/session/checkpoint.ts)) is a three-stage write: the ledger appends are `fsync`ed and `tree.json` is persisted through the writer, then `meta.json` is rewritten with `lastCheckpointAt` and `lastCheckpointReason`. Reasons in use are `shutdown` (session extension stop), `context-summary` (after a compaction summary lands) and `context-handoff` (continuity transaction barriers), and `restart` (before an interactive restart). Nothing is written once `clio-coder uninstall` has removed the state root, so a late checkpoint cannot rebuild a deleted tree.
+`performCheckpoint` ([checkpoint.ts](../../src/domains/session/checkpoint.ts)) is a three-stage write: the ledger appends are `fsync`ed and `tree.json` is persisted through the writer, then `meta.json` is rewritten with `lastCheckpointAt` and `lastCheckpointReason`. Reasons in use are `shutdown` (session extension stop), `context-summary` (after a compaction summary lands), `context-handoff` (continuity transaction barriers), `restart` (before an interactive restart), and `close`, `fork` and `handoff`, which the ACP server writes before `session/close`, a fork or a handoff commit closes the live session's ledger. Nothing is written once `clio-coder uninstall` has removed the state root, so a late checkpoint cannot rebuild a deleted tree.
 
 ### Recovery on open
 
@@ -92,7 +105,7 @@ The session ledger `current.jsonl` records all conversation events, model turns,
 The first line of `current.jsonl` is the canonical session header. A forked session adds `parentSession` (the path of the parent's `current.jsonl`) and `parentTurnId`:
 
 ```json
-{"type":"session","version":6,"id":"01912a34-b567-7890-abcd-ef0123456789","timestamp":"2026-08-14T12:00:00.000Z","cwd":"/path/to/project"}
+{"type":"session","version":7,"id":"01912a34-b567-7890-abcd-ef0123456789","timestamp":"2026-08-14T12:00:00.000Z","cwd":"/path/to/project"}
 ```
 
 ### Entry Taxonomy
@@ -103,7 +116,7 @@ Subsequent lines represent typed `SessionEntry` objects ([entries.ts](../../src/
 | --- | --- |
 | `message` | User inputs, assistant responses, and tool calls and results. The `role` is `user`, `assistant`, `tool_call`, `tool_result`, `system` or `checkpoint`. A user payload carries the prompt `text` sent to the model, and may carry `operatorText` (the raw input before scaffold expansion) and `displayText` (the literal editor input when a prompt template or command expansion replaced it, rendered by the session picker and transcript replay). |
 | `bashExecution` | An operator shell command: command, output, exit code, `cancelled`, `truncated`, an optional `fullOutputPath`, and `excludeFromContext`. |
-| `custom` | Typed extension data (`customType`, `data`). `handoffSeed`, `handoffNote` and the operator recovery request are custom types. |
+| `custom` | Typed extension data (`customType`, `data`). `handoffSeed`, `handoffNote` and the operator recovery request are custom types. `clio-coder.host-insert` records a message the host put into the model's history itself (a reminder, continuation, required-tool, pinned, memory-restoration or recovery message) with its exact content and its place on the path, or retracts one, so a resumed request carries the same host messages the live one did. `clio-coder.step-chain` records the step chain's state at a leaf. |
 | `modelChange`, `thinkingLevelChange` | Route changes: provider, model id and target, or the new thinking level. |
 | `fileEntry` | A file observation: path, operation (`read`, `write`, `edit`, `create`, `delete`), optional bytes and hash. |
 | `branchSummary` | A summary standing in for upstream history at a branch point. Replayed as a user-role context message and counted as a turn start. |
@@ -115,7 +128,7 @@ Subsequent lines represent typed `SessionEntry` objects ([entries.ts](../../src/
 | `taskLedger` | Full session task-board snapshot with a stable board id, goal and subgoal states, active run ids, required validation evidence, and optional operator provenance through `origin: "user"` plus `userTaskId`. |
 | `decisionLedger` | Branch-anchored snapshot of a completed or cancelled `ask_user` interview, or of a decision set the model recorded with the `decide` tool, including its timing, round count, settled values, superseded values, and operator corrections. |
 | `workerRun` | A dispatched worker's identity: assignment id, run id, agent id, runtime and origin. Never worker output. |
-| `contextEviction` | Policy, trigger, estimated token changes, and references to evicted observations or thinking blocks; the original bodies remain in the ledger. |
+| `contextEviction` | Policy, trigger, estimated token changes, and references to evicted observations or thinking blocks; the original bodies remain in the ledger. An eviction may carry a measured `anchor`: a session reopened with no live usage figure rehydrates its context estimate from the newest anchored eviction on the active path (`rehydrationRecord` in `src/domains/session/context-accounting.ts`), and falls back to the structural estimate when that record has no anchor or a recall or checkpoint follows it. |
 | `contextRecall` | Reference, trigger, and token readmission for explicit recall or a matching reread. |
 | `handoffTransaction`, `continuityCommit` | Durable records for staged context continuity and its committed checkpoint. See [Context continuity](../guide/context-continuity.md). |
 
@@ -172,12 +185,16 @@ The active path filter ([active-path.ts](../../src/domains/session/tree/active-p
 
 After a `/tree` switch or a resume, the transcript, the footer totals, `/usage` and the working-set fold all follow the active path, not the whole file.
 
+### Step chain
+
+Under a template's `turnPolicy: step`, the step chain ([step-start.ts](../../src/session-control/step-start.ts)) is bound to its session and to the leaf its last step settled on. Each settled step writes a `clio-coder.step-chain` record on the active path and each dropped chain writes a clear, so a reopen at that leaf resumes the chain. A session switch or a resume takes the chain recorded on the leaf it arrives at, so a session left by a switch resumes its chain on return. A `/tree` navigation within the session writes the clear on the leaf it leaves, and a fork never reads its parent's chain, because a record names the session it belongs to. Either way the next step starts without a lead.
+
 ### Branch Forking (`/fork`)
 
 `/fork` opens the message picker for an assistant turn. The fork (`src/domains/session/tree/fork.ts:forkFromState`) initializes an independent session branched from that turn:
 1. Reads the parent's ledger and traces ancestry before the parent writer is touched, so a broken fork point leaves the parent open.
 2. Creates a new session directory and metadata inheriting `cwd`, `model`, and `target` from the parent.
-3. Copies exactly the active path entries into the new session ledger. Entries written after the fork point are dropped when they are unanchored sidecars, compaction summaries, `handoffTransaction` or `continuityCommit` records, or an operator handoff recovery request. A fork never inherits permission to resume the parent's handoff.
+3. Copies exactly the active path entries into the new session ledger. Entries written after the fork point are dropped when they are unanchored sidecars, compaction summaries, `handoffTransaction` or `continuityCommit` records, or an operator handoff recovery request. A fork never inherits permission to resume the parent's handoff. Host-insert, step-chain, eviction and recall records change only what the model is shown, so they are placed by the projection cursor instead: those on the path up to the fork message's successor are copied.
 4. Stamps `parentSession` (the parent's ledger path) and `parentTurnId` in the new session header, and `parentSessionId` and `parentTurnId` in the new `meta.json`.
 5. Closes the parent writer last, after the child is created, seeded and stamped.
 
@@ -234,8 +251,8 @@ When an operator issues `/new`, `/resume`, `/tree`, or `/fork` during streaming,
 | Entry point | Behavior |
 | --- | --- |
 | `/resume` | Opens the picker. The picker lists only sessions that reached a model turn: an assistant message with text or a tool call, or a tool call. A session that was opened and never used, or whose only assistant turns were empty failures, is hidden, and an ended session is not drawn as a success because closing it does not show the run succeeded. |
-| `/resume <id\|prefix>` | Resumes directly (`src/interactive/overlay-session-lifecycle.ts`). An exact id wins; otherwise the prefix must name exactly one session. Without a match the command warns (`no session matches <target>` or `<target> matches N sessions`) and opens the picker with the argument as its filter. Matching runs over the sessions recorded for the current working directory and does not apply the picker's model-turn filter. |
-| `clio-coder run --session <id>`, `clio-coder run --continue` | Headless resume. `--continue` takes the most recent session for the working directory. A session that cannot be resumed fails the run with exit code 2 instead of answering without its history. The two flags together, or either with `--agent`, are usage errors. Neither uses the picker filter. |
+| `/resume <id\|prefix>` | Resumes directly (`src/interactive/overlay-session-lifecycle.ts`). An exact id wins; otherwise the prefix must name exactly one session, and with no prefix match an exact session name must ([names.ts](../../src/domains/session/names.ts)). Without a match the command warns (`no session matches <target>` or `<target> matches N sessions`) and opens the picker with the argument as its filter. Matching runs over the sessions recorded for the current working directory and does not apply the picker's model-turn filter. |
+| `clio-coder run --session <id>`, `clio-coder run --continue` | Headless resume. `--session` takes an exact id or a unique id prefix, resolved from the `meta.json` of the sessions recorded for the working directory without reading a ledger (`resolveSessionIdForCwd` in [history.ts](../../src/domains/session/history.ts)); an ambiguous prefix fails with `session prefix <id> is ambiguous; matches: <ids>`. `--continue` takes the most recent session for the working directory that reached a model turn, the picker's filter, and fails with `no previous session with a model turn recorded for <cwd>` when there is none. A session that cannot be resumed fails the run with exit code 2 instead of answering without its history. The two flags together, or either with `--agent`, are usage errors. |
 | `clio-coder --resume`, `--continue`, `-r`, `-c` | Refused as unknown global options with exit code 2 (#191) by `src/cli/argv.ts`. The error names `/resume` inside the app. Sessions resume from inside the app, or through `run` for headless work. |
 
 On a clean interactive exit CLIO Coder prints a session summary whose last line is `To resume: clio-coder, then /resume <sessionId>`. `interface.exitSummary` (`auto`, `brief`, `standard`, `report`, `off`; default `auto`) sets its detail. `auto` follows `interface.outputDetail`: compact selects brief, standard selects standard, and detailed selects report. Legacy `full` reads as standard. `off` prints only the resume line ([defaults.ts](../../src/core/defaults.ts)). A session with no model turn prints nothing. `clio-coder --session-file <path>` keeps a live JSON record of the interactive session at `<path>`: it is rewritten at every turn boundary and on every move into or out of a wait (`working`, `idle`, `awaiting-approval`, `awaiting-answer`), and the exit record (`state: "ended"`, with the outcome, exit code, usage and models) replaces it when the session ends ([session-file.ts](../../src/interactive/session-file.ts)). The flag is refused with a subcommand. The snapshot is kept by [exit-summary-collector.ts](../../src/interactive/exit-summary-collector.ts) and formatted by [exit-summary.ts](../../src/interactive/exit-summary.ts); the key is listed in [Commands and modes](../guide/commands-and-modes.md).

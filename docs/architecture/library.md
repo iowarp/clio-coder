@@ -25,7 +25,7 @@ CLIO Coder uses **library** for the collection and **package** for a distributab
 
 Package identity, component identity and invocation identity are distinct. The package reference is `kind:name`. A component reference such as `${component:agent:researcher}` is local to one package and resolves a contained file. It does not rename the agent. Prompt invocation names derive from paths beneath the prompt root with directory separators written as colons, agent IDs derive from agent filenames, and playbooks use their authored names. Authors must choose unique runtime names, normally with their package prefix. Installation does not add an automatic colon namespace to agents or playbooks.
 
-For example, Materio uses `materio-*` agents and playbooks and `/materio:*` prompts; the WTF-P bridge uses `/wtfp:new-paper`, `/wtfp:map-project`, and `/wtfp:create-outline`. Runtime collisions use each resource loader's documented precedence and diagnostics; the skill and prompt rules are in [extensions-and-sharing.md](../guide/extensions-and-sharing.md#resource-roots-and-precedence).
+For example, Materio uses `materio-*` agents and playbooks and `/materio:*` prompts. Runtime collisions use each resource loader's documented precedence and diagnostics; the skill and prompt rules are in [extensions-and-sharing.md](../guide/extensions-and-sharing.md#resource-roots-and-precedence).
 
 ## Owners and boundaries
 

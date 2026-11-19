@@ -65,7 +65,7 @@ Each rule resolves to exactly one of three decisions.
 | Decision | Meaning | Where it surfaces |
 | :--- | :--- | :--- |
 | **accept** | The request is unambiguous. | Nothing is reported. |
-| **warn** | The request is compatible, but admission identified a weaker declaration or a scope-replacement tradeoff. The dispatch runs with the authority it would have had anyway. | Current admission publishes the typed-scope replacement warning as a dispatch diagnostic for internal and harness origin requests, except the context generators. Legacy provenance still appears in the approval artifact. |
+| **warn** | The request is compatible, but scope resolution or admission identified a scope-replacement tradeoff, a prose-inferred path, or write roots that bound less than they appear to. The dispatch runs with the authority it would have had anyway. | The compatibility classifier (`classifyDispatchIntentCompatibility` in [intent-compatibility.ts](../../src/domains/dispatch/intent-compatibility.ts)) reports refusals only. Warnings come from scope resolution and admission: the typed-scope replacement warning is a dispatch diagnostic for internal and harness origin requests, except the context generators, and the inferred-scope and write-root notices are listed in [Reason Codes](#5-reason-codes). Legacy provenance still appears in the approval artifact. |
 | **refuse** | The request states two incompatible things about authority, or states one this build cannot interpret. | Terminal admission error carrying the reason code. The dispatch never runs. |
 
 The invariant that separates `warn` from `refuse`: **a warning is never the
@@ -268,6 +268,7 @@ compatibility identifiers that have no current producer.
 | `gate_and_intent_verification_conflict` | refuse | `gate` combined with `intent.verification`. |
 | `legacy_scope_path_absolute` | refuse | Prose inference met an absolute path token. |
 | `legacy_scope_path_malformed` | refuse | Prose inference met a malformed path token. |
+| `task_forbids_writes` | refuse | The task prose forbids writing any file (`forbidsFileWrites` in `src/core/write-prohibition.ts`), but the agent's capability class is `artifact-write`, so its deliverable is a written artifact. Among the builtins only `architect` has that class. The message names the read-only agents `scout`, `oracle` and `researcher` as the alternative. A scoped prohibition, such as one limited to a directory or with an exception, does not trigger it. |
 
 ---
 

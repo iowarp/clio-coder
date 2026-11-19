@@ -10,7 +10,7 @@ CLIO Coder is a coding harness for terminal and browser sessions, with provider 
 src/
 ├── cli/             # clio-coder subcommands, argument parsing, headless run modes
 ├── core/            # config/state paths, event bus, defaults, domain loader, shared primitives
-├── domains/         # 36 feature-domain directories, loaded through manifests or imported as libraries
+├── domains/         # 37 feature-domain directories, loaded through manifests or imported as libraries
 ├── engine/          # Pi (pi-ai, pi-agent-core, pi-tui) boundary, runtime adapters, ACP, worker runtime
 ├── entry/           # orchestrator bootstrap wiring (bootOrchestrator)
 ├── interactive/     # TUI panels, overlays, key routing, dashboard
@@ -28,14 +28,15 @@ tests/
 
 ## Domains
 
-`src/domains/` holds 36 directories. Not every one is a loaded `DomainModule`. The orchestrator loads config, extensions, plugins, interop, resources, share, context, providers, safety, prompts, agents, middleware, memory, session, telemetry, scheduling, and dispatch, plus mux when the pane tier is active. Each of those except memory has a `manifest.ts` naming its `dependsOn` list. Memory is declared inline in [orchestrator.ts](../../src/entry/orchestrator.ts) with no dependencies: its module wraps the composition root's `MemoryRuntime`, publishes that runtime's contract and disposes it on stop. The plugins domain publishes no contract; it stays loaded so teardown drops cached plugin snapshots. The `evolution` directory also has a `manifest.ts`, but it is the change-manifest schema for `clio-coder evolve`, not a domain manifest.
+`src/domains/` holds 37 directories. Not every one is a loaded `DomainModule`. The orchestrator loads config, extensions, plugins, interop, resources, share, context, providers, safety, prompts, agents, middleware, memory, session, telemetry, scheduling, and dispatch, plus mux when the pane tier is active. Each of those except memory has a `manifest.ts` naming its `dependsOn` list. Memory is declared inline in [orchestrator.ts](../../src/entry/orchestrator.ts) with no dependencies: its module wraps the composition root's `MemoryRuntime`, publishes that runtime's contract and disposes it on stop. The plugins domain publishes no contract; it stays loaded so teardown drops cached plugin snapshots. The `evolution` directory also has a `manifest.ts`, but it is the change-manifest schema for `clio-coder evolve`, not a domain manifest.
 
-System One is not a loaded domain. The orchestrator builds it with `createSystemOne` and hands it to the callers that ask it: the `consult` tool, the safety judge and the chat loop ([orchestrator.ts](../../src/entry/orchestrator.ts)). The remaining directories, which are arena, claims, components, evidence, evolution, gateway, lifecycle, quota, report, research, semantic, semantic-app, store, system-one, toolchain, turn-control, user-tasks, and workspace-snapshots, are libraries or CLI-owned feature areas whose module functions callers import directly. Memory's own files are also imported as a library beside its loaded contract. Of the libraries, gateway (`src/domains/gateway/mcp/`) and user-tasks have no domain-level `index.ts`, so callers import their files.
+System One is not a loaded domain. The orchestrator builds it with `createSystemOne` and hands it to the callers that ask it: the `consult` tool, the safety judge and the chat loop ([orchestrator.ts](../../src/entry/orchestrator.ts)). The remaining directories, which are arena, campaign, claims, components, evidence, evolution, gateway, lifecycle, quota, report, research, semantic, semantic-app, store, system-one, toolchain, turn-control, user-tasks, and workspace-snapshots, are libraries or CLI-owned feature areas whose module functions callers import directly. Memory's own files are also imported as a library beside its loaded contract. Of the libraries, gateway (`src/domains/gateway/mcp/`) and user-tasks have no domain-level `index.ts`, so callers import their files.
 
 | Domain | Primary source | Public surface |
 | --- | --- | --- |
 | agents | `src/domains/agents/**` | Built-in, plugin, user, and project agent recipes, playbooks, and result contracts. |
 | arena | `src/domains/arena/**` | Blind head-to-head matches between contenders: the match runner, the contender environment, votes and standings behind `clio-coder arena`. |
+| campaign | `src/domains/campaign/**` | Model campaigns behind `clio-coder campaign run`: one seeded project run across a roster of models, one entry at a time, each on a fresh copy of the fixture with its own data, state and cache homes, folded into run status, gates reached, refusals, tokens and wall time. |
 | claims | `src/domains/claims/**` | The project-scoped, append-only claims log: capture of judged `verify` verdicts and hypotheses, derived contradiction and supersede edges, memory regressions, and the claims reminders offered to the main agent. See [Artifact placement](artifact-placement.md#state-root-machine-produced-state). |
 | components | `src/domains/components/**` | Component snapshots, diffs, and classification. |
 | config | `src/domains/config/**`, [config.ts](../../src/core/config.ts) | `settings.yaml`, keybindings, effect-timing classification, hot reload. |
@@ -128,9 +129,9 @@ Shutdown stops domains in reverse load order. Each `stop()` runs under a per-hoo
 
 Around the loader, `bootOrchestrator` does the work that must precede or follow the domains:
 
-- Ensures the state directories and reports untrusted project settings and safety surfaces.
-- Recovers state a hard-killed coordinator left behind, namely compete-group and task worktrees.
-- Emits the `session.start` bus event, then composes the tool registry, System One, safety wiring, and chat.
+- Ensures the state directories and reports untrusted project safety, settings, extensions and plugins surfaces.
+- Prepares recovery of the compete-group and task worktrees a hard-killed coordinator left behind ([boot-recovery.ts](../../src/domains/dispatch/boot-recovery.ts)). It starts once the first frame is up on an interactive boot and with the session on a headless or ACP boot, and dispatch holds its ledger scan and every admission until it settles.
+- Emits the `session.started` bus event, then composes the tool registry, System One, safety wiring, and chat.
 - Hands off to one surface. Interactive boot imports `startInteractive` from `src/interactive/index.ts`. A headless run calls `runHeadlessMainAgent` in [print.ts](../../src/cli/modes/print.ts). An ACP boot serves the protocol through `src/engine/acp/server.ts`.
 
 ---
@@ -141,7 +142,7 @@ Two pieces of start-up work are bounded. Run recovery reads only the ledger rows
 
 ### Orphan run recovery
 
-The dispatch domain's start opens the run ledger and calls `recoverAbandonedRuns` ([orphan-recovery.ts](../../src/domains/dispatch/orphan-recovery.ts)). A non-terminal ledger row of this host whose worker process no longer exists is settled from its run's `run.settled` record when the run journal holds one. Otherwise the row closes as `stalled`, its `endedAt` set to the last heartbeat, and the domain journals the `run.settled` the dead host never wrote. A terminal row whose run journal holds `run.settled` but no seal gets its `run.sealed` and `bundle.json` now. Rows another host created are left to that host. A non-interactive boot that settled or closed anything prints `[dispatch] ledger recovery: sealed=<n> abandoned=<n>` to stderr. Recovery is best-effort and never blocks startup.
+The dispatch domain's start opens the run ledger. Once worktree recovery settles, it reloads the ledger, since a sibling may have settled a run in the meantime, and calls `recoverAbandonedRuns` ([orphan-recovery.ts](../../src/domains/dispatch/orphan-recovery.ts)). A non-terminal ledger row of this host whose worker process no longer exists is settled from its run's `run.settled` record when the run journal holds one. Otherwise the row closes as `stalled`, its `endedAt` set to the last heartbeat, and the domain journals the `run.settled` the dead host never wrote. A terminal row whose run journal holds `run.settled` but no seal gets its `run.sealed` and `bundle.json` now. Rows another host created are left to that host. A pass of assignment reconciliation follows, which settles each durable assignment left `running` by a crash against the ledger's evidence, so a wait or collect never hangs on it. A non-interactive boot that settled or closed anything prints `[dispatch] ledger recovery: sealed=<n> abandoned=<n>` and `[dispatch] assignment reconcile: recovered=<n> abandoned=<n>` to stderr. Recovery is best-effort and never blocks startup.
 
 ### Workspace probe reuse
 
@@ -241,7 +242,9 @@ evaluating the implementation. The worker composition root imports
 `core-bootstrap.ts` directly (through [worker-tools.ts](../../src/engine/worker-tools.ts)), so its real
 built entry never evaluates the orchestrator-only dispatch, monitor, or steer
 runners. The orchestrator-side registration adds `dispatch` after the core
-tools, `ledger`, `monitor`, and `steer` when dispatch is composed, `panes` when
+tools, `monitor` and `steer` when dispatch is composed, with `ledger` behind the
+gateway unless an agent ledger is supplied, the job `monitor` when a job host
+exists without dispatch, `panes` when
 a pane host exists, `report` when the session's report host is bound, and `music` when `integrations.music.agentControl` is on and
 the music pane could play at startup (`integrations.music.enabled`, a live pane
 host, and a resolved cliamp).
@@ -274,13 +277,13 @@ and [dispatch.ts](../../src/tools/dispatch.ts) owns a separate cached dynamic im
 
 ## Boundary invariants
 
-`pnpm run lint` runs `biome check .` and then [check-hygiene.ts](https://github.com/iowarp/clio-coder/blob/main/scripts/check-hygiene.ts), which imports the boundary checker ([check-boundaries.ts](https://github.com/iowarp/clio-coder/blob/main/tests/boundaries/check-boundaries.ts)) and runs it against `src/` and against synthetic fixtures that pin each rule's wording. Treat these checks as executable specifications. The checker reads import and export specifiers, dynamic `import("...")` calls, and `/// <reference>` directives in every `.ts`, `.tsx`, and `.mts` file under `src/`. It does not scan `apps/`, `tests/`, or `scripts/`.
+`pnpm run lint` runs `biome check .` and then [check-hygiene.ts](https://github.com/iowarp/clio-coder/blob/main/scripts/check-hygiene.ts), which runs the boundary checker ([check-boundaries.ts](https://github.com/iowarp/clio-coder/blob/main/tests/boundaries/check-boundaries.ts)) against `src/` on a worker thread. Contract tests under `tests/contracts/` run it against synthetic fixtures that pin each rule's wording. Treat these checks as executable specifications. The checker reads import and export specifiers, dynamic `import("...")` calls, and `/// <reference>` directives in every `.ts`, `.tsx`, and `.mts` file under `src/`. It does not scan `apps/`, `tests/`, or `scripts/`.
 
 The enforced import rules below are complemented by the maintained
 [Pi SDK boundary table](pi-boundary.md), which records the semantic owner of
 each overlapping helper and the CLIO Coder deltas that must survive an SDK upgrade.
 
-Nine import rules apply. The same checker also runs rules 10 to 14, which hold telemetry accounting rather than imports and are described in [Telemetry](telemetry.md). Rules 1, 3, 4, 5, 7, 8, and 9 hold for every import form, type-only and dynamic included. Rule 2 and rule 6 treat a type-only import differently from a value import, because a type-only import erases at compile time. A dynamic `import()` always counts as a value import.
+Nine import rules apply. The same checker also runs rules 10 to 14, which hold telemetry accounting rather than imports and are described in [Telemetry](telemetry.md), and rules 15 to 17. Rule 15 holds [orchestrator.ts](../../src/entry/orchestrator.ts) to wiring: no value import of a feature module's internals, no module-scope function outside the declared wiring helpers, and at most 4,800 lines. Rule 16 lets only `chat-loop.ts` and `turn-state.ts` in `src/session-control/` name `ChatTurnState`, and only `turn-state.ts` assign a continuation field. Rule 17 keeps a domain owner's capability inside its domain and its declared holders. Rules 1, 3, 4, 5, 7, 8, and 9 hold for every import form, type-only and dynamic included. Rule 2 and rule 6 treat a type-only import differently from a value import, because a type-only import erases at compile time. A dynamic `import()` always counts as a value import.
 
 ### Rule 1: `@earendil-works/pi-*` imports stay in `src/engine/**`
 
@@ -330,11 +333,12 @@ Neither `src/session-control/**` nor `src/engine/**` may import `src/interactive
 
 The graphical application is a separate workspace package, `@iowarp/clio-coder-gui`, under `apps/clio-coder-gui`. It has its own `package.json`, TypeScript configs, test suite, and lint step, and its server is a Hono process bound to `127.0.0.1` that serves only clients holding a credential. A launcher gets a credential by proving it holds the launch token over a single-use challenge, a browser opens through a single-use launch ticket, and the launch token is new on every start, the background app's included. The guide to using it is [the GUI guide](../guide/gui.md).
 
-The root checker in `tests/boundaries/check-boundaries.ts` does not scan it. Its own `apps/clio-coder-gui/tests/boundaries.test.ts` allows exactly four ways to reach root `src/`:
+The root checker in `tests/boundaries/check-boundaries.ts` does not scan it. Its own `apps/clio-coder-gui/tests/boundaries.test.ts` allows exactly five ways to reach root `src/`:
 
-- `server/clio/wire-shims.ts` re-exports the browser-safe ACP wire declarations: everything in `src/engine/acp/types.ts`, plus the context-operation types from `src/core/context-operation.ts` and `src/core/telemetry/live-events.ts` as type-only exports. It evaluates no process transport.
-- `server/clio/http-shims.ts` re-exports a fixed allowlist for the HTTP process: the ACP stdio transport, errors, and wire types, the XDG directory helpers, `resolvePackageRoot`, process-identity probes, and `getVersionInfo`. The wire types must be type-only.
-- `server/clio/adapters/*.ts` import an allowlist of root domain and core modules, such as the telemetry read model, evidence projections, settings layers, provider registry, and dispatch state types. Adapters are blocking readers, so only the worker entries (`server/worker/reads-main.ts` and `ops-main.ts`) may import them, which keeps their work off the HTTP event loop.
+- `server/clio/wire-shims.ts` re-exports the browser-safe ACP wire declarations: everything in `src/engine/acp/types.ts`, plus the context-operation types from `src/core/context-operation.ts` and `src/core/telemetry/live-events.ts` as type-only exports, and the telemetry read model's wire types and schemas from `src/core/telemetry/dto.ts`. It evaluates no process transport.
+- `server/clio/wire-runtime.ts` takes only `ACP_MAX_JOBS` from `src/engine/acp/runtime.ts`.
+- `server/clio/http-shims.ts` re-exports a fixed allowlist for the HTTP process: the ACP stdio transport, errors, and wire types, the XDG directory helpers, `resolvePackageRoot`, process-identity probes, the running-build helpers and `runningBuildId`, the canonical telemetry renderer, `WORKSPACE_SECRET_PATHS`, and `getVersionInfo`. The wire types must be type-only.
+- `server/clio/adapters/*.ts` import an allowlist of root domain and core modules, such as the telemetry read model, evidence projections, settings layers, provider registry, and dispatch state types. Adapters are blocking readers, so only the worker entries (`server/worker/reads-main.ts` and `ops-main.ts`) and the test harness's adapter may import them, which keeps their work off the HTTP event loop.
 - `tests/harness` and `tests/fixtures` use a separate test-seam allowlist.
 
 Any other import of `src/` from the application fails its boundary test. The same test pins the process chokepoint: only `server/process-policy.ts` may create child processes or `Worker` threads, and only it may call the ACP `createStdioTransport`. The application's one escape to the CLI is the closed command table in `server/cli-commands.ts`, which maps a fixed set of kinds to fixed `clio-coder` argv, with no generic command or extra arguments.
@@ -369,7 +373,7 @@ graph TD
 
 Core data paths:
 
-1. `src/cli/index.ts` loads only argument parsing and boot tracing statically. Every subcommand is a dynamic import in its command table, so a bare start or `--version` pays for its own module graph. Interactive start, `run`, and `acp` all call `runClioCommand` in [clio.ts](../../src/cli/clio.ts), which settles the startup settings, detects or configures a chat route for an existing home, and opens the Stage 0 terminal lease for an interactive TTY. When a newer CLIO Coder last used the home, the terminal asks before continuing (default no), and `run` and ACP exit 2 unless `CLIO_CODER_ALLOW_OLDER=1` is set.
+1. `src/cli/index.ts` statically loads argument parsing, boot tracing and a few process-setup helpers. Every subcommand is a dynamic import in its command table, so a bare start or `--version` pays for its own module graph. Interactive start, `run`, and `acp` all call `runClioCommand` in [clio.ts](../../src/cli/clio.ts), which settles the startup settings, detects or configures a chat route for an existing home, and opens the Stage 0 terminal lease for an interactive TTY. When a newer CLIO Coder last used the home, the terminal asks before continuing (default no), and `run` and ACP exit 2 unless `CLIO_CODER_ALLOW_OLDER=1` is set.
 2. `bootOrchestrator` initializes config, data, state, and cache directories through [init.ts](../../src/core/init.ts), then runs the domain loader described above. Each domain's `manifest.ts` dependency list sets its position. The dispatch domain's start recovers orphaned runs, and session bind and the session prompt share workspace probes ([Cold-start work](#cold-start-work)).
 3. The shared chat loop in `src/session-control/` resolves model/runtime state. `resolveSessionTools` in [agent-tools.ts](../../src/tools/agent-tools.ts) supplies the full resolved tool surface when the runtime supports tools, subject to explicit turn constraints. Task-ranked skills and capability advice enter reminder text; the task does not select a different session schema set.
 4. The prompt compiler builds a hashed prompt envelope and dynamic turn fragments.
@@ -384,7 +388,7 @@ CLIO Coder uses one in-process telemetry hub for status and accountability surfa
 
 - Provider capability resolution decides whether tool schemas are sent at all. A tool-capable session gets the complete registry as one deterministic surface, with each tool placed `direct` (schema attached to every request) or behind the `gateway` tool (found and called on demand). Placement changes what the model sees and never what a call is allowed to do ([surface.ts](../../src/tools/surface.ts)).
 - [policy-engine.ts](../../src/domains/safety/policy-engine.ts) evaluates damage-control rules, project policy, Bash default-deny, and path policy. Playbook step write boundaries are detect-and-rollback mechanisms (change tracking and rollbacks) with no OS-level confinement. The policy engine blocks writes outside dispatch `write_roots`.
-- The OS sandbox (`safety.sandbox`, `src/core/sandbox/`) contains shell commands in two places. A dispatched worker's own `bash`, `run_script` and verification commands run in the worker sandbox, bound to its write roots. At autonomy `default`, and at contained `yolo`, the main session's `bash` and `run_script` also run contained in the main-session sandbox, which writes the workspace, the temp roots, `safety.scratchRoots` and its own `sandbox-cache` under the cache root. Credential variables and secret files are hidden inside either sandbox, and `safety.sandboxUnixSockets: block` refuses new Unix-domain sockets.
+- The OS sandbox (`safety.sandbox`, `src/core/sandbox/`) contains shell commands in two places. A dispatched worker's own `bash`, `run_script` and verification commands run in the worker sandbox, bound to its write roots. At autonomy `default`, and at contained `yolo`, the main session's `bash` and `run_script` also run contained in the main-session sandbox, which writes the workspace, the repository's git directories with their hooks and config kept read-only, the temp roots, `safety.scratchRoots` and its own `sandbox-cache` under the cache root. Credential variables and secret files are hidden inside either sandbox, and `safety.sandboxUnixSockets: block` refuses new Unix-domain sockets.
 - [registry.ts](../../src/tools/registry.ts) is the admission point for every tool invocation.
 - [seal.ts](../../src/domains/telemetry/seal.ts) seals the run journals whose `run.settled` records the evidence and cost surfaces read.
 
