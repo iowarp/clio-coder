@@ -146,7 +146,7 @@ The rest of this page is the maintainers' reference for branches, releases and t
 
 ### Branches and Releases
 
-Development happens on the version branch, currently `v080`. Keep local
+Development happens on the version branch, currently `v084`. Keep local
 and remote version branches synchronized with ordinary pushes. `main` moves
 only by fast-forward when a stable release completes. Published tags and npm
 versions are immutable. The completed stable release deletes its version branch;
