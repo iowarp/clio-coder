@@ -280,6 +280,8 @@ explains worker route selection.
 
 `context.compaction.maxTokens` is the working budget: an input ceiling that caps compaction on every route, chat and dispatched workers alike, whatever the model's window is, and it stands in for the window while the serving window is unknown. A model whose catalog price steps up above a token count lowers the effective ceiling to just under that boundary. `context.compaction.provider: native` uses Codex's own checkpoints on the `openai-codex` runtime and stores each one as a private file under `<stateDir>/provider-checkpoints/`; `off` keeps portable CLIO Coder summaries. See [Threshold and ceiling compaction](../architecture/context-engine.md#threshold-and-ceiling-compaction).
 
+Working-set eviction is the only stage before a summary, and `context.workingSet.enabled: false` turns it off; the `CLIO_CODER_LEGACY_MASK` stale-observation mask has been removed. On a known window under 52,428 tokens, automatic eviction acts at the automatic compaction trigger, before any paid summary, and aims at the same share of the history above the system prompt and tool schemas as `context.workingSet.target` is of `context.compaction.threshold` (75% at the defaults). On those windows a compaction summary asks for at most 8,192 visible output tokens, or `chat.maxOutputTokens` when that is larger ([`pressure.ts`](../../src/domains/context/fold/pressure.ts)).
+
 The compaction and memory controls serve different roles. An unset `context.compaction.model` uses active chat; an explicit model must uniquely resolve to an available eligible summary route or fail visibly. `context.compaction.systemPrompt` is a nonempty UTF-8 prompt file, at most 65,536 bytes, read at compaction time and resolved relative to the session workspace.
 
 Configure `context.memory.target` and `context.memory.model` to give memory a dedicated route. With both unset, the memory tier runs on the active chat route and its calls are billed to the chat model; an explicit memory route still wins. Set `context.memory.enabled: false` to turn proactive memory off. Memory prefers its dedicated route and can use active chat when that route is unavailable and request capacity permits. Known dedicated saturation skips the step rather than initiating failover; neither routing choice edits saved settings.
@@ -401,7 +403,7 @@ Inside a container, bubblewrap must be installed in the image, and the container
 
 ### Prompts
 
-`prompts.profile` selects the main agent's system prompt text: `v1` is the current text, `v2` the D-02 rewrite under evaluation. Workers follow it for their operating contract.
+`prompts.profile` selects the main agent's system prompt text: `v1` is the current text, `v2` an experimental leaner text. Workers follow it for their operating contract.
 
 | Key | Default | When it applies |
 | --- | --- | --- |
@@ -512,7 +514,7 @@ A session plans against the serving window resolved on each turn by [`runtime-re
 | --- | --- | --- |
 | `loaded window` | `loaded` | The backend reports the model open at this window. |
 | `probed window` | `probe` | The target reported a route or model limit without resident instance state. A llama.cpp slot share shows as `<share> (<total> / <n> slots)`. |
-| `configured window` | `target-override` | `targets[].capabilities.contextWindow`, a window sent with every request such as `ollama.numCtx`, or `clio-coder run --max-context-tokens`. A setting can lower a live limit but never raise it. |
+| `configured window` | `target-override` | `targets[].capabilities.contextWindow`, a window sent with every request such as `ollama.numCtx`, or `--max-context-tokens` on interactive `clio-coder` or `clio-coder run`. A setting can lower a live limit but never raise it. |
 | `catalog estimate window` | `catalog` | A cloud route whose runtime has no window endpoint. The window is the model maximum from its profile or Pi's catalog, labeled an estimate. |
 | `context window unknown` | `unknown` | No live report or setting answered. |
 
@@ -528,7 +530,7 @@ The package ships [`models/profiles.yaml`](../../models/profiles.yaml), which de
 
 A profile's `match` block selects models by id, ignoring case:
 
-- `exactIds` compares the full model id, including a route prefix such as `mini/`.
+- `exactIds` compares the full model id, including a route prefix such as `lab/`.
 - `familyPrefixes` compares the model name after its last `/`. A prefix matches that name exactly or when followed by `-`, `_`, `.` or `@`. Prefixes are literal, so `/` and regular-expression characters are rejected.
 - `runtimeIds` limits the profile to those runtime ids. A profile without it applies on every runtime.
 
@@ -543,6 +545,8 @@ Profile claims merge under live reports and target settings ([`capabilities.ts`]
 | Other flags, such as `toolCallFormat`, `thinkingFormat` and `structuredOutputs` | The profile outranks the server's flag list, and a target's `capabilities` outranks the profile. A live report of no audio input still wins. |
 
 When `chat.maxOutputTokens` is `0` and the request sets no limit, the profile's `recommendations.outputTokens` becomes the output budget, clamped to the model's output cap and the remaining window ([`output-budget.ts`](../../src/engine/apis/output-budget.ts)). Sampling presets still come from the [local model catalog](../../src/domains/providers/models/local-models/clio-coder-local-coding-targets.yaml), so a profile's `recommendations.sampling` is not applied.
+
+Each request also holds back an output reserve from the window, and the automatic compaction trigger counts at least the reserve admission checks, so it fires before admission would refuse the next request. A configured `chat.maxOutputTokens` is reserved in full, up to the model's output cap; when the window cannot hold it, the refusal names `chat.maxOutputTokens` instead of shrinking it, and a refusal caused by a `--max-context-tokens` cap names that flag. Without one, the profile recommendation or the 32,768-token product default claims at most half the window, so a small `--max-context-tokens` cap still leaves room for input. On a window under 52,428 tokens with no `chat.maxOutputTokens`, the fit check and the worker guard reserve 8,192 output tokens instead of half the window. On a window of 52,428 tokens or more, transports that do not clamp output at the wire, such as Copilot, Anthropic and OpenAI Responses (every transport except OpenAI-compatible chat completions and native Ollama), reserve at most a quarter of the window and never under 16,384, so a 64K window triggers compaction at 49,152 tokens ([`output-budget.ts`](../../src/engine/apis/output-budget.ts), [`pressure.ts`](../../src/domains/context/fold/pressure.ts)).
 
 `behavior.thinking` names the mechanism (`effort-levels`, `budget-tokens`, `on-off`, `always-on` or `none`) and, for `effort-levels`, the effort string each CLIO Coder level sends in `effortByLevel`. Beyond `off`, the thinking picker offers only the mapped levels. The packaged Qwen3.8-27B (`qwen3.8-27b`) profile maps levels onto `low`, `medium` and `xhigh`, the only efforts its upstream chat template accepts. A requested `high` or `max` is sent as `xhigh`.
 
@@ -644,7 +648,7 @@ Target-specific options are typed in [`target-descriptor.ts`](../../src/domains/
 `lmstudio.load` states how CLIO Coder loads a model on an LM Studio server, so the server's GUI defaults stop deciding the context window, slot count or speculative draft. `lmstudio.models.<model id>.load` overrides fields for one model; the key is the model id selected on that target. Every field maps to the key LM Studio's `POST /api/v1/models/load` takes: `contextLength`, `parallel`, `flashAttention`, `speculativeDraftMaxTokens`, `evalBatchSize`, `numExperts` and `offloadKvCacheToGpu`. The adapter sends these fields to the load API; configure them for the installed server and model.
 
     targets:
-      - id: blade
+      - id: lab-gateway
         runtime: litellm
         url: http://gateway.example:4000
         lmstudio:
@@ -654,7 +658,7 @@ Target-specific options are typed in [`target-descriptor.ts`](../../src/domains/
             flashAttention: true
             speculativeDraftMaxTokens: 2
           models:
-            dynamo/qwen3.8-27b:
+            lab/qwen3.8-27b:
               load:
                 contextLength: 65536
 

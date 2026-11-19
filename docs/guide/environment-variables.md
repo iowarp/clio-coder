@@ -44,7 +44,7 @@ When all CLIO Coder directories are at platform/XDG defaults and `CLIO_CODER_INT
 | `CLIO_CODER_NO_NETWORK_TOOLS` | off | `1` acts as legacy alias of `CLIO_CODER_DISABLE_RETRIEVE_TOOLS` ([network-policy.ts](../../src/tools/network-policy.ts)). |
 | `CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK` | off | `1` permits `web_fetch` to target private/local addresses; process env only ([network-policy.ts](../../src/tools/network-policy.ts)). |
 | `CLIO_CODER_ANTHROPIC_CACHE_RETENTION` | unset | `none`, `short`, or `long` for native `anthropic-messages` requests (`long` requests 1h cache TTL when model metadata supports it). Invalid values throw; per-call preferences override it ([provider-diagnostics.ts](../../src/engine/provider-diagnostics.ts)). |
-| `CLIO_CODER_PROVIDER_DUMP_PATH` | unset | Absolute path for opt-in native-provider JSONL diagnostics (one record per completed call; mode `0600`, operator-owned regular file, non-symlink, existing parent dir; omits auth headers and redacts known credentials, **retains prompt content** — keep private and delete when finished; external-CLI transports are not captured). Write/close failures emit process warning code `CLIO_CODER_PROVIDER_DUMP_FAILED` without failing the call ([provider-diagnostics.ts](../../src/engine/provider-diagnostics.ts)). |
+| `CLIO_CODER_PROVIDER_DUMP_PATH` | unset | Absolute path for opt-in native-provider JSONL diagnostics (one record per completed call; mode `0600`, operator-owned regular file, non-symlink, existing parent dir; omits auth headers and redacts known credentials, **retains prompt content**, so keep it private and delete it when finished; external-CLI transports are not captured). Write/close failures emit process warning code `CLIO_CODER_PROVIDER_DUMP_FAILED` without failing the call ([provider-diagnostics.ts](../../src/engine/provider-diagnostics.ts)). |
 | `CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT` | `131072` | Max context length requested when loading an LM Studio model alongside another resident model (LM Studio reports no VRAM and caps GPU offload instead of refusing, so oversized KV caches crawl on CPU). Positive int overrides; `off`, `false`, or `0` disables clamping; invalid/negative/empty keeps default ([lmstudio-residency.ts](../../src/engine/apis/lmstudio-residency.ts)). |
 | `CLIO_CODER_ENDPOINT_SLOTS_TTL_MS` | `86400000` | TTL (ms) for persisted endpoint concurrency slot counts before expiry/pruning ([endpoint-slots-store.ts](../../src/domains/providers/endpoint-slots-store.ts)). |
 | `CLIO_CODER_SKILL_CATALOG_DIR` | unset | Local skill-catalog directory override ([marketplace.ts](../../src/domains/resources/skills/marketplace.ts), [provenance-pin.ts](../../src/domains/resources/skills/provenance-pin.ts)). |
@@ -74,18 +74,18 @@ When all CLIO Coder directories are at platform/XDG defaults and `CLIO_CODER_INT
 
 Diagnostic toggles default off and activate on `1`:
 
-- `CLIO_CODER_PROFILE_COMPARE` — logs configured routes missing from or differing from `models/profiles.yaml`, once per process ([extension.ts](../../src/domains/providers/extension.ts)).
-- `CLIO_CODER_TRACE_BOOT` — stamps `[clio-coder:boot] +<ms> <phase>` lines to stderr ([boot-trace.ts](../../src/core/boot-trace.ts)).
-- `CLIO_CODER_TIMING` — prints startup timing summary on non-interactive bannered boot ([orchestrator.ts](../../src/entry/orchestrator.ts)).
-- `CLIO_CODER_DEBUG_SHUTDOWN` — logs shutdown hook timings/diagnostics ([termination.ts](../../src/core/termination.ts), [domain-loader.ts](../../src/core/domain-loader.ts)).
-- `CLIO_CODER_HOOK_BUDGET_DEBUG` — records and logs every hook-budget overrun, not only steady-state warnings and stalls ([runtime.ts](../../src/domains/middleware/runtime.ts)).
-- `CLIO_CODER_CONFIG_DEBUG` — prints full error/stack when settings hot-reload watcher fails instead of one summary line ([watcher.ts](../../src/domains/config/watcher.ts)).
+- `CLIO_CODER_PROFILE_COMPARE`: logs configured routes missing from or differing from `models/profiles.yaml`, once per process ([extension.ts](../../src/domains/providers/extension.ts)).
+- `CLIO_CODER_TRACE_BOOT`: stamps `[clio-coder:boot] +<ms> <phase>` lines to stderr ([boot-trace.ts](../../src/core/boot-trace.ts)).
+- `CLIO_CODER_TIMING`: prints startup timing summary on non-interactive bannered boot ([orchestrator.ts](../../src/entry/orchestrator.ts)).
+- `CLIO_CODER_DEBUG_SHUTDOWN`: logs shutdown hook timings/diagnostics ([termination.ts](../../src/core/termination.ts), [domain-loader.ts](../../src/core/domain-loader.ts)).
+- `CLIO_CODER_HOOK_BUDGET_DEBUG`: records and prints every hook-budget overrun after a hook's warmup calls. Without it, an occasional overrun only counts toward the rolling window, and only steady-state slowness and stalls (10 times the budget or more) are recorded ([runtime.ts](../../src/domains/middleware/runtime.ts)).
+- `CLIO_CODER_CONFIG_DEBUG`: prints full error/stack when settings hot-reload watcher fails instead of one summary line ([watcher.ts](../../src/domains/config/watcher.ts)).
 
 File-writing trace:
 
 The render trace takes a path, not `1`. Setting it to `1` writes a file named `1` in the working directory. Unset or empty disables it; parent directories are created automatically and truncated per session.
 
-- `CLIO_CODER_RENDER_TRACE` — versioned JSONL timing trace of the interactive render pipeline (no conversation text) ([render-trace.ts](../../src/interactive/render-trace.ts); see [tui-boot-performance.md](../architecture/tui-boot-performance.md#measuring-an-interactive-boot)).
+- `CLIO_CODER_RENDER_TRACE`: versioned JSONL timing trace of the interactive render pipeline (no conversation text) ([render-trace.ts](../../src/interactive/render-trace.ts); see [tui-boot-performance.md](../architecture/tui-boot-performance.md#measuring-an-interactive-boot)).
 
 ```bash
 CLIO_CODER_RENDER_TRACE=/tmp/clio-coder-render.jsonl clio-coder
