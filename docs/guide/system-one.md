@@ -85,7 +85,7 @@ The result gives `offered`, `scored`, `matchCount`, up to `limit` `matches` (def
 
 ### The question form
 
-`questions` asks one to four typed questions over a `state` of at most 2 KB as JSON and up to eight workspace `paths`, the first 6,000 characters of each.
+`questions` asks one to four typed questions over a `state` of at most 2 KB as JSON and up to eight workspace `paths`, the first 6,000 characters of each. A path may be a glob, as in the filter form: a literal name that exists wins, a pattern skips `.git` and `node_modules`, and a pattern that matches more than 16,384 paths or none is skipped with its reason. An ask with no evidence, meaning an empty `state` and no path that could be read, is refused before anything is sent, and it spends no call. So is a question-form call that puts filter keys (`criterion`, `source`, `items`, `path`, `chunkLines`, `limit`) at the top level instead of inside `filter`.
 
 | Kind | Needs | Comes back as |
 | --- | --- | --- |
@@ -147,6 +147,8 @@ Name the profile. A bound `generic` engine answers `consult` and triage, but its
 
 The target's runtime must implement typed decisions: `typesafe-jev` (a hosted engine, 32,000 tokens counted over the whole request), `systemone` (a server you run that answers `POST /v1/systemone`, with a default 480-token window that `capabilities.contextWindow` raises) or `inception` with `model: mercury-decide` (credential `INCEPTION_API_KEY`). Set `capabilities.contextWindow` to what the served checkpoint actually reads: 4096 for the Strands Decider, 1024 for Julia-1 at the window its published accuracy used.
 
+Each typed-wire ask passes the same request admission as a `kind: llm` engine, including the session cost ceiling, and opens a journal call recorded under `system-one`. The call carries the input and output tokens the wire reports. Its cache read and cache write are recorded as zero, because the typed wire has no prompt cache. `clio-coder telemetry tokens`, cost readers and `/usage` count these calls.
+
 CLIO Coder ships a client for these wires, not an inference server or an accelerator scheduler. The server you run owns its device, and no setting places an engine. Naming each target after its placement (`decider-npu`) makes the doctor rows read as a map of the machine. The same holds for Julia-1. CLIO Coder ships the `julia-1` profile and the `systemone` client, not the model server. The Julia-1 adapter that answers `POST /v1/systemone` for that profile is operator-supplied, and you run it yourself. When a `julia-1` engine is bound, CLIO Coder fetches the pinned tokenizer from the model repository and caches it. Until then it uses conservative byte bounds and can abstain.
 
 ### `kind: llm`
@@ -174,7 +176,7 @@ State is redacted in the process before a request exists, so a hosted engine or 
 
 Every request is also checked against the information-flow restrictions its evidence carries, and files `consult` reads add theirs. A rule whose recipients do not include the engine's target ends that route as `flow-denied`, and nothing is sent. See [Information flow](information-flow.md).
 
-The journal keeps a content-free `system_one.decided` record per ask: the point, outcome, latency, deadline, counts and the route each engine took. There is no decision dataset.
+The journal keeps a content-free `system_one.decided` record per ask: the point, outcome, latency, deadline, counts, the route each engine took and the ids of the journal calls the ask made. There is no decision dataset.
 
 ## Retired settings
 

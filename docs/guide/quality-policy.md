@@ -98,6 +98,8 @@ structured finding per applicable rule/check:
 | `unavailable` | CLIO Coder could not capture or compare the bounded inputs. |
 | `limited` | The rule explicitly permits a check-scoped limitation; the check remains unverified. |
 
+A plain `command` check passes on exit code 0. A judged check (`numeric-compare`, `perf-budget` or `reproduce`) passes only when its judgement passed, so exit code 0 with a failed comparison is `failed`. A `numeric-compare` or `reproduce` check may run up to 5 times through `repeat` and hashes its declared `inputs` before the run; see [Project verifier catalog](tool-usage.md#project-verifier-catalog).
+
 A valid quality policy selects high rigor by default, as
 [Rigor and the validation contract](#rigor-and-the-validation-contract)
 describes. At `CLIO_CODER_RIGOR=normal` the completion assessment is an

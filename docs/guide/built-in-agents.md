@@ -154,7 +154,7 @@ A reply that writes a Markdown review and then closes with its JSON result still
 
 The `coder` persona ([coder.md](../../src/domains/agents/builtins/coder.md)) carries the unattended finishing rule. It restates the task as separate clauses, including performance and robustness clauses, and checks first whether existing tests cover each clause. It writes a new reproduction test only for a clause no existing test covers, only when the task and the project instructions allow tests, following the neighboring tests and making the test fail on untouched code before the fix. Before finishing, it maps each clause to evidence in its diff or a check it ran, and it names any clause without evidence as not done in `summary`.
 
-When a check it needs cannot run, `coder` traces every assertion of each test it added or changed through the changed source by hand and fixes any disagreement before finishing. The trace is not a validation. The check still counts as not run: `validations` lists only checks the worker executed, and the optional `declaredChecks` array of the `mutation-report` names checks not run and why the host must run them.
+When a check it needs cannot run, `coder` traces every assertion of each test it added or changed through the changed source by hand and fixes any disagreement before finishing. The trace is not a validation. The check still counts as not run: `validations` lists only checks the worker executed, and the optional `declaredChecks` array of the `mutation-report` names checks not run and why the host must run them. A deliberate red run before the change, such as the test-first reproduction on untouched code, is reported as a validation entry with `"baseline":true`, and the run after the change is its own entry. Result quality judges only checks run on the changed tree, so a baseline entry never counts as a pass or a failure.
 
 Only the `coder` recipe carries this rule among the shipped personas. `tester`, `debugger`, `documenter`, and the other recipes do not. The same rule is in the `operating.contract-headless` prompt fragment, which only a headless main agent (`clio-coder run`) renders. Attended sessions do not carry it. The install rule in `operating/contract.md` is separate and applies to every prompt tier: a check blocked only by dependencies that were never installed is setup, so the worker installs and reruns, while a failure confined to files the change does not touch is reported and neither repaired nor installed for. See [Worker prompt compilation](../architecture/worker-dispatch-mechanics.md#worker-prompt-compilation).
 
@@ -269,6 +269,8 @@ Headless CLI:
 clio-coder run --agent coder "Refactor the parser."
 ```
 
+`run --agent` exits 1 when the sealed result-contract quality is `fail`, meaning a check the worker ran after its last edit was red, just as it does for a verifier `fail` verdict. The run outcome stays `succeeded`. A deliberate red run before the change (a `baseline` entry) does not change the exit code. `clio-coder evidence inspect <runId> --json` reports the same assessment as `quality.verdict` and `quality.failedValidationCount`.
+
 Dispatch admission checks, among others:
 
 1. The recipe passes the capability policy, and a `tool_profile` only narrows the declared tools.
@@ -276,6 +278,7 @@ Dispatch admission checks, among others:
 3. Every action class the admitted tools request is allowed by the worker scope.
 4. The worker scope is a subset of the orchestrator's active scope.
 5. A user-origin request does not name a shadow or internal agent, and a read-only recipe is not pointed at a task that must change the workspace.
+6. An `artifact-write` recipe such as `architect` is not pointed at a task that forbids writing any file ("do not write any files", "this is a read-only task", "change nothing"). The dispatch tool refuses it with `task_forbids_writes` before a worker starts and names a read-only agent (`scout`, `oracle`, `researcher`) to dispatch instead. A prohibition limited to some paths, or one with an exception, does not trigger the refusal.
 
 ### Ad-hoc specialists
 
@@ -312,7 +315,7 @@ messages, in the order a worker reads them, each present only when it applies:
   limit, plus verification expectations for a verification-class recipe. Recipes with
   tier `none` get none. See
   [worker routing](../architecture/context-engine.md).
-- **Safety posture** (every run, including ACP delegation). A native worker reads that the permit in its instructions applies, the worker permission routing (`deny`, `fail`, `escalate` or `main`), and a sandbox line. An ACP delegation reads one line naming the run's effective autonomy level with the same directive text the session prompt's safety section uses.
+- **Safety posture** (every run, including ACP delegation). A native worker reads that the permit in its instructions applies, the worker permission routing (`deny`, `fail`, `escalate` or `main`), and a sandbox line. An ACP delegation reads one line naming the run's effective autonomy level with the same directive text the session prompt's safety section uses. The worker's authority line states what runs: a read-only run reads "workspace edits are not permitted in this run; read-only inspection runs; other commands require approval.", and every other worker reads "workspace edits and recognized commands run; other commands require approval."
 - **Read-only notice** for a read-only dispatch.
 - **Declared result requirements**: the `expected_outputs` and `verification` entries of a typed dispatch intent, labeled as requirements and never as evidence.
 - **Compete stance** for a compete candidate.
