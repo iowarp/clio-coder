@@ -73,6 +73,7 @@ CLIO Coder 0.8.4 lets an extension-driven pipeline, such as a multi-step writing
 - `clio-coder telemetry tokens --session <id> [--by-source] [--json]` reports each turn's input tokens, cached and fresh. `--by-source` splits them across system prompt, skills, tool schemas, template body, extension effects, tool results per tool and history; totals are provider-measured and the split is estimated, as the output says.
 - The telemetry session read commands accept `--session`, and `models` lists each route's thinking levels (`thinkingLevels` in `--json`).
 - Command hook `hook.ran` receipts record `durationMs`, `timeoutMs` and the `effectKinds` its output became, so a slow tool or an unexplained annotation traces back to its hook.
+- `call.settled` `stages.admission` records the input count a main turn's window fit was decided on (`inputTokens`) and whether the route's provider-measured size priced it (`anchored`).
 
 **Terminal UI**
 
@@ -114,6 +115,7 @@ CLIO Coder 0.8.4 lets an extension-driven pipeline, such as a multi-step writing
 - Headless `observed` writes and the no-op rule read the run's own record of written paths: writes count distinct paths, a `bash` delete, `git mv` or `git rm` counts, and calls that write no workspace path (outward `web_fetch`, `configure_clio` apply, store put) no longer count.
 - Headless output lists a code check that ran and failed under `Failed checks:` and in `failed_checks=`; `Not verified:` and `not_verified=` keep only checks that never ran.
 - Calls the output limit cuts off are stated once, read as not run, and count as no call and no tool error on any surface.
+- Command `--help` text names the product CLIO Coder.
 
 **Safety**
 
@@ -176,6 +178,8 @@ CLIO Coder 0.8.4 lets an extension-driven pipeline, such as a multi-step writing
 - `run --json` on a resumed session reports the active target and model, a prompt resolves only after its journal is flushed, and a run ending during an extension reload no longer prints "Extension reload failed".
 - A run reads its evidence from a submit-keyed log, so a compaction or recovery mid-submit no longer loses the step call or miscounts usage, and `agent_end.messages` and `messageCount` no longer count host inserts (#445).
 - A yolo cap halt's `autonomy.cap_reached` record counts the calls the headless notice does, and `run --help` says `--read-only` runs shell commands in a read-only sandbox.
+- `clio-coder --max-context-tokens=<N>` works like the space form, and an invalid value gives the positive-integer error.
+- A failed dispatch's run line no longer repeats its detail as `failure=`, and the headless no-op reason keeps the worker cause (such as `worker process signal: SIGKILL`) when the line is long.
 
 **Context and compaction**
 
@@ -206,6 +210,7 @@ CLIO Coder 0.8.4 lets an extension-driven pipeline, such as a multi-step writing
 - An unanswered `ask_user` declines a recommended option that leaves the workspace ("Yes, run it"), and a lone delete inside a scratch root needs no workspace snapshot.
 - Containment treats a child named `..x` or `..cache` as inside its root, `git --attr-source <tree>` no longer hides the subcommand from the reset, clean and push rails, and a `<tool_call …>` opener with attributes is read as a written call.
 - A yolo floor block names its rule (`bash blocked: yolo-floor-raw-text`) and the 32768-byte raw-text budget. Redaction hides a quoted `sig: '…'` value and a secret beside a `[redacted:...]` marker.
+- A model shell command using `clio-coder ext` or `clio-coder dev share` now gets the same protection as `clio-coder extensions` and `clio-coder share`: an extension install is blocked and a share import asks first.
 
 **Memory**
 
@@ -227,6 +232,7 @@ CLIO Coder 0.8.4 lets an extension-driven pipeline, such as a multi-step writing
 
 - Status lines cross as `session_info_update` notices (`_meta["clio-coder/notice"] = {level, text}`), not reply text. Assistant messages are separated by a blank line live and on replay (`agent_message_chunk`), and `message_end` no longer repeats or drops text.
 - `session/load` of a newer session returns -32602 `session_format`, `session/delete` on an open session says to close it first, `session/list` reports the current model, and ACP checkpoints a session before close, fork or handoff. Copilot-backed sessions list live models on a cold cache and keep their thinking level.
+- Over ACP, the thinking-level option agrees with the route once live model metadata shows thinking support, instead of saying thinking is unsupported.
 
 **Providers and routes**
 
@@ -235,6 +241,7 @@ CLIO Coder 0.8.4 lets an extension-driven pipeline, such as a multi-step writing
 - Copilot host reminders go in the immediate send, not inside tool results, and `CLIO_CODER_PROVIDER_DUMP_PATH` records Copilot requests instead of `payloads: []`. Inception mercury-3 at thinking off sends `reasoning_effort: "instant"`.
 - Re-prompts for written-out tool calls and empty replies cap at three in a row, not per turn, and a call that hits the output cap while thinking retries once a level lower. Runaway reasoning and a response that repeats one tool call or rewrites one file five times are stopped.
 - `code_nav` names clio_docs only when the run admits it, and `consult` refuses an ask with no evidence before spending a call.
+- A `CLIO_CODER_PROVIDER_DUMP_PATH` that cannot be opened (a directory, or a refused relative, public or symlinked file) emits one `CLIO_CODER_PROVIDER_DUMP_FAILED` warning and the model call runs without a dump instead of failing.
 
 **Terminal UI**
 
@@ -242,6 +249,9 @@ CLIO Coder 0.8.4 lets an extension-driven pipeline, such as a multi-step writing
 - The exit summary keeps the visit's turns, files, workers and time across `/resume`, `/fork`, `/tree`, `/handoff` and `/new`, counts only the session's own tool calls, and says "session tokens per outcome". Replayed receipts state what the live ones did.
 - Worker reports in `/fleet` and elsewhere read as words, not raw JSON; replayed live worker cards keep streaming; hiding the dock restores full width; and the Fleet Runs board says where a proposed commit lands.
 - Provider-redacted reasoning reads `Thinking · hidden by provider`, a streaming edit shows no guessed `+N -M` counts, narrow receipts keep `cached`, and `/view dispatch:<run>` words structured output. The tasks reminder skips answer, read-only and step-template turns, and the `tasks` tool names the key to use.
+- The exit summary's Compactions row counts each compaction once; an eviction and a summary in the same pass no longer count twice, and a failed compaction counts as none.
+- The thinking-length recovery notice names the thinking level you chose, not the route's clamped level.
+- The help reference says the workers key (Alt+W) leaves the keyboard in the session when it opens the workers dock, and the music-off message points to `/settings` Workspace, Panes, where the Music pane row lives.
 
 **GUI**
 
