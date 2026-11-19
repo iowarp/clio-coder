@@ -9,7 +9,8 @@ the tool:
 
 - A main session starts with `read`, `bash`, `edit`, `write`, `verify`,
   `ask_user` and `gateway` attached, plus `dispatch` when workers are
-  available. Everything else is one `gateway` call away.
+  available and `consult` when a decision route is bound. Everything else is
+  one `gateway` call away.
 - To limit what the agent may use, start it with
   `clio-coder --allow-tools read,grep,find,ls`; `--delegate-tools` limits its
   workers. See
@@ -33,7 +34,7 @@ the tool:
 | Look things up | [`gateway`](#gateway-discover-and-call-secondary-capabilities), [`clio_docs`](#cliodocs-retrieve-bundled-documentation-through-the-gateway), [`clio_library`](#cliolibrary-inspect-the-component-catalog-through-the-gateway), [`context`](#context-workspace-skill-activation-and-recall), [`git`](#git-typed-inspection-staging-and-commits), [`data`](#data-inspect-structured-files-through-the-gateway) |
 | Reach outside the machine | [`web_read` and `web_fetch`](#webread-and-webfetch-read-web-pages-or-make-full-http-requests), [`credential_present`](#credentialpresent-check-environment-or-file-for-a-credential-key) |
 | Talk to the operator | [`ask_user`](#askuser-host-owned-operator-interviews), [`panes`](#panes-manage-terminal-panes-owned-by-clio-coder), [`report`](#report-draft-a-clio-coder-report-for-the-operator) |
-| Configure and manage the session | [`configure_clio`](#configureclio-propose-clio-coder-settings-and-targets-with-an-approved-diff), [`self_compact`](#selfcompact-save-a-handoff-note-and-compact-context), [`vision`](#vision-ask-the-configured-vision-model-about-an-image), [`consult`](#consult-ask-a-fast-decision-model), [`music`](#music-control-the-focus-radio-pane) |
+| Configure and manage the session | [`configure_clio`](#configureclio-propose-clio-coder-settings-and-targets-with-an-approved-diff), [`restart_session`](#restartsession-restart-onto-a-rebuilt-clio-coder-checkout), [`self_compact`](#selfcompact-save-a-handoff-note-and-compact-context), [`vision`](#vision-ask-the-configured-vision-model-about-an-image), [`consult`](#consult-ask-a-fast-decision-model), [`music`](#music-control-the-focus-radio-pane) |
 
 Cross-cutting behavior that applies to every tool is in
 [Observation envelope](#observation-envelope-truncation-notices-offload-next-hints-and-the-turn-budget),
@@ -82,10 +83,10 @@ steps in a chain. Describing `gateway` returns composition syntax; describing
 | --- | --- |
 | Direct in main sessions | read, bash, edit, write, verify, ask_user, gateway; dispatch and consult when wired |
 | Gateway in main sessions | Every other wired builtin, including grep, find, ls, code_nav, context, run_script, tasks, monitor, steer, ledger, panes, music, limitation, decide and self_compact |
-| Direct in workers | The builtins that `TOOL_PLACEMENT` marks direct and the recipe admits. `find` and `ls` move behind the gateway when the worker's surface admits `bash`. See its discovered tools rather than assuming the main surface |
-| Gateway when trusted/installed | `extension_<id>__<name>`, `mcp_<id>__<tool>` |
+| Direct in workers | The builtins that `TOOL_PLACEMENT` marks direct and the recipe admits. `find`, `ls` and `count` move behind the gateway when the worker's surface admits `bash`. See its discovered tools rather than assuming the main surface |
+| Gateway when trusted/installed | `extension_<id>__<name>`, `mcp_<id>__<tool>`. An extension tool its manifest lists in `runtime.promote` is attached directly instead, and the gateway refuses that name |
 
-`find` and `ls` sit behind the gateway on any surface that admits `bash`, because bash already runs both as recognized commands on workspace paths (`SHELL_COVERED_TOOLS` in [surface.ts](../../src/tools/surface.ts)). A surface without `bash` keeps them attached, and an explicit placement on a registered spec wins over that rule.
+`find`, `ls` and `count` sit behind the gateway on any surface that admits `bash`, because bash already runs `find`, `ls` and `wc` as recognized commands on workspace paths (`SHELL_COVERED_TOOLS` in [surface.ts](../../src/tools/surface.ts)). A surface without `bash` keeps them attached, and an explicit placement on a registered spec wins over that rule.
 
 Capabilities that the gateway directory implements itself, and the other gateway-placed builtins:
 
@@ -214,7 +215,7 @@ Every name in `ToolNames` ([tool-names.ts](../../src/core/tool-names.ts)) has on
 | `artifact` | gateway | gateway | artifact | write | sequential |
 | `gateway` | direct | direct | gateway | read; the inner call keeps its class | sequential |
 
-There are 40 tools in eight planes. The action class is the tool's base class; admission still judges the effect of a particular call, so `bash`, `run_script`, `verify` and `git` mutations are classified by the command they would run. Where this page says a call runs at `yolo`, it means unconfined yolo (`safety.yoloConfinement: unconfined`). Contained yolo, the default, admits calls as `default` does and refuses a call that would wait for the operator. See [the safety model](../architecture/safety-model.md) for autonomy, and [Prompt Envelope and Tools](../architecture/prompt-envelope-and-tools.md) for why a tool sits in its plane.
+There are 41 tools in eight planes. The action class is the tool's base class; admission still judges the effect of a particular call, so `bash`, `run_script`, `verify` and `git` mutations are classified by the command they would run. Where this page says a call runs at `yolo`, it means unconfined yolo (`safety.yoloConfinement: unconfined`). Contained yolo, the default, admits calls as `default` does and refuses a call that would wait for the operator. See [the safety model](../architecture/safety-model.md) for autonomy, and [Prompt Envelope and Tools](../architecture/prompt-envelope-and-tools.md) for why a tool sits in its plane.
 
 ## Observation envelope: truncation notices, offload, next hints, and the turn budget
 
@@ -238,6 +239,16 @@ Offload: when the byte cap cut content that was already collected, the complete 
 JSON-format results (including code_nav, context workspace, clio_docs, data, and gateway find) never get an appended notice. An oversize JSON payload is replaced whole by the parseable stub `{"error":"result exceeded <cap>","offloadPath":"...","next":"..."}` so the model never receives JSON cut mid-document. Empty results are also valid JSON with empty arrays and `next` populated.
 
 Turn budget: all envelope-backed tools draw from one shared pool per turn (`safety.limits.observationBytesPerTurn`, keyed on `sessionId:turnId`). At the default of 192KB the pool grows with the model's context window, at 1.5 bytes per window token, so windows up to 128K tokens get 192KB and larger windows get more, up to 1MB. Any other configured value applies exactly. When the remaining pool shrinks a call below its self cap, a note is appended naming the bytes already used. When the pool is exhausted, the call short-circuits with `[observation budget exhausted for this turn before <tool> ...]` instead of paying for a search whose output cannot be returned. Use narrower arguments or continue in a follow-up turn. A fourth consecutive exhausted call in one turn fails as an error instead of returning another notice.
+
+A prompt template's `budget` bounds the turn it runs in. `budget.observationBytes` sets this pool and `budget.toolCalls` sets the turn's tool-call limit (`safety.limits.chatToolCallsPerTurn`, default 60). A template value at or below the operator's limit always applies. A higher value applies only up to `safety.limits.templateObservationBytesPerTurnMax` or `safety.limits.templateToolCallsPerTurnMax`; both are unset by default, so by default a template can only lower the limits. The limit notices name the bound that applied. See [prompt template turn budget](extensions-and-sharing.md#prompt-template-turn-budget).
+
+## Repeated calls: the loop guard and superseded results
+
+The loop guard blocks the third identical call: the same tool with the same canonical arguments three times in one turn, within 30 seconds or among the last 48 calls ([loop-detector.ts](../../src/domains/safety/loop-detector.ts), [loop-guard.ts](../../src/engine/loop-guard.ts)). A gateway call is judged as the capability it runs, and a write or edit in between starts a fresh count, so a check rerun after a change is not a repeat. An extension tool counts toward repeats when its manifest declares it `readOnly` or `idempotent`. One that declares neither, such as a step-by-step `next_step`, may answer the same arguments with a new state, so a verbatim repeat is not counted; stagnation and the turn's tool-call limit still bound it.
+
+In the main session, interactive, headless and ACP alike, the turn's tools lock after three loop blocks in the turn, after the same call is blocked twice, or after three identical blocks in a row. One block alone never locks, and the other calls of the response that held the turn's first block still run. Once locked, tool calls are refused and the model is told to answer from what it gathered; two further denied calls stop the turn with `[Clio Coder] loop guard stopped this turn: ...`. Dispatched workers scale their block budget with their run's tool-call budget.
+
+On a route without prompt caching, an automatic or fit fold checkpoint, never a manual one, evicts a tool result that a later identical read-class call covers: the same effective tool and canonical arguments, where read class means a builtin read tool, a bash command that only reads, a typed git inspection, or an extension tool declared `readOnly` or `idempotent`. The later result must not be an error and must show at least as much as the earlier one. Eviction waits until at least 32 KiB of superseded results are pending, and each one becomes an ordinary eviction with the notice `[context engine] superseded: ...; recall by ref with context(scope="recall")` ([superseded.ts](../../src/domains/context/working-set/superseded.ts)). Routes with prompt caching keep every result in place.
 
 ## Search scope: read, ls, grep, and find outside the workspace
 
@@ -314,7 +325,7 @@ write(path="docs/session.md", content="# Session notes\n")
 
 ## bash: run a shell command
 
-Runs a fresh `/bin/bash` per call and returns stdout/stderr. Login environment is captured once and reused when possible; fallback is per-call `bash -lc`. Sources: [bash.ts](../../src/tools/bash.ts), [bash-exec.ts](../../src/core/bash-exec.ts). On Windows the tool runs Git Bash, the first `bash.exe` on `PATH` and then the standard Git for Windows locations, and never the WSL launcher; with no usable bash the tool is not offered, `find` and `ls` stay attached, and dispatch admission drops `bash` ([bash-shell.ts](../../src/core/bash-shell.ts)).
+Runs a fresh `/bin/bash` per call and returns stdout/stderr. Login environment is captured once and reused when possible; fallback is per-call `bash -lc`. Sources: [bash.ts](../../src/tools/bash.ts), [bash-exec.ts](../../src/core/bash-exec.ts). On Windows the tool runs Git Bash, the first `bash.exe` on `PATH` and then the standard Git for Windows locations, and never the WSL launcher; with no usable bash the tool is not offered, `find`, `ls` and `count` stay attached, and dispatch admission drops `bash` ([bash-shell.ts](../../src/core/bash-shell.ts)).
 
 | Argument | Contract |
 | --- | --- |
@@ -602,7 +613,7 @@ Run integrity, worker evidence, orchestrator verification, parent briefing, and 
 
 ### Compact schema in the main session
 
-The main session attaches a compact schema (`coordinatorDispatchParameters` in [dispatch-schema.ts](../../src/tools/dispatch-schema.ts)) instead of the canonical one, so the permanent surface stays small. Its fields are `node`, `target`, `model`, `list`, `agent`, `task`, `tasks` (strings, or objects with `node`, `agent`, `task`, `briefing`, `intent`), `intent` (`read_roots`, `write_roots`, `expected_outputs`, `verification`), `briefing`, `mode`, `worktree` (`false` is the same as omitted) and `detach`. `mode` is a plain string there so the compete and council modes that `describe` teaches are not refused by the compact schema, and its description points the model at describe. `gateway(op="describe", capability="dispatch")` returns the attached schema as `parameters` and the canonical fields the attached schema omits, plus the canonical `mode`, as `advanced`. Canonical validation checks every call whichever schema the model saw.
+The main session attaches a compact schema (`coordinatorDispatchParameters` in [dispatch-schema.ts](../../src/tools/dispatch-schema.ts)) instead of the canonical one, so the permanent surface stays small. Its fields are `node`, `target`, `model`, `list`, `agent`, `task`, `tasks` (strings, or objects with `node`, `agent`, `task`, `briefing`, `intent`), `intent` (`read_roots`, `write_roots`, `expected_outputs`, `verification`), `briefing`, `mode`, `worktree` (`false` is the same as omitted), `apply` (`merge` or `preserve`, with `worktree`) and `detach`. `mode` is a plain string there so the compete and council modes that `describe` teaches are not refused by the compact schema, and its description points the model at describe. `gateway(op="describe", capability="dispatch")` returns the attached schema as `parameters` and the canonical fields the attached schema omits, plus the canonical `mode`, as `advanced`. Canonical validation checks every call whichever schema the model saw.
 
 The canonical schema is composed once per session from the fleet. The council block (`roster`, `members`, `synthesis`, `rounds`) is advertised only when `fleet.rosters` names at least one roster. The compete block (`candidates`, `judge`, `apply_winner`) is always advertised. The adaptive routing fields (`routing.posture`, `minimumQuality`, `locality`, `failover`) are advertised only when `fleet.adaptiveRouting` configures roles, postures or agent roles. Admission reads every field regardless, so a call that sends a field the schema did not advertise is still honored.
 
@@ -847,7 +858,8 @@ session git/project snapshot and requires a bound session. Skills list or activa
 installed skills in `default` and `yolo`, and in read-only runs, where loading
 only reads the skill and every later non-read call stays refused;
 recipe-bound workers can load only their declared skills. Recall retrieves evicted
-observations without changing the eviction marker. Workspace, settings, and
+observations without changing the eviction marker, including results evicted as
+[superseded](#repeated-calls-the-loop-guard-and-superseded-results). Workspace, settings, and
 skills use a 50KB cap.
 
 `context(scope="semantic", query="…")` searches the optional semantic index.
@@ -1339,6 +1351,12 @@ gateway(op="call", capability="configure_clio", args={action: "apply", proposalI
 `music(action)` drives the focus-radio player in CLIO Coder's own dock pane. Source: [music.ts](../../src/tools/music.ts), [music-surface.ts](../../src/tools/music-surface.ts). Read class; sequential. `action` is required and is one of `on` (play, opening or revealing the pane first), `pause` (silence the stream and keep the pane), `off` (stop and close it), `next` (skip to the next station) or `status` (report what is playing or paused). Showing and hiding the pane stay with the operator. The result is one line, and a refusal or failure comes back as an error naming the reason.
 
 The tool registers only when `integrations.music.agentControl` is on, cliamp resolves and the pane mux is live, which also requires `integrations.music.enabled`. A session where it could only refuse carries no schema for it. No prompt fragment says when to play music; that is the operator's call in project instructions. The operator's own door is the `/music` command. Setup, stations and the player are in [Music](music.md).
+
+## restart_session: restart onto a rebuilt CLIO Coder checkout
+
+`restart_session(continuation, reason?)` asks to restart the session onto the build on disk after the model rebuilt the CLIO Coder tree this session runs from. Source: [restart-session.ts](../../src/tools/restart-session.ts). Reached through the gateway; write class; sequential.
+
+It registers only when the workspace is CLIO Coder's own source tree and the session runs from that tree's build, and never on a worker. The operator approves the request on a card that shows the continuation and the optional reason; `continuation` is required and kept to its first 2000 characters. Approval never restarts mid-turn: the interactive terminal restarts once the turn ends and nothing is busy, the session resumes with its history, and the continuation arrives as its next message, the same path as `/restart <text>`. The tool is refused outside an interactive terminal session, at autonomy `yolo`, where nobody approves it, and after three model-requested restarts in a row; the last two refusals ask the operator to type `/restart`, which also starts that count over.
 
 ## self_compact: save a handoff note and compact context
 
