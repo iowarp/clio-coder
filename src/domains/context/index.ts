@@ -80,15 +80,7 @@ export {
 	buildBriefing,
 	shareBytesFairly,
 } from "./fold/briefing.js";
-export {
-	type FoldCheckpoint,
-	type FoldCursor,
-	type FoldOwner,
-	type FoldRouteFacts,
-	stepCheckpointApplies,
-	supersededStageApplies,
-} from "./fold/contract.js";
-export { foldTriggerReserve } from "./fold/pressure.js";
+export type { FoldCursor, FoldOwner } from "./fold/contract.js";
 export { describeHandbookFreshness, readHandbookFreshness } from "./handbook-ledger.js";
 export {
 	type LoadedOperatorProfile,

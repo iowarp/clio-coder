@@ -100,6 +100,7 @@ import {
 import type { TurnOrigin, TurnToolCall } from "../core/turn-origin.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
+import { stepCheckpointApplies } from "../domains/context/fold/contract.js";
 import type { DispatchContract } from "../domains/dispatch/index.js";
 import type { PinnedContextBlock } from "../domains/extensions/pinned-context.js";
 import {
@@ -227,7 +228,6 @@ import {
 	triageUserText,
 } from "./steering-triage.js";
 import {
-	compactStepStartDue,
 	createStepPipeline,
 	createStepStartTracker,
 	type StepRun,
@@ -3497,7 +3497,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					options.yoloContinuation === true || options.requestContinuation === true,
 					{ sessionId: deps.session?.current()?.id ?? null, leafTurnId: state.lastTurnId },
 				);
-				if (stepLead !== null && compactStepStartDue(agentRuntime.runtimeResolution)) {
+				if (stepLead !== null && stepCheckpointApplies(agentRuntime.runtimeResolution)) {
 					try {
 						await context.runStepCheckpoint(agentRuntime, stepLead, pendingSkillPolicy);
 					} catch (err) {

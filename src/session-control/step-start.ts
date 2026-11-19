@@ -1,6 +1,4 @@
-import type { ModelTier } from "../core/model-tier.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
-import { stepCheckpointApplies } from "../domains/context/fold/contract.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import {
 	isStepChainData,
@@ -21,17 +19,6 @@ import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
  * extension pinned blocks re-sent in the tail once the checkpoint drops their
  * earlier copy. Cached standard and frontier routes keep the full history.
  */
-
-/** What the session route reports about itself, from its runtime resolution (WTF-P 0.8.3 C1). */
-export interface StepStartRoute {
-	modelTier?: ModelTier;
-	promptCaching?: boolean;
-}
-
-/** A small model, or a route that does not cache prompts, starts each later step turn from a compact state. */
-export function compactStepStartDue(route: StepStartRoute): boolean {
-	return stepCheckpointApplies(route);
-}
 
 /** Where the session stands: its id and the leaf turn of its active branch. */
 export interface StepPosition {
