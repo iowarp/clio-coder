@@ -1,5 +1,5 @@
-/** Release ownership lock and durable receipt, kept in the clone's git common directory. */
-import { closeSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
+/** Release ownership lock, kept in the clone's git common directory. */
+import { closeSync, linkSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from "node:fs";
 import { hostname, userInfo } from "node:os";
 import { join } from "node:path";
 
@@ -71,7 +71,7 @@ export function acquireLock(
 			const holder = readJson(path);
 			if (holder === null) continue;
 			if (holder.host !== host || isAlive(holder.pid)) throw new LockHeld(holder);
-			// The holder died on this host without releasing; its receipt events say how far it got.
+			// The holder died on this host without releasing.
 			if (takeover !== null) throw new LockHeld(holder);
 			takeover = takeOver(directory, path, draft, holder);
 		}
@@ -110,44 +110,4 @@ function takeOver(directory, path, draft, holder) {
 	} finally {
 		rmSync(guard, { force: true });
 	}
-}
-
-export const receiptPath = (directory, version) => join(directory, `v${version}.json`);
-
-export function loadReceipt(directory, version) {
-	return readJson(receiptPath(directory, version));
-}
-
-export function newReceipt({ version, commit, branch, nonce, owner }) {
-	return {
-		schema: 1,
-		version,
-		commit,
-		branch,
-		nonce,
-		owner,
-		scratch: [],
-		ciRun: null,
-		releaseRun: null,
-		draftId: null,
-		npm: null,
-		rehearsal: null,
-		post: {},
-		events: [],
-	};
-}
-
-export function saveReceipt(directory, receipt) {
-	mkdirSync(directory, { recursive: true });
-	const path = receiptPath(directory, receipt.version);
-	const temporary = `${path}.${process.pid}`;
-	const fd = openSync(temporary, "w");
-	writeSync(fd, `${JSON.stringify(receipt, null, 2)}\n`);
-	closeSync(fd);
-	renameSync(temporary, path);
-}
-
-/** Append-only history: the receipt doubles as the release's audit trail. */
-export function recordEvent(receipt, step, outcome, detail = {}) {
-	receipt.events.push({ at: new Date().toISOString(), step, outcome, ...detail });
 }

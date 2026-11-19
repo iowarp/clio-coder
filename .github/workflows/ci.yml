@@ -21,7 +21,7 @@ on:
         default: false
         type: boolean
       windows:
-        description: With platforms, also boot on Windows (release:next skips it; Windows is verified on a native clone)
+        description: With platforms, also boot on Windows (false boots macOS only)
         default: true
         type: boolean
       browser:
