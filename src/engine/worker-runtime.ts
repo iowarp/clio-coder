@@ -8,6 +8,7 @@ import type {
 	Tool,
 } from "@earendil-works/pi-ai";
 import { getToolStateChanges } from "@earendil-works/pi-ai";
+import { estimateContextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { createHostPolicyMessage } from "../core/host-policy-message.js";
 import { snapshotModelInfo } from "../core/model-tier.js";
@@ -28,7 +29,7 @@ import { abortReasonCause } from "../domains/telemetry/call-facts.js";
 import { seededWorkerMessages, seedRecallLineage } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
 import { anchorContextAtInputTokens, requestOutputReserve } from "./apis/output-budget.js";
-import { resolvedRequestContext } from "./context.js";
+import { normalizeContext, resolvedRequestContext } from "./context.js";
 import { disableCopilotConversationResume } from "./copilot/session-fs.js";
 import { retryStreamOnceOnAuthRejection } from "./oauth-retry-stream.js";
 import { retryStreamOnceOnOverflow } from "./overflow-retry-stream.js";
@@ -1454,14 +1455,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					: undefined;
 			const window = input.runtimeResolution?.capabilities.contextWindow ?? currentModel.contextWindow;
 			const reminded = withResultContractReminder(currentContext.messages, contractReminder).tail;
+			// Priced with the tail directive the round will carry; only the estimate sees it here.
+			const pricedSystemPrompt =
+				synthesisDirective === undefined
+					? (systemPrompt ?? "")
+					: `${systemPrompt ?? ""}\n\n${lockedSynthesisDirective(synthesisDirective.requiredResult)}`;
 			const pressure = {
 				messages: currentContext.messages,
 				overheadTokens: reminded === null ? 0 : estimateAgentMessageTokens(reminded as AgentMessage),
-				// Priced with the tail directive the round will carry; only the estimate sees it here.
-				systemPrompt:
-					synthesisDirective === undefined
-						? (systemPrompt ?? "")
-						: `${systemPrompt ?? ""}\n\n${lockedSynthesisDirective(synthesisDirective.requiredResult)}`,
+				systemPrompt: pricedSystemPrompt,
 				tools: currentContext.tools ?? [],
 				contextWindow: window,
 				threshold: compactionBudget(
@@ -1475,6 +1477,15 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				autoEvict: workerSettings.context.compaction.auto && workerSettings.context.workingSet.enabled,
 				outputReserve: (inputTokens: number) =>
 					requestOutputReserve(currentModel, currentModel.maxTokens, window, inputTokens),
+				unanchoredInputTokens: (history: ReadonlyArray<AgentMessage>) => {
+					const context = normalizeContext({
+						systemPrompt: pricedSystemPrompt,
+						...(currentContext.tools !== undefined ? { tools: currentContext.tools } : {}),
+						messages: withResultContractReminder([...history], contractReminder).messages as Context["messages"],
+					});
+					// The same anchor rule `request` re-pins through: with one, Pi reads the guard's own count.
+					return anchorContextAtInputTokens(context, 1) === context ? estimateContextTokens(context).tokens : 0;
+				},
 			};
 			let messages: AgentMessage[];
 			try {
