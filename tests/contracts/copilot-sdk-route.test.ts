@@ -115,7 +115,7 @@ class FakeSession {
 	async send(options) {
 		if (this.markedDisconnected) throw new Error("Session disconnected");
 		state.order.push("send " + this.sessionId);
-		(state.sends ??= []).push({ sessionId: this.sessionId, prompt: options.prompt, mode: options.mode });
+		(state.sends ??= []).push({ sessionId: this.sessionId, prompt: options.prompt, mode: options.mode, attachments: options.attachments });
 		// Immediate mode joins the run in flight before its next model request; it starts no run of its own.
 		if (options.mode === "immediate") { (this.injected ??= []).push(options.prompt); return "m"; }
 		this.prompts.push(options.prompt);
@@ -347,7 +347,12 @@ interface FakeState {
 	deleted: string[];
 	disconnected: string[];
 	toolResults: Array<{ textResultForLlm: string; resultType: string; injectedBefore: string[] }>;
-	sends?: Array<{ sessionId: string; prompt: string; mode?: string }>;
+	sends?: Array<{
+		sessionId: string;
+		prompt: string;
+		mode?: string;
+		attachments?: Array<{ type: string; data: string }>;
+	}>;
 	rejected: string[];
 	auth: { isAuthenticated: boolean; login?: string; host?: string };
 	instances: unknown[];
@@ -1257,6 +1262,46 @@ test("a synced tool result the working set rewrote reseeds in full; an unchanged
 	const seed = fake().sessions.at(-1)?.prompts[0] ?? "";
 	ok(seed.includes(`<tool_result id="call_1" name="read">\n${stub}\n</tool_result>`), seed);
 	ok(!/<tool_result[^>]*>\nfile body/.test(seed), "the evicted body is absent from the provider's input");
+	disposeCopilotConversations(key);
+});
+
+test("a full reseed keeps a delivered reminder in place and attaches a retained image at its result (Astra #3)", async () => {
+	const key = "reseed-media-session";
+	disposeCopilotConversations(key);
+	const ask = user("please use tool");
+	const first = await step({ tools: [readTool], messages: [ask] }, key);
+	const pinned = user("<system-reminder>pinned: tests live in tests/</system-reminder>");
+	const held = [ask, first, toolResult("call_1", "file body ALPHA"), pinned];
+	const answered = await step({ tools: [readTool], messages: held }, key);
+	const again = user("please use tool on the screenshot");
+	const third = await step({ tools: [readTool], messages: [...held, answered, again] }, key);
+	strictEqual(third.stopReason, "toolUse");
+	const pixels = Buffer.from("png pixels").toString("base64");
+	const image = {
+		...toolResult("call_1", "Read image file [image/png]"),
+		content: [
+			{ type: "text" as const, text: "Read image file [image/png]" },
+			{ type: "image" as const, data: pixels, mimeType: "image/png" },
+		],
+	};
+	const stub = "[evicted ref=r1 reason=step_overflow tool=read path=notes.txt]";
+	const evicted = [ask, first, toolResult("call_1", stub), pinned, answered, again, third, image];
+	const reseeded = await step({ tools: [readTool], messages: evicted }, key);
+	strictEqual((reseeded as { copilotContinuation?: string }).copilotContinuation, "full");
+	const sent = fake().sends?.at(-1);
+	const seed = sent?.prompt ?? "";
+	ok(
+		seed.includes(`${stub}\n</tool_result>\n<user>\n${pinned.content}\n</user>\n<assistant>`),
+		`the delivered reminder stays where it was sent: ${seed}`,
+	);
+	ok(
+		seed.includes('<tool_result id="call_1" name="read" images="1">\nRead image file [image/png]\n</tool_result>'),
+		`the image result names its attachment: ${seed}`,
+	);
+	deepStrictEqual(
+		sent?.attachments?.map((attachment) => [attachment.type, attachment.data]),
+		[["blob", pixels]],
+	);
 	disposeCopilotConversations(key);
 });
 
