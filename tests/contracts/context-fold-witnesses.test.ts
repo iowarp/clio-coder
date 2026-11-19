@@ -302,8 +302,8 @@ describe("W7 (F8 -> CF-8): the step chain lives in the stream", () => {
 			ok(away.begin(constraints, "continue", true, at(leaf3)));
 			const leaf4 = stepTurn("s4", leaf3, "continue", said("Step four ran."));
 			away.settle(constraints, "Step four ran: drafted discussion.", true, at(leaf4), "s4-u");
-			away.reset(at(leaf4), leaf1);
-			away.reset(at(leaf1), leaf4);
+			away.reset(at(leaf4), "s1-u");
+			away.reset(at("s1-u"), leaf4);
 			strictEqual(away.begin(constraints, "continue", true, at(leaf4)), null);
 			strictEqual(createStepStartTracker(store).begin(constraints, "continue", true, at(leaf4)), null);
 
@@ -330,8 +330,8 @@ describe("W7 (F8 -> CF-8): the step chain lives in the stream", () => {
 			};
 			// m2b-D1: /tree away from a settled step leaf and back runs on full history, live and after a reopen alike.
 			const awayAndBack = (tracker: ReturnType<typeof createStepStartTracker>, leaf: string) => {
-				tracker.reset(at(leaf), leaf1);
-				tracker.reset(at(leaf1), leaf);
+				tracker.reset(at(leaf), "s1-u");
+				tracker.reset(at("s1-u"), leaf);
 				return tracker.begin(constraints, "continue", true, at(leaf));
 			};
 			const settled = settledStep("s6");
@@ -368,6 +368,17 @@ describe("W7 (F8 -> CF-8): the step chain lives in the stream", () => {
 			const tree = session.tree();
 			deepStrictEqual(tree.nodesById[reopenedLeaf]?.children, [checkpointId]);
 			strictEqual(tree.nodesById["s9-u"]?.parentId, checkpointId);
+
+			// Astra #9: steps settled at A then B; /tree from B back to A starts the template over, live and reopened.
+			const a = settledStep("s10");
+			ok(a.tracker.begin(constraints, "continue", true, at(a.leaf)));
+			const b = stepTurn("s11", a.leaf, "continue", said("Step s11 ran."));
+			a.tracker.settle(constraints, "Step s11 ran.", true, at(b), "s11-u");
+			a.tracker.reset(at(b), a.leaf);
+			deepStrictEqual(
+				[reopen(a.leaf).begin(constraints, BODY, false, at(a.leaf)), a.tracker.begin(constraints, BODY, false, at(a.leaf))],
+				[null, null],
+			);
 		} finally {
 			await session.close();
 		}
