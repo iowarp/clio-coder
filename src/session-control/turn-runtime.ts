@@ -1340,7 +1340,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// estimate. Admission sizes the request on it, and the provider-bound copy hands Pi's clamp the same figure
 				// on every main request, so Pi never refuses what admission passed (SPEC §0; cf-x6 r2 m3a residual).
 				context.takeOverflowInputPin?.();
-				const input = Math.max(estimateInputTokensFromContext(actual), view.inputTokens ?? 0);
+				const counted = estimateInputTokensFromContext(actual);
+				// With a measured anchor on this route the anchored count replaces the chars/4 floor, and what finalize
+				// added to the request (a synthesis directive) rides on it at chars/4 (bt3 drv-rv5).
+				const anchored = context.anchoredInputTokens?.(localRuntime) ?? null;
+				const input =
+					anchored === null
+						? Math.max(counted, view.inputTokens ?? 0)
+						: anchored + Math.max(0, counted - estimateInputTokensFromContext(request));
 				pinnedInputTokens = input;
 				const output = resolveFitOutputReserve(localRuntime, input);
 				if (view.effectiveWindow !== null && !requestFits(input, output, view.effectiveWindow))

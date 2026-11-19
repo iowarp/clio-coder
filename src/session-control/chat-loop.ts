@@ -3593,7 +3593,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				const fitInput = (view: typeof admission): number | null =>
 					view.inputTokens === null
 						? null
-						: Math.max(view.inputTokens, context.overflowFitTokens?.(agentRuntime, submittedText) ?? 0);
+						: (context.overflowFitTokens?.(agentRuntime, submittedText, view.inputTokens) ?? view.inputTokens);
 				// The output reserve shrinks as input grows, so it is resolved at the count the gate chose.
 				const fitReserve = (input: number | null): number | null =>
 					input === null ? null : resolveFitOutputReserve(agentRuntime, input);

@@ -79,7 +79,10 @@ interface WireRequest {
 }
 
 /** One read per scripted path, then an answer; each request's `max_tokens` and size are kept. */
-function transport(paths: ReadonlyArray<string>, { recalls = 0 }: { recalls?: number } = {}) {
+function transport(
+	paths: ReadonlyArray<string>,
+	{ recalls = 0, charsPerToken = 3.3 }: { recalls?: number; charsPerToken?: number } = {},
+) {
 	const requests: WireRequest[] = [];
 	const called: string[] = [];
 	let reads = 0;
@@ -104,7 +107,7 @@ function transport(paths: ReadonlyArray<string>, { recalls = 0 }: { recalls?: nu
 		if (next !== undefined) reads += 1;
 		if (next !== undefined) called.push(next);
 		// A provider tokenizer near 3.3 characters a token, as drv-cf3a's measured about 27.2k for this request.
-		const prompt = Math.ceil(raw.length / 3.3);
+		const prompt = Math.ceil(raw.length / charsPerToken);
 		const stream = new ReadableStream<Uint8Array>({
 			start(controller) {
 				if (tool)
@@ -671,6 +674,47 @@ for (const via of ["submit", "post-tool guard"] as const) {
 		}
 	});
 }
+
+// bt3 drv-rv5: mini measured 36,228 input for turn 1's prose (about 5 characters a token); the resumed turn added
+// 51,872 characters and was refused at 65,768 + 12,288, though the anchored request (about 50k) fit 65,536.
+it("bt3 drv-rv5: a resumed turn is admitted on the route's measured anchor, not chars/3.5 over the whole request", {
+	timeout: 30_000,
+}, async () => {
+	const prose = (title: string, chars: number) => {
+		let text = `${title}. `;
+		while (text.length < chars) text += "The survey crew logged the pump hall readings and noted every valve in order. ";
+		return text.slice(0, chars);
+	};
+	const first = transport([], { charsPerToken: 5 });
+	const live = harness(first, FILES, { window: 65_536 });
+	let id: string | undefined;
+	try {
+		await live.loop.submit(prose("Field notes part one", 142_000));
+		await live.loop.whenSettled();
+		deepStrictEqual(refusals(live.notices()), []);
+		id = live.session.current()?.id;
+	} finally {
+		await live.close();
+	}
+	ok(id);
+	const wire = transport([], { charsPerToken: 5 });
+	const second = harness(wire, FILES, { window: 65_536 });
+	try {
+		second.session.resume(id);
+		replayCurrentSession(
+			{ session: second.session, chat: second.loop, readEntries: () => second.session.readEntries() },
+			id,
+		);
+		await second.loop.submit(prose("Field notes part two", 51_872));
+		await second.loop.whenSettled();
+		deepStrictEqual(refusals(second.notices()), [], "the resumed turn is not refused");
+		strictEqual(second.summaries(), 0, "nothing compacts a request that fits");
+		strictEqual(wire.requests.length, 1, "the request goes out");
+		ok((wire.requests[0]?.maxTokens ?? 0) >= OUTPUT_SAFETY, `max_tokens ${wire.requests[0]?.maxTokens}`);
+	} finally {
+		await second.close();
+	}
+});
 
 it("drv-cf3a D-A: a protected read larger than the window ends the turn once, naming it, and the session goes on (bt-47)", {
 	timeout: 30_000,
