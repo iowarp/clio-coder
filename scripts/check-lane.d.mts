@@ -7,3 +7,4 @@ export declare function selectLaneTests(input: {
 	lists: { coreTests: string[]; guiTests: string[]; packageTests: string[] };
 }): { affected: string[]; unlisted: string[] };
 export declare function formatOpenapi(text: string): { status: number | null; stdout: string; stderr: string };
+export declare function pnpmCommand(env?: NodeJS.ProcessEnv): string[];
