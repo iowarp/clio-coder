@@ -1,14 +1,16 @@
 # Slurm through the clio-kit MCP server
 
-`slurmMcpFindings` in [doctor-slurm.ts](../../src/cli/doctor-slurm.ts) checks the local Slurm setup. The [MCP tool guide](tool-usage.md) explains capability calls.
-
-CLIO Coder reaches Slurm through the Slurm MCP server that
+Ask CLIO Coder to submit a job script, watch it to completion, read its output
+or cancel it, and run parameter sweeps as job arrays. CLIO Coder reaches Slurm
+through the Slurm MCP server that
 [clio-kit](https://github.com/iowarp/clio-kit) ships, over the same local stdio
 MCP gateway every other MCP server uses. There is no Slurm transport inside
 CLIO Coder and no `srun` or `sbatch` worker tier: the agent submits, polls, and
 cancels jobs by calling five gateway capabilities, and the scheduler does the
 rest. Fleet nodes are SSH hosts and do not submit through Slurm; see
 [HPC clusters](hpc-clusters.md) for cluster hosts.
+
+`slurmMcpFindings` in [doctor-slurm.ts](../../src/cli/doctor-slurm.ts) checks the local Slurm setup. The [MCP tool guide](tool-usage.md) explains capability calls.
 
 ## Set it up
 

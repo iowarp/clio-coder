@@ -255,7 +255,8 @@ home is on.
   local node and for local-port servers, and a plan running on one node is
   not cut short by CLIO Coder starting on another. Slots held by a host that died
   free up five minutes after they expire, or at once with
-  `clio-coder session terminate --force`.
+  `clio-coder session terminate <id> --force` once that session has stopped
+  sending heartbeats.
 - **Apptainer with its own pid namespace.** An instance started with `--pid`
   or `--containall` keeps the host's name but numbers its processes on its
   own. The lock CLIO Coder takes on its state files (`settings.yaml`,
@@ -322,8 +323,9 @@ or newer installer does so with `--leave-prerelease`; in any other case name tha
 
 `clio-coder upgrade` installs the next version beside the current one and keeps
 the managed Node unless you pass `--refresh-runtime`.
-`clio-coder uninstall` removes the launcher, the runtime and
-every installed version.
+`clio-coder uninstall` removes the launcher, the runtime, every installed
+version, and the config, data, state and cache roots; `--keep-config` and
+`--keep-data` preserve those two roots.
 
 ## Using a Node you already have
 

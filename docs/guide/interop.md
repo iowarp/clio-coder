@@ -1,7 +1,5 @@
 # Coding agent interoperability
 
-`detectInteropAgents` in [detect.ts](../../src/domains/interop/detect.ts) discovers local agents. The [library architecture](../architecture/library.md) explains package trust.
-
 CLIO Coder can delegate a task to an installed coding agent, discover resources held
 by Claude Code, Codex, Antigravity CLI, GitHub Copilot CLI, and OpenCode, and
 adopt safe text resources into its library after approval. The canonical
@@ -16,6 +14,8 @@ files, and write nothing into those agents' directories
 ([context engine](../architecture/context-engine.md)). As for every registered
 agent, their directories (`.windsurf/`, `.clinerules/`, `~/.codeium/windsurf/`,
 `~/Documents/Cline/` and `~/.aider/`) are default no-write paths for CLIO Coder's tools.
+
+`detectInteropAgents` in [detect.ts](../../src/domains/interop/detect.ts) discovers local agents. The [library architecture](../architecture/library.md) explains package trust.
 
 ## Quick start
 
@@ -76,6 +76,14 @@ clients live in the [ACP architecture](../architecture/acp.md); a frontend that
 advertises neither attended opt-in keeps the unattended behavior, where
 `ask_user` is absent and a worker ask is not forwarded
 ([attended clients](../architecture/acp.md#attended-clients)).
+
+A frontend can pick the model through the standard ACP surface: session
+openers, forks and handoffs return a `models` block (`currentModelId`,
+`availableModels`) once a model is selected, and `session/set_model` selects
+one while the session is idle. `clio-coder acp` advertises the standard
+`session/fork` in `sessionCapabilities`; it forks the hosted session at its
+active leaf. Loading a session written by a newer CLIO Coder fails with error
+`-32602`, code `session_format`, and a message that says to upgrade.
 
 Install and authenticate the peer's own CLI first. Run
 `clio-coder interop inspect --json` or open `/library interop` to see the installed binary, configured
@@ -297,14 +305,15 @@ claude plugin marketplace add ./path/to/clio-coder
 claude plugin marketplace add "$(npm root -g)/@iowarp/clio-coder"
 ```
 
-The marketplace publishes 39 entries: the 34 curated skill packages and five
-plugins, `materio` and the four science packs (`hpc`, `science-data`,
+The marketplace publishes 40 entries: the 34 curated skill packages and six
+plugins, `materio`, `hoare` and the four science packs (`hpc`, `science-data`,
 `literature`, `life-science`). What each entry becomes on the Claude Code side:
 
 | Source layout | What Claude Code loads |
 | --- | --- |
 | `library/skills/<category>/<name>/` with a root `SKILL.md` | One skill, named by the `SKILL.md` frontmatter, with its `references/` companions |
 | `library/plugins/materio/` with a `skills/` directory | Materio's six portable skills and nothing else |
+| `library/plugins/hoare/` with a `skills/` directory | The `hoare-verification` skill and nothing else |
 | `library/plugins/<pack>/` for a science pack | The pack's skills from its `skills/` directory. A pack's `mcp.json` is the Agent Plugins file CLIO Coder reads, not the `.mcp.json` Claude Code scans, so Claude Code starts none of its servers. |
 
 Nothing is converted and no component body is duplicated. The packages carry their
@@ -313,7 +322,7 @@ marketplace entry supplies the name, description, version, category and license
 it shows. The generated entries use the marketplace format without `strict: false`;
 packages need no second `.claude-plugin/plugin.json`.
 
-Materio's CLIO Coder-native agents, prompts and playbooks sit at declared resource paths
+Materio's and Hoare's CLIO Coder-native agents, prompts and playbooks sit at declared resource paths
 that no peer host scans. They travel with the installed bytes and are never
 presented as Claude-native components. `claude plugin details materio` reports
 `Skills (6)` and `Agents (0)`.
@@ -378,11 +387,12 @@ Inspection reports binary presence, a bounded version probe (or unknown),
 connection and ACP adapter state, peer modes, and resource counts derived from
 the disk inventory. User and current-project resources are distinguished. A
 presence probe that cannot answer reports `unknown`, never `absent`. The JSON
-form is `{version: 1, generatedAt, detectedAt, knownKinds, agents}`; each agent
-carries `presence`, `version`, `acp`, `adapter`, `headless`, `paneEligible`,
-`modes`, `configured`, `decision`, `proposed`, `needsNetworkInstall`, and an
-`inventory` of counts and items with an `adoption` word (`review required` or
-`not adoptable`). JSON omits native source paths and declaration values,
+form is `{version: 1, generatedAt, detectedAt, knownKinds, agents}`, where
+`knownKinds` counts the registered agent kinds; each agent carries `id`, `label`,
+`presence`, `version`, `hasUserDirectory`, `acp`, `adapter`, `headless`,
+`paneEligible`, `modes`, `configured`, `decision`, `decidedAt`, `decisionStale`,
+`proposed`, `needsNetworkInstall`, and an `inventory` of counts and items with an
+`adoption` word (`review required` or `not adoptable`). JSON omits native source paths and declaration values,
 including MCP credentials. Any other argument exits 2.
 A cache directory establishes available content; installation and activation
 remain unknown unless a host's installation registry establishes them.
@@ -463,15 +473,14 @@ package is refused when retained components require omitted files. Use ordinary
 `library install` for a reviewed portable package whose complete assets are
 required, or import supported individual resources.
 
-A WTF-P copy that Claude Code installed from before playbooks keeps the retired
-`fleets` layout in its CLIO Coder namespace. It is not adopted. The plan marks the
-entry `skip` with the reason `built for an older CLIO Coder: wtfp declares
-resources.fleets, and playbooks replaced fleets; install the current WTF-P with
-`wtf-p install clio`, which installs the WTF-P plugin and its desk extension`,
-and nothing is written. Any other package that still declares `resources.fleets`,
-kind `fleet` or a `fleet:` requirement is refused the same way, with the fix for
-its author: rename `resources.fleets` to `resources.playbooks`, the `fleets`
-directory to `playbooks`, and fleet kinds and requirements to `playbook`.
+A package built for a release from before playbooks, one that still declares
+`resources.fleets`, kind `fleet` or a `fleet:` requirement in its CLIO Coder
+namespace, is not adopted. The plan marks the entry `skip` with a reason that
+starts `built for an older Clio:`, names what the package declares, and gives
+the fix: install the package's current release where its publisher names an
+install command, or, for its author, rename `resources.fleets` to
+`resources.playbooks`, the `fleets` directory to `playbooks`, and fleet kinds
+and requirements to `playbook`. Nothing is written.
 
 Installed packages retain `{kind: "interop", host, source}` provenance and
 `trust: "foreign"`, with the original absolute source path. Skill and prompt
