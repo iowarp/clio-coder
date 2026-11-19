@@ -6,6 +6,8 @@ export type BudgetInspection =
 			status: "available";
 			capability: "native";
 			view: LiveBudgetView;
+			/** The view's fit output reserve resolved at another input count, for a caller that adds input to it. */
+			outputReserveAt?: (inputTokens: number) => number;
 			/** The compiled system prompt's sections and their estimated sizes, in prompt order (S-87). */
 			promptSections?: Array<{ id: string; tokens: number }>;
 	  }

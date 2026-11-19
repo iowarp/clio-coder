@@ -1,5 +1,6 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { LiveBudgetView } from "../../src/domains/context/budget/live-view.js";
 import { EMPTY_WORKING_SET_VIEW } from "../../src/domains/context/working-set/contract.js";
 import { DEFAULT_WORKING_SET_SETTINGS } from "../../src/domains/context/working-set/defaults.js";
 import { planEviction } from "../../src/domains/context/working-set/engine.js";
@@ -14,6 +15,7 @@ import {
 } from "../../src/domains/context/working-set/recall.js";
 import { selectVisibleEntries } from "../../src/domains/context/working-set/visible.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
+import { resolveFitOutputReserve } from "../../src/session-control/output-reserve.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 
 const BODY = "line one  \n\tline two\r\nüñîçødé\nend without newline";
@@ -222,6 +224,55 @@ describe("working-set ledger boundary", () => {
 		strictEqual(recorded[0]?.kind, "contextRecall");
 		strictEqual(recorded[0]?.parentTurnId, "r14");
 		strictEqual((recalled.details?.recall as { state: string }).state, "summarized");
+	});
+
+	it("Astra #7: a recall batch resolves the fit reserve at the input it would carry", async () => {
+		const runtime = {
+			runtimeResolution: {
+				capabilityDecisions: { maxTokens: 32_768 },
+				contextWindowDetails: { effectiveContextWindow: 65_536 },
+			},
+			agent: { state: { model: { api: "openai-completions", contextWindow: 65_536, maxTokens: 32_768 } } },
+		} as unknown as Parameters<typeof resolveFitOutputReserve>[0];
+		const reserveAt = (tokens: number) => resolveFitOutputReserve(runtime, tokens);
+		strictEqual(reserveAt(40_000), 21_440);
+		// Two summarized reads whose recalled bodies cost 2,250 tokens each.
+		const entries: SessionEntry[] = [message("u1", null, "user")];
+		for (const ref of ["r1", "r2"]) {
+			const entry = result(ref, entries.at(-1)?.turnId ?? "u1");
+			entry.payload = { toolName: "read", result: { text: "x".repeat(8_926), details: { paths: [`${ref}.ts`] } } };
+			entries.push(entry);
+		}
+		entries.push({
+			kind: "compactionSummary",
+			turnId: "s",
+			parentTurnId: "r2",
+			timestamp: TS,
+			summary: "checkpoint",
+			tokensBefore: 1,
+			firstKeptTurnId: "",
+		});
+		const view = {
+			historical: false,
+			inputTokens: 40_000,
+			outputReserveTokens: reserveAt(40_000),
+			effectiveWindow: 65_536,
+		} as LiveBudgetView;
+		const tool = createContextTool({
+			getContextBudget: () => ({ status: "available", capability: "native", view, outputReserveAt: reserveAt }),
+			session: {
+				hasSession: () => true,
+				readEntries: () => entries,
+				activeLeafTurnId: () => "s",
+				appendEntry: (fields) => ({ ...fields, turnId: "recalled", parentTurnId: "s", timestamp: TS }) as SessionEntry,
+			},
+		});
+		const batch = { sessionId: "astra-7", turnId: "batch" };
+		for (const ref of ["r1", "r2"]) {
+			const recalled = await tool.run({ scope: "recall", ref }, batch);
+			ok(recalled.kind === "ok");
+			doesNotMatch(recalled.output, /no room/, `${ref} fits at 44,500 input with a 16,940 reserve`);
+		}
 	});
 });
 
