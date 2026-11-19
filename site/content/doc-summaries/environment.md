@@ -51,11 +51,11 @@ Supported providers can read their conventional credential variables, such as `O
 | `OPENAI_API_KEY` | OpenAI |
 | `ANTHROPIC_API_KEY` | Anthropic |
 | `OPENROUTER_API_KEY` | OpenRouter |
-| `GEMINI_API_KEY` | Gemini |
-| `AWS_*` | Bedrock credentials |
+| `GEMINI_API_KEY` or `GOOGLE_API_KEY` | Gemini |
+| `AWS_*` | Credentials for an existing Amazon Bedrock connection |
 | `OLLAMA_API_KEY` | An Ollama target at `https://ollama.com` |
 
-Google Vertex uses its application credentials. The managed alternative is `clio-coder auth`, with `auth login` and `auth status` per target.
+The managed alternative is `clio-coder auth`, with `auth login` and `auth status` per target.
 
 `HTTPS_PROXY`, `HTTP_PROXY`, and their lowercase forms apply to model requests, discovery probes, sign-in refreshes, and web fetches. `localhost` and `127.0.0.1` always go direct; name any other local model server in `NO_PROXY`. `clio-coder doctor` shows the proxy in effect.
 

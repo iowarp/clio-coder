@@ -13,7 +13,7 @@ In the terminal, `/run <agent-id> <task>` starts a worker. The same command with
 
 ## Follow the work
 
-Open **Workers** with Alt+W to inspect active runs. Select a running worker and use the displayed steer or cancel action. In a session with panes, Alt+W opens a live dashboard beside the conversation instead. You can also send an addressed message:
+Alt+W opens the **Fleet Runs** board to inspect active runs. Select a running worker and use the displayed steer or cancel action. In a session with panes, Alt+W opens the workers dock instead, a live dashboard beside the conversation. You can also send an addressed message:
 
 ```text
 @<agentId-or-runId-prefix> Focus on empty input and report the existing tests.
@@ -27,7 +27,7 @@ Native workers run their shell, script, and verification commands in an OS sandb
 
 Your own session's shell commands run in the same kind of sandbox at `default` and at contained `yolo`, which is yolo's default. At unconfined `yolo` they do not, and workers keep theirs. A worker's ordinary asks go to the safety judge by default (`fleet.permissions.mode: judge`).
 
-When a worker's task branch would merge with a failing or unrun check, the terminal asks first with a **Merge task branch?** card showing the branch, changed paths, and the check. The card opens on **Keep branch**. Headless and ACP runs always keep the branch. `clio-coder fleet land` lists the branches finished runs kept, previews one, and lands it.
+When a worker's task branch would merge with a failing or unrun check, the terminal asks first with a **Merge task branch?** card showing the branch, changed paths, and the check. The card opens on **Keep branch**. Headless runs keep the branch, and so do ACP sessions whose client cannot answer questions. `clio-coder fleet land` lists the branches finished runs kept, previews one, and lands it.
 
 ## Run a playbook when you need one
 
@@ -41,7 +41,7 @@ A playbook combines workers into a workflow such as a review gate, competing sol
 
 ## Give workers MCP tools
 
-A recipe names exact `mcp_<id>__<tool>` capabilities, and admission refuses an untrusted or stale server. Check a server with `clio-coder mcp test <id>` and grant one project server with `clio-coder mcp trust <id>`. Add `--network` to allow it network inside the worker sandbox.
+A recipe names exact `mcp_<id>__<tool>` capabilities, and admission refuses an untrusted or stale server. Grant one project server with `clio-coder mcp trust <id>`, then check it with `clio-coder mcp test <id>`, which launches only a trusted server. Add `--network` to `mcp trust` to allow it network inside the worker sandbox.
 
 ## Run workers on another machine
 

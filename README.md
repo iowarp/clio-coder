@@ -4,11 +4,12 @@
 
 # CLIO Coder
 
-**The open-source coding agent that works with every model you have, and shows you the checks behind what it says.**
+**An open-source coding agent for any model you have, from a GPU in your lab to a frontier API, that shows you the checks behind what it says.**
 
-One set of project rules, checks and safety controls sits above any model: a
-GPU in your lab, a gateway, a cloud API, or a subscription you already pay
-for. Change the model and nothing else changes.
+CLIO Coder is for developers and research teams who want one set of project
+rules, tools, checks and safety controls above whatever model they run. Change
+the model and nothing else changes. Use it in the terminal, from scripts and
+CI, inside an ACP editor, or in the desktop app (alpha).
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@iowarp/clio-coder"><img alt="npm version" src="https://img.shields.io/npm/v/%40iowarp%2Fclio-coder?color=00a6ad&amp;style=flat-square" /></a>
@@ -29,8 +30,9 @@ No root and no account. The first launch connects a model.
 <p align="center">
   <a href="#why-clio-coder">Why</a> ·
   <a href="#built-for-science-and-hpc">Science and HPC</a> ·
-  <a href="#new-in-083">New in 0.8.3</a> ·
+  <a href="#new-in-084">New in 0.8.4</a> ·
   <a href="#get-started"><strong>Get started</strong></a> ·
+  <a href="#what-you-can-do">Tour</a> ·
   <a href="#models">Models</a> ·
   <a href="#safety-and-control">Safety</a> ·
   <a href="#for-ai-agents-installing-clio-coder">For AI agents</a> ·
@@ -40,22 +42,37 @@ No root and no account. The first launch connects a model.
 
 ## Why CLIO Coder
 
-- **Any model you have.** Local GPUs, lab gateways, cloud APIs, and the
-  ChatGPT, Claude and GitHub Copilot subscriptions you already pay for.
-  `/model` switches the conversation, and your project rules, tools and
-  sessions stay the same.
+- **Any model, local to frontier.** Ollama, vLLM or llama.cpp on your own
+  hardware, a lab gateway, cloud APIs, and the ChatGPT, Claude and GitHub
+  Copilot subscriptions you already pay for. `/model` switches the
+  conversation, and your project rules, tools and sessions stay the same.
+- **One agent, four ways in.** `clio-coder` in the terminal,
+  `clio-coder run` for scripts and CI with exit codes and JSONL,
+  `clio-coder acp` for editors that speak the Agent Client Protocol, and
+  `clio-coder gui` for the desktop alpha. All four share the same
+  connections, project rules and tool policy.
+- **A fleet with sealed receipts.** Chat on one model and send workers to
+  others, or to Claude Code, Codex, OpenCode and Pi, each with a fixed set of
+  tools, permissions and budget. Every run seals a record of what it did:
+  `clio-coder evidence inspect` reads it, and `clio-coder telemetry verify`
+  checks it again on any machine.
+- **Context that holds on small windows.** The window comes from the live
+  model server. Before paying for a summary, CLIO Coder evicts old tool output
+  it can recall exactly later, so long tasks keep their working context on
+  local models.
+  `/context` shows what fills the window.
+- **Pipelines you can build on.** Extensions add tools, hooks and interviews
+  that declare what they may touch. Prompt templates bound a turn's budget,
+  run one pipeline step per turn, and carry separate prompts for small,
+  standard and frontier models. `clio-coder run --answers` runs the whole
+  pipeline headless.
+- **Autonomy you choose, safety that stays on.** By default it asks before
+  commands it cannot sandbox and outward actions such as `git push`. Yolo
+  removes the approval cards but keeps the OS sandbox, file snapshots for
+  `/rewind` and a safety judge.
 - **Claims tied to checks that ran.** CLIO Coder runs your tests, compares
   numbers within a tolerance you set, and reruns an analysis from pinned
-  inputs. It records what passed, what failed and what was never checked,
-  and each recorded claim names its commit, platform and command.
-- **Yolo that stays contained.** Leave it running with no approval cards. An
-  OS sandbox, file snapshots you can `/rewind`, and a safety judge stay on.
-- **A fleet of workers.** Chat on one model and send workers to others: a
-  local model for searches, a strong one for review. Claude Code, Codex,
-  OpenCode and Pi can be workers too, under your project's rules.
-- **One agent, four ways in.** The terminal, `clio-coder run` for scripts and
-  CI, ACP for editors, and a desktop app in alpha. All of them share the same
-  connections, project rules and tool policy.
+  inputs. It records what passed, what failed and what was never checked.
 - **Open source, Apache-2.0.** Project rules and checks live in plain files in
   your repository. There is no CLIO Coder account, and nothing is sent home in
   the background.
@@ -97,14 +114,41 @@ without root, older glibc, `module load`, proxies and
 [shared login nodes](docs/guide/hpc-clusters.md#shared-login-nodes). Then see
 [Slurm](docs/guide/slurm.md) and the [store](docs/guide/store.md).
 
-## New in 0.8.3
+## New in 0.8.4
 
-- **Extensions can confine every worker.** A desk that adds write roots to a dispatch whose intent declared none now narrows it inside the workspace instead of being refused.
-- **Stateful tools are not mistaken for loops.** A repeated call counts as a loop only while its results match, so an extension's `next_step` keeps handing out steps.
-- **Yolo stops cleanly.** A token, call or minute cap lets the running tool call finish and stops before the next model request, and a continuation after the tool budget says every tool is available again.
-- **Your questions wait for you.** An `operator_only` question stays open however long you are away, at every autonomy level.
+- **Headless pipelines that ask the author.** `clio-coder run --answers answers.yaml`
+  answers an extension's interview steps and `operator_only` questions from a
+  file. A question the file does not cover ends the run with exit 5 instead of
+  being guessed.
+- **One prompt template for every model tier.** A template can cap a turn's
+  tool calls and output (`budget`), run one step per turn (`turnPolicy`), limit
+  that policy to small or uncached routes (`when`), and carry a body per tier
+  (`variants`). `models.<id>.tier` pins a model's tier.
+- **Extensions shape what the model sees.** An extension can attach up to four
+  of its tools to every request, pin a context block of up to 8 KB, return a
+  short summary with a `detail_ref` the model pages through, and declare tools
+  `readOnly` or `idempotent` for the loop guard.
+- **Leaner context on small windows.** On a window under about 52K tokens,
+  working-set eviction now acts at the compaction trigger, before any paid
+  summary. On routes without prompt caching, a tool result that a later
+  identical call replaced is evicted to a recallable marker. `clio-coder context working-set --verify <session>`
+  checks each request against the record taken when it was sent.
+- **See where the tokens go.** `clio-coder telemetry tokens --session <id> --by-source`
+  splits each turn's input across the system prompt, skills, tool schemas,
+  tool results and history. `clio-coder models` lists each route's thinking
+  levels.
+- **Compare models on one project.** `clio-coder campaign run` runs a seeded
+  project across a roster of models and reports, per entry, how the run ended,
+  the gates it reached, refusals, tokens and wall time.
+- **Steadier judged checks.** Numerical comparisons and reproductions can
+  repeat up to five times under a seed and report the spread, and a run's
+  sealed result keeps each judged check's report.
+- **More for editors and workers.** ACP clients can switch the model and,
+  when branching is on, fork a session. A `count` tool gives workers without
+  a shell a file's words, lines and bytes.
 
-0.8.3 changes how `operator_only` questions wait at yolo and where a yolo cap stops. Read the
+0.8.4 writes session format 7: once 0.8.4 resumes a session, 0.8.3 refuses
+it. `CLIO_CODER_LEGACY_MASK` is gone. Read the
 [Upgrade notes](CHANGELOG.md#upgrade-notes) before upgrading.
 
 > **Pre-1.0.** The terminal is the primary interface, and the desktop app is
@@ -235,8 +279,9 @@ recommended route.
 | Remove everything | `clio-coder uninstall` |
 
 An installer install checks for a newer release at most once a day while
-idle and switches over at the next start. npm, pnpm and Bun installs show a
-notice instead. Reset and uninstall preview what they remove and ask first.
+idle and switches over at the next start. A user-writable npm, pnpm, Bun or
+Volta install on Linux or macOS updates after its last session quits; other
+installs show a notice. Reset and uninstall preview what they remove and ask first.
 See [installation and lifecycle](docs/guide/installation-and-lifecycle.md).
 
 </details>
@@ -271,7 +316,8 @@ the run, and `--read-only` guarantees no file changes. See
 changes in worktrees to move one number, such as wall time, and keeps a change
 only when repeated trials show a real gain and every check passes.
 `clio-coder arena` runs one prompt on 2 to 4 models, shows their work blind,
-and builds standings from your votes. See
+and builds standings from your votes. `clio-coder campaign run` runs one
+seeded project across a roster of models. See
 [research and arena](docs/guide/research-and-arena.md).
 
 **Tell it once.** Type `remember that ...` or `from now on ...` and CLIO Coder
@@ -280,6 +326,17 @@ saves your words for this project, everywhere, or only this session. See
 
 **Know what it cost.** `/usage` shows spend per model connection and the cost
 per verified outcome.
+
+**Build a pipeline and run it headless.** An extension can define interview
+steps, hooks and tools, and a prompt template can run one step per turn with a
+budget and a body per model tier. `clio-coder run --answers answers.yaml`
+then runs it in CI with no one at the keyboard. See
+[scripted answers](docs/guide/harness-extensions.md#checkpoints-and-scripted-answers)
+and [one step per turn](docs/guide/extensions-and-sharing.md#one-step-per-turn).
+
+**See what fills the window.** `/context` shows the window by category, and
+`clio-coder telemetry tokens --session <id> --by-source` shows which source
+grew each turn.
 
 **Add skills and tools.** Install reviewed packs from the bundled library,
 including `hpc`, `hoare`, `science-data`, `literature` and `life-science`.

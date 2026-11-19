@@ -25,7 +25,7 @@ Follow [the tutorial](/tutorials/semantic-context-and-recordings.html) for a ful
 
 ```sh
 clio-coder semantic configure \
-  --target litellm --model mini/embeddinggemma-2-q8 \
+  --target embeddings --model embeddinggemma-300m \
   --asset-identity sha256:<gguf-sha256> \
   --modality text --modality image \
   --qualify

@@ -7,7 +7,7 @@ clio-coder interop inspect --json
 clio-coder configure --interop
 ```
 
-In the terminal, `/library interop` shows available connections. Supported managed modes vary by peer: Claude Code, Codex, and OpenCode have ACP recipes; other peers may use a headless CLI or a pane.
+In the terminal, `/library interop` shows available connections. Supported managed modes vary by peer: Claude Code, Codex, OpenCode, and GitHub Copilot have ACP recipes; other peers may use a headless CLI or a pane.
 
 - `/run <agent-id> <task>` uses a configured ACP connection; `/run acp:<id> <task>` names one explicitly.
 - `/run --target <target> <agent> <task>` uses a configured headless target.
@@ -21,11 +21,11 @@ A peer that runs its own tool loop is refused write-capable work unless you trus
 
 The Library can discover supported foreign resources and review their origin, scope, trust, and actual availability before adoption. It identifies unsupported components rather than treating an entire foreign package as compatible.
 
-Open `/library`, then use its local-agent discovery action. Inspect the proposed resources and approve the ones you want in your user or project library.
+Run `clio-coder interop adopt <host> --dry-run`, for example with `claude-code`, `codex`, or `copilot`, to see the plan. Run it again without `--dry-run` to approve it into your user library, or add `--project`. In the terminal, `o` in `/library` opens the same review.
 
 ## Connect an ACP frontend
 
-To use CLIO Coder from an editor that speaks the Agent Client Protocol (ACP), point the editor's ACP agent entry at `clio-coder acp`. The editor then exchanges JSON-RPC with that process over stdio, with session listing, resume, modes, and model options.
+To use CLIO Coder from an editor that speaks the Agent Client Protocol (ACP), point the editor's ACP agent entry at `clio-coder acp`. The editor then exchanges JSON-RPC with that process over stdio, with session listing, resume, fork, modes, and model selection.
 
 ```sh
 clio-coder acp --cwd /path/to/project
@@ -36,7 +36,8 @@ clio-coder acp --cwd /path/to/project
 | Option | Effect |
 | --- | --- |
 | `--cwd PATH` | Pins the workspace. Without it, the editor's first session request selects it. |
-| `--permission-timeout MS` | Longest wait, in milliseconds, for one permission answer from the editor; 120000 by default. |
+| `--permission-timeout MS` | Longest wait, in milliseconds, for one permission answer from the editor; defaults to `integrations.externalAgents.defaults.permissionTimeoutMs`, 120000. |
+| `--autonomy LEVEL` | The highest autonomy any session may use, `default` or `yolo`; it never raises your configured level. |
 | `--allow-tools NAMES` | Limits the session's tools to these comma-separated names, as `clio-coder run` does; `none` disables all. |
 | `--delegate-tools NAMES` | Limits the tools the session's dispatched workers may hold. |
 | `--read-only` | Holds every session at the read-only ceiling. No file outside CLIO Coder's own home changes. |
@@ -45,6 +46,6 @@ clio-coder acp --cwd /path/to/project
 
 ## Built on the Pi SDK
 
-CLIO Coder's model connections, agent loop, and terminal interface are built on the Pi SDK. Version 0.8.0 pins the Pi 1.5.2 packages to exact versions and bundles the one terminal package it patches, so an npm install needs no patch step. CLIO Coder owns everything above that layer: permissions, workers, sessions, run records, and its own handling for local model servers.
+CLIO Coder's model connections, agent loop, and terminal interface are built on the Pi SDK. CLIO Coder pins the Pi 1.5.2 packages to exact versions and bundles the one terminal package it patches, so an npm install needs no patch step. CLIO Coder owns everything above that layer: permissions, workers, sessions, run records, and its own handling for local model servers.
 
 Pi's coding agent is also a delegation peer. With the `pi` command installed and signed in, a target on the `pi-cli` runtime runs headless worker tasks under Pi's own login. Like other peers that run their own tool loop, it needs `trustedUnmediated: true` on the target before it may take write-capable work. Developers upgrading the SDK can read the [Pi SDK boundary](../architecture/pi-boundary.md).

@@ -33,4 +33,4 @@ Dispatched workers read the store. They write only into the tags their dispatch 
 - `put` copies bytes, and no backend keeps earlier versions of a blob.
 - `clio-coder reset --data`, `reset --all` and `uninstall` without `--keep-data` delete the store for good.
 - The store has been exercised on Linux only.
-- The clio-core backend is experimental in 0.8.0 and needs a clio-core build from source. The full guide covers choosing it.
+- The clio-core backend is experimental and needs a clio-core build from source; `clio-coder store backend` shows which backend is in use. The full guide covers choosing it.
