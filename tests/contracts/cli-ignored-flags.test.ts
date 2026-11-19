@@ -182,6 +182,18 @@ describe("run --delegate-tools", () => {
 	});
 });
 
+describe("run --max-context-tokens", () => {
+	it("accepts the = form exactly like the space form", () => {
+		const inline = parseRunCliArgs(["--max-context-tokens=8192", "task"]);
+		deepStrictEqual(inline.diagnostics, []);
+		equal(inline.maxContextTokens, 8192);
+		deepStrictEqual(inline.messages, ["task"]);
+		deepStrictEqual(parseRunCliArgs(["--max-context-tokens=0", "task"]).diagnostics, [
+			{ type: "error", message: "--max-context-tokens must be a positive integer" },
+		]);
+	});
+});
+
 describe("--with-panes", () => {
 	it("activates guest detection; without it, panes follow whether Clio runs in a pane host", () => {
 		equal(resolvePanesEnablement("with", {}), "auto");

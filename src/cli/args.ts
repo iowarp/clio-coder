@@ -267,8 +267,8 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			if (value !== null) parsed.skillPaths.push(value);
 			continue;
 		}
-		if (arg === "--max-context-tokens") {
-			const value = need(arg);
+		if (arg === "--max-context-tokens" || arg?.startsWith("--max-context-tokens=")) {
+			const value = arg === "--max-context-tokens" ? need(arg) : arg.slice("--max-context-tokens=".length);
 			const n = value === null ? null : parseMaxContextTokens(value);
 			if (typeof n === "number") parsed.maxContextTokens = n;
 			else if (n !== null) parsed.diagnostics.push({ type: "error", message: n.error });
