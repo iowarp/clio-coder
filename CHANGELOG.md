@@ -519,6 +519,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - A compaction that summarizes a recovered turn's user row no longer replays the discarded reply and an unanswered recovery call.
 - Selecting a user turn in /tree keeps the memory restoration its original request carried.
 - New eviction records no longer write the unread `route` field and a reissued host insert no longer writes `reissueOf`; ledgers that carry either still open.
+- A turn sent in another session or on another branch no longer marks an interrupted session's unsent reminder as sent, so a later checkpoint re-issues it instead of dropping it.
+- `context working-set --verify` no longer reports an eviction as a duplicate decision when two stages of its one context.fold event name the same record.
+- Navigating /tree back to a leaf where a step turn settled no longer revives that step chain, so the next step turn runs on the new branch's history instead of a stale step checkpoint, live and after a reopen.
 
 ## 0.8.3 - 2026-11-16
 
