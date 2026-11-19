@@ -22,6 +22,8 @@ Open `/context` to inspect context usage, output reservation, remaining headroom
 
 For a fresh session with a stated goal, use `/handoff <goal>`. When moving work between agents, make sure the handoff includes evidence and unresolved questions, then review what the receiving agent does.
 
+To keep a session well under the model's window, start it with `clio-coder --max-context-tokens <N>`. `clio-coder run` takes the same flag. It caps the context budget and never enlarges the server's window.
+
 ## Recover an interrupted handoff
 
 If `/context` shows a pending handoff, use its exact ID:

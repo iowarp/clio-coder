@@ -50,7 +50,7 @@ Each term below in a sentence or two, with the guide that explains it. The full 
 | Term | What it means |
 | --- | --- |
 | Skill | Written instructions for a procedure, in a `SKILL.md` file, that the agent loads when the task needs it. |
-| Prompt template | A saved prompt you run as a slash command, such as `/bugfix`. |
+| Prompt template | A saved prompt you run as a slash command, such as `/hoare:review` from the `hoare` plugin. |
 | Library | The installable packages CLIO Coder knows about, browsed with `/library`. See [Library packages](/docs/guide/resource-library.html). |
 | Plugin | A package of content only: skills, prompts, agents and playbooks. Installing one never runs code. See [Plugins](/docs/guide/plugins.html). |
 | Extension | A package of code that changes CLIO Coder itself. It runs in its own process, after you review what it may do. See [Extensions](/docs/guide/harness-extensions.html). |

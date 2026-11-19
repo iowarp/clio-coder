@@ -12,7 +12,7 @@ clio-coder agents validate
 clio-coder run --agent coder "<task>"
 ```
 
-`clio-coder agents` lists the agents you can run, including `architect`, `coder`, `debugger`, `documenter`, `git-master`, `tester`, and `verifier`. `/run` dispatches one from a session. Add `--read-only` to deny writes, commands, and delegation for one dispatch.
+`clio-coder agents` lists the agents you can run, including `architect`, `coder`, `debugger`, `documenter`, `git-master`, `tester`, and `verifier`. `/run` dispatches one from a session. Add `--read-only` to keep one dispatch from changing anything; work it delegates is read-only too.
 
 Helper agents such as Scout are dispatched by the main agent, and `clio-coder agents --all` lists them. You cannot start them directly.
 

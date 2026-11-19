@@ -68,7 +68,7 @@ Campaigns live in `.clio-coder/research/<id>/` and arena matches in `.clio-coder
 
 ```sh
 clio-coder arena run --check unit \
-  --contender copilot/claude-haiku-5.5 --contender litellm/mini/qwen3.8-27b-iq4r-v4 \
+  --contender copilot/claude-haiku-5.5 --contender ollama/qwen3-coder \
   -- "Fix the bug in calc.py so test_calc.py passes."
 clio-coder arena show <match-id>
 clio-coder arena vote <match-id> A --note "smaller diff"
@@ -76,5 +76,7 @@ clio-coder arena show <match-id> --reveal
 ```
 
 Before a vote, `show` hides each target, model, cost, and duration, and `--reveal` is refused. Vote with a label, `tie`, or `both-bad`; `--replace` changes your vote.
+
+To run one seeded project against several models, `clio-coder campaign run --fixture <dir> --roster <roster.yaml> --answers <answers.yaml> --prompt <text> --out <dir>` runs it once per roster entry and reports how each run ended, its tokens, and its wall time.
 
 Research and the arena are new in 0.7.0. With `--autonomy yolo` both run contained yolo: the sandbox, the safety judge, and your autonomous caps stay on, and unconfined yolo is refused. `clio-coder research resume <id>` continues a stopped campaign from its journal with the same spec and budget.

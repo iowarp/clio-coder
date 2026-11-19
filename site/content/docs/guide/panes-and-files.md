@@ -6,7 +6,7 @@ Attach files and open companion terminal panes.
 
 The terminal can open a files pane, a live workers dashboard, logs, a shell, music, or an installed coding peer beside the conversation.
 
-Bare `clio-coder` in an interactive terminal opens its own private pane host with no question to answer. The host is a pinned copy of **Herdr** that the installer provisions. When it cannot start, CLIO Coder says so in one line and runs in the plain terminal.
+Bare `clio-coder` in an interactive terminal opens its own private pane host with no question to answer. The host is a pinned copy of **Herdr** that the installer provisions. When the host is not installed, CLIO Coder starts in the plain terminal without a notice, and `/panes`, `/files`, and Alt+E name `clio-coder panes install`.
 
 After an npm or bun install, add the pane host yourself. The file browser is a separate install either way:
 

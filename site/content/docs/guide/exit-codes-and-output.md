@@ -21,7 +21,8 @@ Nobody is there to approve anything, so a request that would ask you is denied, 
 | `1` | The task failed, including a run that changed nothing because its actions were refused. |
 | `2` | A usage error: an unknown flag, target or agent, or a refused admission or capability request. |
 | `3` | A worker was stopped by permission refusals, or the safety judge kept blocking. |
-| `4` | A spend ceiling stopped the run. |
+| `4` | A spend ceiling stopped the run, or a `yolo` run reached its autonomous tool-call, time, or token cap. |
+| `5` | A `--answers` file did not script a question only the author may answer. |
 | `124` | `--timeout` ran out. |
 | `129`, `130`, `143` | A signal stopped the run (SIGHUP, SIGINT, SIGTERM). |
 
@@ -32,6 +33,7 @@ The full guide lists the codes other commands use.
 - `--timeout <seconds>` stops the run and exits 124.
 - `--max-cost-usd <n>` caps what the run may spend on priced models.
 - `--read-only` leaves every file outside CLIO Coder's own folders unchanged.
+- `--answers <file.yaml>` answers the questions only the author may answer, such as extension interview steps; any other question is still refused.
 - `--autonomy yolo` lets an unattended job continue without waiting. It stays contained by default, and a call that would ask you is refused back to CLIO Coder, which continues without it.
 
 ## Read structured output

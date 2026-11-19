@@ -21,6 +21,7 @@ clio-coder extensions remove <id>
 | --- | --- |
 | `init <id> [--template <name>]` | Scaffold a manifest, entrypoint, and test |
 | `validate <path>` | Check the manifest; print the envelope and its digest |
+| `test <path>` | Run the package's `*.test.ts` files |
 | `install <path> [--user\|--project]` | Review and install; user scope by default |
 | `enable`, `disable`, `remove <id>` | Change one installed copy |
 | `run <id> <command>` | Run one extension command headlessly |
@@ -40,7 +41,7 @@ The first is a read-only review; the second approves it. Until then a project co
 
 ## What an extension can add
 
-Hooks at prompt submit and around tool calls, runtime tools the model can call, status lines, panels, and work on a timer. A `before_tool` hook can refuse a call. The runtime runs inside bubblewrap on Linux or Seatbelt on macOS when a backend exists; without one, it runs with your permissions.
+Hooks at prompt submit and around tool calls, runtime tools the model can call, status lines, panels, and work on a timer. A `before_tool` hook can refuse a call. At `api: 2`, a hook can pin one small context block that stays in the conversation, a tool can return a short `summary` with a `detail_ref` the model pages through on demand, and `runtime.promote` attaches up to four of the package's tools to every request. The runtime runs inside bubblewrap on Linux or Seatbelt on macOS when a backend exists; without one, it runs with your permissions.
 
 Approval covers the manifest's `runtime` block, the capability envelope: commands, hooks, tools with their action class, interface slots, content the runtime may see (`prompt`, `tool-args`, `tool-results`, `assistant-text`), file roots, and whether it may run programs or use the network.
 
