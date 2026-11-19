@@ -103,7 +103,15 @@ choosing one. After approval, execution consumes only the registry-owned resolve
 plan, so later mutation of raw arguments cannot change either field. What a
 worker inherits of the parent session is a separate choice, the `context`
 argument (`isolated` by default, `fork` for native workers, or `splice`); see
-[worker-context.md](../architecture/worker-context.md).
+[worker-context.md](../architecture/worker-context.md). A dispatched worker never
+receives tools an extension promoted into the main session or pinned context
+blocks; those stay with the main session. The builtin `count` tool reaches a
+worker only through a prompt template's `delegated-tools` list
+([extensions-and-sharing.md](extensions-and-sharing.md#prompt-template-tool-ceilings)).
+
+A native worker reserves room for its reply the same way main-session admission
+does, so a `fork` worker on the same model and context window as a parent turn
+that fitted is admitted instead of failing with `worker_context_exhausted`.
 
 Recipes declare a default `budget: {toolCalls, readReserve, synthesis}` and may
 add `maximum: {toolCalls, readReserve}` inside it. A dispatch call may send
@@ -619,7 +627,11 @@ approvals; `judge` by default, `deny`, `fail`, `escalate` or `main`) decides wha
 approval; [built-in-agents.md](built-in-agents.md) describes each posture. Under `judge`, while
 the main session runs at autonomy `default`, the main session's safety judge reviews a native
 local worker's ordinary ask against the operator's messages: an allow runs the call once inside
-the worker's permit and sandbox, and anything else denies it. Elsewhere `judge` behaves as `deny`. In
+the worker's permit and sandbox, and anything else denies it. Elsewhere `judge` behaves as `deny`.
+When a dispatch would run under `judge` with no judge to answer, because the process seats
+none (`run --agent` and the fleet CLI have no main session) or `safety.judge.enabled` is off,
+the first such dispatch in the process raises a `worker_judge_withheld` warning naming the
+cause: those workers run with the deny permit and each ask they raise is denied. In
 `deny` mode, and for a denied execute ask under `judge` or `main`, a refused execute call returns to the worker model as a tool result and
 the third one ends the run with exit 3, outcome `permission_required`, and a
 reason that names every refused command. Refusals of other action classes never
@@ -1318,7 +1330,8 @@ never cancels the assignment; `steer` with `action="cancel"` cancels its current
 and suppresses later attempts. `mode="collect"` is the barrier over a batch id
 or assignment-id list. It blocks while assignments are in flight, polling every
 second for 30 seconds by default (at most 10 minutes), and then returns each assignment's
-terminal attempt plus `attemptRunIds` history. When the wait runs out it returns the
+terminal attempt plus `attemptRunIds` history, each answer in the compact form
+described in [Bounded result delivery](#bounded-result-delivery). When the wait runs out it returns the
 pending snapshot and says the runs keep running. A `wait` or `collect` that ran out its time is not a success, so its transcript row ends with
 `timed out !` rather than `✓`. Collect also stops early when a worker in
 the batch waits for a main-agent permission decision, and it returns that request.
@@ -1585,8 +1598,16 @@ and `src/domains/dispatch/fleet-run.ts`.
 `clio-coder fleet events <rootId> [--follow] [--json] [--all]` reads a fleet's
 hash-chained journal. Without `--follow`, it prints the records available now.
 `--json` writes the stored NDJSON lines verbatim; `--follow` reads appended
-records until `fleet_sealed`. Other-project roots require `--all`. Each settled
-step writes a verifiable manifest checkpoint. This journal belongs to the
+records until `fleet_sealed`. Other-project roots require `--all`, and a unique
+root-id prefix resolves as it does for `fleet view`. Each settled
+step writes a verifiable manifest checkpoint. Lines are hash-chained, not
+signed: the chain detects a line that does not extend the ones before it, not a
+rewrite by someone who can write the file. The command exits 0 when the journal
+is sealed and intact, 1 on an integrity break or read error, 2 on a usage
+error, 3 when the journal read so far is intact but not sealed and `--follow`
+was not given, and 4 when `--follow` stopped because the fleet can no longer
+seal its journal (its root record is gone, it ended without a seal, or the
+process running it is gone). This journal belongs to the
 whole fleet; individual worker transcripts use `fleet view`. Source:
 `src/cli/fleet-events.ts` and `src/domains/dispatch/fleet-event-journal.ts`.
 
@@ -1919,6 +1940,15 @@ step's success.
 ### Inspect worker runs
 
 Inspect a worker run with `clio-coder fleet view <runId> --json`, or open the dispatch runs in `/view` ([/view](../architecture/observability.md)). A run's record states the worker's outcome, route, usage, cost and evidence; `/view verify <runId>` and `clio-coder fleet verify <runId> --json` check its seal. The [fleet CLI viewer](#inspect-fleet-runs-from-the-cli) also shows the run's ledger row and available transcript. Headless `clio-coder run --agent` reads the sealed result's own typed fields: a `Failed checks:` block lists the checks a verifier or code step ran that failed, a `Not verified:` block lists declared checks that never ran and other stated limits, and the command prints the sealed result itself when the worker wrote no prose; [exit-codes-and-output.md](exit-codes-and-output.md) describes that output ([run-output.ts](../../src/cli/run-output.ts)).
+
+A headless main-agent `clio-coder run` that asked for a change and delegated it reads the
+dispatch the same way. When a dispatch failed or never started a worker, no later read,
+command, write or dispatch succeeded, and nothing changed the workspace, the run exits 1 as a no-op (outcome `failed`, detail `noop`) with
+`clio-coder run: no-op: the delegated task failed (<reason>) and no write succeeded`, or
+`never started` in place of `failed`. For a batch the reason is the first failed run's line
+with its outcome, not the batch header. A task worktree that merged counts as a change, and
+a run under `--turn-mode answer` or `proposal` asked for none
+([print.ts](../../src/cli/modes/print.ts)).
 
 ### Run record integrity and fields
 
@@ -2267,7 +2297,7 @@ A takeover follows work forward. When the run it shows finishes and a retry of i
 
 ## Inspect fleet runs from the CLI
 
-Every inspection command reads durable state only, so it works from a second terminal or over SSH. Inspection defaults to the current project, and `--all` widens it to machine-wide state ([fleet-project-scope.ts](../../src/cli/fleet-project-scope.ts)). An unknown flag exits 2.
+Every inspection command reads durable state only, so it works from a second terminal or over SSH. Inspection defaults to the current project, and `--all` widens it to machine-wide state ([fleet-project-scope.ts](../../src/cli/fleet-project-scope.ts)). An unknown flag exits 2. The owning process writes a running worker's spend to the run ledger at most every 10 seconds, while lifecycle changes and settlement are written at once, so live spend read from another process can be up to 10 seconds old. The owner's budget gates read its in-memory meters and do not lag.
 
 | Command | What it reports |
 | --- | --- |
@@ -2278,6 +2308,8 @@ Every inspection command reads durable state only, so it works from a second ter
 | `clio-coder fleet view <fleetRootId> [--all]` | The step index of a fleet run: one line per step with its run id and outcome. Pass one of those run ids back to see that step. |
 | `clio-coder fleet verify <runId> --json` | Re-verifies one run's sealed scope right now and reports `state` (`pending`, `verified`, `failed` or `unavailable`), a closed-set `reason` when it did not verify, and the five trust axes. Exit 1 for an unknown run. |
 | `clio-coder fleet cancel <runId> [--json] [--reason <text>]` | Cancels one running run from any terminal. |
+| `clio-coder fleet events <fleetRootId> [--follow] [--json] [--all]` | A fleet run's hash-chained event journal, with exit codes for a sealed, broken or unsealed journal ([Follow a fleet event journal](#follow-a-fleet-event-journal)). |
+| `clio-coder fleet code-steps <fleetRootId> [--json]` | Every code step the fleet root settled, oldest first, from its `code_step.settled` records: exit code (or `timeout`, or `sig:<signal>`), duration, start time, step, command and run. It reads the root by id and takes no `--all`. Exit 1 when the journal cannot be read. |
 | `clio-coder fleet drain [--json]`, `clio-coder fleet resume [--json]` | Close or reopen durable dispatch admission (see [Placement and process-safe admission](#placement-and-process-safe-admission)). |
 
 The `view` transcript comes from the run's display feed, `<state>/runs/<runId>/feed.jsonl`, which the orchestrator writes while `fleet.history.journal` is on (the default). The feed is run state: it is redacted, never shared, and removed with the run's ledger row, while the run's telemetry journal keeps only its structural projection. The format is in [Run event journal](../architecture/worker-dispatch-mechanics.md#run-event-journal). A run dispatched with the feed off shows its ledger and run record but no transcript, and the viewer says whether the feed is disabled or missing. The transcript renders each feed row in words: prose as `assistant` with its text, a tool call as `<tool> started` and `<tool> ok|error|blocked in <n>ms` with its call target, a terminal result the host refused as `result rejected: <reason>` followed by the start of what was submitted, other events by their type, and the lifecycle rows as `run opened (<agent>)`, `result (<outcome>, exit <code>)` and `terminal (<outcome>)`. `fleet view` exits 0 after it prints a snapshot or index, or after `--follow` ends. An unknown or ambiguous id, an unknown flag, and an invalid combination (`--json` with `--follow`, `--watch` or a fleet root id) exit 2.
@@ -2348,7 +2380,19 @@ dispatches, a top-level `result_summary_max_bytes` default is inherited by
 mutation-report tasks and ignored by other steps; an explicit per-task
 `result_summary_max_bytes` on a step without a mutation report fails validation before model
 dispatch. A one-task batch counts its top-level value as that task's own. `max_output_bytes`
-separately limits the returned preview, not the stored summary.
+separately limits the returned result, not the stored summary.
+
+The result a dispatch call or `monitor(mode="collect")` returns to the model is compact by
+default. Each run keeps its key facts, its trust or verdict line and its evidence notices,
+without the diagnostic route and context labels, and an excerpt of its answer of at most
+2,000 bytes, cut at a line boundary when one falls in its second half. A cut answer ends
+with `[answer excerpt: <kept> of <total> bytes; the whole answer is in monitor(mode="record", run_id="<runId>")]`,
+and the record mode leads with that answer. Setting `max_output_bytes` on a dispatch call
+returns the full form instead: each run's whole answer up to its share of that many bytes in
+total, plus its route decision hash and mode.
+`monitor(mode="collect")` always returns the compact form
+([worker-evidence.ts](../../src/tools/worker-evidence.ts),
+[dispatch-runner.ts](../../src/tools/dispatch-runner.ts)).
 
 If worker output exceeds the sealed output bound, capture fails and names the
 bound rather than reporting an ambiguous JSON syntax error. If the requested

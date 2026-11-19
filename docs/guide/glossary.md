@@ -11,7 +11,8 @@ The words you meet first, each in a sentence or two, with the guide that explain
 | Session | One conversation with CLIO Coder in a project. It is saved, so you can resume it later. See [Commands and modes](commands-and-modes.md). |
 | Target (connection) | A place CLIO Coder sends prompts to: a provider account or a local model server, with its default model. Settings call it a connection. See [Configuration and targets](configuration-and-targets.md). |
 | Chat route | The target and model your main conversation uses right now. |
-| Autonomy level | How much CLIO Coder may do without you: `default` asks for approval when something is risky, `yolo` shows no approval cards. Both still ask you questions. See [Sandbox and safety](sandbox-and-safety.md). |
+| Model tier | How much scaffolding a model needs: `small`, `standard` or `frontier`. CLIO Coder guesses it from the model's window, size and catalog entry; `models.<id>.tier` sets it. Hooks and prompt templates read it. |
+| Autonomy level | How much CLIO Coder may do without you: `default` asks for approval only when the safety judge cannot decide, `yolo` shows no approval cards and refuses such a call back to the agent instead. Both still ask you questions. See [Sandbox and safety](sandbox-and-safety.md). |
 | Sandbox | An operating-system wall around shell commands and some worker runtimes. Inside it a command can write only to the project and scratch folders, and known credential files and variables are hidden from it. Typed tools, external servers and model calls are checked by separate rules. |
 | Contained | A command that runs inside the sandbox. At `default` most contained work runs without asking. |
 | Safety judge | A model that checks a risky call against what you asked for, before you are asked. It allows it, refuses it, or passes it to you. |
@@ -34,6 +35,7 @@ The words you meet first, each in a sentence or two, with the guide that explain
 | Compaction | Shortening a long conversation into a summary so it fits the model's context window. See [Context continuity](context-continuity.md). |
 | Store | A place outside your working tree for result files and datasets, shared by every checkout of the project. See [Store](store.md). |
 | Research campaign | A loop where workers try changes that improve one measured number while every check still passes. See [Research and arena](research-and-arena.md). |
+| Model campaign | One seeded project run across a roster of models with `clio-coder campaign run`, each in a fresh copy, to compare how far each gets. |
 | Arena match | The same task given to several models and graded by the same check, so you can compare the results and vote blind. |
 | Sweep | A set of run directories for one experiment, each checked on its own. See [Parameter sweeps](slurm.md#parameter-sweeps). |
 | Doctor | `clio-coder doctor`, a read-only check of your install, connections and sandbox. See [Doctor](doctor.md). |
@@ -99,8 +101,8 @@ The words you meet first, each in a sentence or two, with the guide that explain
 - **Owning Type**: `RouteCandidate` in [route-decision.ts](../../src/domains/dispatch/route-decision.ts).
 
 ### 15. Posture (Autonomy Level)
-- **Definition**: The operator-set dial, `default` or `yolo`. `default` contains the main session's shell work in an OS sandbox, runs snapshot-recoverable destructive work after a workspace snapshot, and sends what escapes containment to the safety judge before the operator is asked. `yolo` asks nothing: only the yolo floor, operator rules in an approved `.clio-coder/safety.yaml` and the run's ceilings block. Dispatched workers inherit the level through their permit, resolve their own asks through `fleet.permissions.mode`, and a read-only dispatch restricts their tools. See the [safety model](../architecture/safety-model.md#autonomy). Routing postures (`quality`, `balanced`, `latency`, `economy`) under `fleet.adaptiveRouting.postures` are a different axis that ranks candidate routes.
-- **Owning Type**: `AutonomyLevel` in [autonomy.ts](../../src/domains/safety/autonomy.ts).
+- **Definition**: The operator-set dial, `default` or `yolo`. `default` contains the main session's shell work in an OS sandbox, runs snapshot-recoverable destructive work after a workspace snapshot, and sends what escapes containment to the safety judge before the operator is asked. `yolo` never waits for the operator. By default it is contained: it admits exactly as `default` does, with the sandbox, snapshots and the safety judge, and refuses back to the model any call that would wait for a person. Unconfined `yolo` (`safety.yoloConfinement: unconfined`, accepted once) asks nothing: only the yolo floor, operator rules in an approved `.clio-coder/safety.yaml` and the run's ceilings block. Dispatched workers inherit the level through their permit, resolve their own asks through `fleet.permissions.mode`, and a read-only dispatch restricts their tools. See the [safety model](../architecture/safety-model.md#autonomy). Routing postures (`quality`, `balanced`, `latency`, `economy`) under `fleet.adaptiveRouting.postures` are a different axis that ranks candidate routes.
+- **Owning Type**: `AutonomyLevel` and `YoloConfinement` in [autonomy.ts](../../src/domains/safety/autonomy.ts).
 
 ### 16. Capability Class
 - **Definition**: The maximum permitted mutation boundary declared by an agent recipe (`read-only`, `verification`, `artifact-write`, `workspace-edit`, `orchestration`, `internal`).
@@ -139,7 +141,7 @@ The words you meet first, each in a sentence or two, with the guide that explain
 - **Owning Type**: `InteropAgentFacts` in [types.ts](../../src/domains/interop/types.ts).
 
 ### 25. noWritePaths
-- **Definition**: A damage-control path policy class that permits reads while blocking writes and deletes under every registered foreign agent directory at autonomy `default`. At `yolo` only `noWritePaths` entries in an approved `.clio-coder/safety.yaml` hold.
+- **Definition**: A damage-control path policy class that permits reads while blocking writes and deletes under every registered foreign agent directory at autonomy `default` and contained `yolo`. At unconfined `yolo` only `noWritePaths` entries in an approved `.clio-coder/safety.yaml` hold.
 - **Owning Type**: `PathPolicyKind` in [path-policy.ts](../../src/domains/safety/path-policy.ts).
 
 ### 26. Foreign Prompt Root
@@ -171,7 +173,7 @@ The words you meet first, each in a sentence or two, with the guide that explain
 - **Owning Type**: `AgentLedgerEntry` in [protocol.ts](../../src/worker/protocol.ts), stored by [agent-ledger-store.ts](../../src/domains/dispatch/agent-ledger-store.ts).
 
 ### 33. Session Ledger
-- **Definition**: The JSONL record of one session's turns, written per session. It is what `/resume`, `/fork`, and replay read.
+- **Definition**: The JSONL record of one session's turns, written per session. It is what `/resume`, `/fork`, and replay read. Its header names the session format version, 7 since 0.8.4; a format 6 session opens unchanged and is restamped to 7 when it is resumed, after which 0.8.3 refuses it.
 - **Owning Type**: `SessionEntry` in [entries.ts](../../src/domains/session/entries.ts).
 
 ### 34. Task Ledger
@@ -331,11 +333,11 @@ The words you meet first, each in a sentence or two, with the guide that explain
 - **Definition**: One discoverable unit a package or CLIO Coder itself provides: a skill, an agent, a prompt template or a playbook. A package holds components, and `clio-coder library components` reads them with their owner, origin and invocation.
 
 ### 74. Safety Judge
-- **Definition**: The model that reviews, at autonomy `default`, each main-session call that would park for an operator approval, and each ordinary worker ask under `fleet.permissions.mode: judge`. It reads only the operator's messages and the redacted call, then allows it, blocks it back to the model with a rule and a reason, or gives no verdict, which sends the call to the operator. Three consecutive or twenty total blocks in a session hand the next call to the operator. Configured by `safety.judge`.
+- **Definition**: The model that reviews, at autonomy `default` and contained `yolo`, each main-session call that would park for an operator approval, and each ordinary worker ask under `fleet.permissions.mode: judge`. It reads only the operator's messages and the redacted call, then allows it, blocks it back to the model with a rule and a reason, or gives no verdict, which sends the call to the operator. Three consecutive or twenty total blocks in a session hand the next call to the operator. Configured by `safety.judge`.
 - **Owning Type**: `SafetyJudgeSeat` and `createSafetyJudge` in [safety-judge.ts](../../src/domains/safety/safety-judge.ts).
 
 ### 75. Yolo Floor
-- **Definition**: The short list of actions blocked at every autonomy level: deleting or overwriting `/`, the home directory or a system tree, `mkfs`, `wipefs`, writes to a block device, fork bombs, writes into CLIO Coder's own config, state and trust records, and reads of its credential store. A floor block carries reason code `yolo-floor:<rule id>` and no judge or approval clears it.
+- **Definition**: The short list of actions blocked at every autonomy level: deleting or overwriting `/`, the home directory or a system tree, `mkfs`, `wipefs`, writes to a block device, fork bombs, writes into CLIO Coder's own config, data, state and cache trees, a workspace trust grant or a CLIO Coder settings, credential or trust command run from a tool call, and reads of its credential store. A floor block carries reason code `yolo-floor:<rule id>` and no judge or approval clears it.
 - **Owning Type**: `YOLO_FLOOR_RULE_IDS` in [yolo-floor.ts](../../src/domains/safety/yolo-floor.ts).
 
 ### 76. Containment
@@ -365,3 +367,15 @@ The words you meet first, each in a sentence or two, with the guide that explain
 ### 82. Arena match
 - **Definition**: One prompt run by `clio-coder arena run` on 2 to 4 target/model contenders, each in its own worktree. They are shown under blind labels in a seeded order until you vote. Standings are built from those votes and never from a model's judgment. See [Research and Arena](research-and-arena.md#arena-blind-side-by-side-comparison).
 - **Owning Type**: `ArenaMatch` in [types.ts](../../src/domains/arena/types.ts).
+
+### 83. Model tier
+- **Definition**: How much scaffolding a model needs: `small` (explicit steps, short context), `standard`, or `frontier` (terse intent, room to plan). Unless `models.<id>.tier` sets it, the tier is guessed in order: a known window under 32,768 tokens is `small`; a parameter count in the model id under 20B is `small` and 20B or more `standard`; a cloud or subscription catalog model with a window of at least 128,000 tokens is `frontier`, unless its id names a reduced variant such as `mini` or `haiku`; everything else is `standard`. Hooks and api 2 extension hooks receive it on the running `model`, and prompt templates pick per-tier `variants` and gate `turnPolicy` with it. The system prompt never reads it, so a tier change never breaks a cached prefix.
+- **Owning Type**: `ModelTier` and `defaultModelTier` in [model-tier.ts](../../src/core/model-tier.ts).
+
+### 84. Model campaign
+- **Definition**: One seeded project run by `clio-coder campaign run` across a roster of models, one entry at a time. Each entry gets a fresh copy of the fixture and its own empty data, state and cache directories, runs headless with the same `--answers` file, and reports its status, extension gates reached, refusals, loop-guard blocks, tokens and wall time. Not to be confused with a research campaign, which hill-climbs one metric.
+- **Owning Type**: `runCampaign` in [runner.ts](../../src/domains/campaign/runner.ts).
+
+### 85. Answers file
+- **Definition**: The YAML file `clio-coder run --answers <file>` reads to answer, ahead of time, the questions only the author may answer in a headless run: extension interview steps and `operator_only` `ask_user` questions. Each entry matches one question by checkpoint `id`, `header` or a `match` regular expression and gives a `choice`, a `note`, or both. A matched answer is recorded as scripted; an author question no entry matches ends the run with exit `5`. See [Exit codes](exit-codes-and-output.md#exit-code-contract).
+- **Owning Type**: `ScriptedAnswers` and `loadScriptedAnswers` in [run-answers.ts](../../src/cli/run-answers.ts).

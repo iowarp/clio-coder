@@ -48,7 +48,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `chat.modelPicker.cycleSet` | `[]` | `target/model` refs the quick-switch key cycles. | hot reload |
 | `chat.modelPicker.favorites` | `[]` | `target/model` refs pinned in `/model`. A ref that does not name an existing target is dropped. | hot reload |
 | `chat.modelPicker.recentLimit` | `12` | Integer at least 1. Recently used refs `/model` keeps. | hot reload |
-| `chat.maxOutputTokens` | `0` | Integer at least 0. Output tokens requested per turn on every target, clamped to the model's output cap and the remaining window. `0` leaves the budget to the model cap and the profile's recommendation. | next turn |
+| `chat.maxOutputTokens` | `0` | Integer at least 0. Output tokens requested per turn on every target, clamped to the model's output cap and the remaining window. `0` leaves the budget to the model cap and the profile's recommendation. Admission reserves a nonzero value in full and refuses, by name, a request the window cannot hold; see [output reserve](configuration-and-targets.md#model-profiles). | next turn |
 | `chat.prewarm` | `false` | Boolean. See above. | next turn |
 | `chat.cacheKeepalive` | `true` | Boolean. See above. | hot reload |
 | `chat.loopsUntilStopped` | `false` | Boolean. A `/loop` or model job created without a run count or a deadline runs until you stop it, as with `/loop --until-stopped`; the session cost ceiling and the loop guard still apply. An explicit `until_stopped: false` on the job tool overrides it. Read when a loop or job is created. | hot reload |
