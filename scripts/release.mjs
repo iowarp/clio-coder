@@ -5,15 +5,26 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
+import { requirePreflight } from "./preflight.mjs";
 import { isVersionBranch, tmpdirProblem } from "./release/plan.mjs";
 import { acquireLock, LockHeld } from "./release/receipt.mjs";
-import { git, releaseState, run, source, verifyCandidate } from "./release-candidate.mjs";
+import {
+	git,
+	QUALIFIED_MAJORS,
+	qualifiedOn,
+	releaseState,
+	root,
+	run,
+	source,
+	verifyCandidate,
+} from "./release-candidate.mjs";
 import {
 	api,
 	forwardedTags,
 	publicationPlan,
 	registryTags,
 	registryVersion,
+	rehearseBytes,
 	requireIntegrity,
 } from "./release-publish.mjs";
 
@@ -119,19 +130,88 @@ async function ownerPublish(receipt, plan, ask, foreground) {
 	console.log(`npm accepted ${plan.package}. The release job waits up to 40 minutes for npm to serve it.`);
 }
 
+/**
+ * Everything the release needs that can be known in seconds, checked before any build, push or
+ * CI run: the local preflight, then the two logins used at the very end. An expired npm login
+ * used to surface at the owner's publish, after local and CI qualification had both run.
+ */
+async function requireReady({ rehearse }) {
+	// A rehearsal may run from a development tree (-dev, Unreleased), so only a release takes the publish rules.
+	await requirePreflight({ release: !rehearse });
+	const answers = (command, args) => {
+		try {
+			run(command, args, { stdio: "pipe" });
+			return true;
+		} catch {
+			return false;
+		}
+	};
+	const problems = [];
+	if (!answers("gh", ["auth", "status", "--hostname", "github.com"]))
+		problems.push("gh is not authenticated for github.com; run `gh auth login`");
+	if (!rehearse && !answers("npm", ["whoami"]))
+		problems.push(
+			"npm is not logged in as the owner (`npm whoami` failed); run `npm login` so the publish cannot fail after qualification",
+		);
+	// The remote facts release.yml's preflight refuses on, read before qualification instead of after CI.
+	const commit = git("rev-parse", "HEAD");
+	const version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+	try {
+		run("git", ["fetch", "--quiet", "origin", "main"]);
+		if (!answers("git", ["merge-base", "--is-ancestor", "origin/main", commit]))
+			problems.push("origin/main is not an ancestor of the candidate; main moves only by fast-forward, so merge it first");
+		const tagged = git("ls-remote", "origin", `refs/tags/v${version}`, `refs/tags/v${version}^{}`)
+			.split("\n")
+			.filter(Boolean);
+		const tagCommit = (tagged.find((line) => line.endsWith("^{}")) ?? tagged[0])?.split(/\s/u)[0];
+		if (tagCommit && tagCommit !== commit)
+			problems.push(
+				`tag v${version} already points to ${tagCommit}; published tags are immutable, so this version cannot be released from ${commit.slice(0, 12)}`,
+			);
+	} catch (error) {
+		problems.push(`origin is unreachable: ${error.message.split("\n")[0]}`);
+	}
+	if (problems.length) throw new Error(`Not ready to release:\n${problems.map((line) => `  - ${line}`).join("\n")}`);
+}
+
+/** Read-only: what `pnpm run release` would find and do next. Needs no terminal and writes nothing. */
+async function check(values) {
+	await requireReady(values);
+	const commit = git("rev-parse", "HEAD");
+	const directory = join(releaseState(), `c-${commit.slice(0, 12)}`);
+	const local = QUALIFIED_MAJORS.filter((major) => qualifiedOn(directory, commit, major));
+	const qualification = await recentRun("ci.yml", undefined, commit);
+	console.log(
+		`Local qualification of ${commit.slice(0, 12)}: ${local.length === QUALIFIED_MAJORS.length ? "passed on Node 22 and 24, reused" : `not done${local.length ? ` (only Node ${local.join(", ")})` : ""}; the release runs it before any push`}`,
+	);
+	console.log(
+		`CI qualification: ${qualification ? `${qualification.conclusion ?? qualification.status} ${qualification.html_url}` : "none for this commit; the release pushes and dispatches it after local qualification"}`,
+	);
+	console.log("Ready: pnpm run release");
+}
+
 async function main() {
 	const { values } = parseArgs({
 		args: process.argv.slice(2).filter((argument) => argument !== "--"),
-		options: { rehearse: { type: "boolean" }, platforms: { type: "boolean" }, help: { type: "boolean" } },
+		options: {
+			rehearse: { type: "boolean" },
+			platforms: { type: "boolean" },
+			check: { type: "boolean" },
+			help: { type: "boolean" },
+		},
 	});
 	if (values.help) {
 		console.log(
-			"pnpm run release [-- --platforms]\npnpm run release:rehearse [-- --platforms]\nInteractive qualification, owner npm publication, and release dispatch. The release environment requires the owner's final approval.\nRehearsal uses a temporary rehearse/* branch and makes no package, tag, main, or site changes.",
+			"pnpm run release [-- --platforms]\npnpm run release -- --check     read-only readiness report; needs no terminal\npnpm run release:rehearse [-- --platforms]\nInteractive qualification, owner npm publication, and release dispatch. The release environment requires the owner's final approval.\nRehearsal uses a temporary rehearse/* branch and makes no package, tag, main, or site changes.",
 		);
 		return;
 	}
+	if (values.check) return check(values);
 	if (!process.stdin.isTTY || !process.stdout.isTTY)
-		throw new Error("Run this interactive command in a visible terminal.");
+		throw new Error(
+			"Run this interactive command in a visible terminal. `pnpm run release -- --check` reports readiness without one.",
+		);
+	await requireReady(values);
 	const prompt = createInterface({ input: process.stdin, output: process.stdout });
 	// Remote writes need the typed phrase, so a stray "y" in a busy terminal cannot publish.
 	const ask = async (description, phrase) => {
@@ -185,8 +265,9 @@ async function main() {
 			qualification = api(`repos/${repository}/actions/runs/${qualification.id}`);
 		}
 		if (qualification?.conclusion !== "success" || values.rehearse) {
-			await ask(`Qualify ${branch} at ${commit} locally before pushing. Successful qualification is reused on retries.`);
-			run(process.execPath, ["scripts/release-candidate.mjs", "qualify"]);
+			// Local work only, so it needs no confirmation; nothing is pushed until it passes.
+			console.log(`Qualifying ${branch} at ${commit} locally before any push. A passed qualification is reused.`);
+			run(process.execPath, ["scripts/release-candidate.mjs", "qualify", "--skip-preflight"]);
 			if (values.rehearse) {
 				const rehearsal = `rehearse/${branch}-${randomBytes(3).toString("hex")}`;
 				await ask(
@@ -256,6 +337,9 @@ async function main() {
 		]);
 		const candidate = verifyCandidate(scratchDirectory, commit);
 		const plan = publicationPlan(candidate, branch);
+		// The rehearsal's publication check, on the bytes about to be published: npm's own dry run of the
+		// qualified tarball under the release's dist-tag. It writes nothing and needs no rehearsal run.
+		await rehearseBytes(scratchDirectory, commit, branch);
 		await ownerPublish(candidate, plan, ask, foreground);
 		await ask(
 			"Request the owner's final GitHub approval for the GitHub release/tag, main, website, and branch cleanup? Review the receipt above first.",

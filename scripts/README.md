@@ -24,9 +24,10 @@ named in `release-manifest.json` also ship in the npm package.
 | `pnpm install:local --dry-run` | Preview checkout installation. Actual installation can build, replace the launcher and run local repair. |
 | `sh scripts/install.sh --dry-run` | Preview the Unix managed installer, which accepts Clio 0.6.0 or newer. Actual installation downloads and activates a package. |
 | `pnpm release:readiness` | Check public versions, documentation provenance, media, the Windows launcher pins and an isolated website build. |
-| `pnpm ci` / `pnpm ci:release` | Qualify one candidate package and website artifact; reuse qualification for the same clean commit. |
+| `pnpm preflight` | Every release check that needs no build, in about ten seconds: versions, changelog and notes, the readiness checks above, the size budgets the source tree decides, and the tools qualification needs. `-- --release` adds the publish rules. Qualification and `pnpm release` run it first. |
+| `pnpm ci` / `pnpm ci:release` | Qualify one candidate package and website artifact on Node 22 and 24 with the steps, time zone, locale and pinned `rg` and `fd` (`ci-tools.mjs`) that CI uses; reuse qualification for the same clean commit. |
 | `pnpm release:rehearse` | Exercise qualification/publication checks without publishing a package or release. Uses a temporary remote branch with explicit interactive approval. |
-| `pnpm release` | Qualify, publish npm as the owner, request protected GitHub publication, then offer owner dist-tag forwarding and local cleanup. |
+| `pnpm release` | Refuse in seconds when the tree, the tools or the GitHub and npm logins are not ready; then qualify locally before any push, publish npm as the owner, request protected GitHub publication, and offer owner dist-tag forwarding and local cleanup. `-- --check` prints the readiness report without a terminal and writes nothing. |
 | `pnpm eval:prompts -- --target <t> --model <m>` / `pnpm eval:prompts:selftest` | Score the main-agent prompt on harness-use tasks from each run's event stream (see `prompt-eval/README.md`), or check the scorers against recorded runs. Calls the model; writes results under `TMPDIR`. Explicit operator use only. |
 | `node --import tsx scripts/decision-probe.ts <fixture> --engine <name>` | Calibrate a System One binding against labeled fixtures. Calls the selected engine; reports results to stdout/stderr without changing settings. Explicit operator use only. |
 

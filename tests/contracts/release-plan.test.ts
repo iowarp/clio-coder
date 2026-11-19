@@ -12,6 +12,9 @@ const receiptModule = "../../scripts/release/receipt.mjs";
 const nextModule = "../../scripts/release/next.mjs";
 const publishModule = "../../scripts/release-publish.mjs";
 const candidateModule = "../../scripts/release-candidate.mjs";
+const preflightModule = "../../scripts/preflight.mjs";
+const budgetsModule = "../../scripts/release-budgets.mjs";
+const gateEnvModule = "../../scripts/gate-env.mjs";
 const commit = "a".repeat(40);
 
 type Facts = Record<string, unknown>;
@@ -371,7 +374,65 @@ describe("release ownership", () => {
 	});
 });
 
+describe("release preflight", () => {
+	const changelog = (heading: string, notes = "- A change.") =>
+		`# Changelog\n\n## ${heading}\n\n${notes}\n\n## 0.7.0 - 2026-01-01\n`;
+	const input = { version: "0.7.1", guiVersion: "0.7.1", registryVersion: "0.7.1", release: true };
+
+	it("refuses before any build what the publisher refuses after CI", async () => {
+		const { versionProblems } = await import(preflightModule);
+		deepStrictEqual(versionProblems({ ...input, changelog: changelog("0.7.1 - 2026-02-03") }), []);
+		ok(/Unreleased/u.test(versionProblems({ ...input, changelog: changelog("Unreleased") }).join("\n")));
+		ok(/no notes/u.test(versionProblems({ ...input, changelog: changelog("0.7.1 - 2026-02-03", "") }).join("\n")));
+		ok(
+			/versions disagree/u.test(
+				versionProblems({ ...input, guiVersion: "0.7.0", changelog: changelog("0.7.1 - 2026-02-03") })[0],
+			),
+		);
+		const long = versionProblems({ ...input, changelog: changelog("0.7.1 - 2026-02-03", "x".repeat(125_000)) });
+		ok(/GitHub accepts 125000/u.test(long.join("\n")), "notes GitHub would refuse fail before qualification");
+		// A development tree keeps Unreleased notes and still qualifies.
+		deepStrictEqual(versionProblems({ ...input, release: false, changelog: changelog("Unreleased", "") }), []);
+	});
+
+	it("judges a source-decided size class before the build and names one that is nearly full", async () => {
+		const { classifySizes, SIZE_BUDGETS } = await import(budgetsModule);
+		const docs = SIZE_BUDGETS.find((budget: { class: string }) => budget.class === "docs").maxBytes;
+		const sized = (size: number) => classifySizes([{ path: "docs/guide/a.md", size }], { only: ["docs"] });
+		deepStrictEqual([sized(1).errors, sized(1).warnings], [[], []]);
+		strictEqual(sized(docs + 1).errors.length, 1);
+		strictEqual(sized(docs - 1).warnings.length, 1);
+		// Built classes are not judged from a tree that has no build yet.
+		deepStrictEqual(classifySizes([{ path: "dist/cli/index.js", size: 10 ** 9 }], { only: ["docs"] }).errors, []);
+	});
+
+	it("gives every gate process one zone and locale, with a named override for sweeps", async () => {
+		const { pinGateEnv } = await import(gateEnvModule);
+		deepStrictEqual(
+			pinGateEnv({ TZ: "America/Chicago", LANG: "de_DE.UTF-8", LANGUAGE: "de", LC_TIME: "de_DE" }, "linux"),
+			{
+				TZ: "UTC",
+				LANG: "C.UTF-8",
+				LC_ALL: "C.UTF-8",
+			},
+		);
+		strictEqual(pinGateEnv({ CLIO_CODER_TEST_TZ: "Pacific/Kiritimati" }, "linux").TZ, "Pacific/Kiritimati");
+		deepStrictEqual(pinGateEnv({ LANG: "de_DE.UTF-8" }, "win32"), { TZ: "UTC", LANG: "de_DE.UTF-8" });
+	});
+});
+
 describe("release workflows", () => {
+	it("keeps package mirrors off the test path and hands both test jobs the pinned search tools", () => {
+		const workflow = parse(readFileSync(".github/workflows/ci.yml", "utf8"));
+		type Step = { run?: string; uses?: string; with?: Record<string, string> };
+		ok(workflow.jobs.prepare.steps.some((step: Step) => step.run?.includes("scripts/ci-tools.mjs")));
+		for (const key of ["ci", "runtime-compatibility"]) {
+			const steps: Step[] = workflow.jobs[key].steps;
+			ok(!steps.some((step) => /apt-get|sudo/u.test(step.run ?? "")), `${key} installs nothing at test time`);
+			ok(steps.some((step) => step.with?.name === "search-tools" && step.with.path === ".git/clio-release/tools"));
+		}
+	});
+
 	it("tests the candidate on Node 24 as well as Node 22", () => {
 		const workflow = parse(readFileSync(".github/workflows/ci.yml", "utf8"));
 		const steps: Array<{ run?: string; with?: Record<string, string> }> = workflow.jobs["runtime-compatibility"].steps;
