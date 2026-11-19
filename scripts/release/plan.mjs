@@ -5,6 +5,9 @@
  */
 import { dirname, join, resolve } from "node:path";
 
+/** GitHub refuses a release body longer than this many characters. */
+export const RELEASE_BODY_LIMIT = 125_000;
+
 /** The 107-character socket limit leaves room for at most this much TMPDIR. */
 export const MAX_TMPDIR_LENGTH = 40;
 

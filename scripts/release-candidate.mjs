@@ -1,17 +1,8 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-	appendFileSync,
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	readdirSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -19,6 +10,8 @@ import { runTests } from "./ci-tests.mjs";
 import { ensureSearchTools, withSearchTools } from "./ci-tools.mjs";
 import { pinGateEnv } from "./gate-env.mjs";
 import { pnpmArgv } from "./pnpm.mjs";
+import { requirePreflight } from "./preflight.mjs";
+import { nodeBinary, QUALIFIED_MAJORS } from "./release/node-majors.mjs";
 import { tmpdirProblem } from "./release/plan.mjs";
 import { acquireLock } from "./release/receipt.mjs";
 import { creditsSection } from "./report-credits.mjs";
@@ -125,10 +118,7 @@ export async function prepare(directory, credits, { preflighted = false } = {}) 
 	const pkg = json(join(root, "package.json"));
 	const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
 	// Versions, changelog, website pins, docs snapshot and source size budgets, before the minutes below.
-	if (!preflighted) {
-		const { requirePreflight } = await import("./preflight.mjs");
-		await requirePreflight({ release: false, tools: false });
-	}
+	if (!preflighted) await requirePreflight({ release: false, tools: false });
 	mkdirSync(directory, { recursive: true });
 	rmSync(join(directory, "candidate.json"), { force: true });
 	// The checks read src/, tests/ and apps/ and never dist/ (gitignored, outside every tsconfig and biome
@@ -267,29 +257,7 @@ export function releaseState() {
 	return join(git("rev-parse", "--path-format=absolute", "--git-common-dir"), "clio-release");
 }
 
-export const QUALIFIED_MAJORS = ["24", "22"];
-
-/** The Node binary for one major: an explicit path, this process, or the newest nvm install. */
-export function nodeBinary(major, explicit) {
-	const binary = explicit ?? (process.versions.node.split(".")[0] === major ? process.execPath : nvmNode(major));
-	if (!binary) throw new Error(`Qualification needs Node ${major}; pass --node${major} <path to node>.`);
-	const version = run(binary, ["--version"], { encoding: "utf8", stdio: "pipe" }).trim();
-	if (!version.startsWith(`v${major}.`)) throw new Error(`${binary} is ${version}, not Node ${major}.`);
-	return binary;
-}
-
-function nvmNode(major) {
-	const base = join(homedir(), ".nvm", "versions", "node");
-	if (!existsSync(base)) return undefined;
-	const numeric = (name) => name.slice(1).split(".").map(Number);
-	const newest = readdirSync(base)
-		.filter((name) => name.startsWith(`v${major}.`))
-		.sort((a, b) => {
-			const [x, y] = [numeric(a), numeric(b)];
-			return y[1] - x[1] || y[2] - x[2];
-		})[0];
-	return newest === undefined ? undefined : join(base, newest, "bin", "node");
-}
+export { nodeBinary, QUALIFIED_MAJORS };
 
 /** True when this candidate passed tests and the install boot on one Node major. */
 export function qualifiedOn(directory, commit, major) {
@@ -325,10 +293,7 @@ async function qualify(values) {
 	if (problem) throw new Error(problem);
 	const commit = source();
 	// Seconds of checks before worktrees, installs, a build and two test legs.
-	if (!values["skip-preflight"]) {
-		const { requirePreflight } = await import("./preflight.mjs");
-		await requirePreflight({ release: false });
-	}
+	if (!values["skip-preflight"]) await requirePreflight({ release: false });
 	const state = resolve(values.state ?? releaseState());
 	const directory = resolve(values.directory ?? join(state, `c-${commit.slice(0, 12)}`));
 	const nodes = Object.fromEntries(QUALIFIED_MAJORS.map((major) => [major, nodeBinary(major, values[`node${major}`])]));

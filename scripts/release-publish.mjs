@@ -15,13 +15,11 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { draftAction, isVersionBranch, toolingOnly } from "./release/plan.mjs";
+import { draftAction, isVersionBranch, RELEASE_BODY_LIMIT, toolingOnly } from "./release/plan.mjs";
 import { git, installers, QUALIFICATION_TEST_BUDGET, root, run, verifyCandidate } from "./release-candidate.mjs";
 import { DEV_VERSION, publishTagErrors, releaseVersionErrors, snapshotVersion } from "./release-version-policy.mjs";
 
 const repository = "iowarp/clio-coder";
-// GitHub refuses a release body longer than this many characters.
-export const RELEASE_BODY_LIMIT = 125_000;
 const NPM_WAIT_MINUTES = 40;
 export function publicationPlan(receipt, branch, mode = "release") {
 	if (!isVersionBranch(branch)) throw new Error("Public releases must come from a version branch such as v062.");

@@ -19,10 +19,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
 import { pnpmCommand } from "./pnpm.mjs";
-import { isVersionBranch, tmpdirProblem } from "./release/plan.mjs";
+import { nodeBinary, QUALIFIED_MAJORS } from "./release/node-majors.mjs";
+import { isVersionBranch, RELEASE_BODY_LIMIT, tmpdirProblem } from "./release/plan.mjs";
 import { classifySizes } from "./release-budgets.mjs";
-import { nodeBinary, QUALIFIED_MAJORS } from "./release-candidate.mjs";
-import { RELEASE_BODY_LIMIT } from "./release-publish.mjs";
 import { DEV_VERSION, publishTagErrors, releaseVersionErrors } from "./release-version-policy.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
