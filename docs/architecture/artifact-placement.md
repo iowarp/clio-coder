@@ -48,7 +48,6 @@ Markdown.
 | Script runs | `.clio-coder/runs/<runId>/` | Human transient and provenance |
 | Tool-result and harness scratch | XDG state `scratch/`, with tool offloads grouped by session | Agent-to-agent |
 | Run evidence | XDG state `telemetry/runs/<runId>/`, the run's sealed telemetry scope | Human transient (`clio-coder evidence`) |
-| Session evidence bundles | XDG data `evidence/` | Human transient (`clio-coder evidence`) |
 | Approved memory | XDG data `memory/records.json` | Human transient (`clio-coder memory`) |
 | Session ledgers | XDG state `sessions/` | Agent-to-agent |
 | Telemetry journals, objects and seals | XDG state `telemetry/` | Human transient (`clio-coder telemetry`) |
@@ -94,7 +93,6 @@ problem.
 | Path | Contents |
 | --- | --- |
 | `memory/records.json` | Reviewed long-term memory; see [evidence-and-memory.md](evidence-and-memory.md) |
-| `evidence/session-<sessionId>/` | Session evidence bundles |
 | `store/backend.json`, `store/projects/<key>/` | `backend.json` records a selected clio-core backend; without it the store is local. `projects/<key>/` is the project store behind the `store` tool, written owner-only (`0600` files, `0700` directories) and keyed by the first 16 hex of the SHA-256 of the main checkout's real path: `tags/<tag>/` with each tag's `blobs/` and records, and `locks/`, the cross-process lock files (`<sha256 prefix>.lock`, created exclusively) that hold one blob or tag record across a write; a lock whose owner died on this host, or older than ten minutes, is taken over ([lock.ts](../../src/domains/store/lock.ts)) |
 | `tools/<id>/<version>/<binary>` | Pinned external programs installed by `clio-coder tools install`, such as `cliamp`. The version is part of the path, so a pin bump installs beside the old copy. |
 
@@ -111,7 +109,7 @@ problem.
 | `dispatch-verification-base/<key>.json` | Host verification's base replays of failing whole-repo checks, one per base commit and check (newest 64) |
 | `settings-changes.jsonl` | One line per settings change `configure_clio` saved after operator approval: time, session, path and the changed `path: old → new` lines; never a secret ([configure-clio.ts](../../src/tools/configure-clio.ts)) |
 | `handbooks/<key>/` | The handbook compile of another repository a run worked in (`<hash>.json`, one per input set) and its verification `ledger.json`. `<key>` is the first 16 hex characters of the SHA-256 of that repository's real path, so nothing is written into it ([sister-repository.ts](../../src/domains/context/sister-repository.ts)) |
-| `claims/<sha256(project root)>.jsonl` | The append-only claims log of one project, read by `clio-coder claims`. It holds six line types: `claim` (a judged reproduce or numeric-compare verdict with its conditions), `edge`, `regression`, `hypothesis`, `check-start` and `hypothesis-test` ([store.ts](../../src/domains/claims/store.ts)). The project root is the realpath of the repository root, so every subdirectory shares one log. A line over 64 KiB is never written, and on read it counts as unreadable without being parsed. |
+| `claims/<sha256(project root)>.jsonl` | The append-only claims log of one project, read by `clio-coder claims`. It holds eight line types: `claim` (a judged reproduce or numeric-compare verdict with its conditions), `edge`, `regression`, `dispute`, `import`, `hypothesis`, `check-start` and `hypothesis-test` ([store.ts](../../src/domains/claims/store.ts)). The project root is the realpath of the repository root, so every subdirectory shares one log. A line over 64 KiB is never written, and on read it counts as unreadable without being parsed. |
 | `memory/banks/<sessionId>.json` | Same-session task-bank snapshot, consumed on resume; newest 64 retained ([task-bank-store.ts](../../src/domains/memory/task-bank-store.ts)) |
 | `memory/observations/<sessionId>/` | Source-linked continuity notes of one session, one immutable JSON batch per file (at most 64 read), that compaction can offer in place of raw history ([observation-store.ts](../../src/domains/memory/observation-store.ts)) |
 | `memory/history-candidates/` | Lesson candidates saved for filing that an interrupted process or a failed store write left pending; a later process replays and removes them ([lesson-feedback.ts](../../src/domains/memory/lesson-feedback.ts)) |
@@ -258,7 +256,7 @@ Review the forced path before committing it.
 Hiding transient output from the working tree must not mean losing it.
 
 - `.clio-coder/artifacts/` is a plain directory; open it.
-- `clio-coder evidence` lists and inspects evidence bundles.
+- `clio-coder evidence` lists and inspects run evidence from the sealed run scopes.
 - `clio-coder telemetry` reads, verifies and shares the telemetry journals.
 - `clio-coder memory` lists proposed and approved memory.
 - `clio-coder paths` locates every XDG root.
