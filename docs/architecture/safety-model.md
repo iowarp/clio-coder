@@ -401,7 +401,7 @@ Some trees outside the workspace are readable without an ask because CLIO Coder 
 
 ### Damage-control rules
 
-Rules live in [damage-control-rules.yaml](../../damage-control-rules.yaml) and compile at load. A rule either blocks or asks, and a rule match is judged against each command a shell string would run, not only the string as a whole.
+Rules live in the single `base` pack of [damage-control-rules.yaml](../../damage-control-rules.yaml), which one cached loader ([rule-pack-loader.ts](../../src/domains/safety/rule-pack-loader.ts)) reads and compiles on first use. A rule either blocks or asks, and a rule match is judged against each command a shell string would run, not only the string as a whole.
 
 Hard blocks include `rm` of `/`, the home directory or everything in either, `sudo rm`, `rmdir --ignore-fail-on-non-empty`, `find -delete`, `rsync --delete`, `shred`, `chmod 777`, recursive `chmod` on system roots, recursive `chown` to root, `dd` to a device, `mkfs`, fork bombs, `kill -9 -1`, `killall -9`, `pkill -9`, clearing shell history, force pushes (`--force`, `-f` and `+` refspecs), `git reset --hard`, forced `git clean` without a preview flag, `git stash clear`, `git reflog expire`, `git gc --prune=now`, `git filter-branch`, `curl` or `wget` piped to a shell, writes to system roots through redirects or `tee`, cloud deletion commands (AWS, gcloud, Firebase, Vercel, Netlify, Wrangler), and SQL `DROP`, `TRUNCATE` and `DELETE` without a `WHERE`.
 
@@ -639,6 +639,8 @@ Each `tool.decided` record carries the decision's `reasonCode`. The autonomy red
 
 The safety judge also journals its own `safety.judged` records, and an unattended card resolution is an `approval.resolved` record with `decidedBy: unattended`.
 
+A tool guard that holds back a call admission already passed, such as the loop guard (`guard.loop`) or a protected-artifact guard, re-shapes the decision as a block under reason code `guard_block` ([registry.ts](../../src/tools/registry.ts)). A run record keeps the two kinds apart: `safety.decisions.blocked` and `safety.blockedAttempts` count safety refusals only, `safety.decisions.guardBlocked` and `safety.guardBlockedAttempts` count guard holds, and asks the run refused because nobody could answer them count under `safety.decisions.permissionRequested` and `safety.permissionRequestedAttempts` ([types.ts](../../src/domains/dispatch/types.ts)). Records written before the guard and permission lists existed keep those calls in `blockedAttempts`, and a record without `guardBlocked` counts guard holds under `blocked`.
+
 ## Platform limits
 
 - **Windows** has no sandbox backend, so nothing is contained there and `default` keeps the uncontained rails: recognized commands run and the judge reviews the rest. The `bash` tool resolves Git Bash, the first `bash.exe` on `PATH` and then the standard Git for Windows locations, and never the WSL launcher under the system directory or `WindowsApps` ([bash-shell.ts](../../src/core/bash-shell.ts)). With no usable bash the tool is not offered, `find` and `ls` stay attached, and dispatch admission drops `bash` so worker tool signatures still match. Yolo is never refused as root there.
@@ -705,7 +707,8 @@ Defaults come from `DEFAULT_SETTINGS` in [defaults.ts](../../src/core/defaults.t
 | Worker permit | [worker-permit.ts](../../src/domains/safety/worker-permit.ts) | `resolveWorkerPermit` |
 | Worker grants and the judge route | [grant-authority.ts](../../src/domains/dispatch/grant-authority.ts) | `evaluateMainGrant`, `evaluateJudgedGrant`, `effectiveWorkerPermissionMode` |
 | Tool admission | [registry.ts](../../src/tools/registry.ts) | `createRegistry` |
-| Damage-control rules | [damage-control.ts](../../src/domains/safety/damage-control.ts) | `match` |
+| Damage-control rules | [damage-control.ts](../../src/domains/safety/damage-control.ts), [rule-pack-loader.ts](../../src/domains/safety/rule-pack-loader.ts) | `match`, `getCachedBaseRuleset` |
+| Safety decision contract | [contract.ts](../../src/domains/safety/contract.ts) | `toSafetyDecision` |
 | Project policy | [project-policy.ts](../../src/domains/safety/project-policy.ts) | `loadProjectSafetyPolicy` |
 | Project trust | [workspace-trust.ts](../../src/core/workspace-trust.ts), [config-trust.ts](../../src/cli/config-trust.ts) | `captureProjectSurface`, `runConfigTrustCommand` |
 | Read scope checks | [read-scope.ts](../../src/domains/safety/read-scope.ts) | `readScopeEscape`, `readScopeSpellings` |
