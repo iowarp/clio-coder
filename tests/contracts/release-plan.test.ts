@@ -429,7 +429,9 @@ describe("release workflows", () => {
 		for (const key of ["ci", "runtime-compatibility"]) {
 			const steps: Step[] = workflow.jobs[key].steps;
 			ok(!steps.some((step) => /apt-get|sudo/u.test(step.run ?? "")), `${key} installs nothing at test time`);
-			ok(steps.some((step) => step.with?.name === "search-tools" && step.with.path === ".git/clio-release/tools"));
+			ok(
+				steps.some((step) => step.with?.name === "search-tools" && step.with.path === `\${{ runner.temp }}/search-tools`),
+			);
 		}
 	});
 

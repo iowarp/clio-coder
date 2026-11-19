@@ -204,7 +204,8 @@ export async function testCandidate(directory, commit, results = "test-results.j
 	writeFileSync(join(root, "dist/metafile-esm.json"), readFileSync(join(directory, "metafile-esm.json")));
 	process.env.CLIO_CODER_RELEASE_TARBALL = receipt.tarball;
 	// The same rg and fd on every machine: a missing one skips the search contracts without failing.
-	const tools = await ensureSearchTools(join(releaseState(), "tools"));
+	// Kept beside the candidate: under the release state locally, under the runner's scratch in CI.
+	const tools = await ensureSearchTools(join(dirname(resolve(directory)), "search-tools"));
 	process.env.PATH = withSearchTools(process.env, tools).PATH;
 	const tiers = ["core", "gui", "package"];
 	const skipped = {};

@@ -121,7 +121,7 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: search-tools
-          path: .git/clio-release/tools
+          path: ${{ runner.temp }}/search-tools
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: candidate-${{ inputs.sha }}
@@ -164,7 +164,7 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: search-tools
-          path: .git/clio-release/tools
+          path: ${{ runner.temp }}/search-tools
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: candidate-${{ inputs.sha }}
