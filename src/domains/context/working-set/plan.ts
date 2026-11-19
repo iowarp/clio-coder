@@ -45,11 +45,7 @@ export interface FoldPlanInput {
 }
 
 /** S0's part of a plan, for the stage entry the checkpoint writes. */
-export type SupersededOutcome =
-	| { outcome: "none" }
-	| { outcome: "held"; reason: "below_floor"; bytes: number }
-	| { outcome: "dropped"; reason: "no_gain"; bytes: number }
-	| { outcome: "planned"; items: number; bytes: number };
+export type SupersededOutcome = { outcome: "none" | "held" | "dropped" } | { outcome: "planned"; items: number };
 
 export interface FoldPlan {
 	plan: EvictionPlan | null;
@@ -89,15 +85,14 @@ export function planFold(input: FoldPlanInput): FoldPlan {
 		policy === null ? null : (input.planner ?? planEviction)(policy, policyInput);
 	const visible = new Set(policyInput.entries.map((entry) => entry.turnId));
 	const selected = input.superseded.filter((candidate) => visible.has(candidate.ref.entry));
-	const bytes = supersededBytes(selected);
 	const alone = (superseded: SupersededOutcome): FoldPlan => {
 		const plan = planS1();
 		return { plan, superseded, structural: plan !== null };
 	};
 	if (selected.length === 0) return alone({ outcome: "none" });
-	if (bytes < SUPERSEDED_FLOOR_BYTES) return alone({ outcome: "held", reason: "below_floor", bytes });
+	if (supersededBytes(selected) < SUPERSEDED_FLOOR_BYTES) return alone({ outcome: "held" });
 	const first = planSelection(SUPERSEDED_POLICY_ID, selected, policyInput);
-	if (first === null) return alone({ outcome: "dropped", reason: "no_gain", bytes });
+	if (first === null) return alone({ outcome: "dropped" });
 	let structural: ReadonlyArray<EvictionCandidate> = [];
 	if (policy !== null) {
 		const after: PolicyInput = {
@@ -124,12 +119,10 @@ export function planFold(input: FoldPlanInput): FoldPlan {
 		return candidate === undefined ? [] : [candidate];
 	});
 	const covered = kept.every((candidate) => !policyInput.view.evicted.has(candidate.by) && !out.has(candidate.by));
-	const keptBytes = supersededBytes(kept);
-	if (plan === null || !covered || keptBytes < SUPERSEDED_FLOOR_BYTES)
-		return alone({ outcome: "dropped", reason: "no_gain", bytes });
+	if (plan === null || !covered || supersededBytes(kept) < SUPERSEDED_FLOOR_BYTES) return alone({ outcome: "dropped" });
 	return {
 		plan,
-		superseded: { outcome: "planned", items: kept.length, bytes: keptBytes },
+		superseded: { outcome: "planned", items: kept.length },
 		structural: kept.length < items.length,
 	};
 }

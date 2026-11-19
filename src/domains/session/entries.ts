@@ -181,6 +181,7 @@ export interface HostInsertRecord {
 	elements: AgentMessage[];
 	place: HostInsertPlace;
 	replaces?: string[];
+	/** The record a reissue replaced, on older format 7 records. No longer written, and nothing reads it. */
 	reissueOf?: string;
 	restoration?: HostInsertRestoration;
 }
@@ -804,7 +805,7 @@ export interface ContextEvictionEntry extends BaseSessionEntry {
 	/** Used/window ratio that fired the event; null for operator-triggered events. */
 	pressureBefore: number | null;
 	snapshotIdBefore: string | null;
-	/** The route the stage ran under (format 7). Render never reads it. */
+	/** The route the stage ran under, on older format 7 records. No longer written, and nothing reads it. */
 	route?: EvictionRoute;
 	/** What the commit left behind when a live anchor existed (format 7). */
 	anchor?: EvictionAnchor;

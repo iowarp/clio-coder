@@ -31,13 +31,7 @@ import type { ContextCompactionVerdict } from "../domains/session/compaction/aut
 import { createTokenEstimator } from "../domains/session/compaction/tokens.js";
 import type { ContextSnapshot } from "../domains/session/context-accounting.js";
 import type { SessionContract } from "../domains/session/contract.js";
-import type {
-	CompactionTrigger,
-	EvictionAnchor,
-	EvictionRoute,
-	EvictionTrigger,
-	SessionEntry,
-} from "../domains/session/entries.js";
+import type { CompactionTrigger, EvictionAnchor, EvictionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { activePath } from "../domains/session/tree/active-path.js";
 import { replaceEngineMessages } from "../engine/agent.js";
 import { renderEvictionSkipLine } from "./compaction-lines.js";
@@ -363,11 +357,6 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		};
 	};
 
-	const evictionRoute = (agentRuntime: AgentRuntime): EvictionRoute | undefined => {
-		const { modelTier, promptCaching } = agentRuntime.runtimeResolution;
-		return modelTier !== undefined && promptCaching !== undefined ? { tier: modelTier, promptCaching } : undefined;
-	};
-
 	interface CommitInput {
 		agentRuntime: AgentRuntime;
 		decision: FoldDecision;
@@ -383,7 +372,6 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		originSession: string | undefined;
 		pendingUserText: string | undefined;
 		handoff: ContinuityReductionHooks | undefined;
-		route: EvictionRoute | undefined;
 		notice: string;
 	}
 
@@ -402,7 +390,6 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 					pressureBefore: input.pressureBefore,
 					snapshotIdBefore: input.beforeSnapshotId,
 				}),
-				...(input.route !== undefined ? { route: input.route } : {}),
 				...(anchor !== undefined ? { anchor } : {}),
 				// appendEntry does not infer this anchor; the interactive
 				// cursor is the leaf the next message will extend.
@@ -592,7 +579,6 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			originSession,
 			pendingUserText,
 			handoff: input.handoff,
-			route: s0Items > 0 ? evictionRoute(agentRuntime) : undefined,
 			notice: alone
 				? supersededNotice(
 						planned,
@@ -657,7 +643,6 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			originSession: input.originSession,
 			pendingUserText: input.pendingUserText,
 			handoff: input.handoff,
-			route: evictionRoute(agentRuntime),
 			notice: supersededNotice(
 				planned,
 				`${results} ${results === 1 ? "result" : "results"} this session's earlier requests stubbed kept as eviction markers`,

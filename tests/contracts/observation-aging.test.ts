@@ -219,7 +219,6 @@ it("an uncached route commits a superseded read between tool batches; the ledger
 		ok(record);
 		deepStrictEqual(rest, []);
 		strictEqual(record.policyId, "superseded-v1");
-		strictEqual(record.route?.promptCaching, false, "the record names the uncached route it was cut on");
 		strictEqual(JSON.stringify(entries).split(JSON.stringify(RECORD)).length - 1, 2, "the ledger keeps both bodies");
 		const fold = folds.find((candidate) => candidate.stages.some((stage) => stage.recordId === record.turnId));
 		ok(fold);
