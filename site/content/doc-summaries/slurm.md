@@ -47,7 +47,7 @@ The skill submits once, polls through the MCP server, and reports the outcome. I
 
 ## Choose approvals deliberately
 
-With the server declared as `slurm`, CLIO Coder classifies the `mcp_slurm__` tools by name:
+With the server declared as `slurm` in your user `mcp.yaml`, CLIO Coder classifies the `mcp_slurm__` tools by name. A project declaration gets the class you approve with `clio-coder mcp trust slurm`, and the submit and cancel confirmation applies to it as well:
 
 | Capability | Class | At `default` | At `yolo` |
 | --- | --- | --- | --- |
@@ -60,7 +60,7 @@ A `toolActionClasses` entry in `mcp.yaml` can reclassify one tool, but submissio
 
 ## Run a parameter sweep
 
-The `hpc-sweep` skill in the `hpc` plugin runs a sweep as one job array:
+The `hpc-sweep` skill in the `hpc` plugin runs a sweep as one job array by default:
 
 ```sh
 clio-coder library install plugin:hpc --project
@@ -68,4 +68,4 @@ clio-coder library install plugin:hpc --project
 
 Run `/reload library`, then `/skill hpc-sweep dry run sweeps/decay.yaml`. The sweep file names `parameters`, a `mode` (`grid` or `sample`), a run `template`, `resources`, a `concurrency` cap, and a verify `check`. The skill submits only on your word, checks each run, and writes verdicts to `sweeps/<name>/results.md`.
 
-For this release, this path was checked against fake Slurm clients only, not a live controller.
+The sweep path has been tested against simulated Slurm clients only, not a live controller.

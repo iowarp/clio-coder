@@ -25,9 +25,9 @@ Keep results out of Git with `clio-coder store put results run-042.h5`; every ch
 
 ## Old glibc, proxies, and quotas
 
-The installer picks a Node build for the host. Official builds cover Linux with glibc 2.28 or newer, macOS, and Alpine on x64. An unofficial build covers x64 hosts with glibc 2.17 to 2.27, the RHEL and CentOS 7 class. Linux arm64 with an older glibc has no build; use conda-forge Node and npm instead.
+The installer picks a Node build for the host. Official builds cover Linux with glibc 2.28 or newer, macOS, and Alpine on x64. Unofficial builds cover x64 hosts with glibc 2.17 to 2.27, the RHEL and CentOS 7 class, and Alpine on arm64. Linux arm64 with an older glibc has no build; use conda-forge Node and npm instead.
 
-Export `https_proxy` before running the installer behind a proxy. Node adds about 210 MB to a version, and the optional Claude Agent SDK is about 224 MB. The installer refuses to start with under about 732 MB free at the install root. On a small home quota, move the install root:
+Export `https_proxy` before running the installer behind a proxy. Node adds about 210 MB to a version, and the Claude Agent SDK, installed only with `--include-claude-sdk`, adds about 224 MB. The installer refuses to start with under about 732 MB free at the install root. On a small home quota, move the install root:
 
 ```sh
 curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --install-dir /project/$USER/clio-coder
@@ -41,7 +41,7 @@ A mirror without a signature file still installs on the checksum. Set `CLIO_CODE
 
 ## Airgapped sites and your own Node
 
-Point `CLIO_CODER_NODE_MIRROR` at a mirror laid out like nodejs.org/dist, `CLIO_CODER_NODE_UNOFFICIAL_MIRROR` at one for the glibc 2.17 build, and `npm_config_registry` at a registry mirror for the package's dependencies. A Node mirror can be a `file://` URL on a shared filesystem.
+Point `CLIO_CODER_NODE_MIRROR` at a mirror laid out like nodejs.org/dist, `CLIO_CODER_NODE_UNOFFICIAL_MIRROR` at one for the unofficial builds, and `npm_config_registry` at a registry mirror for the package's dependencies. A Node mirror can be a `file://` URL on a shared filesystem.
 
 If the site already provides Node 22.19 or newer, you can install with its npm instead: `npm install -g @iowarp/clio-coder`. When an older `node` comes first on `PATH`, set `CLIO_CODER_NODE` to the newer binary.
 

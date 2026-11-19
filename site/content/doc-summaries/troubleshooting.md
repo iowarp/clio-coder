@@ -61,8 +61,9 @@ Every `clio-coder` command uses the same exit codes, so a script can tell why a 
 | `0` | Success, including `--help`, `--version`, and a `--dry-run`. |
 | `1` | Operational failure: an unreachable model, unresolved doctor findings, or a worker whose changes were withheld or who did no work. |
 | `2` | Usage error: an unknown command, flag, target, or agent, or a global flag placed after the subcommand. |
-| `3` | A dispatched worker was stopped by its permission refusal limit (`permission_required`). |
-| `4` | The priced spend ceiling was reached: `safety.limits.sessionCostUsd` (5 USD by default) or `run --max-cost-usd`. |
+| `3` | A dispatched worker was stopped by its permission refusal limit (`permission_required`), or a headless yolo run ended after too many safety-judge blocks (`judge-streak`). |
+| `4` | The priced spend ceiling was reached: `safety.limits.sessionCostUsd` (5 USD by default) or `run --max-cost-usd`. A headless yolo run that reaches its autonomous tool-call, time or token cap also exits 4. |
+| `5` | `clio-coder run --answers <file.yaml>` met an author question the file does not script. |
 | `75` | An install or upgrade is busy; nothing changed, so retry later. |
 | `124` | `clio-coder run --timeout` elapsed. |
 | `141` | The reader of a `clio-coder run` stdout closed, as in `clio-coder run ... \| head -1`. |

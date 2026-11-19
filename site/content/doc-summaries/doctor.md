@@ -38,7 +38,7 @@ The first row, `chat`, says whether chat can run and what to run when it cannot.
 | --- | --- | --- |
 | `settings.yaml` | Invalid keys, named in the row | Edit those keys |
 | `credentials` | `credentials.yaml` is missing or not `0600` | `clio-coder doctor --fix` |
-| `lifecycle migrations` | Migrations are pending after an update | `clio-coder upgrade` |
+| `lifecycle migrations` | Migrations are pending after an update | `clio-coder upgrade --post-install` |
 | `connection <id>` | Missing credential or no endpoint answer | Check the target and sign-in |
 | `model <id>` | The role model is missing from a live list | Pick a listed model |
 | `external tool <id>` | A pinned helper is missing | `clio-coder tools install <id>` |
