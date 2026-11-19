@@ -526,6 +526,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - Recall resolves the output reserve at the input its batch would carry, so a second recall the next request can hold no longer returns the no-room stub.
 - A worker's first spliced request is fitted at the transport's own count, so the worker guard no longer admits a request that the local transport then refuses.
 - A prose-contract worker keeps each delivered result-contract reminder in later requests, so every tool round extends the previous request's cache prefix.
+- A working-set eviction no longer installs the memory restoration reminder again, so a session with several evictions carries it once; a summary's pending restoration is still delivered after an eviction.
 
 ## 0.8.3 - 2026-11-16
 
