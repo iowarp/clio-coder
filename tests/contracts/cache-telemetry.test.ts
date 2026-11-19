@@ -452,6 +452,10 @@ test("the receipt verifier reports each attempt kind and reconciles fold decisio
 	deepStrictEqual(decisions({}), { missing: [], duplicate: [], orphan: [] }, "reconciled by record id");
 	deepStrictEqual(decisions({ records: records.filter((record) => record !== fold) }).missing, [checkpoint.turnId]);
 	deepStrictEqual(decisions({ records: [...records, fold] }).duplicate, [checkpoint.turnId]);
+	const stages = (fold.data as { stages: Array<{ recordId?: string }> }).stages;
+	const combined = { ...fold, data: { ...(fold.data as object), stages: [...stages, ...stages] } };
+	const oneEvent = records.map((record) => (record === fold ? combined : record));
+	deepStrictEqual(decisions({ records: oneEvent }).duplicate, [], "two stages of one event name one decision");
 });
 
 test("a late verify renders a continuity note at the clock its attempt rendered it, not its own (ContextFold CF-9, F14)", {
