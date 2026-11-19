@@ -115,7 +115,7 @@ CLIO Coder 0.8.4 lets an extension-driven pipeline, such as a multi-step writing
 - Headless `observed` writes and the no-op rule read the run's own record of written paths: writes count distinct paths, a `bash` delete, `git mv` or `git rm` counts, and calls that write no workspace path (outward `web_fetch`, `configure_clio` apply, store put) no longer count.
 - Headless output lists a code check that ran and failed under `Failed checks:` and in `failed_checks=`; `Not verified:` and `not_verified=` keep only checks that never ran.
 - Calls the output limit cuts off are stated once, read as not run, and count as no call and no tool error on any surface.
-- Command `--help` text names the product CLIO Coder.
+- `--help` screens and the interactive help overlay name the product CLIO Coder.
 
 **Safety**
 
