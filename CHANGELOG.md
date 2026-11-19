@@ -515,6 +515,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - One batch of `context(scope="recall")` calls readmits recalled bodies only while they fit under the fit line, in call order; a recall past that room returns a short "not recalled: no room" stub and records no recall, so the post-tool guard no longer stops the run after a batch of recalls (ContextFold, bt-47 drv-f1r).
 - A summary that clips a large tool result to fit its request no longer tells the next turn to read it again: the clip marker and both summary templates say the assistant read the result in full (bt-47 drv-f1y).
 - A checkpoint's exact-facts block now carries each hidden read's recall ref and lists other hidden results under `refs:`, replacing the separate `<recallable-refs>` preview that a resumed model ignored (bt3 drv-f4).
+- A Copilot full reseed after a working-set rewrite keeps already-delivered host reminders in place and attaches retained image tool results at their positions, instead of dropping both.
 
 ## 0.8.3 - 2026-11-16
 
