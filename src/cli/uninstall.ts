@@ -52,7 +52,7 @@ import { printError } from "./shared.js";
 const HELP = `clio-coder uninstall [--keep-binary] [--keep-package] [--keep-config] [--keep-data] [--dry-run] [--force] [--json]
 clio-coder uninstall --inactive [--dry-run] [--force] [--json]
 
-Remove Clio Coder: the config, data, state, and cache roots, the launcher, and for
+Remove CLIO Coder: the config, data, state, and cache roots, the launcher, and for
 an install.sh install its private Node and every installed version.
 
 Per-project \`.clio-coder/\` directories sit outside those roots and are never

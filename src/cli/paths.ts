@@ -15,7 +15,7 @@ import { printError } from "./shared.js";
 
 const HELP = `clio-coder paths [--json]
 
-Print where Clio Coder lives, from this directory. Read-only: nothing is created.
+Print where CLIO Coder lives, from this directory. Read-only: nothing is created.
 This is the single source of truth for scripts; parse the --json form instead
 of re-implementing the resolution rules.
 

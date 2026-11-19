@@ -48,7 +48,7 @@ import { incompleteInstallationAdvice } from "../core/incomplete-installation.js
 import { installProxyFromEnv } from "../core/proxy-env.js";
 import { extractGlobalFlags, parseFlags, printError } from "./argv.js";
 
-const HELP = `Clio Coder command line
+const HELP = `CLIO Coder command line
 
 Coding agent for HPC and scientific-software work, part of IOWarp's CLIO ecosystem of agentic
 science. CLIO stands for Context Layer for Input/Output, named for the Greek muse of history.
@@ -58,7 +58,7 @@ Usage:
   clio-coder acp                  serve CLIO Coder as an ACP v1 agent over stdio
   clio-coder --acp                alias for clio-coder acp
   clio-coder run [flags] <task>   run one headless main-agent turn
-  clio-coder --version, -v        print the Clio Coder version
+  clio-coder --version, -v        print the CLIO Coder version
   clio-coder --api-key <key>      override the active target API key for this run
   clio-coder --no-context-files, -nc  skip main-session project context preload
   clio-coder --skill <path>       make one explicit skill available for this session, repeatable
@@ -82,7 +82,7 @@ Usage:
   clio-coder paths [--json]       print resolved config/data/cache directories
   clio-coder config inspect [--json]  inspect effective customization and provenance
   clio-coder config trust <surface>  review or approve project safety, hooks, settings, extensions, or plugins
-  clio-coder reset                recover or wipe Clio Coder state
+  clio-coder reset                recover or wipe CLIO Coder state
   clio-coder context              show project context status (CLIO-CODER.md, preload, codemap)
   clio-coder context init [--preview|--heuristic]  explore the repo and bootstrap CLIO-CODER.md and codemap
   clio-coder context refresh [--wiki]  re-index the codemap and optionally update the Markdown wiki
@@ -93,8 +93,8 @@ Usage:
   clio-coder context replay --sessions <path>...  compare working-set policies over CLIO Coder ledgers
   clio-coder context working-set --session <id|path>  inspect one session's working-set state
   clio-coder context working-set --verify <id|path>  verify each attempt against the receipt taken at send
-  clio-coder uninstall            remove Clio Coder: its state, settings and launcher
-  clio-coder upgrade              upgrade Clio Coder and run pending migrations
+  clio-coder uninstall            remove CLIO Coder: its state, settings and launcher
+  clio-coder upgrade              upgrade CLIO Coder and run pending migrations
   clio-coder gui                  open the alpha graphical application; 'gui background restart' after an upgrade
   clio-coder agents               list discovered agent recipes
   clio-coder agents validate      report every unresolved reference in the repo's recipes, skills and fleet bindings
@@ -148,7 +148,7 @@ const DEV_COMMANDS: ReadonlyArray<{ name: string; summary: string }> = [
 	{ name: "flywheel", summary: "print the maintainers' ranked backlog from shared usage" },
 ];
 
-const DEV_HELP = `Clio Coder harness instruments and power-user surfaces
+const DEV_HELP = `CLIO Coder harness instruments and power-user surfaces
 
 Usage:
 ${DEV_COMMANDS.map((entry) => `  clio-coder dev ${entry.name.padEnd(20)}${entry.summary}`).join("\n")}

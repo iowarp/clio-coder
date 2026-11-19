@@ -9,7 +9,7 @@ const HELP = `clio-coder components [list] [--json]
 clio-coder components snapshot --out <path>
 clio-coder components diff --from <snapshot-a.json> --to <snapshot-b.json> [--json]
 
-List read-only Clio Coder harness components, write a snapshot, or diff two snapshots. The bare \`clio-coder components\` form and \`clio-coder components list\` are equivalent.
+List read-only CLIO Coder harness components, write a snapshot, or diff two snapshots. The bare \`clio-coder components\` form and \`clio-coder components list\` are equivalent.
 `;
 
 interface ParsedComponentsArgs {

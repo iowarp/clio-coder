@@ -218,14 +218,17 @@ export function openHelpOverlay(
 	const topics: ListOverlayItem[] = [
 		{
 			id: "topic-learning-clio",
-			label: "learning clio & tips  Demo guidance: what it teaches, how tips retire, how to turn it off",
-			cells: { lead: "learning clio & tips", text: "Demo guidance: what it teaches, how tips retire, how to turn it off" },
+			label: "learning CLIO Coder & tips  Demo guidance: what it teaches, how tips retire, how to turn it off",
+			cells: {
+				lead: "learning CLIO Coder & tips",
+				text: "Demo guidance: what it teaches, how tips retire, how to turn it off",
+			},
 			group: "Topics",
 			detail: () => [
-				"# Learning Clio",
-				"**Ask Clio**: questions about Clio itself, such as how to switch models or what workers do, get answered from its own settings and docs.",
+				"# Learning CLIO Coder",
+				"**Ask about CLIO Coder**: questions about CLIO Coder itself, such as how to switch models or what workers do, get answered from its own settings and docs.",
 				"**Demo guidance** (on by default) teaches as you work: the launchpad, one footer tip at a time, and after some turns a `[tip]` naming a feature that would have helped that turn. A newcomer gets two post-turn tips a session, later one.",
-				"**Tips retire**: a tip stops once you use its feature or key, or after a few showings. What you have learned is kept in `harness-profile.json` in Clio's state directory; delete it to start the lessons over.",
+				"**Tips retire**: a tip stops once you use its feature or key, or after a few showings. What you have learned is kept in `harness-profile.json` in CLIO Coder's state directory; delete it to start the lessons over.",
 				`**Worth knowing**: /model or ${manager.actionLabel("clio-coder.model.select")} picks a model; /run coder <task> hands work to a background worker, and /run coder --read-only <task> one that cannot change files; /library skills browses skills, /skill <name> runs one, and /library installs more; /usage shows quota and spend; /doctor checks the install; ${manager.actionLabel("clio-coder.leader")} y switches this session to YOLO.`,
 				"**Turning it off**: Demo guidance in /settings (`interface.demo: false`) for good, or `--no-demo` for one session. The Minimal output style also stays quiet.",
 			],
@@ -237,7 +240,7 @@ export function openHelpOverlay(
 			group: "Topics",
 			detail: () => [
 				"# Keyboard model",
-				`Three rules cover every key. Ctrl edits text and talks to the terminal, as in any readline editor. Alt+letter runs a Clio action: ${(
+				`Three rules cover every key. Ctrl edits text and talks to the terminal, as in any readline editor. Alt+letter runs a CLIO Coder action: ${(
 					[
 						["clio-coder.model.select", "model"],
 						["clio-coder.library.toggle", "library"],
@@ -278,8 +281,8 @@ export function openHelpOverlay(
 			group: "Topics",
 			detail: () => [
 				"# Fleet runs & steering",
-				"**Internal helpers**: Scout and other shadow agents appear as Clio → agent cards. Minimal shows identity/status, Default adds the current action while running, and Detailed shows the full worker card. `/view` opens the complete report. Helpers remain inspectable and steerable/cancellable through this board using the same supported actions, without floating fleet cards.",
-				`**Workers dock**: in a \`--with-panes\` session ${manager.actionLabel("clio-coder.dispatchBoard.toggle")} shows the workers dashboard beside Clio and leaves the keyboard in Clio: a card per worker of this session, running ones first. In the dock, Up/Down or j/k select, Enter takes the dock over with that worker's live stream, Esc returns to the cards. q or ${manager.actionLabel("clio-coder.dispatchBoard.toggle")} in the dock hides it and hands the keyboard back; the same key from Clio shows or hides it, and twice within 0.4 s closes it. A takeover of a fleet step or a retried worker moves on to the next step or attempt when it finishes.`,
+				"**Internal helpers**: Scout and other shadow agents appear as agent cards started by CLIO Coder. Minimal shows identity/status, Default adds the current action while running, and Detailed shows the full worker card. `/view` opens the complete report. Helpers remain inspectable and steerable/cancellable through this board using the same supported actions, without floating fleet cards.",
+				`**Workers dock**: in a \`--with-panes\` session ${manager.actionLabel("clio-coder.dispatchBoard.toggle")} shows the workers dashboard beside CLIO Coder and leaves the keyboard in CLIO Coder: a card per worker of this session, running ones first. In the dock, Up/Down or j/k select, Enter takes the dock over with that worker's live stream, Esc returns to the cards. q or ${manager.actionLabel("clio-coder.dispatchBoard.toggle")} in the dock hides it and hands the keyboard back; the same key from CLIO Coder shows or hides it, and twice within 0.4 s closes it. A takeover of a fleet step or a retried worker moves on to the next step or attempt when it finishes.`,
 				`**Fleet Runs board**: /fleet, the left arrow on an empty composer, or ${manager.actionLabel("clio-coder.dispatchBoard.toggle")} in a session without panes. Use Up/Down or j/k to select a live or recent run.`,
 				"**Enter**: toggles the inline worker-progress detail on any run, and Esc folds an open detail before it closes the board.",
 				"**Watch**: press `w` on a live run in a `--with-panes` session to take the workers dock over for that run (opening it, or bringing back a hidden one, without moving the keyboard); the arrow keys then move it between runs.",
@@ -296,8 +299,8 @@ export function openHelpOverlay(
 			group: "Topics",
 			detail: () => [
 				"# Panes & files",
-				"**Where it works**: Clio's own pane host, which bare `clio-coder` opens, or any herdr pane Clio was started in. Outside herdr `/files` still works as a full-screen pick that returns to the composer; `/panes open logs|shell` do not.",
-				`**Files pane**: /files or ${manager.actionLabel("clio-coder.files.toggle")} shows Yazi and moves the keyboard into it. Yazi and the host own keys until Ctrl+Y returns selected paths and focus. The same key from Clio focus, or inside Yazi, hides the pane and hands the keyboard back: Yazi keeps running and keeps its directory, and the key brings it back. Tap it twice within 0.4 s to close the pane and end Yazi. /files hide, /files close and /files pick are the explicit forms.`,
+				"**Where it works**: CLIO Coder's own pane host, which bare `clio-coder` opens, or any herdr pane CLIO Coder was started in. Outside herdr `/files` still works as a full-screen pick that returns to the composer; `/panes open logs|shell` do not.",
+				`**Files pane**: /files or ${manager.actionLabel("clio-coder.files.toggle")} shows Yazi and moves the keyboard into it. Yazi and the host own keys until Ctrl+Y returns selected paths and focus. The same key from CLIO Coder focus, or inside Yazi, hides the pane and hands the keyboard back: Yazi keeps running and keeps its directory, and the key brings it back. Tap it twice within 0.4 s to close the pane and end Yazi. /files hide, /files close and /files pick are the explicit forms.`,
 				`**Music pane**: ${manager.actionLabel("clio-coder.music.toggle")} or /music shows or hides the focus-radio pane without taking the keyboard, and twice within 0.4 s stops it and closes it. Pressed inside the player, it hides the pane and hands the keyboard back. With integrations.music.enabled on, the pane starts hidden and silent after the first frame, so the first press only reveals it. /music on plays, /music pause silences it and keeps the pane, /music off stops and closes it, /music next skips a station, /music status says what is playing.`,
 				"**Hidden panes**: a hidden pane waits in a tab labeled `clio parked` in your herdr workspace and returns to its slot at the share you last gave it. The tab goes away when the last pane leaves it, and `/quit` closes whatever is still parked.",
 				"**Picking**: navigate, select with Space for several, then Ctrl+Y (or Enter in pick mode). The paths land in the composer as `@file` mentions and the keyboard returns to the composer.",
@@ -312,7 +315,7 @@ export function openHelpOverlay(
 			group: "Topics",
 			detail: () => [
 				"# Steering modes",
-				"While Clio is running, the key that submits a message chooses when it lands. The default is next slot.",
+				"While a turn is running, the key that submits a message chooses when it lands. The default is next slot.",
 				"**Next slot** (Enter): the message is delivered between tool batches, mid-run. The agent keeps going and reads it before its next model call.",
 				`**End of turn**: open the queue navigator (${manager.actionLabel("clio-coder.queue.open")}) and press t on a queued message; it then waits until the whole run settles. ACP clients ask for it with mode end-of-turn.`,
 				`**Send now** (${manager.actionLabel("clio-coder.message.interrupt")}): settle active work and deliver the draft as a fresh prompt; with an empty draft it flushes the queue. Queued messages stay queued for the new run. While a tool is running you are asked whether to stop it or wait for it.`,
@@ -330,7 +333,7 @@ export function openHelpOverlay(
 				"# Autonomy & safety net",
 				"**Tool surface**: which tools exist at all through registration, tool profiles, skill narrowing, and dispatch admission. " +
 					"Violations are terminal denials, never approvable.",
-				"**Safety net**: the floor (deleting or overwriting /, home or a system tree, mkfs, wipefs, block-device writes, fork bombs, writes into Clio's own state, reads of its credential store) and rules in an approved `.clio-coder/safety.yaml` block at every level; secret and protected paths block at default. " +
+				"**Safety net**: the floor (deleting or overwriting /, home or a system tree, mkfs, wipefs, block-device writes, fork bombs, writes into CLIO Coder's own state, reads of its credential store) and rules in an approved `.clio-coder/safety.yaml` block at every level; secret and protected paths block at default. " +
 					"At default, other damage-control rules ask instead of blocking.",
 				"**Mode** (`/settings`, persisted as `safety.autonomy`): default runs workspace edits, and shell commands inside an OS sandbox where the host has one, without asking. " +
 					"Commands that leave the sandbox and outward actions are first reviewed by the safety judge, larger dispatch plans ask you, and destructive workspace operations run after a snapshot `/rewind` can undo. Yolo shows no approval cards but still asks you questions; one nobody answers within `safety.unattendedAfterSeconds` takes its recommended option unless that option leaves the workspace. Contained yolo (the default) keeps default's sandbox, snapshots and judge, and refuses what would need your approval; unconfined yolo (`safety.yoloConfinement`) skips approvals and the sandbox unless `safety.sandbox` is required. " +

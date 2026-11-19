@@ -83,7 +83,7 @@ clio-coder report forget <id>
 clio-coder report selftest [--session <id>] [--transcript [N]] [--with-tool-output] [--anonymize-models]
 clio-coder report security
 
-report files a bug, a feature request or a question with Clio Coder's
+report files a bug, a feature request or a question with CLIO Coder's
 maintainers at github.com/iowarp/clio-coder. It always prints the exact title
 and body first, with what CLIO Coder masked, and the numbered list of what
 sending will do. Nothing is sent until you choose send in a terminal or

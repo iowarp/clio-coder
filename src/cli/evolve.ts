@@ -14,7 +14,7 @@ const HELP = `clio-coder evolve manifest init
 clio-coder evolve manifest validate <path>
 clio-coder evolve manifest summarize <path>
 
-Create, validate, or summarize a Clio Coder change manifest. validate and
+Create, validate, or summarize a CLIO Coder change manifest. validate and
 summarize resolve each non-empty evidenceRef (a run id) against the local run
 scopes, so a manifest that points at a run with no sealed assessment fails.
 `;

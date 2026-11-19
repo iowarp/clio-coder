@@ -3,7 +3,7 @@ import { printError } from "./argv.js";
 
 const HELP = `clio-coder version [--worker-specs | --build]
 
-Print the Clio Coder version; clio-coder --version and -v are the same. --worker-specs
+Print the CLIO Coder version; clio-coder --version and -v are the same. --worker-specs
 prints the worker spec versions this install's worker reads, space separated. --build
 prints the id of this build, or unknown for a source run.
 `;

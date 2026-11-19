@@ -11,7 +11,7 @@ import { printError } from "./shared.js";
 
 const HELP = `clio-coder reset --state|--data|--cache|--auth|--settings|--all [--dry-run] [--force] [--json]
 
-Recover or wipe Clio Coder state while keeping the clio-coder launcher installed.
+Recover or wipe CLIO Coder state while keeping the clio-coder launcher installed.
 Each level clears exactly the root (or file) it names and nothing else, then the
 empty roots are recreated so the next run has somewhere to write.
 
