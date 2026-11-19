@@ -530,6 +530,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - A tool result clipped in a summary request before any model call read it is now marked as clipped before the assistant read it, so a narrow re-read is expected. The summary templates no longer claim that every clipped result was read in full; only a result followed by an assistant message keeps the read-in-full marker.
 - On a window of 52,428 tokens or more, the turn output reserve on transports that do not clamp output at the wire (Copilot SDK, Anthropic, OpenAI Responses) is now at most a quarter of the window and never under 16,384, so a 64K window triggers compaction at 49,152 instead of 32,768 and no longer autocompacts on almost every turn. A configured chat.maxOutputTokens still reserves in full (bt-48-12).
 - A resumed or continuing turn on a route that measured its prior request is now admitted at that measured input plus a chars/3.5 count of what follows, instead of being refused on a whole-request character count that overprices sparse prose. A count carried through an eviction still uses the full conservative count (bt3 drv-rv5).
+- The GUI Usage page loads again. It failed with "Usage returned an invalid report DTO" after the CLI usage report gained step pipeline counts, which the page now shows.
 
 ## 0.8.3 - 2026-11-16
 
