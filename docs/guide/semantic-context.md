@@ -6,11 +6,11 @@ The beta starts disabled. Semantic indexing makes no embedding request or source
 
 ## Configure the model and an inbox
 
-Create a CLIO Coder target for the existing embedding route first. For example, the model may already be exposed as `mini/embeddinggemma-2-q8` through a configured LiteLLM target; this feature does not start a server or add a production port. Use the GGUF and multimodal projector SHA-256 values when available. An operator label is accepted but reported as an unverified asset identity.
+Create a CLIO Coder target for the existing embedding route first. For example, the model may already be exposed as `gateway/embeddinggemma-2-q8` through a configured LiteLLM target; this feature does not start a server or add a production port. Use the GGUF and multimodal projector SHA-256 values when available. An operator label is accepted but reported as an unverified asset identity.
 
 ```sh
 clio-coder semantic configure \
-  --target litellm --model mini/embeddinggemma-2-q8 \
+  --target litellm --model gateway/embeddinggemma-2-q8 \
   --asset-identity sha256:<gguf-sha256> \
   --projector-identity sha256:<projector-sha256> \
   --modality text --modality image --modality audio --modality mixed \
@@ -27,7 +27,7 @@ clio-coder semantic search "Which run produced the delayed oscillation?" --limit
 
 Inbox registration previews file types and estimated work before saving the path. Project inboxes are visible only in that canonical project; `--scope user` registers a global inbox. CLIO Coder honors ignore files, refuses symlinks and credential-shaped sources, and applies the project's read policy. An inbox is never inferred from arbitrary nearby folders. `refresh` is an explicit bounded job; incomplete jobs retain the last complete generation and report pending or failed pieces. An unchanged refresh reuses vectors.
 
-To permit session-scoped refresh after code map changes and at session start, add `--background` to `semantic configure`. The default is off. Background work yields to in-process foreground inference and checkpoints on interruption. Search does not wait for a refresh to finish, although local extraction still uses CPU and disk. The mini router may have only one resident model; assess chat load before enabling this option on a shared route.
+To permit session-scoped refresh after code map changes and at session start, add `--background` to `semantic configure`. The default is off. Background work yields to in-process foreground inference and checkpoints on interruption. Search does not wait for a refresh to finish, although local extraction still uses CPU and disk. A shared embedding endpoint may hold only one resident model; assess chat load before enabling this option on a shared route.
 
 ## Ask CLIO Coder
 
@@ -48,8 +48,8 @@ Supported ingestion in this beta is text/code, typed code map and wiki records, 
 ```sh
 clio-coder run --agent coder --read-only --record "Check the experiment on the worker node"
 clio-coder tools install asciinema
-clio-coder fleet nodes tools install seven asciinema
-clio-coder fleet nodes tools install seven asciinema --yes
+clio-coder fleet nodes tools install <node-id> asciinema
+clio-coder fleet nodes tools install <node-id> asciinema --yes
 ```
 
 The agent-facing dispatch tool also accepts `record: true` on a call or individual task, including SSH placement. Native workers keep their `ssh -T` NDJSON protocol; CLIO Coder writes a separate bounded asciicast v2 display stream. A recording reference appears in the dispatch result, and the redacted `.cast` is written to `<stateDir>/runs/<runId>/recording.cast` with a manifest naming the run, node, timestamps, byte count, and SHA-256. Capture errors and partial runs are labeled incomplete. The run's sealed `run.settled` record still determines worker outcome.
