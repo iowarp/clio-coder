@@ -173,7 +173,7 @@ safety:
 With that ceiling and the default limit of 60, `toolCalls: 100` gives the turn
 100 calls and `toolCalls: 200` gives it 120. The refusal and the operator
 notice name the bound that applied: the template's own value (`soft budget 40,
-set by prompt template "wtfp:advance" budget.toolCalls`), a raise within the
+set by prompt template "desk:advance" budget.toolCalls`), a raise within the
 ceiling, the ceiling a larger value was clamped to, or the operator's limit
 when the template asked for more and no ceiling is set. The turn's scope
 reminder states the effective budget to the model. A yolo continuation keeps
@@ -191,10 +191,10 @@ capped.
 `turnPolicy` makes each turn the template starts run one step of a pipeline:
 
 ```yaml
-allowed-tools: [read, write, edit, extension_wtfp__next_step]
+allowed-tools: [read, write, edit, extension_desk__next_step]
 turnPolicy:
   mode: step
-  stepTool: extension_wtfp__next_step
+  stepTool: extension_desk__next_step
 ```
 
 `mode` must be `step`, and `stepTool` names one tool, in the template's
@@ -233,7 +233,7 @@ prompts:
 ```yaml
 turnPolicy:
   mode: step
-  stepTool: extension_wtfp__next_step
+  stepTool: extension_desk__next_step
   when: [small, uncached]
 ```
 

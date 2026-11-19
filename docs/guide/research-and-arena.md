@@ -203,7 +203,7 @@ Research also writes to the [claims ledger](../architecture/evidence-and-memory.
 ```bash
 clio-coder arena run --suite bugs --check unit \
   --contender copilot/claude-haiku-5.5 \
-  --contender litellm/mini/qwen3.8-27b-iq4r-v4 \
+  --contender litellm/gateway/qwen3.8-27b \
   -- "Fix the bug in calc.py so test_calc.py passes. Keep the change minimal."
 ```
 
@@ -242,6 +242,9 @@ the target, model, duration, tokens and cost, and redacts identifying text such 
 `--reveal` before a vote is refused. One vote counts per match. `--replace` changes it, and the journal keeps both. The
 choices are a label, `tie` or `both-bad`.
 
+`arena list [--suite <name>]` lists the recorded matches with their status, contender count, vote, suite and prompt. It
+names the target/model pairs (under `--json`) only for a voted match, so it never unblinds a pending one.
+
 `standings` counts wins, losses, ties and both-bad votes per target/model. Once an identity has 5 votes, it also shows an
 Elo rating. Every identity starts at 1000, and the votes are replayed in match order with K 32, so the same records
 always give the same ratings. A win beats every other contender in the match, `tie` is a draw between each pair, and
@@ -262,7 +265,7 @@ research campaigns above.
 
 ```bash
 clio-coder campaign run --fixture ./fixtures/brownfield --roster roster.yaml --answers answers.yaml \
-  --prompt "/wtfp:advance" --out ./campaign-out --timeout 1800 --probe wtfp:status
+  --prompt "/desk:advance" --out ./campaign-out --timeout 1800 --probe desk:status
 ```
 
 ```yaml

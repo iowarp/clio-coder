@@ -40,7 +40,7 @@ closes its docks and leaves utility panes open:
   This is an interactive handoff; CLIO Coder can close the owned pane but does not
   capture a managed run or run record from its contents. See [Coding Agent
   Interoperability](interop.md).
-- **The workers dock.** `Alt+W` shows the workers dashboard in a dock to the right of the session. The dashboard, its keys and the per-run
+- **The workers dock.** `Alt+W` opens or shows the workers dashboard in a dock to the right of the session and leaves the keyboard in CLIO Coder. The dashboard lists a card for every live run and for the newest 24 finished runs. When the session pane is too narrow for the dock, or the pane host refuses the split, `Alt+W` opens the Fleet Runs board instead and says why. The dashboard, its keys and the per-run
   takeover are documented with the fleet in [Fleet Dispatch](fleet-dispatch.md). This page covers the utility panes and the dock contract below.
 - **The music pane.** `/music` or `Alt+A` shows cliamp in a dock below the session for focus radio. It is off until `integrations.music.enabled` is `true` (default `false`, in `/settings workspace` under Panes), and it needs the Herdr pane layer and a cliamp at 1.63.2 or newer, either on `PATH` or vendored by `clio-coder tools install cliamp`. See [Music](music.md).
 - **Status and toasts.** In guest mode CLIO Coder reports session state on the hosting pane as agent `clio-coder`: `working`, `blocked` while a tool call waits on an approval, and `idle`. A finished dispatch can raise a herdr toast per `interface.panes.notifications`, and a failed run also leaves a transcript notice.
@@ -49,9 +49,9 @@ CLIO Coder acts only on panes it created, which carry a `clio_coder_owner` metad
 
 When an `@file` mention expands to an image and the routed model cannot accept images, CLIO Coder refuses to submit the turn and prints `IMAGE_INPUT_UNSUPPORTED` with the route and up to five known vision-capable `target/model` choices to pick in `/model`. When the fleet profile named `vision` (`fleet.profiles.vision`) is configured, that sidecar describes the image instead and the turn proceeds.
 
-Outside herdr, `/files` still works: the file view takes over the terminal
+In a `clio-coder --with-panes` session where no pane host answered, `/files` still works: the file view takes over the terminal
 for one pick and returns to the session with the selection in the composer.
-The logs and shell panes need a pane host and say so.
+The logs and shell panes need a pane host and say so. A session that started without the pane layer (see [Turn panes on](#turn-panes-on)) has no files pane at all, and `/panes`, `/files` and `Alt+E` say how to start one with panes.
 
 ## Install, from a clean machine
 
@@ -316,7 +316,7 @@ The workers dock (right of the session), the files pane (below) and the music pa
 
 The workers floor lets the dock open in an 80-column terminal. The music share is small on purpose, so the floor decides its height: cliamp draws its spectrum only from 16 inner rows and Herdr's border takes two. A share is capped at half the axis, and the floor wins over a smaller share. A dock whose floor exceeds half of the session pane's axis is refused with `the <slot> dock needs <n> cells and at most half of <m> is available; enlarge the anchor pane before trying again`. Showing a hidden dock plans the same way, with the share the dock held when it was hidden, and a refusal leaves it hidden.
 
-A divider you drag in herdr becomes the dock's new target share, and a dock you close stays closed. Opening or showing a dock never steals focus by itself. The explicit actions that move the keyboard into a pane are the ones that open or show the files pane (`/files`, `Alt+E`, `/files open`, `/panes open files`, the model's `panes` open of `files`, and the files pane that `interface.panes.layout: cockpit` opens at boot), repeating `/panes open logs` or `shell`, and the workers key (see [Fleet Dispatch](fleet-dispatch.md)). Showing the music pane leaves the keyboard in CLIO Coder.
+A divider you drag in herdr becomes the dock's new target share, and a dock you close stays closed. Opening or showing a dock never steals focus by itself. The explicit actions that move the keyboard into a pane are the ones that open or show the files pane (`/files`, `Alt+E`, `/files open`, `/panes open files`, the model's `panes` open of `files`, and the files pane that `interface.panes.layout: cockpit` opens at boot) and repeating `/panes open logs` or `shell`. Opening or showing the workers dock with `Alt+W` and showing the music pane leave the keyboard in CLIO Coder.
 
 ## Settings
 
@@ -335,7 +335,7 @@ A divider you drag in herdr becomes the dock's new target share, and a dock you 
 | `interface.keybindings."clio-coder.files.toggle"` | `alt+e` | Rebind the files key. The leader entry `Ctrl+G` then `e` is fixed. |
 | `interface.keybindings."clio-coder.music.toggle"` | `alt+a` | Rebind the music key. The leader entry `Ctrl+G` then `a` is fixed. |
 
-Every `interface.panes.*` key except `enabled` and `layout` applies without a restart. In `/settings`, the files keys are under Workspace, group Files pane,
+Every `interface.panes.*` key except `layout` applies without a restart. In `/settings`, the files keys are under Workspace, group Files pane,
 and the other pane keys are in the same area, group Panes (`/settings workspace`). The keys are also in the
 [Configuration Reference](configuration-reference.md).
 
@@ -365,17 +365,19 @@ deletes it; the next open rebuilds it.
 
 ## Troubleshooting
 
-**`panes are inactive: this session started without them`** on `/panes`, or
-**`the files pane is inactive: this session started without panes`** on `/files`: the session booted without the panes extension. Restart with
+**`panes are inactive: this session started without panes`** on `/panes`, or
+**`the files pane is inactive: this session started without panes`** on `/files` or `Alt+E`: the session booted without the panes extension. Restart with
 `clio-coder` in a plain terminal to open its own pane host, or run
 `clio-coder --with-panes` inside herdr.
+
+**``panes are inactive: terminal panes are not installed. Run `clio-coder panes install`, then restart `clio-coder` ``** (or the same ending after `the files pane is inactive`): CLIO Coder's pinned herdr is missing, so the launch stayed in the plain terminal without a notice. Run `clio-coder panes install`, then start `clio-coder` again. `clio-coder doctor` shows the same gap as a WARN on the `external tool herdr` row.
 
 **`the pane layer is not available in this session: HERDR_ENV is not 1 …`**
 on `/panes open logs` or `shell`: CLIO Coder is not running inside a pane host.
 Quit and start bare `clio-coder` in a plain terminal. `/files`
 still works as a one-shot pick in this state.
 
-**`the files pane is disabled by interface.panes.files.enabled`**: set that
+**`the files pane is disabled by interface.panes.files.enabled`** (from `Alt+E` or the `panes` tool), or **`The files pane is off. …`** from `/files`: set that
 key to `true`, or flip Files pane under `/settings workspace`.
 
 **`the files pane engine is not available: not found …`**: the message

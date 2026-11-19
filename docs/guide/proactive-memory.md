@@ -160,7 +160,7 @@ or a labeled prompt section, never a tool or a permission.
 | Tool-result annotation | The second identical failure in the bounded trajectory, at most once per operation per turn | One cited `Memory:` line appended to the failing tool's own result | `annotateRepeatedFailure` in `src/domains/memory/intervention.ts` |
 | Deferred or turn-end reminder | At a native tool-batch boundary while the turn runs, at turn end for the rules tier, or on the next accepted prompt for a finished background step | A `Memory:` block inside `<system-reminder>`, recorded in the session ledger | `src/session-control/turn-middleware.ts` |
 | Post-compaction restoration | After a durable continuity or summary commit is installed | Status (when no handoff note or summary already carries current state), knowledge and procedural entries, labeled unverified | `src/domains/memory/restoration.ts`, `src/session-control/turn-context.ts` |
-| Approved durable memory | Selected at every prepared operator turn and compiled into the system prompt, then held until a completed compaction or a session switch. A later approval or revision arrives in the turn's reminder as a `# Memory update` block, and a rejection or deletion as a withdrawn line | A `# Memory` section of at most 5 approved records within 400 estimated tokens, each naming whether an operator approved it or the evidence gate retained it | `src/domains/memory/prompt-section.ts`, selection rules in the [evidence and memory contract](../architecture/evidence-and-memory.md#prompt-injection-rules) |
+| Approved durable memory | Selected at every prepared operator turn and compiled into the system prompt, then held until a completed compaction or a session switch. A later approval or revision arrives in the turn's reminder as a `# Memory update` block, and a rejection or deletion as a withdrawn line | A `# Memory` section of at most 5 approved records within 400 estimated tokens, each naming whether an operator approved it or the evidence gate retained it. Main sessions carry only records the turn concerns | `src/domains/memory/prompt-section.ts`, selection rules in the [evidence and memory contract](../architecture/evidence-and-memory.md#prompt-injection-rules) |
 
 A background model never writes directly to the system prompt. Durable records
 must pass operator approval or the repository-lesson evidence gate described
@@ -792,7 +792,7 @@ An example gateway topology keeps the three backend routes distinct:
 
 | Role | Target | Runtime and endpoint | Model | Capacity |
 | --- | --- | --- | --- | --- |
-| Chat and memory fallback | `chat-target` | LiteLLM at `http://192.168.1.20:4000` | `chat-profile/qwen3.8-27b` | Gateway-owned unless an explicit or observed endpoint bound is available |
+| Chat and memory fallback | `chat-target` | LiteLLM at `http://localhost:4000` | `chat-profile/qwen3.8-27b` | Gateway-owned unless an explicit or observed endpoint bound is available |
 | Preferred background memory | `memory-dedicated` | Same LiteLLM gateway | `memory-profile/qwen3.5-4b` | Same capacity evidence rules |
 | Alternative memory candidate | `memory-fallback` | Same LiteLLM gateway | `memory-profile/nemotron-3.5-lightning-30b-a3b` | Same capacity evidence rules |
 
@@ -895,7 +895,10 @@ or save procedural entries; validation controls which writes are admitted.
 ## Post-compaction restoration
 
 When a continuity commit or compaction summary becomes durable, the memory
-registration records the commit and prepares one restoration offer. The offer is
+registration records the commit and prepares one restoration offer. A step
+checkpoint under a prompt template's `turnPolicy: step` counts as a compaction
+summary here, so memory restores into that step turn's tail as well; see
+[Step checkpoints](context-continuity.md#step-checkpoints). The offer is
 a user-role `<system-reminder>` message that opens with `Memory: remembered
 execution context (unverified; current instructions take precedence).` followed
 by one line per distinct content, each quoting the entry text and naming its IDs.
