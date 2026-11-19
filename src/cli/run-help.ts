@@ -114,7 +114,8 @@ header or id so the file can be extended. Permission asks stay denied. A file
 that cannot be read or fails validation is a usage error (exit 2) naming the
 file and the offending entry. Main agent only.
 
-The main agent's terminal frame records blocked calls under safety.blockedAttempts
+The main agent's terminal frame records safety refusals under
+safety.blockedAttempts, tool guard blocks under safety.guardBlockedAttempts,
 and a noop flag. A run is a no-op when a block remains unresolved and no write
 succeeded, or when it ran tools and none succeeded; a run that called no tool
 is not. The main agent's own write-class calls count as writes, and so does a
