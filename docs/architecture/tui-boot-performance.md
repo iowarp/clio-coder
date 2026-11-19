@@ -25,6 +25,8 @@ While Stage 0 takes keys, the boot path gives the event loop a full turn, input 
 
 Recovery of the compete groups and task worktrees a hard-killed coordinator left behind starts once the hydrated frame is committed, so its terminate grace and git calls never hold the first frame. Dispatch waits for that recovery to settle before it scans its ledger or admits a run ([boot-recovery.ts](../../src/domains/dispatch/boot-recovery.ts)).
 
+Boot does not stat the tool outputs earlier sessions spilled to scratch files. The sweep that removes those older than 14 days starts once boot is recorded, at the hydrated frame in an interactive session, runs on asynchronous filesystem calls and stops at shutdown ([result-shaping.ts](../../src/tools/result-shaping.ts)).
+
 ### Skill frontmatter cache
 
 Loading the skill catalog parses each `SKILL.md` file's YAML frontmatter, which boot and every `context(scope="skills")` call repeat. Parsed frontmatter is cached across processes in `skill-frontmatter.json` under CLIO Coder's cache directory ([frontmatter-cache.ts](../../src/domains/resources/skills/frontmatter-cache.ts)). An entry is keyed by file path and is used only when the file's mtime and size match and the frontmatter text is byte-identical to what was parsed, so an edit within one mtime tick still reparses. The whole file is dropped when the CLIO Coder version changes, the cache holds at most 2,048 entries, and frontmatter whose parsed value JSON cannot carry exactly is parsed every time. Without a usable cache directory, parsing runs uncached.
