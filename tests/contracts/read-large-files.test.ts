@@ -516,6 +516,29 @@ describe("read windowed reader", () => {
 		deepStrictEqual(exhausted, [false, false, true, true]);
 	});
 
+	it("reserves a narrow parallel read by its range and words sibling reservations apart from returned bytes", async () => {
+		configureGuardrails({ readMaxBytes: 16384, observationTurnBudgetBytes: 32768 });
+		const path = join(scratch.dir, "ledger.txt");
+		writeFileSync(path, Array.from({ length: 400 }, (_, i) => fixedLine(i + 1, 64)).join(""));
+		const narrow = await Promise.all(
+			[10, 20, 30, 40, 50, 60].map((offset) =>
+				readTool.run({ path, offset, limit: 1 }, { sessionId: "read-narrow", turnId: `${scratch.dir}:a` }),
+			),
+		);
+		deepStrictEqual(
+			narrow.map((result) => (result.kind === "ok" ? result.output.slice(0, 12) : result.message)),
+			[10, 20, 30, 40, 50, 60].map((line) => `L${String(line).padStart(10, "0")} `),
+		);
+		const options = { sessionId: "read-narrow", turnId: `${scratch.dir}:b` };
+		const [, , refused] = await Promise.all([
+			readTool.run({ path }, options),
+			readTool.run({ path }, options),
+			readTool.run({ path, offset: 5, limit: 1 }, options),
+		]);
+		ok(refused?.kind === "ok");
+		match(refused.output, /: 0B already returned and 32\.0KB reserved by sibling calls of 32\.0KB\./);
+	});
+
 	it("reports a file that changes in flight with both identities and a notice", async () => {
 		const path = join(scratch.dir, "inflight.log");
 		writeFileSync(path, Array.from({ length: 6 }, (_, i) => `row ${i + 1}\n`).join(""));

@@ -7,6 +7,7 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 ### Fixed
 
 - `clio-coder run --max-context-tokens=N` is accepted like `--max-context-tokens N`, with the same positive-integer error for an invalid value, instead of failing as an unknown option.
+- Parallel reads with a small `limit` or `tail` hold only their requested range of the per-turn observation budget, so siblings in one batch are no longer refused as exhausted, and a refusal counts bytes reserved by sibling calls apart from bytes already returned.
 
 ## 0.8.4 - 2026-11-19
 

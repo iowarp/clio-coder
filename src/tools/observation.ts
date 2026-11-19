@@ -95,7 +95,10 @@ const BUDGET_TRACK_LIMIT = 256;
 const MAX_EXHAUSTED_NOTICES_PER_TURN = 3;
 
 interface TurnBudgetState {
+	/** Bytes settled calls actually returned this turn. */
 	usedBytes: number;
+	/** Bytes in-flight sibling calls hold until they settle; never counted as returned. */
+	reservedBytes: number;
 	lastSeenAt: number;
 	/** Consecutive exhausted-pool short-circuits; reset by any call that got a slice. */
 	exhaustedStreak: number;
@@ -108,10 +111,12 @@ export interface ObservationReservation {
 	key: string | null;
 	limitBytes: number;
 	usedBeforeBytes: number;
+	/** Bytes in-flight siblings held when this call reserved, apart from `usedBeforeBytes`. */
+	reservedBeforeBytes: number;
 	selfCapBytes: number;
-	/** Effective byte cap for this call: min(self cap, remaining budget). */
+	/** Effective byte cap for this call: min(self cap, requested range, remaining budget). */
 	callCapBytes: number;
-	/** True when the pool reduced this call's cap below the self cap. */
+	/** True when the pool reduced this call's cap below what it asked for. */
 	limited: boolean;
 	exhausted: boolean;
 	/**
@@ -219,8 +224,18 @@ function pruneBudgetMap(): void {
  * Reserve this call's slice of the turn pool. Call before doing the work so
  * an exhausted pool short-circuits via `observationBudgetExhausted` instead
  * of paying for a search whose output cannot be returned.
+ *
+ * `requestedBytes` lets a call that asked for a narrow range (a read with a
+ * small line limit) hold only that much, so parallel siblings are not refused
+ * against a worst-case reservation it can never fill.
  */
-export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOptions): ObservationReservation {
+export function reserveObservation(
+	selfCapBytes: number,
+	options?: ToolInvokeOptions,
+	requestedBytes?: number,
+): ObservationReservation {
+	const askBytes =
+		requestedBytes !== undefined && requestedBytes > 0 ? Math.min(selfCapBytes, requestedBytes) : selfCapBytes;
 	const key = budgetKey(options);
 	const { limitBytes, template, boundNote } = observationTurnBudgetLimit(options);
 	const bound = {
@@ -232,8 +247,9 @@ export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOpt
 			key,
 			limitBytes,
 			usedBeforeBytes: 0,
+			reservedBeforeBytes: 0,
 			selfCapBytes,
-			callCapBytes: selfCapBytes,
+			callCapBytes: askBytes,
 			limited: false,
 			exhausted: false,
 			committed: false,
@@ -241,16 +257,17 @@ export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOpt
 			...bound,
 		};
 	}
-	const state = turnBudgets.get(key) ?? { usedBytes: 0, lastSeenAt: Date.now(), exhaustedStreak: 0 };
+	const state = turnBudgets.get(key) ?? { usedBytes: 0, reservedBytes: 0, lastSeenAt: Date.now(), exhaustedStreak: 0 };
 	state.lastSeenAt = Date.now();
 	turnBudgets.set(key, state);
 	pruneBudgetMap();
-	const remaining = Math.max(0, limitBytes - state.usedBytes);
+	const remaining = Math.max(0, limitBytes - state.usedBytes - state.reservedBytes);
 	if (remaining < MIN_BUDGET_SLICE_BYTES) {
 		return {
 			key,
 			limitBytes,
 			usedBeforeBytes: state.usedBytes,
+			reservedBeforeBytes: state.reservedBytes,
 			selfCapBytes,
 			callCapBytes: 0,
 			limited: true,
@@ -263,14 +280,15 @@ export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOpt
 	// A call that got a slice is progress, so the exhausted streak starts over.
 	// Only an unbroken run of short-circuits reaches the terminal failure.
 	state.exhaustedStreak = 0;
-	const callCapBytes = Math.min(selfCapBytes, remaining);
+	const callCapBytes = Math.min(askBytes, remaining);
 	return {
 		key,
 		limitBytes,
 		usedBeforeBytes: state.usedBytes,
+		reservedBeforeBytes: state.reservedBytes,
 		selfCapBytes,
 		callCapBytes,
-		limited: callCapBytes < selfCapBytes,
+		limited: callCapBytes < askBytes,
 		exhausted: false,
 		committed: false,
 		settled: false,
@@ -279,12 +297,13 @@ export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOpt
 }
 
 /**
- * Charge this call's full cap to the shared pool up front so concurrent OBSERVE
- * siblings that reserve during an async call's in-flight window see the running
- * spend instead of an empty pool. finalizeObservation reconciles the charge down
- * to the bytes actually returned; releaseObservation refunds it on an error
- * path. Only tools that await between reserving and finalizing need this;
- * synchronous tools settle within one microtask and charge at finalize.
+ * Hold this call's cap in the shared pool up front so concurrent OBSERVE
+ * siblings that reserve during an async call's in-flight window see it instead
+ * of an empty pool. The hold is reserved, not returned: finalizeObservation
+ * releases it and charges the bytes actually returned; releaseObservation
+ * releases it on an error path. Only tools that await between reserving and
+ * finalizing need this; synchronous tools settle within one microtask and
+ * charge at finalize.
  */
 export function commitObservationReservation(reservation: ObservationReservation): void {
 	if (reservation.key === null || reservation.committed || reservation.settled) return;
@@ -292,10 +311,11 @@ export function commitObservationReservation(reservation: ObservationReservation
 	reservation.committed = true;
 	const state = turnBudgets.get(reservation.key) ?? {
 		usedBytes: reservation.usedBeforeBytes,
+		reservedBytes: reservation.reservedBeforeBytes,
 		lastSeenAt: Date.now(),
 		exhaustedStreak: 0,
 	};
-	state.usedBytes += reservation.callCapBytes;
+	state.reservedBytes += reservation.callCapBytes;
 	state.lastSeenAt = Date.now();
 	turnBudgets.set(reservation.key, state);
 }
@@ -312,7 +332,7 @@ export function releaseObservation(reservation: ObservationReservation): void {
 	if (!reservation.committed) return;
 	const state = turnBudgets.get(reservation.key);
 	if (state === undefined) return;
-	state.usedBytes = Math.max(0, state.usedBytes - reservation.callCapBytes);
+	state.reservedBytes = Math.max(0, state.reservedBytes - reservation.callCapBytes);
 	state.lastSeenAt = Date.now();
 	turnBudgets.set(reservation.key, state);
 }
@@ -320,17 +340,19 @@ export function releaseObservation(reservation: ObservationReservation): void {
 function recordSpentBytes(reservation: ObservationReservation, bytes: number): void {
 	if (reservation.key === null || reservation.settled) return;
 	reservation.settled = true;
-	// A committed call already charged its full cap to the pool at reserve time
-	// so concurrent siblings could see it; reconcile that down (or up) to the
-	// bytes actually returned. An uncommitted (synchronous) call charges its
-	// spend now, having touched the pool nowhere else.
-	const committedBytes = reservation.committed ? reservation.callCapBytes : 0;
+	// A committed call held its cap as a reservation so concurrent siblings could
+	// see it; release the whole hold and charge only the bytes actually returned.
+	// An uncommitted (synchronous) call charges its spend now, having touched the
+	// pool nowhere else.
+	const heldBytes = reservation.committed ? reservation.callCapBytes : 0;
 	const state = turnBudgets.get(reservation.key) ?? {
-		usedBytes: reservation.usedBeforeBytes + committedBytes,
+		usedBytes: reservation.usedBeforeBytes,
+		reservedBytes: reservation.reservedBeforeBytes + heldBytes,
 		lastSeenAt: Date.now(),
 		exhaustedStreak: 0,
 	};
-	state.usedBytes = Math.max(0, state.usedBytes + bytes - committedBytes);
+	state.reservedBytes = Math.max(0, state.reservedBytes - heldBytes);
+	state.usedBytes += bytes;
 	state.lastSeenAt = Date.now();
 	turnBudgets.set(reservation.key, state);
 }
@@ -376,7 +398,7 @@ export function observationBudgetExhausted(input: {
 }): ToolResult {
 	const { tool, unit, reservation, subject, hint } = input;
 	const streak = bumpExhaustedStreak(reservation.key);
-	const spent = `${formatSize(reservation.usedBeforeBytes)} already returned of ${formatSize(reservation.limitBytes)}${templateBound(reservation)}`;
+	const spent = `${poolSpent(reservation)} of ${formatSize(reservation.limitBytes)}${templateBound(reservation)}`;
 	if (streak > MAX_EXHAUSTED_NOTICES_PER_TURN) {
 		const message =
 			`observation budget exhausted for this turn before ${tool} ${subject}: ${spent}. ` +
@@ -463,8 +485,16 @@ function templateBound(reservation: ObservationReservation): string {
 	return reservation.boundNote ?? "";
 }
 
+/** Bytes already returned, and apart from them any bytes in-flight siblings still hold. */
+function poolSpent(reservation: ObservationReservation): string {
+	const returned = `${formatSize(reservation.usedBeforeBytes)} already returned`;
+	return reservation.reservedBeforeBytes > 0
+		? `${returned} and ${formatSize(reservation.reservedBeforeBytes)} reserved by sibling calls`
+		: returned;
+}
+
 function limitedBudgetNote(reservation: ObservationReservation): string {
-	return `[Per-turn observation budget: ${formatSize(reservation.usedBeforeBytes)} already returned of ${formatSize(
+	return `[Per-turn observation budget: ${poolSpent(reservation)} of ${formatSize(
 		reservation.limitBytes,
 	)}${templateBound(reservation)} before this call. Use narrower arguments or continue in a follow-up turn for more content.]`;
 }
@@ -478,8 +508,8 @@ function limitedBudgetNote(reservation: ObservationReservation): string {
  */
 function jsonStubBudgetNote(reservation: ObservationReservation): string {
 	return (
-		`per-turn observation budget nearly exhausted: ${formatSize(reservation.usedBeforeBytes)} of ` +
-		`${formatSize(reservation.limitBytes)} already returned this turn. Do not retry this call; answer from ` +
+		`per-turn observation budget nearly exhausted: ${poolSpent(reservation)} of ` +
+		`${formatSize(reservation.limitBytes)} this turn. Do not retry this call; answer from ` +
 		"what you have gathered, or continue in a follow-up turn."
 	);
 }

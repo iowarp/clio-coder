@@ -166,6 +166,21 @@ export function readMaxBytes(): number {
 	return Math.max(MIN_READ_CAP_BYTES, resolveGuardrail("readMaxBytes"));
 }
 
+// A narrow read (a small `limit` or `tail`) holds this much of the shared turn
+// pool per requested line plus room for its notices, instead of the whole
+// per-call cap, so parallel siblings are not refused against a worst case it
+// cannot fill. A line longer than its share is cut at the window with the
+// usual continuation. Images are decoded whole, so they keep the full cap.
+const NARROW_READ_BYTES_PER_LINE = 4 * 1024;
+const NARROW_READ_BASE_BYTES = 2 * 1024;
+const IMAGE_PATH_PATTERN = /\.(?:png|jpe?g|gif|webp)$/iu;
+
+function narrowReadBytes(pathArg: string, request: ReadRequest): number | undefined {
+	const lines = request.tail ?? request.limit;
+	if (lines === null || IMAGE_PATH_PATTERN.test(pathArg)) return undefined;
+	return NARROW_READ_BASE_BYTES + lines * NARROW_READ_BYTES_PER_LINE;
+}
+
 // Number only an already bounded slice, retaining its explicit physical line
 // count: a truncated slice ending in a blank line can look like a terminator.
 // Models read a directory to see what is in it; naming the tool that lists it saves the turn a blind retry spends.
@@ -880,9 +895,10 @@ export const readTool: ToolSpec = {
 		// hatch appears exactly when the pool is exhausted, so charging these
 		// reads to it made the hatch a dead end. The per-call byte cap still
 		// bounds each slice.
+		const requestedBytes = narrowReadBytes(pathArg, request);
 		const reservation = isSessionOffloadPath(filePath, options?.sessionId)
-			? reserveObservation(readMaxBytes())
-			: reserveObservation(readMaxBytes(), options);
+			? reserveObservation(readMaxBytes(), undefined, requestedBytes)
+			: reserveObservation(readMaxBytes(), options, requestedBytes);
 		// Charge the cap in the same synchronous step as the reservation: the stat
 		// below awaits, and parallel siblings reserving meanwhile must see this
 		// spend. Finalize reconciles it to the bytes returned; the finally block
