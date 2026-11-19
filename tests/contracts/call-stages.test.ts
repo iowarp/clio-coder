@@ -188,6 +188,10 @@ it("a main call journals its stages in Pi's order and its cache physics, a budge
 		ok(transform && auth && admission && send && firstToken !== undefined && settle !== null, JSON.stringify(sent));
 		strictEqual(auth.refreshed, true);
 		strictEqual(admission.waitedOn, "budget");
+		// The admission journals the input count it fitted and whether a provider-measured anchor priced it.
+		ok(Number.isInteger(admission.inputTokens) && (admission.inputTokens ?? 0) > 0, JSON.stringify(admission));
+		strictEqual(admission.anchored, false, "a fresh session has no measured anchor");
+		strictEqual(recompiled.stages.admission?.anchored, true, "the second request is priced on the first's usage");
 		const order = [
 			transform.start,
 			transform.end,

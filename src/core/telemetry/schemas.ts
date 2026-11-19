@@ -219,7 +219,16 @@ export const CallSettledSchema = Type.Object(
 		stages: Type.Object(
 			{
 				admission: Type.Optional(
-					Type.Object({ ...span, waitedOn: Type.Optional(vocabulary(["budget", "capacity", "steering"])) }, closed),
+					Type.Object(
+						{
+							...span,
+							waitedOn: Type.Optional(vocabulary(["budget", "capacity", "steering"])),
+							/** The input count a main turn's window fit was decided on, and whether the route's provider-measured anchor priced it. */
+							inputTokens: Type.Optional(count),
+							anchored: Type.Optional(Type.Boolean()),
+						},
+						closed,
+					),
 				),
 				auth: Type.Optional(Type.Object({ ...span, refreshed: Type.Optional(Type.Boolean()) }, closed)),
 				transform: Type.Optional(Type.Object(span, closed)),

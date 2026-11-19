@@ -260,7 +260,13 @@ attachJournalRoute({
 });
 
 type Stage = "admission" | "auth" | "transform" | "connect" | "send";
-type StageFacts = { waitedOn?: "budget" | "capacity" | "steering"; refreshed?: boolean; reused?: boolean };
+type StageFacts = {
+	waitedOn?: "budget" | "capacity" | "steering";
+	inputTokens?: number;
+	anchored?: boolean;
+	refreshed?: boolean;
+	reused?: boolean;
+};
 type Settlement = Omit<CallSettled, keyof CallStarted | "stages">;
 /** A provider HTTP response as the engine seam saw it. Headers never reach the journal except through an allowlist. */
 export interface ObservedResponse {
@@ -397,7 +403,13 @@ export function beginCall(
 				if (phase === "start") starts[name] ??= elapsed;
 				else if (starts[name] !== undefined && stages[name] === undefined) {
 					const span = { start: starts[name], end: elapsed };
-					if (name === "admission") stages.admission = { ...span, ...(facts.waitedOn ? { waitedOn: facts.waitedOn } : {}) };
+					if (name === "admission")
+						stages.admission = {
+							...span,
+							...(facts.waitedOn ? { waitedOn: facts.waitedOn } : {}),
+							...(facts.inputTokens !== undefined ? { inputTokens: facts.inputTokens } : {}),
+							...(facts.anchored !== undefined ? { anchored: facts.anchored } : {}),
+						};
 					else if (name === "auth")
 						stages.auth = { ...span, ...(facts.refreshed === undefined ? {} : { refreshed: facts.refreshed }) };
 					else if (name === "connect")
