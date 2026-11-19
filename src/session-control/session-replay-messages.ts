@@ -921,15 +921,22 @@ function insertAnchor(record: HostInsertRecord): string {
 	return "after" in record.place ? record.place.after : record.place.before;
 }
 
-/** Inserts whose anchor renders in this replay window, grouped by anchor, and the rows they stand for. */
-function visibleHostInserts(replayEntries: ReadonlyArray<SessionEntry>): {
+/**
+ * Inserts whose anchor renders in this replay window, grouped by anchor, and the rows they stand for. Those rows come
+ * from every record on the uncut path: a cut that removes a recovery's anchor but keeps its stopped reply and call
+ * must not bring them back without the exchange.
+ */
+function visibleHostInserts(
+	replayEntries: ReadonlyArray<SessionEntry>,
+	pathEntries: ReadonlyArray<SessionEntry>,
+): {
 	before: Map<string, HostInsertRecord[]>;
 	after: Map<string, HostInsertRecord[]>;
 	replaced: Set<string>;
 } {
 	const rendering = new Set(replayEntries.filter(rowRenders).map((entry) => entry.turnId));
 	const visible = readHostInserts(replayEntries).filter((record) => rendering.has(insertAnchor(record)));
-	const replaced = new Set(visible.flatMap((record) => record.replaces ?? []));
+	const replaced = new Set(readHostInserts(pathEntries).flatMap((record) => record.replaces ?? []));
 	const before = new Map<string, HostInsertRecord[]>();
 	const after = new Map<string, HostInsertRecord[]>();
 	for (const record of visible) {
@@ -956,8 +963,9 @@ export function newestRenderedRow(
 	leaf: string | null,
 	exclude: ReadonlySet<string> = new Set(),
 ): string | null {
-	const replayEntries = selectReplayEntries(turns, leaf !== null ? { activeLeafTurnId: leaf } : {});
-	const { replaced } = visibleHostInserts(replayEntries);
+	const options = leaf !== null ? { activeLeafTurnId: leaf } : {};
+	const replayEntries = selectReplayEntries(turns, options);
+	const { replaced } = visibleHostInserts(replayEntries, activeEntriesBeforeCompactionCut(turns, options));
 	for (let i = replayEntries.length - 1; i >= 0; i -= 1) {
 		const entry = replayEntries[i];
 		if (entry && rowRenders(entry) && !replaced.has(entry.turnId) && !exclude.has(entry.turnId)) return entry.turnId;
@@ -971,8 +979,11 @@ export function hostInsertVisible(
 	leaf: string | null,
 	record: HostInsertRecord,
 ): boolean {
-	const replayEntries = selectReplayEntries(turns, leaf !== null ? { activeLeafTurnId: leaf } : {});
-	const { before, after } = visibleHostInserts(replayEntries);
+	const options = leaf !== null ? { activeLeafTurnId: leaf } : {};
+	const { before, after } = visibleHostInserts(
+		selectReplayEntries(turns, options),
+		activeEntriesBeforeCompactionCut(turns, options),
+	);
 	return [...before.values(), ...after.values()].some((group) => group.some((item) => item.id === record.id));
 }
 
@@ -1023,7 +1034,7 @@ export function renderReplayElements(
 				entry.role === "user" &&
 				(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
 		);
-	const inserts = visibleHostInserts(replayEntries);
+	const inserts = visibleHostInserts(replayEntries, activeEntries);
 	const placeInserts = (records: ReadonlyArray<HostInsertRecord> | undefined): void => {
 		for (const record of records ?? []) {
 			for (const element of record.elements) out.push(hostInsertElement(record, element), record.id);
