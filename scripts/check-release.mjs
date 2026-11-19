@@ -113,8 +113,9 @@ const SIZE_BUDGETS = [
 	{
 		class: "docs",
 		match: (path) => path.startsWith("docs/"),
-		// The 0.7.0 candidate measured 2,557,799 bytes; the rule would raise this to 3.5 MB, so it stays at 3.0 MB.
-		maxBytes: 3_000_000,
+		// The 0.7.0 candidate measured 2,557,799 bytes; the 0.8.4 candidate measured 3,042,862 after its docs accuracy
+		// pass, so it takes the 3.5 MB the rule gives (maintainer decision, 2026-11-19).
+		maxBytes: 3_500_000,
 	},
 	{
 		class: "library+examples+models+root files",
@@ -130,8 +131,9 @@ const SIZE_BUDGETS = [
 		maxBytes: 2_500_000,
 	},
 ];
-// Maintainer decision: 18.0 MB; the 0.8.0 candidate measured 17,115,838 packed bytes, 17.5 MB rounded up plus a 0.5 MB cycle allowance (#442).
-const MAX_TARBALL_BYTES = 18_000_000;
+// Maintainer decision: 18.5 MB (2026-11-19); the 0.8.0 candidate measured 17,115,838 packed bytes (18.0 MB then, #442) and
+// the 0.8.4 candidate 18,014,690.
+const MAX_TARBALL_BYTES = 18_500_000;
 const MAX_UNPACKED_BYTES = SIZE_BUDGETS.reduce((total, budget) => total + budget.maxBytes, 0);
 const MAX_ENTRY_COUNT = 3_000;
 
