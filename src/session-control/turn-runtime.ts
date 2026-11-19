@@ -1223,7 +1223,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								if (blocks) telemetryHub().emit("prompt.prefix_captured", blocks);
 							});
 						}
-						// This attempt carries every host insert written so far; none needs re-issuing after a later cut.
+						// This attempt carries the host inserts that render on its session's branch; none needs re-issuing after a later cut.
 						deps.hostInserts?.dispatched();
 						// The provider stream runs inside the attempt's context, so the engine seam and every observer below it
 						// find this call; the seam's marks agree with the ones taken here because each keeps its first (#434).

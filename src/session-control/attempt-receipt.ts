@@ -227,10 +227,11 @@ function reconcileDecisions(
 	const named = new Map<string, number>();
 	for (const record of records) {
 		if (record.k !== "context.fold") continue;
-		for (const stage of (record.data as ContextFoldPayload).stages) {
-			if (stage.outcome !== "committed" || stage.recordId === undefined) continue;
-			named.set(stage.recordId, (named.get(stage.recordId) ?? 0) + 1);
-		}
+		// Stages of one event that name one record are contributors to one decision, not separate decisions.
+		const ids = new Set<string>();
+		for (const stage of (record.data as ContextFoldPayload).stages)
+			if (stage.outcome === "committed" && stage.recordId !== undefined) ids.add(stage.recordId);
+		for (const id of ids) named.set(id, (named.get(id) ?? 0) + 1);
 	}
 	return {
 		missing: [...held].filter((id) => !named.has(id)),

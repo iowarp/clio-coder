@@ -1218,7 +1218,11 @@ describe("W2 (F6 -> CF-4): the full element sequence with inserts", () => {
 			await session.close();
 			return render(openSession(id).turns() as SessionEntry[]);
 		};
-		return { inserts, runtime, row, write, checkpoint, live, rebuilt, selected, reopened };
+		const resume = (turnId: string) => {
+			session.resume(id);
+			leaf = turnId;
+		};
+		return { session, inserts, runtime, row, write, checkpoint, live, rebuilt, selected, reopened, resume };
 	}
 	const assistant = (turnId: string, parent: string, text: string) =>
 		message(turnId, parent, "assistant", { content: [{ type: "text", text }], stopReason: "stop" });
@@ -1249,6 +1253,20 @@ describe("W2 (F6 -> CF-4): the full element sequence with inserts", () => {
 				deepStrictEqual(l.rebuilt(), next, "the next request renders as live");
 				deepStrictEqual(await l.reopened(), next, "and a reopen renders the same");
 			});
+
+	it("a dispatch in another session leaves this session's unsent insert pending", () => {
+		const l = ledger();
+		l.row(user("u1", null, "first"), assistant("a1", "u1", "one"));
+		l.row(user("u2", "a1", "second"));
+		l.inserts.insert(l.runtime, "reminder", [REMINDER]);
+		l.session.create({ cwd: process.cwd() });
+		l.write(user("b1", null, "other session"));
+		l.inserts.dispatched();
+		l.resume("u2");
+		l.checkpoint(null);
+		const rebuilt = l.rebuilt();
+		strictEqual(once(rebuilt, REMINDER), rebuilt.length - 1, "the cut re-issues it after the checkpoint");
+	});
 
 	it("one submit with restoration and queued steering: live, rebuilt and reopened agree", async () => {
 		const l = ledger();
