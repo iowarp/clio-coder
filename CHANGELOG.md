@@ -518,6 +518,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - A Copilot full reseed after a working-set rewrite keeps already-delivered host reminders in place and attaches retained image tool results at their positions, instead of dropping both.
 - A compaction that summarizes a recovered turn's user row no longer replays the discarded reply and an unanswered recovery call.
 - Selecting a user turn in /tree keeps the memory restoration its original request carried.
+- New eviction records no longer write the unread `route` field and a reissued host insert no longer writes `reissueOf`; ledgers that carry either still open.
 
 ## 0.8.3 - 2026-11-16
 
