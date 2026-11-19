@@ -1274,7 +1274,8 @@ test("replay and /resume hide what the live view hid", async () => {
 		kind: "message",
 		turnId,
 		parentTurnId,
-		timestamp: "2026-01-01T00:00:00.000Z",
+		// Mid-month at noon renders "May 15" in every time zone; a January date prints "Jan", whose J is a secret letter.
+		timestamp: "2026-05-15T12:00:00.000Z",
 		role,
 		payload,
 	});
