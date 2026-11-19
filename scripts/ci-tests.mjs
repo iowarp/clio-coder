@@ -310,9 +310,12 @@ export async function runTests(tier, { skipped } = {}) {
 		if (fixtureClient) rmSync(fixtureClient, { recursive: true, force: true });
 	});
 	const plain = stripVTControlCharacters(transcript);
-	const count = Number(/(?:ℹ|#) tests (\d+)/u.exec(plain)?.[1]);
+	// The runner's own summary is the last one. A contract that starts a nested `node --test` prints a summary
+	// too, and reading the first one recorded the core tier as 1 test instead of its 1762.
+	const summary = (name) => Number([...plain.matchAll(new RegExp(`(?:ℹ|#) ${name} (\\d+)`, "gu"))].at(-1)?.[1]);
+	const count = summary("tests");
 	if (!Number.isSafeInteger(count) || count < 1) throw new Error(`Missing ${tier} test count`);
-	const skips = Number(/(?:ℹ|#) skipped (\d+)/u.exec(plain)?.[1] ?? 0);
+	const skips = summary("skipped") || 0;
 	if (skipped) skipped[tier] = skips;
 	if (process.env.CLIO_CODER_TEST_SUMMARY)
 		appendFileSync(

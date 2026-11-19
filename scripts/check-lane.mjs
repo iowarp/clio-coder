@@ -276,7 +276,9 @@ async function main() {
 			});
 			process.stdout.write(result.stdout ?? "");
 			process.stderr.write(result.stderr ?? "");
-			const count = (name) => Number(new RegExp(`(?:ℹ|#) ${name} (\\d+)`, "u").exec(result.stdout ?? "")?.[1] ?? 0);
+			// The last summary is the runner's; a test that starts a nested runner prints one before it.
+			const count = (name) =>
+				Number([...(result.stdout ?? "").matchAll(new RegExp(`(?:ℹ|#) ${name} (\\d+)`, "gu"))].at(-1)?.[1] ?? 0);
 			const detail = `(${count("pass")} pass, ${count("fail")} fail, ${count("skipped")} skipped) node ${version.replace(/^v/u, "")}`;
 			const label = `test:file ${files.length} files`;
 			if (result.status !== 0) fail(label, detail);
