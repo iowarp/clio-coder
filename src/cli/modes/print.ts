@@ -764,7 +764,8 @@ function dispatchFailureReason(event: ChatLoopEvent): string {
 		.filter((part) => part.length > 0);
 	const failedRun = lines[0]?.startsWith("dispatch (") ? lines.find((part) => /^- .*\boutcome=/u.test(part)) : undefined;
 	const line = failedRun?.slice(2).replace(/ target=.*?(?= outcome=)/u, "") ?? lines[0] ?? "";
-	return line.length > 200 ? `${line.slice(0, 199)}…` : line;
+	// A run line ends in its worker cause, so a long one loses its middle, not its end.
+	return line.length > 200 ? `${line.slice(0, 99)}…${line.slice(-100)}` : line;
 }
 
 function toolTotals(stats: Map<string, ToolCallStat>): { calls: number; succeeded: number; blocked: number } {
