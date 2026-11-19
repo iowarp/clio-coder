@@ -254,11 +254,12 @@ export function extractGlobalFlags(
 			i += 1;
 			continue;
 		}
-		if (arg === "--max-context-tokens") {
-			const n = parseMaxContextTokens(argv[i + 1]);
+		if (arg === "--max-context-tokens" || arg.startsWith("--max-context-tokens=")) {
+			const inline = arg !== "--max-context-tokens";
+			const n = parseMaxContextTokens(inline ? arg.slice("--max-context-tokens=".length) : argv[i + 1]);
 			if (typeof n !== "number") return failed(n.error);
 			maxContextTokens = n;
-			i += 1;
+			if (!inline) i += 1;
 			continue;
 		}
 		if (arg === "--api-key" || arg === "--skill") {

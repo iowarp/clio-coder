@@ -49,6 +49,8 @@ it("--max-context-tokens caps the interactive session's window through the run o
 		extractGlobalFlags(["--max-context-tokens", "0"]).error,
 		"--max-context-tokens must be a positive integer",
 	);
+	strictEqual(extractGlobalFlags(["--max-context-tokens=8192"]).maxContextTokens, 8192);
+	strictEqual(extractGlobalFlags(["--max-context-tokens=-5"]).error, "--max-context-tokens must be a positive integer");
 	let seen: number | undefined;
 	const code = await runClioCommand(
 		{
