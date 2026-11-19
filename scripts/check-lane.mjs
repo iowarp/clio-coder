@@ -70,10 +70,23 @@ export function selectLaneTests({ changed, added, importsOf, lists }) {
 	return { affected: [...affected].sort(), unlisted };
 }
 
+/** `pnpm` when `env.PATH` runs it, else `corepack pnpm` (pinned by `packageManager`) for corepack-only shells. */
+export function pnpmCommand(env = process.env) {
+	const probe = spawnSync("pnpm", ["--version"], { env, stdio: "ignore" });
+	return probe.error === undefined && probe.status === 0 ? ["pnpm"] : ["corepack", "pnpm"];
+}
+
+let pnpmPrefix;
+function pnpm() {
+	pnpmPrefix ??= pnpmCommand();
+	return pnpmPrefix;
+}
+
 /** Biome-format generated openapi JSON with the GUI package's own config, the one `pnpm run openapi` uses. */
 export function formatOpenapi(text) {
+	const [command, ...prefix] = pnpm();
 	// The root biome config excludes apps/clio-coder-gui, so formatting from the root returns the input unchanged.
-	return spawnSync("pnpm", ["exec", "biome", "format", "--stdin-file-path=contracts/openapi.json"], {
+	return spawnSync(command, [...prefix, "exec", "biome", "format", "--stdin-file-path=contracts/openapi.json"], {
 		cwd: join(root, "apps/clio-coder-gui"),
 		input: text,
 		encoding: "utf8",
@@ -142,9 +155,14 @@ async function main() {
 		console.log(`\n── ${step}: ${command} ${args.join(" ")}`);
 		const result = spawnSync(command, args, { cwd, stdio: "inherit", env: process.env });
 		if (result.status === 0) pass(step);
+		else if (result.error) fail(step, `(could not start ${command}: ${result.error.message})`);
 		else fail(step, `(exit ${result.status ?? result.signal})`);
 		stopIfFailed();
 		return result.status === 0;
+	};
+	const runPnpm = (step, args) => {
+		const [command, ...prefix] = pnpm();
+		return run(step, command, [...prefix, ...args]);
 	};
 
 	// 1. Environment guards.
@@ -175,12 +193,12 @@ async function main() {
 	console.log(`check:lane base ${base.slice(0, 10)}, ${changed.length} changed paths`);
 
 	// 2. Typecheck and lint.
-	run("typecheck", "pnpm", ["run", "typecheck"]);
-	run("lint", "pnpm", ["run", "lint"]);
+	runPnpm("typecheck", ["run", "typecheck"]);
+	runPnpm("lint", ["run", "lint"]);
 
 	// 3. GUI.
 	if (changed.some((path) => path.startsWith("apps/clio-coder-gui/") || path.startsWith("packages/")))
-		run("check:gui", "pnpm", ["run", "check:gui"]);
+		runPnpm("check:gui", ["run", "check:gui"]);
 
 	// 4. Contract freshness.
 	if (
@@ -199,7 +217,8 @@ async function main() {
 		);
 		const formatted = generated.status === 0 ? formatOpenapi(generated.stdout) : generated;
 		const current = readFileSync(join(root, "apps/clio-coder-gui/contracts/openapi.json"), "utf8");
-		if (formatted.status !== 0) fail("openapi", `(could not regenerate: ${formatted.stderr.trim().split("\n")[0]})`);
+		if (formatted.error) fail("openapi", `(could not start the formatter: ${formatted.error.message})`);
+		else if (formatted.status !== 0) fail("openapi", `(could not regenerate: ${formatted.stderr.trim().split("\n")[0]})`);
 		else if (formatted.stdout !== current)
 			fail("openapi", "stale; run: pnpm --filter @iowarp/clio-coder-gui run openapi");
 		else pass("openapi");
@@ -208,8 +227,8 @@ async function main() {
 
 	// 5. Library freshness.
 	if (changed.some((path) => path.startsWith("library/"))) {
-		run("skills:check", "pnpm", ["run", "skills:check"]);
-		run("library:check", "pnpm", ["run", "library:check"]);
+		runPnpm("skills:check", ["run", "skills:check"]);
+		runPnpm("library:check", ["run", "library:check"]);
 	}
 
 	// 6-8. Affected and unlisted tests.

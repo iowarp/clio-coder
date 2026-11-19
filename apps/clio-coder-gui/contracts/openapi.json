@@ -24645,12 +24645,6 @@
 					"$ref": "#/components/schemas/Object_key_resetsAt_usedPct_73154201"
 				}
 			},
-			"Array_6c1ac870": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_admission_agent_attempt_8d7229a7"
-				}
-			},
 			"Array_721a7562": {
 				"type": "array",
 				"items": {
@@ -24848,6 +24842,12 @@
 					"$ref": "#/components/schemas/Object_actionClass_reasonCode_ruleId_30be48f7"
 				},
 				"maxItems": 64
+			},
+			"Array_d0c580ce": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_admission_agent_attempt_b23ebf73"
+				}
 			},
 			"Array_d390febe": {
 				"type": "array",
@@ -25218,7 +25218,7 @@
 						"additionalProperties": false
 					},
 					"calls": {
-						"$ref": "#/components/schemas/Array_6c1ac870"
+						"$ref": "#/components/schemas/Array_d0c580ce"
 					},
 					"matched": {
 						"type": "integer",
@@ -27426,7 +27426,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_admission_agent_attempt_8d7229a7": {
+			"Object_admission_agent_attempt_b23ebf73": {
 				"type": "object",
 				"required": [
 					"callId",
@@ -27453,15 +27453,15 @@
 					"responseId"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_3cbd57d0"
+					"$ref": "#/components/schemas/Shape_7b877c2e"
 				},
 				"additionalProperties": false
 			},
-			"Object_admission_auth_connect_1599d5b6": {
+			"Object_admission_auth_connect_39501ba4": {
 				"type": "object",
 				"required": ["settle"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_4d7a3f49"
+					"$ref": "#/components/schemas/Shape_56f26f01"
 				},
 				"additionalProperties": false
 			},
@@ -27904,7 +27904,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_agent_at_attemptId_3a63cf6c": {
+			"Object_agent_at_attemptId_53ae2c34": {
 				"type": "object",
 				"required": [
 					"kind",
@@ -27924,7 +27924,7 @@
 					"cacheVerdict"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_92089b46"
+					"$ref": "#/components/schemas/Shape_df3a9824"
 				},
 				"additionalProperties": false
 			},
@@ -28030,6 +28030,31 @@
 					"value": {
 						"type": "string",
 						"pattern": "^[0-9a-f]{64}$"
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_anchored_end_inputTokens_33380dfb": {
+				"type": "object",
+				"required": ["start", "end"],
+				"properties": {
+					"start": {
+						"type": "number",
+						"minimum": 0
+					},
+					"end": {
+						"type": "number",
+						"minimum": 0
+					},
+					"waitedOn": {
+						"enum": ["budget", "capacity", "steering"]
+					},
+					"inputTokens": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"anchored": {
+						"type": "boolean"
 					}
 				},
 				"additionalProperties": false
@@ -30607,24 +30632,6 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_end_start_waitedOn_218f13c3": {
-				"type": "object",
-				"required": ["start", "end"],
-				"properties": {
-					"start": {
-						"type": "number",
-						"minimum": 0
-					},
-					"end": {
-						"type": "number",
-						"minimum": 0
-					},
-					"waitedOn": {
-						"enum": ["budget", "capacity", "steering"]
-					}
-				},
-				"additionalProperties": false
-			},
 			"Object_enforcementPassed_runtimeEnforceable_schemaDigest_3923e88f": {
 				"type": "object",
 				"required": ["sourceId", "schemaDigest", "runtimeEnforceable", "enforcementPassed"],
@@ -32889,7 +32896,7 @@
 						"items": {
 							"anyOf": [
 								{
-									"$ref": "#/components/schemas/Object_agent_at_attemptId_3a63cf6c"
+									"$ref": "#/components/schemas/Object_agent_at_attemptId_53ae2c34"
 								},
 								{
 									"$ref": "#/components/schemas/Object_at_event_kind_cc2d5730"
@@ -33932,87 +33939,6 @@
 					"$ref": "#/components/schemas/Union_26071620"
 				}
 			},
-			"Shape_3cbd57d0": {
-				"callId": {
-					"type": "string",
-					"pattern": "^cal_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-				},
-				"attemptId": {
-					"type": "string",
-					"pattern": "^att_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-				},
-				"attempt": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"agent": {
-					"$ref": "#/components/schemas/Object_id_role_c46a0a00"
-				},
-				"owner": {
-					"$ref": "#/components/schemas/Object_runId_sessionId_turnId_6e913239"
-				},
-				"startedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"settledAt": {
-					"$ref": "#/components/schemas/Union_9d36f13d"
-				},
-				"target": {
-					"$ref": "#/components/schemas/Object_api_reportedModel_requestedModel_5dcab2d5"
-				},
-				"roundKind": {
-					"$ref": "#/components/schemas/Enum_413aacec"
-				},
-				"toolChoice": {
-					"type": "string",
-					"maxLength": 4096
-				},
-				"disposition": {
-					"$ref": "#/components/schemas/Union_f0839e51"
-				},
-				"stop": {
-					"$ref": "#/components/schemas/Union_941f2837"
-				},
-				"usage": {
-					"$ref": "#/components/schemas/Union_178a3139"
-				},
-				"usd": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"pricedBy": {
-					"enum": ["provider", "target-rates", "catalog", "free", "none"]
-				},
-				"stages": {
-					"$ref": "#/components/schemas/Union_71874828"
-				},
-				"timing": {
-					"$ref": "#/components/schemas/Object_admissionWait_harness_modelTime_8652ac86"
-				},
-				"admission": {
-					"$ref": "#/components/schemas/Union_6872feba"
-				},
-				"transport": {
-					"$ref": "#/components/schemas/Object_connectionReused_continuation_kind_13d8e1ff"
-				},
-				"cache": {
-					"$ref": "#/components/schemas/Object_breakUsd_expectedColdReasons_firstDivergentSection_395ea4c0"
-				},
-				"quota": {
-					"$ref": "#/components/schemas/Union_96fc0259"
-				},
-				"responseId": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				}
-			},
 			"Shape_3d21f4f2": {
 				"type": {
 					"type": "string",
@@ -34122,42 +34048,6 @@
 					"$ref": "#/components/schemas/Object_display_fact_1897f681"
 				}
 			},
-			"Shape_4d7a3f49": {
-				"admission": {
-					"$ref": "#/components/schemas/Object_end_start_waitedOn_218f13c3"
-				},
-				"auth": {
-					"$ref": "#/components/schemas/Object_end_refreshed_start_b442c43b"
-				},
-				"transform": {
-					"$ref": "#/components/schemas/Object_end_start_c6b71317"
-				},
-				"connect": {
-					"$ref": "#/components/schemas/Object_end_reused_start_b0244d0f"
-				},
-				"send": {
-					"$ref": "#/components/schemas/Object_end_start_c6b71317"
-				},
-				"firstByte": {
-					"type": "number",
-					"minimum": 0
-				},
-				"firstToken": {
-					"type": "number",
-					"minimum": 0
-				},
-				"settle": {
-					"anyOf": [
-						{
-							"type": "number",
-							"minimum": 0
-						},
-						{
-							"type": "null"
-						}
-					]
-				}
-			},
 			"Shape_4e5db761": {
 				"kind": {
 					"type": "string",
@@ -34222,6 +34112,42 @@
 				},
 				"resultContract": {
 					"$ref": "#/components/schemas/Union_aa0baad3"
+				}
+			},
+			"Shape_56f26f01": {
+				"admission": {
+					"$ref": "#/components/schemas/Object_anchored_end_inputTokens_33380dfb"
+				},
+				"auth": {
+					"$ref": "#/components/schemas/Object_end_refreshed_start_b442c43b"
+				},
+				"transform": {
+					"$ref": "#/components/schemas/Object_end_start_c6b71317"
+				},
+				"connect": {
+					"$ref": "#/components/schemas/Object_end_reused_start_b0244d0f"
+				},
+				"send": {
+					"$ref": "#/components/schemas/Object_end_start_c6b71317"
+				},
+				"firstByte": {
+					"type": "number",
+					"minimum": 0
+				},
+				"firstToken": {
+					"type": "number",
+					"minimum": 0
+				},
+				"settle": {
+					"anyOf": [
+						{
+							"type": "number",
+							"minimum": 0
+						},
+						{
+							"type": "null"
+						}
+					]
 				}
 			},
 			"Shape_5788f5fd": {
@@ -34970,6 +34896,87 @@
 					"$ref": "#/components/schemas/Problem"
 				}
 			},
+			"Shape_7b877c2e": {
+				"callId": {
+					"type": "string",
+					"pattern": "^cal_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+				},
+				"attemptId": {
+					"type": "string",
+					"pattern": "^att_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+				},
+				"attempt": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"agent": {
+					"$ref": "#/components/schemas/Object_id_role_c46a0a00"
+				},
+				"owner": {
+					"$ref": "#/components/schemas/Object_runId_sessionId_turnId_6e913239"
+				},
+				"startedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"settledAt": {
+					"$ref": "#/components/schemas/Union_9d36f13d"
+				},
+				"target": {
+					"$ref": "#/components/schemas/Object_api_reportedModel_requestedModel_5dcab2d5"
+				},
+				"roundKind": {
+					"$ref": "#/components/schemas/Enum_413aacec"
+				},
+				"toolChoice": {
+					"type": "string",
+					"maxLength": 4096
+				},
+				"disposition": {
+					"$ref": "#/components/schemas/Union_f0839e51"
+				},
+				"stop": {
+					"$ref": "#/components/schemas/Union_941f2837"
+				},
+				"usage": {
+					"$ref": "#/components/schemas/Union_178a3139"
+				},
+				"usd": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"pricedBy": {
+					"enum": ["provider", "target-rates", "catalog", "free", "none"]
+				},
+				"stages": {
+					"$ref": "#/components/schemas/Union_7288a51c"
+				},
+				"timing": {
+					"$ref": "#/components/schemas/Object_admissionWait_harness_modelTime_8652ac86"
+				},
+				"admission": {
+					"$ref": "#/components/schemas/Union_6872feba"
+				},
+				"transport": {
+					"$ref": "#/components/schemas/Object_connectionReused_continuation_kind_13d8e1ff"
+				},
+				"cache": {
+					"$ref": "#/components/schemas/Object_breakUsd_expectedColdReasons_firstDivergentSection_395ea4c0"
+				},
+				"quota": {
+					"$ref": "#/components/schemas/Union_96fc0259"
+				},
+				"responseId": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
 			"Shape_7c21800d": {
 				"id": {
 					"type": "string",
@@ -35116,57 +35123,6 @@
 				},
 				"evidence": {
 					"$ref": "#/components/schemas/Union_43aa76d8"
-				}
-			},
-			"Shape_92089b46": {
-				"kind": {
-					"type": "string",
-					"const": "call"
-				},
-				"at": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"endAt": {
-					"$ref": "#/components/schemas/Union_9d36f13d"
-				},
-				"callId": {
-					"type": "string",
-					"pattern": "^cal_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-				},
-				"attemptId": {
-					"type": "string",
-					"pattern": "^att_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-				},
-				"agent": {
-					"$ref": "#/components/schemas/Object_id_role_c46a0a00"
-				},
-				"turnId": {
-					"$ref": "#/components/schemas/Union_21b008c5"
-				},
-				"runId": {
-					"$ref": "#/components/schemas/Union_21b008c5"
-				},
-				"disposition": {
-					"$ref": "#/components/schemas/Union_f0839e51"
-				},
-				"failure": {
-					"$ref": "#/components/schemas/Union_f281744d"
-				},
-				"stages": {
-					"$ref": "#/components/schemas/Union_71874828"
-				},
-				"timing": {
-					"$ref": "#/components/schemas/Object_admissionWait_modelTime_settle_7c7494ef"
-				},
-				"tokens": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"usd": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"cacheVerdict": {
-					"enum": ["hot", "partial", "cold", "small", "unknown"]
 				}
 			},
 			"Shape_92bc19ac": {
@@ -36485,6 +36441,57 @@
 					"const": true
 				}
 			},
+			"Shape_df3a9824": {
+				"kind": {
+					"type": "string",
+					"const": "call"
+				},
+				"at": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"endAt": {
+					"$ref": "#/components/schemas/Union_9d36f13d"
+				},
+				"callId": {
+					"type": "string",
+					"pattern": "^cal_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+				},
+				"attemptId": {
+					"type": "string",
+					"pattern": "^att_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+				},
+				"agent": {
+					"$ref": "#/components/schemas/Object_id_role_c46a0a00"
+				},
+				"turnId": {
+					"$ref": "#/components/schemas/Union_21b008c5"
+				},
+				"runId": {
+					"$ref": "#/components/schemas/Union_21b008c5"
+				},
+				"disposition": {
+					"$ref": "#/components/schemas/Union_f0839e51"
+				},
+				"failure": {
+					"$ref": "#/components/schemas/Union_f281744d"
+				},
+				"stages": {
+					"$ref": "#/components/schemas/Union_7288a51c"
+				},
+				"timing": {
+					"$ref": "#/components/schemas/Object_admissionWait_modelTime_settle_7c7494ef"
+				},
+				"tokens": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"usd": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"cacheVerdict": {
+					"enum": ["hot", "partial", "cold", "small", "unknown"]
+				}
+			},
 			"Shape_e0f3765c": {
 				"context": {
 					"$ref": "#/components/schemas/Object_compactionAuto_compactionThreshold_contextWindow_fb814a10"
@@ -36977,7 +36984,7 @@
 						"items": {
 							"anyOf": [
 								{
-									"$ref": "#/components/schemas/Object_agent_at_attemptId_3a63cf6c"
+									"$ref": "#/components/schemas/Object_agent_at_attemptId_53ae2c34"
 								},
 								{
 									"type": "object",
@@ -38820,16 +38827,6 @@
 					}
 				]
 			},
-			"Union_71874828": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_admission_auth_connect_1599d5b6"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_72273147": {
 				"anyOf": [
 					{
@@ -38855,6 +38852,16 @@
 					{
 						"type": "string",
 						"const": "failure"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_7288a51c": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_admission_auth_connect_39501ba4"
 					},
 					{
 						"type": "null"
@@ -40509,7 +40516,7 @@
 						]
 					},
 					"lastCalls": {
-						"$ref": "#/components/schemas/Array_6c1ac870"
+						"$ref": "#/components/schemas/Array_d0c580ce"
 					},
 					"workerStops": {
 						"type": "array",

@@ -80,7 +80,20 @@ export function instrumentProviderCall<T extends StreamOptions>(
 	}
 	const path = process.env.CLIO_CODER_PROVIDER_DUMP_PATH;
 	if (!path) return invoke(effective);
-	const sink = openDump(path);
+	let sink: number;
+	try {
+		sink = openDump(path);
+	} catch (error) {
+		// A dump that cannot be opened (a directory, a refused file) never fails the call it would have recorded.
+		if (!unopenableDumpPaths.has(path)) {
+			unopenableDumpPaths.add(path);
+			process.emitWarning(
+				`Provider diagnostic dump could not be opened: ${error instanceof Error ? error.message : String(error)}`,
+				{ code: "CLIO_CODER_PROVIDER_DUMP_FAILED" },
+			);
+		}
+		return invoke(effective);
+	}
 	const payloads: unknown[] = [];
 	const redact = diagnosticSerializer(model, effective);
 	const callId = randomUUID();
@@ -128,6 +141,9 @@ export function instrumentProviderCall<T extends StreamOptions>(
 		throw error;
 	}
 }
+
+/** Dump paths that failed to open, so a misconfigured path warns once per process rather than on every call. */
+const unopenableDumpPaths = new Set<string>();
 
 /** Refuse insecure existing files instead of silently changing their permissions. */
 function openDump(path: string): number {

@@ -817,7 +817,11 @@ export function formatDispatchOutput(
 				receipt.outcome !== undefined && receipt.outcome !== "succeeded"
 					? ` outcome=${receipt.outcome}${receipt.outcomeDetail ? ` detail=${receipt.outcomeDetail}` : ""}`
 					: "";
-			const failure = receipt.failureMessage ? ` failure=${receipt.failureMessage}` : "";
+			// The detail usually already carries the failure message; render it once.
+			const failure =
+				receipt.failureMessage && !(outcomeSuffix && receipt.outcomeDetail?.includes(receipt.failureMessage))
+					? ` failure=${receipt.failureMessage}`
+					: "";
 			// Pipeline runs are an ordered chain, so each line names its step.
 			const stepLabel = mode === "pipeline" ? `step ${index + 1}/${runs.length} ` : "";
 			// Provenance suffix is empty when a run carries no

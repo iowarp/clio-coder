@@ -1,8 +1,11 @@
 import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { prefixHeadlessFailure, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { CITATION_CHECK_PREFIX } from "../../src/domains/safety/citation-grounding.js";
 import type { ChatLoopRunSnapshot } from "../../src/session-control/chat-loop.js";
+import { formatDispatchOutput } from "../../src/tools/dispatch-runner.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 test("headless budget and admission stops do not report an endpoint outage", () => {
@@ -221,6 +224,30 @@ test("a dispatch whose worker started and failed is not reported as never starte
 			/no-op: the delegated task failed \(1hj006g52rl9 agent=debugger exit=1 outcome=failed detail=worker process signal: SIGKILL\) and no write succeeded/u,
 		);
 		doesNotMatch(started.stderr, /never started/u);
+
+		// A failed run's failure message repeats its outcome detail; the reason names the worker cause once, at its end.
+		const sigkill =
+			"stderr: [worker] bulk evidence incomplete: the worker was terminated by SIGKILL before it finished its output; worker process signal: SIGKILL";
+		const timeout = "exit code 1; worker_turn_timeout: round 2 exceeded the 3 second response limit";
+		for (const [mode, detail, failureMessage] of [
+			["sequential", `exit code 1; ${sigkill}`, sigkill],
+			["parallel", timeout, timeout],
+		] as const) {
+			const envelope = fixtureEnvelope("13k9l997q5o5");
+			const settled = finishRunResult(fixtureReceiptDraft(envelope), envelope, {
+				terminal: { terminalReason: "completed" },
+				processExitCode: 0,
+				frameType: null,
+				usage: undefined,
+			}).result;
+			const receipt = { ...settled, exitCode: 1, outcome: "failed" as const, outcomeDetail: detail, failureMessage };
+			const summary = { count: 0, types: [], lastAssistantText: "", terminalAttemptRunId: receipt.runId };
+			const failed = await failedDispatchRun(formatDispatchOutput(mode, [{ receipt, summary }], 16384));
+			strictEqual(failed.code, 1, failed.stderr);
+			ok(failed.stderr.includes(`13k9l997q5o5 agent=coder exit=1 outcome=failed detail=`), failed.stderr);
+			ok(failed.stderr.includes(`${failureMessage.slice(-60)}) and no write succeeded`), failed.stderr);
+			doesNotMatch(failed.stderr, /failure=/u);
+		}
 
 		// c16-B: a dispatch refused before any worker ran keeps its wording and its exit 1 no-op.
 		const unstarted = await failedDispatchRun("dispatch: admission denied: unknown fleet node 'no-such-node'");
