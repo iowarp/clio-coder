@@ -325,15 +325,21 @@ test("provider dump composes async payload mutations and preserves every stream 
 	}
 });
 
-test("provider dump refuses relative paths, existing public files, and symlink destinations", async () => {
+test("provider dump refuses relative paths, existing public files, symlinks and directories with one warning each, never failing the call", async () => {
 	const env = await isolateClioEnv("provider-dump-path-");
+	const warnings: string[] = [];
+	const onWarning = (warning: Error & { code?: string }) => {
+		if (warning.code === "CLIO_CODER_PROVIDER_DUMP_FAILED") warnings.push(warning.message);
+	};
+	process.on("warning", onWarning);
 	try {
 		const publicPath = join(env.dir, "public.jsonl");
 		writeFileSync(publicPath, "keep", { mode: 0o644 });
 		const link = join(env.dir, "link.jsonl");
 		symlinkSync(publicPath, link);
 		let requests = 0;
-		for (const path of ["relative.jsonl", publicPath, link]) {
+		// The directory comes twice: a path that cannot be opened warns once, not on every call.
+		for (const path of ["relative.jsonl", publicPath, link, env.dir, env.dir]) {
 			process.env.CLIO_CODER_PROVIDER_DUMP_PATH = path;
 			const result = await engineStreamSimple(
 				model,
@@ -346,12 +352,16 @@ test("provider dump refuses relative paths, existing public files, and symlink d
 					},
 				},
 			).result();
-			assert.equal(result.stopReason, "error");
-			assert.match(result.errorMessage ?? "", /absolute file path|operator-owned regular file|ELOOP/u);
+			assert.notEqual(result.stopReason, "error", result.errorMessage);
 		}
-		assert.equal(requests, 0);
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(requests, 5);
+		assert.equal(warnings.length, 4, warnings.join("\n"));
+		assert.match(warnings.join("\n"), /absolute file path[\s\S]*operator-owned regular file[\s\S]*ELOOP[\s\S]*EISDIR/u);
 		assert.equal(readFileSync(publicPath, "utf8"), "keep");
 	} finally {
+		process.off("warning", onWarning);
+		delete process.env.CLIO_CODER_PROVIDER_DUMP_PATH;
 		env.restore();
 	}
 });
