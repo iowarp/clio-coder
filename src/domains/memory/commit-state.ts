@@ -35,8 +35,8 @@ export interface PrepareMemoryRestorationInput extends MemoryRestorationInput {
 /**
  * In-process content authority only. Owns no bank, usage, queue, IO or model.
  * Retain seen identities for the active scope rather than evicting old IDs and
- * permitting duplicate commits to advance the epoch again. Cancellation revokes
- * offers but keeps pending restoration; navigation explicitly clears it.
+ * permitting duplicate commits to advance the epoch again. Cancellation and an eviction-only
+ * fold (no memory text removed) revoke offers but keep pending restoration; navigation clears it.
  */
 export class MemoryCommitState {
 	#scope: MemoryCommitScope;
@@ -74,7 +74,7 @@ export class MemoryCommitState {
 		if (this.#commitEpoch === Number.MAX_SAFE_INTEGER) throw new Error("memory commit epoch exhausted");
 		this.#seen.set(input.commitId, identity);
 		this.#commitEpoch += 1;
-		this.#pending = input.commitId;
+		if (input.kind !== "summary" || input.outcome !== "evicted") this.#pending = input.commitId;
 		this.#issued = null;
 		return "accepted";
 	}
