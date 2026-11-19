@@ -7,7 +7,8 @@
  * it reaches the live history. Render places the record where the live
  * request carried it, so a rebuild, a reopen and a fork send the same bytes.
  *
- * The service also keeps the ids of inserts no dispatched attempt has carried.
+ * The service also keeps the ids of inserts no dispatched attempt has carried,
+ * each under the session that wrote it.
  * A checkpoint whose cut removes such an insert's anchor re-issues it after the
  * checkpoint, durably, so the next request still carries it.
  */
@@ -70,7 +71,7 @@ export interface HostInserts {
 	/** Reserve the row id the event path will write for a host-authored message a record already holds. */
 	reserveRowId(message: object): string;
 	reservedRowId(message: unknown): string | undefined;
-	/** An attempt was dispatched: every insert written so far has been carried. */
+	/** An attempt was dispatched: the current session's inserts that render on its branch have been carried. */
 	dispatched(): void;
 	isUnsent(id: string): boolean;
 	/** After a checkpoint commits: re-issue each unsent insert whose anchor the cut removed. */
@@ -96,7 +97,7 @@ const sameElement = (a: unknown, b: unknown): boolean => a === b || JSON.stringi
 
 export function createHostInserts(deps: HostInsertsDeps): HostInserts {
 	const reserved = new WeakMap<object, string>();
-	let unsent: HostInsertRecord[] = [];
+	let unsent: Array<{ record: HostInsertRecord; sessionId: string }> = [];
 	// Ids this process wrote or already reported as inherited.
 	const known = new Set<string>();
 
@@ -114,7 +115,8 @@ export function createHostInserts(deps: HostInsertsDeps): HostInserts {
 	};
 
 	const record: HostInserts["record"] = (source, elements, options = {}) => {
-		if (!deps.session?.current() || elements.length === 0) return null;
+		const owner = deps.session?.current();
+		if (!owner || elements.length === 0) return null;
 		const exclude = new Set(options.exclude ?? []);
 		const anchor =
 			options.before !== undefined
@@ -132,7 +134,7 @@ export function createHostInserts(deps: HostInsertsDeps): HostInserts {
 		};
 		append(data);
 		known.add(data.id);
-		unsent.push(data);
+		unsent.push({ record: data, sessionId: owner.id });
 		return data;
 	};
 
@@ -159,29 +161,37 @@ export function createHostInserts(deps: HostInsertsDeps): HostInserts {
 		},
 		reservedRowId: (message) => (message !== null && typeof message === "object" ? reserved.get(message) : undefined),
 		dispatched() {
-			unsent = [];
+			const sessionId = deps.session?.current()?.id;
+			if (!unsent.some((item) => item.sessionId === sessionId)) return;
+			const entries = deps.readSessionEntries?.() ?? [];
+			unsent = unsent.filter(
+				(item) => item.sessionId !== sessionId || !hostInsertVisible(entries, deps.leaf(), item.record),
+			);
 		},
-		isUnsent: (id) => unsent.some((item) => item.id === id),
+		isUnsent: (id) => unsent.some((item) => item.record.id === id),
 		reissueUnsent() {
-			if (unsent.length === 0 || !deps.session?.current()) return;
+			const sessionId = deps.session?.current()?.id;
+			if (sessionId === undefined || !unsent.some((item) => item.sessionId === sessionId)) return;
 			const entries = deps.readSessionEntries?.() ?? [];
 			const checkpoint = selectReplayEntries(entries, {
 				...(deps.leaf() ? { activeLeafTurnId: deps.leaf() ?? "" } : {}),
 			})[0];
 			if (checkpoint?.kind !== "compactionSummary") return;
 			const live = new Set(readHostInserts(filterEntriesToActivePath(entries, deps.leaf() ?? undefined)).map((r) => r.id));
-			unsent = unsent.map((original) => {
-				if (!live.has(original.id) || hostInsertVisible(entries, deps.leaf(), original)) return original;
+			unsent = unsent.map((item) => {
+				const original = item.record;
+				if (item.sessionId !== sessionId || !live.has(original.id) || hostInsertVisible(entries, deps.leaf(), original))
+					return item;
 				const { place: _place, id: _id, ...rest } = original;
 				const next: HostInsertRecord = { ...rest, id: newInsertId(), place: { after: checkpoint.turnId } };
 				append(next);
 				known.add(next.id);
-				return next;
+				return { record: next, sessionId };
 			});
 		},
 		retract(target, runtime) {
 			if (deps.session?.current()) append({ version: 1, id: target.id, retract: true });
-			unsent = unsent.filter((item) => item.id !== target.id);
+			unsent = unsent.filter((item) => item.record.id !== target.id);
 			if (runtime) removeLive(runtime, target.elements);
 		},
 		onPath: () => readHostInserts(pathEntries()),
