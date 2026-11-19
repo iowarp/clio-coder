@@ -12,7 +12,7 @@ export async function inspectGuiBackground(fix: boolean): Promise<DoctorFinding[
 	return server.inspectGuiBackground(fix);
 }
 
-const HELP = `Clio Coder graphical application
+const HELP = `CLIO Coder graphical application
 
 Usage:
   clio-coder gui [--path </app/path>] [--open | --no-open] [--foreground]
@@ -20,7 +20,7 @@ Usage:
   clio-coder gui background status|start|open|restart [--if-idle]|stop|uninstall
   clio-coder gui launcher install|status|uninstall
 
-clio-coder gui opens Clio Coder in your browser. When this installation's
+clio-coder gui opens CLIO Coder in your browser. When this installation's
 background app is installed, it reopens that app at its stable address and
 returns your terminal. Otherwise it starts a private server for this terminal,
 prints its launch link and opens it; press Ctrl+C to stop it.
@@ -41,14 +41,14 @@ version; --if-idle leaves it alone while work is active. --handover transfers a
 verified idle service from another installation while retaining its address and credentials. Stop
 stops it until the next login or the next clio-coder gui, and uninstall also
 removes its login, desktop and Windows entries.
-Under WSL, background install also adds a Clio Coder Start Menu shortcut and a
+Under WSL, background install also adds a CLIO Coder Start Menu shortcut and a
 sign-in entry on Windows. The shortcut wakes WSL, starts the app and brings
 its window to the front, opening a Chrome or Edge app window only when none
 is open; the sign-in entry only wakes WSL and starts it. clio-coder gui
 focuses the open window the same way, and --path then shows that page in it.
 macOS and native Windows run the private server only; Windows prints the link
 instead of opening it. Your CLI, terminal interface, headless runs, and
-graphical app use the same Clio Coder runtime, configuration and sessions, and
+graphical app use the same CLIO Coder runtime, configuration and sessions, and
 the graphical app lists every project the terminal interface has worked in.
 `;
 

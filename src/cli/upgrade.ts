@@ -45,7 +45,7 @@ type Channel = (typeof CHANNELS)[number];
 const HELP = `clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations] [--refresh-runtime]
                    [--post-install] [--rollback] [--restart] [--json]
 
-Upgrade Clio Coder and apply pending state migrations. An npm-installed
+Upgrade CLIO Coder and apply pending state migrations. An npm-installed
 binary is updated in its existing prefix. An install.sh install gets the new
 version in a new prefix beside the old one, then its launcher is switched.
 Other package managers and source checkouts receive update instructions for

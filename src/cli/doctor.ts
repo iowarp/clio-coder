@@ -61,7 +61,7 @@ import { printError } from "./shared.js";
 
 const HELP = `clio-coder doctor [--fix] [--json] [--verbose] [--deep [--tools-timeout <seconds>]]
 
-Diagnose Clio Coder state without creating files. The first row says whether
+Diagnose CLIO Coder state without creating files. The first row says whether
 chat can run and what to run when it cannot. On a home CLIO Coder has never
 written to, doctor says so in one row and exits 0. Use --fix to repair structure:
 missing directories, missing template files, and credential permissions.

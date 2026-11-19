@@ -74,7 +74,7 @@ before writing, and for report every name left readable; --dry-run stops there.
 overwritten.
 
 --send shares the archive instead of writing it, only when you run it: it seals
-the archive so that only the Clio Coder maintainers can open it, uploads it as a
+the archive so that only the CLIO Coder maintainers can open it, uploads it as a
 secret gist in your GitHub account through your own gh, and opens a public
 discussion in "Telemetry shares" on iowarp/clio-coder that names the gist and
 nothing else. --consent debug lets the maintainers read it to fix CLIO Coder;

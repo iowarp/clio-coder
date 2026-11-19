@@ -11,7 +11,7 @@ import { printError } from "./shared.js";
 const HELP = `clio-coder acp [--cwd PATH] [--permission-timeout MS] [--autonomy LEVEL] [--allow-tools NAMES] [--delegate-tools NAMES] [--read-only]
 clio-coder acp [--cwd PATH] auth login
 
-Serve Clio Coder as an Agent Client Protocol v1 agent over stdio.
+Serve CLIO Coder as an Agent Client Protocol v1 agent over stdio.
 
   --cwd PATH               Pin this workspace: every session must name it. Without
                            it, the first workspace request selects the root.

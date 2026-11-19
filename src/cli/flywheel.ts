@@ -17,14 +17,14 @@ import { printError } from "./shared.js";
 export const FLYWHEEL_HELP = `clio-coder dev flywheel [--json] [--kind <kind>[,<kind>]] [--top N]
 clio-coder dev flywheel --pull <shareId|all> [--key <pem>] [--out <dir>]
 
-Prints a Usage block for Clio Coder from data/projects/coder/summary.json (npm downloads,
+Prints a Usage block for CLIO Coder from data/projects/coder/summary.json (npm downloads,
 install-script requests, GitHub views and clones over 7 days, stars, forks,
 open reports, shares on file, the latest release and its share of downloads,
 stale data sources, the latest weekly digest issue), then the maintainers'
 ranked backlog, data/projects/coder/backlog.csv, both on the data branch of
 iowarp/clio-metrics (the brand-wide metrics hub; docs/CONSUMERS.md there) and
 read through your gh. When the per-product files are missing it falls back to
-data/summary.json and data/flywheel/backlog.csv, keeping only Clio Coder's rows: failure clusters, regressions,
+data/summary.json and data/flywheel/backlog.csv, keeping only CLIO Coder's rows: failure clusters, regressions,
 feature requests, latent demand and friction, each with the evidence that
 ranks it. --kind keeps the rows of those kinds (failure, regression,
 friction, feature, demand, file-me and any kind clio-metrics adds); --top N
