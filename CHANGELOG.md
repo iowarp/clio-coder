@@ -522,6 +522,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - A turn sent in another session or on another branch no longer marks an interrupted session's unsent reminder as sent, so a later checkpoint re-issues it instead of dropping it.
 - `context working-set --verify` no longer reports an eviction as a duplicate decision when two stages of its one context.fold event name the same record.
 - Navigating /tree back to a leaf where a step turn settled no longer revives that step chain, so the next step turn runs on the new branch's history instead of a stale step checkpoint, live and after a reopen.
+- Pre-submit admission and the post-tool guard resolve the output reserve at the input count they check, so a request that fits a 65,536-token openai-completions window is no longer refused or compacted.
+- Recall resolves the output reserve at the input its batch would carry, so a second recall the next request can hold no longer returns the no-room stub.
 
 ## 0.8.3 - 2026-11-16
 
