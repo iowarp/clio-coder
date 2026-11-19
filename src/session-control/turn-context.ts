@@ -97,7 +97,6 @@ import { foldTriggerReserve } from "../domains/context/fold/pressure.js";
 import { withinRearmBand } from "../domains/context/working-set/checkpoint.js";
 import type { planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
-import { foldAttemptKey } from "../domains/context/working-set/plan.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
 import type { ClassifyCall } from "../domains/context/working-set/superseded.js";
 import { compactionCut } from "../domains/context/working-set/visible.js";
@@ -215,6 +214,14 @@ import type { TurnMiddleware } from "./turn-middleware.js";
 import type { AgentRuntime, TurnContextState } from "./turn-state.js";
 
 const AUTO_COMPACT_FAILURE_LIMIT = 3;
+/** A summary that came back empty, by its empty reason: the `context.fold` stage reason and the card's conclusion. */
+const EMPTY_SUMMARY = {
+	"repeat-no-gain": ["repeat_no_gain", "same history as the last summary without gain; no call made"],
+	"protected-skill": ["protected_skill", "nothing older than the protected skill turn to summarize"],
+	"protected-recent": ["protected_recent", "nothing older than the protected recent window to summarize"],
+	"nothing-to-summarize": ["nothing_to_summarize", "nothing to summarize"],
+	"below-summary-room": ["nothing_to_summarize", "nothing to summarize"],
+} as const;
 /** The summarizer streams a delta every few milliseconds; the rail needs a few redraws a second. */
 const SUMMARY_PROGRESS_INTERVAL_MS = 250;
 
@@ -2101,25 +2108,35 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 			return openedDecision;
 		};
+		// The fields the eviction stage and the legacy adoption share; `superseded` stays explicit at each call.
+		const foldInput = (session: SessionContract, estimate: LiveContextEstimate) => ({
+			agentRuntime,
+			decision: openDecision(),
+			session,
+			settings,
+			compactionThreshold,
+			estimate,
+			beforeSnapshotId: currentContextSnapshot?.snapshotId ?? null,
+			trigger,
+			originSession,
+			pendingUserText,
+			handoff,
+			classify: classifyCall,
+		});
+		const stageRoute = {
+			compactionWindow,
+			workingSetTarget,
+			shouldCompact: route.shouldCompact,
+			triggerFraction: route.triggerFraction,
+		};
 		/** A v6 session's aging stubs, met once per session at its first checkpoint (SPEC §1.5). */
 		const adoptOnce = (estimate: LiveContextEstimate): void => {
 			const session = deps.session;
 			if (originSession === undefined || legacyCheckedFor === originSession || !session?.current()) return;
 			legacyCheckedFor = originSession;
 			contextFold.adoptLegacyAging({
-				agentRuntime,
-				decision: openDecision(),
-				session,
-				settings,
-				compactionThreshold,
+				...foldInput(session, estimate),
 				superseded: supersededStageApplies(agentRuntime.runtimeResolution),
-				estimate,
-				beforeSnapshotId: currentContextSnapshot?.snapshotId ?? null,
-				trigger,
-				originSession,
-				pendingUserText,
-				handoff,
-				classify: classifyCall,
 			});
 		};
 		/** S0 alone, where the checkpoint goes no further: it commits once its floor is met, under the trigger too. */
@@ -2134,34 +2151,21 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			};
 			adoptOnce(current);
 			if (!supersededApplies) return settle();
-			const key = foldAttemptKey({
-				turn: state.activeUserTurnId || null,
-				leaf: state.lastTurnId ?? null,
-				view: foldWorkingSet(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined),
-				history: observeHistory(agentRuntime).digest(),
-			});
+			// What this checkpoint was asked; an equal key plans the same record, so a declined one is not re-planned.
+			const view = foldWorkingSet(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+			const key = sha256Json([
+				state.activeUserTurnId || null,
+				state.lastTurnId ?? null,
+				[[...view.evicted.keys()], view.evictionEvents, view.lastEvictionTurnId, view.recalls],
+				observeHistory(agentRuntime).digest(),
+			]);
 			if (key === supersededAttemptKey) return settle();
 			const stage = contextFold.runEvictionStage({
-				agentRuntime,
-				decision: openDecision(),
-				session,
-				settings,
-				estimate: current,
-				verdict: route.shouldCompact(current.tokens),
-				beforeSnapshotId: currentContextSnapshot?.snapshotId ?? null,
+				...foldInput(session, current),
+				...stageRoute,
 				requiredFit: false,
-				compactionWindow,
-				compactionThreshold,
-				workingSetTarget,
-				trigger,
-				originSession,
-				pendingUserText,
-				handoff,
-				shouldCompact: route.shouldCompact,
 				structural: false,
 				superseded: true,
-				classify: classifyCall,
-				triggerFraction: route.triggerFraction,
 			});
 			if (!stage.committed) supersededAttemptKey = key;
 			return settle();
@@ -2313,32 +2317,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		if (pressureEstimate) {
 			const estimate = pressureEstimate;
-			const verdict = route.shouldCompact(estimate.tokens);
 			const session = deps.session;
 
 			if (session?.current()) {
 				adoptOnce(estimate);
 				const stage = contextFold.runEvictionStage({
-					agentRuntime,
-					decision,
-					session,
-					settings,
-					estimate,
-					verdict,
-					beforeSnapshotId: currentContextSnapshot?.snapshotId ?? null,
+					...foldInput(session, estimate),
+					...stageRoute,
 					requiredFit,
-					compactionWindow,
-					compactionThreshold,
-					workingSetTarget,
-					trigger,
-					originSession,
-					pendingUserText,
-					handoff,
-					shouldCompact: route.shouldCompact,
 					structural: true,
 					superseded: supersededApplies,
-					classify: classifyCall,
-					triggerFraction: route.triggerFraction,
 				});
 				if (stage.acted) preSummaryStageActed = true;
 				else if (stage.committed) compactionConclusion = "superseded tool results evicted";
@@ -2580,14 +2568,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			decision.stage({
 				stage: "llm_summary",
 				outcome: "none",
-				reason:
-					result?.emptyReason === "repeat-no-gain"
-						? "repeat_no_gain"
-						: result?.emptyReason === "protected-skill"
-							? "protected_skill"
-							: result?.emptyReason === "protected-recent"
-								? "protected_recent"
-								: "nothing_to_summarize",
+				reason: EMPTY_SUMMARY[result?.emptyReason ?? "nothing-to-summarize"][0],
 			});
 		else {
 			const recordId = result.checkpointId ?? summaryRecordId;
@@ -2633,15 +2614,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				emitCompactionActivity("completed", "nothing to compact");
 				settleWithoutSummary(null);
 			} else {
-				settleWithoutSummary(
-					result?.emptyReason === "repeat-no-gain"
-						? "same history as the last summary without gain; no call made"
-						: result?.emptyReason === "protected-skill"
-							? "nothing older than the protected skill turn to summarize"
-							: result?.emptyReason === "protected-recent"
-								? "nothing older than the protected recent window to summarize"
-								: "nothing to summarize",
-				);
+				settleWithoutSummary(EMPTY_SUMMARY[result?.emptyReason ?? "nothing-to-summarize"][1]);
 				rememberEmptyAutomaticAttempt();
 			}
 			return false;

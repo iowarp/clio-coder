@@ -31,13 +31,7 @@ import type { ContextCompactionVerdict } from "../domains/session/compaction/aut
 import { createTokenEstimator } from "../domains/session/compaction/tokens.js";
 import type { ContextSnapshot } from "../domains/session/context-accounting.js";
 import type { SessionContract } from "../domains/session/contract.js";
-import type {
-	CompactionTrigger,
-	EvictionAnchor,
-	EvictionRoute,
-	EvictionTrigger,
-	SessionEntry,
-} from "../domains/session/entries.js";
+import type { CompactionTrigger, EvictionAnchor, EvictionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { activePath } from "../domains/session/tree/active-path.js";
 import { replaceEngineMessages } from "../engine/agent.js";
 import { renderEvictionSkipLine } from "./compaction-lines.js";
@@ -154,50 +148,35 @@ const COMMIT_CAUSE: Partial<Record<FoldStageEntry["stage"], NonNullable<ContextF
 	step_checkpoint: "step_checkpoint",
 };
 
-export interface EvictionStageInput {
+export interface LegacyAdoptionInput {
 	agentRuntime: AgentRuntime;
 	/** The checkpoint's decision, which this stage reports its outcome to. */
 	decision: FoldDecision;
 	session: SessionContract;
 	settings: Readonly<ClioSettings>;
+	compactionThreshold: number;
+	/** S0 runs: an uncached route, on a checkpoint that may evict (SPEC §3.4). Adoption releases the stubs otherwise. */
+	superseded: boolean;
 	estimate: LiveContextEstimate;
-	verdict: ContextCompactionVerdict;
 	beforeSnapshotId: string | null;
+	trigger: CompactionTrigger;
+	originSession: string | undefined;
+	pendingUserText: string | undefined;
+	handoff: ContinuityReductionHooks | undefined;
+	/** The loop guard's call identity and read test, for S0. */
+	classify: ClassifyCall;
+}
+
+export interface EvictionStageInput extends LegacyAdoptionInput {
 	/** Overflow on a known window: the stage plans to fit the request, not to the trigger. */
 	requiredFit: boolean;
 	compactionWindow: number;
-	compactionThreshold: number;
 	workingSetTarget: number;
-	trigger: CompactionTrigger;
-	originSession: string | undefined;
-	pendingUserText: string | undefined;
-	handoff: ContinuityReductionHooks | undefined;
 	shouldCompact(tokens: number): ContextCompactionVerdict;
 	/** S1 runs: the checkpoint is past the trigger, or forced. False runs S0 alone. */
 	structural: boolean;
-	/** S0 runs: an uncached route, on a checkpoint that may evict (SPEC §3.4). */
-	superseded: boolean;
-	/** The loop guard's call identity and read test, for S0. */
-	classify: ClassifyCall;
 	/** The fraction of the window at which the automatic trigger fires, counting the reserve for `tokens`. */
 	triggerFraction(tokens: number): number;
-}
-
-export interface LegacyAdoptionInput {
-	agentRuntime: AgentRuntime;
-	decision: FoldDecision;
-	session: SessionContract;
-	settings: Readonly<ClioSettings>;
-	compactionThreshold: number;
-	/** S0 applies on this route; on a cached route the stubs are released, not adopted. */
-	superseded: boolean;
-	estimate: LiveContextEstimate;
-	beforeSnapshotId: string | null;
-	trigger: CompactionTrigger;
-	originSession: string | undefined;
-	pendingUserText: string | undefined;
-	handoff: ContinuityReductionHooks | undefined;
-	classify: ClassifyCall;
 }
 
 export interface EvictionStageResult {
@@ -378,11 +357,6 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		};
 	};
 
-	const evictionRoute = (agentRuntime: AgentRuntime): EvictionRoute | undefined => {
-		const { modelTier, promptCaching } = agentRuntime.runtimeResolution;
-		return modelTier !== undefined && promptCaching !== undefined ? { tier: modelTier, promptCaching } : undefined;
-	};
-
 	interface CommitInput {
 		agentRuntime: AgentRuntime;
 		decision: FoldDecision;
@@ -398,7 +372,6 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		originSession: string | undefined;
 		pendingUserText: string | undefined;
 		handoff: ContinuityReductionHooks | undefined;
-		route: EvictionRoute | undefined;
 		notice: string;
 	}
 
@@ -417,7 +390,6 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 					pressureBefore: input.pressureBefore,
 					snapshotIdBefore: input.beforeSnapshotId,
 				}),
-				...(input.route !== undefined ? { route: input.route } : {}),
 				...(anchor !== undefined ? { anchor } : {}),
 				// appendEntry does not infer this anchor; the interactive
 				// cursor is the leaf the next message will extend.
@@ -502,7 +474,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 	 * commits below the trigger once its floor is met; S1 runs only when the checkpoint reached it.
 	 */
 	const runEvictionStage = (input: EvictionStageInput): EvictionStageResult => {
-		const { agentRuntime, session, settings, estimate, verdict, beforeSnapshotId, requiredFit } = input;
+		const { agentRuntime, session, settings, estimate, beforeSnapshotId, requiredFit } = input;
 		const { compactionWindow, compactionThreshold, workingSetTarget, trigger, originSession, pendingUserText } = input;
 		const { decision } = input;
 		const workingSet = settings.context.workingSet;
@@ -600,14 +572,13 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 				else if (structural) entries.push({ stage: "working_set", outcome: "none", reason: "no_candidates" });
 				return entries;
 			},
-			pressureBefore: verdict.pressure,
+			pressureBefore: input.shouldCompact(estimate.tokens).pressure,
 			beforeSnapshotId,
 			compactionThreshold,
 			trigger,
 			originSession,
 			pendingUserText,
 			handoff: input.handoff,
-			route: s0Items > 0 ? evictionRoute(agentRuntime) : undefined,
 			notice: alone
 				? supersededNotice(
 						planned,
@@ -672,7 +643,6 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			originSession: input.originSession,
 			pendingUserText: input.pendingUserText,
 			handoff: input.handoff,
-			route: evictionRoute(agentRuntime),
 			notice: supersededNotice(
 				planned,
 				`${results} ${results === 1 ? "result" : "results"} this session's earlier requests stubbed kept as eviction markers`,

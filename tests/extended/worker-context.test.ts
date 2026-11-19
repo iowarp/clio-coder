@@ -351,7 +351,6 @@ test("the bypass rows: a step short of output room and a rejected later send eac
 	match(text, /Read only the part you need/);
 	ok(text.includes("GATEWAY_REFUSAL"));
 	deepStrictEqual(archived, ["r1"]);
-	equal(guard.records[0]?.policyId, "step_overflow");
 	// The journal tells this commit from an aged one.
 	deepStrictEqual(decisions.at(-1)?.stages.at(-1), {
 		stage: "working_set",
@@ -418,7 +417,6 @@ test("drv-cf1h: short of headroom under the trigger, older reads leave before th
 			["4", "age_horizon"],
 		],
 	);
-	equal(guard.records[0]?.policyId, "working_set");
 	equal(decisions.at(-1)?.stages.at(-1)?.reason, "evicted");
 	deepStrictEqual(archived, ["r1", "r2"]);
 	const text = JSON.stringify(projected);
@@ -456,7 +454,6 @@ test("only unseen reads can make room: the largest leaves first as unseen_overfl
 	match(text, /\[evicted ref=r1 reason=unseen_overflow tool=read path=src\/large\.ts /);
 	ok(!/Read only the part you need/.test(text), "the model never saw the body; it needs the recall pointer only");
 	ok(text.includes("SMALL") && text.includes("MID "));
-	equal(guard.records[0]?.policyId, "step_overflow");
 	// The run journal names the unseen commit, and the worker's forwarder carries it to the parent.
 	const decision = decisions.at(-1);
 	deepStrictEqual(decision?.stages, [

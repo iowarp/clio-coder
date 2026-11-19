@@ -354,7 +354,7 @@ describe("session integrity", () => {
 		}
 	});
 
-	it("reads the skill_retired and refused_prompt_bound evictions in a version 7 ledger", async () => {
+	it("reads the skill_retired and refused_prompt_bound evictions, a route and a reissueOf in a version 7 ledger", async () => {
 		const current = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
 		current.create({ cwd: scratch.dir });
 		const candidate = createSession({ cwd: scratch.dir });
@@ -374,14 +374,22 @@ describe("session integrity", () => {
 			tokensAfter: 0,
 			pressureBefore: null,
 			snapshotIdBefore: null,
+			route: { tier: "small", promptCaching: false },
 		});
+		const elements = [{ role: "user", content: "insert" }];
+		const data = { version: 1, id: "i2", source: "reminder", elements, place: { after: "v7-evict" }, reissueOf: "i1" };
+		const insert = { kind: "custom", turnId: "v7-insert", parentTurnId: "v7-evict", timestamp: at, data };
+		appendSessionFileEntry(paths.current, { ...insert, customType: "clio-coder.host-insert" });
 		try {
 			current.switchBranch(candidate.meta.id);
 			strictEqual(current.current()?.sessionFormatVersion, 7);
 			const read = readSessionFileEntries(paths.current).filter(isSessionEntry);
+			strictEqual(read.find((value) => value.turnId === "v7-insert")?.kind, "custom", "a reissueOf still validates");
 			deepStrictEqual(
-				read.flatMap((value) => (value.kind === "contextEviction" ? value.evicted.map((one) => one.reason) : [])),
-				["skill_retired", "refused_prompt_bound"],
+				read.flatMap((value) =>
+					value.kind === "contextEviction" ? [...value.evicted.map((one) => one.reason), value.route?.tier] : [],
+				),
+				["skill_retired", "refused_prompt_bound", "small"],
 			);
 		} finally {
 			await current.close();

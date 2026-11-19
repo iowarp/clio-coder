@@ -153,15 +153,20 @@ export function withContinuityReplay(
  * Truncate to the cursor's `hwm` before anything is folded, so a later record cannot reach a past render (F11). A
  * null `hwm` is an empty ledger; one the file does not hold leaves the file whole, as `uptoTurnId` always has.
  */
+export function throughHwm(entries: ReadonlyArray<SessionEntry>, hwm: string | null): ReadonlyArray<SessionEntry> {
+	if (hwm === null) return [];
+	const end = entries.findIndex((entry) => entry.turnId === hwm);
+	return end < 0 ? entries : entries.slice(0, end + 1);
+}
+
 function atCursor(
 	entries: ReadonlyArray<SessionEntry>,
 	options: ModelReplayOptions,
 ): { entries: ReadonlyArray<SessionEntry>; options: ModelReplayOptions } {
 	const { cursor, activeLeafTurnId: _leaf, uptoTurnId: _upto, ...rest } = options;
 	if (cursor === undefined) return { entries, options };
-	const end = cursor.hwm === null ? -1 : entries.findIndex((entry) => entry.turnId === cursor.hwm);
 	return {
-		entries: cursor.hwm === null ? [] : end < 0 ? entries : entries.slice(0, end + 1),
+		entries: throughHwm(entries, cursor.hwm),
 		options: { ...rest, ...(cursor.leaf !== null ? { activeLeafTurnId: cursor.leaf } : {}) },
 	};
 }

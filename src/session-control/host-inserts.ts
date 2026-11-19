@@ -74,7 +74,7 @@ export interface HostInserts {
 	dispatched(): void;
 	isUnsent(id: string): boolean;
 	/** After a checkpoint commits: re-issue each unsent insert whose anchor the cut removed. */
-	reissueUnsent(): number;
+	reissueUnsent(): void;
 	/** Withdraw a record durably and take its elements out of the live history. */
 	retract(record: HostInsertRecord, runtime?: LiveHistory): void;
 	/** The records on the active path, in record order. */
@@ -163,29 +163,21 @@ export function createHostInserts(deps: HostInsertsDeps): HostInserts {
 		},
 		isUnsent: (id) => unsent.some((item) => item.id === id),
 		reissueUnsent() {
-			if (unsent.length === 0 || !deps.session?.current()) return 0;
+			if (unsent.length === 0 || !deps.session?.current()) return;
 			const entries = deps.readSessionEntries?.() ?? [];
 			const checkpoint = selectReplayEntries(entries, {
 				...(deps.leaf() ? { activeLeafTurnId: deps.leaf() ?? "" } : {}),
 			})[0];
-			if (checkpoint?.kind !== "compactionSummary") return 0;
+			if (checkpoint?.kind !== "compactionSummary") return;
 			const live = new Set(readHostInserts(filterEntriesToActivePath(entries, deps.leaf() ?? undefined)).map((r) => r.id));
-			let reissued = 0;
 			unsent = unsent.map((original) => {
 				if (!live.has(original.id) || hostInsertVisible(entries, deps.leaf(), original)) return original;
-				const { place: _place, reissueOf: _of, id: _id, ...rest } = original;
-				const next: HostInsertRecord = {
-					...rest,
-					id: newInsertId(),
-					place: { after: checkpoint.turnId },
-					reissueOf: original.id,
-				};
+				const { place: _place, id: _id, ...rest } = original;
+				const next: HostInsertRecord = { ...rest, id: newInsertId(), place: { after: checkpoint.turnId } };
 				append(next);
 				known.add(next.id);
-				reissued += 1;
 				return next;
 			});
-			return reissued;
 		},
 		retract(target, runtime) {
 			if (deps.session?.current()) append({ version: 1, id: target.id, retract: true });
