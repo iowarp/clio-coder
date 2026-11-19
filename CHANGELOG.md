@@ -528,6 +528,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - A prose-contract worker keeps each delivered result-contract reminder in later requests, so every tool round extends the previous request's cache prefix.
 - A working-set eviction no longer installs the memory restoration reminder again, so a session with several evictions carries it once; a summary's pending restoration is still delivered after an eviction.
 - A tool result clipped in a summary request before any model call read it is now marked as clipped before the assistant read it, so a narrow re-read is expected. The summary templates no longer claim that every clipped result was read in full; only a result followed by an assistant message keeps the read-in-full marker.
+- On a window of 52,428 tokens or more, the turn output reserve on transports that do not clamp output at the wire (Copilot SDK, Anthropic, OpenAI Responses) is now at most a quarter of the window and never under 16,384, so a 64K window triggers compaction at 49,152 instead of 32,768 and no longer autocompacts on almost every turn. A configured chat.maxOutputTokens still reserves in full (bt-48-12).
 
 ## 0.8.3 - 2026-11-16
 
