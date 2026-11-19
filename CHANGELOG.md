@@ -527,6 +527,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - A worker's first spliced request is fitted at the transport's own count, so the worker guard no longer admits a request that the local transport then refuses.
 - A prose-contract worker keeps each delivered result-contract reminder in later requests, so every tool round extends the previous request's cache prefix.
 - A working-set eviction no longer installs the memory restoration reminder again, so a session with several evictions carries it once; a summary's pending restoration is still delivered after an eviction.
+- A tool result clipped in a summary request before any model call read it is now marked as clipped before the assistant read it, so a narrow re-read is expected. The summary templates no longer claim that every clipped result was read in full; only a result followed by an assistant message keeps the read-in-full marker.
 
 ## 0.8.3 - 2026-11-16
 
