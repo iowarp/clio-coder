@@ -4,533 +4,248 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
-This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 0.8.3 install (send-back, revision plan, rewrite, acceptance, re-audit and re-archive at autonomy `yolo`, orchestrator and writers on openai-codex gpt-6-luna, reviewers on gpt-6.1-terra), and adds the harness features an extension-driven pipeline needs to run across small, mid-tier and frontier models. Each entry names its finding id from that run.
+CLIO Coder 0.8.4 lets an extension-driven pipeline, such as a multi-step writing or review desk, run on the model you have: a small local model, a mid-tier cloud route or a frontier one. Prompt templates can run one step per turn, pick a body per model tier and bound their own budgets, a headless run can be scripted end to end from an answers file, and context stays accurate on small windows instead of compacting every turn. Long sessions also cost less: a resume keeps the provider's prompt cache, superseded tool output leaves uncached requests, and you can see where every input token went.
+
+### Highlights
+
+- **Script the author of a headless run.** `clio-coder run --answers answers.yaml` answers extension interview steps and `operator_only` questions from a file, records each answer as scripted, and exits 5 naming any question the file does not cover, so a gated pipeline runs in CI with no one at the keyboard.
+- **One step per turn, on the routes that need it.** A template's `turnPolicy: {mode: step, stepTool: extension_desk__next_step, when: [small, uncached]}` runs one pipeline step per turn, continues under yolo until the step tool returns `pipelineDone`, and on small or uncached routes starts each step from a compact checkpoint instead of the whole history.
+- **Templates that fit the model.** Frontmatter `variants` gives a template a body per model tier, `budget: {toolCalls: 40, observationBytes: 131072}` bounds the turn it starts, and the new `count` tool lets a worker without `bash` check its draft against a word budget.
+- **Extension tools the model cannot miss.** An api 2 extension can attach up to four tools to every request with `runtime.promote`, pin a context block that survives compaction and resume with `pin_context`, and return a short `summary` with a `detail_ref` instead of flooding the context with a large result.
+- **See where your input tokens go.** `clio-coder telemetry tokens --session <id> --by-source` splits each turn's input, cached and fresh, across system prompt, skills, tool schemas, template body, extension effects, tool results per tool and history.
+- **Compare models on one project.** `clio-coder campaign run --fixture <dir> --roster roster.yaml --answers answers.yaml --prompt <text> --out <dir>` runs the same seeded project once per model in isolated data directories and reports gates reached, refusals, loop-guard blocks, tokens and wall time for each.
+- **Context that holds on small windows.** Below 52,428 tokens, working-set eviction acts before any paid summary, the output reserve is 8,192 tokens instead of half the window, and each summary lands near the same target, so a 28K or 32K local model no longer compacts on almost every turn.
+- **Cheaper long sessions.** A resumed session compiles the same system prompt as its last turn so the prompt cache survives, a continued Copilot SDK session sends only the new turn, and on routes without prompt caching superseded tool results leave the request as recallable records.
+- **Fork and switch models from your editor.** ACP clients can call standard `session/fork` and `session/set_model`, and session openers list the models a session can use.
 
 ### Upgrade notes
 
-- **`CLIO_CODER_LEGACY_MASK` is gone.** Setting it no longer brings back the stale-observation mask; working-set eviction runs unless `context.workingSet.enabled` is `false`.
-- **Session format 7.** 0.8.4 writes format 7 session ledgers (host-inserted messages and step-chain records). A format 6 session opens and resumes unchanged; it is restamped to 7 when it is resumed, not when it is listed, and its ledger bytes stay the same. 0.8.3 refuses a session 0.8.4 has resumed (ContextFold CF-4).
+- **`CLIO_CODER_LEGACY_MASK` is gone.** Setting it (or `CLIO_CODER_LEGACY_MASK=1`) no longer brings back the stale-observation mask announced as a one-release escape hatch in 0.3.4. Working-set eviction is the only stage before a summary and runs unless `context.workingSet.enabled` is `false`.
+- **Session format 7.** 0.8.4 writes format 7 session ledgers, which record host-inserted messages and step chains. A format 6 session opens and resumes unchanged; it is restamped to 7 when it is resumed, not when it is listed, and its ledger bytes stay the same. 0.8.3 refuses a session that 0.8.4 has resumed. A format 6 session's observation-aging stubs are adopted once as a superseded record, or released on a route that caches prompts.
+- **Guard blocks have their own fields.** Tool guard blocks are listed under `safety.guardBlockedAttempts` (receipts, `turn_end`, `run_end`, `run.settled`) and counted in `decisions.guardBlocked`, so `safety.blockedAttempts` and `decisions.blocked` hold safety refusals only. An ask denied before the operator decided is listed in `safety.permissionRequestedAttempts`, matching its `permissionRequested` count. Records written earlier keep their old `blockedAttempts` placement.
+- **Renamed and dropped JSON fields.** `evidence inspect --json` names the top-level failed-validation count `quality.failedValidationCount`, so it no longer shares a name with the `evidence.quality.failedValidations` list. `context index --json` drops `codewikiPath`, which always repeated `codemapPath`.
+- **`run --agent` exits 1 on a failed quality verdict.** When the run's sealed result-contract quality is `fail` (a check red after its last edit), the exit code is 1, as a verifier fail verdict already was. The outcome stays `succeeded`, and a baseline red before any edit stays exit 0.
+- **Extensions must promote a tool before requiring it.** A hook's `require_tool` naming one of the package's own tools is refused unless the manifest lists it under `runtime.promote`, and the refusal names the entry to add. Requiring a builtin, an MCP tool or another package's tool behaves as before.
+- **`block` hook policies are enforced where they can be.** An api 2 `turn_start` hook declared `onTimeout` or `onError: block` refuses the turn before its first model request when it times out, throws or has no running runtime. `block` on a `turn_end` hook, which runs after the turn, is refused at load.
+- **`ignorable` needs 0.8.4.** Hosts before 0.8.4 refuse the `ignorable` manifest key itself, so a package that uses it keeps `compatibility.clio` at `>=0.8.4-0`. From 0.8.4 on, a new optional manifest field needs an `ignorable` entry instead of a new floor.
+- **Turn tool budgets count exactly.** A budget of N from `safety.limits.chatToolCallsPerTurn` or a template's `budget.toolCalls` admits N calls and refuses the next, so the default admits 60 calls where it admitted 59. The turn still stops 15 refused attempts after the first refusal.
+- **Amazon Bedrock is hidden** from `clio-coder configure` and its provider listings. A target that already names the `bedrock` runtime still resolves and runs.
 
 ### Added
 
-- ACP session openers return a models block, and `session/set_model` is served. (ACP low 1)
-- Standard ACP `session/fork`, advertised in sessionCapabilities when branching is on. (ACP low 2)
-- Interactive `clio-coder` accepts `--max-context-tokens`, with the same meaning as on `run`. (c16-E)
-- A mutation report's validation may carry `"baseline":true` for a deliberate red run before the change; quality judges only the checks run after the change (bt-17).
-- `models` lists the thinking levels each route offers (`thinkingLevels` in `--json`) (bt-20).
-- The telemetry session read commands accept `--session` (bt-20).
-- `compaction.settled` records `headroomTokens`, the room left below the automatic trigger after a committed checkpoint (bt-18).
-- An extension interview's done result may set `pipelineDone`, so an approval-gated last step ends the step pipeline (bt-16).
-- D3-6: judged checks (numeric-compare, reproduce) record declared input hashes (an input that changes while the check runs fails it), provenance probe output and the untracked file count in their reports.
-- D3-7: numeric-compare and reproduce accept an opt-in `repeat` (at most 5) under a seed and report failed runs and per-key spread; a single run says "n=1, determinism not checked".
-- Extension tools (api 2) can return `pipelineDone: true` to end a yolo step-template pipeline.
-- D3-3: a run's sealed result keeps each judged host check's bounded report (rule, tolerance, reference and payload digests, worst deviation per key) and the tree it judged.
-- A1: an api 2 extension tool may declare `readOnly: true` and `idempotent: true` in `clio-coder-extension.yaml`. Only a tool declared one or the other counts toward the loop guard's identical-call repeats; a `read` tool is read-only by default, and a `write` tool cannot claim it.
-- A4: the session prompt carries the operator's local date, weekday and time zone, recompiled when the date changes. Each turn start, continuations included, states the local time, and the first tool result after the date changes inside a long turn says so.
-- B1: `clio-coder run --answers <file.yaml>` scripts the author of a headless run. The file answers only the author's questions: extension interview steps and `operator_only` `ask_user` questions. Each entry matches one by an extension question's checkpoint id (`id`), by its header (`header`) or by a regular expression over its text (`match`), and gives a `choice` by option label, a `note`, or both. With the file, `ask_user` is registered and extension interviews are asked; a matched question is answered as the operator and recorded as scripted, naming the file and the entry, on the decision ledger and on the extension's `InterviewAnswer.scripted`. An author question no entry matches is never answered for the author: its round is cancelled as `unscripted` and the run exits 5 naming the question. A model's ordinary `ask_user` call is refused as having no operator, as without the file, and no entry answers it. Permission asks stay denied, and a file that fails validation exits 2 naming the offending entry. Api 2 gains `InterviewQuestion.checkpoint`.
-- B2: an api 2 extension may list up to four of its tools under `runtime.promote` in `clio-coder-extension.yaml`. The session attaches a promoted tool's schema to every request under its usual name `extension_<id>__<tool>`, so a hook's `require_tool` naming it becomes the provider's tool choice. The set belongs to the installed extension, never to a turn or a template, so the attached schemas are the same bytes on every turn; a reload that changes it is reported as a tool list change on the next turn. A session attaches at most eight promoted tools and each one's description and input schema may total 2048 bytes. Promotion is part of the capability envelope the operator approves. Dispatched workers never receive promoted tools.
-- B3: a builtin `count` tool gives a file's words (whitespace-separated runs, as `wc -w`), lines and bytes, so a delegated worker without bash can check its length against a budget. A template lists it in `delegated-tools`. It is held to the same workspace scope and information-flow rules as `read`, and a surface that also carries bash reaches it through the gateway, so the main session's schema set is unchanged.
-- B4: a prompt template's frontmatter `budget: {toolCalls, observationBytes}` lowers the tool-call and tool-output limits of the turn it starts. The effective limit is the smaller of the template's and the operator's settings, so a template never raises one; the refusal and the operator notice name the template. An invalid budget makes the template unavailable.
-- B5: an api 2 `prompt_submit`, `turn_start` or `after_tool` hook can pin one context block of up to 8 KB with `{kind: "pin_context", text}`. A new value replaces the old one and empty text clears it. The block rides host-framed text in the message tail, is sent only when the context no longer carries its current value, and is sent again verbatim after a compaction drops it, so an unchanged block costs nothing and a changed one leaves the cached prefix alone. Dispatched workers never receive it.
-- B6: a yolo continuation's `prompt_submit` hook event carries `lastToolCall`: the last tool call the stopped turn made, with its outcome (`ok`, `error` or `unfinished`) and, under `access: tool-args`, its arguments redacted and clipped. Operator, job and peer prompts never carry it.
-- C1: hooks and api 2 extension hook events carry the running model as `model`: id, target, effective context window, thinking level, whether prompt caching is on, and `tier` (`small`, `standard` or `frontier`). A dispatched worker's tool calls carry the worker's own model. The new `models.<id>.tier` setting overrides the tier heuristic. A prompt template may declare per-tier bodies under frontmatter `variants`, each inline or `{file: <path>}` inside its package; expansion picks the session chat model's tier, then `standard`, then the main body.
-- C2: `clio-coder telemetry tokens --session <id> [--by-source] [--json]` reports each turn's input tokens, cached and fresh, and with `--by-source` splits them across system prompt, skills, tool schemas, template body, extension effects, tool results per tool and history. Totals are provider-measured; the split is estimated from each request segment's size and the output says so.
-- C3: an api 2 extension tool may return a `summary` of at most 2048 bytes beside its result. The model sees the summary with a `detail_ref`, and `ledger(action="detail", ref=...)` returns the full result in pages from a per-session store that survives compaction and resume.
-- C4: `clio-coder campaign run --fixture <dir> --roster <roster.yaml> --answers <answers.yaml> --prompt <text> --out <dir>` runs one seeded project across a roster of models, one entry at a time. Each entry gets a fresh copy of the fixture and its own empty data, state and cache, and uses the operator's config directory as it is, so no credential is copied under `--out`. It reports per entry the run status, extension gates reached, extension refusals, loop-guard blocks, fresh, cached and output tokens and wall time, as a table or `--json` plus one `entry.json` per entry; `--probe <ext>:<command>` records the desk's final status.
-- C5: a prompt template's frontmatter `turnPolicy: {mode: step, stepTool}` makes each turn it starts run one step. After the step tool succeeds once, a second call to it is refused, tools lock to a text-only summary with the prompt prefix and tool schemas unchanged, and a yolo continuation starts the next step without counting against the continuation cap.
-- B4: `safety.limits.templateToolCallsPerTurnMax` and `safety.limits.templateObservationBytesPerTurnMax` let a prompt template's `budget` raise its turn above the per-turn limits, up to that ceiling. Unset, the default, a template can only lower them. The limit message names the bound that applied, and a project settings layer can only lower a ceiling the user set.
-- C3: on small-tier routes and routes that do not cache prompts, a tool result that a later identical call (same effective tool and canonical arguments) superseded is replaced in the outgoing request by a one-line stub. Only a call that repeats as a read qualifies: a builtin read-class tool, a bash command that only reads, a typed git inspection, or an extension tool declared `readOnly` or `idempotent`. A second identical `next_step` or a writing bash command returned a new state, so its earlier result always goes out whole. Stubs land in one batch once 32 KiB of superseded bytes accumulate and stay stubbed for the rest of the session, across a model switch or reload that rebuilds the agent; a session switch, a new session or a fork starts over. The session ledger keeps the full result, and the batch is journaled as the `observation_aging` cold reason with `observationAgingBytes`. Cached standard and frontier routes are untouched.
-- C5: the api 2 `compaction_end` observation names its `trigger` (`auto`, `force`, `overflow`, `step` or `unknown`), so an extension that rebuilds state after a compaction can tell a step checkpoint from a native one.
-- C5: under a template `turnPolicy: step`, each step turn after the first on a small-tier or uncached route starts from a step-boundary checkpoint (the previous step's final text, the template body and the pinned blocks) instead of the full history, with no summarizer call. After writing it the host does what it does after a native compaction: `on_compaction` fires with trigger `step`, the checkpoint carries the loaded skills' verified context and the continuity payload, and memory restores into the turn's tail. A turn whose loaded skill cannot be carried keeps the full history. It is recorded as the `step_checkpoint` cold reason. A step turn that failed, or that the loop guard or the tool budget stopped, is followed by a turn with the full history, and cached standard and frontier routes always keep it.
-- A1, B2 (0.8.4 adoption): an extension manifest may list field paths under a top-level `ignorable` (dotted from the manifest root, list elements unindexed, at most 32 entries). A host that meets a key it does not know skips it when its path is listed and warns once per path naming the extension, in `extensions validate`, `discover`, `install` and `list`. An unlisted unknown key still fails, and a key the host knows is parsed and enforced whether or not it is listed. The rule is the same in every manifest object: the root, `compatibility`, `capabilities.tools` and `runtime` at api 1 and api 2. Skipped keys and the list itself stay out of the capability envelope digest, so adding `ignorable` to an installed manifest asks for no new consent. Hosts before 0.8.4 refuse `ignorable` itself, so a package that uses it keeps `compatibility.clio` at `>=0.8.4-0`; from 0.8.4 on, a new optional field needs an `ignorable` entry instead of a new floor.
-- C5 (0.8.4 adoption): a prompt template's `turnPolicy` takes `when`, a list of `small`, `standard`, `frontier` and `uncached`. The step policy then applies only on a turn whose session chat route matches a token: its model tier, with a `models.<id>.tier` override honoured, or a route that does not cache prompts. On any other route the turn runs with no step refusal, text-only lock, step continuation, parallel step refusal or step checkpoint. The route is judged again at every turn the template starts, yolo step continuations included, so a model switch takes effect on the next turn. The turn scope reminder says whether the policy applies on the current route; the system prompt and tool schemas do not change. Without `when` the policy applies on every route, and a malformed `when` makes the template unavailable.
-- Turn receipts close with the local time the turn ended (`✓ Done · 1m4s · 18:42`), with the date when that was another day; a replayed session shows each turn's recorded end time.
-- ContextFold CF-1: a `context.fold` decision event records each fold checkpoint's stages (S1 working-set eviction, S2 step checkpoint, S3 summary) with their outcome and committed record id.
-- Host-authored messages pushed into a run are durable records, so a rebuild and a reopen send them once, where the live request held them (ContextFold CF-4, F6).
-- Recovery exchanges are durable records, so a reopened session sends the recovery the live retry sent (ContextFold CF-4, F13).
-- On routes without prompt caching, a superseded-results stage evicts superseded tool results as recallable `contextEviction` records (ContextFold CF-5, F2, F3, F4).
-- Each main attempt journals a receipt of what it sent, and each request names the first transcript element it changed (ContextFold CF-9, F14).
-- `clio-coder context working-set --verify <session>` checks every attempt against its receipt and reconciles fold decisions (ContextFold CF-9, F14).
+**Extensions and templates**
+
+- **Step turns.** A prompt template's frontmatter `turnPolicy: {mode: step, stepTool}` makes each turn it starts run one step: after the step tool succeeds, a second call is refused and tools lock to a text-only summary with the prompt prefix and tool schemas unchanged. Under yolo a continuation (`turn.continued` with cause `step`, not `tool_budget`) starts the next step until a turn makes no step call, a result sets `pipelineDone`, or 4 step turns have run for the operator prompt. A step call through a gateway chain counts, and a second step call in one parallel batch is refused.
+- **`turnPolicy.when`** lists `small`, `standard`, `frontier` and `uncached`, so the step policy applies only on a matching chat route (its tier, with a `models.<id>.tier` override honoured, or a route that does not cache prompts) and is judged again at every turn, so a model switch takes effect on the next one. Elsewhere the turn runs with no step policy at all; without `when` it applies everywhere, and a malformed `when` makes the template unavailable.
+- **Step checkpoints.** On a small-tier or uncached route, each step turn after the first starts from a checkpoint (the previous step's final text, the template body, pinned blocks and the previous checkpoint's goal, constraints and decisions) instead of the full history, with no summarizer call. `on_compaction` fires with trigger `step`, skills and memory carry over as after a native compaction, the api 2 `compaction_end` observation names its `trigger` (`auto`, `force`, `overflow`, `step` or `unknown`), and a written checkpoint is recorded as the `step_checkpoint` cold reason. A failed or stopped step, a skill that cannot be carried, and every cached standard or frontier route keep the full history.
+- **Ending a pipeline.** An api 2 extension tool returns `pipelineDone: true`, or an interview's done result sets `pipelineDone`, to end a yolo step pipeline. One that stops at the cap or never reports it is journaled (`step_pipeline.settled`, `run.settled.stepPipeline`) with a `step.unreported` note, and headless `run_end` (`stepPipeline`), `telemetry why-stopped`, `usage` and `evidence inspect` report it instead of a plain success.
+- **Template budgets.** Frontmatter `budget: {toolCalls, observationBytes}` lowers the tool-call and tool-output limits of the turn the template starts. `safety.limits.templateToolCallsPerTurnMax` and `safety.limits.templateObservationBytesPerTurnMax` (unset by default; a project layer can only lower them) let a template raise them up to that ceiling. The refusal names the bound that applied, and an invalid budget makes the template unavailable.
+- **Model tiers and template variants.** Hook events carry the running model as `model` (id, target, effective window, thinking level, prompt caching and `tier`: `small`, `standard` or `frontier`), a worker's calls carry the worker's model, and the `models.<id>.tier` setting overrides the tier heuristic. Frontmatter `variants` gives per-tier bodies, inline or `{file: <path>}` inside the package; expansion picks the chat model's tier, then `standard`, then the main body.
+- **`count` tool.** A builtin `count` tool returns a file's words (as `wc -w`), lines and bytes, so a delegated worker without `bash` can check its length against a budget; list it in a template's `delegated-tools`. It follows the same scope and information-flow rules as `read`, and a surface with `bash` reaches it through the gateway, so the main session's schemas are unchanged.
+- **Promoted tools.** An api 2 extension may list up to four tools under `runtime.promote` in `clio-coder-extension.yaml`; every request then carries their schemas as `extension_<id>__<tool>`, so a hook's `require_tool` becomes the provider's tool choice. The set is fixed per installed extension, so the schemas are the same bytes every turn. A session attaches at most eight, each with at most 2048 bytes of description and schema; promotion is part of the approved capability envelope, and workers never receive promoted tools.
+- **Pinned context.** An api 2 `prompt_submit`, `turn_start` or `after_tool` hook can pin one block of up to 8 KB with `{kind: "pin_context", text}` (empty text clears it). It rides the message tail, is sent only when the context lacks its current value and again after a compaction drops it, so it never breaks the cached prefix. Pinned blocks persist across resume and restart, a fork inherits them, deleting a session removes them with the extension's session state, and workers never receive them.
+- **Result summaries.** An api 2 extension tool may return a `summary` of at most 2048 bytes beside its result; the model sees the summary with a `detail_ref`, and `ledger(action="detail", ref=...)`, reachable through the gateway, pages the full result from a per-session store that survives compaction and resume.
+- **Last tool call on continuations.** A yolo continuation's `prompt_submit` hook event carries `lastToolCall`: the stopped turn's last call and its outcome (`ok`, `error` or `unfinished`), with arguments redacted and clipped under `access: tool-args`.
+- **Read-only and idempotent tools.** An api 2 extension tool may declare `readOnly: true` or `idempotent: true`; only such tools count toward the loop guard's identical-call repeats. A `read` tool is read-only by default, and a `write` tool cannot claim it.
+- **`ignorable` manifest paths.** A manifest may list up to 32 dotted field paths under a top-level `ignorable`. An unknown key at a listed path is skipped with one warning per path in `extensions validate`, `discover`, `install` and `list`, in the root, `compatibility`, `capabilities.tools` and `runtime`; an unlisted unknown key still fails, and skipped keys stay out of the capability envelope digest, so adding `ignorable` asks for no new consent.
+- **Interview checkpoints.** Api 2 gains `InterviewQuestion.checkpoint`, and an interview result records the checkpoint ids it asked, even when cancelled.
+
+**Headless and automation**
+
+- **`clio-coder run --answers <file.yaml>`** answers extension interview steps and `operator_only` `ask_user` questions in a headless run. Each entry matches a question by checkpoint `id`, `header` or a regular expression (`match`) and gives a `choice`, a `note`, or both; the answer is recorded as scripted, naming the file and entry, on the decision ledger and `InterviewAnswer.scripted`. An unmatched author question is cancelled as `unscripted` and the run exits 5 naming it, a file that fails validation exits 2, and the model's ordinary `ask_user` calls and permission asks are never answered from the file.
+- **`clio-coder campaign run`** (`--fixture <dir> --roster <roster.yaml> --answers <answers.yaml> --prompt <text> --out <dir>`) runs one seeded project per roster entry, each in a fresh fixture copy with empty data, state and cache, reading your config directory and installed copilot-sdk and claude-sdk components without copying credentials under `--out`. It reports per entry the status, gates reached, extension refusals, loop-guard blocks, fresh, cached and output tokens and wall time, as a table or `--json` plus an `entry.json` each; `--probe <ext>:<command>` records the desk's final status.
+- A mutation report's validation may carry `"baseline":true` for a deliberate red run before the change; quality judges only the checks run after it, and `evidence inspect` shows such a run as a baseline, never as a failed validation.
+- Host checks: `numeric-compare` and reproduce accept an opt-in `repeat` (at most 5) and report per-key spread, or "n=1, determinism not checked", and `numeric-compare` accepts per-key `tolerance.keys`. Judged checks record input hashes (an input that changes mid-check fails it), provenance and the untracked file count, and the sealed result keeps each check's bounded report and the tree it judged.
+
+**Context and compaction**
+
+- On routes without prompt caching, a superseded-results stage replaces a tool result that a later identical read superseded (a read-class builtin, read-only bash, typed git inspection, or extension tool declared `readOnly` or `idempotent`) with a recallable `contextEviction` record. It acts once 32 KiB accumulates, holds for the rest of the session, is journaled as the `observation_aging` cold reason with `observationAgingBytes`, and never touches a repeated `next_step` or a writing bash command.
+- A `context.fold` decision event records each fold checkpoint's stages (working-set eviction, step checkpoint, summary) with their outcome and committed record id, and `compaction.settled` records `headroomTokens`, the room left below the automatic trigger.
+- Each main attempt journals a receipt of what it sent, and each request names the first transcript element it changed. `clio-coder context working-set --verify <session>` checks every attempt against its receipt and reconciles fold decisions; it accepts the `skill_retired` and `refused_prompt_bound` eviction reasons.
+- Host-authored messages and recovery exchanges are durable ledger records, so a rebuild or reopen sends exactly what the live request sent.
+
+**ACP and editors**
+
+- ACP session openers return a models block and `session/set_model` is served; standard ACP `session/fork` is advertised in sessionCapabilities when branching is on.
+
+**Telemetry and inspection**
+
+- `clio-coder telemetry tokens --session <id> [--by-source] [--json]` reports each turn's input tokens, cached and fresh. `--by-source` splits them across system prompt, skills, tool schemas, template body, extension effects, tool results per tool and history; totals are provider-measured and the split is estimated, as the output says.
+- The telemetry session read commands accept `--session`, and `models` lists each route's thinking levels (`thinkingLevels` in `--json`).
+- Command hook `hook.ran` receipts record `durationMs`, `timeoutMs` and the `effectKinds` its output became, so a slow tool or an unexplained annotation traces back to its hook.
+
+**Terminal UI**
+
+- Interactive `clio-coder` accepts `--max-context-tokens`, with the same meaning as on `run`.
+- The session prompt carries your local date, weekday and time zone, recompiled when the date changes; each turn start states the local time, and the first tool result after midnight inside a long turn says so.
+- Turn receipts close with the local time the turn ended (`✓ Done · 1m4s · 18:42`), with the date when it was another day; a replayed session shows each turn's recorded end time.
 
 ### Changed
 
+**Context and compaction**
+
+- Small windows (under 52,428 tokens): working-set eviction acts at the automatic compaction trigger (target 0.75 x the trigger) before any paid summary, where its gate used to sit 6 to 12K tokens above it. With no `chat.maxOutputTokens`, fit, guard and admission reserve 8,192 output tokens instead of half the window. A summary asks for at most 8,192 visible output tokens (or `chat.maxOutputTokens` if larger), states its room, keeps the reasoning share on top on a reasoning route, and carries the previous checkpoint once, so repeated cuts hold near 60% of history instead of creeping toward the trigger.
+- The automatic trigger bounds a reasoning route's summary reserve at half a known window, so a 28K window triggers at 14,000 tokens instead of 1,786, and no summary call is made when the history outside the kept suffix is smaller than the summary room (journaled `none/no_gain` or `nothing_to_summarize`); `/compact` and overflow recovery still call.
+- On windows of 52,428 tokens or more, the turn output reserve on transports that do not clamp output at the wire (Copilot SDK, Anthropic, OpenAI Responses) is at most a quarter of the window and never under 16,384, so a 64K window triggers at 49,152 instead of 32,768. A configured `chat.maxOutputTokens` still reserves in full.
+- `--max-context-tokens` below about 41K no longer refuses every request: with no configured output budget the reserve is at most half the window, auto-compaction counts the same reserve as admission, and a refusal names `chat.maxOutputTokens` or `--max-context-tokens` when one is the cause.
+- Only routes without prompt caching (`promptCaching: false`) age superseded observations. A small-tier route with caching on, including `models.<id>.tier: small` or a `--max-context-tokens` cap below 32K, keeps them.
+- Every main request is admitted, clamped and reported on one count, so a request admitted locally is no longer refused as exceeding the window. A resumed turn on a route that measured its prior request is admitted at that measured input plus a chars/3.5 count of what follows.
+- `/context`, the footer and ACP `usage_update` read one published figure; branch, fork and resume show the current path's figure and last compaction, and a reopened session reports the figure its next request carries. `/context` labels the compaction ceiling "cleanup ceiling" and hides it when it bounds nothing.
+- A checkpoint's exact-facts block carries each hidden read's recall ref and lists other hidden results under `refs:`, replacing the `<recallable-refs>` preview a resumed model ignored. Checkpoint replay restores active decisions as `[Decisions as of checkpoint]` beside the task board, up to 12 lines.
+- One batch of `context(scope="recall")` calls readmits recalled bodies only while they fit, in call order; a recall past that room returns a short "not recalled: no room" stub.
+- A summary that clips a tool result the assistant had already read marks it read in full; one clipped before any model read it is marked so, and a narrow re-read is expected.
+
+**Extensions and hooks**
+
+- One loop block no longer disables tools for the rest of the turn: the interactive turn locks after three blocks or after the same call is blocked twice, and the other calls of the response that held the first block still run. A successful call that may change state (write, edit, a non-read bash command, a typed git `add` or `commit`, an extension tool not declared read-only) resets the identical-call count of every other call, while plain inspections such as `pwd`, `whoami`, `date` and `echo` count as reads.
+- A pinned round (`require_tool` or a terminal handoff) on openai-codex and openai-responses keeps the full tool list and names the tool with the Responses function choice, so it reuses the prompt cache.
+- Reloading an extension asks for consent again when an approved runtime tool changes its action class in either direction, naming both classes, and repeated copies of one approved hook count as consent growth; reordering or narrowing hooks reloads without a new ask.
+- A lone middleware hook budget overrun short of a stall (10x the budget) is no longer journaled as `middleware.hook_failed`; set `CLIO_CODER_HOOK_BUDGET_DEBUG=1` to record every overrun. A command hook's first-run stall is journaled, and a hook that throws is receipted `failed`, not `skipped`, reported as `hook_failed`.
+
+**Fleet and workers**
+
+- Dispatch and collect results are compact by default: each run keeps its facts, trust or verdict line, evidence notices and a 2000-byte answer excerpt naming `monitor(mode="record", run_id=...)`, which leads with the whole answer. Set `max_output_bytes` for the full form.
+- A verifier report whose fail verdict no executed check produced reads `review verdict: fail (N findings)`, not "validation failed".
+- A judge-mode dispatch with no seated safety judge raises a notice that workers run as deny.
+- A worker that locks into synthesis carries the directive on the request tail, and a Codex worker's locked round keeps its tool declarations under `tool_choice: none` and its reasoning level, so the round reads the cached prefix.
+
+**Headless and automation**
+
 - Headless `observed` writes and the no-op rule read the run's own record of written paths: writes count distinct paths, a `bash` delete, `git mv` or `git rm` counts, and calls that write no workspace path (outward `web_fetch`, `configure_clio` apply, store put) no longer count.
-- Receipts: a pass retired by a later change now reads basis retired-by-change instead of no-validation-tool. Older journals keep their basis (c17-a).
-- Calls the output limit cuts off are stated once, read as not run, and count as no call and no tool error on any surface. (bt-39 a)
-- A test pins ACP compaction failure lines as reply text. (c2b-3)
-- A run whose host feed recorded an errored or refused call is followed by the feed's own attempt counts, whatever the worker wrote. (bt-23 #3)
-- A judge-mode dispatch with no seated safety judge raises a worker_judge_withheld notice saying workers run as deny. (N2)
-- Unattended countdowns read m:ss under a minute too (0:59, 0:05). (bt-11 q)
-- The exit card row reads "Session verified" in every style. (drv-tui11)
-- A lone delete inside a scratch root is recorded as scratch-disposable and no longer needs or claims a workspace snapshot. (N3, conf11h)
-- The finish assessment replays the shared check fold once per turn end instead of up to twice (x8-6).
-- Standard keeps one row of the reasoning before an action instead of a bare Thinking marker (bt-11 b).
-- Each bash command is scanned once per classification and only checks compute their extra facets; the registry and finish contract ask for the verdict alone; task-board replays within one run share git lookups and per-call readings (x6-7).
-- Tool guard blocks are listed under `safety.guardBlockedAttempts` (receipts, turn_end/run_end, run.settled), no longer under `safety.blockedAttempts`, matching `decisions.guardBlocked`. Receipts and journals written earlier keep guard blocks in `blockedAttempts` (bt-15 c12b).
-- Run records and the headless terminal frame report tool guard blocks as safety.decisions.guardBlocked, and decisions.blocked counts safety refusals only. Run records written earlier keep the mixed count under blocked (bt-15 T3).
-- `run --agent` exits 1 when the run's sealed result-contract quality is `fail` (a check red after its last edit), as a verifier fail verdict already does; the outcome stays `succeeded`, and a baseline red before any edit stays exit 0 (x1-5).
-- The citation-check nudge asks for the full answer again with corrected citations instead of "keep the rest of the answer as it is" (bt-29).
-- `evidence inspect --json` names the top-level failed-validation count `quality.failedValidationCount`, so it no longer shares a name with the `evidence.quality.failedValidations` array of names (bt-20 P-C).
-- Repetitive test files are consolidated into tables with shared harnesses: loop-guard and template-budget scenarios, one fake ACP transport, both quota providers' error paths, and the damage-control shell segments; constant pins that behaviour already covers are removed (P4-2, P4-5, P4-6, P4-9, P4-10; 214 to 167 tests).
-- The slowest test files run faster with the same coverage: state-file-lock no longer waits on a leaked namespace peer, cli-leaf-help keeps one --help row per router, dispatch-admission judges an empty scratch cwd, upgrade-command runs its plan checks in process, and run-timeout waits out one stalled run instead of two (P4-3, P4-4, P4-7, P4-8).
-- Tests pin gated prompt sections in one condition matrix, and the worker prompt goldens compile from the shipped recipes, so a recipe edit fails its golden (P4-1).
-- Launch no longer prints "terminal panes are not installed"; `/panes`, `/files` and Alt+E name `clio-coder panes install`, and doctor still warns (bt-11).
-- Alt+W opens or shows the workers dock without moving the keyboard out of CLIO Coder (bt-11).
-- The workers board builds cards only for live runs and the newest 24 finished runs, and folds a finished run's telemetry once per journal change, so a long run history no longer makes each poll slower than the poll period (P3).
-- Live worker spend persists to runs.json at most every 10 s, and a persist skips re-reading runs.json when this process wrote it last (P3).
-- The active session path is memoized per ledger snapshot and leaf and extended on append, so turn context, the chat loop and the safety judge no longer rebuild it from the whole ledger on every call (P3).
-- The stale-edit guard indexes only appended entries per edit, about 19 ms to 0.4 ms per edit at 10K session entries (P3).
-- A dispatched run in the current checkout no longer blocks the event loop to measure its checkout delta. Spawn and settle snapshots run asynchronously, re-read only files whose stat moved (up to 1 MiB; a larger file is identified by its stat), and runs spawned together share one baseline, so a wide fan-out on a dirty checkout no longer freezes the TUI (P3).
-- `context index --json` drops `codewikiPath`, which always repeated `codemapPath`; read `codemapPath` (bt-20).
-- A safety judge block now tells the model to ask the operator for the action, and that the judge hands a call to the operator itself only after repeated blocks (bt-21).
-- P2M-5: memory intervention and guardian are imported from the memory domain directly; the middleware compatibility shims and barrel re-exports are gone.
-- A2: one loop block no longer disables tools for the rest of the turn. The interactive turn locks after three blocks or after the same call is blocked twice, and the other calls of the model response that held the turn's first block still run.
-- B2: an extension hook's `require_tool` naming one of the package's own tools is refused unless the manifest promotes that tool, and the refusal names the `runtime.promote` entry to add. A requirement naming a builtin, an MCP tool or another package's tool behaves as before.
-- C3: dispatch and collect results are compact by default: each run keeps its facts, its trust or verdict line, its evidence notices and a 2000-byte answer excerpt that names `monitor(mode="record", run_id=...)`, which now leads with the whole answer. Setting `max_output_bytes` returns the full form.
-- C4: an extension tool's interview result records the checkpoint ids it put to the author in its details, kept on the session ledger even when the interview is cancelled.
-- Docs: the extension, prompt template, settings, tool and CLI guides and the extension-authoring skill (0.1.3) document the 0.8.4 features (WTF-P 0.8.3 A1, B1 to B6, C1 to C5), `ignorable` and `turnPolicy.when` included. `docs/architecture/context-engine.md` gains an Observation aging section (C3).
-- Amazon Bedrock is hidden from `clio-coder configure` and its provider listings. A target that already names the `bedrock` runtime still resolves and runs.
-- Astra r8-4: the post-tool continuation guard decides on one history observation and does not publish the live budget again when no compaction ran.
-- Astra r8-5: the live budget's handoff and outcome fields share one continuity resolution and reuse the active-branch selection until the ledger or the leaf changes.
-- Astra r8-6: prompt-cache structure recording rehashes only the wire entries whose fields changed.
-- Astra r8-2: telemetry reuses the prepared prompt-structure and tool-schema bytes for an unchanged request surface and still verifies the stored object on disk.
-- Astra r8-1: `run --session <id>` resolves the id or prefix from session metadata instead of parsing every transcript in the workspace, so a named resume no longer slows as other conversations grow.
-- Astra r8-3: shipped YAML (prompt fragments, damage-control rules, the bundled model catalog, model profiles) is parsed at build time and digest-verified at load, which removes about 45 ms of parsing from each CLI start and about 40 ms from each native worker start. Overlays still parse at runtime.
-- Astra r9-2: cache keepalive stops once its refreshes for one awaited request cost as much as the miss they prevent, stops after a refresh that read nothing from the cache, and uses the 30-minute lifetime Pi's adapter requests in OpenAI explicit cache mode.
-- Astra r9-5: with no `cache.warm.maxInputTokens` set, the pre-warm input budget is 16,384 tokens, capped at the model's window (8,192 when the window is unknown), so the first attended prompt warms.
-- Astra r9-6: the repetition detector resets on each streamed message instead of each partial object, so a long reply is checked about a hundredth as often.
-- Astra r9-3: the attached gateway schema shows a known edit and its verify as one chain, which saves a round when the model uses it.
-- Astra r10-6: `/export` shows an "exporting" notice at once and writes the file asynchronously; rendering a long session still holds input briefly.
-- P1-8: turn context shares one compaction budget and trigger helper, one JSON digest and one active-path read; prompt bytes, ledger records and telemetry are unchanged.
-- P1-6: tool registry refusals go through one block builder (rejection text and policy key order unchanged), and a call's success and error paths share one flow-withhold and after_tool step.
-- P1-4: the chat loop drops seven unwired dependency seams and the duplicate `admitRuntimeFlow` gate; /btw, /draft, /handoff, triage and pre-warm admit information flow through `admitFlow` directly.
-- P1-5: worker receipt accounting moves from the chat loop into `session-control/worker-receipts.ts`, and the cancel-before-admission and submit-settle paths share one turn-outcome write.
-- P1-7: information-flow admissions, the operator-shell command label and file-reference labels are answered by the flow ledger (`admitDestination`, `labelCommand`, `labelPaths`); refusal text and absorb attributions are unchanged.
-- P1-3: the session-settings state machine (overrides, routing, thinking and scoped-target advances, ACP safe settings) moves out of the composition root into `src/entry/session-settings-view.ts`, and four duplicate routed-session constructors become one.
-- P1-8: the stale-edit guard and decision boards read the active path through the same closure.
-- Astra r10-1: a streaming reasoning rail redacts and wraps only the text after its last certified line break, so per-delta cost no longer grows with the length of the reasoning.
-- Astra r10-4: restoring a session reads each telemetry view's run list once instead of once per receipt.
-- Astra r10-5: a terminal height change that leaves every preview budget unchanged keeps the settled transcript rows instead of re-rendering every entry.
-- P2D-1: ACP delegation and native worker runs settle through one shared finalizer with byte-identical receipts, ledger rows and events.
-- D2-1: live telemetry keeps cache floors, cache breaks and the session projection incremental across batches instead of re-folding every call (12k calls: about 380 ms to 1.4 ms per batch), and ACP skips unchanged session snapshots.
-- P2S-3..7: safety decisions convert through one `toSafetyDecision`, base rules load through one cached loader (the rule compiler and the `rulePacks` option are gone), the safety barrel drops 21 unread exports, and the dead confirmed scope and `tokenizeShellLike` are removed.
-- P2M-2..8: memory promotion validates once with the shared validators, the memory barrel keeps only names read outside the domain, the runtime stops forwarding unsupplied intervention callbacks, kept lessons are typed as projected values, duplicated helpers live in `memory/util.ts`, and the dead `experimentalRelevance` switch is removed (prompt bytes unchanged).
-- bt-12: a lone middleware hook budget overrun short of a stall (10x the budget) is no longer journaled as `middleware.hook_failed`; steady-state slowness and stalls still are, and `CLIO_CODER_HOOK_BUDGET_DEBUG=1` records every overrun.
-- P2D-2: the dispatch barrel re-exports only the names callers import through it, and ten single-file helpers are no longer exported.
-- P2D-3: the dispatch event pump and the assignment event stream share one bounded drop-oldest tee.
-- P2D-6: reservation tests exercise the async release and lock-held transfer that production uses; the test-only twins and unused path helpers are gone.
-- A run now reads its own evidence from a submit-keyed log (ContextFold CF-3, F12). A compaction or recovery edit mid-submit no longer loses the step call or miscounts a machine turn's usage; retry eligibility after a reprompt or compact-and-retry run judges only that run; `agent_end.messages` and the json-stream `messageCount` no longer count in-run host inserts; a machine turn whose recovery ladder is exhausted reports the failure reason, not an earlier round's text (#445).
-- A small-tier route with prompt caching on, including the WTF-P `models.<id>.tier: small` opt-in, no longer ages observations; only routes without prompt caching do, until the maintainer turns on D5 (ContextFold, bt-47 cf1j-a).
-- Observation aging is retired. A format 6 session adopts its aging stubs once as a superseded record, or releases them on a route that caches prompts (ContextFold CF-5, F1, F5).
-- On a known context window under 52,428 tokens, working-set eviction acts at the automatic compaction trigger (target 0.75 x the trigger at the defaults) before any paid summary; before, its gate sat 6-12k tokens above the trigger, so a summary ran on every pass (ContextFold A3, cf-x5).
+- Headless output lists a code check that ran and failed under `Failed checks:` and in `failed_checks=`; `Not verified:` and `not_verified=` keep only checks that never ran.
+- Calls the output limit cuts off are stated once, read as not run, and count as no call and no tool error on any surface.
+
+**Safety**
+
+- A safety judge block tells the model to ask the operator, and at default autonomy a sandbox escape the judge would block goes to the approval card when an operator message or answered `ask_user` names its outside target; headless runs, contained yolo and worker asks still get the block. The approval card names the word it needs, and worker and contained approval cards say an approved shell call still runs inside the OS sandbox.
+- The yolo token cap counts cache reads at one tenth and names its figure "cap tokens", so a long cached prefix no longer trips the 5M default after a few dozen calls.
+- A bash command that only searches for, prints or writes a word such as `sudo`, `pip install` or `systemctl` (`rg sudo README.md`, `git log --grep doas`, `echo "pip install x" >> notes.md`) is no longer a system change; every command that can run the word still is.
+
+**Terminal UI**
+
+- `in` means the uncached input everywhere: `/usage`, the exit card, the turn receipt and the footer show it beside the cache read, and whole-prompt figures (footer live chip, worker cards and table) are labelled `prompt`. The `/usage` Session tab shows the cache write, so its rows add up to `processed`.
+- Launch no longer prints "terminal panes are not installed"; `/panes`, `/files` and Alt+E name `clio-coder panes install`, and doctor still warns. Alt+W opens or shows the workers dock without taking the keyboard away, and opens the Fleet Runs board, saying why, where the dock cannot fit.
+- The welcome banner reads `Default · auto in workspace` instead of `reviewed approvals`, or `auto edits · no OS sandbox` on hosts without a shell sandbox. Standard style keeps one row of reasoning before an action instead of a bare Thinking marker, and the exit card reads "Session verified" in every style.
+- Countdowns read m:ss under a minute (0:59, 0:05), and elapsed clocks never read `2m60s`.
+
+**Performance**
+
+- Startup: shipped YAML is parsed at build time and digest-verified at load, saving about 45 ms per CLI start and 40 ms per worker start; boot no longer stats every spilled tool output, a prompt submitted at launch no longer waits for earlier fleet runs, and route-history warmup reads only the newest 2,000 runs from the last 30 days.
+- Long sessions: `run --session <id>` resolves from session metadata instead of parsing every transcript, the active session path and stale-edit index are incremental (about 19 ms to 0.4 ms per edit at 10K entries), live telemetry folds incrementally (12K calls: about 380 ms to 1.4 ms per batch), and streaming reasoning, repetition checks and code fences no longer grow costlier with reply length.
+- Fleet: the workers board builds cards only for live runs and the newest 24 finished ones, live worker spend persists at most every 10 s, and a dispatch in the current checkout measures its delta asynchronously, so a wide fan-out on a dirty checkout no longer freezes the TUI.
+- A very large bash call (such as a 130 KB heredoc) is admitted in about a third of the time, and while it streams the TUI renders only the visible preview.
+- Cache keepalive stops once its refreshes cost as much as the miss they prevent and uses the 30-minute lifetime in OpenAI explicit cache mode. With no `cache.warm.maxInputTokens`, the pre-warm budget is 16,384 tokens (capped at the window), so the first attended prompt warms. `/export` shows an "exporting" notice at once and writes asynchronously, restoring a session reads each telemetry view once, a terminal height change that leaves preview budgets alone keeps settled rows, and a streaming code fence with an info string (`python title="train.py"`) redraws only its open line.
+
+**Documentation**
+
+- The extension, prompt template, settings, tool and CLI guides and the extension-authoring skill (0.1.3) document the 0.8.4 features, `ignorable` and `turnPolicy.when` included, and `docs/architecture/context-engine.md` describes the superseded-results stage.
 
 ### Removed
 
-- P1-1: the `CLIO_CODER_LEGACY_MASK=1` escape hatch (announced as one-release in 0.3.4) and its destructive stale-observation mask stage; working-set eviction is the only pre-summary stage, and `context.workingSet.enabled: false` turns it off.
-- P1-2: the unread `retrySafety` and `costLatency` tool metadata fields.
-- P2D-4: the unread typed-intent warn codes (`intent_absent_legacy_inference`, `intent_partial_verification_absent`) and the intent retirement constants; the compatibility classifier reports refusals only.
+- The `CLIO_CODER_LEGACY_MASK=1` escape hatch and its stale-observation mask stage.
+- The unread typed-intent warn codes `intent_absent_legacy_inference` and `intent_partial_verification_absent`; the compatibility classifier reports refusals only.
+- New eviction records no longer write the unread `route` field and a reissued host insert no longer writes `reissueOf`; ledgers that carry either still open.
 
 ### Fixed
 
-- The citation check no longer reads a decimal label such as `line 3.37` as a line citation. (B-66)
-- A headless no-op line for a failed sequential or parallel dispatch names the failed run, with its outcome and detail, instead of the batch header. (H6)
-- `run --json` on a resumed session reports the active target and model in its session frame, not the creation-time route.
-- ACP session/load of a session written by a newer Clio returns -32602 `session_format` with the upgrade text (no path) instead of a generic load failure.
-- ACP and terminal `/context compact` no longer streams the once-per-session thinking notice into its reply; it lands on the next real turn.
-- A headless or ACP prompt resolves only after its turn's journal is flushed.
-- A killed worker's work label counts the calls it started but never finished (unfinished:N). (bt-47 r5)
-- `fleet cancel` of an orphaned run files the canceled attempt and its terminal run id in the assignment record.
-- A council member that fails to resolve reports the real cause (for example a scope refusal) instead of calling every failure an unknown target.
-- The not_retried policy line is one sentence: the outcome, its code and how many of maxRetries were used.
-- `steer` cancel and `clio-coder fleet cancel` now find a headless (hosted) worker's assignment by its attempt id. Cancelling a hosted worker waiting on its retry backoff no longer reports 'nothing to cancel' and lets the retry spawn, and `fleet cancel` of a hosted worker whose owner is gone seals it as an orphan instead of waiting 15 s and exiting pending.
-- A very large bash call (for example a 130 KB heredoc) no longer stalls admission: each distinct read token is judged once per evaluation, so path lookups no longer grow with repeated lines (about 1.8 s to 0.65 s end to end at 130 KB). While such a call is still streaming, the TUI renders only the visible preview of its arguments, so each frame stays a few milliseconds whatever the argument size; the settled card and `/view` are unchanged.
-- A read-only worker's authority line now says workspace edits are not permitted in this run. It no longer says "workspace edits and recognized commands run". Other workers' prompts are byte-identical (D-C).
-- Headless `run`: a killed or timed-out worker that is not retried now prints its not_retried line, as interactive does, including under the review gate and a pipeline halt. A delegated task whose workers started and then failed reads "failed (...)" instead of "never started" (D3-c, H6).
-- ask_user: a timed-out question that names writing outside the workspace now declines a recommended option that affirms it ("Yes, run it"). Before, only the option's own words were checked. A recommended option that declines is still picked (bt-21).
-- `telemetry why-stopped` now reports a turn that stopped normally without answering, such as one that wrote a tool call as text, as a failed turn naming the cause. Before, it read "ended normally". turn.settled carries an optional content-free `terminal.noAnswer` (J1).
-- An output-limit cut with tool calls shows only its warning notice, without a second red "[stopped: length]" row (J4).
-- ACP: session/load replay separates the assistant messages of one turn with a blank line, as live does. A slash command's failure line now crosses a prompt once (J9, J10).
-- Verification: after a passing check, a Python probe that imports the workspace's own module and writes nothing reads as unknown. A no-op step such as `exit 0;` reads as inspection. Neither retires the pass, so the run no longer settles unverified with no-validation-tool. A probe that writes still retires it (c17-a).
-- Receipts: a headless main run with no check of its own is credited with a dispatched worker's validated pass (basis dispatch-run-record, naming the run and agent), unless the main run changed the tree afterwards (c17-a).
-- Copilot route: host reminders that follow tool results, such as the result-contract reminder, now go in Copilot's immediate send before the next model request. They are never appended inside a tool result, which models read as an injection (D4).
-- Telemetry insights counts a fork's own verified outcomes after its own check, so the verified share moves with it. (c16-D, bt-fork-verified, drv-n3)
-- `telemetry why-stopped` names a dispatched worker's stop on the parent session, in text and in `--json` `workerStops`. (D3-b, drv-n2a)
-- Inline python (`python -c`, heredoc) and jq no longer retire a standing check; python that shows a write-shaped call (a write-mode `open`, `write_text`, a remove, rename or subprocess call) still does. (c17-a)
-- A bash check's pass is filed on the receipt under its full command. (x8-2)
-- A check after a known write on an earlier line or after `;` is credited. (bt-46 S2)
-- A heredoc-written script that a later step may run is read as code. (bt-low1 heredoc limit)
-- A check log that clobbers a file older than the run counts as a change. (bt-verify8b limit a)
-- The headless observed line names a standing dispatch run-record pass. (bt-verify7a limit)
-- A `<tool_call …>` opener with attributes is read as a written call. (c2b-2b/m2a-4)
-- An operator's cancel no longer names a failure route. (operator-cancel failureRoute)
-- A response that rewrites one file five times is stopped by the flood check. (bt-39 b)
-- Reasoning that re-drafts the same lines, or reaches 75% of the output cap with nothing but thinking, is stopped on routes without an enforced thinking budget. (bt-25 fix 2)
-- ACP checkpoints a live session before session/close, a fork or a handoff closes it. (ACP low 3)
-- ACP keeps an assistant message's text blocks apart with a blank line, live and on replay. (bt-acp-tail)
-- A worker ask that no operator could answer counts as a permission request in the receipt. (bt-readonly residual)
-- A worker call refused before it reached a tool counts in toolStats as an error, and a call cut off by the output token limit is not counted as one. (bt-23 #5)
-- A worker call refused by an approval timeout names that cause in its evidence. (bt-11 t)
-- A headless run whose delegated task never started exits 1 as a no-op. (c16-B)
-- A failed dispatch run that was not retried says why, including at the review gate and a pipeline halt. (D3-c)
-- Enter on a slash draft under an approval card shows a notice naming the card and its keys instead of doing nothing. (bt-11 p)
-- `/fleet` at narrow widths keeps who holds an approval-waiting run. (bt-11 l residual)
-- An unanswered ask_user declines a recommended option that leaves the workspace, and prompts, help, the yolo card and docs say so. (bt-21 residual)
-- The default autonomy banner reads `auto edits · no OS sandbox` on hosts without a shell sandbox. (bt-11 banner wording)
-- The selected workers-dock card wraps its whole task at 45 columns. (bt-tui dock cut)
-- The Fleet Runs board says where a coder's proposed commit lands, as the transcript card does. (board commit placement)
-- A Copilot target reads its own context tier's window from the cached listing, and the per-tier record survives the providers re-record. (bt-copilot limit)
-- A dispatch briefing that mentions a `~/` home path is admitted instead of refused as legacy_scope_path_absolute. (bt-11 r)
-- A fork's Verified row, /usage and telemetry insights cut copied parent outcomes by ledger position. (bt-fork-verified limit)
-- A JSON-encoded off-schema dispatch field (candidates, judge, members, review, routing, budget, per-task budget) is decoded when it is that field's valid value, instead of refused. (bt-dispatch-schema limit)
-- CLIO_CODER_PROVIDER_DUMP_PATH records each request Clio hands the Copilot runtime instead of `payloads: []`. (c2b-1)
-- A worker's result-contract reminder arrives as a host reminder after its tool results instead of inside them, so models no longer treat it as an injection. (D4, drv-cf3b)
-- Dispatching an architect with a task that forbids writing any file is refused with `task_forbids_writes` before a worker starts, naming a read-only agent (scout, oracle, researcher) instead. (D-C)
-- The [Tasks] reminder no longer fires when the request's own words forbid writing files. (bt-22b)
-- The safety judge is told when an operator message spells a call's outside path, so a requested report file is no longer refused as shared-config. (cw-3)
-- The approval card for a judge-allowed sandbox escape names the word it needs instead of saying the operator never mentioned the sandbox. (bt-24 residual)
-- A dispatch that puts a target id in `node` (for example `node:'openai-codex'`) is told the value is a target id that belongs in `target`, with `node` omitted (bt-45 c16-A).
-- The exit summary's Workers line shows refused worker calls (`· 1 call refused`) in the same words as the collected block (bt-11 s).
-- The dispatch scope notice for `../` briefing paths is one plain sentence naming the paths that were not granted, plus any read from the workspace root (bt-11 u).
-- A `verify` naming an undeclared check ran nothing, so it no longer fails a worker's result quality after the declared check passes (bt-45 c16-C).
-- A worker past its window before eviction no longer loses a tool call to a 32-byte argument ceiling; a worker call cut off by its turn timeout, output cap or tool-argument bound settles with that cause instead of `transport_dropped`; `why stopped` names the stop of each worker run the last turn dispatched; and a dispatch that recovered on a retry reports `recovered=N` and the failed attempt (bt-47 cf1h-D3).
-- The worker context guard evicts older reads before a read the model has not yet seen; such a read leaves last, largest first, and is journaled as `unseen_overflow` (ContextFold A2, bt-47 cf1h-D1).
-- A worker request the context guard fitted after an eviction is no longer refused at admission as leaving too few output tokens; the guard, admission and the output clamp size it by one count (ContextFold A2, bt-47 cf1h-D2).
-- An overflow fold and its requireFit summary now fit, admit and clamp the next main request on one count (the larger of the fold's estimate and Pi's chars/3.5), so a request the fold fitted is not refused and a wedged session resumes (ContextFold A4, bt-47 drv-cf3a D-A).
-- When a protected tool result alone overflows the window after compaction, ContextFold ends the turn once, naming the read and its size, and the session stays usable (bt-47 drv-cf3a D-A).
-- A worker's result-contract repair round, which is never sent, no longer replaces the provider's last count as the context anchor (bt-47 drv-cf3a D-B).
-- The eviction skip line agrees in number ("the 1 turn is") (bt-47 drv-cf3a).
-- The [Collected elsewhere] notice names a forked collection's refused tool calls in the worker card's words (e.g. "succeeded · 1 tool call · 1 call refused"), so the parent model no longer reports a run whose only action was refused as a clean success (bt-11 o).
-- A fork or splice `context` sent JSON-encoded by a grammar-constrained route (llama.cpp) is accepted by dispatch instead of refused as "expected object, got string" (bt-47 cf1h-D4).
-- A fork's Verified row on the exit card, `/usage` and `telemetry insights` counts only the verified outcomes the fork recorded itself, not the passes and done tasks it copied from its parent; the insights share counts a fork as verified only when it verified something itself (bt-47 D3b, c16-D).
-- A fork's exit card counts only the compactions the fork ran, not its parent's (bt-47 D3).
-- Over ACP, context engine status lines (working set, observation aging, compaction rows) cross as `session_info_update` notices (`_meta["clio-coder/notice"] = {level, text}`), not as assistant reply text (bt-47 cf1j-d).
-- `isort --check-only`/`-c` (also `python -m isort`) no longer reads as a writer that retires passes, and `black --check`, `ruff format --check`, `cargo fmt --check` (also `-- --check`) and `rustfmt --check` now read as checks (x10-2).
-- `cargo nextest run` reads as a check labeled `cargo test`, and `golangci-lint run` (a writer with `--fix`) and `staticcheck` read as read-only checks (x10-3).
-- A writer behind `pnpm|yarn <bin>` (`pnpm prettier -w .`, an emitting `pnpm tsc`) reads as a writer, as its `exec` spelling does (x10-4).
-- A check the project catalog or a session declares (such as `make ci`) counts the same when run through bash behind `timeout`, `time` or `nice`, piped to `tail`, or logged with `tee` or a redirect: it settles its pass, satisfies the finish gate and meets an acceptance that requires its id, and a logged run no longer reads as a change that retires standing passes (x10-1).
-- The finish gate no longer credits a dispatched worker's passing run record after a later edit; the shared check fold retires that record like any check, so the edit engages `unvalidated_mutation` (x9-1).
-- A green check behind `timeout`, `nice` or `xvfb-run`, or spelled `python -m mypy|ruff|pylint|flake8`, `pnpm|yarn <runner>`, `npm|yarn|bun exec <runner>`, `npm --prefix <dir>` / `pnpm -C` / `yarn --cwd`, `cargo build` or `php artisan test`, now settles the finish gate after an edit (a build chained to running its output, `cargo build && ./target/debug/app`, still reads as mixed: it settles nothing and retires a standing pass, so run the check on its own), and `npm exec vitest run` no longer retires standing passes as a change. The safety readers also see through these prefixes, so `timeout 5 rm -rf x` reads as the delete it is (x9-2).
-- A passing check the model ran through the shell now files its typed receipt fact from the shared classifier verdict, under its declared check ids and label, so declared scripts such as `./acceptance.sh` count toward verification (bt-46 S1).
-- Line continuations inside a here-document body no longer join across its terminator, so the check after the heredoc keeps its own name and scope (bt-46 S2).
-- Here-document bodies are data in the check-step verdict: a scratch script that only spells a check neither counts as running it nor retires a standing pass, and the finish gate no longer credits it (bt-46 S3).
-- Elapsed clocks (worker cards, run_script progress, /view wall time) carry a rounded second into the minute and never read `2m60s` (bt-11 j).
-- A fork words a parent session's held worker approval as held by that session ("approval held by session <id>") and keeps "coder running" in the rail, instead of "waiting for your approval" (bt-11 l).
-- When a fork collects a detached batch, the dispatching session is told once, in its next turn, that the batch was collected and how each run ended, so it no longer says the work is still in the background (bt-11 m).
-- `clio telemetry cost --run` and `calls --run` now break a main run's cost down by model and role from the session calls its settlement names, instead of printing an empty breakdown (bt-45 E).
-- A receipt whose only passing check was a host-observed bash command now reports verification basis `host-observed-command` instead of `validation-tool` (bt-45 F).
-- A dispatched worker's `context(scope="workspace")` now returns a snapshot of its own working directory instead of refusing for lack of a bound session (bt-45 G).
-- Worker and contained main-session approval cards now say that an approved shell call still runs inside the OS sandbox, where writes outside its writable roots fail; approval never widened the sandbox (bt-11 k).
-- why-stopped names the tool boundary when a harness stop (autonomy cap, cancel) lands after a call that asked for tools (bt-26 N2g).
-- A turn steered mid-run settles with every model call it opened and its cause, so a headless `--timeout` after a steer reports `shutdown` (bt-26 N2h).
-- The sealed run's tools row no longer counts an ask refused by a `--timeout` abort as blocked; decisions already counted it as a permission request (bt-15 c14a).
-- The finish contract credits a passing check (bash, `verify`, operator `!`, or declared) only while no later edit has retired it, so edit-test-edit no longer finishes "checks passed" and the high-rigor acceptance gate no longer passes on a stale check, for the main agent and dispatched workers. Any shell or `!` check pass the shared check fold still holds is credited under its observed name, so a green `cargo clippy`, `mypy .`, `go vet` or `ruff check` after the last edit satisfies the gate (x8-1).
-- Read-only checks from other ecosystems now settle a recorded outcome instead of reading as unknown: `cargo check`/`clippy`, `go vet`/`build`, `gofmt -l`, `mypy`, `pyright`, `ruff check`, `prettier --check`, `biome check`, `dotnet test`, `rspec`, `phpunit`, `deno`, `playwright`, `cypress`, `tox`, `nox`, `make test`/`check`/`lint`, and runs behind `poetry`, `pipenv`, `hatch`, `pdm`, `rye` or `bundle exec`. Their `--fix` and `--write` forms stay writers (x8-2).
-- A write into a scratch root or temp dir inside the workspace now retires standing check passes (x8-4).
-- A check call that also copies or creates files only outside the workspace (`npm test && cp coverage/lcov.info /tmp/`) no longer retires earlier passes (x8-5).
-- ACP `message_end` no longer repeats the last characters of an assistant message that carries more than one text block; its tail now lines up with the streamed text (x8-3).
-- A fork no longer shows or answers the approval of a worker its parent dispatched. It prints a notice naming the owner and how to answer, and the card returns on `/resume` of that session (bt-11 f).
-- A fork's worker card shows elapsed time for a worker its parent dispatched, instead of "—" (bt-11 g).
-- The exit card's Tools row counts only the current session's own tool calls, not those of a session visited earlier in the process (bt-11 h).
-- A cut reasoning excerpt keeps its "Thinking ·" label on the row that says how many rows were cut (bt-11 i).
-- An ask denied before the operator decided is listed in `safety.permissionRequestedAttempts`, matching its `permissionRequested` count, instead of in `blockedAttempts`. Older records keep such asks in `blockedAttempts` (bt-15 c13a).
-- `run --help` and the read-only docs now say `--read-only` runs shell commands in a read-only sandbox and runs delegations read-only, instead of claiming it denies every command and delegation (bt-15 c13b).
-- A write that lands outside the workspace (tmp, a scratch root, or outside the cwd) no longer retires standing checks on the receipt or the task board (x7-1).
-- Catalog and `run --verify` checks run through bash are read by the shared check classifier, so the finish gate, the receipt and the board agree on them (x7-5).
-- The finish footer says a check failed, not "checks passed", while a check's last outcome since the last change is red (bt-44).
-- A safety-judge or System One call cut off by shutdown (such as `--timeout`) now settles with the `shutdown` failure cause, as other side calls do (bt-26 N2e).
-- A yolo cap halt's `autonomy.cap_reached` record is journaled when the stop lands and counts the same tool calls as the headless stderr notice. A turn the cap stops at the tool boundary settles with no mid-stream stage, and why-stopped says "at the tool boundary" (bt-26 N2f).
-- A repetition, shutdown or other harness stop no longer reports as `operator_cancel` or `triage_stop` because an earlier turn was stopped with Esc or by triage (x7-3).
-- ACP clients now receive the full text of a later assistant message whose text arrives only on `message_end`, instead of a truncated or missing answer (x7-6).
-- Snapshot and golden update flags on recognised test runners (`go test -update`, `pytest --snapshot-update`/`--force-regen`/`--regen-all`, `bun test -u`/`--update-snapshots`, `--update-goldens`, `cargo insta accept`) now count as tree changes, so a run that regenerated its expectations is no longer credited a passing check (x7-2).
-- A check written across lines with a backslash continuation now has its pass or failure recorded under its single-line name, instead of reading as "no check observed" (x7-4).
-- A replayed or forked receipt says "Turn ended · N workers running" when its workers outlived the turn, as the live one did (bt-11 a).
-- A worker card replayed by /fork, /resume or /tree while its run is live keeps streaming and settles, and an unfollowed one reads "still running" (bt-11 c).
-- The steer refusal names the session that owns the run, and says when it is the session this one was forked from (bt-11 d).
-- The exit summary counts a settled worker's changed files even after /fork dropped its card (bt-11 e).
-- An autonomy cap or judge halt now settles its turn with the named harness cause `autonomy_stop` instead of null (bt-26 N2d).
-- A side call (memory, compaction, side question) cut off by shutdown now settles with the shutdown cause main calls get (bt-26 N2c).
-- ACP `agent_message_chunk` text from consecutive assistant messages is now separated by a blank line (bt-41).
-- The sealed run.settled record and `evidence inspect` now carry a run's `unclassifiedAfterLastCheck` (count plus up to 5 redacted commands), for main-agent headless runs as well as dispatched ones (bt-15 c12a).
-- A check that fails outside the receipt vocabulary, such as `npx tsc --noEmit` or `npx eslint .`, now fails the sealed receipt and the headless line as it already did on the task board, instead of the run sealing verified (x6-1).
-- The receipt and the headless line keep disclosing unclassified commands while a check that ran before them still stands, even after a later check (x6-3).
-- A change that retires every standing check also drops the unclassified-command disclosure, so the receipt and `turn_end.observed` agree (x6-6).
-- Dispatched workers read `safety.scratchRoots` when judging check logs, matching the orchestrator's record of the same run (x6-8).
-- `git --no-pager diff`, `git -P log`, `git -c color.ui=never status`, `git ls-files`, `rev-list`, `describe`, `cat-file -p`, `ls-tree`, `git grep` and `git blame` read as inspection and no longer clear a green check, while `-C`, `--paginate` and helper-naming `-c` keys stay refused (x6-2).
-- `pnpm lint`, `yarn lint`, `pnpm typecheck`, `pnpm --filter web test`, `pnpm -r test` and `yarn workspace web test` count as checks; a selected workspace keeps its selectors in its identity, and `pnpm test -u` or `pnpm --filter web lint:fix` still count as changes (x6-4).
-- A runtime loader (`--import`, `--require`, `--loader`) on `node --test` is refused in either order, and when passed to a package script, so those runs no longer credit a pass (x6-5).
-- `clio-coder evidence` now reads a main-agent run's quality from its sealed typed checks, so a green verify on the final tree reads pass, not unmeasured (bt-27 c27d).
-- A run that no review judged no longer carries the `independent-review` tag, which contradicted its "not independently reviewed" trust line (bt-27 c27d).
-- A System One typed-wire call (TypeSafe Jev and the other decide() wires) now records cache read and cache write as a known zero, and `telemetry tokens` no longer blanks a session's cached/fresh when one call lacks a cache-read count: cached and fresh sum the calls with a split, the total stays exact, and the rest is named "N without split" (optional `unsplitCalls` in the --json report and campaign metrics) (bt-42).
-- A steer that steering triage reads as a stop in a headless `--steer-channel` run or an ACP prompt now interrupts the turn and answers it, keeping queued follow-ups; the run no longer ends canceled with exit 1, and the cut reply journals cause `triage_stop` (stage harness, abort source `triage`) instead of an operator cancel (bt-41).
-- /view dispatch:<run> words a worker's structured output as its Fleet Runs card does instead of raw JSON (bt-11 i22-e).
-- A narrow finish line marks the token amounts it had no room for with an ellipsis (bt-11 i22-d).
-- The /usage Session tab shows the cache write, so its rows add up to `processed` (bt-11 i22-cw).
-- Replayed finish lines in a forked session state the calls and tokens the live ones did (bt-11 i22-replay).
-- Reasoning the provider redacted reads `Thinking · hidden by provider` instead of a fold that opens a placeholder (bt-11 i22-think).
-- The expanded Fleet Runs record row no longer prints the provider's raw tool call id (bt-11 i22-toolu).
-- The run-effects recorder, task board, finish contract, receipts and headless observed line now read every call through one check classifier (check, inspection, mutation or unknown), so they agree on what ran a check; an unknown command neither settles nor clears a recorded outcome (x5-1).
-- A runner flag after `--` (`npm test -- --runInBand`) is a check; a loader flag (`--import`, `--require`) is unknown and settles nothing. Unknown calls after the last check are disclosed as unclassifiedAfterLastCheck without changing the verdict (x5-2).
-- A turn whose last call streamed before it stopped now settles with stage "streaming", not "firstToken", and a harness stop (shutdown, run --timeout, repetition guard, operator cancel, route move) persists failure stage "harness" with its own cause instead of a transport abort (bt-26 N2a).
-- why-stopped words harness-initiated stops as "Stopped on <cause>" instead of "Failed on <cause>"; provider and transport failures still read "Failed on" (bt-26 N2b).
-- A headless or ACP run that ends while an extension reload is still staging no longer prints "Extension reload failed"; the closed runtime drops the reload silently (cw-6).
-- The yolo autonomous token cap now counts cache reads at one tenth and names its figure "cap tokens", so a long cached prefix no longer trips the 5M default after a few dozen calls (cw-2).
-- A /fork session is now nudged about and can collect its ancestors' uncollected detached batches; the first collector wins and cancel stays with the dispatching session (D1-4).
-- `go test -run '^TestX$' ./pkg` and other runner option values (jest/vitest `-t`, pytest `-k`) no longer read as a check run outside the workspace, so their green verifies and clears an earlier red (x5-3).
-- A check logged to `$TMPDIR/…`, `~/…`, a `safety.scratchRoots` directory, or a new untracked file through its own tee or redirect is output, not a change; its green verifies and no longer wipes earlier passes (x5-4).
-- A read-only `sed -n` script with a bracket expression (`/^[[:space:]]*x/p`) stays a read and no longer erases standing check outcomes (x5-5).
-- bt-32: A catalog row whose rates are all zero, such as Inception mercury-3, now reads as unknown cost (pricedBy none) instead of a catalog-priced ~$0.00, so a paid route no longer looks free to cost caps and telemetry. OpenRouter `:free` models keep their catalog $0.
-- bt-39: Clio Coder stops a response that streams the same tool call five or more times and re-prompts it once to make one call.
-- bt-26 N2: A reply cut off by `run --timeout`, a signal or quitting is recorded as Clio Coder's shutdown, with cause `shutdown`, instead of a failure of the route.
-- bt-40: Resuming a session whose turn compacted mid-turn now sends the same prefix the live turn sent, so the first resumed call reads it from cache instead of rewriting everything after the compaction summary.
-- x4-1: The task board, the headless observed line and run --json turn_end.observed read checks by the receipt's rules, so a masked, chained, outdated or out-of-tree check no longer shows as passed there.
-- x4-6: A headless run's receipt counts a check run through bash after the last write, so editing and then running a green test seals verified.
-- x4-2: A check logged through `tee` or a redirect into a log, temp, outside or git-ignored file keeps its outcome, so its green seals and an earlier red stands.
-- x4-3: `sort` long-option abbreviations of --output or --compress-program and `sed` scripts with bracket expressions count as writes, not read-only filters.
-- x4-4: A check whose own directory flag or test path leaves the workspace (`--prefix ../x`, `make -C ../x`, `pytest ../x`) settles no pass.
-- x4-5: An inverted pipeline (`!`) or a quoted or clustered pipefail toggle makes the shell exit status speak for no check.
-- x4-7: A `cd` inside a subshell or between pushd and popd ends at its close, so a check after `(cd ../lib && make) &&` settles.
-- `cd`, `source`, `export` or `set` before a check no longer clears a standing red as if the tree changed (x3-1).
-- A red check piped into `head`, `grep` or another stage that can mask its exit no longer settles a failure (x3-2).
-- A check that rewrites the tree (`--fix`, `--write`, a format or fix script) counts as a change, and its green is not credited (x3-3).
-- A check piped through read-only `sed`, `awk`, `sort` or `uniq` keeps its own green (x3-4).
-- A check run outside the run cwd, by `cd` or the bash cwd, no longer seals the run verified or settles a standing red (x3-5).
-- `in` now means the uncached input everywhere: /usage, the exit card, the turn receipt and the footer show it beside the cache read, and whole-prompt figures (footer live chip, worker cards and table) are labelled `prompt` (bt-11).
-- A streaming edit's row no longer shows `+N -M` counts guessed from partial arguments; the applied row's diff is the only count (bt-11).
-- A check whose exit status a later command overwrote (`; echo`, `||`) no longer grounds a passed claim; grounding reports "unattributable-status" (bt-9).
-- A green claim against a red latest `verify` on the final tree now seals quality fail, as the bash equivalent does; verification stays unverified (bt-27).
-- code_nav names clio_docs in its remedy only when the run admits it, and a session's first thinking row records the route-supported level, not an unsupported selection (bt-37).
-- The compaction notice says "(the cut fell inside a turn)" only when the kept suffix holds part of that turn (bt-18).
-- On the copilot-sdk route, a tool result over 50 KB is no longer re-spilled by the Copilot runtime to a virtual path Clio's read cannot open; Clio's own offload, at a real readable path, is the only cap, as on other routes (bt-38).
-- The safety judge now names the session's workspace and scratch roots by path, including the one $TMPDIR names, so a lane can delete its own scratch under $TMPDIR. Escapes through .. or symlinks are still judged by their resolved target (cw-5).
-- System One typed-wire asks now open a journal call with the wire's token usage, so telemetry tokens, cost and usage count them (bt-33).
-- consult refuses an ask with no evidence or with filter keys at the top level before spending a call, and expands globs in question paths (bt-35).
-- Steers and follow-ups from the headless steer channel and ACP now start steering triage like TUI steers (bt-36).
-- Inception mercury-3 at thinking off now sends `reasoning_effort: "instant"` instead of no effort, so it no longer reasons at the backend default while Clio strips that reasoning and shows thinking as off (bt-34).
-- The /fork picker lists one row per prompt and forks after that turn's last reply (bt-11 #3).
-- The resume picker explains its ● and ◌ markers in a legend row (bt-11 #4).
-- Enter sends a typed /thinking level as typed instead of a sibling that only matches its letters (bt-11).
-- A narrow turn receipt keeps `cached` beside the token amounts instead of dropping it alone (bt-11).
-- The workers takeover shows a worker's sealed report in words, not as raw JSON (bt-11).
-- A bash call that runs a check alongside a change (`fix; npm test`, `npm test && codemod`) now counts as a mutation, so a pass from before the change no longer seals verified/pass; `npm ci && npm test` still counts its check (x1-1).
-- Read-only inspection no longer exempts `rg --hostname-bin` or `file`, and `git status`, `git diff`, `git log` and `git show` lose it when the repository's git config sets a `core.fsmonitor` hook, `diff.external` or a diff driver command or textconv, so a helper that writes the tree clears earlier passes (x1-3).
-- Step checkpoints carry the last summarized checkpoint once, with only the current step lead, and an oversized carry drops its oldest text instead of the newest (x2-1).
-- A continuation no longer refreshes the written-out tool call re-prompt budget of a model that ran tools earlier in the turn (x2-2).
-- A helper-result worker that reaches the permission refusal limit can still submit its result through the result tool in the report round (x2-3).
-- Run verification counts only the `verify` tool as a validation tool, so a `decide`, `tasks` or check-named gateway call no longer marks a run verified with no check run (x1-2).
-- `run --verify` acceptance results seal into the run's receipt as its host verification, so the receipt and `evidence inspect` agree with `turn_end.verify`; the exit code is unchanged (x1-4).
-- A byte-stable prompt recompile keeps its prompt-structure object id; the predecessor hash moved from the hashed structure to the `prompt.compiled` record (bt-10).
-- A refused heredoc command, and each entry of the refusal-limit list, appears once in the model-facing rejection, with its reason and remedy intact (bt-28).
-- A claim grounds in a passing `verify` run on the final tree when it or its evidence names the check id, or it names the command the check resolved to (bt-9).
-- Working-set eviction no longer credits the full body of a tool result that observation aging already stubbed, so the plan no longer stops before the request is under target (D1-1).
-- Observation aging records each batch in the session ledger and seeds from it, so a resumed or forked session sends the same stub set instead of a fresh batch that broke the prompt cache (D1-6).
-- `evidence inspect` and the run row now report a headless main-agent run's real token usage, read from its settlement, instead of a measured "tokens: 0" (bt-31).
-- A `verify` pass, or a validation tool's passing aggregate, followed by a workspace edit no longer marks the run verified; only checks that ran on the final tree count, a red after the last edit still fails and a fixed, re-run check still passes (bt-27c).
-- `run --json` (full) keeps the checked answer in the final `turn_end.message` when the reply to a citation check only confirms or corrects citations (bt-29).
-- The citation check credits line numbers printed by a bash `grep -n`/`rg -n` for files the command names, so citing them no longer draws a false nudge (bt-29).
-- A dispatched worker now reserves output with the same function the main loop's admission uses, so it no longer refuses with worker_context_exhausted a fork the parent fitted on the same model and window (D1-5).
-- Evicted worker observation archives are filed per run and age out with the run journals' 90-day retention in the daily telemetry sweep; running and recoverable runs keep theirs (D1-5).
-- A step checkpoint on a small or uncached route now keeps the previous checkpoint's goal, constraints and decisions, held to the summary room, and its preserved operator request, instead of replacing them with the step lead (D1-2).
-- Checkpoint replay now restores the active decisions recorded before the cut as `[Decisions as of checkpoint]`, beside the task board, up to 12 lines (D1-3).
-- Socket drops (ECONNRESET, EPIPE, ETIMEDOUT and similar), "Connection closed.", "connection reset by peer" and the Codex WebSocket connection limit now retry instead of failing the turn (PI-1).
-- Written-out tool call and empty-reply re-prompts are capped at three in a row instead of three per operator turn; a real call resets the count, so long local-model turns that keep recovering no longer end with no answer (bt-30).
-- A check that passed before the run's last edit no longer marks the run verified or its mutation report quality pass, and read-only shell inspection (`git diff`, `git status`, `cat`, `grep`, ...) no longer counts as a workspace change, so it neither clears a real red check nor stales a final pass; the latter fixes a regression from bt-27 (bt-27b).
-- A worker that hits its refusal limit now gets one reply, with tools refused, to report its work; dispatch judges that report, long refusal reasons keep their remedy, and the failure names untracked files the run left behind (bt-28).
-- The prompt structure id stays the same when an unchanged prompt is recompiled, so telemetry no longer records a new structure per compile (bt-10).
-- The exit summary's Verified row says "session tokens per outcome"; "tokens each" read as a per-worker figure (bt-11).
-- A finished worker's dock row keeps its refused calls and seal state whole when narrow, dropping the contract first (bt-11).
-- After `/fork` or `/resume` the exit summary's Tools row keeps the visit's calls and lists no zero-count tool (bt-11).
-- A run stopped by the repetition guard now fails on the guard's reason instead of blaming the model route with "Request was aborted", and its turn settles with cause `repetition` (bt-26).
-- A model call that hits the output cap while still thinking is retried once with a reminder and one thinking level lower; a second such stop ends the turn naming the cause and the fix (bt-25).
-- A red check observed before the run's last edit no longer seals a finished run `unverified` with quality `fail`. A later pass of the same check counts even when the two runs piped output differently (`2>&1`, `| tail`, `| head`), and a reported baseline excuses its own observed red only when no edit was observed (bt-27).
-- On small context windows the compaction summary request now states the room the checkpoint may use, so repeated cuts hold near 60% of history instead of creeping toward the trigger as the cumulative checkpoint grows (bt-18).
-- The gateway accepts an empty `parameters` object on a call and names the exact `args` rewrite for a non-empty one (bt-23).
-- A gateway chain whose `steps` sit inside `args` is refused with the top-level shape instead of a generic error (bt-23).
-- A step-template pipeline that stopped at the continuation cap or without `pipelineDone` is journaled (`step_pipeline.settled`, `run.settled.stepPipeline`), so `telemetry why-stopped`, `usage` and `evidence inspect` report it instead of a plain success (bt-20).
-- A step-template pipeline no longer gets `finish.unverified` on each step turn; the finish check assesses the whole pipeline when it ends (bt-12).
-- A pipeline whose step tool never reports `pipelineDone` ends with a `step.unreported` note instead of the continuation-cap warning (bt-15).
-- Step continuations journal `turn.continued` with cause `step`, not `tool_budget` (bt-15).
-- Arena facts and the TUI tool tally count a gateway chain as its steps, without the wrapper call (bt-14).
-- `evidence inspect` shows a red baseline as a baseline taken before the change, never as a failed validation (bt-17).
-- `evidence inspect --json` now carries the trust summary and the full run evidence (findings, totals, quality, baselines) that the text form prints (bt-20).
-- `config inspect` and the seeded settings.yaml explain the worker thinking level `off`, including the route_warning fallback (bt-20).
-- A continued Copilot SDK session (`run --session`/`--continue`, ACP session load, `/resume`) resumes the same Copilot conversation and sends only the new turn instead of replaying the whole transcript. Resumable conversations are bounded to the newest 32, none idle over 7 days (bt-10).
-- A bash refusal from the raw-text floor now states the 32768-byte raw-text budget instead of the classifier's action class (bt-12).
-- `=>` and other text in a quoted here-document that `cat` or `tee` copies into a file no longer counts as a bash write target (bt-safety).
-- The compaction artifact labels its count as entries summarized (bt-compact-acct).
-- A red baseline validation entry no longer grounds a validation claim (bt-17).
-- Removed the unread requestedDisplay thinking-capability field (bt-words2).
-- On small context windows each automatic summary now lands near the same target below the trigger: a split-turn checkpoint no longer carries the previous checkpoint twice, and the kept suffix shrinks as the checkpoint grows (bt-18).
-- The safety judge reads the operator's typed messages and ask_user answers in the order given on the active session path, so an earlier interview "No" no longer overrides a later typed authorization (and a stale "Yes" no longer overrides a later "stop"); answers now follow /tree and survive resume (bt-24).
-- The tasks reminder names the gateway call when tasks is reachable only through gateway, and is skipped on answer, proposal and read-only turns (bt-22).
-- The tasks tool refuses unknown keys with the key to use, and every task error names its key (bt-22).
-- dispatch accepts worktree:false as the same as omitted (bt-23).
-- Dispatch results flag worker verification that was limited by calls denied for want of an operator (bt-23).
-- Gateway refuses a parameters envelope on every op instead of find ignoring it (bt-23).
-- A worker's gateway chain counts its steps once in the receipt, without the wrapper (bt-14).
-- A step tool called inside a gateway chain counts as the turn's step (bt-15).
-- The exit summary and run receipts now count files a worker on an HTTP or SDK runtime changed in the current checkout (bt-11 #3).
-- The exit summary keeps the visit's turns, files, workers and time across /resume, /fork, /tree, /handoff and /new, and names how many sessions it spans (bt-11 #3).
-- The workers dock reads a finished run's record again until its seal is checked, so a verified run no longer shows "seal unchecked" (bt-11).
-- Hiding or showing the workers dock gives Clio back its full width instead of leaving it drawn at the split width (bt-11).
-- An unknown slash command such as /tools is sent as typed and named as unknown, instead of being completed into a command whose description mentions it (bt-11).
-- A Copilot target switched between the default and long_context tiers now reads the right context window from the cached model listing in a new process, with no wait for the 24 h cache expiry (bt-copilot cache-tier limit).
-- A worker's `verify` call that only lists the declared checks no longer seals a passed validation or a verified run (bt-19).
-- A dispatched run's verification takes the host's verdict on the finished tree, with basis `host-verification`, instead of reading `no-validation-tool` beside a host pass (bt-17).
-- Tool containment checks (run-script, store put, artifact, grep paths, task worktree overlay, stray writes and tmpfs parent, dispatch worktree cwd, offload reads, cd display, context-map own files) now treat a child named `..x` as inside its root, sharing `relativePathEscapes`.
-- Automatic compaction on small context windows no longer re-summarizes nearly every turn: the kept suffix now fits below the trigger, and the summary rearm band survives across headless `run` processes (bt-18).
-- `fleet view` and `evidence inspect` now use the same trust reader and agree on completion evidence (bt-20).
-- `extensions list` shows the runtime tools of api-2 extensions (bt-20).
-- `telemetry why-stopped` reports a normal model stop as a normal end, not as a stage (bt-20).
-- `evidence inspect` shows the stored result-contract quality verdict and the failed validation names (bt-20).
-- A gateway chain is charged only for its steps against the per-turn tool budget and the worker call cap, so an N-step chain costs N calls instead of N+1, and the budget refusal's by-tool breakdown no longer lists the wrapper (bt-14).
-- A headless run counts a gateway chain as its steps, so the observed tool-call and tool-error counts no longer add the wrapper on top (bt-14).
-- At default autonomy, a sandbox escape the safety judge would block now goes to the operator approval card when an operator message or an operator-answered ask_user round names its outside target. It never runs without the operator's approval; headless runs, contained yolo and worker asks still get the block (bt-21).
-- A yolo step pipeline continues until its step tool says pipelineDone or the continuation cap; headless `run_end` reports `stepPipeline` when it ends unfinished (bt-15).
-- The task-board nudge no longer fires on a step-template turn, the first included (bt-12 #4).
-- The finish.unverified footer names a changed file a later command ran instead of saying nothing ran (bt-12).
-- ACP `session/list` reports a session's current model after a mid-session model switch (bt-5).
-- Dispatch results hand the worker's route warnings (e.g. coerced thinking) to the dispatching model, and dispatch tool details carry each worker's runtime resolution (bt-5).
-- Validation grounding reports basis "grounded" when every claimed check matched (bt-9).
-- `telemetry tokens` charges compaction and memory calls to the turn they ran in and counts them in its totals, labelled by role (bt-12 #10).
-- The compaction notice counts the messages it summarized as the context snapshot does, in provider messages, not ledger entries (bt-12 #11).
-- The exit summary's `in` is the whole prompt, matching the turn receipt, footer and usage report (bt-12 #2 follow-up).
-- On an on/off thinking route, the Shift+Tab toast, the composer rail and the /thinking picker now use one word ("on") for a state; a level the route changes is shown with its note (bt-11 item 5).
-- A refused `/compact <instructions>` on a short or empty session now says the instructions were not used (bt-11 item 7).
-- ACP `session/delete` on an open session now says to close it first (session/close or the client's close action) (bt-12 item 6).
-- The chat-loop context-window refusal now names chat.maxOutputTokens or --max-context-tokens when one of them is the cause (bt-13).
-- A yolo floor block's headline names the floor rule that fired (e.g. `bash blocked: yolo-floor-raw-text`) instead of the classifier's action class (bt-12 item 1).
-- `python3 -B -m unittest` and `python -m pytest` with harmless interpreter flags (-B, -u, -I, -X dev, -W error::DeprecationWarning) are recognised as test runners; flags that run code still ask (bt-12 item 7).
-- Streaming and final redaction hide a quoted `sig: '…'` value with no other secret word in the text, and hold an open quoted value whose name sits on the previous line (Astra r10-chat).
-- The turn receipt, the footer's last-turn line and `usage report` now count input as the whole prompt, with cached reads beside it, as `telemetry tokens` does. A 17K prompt no longer reads `in 8` (bt-12 #2, bt-11 #8).
-- Dispatch receipts and the turn summary record `differingResponseModelId` only when the response model really differs from the requested one (bt-12 #5).
-- `/context` labels the compaction ceiling "cleanup ceiling" and hides it when it is at or above a known window, where it bounds nothing (bt-12 #8).
-- `telemetry tokens` notes when calls ran on copilot-sdk, which reports no uncached input, so their fresh input is cache write (bt-12 #12).
-- D3-1: a reproduce reference is sealed at admission, so a run that rewrites its reference fails. D3-5: a reproduce tolerance key that no run reports fails instead of passing unchecked.
-- bt-10: a session resumed with `run --session`, ACP `session/load` or `/resume` compiles the same system prompt as its last turn, so the provider prompt cache survives. Path-scoped project rules ride the turn reminder, the frozen memory section is restored from the ledger, and a new `system_prompt_changed` cold reason names any remaining drift. The copilot-sdk route is not covered yet.
-- bt-13: `--max-context-tokens` below about 41K no longer refuses every request. With no configured output budget the reserved output is at most half the window, auto-compaction counts the same reserve as the admission check, and a refusal names `chat.maxOutputTokens` or `--max-context-tokens` when one of them is the cause.
-- bt-11: the welcome banner's default autonomy row reads `Default · auto in workspace` instead of `reviewed approvals`, matching what default runs without a prompt; `/fleet` shows a coder's sealed mutation report as changed paths, checks and commit message instead of raw JSON.
-- bt-11: Alt+W in a pane too narrow for the workers dock, or under a host that refuses the split, opens the Fleet Runs board and says why, instead of leaving a truncated "cannot open the watch pane" toast.
-- bt-11: the context meter no longer jumps after `/fork` or reads high after `/resume` (tool schemas were counted twice once the live anchor was dropped). `/fork` names the new and original session ids, and `/resume` says which session it opened.
-- bt-11: the exit summary's visit row names its scope ("This visit", workers included when they ran) and flags workers whose file writes were not recorded. An empty Verified row says command checks are not counted.
-- bt-6: under yolo, a step-mode template whose model runs one step and then summarizes now continues to the next step. It stops at a turn without a step call, a `pipelineDone` result, or the continuation cap (at most 4 step turns per operator prompt, the refusal path included).
-- bt-12: the high-rigor finish gate no longer re-prompts a step-template turn for validation; the summary reports the change as unverified instead.
-- bt-3: `campaign run` entries resolve the copilot-sdk and claude-sdk components the operator installed (read-only, never installing into an entry's throwaway home), and a missing one names the operator's directory, so Copilot and Claude SDK routes run in a campaign.
-- D2-2: command hook `hook.ran` receipts record `durationMs`, `timeoutMs` and the `effectKinds` the output became, so a slow tool or an unexplained annotation traces back to its hook.
-- D2-3: a command hook's first-run stall is journaled (a subprocess gets no budget warmup grace), and a hook that throws is receipted as `failed`, not `skipped`, with its message reported as `hook_failed`.
-- P2M-1: memory promotion and task handoff redact a quoted secret even when the text already holds a `[redacted:...]` marker.
-- Lesson evidence treats a repository child named `..x` as inside the repository.
-- P2S-1: containment checks across safety, sandbox and core no longer treat a child whose name starts with `..` (such as `..cache`) as outside its parent; one shared helper replaces the private copies.
-- P2S-2: `git --attr-source <tree>` (and other value-taking global options) no longer hides the git subcommand from the reset, clean and push rails.
-- D2-4: the cached share comes from one fold everywhere, shown as a lower bound (`≥`) when a cache read went unreported and as an estimate (`~`) when derived from a timed prefill; `telemetry cost` and GUI operator metrics now show it.
-- bt-1: Copilot targets launch the SDK's bundled runtime even from inside a Copilot CLI shell, and a protocol mismatch names the foreign runtime.
-- bt-2: Copilot models offer exactly the reasoning efforts their listing publishes (medium is no longer sent as low), with a notice when a level is clamped.
-- bt-5: ACP sessions and agent workers on Copilot list live models on a cold cache, resolve the same thinking levels, context window and output budget as the main agent, and keep their thinking level across model switches.
-- bt-9: a worker that verifies through the `verify` tool and claims that check, by `verify <id>` or by its resolved command, has the claim grounded instead of reported as "unmatched validation" next to a "verified" verdict.
-- D3-4: claims from host verification read as verified only against the sealed check of the run and settlement they cite; any other reads as unverified in delivery, `claims` and `memory propose`, and a numeric-compare that compared nothing records no claim.
-- D3-2: host verification honors a memoized pass only when the run it cites has a verified seal holding that check, executed with exit 0 on the same tree; a forged or dangling memo entry runs the check.
-- P2D-5: plan preview refuses what dispatch admission refuses for ACP delegations, harness-origin writers, pinned read-only recipes on mutating tasks and denyTools on external CLIs.
-- bt-7: dispatch `intent.verification` accepts the toolchain-derived checks verify lists (such as `python-unittest`) and seals the argv verify runs, so Python, C/C++ and Fortran projects with no package.json or verifiers.yaml no longer get "declared ids: none".
-- bt-8: gateway chains accept a step's `args` sent as a JSON-object string, number id-less steps `s1`, `s2`, ... when nothing depends on them, and name the step index and field in every shape error.
-- bt-4: api-2 extension `turn_start` and `turn_end` hook events carry the id of the user turn that the same turn's `before_tool` and `after_tool` events name (`turn_start` used to send an empty id, and `turn_end` the final assistant entry's id), on every path (TUI, `run`, ACP). Each continuation has its own id.
-- D3-1: a numeric-compare or perf-budget host check fails when its reference or baseline changed since dispatch admission or while the check ran.
-- D3-2: host verification validates a run only when every check that applied ran for it: a pass reused from another run's memo, a run whose every check was skipped, and a record without the executed/reused/skipped counts read as unknown; numeric-compare and perf-budget verdicts are never memoized.
-- D3-5: `numeric-compare` checks accept per-key `tolerance.keys` bounds (an entry replaces the check-level bounds for its key; an entry naming a key the reference lacks fails), and a reference with no keys or a key whose arrays are both empty is unjudgeable and fails instead of passing.
-- Astra r10-2: the fleet board no longer rereads every running worker's run scope and re-projects its rows several times on each frame.
-- Astra r10-3: the footer reads the main route's first-output history only when the long-silence note prints it, instead of on every refresh.
-- Astra r9-1: a failed `/context` operation no longer rewrites the system prompt and breaks the prompt cache; the fact arrives once in the turn reminder.
-- Astra r9-4: a completed task that left no command receipt or read excerpt settles its lesson retention without a model call, so headless exit no longer waits on one.
-- A1 (F-C13 residual): a successful call that may have changed state resets the identical-call count of every other call, so read, write, read of a desk record is admitted while three reads with nothing between are still blocked. Write, edit, any bash command that is not a plain read, and any extension tool not declared read-only count.
-- A3: a verifier-report whose fail verdict no executed check produced is labelled `review verdict: fail (N findings)` in dispatch and collect results, not "validation failed; a check ran and did not pass". A check that ran and failed keeps the validation wording.
-- B2: a pinned round (`require_tool` or a terminal handoff) on openai-codex and openai-responses keeps the full tool list and names the tool with the Responses function choice, so it reuses the prompt cache instead of missing it.
-- B5: a session's pinned context blocks persist with the session, so a resumed or restarted session carries them on its first request. A cleared block, or one whose extension was removed, stays cleared, and a state directory that cannot be written leaves the running session's blocks in place. A forked session starts with its parent's blocks, and deleting a session removes its pinned blocks, its dock frame and each extension's session state with it.
-- C3: `ledger(action="detail", ref=...)` is reachable through the gateway in a session without dispatch once an api 2 extension serves a runtime tool, and in a resumed session whose detail store holds entries even when the extensions that wrote them are gone, so an extension result's `detail_ref` stays readable. The session's tool schema set is the same either way.
-- C5: two step-tool calls in one parallel batch no longer both run under a template `turnPolicy: step`. The second is refused while the first is in flight.
-- Astra r1-1: a step checkpoint no longer takes another session's or another branch's step summary as its lead. The step chain is bound to its session and the leaf its step settled on, a session switch, resume, fork or tree navigation clears it, and a turn that a session reset superseded cannot settle into the new session's chain.
-- Astra r1-2: portable compaction renders a persisted tool call once per summarized slice and clips its serialized arguments with the message budget, so a large write no longer doubles the summarizer input or fails the fit check.
-- Astra r1-3: a repeated read that hit the exhausted observation budget, or came back clipped shorter, no longer ages away the earlier full result. A later copy supersedes an earlier one only when it delivered at least as much.
-- Astra r1-4: a synthesis lock in the main loop, and a text-only tool lock sent with automatic tool choice, carry their directive in the request tail. The system prompt and the history keep their bytes, so the prefix cache survives the locked round. Dispatched workers keep the system prompt form.
-- Astra r1-5: the post-tool guard, the compaction trigger, stream admission and the footer budget price the observation-aged request the provider receives, so a superseded read no longer forces a compaction or stops a request that fits.
-- Astra r1-6: cache telemetry marks a cache-read count as sent or omitted from the same fields the provider adapter normalizes. DeepSeek `prompt_cache_hit_tokens` and a top-level `cached_tokens` count as reported, and an OpenAI Responses or Codex usage without `input_tokens_details.cached_tokens` reads as unknown instead of cold.
-- Astra r1-7: the argument shapes block for a turn's scoped capabilities fits its 1,600-byte budget as a whole, with a count for the capabilities left out, and is sent again only after a compaction or step checkpoint dropped the earlier copy.
-- Astra r1-8: the `step_checkpoint` cold-cache reason is recorded only when the step checkpoint was written.
-- Astra r2-1: a bash check whose exit status is only a later command's (`pytest; echo done`) no longer records a pass on a protected artifact or in a worker's run effects. The check is named and its outcome stays unknown.
-- Astra r2-3: a `before_tool` hook that rewrites a step tool's arguments no longer makes the turn's one step call refuse itself as a parallel sibling, and the loop guard's second judgement of any rewritten call no longer charges the worker cap, the soft budget or the turn tool budget a second time.
-- Astra r2-4: the loop guard counts a typed git `add` or `commit`, direct or through the gateway, as a state change, so the status read after staging is fresh. A bash git command counts as a read only for inspection subcommands, and plain shell inspections such as `pwd`, `whoami`, `date` and `echo` count as reads, so alternating two of them reaches the repeat limit.
-- Astra r2-5: parallel `read`, `code_nav` and `clio_library` calls charge the turn observation pool before they await, so one batch can no longer spend the same budget several times over.
-- Astra r2-6: a required capability called through the gateway shorthand without an explicit `op` counts as called, so the follow-up no longer asks for it again. Tool rows, telemetry facets, the judge screen and safety descriptors read the shorthand as the call the gateway ran.
-- Astra r2-7: a gateway chain keeps every step whole when the aggregate fits its 32 KiB budget, gives unused shares to oversized steps, and keeps the head and tail of a failed step that must be cut, so the assertion survives.
-- Astra r3-1: a targeted jest or vitest run of a changed test passes `--passWithNoTests=false`, so a changed test the configuration excludes can no longer earn a passing check with zero tests run. When the runner reports an empty selection, the check's evidence says the changed test did not run.
-- Astra r3-2: a changed test whose known runner cannot start, such as pytest in a uv project with `uv.lock` and no `.venv`, fails the code check with the reason and the provisioning command instead of dropping to a note. A fleet loop does not attempt to repair it, since no edit makes the runner start.
-- Astra r3-3: a reporting worker whose locked synthesis reply and its one re-prompt held only tool-call markup fails as `worker_final_output_missing` instead of reporting success with the runtime notice.
-- Astra r3-4: sealed run evidence keeps a host check's `notRun` reason, so `/view`, the failure line, worker evidence and the GUI say that a refused, unconfigured or spawn-failed check did not run instead of quoting an exit code.
-- Astra r3-5: headless output lists a code check that ran and failed under `Failed checks:` and counts it in `failed_checks=`. `Not verified:` and `not_verified=` keep only the checks that never ran. A code report sealed before this release prints as before.
-- Astra r6-4: a per-turn tool-call budget of N, from a template `budget.toolCalls` or from `safety.limits.chatToolCallsPerTurn`, admits N calls and refuses the next one, so a budget of one no longer refuses the first step. The default budget admits 60 calls where it admitted 59. The turn still stops 15 refused attempts after the first refusal.
-- Astra r4-1: a lesson backed only by a wrapped command that cannot fail, such as `env true`, `timeout 30 true` or `command true`, no longer earns retention without the operator. A wrapper (`env`, `nice`, `time`, `timeout`, `nohup`, `command`, `exec`, `builtin`) is judged by the command it runs, help and version requests included, and a wrapper form the host cannot read with certainty grounds no lesson.
-- Astra r4-2: a compaction note that claims a constraint or a decision without citing the operator's own message is kept as context, so tool output can no longer enter a checkpoint as an operator requirement. Reflections keep the categories of their inputs, and stored observations load as written.
-- Astra r4-3: a memory offer no longer forces the portable compaction route. The live-prefix call is priced against the portable texts with the offer already substituted, and the offer is used and recorded only when a portable request carrying it is sent. When the live call wins, the decision is journaled as `offer-declined` with reason `live-prefix-cheaper` and the checkpoint carries no memory receipt.
-- Astra r4-4: an observation group that failed twice no longer gets two fresh attempts each time an unrelated turn is appended. Attempts key on the observer's own input, so only a change to that input allows a retry.
-- Astra r4-5: restoring a memory record's earlier wording, or reapproving a withdrawn record, reaches the model as a `# Memory update`. The update is computed against what the model last received for each record, so a superseded revision or a withdrawal no longer stays the latest word in context. An unchanged session still sends nothing.
-- Astra r5-1: `telemetry tokens` counts every invoked call and names the unmeasured ones (`3 (1 unmeasured)`), and a turn or total with no measured call prints its tokens as unknown instead of 0. The `--json` report is unchanged.
-- Astra r5-4: route-history warmup folds only the newest 2,000 runs from the last 30 days, newest first, instead of every run on disk.
-- Astra r5-5: the exit summary's model-call time includes the worker runs' calls that its call count already includes, and its coverage note names worker calls that have no timing.
-- Astra r6-1: a `turn_start` or `turn_end` hook that fails under a `block` policy now says the policy is not enforced at that point and the turn proceeds, where the notice used to say it fails closed. `extensions validate` warns about such a declaration.
-- Astra r6-2: reloading an extension asks for consent again when an approved runtime tool changes its action class in any direction, and the consent card names the approved class and the new one.
-- Astra r6-5: on reload, one approved hook declaration covers only one hook, so repeated copies of an approved hook are shown as consent growth. A manifest that only reorders its hooks or narrows one still reloads without a new ask.
-- Astra r7-1: a dispatch's gate recovery serves unchanged gate decision artifacts from an in-process verified cache keyed by file identity. Only a new or changed file is read and verified again, instead of the whole archive on every dispatch.
-- Astra r7-2: boot no longer stats every spilled tool output file before the shell takes keys. The retention sweep runs asynchronously once the session answers and stops at shutdown.
-- Astra r7-3: a streaming top-level code fence whose info string carries words after the language (`python title="train.py"`) or an indent of up to three spaces draws only its open line per update instead of re-rendering the whole tail.
-- Astra r7-4: a prompt submitted at launch no longer waits for the fleet board's earlier worker runs. They load one run per loop turn after the first paint, and the board shows them once they arrive.
-- An api 2 extension hook at `turn_start` declared `onTimeout` or `onError: block` refuses the turn before its first model request when it times out, throws or has no running runtime; `block` at `turn_end`, which runs after the turn, is refused at load (Astra r6-1).
-- A bash command that only searches for, prints or writes a word such as `sudo`, `pip install` or `systemctl` (`rg sudo README.md`, `git log --grep doas`, `echo "pip install x" >> notes.md`) is no longer classified as a system change, and a search for a blocked phrase piped into `head` is no longer hard-blocked; every command that can run the word still is (Astra r2-8).
-- A worker that locks into synthesis carries the synthesis directive on the request tail instead of its system prompt, and a Codex worker's locked round keeps its tool declarations under `tool_choice: none` and its reasoning level, so the locked round reads the cached prefix (Astra r1-4a, r1-6).
-- A render at a past position and a fork at an earlier message no longer show an eviction or recall written after that point (ContextFold CF-2, F11).
-- Request admission prices the synthesis directive whenever the sent request carries it, including a middleware text lock sent as `auto` (ContextFold CF-2, F15).
-- The worker context guard commits ContextFold records with `r<N>` aliases, the working-set target and rearm band, journals `context.fold` under the run, and refuses recall of parent aliases (ContextFold CF-7, F7).
-- Observation aging no longer runs on a route that caches prompts when a `--max-context-tokens` cap below 32k makes it small-tier; its gate is the ContextFold S0 gate, `promptCaching: false` only (bt-47 cf1j-a).
-- The working-set skip notice after a cut inside a turn says the visible context starts inside a turn and all of its steps are protected, not "all 0 turns are inside the protected window" (bt-47 cf1j-c).
-- The request no longer differs from the rendered ledger, and an unsent prewarm request records nothing (ContextFold CF-5, F1, F5).
-- Eviction records carry a measured anchor, so a reopened or resumed session rehydrates its live context estimate from it instead of falling back to chars/4 (ContextFold CF-6, F9).
-- `/context`, the footer and ACP `usage_update` read one published figure, and branch, fork and resume show the current path's figure and last compaction (ContextFold CF-6, bt-47 D2).
-- A session reopened over ACP or headless reports the context figure its next request carries, and on an unchanged route its next system prompt is byte-identical to the live one (ContextFold CF-6).
-- After a resume, automatic compaction prices the compiled session prompt the request carries, so a combined eviction and summary reports the figure the next request sends (ContextFold CF-6, bt-47 D1).
-- Every main request is admitted, clamped and reported on one count, so a request Clio admitted is no longer refused locally as exceeding the context window, and no retry summary is paid for it (ContextFold CF-6, bt-47 drv-m3a).
-- Checkpoints publish once by a ledger-confirmed id, an append that wrote before throwing is published instead of failed, and a step pipeline reopened mid-chain still leads the next step from its recorded chain (ContextFold CF-8, F8).
-- After a reopen, navigating away from a settled step turn and back runs the next step on full history, as live use does, and returning to a session left by a switch resumes its step chain as reopening it does (ContextFold CF-8, bt-47 m2b-D1).
-- The first step turn of a new session seeds the step chain, so step two starts from the compact state (ContextFold CF-8, bt-47 m2b-D2).
-- `/tree` draws a step checkpoint on the path it compacted instead of as a sibling "Compacted" branch (ContextFold CF-8).
-- A native checkpoint handle is part of its element's digest (ContextFold CF-9, F14, W12).
-- A worker under output backpressure keeps its fold decisions, and its output-cap failure names its limit from the pinned input count (ContextFold CF-9, F14).
-- A late `context working-set --verify` renders a handoff note at the clock its attempt rendered it, accepts the `skill_retired` and `refused_prompt_bound` eviction reasons, and re-derives the Codex effort history a receipt names (ContextFold CF-9, F14).
-- Council peer and judge briefings stay within their 8 KiB cap without dropping a peer: each peer keeps a labeled head and tail excerpt that states the bytes it omitted and names the peer's result object, and each clip is journaled as `context.briefing_clipped` in the session that convened the council (ContextFold CF-10, F10, bt-47 m2c-1).
-- A failed council seat shows its provider cause on one bounded line to members and the judge (ContextFold CF-10, bt-47 m2c-2, m2c-3).
-- A council judge and round-2 members declare the operator's scope instead of inferring it from host-written briefing text, so a failed seat's provider cause or a clipped answer's result path no longer gets them refused with `legacy_scope_path_absolute` (ContextFold CF-10, bt-47 drv-m3b).
-- A forked worker's own task follows a boundary that marks the parent's inherited requests, including a compaction summary's active request, as context only (ContextFold, bt-47 c2a-D7).
-- The automatic compaction trigger bounds a reasoning route's summary reserve at half a known window, so a 28K window triggers at 14,000 tokens instead of 1,786 (ContextFold A1, bt-47 cf1j-b).
-- Automatic compaction makes no summary call when the history outside the kept suffix and the active request is smaller than the summary room, journaling `none/no_gain` or `nothing_to_summarize`; `/compact` and overflow recovery still call (ContextFold A1, bt-47 cf1j-d).
-- After a resume, `context.fold` and the TUI compaction card report a working-set eviction's own before and after figures, as `context.pruned` does, instead of a structural re-estimate that claimed a false reduction (ContextFold, bt-47 D1).
-- On windows under 52,428 tokens with no `chat.maxOutputTokens`, fit, guard and admission reserve 8,192 output tokens instead of half the window, and a skipped summary no longer says "llm_summary runs instead" (ContextFold A5, bt-47 m2a-1, m2a-2, m2a-3).
-- On windows under 52,428 tokens, an automatic summary asks for at most 8,192 visible output tokens (or `chat.maxOutputTokens` if larger) and states its length budget, and small-window eviction aims at 75% of the history space above the system prompt and tools, so cumulative checkpoints stop crowding out the history (ContextFold bt-18).
-- On a reasoning route, that capped summary request keeps the reasoning share on top of its stated room, so a summary that runs past its budget no longer stops at the output limit and drops the checkpoint (ContextFold bt-18, bt-47 drv-m3c).
-- On copilot-sdk, a working-set eviction or overflow cut of a tool result the provider already holds reseeds the Copilot conversation in full, so the provider no longer keeps the evicted bodies and the guard no longer stops the turn (ContextFold, bt-47 drv-r4a).
-- One batch of `context(scope="recall")` calls readmits recalled bodies only while they fit under the fit line, in call order; a recall past that room returns a short "not recalled: no room" stub and records no recall, so the post-tool guard no longer stops the run after a batch of recalls (ContextFold, bt-47 drv-f1r).
-- A summary that clips a large tool result to fit its request no longer tells the next turn to read it again: the clip marker and both summary templates say the assistant read the result in full (bt-47 drv-f1y).
-- A checkpoint's exact-facts block now carries each hidden read's recall ref and lists other hidden results under `refs:`, replacing the separate `<recallable-refs>` preview that a resumed model ignored (bt3 drv-f4).
-- A Copilot full reseed after a working-set rewrite keeps already-delivered host reminders in place and attaches retained image tool results at their positions, instead of dropping both.
-- A compaction that summarizes a recovered turn's user row no longer replays the discarded reply and an unanswered recovery call.
-- Selecting a user turn in /tree keeps the memory restoration its original request carried.
-- New eviction records no longer write the unread `route` field and a reissued host insert no longer writes `reissueOf`; ledgers that carry either still open.
-- A turn sent in another session or on another branch no longer marks an interrupted session's unsent reminder as sent, so a later checkpoint re-issues it instead of dropping it.
-- `context working-set --verify` no longer reports an eviction as a duplicate decision when two stages of its one context.fold event name the same record.
-- Navigating /tree back to a leaf where a step turn settled no longer revives that step chain, so the next step turn runs on the new branch's history instead of a stale step checkpoint, live and after a reopen.
-- Pre-submit admission and the post-tool guard resolve the output reserve at the input count they check, so a request that fits a 65,536-token openai-completions window is no longer refused or compacted.
-- Recall resolves the output reserve at the input its batch would carry, so a second recall the next request can hold no longer returns the no-room stub.
-- A worker's first spliced request is fitted at the transport's own count, so the worker guard no longer admits a request that the local transport then refuses.
-- A prose-contract worker keeps each delivered result-contract reminder in later requests, so every tool round extends the previous request's cache prefix.
-- A working-set eviction no longer installs the memory restoration reminder again, so a session with several evictions carries it once; a summary's pending restoration is still delivered after an eviction.
-- A tool result clipped in a summary request before any model call read it is now marked as clipped before the assistant read it, so a narrow re-read is expected. The summary templates no longer claim that every clipped result was read in full; only a result followed by an assistant message keeps the read-in-full marker.
-- On a window of 52,428 tokens or more, the turn output reserve on transports that do not clamp output at the wire (Copilot SDK, Anthropic, OpenAI Responses) is now at most a quarter of the window and never under 16,384, so a 64K window triggers compaction at 49,152 instead of 32,768 and no longer autocompacts on almost every turn. A configured chat.maxOutputTokens still reserves in full (bt-48-12).
-- A resumed or continuing turn on a route that measured its prior request is now admitted at that measured input plus a chars/3.5 count of what follows, instead of being refused on a whole-request character count that overprices sparse prose. A count carried through an eviction still uses the full conservative count (bt3 drv-rv5).
-- The GUI Usage page loads again. It failed with "Usage returned an invalid report DTO" after the CLI usage report gained step pipeline counts, which the page now shows.
+**Checks and verification**
+
+- Every surface (task board, finish contract, receipts, headless observed line, `turn_end.observed`) reads calls through one check classifier, so they agree on what ran a check. A pass counts only while no later edit retired it, so edit-test-edit no longer finishes "checks passed", and a dispatched worker's passing run record retires like any check (`unvalidated_mutation`).
+- More read-only checks settle an outcome: `cargo check`/`clippy`, `cargo nextest run` (as `cargo test`), `go vet`/`build`, `gofmt -l`, `golangci-lint run`, `staticcheck`, `mypy`, `pyright`, `ruff check`, `prettier --check`, `biome check`, `black --check`, `ruff format --check`, `cargo fmt --check` (or `-- --check`), `rustfmt --check`, `isort --check-only`/`-c` (or `python -m isort`), `dotnet test`, `rspec`, `phpunit`, `php artisan test`, `deno`, `playwright`, `cypress`, `tox`, `nox`, `make test`/`check`/`lint`, `pnpm lint`, `yarn lint`, `pnpm typecheck`, `pnpm --filter web test`, `pnpm -r test`, `yarn workspace web test`, `python3 -B -m unittest`, `python -m pytest`, and runs behind `poetry`, `pipenv`, `hatch`, `pdm`, `rye` or `bundle exec`. Their `--fix` and `--write` forms stay writers.
+- A check keeps its outcome behind `timeout`, `time`, `nice` or `xvfb-run`; spelled `python -m mypy|ruff|pylint|flake8`, `pnpm|yarn <runner>`, `npm|yarn|bun exec <runner>`, `npm --prefix <dir>`, `pnpm -C` or `yarn --cwd`; piped to `tail` or read-only `sed`, `awk`, `sort` or `uniq`; or logged with `tee` or a redirect to `$TMPDIR/…`, `~/…`, a `safety.scratchRoots` directory or a new untracked file. Declared checks such as `make ci` or `./acceptance.sh` count the same, and safety readers see `timeout 5 rm -rf x` as the delete it is.
+- These now count as changes: a writer behind `pnpm|yarn <bin>` (`pnpm prettier -w .`, an emitting `pnpm tsc`), snapshot updates (`go test -update`, `pytest --snapshot-update`/`--force-regen`/`--regen-all`, `bun test -u`/`--update-snapshots`, `--update-goldens`, `cargo insta accept`, `pnpm test -u`, `pnpm --filter web lint:fix`), `--fix` and `--write`, a check chained with a change (`fix; npm test`, `npm test && codemod`, `cargo build && ./target/debug/app`), a write to a scratch root inside the workspace, a log that clobbers an older file, and `sort --output` or bracket `sed` scripts. `npm ci && npm test` still counts its check.
+- These no longer count as changes: git inspection (`git diff`, `git status`, `git log`, `git show`, `git --no-pager diff`, `git -P log`, `git -c color.ui=never status`, `git ls-files`, `rev-list`, `describe`, `cat-file -p`, `ls-tree`, `git grep`, `git blame`), `cat`, `grep`, `sed -n` with `/^[[:space:]]*x/p`, `cd`, `source`, `export`, `set`, `npm exec vitest run`, `python -c` or heredoc python and jq without a write-shaped call (`open` for writing, `write_text`, remove, rename, subprocess), `exit 0;`, a probe that only imports the workspace module, and writes only outside the workspace (`npm test && cp coverage/lcov.info /tmp/`).
+- Git inspection loses its exemption when the repository config sets `core.fsmonitor`, `diff.external` or a diff driver, `rg --hostname-bin` and `file` lose theirs, and `-C`, `--paginate` and helper-naming `-c` keys stay refused.
+- A check masked by `| head` or `grep`, overwritten by `; echo` or `||` (`pytest; echo done`), inverted with `!`, under a quoted pipefail toggle, or run outside the run cwd (`--prefix ../x`, `make -C ../x`, `pytest ../x`) settles nothing, and a claim on it reports "unattributable-status". A `cd` in `(cd ../lib && make) &&` ends at its close, `npm test -- --runInBand` is a check, option values such as `go test -run '^TestX$' ./pkg`, `-t` and `-k` are not paths, and `--import`, `--require` or `--loader` on `node --test` settles no pass.
+- Here-document continuations no longer join across the terminator, a body that only spells a check is data, quoted text such as `=>` that `cat` or `tee` copies is not a write target, and a heredoc-written script is read as code. A multi-line check is recorded under its single-line name and a bash pass under its full command.
+- A later pass of a check counts even when piped differently (`2>&1`, `| tail`, `| head`), a check after a write on an earlier line or after `;` is credited, and a red before the last edit no longer seals a finished run `unverified` with quality `fail`. A check that fails outside the receipt vocabulary (`npx tsc --noEmit`, `npx eslint .`) fails the receipt.
+- Unknown commands after the last check are disclosed as `unclassifiedAfterLastCheck` (count plus up to 5 redacted commands) on `run.settled` and `evidence inspect` without changing the verdict.
+- Receipts: only the `verify` tool is a validation tool (not `decide`, `tasks` or a gateway call), and a `verify` that only lists checks or names an undeclared one proves nothing. `run --verify` results seal into the receipt as `turn_end.verify` reports, a green `cargo build`, `cargo clippy` or `mypy .` after the last edit satisfies the finish gate, and a green claim against a red final `verify` seals quality `fail`.
+- Verification bases: a host-observed bash pass reads `host-observed-command` (not `validation-tool`), a dispatched run takes the host verdict as `host-verification`, a headless main run is credited a worker's validated pass when it changed nothing after, and a retired pass reads retired-by-change instead of `no-validation-tool`.
+- Claims ground in a passing `verify` on the final tree that they name by id (`verify <id>`) or command, and a red baseline never grounds one. The citation check credits `grep -n`/`rg -n` line numbers, ignores decimals like `line 3.37`, and asks for the whole answer again; `run --json` keeps the checked answer in `turn_end.message`.
+- Host verification: a reproduce reference is sealed at admission, a `numeric-compare` or perf-budget check fails when its reference changed, and a missing tolerance key, empty reference or bad `tolerance.keys` entry fails instead of passing. A memoized pass counts only when the cited run's seal holds that check on the same tree, and host-verification claims read verified only against the check they cite, in delivery, `claims` and `memory propose`.
+- A targeted jest or vitest run passes `--passWithNoTests=false`, and a runner that cannot start (pytest in a uv project with `uv.lock` and no `.venv`) fails the code check with the provisioning command. A wrapper (`env`, `nice`, `time`, `timeout`, `nohup`, `command`, `exec`, `builtin`) is judged by what it runs, so `env true`, `timeout 30 true` or `command true` earns no lesson.
+- Dispatch `intent.verification` accepts toolchain checks such as `python-unittest`, so Python, C/C++ and Fortran projects without package.json no longer get "declared ids: none". `clio-coder evidence` reads a main run's quality from its sealed checks, an unreviewed run drops the `independent-review` tag, and `evidence inspect --json` carries the trust summary and full evidence.
+- The finish footer says a check failed while one is red and names a changed file a later command ran, and step-template turns get no per-turn `finish.unverified` or high-rigor re-prompt; the pipeline is assessed when it ends. Sealed evidence keeps a check's `notRun` reason, so `/view`, worker evidence and the GUI say it did not run instead of quoting an exit code.
+
+**Headless and automation**
+
+- A reply cut off by `run --timeout`, a signal or quitting is recorded as `shutdown`, not a route failure, and harness stops keep their own cause (`repetition`, `autonomy_stop`, `triage_stop`) instead of `operator_cancel` or a transport abort. `telemetry why-stopped` says "Stopped on" for them, names a dispatched worker's stop (`workerStops`), and reports a turn that ended without answering (`terminal.noAnswer`).
+- A steer that triage reads as a stop in a `--steer-channel` run or ACP prompt interrupts and answers the turn instead of ending canceled with exit 1, and those steers start triage as TUI steers do.
+- A headless run whose delegated task never started exits 1 as a no-op, an unretried failed dispatch prints its not_retried line, and the sealed tools row no longer counts an ask refused by a `--timeout` abort as blocked.
+- `run --json` on a resumed session reports the active target and model, a prompt resolves only after its journal is flushed, and a run ending during an extension reload no longer prints "Extension reload failed".
+- A run reads its evidence from a submit-keyed log, so a compaction or recovery mid-submit no longer loses the step call or miscounts usage, and `agent_end.messages` and `messageCount` no longer count host inserts (#445).
+- A yolo cap halt's `autonomy.cap_reached` record counts the calls the headless notice does, and `run --help` says `--read-only` runs shell commands in a read-only sandbox.
+
+**Context and compaction**
+
+- A resumed session compiles the same system prompt as its last turn, so the prompt cache survives; path-scoped rules ride the turn reminder and a `system_prompt_changed` cold reason names any drift (copilot-sdk not yet covered). A turn that compacted mid-turn resends the same prefix on resume, and a failed `/context` operation no longer rewrites the system prompt.
+- Small windows no longer re-summarize nearly every turn: the kept suffix fits below the trigger and the rearm band survives across headless `run` processes.
+- An overflow fold fits, admits and clamps on one count, so a wedged session resumes, and a protected result that alone overflows ends the turn once with its name and size.
+- Requests are priced as sent: guards, trigger, admission and footer price what the provider receives, lock directives ride the request tail so the cached prefix survives, and the output reserve is resolved at the input being checked, so a request that fits a 65,536-token openai-completions window is not refused.
+- Eviction records carry a measured anchor, so a reopened session rehydrates its estimate, and the context meter no longer jumps after `/fork` or `/resume`. After a resume, `context.fold` and the compaction card report an eviction's own figures, as `context.pruned` does.
+- A past render or earlier fork no longer shows a later eviction, a clipped re-read no longer supersedes a full one, and an unsent reminder is not marked sent by another session. On copilot-sdk an eviction reseeds the conversation, keeping delivered reminders and images in place.
+- Step chains stay with their session and branch through `/tree`, switch, resume and fork, the first step turn seeds the chain, and `/tree` draws a step checkpoint on its path.
+- The argument shapes block fits its 1,600-byte budget and is resent only after a compaction, and a prose-contract worker keeps delivered reminders so each round extends the cached prefix.
+- The compaction notice says "(the cut fell inside a turn)" only when it did and counts provider messages, and `context working-set --verify` no longer reports one eviction twice. `/context compact` no longer streams the thinking notice into its reply, and a refused `/compact <instructions>` says the instructions were not used.
+
+**Fleet and workers**
+
+- The worker guard evicts older reads before an unseen one (`unseen_overflow`) and sizes output on the admission count, so a worker no longer refuses with worker_context_exhausted a fork the parent fitted. A cut-off call settles with its real cause instead of `transport_dropped`, a recovered dispatch reports `recovered=N`, and worker fold records use `r<N>` aliases.
+- A worker at its refusal limit gets one reply to report, and one whose final output held only tool-call markup fails as `worker_final_output_missing`. Its result-contract reminder arrives after tool results, not inside them, and unanswerable asks, pre-tool refusals and approval timeouts are counted and named.
+- Dispatch refuses an architect told to write nothing with `task_forbids_writes`, tells a target id in `node` (`node:'openai-codex'`) to move to `target`, admits a `~/` briefing path instead of `legacy_scope_path_absolute`, decodes JSON-encoded fields and fork `context`, and treats `worktree:false` as omitted. Plan preview refuses what dispatch admission refuses, and `../` briefing paths get one plain scope notice.
+- A `[Collected elsewhere]` notice names refused calls (`· 1 call refused`), so a run whose only action was refused no longer reads as clean.
+- `steer` and `clio-coder fleet cancel` find a hosted worker by attempt id, cancel one waiting on retry backoff, and seal an orphan instead of waiting 15 s.
+- A fork no longer shows or answers its parent's worker approvals, counts only its own compactions and verified outcomes (`/usage`, `telemetry insights`), and can collect its ancestors' detached batches; the dispatching session is told once when a batch was collected.
+- Council briefings stay within 8 KiB without dropping a peer (`context.briefing_clipped`), a failed seat shows its provider cause, and members declare the operator's scope so they are not refused.
+- Gateway chains count and charge their steps once, keep every step whole within 32 KiB, and accept stringified `args`, unnumbered `steps` (`s1`, `s2`) and empty `parameters`; a shorthand call without `op` counts as the capability it ran. Parallel `read`, `code_nav` and `clio_library` calls charge the observation pool before they await, and a worker's `context(scope="workspace")` returns its own directory.
+
+**Safety**
+
+- The safety judge names workspace and scratch roots (including `$TMPDIR`), reads operator messages and `ask_user` answers in order on the active path, and is told when an operator message spells an outside path.
+- An unanswered `ask_user` declines a recommended option that leaves the workspace ("Yes, run it"), and a lone delete inside a scratch root needs no workspace snapshot.
+- Containment treats a child named `..x` or `..cache` as inside its root, `git --attr-source <tree>` no longer hides the subcommand from the reset, clean and push rails, and a `<tool_call …>` opener with attributes is read as a written call.
+- A yolo floor block names its rule (`bash blocked: yolo-floor-raw-text`) and the 32768-byte raw-text budget. Redaction hides a quoted `sig: '…'` value and a secret beside a `[redacted:...]` marker.
+
+**Memory**
+
+- A memory offer no longer forces the portable compaction route; when the live-prefix call is cheaper it is journaled as `offer-declined` with reason `live-prefix-cheaper`. Restoring a record's earlier wording or reapproving a withdrawn one reaches the model as a `# Memory update`.
+- A compaction note that cites no operator message is kept as context, so tool output cannot become an operator requirement. A failed observation group retries only when its input changes, and a task with no receipt settles its lesson without a model call.
+
+**Extensions**
+
+- Api 2 `turn_start` and `turn_end` hook events carry the user turn id that `before_tool` and `after_tool` name, and `extensions list` shows api 2 runtime tools.
+
+**Telemetry and usage**
+
+- `telemetry tokens` names unmeasured calls (`3 (1 unmeasured)`) and calls without a cache split (`unsplitCalls` in `--json`), prints unknown instead of 0, and charges compaction and memory calls to their turn.
+- A catalog row priced all zero reads as unknown cost, not $0.00; OpenRouter `:free` models keep $0. `clio-coder telemetry cost --run` and `calls --run` break a main run down by model and role, and the cached share shows `≥` when a read went unreported and `~` when estimated.
+- Cache telemetry reads DeepSeek `prompt_cache_hit_tokens` and a top-level `cached_tokens`, and a Responses usage without `input_tokens_details.cached_tokens` reads unknown. A byte-stable recompile keeps its prompt structure id (`prompt.compiled` holds the predecessor hash).
+- `evidence inspect` reports a headless run's real tokens and shares `fleet view`'s trust reader, receipts record `differingResponseModelId` only when it differs, and `config inspect` explains the worker thinking level `off`.
+
+**ACP and editors**
+
+- Status lines cross as `session_info_update` notices (`_meta["clio-coder/notice"] = {level, text}`), not reply text. Assistant messages are separated by a blank line live and on replay (`agent_message_chunk`), and `message_end` no longer repeats or drops text.
+- `session/load` of a newer session returns -32602 `session_format`, `session/delete` on an open session says to close it first, `session/list` reports the current model, and ACP checkpoints a session before close, fork or handoff. Copilot-backed sessions list live models on a cold cache and keep their thinking level.
+
+**Providers and routes**
+
+- Socket drops (ECONNRESET, EPIPE, ETIMEDOUT), "Connection closed." and the Codex WebSocket limit retry instead of failing the turn.
+- A continued Copilot SDK session (`run --session`/`--continue`, ACP `session/load`, `/resume`) sends only the new turn; the newest 32 conversations idle under 7 days stay resumable. Copilot targets launch their bundled runtime inside a Copilot CLI shell, offer exactly their published reasoning efforts, read each tier's window from the cached listing, and no longer re-spill results over 50 KB.
+- Copilot host reminders go in the immediate send, not inside tool results, and `CLIO_CODER_PROVIDER_DUMP_PATH` records Copilot requests instead of `payloads: []`. Inception mercury-3 at thinking off sends `reasoning_effort: "instant"`.
+- Re-prompts for written-out tool calls and empty replies cap at three in a row, not per turn, and a call that hits the output cap while thinking retries once a level lower. Runaway reasoning and a response that repeats one tool call or rewrites one file five times are stopped.
+- `code_nav` names clio_docs only when the run admits it, and `consult` refuses an ask with no evidence before spending a call.
+
+**Terminal UI**
+
+- `/fork` lists one row per prompt, the resume picker explains its markers, Enter sends a typed `/thinking` level as typed, an unknown slash command such as /tools is named unknown, and Enter on a slash draft under an approval card says why.
+- The exit summary keeps the visit's turns, files, workers and time across `/resume`, `/fork`, `/tree`, `/handoff` and `/new`, counts only the session's own tool calls, and says "session tokens per outcome". Replayed receipts state what the live ones did.
+- Worker reports in `/fleet` and elsewhere read as words, not raw JSON; replayed live worker cards keep streaming; hiding the dock restores full width; and the Fleet Runs board says where a proposed commit lands.
+- Provider-redacted reasoning reads `Thinking · hidden by provider`, a streaming edit shows no guessed `+N -M` counts, narrow receipts keep `cached`, and `/view dispatch:<run>` words structured output. The tasks reminder skips answer, read-only and step-template turns, and the `tasks` tool names the key to use.
+
+**GUI**
+
+- The Usage page loads again and shows step pipeline counts.
 
 ## 0.8.3 - 2026-11-16
 
