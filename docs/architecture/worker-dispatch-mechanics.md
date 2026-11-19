@@ -67,12 +67,16 @@ CLIO Coder divides worker output into two isolated streams to protect control si
    | `clio_coder_steer_received` | Acceptance of a steer line: `chars` and the parent-assigned `sequence`. |
    | `clio_coder_run_outcome` | A machine-readable terminal classification: `outcomeCode` and an optional bounded `detail`. |
    | `clio_coder_flow_restrictions` | The run's information-flow restriction set after a read added to it. The parent absorbs it before any output is shown. |
+   | `clio_coder_tool_observation` | A call an external runtime such as the Claude SDK ran itself, in the finish shape. CLIO Coder observed it and did not enforce it. |
+   | `clio_coder_model_call` | One model call an external runtime made: `callIndex`, normalized `usage`, `model`, and optional `responseModel` and `responseId`. |
+   | `clio_coder_telemetry` | A forwarded worker telemetry record of an allowed kind (`call.started`, `call.settled`, `run.usage_reported`, `journal.gap`, `process.started`, `process.exited`, `tool.settled`, `tool.decided`, `middleware.fired`, `auth.refreshed`, `context.fold`). The parent accepts it only when its run, session, batch and turn identity match the run it dispatched ([forwarder.ts](../../src/core/telemetry/forwarder.ts)). |
    | `clio_coder_helper_result` | The internal helper's terminal object, emitted only after the host validates it. |
+   | `clio_coder_helper_result_rejected` | A terminal object the host refused: `reason` and the bounded `submitted` payload. |
    | `clio_coder_repository_instructions` | A delegated harness read its own repository instruction files after all: `reason` (`switch-unsupported`, its installed version lacks the switch that skips them) and a `detail`. The run record then says the rules were read beside those files. |
 
    The orchestrator adds one frame of its own, `spawn_error`, when the process cannot start.
 
-   The orchestrator reads the bulk lane through a bounded queue of 4096 frames ([worker-protocol.ts](../../src/domains/dispatch/worker-protocol.ts)). At the bound it drops the oldest display-only frame, such as a `message_update`. It never drops an evidence-bearing frame: `message_end`, the tool frames (`tool_execution_start`, `tool_execution_end`, `clio_coder_tool_start`, `clio_coder_tool_finish`), `clio_coder_run_outcome`, `clio_coder_helper_result`, `clio_coder_flow_restrictions`, the permission escalation, resolution, and grant execution frames, `clio_coder_steer_received`, `clio_coder_repository_instructions`, and `spawn_error`. The set is `RECEIPT_BEARING_BULK_TYPES` in [protocol.ts](../../src/worker/protocol.ts). When the queue holds only evidence, it accepts one more receipt-bearing frame past the bound and refuses the new display frame instead. A bulk line over `WORKER_BULK_FRAME_MAX_BYTES` is discarded before parsing and counted as malformed.
+   The orchestrator reads the bulk lane through a bounded queue of 4096 frames ([worker-protocol.ts](../../src/domains/dispatch/worker-protocol.ts)). At the bound it drops the oldest display-only frame, such as a `message_update`. It never drops an evidence-bearing frame: `message_end`, the tool frames (`tool_execution_start`, `tool_execution_end`, `clio_coder_tool_start`, `clio_coder_tool_finish`, `clio_coder_tool_observation`), `clio_coder_model_call`, `clio_coder_telemetry`, `clio_coder_run_outcome`, `clio_coder_helper_result`, `clio_coder_flow_restrictions`, the permission escalation, resolution, and grant execution frames, `clio_coder_steer_received`, `clio_coder_repository_instructions`, and `spawn_error`. The set is `RECEIPT_BEARING_BULK_TYPES` in [protocol.ts](../../src/worker/protocol.ts). When the queue holds only evidence, it accepts one more receipt-bearing frame past the bound and refuses the new display frame instead. A bulk line over `WORKER_BULK_FRAME_MAX_BYTES` is discarded before parsing and counted as malformed.
 
    A trail with a gap cannot seal as a complete run. Two stderr lines name the gap:
 
@@ -268,15 +272,15 @@ infrastructure breakers.
 | 9 | `policy` | Diagnostic names `GitHub Copilot refused the request`, the prefix the `copilot-sdk` adapter writes for a policy, quota, rate-limit or authorization refusal. It is the seat's answer, never retried on this or another account or target (`isCopilotRefusal` in `src/core/copilot-refusal.ts`). | No | None | None |
 | 10 | `provider-refusal` | Outcome `failed` and the provider's content filter answered. The endpoint is healthy. | Yes | None | None |
 | 11 | `deterministic-task` | Diagnostic text (see below): a rejected response schema, a malformed WorkerSpec other than version skew, a missing optional runtime SDK component (`copilot-sdk` or `claude-sdk`), a Copilot worker that is not signed in, an ACP model admission or HTTP 400 or 404 prompt verdict, a context overflow, or a provider 4xx. | No | None | None |
-| 12 | `target-auth` | Diagnostic matches `401`, `403`, `unauthorized`, `forbidden`, `invalid api key`, or `authentication`. | Yes | `target` | None |
-| 13 | `target-rate-limit` | Diagnostic matches `429`, `rate limit`, or `too many requests`. | Yes | `target` | 1 second |
-| 14 | `node-resource` | Diagnostic matches `vram`, `gpu`, `cuda`, `oom`, or `out of memory`. | Yes | `node` | None |
-| 15 | `capacity` | Diagnostic matches `capacity`, `overloaded`, or `queue full`. | Yes | `node` | None |
-| 16 | `target-transient` | Run timeout or outcome `timed_out`, or diagnostic matches `timeout`, `timed out`, `temporar`, `unavailable`, `500`, `502`, `503`, `504`, `internal server error`, `econnrefused`, `econnreset`, `fetch failed`, or `connection error`. | Yes | `target` | None |
+| 12 | `target-auth` | Typed status `401` or `403`, or the provider message matches `401`, `403`, `unauthorized`, `forbidden`, `invalid api key`, or `authentication`. | Yes | `target` | None |
+| 13 | `target-rate-limit` | Typed status `429`, or the provider message matches `429`, `rate limit`, or `too many requests`. | Yes | `target` | 1 second |
+| 14 | `node-resource` | The provider message matches `vram`, `gpu`, `cuda`, `oom`, or `out of memory`. | Yes | `node` | None |
+| 15 | `capacity` | The provider message matches `capacity`, `overloaded`, or `queue full`. Anthropic's `overloaded_error` is the provider's own load and classifies as `target-transient` instead. | Yes | `node` | None |
+| 16 | `target-transient` | Typed status `408` or 5xx, a run timeout or outcome `timed_out`, or the provider message matches `timeout`, `timed out`, `temporar`, `unavailable`, `500`, `502`, `503`, `504`, `internal server error`, `econnrefused`, `econnreset`, `fetch failed`, or `connection error`. | Yes | `target` | None |
 | 17 | `worker-runtime` | Outcome `failed` that no earlier test matched. | Yes | `runtime` | None |
 | 18 | `internal` | No more specific termination evidence. | Yes | None | None |
 
-The diagnostic text is the lower-cased join of the worker's `stderrTail` (last 4096 bytes) and the worker's last provider error message. An ACP delegation passes the provider message in place of stderr, and so does a structured-handoff run, which writes nothing to stderr.
+The diagnostic text for orders 6 through 11 is the lower-cased join of the worker's `stderrTail` (last 4096 bytes) and the worker's last provider error message. An ACP delegation passes the provider message in place of stderr, and so does a structured-handoff run, which writes nothing to stderr. The text patterns of orders 12 through 16 read only the provider message: the last provider error and the stderr lines that quote one (`[worker] agent ended with stopReason=error: `, `[worker] provider error: `, or a line starting `acp `). A tail with no `[worker] ` line counts whole, because it came from a peer that writes the provider's answer as is. A port number, test name or file error elsewhere in the tail therefore cannot read as a provider status. A typed status from the [provider HTTP status marker](#provider-http-status-marker) decides before any text pattern.
 
 #### Unrepaired result contracts
 
@@ -320,6 +324,10 @@ A finished run's record is its run journal at `<stateDir>/telemetry/runs/<runId>
 - **Object Key Sorting**: Keys are sorted recursively before serialization; arrays keep their order.
 - **Strict Primitive Handling**: `undefined` object properties are omitted; non-finite numbers (`NaN`, `Infinity`) or `bigint` throw an explicit serialization error.
 
+Native worker runs and ACP delegations settle through one finalizer. `settleRunResult` in [extension.ts](../../src/domains/dispatch/extension.ts) builds the receipt and the settlement together with `finishRunResult` ([run-settlement.ts](../../src/domains/dispatch/run-settlement.ts)), makes `run.settled` durable, and only then lets the ledger row read terminal, so no reader sees a finished row whose record is not on disk and both paths write the same receipt, ledger and event shapes.
+
+A worker process run in the current checkout, with no task worktree, keeps its measured checkout delta on the receipt (`checkoutChanges`, attribution `observed-delta`). Both snapshots run off the event loop ([checkout-changes.ts](../../src/tools/checkout-changes.ts)). The baseline is taken before the worker spawns, and runs spawned against the same directory while it is being taken share it, since edits between concurrent peers are not attributable anyway. The settle snapshot re-reads only files whose status and stat tuple (mode, size, mtime, ctime, inode) moved since the baseline. A file up to 1 MiB is identified by its content, so a rewrite that leaves the bytes unchanged is no change, and a larger file by its stat tuple. One settle snapshot serves the receipt, the removed-test check of a subprocess runtime, and the report of untracked files a refused run left behind.
+
 Startup orphan recovery ([orphan-recovery.ts](../../src/domains/dispatch/orphan-recovery.ts)) settles a ledger row whose worker is gone from its run's `run.settled` when the journal holds one, and closes it as stalled when it does not, because a run with no settled record did not finish. A terminal row whose journal holds `run.settled` but no seal is sealed. See [Cold-start work](architecture.md#cold-start-work).
 
 Integrity is only the artifact-integrity axis of the canonical trust status.
@@ -335,6 +343,12 @@ state vocabulary and compatibility map are documented in
 ### 5.3 Helper Acceptance and Capture Ceilings
 
 Structured helper results ([result-contract.ts](../../src/domains/agents/result-contract.ts)) enforce an aligned acceptance and capture ceiling of 32 KiB (`STRUCTURED_HELPER_RESULT_MAX_BYTES = 32_768`). A worker rejects outputs exceeding 32 KiB during validation, guaranteeing that a worker cannot accept a helper result that exceeds what the orchestrator captures in the run's `run-result` object.
+
+### 5.4 Dispatch and collect result forms
+
+A dispatch result is compact by default (`formatDispatchOutput` in [dispatch-runner.ts](../../src/tools/dispatch-runner.ts)). Each run keeps its key facts, its trust or verdict line and its evidence notices, and its answer becomes an excerpt of at most 2000 bytes (`COMPACT_ANSWER_BYTES` and `compactAnswer` in [worker-evidence.ts](../../src/tools/worker-evidence.ts)). The excerpt ends at a line boundary when one falls in its second half and is followed by `[answer excerpt: <kept> of <total> bytes; the whole answer is in monitor(mode="record", run_id="<runId>")]`. An answer within the budget is shown whole, and a validated helper result keeps its own compact lines. Detached `monitor collect` uses the same compact form ([monitor-collect.ts](../../src/tools/monitor-collect.ts)).
+
+Setting `max_output_bytes` selects the full form: each run returns its whole answer within its share of that budget (the budget divided by the number of runs, at least 1024 bytes). Unset, the budget is 20000 bytes. `monitor(mode="record")` leads with the run's whole answer as plain text, up to 12000 bytes, when the run's seal verifies, and the record JSON follows with a stand-in for the answer ([monitor.ts](../../src/tools/monitor.ts)).
 
 ## 6. Worker Exit Codes
 
