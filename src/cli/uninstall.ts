@@ -56,12 +56,13 @@ Remove Clio Coder: the config, data, state, and cache roots, the launcher, and f
 an install.sh install its private Node and every installed version.
 
 Per-project \`.clio-coder/\` directories sit outside those roots and are never
-removed here. Every project Clio has run in is recorded in the session metadata,
-so the real run and --dry-run both list them and name the command that clears one.
-The PATH block install.sh --modify-path appended goes with the launcher when its
-two marked lines are unchanged; any other mention in a shell startup file is
-reported, never edited. Clio's private pane host is stopped before its binary is
-removed. Uninstall stops while a session is still open.
+removed here. Every project CLIO Coder has run in is recorded in the session
+metadata, so the real run and --dry-run both list them and name the command that
+clears one. The PATH block install.sh --modify-path appended goes with the
+launcher when its two marked lines are unchanged; any other mention in a shell
+startup file is reported, never edited. CLIO Coder's private pane host is
+stopped before its binary is removed. Uninstall stops while a session is still
+open.
 Owned graphical background services are stopped and disabled before their state is
 removed; their desktop launchers are removed using the app's ownership manifests.
 

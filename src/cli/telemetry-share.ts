@@ -65,23 +65,23 @@ flags it asks which scopes and which profile. Profiles:
 Every profile redacts secrets again in every record and object it keeps. Each
 scope is resealed with share.sealed over exactly what the archive carries, and
 the archive's manifest names the profile, this installation's random install id
-and the Clio version, never a hostname or path; a report archive gets an install
-id and anonymization key of its own, so no anonymous id links it to another
-share, though a settings fingerprint matches across shares of unchanged
-settings. It previews scope, record and object counts and what the profile
-drops before writing, and for report every name left readable; --dry-run stops
-there.
+and the CLIO Coder version, never a hostname or path; a report archive gets an
+install id and anonymization key of its own, so no anonymous id links it to
+another share, though a settings fingerprint matches across shares of unchanged
+settings. It previews scope, record and object counts and what the profile drops
+before writing, and for report every name left readable; --dry-run stops there.
 --out defaults to a timestamped file in the current directory and is never
 overwritten.
 
---send shares the archive instead of writing it, only when you run it: it seals the
-archive so that only the Clio Coder maintainers can open it, uploads it as a secret
-gist in your GitHub account through your own gh, and opens a public discussion in
-"Telemetry shares" on iowarp/clio-coder that names the gist and nothing else.
---consent debug lets the maintainers read it to fix Clio; dataset also lets them
-publish an anonymized dataset from it. It takes the content-free, structural or
-research profile, asks before sending in a terminal and needs --yes outside one,
-and is refused in a command a Clio session started. list shows what this machine
+--send shares the archive instead of writing it, only when you run it: it seals
+the archive so that only the Clio Coder maintainers can open it, uploads it as a
+secret gist in your GitHub account through your own gh, and opens a public
+discussion in "Telemetry shares" on iowarp/clio-coder that names the gist and
+nothing else. --consent debug lets the maintainers read it to fix CLIO Coder;
+dataset also lets them publish an anonymized dataset from it. It takes the
+content-free, structural or research profile, asks before sending in a terminal
+and needs --yes outside one, and is refused in a command a CLIO Coder session
+started. list shows what this machine
 shared; forget <shareId> or github.com deletes the gist any time; once it is ${SHARE_RETENTION_DAYS} days
 old, the next report or telemetry share run deletes it.
 

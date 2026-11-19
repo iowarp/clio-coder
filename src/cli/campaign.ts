@@ -30,8 +30,8 @@ target, model, an optional thinking level and an optional label (default
 \`clio-coder run --answers\` file and is validated before anything starts.
 
 Entries run one at a time. Each gets a fresh copy of the fixture and its own
-empty Clio data, state and cache under --out, so entries share no sessions or
-memory. Each uses your config directory as it is (targets, credentials,
+empty CLIO Coder data, state and cache under --out, so entries share no sessions
+or memory. Each uses your config directory as it is (targets, credentials,
 installed extensions), as your own \`clio-coder run\` would: nothing secret is
 copied under --out, and a login an entry refreshes is saved to your credential
 store. Each also reads the runtime components you installed with

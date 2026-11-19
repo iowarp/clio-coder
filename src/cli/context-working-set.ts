@@ -31,7 +31,7 @@ const REPLAY_HELP = `Usage:
   clio-coder context replay (--sessions <path>... | --synthetic <corpus>...) [options]
 
 Options:
-  --sessions <path>... Clio session directories, sessions roots, or ledger JSONL files
+  --sessions <path>... CLIO Coder session directories, sessions roots, or ledger JSONL files
   --synthetic <ids>   comma-separated procedural corpora: ${SYNTHETIC_CORPORA.map((spec) => spec.id).join(",")}
   --policies <ids>    comma-separated none,random,age-horizon,structural-v1,structural-v2,oracle, or a
                       composition: <id>+<rung>, <id>-<rung>, rungs:<a>/<b>/<c>
@@ -59,7 +59,7 @@ const WORKING_SET_HELP = `Usage:
   clio-coder context working-set --session <id|path>
   clio-coder context working-set --verify <id|path>
 
---session prints the durable working-set fold and path-index summary for one Clio session.
+--session prints the durable working-set fold and path-index summary for one CLIO Coder session.
 --verify renders the session at each dispatched attempt's cursor and owner and compares it with the receipt the
 attempt journaled at send: verified, not-verifiable (with the reason), external, or mismatch. It also reconciles
 fold decisions against the fold records on the ledger. Exits 1 when any attempt mismatches.

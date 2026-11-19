@@ -19,8 +19,8 @@ clio-coder telemetry doctor [--json]
 consent records, for this operator, that research content capture may run in a
 workspace (default: the current directory) and everything under it. Capture also
 needs telemetry.mode: research and telemetry.research.content: true. The record
-lives in Clio's state directory, never in the workspace. --revoke deletes it;
-content captured before that stays in the sessions that recorded it. --list
+lives in CLIO Coder's state directory, never in the workspace. --revoke deletes
+it; content captured before that stays in the sessions that recorded it. --list
 shows every consent.
 
 prune lists, oldest first, the telemetry it would remove: session call journals

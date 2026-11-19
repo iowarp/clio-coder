@@ -83,18 +83,20 @@ clio-coder report forget <id>
 clio-coder report selftest [--session <id>] [--transcript [N]] [--with-tool-output] [--anonymize-models]
 clio-coder report security
 
-report files a bug, a feature request or a question with Clio Coder's maintainers
-at github.com/iowarp/clio-coder. It always prints the exact title and body first,
-with what Clio masked, and the numbered list of what sending will do. Nothing is
-sent until you choose send in a terminal or pass --yes.
+report files a bug, a feature request or a question with Clio Coder's
+maintainers at github.com/iowarp/clio-coder. It always prints the exact title
+and body first, with what CLIO Coder masked, and the numbered list of what
+sending will do. Nothing is sent until you choose send in a terminal or
+pass --yes.
 --body-file (or - for stdin) supplies "What happened"; in a terminal without it,
 $EDITOR opens a template. --last uses the newest session in this directory and
---session a named one, to add what Clio observed. --dry-run stops after the
-preview and makes no network call. When the search finds an open report of the
-same problem, or a fixed one this would be a regression of, a terminal asks; with
---yes, --on-duplicate decides (default stop: an unattended script never comments
-on someone's issue or files a regression). --reply-check lets an attended session
-check the filed issue once a day for a maintainer's reply (off unless asked).
+--session a named one, to add what CLIO Coder observed. --dry-run stops after
+the preview and makes no network call. When the search finds an open report of
+the same problem, or a fixed one this would be a regression of, a terminal asks;
+with --yes, --on-duplicate decides (default stop: an unattended script never
+comments on someone's issue or files a regression). --reply-check lets an
+attended session check the filed issue once a day for a maintainer's reply (off
+unless asked).
 status asks GitHub, through your gh, where each open report stands.
 Security problems go to a private advisory: clio-coder report security.
 --bundle mechanics builds a diagnostic bundle of the session's telemetry and needs

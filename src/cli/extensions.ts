@@ -19,7 +19,7 @@ import { formatColumns, printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder extensions <command>
 
-Manage Clio extension packages.
+Manage CLIO Coder extension packages.
 
 Commands:
   clio-coder extensions init <id> [--template status|hook|panel|tool|workspace] [--dir <path>]

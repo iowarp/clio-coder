@@ -142,7 +142,7 @@ TARGET/MODEL                    VOTES  WINS  LOSSES  TIES  BOTH-BAD  ELO
 anthropic-max/claude-haiku-5-5  1      0     0       1     0         n/a (<5 votes)
 openai-codex/gpt-6-luna         1      0     0       1     0         n/a (<5 votes)
 
-1 voted of 1 matches in suite speed. These are your recorded votes; Clio does not judge.
+1 voted of 1 matches in suite speed. These are your recorded votes; CLIO Coder does not judge.
 ```
 :::
 

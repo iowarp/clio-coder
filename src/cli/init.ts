@@ -23,7 +23,7 @@ const HELP = `Usage:
   clio-coder context init --accept [<proposal path or id>] [--json]
 
 Explore the repository and bootstrap the project context in one pass: CLIO-CODER.md,
-the codewiki index, and the .clio-coder state. The configured Clio
+the codewiki index, and the .clio-coder state. The configured CLIO Coder
 target drafts CLIO-CODER.md grounded in the existing handbook, codewiki structure, and
 sibling agent context. Existing CLIO-CODER.md files are preserved by default; use
 --propose for an ignored draft, --apply to update the handbook using it as source,

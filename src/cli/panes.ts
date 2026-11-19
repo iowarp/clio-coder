@@ -5,17 +5,18 @@ import { runToolsCommand } from "./tools.js";
 const HELP = `clio-coder panes install [--if-missing] [--force] [--json]
 clio-coder panes theme
 
-install  Install the pane host Clio runs its panes in (herdr, Apache-2.0). This
-         is an alias for \`clio-coder tools install herdr\`; the toolchain
+install  Install the pane host CLIO Coder runs its panes in (herdr, Apache-2.0).
+         This is an alias for \`clio-coder tools install herdr\`; the toolchain
          command is where every pinned external program is managed. The
-         installer provisions it, and Clio installs a new pin on launch after
-         an upgrade. Run this when the installer could not fetch it or after
-         \`npm install -g\`; a launch without it says so once. With
-         --if-missing nothing is downloaded when Clio's own pinned copy is
+         installer provisions it, and CLIO Coder installs a new pin on launch
+         after an upgrade. Run this when the installer could not fetch it or
+         after \`npm install -g\`; a launch without it says so once. With
+         --if-missing nothing is downloaded when CLIO Coder's own pinned copy is
          already installed. A herdr of your own on PATH is never used to host
-         Clio's panes and is never touched.
-theme    Print Clio's theme tokens as a herdr [theme.custom] block for your own
-         herdr config. Clio's private pane host is themed by Clio already.
+         CLIO Coder's panes and is never touched.
+theme    Print CLIO Coder's theme tokens as a herdr [theme.custom] block for
+         your own herdr config. CLIO Coder already themes its own private pane
+         host.
 `;
 
 /**

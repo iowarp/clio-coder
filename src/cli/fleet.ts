@@ -120,7 +120,7 @@ Notes:
   event journal, written when fleet.history.journal is on (the default). Handed the
   fleet-<hex> root id that run prints, it lists that run's steps instead.
   drain preserves running work. Repeat it to renew the one-hour expiry; resume
-  clears it early. The expiry prevents an abandoned drain from wedging Clio.
+  clears it early. The expiry keeps an abandoned drain from wedging CLIO Coder.
   cancel asks the process that owns the run to abort it and waits up to 15s
   for the run to seal canceled; it exits 1 while the request is still pending.
   When the owning process is gone it terminates the orphaned worker's process
