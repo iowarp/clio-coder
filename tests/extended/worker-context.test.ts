@@ -616,6 +616,56 @@ test("drv-cf1h: a request the guard fitted after an eviction reaches the provide
 	}
 });
 
+test("a first splice with no usage anchor is fitted at the transport's own count (Astra #4)", {
+	timeout: 20_000,
+}, async () => {
+	const env = await isolateClioEnv("clio-coder-worker-unanchored-splice-");
+	// Within the guard's trigger and fit at chars/4, but over the window at Pi's chars/3.5.
+	const seed = selectWorkerContext(captureWorkerContext(source, [user("evidence ".repeat(21_000))]), {
+		mode: "splice",
+		max_tokens: 60_000,
+	});
+	const packet = seed.messages[0];
+	const body =
+		packet?.role === "user" && Array.isArray(packet.content)
+			? packet.content.map((b) => (b.type === "text" ? b.text : "")).join("")
+			: "";
+	const events: unknown[] = [];
+	let worker: WorkerRunHandle | undefined;
+	try {
+		worker = startWorkerRun(
+			{
+				// The splice rides as the dispatch packet's prompt message, as `buildDynamicPromptMessages` sends it.
+				dynamicPromptMessages: [{ id: "dispatch-worker-context", body, contentHash: "fixture" }],
+				agentId: "unanchored-splice-fixture",
+				systemPrompt: "Answer from the inherited evidence.",
+				task: "Summarize the evidence.",
+				target: { id: "fixture", runtime: "litellm", url: "http://127.0.0.1:9" },
+				runtime: litellm,
+				wireModelId: "fixture",
+				apiKey: "fixture",
+				modelCapabilities: { contextWindow: 65_536, maxTokens: 32_768, tools: true },
+				allowedTools: [],
+				budget: { mode: "advisory", toolCalls: 4, readReserve: 0, synthesis: true, hardCap: 8 },
+				product: "orientation",
+				noSkills: true,
+				cwd: env.dir,
+				contextSeed: seed,
+			},
+			(event) => void events.push(event),
+		);
+		const outcome = await worker.promise;
+		const text = JSON.stringify(events);
+		ok(!text.includes(LOCAL_CONTEXT_OVERFLOW_PREFIX), "the guard, not the transport, refuses the splice");
+		match(text, /"outcomeCode":"worker_context_exhausted"/);
+		notEqual(outcome.exitCode, 0);
+	} finally {
+		worker?.abort();
+		await worker?.promise;
+		env.restore();
+	}
+});
+
 test("drv-cf3a D-B: a result-contract repair round stays anchored on the provider's last count", () => {
 	const guard = createWorkerContextGuard(refuseArchive);
 	const input = { systemPrompt: "worker", tools: [], contextWindow: 32_768, outputReserve: () => 4096 };

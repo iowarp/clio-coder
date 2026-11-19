@@ -1,4 +1,4 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -154,6 +154,17 @@ test("a server that refuses the schema gets the same round once without it", { t
 	strictEqual(bodies[2]?.response_format?.type, "json_schema");
 	strictEqual(bodies[3]?.response_format, undefined);
 	strictEqual((bodies[3]?.tools ?? []).length, 0);
+});
+
+test("each tool round extends the previous request byte for byte, its reminder included (Astra #5)", {
+	timeout: 15_000,
+}, async () => {
+	const { result, bodies } = await runReviewer([read, read, { text: REPORT }], "none");
+	strictEqual(result.exitCode, 0);
+	strictEqual(bodies.length, 3);
+	const previous = bodies[1]?.messages ?? [];
+	deepStrictEqual(bodies[2]?.messages.slice(0, previous.length), previous);
+	ok(JSON.stringify(bodies[2]?.messages.at(-1)).includes("[result contract: verifier-report]"));
 });
 
 test("a capped reporting worker whose locked replies are only tool-call markup fails as missing output", {

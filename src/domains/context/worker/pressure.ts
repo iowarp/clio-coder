@@ -27,6 +27,13 @@ export interface WorkerPressureInput {
 	 * changes them, but the fit check must price the request that is sent.
 	 */
 	overheadTokens?: number;
+	/**
+	 * The transport's own count of the request these messages make when it has
+	 * no assistant answer to re-anchor at the guard's count, else 0. Pi's clamp
+	 * then counts the whole request at its own ratio, above this estimate, so
+	 * the fit and the pinned count must carry it.
+	 */
+	unanchoredInputTokens?: (messages: ReadonlyArray<AgentMessage>) => number;
 	/** The economic trigger as a share of the window. */
 	threshold?: number;
 	/** `context.workingSet.target`: where a batch over the trigger stops. */
@@ -137,7 +144,6 @@ export function createWorkerContextGuard(
 		// The reserve is resolved at the request's own size: a wire-clamped transport
 		// reserves less as input grows, so no single reserve gives a fixed ceiling (D5).
 		const fitsWindow = (tokens: number) => !windowKnown || tokens + input.outputReserve(tokens) <= input.contextWindow;
-		const fits = (tokens: number) => tokens <= trigger && fitsWindow(tokens);
 		const messages = input.messages.map((message, index) => {
 			const unit = projected.get(index);
 			return unit !== undefined && unit.digest === contextHash(message) ? unit.message : message;
@@ -145,6 +151,8 @@ export function createWorkerContextGuard(
 		const breakdown = estimateAgentContextBreakdown({ systemPrompt: input.systemPrompt, tools: input.tools, messages });
 		let structural =
 			Object.values(breakdown).reduce((sum, value) => sum + value, 0) + Math.max(0, input.overheadTokens ?? 0);
+		const transportCount = () => Math.max(0, input.unanchoredInputTokens?.(messages) ?? 0);
+		let unanchored = transportCount();
 
 		// Parent usage never anchors a child. Only a response to this worker's own request can do so.
 		if (calls === 0) firstInputLength = input.messages.length;
@@ -174,6 +182,9 @@ export function createWorkerContextGuard(
 			}
 		}
 		const count = () => Math.max(structural, anchorUsage > 0 ? anchorUsage + structural - anchorFootprint : 0);
+		// The trigger keeps the guard's count; the window fit and the pin read what the transport will count.
+		const sent = () => Math.max(count(), unanchored);
+		const fits = () => count() <= trigger && fitsWindow(sent());
 		// The recovery target is relative to the failed request, so recovery measures structurally.
 		const measure = recovering ? () => structural : count;
 		const tokensBefore = recovering ? lastRequestTokens : count();
@@ -194,7 +205,7 @@ export function createWorkerContextGuard(
 			close();
 			calls++;
 			lastRequestTokens = structural;
-			admittedTokens = Math.max(0, Math.round(count()));
+			admittedTokens = Math.max(0, Math.round(sent()));
 			return messages;
 		};
 		const fail = (message: string): never => {
@@ -214,7 +225,7 @@ export function createWorkerContextGuard(
 				return null;
 			}
 		} else {
-			if (!windowKnown || fits(count())) return accept();
+			if (!windowKnown || fits()) return accept();
 			// With no checkpoint stage on a worker, exhaustion stays an error.
 			if (calls === 0) {
 				stages.push({ stage: "working_set", outcome: "none", reason: "protected_recent" });
@@ -259,6 +270,8 @@ export function createWorkerContextGuard(
 			items.push({ ...item, tokensFreed });
 			messages[index] = projection;
 			structural -= tokensFreed;
+			// Eviction never adds or removes an assistant, so only an unanchored request needs a recount.
+			if (unanchored > 0) unanchored = transportCount();
 			return true;
 		};
 		const takeObservation = (
@@ -362,7 +375,7 @@ export function createWorkerContextGuard(
 			}
 			// Short of headroom, or still over after the batch: the band holds the trigger, never a fit.
 			// A fit takes older units before any protected read, without the band (A2a).
-			const exhausted = () => (held ? !fitsWindow(count()) : !fits(count()));
+			const exhausted = () => (held ? !fitsWindow(sent()) : !fits());
 			if (exhausted()) selectForFit(exhausted);
 			if (exhausted()) {
 				if (items.length > 0) stages.push({ stage: "working_set", outcome: "none", reason: "no_gain" });
