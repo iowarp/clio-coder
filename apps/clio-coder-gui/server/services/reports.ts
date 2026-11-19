@@ -13,6 +13,7 @@ const UsageDto = Type.Object(
 	{
 		sessions: shown,
 		runs: shown,
+		stepPipelines: Type.Object({ settled: shown, incomplete: shown }, closed),
 		decisions: Type.Object(
 			{ total: shown, blocked: shown, tools: Type.Array(Type.Object({ tool: Type.String(), count: shown }, closed)) },
 			closed,
@@ -45,6 +46,7 @@ export class ReportsService {
 			facts: [
 				{ name: "sessions", values: report.sessions },
 				{ name: "dispatch-runs", values: report.runs },
+				{ name: "step-pipelines", values: report.stepPipelines },
 				{ name: "tool-decisions", values: report.decisions },
 				{ name: "permission-decisions", values: report.approvals },
 				{ name: "telemetry-tokens", values: { tokens: report.tokens } },
