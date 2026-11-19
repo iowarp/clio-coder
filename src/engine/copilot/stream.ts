@@ -599,12 +599,22 @@ function seedAttribute(value: string): string {
 	return value.replace(/&/gu, "&amp;").replace(/"/gu, "&quot;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;");
 }
 
-function renderTranscript(messages: ReadonlyArray<CoreMessage>): string {
+/**
+ * The seed's history in source order. A message's images join the seed's attachments, and its host-made frame
+ * names their 1-based attachment positions (`images="1,2"`), which replayed text cannot forge.
+ */
+function renderTranscript(messages: ReadonlyArray<CoreMessage>, attachments: ImageContent[]): string {
 	const lines: string[] = [];
+	const attached = (message: CoreMessage): string => {
+		if (message.role === "assistant") return "";
+		const positions = imagesOf(message.content).map((image) => attachments.push(image));
+		return positions.length > 0 ? ` images="${positions.join(",")}"` : "";
+	};
 	for (const message of messages) {
 		if (message.role === "user") {
 			const text = neutralizeSeedFrames(textOf(message.content));
-			if (text.length > 0) lines.push(`<user>\n${text}\n</user>`);
+			const images = attached(message);
+			if (text.length > 0 || images.length > 0) lines.push(`<user${images}>\n${text}\n</user>`);
 		} else if (message.role === "assistant") {
 			const text = neutralizeSeedFrames(textOf(message.content));
 			const calls = message.content
@@ -616,29 +626,33 @@ function renderTranscript(messages: ReadonlyArray<CoreMessage>): string {
 			lines.push(`<assistant>\n${[text, ...calls].filter((part) => part.length > 0).join("\n")}\n</assistant>`);
 		} else {
 			lines.push(
-				`<tool_result id="${seedAttribute(message.toolCallId)}" name="${seedAttribute(message.toolName)}"${message.isError ? ' error="true"' : ""}>\n${neutralizeSeedFrames(textOf(message.content))}\n</tool_result>`,
+				`<tool_result id="${seedAttribute(message.toolCallId)}" name="${seedAttribute(message.toolName)}"${message.isError ? ' error="true"' : ""}${attached(message)}>\n${neutralizeSeedFrames(textOf(message.content))}\n</tool_result>`,
 			);
 		}
 	}
 	return lines.join("\n");
 }
 
-/** The first prompt of a fresh session: the trailing user turn, after earlier history when there is any. */
+/**
+ * The first prompt of a fresh session, from the whole provider-visible transcript in order: host reminders
+ * already delivered stay where they were, and retained images are attached. The trailing user turn follows
+ * earlier history when there is any; a trailing turn of host framing only is preceded by "Continue.".
+ */
 function seedPrompt(messages: ReadonlyArray<CoreMessage>): { prompt: string; images: ImageContent[] } {
 	let tail = messages.length;
 	while (tail > 0 && messages[tail - 1]?.role === "user") tail--;
 	const history = messages.slice(0, tail);
 	const current = messages.slice(tail);
 	const currentText = current.map((message) => textOf(message.content)).filter((text) => text.length > 0);
-	const images = current.flatMap((message) => imagesOf(message.content));
-	if (history.length === 0) return { prompt: currentText.join("\n\n"), images };
+	if (history.length === 0)
+		return { prompt: currentText.join("\n\n"), images: current.flatMap((message) => imagesOf(message.content)) };
 	const intro =
 		"<conversation-history>\nThe conversation so far, recorded by the host. Continue it; do not repeat completed tool calls.\n";
-	const body = `${intro}${renderTranscript(history)}\n</conversation-history>`;
-	return {
-		prompt: currentText.length > 0 ? `${body}\n\n${currentText.join("\n\n")}` : `${body}\n\nContinue.`,
-		images,
-	};
+	const images: ImageContent[] = [];
+	const body = `${intro}${renderTranscript(history, images)}\n</conversation-history>`;
+	images.push(...current.flatMap((message) => imagesOf(message.content)));
+	const lead = current.every((message) => fingerprint(message) === null) ? ["Continue."] : [];
+	return { prompt: [body, ...lead, ...currentText].join("\n\n"), images };
 }
 
 function refusalMessage(data: {
@@ -1245,10 +1259,6 @@ async function runStep(
 	const syncedCount = conversation?.synced.length ?? stored?.synced.length ?? 0;
 	const lastSeen = syncedCount > 0 ? kept[syncedCount - 1] : undefined;
 	const fresh = lastSeen ? core.slice(core.indexOf(lastSeen) + 1) : core;
-	const lastKept = kept[kept.length - 1];
-	const tailFraming = core
-		.slice(lastKept ? core.indexOf(lastKept) + 1 : 0)
-		.filter((message) => fingerprint(message) === null);
 
 	let bound = false;
 	try {
@@ -1412,10 +1422,6 @@ async function runStep(
 			if (!(await request({ request: "toolResults", results: delivered }))) return;
 			for (const { toolCallId, ...result } of delivered) active.deliver(toolCallId, result);
 		} else {
-			const framingText = tailFraming
-				.map((message) => textOf(message.content))
-				.filter((text) => text.length > 0)
-				.join("\n\n");
 			const seed = continued
 				? {
 						prompt: fresh
@@ -1424,13 +1430,7 @@ async function runStep(
 							.join("\n\n"),
 						images: fresh.flatMap((message) => imagesOf(message.content)),
 					}
-				: (() => {
-						const seeded = seedPrompt(core.filter((message) => fingerprint(message) !== null));
-						return {
-							prompt: [seeded.prompt, framingText].filter((text) => text.length > 0).join("\n\n"),
-							images: seeded.images,
-						};
-					})();
+				: seedPrompt(core);
 			const send = {
 				prompt: [policyText, seed.prompt].filter((text) => text.length > 0).join("\n\n"),
 				...(seed.images.length > 0 ? { attachments: blobAttachments(seed.images) } : {}),
