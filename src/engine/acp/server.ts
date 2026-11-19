@@ -5486,6 +5486,25 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			for (const session of sessions.values()) if (session.target === targetId) notifyConfigOptions(session);
 		});
 	};
+	/**
+	 * A turn probes its target live before it resolves thinking support, as turn-runtime does, so a cold cache can say
+	 * unsupported while the route thinks. The same probe here keeps the thinking option in step; it is re-sent on change only.
+	 */
+	const refreshThinkingOption = (session: AcpServerSession): void => {
+		const providers = options.providers;
+		const targetId = session.target;
+		const runtime = providers?.list().find((item) => item.target.id === targetId)?.runtime;
+		if (!providers || targetId === null || !runtime || typeof providers.probeTarget !== "function") return;
+		if (runtime.tier === "cloud" && typeof runtime.probeServingWindows !== "function") return;
+		const before = JSON.stringify(sessionThinking(session));
+		void providers.probeTarget(targetId).then(
+			() => {
+				if (sessions.get(session.id) !== session || session.target !== targetId) return;
+				if (JSON.stringify(sessionThinking(session)) !== before) notifyConfigOptions(session);
+			},
+			() => {},
+		);
+	};
 	const refuseYolo = (level: AutonomyLevel): void => {
 		const refusal = level === "yolo" ? (options.yoloRefusal?.() ?? null) : null;
 		if (refusal !== null) throw new AcpRequestError(-32602, refusal, { code: "yolo_refused" });
@@ -5606,6 +5625,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			announceCommands(id);
 			telemetry.bind(false);
 			await listTargetModels(session.target);
+			refreshThinkingOption(session);
 			const opened = {
 				sessionId: id,
 				...sessionConfig(session),
