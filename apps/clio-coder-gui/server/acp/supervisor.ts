@@ -806,13 +806,13 @@ export class Supervisor {
 		if (entry.turnId) throw new AppProblem("conflict", "A turn is already running in this session.");
 		if (this.configuring.has(id)) throw new AppProblem("conflict", "Session configuration is being changed.");
 		if (entry.rebase) throw new AppProblem("conflict", "The conversation is moving to another branch.");
-		if (entry.drafting) throw new AppProblem("conflict", "Clio Coder is drawing up a handoff for this conversation.");
+		if (entry.drafting) throw new AppProblem("conflict", "CLIO Coder is drawing up a handoff for this conversation.");
 		if (entry.contextCommand || this.snapshot(id).contextWork?.active)
 			throw new AppProblem("conflict", "Context work is running in this task. Wait for it or stop it.");
 		if (images.length > 0 && !entry.client.capabilities.images)
-			throw new AppProblem("conflict", "This Clio Coder build does not accept images with a request.");
+			throw new AppProblem("conflict", "This CLIO Coder build does not accept images with a request.");
 		if (files.length > 0 && !entry.client.capabilities.embeddedContext)
-			throw new AppProblem("conflict", "This Clio Coder build does not accept files with a request.");
+			throw new AppProblem("conflict", "This CLIO Coder build does not accept files with a request.");
 		if (attachmentWeight(images, files) > TURN_IMAGES_MAX_BASE64)
 			throw new AppProblem(
 				"validation",
@@ -1107,7 +1107,7 @@ export class Supervisor {
 			});
 		if (update.sessionUpdate === "config_option_update") {
 			const options = projectConfigOptions(update.configOptions);
-			if (options === undefined) throw new AppProblem("upstream_acp", "Clio Coder omitted session configuration.");
+			if (options === undefined) throw new AppProblem("upstream_acp", "CLIO Coder omitted session configuration.");
 			const target = record(meta[ACP_SESSION_META_KEY]).target;
 			const config = {
 				...entry.client.config,
@@ -1348,9 +1348,9 @@ export class Supervisor {
 			throw new AppProblem("conflict", "Wait for the current turn or configuration change to finish.");
 		const config = this.snapshot(id).config;
 		const option = config?.options.find((row) => row.id === body.configId);
-		if (!option) throw new AppProblem("conflict", "This Clio Coder build does not offer that conversation control.");
+		if (!option) throw new AppProblem("conflict", "This CLIO Coder build does not offer that conversation control.");
 		if (Buffer.byteLength(body.value) > 256 || !option.options.some((row) => row.value === body.value))
-			throw new AppProblem("validation", "Choose a value Clio Coder reports for this conversation.");
+			throw new AppProblem("validation", "Choose a value CLIO Coder reports for this conversation.");
 		this.configuring.add(id);
 		try {
 			const next = await entry.client.setConfig(id, body);
@@ -1437,7 +1437,7 @@ export class Supervisor {
 		const entry = this.steering(id);
 		const queue = entry.client.capabilities.queue;
 		if (!queue?.ops.includes(body.op))
-			throw new AppProblem("conflict", "This Clio Coder build cannot change one waiting message.");
+			throw new AppProblem("conflict", "This CLIO Coder build cannot change one waiting message.");
 		const version = ++entry.queueVersion;
 		entry.queueEmpty = null;
 		const result = await this.projected(id, queue.edit, { sessionId: id, ...body }, QueueEditResult);
@@ -1454,11 +1454,11 @@ export class Supervisor {
 		if (!entry || entry.closing || this.snapshot(id).state !== "open")
 			throw new AppProblem("conflict", "Session is not available for a shell line.");
 		const shell = entry.client.capabilities.shell;
-		if (!shell) throw new AppProblem("conflict", "This Clio Coder build does not run shell lines from this app.");
+		if (!shell) throw new AppProblem("conflict", "This CLIO Coder build does not run shell lines from this app.");
 		if (entry.turnId) throw new AppProblem("conflict", "A shell line runs between turns. Wait for this turn or stop it.");
 		if (this.configuring.has(id)) throw new AppProblem("conflict", "Session configuration is being changed.");
 		if (entry.rebase) throw new AppProblem("conflict", "The conversation is moving to another branch.");
-		if (entry.drafting) throw new AppProblem("conflict", "Clio Coder is drawing up a handoff for this conversation.");
+		if (entry.drafting) throw new AppProblem("conflict", "CLIO Coder is drawing up a handoff for this conversation.");
 		const command = body.command.trim();
 		const excludeFromContext = body.excludeFromContext === true;
 		entry.replay = null;
@@ -1538,7 +1538,7 @@ export class Supervisor {
 	private branching(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.branches)
-			throw new AppProblem("conflict", "This Clio Coder build cannot show or change conversation branches.");
+			throw new AppProblem("conflict", "This CLIO Coder build cannot show or change conversation branches.");
 		return entry;
 	}
 	tree(id: string) {
@@ -1597,7 +1597,7 @@ export class Supervisor {
 			const result = record(
 				await entry.client.request(ACP_SESSION_SWITCH_TURN_METHOD, { sessionId: id, turnId }, BRANCH_TIMEOUT_MS),
 			);
-			if (result.leafId !== turnId) throw new AppProblem("upstream_acp", "Clio Coder moved to a different turn.");
+			if (result.leafId !== turnId) throw new AppProblem("upstream_acp", "CLIO Coder moved to a different turn.");
 			if (entry.rebase?.mode === "switch" && !entry.rebase.reset) this.resetTimeline(entry);
 			if (entry.replay !== null && entry.turnId) this.finishReplay(entry);
 			return { leafId: turnId, replayedTurns: this.snapshot(id).turns.length };
@@ -1685,7 +1685,7 @@ export class Supervisor {
 	private asiding(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.aside)
-			throw new AppProblem("conflict", "This Clio Coder build cannot answer beside the conversation.");
+			throw new AppProblem("conflict", "This CLIO Coder build cannot answer beside the conversation.");
 		return entry;
 	}
 	// A round beside the conversation reads the history and bills a model; it waits as long as a turn might.
@@ -1704,7 +1704,7 @@ export class Supervisor {
 	private extending(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.extensions)
-			throw new AppProblem("conflict", "This Clio Coder build does not report its extensions.");
+			throw new AppProblem("conflict", "This CLIO Coder build does not report its extensions.");
 		return entry;
 	}
 	extensions(id: string) {
@@ -1778,7 +1778,7 @@ export class Supervisor {
 	async contextLedger(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.context)
-			throw new AppProblem("conflict", "This Clio Coder build does not report its context window.");
+			throw new AppProblem("conflict", "This CLIO Coder build does not report its context window.");
 		return withLedgerDisplay(await this.projected(id, ACP_CONTEXT_LEDGER_METHOD, { sessionId: id }, WireContextLedger));
 	}
 	async contextStatus(id: string) {
@@ -1817,7 +1817,7 @@ export class Supervisor {
 	private fleeting(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.fleet)
-			throw new AppProblem("conflict", "This Clio Coder build cannot preview or start a playbook.");
+			throw new AppProblem("conflict", "This CLIO Coder build cannot preview or start a playbook.");
 		return entry;
 	}
 	fleetPreview(id: string, body: Static<typeof FleetPreviewRequest>) {
@@ -1834,7 +1834,7 @@ export class Supervisor {
 	private handing(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.handoff)
-			throw new AppProblem("conflict", "This Clio Coder build cannot hand a conversation off.");
+			throw new AppProblem("conflict", "This CLIO Coder build cannot hand a conversation off.");
 		return entry;
 	}
 	async prepareHandoff(id: string, goal: string) {
@@ -1878,7 +1878,7 @@ export class Supervisor {
 	private boardWrites(id: string, method: "supersede" | "proposeMemory") {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.board?.[method])
-			throw new AppProblem("conflict", "This Clio Coder build cannot change decisions or memory from here.");
+			throw new AppProblem("conflict", "This CLIO Coder build cannot change decisions or memory from here.");
 		return entry;
 	}
 	supersedeDecision(id: string, body: Static<typeof DecisionSupersedeRequest>) {
@@ -1934,7 +1934,7 @@ export class Supervisor {
 			if (entry.client.capabilities.commands.promptTurns !== true)
 				throw new AppProblem(
 					"conflict",
-					"This Clio Coder build cannot show a command's injected turn. Update it before sending this command.",
+					"This CLIO Coder build cannot show a command's injected turn. Update it before sending this command.",
 				);
 			const argv = body.argv ?? [];
 			if (argv.some((arg) => /[\r\n]/u.test(arg)))

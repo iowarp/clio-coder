@@ -126,11 +126,11 @@ export function versionGate(
 ): { ok: true } | { ok: false; detail: string } {
 	const install = `Install this build there with: clio-coder fleet nodes install ${id} --yes`;
 	if (remote.clio !== local.clio)
-		return { ok: false, detail: `The node runs Clio Coder ${remote.clio} and this app is ${local.clio}. ${install}` };
+		return { ok: false, detail: `The node runs CLIO Coder ${remote.clio} and this app is ${local.clio}. ${install}` };
 	if (local.build !== null && remote.build !== null && local.build !== remote.build)
 		return {
 			ok: false,
-			detail: `The node runs a different build of Clio Coder ${remote.clio} (${remote.build}, this app is ${local.build}). ${install}`,
+			detail: `The node runs a different build of CLIO Coder ${remote.clio} (${remote.build}, this app is ${local.build}). ${install}`,
 		};
 	return { ok: true };
 }

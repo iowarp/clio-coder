@@ -27,7 +27,7 @@ const shortcutScript = [
 	"$a.TargetPath=$env:CLIO_WIN_TARGET",
 	"$a.Arguments=$env:CLIO_WIN_MENU_ARGS",
 	"$a.IconLocation=$env:CLIO_WIN_ICON",
-	"$a.Description='Build and explore with Clio Coder'",
+	"$a.Description='Build and explore with CLIO Coder'",
 	"$a.WindowStyle=7",
 	"$a.Save()",
 	"Add-Type -Path $env:CLIO_WIN_IDENTITY_SOURCE",
@@ -36,7 +36,7 @@ const shortcutScript = [
 	"$b.TargetPath=$env:CLIO_WIN_TARGET",
 	"$b.Arguments=$env:CLIO_WIN_STARTUP_ARGS",
 	"$b.IconLocation=$env:CLIO_WIN_ICON",
-	"$b.Description='Starts the Clio Coder background app when you sign in'",
+	"$b.Description='Starts the CLIO Coder background app when you sign in'",
 	"$b.WindowStyle=7",
 	"$b.Save()",
 	"if ($env:CLIO_WIN_PIN_FOLDER -and (Test-Path -LiteralPath $env:CLIO_WIN_PIN_FOLDER)) { Get-ChildItem -LiteralPath $env:CLIO_WIN_PIN_FOLDER -Filter '*.lnk' | ForEach-Object { $c=$s.CreateShortcut($_.FullName); if (($c.TargetPath -match 'wslg?\\.exe$' -and $c.Arguments.StartsWith($env:CLIO_WIN_PIN_PREFIX) -and $c.Arguments.EndsWith($env:CLIO_WIN_PIN_SUFFIX)) -or ($c.TargetPath -eq $env:CLIO_WIN_TARGET -and $c.Arguments -eq $env:CLIO_WIN_OLD_ARGS)) { $c.TargetPath=$env:CLIO_WIN_TARGET; $c.Arguments=$env:CLIO_WIN_MENU_ARGS; $c.Save(); [ClioIdentity]::SetShortcut($_.FullName,$env:CLIO_WIN_APP_ID) } } }",
@@ -153,9 +153,9 @@ export function visibleWslScript(args: string) {
 		`$p.StartInfo.Arguments=${literal(args)}`,
 		"$p.StartInfo.UseShellExecute=$false; $p.StartInfo.CreateNoWindow=$true; $p.StartInfo.RedirectStandardOutput=$true; $p.StartInfo.RedirectStandardError=$true",
 		"[void]$p.Start(); $out=$p.StandardOutput.ReadToEndAsync(); $err=$p.StandardError.ReadToEndAsync()",
-		"if (-not $p.WaitForExit(60000)) { $p.Kill(); throw 'WSL did not finish launching Clio Coder within 60 seconds.' }",
+		"if (-not $p.WaitForExit(60000)) { $p.Kill(); throw 'WSL did not finish launching CLIO Coder within 60 seconds.' }",
 		"$text=$out.Result + $err.Result; if ($p.ExitCode -ne 0) { throw ('WSL exited with code ' + $p.ExitCode + ': ' + $text) }",
-		"} catch { Add-Type -AssemblyName System.Windows.Forms; [void][System.Windows.Forms.MessageBox]::Show(('Clio Coder could not open.' + [Environment]::NewLine + $_.Exception.Message + [Environment]::NewLine + 'Open your WSL terminal and run: clio-coder doctor --fix'), 'Clio Coder launch failed', 'OK', 'Error'); exit 1 }",
+		"} catch { Add-Type -AssemblyName System.Windows.Forms; [void][System.Windows.Forms.MessageBox]::Show(('CLIO Coder could not open.' + [Environment]::NewLine + $_.Exception.Message + [Environment]::NewLine + 'Open your WSL terminal and run: clio-coder doctor --fix'), 'CLIO Coder launch failed', 'OK', 'Error'); exit 1 }",
 	].join("; ");
 	return `\uFEFF${script}\n`;
 }
@@ -293,7 +293,7 @@ export async function installWindowsLauncher(directory: string, launch: LaunchPa
 		for (const path of [menu, boot])
 			if ((await bytes(path)) !== null)
 				throw new Error(
-					`A shortcut named ${path.split("/").pop()} already exists and is not Clio Coder's; it was left alone.`,
+					`A shortcut named ${path.split("/").pop()} already exists and is not CLIO Coder's; it was left alone.`,
 				);
 	if (!launch.icon) throw new Error("The app icon path is required for the Windows launcher.");
 	const icon = join(windowsToWsl(windowsDirectory), iconName);

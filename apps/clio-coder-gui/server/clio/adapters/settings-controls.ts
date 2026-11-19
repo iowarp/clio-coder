@@ -58,9 +58,9 @@ const READ_ONLY: Array<[prefix: string, reason: string]> = [
 ];
 const NOTES: Record<string, string> = {
 	"context.compaction.systemPrompt":
-		"Clio Coder reads this file when compacting context. Enter the path as you would in terminal settings.",
+		"CLIO Coder reads this file when compacting context. Enter the path as you would in terminal settings.",
 	"integrations.library.catalog":
-		"Clio Coder reads this catalog path when resolving library resources. Saving the path does not install a package.",
+		"CLIO Coder reads this catalog path when resolving library resources. Saving the path does not install a package.",
 	"safety.review.enabled":
 		"Conversations in this app run over ACP, and headless and ACP runs never fire the review. This setting changes terminal sessions only.",
 	"safety.review.target": "Used by terminal sessions only; ACP runs never fire the review.",

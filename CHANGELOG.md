@@ -12,7 +12,7 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 ### Changed
 
-- The version banner, notice prefixes and upgrade messages name the product CLIO Coder; the `clio-coder` command, package and paths are unchanged.
+- The version banner, notice prefixes, upgrade messages, installer output and desktop app messages name the product CLIO Coder; the `clio-coder` command, package and paths are unchanged.
 
 ## 0.8.4 - 2026-11-19
 

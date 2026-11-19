@@ -379,7 +379,7 @@ export class AcpClient {
 		const previous = this.config;
 		const result = record(await this.request("session/set_config_option", { sessionId, ...body }));
 		const options = projectConfigOptions(result.configOptions);
-		if (options === undefined) throw new AppProblem("upstream_acp", "Clio Coder omitted session configuration.");
+		if (options === undefined) throw new AppProblem("upstream_acp", "CLIO Coder omitted session configuration.");
 		if (this.config === previous) {
 			const target = record(record(result._meta)[ACP_SESSION_META_KEY]).target;
 			this.config = {
@@ -388,7 +388,7 @@ export class AcpClient {
 				...(target === null || (typeof target === "string" && target.length <= 128) ? { target } : {}),
 			};
 		}
-		if (!this.config) throw new AppProblem("upstream_acp", "Clio Coder omitted session configuration.");
+		if (!this.config) throw new AppProblem("upstream_acp", "CLIO Coder omitted session configuration.");
 		return this.config;
 	}
 	async prompt(

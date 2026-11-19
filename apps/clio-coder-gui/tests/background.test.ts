@@ -323,7 +323,7 @@ test("a bare launch reuses only this installation's verified background app and 
 	const before = calls.length;
 	const foreign = await preferBackground(directory, root, control, ready);
 	assert.equal(foreign.kind, "unavailable");
-	assert.match((foreign as { reason: string }).reason, /another Clio Coder installation/);
+	assert.match((foreign as { reason: string }).reason, /another CLIO Coder installation/);
 	assert.equal(calls.length, before, "Another installation's service is never touched");
 	assert.deepEqual(await preferBackground(directory, config.packageRoot, control, ready, "darwin"), { kind: "absent" });
 	failStart = true;

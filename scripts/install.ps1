@@ -130,7 +130,7 @@ function Install-ClioCoder {
 			return
 		}
 		Say "would install Node $($Options.NodeVersion) ($build) and run its npm: npm install --prefix $installRoot\versions\<version>\lib $installSpec"
-		Say "would then install the pinned herdr that hosts Clio Coder's terminal panes: clio-coder tools install herdr"
+		Say "would then install the pinned herdr that hosts CLIO Coder's terminal panes: clio-coder tools install herdr"
 		Ok "dry run complete; nothing was downloaded or changed"
 		return
 	}
@@ -220,7 +220,7 @@ function Install-ClioCoder {
 			if (-not $release) { Fail "no Node.js $nodeVersion.x release at $OfficialBase ships $build" }
 			$nodeVersion = $release.version.TrimStart("v")
 		}
-		if ([version]$nodeVersion -lt $NodeMin) { Fail "Node $nodeVersion is older than Clio Coder's floor $NodeMin" }
+		if ([version]$nodeVersion -lt $NodeMin) { Fail "Node $nodeVersion is older than CLIO Coder's floor $NodeMin" }
 		if (-not $zipName) { $zipName = "node-v$nodeVersion-$build.zip" }
 		$runtimeDir = Join-Path $installRoot "runtime\node-v$nodeVersion-$build"
 		$node = Join-Path $runtimeDir "node.exe"
@@ -383,7 +383,7 @@ function Install-ClioCoder {
 			}
 			# An older version rejects keys a newer one wrote, and its own doctor --fix exits 1 and changes nothing.
 			if ($activeVersion -and [version](($pkg.version -split '-')[0]) -lt [version](($activeVersion -split '-')[0])) {
-				Fail "candidate checks failed; previous install remains active. Clio Coder $($pkg.version) is older than the active $activeVersion, and doctor --fix cannot make it read settings a newer version wrote, whatever the lines above advise. To use $($pkg.version), remove the keys named above from settings.yaml, then rerun this installer."
+				Fail "candidate checks failed; previous install remains active. CLIO Coder $($pkg.version) is older than the active $activeVersion, and doctor --fix cannot make it read settings a newer version wrote, whatever the lines above advise. To use $($pkg.version), remove the keys named above from settings.yaml, then rerun this installer."
 			}
 			$repair = "& '" + $node.Replace("'", "''") + "' '" + $entry.Replace("'", "''") + "' doctor --fix"
 			Fail "candidate checks failed; previous install remains active. Repair with the new version itself, then rerun this installer: $repair"
@@ -416,7 +416,7 @@ function Install-ClioCoder {
 			Ok "terminal panes ready (powered by herdr $($panes.version), Apache-2.0)"
 		} else {
 			$why = if ($panes -and $panes.message) { $panes.message } else { "the pane host could not be installed" }
-			Warn "terminal panes are not set up yet: $why. Clio Coder runs in the plain terminal until you run: clio-coder panes install"
+			Warn "terminal panes are not set up yet: $why. CLIO Coder runs in the plain terminal until you run: clio-coder panes install"
 		}
 
 		# Read and write the raw registry value: [Environment]::SetEnvironmentVariable

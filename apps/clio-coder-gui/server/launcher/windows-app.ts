@@ -136,7 +136,7 @@ public static class ClioIdentity {
         try {
             Set(store,2,command);
             Set(store,3,icon);
-            Set(store,4,"Clio Coder");
+            Set(store,4,"CLIO Coder");
             Set(store,5,id);
         }
         finally {
@@ -167,7 +167,7 @@ $mutex=New-Object System.Threading.Mutex($false,('Local\ClioCoder.'+$id))
 $acquired=$false
 try {
  try { $acquired=$mutex.WaitOne(30000) } catch [System.Threading.AbandonedMutexException] { $acquired=$true }
- if(-not $acquired) { throw 'Another Clio Coder launch is still in progress. Retry after it finishes.' }
+ if(-not $acquired) { throw 'Another CLIO Coder launch is still in progress. Retry after it finishes.' }
 $profile=Join-Path $PSScriptRoot 'browser'
 $browser=@(
  'C:\Program Files\Google\Chrome\Application\chrome.exe',
@@ -175,9 +175,9 @@ $browser=@(
  'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
  'C:\Program Files\Microsoft\Edge\Application\msedge.exe'
 ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-if (-not $browser) { throw 'Clio Coder needs Chrome or Edge to open its desktop window.' }
+if (-not $browser) { throw 'CLIO Coder needs Chrome or Edge to open its desktop window.' }
 $url=[Uri]$env:CLIO_WIN_URL
-if ($url.Scheme -ne 'http' -or $url.Host -ne '127.0.0.1') { throw 'Clio Coder refused a non-local desktop address.' }
+if ($url.Scheme -ne 'http' -or $url.Host -ne '127.0.0.1') { throw 'CLIO Coder refused a non-local desktop address.' }
 # Chromium derives its installed app id by hashing the stable manifest identity twice.
 $manifestId=$url.GetLeftPart([UriPartial]::Authority)+'/'
 $sha=[Security.Cryptography.SHA256]::Create()
@@ -209,7 +209,7 @@ if($existing.Count -gt 0) {
  # A changed port or credential cannot reconnect the old window. Close only this owned profile's windows.
  foreach($w in $existing) { [ClioIdentity]::Close($w) }
  for($i=0; $i -lt 30 -and @(AppWindows).Count -gt 0; $i++) { Start-Sleep -Milliseconds 200 }
- if(@(AppWindows).Count -gt 0) { throw 'Close the previous Clio Coder window, then reopen the app to reconnect.' }
+ if(@(AppWindows).Count -gt 0) { throw 'Close the previous CLIO Coder window, then reopen the app to reconnect.' }
 }
 $arguments='"--user-data-dir=' + $profile + '" --no-first-run --no-default-browser-check --disable-background-mode'
 if($installed) {
@@ -227,7 +227,7 @@ for($i=0; $i -lt 40 -and $window -eq [IntPtr]::Zero; $i++) {
   if($window -ne [IntPtr]::Zero) { break }
  }
 }
-if($window -eq [IntPtr]::Zero) { throw 'The Clio Coder desktop window did not appear.' }
+if($window -eq [IntPtr]::Zero) { throw 'The CLIO Coder desktop window did not appear.' }
 $relaunch='C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoP -W Hidden -EP Bypass -File "' + (Join-Path $PSScriptRoot 'open.ps1') + '"'
 $id=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'app-id')).Trim()
 foreach($p in (Get-CimInstance Win32_Process -Filter ("name='" + $name + "'") | Where-Object { [ClioIdentity]::UsesProfile($_.CommandLine,$profile) -and -not $_.CommandLine.Contains('--type=') })) { foreach($w in [ClioIdentity]::Windows($p.ProcessId)) { [ClioIdentity]::SetWindow($w,$id,$relaunch,((Join-Path $PSScriptRoot 'clio-coder.ico') + ',0')) } }

@@ -56,10 +56,10 @@ usage() {
 	cat <<'USAGE'
 Usage: install.sh [options]
 
-Install Clio Coder 0.6.0 or newer with a private Node.js runtime. No root, no system Node.
+Install CLIO Coder 0.6.0 or newer with a private Node.js runtime. No root, no system Node.
 
 Options:
-  --version <spec>      Clio Coder version: an exact version such as 0.6.0 or a
+  --version <spec>      CLIO Coder version: an exact version such as 0.6.0 or a
                         dist-tag. Default: the --channel. Env: CLIO_CODER_VERSION
   --channel <name>      latest (default), beta or dev. Env: CLIO_CODER_CHANNEL
   --leave-prerelease    With the latest channel, move from an active pre-release
@@ -95,7 +95,7 @@ Options:
                         Start Menu). Env: CLIO_CODER_INSTALL_GUI=1
   --no-gui              Skip the desktop app. Default: ask on a terminal, skip
                         otherwise. Env: CLIO_CODER_INSTALL_GUI=0
-  --no-workspace        Deprecated and ignored: Clio Coder's pane host (herdr,
+  --no-workspace        Deprecated and ignored: CLIO Coder's pane host (herdr,
                         Apache-2.0) is part of every install.
   --force               Replace a clio-coder launcher this installer did not write.
   --dry-run             Print the plan; download and change nothing.
@@ -169,7 +169,7 @@ version_ge() {
 }
 
 require_supported_version() {
-	version_ge "${1%%-*}" "$PACKAGE_MIN" || fail "Clio Coder $1 is unsupported; this installer requires $PACKAGE_MIN or newer. The active installation was left unchanged."
+	version_ge "${1%%-*}" "$PACKAGE_MIN" || fail "CLIO Coder $1 is unsupported; this installer requires $PACKAGE_MIN or newer. The active installation was left unchanged."
 }
 
 single_line() {
@@ -487,7 +487,7 @@ check_node_runs() {
 		if [ "$libc" = musl ]; then hint=" musl builds need libstdc++ and libgcc (apk add libstdc++)."; fi
 		fail "the managed Node at $node_bin does not run: $detail.$hint"
 	fi
-	version_ge "$ran" "$NODE_MIN" || fail "Node $ran is older than Clio Coder's floor $NODE_MIN"
+	version_ge "$ran" "$NODE_MIN" || fail "Node $ran is older than CLIO Coder's floor $NODE_MIN"
 	ok "Node v$ran runs ($node_build)"
 }
 
@@ -533,7 +533,7 @@ check_existing_launcher() {
 		esac
 		case "$target" in
 			*lib/node_modules/@iowarp/clio-coder/*)
-				warn "replacing $launcher, a link into an npm install of Clio Coder ($target)"
+				warn "replacing $launcher, a link into an npm install of CLIO Coder ($target)"
 				npm_prefix="${checkout_entry%/lib/node_modules/@iowarp/clio-coder/*}"
 				npm_prefix="$(cd "$npm_prefix" 2>/dev/null && pwd -P || printf '%s' "$npm_prefix")"
 				warn "that npm copy stays on disk; remove it with the npm that installed it: npm uninstall -g --prefix \"$npm_prefix\" $PACKAGE"
@@ -625,7 +625,7 @@ offer_gui() {
 		return 0
 	fi
 	if [ "$install_gui" = ask ]; then
-		printf '[install] Add the Clio Coder desktop app? It starts at login and appears in your app menu. [Y/n] '
+		printf '[install] Add the CLIO Coder desktop app? It starts at login and appears in your app menu. [Y/n] '
 		answer=""
 		read -r answer </dev/tty || answer=n
 		case "$answer" in "" | [Yy]*) ;; *) return 0 ;; esac
@@ -633,13 +633,13 @@ offer_gui() {
 	# The command's report is JSON for scripts; the installer states the outcome in its own words.
 	if "$node_bin" "$entry" gui background install --handover --json </dev/null >"$work/gui.out"; then
 		if "$node_bin" -e 'try { process.exit(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).windows?.status === "installed" ? 0 : 1); } catch { process.exit(1); }' "$work/gui.out"; then
-			ok "desktop app installed; open Clio Coder from the Windows Start Menu or your app menu, or run: clio-coder gui"
+			ok "desktop app installed; open CLIO Coder from the Windows Start Menu or your app menu, or run: clio-coder gui"
 		else
-			ok "desktop app installed; it starts at login and is in your app menu as Clio Coder, or run: clio-coder gui"
+			ok "desktop app installed; it starts at login and is in your app menu as CLIO Coder, or run: clio-coder gui"
 		fi
 		gui_warning="$("$node_bin" -e 'try { const w=JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).windows; if(w?.status === "failed") process.stdout.write("Windows desktop setup failed: " + String(w.reason || "unknown error") + "; run clio-coder doctor --fix"); } catch { process.stdout.write("Could not read the desktop setup report; run clio-coder doctor"); }' "$work/gui.out")"
 		[ -z "$gui_warning" ] || warn "$gui_warning"
-		log "the desktop app uses Clio Coder's saved credentials; save a key that lives only in your shell with: clio-coder auth login <target>"
+		log "the desktop app uses CLIO Coder's saved credentials; save a key that lives only in your shell with: clio-coder auth login <target>"
 	else
 		warn "the desktop app was not set up. Retry with: clio-coder doctor --fix (verified service handover waits until active work finishes)"
 	fi
@@ -654,7 +654,7 @@ provision_workspace() {
 	if "$node_bin" "$entry" tools install herdr --json </dev/null >"$work/workspace.out" 2>"$work/workspace.err"; then
 		ok "pane host ready: $("$node_bin" -e 'try { process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).message || "herdr")); } catch { process.stdout.write("herdr"); }' "$work/workspace.out")"
 	else
-		warn "the pane host (herdr) was not installed; Clio Coder runs in the plain terminal until you run: clio-coder panes install"
+		warn "the pane host (herdr) was not installed; CLIO Coder runs in the plain terminal until you run: clio-coder panes install"
 	fi
 }
 
@@ -771,7 +771,7 @@ do_rollback() {
 	node_path="$(manifest_field node)"
 	current="$(manifest_field current)"
 	helper="$current/lib/node_modules/@iowarp/clio-coder/scripts/native-install.cjs"
-	[ -f "$helper" ] || fail "rollback requires a Clio Coder $PACKAGE_MIN or newer managed installation"
+	[ -f "$helper" ] || fail "rollback requires a CLIO Coder $PACKAGE_MIN or newer managed installation"
 	previous="$(manifest_field previous)"
 	previous_version="$("$node_path" -e 'process.stdout.write(require(process.argv[1]).version)' "$previous/lib/node_modules/@iowarp/clio-coder/package.json" 2>/dev/null)" || fail "no complete previous install"
 	require_supported_version "$previous_version"
@@ -960,7 +960,7 @@ main() {
 		'' | *[!0-9]*) ;;
 		*)
 			if [ "$available" -lt "$MIN_FREE_KB" ]; then
-				fail "only $((available / 1024)) MB free under $install_root; Clio Coder and its runtime need about $((MIN_FREE_KB / 1024)) MB. Free space, or choose --install-dir on a larger filesystem."
+				fail "only $((available / 1024)) MB free under $install_root; CLIO Coder and its runtime need about $((MIN_FREE_KB / 1024)) MB. Free space, or choose --install-dir on a larger filesystem."
 			fi
 			;;
 	esac
@@ -970,7 +970,7 @@ main() {
 	trap 'exit 143' TERM
 
 	node_version="$(resolve_node_version "$node_wanted")"
-	version_ge "$node_version" "$NODE_MIN" || fail "Node $node_version is older than Clio Coder's floor $NODE_MIN; pick $NODE_DEFAULT_MAJOR or newer"
+	version_ge "$node_version" "$NODE_MIN" || fail "Node $node_version is older than CLIO Coder's floor $NODE_MIN; pick $NODE_DEFAULT_MAJOR or newer"
 	runtime_dir="$install_root/runtime/node-v$node_version-$node_build"
 	node_bin="$runtime_dir/bin/node"
 	if [ "$refresh_runtime" = 0 ] && [ -x "$node_bin" ] && "$node_bin" --version >/dev/null 2>&1; then
@@ -1073,7 +1073,7 @@ if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rc
 		active_version="$("$node_bin" -e 'process.stdout.write(require(process.argv[1]).version)' "$(manifest_field current)/lib/node_modules/@iowarp/clio-coder/package.json" 2>/dev/null)" || active_version=""
 		if [ -n "$active_version" ] && ! version_ge "${installed_version%%-*}" "${active_version%%-*}"; then
 			# An older version rejects keys a newer one wrote, and its own doctor --fix exits 1 and changes nothing.
-			fail "candidate checks failed; previous install remains active. Clio Coder $installed_version is older than the active $active_version, and doctor --fix cannot make it read settings a newer version wrote, whatever the lines above advise. To use $installed_version, remove the keys named above from settings.yaml, then rerun this installer."
+			fail "candidate checks failed; previous install remains active. CLIO Coder $installed_version is older than the active $active_version, and doctor --fix cannot make it read settings a newer version wrote, whatever the lines above advise. To use $installed_version, remove the keys named above from settings.yaml, then rerun this installer."
 		fi
 		# The clio-coder on PATH is still the previous version, and a version that predates a repair reports nothing to fix.
 		fail "candidate checks failed; previous install remains active. Repair with the new version itself, then rerun this installer: \"$node_bin\" \"$entry\" doctor --fix"

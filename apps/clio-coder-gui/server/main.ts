@@ -146,11 +146,11 @@ export async function main(args = process.argv.slice(2)) {
 			console.log(`[clio-coder:gui] ${url.href}`);
 			if ("restartedFrom" in reused)
 				console.error(
-					`[clio-coder:gui] Restarted the idle background app from Clio Coder ${reused.restartedFrom} to ${reused.running ?? version}.`,
+					`[clio-coder:gui] Restarted the idle background app from CLIO Coder ${reused.restartedFrom} to ${reused.running ?? version}.`,
 				);
 			if (reused.running && reused.running !== version)
 				console.error(
-					`[clio-coder:gui] The background app is still running Clio Coder ${reused.running}; this installation is ${version}. Restart it to use this version: clio-coder gui background restart`,
+					`[clio-coder:gui] The background app is still running CLIO Coder ${reused.running}; this installation is ${version}. Restart it to use this version: clio-coder gui background restart`,
 				);
 			// A window the app says is live is brought forward, still on its own page; a launch that named a
 			// page asks the app to show it there. A window left by a restarted server is dead, so the fresh link
@@ -161,7 +161,7 @@ export async function main(args = process.argv.slice(2)) {
 				focus: () => focusAppWindow(),
 				open: (reuse) => openLink(url.href, reuse),
 			});
-			if (outcome !== "opened") hint("Brought the open Clio Coder window forward.");
+			if (outcome !== "opened") hint("Brought the open CLIO Coder window forward.");
 			if (outcome === "page-not-shown")
 				console.error(
 					"[clio-coder:gui] The open window was brought forward but could not be shown that page. Open the printed URL in it.",
@@ -322,8 +322,8 @@ export async function main(args = process.argv.slice(2)) {
 		if (!persistent) {
 			hint(
 				values.idleMs === undefined
-					? "Clio Coder runs while this terminal stays open. Press Ctrl+C to stop it."
-					: "Clio Coder stops after it has been idle. Press Ctrl+C to stop it now.",
+					? "CLIO Coder runs while this terminal stays open. Press Ctrl+C to stop it."
+					: "CLIO Coder stops after it has been idle. Press Ctrl+C to stop it now.",
 			);
 			if (backgroundAbsent && backgroundCapability(process.platform).available)
 				hint(

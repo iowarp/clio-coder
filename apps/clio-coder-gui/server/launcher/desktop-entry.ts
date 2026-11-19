@@ -25,8 +25,8 @@ export function desktopEntry(paths: LaunchPaths) {
 	return [
 		"[Desktop Entry]",
 		"Type=Application",
-		"Name=Clio Coder",
-		"Comment=Build and explore with Clio Coder",
+		"Name=CLIO Coder",
+		"Comment=Build and explore with CLIO Coder",
 		`Exec=${argv.map(desktopArgument).join(" ")}`,
 		`Icon=${paths.icon ? paths.icon.replace(/\\/g, "\\\\") : "applications-development"}`,
 		"Terminal=false",

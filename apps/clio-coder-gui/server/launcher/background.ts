@@ -441,7 +441,7 @@ export async function preferBackground(
 	if (!(await sameInstallation(state.config.packageRoot, packageRoot)))
 		return {
 			kind: "unavailable",
-			reason: "The background app belongs to another Clio Coder installation, so this one will not take it over.",
+			reason: "The background app belongs to another CLIO Coder installation, so this one will not take it over.",
 		};
 	try {
 		if (state.legacy) {
@@ -624,7 +624,7 @@ export async function background(args: string[], launch: LaunchPaths, platform: 
 	}
 	if (command === "stop") {
 		await stopBackground(directory);
-		console.log("Clio Coder background app stopped. It starts again at your next login, or with clio-coder gui.");
+		console.log("CLIO Coder background app stopped. It starts again at your next login, or with clio-coder gui.");
 		return;
 	}
 	if (command === "install") {
@@ -656,12 +656,12 @@ export async function background(args: string[], launch: LaunchPaths, platform: 
 		console.log(JSON.stringify({ ...result, windows }, null, 2));
 		if (values.json && !values.open) return;
 		console.log(
-			"Background sessions use Clio Coder's saved credentials. If a target key exists only in your terminal environment, save it with clio-coder auth login <target> before starting a conversation.",
+			"Background sessions use CLIO Coder's saved credentials. If a target key exists only in your terminal environment, save it with clio-coder auth login <target> before starting a conversation.",
 		);
 		if (!values.open) {
 			console.log(
 				windows.status === "installed"
-					? "Open it any time from the Windows Start Menu (Clio Coder) or with: clio-coder gui"
+					? "Open it any time from the Windows Start Menu (CLIO Coder) or with: clio-coder gui"
 					: "Open it any time with: clio-coder gui",
 			);
 			return;
@@ -670,33 +670,33 @@ export async function background(args: string[], launch: LaunchPaths, platform: 
 	if (command === "restart") {
 		if (values["if-idle"]) {
 			if (upgraded) {
-				console.log("Clio Coder background app restarted.");
+				console.log("CLIO Coder background app restarted.");
 				return;
 			}
 			const result = await restartBackgroundIfIdle(directory, undefined, undefined, undefined, launch);
 			const line =
 				result.status === "absent"
-					? "Clio Coder background app is not installed."
+					? "CLIO Coder background app is not installed."
 					: result.status === "restarted"
-						? "Clio Coder background app restarted."
+						? "CLIO Coder background app restarted."
 						: result.reason === "busy"
-							? "Clio Coder background app was left running because it is busy."
+							? "CLIO Coder background app was left running because it is busy."
 							: result.reason === "unknown"
-								? "Clio Coder background app was left running because it does not report whether it is idle."
+								? "CLIO Coder background app was left running because it does not report whether it is idle."
 								: result.reason === "unproven"
-									? "Clio Coder background app is running but did not prove it is this installation's app, so it was left running. See clio-coder gui background status."
-									: "Clio Coder background app was left stopped.";
+									? "CLIO Coder background app is running but did not prove it is this installation's app, so it was left running. See clio-coder gui background status."
+									: "CLIO Coder background app was left stopped.";
 			console.log(line);
 			return;
 		}
 		const restarted = await restartBackground(directory, undefined, undefined, launch);
-		console.log(`Clio Coder background app restarted and ready at ${new URL(restarted.url).origin}.`);
+		console.log(`CLIO Coder background app restarted and ready at ${new URL(restarted.url).origin}.`);
 		return;
 	}
 	const { url: origin } = await startCurrentBackground(directory, launch);
 	const url = command === "open" ? await ticketUrl(directory, origin) : origin;
 	if (command === "start") {
-		console.log(`Clio Coder background app is ready at ${new URL(url).origin}.`);
+		console.log(`CLIO Coder background app is ready at ${new URL(url).origin}.`);
 		return;
 	}
 	// Print a manual fallback, and fail so the Windows host can display the captured error.

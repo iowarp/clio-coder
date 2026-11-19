@@ -114,7 +114,7 @@ export function backgroundUnit(config: BackgroundConfig, directory: string) {
 	];
 	return [
 		"[Unit]",
-		"Description=Clio Coder graphical application",
+		"Description=CLIO Coder graphical application",
 		"StartLimitIntervalSec=30",
 		"StartLimitBurst=5",
 		"",

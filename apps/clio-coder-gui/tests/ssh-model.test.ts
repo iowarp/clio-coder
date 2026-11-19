@@ -125,7 +125,7 @@ test("the version gate refuses a different package version or a different known 
 	assert.match(version.ok ? "" : version.detail, /clio-coder fleet nodes install blade --yes$/);
 	const build = versionGate("blade", { clio: "0.6.7-dev", build: "b1" }, { clio: "0.6.7-dev", build: "b2" });
 	assert.equal(build.ok, false);
-	assert.match(build.ok ? "" : build.detail, /different build of Clio Coder 0\.6\.7-dev \(b2, this app is b1\)/);
+	assert.match(build.ok ? "" : build.detail, /different build of CLIO Coder 0\.6\.7-dev \(b2, this app is b1\)/);
 	assert.match(build.ok ? "" : build.detail, /clio-coder fleet nodes install blade --yes$/);
 });
 
