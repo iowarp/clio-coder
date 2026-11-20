@@ -937,7 +937,9 @@ describe("contracts/configure-onboarding", () => {
 			);
 			// S-78: "Later" ends setup with nothing saved and names the sign-in command.
 			const screen = plainText(result.transcript());
-			ok(screen.includes("shows a link and a code to sign in on any device"), screen);
+			// ALCF never shows a code of its own: Globus shows one after sign-in and the operator pastes it back.
+			ok(screen.includes("shows a sign-in link for any device, then asks for the code that page shows"), screen);
+			ok(!screen.includes("a link and a code"), screen);
 			ok(!screen.includes("opens your browser"), screen);
 			strictEqual(result.code, 130, screen);
 			ok(screen.includes("clio-coder auth login alcf, then clio-coder"), screen);

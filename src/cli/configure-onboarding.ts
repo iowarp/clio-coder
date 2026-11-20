@@ -1043,6 +1043,22 @@ function keyWaitsForRefusal(answers: Answers, runtime: RuntimeDescriptor): boole
 	);
 }
 
+/**
+ * What Connect now does for this runtime's sign-in, as a phrase that follows the choice's name. A device-code flow
+ * shows its own code; every other flow asks for the code its sign-in page shows, so it never promises one.
+ */
+function connectHint(runtime: RuntimeDescriptor, browser: boolean): string {
+	const flow = runtime.oauthSignIn ?? "paste-code";
+	if (flow === "paste-only")
+		return browser
+			? "opens your browser, then asks for the code the sign-in page shows"
+			: "shows a sign-in link for any device, then asks for the code that page shows";
+	if (browser) return "opens your browser and waits for the sign-in";
+	return flow === "device-code"
+		? "shows a link and a code to enter on any device"
+		: "shows a sign-in link for any device, then asks for the code that page shows";
+}
+
 const CREDENTIAL_STEP: Step = {
 	id: "credential",
 	applies: (answers) =>
@@ -1065,10 +1081,8 @@ const CREDENTIAL_STEP: Step = {
 					{
 						value: "oauth-connect",
 						label: "Connect now",
-						// The sign-in opens a browser only where loginOAuthRuntime can; elsewhere it prints a link and a code.
-						hint: canOpenBrowser()
-							? "opens your browser and waits for the sign-in"
-							: "no browser here; shows a link and a code to sign in on any device",
+						// Worded per flow: only a device-code flow shows a code of its own; the others ask for the one the page shows.
+						hint: connectHint(runtime, canOpenBrowser()),
 					},
 					{
 						value: "oauth-skip",

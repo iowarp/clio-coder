@@ -64,6 +64,25 @@ test("the routes Clio found and the test-request failure are steps of their own,
 	);
 	assert.equal(review.kind === "review" && review.tests, true);
 	assert.deepEqual(review.kind === "review" ? review.notes : null, []);
+
+	// The sign-in lede is the backend's own Connect now hint: only a device-code flow shows a code, and a host with no
+	// browser opens none.
+	const signIn = (hint: string) => {
+		const view = stepFor({
+			...select(["Sign in to ALCF Inference (Globus)", "credential: none"], ["Connect now", "Later"]),
+			choices: [
+				{ id: 0, label: "Connect now", hint },
+				{ id: 1, label: "Later", hint: "" },
+			],
+		});
+		return view.kind === "signin" ? view.lede : null;
+	};
+	assert.equal(
+		signIn("shows a sign-in link for any device, then asks for the code that page shows"),
+		"CLIO Coder shows a sign-in link for any device, then asks for the code that page shows.",
+	);
+	assert.equal(signIn("opens your browser and waits for the sign-in"), "CLIO Coder opens your browser and waits for the sign-in.");
+
 });
 
 test("the test request is read from the CLI's lines: waiting on it, its answer, and a save without it", () => {

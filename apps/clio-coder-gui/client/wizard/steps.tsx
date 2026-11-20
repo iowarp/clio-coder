@@ -287,8 +287,7 @@ export function SignInStep({ view, busy, send }: StepProps<Of<"signin">>) {
 			title={`Sign in to ${view.provider}`}
 			lede={
 				<p>
-					CLIO Coder opens your browser so you can sign in there. The command-line tool stores the result, and this page
-					never sees it.
+					{view.lede} The command-line tool stores the result, and this page never sees it.
 				</p>
 			}
 			actions={

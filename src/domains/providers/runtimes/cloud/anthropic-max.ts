@@ -126,6 +126,7 @@ const anthropicMaxRuntime = {
 	tier: "cloud",
 	apiFamily: "anthropic-messages",
 	auth: "oauth",
+	oauthSignIn: "paste-code",
 	authNotice:
 		"Connects with your Claude Pro/Max subscription via OAuth (the same path Claude Code uses). " +
 		"Using subscription credentials outside Anthropic's first-party apps may not align with their " +

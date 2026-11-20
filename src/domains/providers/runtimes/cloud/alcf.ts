@@ -143,6 +143,7 @@ const alcfRuntime: RuntimeDescriptor = {
 	tier: "cloud",
 	apiFamily: "openai-completions",
 	auth: "oauth",
+	oauthSignIn: "paste-only",
 	gatewayUrl: {
 		label: "ALCF gateway URL",
 		example: "https://inference-api.alcf.anl.gov/resource_server/sophia/vllm/v1",

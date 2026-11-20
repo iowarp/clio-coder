@@ -114,6 +114,8 @@ export type StepView =
 			note: string | null;
 			connect: Choice | null;
 			later: Choice | null;
+			/** What Connect now does, in the backend's own words: it knows the flow and whether a browser can open there. */
+			lede: string;
 	  })
 	| (Base & {
 			kind: "credential-source";
@@ -310,6 +312,7 @@ export function stepFor(prompt: Prompt): StepView {
 					.find((line) => line.startsWith("credential:"))
 					?.slice("credential:".length)
 					.trim() ?? "";
+			const connect = byLabel(prompt, /^Connect now$/u);
 			return {
 				kind: "signin",
 				stage: "connect",
@@ -318,8 +321,11 @@ export function stepFor(prompt: Prompt): StepView {
 				provider: title.slice("Sign in to ".length),
 				status,
 				note: lines.find((line) => /^Sign-in stores credentials/u.test(line)) ?? null,
-				connect: byLabel(prompt, /^Connect now$/u),
+				connect,
 				later: byLabel(prompt, /^Later$/u),
+				lede: connect?.hint
+					? `CLIO Coder ${connect.hint}.`
+					: "CLIO Coder signs you in through its command-line tool.",
 			};
 		}
 		if (title === "How should Clio get the API key?")
