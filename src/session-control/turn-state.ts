@@ -429,6 +429,7 @@ export type TurnPersistenceState = TurnStateView<
 	| "lastTurnId"
 	| "synthesisToolLock"
 	| "toolBudgetLock"
+	| "turnCompletion"
 >;
 
 /** turn-recovery: owns the route move and consumes the stall watchdog's reason. */
