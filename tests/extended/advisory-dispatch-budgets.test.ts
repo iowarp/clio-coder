@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { createAdmissionQueue } from "../../src/domains/dispatch/admission-queue.js";
 import {
+	budgetLimitWords,
 	cloneRunToolBudgetEnvelope,
 	resolveToolBudgetEnvelope,
 	workerBudgetFromEnvelope,
@@ -386,6 +387,27 @@ describe("dispatch advisory admission and explicit authority", () => {
 		equal(workerBudgetFromEnvelope(raised).ceiling, 150);
 		ok(raised.reasons.some((reason) => reason.code === "global-cap-clamp"));
 		deepStrictEqual(cloneRunToolBudgetEnvelope(JSON.parse(JSON.stringify(raised))), raised);
+		// The card's growth note follows the revision left after the cap: none when the cap folded it away.
+		const growth = (hardCap: number) =>
+			budgetLimitWords(
+				resolveToolBudgetEnvelope({
+					...advisory,
+					hardCap,
+					request: { toolCalls: 50, readReserve: 2, retryRevision: { toolCalls: 200, readReserve: 2 } },
+				}),
+			);
+		equal(
+			growth(150),
+			"planned for about 50 tool calls; Clio stops it at 150 (lowered to Clio's overall limit; about 150 if it has to redo its answer)",
+		);
+		equal(growth(50), "Clio stops it at 50 tool calls (lowered to Clio's overall limit)");
+		ok(
+			!resolveToolBudgetEnvelope({
+				...advisory,
+				hardCap: 50,
+				request: { toolCalls: 50, readReserve: 2, retryRevision: { toolCalls: 200, readReserve: 2 } },
+			}).reasons.some((reason) => reason.code === "revision-growth-authorized"),
+		);
 
 		let observed: unknown;
 		const bundle = makeDispatchBundle(dispatchStubContext(), {

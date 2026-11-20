@@ -192,12 +192,6 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 			detail: `the ${requestedPeak} tool calls estimated were held at fleet.limits.toolCallsPerRun ${input.hardCap}`,
 		});
 	}
-	if (!forceSynthesis && revisionCeiling !== undefined && !samePhase(revisionCeiling, selected)) {
-		reasons.push({
-			code: "revision-growth-authorized",
-			detail: `a result-contract revision may grow from ${selected.toolCalls}/${selected.readReserve} to the advisory estimate ${revisionCeiling.toolCalls}/${revisionCeiling.readReserve}`,
-		});
-	}
 
 	const toolCalls = forceSynthesis
 		? Math.min(
@@ -242,9 +236,14 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 		}
 		const revisionToolCalls = Math.min(revisionCeiling.toolCalls, advisoryCap);
 		revisionReadReserve = Math.min(revisionReadReserve, Math.max(0, revisionToolCalls - 1));
-		// A revision the cap folds onto the base phase grows nothing and is dropped.
-		if (revisionToolCalls > toolCalls || (revisionToolCalls === toolCalls && revisionReadReserve > readReserve))
+		// A revision the cap folds onto the base phase grows nothing and is dropped, with no growth reason.
+		if (revisionToolCalls > toolCalls || (revisionToolCalls === toolCalls && revisionReadReserve > readReserve)) {
 			effectiveRevision = { toolCalls: revisionToolCalls, readReserve: revisionReadReserve };
+			reasons.push({
+				code: "revision-growth-authorized",
+				detail: `a result-contract revision may grow from ${toolCalls}/${readReserve} to ${revisionToolCalls}/${revisionReadReserve}`,
+			});
+		}
 	}
 
 	const authoredMaximum = input.policy.maximum ?? input.policy;
@@ -526,11 +525,18 @@ export function budgetLimitWords(envelope: RunToolBudgetEnvelope): string {
 	}
 	const budget = workerBudgetFromEnvelope(envelope);
 	const codes = new Set(envelope.reasons.map((reason) => reason.code));
+	// Growth is worded from the revision the run holds after the cap, never from the reason codes the estimate
+	// produced: a cap that folded the revision onto the base phase leaves nothing to grow into (M6).
+	const revision = budget.revision;
 	const notes = [
 		...(codes.has("global-cap-clamp") ? ["lowered to Clio's overall limit"] : []),
-		...(codes.has("retry-growth-authorized") || codes.has("revision-growth-authorized")
-			? ["more if it has to redo its answer"]
-			: []),
+		...(revision === undefined
+			? []
+			: [
+					revision.toolCalls > budget.toolCalls
+						? `about ${revision.toolCalls} if it has to redo its answer`
+						: "more reads if it has to redo its answer",
+				]),
 	];
 	const stop = budget.mode === "advisory" ? (budget.ceiling ?? budget.hardCap) : budget.hardCap;
 	// A plan that equals the stop is one number, said once: `about 20; stops at 20` read as two limits.
