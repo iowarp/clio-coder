@@ -1239,6 +1239,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		providers,
 		() => telemetry?.acquireTelemetrySession,
 		() => session?.current(),
+		() => telemetry?.read?.live()?.callRecords() ?? null,
 	);
 	// Lesson gate decisions reach the operator through the transcript notice
 	// path once the chat loop has bound it; before that, a diagnostic line.
@@ -1309,6 +1310,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				windowSteps: memory.trajectorySteps,
 				maxTokens: memory.maxOutputTokens,
 				timeoutMs: memory.timeoutMs,
+				surfaces: memory.surfaces,
 			};
 		},
 		...createBackgroundMemoryRouting(

@@ -13,6 +13,7 @@ import type { ThinkingLevel } from "../../core/defaults.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { resolveMemoryRoute } from "../../core/session-routing.js";
 import type { MemorySurfaceId } from "../../core/side-surfaces.js";
+import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import { noCallRunUsageFacts, pricingBasisFields, unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
@@ -48,8 +49,8 @@ import { ceilChars, estimateAgentContextTokens } from "../session/context-accoun
 import { callSettlementFromMessage } from "../telemetry/call-facts.js";
 import type { CallJournalOptions } from "../telemetry/call-scope.js";
 import { openCallScope } from "../telemetry/call-scope.js";
-import type { BackgroundRouteFacts } from "./background-budget.js";
-import { decideBackgroundStep } from "./background-budget.js";
+import type { BackgroundRouteFacts, SideShareFacts, SideShareHeld } from "./background-budget.js";
+import { decideBackgroundStep, foldSideShare, SIDE_SHARE_EXEMPT } from "./background-budget.js";
 import { OBSERVATION_PROMPT } from "./observations.js";
 import type { TaskMemoryModelClient, TaskMemoryModelRequest, TaskMemoryStepUsage } from "./task-memory-policy.js";
 import {
@@ -94,6 +95,43 @@ interface BackgroundBudgetInputs {
 	settings: Readonly<ClioSettings>;
 	/** Priced session spend; absent where no session ledger exists, which reads as none. */
 	sessionSpendUsd?: () => number;
+	/** The session's side-share governor; absent where no session journal is read, which admits. */
+	sideShare?: SideShareGovernor;
+}
+
+/**
+ * The side-share governor of one session (memory design 4.1), shared by every routing instance a call journal serves so
+ * a call held by one counts for the others. Its counters fold from the session's own journal on each decision.
+ */
+export interface SideShareGovernor {
+	/** What the governor reads for a call of `purpose`, the calls this process holds included. */
+	facts(purpose: MemorySurfaceId, memory: Readonly<ClioSettings["context"]["memory"]>): SideShareFacts;
+	/** Hold an admitted call's output budget until its attempt settles; taken in the step that admitted it. */
+	hold(purpose: MemorySurfaceId, maxTokens: number): () => void;
+}
+
+function createSideShareGovernor(sessionCallRecords: () => readonly TelemetryRecord[] | null): SideShareGovernor {
+	const held = new Set<SideShareHeld>();
+	return {
+		facts(purpose, memory) {
+			let records: readonly TelemetryRecord[] = [];
+			try {
+				records = sessionCallRecords() ?? [];
+			} catch {
+				// An unreadable journal folds as no session spend: past the free calls, a zero main denominator refuses.
+			}
+			return {
+				share: memory.sideShare,
+				automatic: !SIDE_SHARE_EXEMPT.has(purpose),
+				...foldSideShare(records, [...held], memory.maxOutputTokens),
+			};
+		},
+		hold(purpose, maxTokens) {
+			const call = { purpose, maxTokens };
+			held.add(call);
+			return () => held.delete(call);
+		},
+	};
 }
 
 function backgroundRouteFacts(
@@ -122,9 +160,14 @@ export function createBackgroundMemoryModelClient(
 	fallbackOnly = false,
 	admitModelFlow?: AdmitBackgroundModelFlow,
 	sessionSpendUsd?: () => number,
+	sideShare?: SideShareGovernor,
 ): BackgroundMemoryRoute | null {
 	if (!settings.context.memory.enabled) return null;
-	const budget: BackgroundBudgetInputs = { settings, ...(sessionSpendUsd === undefined ? {} : { sessionSpendUsd }) };
+	const budget: BackgroundBudgetInputs = {
+		settings,
+		...(sessionSpendUsd === undefined ? {} : { sessionSpendUsd }),
+		...(sideShare === undefined ? {} : { sideShare }),
+	};
 	const memoryRoute = resolveMemoryRoute(settings);
 	const configuredTarget = memoryRoute.target?.trim();
 	const configuredModel = memoryRoute.model?.trim();
@@ -345,6 +388,7 @@ function prepareBackgroundMemoryRoute(
 			// disturbance even when a timeout means the usage sink never sees it.
 			complete: async (request) => {
 				let usageObserved = false;
+				let releaseHold: (() => void) | undefined;
 				try {
 					// Decided before the metadata probe, auth or any byte leaves, so a
 					// skipped step costs nothing; the next cadence tick decides again.
@@ -379,6 +423,9 @@ function prepareBackgroundMemoryRoute(
 							ceilingUsd: budget?.settings.safety.limits.sessionCostUsd ?? 0,
 						},
 						quota: routeQuota,
+						...(budget?.sideShare === undefined
+							? {}
+							: { sideShare: budget.sideShare.facts(request.purpose, budget.settings.context.memory) }),
 						endpoint: {
 							occupied: endpointKey === null ? 0 : modelStreamUsage(endpointCapacityUsage(), endpointKey),
 							admissionLimit:
@@ -393,6 +440,8 @@ function prepareBackgroundMemoryRoute(
 						}
 						throw new TaskMemoryBudgetSkipError(decision.reason, decision.resumeAt);
 					}
+					// In the step that admitted it, so a concurrent decision on another routing instance already counts it.
+					releaseHold = budget?.sideShare?.hold(request.purpose, request.maxTokens);
 					await prepareBackgroundModelMetadata(providers, targetId, request.signal);
 					const { model, refined } = prepareBackgroundMemoryModel(providers, targetId, wireModelId, thinkingLevel);
 					if (refined.runtimeId !== initial.refined.runtimeId || canonicalEndpointKey(refined.target) !== gatewayKey) {
@@ -523,6 +572,8 @@ function prepareBackgroundMemoryRoute(
 							failure: classifyCallFailure(error, { invoked: false, aborted: request.signal.aborted }),
 						});
 					throw error;
+				} finally {
+					releaseHold?.();
 				}
 			},
 		},
@@ -578,14 +629,16 @@ export function createMemoryFlowAdmission(
 /**
  * Each memory step is a journaled call, in its session's journal or the
  * process journal (#434). Undefined when telemetry cannot journal or the
- * target no longer resolves.
+ * target no longer resolves. With `sessionCallRecords`, the session's own call
+ * records, it also carries the session's side-share governor.
  */
 export function createBackgroundCallJournal(
 	providers: ProvidersContract,
 	acquireTelemetrySession: () => CallJournalOptions["acquire"] | undefined,
 	currentOrigin: () => CallJournalOptions["origin"] | undefined,
-): (targetId: string, modelId: string, purpose: MemorySurfaceId) => CallJournalOptions | undefined {
-	return (targetId, modelId, purpose) => {
+	sessionCallRecords?: () => readonly TelemetryRecord[] | null,
+): BackgroundCallJournal {
+	const journal = (targetId: string, modelId: string, purpose: MemorySurfaceId): CallJournalOptions | undefined => {
 		const origin = currentOrigin();
 		const acquire = acquireTelemetrySession();
 		const target = providers.getTarget(targetId);
@@ -601,7 +654,17 @@ export function createBackgroundCallJournal(
 			...pricingBasisFields(resolveEffectivePricing(target, runtime, modelId)),
 		};
 	};
+	return sessionCallRecords === undefined
+		? journal
+		: Object.assign(journal, { sideShare: createSideShareGovernor(sessionCallRecords) });
 }
+
+/** Opens a memory call's journal options; the governor, when present, is shared by every routing instance using it. */
+export type BackgroundCallJournal = ((
+	targetId: string,
+	modelId: string,
+	purpose: MemorySurfaceId,
+) => CallJournalOptions | undefined) & { readonly sideShare?: SideShareGovernor };
 
 const emitRouteFallbackNotice = declareRuntimeNoticeProducer("background-memory-route", ["route-fallback"]);
 
@@ -623,7 +686,7 @@ export function createBackgroundMemoryRouting(
 	announceFallback = true,
 	/** Priced session spend the metered budget adds a step's projected cost to. */
 	sessionSpendUsd?: () => number,
-	callJournal?: (targetId: string, modelId: string, purpose: MemorySurfaceId) => CallJournalOptions | undefined,
+	callJournal?: BackgroundCallJournal,
 ) {
 	let route: BackgroundMemoryRoute | null = null;
 	let snapshot: Readonly<ClioSettings> | undefined;
@@ -716,6 +779,7 @@ export function createBackgroundMemoryRouting(
 							false,
 							admitModelFlow,
 							sessionSpendUsd,
+							callJournal?.sideShare,
 						);
 			noteFallback();
 			clientFailure = null;
@@ -744,6 +808,7 @@ export function createBackgroundMemoryRouting(
 				true,
 				admitModelFlow,
 				sessionSpendUsd,
+				callJournal?.sideShare,
 			);
 			if (route && clientFailure) route.fallbackReason = `configured route client error: ${clientFailure}`;
 			noteFallback();

@@ -320,6 +320,7 @@ async function retainWithinDeadline(
 				"quota_window",
 				"quota_retry",
 				"time_budget",
+				"side_share",
 				"information_flow_blocked",
 				"no_client",
 			].includes(result.reason);

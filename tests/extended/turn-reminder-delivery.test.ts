@@ -84,6 +84,8 @@ test("empty failed and canceled turns reach memory observers without resuming fo
 		let calls = 0;
 		const rows: TaskMemoryTelemetryStep[] = [];
 		const memory = createMemoryInterventionRegistration({
+			// These pin the model tiers, which ship off (`rules`) as a policy choice.
+			surfaces: { correct: "model", bank: "model" },
 			bank: new TaskMemoryBank(),
 			telemetry: { record: (row) => rows.push(row) },
 			getModelClient: () => ({
@@ -153,6 +155,8 @@ test("tool-batch cadence starts one detached step and delivers completed memory 
 	});
 	let turn!: ReturnType<typeof createTurnMiddleware>;
 	const memory = createMemoryInterventionRegistration({
+		// These pin the model tiers, which ship off (`rules`) as a policy choice.
+		surfaces: { correct: "model", bank: "model" },
 		bank: new TaskMemoryBank(),
 		getModelClient: () => ({
 			complete: () => {

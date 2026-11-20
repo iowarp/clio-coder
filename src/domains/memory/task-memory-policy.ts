@@ -208,6 +208,8 @@ export type TaskMemoryPolicyReason =
 	| "quota_retry"
 	/** The endpoint's measured speed cannot finish this step inside `context.memory.timeoutMs`. */
 	| "time_budget"
+	/** The session's automatic memory spend is over `context.memory.sideShare` of its main spend. */
+	| "side_share"
 	/** The model client threw: unreachable route, auth failure, malformed request. */
 	| "client_error"
 	/** Information-flow admission refused the request before inference. */

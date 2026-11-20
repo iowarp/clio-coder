@@ -674,6 +674,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 						"quota_window",
 						"quota_retry",
 						"time_budget",
+						"side_share",
 						"information_flow_blocked",
 						"store-error",
 						"judge-unavailable",
