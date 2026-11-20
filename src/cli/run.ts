@@ -601,7 +601,8 @@ async function executeRunCommand(
 					// --dry-run (CLI-L4): resolve and print, before any session, model call or --verify command.
 					if (parsed.dryRun === true) {
 						const { buildRunPlan, dryRunPricingRefusal, writeRunPlan } = await import("./run-plan.js");
-						const settings = borrowed?.settings ?? readSettings();
+						// The same layered stack the real run boots from, so a trusted project's chat route is the one previewed.
+						const settings = borrowed?.settings ?? readStrictLayeredSettings(process.cwd()).settings;
 						// CLI-P16: a run the require-priced preflight would refuse is refused here too, not previewed.
 						const pricing = await dryRunPricingRefusal(parsed, settings);
 						if (pricing !== undefined) {
@@ -619,7 +620,7 @@ async function executeRunCommand(
 					if (borrowed === null && parsed.target === undefined && parsed.outputFormat !== undefined) {
 						let unconfigured = false;
 						try {
-							unconfigured = classifyDefaultTarget().kind === "no-target";
+							unconfigured = classifyDefaultTarget(readStrictLayeredSettings(process.cwd()).settings).kind === "no-target";
 						} catch {
 							// Unreadable settings keep the boot path's own diagnostic.
 						}
