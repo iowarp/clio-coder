@@ -144,13 +144,19 @@ test("a held credential's answer counts only from the app that issued it, so a l
 	named = false;
 	assert.equal(await localServerReady(port, token), false);
 	assert.equal(await launchTicket(port, token), null);
+	// One more authenticated exchange with the app, so the launcher holds a credential when the replacement binds.
+	named = true;
+	assert.equal(await localServerReady(port, token), true);
 	app.closeAllConnections();
 	await new Promise((resolve) => app.close(resolve));
-	// Another program takes the port in the restart gap and answers 200 to anything; it cannot prove the token.
+	// Another program takes the port in the restart gap and answers 200 to anything; the held credential's answer names
+	// a client this process does not hold, and the squatter cannot prove the token.
+	const presented: string[] = [];
 	const squatter = createServer((req, res) => {
 		if (req.url === "/api/auth/challenge") return res.end(JSON.stringify({ challenge: "q".repeat(43), expiresIn: 60 }));
 		if (req.url === "/api/auth/clients")
 			return res.end(JSON.stringify({ clientId: "x", credential: "x".repeat(43), rotateIn: 450, serverProof: "nope" }));
+		presented.push(req.headers.authorization ?? "");
 		res.setHeader("X-Clio-Client", "squatter");
 		res.end(JSON.stringify({ apiVersion: 1, pwa: true }));
 	});
@@ -160,4 +166,5 @@ test("a held credential's answer counts only from the app that issued it, so a l
 		squatter.close();
 	});
 	assert.equal(await localServerReady(port, token), false);
+	assert.ok(presented[0]?.endsWith("c".repeat(43)), "the replacement was asked with the held credential");
 });
