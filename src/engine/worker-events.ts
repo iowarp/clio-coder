@@ -186,6 +186,22 @@ export interface ClioRepositoryInstructionsEvent {
 	payload: { reason: "switch-unsupported"; detail: string };
 }
 
+/**
+ * An ACP peer asked the user a fixed-choice question (not a tool approval). A delegation has no operator to
+ * choose, so it was answered `cancelled`; the record keeps what was asked and any security warning the peer
+ * attached to a choice.
+ */
+export interface ClioPeerQuestionEvent {
+	type: "clio_coder_peer_question";
+	payload: {
+		questionId: string;
+		question: string;
+		choices: ReadonlyArray<string>;
+		securityWarning?: string;
+		answer: "cancelled";
+	};
+}
+
 export type ClioWorkerEvent =
 	| WorkerTelemetryFrame
 	| ClioToolStartEvent
@@ -200,4 +216,5 @@ export type ClioWorkerEvent =
 	| ClioFlowRestrictionsEvent
 	| ClioHelperResultEvent
 	| ClioHelperResultRejectedEvent
-	| ClioRepositoryInstructionsEvent;
+	| ClioRepositoryInstructionsEvent
+	| ClioPeerQuestionEvent;

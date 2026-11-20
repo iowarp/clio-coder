@@ -243,6 +243,121 @@ test("ACP adapter launches agy with an allowlisted env and an owned, marked TMPD
 	}
 });
 
+interface AgyFrame {
+	method?: string;
+	id?: unknown;
+	params?: {
+		clientCapabilities?: unknown;
+		clientInfo?: { name?: string };
+		_meta?: unknown;
+		prompt?: Array<{ text?: string }>;
+	};
+	result?: unknown;
+}
+
+test("ACP adapter applies the agy shims: version floor, explicit capabilities, prompt append, default mode, questions, steering, sign-in", {
+	skip: process.platform === "win32",
+}, async () => {
+	const scratch = await mkdtemp(join(tmpdir(), "clio-agy-shims-"));
+	const fixture = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
+	const cwd = process.cwd();
+	const launch = async (name: string, version: string, session: "ok" | "auth") => {
+		const dir = join(scratch, name);
+		await mkdir(dir);
+		const log = join(dir, "frames.jsonl");
+		const agy = join(dir, "agy");
+		await writeFile(agy, `#!/bin/sh\nexec "${process.execPath}" "${fixture}" agy "${log}" ${version} ${session}\n`, {
+			mode: 0o755,
+		});
+		const run = startAcpDelegationRun({
+			agent: {
+				id: "antigravity",
+				command: agy,
+				args: ["acp", "--gemini-dir", "~/.gemini", "--app-data-dir", "antigravity-cli"],
+				env: { HOME: scratch },
+				connectTimeoutMs: 5_000,
+			},
+			task: "pick a branch",
+			systemPrompt: "SYSTEM RULES",
+			cwd,
+			safety: createWorkerSafety({ cwd }),
+		});
+		const frames = async () =>
+			(await readFile(log, "utf8").catch(() => ""))
+				.trim()
+				.split("\n")
+				.filter((line) => line.length > 0)
+				.map((line) => JSON.parse(line) as AgyFrame);
+		return { run, frames, agy };
+	};
+	try {
+		const old = await launch("old", "1.5.0", "ok");
+		const refused = await old.run.promise;
+		strictEqual(refused.stopReason, "error");
+		ok(/CLI 1\.5\.0 is not supported.*agy 1\.5\.1 or later/u.test(refused.failureMessage ?? ""), refused.failureMessage);
+		deepStrictEqual(
+			(await old.frames()).map((frame) => frame.method),
+			["initialize"],
+		);
+
+		const signedOut = await launch("auth", "1.5.13", "auth");
+		const auth = await signedOut.run.promise;
+		const login = `${signedOut.agy} acp --gemini-dir ${join(scratch, ".gemini")} --app-data-dir antigravity-cli --login`;
+		deepStrictEqual(auth.authRequired, { loginCommand: login });
+		ok(auth.failureMessage?.includes(`Authentication required`), auth.failureMessage);
+		ok(auth.failureMessage?.endsWith(login), auth.failureMessage);
+
+		const live = await launch("live", "1.5.13", "ok");
+		const questions: unknown[] = [];
+		const steered: boolean[] = [];
+		for await (const event of live.run.events) {
+			const typed = event as { type: string; payload?: unknown };
+			if (typed.type !== "clio_coder_peer_question") continue;
+			questions.push(typed.payload);
+			steered.push(live.run.steer?.("use the topic branch") === true);
+		}
+		const result = await live.run.promise;
+		strictEqual(result.stopReason, "end_turn", result.failureMessage);
+		strictEqual(result.delegation.toolCallsRequested, 0);
+		deepStrictEqual(steered, [true]);
+		deepStrictEqual(questions, [
+			{
+				questionId: "interaction_1",
+				question: "Which branch?",
+				choices: ["main", "topic"],
+				securityWarning: "pushes to main",
+				answer: "cancelled",
+			},
+		]);
+		const frames = await live.frames();
+		const init = frames.find((frame) => frame.method === "initialize");
+		deepStrictEqual(init?.params?.clientCapabilities, {
+			fs: { readTextFile: false, writeTextFile: false },
+			terminal: false,
+		});
+		strictEqual(init?.params?.clientInfo?.name, "clio-coder");
+		const sessionNew = frames.find((frame) => frame.method === "session/new");
+		deepStrictEqual(sessionNew?.params?._meta, { antigravity: { systemPrompt: { append: "SYSTEM RULES" } } });
+		deepStrictEqual(frames.find((frame) => frame.method === "session/set_mode")?.params, {
+			sessionId: "agy-session",
+			modeId: "default",
+		});
+		const prompts = frames
+			.filter((frame) => frame.method === "session/prompt")
+			.map((frame) => frame.params?.prompt?.[0]?.text ?? "");
+		strictEqual(prompts.length, 2);
+		const [first = "", second] = prompts;
+		ok(!first.includes("SYSTEM RULES") && first.includes("pick a branch"), first);
+		strictEqual(second, "use the topic branch");
+		ok(!frames.some((frame) => frame.method === "session/cancel"));
+		deepStrictEqual(frames.find((frame) => frame.id === "question-1" && frame.method === undefined)?.result, {
+			outcome: { outcome: "cancelled" },
+		});
+	} finally {
+		await rm(scratch, { recursive: true, force: true });
+	}
+});
+
 test("ACP adapter fails a statusless Anthropic error envelope with end_turn", async () => {
 	const cwd = process.cwd();
 	const result = await startAcpDelegationRun({

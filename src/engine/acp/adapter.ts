@@ -23,8 +23,9 @@ import { externalUsageFacts, reportedUsageSums } from "../external-call-telemetr
 import type { AgentEvent } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
 import { isAntigravityAcp, prepareAntigravityLaunch } from "./antigravity-launch.js";
+import { createAntigravityShims } from "./antigravity-shims.js";
 import { withInstalledCodex } from "./codex-launch.js";
-import { AcpTimeoutError } from "./errors.js";
+import { AcpAuthRequiredError, AcpTimeoutError } from "./errors.js";
 import { AcpEventMapper } from "./event-mapper.js";
 import { AcpToolMediator } from "./tool-mediator.js";
 import {
@@ -89,6 +90,11 @@ export interface AcpDelegationRunHandle {
 	 * final observation bound expires.
 	 */
 	kill(): void;
+	/**
+	 * Mid-turn guidance for a peer that takes it as another `session/prompt` (agy 1.5.0 and later), never
+	 * `session/cancel`. False when the peer has no such channel or no turn is running.
+	 */
+	steer?(text: string): boolean;
 	heartbeatAt: HeartbeatStamp;
 	toolCallLog(): ReturnType<AcpToolMediator["snapshot"]>["toolCallLog"];
 }
@@ -195,9 +201,9 @@ function peerSelectOption(
 	return first;
 }
 
-function flattenPrompt(input: AcpDelegationRunInput): string {
+function flattenPrompt(input: AcpDelegationRunInput, systemPromptSent = false): string {
 	const parts = [
-		input.systemPrompt?.trim() ?? "",
+		systemPromptSent ? "" : (input.systemPrompt?.trim() ?? ""),
 		...(input.dynamicPromptMessages ?? []).map((message) => message.body.trim()),
 		"# Delegated Task",
 		input.task.trim(),
@@ -342,6 +348,14 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	}
 	const antigravity = isAntigravityAcp(input.agent) ? prepareAntigravityLaunch(input.agent, transportOptions.env) : null;
 	if (antigravity) transportOptions.env = antigravity.env;
+	const agy = antigravity
+		? createAntigravityShims({
+				command: input.agent.command,
+				launchArgs: antigravity.args,
+				toolGovernance: input.agent.toolGovernance ?? "clio-coder-policy",
+			})
+		: null;
+	if (agy) Object.assign(transportOptions, agy.transportHooks);
 	if (input.terminationGraceMs !== undefined) transportOptions.terminationGraceMs = input.terminationGraceMs;
 	if (input.terminationWaitMs !== undefined) transportOptions.terminationWaitMs = input.terminationWaitMs;
 	const transport = (() => {
@@ -427,6 +441,12 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			for (const event of mapper.mapUpdate(params)) emit(event);
 		}),
 		transport.onRequest("session/request_permission", (params) => {
+			const question = agy?.question(params) ?? null;
+			if (agy !== null && question !== null) {
+				const { answer, ...asked } = question;
+				emit({ type: "clio_coder_peer_question", payload: { ...asked, answer } });
+				return agy.questionResponse();
+			}
 			if (!telemetry) return mediator.handle(params);
 			const toolCall = isRecord(params) && isRecord(params.toolCall) ? params.toolCall : undefined;
 			return withTelemetryContext(
@@ -474,6 +494,24 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			"Clio's Claude subscription access token expired. Start a new delegation to refresh it; this run was stopped without replaying its work.";
 		void beginForceTermination();
 	});
+	const promptTimeoutMs = turnTimeoutMs === 0 ? undefined : turnTimeoutMs;
+	// Prompts a steer sent into the running turn; the run settles after the last of them.
+	const steerPrompts: Array<Promise<AcpPromptResponse>> = [];
+	let promptInFlight = false;
+	const steer = (text: string): boolean => {
+		const body = text.trim();
+		if (finished || aborted || !promptInFlight || sessionId === null || body.length === 0) return false;
+		if (agy?.steersByPrompt() !== true) return false;
+		const sent = transport.request<AcpPromptResponse>(
+			"session/prompt",
+			{ sessionId, prompt: [{ type: "text", text: body }] },
+			promptTimeoutMs,
+		);
+		// Awaited in turn order below; this only keeps an early rejection from going unhandled.
+		sent.catch(() => {});
+		steerPrompts.push(sent);
+		return true;
+	};
 	const promise = (async (): Promise<AcpDelegationResult> => {
 		let selectedModelId: string | null = null;
 		const requireActive = () => {
@@ -488,8 +526,8 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					protocolVersion: 1,
 					// Clio serves no client-side method (fs/*, terminal/*) to a peer,
 					// so it advertises no client capability; an omitted capability
-					// means unsupported.
-					clientCapabilities: {},
+					// means unsupported. agy needs the refusals spelled out.
+					clientCapabilities: agy?.clientCapabilities ?? {},
 					clientInfo: {
 						name: "clio-coder",
 						title: "CLIO Coder",
@@ -502,14 +540,24 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			if (initialized.protocolVersion !== undefined && initialized.protocolVersion !== 1) {
 				throw new Error(`ACP protocol version ${initialized.protocolVersion} is not supported`);
 			}
-			const session = await transport.request<unknown>(
-				"session/new",
-				{ cwd: input.cwd, mcpServers: [] },
-				connectTimeoutMs,
-			);
+			agy?.admit(initialized);
+			const sessionNew = agy?.sessionNew(input.cwd, input.systemPrompt) ?? {
+				params: { cwd: input.cwd, mcpServers: [] },
+				systemPromptSent: false,
+			};
+			const session = await transport
+				.request<unknown>("session/new", sessionNew.params, connectTimeoutMs)
+				.catch((error: unknown) => {
+					throw agy?.authFailure(error) ?? error;
+				});
 			sessionId = sessionIdFrom(session);
 			requireActive();
 			if (!sessionId) throw new Error("ACP session/new response did not include sessionId");
+			const defaultMode = agy?.defaultMode(sessionId, session) ?? null;
+			if (defaultMode !== null) {
+				await transport.request<unknown>("session/set_mode", defaultMode, connectTimeoutMs);
+				requireActive();
+			}
 			const configOptions = isRecord(session) ? session.configOptions : undefined;
 			const modelOption = peerSelectOption(configOptions, "model", "model");
 			const thoughtOption = peerSelectOption(configOptions, "thought_level");
@@ -580,14 +628,21 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				}
 			}
 			requireActive();
-			const promptResponse = await transport.request<AcpPromptResponse>(
+			promptInFlight = true;
+			let promptResponse = await transport.request<AcpPromptResponse>(
 				"session/prompt",
 				{
 					sessionId,
-					prompt: [{ type: "text", text: flattenPrompt(input) }],
+					prompt: [{ type: "text", text: flattenPrompt(input, sessionNew.systemPromptSent) }],
 				},
-				turnTimeoutMs === 0 ? undefined : turnTimeoutMs,
+				promptTimeoutMs,
 			);
+			// A steer continues the same turn, so the turn ends with the last prompt sent into it.
+			for (let index = 0; index < steerPrompts.length; index++) {
+				const steered = steerPrompts[index];
+				if (steered !== undefined) promptResponse = await steered;
+			}
+			promptInFlight = false;
 			// ACP v1 has no usage field on PromptResponse. Clio servers report it in
 			// _meta; other agents (Copilot/Codex/OpenCode) report nothing here, so usage
 			// is best-effort. Fall back to legacy top-level fields for older peers.
@@ -632,6 +687,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				},
 			};
 		} catch (err) {
+			promptInFlight = false;
 			const termination = await beginForceTermination();
 			const baseMessage = `ACP delegation failed: ${authFailure ?? errorMessage(err)}`;
 			const message = termination.exited
@@ -644,6 +700,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				exitCode: 1,
 				stopReason: aborted ? "cancelled" : "error",
 				...(err instanceof AcpTimeoutError ? { timedOut: true } : {}),
+				...(err instanceof AcpAuthRequiredError ? { authRequired: { loginCommand: err.loginCommand } } : {}),
 				failureMessage: message,
 				delegation: {
 					acpSessionId: sessionId,
@@ -703,6 +760,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		promise,
 		abort,
 		kill,
+		steer,
 		heartbeatAt,
 		toolCallLog: () => mediator.snapshot().toolCallLog,
 	};

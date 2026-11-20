@@ -90,9 +90,80 @@ function advertisesClientCapability(capabilities) {
 	return walk(capabilities);
 }
 
+/**
+ * An `agy acp` 1.5 stand-in: argv is `agy <log> <version> <ok|auth>`. Every frame it receives is appended to the
+ * log. The first prompt asks a fixed-choice question and stays open until a steer prompt arrives.
+ */
+const agyState = { firstPrompt: undefined };
+function agy(request) {
+	appendFileSync(process.argv[3], `${JSON.stringify(request)}\n`);
+	if (request.method === "initialize") {
+		send({
+			jsonrpc: "2.0",
+			id: request.id,
+			result: {
+				protocolVersion: 1,
+				agentCapabilities: { _meta: { antigravity: { systemPrompt: { append: true } } } },
+				agentInfo: { name: "Antigravity ACP Server", version: process.argv[4] },
+			},
+		});
+	} else if (request.method === "session/new") {
+		send(
+			process.argv[5] === "auth"
+				? { jsonrpc: "2.0", id: request.id, error: { code: -32000, message: "Authentication required" } }
+				: {
+						jsonrpc: "2.0",
+						id: request.id,
+						result: {
+							sessionId: "agy-session",
+							modes: {
+								currentModeId: "accept-edits",
+								availableModes: [
+									{ id: "default", name: "Default" },
+									{ id: "accept-edits", name: "Accept edits" },
+								],
+							},
+						},
+					},
+		);
+	} else if (request.method === "session/set_mode") {
+		send({ jsonrpc: "2.0", id: request.id, result: {} });
+	} else if (request.method === "session/prompt" && agyState.firstPrompt === undefined) {
+		agyState.firstPrompt = request.id;
+		send({
+			jsonrpc: "2.0",
+			id: "question-1",
+			method: "session/request_permission",
+			params: {
+				sessionId: "agy-session",
+				toolCall: { toolCallId: "interaction_1", title: "Which branch?", kind: "other" },
+				options: [
+					{ optionId: "main", name: "main", kind: "allow_once", _meta: { "agy.security.warning": "pushes to main" } },
+					{ optionId: "topic", name: "topic", kind: "allow_once" },
+				],
+			},
+		});
+	} else if (request.method === "session/prompt") {
+		send({
+			jsonrpc: "2.0",
+			method: "session/update",
+			params: {
+				sessionId: "agy-session",
+				update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "steered" } },
+			},
+		});
+		send({ jsonrpc: "2.0", id: agyState.firstPrompt, result: { stopReason: "end_turn" } });
+		send({ jsonrpc: "2.0", id: request.id, result: { stopReason: "end_turn" } });
+	}
+}
+
 for await (const line of createInterface({ input: process.stdin })) {
 	const request = JSON.parse(line);
 	if (mode === "cancel-connect") appendFileSync(process.argv[3], `${request.method}\n`);
+	if (mode === "agy") {
+		agy(request);
+		continue;
+	}
 	if (request.id === undefined) continue;
 	if (request.method === "initialize") {
 		if (mode === "cancel-connect" && process.argv[4]) while (!existsSync(process.argv[4])) await setTimeout(5);
