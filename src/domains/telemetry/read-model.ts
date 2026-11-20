@@ -3536,13 +3536,33 @@ function scopeObject<T>(
 	}
 }
 
-/** Live and settled run quantities, from journal clocks and tool settlements (#434). */
-function runActivity(run: Run, options: ReadOptions): RunTelemetryV1["activity"] {
+/** A run's elapsed time and output rate at `options.now`: the only run quantities that move while its journal is quiet. */
+function runClock(
+	run: Run,
+	output: Quantity["fact"],
+	options: ReadOptions,
+): Pick<RunTelemetryV1["activity"], "elapsed" | "outputPerSecond"> {
 	const started = run.settled?.data.startedAt ?? run.firstAt;
 	const terminal = run.source.records.at(-1);
 	const sealedAt = terminal?.k === "run.sealed" || terminal?.k === "share.sealed" ? terminal.t : null;
 	const ended = run.settled?.data.endedAt ?? sealedAt ?? (options.now ?? new Date()).toISOString();
 	const elapsed = started === null ? unobserved : localClock(Math.max(0, Date.parse(ended) - Date.parse(started)));
+	const measured =
+		"kind" in output
+			? output.kind === "measured"
+			: output.unknownCount === 0 && output.coverage.estimated === 0 && output.coverage.measured > 0;
+	const rate =
+		measured && elapsed.kind === "measured" && elapsed.value > 100
+			? localCount(factKnownValue(output) / (elapsed.value / 1000))
+			: unobserved;
+	return {
+		elapsed: { fact: elapsed, display: renderFact(elapsed, "duration") },
+		outputPerSecond: { fact: rate, display: renderFact(rate) },
+	};
+}
+
+/** Live and settled run quantities, from journal clocks and tool settlements (#434). */
+function runActivity(run: Run, output: Quantity["fact"], options: ReadOptions): RunTelemetryV1["activity"] {
 	const toolIds = new Set<string>();
 	for (const record of run.source.records) {
 		if (record.k === "tool.settled") toolIds.add(record.ctx.toolCallId ?? record.id);
@@ -3560,22 +3580,12 @@ function runActivity(run: Run, options: ReadOptions): RunTelemetryV1["activity"]
 				!run.source.records.some((record) => record.k === "journal.gap" && !POLICY_GAPS.has(record.data.reason))
 			? localCount(toolIds.size)
 			: unobserved;
-	const output = quantity({ run }, { scope: "run", owner: run.runId, metric: "output" }).fact;
-	const measured =
-		"kind" in output
-			? output.kind === "measured"
-			: output.unknownCount === 0 && output.coverage.estimated === 0 && output.coverage.measured > 0;
-	const rate =
-		measured && elapsed.kind === "measured" && elapsed.value > 100
-			? localCount(factKnownValue(output) / (elapsed.value / 1000))
-			: unobserved;
 	const latest = [...run.attempts].reverse().find((attempt) => attempt.settled?.usage != null);
 	return {
 		contextTokens: latest
 			? quantity({ run }, { scope: "run", owner: run.runId, attemptId: latest.started.attemptId, metric: "total" })
 			: null,
-		elapsed: { fact: elapsed, display: renderFact(elapsed, "duration") },
-		outputPerSecond: { fact: rate, display: renderFact(rate) },
+		...runClock(run, output, options),
 		toolCalls: { fact: tools, display: renderFact(tools) },
 	};
 }
@@ -3613,14 +3623,15 @@ export function runTelemetry(
 	const view: View = { run };
 	const base = { scope: "run" as const, owner: runId };
 	const settled = run.settled;
+	const tokens = tokenQuantities(view, base);
 	return {
 		...header(options),
 		kind: "run",
-		activity: runActivity(run, options),
+		activity: runActivity(run, tokens.output.fact, options),
 		row: runRow(view, run),
 		journal: journalCoverage(source, run.fold.calls),
 		counts: callCounts(view, base),
-		tokens: tokenQuantities(view, base),
+		tokens,
 		unmeteredCalls: quantity(view, { ...base, metric: "unmeteredCalls" }),
 		settled: settled
 			? {
@@ -3634,6 +3645,23 @@ export function runTelemetry(
 		seal: sealVerdict,
 		result: runResultOf(settled, scope),
 		assessment: runAssessmentOf(run.assessed, scope),
+	};
+}
+
+/**
+ * `telemetry`, which `runTelemetry` built from this same `source`, read again at `options.now`. Only the header's time,
+ * the elapsed time and the output rate read the clock, so a card polling a quiet open run refolds nothing else.
+ */
+export function runTelemetryAt(
+	runId: string,
+	source: JournalSource,
+	telemetry: RunTelemetryV1,
+	options: ReadOptions = {},
+): RunTelemetryV1 {
+	return {
+		...telemetry,
+		...header(options),
+		activity: { ...telemetry.activity, ...runClock(analyzeRun(runId, source), telemetry.tokens.output.fact, options) },
 	};
 }
 
