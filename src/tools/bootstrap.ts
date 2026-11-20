@@ -189,8 +189,11 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		const dispatchToolDeps = {
 			dispatch,
 			getWorkspaceRoot: () => deps.session?.current()?.cwd,
-			approveExternalRead: (root: string, options?: import("./registry.js").ToolInvokeOptions) =>
-				registry.requestReadRootApproval?.(root, options) ?? Promise.resolve(null),
+			approveExternalRead: (
+				root: string,
+				options?: import("./registry.js").ToolInvokeOptions,
+				task?: import("./registry.js").DispatchReadRootTask,
+			) => registry.requestReadRootApproval?.(root, options, task) ?? Promise.resolve(null),
 			...(deps.captureWorkerContext ? { captureWorkerContext: deps.captureWorkerContext } : {}),
 			runEvents: dispatchRunEvents,
 			getAgentSpecs: deps.getAgentSpecs ?? (() => []),

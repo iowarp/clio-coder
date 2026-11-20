@@ -135,6 +135,31 @@ function admissionFailureResult(message: string) {
 	};
 }
 
+/**
+ * Hands each outside read-root approval the dispatched task that reads the root, matched by root in the
+ * order the runner asks, so the card shows that task instead of the operator's last message (CLI-P35).
+ */
+function withReadRootTasks(deps: DispatchToolDeps, snapshot: DispatchExecutionSnapshot | undefined): DispatchToolDeps {
+	const approve = deps.approveExternalRead;
+	if (approve === undefined || snapshot?.kind !== "dispatch") return deps;
+	const count = snapshot.requests.length + (snapshot.rejectedTasks?.length ?? 0);
+	const pending = snapshot.requests.flatMap((request, index) =>
+		request.externalReadRoot === undefined
+			? []
+			: [{ root: request.externalReadRoot, text: request.task, position: snapshot.positions?.[index] ?? index + 1 }],
+	);
+	if (pending.length === 0) return deps;
+	return {
+		...deps,
+		approveExternalRead: (root, options, task) => {
+			const at = pending.findIndex((entry) => entry.root === root);
+			const [entry] = at === -1 ? [] : pending.splice(at, 1);
+			const served = task ?? (entry === undefined ? undefined : { text: entry.text, position: entry.position, count });
+			return approve(root, options, served);
+		},
+	};
+}
+
 export function createDispatchTool(
 	inputDeps: DispatchToolDeps,
 	surfaceOptions: DispatchToolSurfaceOptions = {},
@@ -188,8 +213,8 @@ export function createDispatchTool(
 						`dispatch: implementation unavailable: ${error instanceof Error ? error.message : String(error)}`,
 				};
 			}
-			const result = await runner.runDispatchTool(deps, admission.state, args, options);
 			const snapshot = admission.state.trustedExecutionSnapshots.get(args);
+			const result = await runner.runDispatchTool(withReadRootTasks(deps, snapshot), admission.state, args, options);
 			const notices = snapshot?.kind === "dispatch" ? (snapshot.notices ?? []) : [];
 			const noted: ToolResult =
 				notices.length === 0
