@@ -173,14 +173,14 @@ test("an open run's card reuses its DTO across polls and views, advancing only i
 	strictEqual(second.row, first.row, "a quiet journal is not refolded");
 	strictEqual(second.tokens, first.tokens);
 	strictEqual(second.counts, first.counts);
-	strictEqual(reads, 1, "its scope is read once while its journal is quiet");
+	strictEqual(reads, 2, "each view reads the scope once, and an unchanged scope keeps the DTO");
 	deepStrictEqual([elapsed(first), elapsed(second)], [10_000, 15_000]);
 	strictEqual(second.generatedAt, "2026-01-01T00:00:15.000Z");
 
 	const grown = journal([...quiet.records, ...call("2026-01-01T00:00:12.000Z")]);
 	const third = poll(grown);
 	notStrictEqual(third.row, first.row, "a new record swaps the source and refolds");
-	strictEqual(reads, 2);
+	strictEqual(reads, 3);
 	const calls = third.counts.calls.fact;
 	strictEqual("measured" in calls ? calls.measured : null, 2);
 	strictEqual(elapsed(third), 15_000);
@@ -191,6 +191,69 @@ test("an open run's card reuses its DTO across polls and views, advancing only i
 	const closing = poll(sealed);
 	t.mock.timers.tick(60_000);
 	deepStrictEqual([elapsed(closing), elapsed(poll(sealed))], [14_000, 14_000], "a sealed run's clock stops at its seal");
+});
+
+test("an open run sealed by another process stops advancing on the next view, with no record in this session", async (t) => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-seal-elsewhere-"));
+	const directory = telemetryRunDirectory(stateDir, "run_elsewhere");
+	const context: TelemetryContext = { sessionId: "ses_other", agent: { role: "worker", id: "run_elsewhere" } };
+	const writer = await openCallJournal({
+		directory,
+		context,
+		writer: { clioCoderVersion: "0.0.0-test", piVersion: "test" },
+	});
+	writer.enqueue({
+		kind: "session.opened",
+		data: {},
+		ctx: context,
+		wallMs: Date.now(),
+		mono: performance.now(),
+	} as Parameters<typeof writer.enqueue>[0]);
+	await writer.flush();
+	const unsealed = await readTelemetryScopeFiles(directory);
+	ok(await writer.sealAndClose());
+	const sealedFiles = await readTelemetryScopeFiles(directory);
+
+	t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-01-01T00:00:10.000Z") });
+	const run: JournalSource = {
+		present: true,
+		records: telemetryCall("ses_poll", {
+			role: "worker",
+			at: "2026-01-01T00:00:00.000Z",
+			usage: { input: 1, output: 2 },
+		}),
+		modes: ["standard"],
+		skipped: 0,
+		damaged: 0,
+	};
+	const verified = new Map();
+	const open = new Map();
+	let files = unsealed;
+	// The run's journal source never changes here: the seal lands only in the scope files another process wrote.
+	const poll = () => {
+		const source = {
+			sessionId: "ses_poll",
+			journal: { ...run, records: [] },
+			runs: new Map([["run_elsewhere", run]]),
+			parent: null,
+		};
+		const telemetry = telemetryView(source, () => files, verified, open).run("run_elsewhere");
+		ok(telemetry);
+		return telemetry;
+	};
+	const elapsed = (telemetry: RunTelemetryV1) =>
+		telemetry.activity.elapsed.fact.kind === "measured" ? telemetry.activity.elapsed.fact.value : null;
+	const first = poll();
+	t.mock.timers.tick(5_000);
+	const second = poll();
+	strictEqual(second.row, first.row, "an unchanged scope keeps the DTO");
+	deepStrictEqual([elapsed(first), elapsed(second), second.seal?.status], [10_000, 15_000, "unsealed"]);
+
+	files = sealedFiles;
+	const picked = poll();
+	strictEqual(picked.seal?.status, "verified", "the next view reads the seal from the scope");
+	t.mock.timers.tick(30_000);
+	deepStrictEqual([elapsed(picked), elapsed(poll())], [15_000, 15_000], "its clock stops once the seal is read");
 });
 
 test("a verified run cache follows a reopened and resealed journal", async () => {
