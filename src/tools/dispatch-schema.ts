@@ -101,8 +101,9 @@ export function coordinatorDispatchParameters() {
 		intent: Type.Optional(intent),
 		// No `tags`: store grants are taught on demand (gateway describe dispatch); the canonical schema admits them.
 		// `context` stays off too, but a model cannot ask for a field it never saw, so a fork worker ran isolated (FL-5).
+		// The tool description leaves briefing to this line, and detach to its own sentence, to stay in the byte budget.
 		briefing: Type.Optional(
-			Type.String({ description: "Parent evidence. Parent history (context fork or splice): gateway describe dispatch." }),
+			Type.String({ description: "Parent evidence; history (context fork or splice): gateway describe dispatch." }),
 		),
 		// A plain string: this schema is checked before the canonical one, so an
 		// enum here would refuse the compete and council modes describe teaches.
@@ -118,7 +119,7 @@ export function coordinatorDispatchParameters() {
 		apply: Type.Optional(
 			StringEnum(["merge", "preserve"], { description: "With worktree: merge (default) or keep the branch." }),
 		),
-		detach: Type.Optional(Type.Boolean({ description: "Return ids; collect with monitor before synthesis." })),
+		detach: Type.Optional(Type.Boolean()),
 		// Last for the same reason: a batch stays reachable after any option a model opens with.
 		tasks: Type.Optional(
 			Type.Array(
