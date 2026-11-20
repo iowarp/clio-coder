@@ -714,6 +714,11 @@ export function compareNumeric(
 		reports.push(compareElements(key, gotList, wantList, rule, effectiveNumericCombine(rule), nonFinite));
 	}
 	const failedKeys = reports.filter((report) => !report.passed).map((report) => report.key);
+	// A key whose arrays were both empty compared nothing, so the summary does not call it out of tolerance (SF-10).
+	const unjudgeableKeys = reports
+		.filter((report) => !report.passed && report.failed.every((cause) => cause === "unjudgeable"))
+		.map((report) => report.key);
+	const outOfTolerance = failedKeys.filter((key) => !unjudgeableKeys.includes(key));
 	const empty = Object.keys(reference).length === 0;
 	const passed = failedKeys.length === 0 && !empty;
 	return {
@@ -729,7 +734,9 @@ export function compareNumeric(
 			? "numeric-compare unjudgeable: the reference has no keys, so nothing was compared"
 			: passed
 				? `numeric-compare passed: ${reports.length} key(s) within tolerance`
-				: `numeric-compare failed: ${failedKeys.length} of ${reports.length} key(s) out of tolerance (${failedKeys.join(", ")})`,
+				: outOfTolerance.length === 0
+					? `numeric-compare unjudgeable: ${unjudgeableKeys.join(", ")} held empty arrays on both sides, so nothing was compared`
+					: `numeric-compare failed: ${outOfTolerance.length} of ${reports.length} key(s) out of tolerance (${outOfTolerance.join(", ")})${unjudgeableKeys.length > 0 ? `; unjudgeable: ${unjudgeableKeys.join(", ")}` : ""}`,
 	};
 }
 
