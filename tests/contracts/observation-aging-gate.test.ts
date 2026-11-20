@@ -123,6 +123,13 @@ it("only a call A1 reads as making no change is superseded; a step tool never is
 		[`awk '{print > "f"}' intro.md`, false],
 		["tree -o out.txt", false],
 		["rg --pre cat x .", false],
+		// X1: `cd <one path>` reads and writes nothing, so a cd-prefixed read is a read and a cd-prefixed write is not.
+		["cd src && rg loop .", true],
+		["cd src; git status", true],
+		["cd src && sed -i s/a/b/ intro.md", false],
+		["cd src; make build", false],
+		["cd && ls", false],
+		["cd -P src && ls", false],
 	] as const)
 		strictEqual(callRepeatsAsRead("bash", { command }, declared), read, command);
 	// Typed git: an inspection qualifies, a commit does not.

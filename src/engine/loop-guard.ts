@@ -290,6 +290,8 @@ function segmentOnlyReads(input: ReadonlyArray<string>): boolean {
 	}
 	const program = commandName(words[0] ?? "");
 	const args = words.slice(1);
+	// `cd <one path>` reads nothing and writes nothing, so a cd-prefixed read stays a read (X1).
+	if (program === "cd") return args.length === 1 && !(args[0] ?? "-").startsWith("-");
 	if (program === "git") return gitSegmentOnlyReads(["git", ...args]);
 	const listed = READ_ONLY_SHELL_COMMAND_PATTERN.exec(program)?.[0].trim() === program;
 	return (listed || SHELL_INSPECTIONS.has(program)) && READ_PROGRAM_WRITES[program]?.(args) !== true;
