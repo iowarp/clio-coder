@@ -442,6 +442,10 @@ it("uses package and entry footer units with singular/plural forms across compon
 		() => {},
 	);
 	match(plain(legacy.getHint()), /tab · 1 agents/);
+	// `o` opens the adoption view, not a path import, which only `/library import <path>` does (FX-14).
+	const library = browser("agent", inventory());
+	for (const width of [100, 220]) match(plain(library.view.getHint(width)), /\[o\] adopt · \/library import <path>/);
+	ok(!/\[o\] import/.test(plain(library.view.getHint(220))));
 });
 
 it("a confirmGlobal key asks once: the rail says so, another key keeps it, the same key twice runs it", () => {
