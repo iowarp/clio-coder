@@ -1517,6 +1517,34 @@ test("the yolo floor reads a line with a here-document or here-string and a subs
 	strictEqual(quoted.reasonCode, "yolo-floor:yolo-floor-raw-text");
 	match(quoted.rejection?.detail ?? "", /^rule: yolo-floor-raw-text$/mu);
 	match(quoted.reasons.join("\n"), /matched yolo-floor-delete-target/u);
+
+	// FX-25: replay the two reported command shapes with inert TypeScript fixtures.
+	const templates = Array.from(
+		{ length: 164 },
+		(_, n) => `const p${n} = \`repos/\${CODER_REPOSITORY}/pulls/${n}\`;`,
+	).join("\n");
+	const probe = "const cd = 'cd /etc';\nconst rm = 'rm -rf build';\n";
+	const rows = [
+		["bundle-retention", `cd ${cwd}; cat > $TMPDIR/pull-block.ts <<'EOF'\n${templates}\nEOF`, "allow"],
+		["judge-split", `export TMPDIR=$(mktemp -d); cd ${cwd}; cat > $TMPDIR/probe.ts <<'EOF'\n${probe}EOF`, "allow"],
+		["double quotes", 'cat > probe.ts <<"EOF"\n$(rm -rf /etc)\nEOF', "allow"],
+		["backslash", "cat > probe.ts <<\\EOF\n`rm -rf /etc`\nEOF", "allow"],
+		["unquoted substitution", "cat > probe.ts <<EOF\n$(rm -rf /etc)\nEOF", "yolo-floor-delete-target"],
+		["unquoted backticks", "cat > probe.ts <<EOF\n`rm -rf /etc`\nEOF", "yolo-floor-delete-target"],
+		["protected redirect", `cat > ${config}/settings.yaml <<'EOF'\nsafe text\nEOF`, "clio-owned-state"],
+		["block-device redirect", "cat > /dev/sdz <<'EOF'\nsafe text\nEOF", "yolo-floor-block-device"],
+		["command after delimiter", "cat > probe.ts <<'EOF'\nsafe text\nEOF\nrm -rf /etc", "yolo-floor-delete-target"],
+		["written then run", "cat > probe.sh <<'EOF'\nrm -rf /etc\nEOF\nbash probe.sh", "yolo-floor-delete-target"],
+	] as const;
+	deepStrictEqual(
+		Object.fromEntries(
+			rows.map(([label, command]) => {
+				const decision = judge(command);
+				return [label, decision.kind === "block" ? decision.ruleId : decision.kind];
+			}),
+		),
+		Object.fromEntries(rows.map(([label, , expected]) => [label, expected])),
+	);
 });
 
 test("the raw-text reading follows a literal cd, joins and decodes its words, and blocks over its byte budget", async (t) => {
@@ -1563,7 +1591,7 @@ test("the raw-text reading follows a literal cd, joins and decodes its words, an
 	);
 });
 
-test("the raw-text reading places every cd form, reads $$ as the PID, and charges cd fan-out to its budget", async (t) => {
+test("the raw-text reading places every cd form, reads $$ as the PID, and charges candidate text once", async (t) => {
 	const cwd = workspace("clio-yolo-floor-raw-cd-");
 	const home = await isolateClioEnv("clio-yolo-floor-raw-cd-home-");
 	t.after(() => home.restore());
@@ -1579,10 +1607,10 @@ test("the raw-text reading places every cd form, reads $$ as the PID, and charge
 	]) {
 		strictEqual(judge(command).kind, "block", command);
 	}
-	const steps = Array.from({ length: 136 }, (_, n) => `rm g${n} rm h${n} rm k${n}; `).join("");
-	const fanned = judge(`: "$(cat <<X\nX\n)" cd a; cd b; cd c; cd d; cd e; ${steps}`);
-	strictEqual(fanned.kind, "block");
-	match(fanned.reasons.join("\n"), /too large to read that way/u);
+	const steps = Array.from({ length: 35 }, (_, n) => `rm g${n} rm h${n} rm k${n}; `).join("");
+	const fanned = judge(`cd ${cwd}; cd sub; cd ..; x=$(pwd); ${steps}`);
+	strictEqual(fanned.kind, "allow", fanned.reasons.join("\n"));
+	strictEqual(judge("x=$(pwd); cd /; rm -rf *").ruleId, "yolo-floor-delete-target");
 });
 
 test("the raw-text reading covers every line with a substitution the shell runs, not one in single quotes", async (t) => {

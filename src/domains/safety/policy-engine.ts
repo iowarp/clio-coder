@@ -158,6 +158,7 @@ import {
 	YOLO_FLOOR_RULE_IDS,
 	YOLO_FLOOR_TEXT_RULES,
 	type YoloFloorHit,
+	yoloFloorCommandText,
 	yoloFloorDeleteHit,
 	yoloFloorExecutableHit,
 	yoloFloorRawCandidates,
@@ -1199,11 +1200,12 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	const floorBlock = (
 		call: ClassifierCall,
 		callCwd: string,
-		command: string | null,
+		originalCommand: string | null,
 	): Omit<
 		SafetyPolicyDecision,
 		"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
 	> | null => {
+		const command = originalCommand === null ? null : yoloFloorCommandText(originalCommand);
 		const trees = clioOwnedTrees(cwd);
 		const held = (
 			hit: { match: DamageControlMatch; source: SafetyPolicySource },
@@ -1232,7 +1234,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				}),
 			);
 		}
-		const credentials = credentialReadHit(call, callCwd, command);
+		const floorCall = command === originalCommand ? call : { ...call, args: { ...call.args, command } };
+		const credentials = credentialReadHit(floorCall, callCwd, command);
 		if (credentials !== null) return held(floorMatch(credentials, "read"));
 		const raw = command === null ? null : yoloFloorRawCandidates(command);
 		if (raw?.overflow === true) {
