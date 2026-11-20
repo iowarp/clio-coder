@@ -74,6 +74,7 @@ import {
 import { ConfigDomainModule, createConfigDomainModule } from "../domains/config/index.js";
 import { CLIO_KEYBINDINGS, type ClioKeybinding } from "../domains/config/keybindings.js";
 import { liveHistoryBudget } from "../domains/context/budget/inspection.js";
+import { foldProjection } from "../domains/context/fold/pressure.js";
 import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
 import { createContextDomainModule } from "../domains/context/runtime.js";
 import { runOperatorRecall } from "../domains/context/working-set/operator-recall.js";
@@ -1413,10 +1414,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			};
 		},
 		usableHistoryTokens: () => liveHistory()?.usable ?? 0,
-		historyPressure: () => {
-			const live = liveHistory();
-			return live === null || live.usable <= 0 ? null : live.used / live.usable;
-		},
+		foldProjection: () =>
+			foldProjection(
+				chat,
+				getCurrentSettings().context.compaction,
+				(ref) => resolveModelReference(ref, providers, { use: "chat" }).ref,
+			),
 		client: createBackgroundMemoryRouting(
 			providers,
 			() => effectiveSettingsForDispatch?.(),

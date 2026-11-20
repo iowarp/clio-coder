@@ -518,7 +518,7 @@ async function closedSessionRuntime(source: CompletedLessonSource, complete: () 
 		stateDir: () => stateDir,
 		dataDir: () => dataDir,
 		cwd: () => cwd,
-		settings: () => ({ enabled: true, observations: { enabled: false }, maxOutputTokens: 512, timeoutMs: 5000 }),
+		settings: () => ({ enabled: true, surfaces: { observe: "off" }, maxOutputTokens: 512, timeoutMs: 5000 }),
 		lessonSource: () => null,
 		closedLessonSource: (sessionId) => (sessionId === scope.sessionId ? { scope, source } : null),
 		source: () => null,

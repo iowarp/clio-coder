@@ -2248,6 +2248,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					issues.unknownKeys("context.memory", memory, [
 						"enabled",
 						"observations",
+						"surfaces",
 						"target",
 						"model",
 						"thinkingLevel",
@@ -2266,7 +2267,23 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 							issues.unknownKeys("context.memory.observations", memory.observations, ["enabled"]);
 							if ("enabled" in memory.observations) {
 								const parsed = expectBoolean(issues, "context.memory.observations.enabled", memory.observations.enabled);
-								if (parsed !== undefined) settings.context.memory.observations.enabled = parsed;
+								// The switch moved to `surfaces.observe`. Files written before the move keep working: the old key
+								// sets the surface, and an explicit `surfaces.observe`, parsed below, wins over it.
+								if (parsed !== undefined) settings.context.memory.surfaces.observe = parsed ? "on" : "off";
+							}
+						}
+					}
+					if ("surfaces" in memory) {
+						if (!isPlainObject(memory.surfaces))
+							issues.add("context.memory.surfaces", `expected a map, got ${describe(memory.surfaces)}`);
+						else {
+							issues.unknownKeys("context.memory.surfaces", memory.surfaces, ["observe"]);
+							if ("observe" in memory.surfaces) {
+								const parsed = expectEnum(issues, "context.memory.surfaces.observe", memory.surfaces.observe, [
+									"off",
+									"on",
+								] as const);
+								if (parsed !== undefined) settings.context.memory.surfaces.observe = parsed;
 							}
 						}
 					}

@@ -270,6 +270,7 @@ explains worker route selection.
 | `context.memory.maxOutputTokens` | `2000` | next turn |
 | `context.memory.timeoutMs` | `60000` | next turn |
 | `context.memory.observations.enabled` | `false` | next turn |
+| `context.memory.surfaces.observe` | `off` | next turn; off as a policy choice (observation cost is measured, its benefit is not) until eligible pairs show a benefit. Preparation runs only when the next automatic fold would send history to a separate summary request, starts within an uncalibrated 0.15 of the window below the compaction trigger, and stops for the session after two folds in a row decline its notes. `context.memory.observations.enabled: true` still turns it on when this key is unset |
 | `context.semantic.enabled` | `false` | next turn |
 | `context.semantic.target` | `null` | next turn or semantic CLI request |
 | `context.semantic.model` | `null` | next turn or semantic CLI request |
