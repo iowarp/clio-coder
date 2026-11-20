@@ -45,9 +45,18 @@
 		"event": {
 			"type": "object",
 			"required": ["type"],
+			"description": "An engine event frame. A field that names a tool call (`toolCallId` on tool_execution_* and tool_approval_state frames and on a toolResult message, `parentToolCallId` on a gateway chain step) holds Clio's id `tc_<turn>_<n>`: the n-th call (1-based) the model's message lists in the run's turn-th agent turn (1-based, counted from turn_start). A chain step's id is `<parent's Clio id>:<step id>`. The provider's id rides beside it as `providerToolCallId`; for a chain step, the provider's id of the call that ran the chain. A toolCall block inside a message keeps the provider's `id`.",
 			"properties": {
-				"type": { "not": { "enum": ["session", "steer", "run_end"] } }
-			}
+				"type": { "not": { "enum": ["session", "steer", "run_end"] } },
+				"toolCallId": { "$ref": "#/$defs/toolCallId" },
+				"parentToolCallId": { "$ref": "#/$defs/toolCallId" },
+				"providerToolCallId": { "type": "string" }
+			},
+			"dependentRequired": { "toolCallId": ["providerToolCallId"] }
+		},
+		"toolCallId": {
+			"type": "string",
+			"pattern": "^tc_[0-9]+_[0-9]+(:.+)?$"
 		}
 	}
 }

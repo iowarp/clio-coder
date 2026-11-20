@@ -201,6 +201,59 @@ export function verifyChecksV2(
 	});
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * CLI-8: Clio's own id for each tool call on a v2 stream, `tc_<turn>_<n>`: the n-th call (1-based) in the run's
+ * turn-th agent turn (1-based, counted from `turn_start`), numbered in the order the model's message lists its calls,
+ * so parallel execution order never renumbers them. A provider's id can repeat across turns or change shape between
+ * providers; this one does neither within a run. Every frame field that names a call (`toolCallId`, a chain step's
+ * `parentToolCallId`, a tool result message's `toolCallId`) carries it, with the provider's id beside it as
+ * `providerToolCallId`. A chain step's own id is `<parent's Clio id>:<step id>`, and its `providerToolCallId` is the
+ * provider's id of the call that ran the chain. The model's `toolCall` blocks keep the provider's `id` as sent.
+ */
+export function createToolCallIdMinter(): (frame: object) => object {
+	let turn = 0;
+	let calls = 0;
+	// Per turn, so a provider that numbers each turn's calls from zero again still gets a fresh id per call.
+	let ids = new Map<string, string>();
+	const mint = (providerId: string): string => {
+		const known = ids.get(providerId);
+		if (known !== undefined) return known;
+		calls += 1;
+		const id = `tc_${turn}_${calls}`;
+		ids.set(providerId, id);
+		return id;
+	};
+	const named = (record: Record<string, unknown>): Record<string, unknown> => {
+		const providerId = record.toolCallId;
+		if (typeof providerId !== "string") return record;
+		const parent = record.parentToolCallId;
+		if (typeof parent !== "string") return { ...record, toolCallId: mint(providerId), providerToolCallId: providerId };
+		const clioParent = mint(parent);
+		const step = providerId.startsWith(`${parent}:`) ? providerId.slice(parent.length + 1) : providerId;
+		return { ...record, toolCallId: `${clioParent}:${step}`, parentToolCallId: clioParent, providerToolCallId: parent };
+	};
+	return (frame) => {
+		if (!isRecord(frame)) return frame;
+		if (frame.type === "turn_start") {
+			turn += 1;
+			calls = 0;
+			ids = new Map();
+			return frame;
+		}
+		const message = frame.message;
+		if (isRecord(message) && message.role === "assistant" && Array.isArray(message.content)) {
+			for (const block of message.content)
+				if (isRecord(block) && block.type === "toolCall" && typeof block.id === "string") mint(block.id);
+		}
+		const result = isRecord(message) && message.role === "toolResult" ? { ...frame, message: named(message) } : frame;
+		return named(result);
+	};
+}
+
 /**
  * `stream-json` only: one frame per steer-channel line the reader took. `accepted` and `refused` are final; a line
  * read before the first turn streamed is `queued`, and gets one more frame, `accepted` once that turn takes it or
@@ -335,7 +388,11 @@ export interface RunResultEnvelopeV2 {
 	safety?: MainRunSettlementV2["safety"];
 	verify: MainRunSettlementV2["verify"];
 	dispatch: {
-		runs: RunResult[];
+		/**
+		 * Main run (row 164): every child run the main agent dispatched, retried attempts included, oldest first, each with
+		 * its own outcome; a run the agent canceled through steer reads `canceled`. `--agent`: the one sealed receipt.
+		 */
+		runs: Array<RunResult | RunDispatchedRunV2>;
 		live: RunJsonDispatchedRunOutcome[];
 		undelivered: RunJsonDispatchedRunOutcome[];
 		/** CLI-5: failed runs a later dispatch of the same task delivered; they do not fail the run. Absent when none. */
