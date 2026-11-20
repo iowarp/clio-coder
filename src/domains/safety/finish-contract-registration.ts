@@ -26,10 +26,13 @@ import type { CompletionEvaluationInput } from "./decision-events.js";
 import {
 	assessFinishContract,
 	DEFAULT_RECENT_ENTRY_LIMIT,
+	FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE,
 	type FinishContractAssessment,
+	type FinishContractInput,
 	mutationPathsForTool,
 	recentEntries,
 	type SessionVerifier,
+	standingFailedCheck,
 } from "./finish-contract.js";
 import { extractCommandPathWalks } from "./protected-artifacts.js";
 import type { Rigor } from "./rigor.js";
@@ -179,9 +182,13 @@ export function createFinishContractRegistration(
 			// An absent stopReason is treated as "stop".
 			const stopReason = input.metadata?.stopReason;
 			if (stopReason !== undefined && stopReason !== "stop") return [];
-			// An empty final text is not a completion claim. The assessor reads
-			// only ledger receipts, so the text is otherwise unused here.
-			if ((input.text?.trim() ?? "").length === 0) return [];
+			// XR-8, fleet design 4.3: a turn that declared itself partly_done or not_done through `finish` claims no
+			// completion; it is an honest progress note and the gate leaves it alone. Only the typed declaration counts.
+			const declared = input.metadata?.completionState;
+			if (declared === "partly_done" || declared === "not_done") return [];
+			// An empty final text is not a completion claim, unless `finish` declared one: a textless declared `done` is
+			// assessed from the ledger like any other. The assessor reads only receipts, so the text is otherwise unused.
+			if (declared === undefined && (input.text?.trim() ?? "").length === 0) return [];
 			// A step turn runs one pipeline step by contract; while a step continuation follows it, its change waits
 			// for the turn that ends the pipeline, which assesses every step's changes and checks together (bt-12 #4).
 			if (input.metadata?.stepContinues === true) return [];
@@ -197,7 +204,7 @@ export function createFinishContractRegistration(
 			const activeAcceptance = options.readActiveAcceptance?.(
 				recentEntries(entries, input.turnId ?? null, DEFAULT_RECENT_ENTRY_LIMIT),
 			);
-			const assessment = assessFinishContract({
+			const contractInput: FinishContractInput = {
 				sessionEntries: entries,
 				workspaceRoot: process.cwd(),
 				sessionVerifiers: options.readSessionVerifiers?.() ?? [],
@@ -206,10 +213,33 @@ export function createFinishContractRegistration(
 				...(activeAcceptance ? { activeAcceptance } : {}),
 				assistantTurnId: input.turnId ?? null,
 				...(typeof pipelineStart === "string" ? { windowStartTurnId: pipelineStart } : {}),
-			});
+			};
+			const assessment = assessFinishContract(contractInput);
 			recordDecision(options, input, assessment, rigor);
-			if (assessment.kind === "ok")
-				return assessment.advisory ? [{ kind: "inject_reminder", message: assessment.advisory, severity: "warn" }] : [];
+			if (assessment.kind === "ok") {
+				if (assessment.advisory) {
+					const failedCheck = assessment.advisory === FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE;
+					return [
+						{
+							kind: "inject_reminder",
+							message: assessment.advisory,
+							severity: "warn",
+							...(failedCheck ? { fact: "failed_check" as const } : {}),
+						},
+					];
+				}
+				// A declared `done` with no change to assess still stands on its checks: a red one lowers it (4.3).
+				if (declared === "done" && standingFailedCheck(contractInput))
+					return [
+						{
+							kind: "inject_reminder",
+							message: FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE,
+							severity: "warn",
+							fact: "failed_check",
+						},
+					];
+				return [];
+			}
 			if (rigor === "high") {
 				const constraints = options.getTurnConstraints?.();
 				const names = input.metadata?.activeCapabilityNames ?? input.metadata?.activeToolNames;
@@ -231,6 +261,7 @@ export function createFinishContractRegistration(
 							kind: "inject_reminder",
 							severity: "warn",
 							message: `${assessment.message} The current task scope does not permit automatic validation recovery; report the change as unverified. This notice grants no additional authority.`,
+							fact: "unvalidated_mutation",
 						},
 					];
 				}
@@ -252,11 +283,12 @@ export function createFinishContractRegistration(
 						message,
 						note: "the change has no validation evidence yet",
 						...(reserved ? { reserved: "verification" as const } : {}),
+						fact: "unvalidated_mutation",
 					},
 					{ kind: "inject_reminder", message, severity: "warn" },
 				];
 			}
-			return [{ kind: "inject_reminder", message: assessment.message, severity: "warn" }];
+			return [{ kind: "inject_reminder", message: assessment.message, severity: "warn", fact: "unvalidated_mutation" }];
 		},
 	};
 }

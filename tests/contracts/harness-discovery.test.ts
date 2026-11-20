@@ -111,7 +111,7 @@ describe("coordinator discovery and dependency composition", () => {
 			const tools = resolveAgentTools({ registry });
 			deepStrictEqual(
 				tools.map((tool) => tool.name),
-				["bash", "code_nav", "dispatch", "edit", "gateway", "grep", "read", "verify", "write"],
+				["bash", "code_nav", "dispatch", "edit", "finish", "gateway", "grep", "read", "verify", "write"],
 			);
 			const wireDispatch = tools.find((tool) => tool.name === "dispatch");
 			ok(wireDispatch);
@@ -170,7 +170,7 @@ describe("coordinator discovery and dependency composition", () => {
 			middleware.fireTurnStart(runtime, "Implement solver");
 			await middleware.fireTurnEnd(runtime, [], { toolCallId: "fixture", toolName: "gateway" });
 			for (const input of observed) {
-				strictEqual(input.metadata?.activeToolNames, "bash,code_nav,dispatch,edit,gateway,grep,read,verify,write");
+				strictEqual(input.metadata?.activeToolNames, "bash,code_nav,dispatch,edit,finish,gateway,grep,read,verify,write");
 				for (const name of ["tasks", "monitor", "grep"]) {
 					ok(String(input.metadata?.activeCapabilityNames).split(",").includes(name));
 				}
@@ -184,13 +184,30 @@ describe("coordinator discovery and dependency composition", () => {
 			state.continuation.dropRequest();
 			await middleware.fireTurnEnd(runtime, [], { toolCallId: "scoped", toolName: "read" });
 			strictEqual(observed.at(-1)?.metadata?.activeCapabilityNames, "read");
-			strictEqual(middleware.flushPendingReminders(), "");
+			// Without tasks the board cannot be repaired, so nothing nudges; the open board is still a note and a fact.
+			const scopedNote = middleware.flushPendingReminders();
+			match(scopedNote, /cannot reach the tasks tool/u);
+			strictEqual(scopedNote.includes("action="), false);
 			strictEqual(state.continuation.requested, false);
+			deepStrictEqual(state.turnSealedCompletion?.facts, ["open_task"]);
+			// A declared done whose scope admits finish but not tasks seals partly_done from the board alone.
+			state.currentTurnConstraints = { allowedTools: ["read", "finish"] };
+			state.turnCompletion = { state: "done", limitations: [], unverified: [] };
+			await middleware.fireTurnEnd(runtime, [], { toolCallId: "declared", toolName: "finish" });
+			strictEqual(String(observed.at(-1)?.metadata?.activeCapabilityNames).split(",").includes("tasks"), false);
+			deepStrictEqual(
+				[state.turnSealedCompletion?.claimed, state.turnSealedCompletion?.assessed, state.turnSealedCompletion?.facts],
+				["done", "partly_done", ["open_task"]],
+			);
+			strictEqual(state.continuation.requested, false);
+			middleware.flushPendingReminders();
+			state.turnCompletion = null;
 			state.currentTurnConstraints = undefined;
 			runtime.agent.state.tools = [];
 			await middleware.fireTurnEnd(runtime, [], { toolCallId: "no-tools", toolName: "read" });
 			strictEqual(observed.at(-1)?.metadata?.activeCapabilityNames, "");
-			strictEqual(middleware.flushPendingReminders(), "");
+			match(middleware.flushPendingReminders(), /cannot reach the tasks tool/u);
+			strictEqual(state.continuation.requested, false);
 		} finally {
 			await bundle.extension.stop?.();
 		}

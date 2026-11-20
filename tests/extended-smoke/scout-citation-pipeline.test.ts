@@ -42,8 +42,13 @@ function isScout(request: Record<string, unknown>): boolean {
 			message.role === "system" && String(message.content).includes("You are Scout, a shadow reconnaissance agent"),
 	);
 }
+// The main session's requests carry dispatch; its round pinned to finish (fleet design 4.3) may carry finish alone, a
+// tool no worker registry holds.
 function isMain(request: Record<string, unknown>): boolean {
-	return Array.isArray(request.tools) && request.tools.some((tool) => tool.function?.name === "dispatch");
+	return (
+		Array.isArray(request.tools) &&
+		request.tools.some((tool) => tool.function?.name === "dispatch" || tool.function?.name === "finish")
+	);
 }
 function repairs(request: Record<string, unknown>): WireMessage[] {
 	return messages(request).filter(

@@ -89,6 +89,7 @@ import {
 	turnNoAnswerSentence,
 	validateStructuredAnswer,
 } from "../../session-control/chat-loop-messages.js";
+import { type CompletionDeclaration, completionOfToolResult, sealCompletion } from "../../tools/finish.js";
 import { TOOL_PLANES } from "../../tools/policy.js";
 import { toolResultText } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
@@ -101,6 +102,7 @@ const PERMISSION_REQUIRED_EXIT_CODE = 3;
 import {
 	noteDispatchSupersededV2,
 	noteMainRunV2,
+	noteRunCompletion,
 	noteSteerV2,
 	noteStructuredV2,
 	noteTextAnswer,
@@ -249,6 +251,8 @@ interface HeadlessMainAgentResult {
 	 * response.
 	 */
 	sawTerminatingToolResult: boolean;
+	/** The completion the agent declared through `finish` (fleet design 4.3), from the tool's settled result. */
+	completion: CompletionDeclaration | null;
 	/**
 	 * What that terminating tool returned ("wrote plan artifact (572B) to
 	 * PLAN.md"). The turn ends there by design, so this text is the whole
@@ -470,6 +474,16 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 	if (event.type === "tool_execution_end") {
 		const result = event.result as { terminate?: boolean; content?: unknown } | undefined;
 		const terminate = result?.terminate === true && !event.isError;
+		const completion = event.isError ? null : completionOfToolResult(event.toolName, event.result);
+		// `finish` closes the reply the model wrote beside it, so that reply stays the answer; a forced declaring round
+		// carries no text of its own, and the reply before it stands.
+		if (completion !== null)
+			return {
+				...current,
+				completion,
+				sawTerminatingToolResult: terminate,
+				terminatingToolText: terminate ? (current.text.length > 0 ? current.text : toolResultText(result?.content)) : "",
+			};
 		return {
 			...current,
 			sawTerminatingToolResult: terminate,
@@ -754,7 +768,9 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
  */
 function headlessNoop(stats: HeadlessMainAgentRunStats): boolean {
 	if (!stats.changeAsked) return false;
-	const totals = toolTotals(stats.toolStats);
+	// A completion declaration is no work: a run whose every other call failed is still a no-op.
+	const work = new Map([...stats.toolStats].filter(([tool]) => tool !== ToolNames.Finish));
+	const totals = toolTotals(work);
 	if (unmetWithoutChange(stats)) return true;
 	return totals.calls > 0 && totals.succeeded === 0;
 }
@@ -1166,6 +1182,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		text: "",
 		error: null,
 		sawTerminatingToolResult: false,
+		completion: null,
 		terminatingToolText: "",
 		abortReason: null,
 		lastNotice: null,
@@ -1846,6 +1863,19 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		stdoutMessage = null;
 	}
 	const exitCode = terminal.exitCode;
+	// Fleet design 4.3: the envelope carries the host's seal of the typed declaration, never a reading of the answer:
+	// the claim, its assessment from the turn's facts, and state = assessed, which `--exit-code` maps (ruling 7).
+	const sealedCompletion = chat.lastTurnCompletion?.() ?? sealCompletion(result.completion, []);
+	noteRunCompletion({
+		declared: sealedCompletion.declared,
+		claimed: sealedCompletion.claimed,
+		assessed: sealedCompletion.assessed,
+		state: sealedCompletion.assessed,
+		...(sealedCompletion.facts.length > 0 ? { facts: sealedCompletion.facts } : {}),
+		limitations: sealedCompletion.limitations,
+		unverified: sealedCompletion.unverified,
+		...(sealedCompletion.remaining !== undefined ? { remaining: sealedCompletion.remaining } : {}),
+	});
 	if (options.outputSchema !== undefined) {
 		noteStructuredV2({
 			enforcedBy: "host",
@@ -1876,7 +1906,13 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		writeRawStdout(`${stdoutMessage}\n`);
 	}
 	// What the harness saw, beside the model's account; stdout stays the answer and the exit code is unchanged.
-	const observedLine = observed !== null && mode === "text" ? formatHeadlessObservedLine(observed) : null;
+	const observedLine =
+		observed !== null && mode === "text"
+			? formatHeadlessObservedLine({
+					...observed,
+					...(sealedCompletion.assessed !== "unknown" ? { completion: sealedCompletion.assessed } : {}),
+				})
+			: null;
 	if (observedLine !== null) process.stderr.write(`${observedLine}\n`);
 	if (unreportedUsage !== null && mode === "text")
 		process.stderr.write(`clio-coder run: ${redactUrlCredentials(unreportedUsage)}\n`);

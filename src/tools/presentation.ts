@@ -82,6 +82,7 @@ export const TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationPolicy>>
 	[ToolNames.Panes]: FOLDED,
 	[ToolNames.Music]: FOLDED,
 	[ToolNames.Limitation]: FOLDED,
+	[ToolNames.Finish]: FOLDED,
 	[ToolNames.Decide]: FOLDED,
 	[ToolNames.Consult]: FOLDED,
 	[ToolNames.Vision]: FOLDED,
@@ -774,6 +775,12 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 		verbs: ["noting", "noted"],
 		object: (args) => plain(joinDefined("limitation:", text(args, "scope"))),
 		consumes: ["scope"],
+	},
+	[ToolNames.Finish]: {
+		class: "interaction",
+		verbs: ["declaring", "declared"],
+		object: (args) => plain(joinDefined("completion", text(args, "state"))),
+		consumes: ["state"],
 	},
 	// The proposed value is a JSON blob the model composed; the settled result
 	// states the same change as bounded `path: old → new` lines, so the row names

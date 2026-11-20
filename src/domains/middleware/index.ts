@@ -135,6 +135,7 @@ export {
 	type MiddlewareToolChoiceControl,
 } from "./tool-choice-control.js";
 export type {
+	CompletionFact,
 	MiddlewareAnnotationSeverity,
 	MiddlewareEffect,
 	MiddlewareEffectKind,

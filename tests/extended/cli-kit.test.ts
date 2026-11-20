@@ -1,6 +1,6 @@
 import { deepStrictEqual, equal, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
 import { parseRunCliArgs } from "../../src/cli/args.js";
@@ -277,6 +277,34 @@ test("-o is written when a text run exits 0 through process.exit before returnin
 		equal(child.status, 0, child.stderr);
 		equal(child.stdout, "pong\n");
 		equal(readFileSync(join(env.dir, "out-text.txt"), "utf8"), "pong\n");
+		// --exit-code decides success on that path too: a host-lowered done exits 1 and leaves no file, text and v2 alike.
+		const lowered = `{ declared: true, claimed: "done", assessed: "partly_done", state: "partly_done", facts: ["open_task"], limitations: [], unverified: [] }`;
+		for (const [file, wrap] of [
+			["out-lowered-text.txt", `withRunFailureReporting(body, { path: "out-lowered-text.txt", cwd }, true)`],
+			[
+				"out-lowered-v2.txt",
+				`withRunResultV2({ format: "json", mode: "main", verify: [], cwd, outputLastMessage: "out-lowered-v2.txt", exitCode: true }, body)`,
+			],
+		] as const) {
+			const run = spawnSync(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"--input-type=module",
+					"-e",
+					`
+					const { noteRunCompletion, noteTextAnswer, withRunFailureReporting, withRunResultV2 } = await import(${JSON.stringify(resolve("src/cli/run-failure.ts"))});
+					const cwd = ${JSON.stringify(env.dir)};
+					const body = async () => { noteTextAnswer("pong"); noteRunCompletion(${lowered}); process.exit(0); };
+					await ${wrap};
+				`,
+				],
+				{ env: { ...process.env, HOME: env.dir }, encoding: "utf8" },
+			);
+			equal(run.status, 1, `${file}: ${run.stderr}`);
+			equal(existsSync(join(env.dir, file)), false, file);
+		}
 	} finally {
 		env.restore();
 	}

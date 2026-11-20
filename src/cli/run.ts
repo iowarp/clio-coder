@@ -31,6 +31,7 @@ import { RUN_JSON_SCHEMA_VERSION } from "./modes/run-json-schema.js";
 import { flushRawStdout, handleRunStdoutErrors, restoreStdout, takeOverStdout } from "./output-guard.js";
 import { loadScriptedAnswers } from "./run-answers.js";
 import {
+	completionExitCode,
 	noteStructuredV2,
 	noteTextAnswer,
 	requestRunTextSummary,
@@ -398,16 +399,19 @@ export async function runClioRun(
 				...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
 				...(parsed.timeoutSeconds !== undefined ? { timeoutSeconds: parsed.timeoutSeconds } : {}),
 				limits: requestedRunLimits(parsed),
+				...(parsed.exitCodeVerdict === true ? { exitCode: true as const } : {}),
 			},
 			execute,
 		);
 	}
-	// Text output: the v2 writer is the only JSON writer, so this wrapper adds only text mode's `-o`.
+	// Text output: the v2 writer is the only JSON writer, so this wrapper adds only text mode's `-o`. `-o` is written
+	// only on exit 0, so `--exit-code` maps the run's exit before the wrapper settles it.
 	return withRunFailureReporting(
-		execute,
+		async () => completionExitCode(await execute(), parsed.exitCodeVerdict === true),
 		parsed.outputLastMessage !== undefined
 			? { path: parsed.outputLastMessage, ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}) }
 			: undefined,
+		parsed.exitCodeVerdict === true,
 	);
 }
 

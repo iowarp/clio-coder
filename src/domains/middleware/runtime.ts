@@ -454,6 +454,7 @@ export function cloneMiddlewareEffect(effect: MiddlewareEffect): MiddlewareEffec
 			if (effect.severity !== undefined) cloned.severity = effect.severity;
 			if (effect.source !== undefined) cloned.source = effect.source;
 			if (effect.audience !== undefined) cloned.audience = effect.audience;
+			if (effect.fact !== undefined) cloned.fact = effect.fact;
 			return cloned;
 		}
 		case "annotate_tool_result": {
@@ -475,6 +476,7 @@ export function cloneMiddlewareEffect(effect: MiddlewareEffect): MiddlewareEffec
 			if (effect.note !== undefined) cloned.note = effect.note;
 			if (effect.toolFree === true) cloned.toolFree = true;
 			if (effect.reserved === "verification") cloned.reserved = "verification";
+			if (effect.fact !== undefined) cloned.fact = effect.fact;
 			return cloned;
 		}
 		case "require_tool":

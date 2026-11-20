@@ -438,6 +438,15 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			followUpHint: "Call limitation again with a narrower scope if the first call was rejected.",
 		},
 	},
+	[ToolNames.Finish]: {
+		objective: "Declare how the turn ended (done, partly_done or not_done) as the last call of the final reply.",
+		uiLabel: "Finish",
+		resultSizePolicy: {
+			kind: "exact",
+			maxBytes: 1_024,
+			followUpHint: "Call finish alone with a valid state if the first call was rejected.",
+		},
+	},
 	[ToolNames.Consult]: {
 		objective: "Filter evidence you do not hold through the bound decision model, or ask it typed questions, as advice.",
 		// A session's usage notes read this, not promptHint, and only a registered tool has one.

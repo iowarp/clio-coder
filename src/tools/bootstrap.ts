@@ -20,6 +20,7 @@ import { createDispatchRunEventRegistry, createDispatchTool } from "./dispatch.j
 import type { DispatchBackgroundRegistry } from "./dispatch-background.js";
 import type { DispatchSchemaComposition } from "./dispatch-schema.js";
 import { COORDINATOR_DISPATCH_ARGUMENTS, coordinatorDispatchParameters } from "./dispatch-schema.js";
+import { finishTool } from "./finish.js";
 import { createMcpCapabilitySource, type McpCapabilitySource } from "./gateway/index.js";
 import { registerHarnessExtensionTools } from "./harness-extensions.js";
 import type { JobOperations } from "./job-types.js";
@@ -144,6 +145,8 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 				{ path: "src/tools/configure-clio.ts", scope: "core" },
 			),
 		);
+	// The main agent's completion declaration is always attached, so the session schema set never varies (#423).
+	registry.register(builtin(finishTool, { path: "src/tools/finish.ts", scope: "core" }));
 	if (deps.requestSelfCompact)
 		registry.register(
 			builtin(createSelfCompactTool(deps.requestSelfCompact), { path: "src/tools/self-compact.ts", scope: "core" }),

@@ -131,8 +131,8 @@ describe("gateway in the session prompt", () => {
 			console.log(
 				`attached schema bytes: total ${total}\n${sizes.map((entry) => `  ${entry.name}: ${entry.bytes}`).join("\n")}`,
 			);
-			// 12,376: grep and code_nav attached (row 145) and the job table leading dispatch (fleet DESIGN open question 10).
-			ok(total <= 12_376, `nine attached tools must stay within 12,376 bytes, down from ${ATTACHED_BUDGET_BYTES}`);
+			// 13,024 (fleet DESIGN open question 10): grep and code_nav (row 145) and dispatch's job table, plus the 648-byte finish declaration.
+			ok(total <= 13_024, `ten attached tools must stay within 13,024 bytes, down from ${ATTACHED_BUDGET_BYTES}`);
 			const gateway = sizes.find((entry) => entry.name === ToolNames.Gateway);
 			ok(gateway !== undefined && gateway.bytes < 2_048, `the gateway schema stays small: ${gateway?.bytes}`);
 			doesNotMatch(
