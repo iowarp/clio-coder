@@ -73,9 +73,8 @@ function attachedChecks(request: DispatchRequest): string[] {
 }
 
 /**
- * Run the request read-only. Verification on it can only be the operator's
- * named checks parse merged in (callers exclude a member that declared its
- * own), and a read-only run changes nothing for them to judge.
+ * Run the request read-only. Callers pass only a request carrying no checks: a
+ * member's own exclude it, and so do the operator's named checks parse merged in.
  */
 function readOnly(request: DispatchRequest): DispatchRequest {
 	const { resolvedVerification: _checks, ...rest } = request;
@@ -145,16 +144,13 @@ export function normalizeDispatchAdmission(input: DispatchNormalizeInput): strin
 		const itemArgs = memberArgs(index);
 		const capabilityClass = classes.get(request.agentId);
 		if (!mayRunReadOnly(request, itemArgs, capabilityClass) || !declaresEmptyWriteRoots(itemArgs)) continue;
-		const dropped = attachedChecks(request);
+		// Normalization never removes a check the operator required: the request stays as parsed and admission
+		// decides, or refuses, with the check in place.
+		if (attachedChecks(request).length > 0) continue;
 		requests[index] = readOnly(request);
-		if (capabilityClass === "read-only" && dropped.length === 0) continue;
-		// The coordinator's explicit no-write declaration stands; the operator's checks it drops are named.
-		const checks =
-			dropped.length > 0
-				? ` The checks the operator named (${dropped.join(", ")}) do not run on it: a read-only run changes nothing for them to judge.`
-				: "";
+		if (capabilityClass === "read-only") continue;
 		notices.push(
-			`${NOTICE_PREFIX} ${label(index)} runs read-only: its intent.write_roots: [] declares no writes, so it gets the read-only tool surface and changes no files; declare write roots or use worktree: true for a task that writes.${checks}`,
+			`${NOTICE_PREFIX} ${label(index)} runs read-only: its intent.write_roots: [] declares no writes, so it gets the read-only tool surface and changes no files; declare write roots or use worktree: true for a task that writes.`,
 		);
 	}
 

@@ -749,6 +749,7 @@ describe("dispatch admission boundary", () => {
 		};
 		try {
 			mkdirSync(join(root, "paper", "background"), { recursive: true });
+			mkdirSync(`${root}.`);
 			for (const [task, paths] of [
 				[`audit ${root} for leaks`, []],
 				[`audit the tree at ${root}.`, []],
@@ -780,6 +781,8 @@ describe("dispatch admission boundary", () => {
 				`read ${dirname(root)}/elsewhere/a.md now`,
 				`Read "${root} archive/paper/method.md" now`,
 				`Read \`${root} archive/paper/method.md\` now`,
+				// A closed quote is literal: "<root>." names the sibling directory, not the workspace and a period.
+				`List "${root}."`,
 			]) {
 				const { request, notices } = normalized(task);
 				deepStrictEqual(notices, [], task);
@@ -787,6 +790,7 @@ describe("dispatch admission boundary", () => {
 			}
 		} finally {
 			rmSync(root, { recursive: true, force: true });
+			rmSync(`${root}.`, { recursive: true, force: true });
 		}
 	});
 
@@ -916,12 +920,11 @@ describe("dispatch admission boundary", () => {
 			[
 				[false, "builder", []],
 				[false, "builder", ["test"]],
-				[true, "builder", []],
+				[false, "builder", ["test"]],
 			],
 		);
-		deepStrictEqual([dotted.notices, checked.notices], [[], []]);
-		// The explicit no-write declaration stands, and the check it drops is named.
-		match(declaredNone.notices.join("\n"), /checks the operator named \(test\) do not run on it/u);
+		// Normalization never removes an operator-required check: write_roots: [] with one is left for admission.
+		deepStrictEqual([dotted.notices, checked.notices, declaredNone.notices], [[], [], []]);
 		// A single task is not a batch, and writers: 1 asks for serialized writers: both left alone.
 		const serialized = normalized({
 			mode: "parallel",

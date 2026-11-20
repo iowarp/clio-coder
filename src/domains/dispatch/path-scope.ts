@@ -274,6 +274,8 @@ export const WORKING_DIRECTORY_PHRASE = "the working directory";
  * so "/etc/passwd" stays as written. A token opened by a quote or backtick is rewritten only when
  * that quote closes right after it or after its trailing slash: a quoted path that runs on
  * ("<root> archive/a.md") names another place, so it stays as written for inference to refuse.
+ * A closed quote holds the path literally, so its trailing dots are part of it ("<root>." names
+ * a sibling), not a sentence period.
  */
 export function relativizeWorkspaceAbsoluteTokens(
 	text: string,
@@ -286,8 +288,9 @@ export function relativizeWorkspaceAbsoluteTokens(
 		(match: string, raw: string, slash: string, offset: number) => {
 			const prefix = match.slice(0, match.length - raw.length - slash.length);
 			const opener = prefix.at(-1);
-			if ((opener === '"' || opener === "'" || opener === "`") && text[offset + match.length] !== opener) return match;
-			const token = raw.replace(TRAILING_SENTENCE_DOTS_RE, "");
+			const quoted = opener === '"' || opener === "'" || opener === "`";
+			if (quoted && text[offset + match.length] !== opener) return match;
+			const token = quoted ? raw : raw.replace(TRAILING_SENTENCE_DOTS_RE, "");
 			const trailing = raw.slice(token.length);
 			const local = relative(base, token);
 			let to: string | null = null;
