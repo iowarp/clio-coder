@@ -720,7 +720,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				});
 			// Race an abort-ignoring client; late usage still belongs to its captured launch.
 			const completion = client.complete({
-				purpose: work.inputs.length ? "reflection" : "observation",
+				purpose: work.inputs.length ? "memory.reflect" : "memory.observe",
 				systemPrompt,
 				userPrompt,
 				maxTokens,
@@ -1050,7 +1050,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				bank: orphan ? new TaskMemoryBank() : this.bank,
 				client: {
 					...(client.route ? { route: client.route } : {}),
-					complete: (request) => client.complete({ ...request, purpose: "lesson" }),
+					complete: (request) => client.complete({ ...request, purpose: "memory.retain" }),
 				},
 				maxTokens: Math.min(
 					infra.settings().maxOutputTokens,

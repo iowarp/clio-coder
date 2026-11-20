@@ -1,5 +1,6 @@
 import type { Static, TSchema } from "typebox";
 import { Type } from "typebox";
+import { SURFACE_IDS } from "../side-surfaces.js";
 import {
 	ConfigChangeScope,
 	ConfigChangeSource,
@@ -152,6 +153,8 @@ const call = {
 	attempt: count,
 	target,
 	roundKind: RoundKind,
+	/** The side surface that made the call (`SIDE_SURFACES`); absent on a main, worker or coordinator call. */
+	purpose: Type.Optional(vocabulary(SURFACE_IDS)),
 	toolChoice: Type.Union([
 		vocabulary(["auto", "none", "required", "unknown"]),
 		Type.Object({ name: ExistingId }, closed),
@@ -2133,6 +2136,10 @@ export const SafetyJudgedSchema = Type.Object(
 		screened: Type.Optional(vocabulary(["parked"])),
 		unnamedEscape: Type.Optional(vocabulary(["parked"])),
 		namedTarget: Type.Optional(vocabulary(["parked"])),
+		/** The judge's own provider call; its tokens are journaled under that id with role `safety-judge`. */
+		judgeCallId: Type.Optional(CallIdSchema),
+		/** The call the judged tool call came from, which the row's context also names. */
+		parentCallId: Type.Optional(CallIdSchema),
 	},
 	closed,
 );

@@ -260,6 +260,7 @@ async function retainWithinDeadline(
 		const result = savedCandidates.length
 			? { decision: "silent" as const, reason: "suppressed" as const, bankOperations: 0, droppedOperations: 0 }
 			: await runTaskMemoryPolicy(input.bank, input.client, {
+					purpose: "memory.retain",
 					task: "Retain only reusable, evidence-backed lessons from this completed repository task.",
 					trajectory: [],
 					deterministicTrigger: false,

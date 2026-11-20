@@ -380,7 +380,14 @@ test("generation authority blocks bank writes even without cancellation", async 
 	const result = runTaskMemoryPolicy(
 		bank,
 		{ complete: () => completion.promise },
-		{ task: "A", trajectory: [], deterministicTrigger: true, maxTokens: 2000, isCurrent: () => current },
+		{
+			purpose: "memory.correct",
+			task: "A",
+			trajectory: [],
+			deterministicTrigger: true,
+			maxTokens: 2000,
+			isCurrent: () => current,
+		},
 	);
 	current = false;
 	completion.resolve(response);
@@ -400,6 +407,7 @@ test("provider usage arriving after the policy deadline is recorded exactly once
 		bank,
 		{ complete: () => completion.promise },
 		{
+			purpose: "memory.correct",
 			task: "A",
 			trajectory: [],
 			deterministicTrigger: true,

@@ -4,7 +4,9 @@
  * both ask through this; the role names whose call the journal records.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { CallObservation } from "../core/call-failure.js";
+import type { SurfaceId } from "../core/side-surfaces.js";
 import type { AgentRole } from "../core/telemetry/enums.js";
 import { beginCall, processTelemetryContext } from "../core/telemetry/producer.js";
 import { calculatePricingCostUsd, resolveEffectivePricing } from "../domains/providers/catalog.js";
@@ -20,6 +22,26 @@ import {
 	sideCallShutdownCause,
 } from "../domains/telemetry/call-facts.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
+
+/** The surface a System One ask runs for, set by the host that asks (memory design 4.1). */
+const sidePurpose = new AsyncLocalStorage<SurfaceId>();
+/** The safety judge's own call, noted while one review runs so its decision row can name it (memory design 4.5). */
+const judgeCalls = new AsyncLocalStorage<{ callId?: string }>();
+
+/** Run a System One ask under the surface it is for; its admitted calls journal that purpose. */
+export function withSidePurpose<T>(purpose: SurfaceId, work: () => T): T {
+	return sidePurpose.run(purpose, work);
+}
+
+/** Run one safety judge review with a fresh slot for the judge call it makes. */
+export function withJudgeCallCapture<T>(work: () => T): T {
+	return judgeCalls.run({}, work);
+}
+
+/** The last judge call the current review opened, if it opened one. */
+export function capturedJudgeCallId(): string | undefined {
+	return judgeCalls.getStore()?.callId;
+}
 
 export function createSideRequestAdmission(deps: {
 	providers: Pick<ProvidersContract, "getTarget"> & Partial<Pick<ProvidersContract, "getRuntime">>;
@@ -56,6 +78,7 @@ export function createSideRequestAdmission(deps: {
 			: lease?.journaled
 				? lease.context
 				: undefined;
+		const purpose = role === "safety-judge" ? "judge" : sidePurpose.getStore();
 		const call = owner
 			? beginCall(
 					{
@@ -67,12 +90,15 @@ export function createSideRequestAdmission(deps: {
 							reportedModel: { kind: "unknown", reason: "not-observed" },
 						},
 						roundKind: "tools-removed",
+						...(purpose !== undefined ? { purpose } : {}),
 						toolChoice: "none",
 					},
 					owner,
 				)
 			: undefined;
 		if (call) noteSystemOneCall(call.callId);
+		const judgeCall = role === "safety-judge" ? judgeCalls.getStore() : undefined;
+		if (call && judgeCall) judgeCall.callId = call.callId;
 		let settled = false;
 		const settle = (message: unknown): void => {
 			if (settled) return;

@@ -372,7 +372,7 @@ export async function classifyOperatorStatement(
 ): Promise<OperatorStatementClassification | null> {
 	try {
 		const response = await client.complete({
-			purpose: "lesson",
+			purpose: "memory.classify",
 			systemPrompt: CLASSIFY_SYSTEM_PROMPT,
 			userPrompt: redactForMemoryRoute(`Workspace: ${workspace}\nStatement: ${text}`),
 			maxTokens: 64,

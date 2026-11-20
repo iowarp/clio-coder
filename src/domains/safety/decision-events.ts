@@ -141,9 +141,13 @@ export interface SafetyJudgementInput {
 	unnamedEscape?: "parked";
 	/** Set when a blocked sandbox escape whose outside target the operator named went to the operator instead. */
 	namedTarget?: "parked";
+	/** The judge's own provider call, when it made one; its tokens are journaled under this id. */
+	judgeCallId?: string;
 }
 
 export function safetyJudgedPayload(input: SafetyJudgementInput): EventPayload<"safety.judged"> {
+	// The call the judged tool call came from; the row's context names it too, and the judge's own call is separate.
+	const parentCallId = safetyJudgementContext(input)?.callId;
 	return {
 		tool: input.tool,
 		actionClass: input.actionClass,
@@ -161,6 +165,8 @@ export function safetyJudgedPayload(input: SafetyJudgementInput): EventPayload<"
 		...(input.screened !== undefined ? { screened: input.screened } : {}),
 		...(input.unnamedEscape !== undefined ? { unnamedEscape: input.unnamedEscape } : {}),
 		...(input.namedTarget !== undefined ? { namedTarget: input.namedTarget } : {}),
+		...(input.judgeCallId !== undefined ? { judgeCallId: input.judgeCallId } : {}),
+		...(parentCallId !== undefined ? { parentCallId } : {}),
 	};
 }
 

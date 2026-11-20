@@ -367,6 +367,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		const run = (selected: TaskMemoryModelClient): Promise<TaskMemoryPolicyResult> => {
 			const started = process.hrtime.bigint();
 			return runTaskMemoryPolicy(bank, selected, {
+				purpose: "memory.history",
 				isCurrent,
 				signal: controller.signal,
 				task: "Review an earlier session in this repository for lessons a future session needs.",

@@ -631,7 +631,13 @@ test("a recipe the task's receipts prove is retained though the model keeps noth
 
 test("an operation list missing only its closing bracket is repaired, and nothing else is", async () => {
 	const reply = (body: string) => ({ complete: async () => ({ text: `<operations>${body}</operations>` }) });
-	const input = { task: "Keep facts", trajectory: [], deterministicTrigger: false, maxTokens: 2000 };
+	const input = {
+		purpose: "memory.bank" as const,
+		task: "Keep facts",
+		trajectory: [],
+		deterministicTrigger: false,
+		maxTokens: 2000,
+	};
 	const repaired = await runTaskMemoryPolicy(
 		new TaskMemoryBank(),
 		reply('[{"op":"save_knowledge","content":"first"},{"op":"save_knowledge","content":"second"},'),

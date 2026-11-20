@@ -22,6 +22,7 @@ test("memory delivery validates workspace file references after applying bank op
 		writeFileSync(join(workspaceRoot, ".clio-coder", "handoffs", "current.md"), "");
 		const bank = new TaskMemoryBank();
 		const input: TaskMemoryPolicyInput = {
+			purpose: "memory.bank",
 			task: "Check handoff",
 			trajectory: [],
 			deterministicTrigger: false,
@@ -61,6 +62,7 @@ test("a cited failed attempt stays silent after the same operation succeeds", as
 			}),
 		},
 		{
+			purpose: "memory.bank",
 			task: "Build",
 			trajectory: [
 				{
@@ -89,6 +91,7 @@ test("a cited failed attempt stays silent after the same operation succeeds", as
 			}),
 		},
 		{
+			purpose: "memory.bank",
 			task: "Build",
 			trajectory: [
 				{
@@ -143,7 +146,7 @@ for (const probe of [false, true]) {
 							'<operations>[{"op":"save_knowledge","content":"The latest attempt failed."}]</operations><context_for_action>[tm-k-1] Avoid repeating this failure.</context_for_action>',
 					}),
 				},
-				{ task: "Inspect the project", trajectory, deterministicTrigger: true, maxTokens: 2000 },
+				{ purpose: "memory.correct", task: "Inspect the project", trajectory, deterministicTrigger: true, maxTokens: 2000 },
 			);
 			strictEqual(result.reason, "no_repeated_failure");
 			strictEqual(result.reminder, null);

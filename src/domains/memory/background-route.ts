@@ -12,6 +12,7 @@ import type { ClioSettings } from "../../core/config.js";
 import type { ThinkingLevel } from "../../core/defaults.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { resolveMemoryRoute } from "../../core/session-routing.js";
+import type { MemorySurfaceId } from "../../core/side-surfaces.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import { noCallRunUsageFacts, pricingBasisFields, unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
@@ -56,6 +57,17 @@ import {
 	TaskMemoryEndpointBusyError,
 	TaskMemoryInformationFlowBlockedError,
 } from "./task-memory-policy.js";
+
+/**
+ * The surfaces whose request is checked against the route's context window before it is sent: the ones that named a
+ * purpose before every memory request had to, kept as they were so attribution changes no admission.
+ */
+const WINDOW_CHECKED_PURPOSES: ReadonlySet<MemorySurfaceId> = new Set([
+	"memory.observe",
+	"memory.reflect",
+	"memory.retain",
+	"memory.classify",
+]);
 
 /**
  * The background memory role, resolved to the endpoint it would call.
@@ -386,7 +398,7 @@ function prepareBackgroundMemoryRoute(
 					if (refined.runtimeId !== initial.refined.runtimeId || canonicalEndpointKey(refined.target) !== gatewayKey) {
 						throw new Error("background memory target changed during preparation");
 					}
-					if (request.purpose) {
+					if (WINDOW_CHECKED_PURPOSES.has(request.purpose)) {
 						const inputTokens = estimateAgentContextTokens({
 							systemPrompt: request.systemPrompt,
 							messages: [{ role: "user", content: [{ type: "text", text: request.userPrompt }], timestamp: Date.now() }],
@@ -572,8 +584,8 @@ export function createBackgroundCallJournal(
 	providers: ProvidersContract,
 	acquireTelemetrySession: () => CallJournalOptions["acquire"] | undefined,
 	currentOrigin: () => CallJournalOptions["origin"] | undefined,
-): (targetId: string, modelId: string) => CallJournalOptions | undefined {
-	return (targetId, modelId) => {
+): (targetId: string, modelId: string, purpose: MemorySurfaceId) => CallJournalOptions | undefined {
+	return (targetId, modelId, purpose) => {
 		const origin = currentOrigin();
 		const acquire = acquireTelemetrySession();
 		const target = providers.getTarget(targetId);
@@ -583,6 +595,7 @@ export function createBackgroundCallJournal(
 			origin: origin ?? null,
 			acquire,
 			role: "memory",
+			purpose,
 			targetId,
 			runtimeId: runtime.id,
 			...pricingBasisFields(resolveEffectivePricing(target, runtime, modelId)),
@@ -610,7 +623,7 @@ export function createBackgroundMemoryRouting(
 	announceFallback = true,
 	/** Priced session spend the metered budget adds a step's projected cost to. */
 	sessionSpendUsd?: () => number,
-	callJournal?: (targetId: string, modelId: string) => CallJournalOptions | undefined,
+	callJournal?: (targetId: string, modelId: string, purpose: MemorySurfaceId) => CallJournalOptions | undefined,
 ) {
 	let route: BackgroundMemoryRoute | null = null;
 	let snapshot: Readonly<ClioSettings> | undefined;
@@ -622,7 +635,7 @@ export function createBackgroundMemoryRouting(
 			...client,
 			async complete(request) {
 				const destination = client.route;
-				const options = destination ? callJournal?.(destination.targetId, destination.modelId) : undefined;
+				const options = destination ? callJournal?.(destination.targetId, destination.modelId, request.purpose) : undefined;
 				const scope = await openCallScope(options, {
 					api: options ? (providers.getRuntime(options.runtimeId)?.apiFamily ?? "unknown") : "unknown",
 					id: destination?.modelId ?? "unknown",

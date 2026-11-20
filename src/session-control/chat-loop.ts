@@ -4936,6 +4936,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								(sampling) =>
 									runOutOfTurnRound({
 										...sideCallJournal(prepared.runtime, "helper", prepared.origin),
+										purpose: "draft",
 										beforeRequest: sideCallAdmission(prepared.origin, slot, options.signal),
 										admitFlow: () => deps.admitFlow?.(prepared.runtime) ?? null,
 										model: prepared.runtime.agent.state.model,

@@ -117,6 +117,7 @@ it("redacts before cutting, so a cut leaves no partial secret", async () => {
 	};
 	const policy = (task: string) =>
 		runTaskMemoryPolicy(new TaskMemoryBank(), client, {
+			purpose: "memory.bank",
 			task,
 			trajectory: [],
 			deterministicTrigger: false,

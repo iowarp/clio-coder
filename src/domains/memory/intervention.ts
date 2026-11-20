@@ -1341,6 +1341,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					const runClient = (selected: TaskMemoryModelClient, timeoutMs: number) => {
 						attemptRoute = selected.route;
 						return runTaskMemoryPolicy(deps.bank, selected, {
+							purpose: consolidate ? "memory.lesson" : input.deterministicTrigger ? "memory.correct" : "memory.bank",
 							isCurrent,
 							signal: generationController.signal,
 							task: input.task?.trim() || currentTask,

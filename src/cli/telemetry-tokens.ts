@@ -30,8 +30,10 @@ write, so on its calls fresh is cache write and the output says so. Calls a
 side agent made for the session (compaction, memory and the like) are charged to
 the turn they ran in, and calls of the workers the session dispatched to the
 turn open when each started; both are counted in its totals. The calls column
-names them by role, and --by-source gives each role its own row. --json emits
-the report verbatim.
+names them by role, and --by-source gives each role its own row, split into
+one row per purpose (memory.observe, compaction.history, judge and so on) for
+the calls that journaled the surface they were for. --json emits the report
+verbatim.
 `;
 
 const count = (value: number | null) => (value === null ? "unknown" : String(value));
