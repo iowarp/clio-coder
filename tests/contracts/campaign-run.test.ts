@@ -141,8 +141,16 @@ describe("campaign run folds one fixture across a roster", { timeout: 240_000 },
 			{ env: scratch.env, cwd: scratch.root },
 		);
 		strictEqual(result.status, 0, `stdout=${result.stdout}\nstderr=${result.stderr}`);
-		const campaign = JSON.parse(result.stdout) as CampaignResult;
+		const campaign = JSON.parse(result.stdout) as CampaignResult & {
+			completion: { state: string };
+			verdict: { aggregate: string; entries: Array<{ label: string; status: string }> };
+		};
 		strictEqual(campaign.entries.length, 2);
+		deepStrictEqual([campaign.completion.state, campaign.verdict.aggregate], ["completed", "partial"]);
+		deepStrictEqual(
+			campaign.verdict.entries.map((entry) => entry.status),
+			["completed", "failed"],
+		);
 		const [mock, broken] = campaign.entries;
 		ok(mock && broken);
 
@@ -229,6 +237,16 @@ describe("campaign run folds one fixture across a roster", { timeout: 240_000 },
 			unscripted: 1,
 			unanswered: 0,
 		});
+		strictEqual((JSON.parse(stopped.stdout) as { verdict: { aggregate: string } }).verdict.aggregate, "fail");
+
+		// --exit-code lets the verdict reach the exit code: a roster where no entry completed exits 1 (C19).
+		writeFileSync(join(scratch.root, "only-broken.yaml"), "roster:\n  - target: absent-target\n    model: nope\n");
+		const gated = await cli(
+			[...campaignArgs("only-broken.yaml", "answers.yaml", join(scratch.root, "out3")), "--json", "--exit-code"],
+			{ env: scratch.env, cwd: scratch.root },
+		);
+		strictEqual(gated.status, 1, gated.stderr);
+		strictEqual((JSON.parse(gated.stdout) as { verdict: { aggregate: string } }).verdict.aggregate, "fail");
 	});
 });
 
