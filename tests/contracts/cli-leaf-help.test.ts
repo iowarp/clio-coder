@@ -16,11 +16,14 @@ const ENTRY = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
 const home = makeScratchHome("clio-coder-leaf-help-");
 after(() => home.cleanup());
 
-function cli(args: ReadonlyArray<string>): Promise<{ status: number | null; stdout: string; stderr: string }> {
+function cli(
+	args: ReadonlyArray<string>,
+	at: { dir: string; env: NodeJS.ProcessEnv } = home,
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
 	return new Promise((resolve, reject) => {
 		const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), ENTRY, ...args], {
-			cwd: home.dir,
-			env: { ...process.env, ...home.env, NO_COLOR: "1" },
+			cwd: at.dir,
+			env: { ...process.env, ...at.env, NO_COLOR: "1" },
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		let stdout = "";
@@ -215,8 +218,8 @@ describe("root help, tombstones and deprecated spellings", { concurrency: 4 }, (
 		ok(help.stdout.includes("help run --topics"));
 	});
 
-	it("the deprecation table classes every section 9 spelling, four of them migration", () => {
-		equal(DEPRECATED_SPELLINGS.filter((row) => row.class === "migration").length, 4);
+	it("the deprecation table classes every section 9 spelling, twelve of them migration", () => {
+		equal(DEPRECATED_SPELLINGS.filter((row) => row.class === "migration").length, 12);
 		for (const row of DEPRECATED_SPELLINGS) {
 			ok(row.notice !== "dispatcher" || row.matches !== undefined, row.old);
 			ok(row.notice === "dispatcher" || row.where !== undefined, row.old);
@@ -244,10 +247,6 @@ describe("root help, tombstones and deprecated spellings", { concurrency: 4 }, (
 			["evolve", "--help"],
 			["dev", "evolve", "--help"],
 		],
-		[
-			["fleet", "resume"],
-			["fleet", "admission", "open"],
-		],
 	] as const) {
 		it(`clio-coder ${old.join(" ")} equals ${current.join(" ")} plus one deprecation line`, async () => {
 			const [before, after] = await Promise.all([cli(old), cli(current)]);
@@ -258,4 +257,21 @@ describe("root help, tombstones and deprecated spellings", { concurrency: 4 }, (
 			ok(!after.stderr.includes("deprecated"), after.stderr);
 		});
 	}
+
+	// A migration row: the old spelling keeps its v1 document, which `fleet admission drain --json` does not print.
+	it("clio-coder fleet drain --json keeps its unversioned admission document plus one deprecation line", async () => {
+		const own = makeScratchHome("clio-coder-leaf-drain-");
+		try {
+			const result = await cli(["fleet", "drain", "--json"], own);
+			equal(result.status, 0, result.stderr);
+			const doc = JSON.parse(result.stdout) as { admission: { state: string } };
+			equal(result.stdout, `${JSON.stringify(doc, null, 2)}\n`);
+			equal(Object.keys(doc).join(), "admission");
+			equal(doc.admission.state, "draining");
+			const notices = result.stderr.split("\n").filter((line) => line.startsWith("clio-coder: deprecated:"));
+			equal(notices.length, 1, result.stderr);
+		} finally {
+			own.cleanup();
+		}
+	});
 });
