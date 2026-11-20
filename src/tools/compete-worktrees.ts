@@ -32,7 +32,7 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { internalGitArgv, withoutRepositoryEnv } from "../core/internal-git.js";
 import { relativePathEscapes } from "../core/path-containment.js";
@@ -614,8 +614,10 @@ function ignoredInCheckout(root: string, paths: ReadonlyArray<string>): Set<stri
  * A candidate's host checks, moved from the checkout admission sealed them in to the candidate's own worktree, the
  * way a task worktree's checks move with its worker; a check left in the checkout would judge the operator's tree.
  * Every path the check reads that lies under the checkout follows it: the cwd, absolute argv words (`--opt=/path`
- * too), numeric inputs and provenance probes. A path outside the checkout, or one git ignores there (dependencies,
- * build output a candidate's worktree never has), stays as it is. The sealed reference and
+ * too), numeric inputs and provenance probes. A path outside the checkout stays as it is, and so does the tool a
+ * check or probe runs when git ignores it there (argv[0], or a word under `node_modules`): installed dependencies a
+ * candidate's worktree never has. An ignored operand or input moves: it is candidate output, and one the candidate
+ * did not produce fails the check rather than reading the operator's copy. The sealed reference and
  * baseline stay where admission read them: they are the operator's yardstick, digest-checked, not candidate output.
  * The commit the worktree starts at is the base a failing check is compared against (M10a). A check whose cwd lies
  * outside the checkout cannot follow the candidate and is refused; compete builds every candidate's request before
@@ -628,22 +630,23 @@ export function candidateVerification(
 ): Required<Pick<DispatchRequest, "resolvedVerification" | "candidateWorktree">> {
 	const underRoot = (path: string): boolean => !relativePathEscapes(relative(root, path));
 	const pathValue = (arg: string): string => (isAbsolute(arg) ? arg : arg.slice(arg.indexOf("=") + 1));
-	const named = checks.flatMap((check) => [
-		...check.argv,
-		...(check.numeric?.inputs ?? []),
-		...(check.numeric?.provenance ?? []).flat(),
-	]);
+	// The executable a command vector runs: its first word, or an installed dependency it names.
+	const tool = (path: string, index: number): boolean => index === 0 || path.split(sep).includes("node_modules");
+	const toolPaths = checks
+		.flatMap((check) => [check.argv, ...(check.numeric?.provenance ?? [])])
+		.flatMap((argv) => argv.map(pathValue).filter((path, index) => tool(path, index)));
 	const ignored = ignoredInCheckout(
 		root,
-		named.map(pathValue).filter((path) => isAbsolute(path) && path !== root && underRoot(path)),
+		toolPaths.filter((path) => isAbsolute(path) && path !== root && underRoot(path)),
 	);
-	// A path git ignores (installed dependencies, build output) never reaches a candidate's worktree, so it stays.
-	const moved = (path: string): string =>
-		underRoot(path) && !ignored.has(path) ? resolve(worktree.path, relative(root, path)) : path;
-	const word = (arg: string): string => {
-		if (isAbsolute(arg)) return moved(arg);
+	const moved = (path: string, isTool = false): string =>
+		underRoot(path) && !(isTool && ignored.has(path)) ? resolve(worktree.path, relative(root, path)) : path;
+	const word = (arg: string, index: number): string => {
 		const value = pathValue(arg);
-		return arg.includes("=") && isAbsolute(value) ? `${arg.slice(0, arg.length - value.length)}${moved(value)}` : arg;
+		if (isAbsolute(arg)) return moved(arg, tool(arg, index));
+		return arg.includes("=") && isAbsolute(value)
+			? `${arg.slice(0, arg.length - value.length)}${moved(value, tool(value, index))}`
+			: arg;
 	};
 	return {
 		resolvedVerification: checks.map((check) => {
@@ -660,7 +663,7 @@ export function candidateVerification(
 					? {
 							numeric: {
 								...numeric,
-								...(numeric.inputs !== undefined ? { inputs: numeric.inputs.map(moved) } : {}),
+								...(numeric.inputs !== undefined ? { inputs: numeric.inputs.map((input) => moved(input)) } : {}),
 								...(numeric.provenance !== undefined ? { provenance: numeric.provenance.map((probe) => probe.map(word)) } : {}),
 							},
 						}

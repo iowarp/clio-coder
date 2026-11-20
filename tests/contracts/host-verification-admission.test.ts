@@ -284,11 +284,12 @@ it("asks once for a multi-task dispatch that needs the session's test-runner con
 it("admits a compete whose operator turn names `npm test`, moving the check and every checkout path it names into each candidate's worktree (M10a)", async () => {
 	const root = project([{ id: "test", command: [process.execPath, "-e", "process.exit(0)"] }]);
 	// Absolute argv words and numeric inputs under the checkout follow the candidate; a path outside the checkout,
-	// or one git ignores there, stays.
-	writeFileSync(join(root, ".gitignore"), "dist/\n");
+	// or a tool git ignores there, stays. An ignored operand is candidate output and moves.
+	writeFileSync(join(root, ".gitignore"), "dist/\nnode_modules/\n");
 	writeFileSync(join(root, "ref.json"), '{"e":1}');
 	const argv = [
 		process.execPath,
+		join(root, "node_modules", ".bin", "tool"),
 		join(root, "scripts", "check.mjs"),
 		join(root, "src"),
 		`--root=${root}`,
@@ -365,10 +366,11 @@ it("admits a compete whose operator turn names `npm test`, moving the check and 
 			]);
 			deepStrictEqual(checks.find((check) => check.check === "test")?.argv, [
 				process.execPath,
+				join(root, "node_modules", ".bin", "tool"),
 				join(worktree, "scripts", "check.mjs"),
 				join(worktree, "src"),
 				`--root=${worktree}`,
-				join(root, "dist", "x.js"),
+				join(worktree, "dist", "x.js"),
 			]);
 			const numeric = checks.find((check) => check.check === "num")?.numeric;
 			deepStrictEqual(numeric?.inputs, [join(worktree, "input.txt")]);
