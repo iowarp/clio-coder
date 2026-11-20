@@ -35,6 +35,8 @@ import {
 import { join, relative, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { internalGitArgv, withoutRepositoryEnv } from "../core/internal-git.js";
+import { relativePathEscapes } from "../core/path-containment.js";
+import type { DispatchRequest, ResolvedVerificationCheck } from "../domains/dispatch/contract.js";
 import type { RunGateWorktreeProvenance, RunKind } from "../domains/dispatch/types.js";
 import { captureWorkspaceCheckpoint, workspaceCheckpointRef } from "../domains/dispatch/workspace-checkpoint.js";
 import {
@@ -588,6 +590,34 @@ export function commitCandidateWork(
 /** One-line stat summary of what a candidate branch changed relative to HEAD. */
 export function candidateDiffStat(root: string, branch: string): string {
 	return worktreeBranchDiffStat(root, branch);
+}
+
+/**
+ * A candidate's host checks, moved from the checkout admission sealed them in to the candidate's own worktree, the
+ * way a task worktree's checks move with its worker; a check left in the checkout would judge the operator's tree.
+ * The commit the worktree starts at is the base a failing check is compared against (M10a). Sealed reference and
+ * baseline files stay where admission read them. A check outside the checkout cannot follow the candidate and is
+ * refused; compete builds every candidate's request before admitting any, so that refusal starts no run.
+ */
+export function candidateVerification(
+	root: string,
+	worktree: CandidateWorktree,
+	checks: ReadonlyArray<ResolvedVerificationCheck>,
+): Required<Pick<DispatchRequest, "resolvedVerification" | "candidateWorktree">> {
+	return {
+		resolvedVerification: checks.map((check) => {
+			const rel = relative(root, resolve(root, check.cwd));
+			if (relativePathEscapes(rel)) {
+				throw new Error(`dispatch: host verification check '${check.check}' runs outside the compete checkout`);
+			}
+			return { ...check, argv: [...check.argv], cwd: resolve(worktree.path, rel) };
+		}),
+		candidateWorktree: {
+			root,
+			path: worktree.path,
+			base: git(worktree.path, ["rev-parse", "--verify", "HEAD^{commit}"]),
+		},
+	};
 }
 
 /**

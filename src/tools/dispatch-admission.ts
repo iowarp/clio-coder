@@ -839,9 +839,6 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		if (mode === "compete" && (parsed.requests.length !== 1 || parsed.requests[0] === undefined)) {
 			return shapeRejection(args, COMPETE_SINGLE_TASK_MESSAGE);
 		}
-		if (mode === "compete" && parsed.requests.some((request) => (request.resolvedVerification?.length ?? 0) > 0)) {
-			return shapeRejection(args, "verification_unsupported_for_mode: compete requests cannot run host verification");
-		}
 		const competeResult = mode === "compete" ? competeSettingsFromArgs(args) : undefined;
 		if (competeResult !== undefined && !competeResult.ok) return shapeRejection(args, competeResult.message);
 		const councilResult = mode === "council" ? councilSettingsFromArgs(args, deps) : undefined;

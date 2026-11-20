@@ -281,6 +281,50 @@ it("asks once for a multi-task dispatch that needs the session's test-runner con
 	}
 });
 
+it("admits a compete whose operator turn names `npm test`, moving the check into each candidate's worktree (M10a)", async () => {
+	const root = project([{ id: "test", command: [process.execPath, "-e", "process.exit(0)"] }]);
+	const head = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+	const previousCwd = process.cwd();
+	process.chdir(root);
+	try {
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "yolo" });
+		const requests: Array<Record<string, unknown>> = [];
+		const contract = {
+			dispatch: async (request: Record<string, unknown>) => {
+				requests.push(request);
+				throw new Error("dispatched");
+			},
+		} as unknown as DispatchContract;
+		registry.register(
+			createDispatchTool({
+				dispatch: contract,
+				getAgentSpecs: () => [{ id: "coder", capabilityClass: "workspace-edit" }] as never,
+				getAutonomy: () => "yolo",
+				captureWorkerContext: () =>
+					({ messages: [{ role: "user", content: "Run npm test to verify, and compete on this edit." }] }) as never,
+			}),
+		);
+		const verdict = await registry.invoke({
+			tool: "dispatch",
+			args: { agent: "coder", task: "Edit input.txt.", mode: "compete", candidates: 2 },
+		});
+		ok(!JSON.stringify(verdict).includes("verification_unsupported_for_mode"), JSON.stringify(verdict));
+		ok(requests.length > 0, JSON.stringify(verdict));
+		for (const request of requests) {
+			const worktree = request.cwd as string;
+			ok(worktree !== root && worktree.startsWith(root), worktree);
+			const checks = request.resolvedVerification as Array<{ check: string; cwd: string }>;
+			deepStrictEqual(
+				checks.map((check) => [check.check, check.cwd]),
+				[["test", worktree]],
+			);
+			deepStrictEqual(request.candidateWorktree, { root, path: worktree, base: head });
+		}
+	} finally {
+		process.chdir(previousCwd);
+	}
+});
+
 it("admits a toolchain check verify lists in a Python project and seals the argv verify runs", async () => {
 	const stateDir = process.env.CLIO_CODER_STATE_DIR;
 	ok(stateDir);

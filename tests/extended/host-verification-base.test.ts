@@ -70,6 +70,53 @@ it("leaves the base not compared when the linked base tree cannot resolve the ch
 	strictEqual(existsSync(join(stateDir, "dispatch-verification-base")), false);
 });
 
+it("seals a compete candidate's check that could not start as not run, never a rejection, and compares a failure on its base (M10a)", async () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-host-verification-base-"));
+	scratches.push(root);
+	const project = join(root, "project");
+	const stateDir = join(root, "state");
+	mkdirSync(project, { recursive: true });
+	mkdirSync(stateDir, { recursive: true });
+	writeFileSync(join(project, "a.txt"), "a\n");
+	git(project, "init", "-q", "-b", "main");
+	git(project, "config", "user.name", "Host Verification Base");
+	git(project, "config", "user.email", "host-verification@example.invalid");
+	git(project, "add", "-A");
+	git(project, "commit", "-q", "-m", "baseline");
+	const base = git(project, "rev-parse", "HEAD").trim();
+	const checks: ResolvedCheck[] = [
+		{ check: "passes", cwd: project, timeoutMs: 5_000, argv: [process.execPath, "-e", "process.exit(0)"] },
+		{ check: "absent", cwd: project, timeoutMs: 5_000, argv: [join(project, "no-such-tool")] },
+	];
+	const candidateWorktree = { root: project, path: project, base };
+	const candidate = await runHostVerification({
+		runId: "candidate",
+		request: { resolvedVerification: checks, candidateWorktree },
+		workerSuccessful: true,
+		stateDir,
+	});
+	strictEqual(candidate?.checks[1]?.notRun, "spawn-failed");
+	strictEqual(candidate?.status, "skipped");
+	strictEqual(candidate?.reason, "check_not_started");
+	strictEqual(hostVerificationRejection(candidate), null);
+	// A failure the candidate's base has too is compared there, as a task worktree's is.
+	const red: ResolvedCheck = {
+		check: "red",
+		cwd: project,
+		timeoutMs: 5_000,
+		argv: [process.execPath, "-e", "process.exit(1)"],
+	};
+	const request = { resolvedVerification: [red], candidateWorktree };
+	const failing = await runHostVerification({ runId: "candidate-red", request, workerSuccessful: true, stateDir });
+	strictEqual(failing?.status, "rejected");
+	await compareHostVerificationBase({ verification: failing, request, stateDir });
+	strictEqual(failing?.checks[0]?.baseComparison?.base, base);
+	if (sandboxAvailability().available && sandboxAvailability().backend === "bwrap") {
+		strictEqual(failing?.checks[0]?.baseComparison?.status, "failed");
+		strictEqual(failing?.status, "not_implicated");
+	}
+});
+
 it("masks the source checkout's and the worktree's secret files and Clio's settings from the check and its base replay", {
 	skip: !(sandboxAvailability().available && sandboxAvailability().backend === "bwrap"),
 }, async () => {

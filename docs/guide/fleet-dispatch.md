@@ -1243,10 +1243,9 @@ once per wave, on the settled tree after every live member has finished
 roots cover the paths it names. A member to which the failure is not charged records
 `not_implicated`.
 
-Host checks are supported for singular, parallel, sequential, pipeline, and
-detached native runs. Compete refuses verification entries with
-`verification_unsupported_for_mode` and council with `council_verification_unsupported`;
-both still accept intent paths and outputs.
+Host checks are supported for singular, parallel, sequential, pipeline, compete, and
+detached native runs; compete runs each candidate's checks in that candidate's worktree. Council refuses
+verification entries with `council_verification_unsupported` and still accepts intent paths and outputs.
 Claude Code subprocess routes refuse them with
 `verification_unsupported_runtime`.
 

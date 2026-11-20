@@ -98,6 +98,7 @@ import {
 	type CandidateWorktree,
 	type CompeteGroupOwnership,
 	candidateDiffStat,
+	candidateVerification,
 	claimCompeteGroup,
 	cleanupCompeteGroup,
 	commitCandidateWork,
@@ -1073,6 +1074,11 @@ type ReviewGateSettings = DispatchReviewSettings;
 
 const REVIEW_SINGLE_TASK_MESSAGE =
 	"dispatch: review supports exactly one task; run the fan-out without review, then dispatch one integration task with review to gate the combined result";
+/** A compete judge's intent declares no check of its own; a compete with no check keeps its intent object as is. */
+function judgeIntent(intent: DispatchIntent): DispatchIntent {
+	return intent.verification.length === 0 ? intent : { ...intent, verification: [] };
+}
+
 const COMPETE_SINGLE_TASK_MESSAGE = "dispatch: compete requires exactly one task";
 const COMPETE_NO_REVIEW_MESSAGE = "dispatch: compete has its own judge and cannot combine with review";
 
@@ -1771,9 +1777,11 @@ async function runCompete(
 			// every admission promise is observed to settlement. The first rejection
 			// aborts known siblings, and any sibling accepted later sees `stop` and is
 			// aborted before it can escape the transaction.
-			const admissionResults = await Promise.allSettled(
-				worktrees.map((worktree) => {
-					const request: DispatchRequest = {
+			// Declared checks run in each candidate's own worktree at its own settlement, never across candidates (M10a).
+			// They move after the plan pin, which reseals the checks admission resolved in the checkout.
+			const candidateRequests = worktrees.map((worktree) => {
+				const pinned = withResolvedPlanTaskPin(
+					{
 						...base,
 						executionRole: "builder",
 						cwd: worktree.path,
@@ -1785,15 +1793,16 @@ async function runCompete(
 							...(worktree.provenance ? { worktree: worktree.provenance } : {}),
 						},
 						competeStance: competeStanceFor(group, worktree.index),
-					};
-					return admitOwnedRun(
-						withResolvedPlanTaskPin(
-							request,
-							compete.resolvedTasks?.find((task) => task.role === "candidate" && task.position === worktree.index),
-						),
-						`candidate ${worktree.index}`,
-					);
-				}),
+					},
+					compete.resolvedTasks?.find((task) => task.role === "candidate" && task.position === worktree.index),
+				);
+				const checks = pinned.resolvedVerification ?? [];
+				return checks.length > 0 ? { ...pinned, ...candidateVerification(root, worktree, checks) } : pinned;
+			});
+			const admissionResults = await Promise.allSettled(
+				worktrees.map((worktree, position) =>
+					admitOwnedRun(candidateRequests[position] as DispatchRequest, `candidate ${worktree.index}`),
+				),
 			);
 			const admissionFailures = rejectedReasons(admissionResults);
 			if (admissionFailures.length > 0) {
@@ -1862,16 +1871,19 @@ async function runCompete(
 				// Candidate prose and receipt locators are evidence, not inferred authority.
 				// Read-only execution is enforced by the role/autonomy, not empty write roots.
 				// These roots are the subjects' scope, what the judge may read; its obligation is cited evidence, not reads (M1).
-				intent: narrowDispatchIntentToReadOnly(
-					base.intent ?? {
-						version: 2,
-						readRoots: [],
-						writeRoots: [],
-						relevantPaths: [],
-						pathProvenance: [],
-						expectedOutputs: [],
-						verification: [],
-					},
+				// The judge runs no check: the candidates' host check results are in its task.
+				intent: judgeIntent(
+					narrowDispatchIntentToReadOnly(
+						base.intent ?? {
+							version: 2,
+							readRoots: [],
+							writeRoots: [],
+							relevantPaths: [],
+							pathProvenance: [],
+							expectedOutputs: [],
+							verification: [],
+						},
+					),
 				),
 				systemPrompt: JUDGE_GATE_PROMPT,
 				readOnly: true,

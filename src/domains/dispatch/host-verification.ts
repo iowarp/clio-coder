@@ -53,7 +53,7 @@ import { readVerifiedRun } from "../telemetry/run-record.js";
 import { CODE_STEP_CAPTURE_MAX_BYTES, runCodeStep } from "./code-step.js";
 import type { DispatchRequest } from "./contract.js";
 import { BASE_PREFLIGHT_EXIT, BASE_PREFLIGHT_SCRIPT, baseModulesLinks } from "./host-verification-base.js";
-import { hostCheckBaseNote } from "./host-verification-note.js";
+import { failsTheSameOnBase, hostCheckBaseNote } from "./host-verification-note.js";
 import type { RunHostVerification, RunHostVerificationAttribution, RunHostVerificationCheck } from "./types.js";
 import { type VerificationSlotEvents, withVerificationSlot } from "./verification-slot.js";
 import { captureWorkspaceSnapshot } from "./write-boundary.js";
@@ -538,11 +538,6 @@ function boundedLine(line: string): string {
 	return line.length > 160 ? `${line.slice(0, 157)}...` : line;
 }
 
-/** A failing check the base fails the same way: it predates the task and does not reject it. */
-function failsTheSameOnBase(check: RunHostVerificationCheck): boolean {
-	return check.baseComparison?.status === "failed" && check.baseComparison.reason === undefined;
-}
-
 function resolvedBaseSha(root: string, base: string): string | null {
 	try {
 		return execFileSync("git", internalGitArgv(["-C", root, "rev-parse", "--verify", "-q", `${base}^{commit}`]), {
@@ -571,7 +566,7 @@ function resolvedBaseSha(root: string, base: string): string | null {
  */
 export async function compareHostVerificationBase(input: {
 	verification: RunHostVerification | undefined;
-	request: Pick<DispatchRequest, "resolvedVerification" | "taskWorktree">;
+	request: Pick<DispatchRequest, "resolvedVerification" | "taskWorktree" | "candidateWorktree">;
 	stateDir?: string;
 	env?: NodeJS.ProcessEnv;
 	/** Reports the wait for the verification slot each base replay takes; see {@link withVerificationSlot}. */
@@ -579,7 +574,8 @@ export async function compareHostVerificationBase(input: {
 }): Promise<void> {
 	const failures = input.verification?.checks.filter((check) => check.exitCode !== 0) ?? [];
 	if (failures.length === 0) return;
-	const worktree = input.request.taskWorktree;
+	// A compete candidate's checkout is isolated from the base it was cut from, as a task worktree is.
+	const worktree = input.request.taskWorktree ?? input.request.candidateWorktree;
 	for (const check of failures)
 		check.baseComparison = { status: "not_compared", reason: "no isolated task base available" };
 	if (worktree === undefined) return;
@@ -836,7 +832,10 @@ export async function compareHostVerificationBase(input: {
 		}
 	}
 	const verification = input.verification;
-	if (verification?.status === "rejected" && failures.every(failsTheSameOnBase)) {
+	// A candidate's check that never started judged nothing, so it cannot keep its run rejected either (M10a).
+	const judged =
+		input.request.candidateWorktree === undefined ? failures : failures.filter((check) => check.notRun === undefined);
+	if (verification?.status === "rejected" && judged.every(failsTheSameOnBase)) {
 		// Every failure is already present on the base: the task did not cause it.
 		verification.status = "not_implicated";
 		verification.reason = "failures_present_on_base";
@@ -1256,7 +1255,7 @@ export function hostVerificationSandbox(
 
 export async function runHostVerification(input: {
 	runId: string;
-	request: Pick<DispatchRequest, "resolvedVerification" | "taskWorktree">;
+	request: Pick<DispatchRequest, "resolvedVerification" | "taskWorktree" | "candidateWorktree">;
 	workerSuccessful: boolean;
 	stateDir?: string;
 	env?: NodeJS.ProcessEnv;
@@ -1284,6 +1283,13 @@ export async function runHostVerification(input: {
 			...(input.slot !== undefined ? { slot: input.slot } : {}),
 		});
 		results.push(outcome.check);
+	}
+	if (input.request.candidateWorktree !== undefined) {
+		// A compete candidate's check that never started judged nothing: it is not run, never a rejection (M10a).
+		const judged = results.filter((check) => check.notRun === undefined || check.notRun === "nothing-changed");
+		if (judged.length < results.length && judged.every((check) => check.exitCode === 0)) {
+			return { status: "skipped", reason: "check_not_started", checks: results };
+		}
 	}
 	return {
 		status: results.every((check) => check.exitCode === 0) ? "verified" : "rejected",

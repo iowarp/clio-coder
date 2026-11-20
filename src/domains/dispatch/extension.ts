@@ -10059,7 +10059,7 @@ export function createDispatchBundle(
 				}
 				const hostVerificationSandboxPolicy =
 					(req.resolvedVerification?.length ?? 0) > 0
-						? hostVerificationSandbox(lifecycle.settings, req.taskWorktree ?? lifecycle.cwd)
+						? hostVerificationSandbox(lifecycle.settings, req.taskWorktree ?? req.candidateWorktree ?? lifecycle.cwd)
 						: undefined;
 				// The worker has ended, so the card's phase is the run's own: a check queued behind the machine's one
 				// verification slot says so instead of reading as a worker waiting for its model.

@@ -64,6 +64,66 @@ it("delivers distinct sealed inline explanations with identity even when both tr
 	match(JUDGE_GATE_PROMPT, /inline answers and citations/);
 });
 
+it("lists each candidate's host check results as hostChecks, and adds nothing when no check was declared (M10a)", () => {
+	const check = (name: string, exitCode: number, extra: Record<string, unknown> = {}) => ({
+		check: name,
+		argv: ["npm", "test"],
+		cwd: "/repo",
+		exitCode,
+		durationMs: 1,
+		memo: false,
+		outputTail: "",
+		...extra,
+	});
+	const base = { status: "failed" as const, base: "abc", exitCode: 1 };
+	const verified = run(1, "First");
+	const rejected = run(2, "Second");
+	const runs = [
+		{
+			...verified,
+			receipt: {
+				...verified.receipt,
+				hostVerification: {
+					status: "not_implicated" as const,
+					checks: [check("test", 0), check("lint", 1, { baseComparison: base })],
+				},
+			},
+		},
+		{
+			...rejected,
+			receipt: {
+				...rejected.receipt,
+				outcome: "failed" as const,
+				hostVerification: {
+					status: "rejected" as const,
+					checks: [
+						check("test", 1, { baseComparison: { status: "passed", base: "abc", exitCode: 0 } }),
+						check("lint", 127, { notRun: "spawn-failed" }),
+					],
+				},
+			},
+		},
+	];
+	const task = renderCompeteJudgeTask("Fix it", candidates, [], runs);
+	deepStrictEqual(
+		records(task).map((record) => record.hostChecks),
+		[
+			[
+				{ check: "test", status: "verified" },
+				{ check: "lint", status: "not_implicated" },
+			],
+			[
+				{ check: "test", status: "rejected" },
+				{ check: "lint", status: "not_run", reason: "its process could not start" },
+			],
+		],
+	);
+	match(task, /hostChecks lists the host's own run of each declared check/);
+	const plain = renderCompeteJudgeTask("Fix it", candidates, [], [verified, rejected]);
+	ok(records(plain).every((record) => !("hostChecks" in record)));
+	ok(!plain.includes("hostChecks"));
+});
+
 it("orders candidates and stances by group hash while each record keeps its own ordinal", () => {
 	const four = [1, 2, 3, 4].map((index) => ({ index, branch: `candidate/${index}`, path: `/repo/candidate-${index}` }));
 	const runs = four.map((candidate) => run(candidate.index, `answer ${candidate.index}`));
