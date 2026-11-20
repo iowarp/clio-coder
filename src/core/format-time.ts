@@ -29,14 +29,47 @@ const CLOCK_OPTIONS: Intl.DateTimeFormatOptions = {
 const DATE_OPTIONS: Intl.DateTimeFormatOptions = { year: "numeric", month: "2-digit", day: "2-digit" };
 const DAY_OPTIONS: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
 
+/** A turn receipt's hour and minute in the operator's time locale: `18:42`, or `6:42 PM` where the locale says so. */
+const WALL_CLOCK_OPTIONS: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
+/** Without a usable locale (unset, `C`, `POSIX`) the wall clock keeps the 24-hour form those locales use. */
+const WALL_CLOCK_FALLBACK: Intl.DateTimeFormatOptions = { hourCycle: "h23", hour: "2-digit", minute: "2-digit" };
+
+/**
+ * The POSIX time locale as a BCP 47 tag: `LC_ALL`, then `LC_TIME`, then `LANG`,
+ * the order a C program's `strftime` reads them. ICU's own default follows
+ * `LC_MESSAGES` instead, which is not the setting for how a clock reads.
+ */
+function timeLocale(): string | undefined {
+	const raw = process.env.LC_ALL || process.env.LC_TIME || process.env.LANG;
+	const tag = raw?.split(/[.@]/u)[0]?.replace(/_/gu, "-");
+	if (!tag || tag === "C" || tag === "POSIX") return undefined;
+	try {
+		return Intl.DateTimeFormat.supportedLocalesOf(tag)[0];
+	} catch {
+		return undefined;
+	}
+}
+
+function buildWallClock(zone: Intl.DateTimeFormatOptions | undefined): Intl.DateTimeFormat {
+	const locale = timeLocale();
+	return locale === undefined
+		? new Intl.DateTimeFormat("en-GB", { ...WALL_CLOCK_FALLBACK, ...zone })
+		: new Intl.DateTimeFormat(locale, { ...WALL_CLOCK_OPTIONS, ...zone });
+}
+
+const localeEnv = (): string => `${process.env.LC_ALL}|${process.env.LC_TIME}|${process.env.LANG}`;
+
 let builtForZone = process.env.TZ;
+let builtForLocale = localeEnv();
 let clockFormatter = new Intl.DateTimeFormat("en-GB", CLOCK_OPTIONS);
 let dateFormatter = new Intl.DateTimeFormat("en-CA", DATE_OPTIONS);
 let dayFormatter = new Intl.DateTimeFormat("en-US", DAY_OPTIONS);
+let wallClockFormatter = buildWallClock(undefined);
 
 function syncZone(): void {
-	if (process.env.TZ === builtForZone) return;
+	if (process.env.TZ === builtForZone && localeEnv() === builtForLocale) return;
 	builtForZone = process.env.TZ;
+	builtForLocale = localeEnv();
 	// The zone is passed explicitly, not left for Intl to pick up from
 	// process.env.TZ implicitly, because it doesn't reliably do so: under a
 	// shared test process that constructs many formatters across many zones,
@@ -52,6 +85,7 @@ function syncZone(): void {
 	clockFormatter = new Intl.DateTimeFormat("en-GB", { ...CLOCK_OPTIONS, ...zone });
 	dateFormatter = new Intl.DateTimeFormat("en-CA", { ...DATE_OPTIONS, ...zone });
 	dayFormatter = new Intl.DateTimeFormat("en-US", { ...DAY_OPTIONS, ...zone });
+	wallClockFormatter = buildWallClock(zone);
 }
 
 function toEpochMs(instant: Instant): number | null {
@@ -89,16 +123,17 @@ export function stampLocal(instant: Instant, now: number = Date.now()): string {
 }
 
 /**
- * Operator-local wall clock to the minute: `HH:MM` when the instant falls on
- * today's local date, `Nov 16 HH:MM` on another day of this year, and
- * `Nov 16 2025 HH:MM` in another year. A turn receipt reads it at a glance.
+ * Operator-local wall clock to the minute in the operator's time locale
+ * (`18:42` or `6:42 PM`) when the instant falls on today's local date,
+ * `Nov 16 18:42` on another day of this year, and `Nov 16 2025 18:42` in
+ * another year. A turn receipt reads it at a glance.
  */
 export function wallClockLocal(instant: Instant, now: number = Date.now()): string {
 	const ms = toEpochMs(instant);
 	if (ms === null) return MISSING;
 	const date = dateLocal(ms);
 	const today = dateLocal(now);
-	const clock = clockFormatter.format(ms).slice(0, 5);
+	const clock = wallClockFormatter.format(ms);
 	if (date === today) return clock;
 	const year = date.slice(0, 4) === today.slice(0, 4) ? "" : ` ${date.slice(0, 4)}`;
 	return `${dayFormatter.format(ms)}${year} ${clock}`;

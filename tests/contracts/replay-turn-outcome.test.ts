@@ -39,14 +39,17 @@ const usage = {
 	totalTokens: 12,
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
-/** Pins the operator's zone for one test, so a receipt's end time never depends on the host. */
-function pinZone(t: TestContext, zone: string): void {
-	const saved = process.env.TZ;
-	process.env.TZ = zone;
-	t.after(() => {
-		if (saved === undefined) delete process.env.TZ;
-		else process.env.TZ = saved;
-	});
+/** Pins the operator's zone and time locale for one test, so a receipt's end time never depends on the host. */
+function pinZone(t: TestContext, zone: string, locale = "C"): void {
+	const pinned = { TZ: zone, LC_ALL: locale };
+	for (const [name, value] of Object.entries(pinned)) {
+		const saved = process.env[name];
+		process.env[name] = value;
+		t.after(() => {
+			if (saved === undefined) delete process.env[name];
+			else process.env[name] = saved;
+		});
+	}
 }
 function replay(items: Array<{ role: "user" | "assistant"; payload: unknown } | { retry: true }>): string {
 	const entries: SessionEntry[] = items.map((item, index) => ({
@@ -567,6 +570,27 @@ test("a replayed receipt states the duration, cold-cache reasons and end time th
 		},
 	] as SessionEntry[]);
 	assert.equal(plainRows(warm).at(-1), "✓ Done · 1m36s · in 7 · out 5 · cached 68.6k · Sep 16 19:01");
+});
+
+test("a receipt's clock follows the time locale, and a receipt rendered before midnight gains its date after", (t) => {
+	pinZone(t, "America/Chicago", "en_US.UTF-8");
+	let clock = Date.parse("2026-09-17T23:42:00Z");
+	const panel = createChatPanel({ now: () => clock, getOutputStyle: () => "detailed" });
+	const final = { role: "assistant" as const, content: [{ type: "text", text: "Answer" }], stopReason: "stop", usage };
+	panel.appendUser("Question");
+	panel.applyEvent({ type: "agent_start", turnId: "u" } as ChatLoopEvent);
+	panel.applyEvent({ type: "message_end", message: final } as unknown as ChatLoopEvent);
+	panel.applyEvent({ type: "agent_end", messages: [final] } as unknown as ChatLoopEvent);
+	const receipt = () =>
+		panel
+			.render(120)
+			.map(stripTerminalSequences)
+			.filter((line) => line.length > 0)
+			.at(-1);
+	assert.match(receipt() ?? "", / · 6:42\sPM$/u);
+	// Nothing changed but the local day: the settled receipt is not served from the cache.
+	clock = Date.parse("2026-09-18T06:00:00Z");
+	assert.match(receipt() ?? "", / · Sep 17 6:42\sPM$/u);
 });
 
 test("a middleware reminder reads the same live and on replay, and a skill activation adds no line", () => {
