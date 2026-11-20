@@ -130,6 +130,20 @@ it("only a call A1 reads as making no change is superseded; a step tool never is
 		["cd src; make build", false],
 		["cd && ls", false],
 		["cd -P src && ls", false],
+		["builtin cd src && ls", true],
+		["command cd src && ls", true],
+		// Only the builtin counts: a path-spelled, env-run, exec'd, sudo'd or xargs'd cd runs a program.
+		["./cd deploy && ls", false],
+		["/tmp/cd foo && ls", false],
+		["env PATH=. cd foo && ls", false],
+		["PATH=. env cd foo && ls", false],
+		["X=1 cd foo && ls", false],
+		["exec cd foo", false],
+		["sudo cd foo && ls", false],
+		["xargs cd foo", false],
+		// A `$` in the operand is an expansion, and `${X@P}` can run code.
+		[`cd \${X@P} && ls`, false],
+		['cd "$X" && ls', false],
 	] as const)
 		strictEqual(callRepeatsAsRead("bash", { command }, declared), read, command);
 	// Typed git: an inspection qualifies, a commit does not.

@@ -279,6 +279,14 @@ function gitConfigOnlyReads(words: ReadonlyArray<string>): boolean {
  * its options (Astra r2-4, SF-4).
  */
 function segmentOnlyReads(input: ReadonlyArray<string>): boolean {
+	// `cd <one path>` reads nothing and writes nothing, so a cd-prefixed read stays a read (X1). Only the
+	// builtin counts: a bare `cd`, or one through `builtin` or `command`, with no leading assignment, since
+	// `./cd`, `env cd` or `sudo cd` runs a program, and no `$`, since an expansion such as `${X@P}` can run code.
+	const cd = input[0] === "cd" ? 1 : (input[0] === "builtin" || input[0] === "command") && input[1] === "cd" ? 2 : 0;
+	if (cd > 0) {
+		const operand = input[cd] ?? "-";
+		return input.length === cd + 1 && !operand.startsWith("-") && !operand.includes("$");
+	}
 	let words = input;
 	while (/^[A-Za-z_]\w*=/.test(words[0] ?? "")) words = words.slice(1);
 	for (let depth = 0; depth < 8; depth++) {
@@ -290,8 +298,6 @@ function segmentOnlyReads(input: ReadonlyArray<string>): boolean {
 	}
 	const program = commandName(words[0] ?? "");
 	const args = words.slice(1);
-	// `cd <one path>` reads nothing and writes nothing, so a cd-prefixed read stays a read (X1).
-	if (program === "cd") return args.length === 1 && !(args[0] ?? "-").startsWith("-");
 	if (program === "git") return gitSegmentOnlyReads(["git", ...args]);
 	const listed = READ_ONLY_SHELL_COMMAND_PATTERN.exec(program)?.[0].trim() === program;
 	return (listed || SHELL_INSPECTIONS.has(program)) && READ_PROGRAM_WRITES[program]?.(args) !== true;
