@@ -450,6 +450,9 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 			// The group help answers from a leaf, before fleet.js and its domain graph load.
 			const help = (await import("./fleet-help.js")).answerFleetHelp(subArgs);
 			if (help !== null) return help;
+			// A status with no ledger rows answers from a leaf too; with rows it needs per-run telemetry from fleet.js.
+			const status = await (await import("./fleet-status.js")).answerFleetStatus(subArgs);
+			if (status !== null) return status;
 			return (await import("./fleet.js")).runFleetCommand(subArgs);
 		},
 	],

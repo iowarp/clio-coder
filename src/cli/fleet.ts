@@ -48,7 +48,7 @@ import {
 	type RunToolBudgetEnvelope,
 } from "../domains/dispatch/budget-envelope.js";
 import { clearRootCancelRequest, readRootCancelRequest } from "../domains/dispatch/cancel-requests.js";
-import { type CapacityDrain, capacityDrain, setCapacityDraining } from "../domains/dispatch/capacity-lease.js";
+import { capacityDrain, setCapacityDraining } from "../domains/dispatch/capacity-lease.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { bindExecutionPlanEndpoints, type ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { agentRoleFactsResolver, requestExecutionRole, withAttemptRole } from "../domains/dispatch/execution-role.js";
@@ -93,6 +93,7 @@ import { answerFleetHelp, FLEET_HELP as HELP } from "./fleet-help.js";
 import { runFleetWithShutdown } from "./fleet-lifecycle.js";
 import { fleetInspectionScope } from "./fleet-project-scope.js";
 import { createFleetReporter } from "./fleet-reporting.js";
+import { admissionStatus, type FleetAdmissionStatus, writeStatusFooter, writeStatusHeader } from "./fleet-status.js";
 import { parseDuration } from "./kit/duration.js";
 import { EXIT_CODES } from "./kit/exit-codes.js";
 import { parseCommandFlags } from "./kit/flags.js";
@@ -977,20 +978,6 @@ function rowHeartbeat(row: RunEnvelope): "alive" | "stale" | "dead" | "n/a" {
 	return isProcessAlive(row.pid) ? "alive" : "dead";
 }
 
-export type FleetAdmissionStatus =
-	| { state: "open" }
-	| {
-			state: "draining";
-			requestedByPid: number;
-			requestedAt: string;
-			expiresAt: string;
-	  };
-
-function admissionStatus(drain: CapacityDrain | null): FleetAdmissionStatus {
-	if (drain === null) return { state: "open" };
-	return { state: "draining", ...drain };
-}
-
 function statusSnapshot(all = false) {
 	const nowMs = Date.now();
 	const scope = fleetInspectionScope(all);
@@ -1031,12 +1018,7 @@ function runStatus(args: ReadonlyArray<string>): number {
 		process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
 		return 0;
 	}
-	process.stdout.write(`dispatch status @ ${snapshot.generatedAt} (ledger: ${clioStateDir()})\n`);
-	process.stdout.write(
-		snapshot.admission.state === "draining"
-			? `admission: draining until ${snapshot.admission.expiresAt} (requested by pid ${snapshot.admission.requestedByPid} at ${snapshot.admission.requestedAt})\n`
-			: "admission: open\n",
-	);
+	writeStatusHeader(process.stdout, snapshot.generatedAt, snapshot.admission);
 	if (snapshot.running.length === 0) {
 		process.stdout.write("running: none\n");
 	} else {
@@ -1055,18 +1037,7 @@ function runStatus(args: ReadonlyArray<string>): number {
 			}
 		}
 	}
-	if (snapshot.retrying.length === 0) {
-		process.stdout.write("retrying: none (retry queue is in-memory and only visible in the owning process)\n");
-	} else {
-		process.stdout.write("retrying:\n");
-		for (const row of snapshot.retrying) {
-			process.stdout.write(`  ${row.runId}  ${row.agentId}  attempt=${row.attempt} due=${row.dueAt}  ${row.reason}\n`);
-		}
-	}
-	const t = snapshot.totals;
-	process.stdout.write(
-		`totals: tokens=${t.total.display} (in=${t.input.display} out=${t.output.display}) cost=${t.usd.display} runtime=${t.elapsed.display}\n`,
-	);
+	writeStatusFooter(process.stdout, snapshot.retrying, snapshot.totals);
 	return 0;
 }
 
