@@ -97,6 +97,7 @@ import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from
 const PERMISSION_REQUIRED_EXIT_CODE = 3;
 
 import {
+	noteDispatchSupersededV2,
 	noteMainRunV2,
 	noteRunEndWritten,
 	noteSteerV2,
@@ -1598,8 +1599,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// Detached workers outlive the turn but not the process, so wait for them
 	// while a deadline can still fire.
 	const settlement: DispatchedRunsSettlement = options.dispatch
-		? await settleDispatchedRuns(options.dispatch, runId, () => termination.isShuttingDown())
-		: { live: [], undelivered: [] };
+		? await settleDispatchedRuns(options.dispatch, runId, () => termination.isShuttingDown(), {
+				supersede: runResultV2Active(),
+			})
+		: { live: [], undelivered: [], superseded: [] };
+	if (settlement.superseded.length > 0) noteDispatchSupersededV2(settlement.superseded.map(projectDispatchedRunOutcome));
 	if (mode === "json" && (settlement.live.length > 0 || settlement.undelivered.length > 0)) {
 		writeJsonHeader(true);
 		writeMainFrame({

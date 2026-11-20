@@ -20,6 +20,11 @@ export interface DispatchedRunsSettlement {
 	live: ReadonlyArray<RunEnvelope>;
 	/** Final attempts that ended without delivering (a retried attempt is not final). */
 	undelivered: ReadonlyArray<RunEnvelope>;
+	/**
+	 * Schema v2 only (CLI-5): final attempts that did not deliver but a later dispatch of the same task by the same
+	 * agent and parent did, so they no longer fail the run. Always empty unless the caller asks for it.
+	 */
+	superseded: ReadonlyArray<RunEnvelope>;
 }
 
 function dispatchedBy(dispatch: Pick<DispatchContract, "listRuns">, rootRunId: string): RunEnvelope[] {
@@ -29,17 +34,35 @@ function dispatchedBy(dispatch: Pick<DispatchContract, "listRuns">, rootRunId: s
 }
 
 /**
+ * Whether a later run of the same task delivered: same agent, same parent, byte-identical task, started after it and
+ * sealed `succeeded`. A reworded task is a different task, so its failure still counts.
+ */
+function supersededBy(failed: RunEnvelope, runs: ReadonlyArray<RunEnvelope>): boolean {
+	return runs.some(
+		(later) =>
+			later.id !== failed.id &&
+			later.outcome === "succeeded" &&
+			later.agentId === failed.agentId &&
+			later.task === failed.task &&
+			(later.lineage?.parentRunId ?? null) === (failed.lineage?.parentRunId ?? null) &&
+			later.startedAt > failed.startedAt,
+	);
+}
+
+/**
  * Wait for every run the headless turn dispatched to seal, then report the ones
  * that did not deliver. Detached runs are children of this process, so exiting
  * while they run drains and cancels them; before D3 a coordinator that ended
  * its turn early silently discarded its whole fan-out. Waiting stops when the
  * process starts shutting down (a signal or `--timeout`), and whatever is still
- * live is returned so the caller can name it.
+ * live is returned so the caller can name it. With `supersede` (schema v2), a
+ * failure a later dispatch of the same task made good moves to `superseded`.
  */
 export async function settleDispatchedRuns(
 	dispatch: Pick<DispatchContract, "listRuns">,
 	rootRunId: string,
 	isShuttingDown: () => boolean,
+	options: { supersede?: boolean } = {},
 ): Promise<DispatchedRunsSettlement> {
 	while (!isShuttingDown() && dispatchedBy(dispatch, rootRunId).some((run) => !isTerminalRunEnvelope(run))) {
 		await sleep(SETTLE_POLL_MS);
@@ -48,16 +71,19 @@ export async function settleDispatchedRuns(
 	const retried = new Set(
 		runs.flatMap((run) => ((run.lineage?.attempt ?? 0) > 0 && run.lineage?.parentRunId ? [run.lineage.parentRunId] : [])),
 	);
+	const failed = runs.filter(
+		(run) =>
+			isTerminalRunEnvelope(run) &&
+			!retried.has(run.id) &&
+			run.outcome !== undefined &&
+			run.outcome !== null &&
+			UNDELIVERED_OUTCOMES.has(run.outcome),
+	);
+	const superseded = options.supersede === true ? failed.filter((run) => supersededBy(run, runs)) : [];
 	return {
 		live: runs.filter((run) => !isTerminalRunEnvelope(run)),
-		undelivered: runs.filter(
-			(run) =>
-				isTerminalRunEnvelope(run) &&
-				!retried.has(run.id) &&
-				run.outcome !== undefined &&
-				run.outcome !== null &&
-				UNDELIVERED_OUTCOMES.has(run.outcome),
-		),
+		undelivered: failed.filter((run) => !superseded.includes(run)),
+		superseded,
 	};
 }
 

@@ -260,6 +260,15 @@ export interface RunLimitsV2 {
 	cost?: { overshootPossible: true; unpricedCalls: number; unpricedRoutes: string[] };
 }
 
+/** One dispatched run as v2 lists it: its own outcome, with an absent key for each value it lacks. */
+export interface RunDispatchedRunV2 {
+	runId: string;
+	agentId: string;
+	outcome?: string;
+	outcomeCode?: string;
+	outcomeDetail?: string;
+}
+
 export interface RunResultEnvelopeV2 {
 	type: "run_end";
 	schemaVersion: typeof RUN_RESULT_SCHEMA_VERSION;
@@ -295,6 +304,8 @@ export interface RunResultEnvelopeV2 {
 		runs: RunResult[];
 		live: RunJsonDispatchedRunOutcome[];
 		undelivered: RunJsonDispatchedRunOutcome[];
+		/** CLI-5: failed runs a later dispatch of the same task delivered; they do not fail the run. Absent when none. */
+		superseded?: RunDispatchedRunV2[];
 	};
 	timings: { sessionReadyMs?: number; firstRequestMs?: number; firstTokenMs?: number };
 	/** Present when the run was given any limit (SPEC 6.9). */
