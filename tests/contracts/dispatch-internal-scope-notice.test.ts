@@ -8,6 +8,7 @@ import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
 import { declaredScopeReplacementDiagnostic, resolveDispatchPathScope } from "../../src/domains/dispatch/path-scope.js";
 import { localNodeIdentity } from "../../src/domains/dispatch/transport.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
+import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -123,6 +124,59 @@ it("announces withheld checks for narrow roots without an OS sandbox", async () 
 		ok(tools[1]?.includes(ToolNames.Verify));
 	} finally {
 		unsubscribe();
+		await bundle.extension.stop?.();
+		env.restore();
+	}
+});
+
+it("names withheld checks in the dispatch result and the worker's own prompt (CLI-H2)", async () => {
+	const env = await isolateClioEnv("withheld-checks-result-");
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.safety.sandbox = "off";
+	const context = dispatchStubContext({ settings });
+	const specs: WorkerSpec[] = [];
+	const bundle = makeDispatchBundle(context, {
+		spawnWorker: (spec) => {
+			specs.push(spec);
+			return {
+				pid: null,
+				promise: Promise.resolve({ exitCode: 0, signal: null }),
+				heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+				abort() {},
+				events: (async function* () {
+					yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content: "edited" } };
+				})(),
+			};
+		},
+	});
+	const home = process.cwd();
+	process.chdir(env.dir);
+	try {
+		await bundle.extension.start();
+		const tool = createDispatchTool({
+			dispatch: bundle.contract,
+			getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
+			getAutonomy: () => "yolo",
+		});
+		const task = (path: string) => ({ task: `Edit ${path}.`, intent: { write_roots: [path] } });
+		const detached = await tool.run({
+			agent: "coder",
+			tasks: [task("a.js"), task("b.js")],
+			detach: true,
+		});
+		strictEqual(detached.kind, "ok", JSON.stringify(detached).slice(0, 600));
+		const detachedText = detached.kind === "ok" ? detached.output : "";
+		strictEqual(detachedText.match(/agent=coder \[withheld: bash, verify\]/gu)?.length, 2, detachedText);
+		match(detachedText, /write roots without an OS sandbox.*cannot run checks/u);
+		const sync = await tool.run({ agent: "coder", ...task("c.js") });
+		match(JSON.stringify(sync), /ran without bash, verify.*write roots without an OS sandbox/u);
+		strictEqual(specs.length, 3);
+		for (const spec of specs) {
+			const notice = spec.dynamicPromptMessages?.find((message) => message.id === "dispatch-checks-withheld");
+			match(notice?.body ?? "", /bash, verify.*withheld.*checks you could not run/su);
+		}
+	} finally {
+		process.chdir(home);
 		await bundle.extension.stop?.();
 		env.restore();
 	}

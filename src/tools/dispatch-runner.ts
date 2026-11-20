@@ -324,7 +324,13 @@ async function runDetached(
 	}
 	const lines = [
 		`dispatch (detached) batch=${handle.batchId} started ${runs.length} run(s)`,
-		...runs.map((run) => `- ${run.assignmentId} agent=${run.agentId}`),
+		...runs.map((run) => {
+			const withheld = deps.dispatch.getRun(run.runId)?.projection?.checksWithheld ?? [];
+			return `- ${run.assignmentId} agent=${run.agentId}${withheld.length > 0 ? ` [withheld: ${withheld.join(", ")}]` : ""}`;
+		}),
+		...(runs.some((run) => (deps.dispatch.getRun(run.runId)?.projection?.checksWithheld?.length ?? 0) > 0)
+			? [CHECKS_WITHHELD_DETACHED]
+			: []),
 		"",
 		`Runs continue in the background. Collect results with monitor(mode="collect", batch_id="${handle.batchId}"); block on one run with monitor(mode="wait", run_id=<id>).`,
 	];
@@ -338,6 +344,21 @@ async function runDetached(
 			runs: runs.map((run) => ({ runId: run.runId, assignmentId: run.assignmentId, agentId: run.agentId })),
 		},
 	};
+}
+
+/**
+ * Runs started with write roots no OS sandbox enforces have no bash or verify.
+ * The parent learned that only after collect and briefed checks the workers
+ * could not run (CLI-H2), so the start result says it per run.
+ */
+const CHECKS_WITHHELD_DETACHED =
+	"Runs marked [withheld] have write roots without an OS sandbox enforcing them, so they cannot run checks: they report edits, and you run the checks after collect. worktree: true, or no write roots, keeps bash and verify.";
+
+/** The sync counterpart, read back from the run's ledger projection. */
+function checksWithheldNotice(run: CompletedRun): string | null {
+	const withheld = run.checksWithheld ?? [];
+	if (withheld.length === 0) return null;
+	return `${run.receipt.runId} ran without ${withheld.join(", ")}: write roots without an OS sandbox enforcing them withheld them, so it ran no checks; run them in the host workspace before reporting them passed.`;
 }
 
 /**
@@ -569,6 +590,8 @@ interface CompletedRun {
 	failedAttempts?: ReadonlyArray<FailedAttempt>;
 	/** Why the assignment settled on this failed attempt with no further attempt, such as a suppressed retry. */
 	notRetried?: string;
+	/** Check tools the run's write roots cost it (no OS sandbox enforced them). */
+	checksWithheld?: ReadonlyArray<string>;
 }
 
 export interface FailedAttempt {
@@ -667,6 +690,7 @@ function completeRun(
 		summary,
 		...(pendingGate !== undefined ? { pendingGate } : {}),
 		...(failedAttempts.length > 0 ? { failedAttempts } : {}),
+		...(envelope?.projection?.checksWithheld !== undefined ? { checksWithheld: envelope.projection.checksWithheld } : {}),
 	};
 }
 
@@ -781,6 +805,7 @@ export function formatDispatchOutput(
 			runs
 				.flatMap((run) => [
 					nextHostValidationAction(run.receipt, run.readOnly === true),
+					checksWithheldNotice(run),
 					withheldMergeNotice(run.receipt),
 					mcpSandboxNoNetworkNotice(run.receipt),
 					...routeWarningLines(run.receipt),

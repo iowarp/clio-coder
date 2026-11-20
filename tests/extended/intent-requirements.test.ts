@@ -1,7 +1,10 @@
 import { doesNotMatch, match, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { DispatchIntent } from "../../src/domains/dispatch/intent.js";
-import { renderDispatchIntentRequirements } from "../../src/domains/dispatch/intent-requirements.js";
+import {
+	renderChecksWithheldNotice,
+	renderDispatchIntentRequirements,
+} from "../../src/domains/dispatch/intent-requirements.js";
 
 function intent(overrides: Partial<DispatchIntent>): DispatchIntent {
 	return {
@@ -17,31 +20,32 @@ function intent(overrides: Partial<DispatchIntent>): DispatchIntent {
 }
 
 describe("declared result requirements", () => {
-	it("tells a write-confined worker that it has no shell and the host runs the checks", () => {
-		const block = renderDispatchIntentRequirements(
-			intent({
-				writeRoots: ["src/compaction.ts"],
-				expectedOutputs: ["src/compaction.ts"],
-				verification: [{ check: "typecheck", timeoutMs: 120_000 }],
-			}),
-		);
-		match(block ?? "", /no bash or verify tool/u);
-		match(block ?? "", /the host runs the declared checks/u);
-		match(block ?? "", /typecheck must pass/u);
+	it("tells a write-confined worker which check tools it lost and that the host runs the checks", () => {
+		const withRequirements = intent({
+			writeRoots: ["src/compaction.ts"],
+			expectedOutputs: ["src/compaction.ts"],
+			verification: [{ check: "typecheck", timeoutMs: 120_000 }],
+		});
+		const notice = renderChecksWithheldNotice(["bash", "verify"], withRequirements);
+		match(notice ?? "", /bash, verify are withheld/u);
+		match(notice ?? "", /the host runs the declared checks/u);
+		match(renderDispatchIntentRequirements(withRequirements) ?? "", /typecheck must pass/u);
+		// Write roots alone still produce the notice: no requirements block carries it (CLI-H2).
+		match(renderChecksWithheldNotice(["bash"], intent({ writeRoots: ["a.js"] })) ?? "", /bash is withheld/u);
 	});
 
-	it("drops the no-shell claim when the worker was admitted a shell", () => {
+	it("drops the notice when admission withheld nothing", () => {
+		strictEqual(renderChecksWithheldNotice([], intent({ writeRoots: ["src/duration.js"] })), null);
 		const block = renderDispatchIntentRequirements(
 			intent({ writeRoots: ["src/duration.js"], expectedOutputs: ["src/duration.js"] }),
-			{ shellAvailable: true },
 		);
-		doesNotMatch(block ?? "", /no bash or verify tool/u);
+		doesNotMatch(block ?? "", /withheld/u);
 		match(block ?? "", /Expected outputs:/u);
 	});
 
 	it("says nothing about confinement when no write root is declared", () => {
 		const block = renderDispatchIntentRequirements(intent({ expectedOutputs: ["REPORT.md"] }));
-		doesNotMatch(block ?? "", /no bash or verify tool/u);
+		doesNotMatch(block ?? "", /withheld/u);
 		strictEqual(renderDispatchIntentRequirements(intent({})), null);
 	});
 });

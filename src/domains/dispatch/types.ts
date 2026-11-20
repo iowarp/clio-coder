@@ -444,6 +444,8 @@ export interface RunLedgerProjection {
 	readRoots: ReadonlyArray<string>;
 	writeRoots: ReadonlyArray<string>;
 	scopeSource: "intent" | "legacy-write-roots" | "none";
+	/** Check tools (bash, verify, run_script) withheld because the write roots have no OS sandbox enforcing them. */
+	checksWithheld?: ReadonlyArray<string>;
 }
 
 export interface RunEnvelope {

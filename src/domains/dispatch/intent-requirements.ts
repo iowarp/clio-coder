@@ -1,28 +1,12 @@
 import type { DispatchIntent } from "./intent.js";
 
 /** Render intent fields that describe required results rather than observed facts. */
-export function renderDispatchIntentRequirements(
-	intent: DispatchIntent | undefined,
-	options: { shellAvailable?: boolean } = {},
-): string | null {
+export function renderDispatchIntentRequirements(intent: DispatchIntent | undefined): string | null {
 	if (intent === undefined || (intent.expectedOutputs.length === 0 && intent.verification.length === 0)) return null;
 	const lines = [
 		"# Declared Result Requirements",
 		"These entries are requirements to satisfy and verify. They are not evidence that an output exists or a check passed.",
 	];
-	// A run confined to write roots has no bash or verify tool: the rail cannot
-	// police a shell, so it is not offered. Left unsaid, a worker told to "run
-	// the tests" spent 40 code_nav calls looking for a way to run them and
-	// exhausted its budget before touching the source (kvlog exercise, r5).
-	// Skipped when the worker was admitted bash or verify (an OS sandbox confines
-	// them to the write roots): the claim contradicts its tool contract, and a
-	// worker that reads both ends with "no edit tool" and 0 calls (p8/S1).
-	if (intent.writeRoots.length > 0 && options.shellAvailable !== true) {
-		lines.push(
-			"",
-			"This run is confined to its write roots and has no bash or verify tool, so you cannot run tests, scripts, or the checks below yourself. Write the code and the tests, re-read them, and report what you wrote; the host runs the declared checks after you finish and records the result on the run record.",
-		);
-	}
 	if (intent.expectedOutputs.length > 0) {
 		lines.push("", "Expected outputs:", ...intent.expectedOutputs.map((output) => `- ${output}`));
 	}
@@ -36,6 +20,27 @@ export function renderDispatchIntentRequirements(
 		);
 	}
 	return lines.join("\n");
+}
+
+/**
+ * Tell a worker which check tools its write roots cost it. The rail cannot
+ * police a shell no OS sandbox confines, so bash and verify are withheld.
+ * Left unsaid, a worker told to "run the tests" spent 40 code_nav calls
+ * looking for a way to run them (kvlog exercise, r5), and parallel coders
+ * reported only after collect that they had no shell (CLI-H2). Rendered from
+ * the tools admission actually withheld, so a worker that kept bash under an
+ * OS sandbox is never told it lacks one (p8/S1).
+ */
+export function renderChecksWithheldNotice(
+	withheld: ReadonlyArray<string>,
+	intent: DispatchIntent | undefined,
+): string | null {
+	if (withheld.length === 0) return null;
+	const declared = (intent?.verification.length ?? 0) > 0;
+	return [
+		"# Checks withheld",
+		`${withheld.join(", ")} ${withheld.length === 1 ? "is" : "are"} withheld from this run: its write roots have no OS sandbox enforcing them, so you cannot run tests, builds, or scripts yourself. Write the code and the tests and re-read them. End your report with the files you changed and the checks you could not run, by name; ${declared ? "the host runs the declared checks after you finish and records the result on the run record" : "the dispatcher runs them after you finish"}.`,
+	].join("\n");
 }
 
 /** Build the reviewer assignment from the same requirements the builder received. */
