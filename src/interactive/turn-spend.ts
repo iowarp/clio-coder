@@ -13,7 +13,7 @@ import { type ReasoningUsageView, reasoningFromQuantity } from "./status/reasoni
  * (#434 §11.3). An unknown count reads `?` and a partial one `≥`, never a zero nothing measured.
  */
 export interface TurnSpend {
-	/** API calls the turn made, its workers' included; null when the count is unknown. */
+	/** API calls the turn made, its workers' included except those still running when it ended; null when the count is unknown. */
 	calls: number | null;
 	/** How many of those calls Clio prepared but never sent. */
 	neverSent?: number;
@@ -106,14 +106,38 @@ function answerSpend(view: TelemetryView, turnId: string, callId: string): NonNu
 }
 
 /**
+ * The calls the worker runs a turn left running at its end hold under that turn: known and unknown. Their calls belong
+ * to the worker's own row and card, so the ended turn's count leaves them out and stays what the turn itself made
+ * (ns:49-50). Only a run the turn started counts here; the turn's quantity holds no other.
+ */
+function detachedCalls(
+	view: TelemetryView,
+	turnId: string,
+	runIds: ReadonlyArray<string>,
+): { known: number; unknown: number } {
+	const detached = { known: 0, unknown: 0 };
+	if (runIds.length === 0) return detached;
+	const ids = new Set(runIds);
+	for (const run of view.runs()) {
+		if (!ids.has(run.runId) || run.turnId !== turnId) continue;
+		const fact = run.apiCalls.fact;
+		detached.known += known(run.apiCalls);
+		detached.unknown += "kind" in fact ? (fact.kind === "unknown" ? 1 : 0) : fact.unknownCount;
+	}
+	return detached;
+}
+
+/**
  * Null when the view cannot resolve the turn's references. `answeringCallId` also reads that one call's own amounts.
  * A replayed turn reads the `lineage` scope: a forked session's copied turns journaled their calls under its parent.
+ * `detachedRunIds` names the worker runs still going when the turn ended, whose calls the turn's count leaves out.
  */
 export function turnSpend(
 	view: TelemetryView,
 	turnId: string,
 	answeringCallId?: string,
 	scope: "session" | "lineage" = "session",
+	detachedRunIds: ReadonlyArray<string> = [],
 ): TurnSpend | null {
 	const read = (metric: FactMetric) =>
 		view.quantity(factRef({ scope, owner: view.sessionId, metric, group: { by: "turn", key: turnId } }));
@@ -133,8 +157,12 @@ export function turnSpend(
 	const skipped = known(neverSent);
 	const tokens = measuredTokens(input, output);
 	const neverSentNote = skipped > 0 ? `${skipped} ${skipped === 1 ? "call" : "calls"} never sent` : null;
+	const detached = detachedCalls(view, turnId, detachedRunIds);
 	return {
-		calls: "kind" in calls.fact || calls.fact.unknownCount === 0 ? known(calls) : null,
+		calls:
+			"kind" in calls.fact || calls.fact.unknownCount - detached.unknown <= 0
+				? Math.max(0, known(calls) - detached.known)
+				: null,
 		...(skipped > 0 ? { neverSent: skipped } : {}),
 		input: compactFigure(input),
 		output: compactFigure(output),

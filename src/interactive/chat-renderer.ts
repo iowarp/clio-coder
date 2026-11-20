@@ -832,6 +832,8 @@ function replayEntries(
 	}
 	const workersRunningAt = (atMs: number): number =>
 		[...workerSpans.values()].filter((span) => span.startedAtMs <= atMs && span.endedAtMs > atMs).length;
+	const workerRunIdsRunningAt = (atMs: number): string[] =>
+		[...workerSpans].flatMap(([runId, span]) => (span.startedAtMs <= atMs && span.endedAtMs > atMs ? [runId] : []));
 	const placedAssignments = new Set<string>();
 	// What a settled run spent waiting on the operator, which only the live status clock could measure.
 	const turnHumanWaits = new Map<string, number>();
@@ -946,7 +948,10 @@ function replayEntries(
 								...(runColdReasons.length > 0 ? { coldReasons: [...runColdReasons] } : {}),
 							};
 							const workersRunning = Number.isFinite(endedAt) ? workersRunningAt(endedAt) : 0;
-							if (workersRunning > 0) replayed.workersRunning = workersRunning;
+							if (workersRunning > 0) {
+								replayed.workersRunning = workersRunning;
+								replayed.workerRunIdsRunning = workerRunIdsRunningAt(endedAt);
+							}
 							const humanWaitMs = runTurnId === undefined ? undefined : turnHumanWaits.get(runTurnId);
 							if (humanWaitMs !== undefined) replayed.humanWaitMs = humanWaitMs;
 							const messages = runAssistantMessages;

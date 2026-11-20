@@ -221,6 +221,8 @@ export interface ChatPanelTurnUsage {
 	endedAtMs?: number;
 	/** Replayed from the session, so a forked session's copied turn reads the calls its parent journaled. */
 	replayed?: true;
+	/** Worker runs still going when the turn ended; their calls show on their own cards, never in this receipt's count. */
+	detachedRunIds?: ReadonlyArray<string>;
 }
 
 /**
@@ -236,6 +238,8 @@ export interface ReplayedRunFacts {
 	endedAtMs?: number;
 	/** Workers whose start entry and receipt place them still running at `endedAtMs`. */
 	workersRunning?: number;
+	/** The runs of those workers, whose calls the turn's receipt leaves out. */
+	workerRunIdsRunning?: ReadonlyArray<string>;
 }
 
 /** What one Markdown layout of the open reply cost and how long the reply was then. */
@@ -3321,6 +3325,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			usage.turnId,
 			usage.movedTo === undefined ? undefined : usage.callIds?.at(-1),
 			usage.replayed === true ? "lineage" : "session",
+			usage.detachedRunIds,
 		);
 		if (spend === null) return;
 		if (JSON.stringify(spend) !== JSON.stringify(usage.spend)) {
@@ -3621,6 +3626,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					replayed === undefined
 						? [...workerEntries.values()].filter((entry) => entry.state.pending).length
 						: (replayed.workersRunning ?? 0);
+				// Their calls are the workers' own: the receipt's count stays what the turn made by its end (ns:49-50).
+				const detachedRunIds =
+					replayed === undefined
+						? [...workerEntries.values()].flatMap((entry) => (entry.state.pending ? [entry.state.runId] : []))
+						: (replayed.workerRunIdsRunning ?? []);
 				const humanWaitMs = replayed === undefined ? (options.getHumanWaitMs?.() ?? 0) : (replayed.humanWaitMs ?? 0);
 				if (replayed === undefined && humanWaitMs > 0 && turnId !== undefined) {
 					options.recordTurnHumanWait?.({ turnId, humanWaitMs });
@@ -3631,6 +3641,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					...(elapsedMs === undefined ? {} : { elapsedMs }),
 					...(endedAtMs === undefined ? {} : { endedAtMs }),
 					...(replayed !== undefined ? { replayed: true as const } : {}),
+					...(detachedRunIds.length > 0 ? { detachedRunIds } : {}),
 					...(humanWaitMs > 0 ? { humanWaitMs } : {}),
 					...(coldReasons.length > 0 ? { coldReasons: [...coldReasons] } : {}),
 					...(runRetries > 0 ? { retries: runRetries } : {}),

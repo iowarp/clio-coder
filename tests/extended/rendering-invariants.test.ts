@@ -1,6 +1,8 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { OutputStyle } from "../../src/core/defaults.js";
+import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import type { WorkerRunEntry } from "../../src/domains/session/index.js";
@@ -2733,6 +2735,54 @@ describe("transcript block grammar", () => {
 		doesNotMatch(plain, /Done/u, plain);
 		doesNotMatch(plain, new RegExp(`^${GLYPH.ok} `, "mu"), plain);
 		match(plain, /Turn ended · 2 workers running/u, plain);
+	});
+
+	it("keeps the ended turn's call count when its detached worker keeps calling (ns:49-50)", () => {
+		const main = [1, 2].flatMap(() => telemetryCall("frozen", { turnId: "fanout", usage: { input: 10, output: 5 } }));
+		const first = main[0];
+		if (!first) throw new Error("fixture call missing");
+		const linked = makeTelemetryRecord("run.linked", { runId: "run-a1" }, first.ctx, { t: first.t, mono: 0 });
+		const workerCalls = (count: number) =>
+			Array.from({ length: count }, () =>
+				telemetryCall("frozen", { role: "worker", usage: { input: 3, output: 1 } }).map(
+					(record) =>
+						({
+							...record,
+							ctx: { ...record.ctx, runId: "run-a1", agent: { role: "worker", id: "run-a1" } },
+						}) as TelemetryRecord,
+				),
+			).flat();
+		const viewWith = (count: number) =>
+			telemetryViewOf("frozen", [...main, linked], new Map([["run-a1", workerCalls(count)]]));
+		let view = viewWith(1);
+		const panel = createChatPanel({ getOutputStyle: () => "standard", getTelemetry: () => view });
+		panel.appendUser("Fan out the fix");
+		panel.applyEvent({ type: "agent_start", turnId: "fanout" } as never);
+		act(panel, "d1", "dispatch", { agent: "coder", task: "a", detach: true }, "1 task dispatched");
+		panel.applyWorkerState({
+			assignmentId: "a1",
+			runId: "run-a1",
+			origin: "agent",
+			agentId: "coder",
+			runtime: { kind: "clio", targetId: "mini", wireModelId: "coder" },
+			text: "",
+			droppedLines: 0,
+			tools: [],
+			attempts: [{ runId: "run-a1", targetLabel: "mini" }],
+			pending: true,
+			startedAtMs: 0,
+			parentToolCallId: "d1",
+		} as WorkerEntryState);
+		say(panel, "A worker is fixing it.");
+		panel.applyEvent({ type: "agent_end", messages: [assistantMessage("A worker is fixing it.")] } as never);
+		const row = () =>
+			plainRender(panel, 160)
+				.split("\n")
+				.find((line) => line.includes("Turn ended · 1 worker running")) ?? "";
+		match(row(), / · 2 calls\b/u, row());
+		// The worker goes on calling after the turn ended; the turn's row still counts only the turn's own two.
+		view = viewWith(31);
+		match(row(), / · 2 calls\b/u, row());
 	});
 
 	it("puts a card that arrives after its dispatch settled under that call, and one from an earlier turn at the tail", () => {
