@@ -7,10 +7,19 @@ const thoughtOption = mode === "thought-option" || mode === "thought-refuse";
 const targetFirst = mode === "target-first";
 const modelPin = mode === "model-pin" || mode === "model-variants" || targetFirst || thoughtOption;
 const legacyModels = mode === "legacy-models";
-// agy-like: model families in `model`, and a `thought_level` option whose levels depend on the selected model.
+// agy-like (live 1.5.13 shape): model families in `model`, and a `thought_level` option whose levels depend on the
+// selected model and which is absent for a model without levels. argv: agy-levels <start model> <expected model/level>.
 const agyLevels = mode === "agy-levels";
-const AGY_LEVELS = { "gemini-3.8-flash": ["low", "medium", "high"], "gemini-3.8-pro": ["low", "high", "xhigh"] };
-let selectedModel = agyLevels ? "gemini-3.8-flash" : thoughtOption ? "gpt-6-astra" : "gpt-6-astra[medium]";
+const AGY_LEVELS = {
+	"gemini-3.8-flash": ["low", "medium", "high"],
+	"gemini-3.8-pro": ["low", "high", "xhigh"],
+	"claude-sonnet-4-6": [],
+};
+let selectedModel = agyLevels
+	? process.argv[3] || "gemini-3.8-flash"
+	: thoughtOption
+		? "gpt-6-astra"
+		: "gpt-6-astra[medium]";
 let selectedThought = "medium";
 let setModelCalled = false;
 
@@ -29,6 +38,7 @@ function modelValue(value) {
  */
 function configOptions() {
 	if (agyLevels) {
+		const levels = AGY_LEVELS[selectedModel];
 		return [
 			{
 				id: "model",
@@ -38,14 +48,18 @@ function configOptions() {
 				currentValue: selectedModel,
 				options: Object.keys(AGY_LEVELS).map(modelValue),
 			},
-			{
-				id: "thought_level",
-				name: "Thinking level",
-				category: "thought_level",
-				type: "select",
-				currentValue: selectedThought,
-				options: AGY_LEVELS[selectedModel].map(modelValue),
-			},
+			...(levels.length > 0
+				? [
+						{
+							id: "thought_level",
+							name: "Thinking level",
+							category: "thought_level",
+							type: "select",
+							currentValue: selectedThought,
+							options: levels.map(modelValue),
+						},
+					]
+				: []),
 		];
 	}
 	const values = thoughtOption
@@ -261,7 +275,8 @@ for await (const line of createInterface({ input: process.stdin })) {
 			});
 			continue;
 		}
-		send({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: 1, agentInfo: { name: "error-fixture" } } });
+		const agentInfo = agyLevels ? { name: "Antigravity ACP Server", version: "1.5.13" } : { name: "error-fixture" };
+		send({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: 1, agentInfo } });
 	} else if (request.method === "session/new") {
 		send({
 			jsonrpc: "2.0",
@@ -269,6 +284,8 @@ for await (const line of createInterface({ input: process.stdin })) {
 			result: {
 				sessionId: "error-session",
 				...(modelPin || agyLevels ? { configOptions: configOptions() } : {}),
+				// Live agy reports its modes; starting in `default` needs no set_mode.
+				...(agyLevels ? { modes: { currentModeId: "default", availableModes: [{ id: "default", name: "Default" }] } } : {}),
 				// The unstable `models` field is not in the v1 schema; a client
 				// that still reads it would pick a model here.
 				...(legacyModels
@@ -313,7 +330,7 @@ for await (const line of createInterface({ input: process.stdin })) {
 			continue;
 		}
 		if (agyLevels) {
-			const stopReason = `${selectedModel}/${selectedThought}` === "gemini-3.8-pro/xhigh" ? "end_turn" : "refusal";
+			const stopReason = `${selectedModel}/${selectedThought}` === process.argv[4] ? "end_turn" : "refusal";
 			send({ jsonrpc: "2.0", id: request.id, result: { stopReason } });
 			continue;
 		}

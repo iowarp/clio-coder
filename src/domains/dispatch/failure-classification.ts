@@ -263,7 +263,7 @@ export function classifyFailure(
 	// ACP model admission and 400/404 prompt verdicts reject the same request
 	// on every attempt. They do not indicate that the peer is unhealthy.
 	if (
-		/^acp delegation failed: acp peer (?:does not offer|offers multiple efforts for) requested model\b/.test(
+		/^acp delegation failed: acp peer (?:does not offer requested (?:model|thinking level)|offers multiple efforts for requested model)\b/.test(
 			diagnostic,
 		) ||
 		/^acp peer reported http (?:400|404):/.test(diagnostic) ||

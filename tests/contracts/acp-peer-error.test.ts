@@ -537,12 +537,20 @@ test("ACP adapter splits agy legacy <model>-<level> ids and names the offered ch
 	const scratch = await mkdtemp(join(tmpdir(), "clio-agy-levels-"));
 	const agy = join(scratch, "agy");
 	const fixture = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
-	await writeFile(agy, `#!/bin/sh\nexec "${process.execPath}" "${fixture}" agy-levels\n`, { mode: 0o755 });
+	await writeFile(agy, `#!/bin/sh\nexec "${process.execPath}" "${fixture}" agy-levels "$AGY_START" "$AGY_EXPECT"\n`, {
+		mode: 0o755,
+	});
 	const cwd = process.cwd();
-	const agent = { id: "antigravity", command: agy, args: ["acp"], env: { HOME: scratch }, connectTimeoutMs: 5_000 };
-	const run = (model: string, thinkingLevel?: string) =>
+	// The fixture ends the turn only when it runs the expected model and level; a level-less model has no thought_level.
+	const run = (model: string, thinkingLevel?: string, start = "gemini-3.8-flash", expect = "") =>
 		startAcpDelegationRun({
-			agent,
+			agent: {
+				id: "antigravity",
+				command: agy,
+				args: ["acp"],
+				env: { HOME: scratch, AGY_START: start, AGY_EXPECT: expect },
+				connectTimeoutMs: 5_000,
+			},
 			task: "report version",
 			model,
 			...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
@@ -550,14 +558,30 @@ test("ACP adapter splits agy legacy <model>-<level> ids and names the offered ch
 			safety: createWorkerSafety({ cwd }),
 		}).promise;
 	try {
-		// xhigh is offered only once the model is pro, so the level is checked against the switched model's list.
-		const split = await run("gemini-3.8-pro-xhigh");
-		strictEqual(split.exitCode, 0, split.failureMessage);
-		strictEqual(split.delegation.selectedModelId, "gemini-3.8-pro");
+		for (const [model, thinkingLevel, start, expect] of [
+			// xhigh is offered only once the model is pro, so the level is checked against the switched model's list.
+			["gemini-3.8-pro-xhigh", undefined, undefined, "gemini-3.8-pro/xhigh"],
+			// The offered spelling is sent whatever case the request used.
+			["gemini-3.8-flash-high", "HIGH", undefined, "gemini-3.8-flash/high"],
+			// Starting on a model without levels: an offered id is never rewritten as gemini-3.8-flash[low], and a
+			// legacy id still splits; each level is checked once the switch returns flash's options.
+			["gemini-3.8-flash", "low", "claude-sonnet-4-6", "gemini-3.8-flash/low"],
+			["gemini-3.8-flash-medium", undefined, "claude-sonnet-4-6", "gemini-3.8-flash/medium"],
+		] as const) {
+			const selected = await run(model, thinkingLevel, start, expect);
+			strictEqual(selected.exitCode, 0, `${model}: ${selected.failureMessage}`);
+			strictEqual(selected.delegation.selectedModelId, expect.split("/")[0]);
+		}
 		for (const [model, thinkingLevel, failure] of [
 			["gemini-3.8-pro-medium", undefined, "thinking level 'medium'; offered: low, high, xhigh"],
-			["gemini-9-ultra", undefined, "model 'gemini-9-ultra'; offered: gemini-3.8-flash, gemini-3.8-pro"],
+			[
+				"gemini-9-ultra",
+				undefined,
+				"model 'gemini-9-ultra'; offered: gemini-3.8-flash, gemini-3.8-pro, claude-sonnet-4-6",
+			],
 			["gemini-3.8-pro-high", "low", "model 'gemini-3.8-pro-high' with thinking level 'low'"],
+			// The switch's options drop thought_level, so the level is refused rather than ignored.
+			["claude-sonnet-4-6", "low", "thinking level 'low'; the peer offers none"],
 		] as const) {
 			const refused = await run(model, thinkingLevel);
 			strictEqual(refused.exitCode, 1);

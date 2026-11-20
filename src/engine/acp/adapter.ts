@@ -541,12 +541,15 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			const { model: requestedModel, thinkingLevel } = isAntigravityAcp(input.agent)
 				? legacyModelRequest(input, modelOption, thoughtOption)
 				: input;
+			let effortInModelId = false;
 			if (requestedModel !== undefined) {
 				const ids = modelOption?.values ?? [];
 				const current = modelOption?.currentValue ?? null;
 				const matches = (id: string): boolean => id === requestedModel || id.startsWith(`${requestedModel}[`);
 				const matching = ids.filter(matches);
-				const effortInModel = thinkingLevel !== undefined && thoughtOption === null;
+				// An offered model id takes the level through its own options after the switch, never as an id suffix.
+				const effortInModel = thinkingLevel !== undefined && thoughtOption === null && !ids.includes(requestedModel);
+				effortInModelId = effortInModel;
 				const requested =
 					effortInModel && !requestedModel.endsWith("]") ? `${requestedModel}[${thinkingLevel}]` : requestedModel;
 				const selected = ids.includes(requested)
@@ -579,23 +582,24 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					if (typeof applied === "string" && applied !== selected) {
 						throw new Error(`ACP peer kept model '${applied}' after Clio selected '${selected}'`);
 					}
-					// Thinking levels can differ per model (agy offers each model its own), so check the new model's list.
-					thoughtOption = peerSelectOption(updatedOptions, "thought_level") ?? thoughtOption;
+					// Thinking levels differ per model (agy offers some models none), so the new state replaces the old.
+					if (Array.isArray(updatedOptions)) thoughtOption = peerSelectOption(updatedOptions, "thought_level");
 				}
 				selectedModelId = selected;
 			} else if (modelOption?.currentValue) {
 				selectedModelId = modelOption.currentValue;
 			}
-			if (thinkingLevel !== undefined && thoughtOption !== null) {
-				if (!thoughtOption.values.includes(thinkingLevel)) {
+			if (thinkingLevel !== undefined && !effortInModelId) {
+				const level = thoughtOption?.values.find((value) => value.toLowerCase() === thinkingLevel.toLowerCase());
+				if (thoughtOption === null || level === undefined) {
 					throw new Error(
-						`ACP peer does not offer requested thinking level '${thinkingLevel}'${offeredChoices(thoughtOption.values)}`,
+						`ACP peer does not offer requested thinking level '${thinkingLevel}'${offeredChoices(thoughtOption?.values)}`,
 					);
 				}
-				if (thoughtOption.currentValue !== thinkingLevel) {
+				if (thoughtOption.currentValue !== level) {
 					const updated = await transport.request<unknown>(
 						"session/set_config_option",
-						{ sessionId, configId: thoughtOption.id, value: thinkingLevel },
+						{ sessionId, configId: thoughtOption.id, value: level },
 						connectTimeoutMs,
 					);
 					requireActive();
@@ -603,8 +607,8 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 						isRecord(updated) ? updated.configOptions : undefined,
 						"thought_level",
 					)?.currentValue;
-					if (typeof applied === "string" && applied !== thinkingLevel) {
-						throw new Error(`ACP peer kept thinking level '${applied}' after Clio selected '${thinkingLevel}'`);
+					if (typeof applied === "string" && applied !== level) {
+						throw new Error(`ACP peer kept thinking level '${applied}' after Clio selected '${level}'`);
 					}
 				}
 			}

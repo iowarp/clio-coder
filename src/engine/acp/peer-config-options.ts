@@ -82,10 +82,12 @@ export interface PeerModelRequest {
 }
 
 /**
- * An agy request in the shape its options take. With a `thought_level` option, an id agy does not offer as a model
- * that is `<offered model>-<level>` becomes that model plus the level; a level asked for separately must agree. With
- * no such option, efforts live in the model ids: `<model>` plus a level becomes `<model>-<level>`, and a bare base
- * resolves to the current or only variant. Anything else passes through for the ordinary checks to accept or refuse.
+ * An agy request in the shape its options take. An id agy does not offer as a model that is `<offered model>-<level>`
+ * becomes that model plus the level, in the offered spelling when the current options list it; a level asked for
+ * separately must agree, and the adapter checks it against the options the model switch returns (agy offers some
+ * models no level). Otherwise, with no `thought_level` option, efforts may live in the model ids: `<model>` plus a level
+ * becomes `<model>-<level>`, and a bare base resolves to the current or only variant. Anything else passes through for
+ * the ordinary checks to accept or refuse.
  */
 export function legacyModelRequest(
 	request: PeerModelRequest,
@@ -95,19 +97,19 @@ export function legacyModelRequest(
 	const model = request.model;
 	const ids = modelOption?.values ?? [];
 	if (model === undefined || ids.includes(model)) return request;
-	if (thoughtOption !== null) {
-		const at = model.lastIndexOf("-");
-		const base = at > 0 ? model.slice(0, at) : "";
-		const level = at > 0 ? effortSuffix(model, base) : null;
-		if (level === null || !ids.includes(base)) return request;
-		const offered = thoughtOption.values.find((value) => value.toLowerCase() === level.toLowerCase()) ?? level;
+	const at = model.lastIndexOf("-");
+	const base = at > 0 ? model.slice(0, at) : "";
+	const level = at > 0 ? effortSuffix(model, base) : null;
+	if (level !== null && ids.includes(base)) {
+		const offered = thoughtOption?.values.find((value) => value.toLowerCase() === level.toLowerCase()) ?? level;
 		if (request.thinkingLevel !== undefined && request.thinkingLevel.toLowerCase() !== offered.toLowerCase()) {
 			throw new Error(
 				`ACP peer does not offer requested model '${model}' with thinking level '${request.thinkingLevel}': the id names thinking level '${level}'`,
 			);
 		}
-		return { model: base, thinkingLevel: request.thinkingLevel ?? offered };
+		return { model: base, thinkingLevel: offered };
 	}
+	if (thoughtOption !== null) return request;
 	const variants = ids.filter((id) => effortSuffix(id, model) !== null);
 	if (variants.length === 0) return request;
 	if (request.thinkingLevel !== undefined) {
