@@ -2813,6 +2813,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const prewarm = createTurnPrewarm({
 		callJournal: (runtime, origin) => sideCallJournal(runtime, "prewarm", origin),
+		notice: (text) => emitNotice(text),
+		// Prompt guidance is interactive exactly on the terminal UI: neither headless nor ACP.
+		isAttended: () => deps.interactiveGuidance === true,
 		state,
 		getSettings: deps.getSettings,
 		providers: deps.providers,
