@@ -435,6 +435,7 @@ import {
 	taskRequestsTestRemoval,
 	taskWorktreeCommitMessage,
 } from "./merge-gate.js";
+import { OBLIGATION_RETRY_LIMIT, type Obligation, resolveObligation, resolveRunRole } from "./obligation.js";
 import { recoverAbandonedRuns } from "./orphan-recovery.js";
 import {
 	type ResolvedTerminalReason,
@@ -5133,6 +5134,7 @@ export function createDispatchBundle(
 		failureClass: FailureClass,
 		contextOverflow = false,
 		currentRetryReason: string | null = null,
+		unmetObligation?: Obligation,
 	): RetryScheduleResult {
 		if (draining) return { scheduled: false };
 		const rootRunId = run.lineage.rootRunId;
@@ -5152,14 +5154,24 @@ export function createDispatchBundle(
 		}
 		// #231 gives each member its own configured retry budget, even when a
 		// sibling has already opened an assignment under the shared fleet root.
-		const maxRetries =
+		const configuredRetries =
 			assignments.get(controlRoot)?.policy.maxRetries ??
 			controlAttempts.get(controlRoot)?.maxRetries ??
 			assignmentPolicyFor(run.req).maxRetries;
+		const maxRetries =
+			unmetObligation !== undefined ? Math.min(configuredRetries, OBLIGATION_RETRY_LIMIT) : configuredRetries;
 		const baseDecision = decideRetry(failureClass, memberRetryAttempt(run), maxRetries);
+		let plannedRoute: DispatchFailoverCandidate | null = null;
+		if (unmetObligation !== undefined && baseDecision.retry) {
+			const plan = planObligationRetry(run, unmetObligation, baseDecision);
+			if ("settlementDetail" in plan) {
+				retryBackoff.delete(controlRoot);
+				return { scheduled: false, settlementDetail: plan.settlementDetail };
+			}
+			plannedRoute = plan.route;
+		}
 		// An exact manual route may be retried, but no route component may drift.
 		let decision = recovery.retryDecisionWithinFailover(baseDecision, failoverModeFor(run.req));
-		let overflowRoute: DispatchFailoverCandidate | null = null;
 		let overflowReason: string | null = null;
 		if (contextOverflow && !decision.retry) {
 			const plan = planOverflowRetry(run, currentRetryReason, maxRetries);
@@ -5167,7 +5179,7 @@ export function createDispatchBundle(
 				retryBackoff.delete(controlRoot);
 				return { scheduled: false, settlementDetail: plan.settlementDetail };
 			}
-			overflowRoute = plan.route;
+			plannedRoute = plan.route;
 			overflowReason = plan.reason;
 			decision = { retry: true, excludedRouteParts: [], qualityEscalation: null, reasonCode: "retry-context-overflow" };
 		}
@@ -5235,7 +5247,7 @@ export function createDispatchBundle(
 			retryQueue.delete(run.runId);
 			// Ownership starts at scheduling, covering admission before a handle
 			// exists and terminal receipt work after the handle arrives.
-			executeRetry(run, attempt, reason, decision, overflowRoute, failureClassWords(failureClass)).then(
+			executeRetry(run, attempt, reason, decision, plannedRoute, failureClassWords(failureClass)).then(
 				settleCanceled,
 				rejectContinuation,
 			);
@@ -5281,7 +5293,8 @@ export function createDispatchBundle(
 		detail: string | null,
 		failureClass: FailureClass,
 		contextOverflow = false,
-	): void {
+		unmetObligation?: Obligation,
+	): boolean {
 		const controlAttempt = controlAttempts.get(run.runId);
 		if (controlAttempt !== undefined && run.lineage.depth > 0) controlAttempt.receipt = receipt;
 		const assignment = assignments.open(run.lineage.rootRunId, assignmentPolicyFor(run.req));
@@ -5298,9 +5311,18 @@ export function createDispatchBundle(
 			retryReason,
 		});
 		persistAssignment(recordAssignmentAttempt(assignment.id, run.runId), `${assignment.id}:attempt:${run.runId}`);
-		if (writeRootPark.park(run, receipt)) return;
-		const retry = maybeScheduleRetry(run, outcome, detail, receipt, failureClass, contextOverflow, retryReason);
-		if (retry.scheduled) return;
+		if (writeRootPark.park(run, receipt)) return true;
+		const retry = maybeScheduleRetry(
+			run,
+			outcome,
+			detail,
+			receipt,
+			failureClass,
+			contextOverflow,
+			retryReason,
+			unmetObligation,
+		);
+		if (retry.scheduled) return true;
 		const currentStatus = assignments.get(assignment.id)?.status;
 		const terminalStatus =
 			currentStatus === "canceled" || outcome === "canceled"
@@ -5309,6 +5331,7 @@ export function createDispatchBundle(
 					? "succeeded"
 					: "failed";
 		settleAssignmentDurably(assignment.id, receipt, terminalStatus, retry.settlementDetail);
+		return false;
 	}
 
 	function assertRouteWithinApprovedEnvelope(req: DispatchRequest, effective: DispatchFailoverCandidate): void {
@@ -5335,7 +5358,8 @@ export function createDispatchBundle(
 		attempt: number,
 		reason = "retry",
 		decision: RetryDecision = decideRetry("internal", memberRetryAttempt(run), assignmentPolicyFor(run.req).maxRetries),
-		overflowRoute: DispatchFailoverCandidate | null = null,
+		/** A route chosen at scheduling, by a context overflow or an unmet obligation. */
+		plannedRoute: DispatchFailoverCandidate | null = null,
 		moveReason = reason,
 		continuation: WriteRootContinuation = {},
 	): Promise<void> {
@@ -5376,7 +5400,7 @@ export function createDispatchBundle(
 		retryReasons.set(reasonKey, reason);
 		try {
 			if (failoverModeFor(run.req) === "approved") {
-				const candidates = overflowRoute !== null ? [overflowRoute] : approvedRetryCandidates(run, decision);
+				const candidates = plannedRoute !== null ? [plannedRoute] : approvedRetryCandidates(run, decision);
 				if (run.req.routeApproval === undefined) {
 					const candidate = candidates[0] as DispatchFailoverCandidate;
 					retryReq.agentId = candidate.agentId;
@@ -5423,9 +5447,9 @@ export function createDispatchBundle(
 					retryReq.model = run.wireModelId;
 					retryReq.node = run.node?.id ?? "local";
 				}
-				if (overflowRoute !== null) {
-					retryReq.target = overflowRoute.target;
-					retryReq.model = overflowRoute.model;
+				if (plannedRoute !== null) {
+					retryReq.target = plannedRoute.target;
+					retryReq.model = plannedRoute.model;
 				}
 				// Automatic placement re-selects only the failed route component.
 				if (excludesNode) {
@@ -5445,7 +5469,8 @@ export function createDispatchBundle(
 						delete retryReq.target;
 					}
 				}
-				if (decision.excludedRouteParts.includes("model")) delete retryReq.model;
+				// A planned route already moved off the failed model; placement would be free to pick it again.
+				if (plannedRoute === null && decision.excludedRouteParts.includes("model")) delete retryReq.model;
 				if (decision.excludedRouteParts.includes("runtime")) delete retryReq.workerRuntime;
 			}
 			const handle = await dispatchRetryAcrossAlternates(run, retryReq, tryAlternates, moveReason);
@@ -5901,13 +5926,15 @@ export function createDispatchBundle(
 	 * breaker is neither open nor probing. With minContextWindow the route may
 	 * also be another model on the failed target, and its effective context
 	 * window must be strictly larger than minContextWindow. allowed narrows the
-	 * routes further, as an approved envelope does.
+	 * routes further, as an approved envelope does. otherModel instead admits
+	 * any target, failed one included, whose route resolves to another model.
 	 */
 	function eligibleAlternateRoute(
 		run: ActiveRun,
 		req: DispatchRequest,
 		minContextWindow?: number,
 		allowed?: (candidate: DispatchFailoverCandidate) => boolean,
+		otherModel = false,
 	): (DispatchFailoverCandidate & { contextWindow: number }) | null {
 		const settings = getEffectiveSettings();
 		const failed = {
@@ -5917,9 +5944,11 @@ export function createDispatchBundle(
 			endpointIdentityHash: "",
 		};
 		const routes = configuredJointTargets(settings?.targets ?? [], failed, endpointIdentityHash).filter((route) =>
-			minContextWindow === undefined
-				? route.targetId !== run.targetId
-				: route.targetId !== run.targetId || route.modelId !== run.wireModelId,
+			otherModel
+				? route.modelId !== run.wireModelId
+				: minContextWindow === undefined
+					? route.targetId !== run.targetId
+					: route.targetId !== run.targetId || route.modelId !== run.wireModelId,
 		);
 		const windows = new Map<string, number>();
 		const probes: RouteAvailability[] = routes.map((route) => {
@@ -5934,6 +5963,9 @@ export function createDispatchBundle(
 				}
 				if (identity.targetId === run.targetId && identity.wireModelId === run.wireModelId) {
 					return { candidate, unavailable: "route resolved to the failed route" };
+				}
+				if (otherModel && identity.wireModelId === run.wireModelId) {
+					return { candidate, unavailable: "route resolved to the failed model" };
 				}
 				// Admission refuses a target that is down or unusable, so choosing one spent the retry on a refusal
 				// while a healthy alternate sat later in the configured order.
@@ -5961,6 +5993,42 @@ export function createDispatchBundle(
 		});
 		const chosen = firstAvailableRouteCandidate(probes);
 		return chosen === null ? null : { ...chosen, contextWindow: windows.get(`${chosen.target}\0${chosen.model}`) ?? 0 };
+	}
+
+	/**
+	 * Ruling 5 retries an unmet obligation once, and only on another model:
+	 * the route that retry runs on, or why there is none. A pinned route has
+	 * no other model, an approved plan moves only inside its envelope, and
+	 * automatic failover takes the first eligible route with a different wire
+	 * model on any target.
+	 */
+	function planObligationRetry(
+		run: ActiveRun,
+		obligation: Obligation,
+		decision: RetryDecision,
+	): { route: DispatchFailoverCandidate } | { settlementDetail: string } {
+		const unmet = (because: string) => ({
+			settlementDetail: `obligation ${obligation} unmet, not retried because ${because}`,
+		});
+		const mode = failoverModeFor(run.req);
+		if (mode === "none") return unmet("failover is none, which pins the route to the model that left it unmet");
+		const node = run.node?.id ?? "local";
+		if (mode === "approved") {
+			let candidates: DispatchFailoverCandidate[] = [];
+			try {
+				candidates = approvedRetryCandidates(run, decision);
+			} catch {
+				// An envelope with no next candidate has no other model either.
+			}
+			const route = candidates.find((candidate) => candidate.model !== run.wireModelId);
+			return route !== undefined
+				? { route }
+				: unmet(`the approved failover envelope has no model other than ${run.wireModelId}, which left it unmet`);
+		}
+		const route = eligibleAlternateRoute(run, run.req, undefined, undefined, true);
+		return route !== null
+			? { route: { agentId: route.agentId, target: route.target, model: route.model, node } }
+			: unmet(`no other eligible model can take it, and ${run.targetId}/${run.wireModelId} left it unmet`);
 	}
 
 	/**
@@ -9714,6 +9782,17 @@ export function createDispatchBundle(
 					finalDetail = [finalDetail, `deterministic worker failure: ${outcomeCode}`].filter(Boolean).join("; ");
 					failureMessage = finalDetail;
 				}
+				const appliedResultContract = dispatchResultContract(req, lifecycle.recipe) ?? null;
+				// DESIGN 4.8: what the result must rest on, from the run's role. A gate's read roots are what it may read.
+				const runObligation = resolveObligation(
+					resolveRunRole({
+						gateRole: req.gate?.role,
+						capabilityClass: lifecycle.capabilityClass,
+						readOnly: lifecycle.readOnly,
+					}),
+					appliedResultContract?.kind ?? null,
+					req.intent?.readRoots ?? [],
+				);
 				// A write worker that stopped to ask for wider write roots changed
 				// nothing; whether the assignment continues is the request's decision.
 				if (
@@ -9795,11 +9874,22 @@ export function createDispatchBundle(
 						}
 					}
 				}
+				// Ruling 5: a builder that ran no tool over an unchanged tree left its obligation unmet, whichever side sealed it.
+				// A declared request for wider write roots is the "declared" half of change-or-declared, so it meets it.
+				if (
+					outcomeCode === "worker_no_work" &&
+					runObligation === "change-or-declared" &&
+					lifecycle.runtimeKind !== "subprocess" &&
+					finishContract?.assessment.mutatedPaths.length === 0 &&
+					summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass).calls === 0 &&
+					writeRootRequestFromEntries(finishContractEntries) === null
+				) {
+					evidence.obligationUnmet = runObligation;
+				}
 				// Close steering provenance before taking receipt snapshots. A late
 				// acknowledgement after the bounded drain cannot race the sealed facts.
 				const steering = snapshotSteeringProvenance();
 				const capturedOutput = outputCapture.snapshot();
-				const appliedResultContract = dispatchResultContract(req, lifecycle.recipe) ?? null;
 				// #425: a cut-off loop never reached contract repair, even if its process exited zero.
 				if (
 					finalOutcome === "succeeded" &&
@@ -9863,21 +9953,19 @@ export function createDispatchBundle(
 								resultContract.fact.quality === "pass"
 							? { ...resultContract.fact, quality: "unmeasured" }
 							: resultContract.fact;
-				// FX-19: a read-scoped worker that read nothing grades fail and seals failed, so retry and summaries count it.
+				// FX-19: a run owing observed evidence that read nothing grades fail and seals failed, so retry and summaries count it.
 				const noToolsReason =
 					finalOutcome === "succeeded"
 						? readScopedNoToolsReason({
 								activity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
-								readOnly: lifecycle.readOnly,
-								capabilityClass: lifecycle.capabilityClass,
-								contractKind: appliedResultContract?.kind ?? null,
-								readRoots: req.intent?.readRoots ?? [],
+								obligation: runObligation,
 								toolLaneObserved: lifecycle.runtimeKind !== "subprocess",
 							})
 						: null;
 				if (noToolsReason !== null) {
 					if (sealedResultContractFact !== null) sealedResultContractFact = { ...sealedResultContractFact, quality: "fail" };
 					evidence.qualityGateFailure = true;
+					evidence.obligationUnmet = runObligation;
 					finalOutcome = "failed";
 					finalDetail = noToolsReason;
 					failureMessage = noToolsReason;
@@ -10487,10 +10575,14 @@ export function createDispatchBundle(
 					// mode, a failed run, a refused merge). Saying so on the claim keeps
 					// restart recovery from reading it as a crash.
 					try {
-						// A canceled run that never produced work leaves nothing to keep.
+						// A canceled run that never produced work leaves nothing to keep. An idle builder that left its
+						// obligation unmet keeps the tree until the retry decision below, since its retry runs in it.
 						if (
 							!(
-								(finalOutcome === "canceled" || (outcomeCode === "worker_no_work" && !writeRootPark.isStaged(envelope.id))) &&
+								(finalOutcome === "canceled" ||
+									(outcomeCode === "worker_no_work" &&
+										evidence.obligationUnmet === undefined &&
+										!writeRootPark.isStaged(envelope.id))) &&
 								discardIdleTaskWorktree(req.taskWorktree)
 							)
 						) {
@@ -10520,14 +10612,30 @@ export function createDispatchBundle(
 				});
 				await closeRunJournal();
 				emitTerminalDispatchEvent(finalizing, receipt, finalOutcome);
-				completeAssignmentAttempt(
+				const continues = completeAssignmentAttempt(
 					activeRun,
 					receipt,
 					finalOutcome,
 					receipt.outcomeDetail ?? finalDetail,
 					failureClass,
 					contextOverflow,
+					evidence.obligationUnmet,
 				);
+				// The idle tree kept above goes once no retry will run in it.
+				if (
+					!continues &&
+					outcomeCode === "worker_no_work" &&
+					evidence.obligationUnmet !== undefined &&
+					req.taskWorktree !== undefined &&
+					worktreeReceipt?.applied !== true &&
+					!claimReleased
+				) {
+					try {
+						discardIdleTaskWorktree(req.taskWorktree);
+					} catch (discardError) {
+						reportDispatchDiagnostic(`discard idle task worktree ${req.taskWorktree.runId}`, discardError);
+					}
+				}
 				return receipt;
 			} catch (error) {
 				await failFinalization(
