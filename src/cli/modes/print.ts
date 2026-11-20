@@ -479,7 +479,7 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 			return { ...current, lastNotice: text, error: text, admissionRefused: true };
 		}
 		if (event.key === "turn.interrupted") {
-			// A redirect closes the cut-short run; the run that delivers the new message carries the answer (bt-41).
+			// A redirect or a budget roll closes the cut-short run; the run that follows carries the answer (bt-41, XR-6).
 			return event.redirect === true
 				? { ...current, lastNotice: text }
 				: { ...current, lastNotice: text, abortReason: text };

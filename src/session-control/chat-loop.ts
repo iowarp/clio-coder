@@ -375,8 +375,9 @@ export interface ChatNoticeEvent {
 	operatorCancel?: true;
 	/**
 	 * Present only on the transcript notice that closes a turn an interrupt cut
-	 * short to deliver a new message: a run follows, so the turn was redirected
-	 * and a headless or protocol host waits for that run instead of ending (bt-41).
+	 * short to deliver a new message, or that a budget roll stopped at its tool
+	 * boundary (XR-6): a run follows, so the turn was redirected and a headless
+	 * or protocol host waits for that run instead of ending (bt-41).
 	 */
 	redirect?: true;
 	/**
@@ -4247,7 +4248,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								text: reason,
 								key: "turn.interrupted",
 								...(state.activeInterruptByOperator ? { operatorCancel: true as const } : {}),
-								...(isRedirectReason(reason) ? { redirect: true as const } : {}),
+								...(isRedirectReason(reason) || (budgetRoll !== null && !state.activeInterruptByOperator)
+									? { redirect: true as const }
+									: {}),
 							});
 						}
 						state.interruptedAssistantMessage = null;
