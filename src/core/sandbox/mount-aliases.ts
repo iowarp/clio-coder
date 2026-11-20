@@ -30,6 +30,15 @@ function parseMountInfo(text: string): MountRecord[] {
 	return records;
 }
 
+function isDeviceNode(entry: string): boolean {
+	try {
+		const stat = statSync(entry);
+		return stat.isCharacterDevice() || stat.isBlockDevice();
+	} catch {
+		return false;
+	}
+}
+
 /** `child` relative to `parent` when it is `parent` or inside it, else null. */
 function within(parent: string, child: string): string | null {
 	const rel = path.posix.relative(parent, child);
@@ -92,7 +101,11 @@ export function withMountAliases(
 	const result = [...masks];
 	const seen = new Set(masks.map((mask) => mask.path));
 	const hiddenBy = masks.filter((mask) => mask.kind === "directory").map((mask) => mask.path);
-	for (const alias of maskAliases(masks, mounts)) {
+	// Inside an enclosing sandbox a secret file is already a bind of /dev/null.
+	// Its "aliases" would be every other bind of that device, /dev/null itself
+	// included, and a mask there leaves the command a read-only /dev/null.
+	const secretBearing = masks.filter((mask) => !isDeviceNode(mask.path));
+	for (const alias of maskAliases(secretBearing, mounts)) {
 		if (seen.has(alias.path) || hiddenBy.some((dir) => within(dir, alias.path) !== null)) continue;
 		seen.add(alias.path);
 		try {
