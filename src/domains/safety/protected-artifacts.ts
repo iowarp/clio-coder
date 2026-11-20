@@ -1424,6 +1424,15 @@ const SED_READ_FLAGS: ReadonlySet<string> = new Set([
 ]);
 
 function sedOnlyReads(args: ReadonlyArray<string>): boolean {
+	const scripts = sedScripts(args, false);
+	return scripts !== null && scripts.every(sedScriptOnlyReads);
+}
+
+/**
+ * The inline scripts of a sed invocation. Strict, it answers null for any flag but the read-only ones; lenient, it
+ * steps over the others (`-i`, `-s`) and stops at a script read from a file (`-f`), which it does not read.
+ */
+function sedScripts(args: ReadonlyArray<string>, lenient: boolean): string[] | null {
 	const scripts: string[] = [];
 	let first: string | undefined;
 	for (let index = 0; index < args.length; index += 1) {
@@ -1438,14 +1447,16 @@ function sedOnlyReads(args: ReadonlyArray<string>): boolean {
 		} else if (arg.startsWith("--expression=")) scripts.push(arg.slice("--expression=".length));
 		else if (arg === "-l" || arg === "--line-length") index += 1;
 		else if (arg.startsWith("-") && arg !== "-") {
-			if (!/^-[nErsuz]+$/u.test(arg) && !SED_READ_FLAGS.has(arg) && !arg.startsWith("--line-length=")) return false;
+			if (/^-[nErsuz]+$/u.test(arg) || SED_READ_FLAGS.has(arg) || arg.startsWith("--line-length=")) continue;
+			if (!lenient) return null;
+			if (/^-[A-Za-z]*f$/u.test(arg) || arg === "--file" || arg.startsWith("--file=")) return scripts;
 		} else first ??= arg;
 	}
 	if (scripts.length === 0) {
-		if (first === undefined) return false;
+		if (first === undefined) return null;
 		scripts.push(first);
 	}
-	return scripts.every(sedScriptOnlyReads);
+	return scripts;
 }
 
 /**
@@ -1533,6 +1544,13 @@ function sedScriptOnlyReads(script: string): boolean {
 }
 
 function awkOnlyReads(args: ReadonlyArray<string>): boolean {
+	const programs = awkPrograms(args);
+	// A comparison spelled `>` reads as a redirect here, which only costs a pass.
+	return programs !== null && programs.every((program) => !/system|[|>@]/u.test(program));
+}
+
+/** The inline programs of an awk invocation, or null when it names a program file or a flag this cannot read. */
+function awkPrograms(args: ReadonlyArray<string>): string[] | null {
 	const programs: string[] = [];
 	let first: string | undefined;
 	for (let index = 0; index < args.length; index += 1) {
@@ -1547,15 +1565,40 @@ function awkOnlyReads(args: ReadonlyArray<string>): boolean {
 			programs.push(args[index + 1] ?? "");
 			index += 1;
 		} else if (arg.startsWith("--source=")) programs.push(arg.slice("--source=".length));
-		else if (arg.startsWith("-") && arg !== "-") return false;
+		else if (arg.startsWith("-") && arg !== "-") return null;
 		else first ??= arg;
 	}
 	if (programs.length === 0) {
-		if (first === undefined) return false;
+		if (first === undefined) return null;
 		programs.push(first);
 	}
-	// A comparison spelled `>` reads as a redirect here, which only costs a pass.
-	return programs.every((program) => !/system|[|>@]/u.test(program));
+	return programs;
+}
+
+const SED_NAMES: ReadonlySet<string> = new Set(["sed", "gsed"]);
+const AWK_NAMES: ReadonlySet<string> = new Set(["awk", "gawk", "mawk", "nawk"]);
+
+/** A sed `w`/`W` command or an `s` flagged `w`, and the file name it runs to the end of the line with. */
+const SED_WRITE_FILE = /(?:^|[\s;{}!$0-9]|[/|#,:@%][gpiImMe0-9]*)[wW][ \t]+(\S[^\n]*)/gu;
+
+/** An awk output redirect to a string literal: `print > "/etc/x"`, `printf ... >> "log"`. */
+const AWK_WRITE_FILE = />>?[ \t]*"([^"\\\n]+)"/gu;
+
+/**
+ * Files a sed or awk script writes itself (LEAD-1): sed's `w`, `W` and `s///w`, and awk's `>` and `>>` to a string
+ * literal. Only a script the read-only parsers above refuse is read, and it is read lexically, so text that merely
+ * looks like such a command adds a target rather than hiding one. A program file (`sed -f`, `awk -f`) is not read.
+ */
+function collectScriptWriteTargets(name: string, args: ReadonlyArray<string>, out: string[]): void {
+	if (SED_NAMES.has(name) && !sedOnlyReads(args)) {
+		for (const script of sedScripts(args, true) ?? []) {
+			for (const match of script.matchAll(SED_WRITE_FILE)) out.push((match[1] ?? "").trim());
+		}
+	} else if (AWK_NAMES.has(name) && !awkOnlyReads(args)) {
+		for (const program of awkPrograms(args) ?? []) {
+			for (const match of program.matchAll(AWK_WRITE_FILE)) out.push(match[1] ?? "");
+		}
+	}
 }
 
 function uniqOnlyReads(args: ReadonlyArray<string>): boolean {
@@ -3095,6 +3138,7 @@ function targetDirectoryOption(segment: ReadonlyArray<string>, commandIndex: num
 function collectInPlaceEditTargets(segment: ReadonlyArray<string>, out: string[]): void {
 	const cmdIndex = commandTokenIndex(segment);
 	if (cmdIndex === null) return;
+	collectScriptWriteTargets(basenameToken(segment[cmdIndex]), segment.slice(cmdIndex + 1), out);
 	if (basenameToken(segment[cmdIndex]) !== "sed") return;
 	if (!hasSedInPlaceFlag(segment, cmdIndex)) return;
 	for (const operand of sedFileOperands(segment, cmdIndex)) out.push(operand);

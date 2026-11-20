@@ -152,6 +152,7 @@ import {
 import { gateProjectSafetyPolicy, workspaceTrustDirectory } from "./workspace-trust.js";
 import {
 	MAX_RAW_TEXT_BYTES,
+	pinnedClioCommand,
 	YOLO_FLOOR_PACK_RULE_IDS,
 	YOLO_FLOOR_REASON_PREFIX,
 	YOLO_FLOOR_RULE_IDS,
@@ -1110,7 +1111,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				reason: `matched ${YOLO_FLOOR_RULE_IDS.settingsAuthority}: ${SETTINGS_AUTHORITY_REASON}`,
 			});
 		}
-		if (clioOwnedMutation({ tool: ToolNames.Bash, args: { command } }, callCwd, command, trees)) {
+		// A Clio variable the command pins to a literal path is judged by that path (CLI-H4).
+		const owned = pinnedClioCommand(command);
+		if (clioOwnedMutation({ tool: ToolNames.Bash, args: { command: owned } }, callCwd, owned, trees)) {
 			return floorMatch({
 				ruleId: YOLO_FLOOR_RULE_IDS.clioOwned,
 				reason: `matched ${YOLO_FLOOR_RULE_IDS.clioOwned}: writes into or deletes Clio's own config, data, state or trust records, which only the operator changes`,
@@ -2465,11 +2468,27 @@ function segmentOperandRoles(tokens: ReadonlyArray<ShellToken>, roles: BashOpera
 				skipped.add(arg);
 				roles.writes.push({ target: arg.value, sources: [], intoDirectory: false });
 			}
-		} else searchOperandRoles(name, args, skipped, roles);
+		} else if (name === "clio-coder" && head.value === name) settingsPathOperand(args, skipped);
+		else searchOperandRoles(name, args, skipped, roles);
 	}
 	for (const token of tokens) {
 		if (!token.operator && !skipped.has(token)) pushReadCandidate(token.value, roles.reads);
 	}
+}
+
+/** A dotted settings path such as `safety.scratchRoots`: no slash, so it never names a file below a directory. */
+const SETTINGS_PATH = /^[A-Za-z][\w-]*(?:\.[\w-]+)+$/u;
+
+/**
+ * `clio-coder config get|set|unset <path>`: the dotted path names a setting, not a file, so `nope.key` is not read as
+ * a key file (LEAD-2). Only the bare launcher on PATH counts, since a workspace script of that name could read its
+ * argument; the value of `set` stays a read candidate.
+ */
+function settingsPathOperand(args: ReadonlyArray<ShellToken>, skipped: Set<ShellToken>): void {
+	const words = args.filter((token, index) => !token.value.startsWith("-") && args[index - 1]?.value !== "--scope");
+	const [command, verb, setting] = words;
+	if (command?.value !== "config" || setting === undefined) return;
+	if (["get", "set", "unset"].includes(verb?.value ?? "") && SETTINGS_PATH.test(setting.value)) skipped.add(setting);
 }
 
 /** Short options of cp/mv/install/ln that take a value. */

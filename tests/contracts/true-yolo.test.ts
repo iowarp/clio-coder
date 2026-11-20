@@ -10,6 +10,7 @@ import {
 	readFileSync,
 	realpathSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { homedir, hostname, tmpdir, userInfo } from "node:os";
@@ -388,6 +389,25 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 	}
 	const edit = { tool: ToolNames.Write, args: { path: join(home.dir, "config", "runtimes", "local.js"), content: "x" } };
 	strictEqual(engine.evaluate(edit, "yolo", OPERATOR_YOLO).reasonCode, "yolo-floor:clio-owned-state");
+	// CLI-H4: a Clio variable pinned to a scratch home is judged by that path; every route back to the real one blocks.
+	const scratchHome = workspace("clio-yolo-scratch-home-");
+	const link = join(scratchHome, "link");
+	symlinkSync(home.dir, link);
+	const writeVia = (pin: string) => `${pin}; echo x > $CLIO_CODER_HOME/state/live.json`;
+	for (const command of [
+		writeVia(`export CLIO_CODER_HOME=${home.dir}`),
+		writeVia(`export CLIO_CODER_HOME=${dirname(home.dir)}/./${basename(home.dir)}/`),
+		writeVia(`export CLIO_CODER_HOME='${link}'`),
+		writeVia(`export CLIO_CODER_HOME=${scratchHome}; CLIO_CODER_HOME=${home.dir}`),
+		writeVia(`export CLIO_CODER_HOME=${scratchHome}; source env.sh`),
+		writeVia(`CLIO_CODER_HOME=${scratchHome} true`),
+		`export CLIO_CODER_HOME=${scratchHome}; echo x > \${CLIO_CODER_HOME:-${home.dir}}/state/f`,
+		`export CLIO_CODER_HOME=${scratchHome}; echo x > $CLIO_CODER_STATE_DIR/f`,
+	]) {
+		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).reasonCode, "yolo-floor:clio-owned-state", command);
+	}
+	const staged = `export CLIO_CODER_HOME=${scratchHome}; mkdir -p $CLIO_CODER_HOME/state && echo x > "\${CLIO_CODER_HOME}/state/f"`;
+	strictEqual(engine.evaluate(bash(staged), "yolo", OPERATOR_YOLO).kind, "allow", staged);
 	// Reading Clio's own state, cleaning the workspace and writing /dev/null stay off the floor.
 	for (const command of [
 		`cat ${join(home.dir, "config", "settings.yaml")}`,

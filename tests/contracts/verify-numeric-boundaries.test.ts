@@ -412,6 +412,9 @@ describe("numeric-compare shapes and missing values", () => {
 			violated: [],
 			detail: "v: unjudgeable, both arrays are empty so nothing was compared",
 		});
+		strictEqual(empty.summary, "numeric-compare unjudgeable: v held empty arrays on both sides, so nothing was compared");
+		const mixed = compareNumeric({ v: [], w: 2 }, { v: [], w: 1 }, { absolute: 0 });
+		strictEqual(mixed.summary, "numeric-compare failed: 1 of 2 key(s) out of tolerance (w); unjudgeable: v");
 		const filled = compareNumeric({ v: [] }, { v: [1] }, { absolute: 0 });
 		strictEqual(filled.passed, false);
 		deepStrictEqual(key(filled).failed, ["length-mismatch"]);

@@ -33,6 +33,8 @@ test("Clio's settings, credential and trust CLI is recognized however it is laun
 		"clio-coder mcp trust docs",
 		"clio-coder configure --json 2>&1 && clio-coder targets use gw >/dev/null",
 		"clio-coder reset --settings --force",
+		"clio-coder config set nope.key 1",
+		"clio-coder config --scope project unset safety.scratchRoots",
 	];
 	for (const command of mutating) strictEqual(invokesSettingsMutation(command), true, command);
 	const reads = [
@@ -45,6 +47,7 @@ test("Clio's settings, credential and trust CLI is recognized however it is laun
 		"clio-coder targets profile list",
 		"clio-coder auth status litellm",
 		"clio-coder config inspect --json",
+		"clio-coder config get nope.key",
 		"clio-coder reset --all --dry-run",
 		"./configure --prefix=/usr && make",
 		"git config user.name x",
@@ -78,6 +81,12 @@ test("a settings CLI call is blocked at default, unsandboxed or not, and on the 
 		OPERATOR_DEFAULT,
 	);
 	strictEqual(read.reasonCode.endsWith("settings-authority"), false);
+	// LEAD-2: a dotted settings path is no key file, though a file of that name, or a launcher from the workspace, still is.
+	const bash = (command: string) => ({ tool: ToolNames.Bash, args: { command } });
+	strictEqual(engine.evaluate(bash("clio-coder config get nope.key")).kind, "allow");
+	strictEqual(engine.evaluate(bash("clio-coder config set nope.key 1")).reasonCode, "settings-authority");
+	for (const command of ["cat nope.key", "./clio-coder config get nope.key", "clio-coder config get ../nope.key"])
+		strictEqual(engine.evaluate(bash(command)).reasonCode, "secret_path_bash", command);
 });
 
 // The floor binds model tool calls only: the operator's own `!` line is theirs to run.
