@@ -648,6 +648,12 @@ it("detached siblings keep distinct assignments; canceling a completed first att
 		strictEqual(f.bundle.contract.assignments?.getStored(retry.runId)?.assignmentId, first);
 		const collected = await monitor.run({ mode: "collect", run_ids: [first, second] });
 		strictEqual(collected.kind, "ok");
+		// A background collect shows the failed attempt behind the retry, as a foreground result does (FL-9).
+		if (collected.kind === "ok") {
+			match(collected.output, /^collect complete .* recovered=1$/mu);
+			match(collected.output, new RegExp(`^recovered ${retry.runId} after attempt 0 ${first} failed: `, "mu"));
+		}
+		strictEqual(collected.details?.recoveredCount, 1);
 		const rows = collected.details?.runs;
 		ok(Array.isArray(rows));
 		deepStrictEqual(

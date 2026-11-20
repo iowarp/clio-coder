@@ -666,6 +666,54 @@ test("a first splice with no usage anchor is fitted at the transport's own count
 	}
 });
 
+test("a worker stopped by its own lost stdout lane names cause=internal, not parent_cancel (FL-9)", {
+	timeout: 20_000,
+}, async () => {
+	const env = await isolateClioEnv("clio-coder-worker-internal-stop-");
+	let requested!: () => void;
+	const request = new Promise<void>((resolve) => {
+		requested = resolve;
+	});
+	// The provider holds the request open, so only the abort ends the call.
+	const server = createServer((_req, _res) => requested());
+	let worker: WorkerRunHandle | undefined;
+	try {
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const events: unknown[] = [];
+		worker = startWorkerRun(
+			{
+				agentId: "internal-stop-fixture",
+				systemPrompt: "Reply Complete.",
+				task: "Reply Complete.",
+				target: { id: "fixture", runtime: "litellm", url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` },
+				runtime: litellm,
+				wireModelId: "fixture",
+				apiKey: "[redacted:assignment]",
+				modelCapabilities: { contextWindow: 32_768, maxTokens: 4096, tools: true },
+				allowedTools: [],
+				budget: { mode: "advisory", toolCalls: 4, readReserve: 0, synthesis: true, hardCap: 8 },
+				product: "orientation",
+				noSkills: true,
+				cwd: env.dir,
+			},
+			(event) => void events.push(event),
+		);
+		await request;
+		worker.abort("internal");
+		const outcome = await worker.promise;
+		notEqual(outcome.exitCode, 0);
+		const text = JSON.stringify(events);
+		match(text, /cause=internal/u);
+		ok(!text.includes("parent_cancel"), "the worker's own failure is not its parent's cancel");
+	} finally {
+		worker?.abort();
+		await worker?.promise;
+		server.closeAllConnections();
+		await closeServer(server);
+		env.restore();
+	}
+});
+
 test("drv-cf3a D-B: a result-contract repair round stays anchored on the provider's last count", () => {
 	const guard = createWorkerContextGuard(refuseArchive);
 	const input = { systemPrompt: "worker", tools: [], contextWindow: 32_768, outputReserve: () => 4096 };

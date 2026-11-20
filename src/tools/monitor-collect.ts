@@ -15,7 +15,7 @@ import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
 import { loadRunRecord } from "../domains/session/telemetry-source.js";
 import { readVerifiedRun } from "../domains/telemetry/index.js";
 import { telemetryObjectsDirectory, telemetryRunDirectory } from "../domains/telemetry/paths.js";
-import { flowRestrictionsOfRuns } from "./dispatch-runner.js";
+import { earlierFailedAttempts, flowRestrictionsOfRuns, recoveredAttemptLines } from "./dispatch-runner.js";
 import type { MonitorToolDeps } from "./monitor.js";
 import type { ToolResult } from "./registry.js";
 import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
@@ -306,11 +306,27 @@ export async function collectRuns(
 		}
 	}
 	const collectedRows: CollectedRunRow[] = rows.map((row) => ({ ...row, evidence: durableRunEvidence(row.run) }));
+	// A background batch shows the attempts a retry recovered from, as a foreground dispatch result does (FL-9).
+	const failedAttempts = rows.flatMap((row) =>
+		row.run === null
+			? []
+			: earlierFailedAttempts((id) => deps.dispatch.getRun(id), row.run.lineage).map((prior) => ({
+					...prior,
+					recoveredBy: row.runId,
+				})),
+	);
+	const recoveredCount = new Set(failedAttempts.map((entry) => entry.recoveredBy)).size;
 	const lines = [
-		`collect complete for ${scope}: total=${rows.length} failed=${failed.length}${missing.length > 0 ? ` missing=${missing.length}` : ""}`,
+		`collect complete for ${scope}: total=${rows.length} failed=${failed.length}${missing.length > 0 ? ` missing=${missing.length}` : ""}${recoveredCount > 0 ? ` recovered=${recoveredCount}` : ""}`,
 		// Every run is named up front: per-run detail below can be long, and a
 		// bounded consumer (the turn-control collected block) cuts from the end.
 		`runs: ${rows.map((row) => `${row.runId}=${row.run === null ? "missing" : (row.run.outcome ?? row.run.status)}`).join(" ")}`,
+		...rows.flatMap((row) =>
+			recoveredAttemptLines(
+				row.runId,
+				failedAttempts.filter((entry) => entry.recoveredBy === row.runId),
+			),
+		),
 		...collectedRows.flatMap((row) => collectRunLine(row)),
 		...(board !== null ? ["", board] : []),
 		...(batchId.length > 0 && !collected
@@ -334,6 +350,7 @@ export async function collectRuns(
 			complete: true,
 			runCount: rows.length,
 			failedCount: failed.length,
+			...(recoveredCount > 0 ? { recoveredCount, failedAttempts } : {}),
 			runs: collectedRows.map((row) => {
 				const evidenceRun = row.evidence.run;
 				const output = evidenceRun?.delivered?.output ?? null;

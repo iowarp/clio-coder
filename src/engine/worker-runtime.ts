@@ -357,7 +357,8 @@ export interface WorkerRunResult {
 
 export interface WorkerRunHandle {
 	promise: Promise<WorkerRunResult>;
-	abort(): void;
+	/** Absent cause is the parent stopping the run; `internal` is the worker's own failure, such as a lost stdout lane. */
+	abort(cause?: "internal"): void;
 	/**
 	 * Queue operator guidance on a runtime that exposes a live input API. Absent
 	 * for single-shot subprocess runtimes. Returns true only after the runtime
@@ -860,7 +861,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	let workerBoundAborted = false;
 	let abortWorkerForBound: (() => void) | null = null;
 	// Who aborted the agent, so the call it cut off and the run's diagnostic name the same cause (cf1h-D3).
-	let workerStopCause: "loop_guard" | "parent_cancel" | undefined;
+	let workerStopCause: "loop_guard" | "parent_cancel" | "internal" | undefined;
 	// For synthesis:false, the loop guard records the final admitted call while
 	// rejecting later siblings immediately. The runtime stops only after pi has
 	// emitted that call's tool-result message, so a slow tool is never aborted
@@ -2836,7 +2837,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 
 	return {
 		promise,
-		abort: () => {
+		abort: (cause) => {
 			// Under escalate a parked call would otherwise keep waitForIdle from
 			// returning, so cancel it before aborting. cancelParkedCalls is a
 			// no-op when nothing is parked, so deny/fail abort stays unchanged.
@@ -2845,7 +2846,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				denyActiveEscalationOnAbort(reason);
 				registry.cancelParkedCalls(reason);
 			}
-			workerStopCause ??= "parent_cancel";
+			workerStopCause ??= cause ?? "parent_cancel";
 			agent.abort();
 		},
 		steer: (text: string) => {

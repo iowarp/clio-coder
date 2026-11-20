@@ -571,7 +571,7 @@ interface CompletedRun {
 	notRetried?: string;
 }
 
-interface FailedAttempt {
+export interface FailedAttempt {
 	runId: string;
 	attempt: number;
 	outcome: string;
@@ -583,11 +583,14 @@ interface FailedAttempt {
  * A recovery attempt's success settles the assignment, but the attempts it replaced stay on the parent's record:
  * each is read back from its own run along the receipt's retry lineage (cf1h-D3).
  */
-function earlierFailedAttempts(deps: DispatchToolDeps, start: RunEnvelope["lineage"]): FailedAttempt[] {
+export function earlierFailedAttempts(
+	getRun: (runId: string) => RunEnvelope | null,
+	start: RunEnvelope["lineage"],
+): FailedAttempt[] {
 	const failed: FailedAttempt[] = [];
 	let lineage = start;
 	while (lineage !== undefined && lineage.attempt > 0 && lineage.parentRunId !== null) {
-		const prior = deps.dispatch.getRun(lineage.parentRunId);
+		const prior = getRun(lineage.parentRunId);
 		const attempt = prior?.lineage?.attempt ?? lineage.attempt - 1;
 		if (prior === null || attempt >= lineage.attempt) break;
 		if (prior.outcome !== "succeeded")
@@ -628,10 +631,10 @@ async function withNotRetried(deps: DispatchToolDeps, runs: readonly CompletedRu
 	});
 }
 
-function recoveredAttemptLines(run: CompletedRun): string[] {
-	return (run.failedAttempts ?? []).map((prior) => {
+export function recoveredAttemptLines(terminalRunId: string, failedAttempts: ReadonlyArray<FailedAttempt>): string[] {
+	return failedAttempts.map((prior) => {
 		const detail = prior.detail && prior.detail.length > 240 ? `${prior.detail.slice(0, 239)}…` : prior.detail;
-		return `recovered ${run.receipt.runId} after attempt ${prior.attempt} ${prior.runId} ${prior.outcome}: ${prior.outcomeCode ?? "no outcome code"}${detail ? ` (${detail})` : ""}`;
+		return `recovered ${terminalRunId} after attempt ${prior.attempt} ${prior.runId} ${prior.outcome}: ${prior.outcomeCode ?? "no outcome code"}${detail ? ` (${detail})` : ""}`;
 	});
 }
 
@@ -647,7 +650,7 @@ function completeRun(
 	request?: DispatchRequest,
 ): CompletedRun {
 	const envelope = deps.dispatch.getRun(receipt.runId);
-	const failedAttempts = earlierFailedAttempts(deps, envelope?.lineage ?? receipt.lineage);
+	const failedAttempts = earlierFailedAttempts((id) => deps.dispatch.getRun(id), envelope?.lineage ?? receipt.lineage);
 	const capabilityClass = deps.getAgentSpecs().find((spec) => spec.id === receipt.agentId)?.capabilityClass;
 	const gateRole = receipt.gate?.role;
 	const readOnly =
@@ -798,7 +801,7 @@ export function formatDispatchOutput(
 	const lines = [
 		`dispatch (${mode}) total=${runs.length} failed=${failed.length}${recovered.length > 0 ? ` recovered=${recovered.length}` : ""}`,
 		`runs=${runs.map((run) => run.receipt.runId).join(", ")}`,
-		...recovered.flatMap(recoveredAttemptLines),
+		...recovered.flatMap((run) => recoveredAttemptLines(run.receipt.runId, run.failedAttempts ?? [])),
 		...runs.flatMap((run) => (run.notRetried ? [`not_retried ${run.receipt.runId}: ${run.notRetried}`] : [])),
 		`batch observed_tool_calls=${batch.observedToolCalls} cost=${batch.cost}${batch.unobservableToolRuns > 0 ? ` unobservable_tool_runs=${batch.unobservableToolRuns}` : ""}`,
 		...hostActions,
