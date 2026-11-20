@@ -321,8 +321,24 @@ export function checkIdentity(name: string): string {
 	const run =
 		executable === "npm" || executable === "pnpm" || executable === "yarn" ? packageScriptRun(executable, args) : null;
 	const argv =
-		run === null ? [executable, ...args] : [executable, ...run.selectors, "run", run.script, ...run.forwarded];
+		run !== null
+			? [executable, ...run.selectors, "run", run.script, ...run.forwarded]
+			: executable === "npm" || executable === "pnpm" || executable === "yarn"
+				? [executable, ...withoutLeadingOutputFlags(executable, args)]
+				: [executable, ...args];
 	return `argv:${JSON.stringify(argv)}`;
+}
+
+/** A package manager's words with its output-only flags before the command removed (`pnpm -s exec x` is `pnpm exec x`). */
+function withoutLeadingOutputFlags(executable: PackageManager, args: ReadonlyArray<string>): string[] {
+	const end = packageSelectors(executable, args)?.index ?? 0;
+	const kept: string[] = [];
+	for (let index = 0; index < end; ) {
+		const width = outputFlagWidth(args, index);
+		if (width === 0) kept.push(args[index] as string);
+		index += Math.max(width, 1);
+	}
+	return [...kept, ...args.slice(end)];
 }
 
 /**
@@ -3538,7 +3554,7 @@ export type ValidationCommandLabel = (typeof VALIDATION_COMMAND_LABELS)[number];
 function validationMatch(
 	executable: string,
 	args: ReadonlyArray<string>,
-): ValidationCommandLabel | PackageScriptLabel | null {
+): ValidationCommandLabel | PackageScriptLabel | CheckerLabel | null {
 	// A runtime loader (`--import`, `--require`) runs code beside the check, so wherever it appears the run is not the
 	// project's check (x6-5).
 	if (executable === "node") return args[0] === "--test" && !args.some(isRuntimeLoaderFlag) ? "node --test" : null;
@@ -3571,6 +3587,24 @@ function validationMatch(
 	if (executable === "meson" && args[0] === "test") return "meson test";
 	if (executable === "mvn" && args[0] === "test") return "mvn test";
 	if ((executable === "gradle" || executable === "gradlew") && args[0] === "test") return "gradle test";
+	// `npx`, `<pm> exec` and `pnpm dlx` run the checker they name, so the run carries that checker's label (CLI-P24).
+	const inner =
+		executable === "npx" && !args.some((arg) => arg === "-c" || arg === "--call" || arg.startsWith("--call="))
+			? npxInvocation(args)
+			: packageExecInvocation(executable, args);
+	if (inner !== null) return inner.executable === "node" ? null : validationMatch(inner.executable, inner.args);
+	return checkerMatch(executable, args);
+}
+
+/** Type and lint checkers the finish vocabulary names by tool, bare or behind a runner. */
+type CheckerLabel = "tsc --noEmit" | "biome check" | "biome lint" | "eslint";
+
+/** `tsc --noEmit`, `biome check|lint` and `eslint` while they only read the tree; a write mode keeps them unlabeled. */
+function checkerMatch(executable: string, args: ReadonlyArray<string>): CheckerLabel | null {
+	if (!readOnlyCheckMatch(executable, args)) return null;
+	if (executable === "tsc") return "tsc --noEmit";
+	if (executable === "biome" && (args[0] === "check" || args[0] === "lint")) return `biome ${args[0]}`;
+	if (executable === "eslint") return "eslint";
 	return null;
 }
 
@@ -3679,15 +3713,35 @@ function packageScriptRun(
 	if (first === undefined) return null;
 	if (first === "test") return { manager: executable, selectors, script: first, forwarded: args.slice(index + 1) };
 	if (first === "run") {
-		const script = args[index + 1];
-		return script === undefined ? null : { manager: executable, selectors, script, forwarded: args.slice(index + 2) };
+		// `pnpm run -s typecheck`: the manager's output flags may also stand between `run` and the script.
+		let at = index + 1;
+		for (let width = outputFlagWidth(args, at); width > 0; width = outputFlagWidth(args, at)) at += width;
+		const script = args[at];
+		return script === undefined ? null : { manager: executable, selectors, script, forwarded: args.slice(at + 1) };
 	}
 	if (executable !== "pnpm" && executable !== "yarn") return null;
 	if (first.startsWith("-") || PACKAGE_MANAGER_BUILTINS.get(executable)?.has(first) === true) return null;
 	return { manager: executable, selectors, script: first, forwarded: args.slice(index + 1) };
 }
 
-/** The workspace selectors and project directory before a package manager's command, and the index past them. */
+/** Package-manager flags that only change what a run prints (CLI-P24), and those of them that take a value. */
+const PACKAGE_OUTPUT_FLAGS: ReadonlySet<string> = new Set(["-s", "--silent", "-q", "--quiet", "--color", "--no-color"]);
+const PACKAGE_OUTPUT_VALUE_FLAGS: ReadonlySet<string> = new Set(["--loglevel", "--reporter"]);
+
+/** How many words the output-only flag at `index` spans: 0 when none stands there. */
+function outputFlagWidth(args: ReadonlyArray<string>, index: number): number {
+	const arg = args[index];
+	if (arg === undefined) return 0;
+	if (PACKAGE_OUTPUT_FLAGS.has(arg)) return 1;
+	const equals = arg.indexOf("=");
+	if (equals > 0) return PACKAGE_OUTPUT_VALUE_FLAGS.has(arg.slice(0, equals)) ? 1 : 0;
+	return PACKAGE_OUTPUT_VALUE_FLAGS.has(arg) && args[index + 1] !== undefined ? 2 : 0;
+}
+
+/**
+ * The workspace selectors and project directory before a package manager's command, and the index past them; the
+ * manager's output-only flags there are skipped and kept out of the selectors.
+ */
 function packageSelectors(
 	executable: PackageManager,
 	args: ReadonlyArray<string>,
@@ -3705,6 +3759,9 @@ function packageSelectors(
 		} else if (executable === "pnpm" && PNPM_SELECTOR_FLAGS.has(arg)) {
 			selectors.push(arg);
 			index += 1;
+		} else if (outputFlagWidth(args, index) > 0) {
+			// Output-only flags change what the run prints, not what it checks, so they stay out of its identity.
+			index += outputFlagWidth(args, index);
 		} else break;
 	}
 	if (executable === "yarn" && args[index] === "workspace" && args[index + 1]?.startsWith("-") === false) {
@@ -3818,13 +3875,19 @@ function pythonToolModule(
 	return null;
 }
 
-/** The binary `npm exec`, `pnpm exec`, `yarn exec` or `bun exec` runs, past an optional `--`; null for anything else. */
+/**
+ * The binary `npm exec`, `pnpm exec`, `yarn exec`, `bun exec`, `pnpm dlx` or `yarn dlx` runs, past the manager's
+ * selectors and output flags and an optional `--`; null for anything else.
+ */
 function packageExecInvocation(
 	executable: string,
 	args: ReadonlyArray<string>,
 ): { executable: string; args: ReadonlyArray<string> } | null {
-	if (args[0] !== "exec" || !["npm", "pnpm", "yarn", "bun"].includes(executable)) return null;
-	const at = args[1] === "--" ? 2 : 1;
+	if (executable !== "npm" && executable !== "pnpm" && executable !== "yarn" && executable !== "bun") return null;
+	const start = packageSelectors(executable, args)?.index ?? 0;
+	const command = args[start];
+	if (command !== "exec" && !(command === "dlx" && (executable === "pnpm" || executable === "yarn"))) return null;
+	const at = args[start + 1] === "--" ? start + 2 : start + 1;
 	const bin = args[at];
 	return bin === undefined || bin.startsWith("-") ? null : { executable: basenameToken(bin), args: args.slice(at + 1) };
 }
@@ -4475,6 +4538,8 @@ function commandTokenIndex(segment: ReadonlyArray<string>): number | null {
 /** The index past a transparent wrapper standing at `index` and its options, or `index` when none stands there. */
 function pastTransparentWrapper(segment: ReadonlyArray<string>, index: number): number {
 	const token = segment[index];
+	// `corepack pnpm run lint` runs the pinned pnpm on the same words; corepack's own commands (`enable`, `use`) do not.
+	if (token === "corepack") return COREPACK_MANAGERS.has(segment[index + 1] ?? "") ? index + 1 : index;
 	const valued = token === undefined ? undefined : TRANSPARENT_WRAPPERS.get(token);
 	if (valued === undefined) return index;
 	let next = index + 1;
@@ -4521,6 +4586,9 @@ const PRIVILEGE_VALUE_OPTIONS: ReadonlySet<string> = new Set([
  * and `nohup` (SF-2). The command after them is the one every reader judges, so `timeout 300 npm test` runs a check
  * and `timeout 5 rm -rf x` deletes.
  */
+/** Package managers `corepack <manager>` runs with the rest of the words unchanged (CLI-P24). */
+const COREPACK_MANAGERS: ReadonlySet<string> = new Set(["npm", "npx", "pnpm", "yarn"]);
+
 const TRANSPARENT_WRAPPERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
 	["timeout", new Set(["-s", "--signal", "-k", "--kill-after"])],
 	["nice", new Set(["-n", "--adjustment"])],
