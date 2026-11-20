@@ -376,6 +376,11 @@ export async function runClioRun(
 		// parser already refused --json and --json-events beside --output-format.
 		parsed.json = true;
 		parsed.jsonEvents = "full";
+	} else if (parsed.json) {
+		// The v1 stream stays byte-identical on stdout; the deprecation is a single stderr line.
+		process.stderr.write(
+			"clio-coder run: --json and --json-events are deprecated (removed in 0.9.0); use --output-format json|stream-json for schema v2\n",
+		);
 	}
 	const fullMainStream = parsed.json && parsed.agentId === undefined && parsed.jsonEvents !== "terminal";
 	const execute = async (): Promise<number> => {
