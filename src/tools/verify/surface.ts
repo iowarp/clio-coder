@@ -57,7 +57,7 @@ export const verifyToolSurface: ToolSurface = {
 		timeout_ms: Type.Optional(Type.Number({ description: "Timeout ms (not declared checks)." })),
 		max_output_bytes: Type.Optional(
 			Type.Number({
-				description: "Max bytes of returned output (keeps head and tail); never stops the check.",
+				description: "Returned-text cap.",
 			}),
 		),
 	}),
