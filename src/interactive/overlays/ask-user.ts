@@ -899,12 +899,29 @@ class AskUserOverlayView implements Component {
 		if (!question) return emptyState(clioTheme(), "No questions.", safeWidth);
 		const compact = maxRows <= COMPACT_BODY_ROWS;
 		for (const fit of compact ? COMPACT_BODY_FITS : BODY_FITS) {
-			const attempt = this.composeBody(question, safeWidth, hasMenu, maxRows, fit);
+			const attempt = this.composeSettled(question, safeWidth, hasMenu, maxRows, fit);
 			if (attempt.fits) return attempt.rows;
 		}
 		// Nothing lists every choice, so the list windows around the focused one.
 		const fallback = compact ? COMPACT_BODY_FITS[COMPACT_BODY_FITS.length - 1] : TIGHT_FIT;
-		return this.composeBody(question, safeWidth, hasMenu, maxRows, fallback ?? TIGHT_FIT).rows;
+		return this.composeSettled(question, safeWidth, hasMenu, maxRows, fallback ?? TIGHT_FIT).rows;
+	}
+
+	/**
+	 * The legend and the rail name the scroll keys only while the question
+	 * overflows, which the layout itself decides; a layout that changed the answer
+	 * is composed again, so a key the rail drops for PgUp/PgDn still has a row.
+	 */
+	private composeSettled(
+		question: AskUserQuestion,
+		width: number,
+		hasMenu: boolean,
+		maxRows: number,
+		fit: BodyFit,
+	): { rows: string[]; fits: boolean } {
+		const overflowed = this.questionOverflows;
+		const attempt = this.composeBody(question, width, hasMenu, maxRows, fit);
+		return this.questionOverflows === overflowed ? attempt : this.composeBody(question, width, hasMenu, maxRows, fit);
 	}
 
 	private composeBody(
@@ -957,13 +974,14 @@ class AskUserOverlayView implements Component {
 			...formatAskUserQuestion(question.question, width).map((line) => theme.fg("decisionQuestion", line)),
 		];
 		const fixedTop = [...strip, ...header, ...details];
-		const questionFloor = Math.min(body.length, MIN_QUESTION_ROWS);
-		// The control is sized after the question has claimed its minimum, so a
-		// long option list cannot push a short question off the box.
-		const controlBudget = Math.max(
-			fit.headers ? 4 : 2,
-			maxRows - fixedTop.length - gap.length - legend.length - status.length - questionFloor,
-		);
+		// The question is what the options answer, so it is sized first: it keeps up
+		// to two thirds of the rows the chrome leaves before the options are laid
+		// out, and a short option list hands back what it does not use.
+		const freeRows = maxRows - fixedTop.length - gap.length - legend.length - status.length;
+		const questionFloor = Math.min(body.length, Math.max(MIN_QUESTION_ROWS, Math.floor((freeRows * 2) / 3)));
+		// The control is sized after the question has claimed its share, so a
+		// long option list cannot push the question off the box.
+		const controlBudget = Math.max(fit.headers ? 4 : 2, freeRows - questionFloor);
 		this.optionDetailRows = [];
 		this.controlWindowed = false;
 		const control = this.renderControlLines(width, controlBudget, fit.detail, otherPointer);
@@ -977,7 +995,7 @@ class AskUserOverlayView implements Component {
 				control.length -
 				legend.length -
 				status.length -
-				Math.min(body.length, MIN_QUESTION_ROWS),
+				Math.max(questionFloor, Math.min(body.length, MIN_QUESTION_ROWS)),
 		);
 		const ledger = this.renderAnswerLedger(width, ledgerBudget, fit);
 		const fixed = fixedTop.length + gap.length + control.length + legend.length + status.length + ledger.length;
@@ -1112,7 +1130,15 @@ class AskUserOverlayView implements Component {
 		if (!this.questionOverflows) return false;
 		const action = this.scrollAction(data, mode);
 		if (!action) return false;
-		const next = nextContentScrollOffset(this.questionScroll, this.questionTotalRows, this.questionRegionRows, action);
+		// A page is the whole visible region: the question is read in screenfuls, not one overlapping line at a time.
+		const maxScroll = Math.max(0, this.questionTotalRows - this.questionRegionRows);
+		const next =
+			action === "page-up" || action === "page-down"
+				? Math.max(
+						0,
+						Math.min(maxScroll, this.questionScroll + (action === "page-up" ? -1 : 1) * Math.max(1, this.questionRegionRows)),
+					)
+				: nextContentScrollOffset(this.questionScroll, this.questionTotalRows, this.questionRegionRows, action);
 		if (next !== this.questionScroll) {
 			this.questionScroll = next;
 			this.deps.requestRender();
@@ -1971,7 +1997,8 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 	const view = new AskUserOverlayView({
 		...deps,
 		// The dock's growth ceiling, spelled as the terminal height the body subtracts its frame rows from.
-		getTerminalRows: () => dockGrowthRows(tui) + ASK_USER_FRAME_AND_MARGIN_ROWS,
+		// A pending decision fills the screen, the way the composer grants it (`awaitingInput` below).
+		getTerminalRows: () => dockGrowthRows(tui, view.isDecisionPending()) + ASK_USER_FRAME_AND_MARGIN_ROWS,
 		requestRender: () => tui.requestRender(),
 		tui,
 	});
