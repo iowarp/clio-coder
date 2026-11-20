@@ -631,7 +631,17 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					effect.kind === "inject_reminder" && pairedReminderPersists(effect) ? [effect.message] : [],
 				),
 			);
+			// FX-38: a reminder voicing a continuation a declared turn drops would ask for another round after the end. The
+			// seal holds its fact; the operator reads the assessment in the footer, and the model is not reminded.
+			const dropped = declaredTurn
+				? effects.flatMap((effect) => (effect.kind === "request_continuation" ? [effect] : []))
+				: [];
+			const voiced = new Set(dropped.map((effect) => effect.message));
+			const notes = [...new Set(dropped.flatMap((effect) => (effect.fact && effect.note ? [effect.note] : [])))];
+			if (state.turnCompletion?.state === "done" && notes.length > 0)
+				deps.emitFooterNotice("warning", `declared done, assessed partly done: ${notes.join("; ")}`, "finish.assessed");
 			for (const effect of effects) {
+				if (effect.kind === "inject_reminder" && voiced.has(effect.message)) continue;
 				if (effect.kind === "inject_reminder") {
 					applyTurnEndReminder(
 						agentRuntime,

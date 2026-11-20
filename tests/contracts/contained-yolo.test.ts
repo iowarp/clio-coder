@@ -451,6 +451,7 @@ function finishGateTurn(contained: boolean) {
 	state.continuation.takeRequest();
 	const footer: string[] = [];
 	const nudges: string[] = [];
+	const notices: string[] = [];
 	const middleware = createTurnMiddleware({
 		state,
 		middleware: {
@@ -461,7 +462,7 @@ function finishGateTurn(contained: boolean) {
 			},
 		} as MiddlewareContract,
 		middlewareToolChoice: createMiddlewareToolChoiceControl(),
-		emitNotice: () => {},
+		emitNotice: (text) => notices.push(text),
 		emitFooterNotice: (_level, _text, key) => footer.push(key),
 	});
 	const runtime = {
@@ -474,7 +475,7 @@ function finishGateTurn(contained: boolean) {
 		middleware.fireTurnEnd(runtime, [
 			{ role: "assistant", content: [{ type: "text", text: "Done." }], stopReason: "stop" },
 		] as never);
-	return { state, footer, audits, nudges, finish };
+	return { state, footer, audits, nudges, notices, middleware, finish };
 }
 
 test("contained yolo's finish gate keeps its own nudge and records an exhausted check as unverified", async () => {
@@ -508,4 +509,8 @@ test("contained yolo's finish gate keeps its own nudge and records an exhausted 
 	strictEqual(declared.state.continuation.requested, false);
 	strictEqual(declared.state.turnSealedCompletion?.assessed, "partly_done");
 	deepStrictEqual(declared.state.turnSealedCompletion?.facts, ["unvalidated_mutation"]);
+	// FX-38: the gate's directive neither shows after the declared end nor rides the next request; the footer says why.
+	deepStrictEqual(declared.notices, []);
+	strictEqual(declared.middleware.flushPendingReminders(), "");
+	strictEqual(declared.footer.at(-1), "finish.assessed");
 });
