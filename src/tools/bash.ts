@@ -349,6 +349,9 @@ const TEST_RUN_COMMAND =
 /**
  * A timeout is the command outliving its own limit, not the tool going away: a model that read the old test-run wording
  * after a lock wait concluded bash had stopped answering. The test-run hint stays for commands that look like test runs.
+ * A stop at the run's --timeout deadline names that deadline (`runTimeoutMs`, counted from process start, is the
+ * --timeout itself) and says the run's time is spent; a command the deadline kept from starting printed nothing because
+ * it never ran, so it gets neither the printed-nothing note nor the next-call advice (XR-12).
  */
 function bashTimeoutStatus(
 	command: string,
@@ -356,16 +359,21 @@ function bashTimeoutStatus(
 	printedNothing: boolean,
 	lastActiveTest: string | null,
 	requestedMs: number,
+	runTimeoutMs: number | null,
 ): string {
+	const deadline = `the run's --timeout deadline${runTimeoutMs === null ? "" : ` (${Math.round(runTimeoutMs / 1000)} s)`}`;
+	if (limit.by === "run-deadline" && limit.ms === 0)
+		return `bash: ${deadline} had passed before this command started, so it did not run (${timeoutWords(requestedMs)} requested). The run's time is spent, so no further command can run in it.`;
 	let status =
 		limit.by === "timeout"
 			? `bash: this command ran past its own ${timeoutWords(limit.ms)} timeout and was stopped.`
-			: limit.ms === 0
-				? `bash: the run's --timeout deadline had passed before this command started, so it did not run (${timeoutWords(requestedMs)} requested).`
-				: `bash: this command reached the run's --timeout deadline (${timeoutWords(limit.ms)} left of the ${timeoutWords(requestedMs)} requested) and was stopped.`;
+			: `bash: this command was stopped at ${deadline}, before the ${timeoutWords(requestedMs)} requested ran out.`;
 	if (printedNothing)
 		status += " It printed nothing before it was stopped (its output went elsewhere, or it was waiting).";
-	status += " The bash tool still works; the next call runs normally.";
+	status +=
+		limit.by === "timeout"
+			? " The bash tool still works; the next call runs normally."
+			: " The run's time is spent, so no further command can run in it.";
 	if (lastActiveTest !== null || TEST_RUN_COMMAND.test(command)) {
 		status +=
 			" Validation did not finish." +
@@ -492,8 +500,15 @@ export const bashTool: ToolSpec = {
 			// so only the notes appended below read as host notes.
 			const shown = neutralizeFraming(rawOutput);
 			const output = shown.trim();
-			if (aborted) {
-				const abortCause = options?.abortCause?.() ?? null;
+			const abortCause = aborted ? (options?.abortCause?.() ?? null) : null;
+			// The run's --timeout shuts the run down at the same instant this command's deadline timer fires, so the run's
+			// abort and the timer race and a result can carry both flags. Whichever landed first, a stop on or past the
+			// deadline with no other recorded cause is the deadline's, judged on unrounded time (XR-12).
+			const deadlineStop =
+				deadlineAt !== null &&
+				((timedOut && limit.by === "run-deadline") || (aborted && abortCause === null && performance.now() >= deadlineAt));
+			// An abort with no cause on a command its own timer already stopped is that timeout, not an unexplained abort.
+			if (aborted && !deadlineStop && (abortCause !== null || !timedOut)) {
 				const status = bashAbortStatus(elapsedMs, limit.ms, abortCause);
 				return {
 					kind: "error",
@@ -501,9 +516,19 @@ export const bashTool: ToolSpec = {
 					details: { ...bashResultDetails(result, rawOutput, "abort", elapsedMs), abortCause },
 				};
 			}
-			if (timedOut) {
+			if (timedOut || deadlineStop) {
 				const lastActiveTest = lastActivePytestTest(args.command, rawOutput);
-				const status = bashTimeoutStatus(args.command, limit, output.length === 0, lastActiveTest, requested);
+				// An abort only lands on a spawned command, so a deadline stop it caused is never the did-not-start case.
+				const stopLimit: BashTimeoutLimit =
+					deadlineStop && limit.by !== "run-deadline" ? { by: "run-deadline", ms: Math.max(1, limit.ms) } : limit;
+				const status = bashTimeoutStatus(
+					args.command,
+					stopLimit,
+					output.length === 0,
+					lastActiveTest,
+					requested,
+					deadlineAt,
+				);
 				return {
 					kind: "error",
 					message: output.length > 0 ? `${output}\n\n${status}` : status,
