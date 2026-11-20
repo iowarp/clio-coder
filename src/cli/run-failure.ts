@@ -125,31 +125,10 @@ export async function withRunFailureReporting(
 	fullMainStream = false,
 	output?: OutputLastMessageRequest,
 ): Promise<number> {
-	if (!json) return run();
-	// CLI-P14: `-o` beside --json keeps v2's semantics (SPEC 6.6) and leaves every v1 frame as it was written.
-	const execute =
-		output === undefined
-			? run
-			: async (): Promise<number> => {
-					const resolved = resolveOutputTarget(output);
-					if (!prepareOutputTarget(resolved)) return 2;
-					let text = "";
-					structuredNote = undefined;
-					setFrameProjector((frame) => {
-						const answer = turnAnswer(frame);
-						if (answer !== null) text = answer;
-						return frame;
-					});
-					let code: number;
-					try {
-						code = await run();
-					} finally {
-						setFrameProjector(null);
-					}
-					if (code !== 0 || writeOutputFile(resolved, `${structuredAnswerJson() ?? text}\n`)) return code;
-					writeRunDiagnostic(`clio-coder run: --output-last-message could not be written: ${resolved}\n`);
-					return 1;
-				};
+	// CLI-P14, CLI-P22: `-o` beside --json or in text mode keeps v2's semantics (SPEC 6.6) and leaves every v1 frame and
+	// every byte text mode prints as it was written.
+	const execute = output === undefined ? run : () => withOutputLastMessage(output, json, run);
+	if (!json) return execute();
 	const state: RunFailureState = { pending: true };
 	const startedAt = new Date().toISOString();
 	runEndWritten = false;
@@ -214,6 +193,62 @@ export async function withRunFailureReporting(
 			process.off("exit", onExit);
 		}
 	});
+}
+
+/** The answer text mode printed on stdout, the validated structured JSON when there is one; `-o` holds it (CLI-P22). */
+let textAnswer: string | undefined;
+
+/** Hand the text-mode `-o` writer the answer just printed on stdout, without its closing newline. */
+export function noteTextAnswer(text: string): void {
+	textAnswer = text;
+}
+
+/**
+ * SPEC 6.6 `-o` outside schema v2: the stale file goes at preflight, a missing directory is exit 2 before the run, and
+ * the answer is written by temp file and rename only on exit 0. v1 JSON reads the answer from its `turn_end` frames,
+ * text mode from what it printed; a failed write is exit 1.
+ */
+async function withOutputLastMessage(
+	output: OutputLastMessageRequest,
+	json: boolean,
+	run: () => Promise<number>,
+): Promise<number> {
+	const resolved = resolveOutputTarget(output);
+	if (!prepareOutputTarget(resolved)) return 2;
+	let text = "";
+	structuredNote = undefined;
+	textAnswer = undefined;
+	if (json)
+		setFrameProjector((frame) => {
+			const answer = turnAnswer(frame);
+			if (answer !== null) text = answer;
+			return frame;
+		});
+	const answer = (): string => (json ? (structuredAnswerJson() ?? text) : (textAnswer ?? ""));
+	// CLI-P22: a coordinated shutdown ends a successful run with process.exit before run() returns, as under v2; the
+	// file is still written then, synchronously, and a failed write still moves the exit code to 1.
+	let settled = false;
+	const settle = (code: number): boolean => {
+		if (settled || code !== 0) return true;
+		settled = true;
+		return writeOutputFile(resolved, `${answer()}\n`);
+	};
+	const onExit = (exitCode: number): void => {
+		if (settle(exitCode)) return;
+		process.stderr.write(`clio-coder run: --output-last-message could not be written: ${resolved}\n`);
+		process.exitCode = 1;
+	};
+	process.once("exit", onExit);
+	let code: number;
+	try {
+		code = await run();
+	} finally {
+		process.off("exit", onExit);
+		if (json) setFrameProjector(null);
+	}
+	if (settle(code)) return code;
+	writeRunDiagnostic(`clio-coder run: --output-last-message could not be written: ${resolved}\n`);
+	return 1;
 }
 
 /** `-o` as the caller gave it; the path resolves against the run directory (SPEC 6.2). */

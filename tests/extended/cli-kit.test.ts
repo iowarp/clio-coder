@@ -289,6 +289,34 @@ test("-o beside v1 --json writes the answer on exit 0, removes a stale file othe
 	}
 });
 
+test("-o is written when a v1 --json or text run exits 0 through process.exit before returning (CLI-P22)", async () => {
+	const env = await isolateClioEnv("cli-kit-exit-output-");
+	try {
+		// The coordinated shutdown ends a successful headless run with process.exit (src/core/termination.ts).
+		const script = `
+			const { noteTextAnswer, withRunFailureReporting } = await import(${JSON.stringify(resolve("src/cli/run-failure.ts"))});
+			const { writeFrame } = await import(${JSON.stringify(resolve("src/cli/modes/jsonl.ts"))});
+			const json = process.argv[1] === "json";
+			const output = { path: "out-" + process.argv[1] + ".txt", cwd: ${JSON.stringify(env.dir)} };
+			await withRunFailureReporting(json, async () => {
+				if (json) writeFrame({ type: "turn_end", startedAt: "t0", endedAt: "t1", exitCode: 0, outcome: "succeeded", text: "pong" });
+				else { noteTextAnswer("pong"); process.stdout.write("pong\\n"); }
+				process.exit(0);
+			}, false, output);
+		`;
+		for (const mode of ["json", "text"]) {
+			const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script, mode], {
+				env: { ...process.env, HOME: env.dir },
+				encoding: "utf8",
+			});
+			equal(child.status, 0, child.stderr);
+			equal(readFileSync(join(env.dir, `out-${mode}.txt`), "utf8"), "pong\n", mode);
+		}
+	} finally {
+		env.restore();
+	}
+});
+
 test("the v2 dry-run plan leaves out an absent value instead of sending null (CLI-P15)", async () => {
 	const env = await isolateClioEnv("cli-kit-dry-run-plan-");
 	try {

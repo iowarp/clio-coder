@@ -32,6 +32,7 @@ import { flushRawStdout, handleRunStdoutErrors, restoreStdout, takeOverStdout } 
 import { loadScriptedAnswers } from "./run-answers.js";
 import {
 	noteStructuredV2,
+	noteTextAnswer,
 	requestRunTextSummary,
 	startRunOutput,
 	withRunFailureReporting,
@@ -407,11 +408,6 @@ export async function runClioRun(
 			},
 			execute,
 		);
-	}
-	if (parsed.outputLastMessage !== undefined && !parsed.json) {
-		// Text mode has no seam that hands its stdout answer to the -o writer yet (CLI-P14, OPEN).
-		writeRunDiagnostic("clio-coder run: --output-last-message needs --output-format json or stream-json, or --json\n");
-		return 2;
 	}
 	return withRunFailureReporting(
 		parsed.json,
@@ -1133,6 +1129,8 @@ async function runDispatch(
 				writeAgentFrame(frame);
 		} else {
 			const answer = lastAssistantText.length > 0 ? lastAssistantText : accumulatedText.trim();
+			// CLI-P22: `-o` holds the validated JSON or the worker's redacted answer, as it does under v2.
+			noteTextAnswer(structuredVerdict?.ok === true ? structuredVerdict.json : redactUrlCredentials(answer));
 			if (structuredVerdict?.ok === true) process.stdout.write(`${structuredVerdict.json}\n`);
 			else if (schemaCheck !== undefined && structuredVerdict !== null && !structuredVerdict.ok)
 				process.stderr.write(`${schemaCheck.finish.schemaMismatchMessage(structuredVerdict.errors)}\n`);
