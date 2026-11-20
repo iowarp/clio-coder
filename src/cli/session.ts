@@ -305,7 +305,7 @@ async function runTerminate(args: ReadonlyArray<string>): Promise<number> {
 			{
 				...base,
 				action: "released",
-				message: `released ${id} (${why}); ${freed}; resume it with clio-coder run --session ${id}`,
+				message: `released ${id} (${why}); ${freed}; resume it with clio-coder run --resume ${id}`,
 				released,
 			},
 			json,

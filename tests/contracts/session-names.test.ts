@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
@@ -293,7 +294,21 @@ test("a CLI fork names its child at creation, never writes the parent, and block
 	assert.throws(() => session.resume(parent.id), new RegExp(`${process.ppid}`));
 	assert.equal(session.forkFrom(parent.id).parentSessionId, parent.id, "a live parent can still be forked");
 	await session.close();
-	rmSync(liveRecordPath(parent.id));
+
+	// The owner died: terminate --force releases the record and points at the resume flag, not the retired alias.
+	writeFileSync(
+		liveRecordPath(parent.id),
+		`${JSON.stringify({ schema: 1, id: parent.id, cwd: env.dir, cwdHash: cwdHash(env.dir), host: hostname(), pid: 99_999_999, birth: null, startedAt: now, at: now, surface: "run", version: "0.0.0", user: "u" })}\n`,
+	);
+	const script = `process.argv = [process.execPath, "clio-coder", "session", "terminate", ${JSON.stringify(parent.id)}, "--force", "--json"]; await import(${JSON.stringify(join(process.cwd(), "src/cli/index.ts"))});`;
+	const terminated = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+		env: process.env,
+		encoding: "utf8",
+	});
+	assert.equal(terminated.status, 0, terminated.stderr);
+	assert.match(terminated.stdout, new RegExp(`clio-coder run --resume ${parent.id}`));
+	assert.doesNotMatch(terminated.stdout, /run --session/);
+	rmSync(liveRecordPath(parent.id), { force: true });
 
 	removeSessionAtRest(child.id);
 	assert.equal(
