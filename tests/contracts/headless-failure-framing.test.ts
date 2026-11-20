@@ -654,35 +654,66 @@ test("every reply of the final user turn reaches stdout, -o and the v2 answer in
 	const env = await isolateClioEnv("headless-reply-segments-");
 	t.after(() => env.restore());
 	const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } };
-	const review = "Findings:\n1. [blocker] the collector drops a settling firing.";
-	const closing = "VERDICT: BOUNCE on the blocker reported above.";
-	// The review, a round whose text sits beside a call, and the host's finish round, which made only a call.
-	const narration = {
-		role: "assistant",
-		stopReason: "toolUse",
-		content: [
-			{ type: "text", text: "Let me check one more file." },
-			{ type: "toolCall", id: "r1", name: "read", arguments: { path: "a.ts" } },
-		],
-		usage,
-	};
-	const finishRound = {
-		role: "assistant",
-		stopReason: "toolUse",
-		content: [{ type: "toolCall", id: "f1", name: "finish", arguments: { state: "partly_done" } }],
-		usage,
-	};
-	const before = [answerMessage(review), narration, finishRound].flatMap((message) => [
+	const assistant = (stopReason: string, content: object[]) => ({ role: "assistant", stopReason, content, usage });
+	const finishCall = { type: "toolCall", id: "f1", name: "finish", arguments: { state: "partly_done" } };
+	const review = "Findings:\n1. [blocker] the collector drops a settling firing (src/collector.ts:12).";
+	const closing = "Citations re-verified; the ranges hold.";
+	const note = "Let me check one more file.";
+	// Rounds as the turn runtime emits them: text beside a read is narration, and finish ends the turn with
+	// `terminate` (the helper's declared finish), so no message follows it.
+	const narration = assistant("toolUse", [
+		{ type: "text", text: note },
+		{ type: "toolCall", id: "r1", name: "read", arguments: { path: "a.ts" } },
+	]);
+	const failed = { ...assistant("error", []), errorMessage: "503 overloaded" };
+	const round = (message: object) => [
 		{ type: "message_end", message },
 		{ type: "turn_end", message, toolResults: [] },
-	]);
-	const expected = `${review}\n\n${closing}`;
-	const reply = answerMessage(closing) as Record<string, unknown>;
-	const text = await writtenCallRun(undefined, reply, { path: "out.txt", cwd: env.dir }, { before });
-	strictEqual(text.code, 0, text.stderr);
-	strictEqual(text.stdout, `${expected}\n`);
-	strictEqual(readFileSync(join(env.dir, "out.txt"), "utf8"), `${expected}\n`);
-	const v2 = await writtenCallRun("json", reply, undefined, { before });
-	const envelope = JSON.parse(v2.stdout.trim().split("\n").at(-1) ?? "{}") as { result?: { text?: string } };
-	strictEqual(envelope.result?.text, expected, v2.stdout);
+	];
+	const citationCheck = {
+		type: "notice",
+		level: "warning",
+		surface: "transcript",
+		source: "reminder",
+		text: `${CITATION_CHECK_PREFIX} src/collector.ts:12 cite line numbers no tool printed; re-read it with line numbers.`,
+	};
+	const silentFinish = assistant("toolUse", [finishCall]);
+	const besideFinish = assistant("toolUse", [{ type: "text", text: closing }, finishCall]);
+	const scenarios = [
+		{
+			name: "reply, narration beside a read, silent finish",
+			before: [...round(answerMessage(review)), ...round(narration)],
+			last: silentFinish,
+			expected: review,
+		},
+		{
+			name: "reply, transient retry (agent_start), reply beside finish",
+			before: [
+				...round(answerMessage(review)),
+				...round(failed),
+				{ type: "agent_end", messages: [failed] },
+				{ type: "agent_start" },
+			],
+			last: besideFinish,
+			expected: `${review}\n\n${closing}`,
+		},
+		{
+			name: "citation check, reply beside finish",
+			before: [...round(answerMessage(review)), citationCheck],
+			last: besideFinish,
+			expected: `${review}\n\n${closing}`,
+		},
+		// No reply at all: the narration stands as the answer, as before.
+		{ name: "narration only, silent finish", before: round(narration), last: silentFinish, expected: note },
+	];
+	for (const { name, before, last, expected } of scenarios) {
+		const declared = { state: "partly_done" };
+		const text = await writtenCallRun(undefined, last, { path: "out.txt", cwd: env.dir }, { before, declared });
+		strictEqual(text.code, 0, `${name}: ${text.stderr}`);
+		strictEqual(text.stdout, `${expected}\n`, name);
+		strictEqual(readFileSync(join(env.dir, "out.txt"), "utf8"), `${expected}\n`, name);
+		const v2 = await writtenCallRun("json", last, undefined, { before, declared });
+		const envelope = JSON.parse(v2.stdout.trim().split("\n").at(-1) ?? "{}") as { result?: { text?: string } };
+		strictEqual(envelope.result?.text, expected, `${name}: ${v2.stdout}`);
+	}
 });
