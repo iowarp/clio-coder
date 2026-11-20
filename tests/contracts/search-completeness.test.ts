@@ -130,8 +130,18 @@ test("rg distinguishes complete empty searches, skipped-only searches, and inval
 	result = await grepTool.run({ path: root, pattern: "needle" });
 	assert.equal(search(result).reason, "errors");
 	assert.doesNotMatch(ok(result).output, /No matches found/);
-	binary("rg", "console.error('regex parse error: unclosed group'); process.exitCode=2;");
-	assert.equal((await grepTool.run({ path: root, pattern: "(" })).kind, "error");
+	binary(
+		"rg",
+		`console.error(${JSON.stringify(`${root}/secret: Permission denied (os error 13)`)}); console.error('regex parse error: unclosed group'); process.exitCode=2;`,
+	);
+	const rejected = await grepTool.run({ path: root, pattern: "(" });
+	assert.equal(rejected.kind, "error");
+	// TL-1: rg's own reason reaches the error, a path diagnostic does not.
+	assert.match(
+		rejected.kind === "error" ? rejected.message : "",
+		/exit code 2\)[\s\S]*regex parse error: unclosed group/,
+	);
+	assert.doesNotMatch(rejected.kind === "error" ? rejected.message : "", /secret/);
 });
 
 test("native searches retain matches on timeout and name the shown count", { timeout: 5_000 }, async () => {
@@ -408,9 +418,24 @@ test("ls selects a bounded alphabetic prefix in a wide directory without blockin
 	const timer = setInterval(() => ticks++, 1);
 	const start = performance.now();
 	try {
-		const result = ok(await lsTool.run({ path: root, limit: 3 }, { allowsObservationPath: () => true }));
+		let screened = 0;
+		const result = ok(
+			await lsTool.run(
+				{ path: root, limit: 3 },
+				{
+					allowsObservationPath: () => {
+						screened++;
+						return true;
+					},
+				},
+			),
+		);
 		assert.deepEqual(result.output.split("\n").slice(0, 3), expected);
-		assert.deepEqual(result.details?.selection, { scanned: 5003, retained: 3 });
+		// TL-2: only the shown names pay the path-policy check, and the total says it was not counted.
+		assert.deepEqual(result.details?.selection, { scanned: 5003, retained: 67, screened: 3 });
+		assert.equal(screened, 3);
+		assert.match(result.output, /5003 names in this directory; only the first 3 in order were checked/);
+		assert.match(result.output, /3\/3\+ entries shown/);
 		assert.equal(statCount, 3);
 		assert.ok(ticks >= Math.max(1, Math.floor((performance.now() - start) / 100)));
 	} finally {

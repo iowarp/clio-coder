@@ -80,6 +80,114 @@ export class BoundedListingSelection {
 	}
 }
 
+/** Names a fast pass retains beyond the limit, so a few withheld names do not force a full screening pass. */
+const selectionCapacity = (limit: number): number => Math.max(limit * 2, limit + 64);
+
+interface ListingSelectionResult {
+	/** Visible names in listing order, at most `limit`. */
+	names: string[];
+	/** Rendered packed entries by name, withheld ones removed. */
+	packedRendered: Map<string, string>;
+	scanned: number;
+	retained: number;
+	/** Names the path policy judged; every scanned name on the full pass. */
+	screened: number;
+	withheld: number;
+	/** Every visible name, or null when names past the shown prefix were never screened. */
+	visible: number | null;
+	/** Visible or unscreened names exist past `names`. */
+	more: boolean;
+}
+
+/**
+ * Alphabetical selection requires examining every name, but the path policy
+ * costs a filesystem walk per name. The fast pass screens only the names that
+ * can be shown; `screenEvery` screens every name (exact visible total) and is
+ * used when withheld names exhaust the fast pass's candidates. Returns null on
+ * abort, and "short" when the fast pass could not fill the limit.
+ */
+async function selectListing(
+	root: string,
+	onDisk: boolean,
+	packed: ReturnType<typeof packedSourcePathsUnder>,
+	limit: number,
+	allows: (entryPath: string) => boolean,
+	signal: AbortSignal | undefined,
+	screenEvery: boolean,
+): Promise<ListingSelectionResult | null | "short"> {
+	const capacity = screenEvery ? limit : selectionCapacity(limit);
+	const selection = new BoundedListingSelection(capacity);
+	let scanned = 0;
+	let screened = 0;
+	let withheld = 0;
+	const screen = (name: string): boolean => {
+		screened++;
+		if (allows(path.join(root, name))) return true;
+		withheld++;
+		return false;
+	};
+	// Names seen on disk, kept only when the pack also has entries here.
+	const diskNames = packed ? new Set<string>() : null;
+	if (onDisk) {
+		for await (const entry of await opendir(root)) {
+			if (++scanned % 128 === 0) await yieldToLoop();
+			if (signal?.aborted) return null;
+			if (screenEvery && !screen(entry.name)) continue;
+			diskNames?.add(entry.name);
+			selection.add(entry.name);
+		}
+	}
+	// Packed names carry their rendering ("name/" or "name") so they are
+	// never stat'ed; a directory also present on disk lists once, as disk.
+	const packedRendered = new Map<string, string>();
+	for (const rendered of packed ? [...packed.directories, ...packed.files] : []) {
+		const name = rendered.endsWith("/") ? rendered.slice(0, -1) : rendered;
+		if (diskNames?.has(name) || packedRendered.has(name)) continue;
+		scanned++;
+		if (screenEvery && !screen(name)) continue;
+		packedRendered.set(name, `${rendered}${PACKED_MARK}`);
+		selection.add(name);
+	}
+	const candidates = selection.sorted();
+	if (screenEvery) {
+		const visible = scanned - withheld;
+		return {
+			names: candidates,
+			packedRendered,
+			scanned,
+			retained: selection.retained,
+			screened,
+			withheld,
+			visible,
+			more: visible > limit,
+		};
+	}
+	// Every name was retained: screen them all so the visible total is exact.
+	const allRetained = scanned <= capacity;
+	const names: string[] = [];
+	let visibleScreened = 0;
+	for (const name of candidates) {
+		if (!allRetained && names.length >= limit) break;
+		if (!screen(name)) {
+			packedRendered.delete(name);
+			continue;
+		}
+		visibleScreened++;
+		if (names.length < limit) names.push(name);
+	}
+	if (!allRetained && names.length < limit) return "short";
+	return {
+		names,
+		packedRendered,
+		scanned,
+		retained: selection.retained,
+		screened,
+		withheld,
+		visible: allRetained ? visibleScreened : null,
+		more: allRetained ? visibleScreened > limit : true,
+	};
+}
+
 export const lsTool: ToolSpec = {
 	name: ToolNames.Ls,
 	description:
@@ -128,45 +236,14 @@ export const lsTool: ToolSpec = {
 		try {
 			const policy = options?.allowsObservationPath ? undefined : createSafetyPolicyEngine({ cwd: process.cwd() });
 			const allows = options?.allowsObservationPath ?? ((entryPath: string) => policy?.readablePath(entryPath) !== false);
-			let withheldPaths = 0;
-			let visibleCount = 0;
-			let scanned = 0;
-			const selection = new BoundedListingSelection(limit);
-			// Names seen on disk, kept only when the pack also has entries here.
-			const diskNames = packed ? new Set<string>() : null;
-			// Alphabetical selection requires examining every name, but only limit
-			// names are retained. No metadata calls are made for unselected entries.
-			if (onDisk) {
-				for await (const entry of await opendir(root)) {
-					if (++scanned % 128 === 0) await yieldToLoop();
-					if (options?.signal?.aborted) return { kind: "error", message: "ls: operation aborted during enumeration" };
-					if (!allows(path.join(root, entry.name))) {
-						withheldPaths++;
-						continue;
-					}
-					diskNames?.add(entry.name);
-					visibleCount++;
-					selection.add(entry.name);
-				}
-			}
-			// Packed names carry their rendering ("name/" or "name") so they are
-			// never stat'ed; a directory also present on disk lists once, as disk.
-			const packedRendered = new Map<string, string>();
-			for (const rendered of packed ? [...packed.directories, ...packed.files] : []) {
-				const name = rendered.endsWith("/") ? rendered.slice(0, -1) : rendered;
-				if (diskNames?.has(name) || packedRendered.has(name)) continue;
-				scanned++;
-				if (!allows(path.join(root, name))) {
-					withheldPaths++;
-					continue;
-				}
-				packedRendered.set(name, `${rendered}${PACKED_MARK}`);
-				visibleCount++;
-				selection.add(name);
-			}
-			const entries = selection.sorted();
+			let picked = await selectListing(root, onDisk, packed, limit, allows, options?.signal, false);
+			if (picked === "short") picked = await selectListing(root, onDisk, packed, limit, allows, options?.signal, true);
+			if (picked === null || picked === "short")
+				return { kind: "error", message: "ls: operation aborted during enumeration" };
+			const { names: entries, packedRendered, scanned, withheld: withheldPaths } = picked;
+			const selectionDetails = { scanned, retained: picked.retained, screened: picked.screened };
 			const outputEntries: string[] = [];
-			const entryLimitReached = visibleCount > limit;
+			const entryLimitReached = picked.more;
 			const search = newSearchCompleteness();
 			let packedShown = 0;
 			for (const entry of entries) {
@@ -204,7 +281,7 @@ export const lsTool: ToolSpec = {
 					withheldPaths,
 					unit: "entries",
 					output: "(empty directory)",
-					details: { skipped: search.skipped, selection: { scanned, retained: selection.retained } },
+					details: { skipped: search.skipped, selection: selectionDetails },
 					shownCount: 0,
 					totalCount: 0,
 					truncated: false,
@@ -219,21 +296,27 @@ export const lsTool: ToolSpec = {
 				maxLines: Number.MAX_SAFE_INTEGER,
 			});
 			const truncated = entryLimitReached || truncation.truncated;
+			// The fast pass screens only the names it shows, so the rest may hold
+			// protected paths and the visible total is only a lower bound.
+			const unscreenedNotice =
+				picked.visible === null
+					? `\n[${scanned} names in this directory; only the first ${picked.screened} in order were checked against path policy, so the visible total is not counted.]`
+					: "";
 			return finalizeObservation({
 				tool: ToolNames.Ls,
 				withheldPaths,
 				unit: "entries",
-				output: truncation.content + (packedShown > 0 ? PACKED_NOTICE : ""),
+				output: truncation.content + (packedShown > 0 ? PACKED_NOTICE : "") + unscreenedNotice,
 				details: {
 					skipped: search.skipped,
-					selection: { scanned, retained: selection.retained },
+					selection: selectionDetails,
 					...(packedRendered.size > 0 ? { packed: { entries: packedRendered.size, shown: packedShown } } : {}),
 				},
 				// Offload only when the byte cap cut collected entries; a bare
 				// entry limit continues via `next`.
 				...(truncation.truncated ? { fullOutput } : {}),
 				shownCount: truncation.outputLines,
-				totalCount: visibleCount,
+				totalCount: picked.visible,
 				truncated,
 				...(entryLimitReached ? { next: `limit=${limit * 2}` } : {}),
 				reservation,

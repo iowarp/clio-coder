@@ -31,6 +31,7 @@ import {
 	createSearchDiagnostics,
 	finishSearch,
 	newSearchCompleteness,
+	rejectionSuffix,
 	type SearchCompleteness,
 	searchNotice,
 	skipSearchPath,
@@ -348,7 +349,7 @@ async function runRipgrep(input: RgSearchInput): Promise<ToolResult> {
 	) {
 		return {
 			kind: "error",
-			message: `grep: rg rejected the search or failed (exit code ${result.exitCode}). Check the pattern and search path.`,
+			message: `grep: rg rejected the search or failed (exit code ${result.exitCode}). Check the pattern and search path.${rejectionSuffix(diagnostics.rejectionDetail)}`,
 		};
 	}
 	return renderGrepResult({

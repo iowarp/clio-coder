@@ -43,7 +43,8 @@ describe("ls tool", () => {
 	it("lists dotfiles and marks directories in case-insensitive order", async () => {
 		const listed = ok(await call({ path: root }));
 		strictEqual(listed.output, ".hidden\nA.md\nb.txt\nc\nempty/\nsub/");
-		deepStrictEqual(listed.details?.selection, { scanned: 6, retained: 6 });
+		// A directory within the selection capacity screens every name, so its total is exact.
+		deepStrictEqual(listed.details?.selection, { scanned: 6, retained: 6, screened: 6 });
 		strictEqual((listed.details?.observation as { truncated: boolean }).truncated, false);
 	});
 
@@ -68,7 +69,39 @@ describe("ls tool", () => {
 		strictEqual(ok(await call({})).output, ".hidden\nA.md\nb.txt\nc\nempty/\nsub/");
 		const empty = ok(await call({ path: "empty" }));
 		strictEqual(empty.output, "(empty directory)");
-		deepStrictEqual(empty.details?.selection, { scanned: 0, retained: 0 });
+		deepStrictEqual(empty.details?.selection, { scanned: 0, retained: 0, screened: 0 });
+	});
+
+	it("screens only the shown names of a directory wider than its selection capacity and says the total is uncounted", async () => {
+		// limit 2 retains max(2 * 2, 2 + 64) = 66 candidates; 70 names exceed it (TL-2).
+		const wide = join(root, "wide");
+		mkdirSync(wide);
+		for (let i = 0; i < 70; i++) writeFileSync(join(wide, `f${String(i).padStart(2, "0")}`), "");
+		const listed = ok(await call({ path: wide, limit: 2 }));
+		match(listed.output, /^f00\nf01\n/);
+		match(
+			listed.output,
+			/\[70 names in this directory; only the first 2 in order were checked against path policy, so the visible total is not counted\.\]/,
+		);
+		match(listed.output, /\[ls: 2\/2\+ entries shown .*\| next: limit=4\]/);
+		deepStrictEqual(listed.details?.selection, { scanned: 70, retained: 66, screened: 2 });
+		const observation = listed.details?.observation as { totalCount: number | null; next: string; truncated: boolean };
+		deepStrictEqual([observation.totalCount, observation.next, observation.truncated], [null, "limit=4", true]);
+	});
+
+	it("screens every name when withheld names crowd out the first candidates", async () => {
+		// 70 zero-access names sort ahead of the visible ones and fill all 66 candidates, so the
+		// fast pass comes up short and the full pass counts the exact total (TL-2).
+		const crowd = join(root, "crowd");
+		mkdirSync(crowd);
+		for (let i = 0; i < 70; i++) writeFileSync(join(crowd, `.env.s${String(i).padStart(2, "0")}.local`), "");
+		for (const name of ["keep1", "keep2", "keep3"]) writeFileSync(join(crowd, name), "");
+		const listed = ok(await call({ path: crowd, limit: 2 }));
+		match(listed.output, /^keep1\nkeep2\n\n\[ls: 2\/3 entries shown .*\| next: limit=4\]/);
+		match(listed.output, /\[70 protected paths withheld by zero-access policy\]/);
+		strictEqual(/not counted|\.env/.test(listed.output), false);
+		deepStrictEqual(listed.details?.selection, { scanned: 73, retained: 2, screened: 73 });
+		strictEqual((listed.details?.observation as { totalCount: number | null }).totalCount, 3);
 	});
 
 	it("refuses a file, a missing path, and a cancelled listing with the reason", async () => {
