@@ -247,6 +247,18 @@ export function isThinkingOnlyLengthStop(message: AgentMessage | undefined): boo
 export const THINKING_LENGTH_STOP_REASON =
 	"[CLIO Coder] the model spent its whole output budget thinking and stopped before acting or answering, twice in this turn. Lower --thinking or raise the output cap (chat.maxOutputTokens) and resume.";
 
+/** The key of overflow recovery's last notice when compaction could not make the refused request fit (FX-22a). */
+export const CONTEXT_OVERFLOW_STOP_NOTICE_KEY = "turn.context-overflow-stop";
+
+/**
+ * The post-tool context guard ended this reply: the turn runtime stamps the guard's stop with the harness stage and
+ * the guard's own class, so a reader never needs its words (FX-22a).
+ */
+export function isContextGuardStop(message: unknown): boolean {
+	const failure = (message as { failure?: { stage?: unknown; errorClass?: unknown } } | null | undefined)?.failure;
+	return failure?.stage === "harness" && failure.errorClass === "oversized_tool_result";
+}
+
 /**
  * An aborted assistant message with no text, thinking, or structured tool
  * call. Only a hollow abort needs a synthetic closing record; streamed

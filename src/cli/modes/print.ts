@@ -74,7 +74,9 @@ import type { AgentMessage, ImageContent, ToolRoundRecord } from "../../engine/t
 import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
 import type { ChatLoop, ChatLoopEvent } from "../../session-control/chat-loop.js";
 import {
+	CONTEXT_OVERFLOW_STOP_NOTICE_KEY,
 	classifyTurnEnding,
+	isContextGuardStop,
 	isThinkingOnlyLengthStop,
 	messageCallSpends,
 	proseBeforeWrittenCalls,
@@ -277,6 +279,12 @@ interface HeadlessMainAgentResult {
 	admissionRefused: boolean;
 	/** The harness stopped the last reply (a repetition or tool-prose guard), so its error names no route (bt-26). */
 	harnessStopped: boolean;
+	/**
+	 * The last reply ended on the context window, read from typed signals only (FX-22a): `guard` is the post-tool context
+	 * guard's stop, which names no route; `recovery` is overflow recovery's notice that compaction could not make the
+	 * refused request fit.
+	 */
+	contextOverflow: "guard" | "recovery" | null;
 	/** The latest assistant stop is a length stop that produced only thinking; the chat loop already spent its one recovery. */
 	thinkingOnlyLength: boolean;
 	/**
@@ -487,6 +495,8 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 		if (event.text.startsWith(CITATION_CHECK_PREFIX) && current.text.length > 0) {
 			return { ...current, lastNotice: text, citationCheckedAnswer: current.text };
 		}
+		if (event.key === CONTEXT_OVERFLOW_STOP_NOTICE_KEY)
+			return { ...current, lastNotice: text, contextOverflow: "recovery" };
 		return { ...current, lastNotice: text };
 	}
 	if (event.type === "agent_end") {
@@ -515,6 +525,7 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 		sawTerminatingToolResult: false,
 		admissionRefused: false,
 		harnessStopped: (message as { harnessStopped?: unknown }).harnessStopped === true,
+		contextOverflow: isContextGuardStop(message) ? "guard" : null,
 		thinkingOnlyLength: isThinkingOnlyLengthStop(message),
 	};
 	const error = assistantError(message);
@@ -1163,6 +1174,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		callsNotRun: null,
 		admissionRefused: false,
 		harnessStopped: false,
+		contextOverflow: null,
 		thinkingOnlyLength: false,
 		citationCheckedAnswer: null,
 	};
@@ -1665,19 +1677,25 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		// `--max-requests`/`--max-tool-calls` fired: a limit exit, as the cost ceiling is.
 		const runCap = runCapStopCode(result.error);
 		const limitDetail = budgetCeiling ? SESSION_COST_CEILING_REASON : runCap;
+		// The window, not the route, ended the run: its own cause (FX-22a).
+		const detail = limitDetail ?? (result.contextOverflow !== null ? "context_overflow" : undefined);
 		terminal = {
 			exitCode: limitDetail !== undefined ? SESSION_COST_CEILING_EXIT_CODE : 1,
 			outcome: "failed",
 			status: "failed",
 			failureMessage: result.error,
-			...(limitDetail !== undefined ? { outcomeDetail: limitDetail } : {}),
+			...(detail !== undefined ? { outcomeDetail: detail } : {}),
 		};
 		// Text mode printed the refusal's notice as it arrived; saying it twice
 		// reads as two failures.
 		stderrMessage =
 			mode === "text" && result.admissionRefused
 				? null
-				: prefixHeadlessFailure(chat, result.error, result.admissionRefused || result.harnessStopped);
+				: prefixHeadlessFailure(
+						chat,
+						result.error,
+						result.admissionRefused || result.harnessStopped || result.contextOverflow === "guard",
+					);
 	} else if (result.outputExhausted && !result.sawTerminatingToolResult) {
 		// The provider returned normally, but generation exhausted its budget.
 		// Earlier chatter and partial prose cannot turn that terminal cause into

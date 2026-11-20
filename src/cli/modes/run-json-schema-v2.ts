@@ -20,7 +20,8 @@ export const RUN_RESULT_SCHEMA_VERSION = 2;
  * winner first. `not_started` covers a request refused before any work (usage, configuration, admission), and
  * `run_failed` a failure no narrower code names. `flag_conflict`, `not_configured`, `session_live` (the resumed
  * session is open in another process) and `io` (a path the run needs cannot be opened) are the pre-work refusals with a
- * narrower name of their own.
+ * narrower name of their own. `context_overflow` is a run the context window ended: the post-tool guard or overflow
+ * recovery could not make the request fit.
  */
 const CAUSE_ORDER = [
 	"interrupted",
@@ -46,6 +47,7 @@ const CAUSE_ORDER = [
 	"max_requests",
 	"max_tool_calls",
 	"provider_error",
+	"context_overflow",
 	"no_answer",
 	"output_limit",
 	"schema_mismatch",

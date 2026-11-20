@@ -323,4 +323,38 @@ describe("gateway correction contracts", () => {
 		}
 		strictEqual(calls.length, 2);
 	});
+
+	it("forwards op=call capability=dispatch to the direct tool and still refuses other direct tools (XR-60)", async () => {
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: clioStateDir() }), autonomy: () => "yolo" });
+		const ran: string[] = [];
+		for (const name of [ToolNames.Dispatch, ToolNames.Limitation] as const)
+			registry.register({
+				name,
+				placement: "direct",
+				description: `stub ${name}`,
+				parameters: Type.Object({ task: Type.String() }),
+				baseActionClass: name === ToolNames.Dispatch ? "dispatch" : "read",
+				run: async () => {
+					ran.push(name);
+					return { kind: "ok", output: `${name} ran` };
+				},
+			});
+		registry.register(createGatewayTool({ registry }));
+		const forwarded = await registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability: ToolNames.Dispatch, args: { task: "map src" } },
+		});
+		ok(forwarded.kind === "ok" && forwarded.result.kind === "ok", JSON.stringify(forwarded));
+		match(
+			String(forwarded.result.modelContext),
+			/^\[dispatch normalize\] gateway op=call capability=dispatch was forwarded/u,
+		);
+		const refused = await registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability: ToolNames.Limitation, args: { task: "x" } },
+		});
+		ok(refused.kind === "ok" && refused.result.kind === "error", JSON.stringify(refused));
+		match(refused.result.message, /is a direct tool with an attached schema/u);
+		deepStrictEqual(ran, [ToolNames.Dispatch]);
+	});
 });

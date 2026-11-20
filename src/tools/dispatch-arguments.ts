@@ -121,6 +121,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * The arguments one batch member parses from: the shared fields, then the
+ * member's own, with a member intent layered over the shared intent. Null when
+ * there is no member at `index`. The normalize stage reads the same view.
+ */
+export function dispatchTaskArgs(args: Record<string, unknown>, index: number): Record<string, unknown> | null {
+	const tasks = args.tasks;
+	if (!Array.isArray(tasks) || index < 0 || index >= tasks.length) return null;
+	const item: unknown = tasks[index];
+	const shared = { ...args };
+	Reflect.deleteProperty(shared, "tasks");
+	const itemArgs: Record<string, unknown> = isRecord(item) ? { ...shared, ...item } : { ...shared, task: item };
+	const sharedIntent = isRecord(shared.intent) ? shared.intent : null;
+	const itemIntent = isRecord(item) && Object.hasOwn(item, "intent") && isRecord(item.intent) ? item.intent : null;
+	if (sharedIntent !== null && itemIntent !== null) itemArgs.intent = { ...sharedIntent, ...itemIntent };
+	return itemArgs;
+}
+
 export function stringArg(args: Record<string, unknown>, ...names: string[]): string | undefined {
 	for (const name of names) {
 		const value = args[name];
@@ -291,12 +309,6 @@ function dispatchRequestFromArgs(
 		request.extraReadRoots = workspace.extraReadRoots;
 	}
 	if (workspace.externalReadRoot !== undefined) {
-		if (args.detach === true)
-			return {
-				ok: false,
-				reason: "external_read_mode_unsupported",
-				message: "external_read_mode_unsupported: External Scout approval requires an attached parallel dispatch.",
-			};
 		request.externalReadRoot = workspace.externalReadRoot;
 		request.readOnly = true;
 		if (Object.hasOwn(args, "gate"))
@@ -425,7 +437,7 @@ export function dispatchRequestsFromArgs(
 	const isolateIntentFailures = (args.mode === undefined || args.mode === "parallel") && args.review === undefined;
 	for (let index = 0; index < tasks.length; index += 1) {
 		const item = tasks[index];
-		const itemArgs: Record<string, unknown> = isRecord(item) ? { ...shared, ...item } : { ...shared, task: item };
+		const itemArgs = dispatchTaskArgs(args, index) ?? { ...shared, task: item };
 		// A shared allowance over several members is inherited, not chosen for
 		// each of them; a one-task batch is the single-task form the tool
 		// normalizes every call into, so its shared value is that task's own.
@@ -437,7 +449,6 @@ export function dispatchRequestsFromArgs(
 				: "task";
 		const sharedIntent = isRecord(shared.intent) ? shared.intent : null;
 		const itemIntent = isRecord(item) && Object.hasOwn(item, "intent") && isRecord(item.intent) ? item.intent : null;
-		if (sharedIntent !== null && itemIntent !== null) itemArgs.intent = { ...sharedIntent, ...itemIntent };
 		const parsed = dispatchRequestFromArgs(itemArgs, options, resultSummaryScope);
 		if (!parsed.ok) {
 			if (isolateIntentFailures && parsed.reason !== undefined) {
@@ -445,6 +456,22 @@ export function dispatchRequestsFromArgs(
 				continue;
 			}
 			return { ok: false, message: `dispatch: whole batch rejected; task ${index + 1}: ${parsed.message}` };
+		}
+		// An explicit batch-level write_roots: [] is a no-write ceiling, not the unbounded
+		// ceiling an omitted write_roots leaves, so a member may not declare writes under it.
+		const memberWriteRoots = [
+			...(Array.isArray(itemIntent?.write_roots) ? itemIntent.write_roots : []),
+			...(isRecord(item) && Array.isArray(item.writeRoots) ? item.writeRoots : []),
+		];
+		if (
+			Array.isArray(sharedIntent?.write_roots) &&
+			sharedIntent.write_roots.length === 0 &&
+			memberWriteRoots.length > 0
+		) {
+			return {
+				ok: false,
+				message: `dispatch: task ${index + 1}: intent_scope_widening: writeRoots entry '${String(memberWriteRoots[0])}' is outside the enclosing intent ceiling: the batch intent declares write_roots: [] (no writes). Drop the batch-level write_roots: [] or this task's write roots.`,
+			};
 		}
 		if (sharedIntent !== null && itemIntent !== null) {
 			if (options.resolveIntent === undefined) {

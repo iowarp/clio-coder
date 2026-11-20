@@ -365,7 +365,14 @@ const LIMIT_CODES: ReadonlyArray<RunCauseCode> = [
 	"max_requests",
 	"max_tool_calls",
 ];
-const WORK_CODES: ReadonlyArray<RunCauseCode> = ["provider_error", "no_answer", "output_limit", "noop", "limitation"];
+const WORK_CODES: ReadonlyArray<RunCauseCode> = [
+	"provider_error",
+	"context_overflow",
+	"no_answer",
+	"output_limit",
+	"noop",
+	"limitation",
+];
 
 function answerText(frame: RunJsonFrame): string | null {
 	const message = (frame as { message?: { role?: string; content?: unknown } }).message;

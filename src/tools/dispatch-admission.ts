@@ -39,6 +39,7 @@ import {
 	timeoutMsArg,
 } from "./dispatch-arguments.js";
 import { derivedGrantsNarrow, dispatchInputChangesOnlyIntent, dispatchRewriteNarrows } from "./dispatch-narrowing.js";
+import { normalizeDispatchAdmission } from "./dispatch-normalize.js";
 import {
 	DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT,
 	type DispatchPlanView,
@@ -492,7 +493,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		args: Record<string, unknown>,
 		fields: Pick<
 			DispatchExecutionSnapshot & { kind: "dispatch" },
-			"requests" | "positions" | "rejectedTasks" | "mode" | "review" | "compete" | "council"
+			"requests" | "positions" | "rejectedTasks" | "notices" | "mode" | "review" | "compete" | "council"
 		>,
 	): DispatchExecutionSnapshot => ({
 		kind: "dispatch",
@@ -797,6 +798,13 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				"dispatch: writers: 1 cannot combine with detach: true; a detached batch starts every task at once. Dispatch serialized writers attached, or detach writers that use worktree: true or disjoint intent.write_roots.",
 			);
 		}
+		const notices = normalizeDispatchAdmission({
+			args,
+			requests: parsed.requests,
+			positions: parsed.positions,
+			mode,
+			specs: deps.getAgentSpecs(),
+		});
 		if (mode === "parallel" && args.writers !== 1) {
 			const specs = deps.getAgentSpecs();
 			const conflict = parallelWriterConflict(parsed.requests, specs);
@@ -851,6 +859,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			requests: parsed.requests,
 			positions: parsed.positions,
 			...(parsed.rejectedTasks.length > 0 ? { rejectedTasks: parsed.rejectedTasks } : {}),
+			...(notices.length > 0 ? { notices } : {}),
 			mode,
 			review: reviewResult.review,
 			compete: competeResult?.ok === true ? competeResult.compete : undefined,

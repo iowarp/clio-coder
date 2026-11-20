@@ -29,6 +29,7 @@ import { admissionWriteBoundaries } from "../../src/domains/dispatch/extension.j
 import { isBoundedGateRolePrompt, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
 import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
 import { classifyDispatchIntentCompatibility } from "../../src/domains/dispatch/intent-compatibility.js";
+import { parallelWriterConflict } from "../../src/domains/dispatch/parallel-writers.js";
 import {
 	declaredScopeReplacementNotice,
 	inferredScopeParentTokenNotice,
@@ -50,6 +51,7 @@ import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claud
 import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { dispatchRequestsFromArgs } from "../../src/tools/dispatch-arguments.js";
+import { normalizeDispatchAdmission } from "../../src/tools/dispatch-normalize.js";
 import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT, describeDispatchPlan } from "../../src/tools/dispatch-plan.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -729,6 +731,218 @@ describe("dispatch admission boundary", () => {
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
+	});
+
+	it("normalizes absolute workspace paths before inference and leaves one outside the workspace to refuse (XR-60, M2)", () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-path-scope-"));
+		type Request = Parameters<typeof resolveDispatchPathScope>[0];
+		const normalized = (task: string) => {
+			const requests = [{ agentId: "scout", cwd: root, task }] as unknown as Request[];
+			const notices = normalizeDispatchAdmission({
+				args: { tasks: [{ agent: "scout", task }] },
+				requests,
+				positions: [1],
+				mode: "parallel",
+				specs: [],
+			});
+			return { request: requests[0] as Request, notices };
+		};
+		try {
+			mkdirSync(join(root, "paper", "background"), { recursive: true });
+			mkdirSync(`${root}.`);
+			for (const [task, paths] of [
+				[`audit ${root} for leaks`, []],
+				[`audit the tree at ${root}.`, []],
+				[`read ${root}/paper/method.md and report`, ["paper/method.md"]],
+				["summarize /paper/background now", ["paper/background"]],
+			] as const) {
+				const { request, notices } = normalized(task);
+				strictEqual(notices.length, 1, task);
+				match(
+					notices[0] ?? "",
+					/^\[dispatch normalize\] task 1 \(scout\): read absolute workspace paths as workspace-relative/u,
+				);
+				deepStrictEqual(resolveDispatchPathScope(request).workingContextPaths, paths, task);
+				deepStrictEqual(resolveDispatchPathScope(request).writeBoundaries, [], task);
+			}
+			// A backticked or quoted token that closes right after the path is a whole token.
+			for (const [task, paths] of [
+				[`Read \`${root}/paper/method.md\` and report`, ["paper/method.md"]],
+				[`Read "${root}/paper/method.md" and report`, ["paper/method.md"]],
+				[`List "${root}/paper/background/" and report`, ["paper/background"]],
+			] as const) {
+				const { request, notices } = normalized(task);
+				strictEqual(notices.length, 1, task);
+				deepStrictEqual(resolveDispatchPathScope(request).workingContextPaths, paths, task);
+			}
+			// A quoted path that runs on past the workspace root names a sibling: left as written, still refused.
+			for (const task of [
+				"read /etc/passwd now",
+				`read ${dirname(root)}/elsewhere/a.md now`,
+				`Read "${root} archive/paper/method.md" now`,
+				`Read \`${root} archive/paper/method.md\` now`,
+				// A closed quote is literal: "<root>." names the sibling directory, not the workspace and a period.
+				`List "${root}."`,
+			]) {
+				const { request, notices } = normalized(task);
+				deepStrictEqual(notices, [], task);
+				throws(() => resolveDispatchPathScope(request), /legacy_scope_path_absolute/u);
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+			rmSync(`${root}.`, { recursive: true, force: true });
+		}
+	});
+
+	it("normalizes write_roots: [] and undeclared builders in a parallel batch to read-only runs with notices (XR-60, row 146, M2)", () => {
+		const auto = { approvedAuthorities: ["read-only" as const], authorityBasis: "yolo-policy" as const };
+		const resolveIntent = (raw: unknown) => {
+			const declared = raw as { write_roots?: string[]; verification?: Array<{ check: string }> } | undefined;
+			// As intent resolution does, "." names the whole workspace and resolves to no root.
+			const roots = (declared?.write_roots ?? []).filter((root) => !/^\.\/?$/u.test(root));
+			const checks = (declared?.verification ?? []).map(({ check }) => ({ check, timeoutMs: 1_000 }));
+			return {
+				ok: true as const,
+				intent: {
+					writeRoots: roots,
+					readRoots: [],
+					relevantPaths: [],
+					expectedOutputs: [],
+					verification: checks,
+				} as unknown as NonNullable<Parameters<typeof resolveDispatchPathScope>[0]["intent"]>,
+				resolvedVerification: checks.map((entry) => ({ ...entry, argv: ["true"], cwd: process.cwd() })),
+			};
+		};
+		const specs = [
+			{ id: "coder", capabilityClass: "workspace-edit" },
+			{ id: "debugger", capabilityClass: "verification" },
+			{ id: "scout", capabilityClass: "read-only" },
+		] as unknown as AgentSpec[];
+		const normalized = (args: Record<string, unknown>, named: string[] = []) => {
+			const parsed = dispatchRequestsFromArgs(args, {
+				auto,
+				resolveIntent,
+				workspaceRoot: process.cwd(),
+				operatorNamedChecks: () => named,
+			});
+			ok(parsed.ok, JSON.stringify(parsed));
+			const requests = [...parsed.requests];
+			const notices = normalizeDispatchAdmission({ args, requests, positions: parsed.positions, mode: "parallel", specs });
+			return { requests, notices };
+		};
+		const empty = { agent: "coder", task: "Map the cache split", intent: { write_roots: [] } };
+		const declared = normalized({ mode: "parallel", tasks: [empty, empty, empty] });
+		deepStrictEqual(
+			declared.requests.map((request) => request.readOnly),
+			[true, true, true],
+		);
+		strictEqual(parallelWriterConflict(declared.requests, specs), null);
+		strictEqual(declared.notices.length, 3);
+		match(
+			declared.notices[0] ?? "",
+			/task 1 \(coder\) runs read-only: its intent\.write_roots: \[\] declares no writes/u,
+		);
+		// verification: [] asks for no checks, so it does not keep a write_roots: [] task writable.
+		const noChecks = normalized({
+			mode: "parallel",
+			tasks: [{ agent: "coder", task: "Inspect src", intent: { write_roots: [], verification: [] } }],
+		});
+		strictEqual(noChecks.requests[0]?.readOnly, true);
+		// An explicit batch-level write_roots: [] is a no-write ceiling a member may not widen.
+		const widened = dispatchRequestsFromArgs(
+			{
+				mode: "parallel",
+				intent: { write_roots: [] },
+				tasks: [{ agent: "coder", task: "Update src", intent: { write_roots: ["src/"] } }],
+			},
+			{ auto, resolveIntent, workspaceRoot: process.cwd() },
+		);
+		ok(!widened.ok);
+		match(widened.message, /task 1: intent_scope_widening: .*'src\/'.*write_roots: \[\] \(no writes\)/u);
+		const inherited = normalized({
+			mode: "parallel",
+			intent: { write_roots: [] },
+			tasks: [{ agent: "coder", task: "Update src", intent: { relevant_paths: ["src/"] } }],
+		});
+		strictEqual(inherited.requests[0]?.readOnly, true);
+		// Row 146: builders with nothing declared run as inspection (explorer role) in a parallel batch.
+		const builders = normalized({
+			mode: "parallel",
+			tasks: [
+				{ agent: "coder", task: "Explain the cache split" },
+				{ agent: "debugger", task: "Diagnose the flaky collect" },
+				{ agent: "coder", task: "Fix a", intent: { write_roots: ["src/a/"] } },
+			],
+		});
+		deepStrictEqual(
+			builders.requests.map((request) => [request.readOnly === true, request.executionRole]),
+			[
+				[true, "researcher"],
+				[true, "researcher"],
+				[false, "builder"],
+			],
+		);
+		strictEqual(parallelWriterConflict(builders.requests, specs), null);
+		match(
+			builders.notices.join("\n"),
+			/task 2 \(debugger\) runs read-only as an explorer: a builder in a parallel batch with no intent\.write_roots/u,
+		);
+		// One unscoped coder beside a scout is no writer conflict, and still runs as inspection (DESIGN 4.7).
+		const beside = normalized({
+			mode: "parallel",
+			tasks: [
+				{ agent: "coder", task: "Explain the cache" },
+				{ agent: "scout", task: "Map the tests" },
+			],
+		});
+		deepStrictEqual(
+			beside.requests.map((request) => request.readOnly === true),
+			[true, false],
+		);
+		strictEqual(beside.requests[0]?.executionRole, "researcher");
+		// Evidence of a write keeps the builder: an explicit "." write root, or a check the operator named in the turn.
+		const coderBesideScout = (intent?: Record<string, unknown>) => ({
+			mode: "parallel",
+			tasks: [
+				{ agent: "coder", task: "Fix the cache", ...(intent !== undefined ? { intent } : {}) },
+				{ agent: "scout", task: "Map the tests" },
+			],
+		});
+		const dotted = normalized(coderBesideScout({ write_roots: ["."] }));
+		const checked = normalized(coderBesideScout(), ["test"]);
+		const declaredNone = normalized(coderBesideScout({ write_roots: [] }), ["test"]);
+		deepStrictEqual(
+			[dotted, checked, declaredNone].map(({ requests }) => [
+				requests[0]?.readOnly === true,
+				requests[0]?.executionRole,
+				(requests[0]?.resolvedVerification ?? []).map((entry) => entry.check),
+			]),
+			[
+				[false, "builder", []],
+				[false, "builder", ["test"]],
+				[false, "builder", ["test"]],
+			],
+		);
+		// Normalization never removes an operator-required check: write_roots: [] with one is left for admission.
+		deepStrictEqual([dotted.notices, checked.notices, declaredNone.notices], [[], [], []]);
+		// A single task is not a batch, and writers: 1 asks for serialized writers: both left alone.
+		const serialized = normalized({
+			mode: "parallel",
+			writers: 1,
+			tasks: [
+				{ agent: "coder", task: "Fix a" },
+				{ agent: "coder", task: "Fix b" },
+			],
+		});
+		deepStrictEqual(serialized.notices, []);
+		const lone = normalized({ mode: "parallel", tasks: [{ agent: "coder", task: "Fix b" }] });
+		deepStrictEqual([lone.requests[0]?.readOnly, lone.notices], [undefined, []]);
+		const writers = dispatchRequestsFromArgs(
+			{ mode: "parallel", tasks: ["Fix a", "Fix b"].map((text) => ({ agent: "coder", task: text })) },
+			{ auto, resolveIntent },
+		);
+		ok(writers.ok);
+		match(String(parallelWriterConflict(writers.requests, specs)), /withhold bash and verify .* worktree: true/u);
 	});
 
 	it("resolves the plan artifact's legacy scope against the dispatch cwd, not the process cwd", () => {

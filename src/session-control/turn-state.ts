@@ -354,6 +354,7 @@ export type TurnRuntimeState = TurnStateView<
 	| "activeInterruptReason"
 	| "activeUserTurnId"
 	| "continuation"
+	| "currentAskUserPolicy"
 	| "lastRunSnapshot"
 	| "replayedContextMessages"
 	| "routeMove"

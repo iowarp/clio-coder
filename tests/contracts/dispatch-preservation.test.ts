@@ -90,16 +90,21 @@ test("parallel admission refuses overlapping/unknown writers and allows enforced
 			{ id: "verifier", capabilityClass: "verification" },
 			{ id: "context-bootstrap", capabilityClass: "read-only", audience: "internal" },
 		],
+		getAgentRoleFacts: (id: string) =>
+			id === "verifier" ? { capabilityClass: "verification", resultContractKind: "verifier-report" } : null,
 	} as unknown as DispatchToolDeps);
 	const prepare = (tasks: unknown[], extra = {}) =>
 		admission.prepareAdmissionArguments({ mode: "parallel", tasks, ...extra })[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT];
+	// A writer naming what it produces but no write roots; a bare builder would be normalized to inspection (M2).
 	const writer = (roots?: string[]) => ({
 		agent: "coder",
 		task: "Implement scoped change",
-		...(roots ? { intent: { write_roots: roots } } : {}),
+		intent: roots ? { write_roots: roots } : { expected_outputs: ["src/out.ts"] },
 	});
 	try {
 		match(String(prepare([writer(), writer()])), /parallel_writer_conflict/);
+		// Row 146: builders that declare nothing to write run read-only instead of refusing the batch.
+		strictEqual(prepare([0, 1].map(() => ({ agent: "coder", task: "Explain the cache split" }))), undefined);
 		// Verification recipes run checks in the tree, so a parallel review sent to
 		// them stays refused; the refusal names the read-only recipes that can take it.
 		const review = (agent: string) => ({ agent, task: "Review src/a.ts for bugs" });

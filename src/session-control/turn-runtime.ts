@@ -88,6 +88,7 @@ import {
 } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, CodexConfiguration, EngineModel, Usage } from "../engine/types.js";
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
+import { closeAskUserInterviewOnAssistantTurn } from "../tools/ask-user.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 import type { ChatNoticeEvent } from "./chat-loop.js";
 import {
@@ -2266,6 +2267,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (isAssistant) {
 					apiCallStartedAt = null;
 					preInvocationStage = "transform";
+					if (state.currentAskUserPolicy) {
+						const sessionId = deps.sessionId?.();
+						const turnId = state.activeUserTurnId ?? undefined;
+						await closeAskUserInterviewOnAssistantTurn(state.currentAskUserPolicy, enrichedEvent.message, {
+							...(sessionId ? { sessionId } : {}),
+							...(turnId ? { turnId } : {}),
+						});
+					}
 				}
 				const usage = (enrichedEvent.message as { usage?: Usage }).usage;
 				if (isAssistant && usage && typeof usage === "object" && runFirstCallVerdict === null) {

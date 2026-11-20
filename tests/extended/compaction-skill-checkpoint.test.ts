@@ -1396,5 +1396,24 @@ describe("typed historical skill checkpoints (pure source)", () => {
 				/post-tool context guard stopped continuation before provider call/.test(error.message),
 		);
 		ok(context.liveContextEstimate(runtime).tokens > 32768);
+		// The compaction the fit needs fails: the same typed stop, so it never reads as a provider failure (FX-22c).
+		const failing = createTurnContext({
+			state,
+			getSettings: () => settings,
+			providers: {} as ProvidersContract,
+			readSessionEntries: () => entries,
+			middleware: { fireCompactionHook: () => {} } as unknown as TurnMiddleware,
+			emitNotice: () => {},
+			autoCompact: async () => {
+				throw new Error("summary model unavailable");
+			},
+		});
+		failing.refreshAgentMessagesFromSession(runtime);
+		await rejects(
+			failing.postToolContinuationGuard(runtime),
+			(error: Error) =>
+				error.name === OVERSIZED_RESULT_STOP &&
+				/post-tool context guard could not compact before continuation: summary model unavailable/.test(error.message),
+		);
 	});
 });
