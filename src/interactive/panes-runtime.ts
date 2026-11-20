@@ -495,7 +495,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 					return {
 						status: "refused",
 						reason:
-							"a second Clio takes no brief on its command line: open it without one, then give it its task with action=send",
+							"a second Clio takes no brief on its command line: open it without one, then type its task into the new pane",
 					};
 				}
 				// The brief is free text: it rides as `textArg`, out of band of the pane's shell.

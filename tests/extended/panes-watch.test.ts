@@ -276,7 +276,7 @@ for (const missing of [false, true]) {
 			result.reason,
 			missing
 				? /no anchor geometry for self; check the pane host layout/
-				: /needs 40 cells and at most half of 72 is available; enlarge the anchor pane/,
+				: /needs 40 columns and at most half of 72 is available; enlarge the anchor pane/,
 		);
 		doesNotMatch(result.reason, /capacity|code=/);
 		deepStrictEqual(f.calls, []);

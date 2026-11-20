@@ -1545,7 +1545,7 @@ function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 		status.yazi.mode === "closed" || status.yazi.paneId === null
 			? status.settings.yazi.enabled
 				? "closed · /files opens it"
-				: "off · turn on Files pane in /settings (Workspace & Files), then /files opens it"
+				: "off · turn on Files pane in /settings (Workspace), then /files opens it"
 			: `open${status.yazi.paneCwd ? ` in ${status.yazi.paneCwd}` : ""} · picks land in the composer as @ mentions${status.yazi.droppedLines > 0 ? ` · ${status.yazi.droppedLines} picks dropped` : ""}`;
 	const lines = [lead, row("Files pane", files)];
 	for (const dock of status.docks) {
@@ -3156,9 +3156,12 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				if (result.status === "opened") {
 					// The in-terminal chooser reports through its own composer notice.
 					if (result.paneId !== null) {
+						// A managed files dock splits down from this pane; without the layout tier the
+						// pane host makes a plain split to the right, and the dock report shows it closed.
+						const docked = (await panes.docks()).some((dock) => dock.slot === "files" && dock.state === "visible");
 						ctx.notice(
 							"success",
-							`${result.revealed ? "Files pane shown" : result.existing ? "Files pane focused" : "Files pane opened"} beside this one. Picks land in the composer as @ mentions; /files hides it.`,
+							`${result.revealed ? "Files pane shown" : result.existing ? "Files pane focused" : "Files pane opened"} ${docked ? "below" : "beside"} this one. Picks land in the composer as @ mentions; /files hides it.`,
 						);
 					}
 				} else if (result.status === "hidden") {
@@ -3172,7 +3175,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					// The gate's reason names the key; the operator also needs where to flip it.
 					ctx.notice(
 						"warn",
-						"The files pane is off. Turn on Files pane in /settings (Workspace & Files), or set interface.panes.files.enabled: true, then run /files again.",
+						"The files pane is off. Turn on Files pane in /settings (Workspace), or set interface.panes.files.enabled: true, then run /files again.",
 					);
 				} else {
 					ctx.notice("warn", result.reason);

@@ -201,7 +201,7 @@ export function planDockOpen(
 	const axis = axisCells(anchorRect, spec);
 	if (axis * DOCK_MAX_SHARE < spec.minCells) {
 		return {
-			refused: `the ${spec.slot} dock needs ${spec.minCells} cells and at most half of ${axis} is available`,
+			refused: `the ${spec.slot} dock needs ${spec.minCells} ${spec.direction === "right" ? "columns" : "rows"} and at most half of ${axis} is available`,
 		};
 	}
 	const share = Math.max(clampDockShare(requestedShare ?? spec.defaultShare), spec.minCells / axis);

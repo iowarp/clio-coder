@@ -1021,10 +1021,10 @@ export function libraryImportOutcome(plan: LibraryImportPlan, result: LibraryImp
 		diagnostics: [
 			...result.diagnostics,
 			result.admission.gateEnabled === true
-				? "imported content keeps its outside origin, and the setting that admits imported content is on"
+				? `imported content keeps its outside origin, and ${result.admission.gate} is on`
 				: result.admission.gateEnabled === false
-					? "imported content keeps its outside origin, and the setting that admits imported content is off, so it does not load yet"
-					: "imported content keeps its outside origin; whether it loads depends on the setting that admits imported content",
+					? `imported content keeps its outside origin, and ${result.admission.gate} is off, so it does not load yet`
+					: `imported content keeps its outside origin; it loads only while ${result.admission.gate} is on`,
 		],
 	};
 	annotateVerification(outcome, plan.cwd, "pre-refresh", false);
