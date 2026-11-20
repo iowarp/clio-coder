@@ -1248,3 +1248,15 @@ test("an on/off route's thinking reads one word on the toast, the rail and the p
 		["low:on · current", "off:off"],
 	);
 });
+
+test("the launchpad's hints hold one page however long the welcome stays up (TUI-13)", () => {
+	let clock = 1_000;
+	const component = banner({ now: () => clock });
+	const first = rows(component, 200).join("\n");
+	ok(first.includes("Make Clio yours"), first);
+	ok(!/\b\d\/\d\b/u.test(first), "no page counter");
+	for (const minutes of [1, 5, 60]) {
+		clock += minutes * 60_000;
+		strictEqual(rows(component, 200).join("\n"), first, `after ${minutes} more minutes`);
+	}
+});

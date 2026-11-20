@@ -380,66 +380,36 @@ function sessionRow(theme: ClioTheme, stats: WelcomeDashboardStats, version: str
 	return `${mark} ${fitByPriority(theme, units, room)}`;
 }
 
-const WELCOME_HINT_INTERVAL_MS = 15_000;
 const WELCOME_HINT_MIN_WIDTH = 160;
 /** Reserved before provider reads so quota hydration cannot move the frame. */
 const WELCOME_SUBSCRIPTION_ROWS = 2;
 
-const WELCOME_HINTS: ReadonlyArray<{
+/**
+ * One page that holds still (D-TUI 4.8): a welcome that turned every 15 seconds moved under the eye while the
+ * operator read it. The lessons the other pages carried live in `/help`.
+ */
+const WELCOME_HINT: {
 	title: string;
 	commands: ReadonlyArray<readonly [string, string]>;
 	keys: ReadonlyArray<readonly [Keybinding, string]>;
-}> = [
-	{
-		title: "Make Clio yours",
-		commands: [
-			["/model", "Choose a model and target"],
-			["/library", "Browse plugins and extensions"],
-			["/help", "Explore commands and shortcuts"],
-		],
-		keys: [
-			["clio-coder.leader", "Every action by letter"],
-			["clio-coder.model.select", "Model picker"],
-			["clio-coder.thinking.cycle", "Cycle thinking effort"],
-			["clio-coder.editor.external", "Write in your own editor"],
-		],
-	},
-	{
-		title: "Know your workspace",
-		commands: [
-			["/context", "Inspect the active context"],
-			["/fleet", "Explore your agent fleet"],
-			["/help", "Find a command by name"],
-		],
-		keys: [
-			["clio-coder.status.toggle", "Open or close the dashboard"],
-			["clio-coder.dispatchBoard.toggle", "Show the workers"],
-			["clio-coder.files.toggle", "Show or hide files"],
-			["clio-coder.library.toggle", "Open the library"],
-		],
-	},
-	{
-		title: "Keep work moving",
-		commands: [
-			["/library skills", "See available skills"],
-			["/model", "Switch the active model"],
-			["/help", "Look up a shortcut"],
-		],
-		keys: [
-			["tui.input.newLine", "New line"],
-			["clio-coder.message.interrupt", "Send now, mid-run"],
-			["clio-coder.queue.open", "Review queued messages"],
-			["clio-coder.output.cycle", "Cycle output detail"],
-		],
-	},
-];
+} = {
+	title: "Make Clio yours",
+	commands: [
+		["/model", "Choose a model and target"],
+		["/library", "Browse plugins and extensions"],
+		["/help", "Explore commands and shortcuts"],
+	],
+	keys: [
+		["clio-coder.leader", "Every action by letter"],
+		["clio-coder.model.select", "Model picker"],
+		["clio-coder.thinking.cycle", "Cycle thinking effort"],
+		["clio-coder.editor.external", "Write in your own editor"],
+	],
+};
 
-function welcomeHints(theme: ClioTheme, page: number, getKeyLabel?: WelcomeDashboardDeps["getKeyLabel"]): string[] {
-	const hint = WELCOME_HINTS[page % WELCOME_HINTS.length];
-	if (!hint) return [];
-	const commandWidth = Math.max(
-		...WELCOME_HINTS.flatMap((entry) => entry.commands.map(([command]) => visibleWidth(command))),
-	);
+function welcomeHints(theme: ClioTheme, getKeyLabel?: WelcomeDashboardDeps["getKeyLabel"]): string[] {
+	const hint = WELCOME_HINT;
+	const commandWidth = Math.max(...hint.commands.map(([command]) => visibleWidth(command)));
 	const bindings = hint.keys.flatMap(([action, description]) => {
 		const label = getKeyLabel?.(action);
 		return label ? [{ label, description }] : [];
@@ -449,8 +419,7 @@ function welcomeHints(theme: ClioTheme, page: number, getKeyLabel?: WelcomeDashb
 		({ label, description }) => `${theme.fg("guidance", padAnsi(label, keyWidth))}  ${theme.fg("body", description)}`,
 	);
 	return [
-		theme.style("sectionHeading", hint.title, { bold: true }) +
-			theme.fg("annotation", `  ${(page % WELCOME_HINTS.length) + 1}/${WELCOME_HINTS.length}`),
+		theme.style("sectionHeading", hint.title, { bold: true }),
 		"",
 		...hint.commands.map(
 			([command, description]) =>
@@ -518,7 +487,6 @@ export function buildWelcomeDashboardLines(
 	versionLabel: string,
 	width: number,
 	mode: WelcomeDashboardMode,
-	hintPage = 0,
 	getKeyLabel?: WelcomeDashboardDeps["getKeyLabel"],
 	tagline = SESSION_TAGLINE,
 	terminalRows?: number,
@@ -562,7 +530,7 @@ export function buildWelcomeDashboardLines(
 	const showHints = panelWidth >= WELCOME_HINT_MIN_WIDTH;
 	const contentWidth = showHints ? Math.max(artWidth + 3 + 42, Math.min(132, Math.floor((room - 3) * 0.66))) : room;
 	const hintWidth = room - contentWidth - 3;
-	const hints = showHints ? welcomeHints(theme, hintPage, getKeyLabel) : [];
+	const hints = showHints ? welcomeHints(theme, getKeyLabel) : [];
 	const detailWidth = sideBySide ? contentWidth - artWidth - 3 : contentWidth;
 	// Give the wide three-column panel one value axis, including wrapped quotas.
 	// Narrow layouts keep short labels so padding does not consume the route.
@@ -795,7 +763,6 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 	private disposed = false;
 	private mode: WelcomeDashboardMode = "launchpad";
 	private readonly now: () => number;
-	private hintStartedAt: number;
 	private readonly schedule: (run: () => void) => void;
 	/**
 	 * Read once, here, rather than inside a frame: resolving it walks up for
@@ -806,7 +773,6 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 
 	constructor(private readonly deps: WelcomeDashboardDeps) {
 		this.now = deps.now ?? ((): number => Date.now());
-		this.hintStartedAt = this.now();
 		this.schedule =
 			deps.scheduleRefresh ??
 			((run: () => void): void => {
@@ -823,17 +789,12 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 		const settings = this.deps.getSettings?.();
 		const mode = richWelcomeEnabled(settings?.interface?.demo, settings?.interface?.outputDetail) ? this.mode : "session";
 		const stats = this.stats(mode);
-		// Existing presentation refreshes advance the hints; no extra timer or startup work.
-		const hintPage =
-			mode === "launchpad" && width >= WELCOME_HINT_MIN_WIDTH
-				? Math.floor(Math.max(0, this.now() - this.hintStartedAt) / WELCOME_HINT_INTERVAL_MS) % WELCOME_HINTS.length
-				: 0;
 		const shortcutSignature =
 			mode === "launchpad" && width >= WELCOME_HINT_MIN_WIDTH
-				? WELCOME_HINTS[hintPage]?.keys.map(([action]) => this.deps.getKeyLabel?.(action)).join("|")
+				? WELCOME_HINT.keys.map(([action]) => this.deps.getKeyLabel?.(action)).join("|")
 				: "";
 		const terminalRows = this.deps.getTerminalRows?.();
-		const signature = `${skinEpoch()}\0${mode}\0${statsSignature(stats)}\0${hintPage}\0${shortcutSignature}\0${terminalRows}`;
+		const signature = `${skinEpoch()}\0${mode}\0${statsSignature(stats)}\0${shortcutSignature}\0${terminalRows}`;
 		const cached = this.cachedRender;
 		if (cached !== null && cached.width === width && cached.signature === signature) return cached.lines;
 		const lines = buildWelcomeDashboardLines(
@@ -841,7 +802,6 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 			this.version,
 			width,
 			mode,
-			hintPage,
 			this.deps.getKeyLabel,
 			SESSION_TAGLINE,
 			terminalRows,
@@ -868,7 +828,6 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 		if (this.mode === "launchpad") return false;
 		this.mode = "launchpad";
 		this.context = null;
-		this.hintStartedAt = this.now();
 		this.cachedRender = null;
 		return true;
 	}
@@ -1042,7 +1001,7 @@ export function createBootWelcome(
 		render: (width) => {
 			const rows = process.stdout.rows;
 			if (cached?.width === width && cached.rows === rows && cached.epoch === skinEpoch()) return cached.lines;
-			const lines = buildWelcomeDashboardLines(stats, version, width, mode, 0, getKeyLabel, SESSION_TAGLINE, rows);
+			const lines = buildWelcomeDashboardLines(stats, version, width, mode, getKeyLabel, SESSION_TAGLINE, rows);
 			cached = { width, rows, epoch: skinEpoch(), lines };
 			return lines;
 		},
