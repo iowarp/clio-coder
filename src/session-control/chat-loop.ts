@@ -1251,6 +1251,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const sideQuestionRound = deps.runSideQuestion ?? runSideQuestion;
 	const middlewareToolChoice = deps.middlewareToolChoice ?? createMiddlewareToolChoiceControl();
 	const state = createTurnState();
+	const noteTurnControlCollection = ({ block, record }: Awaited<ReturnType<TurnControlRunner["run"]>>): void => {
+		if (block !== null && record.decision.kind === "collect" && record.executed && "blockChars" in record.executed)
+			state.turnCollectedDetachedBatch = true;
+	};
 	const operatorToolLimits = snapshotTurnConstraints(deps.sessionToolLimits);
 	let sessionToolLimits = operatorToolLimits;
 	let promptToolLimits = sessionToolLimits;
@@ -2085,6 +2089,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				const result = await deps.turnControl.run({ userTurnId, signal: controllerAbort.signal });
 				if (controllerAbort.signal.aborted || ownerSignal?.aborted || identity !== submitGeneration) return null;
+				noteTurnControlCollection(result);
 				outcomeCollector.recordControl(result.record);
 				if (deps.session?.current()) {
 					try {
@@ -3415,6 +3420,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.turnToolNames = [];
 				state.turnCallsDone = [];
 				state.turnSharedWorkerNote = isWorkerShareNote(text);
+				state.turnCollectedDetachedBatch = false;
 				state.continuation.beginPrompt({
 					requestContinuation: options.requestContinuation === true,
 					yoloContinuation: options.yoloContinuation === true,
@@ -3455,6 +3461,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							signal: controllerAbort.signal,
 						});
 						if (generation !== submitGeneration || disposed) return;
+						if (!controllerAbort.signal.aborted) noteTurnControlCollection(result);
 						turnControlBlock = result.block;
 						turnControlRecord = result.record;
 					} finally {

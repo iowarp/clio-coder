@@ -320,6 +320,8 @@ export interface ChatTurnState {
 	turnCallsDone: string[];
 	/** A `[worker result]` note the operator shared entered this turn, as the prompt or as a steer; feeds turn_end metadata. */
 	turnSharedWorkerNote: boolean;
+	/** Results from a detached batch were collected into this turn; feeds turn_end metadata. */
+	turnCollectedDetachedBatch: boolean;
 	currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
 	currentTurnConstraints: TurnConstraints | undefined;
 	/** Who started the current submitted turn; hooks read it on prompt_submit, turn_start and turn_end. */
@@ -371,6 +373,7 @@ export type TurnRuntimeState = TurnStateView<
 	| "turnToolCalls"
 	| "turnToolNames"
 	| "turnCallsDone"
+	| "turnCollectedDetachedBatch"
 >;
 
 /** turn-middleware: reads the turn's facts for its hooks; a hard block sets the tool-prose abort reason. */
@@ -384,6 +387,7 @@ export type TurnMiddlewareState = TurnStateView<
 	| "synthesisToolLock"
 	| "toolBudgetLock"
 	| "turnSharedWorkerNote"
+	| "turnCollectedDetachedBatch"
 	| "turnToolCalls"
 	| "turnToolNames",
 	"toolProseAbortReason"
@@ -474,6 +478,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		turnToolNames: [],
 		turnCallsDone: [],
 		turnSharedWorkerNote: false,
+		turnCollectedDetachedBatch: false,
 		currentPendingSkillPolicy: undefined,
 		currentTurnConstraints: undefined,
 		currentTurnOrigin: null,
