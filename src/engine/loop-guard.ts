@@ -504,7 +504,14 @@ export function withLockedSynthesisDirective<C extends { messages: ReadonlyArray
 	context: C,
 	requiredResult?: string,
 ): C {
-	const directive = lockedSynthesisDirective(requiredResult);
+	return withRequestTailDirective(context, lockedSynthesisDirective(requiredResult));
+}
+
+/** Any request-only host directive, placed on the tail the way the locked-synthesis directive is. */
+export function withRequestTailDirective<C extends { messages: ReadonlyArray<unknown> }>(
+	context: C,
+	directive: string,
+): C {
 	const messages = [...context.messages] as RequestMessage[];
 	let index = messages.length - 1;
 	while (index >= 0 && messages[index]?.role === "system") index -= 1;

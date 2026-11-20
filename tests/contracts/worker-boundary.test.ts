@@ -189,6 +189,16 @@ describe("worker boundary", () => {
 		deepStrictEqual(verifyWorkerAttestation(attestation as never, approved), { ok: true });
 		const drift = verifyWorkerAttestation({ ...attestation, toolSignature: "changed" } as never, approved);
 		strictEqual(drift.ok, false);
+		// FL-21: same tool names under different schemas (another build on a fleet node) is drift too.
+		match(approved.toolSchemaSignature ?? "", /^[0-9a-f]{64}$/u);
+		const schemaDrift = verifyWorkerAttestation(
+			{ ...attestation, toolSchemaSignature: "0".repeat(64) } as never,
+			approved,
+		);
+		strictEqual(schemaDrift.ok, false);
+		// A peer from before the schema field announces names only and is still admitted on the name check.
+		const { toolSchemaSignature: _omitted, ...namesOnly } = attestation;
+		deepStrictEqual(verifyWorkerAttestation(namesOnly as never, approved), { ok: true });
 	});
 
 	it("emits canonical hash domains and normalizes released event ids at the wire read boundary", () => {

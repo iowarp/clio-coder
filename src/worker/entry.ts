@@ -46,7 +46,7 @@ import {
 } from "../engine/apis/residency.js";
 import type { WorkerHookTransport } from "../engine/worker-extension-hooks.js";
 import { startWorkerRun, type WorkerRunInput, workerProviderSupportsTools } from "../engine/worker-runtime.js";
-import { attestedToolSignature } from "../engine/worker-tools.js";
+import { attestedToolNames, attestedToolSchemaSignature } from "../engine/worker-tools.js";
 import { emitControlFrame } from "./control-lane.js";
 import { projectWorkerEventForStdout } from "./event-projection.js";
 import { startWorkerHeartbeat } from "./heartbeat.js";
@@ -54,6 +54,7 @@ import { createWorkerAgentLedgerPort } from "./ledger-mirror.js";
 import { emitEvent, exitAfterDrain, onStdoutFailure } from "./ndjson.js";
 import {
 	endpointIdentityHash,
+	toolSignatureOf,
 	WORKER_ADMISSION_WAIT_MS,
 	WORKER_HOOK_REQUEST_EVENT,
 	WORKER_PROTOCOL_VERSION,
@@ -103,6 +104,15 @@ function announcedProcessGroupId(): number | null {
  */
 function announceWorker(spec: WorkerSpec, input: WorkerRunInput): string {
 	const specDigest = workerSpecDigest(spec);
+	const toolNames = attestedToolNames({
+		allowedTools: spec.allowedTools,
+		toolsSupported: workerProviderSupportsTools(input),
+		...(spec.helperResult === true ? { helperResult: true } : {}),
+		...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
+		agentId: spec.agentId,
+		task: spec.task,
+		runtime: spec.runtime,
+	});
 	emitControlFrame({
 		kind: "announce",
 		attestation: {
@@ -117,15 +127,8 @@ function announceWorker(spec: WorkerSpec, input: WorkerRunInput): string {
 			targetId: spec.target.id,
 			endpointIdentityHash: endpointIdentityHash(spec.target.url),
 			wireModelId: spec.wireModelId,
-			toolSignature: attestedToolSignature({
-				allowedTools: spec.allowedTools,
-				toolsSupported: workerProviderSupportsTools(input),
-				...(spec.helperResult === true ? { helperResult: true } : {}),
-				...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
-				agentId: spec.agentId,
-				task: spec.task,
-				runtime: spec.runtime,
-			}),
+			toolSignature: toolSignatureOf(toolNames),
+			toolSchemaSignature: attestedToolSchemaSignature(toolNames),
 			resources: observeWorkerResourceFacts(configuredNodeLabels()),
 		},
 	});
