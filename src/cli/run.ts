@@ -43,7 +43,7 @@ import type { HeadlessRunDeadline } from "../entry/boot-options.js";
 import { assistantTextFromEvent } from "../tools/dispatch-event-text.js";
 import { isToolProfileName } from "../tools/profiles.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../worker/spec-contract.js";
-import { parseRunCliArgs, type RunCliArgs } from "./args.js";
+import { parseRunCliArgs, type RunCliArgs, requestedRunLimits } from "./args.js";
 import { runClioCommand } from "./clio.js";
 import { classifyDefaultTarget } from "./default-target.js";
 import { buildInitialMessage, readPipedStdin } from "./initial-message.js";
@@ -418,6 +418,7 @@ export async function runClioRun(
 				...(parsed.outputLastMessage !== undefined ? { outputLastMessage: parsed.outputLastMessage } : {}),
 				...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
 				...(parsed.timeoutSeconds !== undefined ? { timeoutSeconds: parsed.timeoutSeconds } : {}),
+				limits: requestedRunLimits(parsed),
 			},
 			execute,
 		);

@@ -1112,6 +1112,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// The terminal writer reuses this identity whichever settlement path wins.
 	const runId = newRunId();
 	noteMainRunV2({ runId, sessionReady: true });
+	if (options.costCap !== undefined) noteMainRunV2({ unpricedRoutes: options.costCap.unpricedRoutes });
 	const mode = options.mode ?? "text";
 	const jsonEvents = options.jsonEvents ?? "full";
 	const startedAt = new Date().toISOString();

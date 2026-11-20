@@ -7,6 +7,7 @@ import { type AutonomyLevel, autonomyFromUserInput } from "../domains/safety/aut
 import { globalFlagPositionHint, parseMaxContextTokens } from "./argv.js";
 import { parseDuration } from "./kit/duration.js";
 import type { ErrorSlug } from "./kit/slugs.js";
+import type { RunLimitsV2 } from "./modes/run-json-schema-v2.js";
 
 export interface CliArgDiagnostic {
 	type: "warning" | "error";
@@ -203,6 +204,16 @@ export function taskFileAuthorityRefusal(
 	];
 	if (widening.length === 0) return undefined;
 	return `task file carries ${widening.join(", ")}, which widen what the host does; pass --trust-task-file to accept ${widening.length === 1 ? "it" : "them"}`;
+}
+
+/** SPEC 6.9: the limits this run was given, as the v2 envelope and `--dry-run` list them under `limits.requested`. */
+export function requestedRunLimits(parsed: RunCliArgs): RunLimitsV2["requested"] {
+	return {
+		...(parsed.maxCostUsd !== undefined ? { maxCostUsd: parsed.maxCostUsd } : {}),
+		...(parsed.maxRequests !== undefined ? { maxRequests: parsed.maxRequests } : {}),
+		...(parsed.maxToolCalls !== undefined ? { maxToolCalls: parsed.maxToolCalls } : {}),
+		...(parsed.timeoutSeconds !== undefined ? { timeoutSeconds: parsed.timeoutSeconds } : {}),
+	};
 }
 
 export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {

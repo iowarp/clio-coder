@@ -19,6 +19,7 @@ import {
 	RUN_RESULT_SCHEMA_VERSION,
 	type RunCauseCode,
 	type RunExitFact,
+	type RunLimitsV2,
 	type RunResultEnvelopeV2,
 	type RunSteerFrameV2,
 	type RunUsageV2,
@@ -157,6 +158,8 @@ interface MainRunNoteV2 {
 	parentSessionId?: string;
 	usage?: RunUsageV2;
 	sessionReadyMs?: number;
+	/** Routes the run can reach whose cost `--max-cost-usd` cannot bound. */
+	unpricedRoutes?: string[];
 }
 
 let v2Started: number | null = null;
@@ -182,6 +185,26 @@ export function noteRunPlan(plan: object): void {
 	if (v2Started !== null) runPlan = { ...plan };
 }
 
+/**
+ * SPEC 6.9 `limits`: what was requested and what is enforced. Every accepted limit is enforced, because one
+ * this build cannot enforce is refused at preflight. Undefined when no limit was given.
+ */
+export function runLimitsV2(
+	requested: RunLimitsV2["requested"] | undefined,
+	usage?: RunUsageV2,
+	unpricedRoutes?: ReadonlyArray<string>,
+): RunLimitsV2 | undefined {
+	if (requested === undefined || Object.keys(requested).length === 0) return undefined;
+	const spend = (usage?.total ?? usage?.main)?.sums.usd.coverage.unknown ?? 0;
+	return {
+		requested: { ...requested },
+		enforced: Object.keys(requested),
+		...(requested.maxCostUsd !== undefined
+			? { cost: { overshootPossible: true, unpricedCalls: spend, unpricedRoutes: [...(unpricedRoutes ?? [])] } }
+			: {}),
+	};
+}
+
 /** True while a `--output-format json|stream-json` run is being written, so v1 runs pay for nothing v2 reads. */
 export function runResultV2Active(): boolean {
 	return v2Started !== null;
@@ -193,8 +216,10 @@ export function noteMainRunV2(note: {
 	usage?: RunUsageV2;
 	sessionReady?: true;
 	parentSessionId?: string;
+	unpricedRoutes?: string[];
 }): void {
 	if (v2Started === null) return;
+	if (note.unpricedRoutes !== undefined) mainRunNote.unpricedRoutes = [...note.unpricedRoutes];
 	if (note.runId !== undefined) mainRunNote.runId = note.runId;
 	if (note.parentSessionId !== undefined) mainRunNote.parentSessionId = note.parentSessionId;
 	if (note.usage !== undefined) mainRunNote.usage = note.usage;
@@ -220,6 +245,8 @@ export interface RunResultV2Request {
 	outputLastMessage?: string;
 	cwd?: string;
 	timeoutSeconds?: number;
+	/** The limits the run was given (SPEC 6.9); the envelope carries them as `limits` when any is set. */
+	limits?: RunLimitsV2["requested"];
 }
 
 /** What the v1 frames told the v2 writer; the run itself still speaks v1 underneath. */
@@ -417,6 +444,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			...(seen.firstRequestMs !== undefined ? { firstRequestMs: seen.firstRequestMs } : {}),
 			...(seen.firstTokenMs !== undefined ? { firstTokenMs: seen.firstTokenMs } : {}),
 		};
+		const limits = runLimitsV2(request.limits, usage, mainRunNote.unpricedRoutes);
 		const envelope: RunResultEnvelopeV2 = {
 			type: "run_end",
 			schemaVersion: RUN_RESULT_SCHEMA_VERSION,
@@ -450,6 +478,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			verify: { requested: request.verify.length, checks: verifyChecksV2(request.verify, seen.verify, skipReason) },
 			dispatch: { runs: seen.receipt !== undefined ? [seen.receipt] : [], live: seen.live, undelivered: seen.undelivered },
 			timings,
+			...(limits !== undefined ? { limits } : {}),
 			...(previewed && runPlan !== undefined ? { plan: runPlan } : {}),
 		};
 		const pending =

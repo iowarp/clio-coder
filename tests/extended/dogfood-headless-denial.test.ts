@@ -297,6 +297,8 @@ describe("headless no-op contract through the built binary", () => {
 			{ code: causes[0]?.code, limit: causes[0]?.limit, observed: causes[0]?.observed },
 			{ code: "max_requests", limit: 2, observed: 2 },
 		);
+		// SPEC 6.9: the envelope lists what was requested and what is enforced.
+		deepStrictEqual(lastJson(turn.stdout).limits, { requested: { maxRequests: 2 }, enforced: ["maxRequests"] });
 	});
 
 	test("--max-tool-calls refuses the batch past the cap and ends the run: exit 4, cause max_tool_calls", async () => {

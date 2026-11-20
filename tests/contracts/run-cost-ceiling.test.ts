@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, test } from "node:test";
-import { parseRunCliArgs, taskFileAuthorityRefusal } from "../../src/cli/args.js";
+import { parseRunCliArgs, requestedRunLimits, taskFileAuthorityRefusal } from "../../src/cli/args.js";
+import { runLimitsV2 } from "../../src/cli/run-failure.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
@@ -145,4 +146,14 @@ test("the --trust-task-file gate refuses verify, yolo and cwd in an untrusted en
 		/carries permissions\.autonomy yolo, cwd/,
 	);
 	strictEqual(taskFileAuthorityRefusal({ task: "x", verify: [], cwd: "/w" }, true), undefined);
+});
+
+test("--agent --max-cost-usd 0.01 is a requested, enforced limit whose overshoot is possible (SPEC 6.9)", () => {
+	const parsed = parseRunCliArgs(["--agent", "scout", "--max-cost-usd", "0.01", "x"]);
+	deepStrictEqual(runLimitsV2(requestedRunLimits(parsed)), {
+		requested: { maxCostUsd: 0.01 },
+		enforced: ["maxCostUsd"],
+		cost: { overshootPossible: true, unpricedCalls: 0, unpricedRoutes: [] },
+	});
+	strictEqual(runLimitsV2(requestedRunLimits(parseRunCliArgs(["x"]))), undefined);
 });
