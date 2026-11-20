@@ -62,9 +62,14 @@ options:
   --probe <ext>:<command>  extension command recorded as the desk's final status
   --autonomy default|yolo  every entry's autonomy (default: default); yolo is contained
   --json                   print the whole campaign as JSON
+  --exit-code              exit 1 unless every entry completed
 
 Exit codes: 0 when every entry was run (whatever each one's status), 1 when the
-campaign itself failed, 2 on a usage error, and the signal's code when stopped.`;
+campaign itself failed, 2 on a usage error, and the signal's code when stopped.
+With --exit-code a finished campaign exits 0 only when every entry completed,
+and 1 when some or all did not. The --json document carries completion.state
+and verdict.aggregate (pass: every entry completed, fail: none did, else
+partial) with each entry's status.`;
 
 class UsageError extends Error {}
 
@@ -82,14 +87,19 @@ const VALUE_FLAGS = new Set([
 interface Parsed {
 	values: Map<string, string>;
 	json: boolean;
+	exitCode: boolean;
 }
 
 function parse(args: ReadonlyArray<string>): Parsed {
-	const parsed: Parsed = { values: new Map(), json: false };
+	const parsed: Parsed = { values: new Map(), json: false, exitCode: false };
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i] as string;
 		if (arg === "--json") {
 			parsed.json = true;
+			continue;
+		}
+		if (arg === "--exit-code") {
+			parsed.exitCode = true;
 			continue;
 		}
 		if (VALUE_FLAGS.has(arg)) {
@@ -176,6 +186,18 @@ function renderCampaign(result: CampaignResult): string {
 	return `${formatColumns(rows)}${notes.length > 0 ? `\n${notes.join("\n")}\n` : ""}\nentries and logs under ${result.out}\n`;
 }
 
+type CampaignAggregate = "pass" | "partial" | "fail";
+
+/** The C19 verdict: pass when every entry completed, fail when none did, partial otherwise. */
+function campaignVerdict(result: CampaignResult): {
+	aggregate: CampaignAggregate;
+	entries: Array<{ label: string; status: CampaignEntryResult["status"] }>;
+} {
+	const passed = result.entries.filter((entry) => entry.status === "completed").length;
+	const aggregate: CampaignAggregate = passed === 0 ? "fail" : passed === result.entries.length ? "pass" : "partial";
+	return { aggregate, entries: result.entries.map((entry) => ({ label: entry.label, status: entry.status })) };
+}
+
 async function runCommand(args: ReadonlyArray<string>): Promise<number> {
 	const parsed = parse(args);
 	const fixture = resolve(required(parsed, "--fixture"));
@@ -225,8 +247,17 @@ async function runCommand(args: ReadonlyArray<string>): Promise<number> {
 		signal: controller.signal,
 		onProgress: (line) => process.stderr.write(`clio-coder campaign: ${line}\n`),
 	}).finally(() => stops.dispose());
-	process.stdout.write(parsed.json ? `${JSON.stringify(result, null, 2)}\n` : renderCampaign(result));
+	const verdict = campaignVerdict(result);
+	// completion says whether the batch ran to its end; verdict says how its entries fared (C19). Both are additive
+	// fields on the document, and only --exit-code lets the verdict reach the exit code.
+	const completion = result.canceled
+		? { state: "stopped" as const, stopReason: "signal" as const }
+		: { state: "completed" as const, stopReason: null };
+	process.stdout.write(
+		parsed.json ? `${JSON.stringify({ ...result, completion, verdict }, null, 2)}\n` : renderCampaign(result),
+	);
 	if (stops.received() !== null) return stops.exitCode();
+	if (parsed.exitCode && verdict.aggregate !== "pass") return 1;
 	return 0;
 }
 

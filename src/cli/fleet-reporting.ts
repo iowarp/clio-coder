@@ -22,6 +22,7 @@ export function createFleetReporter(stdout: Writable = process.stdout, stderr: W
 					closed = true;
 				}
 			},
+			closed: (): boolean => closed || stream.destroyed,
 			dispose: () => stream.off("error", onError),
 		};
 	};
@@ -30,6 +31,8 @@ export function createFleetReporter(stdout: Writable = process.stdout, stderr: W
 	return {
 		stdout: out.write,
 		stderr: err.write,
+		/** stdout's reader went away; the fleet keeps running and its later output is dropped. */
+		readerClosed: out.closed,
 		async dispose(): Promise<void> {
 			// Writes may emit EPIPE on the next tick, after the last report returns.
 			await new Promise<void>((resolve) => setImmediate(resolve));

@@ -188,6 +188,23 @@ describe("fleet run", () => {
 		match(result.stderr, /no-such-fleet/u);
 		doesNotMatch(result.stderr, /run-abc\.md|named 'run-abc'/u);
 	});
+
+	it("answers a structured run it refused with one fleet_end document and refuses a bad output format", () => {
+		const refused = cli(["fleet", "run", "no-such-fleet", "--output-format", "stream-json"]);
+		equal(refused.status, 2, refused.stderr);
+		const lines = refused.stdout.trim().split("\n");
+		equal(lines.length, 1, refused.stdout);
+		const end = JSON.parse(lines[0] ?? "") as { type: string; exitCode: number; completion: { state: string } };
+		deepStrictEqual([end.type, end.exitCode, end.completion.state], ["fleet_end", 2, "refused"]);
+		const format = cli(["fleet", "run", "no-such-fleet", "--output-format", "xml"]);
+		equal(format.status, 2, format.stderr);
+		equal(format.stdout, "");
+		equal(cli(["fleet", "list", "--limit", "0"]).status, 2);
+		equal(cli(["fleet", "admission", "bogus"]).status, 2);
+		const verify = cli(["fleet", "verify", "no-such-run", "--json", "--exit-code"]);
+		equal(verify.status, 1, verify.stderr);
+		equal(JSON.parse(verify.stdout).error.code, "not_found");
+	});
 });
 
 describe("run --agent", () => {

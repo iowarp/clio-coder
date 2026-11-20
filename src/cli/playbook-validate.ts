@@ -24,8 +24,7 @@ export function runPlaybookValidate(args: ReadonlyArray<string>): number {
 		else for (const check of result.checks) process.stdout.write(`${check.check}: ${check.summary}\n`);
 		return 0;
 	} catch (error) {
-		const raw = error instanceof Error ? error.message : String(error);
-		const message = raw.startsWith("unknown agent '") ? `preflight failed: ${raw}` : raw;
+		const message = error instanceof Error ? error.message : String(error);
 		const diagnostics = [
 			message,
 			...(error instanceof PlaybookCommandRegistryMissingError ? [PLAYBOOK_COMMANDS_REMEDY] : []),
