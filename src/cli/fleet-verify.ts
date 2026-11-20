@@ -13,6 +13,9 @@ import { clioStateDir } from "../core/xdg.js";
 import { openLedger } from "../domains/dispatch/state.js";
 import { inspectRunTrustStatus, TRUST_STATUS_AXES, type TrustStatusAxis } from "../domains/evidence/index.js";
 import { loadRunRecord } from "../domains/session/telemetry-source.js";
+import { EXIT_CODES } from "./kit/exit-codes.js";
+import { parseCommandFlags } from "./kit/flags.js";
+import { writeCliFailure } from "./kit/json-out.js";
 
 /** A run's trust as of this check: still pending, verified, failed, or unavailable. */
 export type FleetVerifyState = "pending" | "verified" | "failed" | "unavailable";
@@ -73,18 +76,45 @@ function fleetVerifySnapshot(runId: string, now: () => number = Date.now): Fleet
 	return snapshot("unavailable", "unsealed");
 }
 
+/**
+ * The verdict as an exit code under `--exit-code` (C19): verified 0, failed or unavailable 1, and pending 75 because
+ * the run is still live and a later check can answer. Without the flag every answered state exits 0.
+ */
+function verdictExitCode(state: FleetVerifyState): number {
+	if (state === "verified") return EXIT_CODES.success;
+	if (state === "pending") return EXIT_CODES.notReady;
+	return EXIT_CODES.failed;
+}
+
+const VERIFY_PATH = ["fleet", "verify"] as const;
+const VERIFY_USAGE = "usage: clio-coder fleet verify <runId> [--json] [--exit-code]";
+
 export function runFleetVerify(args: ReadonlyArray<string>): number {
-	const runId = args[0];
-	if (args.length !== 2 || runId === undefined || runId.startsWith("-") || args[1] !== "--json") {
-		process.stderr.write("clio-coder fleet verify: usage: clio-coder fleet verify <runId> --json\n");
-		return 2;
+	const parsed = parseCommandFlags(args, { json: { kind: "boolean" }, "exit-code": { kind: "boolean" } });
+	const json = parsed.ok ? parsed.flags.json === true : args.includes("--json");
+	if (!parsed.ok) {
+		writeCliFailure({ path: VERIFY_PATH, slug: parsed.slug, message: parsed.message, json });
+		return EXIT_CODES.notStarted;
 	}
+	const runId = parsed.positional[0];
+	if (parsed.positional.length !== 1 || runId === undefined) {
+		writeCliFailure({ path: VERIFY_PATH, slug: "usage", message: VERIFY_USAGE, json });
+		return EXIT_CODES.notStarted;
+	}
+	let snapshot: FleetVerifySnapshot;
 	try {
-		process.stdout.write(`${JSON.stringify(fleetVerifySnapshot(runId), null, 2)}\n`);
-		return 0;
+		snapshot = fleetVerifySnapshot(runId);
 	} catch (error) {
 		if (!(error instanceof FleetVerifyUnknownRunError)) throw error;
-		process.stderr.write(`clio-coder fleet verify: ${error.message}\n`);
-		return 1;
+		writeCliFailure({ path: VERIFY_PATH, slug: "not_found", message: error.message, json });
+		return EXIT_CODES.failed;
 	}
+	if (json) process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
+	else {
+		process.stdout.write(
+			`run ${snapshot.runId}: ${snapshot.state}${snapshot.reason !== null ? ` (${snapshot.reason})` : ""} at ${snapshot.verifiedAt}\n`,
+		);
+		for (const [axis, state] of Object.entries(snapshot.axes)) process.stdout.write(`  ${axis}: ${state}\n`);
+	}
+	return parsed.flags["exit-code"] === true ? verdictExitCode(snapshot.state) : EXIT_CODES.success;
 }
