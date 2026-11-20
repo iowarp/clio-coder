@@ -1063,7 +1063,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	};
 	/** A write or delete into one of Clio's own trees, however the command spells or reaches it. */
 	const clioOwnedMutation = (call: ClassifierCall, callCwd: string, command: string | null, trees: ClioOwnedTrees) => {
-		const targets = pathPolicyTargets(call, callCwd).filter((target) => target.operation !== "read");
+		const scanned = pathPolicyTargets(call, callCwd).filter((target) => target.operation !== "read");
+		const targets = command === null ? scanned : [...scanned, ...sameCommandWriteTargets(command, scanned, callCwd)];
 		if (targets.length === 0) return false;
 		const spelled = targets.some(
 			(target) =>
@@ -1203,7 +1204,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		SafetyPolicyDecision,
 		"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
 	> | null => {
-		const trees = clioOwnedTrees();
+		const trees = clioOwnedTrees(cwd);
 		const held = (
 			hit: { match: DamageControlMatch; source: SafetyPolicySource },
 			reasons: string[] = [],
@@ -2272,10 +2273,25 @@ function evaluateBashZeroAccessRead(
 	// decision cannot change within one evaluation, so each is judged once.
 	const memo = createPathWalkMemo();
 	const judged = new Set<string>();
+	// A glob entry such as `*.key` names a file by its suffix alone, so it holds a word only in a path position or one
+	// that names a file on disk: `event.key` in a sed script, a heredoc or an echo is a field, not a key file (FX-7).
+	let literalPolicy: CompiledPathPolicy | null = null;
 	for (const token of roles.reads) {
 		if (judged.has(token)) continue;
 		judged.add(token);
-		const decision = evaluatePathPolicy(zeroAccessPolicy, "read", token, callCwd, memo);
+		let decision = evaluatePathPolicy(zeroAccessPolicy, "read", token, callCwd, memo);
+		if (
+			decision.kind === "block" &&
+			!roles.pathOperands.has(token) &&
+			!pathExistsAt(token, callCwd) &&
+			!(token.startsWith("@") && pathExistsAt(token.slice(1), callCwd))
+		) {
+			literalPolicy ??= {
+				...zeroAccessPolicy,
+				entries: zeroAccessPolicy.entries.filter((entry) => entry.pattern === undefined),
+			};
+			decision = evaluatePathPolicy(literalPolicy, "read", token, callCwd, memo);
+		}
 		if (decision.kind === "block") {
 			return { verb: "read", token, entrySource: `zeroAccessPaths entry ${decision.matchedPath}` };
 		}
@@ -2361,6 +2377,12 @@ interface RecursiveSearch {
 interface BashOperandRoles {
 	/** Words judged as reads: everything that is not a write destination, a search pattern or an exclusion. */
 	reads: string[];
+	/**
+	 * The reads in a path position: an input redirect operand, a file operand of a known reader, a copy source or a
+	 * search operand, and any word the shell expands (`$`, a backtick, an unquoted glob). Only these, and words naming
+	 * a file that exists, meet glob entries such as `*.key`.
+	 */
+	pathOperands: Set<string>;
 	writes: BashWriteOperand[];
 	searches: RecursiveSearch[];
 }
@@ -2390,11 +2412,12 @@ const ROLE_PREFIX_WRAPPERS: ReadonlySet<string> = new Set([
  * with their roots so their walk can be judged.
  */
 function bashOperandRoles(command: string): BashOperandRoles {
-	const roles: BashOperandRoles = { reads: [], writes: [], searches: [] };
+	const roles: BashOperandRoles = { reads: [], pathOperands: new Set(), writes: [], searches: [] };
 	const inner = inlineShellScript(command);
 	if (inner !== null && inner !== command) {
 		const nested = bashOperandRoles(inner);
 		roles.reads.push(...nested.reads);
+		for (const operand of nested.pathOperands) roles.pathOperands.add(operand);
 		roles.writes.push(...nested.writes);
 		roles.searches.push(...nested.searches);
 	}
@@ -2411,17 +2434,100 @@ function bashOperandRoles(command: string): BashOperandRoles {
 	return roles;
 }
 
-function pushReadCandidate(token: string, reads: string[]): void {
+function pushReadCandidate(token: string, reads: string[], pathOperands: Set<string> | null): void {
 	if (token.length === 0) return;
 	if (/\s/.test(token) && !token.includes("/")) return;
 	if (token.startsWith("-") && !token.includes("/") && !token.includes("=")) return;
 	reads.push(token);
+	pathOperands?.add(token);
 	const eq = token.indexOf("=");
-	if (eq > 0 && eq < token.length - 1) reads.push(token.slice(eq + 1));
+	if (eq > 0 && eq < token.length - 1) {
+		reads.push(token.slice(eq + 1));
+		pathOperands?.add(token.slice(eq + 1));
+	}
+}
+
+/**
+ * Commands whose operands are files they open and print or hash: a word after one of these names a file even when it
+ * does not exist yet (an earlier step may create it). Others reach a glob entry only through a word naming a file.
+ */
+const FILE_READERS: ReadonlySet<string> = new Set([
+	"cat",
+	"tac",
+	"nl",
+	"head",
+	"tail",
+	"less",
+	"more",
+	"bat",
+	"batcat",
+	"wc",
+	"sort",
+	"uniq",
+	"cut",
+	"paste",
+	"join",
+	"comm",
+	"diff",
+	"cmp",
+	"base64",
+	"base32",
+	"basenc",
+	"xxd",
+	"od",
+	"hexdump",
+	"hd",
+	"strings",
+	"file",
+	"stat",
+	"md5sum",
+	"sha1sum",
+	"sha256sum",
+	"sha512sum",
+	"shasum",
+	"b2sum",
+	"cksum",
+	"source",
+	".",
+	"openssl",
+	"ssh-keygen",
+	"ssh-add",
+	"gpg",
+	"scp",
+	"rsync",
+	"tar",
+	"zip",
+	"gzip",
+	"zcat",
+	"xz",
+	"bzip2",
+	"zstd",
+]);
+
+/** Commands whose quoted patterns name the files they select, so every operand keeps the base judgement (FX-7). */
+const FILE_FINDERS: ReadonlySet<string> = new Set(["find", "fd", "fdfind", "locate", "plocate", "mlocate", "slocate"]);
+
+/** Reserved words that may stand before the command word of a segment (`if cat x.key; then`). */
+const READER_PREFIX_WORDS: ReadonlySet<string> = new Set([
+	"{",
+	"!",
+	"if",
+	"then",
+	"elif",
+	"else",
+	"while",
+	"until",
+	"do",
+]);
+
+/** A word the shell expands before the command sees it, so its literal text is no file name to test. */
+function shellExpandsWord(token: ShellToken): boolean {
+	return /[$`]/u.test(token.value) || (!token.quoted && /[*?[{]/u.test(token.value));
 }
 
 function segmentOperandRoles(tokens: ReadonlyArray<ShellToken>, roles: BashOperandRoles): void {
 	const skipped = new Set<ShellToken>();
+	const inputs: ShellToken[] = [];
 	const words: ShellToken[] = [];
 	for (let index = 0; index < tokens.length; index += 1) {
 		const token = tokens[index];
@@ -2442,7 +2548,9 @@ function segmentOperandRoles(tokens: ReadonlyArray<ShellToken>, roles: BashOpera
 				roles.writes.push({ target: next.value, sources: [], intoDirectory: false });
 			}
 		} else if (ROLE_OTHER_REDIRECTS.has(token.value)) {
-			// Input redirects stay reads; they are just not command arguments.
+			// Input redirects stay reads; they are just not command arguments. `< f` and `<> f` open a file, while a
+			// here-document delimiter and a here-string are text.
+			if (token.value === "<" || token.value === "<>") inputs.push(next);
 			index += 1;
 		}
 	}
@@ -2456,23 +2564,40 @@ function segmentOperandRoles(tokens: ReadonlyArray<ShellToken>, roles: BashOpera
 			at += 1;
 		} else break;
 	}
+	const positioned = new Set<ShellToken>(inputs);
 	const head = words[at];
 	if (head !== undefined) {
 		const name = path.basename(head.value);
 		const args = words.slice(at + 1);
-		if (name === "cp" || name === "mv" || name === "install" || name === "ln")
+		let reader = at;
+		while (READER_PREFIX_WORDS.has(words[reader]?.value ?? "")) reader += 1;
+		const readerWord = words[reader]?.value ?? "";
+		// A program named by path (`./tool`, `bin/run`) is the workspace's own code, so any operand may be a file it opens.
+		// A file finder's pattern (`find -name '*.key'`) selects the files its -exec or a later xargs reads.
+		const readerName = path.basename(readerWord);
+		if (FILE_READERS.has(readerName) || FILE_FINDERS.has(readerName) || readerWord.includes("/")) {
+			for (const arg of words.slice(reader + 1)) positioned.add(arg);
+		}
+		if (name === "cp" || name === "mv" || name === "install" || name === "ln") {
+			for (const arg of args) positioned.add(arg);
 			copyOperandRoles(name, args, skipped, roles);
-		else if (name === "tee") {
+		} else if (name === "tee") {
 			for (const arg of args) {
 				if (arg.value.startsWith("-")) continue;
 				skipped.add(arg);
 				roles.writes.push({ target: arg.value, sources: [], intoDirectory: false });
 			}
 		} else if (name === "clio-coder" && head.value === name) settingsPathOperand(args, skipped);
-		else searchOperandRoles(name, args, skipped, roles);
+		else if (searchOperandRoles(name, args, skipped, roles)) {
+			// What the search leaves after its pattern and exclusions are the files and roots it opens.
+			for (const arg of args) positioned.add(arg);
+		}
 	}
 	for (const token of tokens) {
-		if (!token.operator && !skipped.has(token)) pushReadCandidate(token.value, roles.reads);
+		if (token.operator || skipped.has(token)) continue;
+		// An unquoted word spelled with a separator (`../x.key`) is a path wherever it stands; a quoted script is not.
+		const pathPosition = positioned.has(token) || shellExpandsWord(token) || (!token.quoted && token.value.includes("/"));
+		pushReadCandidate(token.value, roles.reads, pathPosition ? roles.pathOperands : null);
 	}
 }
 
@@ -2746,7 +2871,7 @@ function searchOperandRoles(
 	rawArgs: ReadonlyArray<ShellToken>,
 	skipped: Set<ShellToken>,
 	roles: BashOperandRoles,
-): void {
+): boolean {
 	let tool: RecursiveSearchTool;
 	let syntax: SearchSyntax;
 	let args = rawArgs;
@@ -2771,11 +2896,11 @@ function searchOperandRoles(
 			else if (value.startsWith("-")) index += 1;
 			else break;
 		}
-		if (rawArgs[index]?.value !== "grep") return;
+		if (rawArgs[index]?.value !== "grep") return false;
 		tool = "git grep";
 		syntax = GIT_GREP_SEARCH_SYNTAX;
 		args = rawArgs.slice(index + 1);
-	} else return;
+	} else return false;
 	const parsed = parseSearchArgs(args, syntax);
 	// The pattern (and an -e value) is a regular expression, never opened.
 	for (const entry of parsed.values) {
@@ -2801,7 +2926,7 @@ function searchOperandRoles(
 		if (pattern !== undefined) skipped.add(pattern);
 	}
 	const recursive = tool === "grep" ? recursesDirectories(args.map((arg) => arg.value)) : tool !== "rg" || !listsOnly;
-	if (!recursive) return;
+	if (!recursive) return true;
 	const excludes: string[] = [];
 	const excludeDirs: string[] = [];
 	for (const entry of parsed.values) {
@@ -2837,6 +2962,7 @@ function searchOperandRoles(
 		excludeDirs,
 		trackedOnly: tool === "git grep" && !parsed.flags.includes("--untracked") && !parsed.flags.includes("--no-index"),
 	});
+	return true;
 }
 
 function globExpression(glob: string): RegExp {
@@ -3852,13 +3978,28 @@ interface ClioOwnedTrees {
 	spellings: ReadonlyArray<string>;
 }
 
-function clioOwnedTrees(): ClioOwnedTrees {
+function clioOwnedTrees(workspace: string): ClioOwnedTrees {
 	const dirs = resolveClioDirs();
 	const roots = new Set<string>();
-	for (const dir of [dirs.config, dirs.data, dirs.state, dirs.cache]) {
+	const add = (dir: string) => {
 		roots.add(path.resolve(dir));
 		const canonical = canonicalizePath(dir);
 		if (canonical !== null) roots.add(canonical);
+	};
+	const trees = [dirs.config, dirs.data, dirs.state, dirs.cache];
+	for (const dir of trees) add(dir);
+	// The CLIO_CODER_HOME that holds these trees is Clio's as a whole, so `cp -r x <home>/` lands in it (FX-8). Not
+	// when it is the account's home, or holds the workspace, where it would claim every file the task edits.
+	const clioHome = process.env.CLIO_CODER_HOME?.trim();
+	if (clioHome !== undefined && path.isAbsolute(clioHome)) {
+		const resolvedHome = path.resolve(clioHome);
+		if (
+			path.dirname(resolvedHome) !== resolvedHome &&
+			resolvedHome !== path.resolve(homedir()) &&
+			!isSameOrDescendant(path.resolve(workspace), resolvedHome) &&
+			trees.some((dir) => isSameOrDescendant(path.resolve(dir), resolvedHome))
+		)
+			add(resolvedHome);
 	}
 	const home = homedir();
 	const spellings = new Set<string>(roots);
@@ -3868,6 +4009,90 @@ function clioOwnedTrees(): ClioOwnedTrees {
 		for (const prefix of ["~", "$HOME", `\${HOME}`]) spellings.add(`${prefix}${rest}`);
 	}
 	return { roots: [...roots], spellings: [...spellings] };
+}
+
+/**
+ * Write targets the floor reads beyond the general scan (FX-8): an `rsync` destination, and a write that goes through a
+ * symbolic link an `ln -s` in the same command plants, spelled at the link's target. The scan judges paths as they
+ * stand before the command runs, when that link does not exist yet. A link a cd places elsewhere resolves from `cwd`.
+ */
+function sameCommandWriteTargets(
+	command: string,
+	targets: ReadonlyArray<{ operation: PathPolicyOperation; path: string }>,
+	cwd: string,
+): Array<{ operation: PathPolicyOperation; path: string }> {
+	const found: Array<{ operation: PathPolicyOperation; path: string }> = [];
+	const links = new Map<string, { target: string; planted: number }>();
+	const literal = (word: string) => !/[$`]/u.test(word);
+	for (const step of shellCommandSteps(command, homedir())) {
+		const operands: string[] = [];
+		let targetDir: string | null = null;
+		let symbolic = false;
+		for (let index = 0, options = true; index < step.args.length; index += 1) {
+			const word = step.args[index] as string;
+			if (options && word === "--") options = false;
+			else if (options && word.startsWith("--")) {
+				if (word === "--symbolic") symbolic = true;
+				else if (word.startsWith("--target-directory=")) targetDir = word.slice("--target-directory=".length);
+				else if (word === "--target-directory" || word === "--suffix") {
+					if (word === "--target-directory") targetDir = step.args[index + 1] ?? null;
+					index += 1;
+				}
+			} else if (options && word.startsWith("-") && word.length > 1) {
+				if (step.executable !== "ln") continue;
+				if (word.includes("s")) symbolic = true;
+				const valued = /[tS]/u.exec(word);
+				if (valued !== null) {
+					const rest = word.slice(valued.index + 1);
+					if (rest.length === 0) index += 1;
+					const value = rest.length > 0 ? rest : (step.args[index] ?? null);
+					if (valued[0] === "t") targetDir = value;
+				}
+			} else operands.push(word);
+		}
+		if (step.executable === "rsync") {
+			const destination = operands.at(-1);
+			// `host:path` and `rsync://` are remote; a local destination is a path.
+			if (operands.length >= 2 && destination !== undefined && !/^[^/]*:/u.test(destination))
+				found.push({ operation: "write", path: destination });
+			continue;
+		}
+		if (step.executable !== "ln" || !symbolic || !operands.every(literal)) continue;
+		const plant = (link: string, source: string) => {
+			const at = path.resolve(cwd, link);
+			const entry = links.get(at);
+			links.set(at, { target: path.resolve(path.dirname(at), source), planted: (entry?.planted ?? 0) + 1 });
+		};
+		if (targetDir !== null) {
+			if (literal(targetDir)) for (const source of operands) plant(path.join(targetDir, path.basename(source)), source);
+		} else if (operands.length === 1) plant(path.basename(operands[0] as string), operands[0] as string);
+		else {
+			const destination = operands.at(-1) as string;
+			const sources = operands.slice(0, -1);
+			// One source may name the link itself or, when the destination is a directory, a link inside it.
+			if (sources.length === 1) plant(destination, sources[0] as string);
+			for (const source of sources) plant(path.join(destination, path.basename(source)), source);
+		}
+	}
+	if (links.size === 0) return found;
+	const seen = new Map<string, number>();
+	for (const target of targets) {
+		if (!literal(target.path)) continue;
+		const raw =
+			target.path === "~" || target.path.startsWith("~/") ? path.join(homedir(), target.path.slice(1)) : target.path;
+		const at = path.resolve(cwd, raw);
+		for (const [link, { target: linked, planted }] of links) {
+			if (at === link) {
+				// The `ln` step names its own link once; another write naming it writes through it.
+				const count = (seen.get(link) ?? 0) + 1;
+				seen.set(link, count);
+				if (count > planted) found.push({ operation: target.operation, path: linked });
+			} else if (isSameOrDescendant(at, link)) {
+				found.push({ operation: target.operation, path: path.join(linked, path.relative(link, at)) });
+			}
+		}
+	}
+	return found;
 }
 
 /** Commands that print names and metadata, never contents. */

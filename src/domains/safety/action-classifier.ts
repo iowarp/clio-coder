@@ -445,6 +445,67 @@ function deleteTargetReason(
 	return inScratch ? null : `${DELETE_PATH_REASON_PREFIX}outside-workspace: ${abs}`;
 }
 
+/**
+ * Statements that can give a variable a value the text does not show: the same discipline as the yolo floor's
+ * Clio-variable pins (`yolo-floor.ts` DYNAMIC_ASSIGNERS).
+ */
+const TEMP_DIR_ASSIGNERS =
+	/(?:^|[\s;&|(){}`])(?:eval|source|\.|declare|typeset|local|readonly|read|mapfile|readarray|unset|export|let|getopts|alias|enable|builtin)(?=[\s;&|)]|$)|\bprintf\b[^\n;&|]*\s-v|\bwait\b[^\n;&|]*\s-p|\$\{!/u;
+
+/**
+ * The bash command with each `$TMPDIR` and `${TMPDIR}` the outer shell expands spelled as this process's temp
+ * directory, which the command inherits, so `rm "$TMPDIR/f"` meets every rule exactly as `rm /that/dir/f` does (FX-7).
+ * The command is returned unchanged when anything in it can assign TMPDIR (every mention of the name must be a plain
+ * reference, and no dynamic assigner may appear), when a quoted here-document or ANSI-C string could hold the
+ * reference as text, or when TMPDIR is not the directory `tmpdir()` resolves to or is `/`, the home or above it.
+ * Single-quoted and escaped references are text to the outer shell and stay as they are.
+ */
+function expandTempDirReferences(command: string): string {
+	if (!command.includes("TMPDIR")) return command;
+	const value = process.env.TMPDIR?.trim().replace(/(.)\/+$/u, "$1");
+	if (value === undefined || !path.isAbsolute(value) || !/^[\w./+@%,:-]+$/u.test(value)) return command;
+	const temp = canonicalizePath(tmpdir());
+	const home = canonicalizePath(homedir());
+	if (
+		temp === null ||
+		canonicalizePath(value) !== temp ||
+		temp === "/" ||
+		(home !== null && isSameOrDescendant(home, temp))
+	)
+		return command;
+	const names = command.match(/\bTMPDIR\b/gu)?.length ?? 0;
+	const references = command.match(/\$\{TMPDIR\}|\$TMPDIR(?![A-Za-z0-9_])/gu)?.length ?? 0;
+	if (names !== references || TEMP_DIR_ASSIGNERS.test(command) || /<<-?\s*[^\s<;&|]*['"\\]|\$'/u.test(command))
+		return command;
+	let out = "";
+	let single = false;
+	let double = false;
+	for (let index = 0; index < command.length; index += 1) {
+		const char = command[index] as string;
+		if (single) {
+			if (char === "'") single = false;
+			out += char;
+		} else if (char === "\\") {
+			out += command.slice(index, index + 2);
+			index += 1;
+		} else if (char === "'" && !double) {
+			single = true;
+			out += char;
+		} else if (char === '"') {
+			double = !double;
+			out += char;
+		} else {
+			const reference = char === "$" ? /^\$(?:\{TMPDIR\}|TMPDIR(?![A-Za-z0-9_]))/u.exec(command.slice(index)) : null;
+			if (reference === null) out += char;
+			else {
+				out += value;
+				index += reference[0].length - 1;
+			}
+		}
+	}
+	return out;
+}
+
 function deleteEventReasons(
 	event: Extract<CommandPathEvent, { kind: "delete" }>,
 	bases: ShellBases,
@@ -718,9 +779,16 @@ export function normalizeCallPaths(call: ClassifierCall): ClassifierCall {
 	const args = call.args;
 	if (!args) return call;
 	if (call.tool === ToolNames.Bash) {
-		if (typeof args.cwd !== "string") return call;
-		const cwd = expandPath(args.cwd);
-		return cwd === args.cwd ? call : { ...call, args: { ...args, cwd } };
+		let next: Record<string, unknown> = args;
+		if (typeof args.command === "string") {
+			const command = expandTempDirReferences(args.command);
+			if (command !== args.command) next = { ...next, command };
+		}
+		if (typeof args.cwd === "string") {
+			const cwd = expandPath(args.cwd);
+			if (cwd !== args.cwd) next = { ...next, cwd };
+		}
+		return next === args ? call : { ...call, args: next };
 	}
 	if (call.tool === ToolNames.RunScript) {
 		if (!("cwd" in args)) return call;
