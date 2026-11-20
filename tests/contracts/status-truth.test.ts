@@ -2383,6 +2383,11 @@ test("an idle route a worker already got answers from reads ready, not `no reque
 	const facts = { targetId: "mock", available: true, reason: "", health: "healthy" as const, lastStop: null };
 	match(idleReadinessPresentation(facts, 120).label, /no request yet/u);
 	strictEqual(idleReadinessPresentation({ ...facts, workerAnswered: true }, 120).label, "is ready");
+	// The probe found the model unloaded: the rail agrees with the "not resident" notice instead of claiming ready.
+	match(
+		idleReadinessPresentation({ ...facts, notResident: true }, 120).label,
+		/is not loaded · loads on first request/u,
+	);
 });
 
 test("a settled shell line leads the idle rail in the card's words and keeps the route's blocker beside it", () => {

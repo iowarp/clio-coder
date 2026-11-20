@@ -460,11 +460,16 @@ function outcomeFacts(outcome: LibraryStepOutcome, refresh: LibraryRefreshResult
 		// Nothing loads from a package that is gone; the fact would only restate it.
 		if (verification.effective || verification.resources.length > 0)
 			facts.push({ label: "Loads", value: label ? `${loaded} (${label})` : loaded, tone: "muted" });
+		// A loadable copy with nothing available in it must not read as loaded beside a "Loads" fact that says nothing does.
+		const nothingAvailable =
+			outcome.identity.kind !== "extension" && !verification.resources.some((item) => item.available);
 		facts.push({
 			label: "In effect",
 			value: verification.effective
 				? verification.effective.loadable
-					? `the ${verification.effective.scope} copy, which Clio loads`
+					? nothingAvailable
+						? `the ${verification.effective.scope} copy; nothing from it is available yet`
+						: `the ${verification.effective.scope} copy, which Clio loads`
 					: `the ${verification.effective.scope} copy, which Clio cannot load`
 				: "no copy remains",
 			tone: "muted",
