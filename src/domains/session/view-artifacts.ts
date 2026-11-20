@@ -14,7 +14,7 @@ import type { DispatchContract } from "../dispatch/contract.js";
 import { plainOutcomeLabel } from "../dispatch/failure-headline.js";
 import { hostCheckNotRunNote } from "../dispatch/host-verification-note.js";
 import type { DispatchOwnership } from "../dispatch/ownership.js";
-import { dispatchOwnership } from "../dispatch/ownership.js";
+import { dispatchOwnership, sessionAncestorIds } from "../dispatch/ownership.js";
 import type { RunEnvelope } from "../dispatch/types.js";
 import { listRunEvidence, runEvidence } from "../evidence/run-evidence.js";
 import { readRunGateIndex } from "../evidence/run-trust.js";
@@ -46,6 +46,7 @@ import type {
 	TaskLedgerGoal,
 	TaskLedgerValidationEvidence,
 } from "./entries.js";
+import { forkParentSessionId } from "./fork-journal.js";
 import type { MessagePathTone } from "./message-path-view.js";
 import { foldMessagePaths } from "./message-path-view.js";
 import type { SessionPromptCompileRecord } from "./prompt-manifest.js";
@@ -274,7 +275,17 @@ function readRunLedger(stateDir: string): RunEnvelope[] {
  * built from them keeps only what this session or this project produced.
  */
 function viewOwnership(deps: ArtifactProviderDeps): DispatchOwnership {
-	return dispatchOwnership({ sessionId: deps.sessionMeta?.id ?? null, cwd: deps.sessionMeta?.cwd ?? process.cwd() });
+	const sessionId = deps.sessionMeta?.id ?? null;
+	// A fork lists what its ancestors dispatched, as monitor reads it (FL-14).
+	const ancestorSessionIds =
+		sessionId === null
+			? []
+			: sessionAncestorIds(sessionId, deps.sessionMeta?.parentSessionId, (id) => forkParentSessionId(deps.stateDir, id));
+	return dispatchOwnership({
+		sessionId,
+		cwd: deps.sessionMeta?.cwd ?? process.cwd(),
+		...(ancestorSessionIds.length > 0 ? { ancestorSessionIds } : {}),
+	});
 }
 
 function allRunEnvelopes(deps: ArtifactProviderDeps): RunEnvelope[] {

@@ -15,6 +15,7 @@ import {
 import { dispatchOwnership } from "../../src/domains/dispatch/ownership.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import { finishedDetachedBatchIds, openDetachedBatchViews } from "../../src/domains/middleware/dispatch-nudge.js";
+import { seedForkCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { DispatchArtifactProvider } from "../../src/interactive/view/artifacts.js";
 import { createTurnControlRunner } from "../../src/session-control/turn-control-runner.js";
@@ -273,6 +274,33 @@ describe("dispatch session ownership", () => {
 		}
 	});
 
+	it("a fork collects its grandparent's batch when the session between them was deleted (FL-14)", async () => {
+		const parent = await openSession(scratch, "session-p", projectA);
+		const handle = await parent.contract.dispatch(parent.request);
+		await parent.contract.detached?.register({
+			batchId: "batch-g",
+			runs: [{ runId: handle.runId, assignmentId: handle.runId, agentId: "scout" }],
+			sessionId: "session-p",
+			cwd: projectA,
+		});
+		// session-m was forked from session-p, then deleted: no meta.json, only its telemetry journal is left.
+		seedForkCallJournal(clioStateDir(), "session-m", {
+			parentSessionId: "session-p",
+			parentCwdHash: "fixture",
+			parentTurnId: "turn-p",
+			parentTurnAt: new Date().toISOString(),
+		});
+		const fork = await openSession(scratch, "session-f", process.cwd(), "session-m");
+		try {
+			parent.workers[0]?.finish();
+			await handle.finalPromise;
+			okResult(await fork.call(ToolNames.Monitor, { mode: "collect", batch_id: "batch-g" }));
+		} finally {
+			await fork.stop();
+			await parent.stop();
+		}
+	});
+
 	it("tells the dispatching session that a run a fork collected had a call refused", async () => {
 		const parent = await openSession(scratch, "session-p", projectA);
 		const handle = await parent.contract.dispatch(parent.request);
@@ -493,8 +521,17 @@ describe("dispatch ownership rules", () => {
 				row("sibling", "t", project),
 				row("legacy", null, project),
 				row("foreign", "t", "/other-project"),
+				// A fork's /view lists its ancestors' runs as monitor does, through a deleted parent too (FL-14).
+				row("parent", "m", "/parent-project"),
+				row("grandparent", "g", "/grand-project"),
 			]),
 		);
+		seedForkCallJournal(clioStateDir(), "m", {
+			parentSessionId: "g",
+			parentCwdHash: "fixture",
+			parentTurnId: "turn-g",
+			parentTurnAt: "2026-09-22T00:00:00Z",
+		});
 		const provider = new DispatchArtifactProvider({
 			stateDir: clioStateDir(),
 			sessionMeta: {
@@ -510,8 +547,15 @@ describe("dispatch ownership rules", () => {
 				platform: "linux",
 				nodeVersion: process.version,
 				sessionFormatVersion: 4,
+				parentSessionId: "m",
 			},
 		});
-		deepStrictEqual((await provider.list()).map((artifact) => artifact.id).sort(), ["legacy", "own", "sibling"]);
+		deepStrictEqual((await provider.list()).map((artifact) => artifact.id).sort(), [
+			"grandparent",
+			"legacy",
+			"own",
+			"parent",
+			"sibling",
+		]);
 	});
 });

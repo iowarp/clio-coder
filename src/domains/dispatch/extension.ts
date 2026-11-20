@@ -12,7 +12,6 @@ import {
 } from "../../core/telemetry/pricing.js";
 import { renderUsdEstimate, renderUsdLimit } from "../../core/telemetry/render.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
-import { readSessionMeta } from "../../engine/session.js";
 import type { ToolRoundRecord } from "../../engine/types.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
 import { WORKER_EXTENSION_HOOKS_MAX, WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
@@ -283,6 +282,7 @@ import {
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { describeLocalCapacityRefusal, resolveGlobalConcurrency } from "../scheduling/local-capacity.js";
 import { ceilChars } from "../session/context-accounting.js";
+import { forkParentSessionId } from "../session/fork-journal.js";
 import { telemetryBundlePath, telemetryJournalPath, telemetryRunDirectory } from "../telemetry/index.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../telemetry/session-journals.js";
 import {
@@ -12063,11 +12063,8 @@ export function createDispatchBundle(
 		const key = `${sessionId}\0${parentSessionId}`;
 		const cached = ancestorChains.get(key);
 		if (cached !== undefined) return cached;
-		const chain = sessionAncestorIds(
-			sessionId,
-			parentSessionId,
-			(id) => (readSessionMeta(id) as { parentSessionId?: string | null }).parentSessionId,
-		);
+		// Through a deleted ancestor too, by its telemetry journal's fork record (FL-14).
+		const chain = sessionAncestorIds(sessionId, parentSessionId, (id) => forkParentSessionId(clioStateDir(), id));
 		ancestorChains.set(key, chain);
 		return chain;
 	};
