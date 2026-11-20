@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { runningBuildId } from "./build-info.js";
 import { resolvePackageRoot } from "./package-root.js";
 import { processAlive, processBirthToken, processStartedAtMs } from "./process-identity.js";
-import { safeResourceWrite } from "./safe-resource-write.js";
+import { safeResourceWriteAsync } from "./safe-resource-write.js";
 import { resolveClioDirs, xdgBaseDir } from "./xdg.js";
 
 function diskBuild(root: string): { id: string; files: string[] } | null {
@@ -101,15 +101,22 @@ function holdBuildFiles(record: RunningBuild): string | null {
 		const directory = join(record.root, "dist", "builds", "holds");
 		mkdirSync(directory, { recursive: true });
 		const hold = join(directory, `${record.pid}.json`);
-		safeResourceWrite(hold, `${JSON.stringify({ pid: record.pid, build: record.build })}\n`);
+		settleQuietly(safeResourceWriteAsync(hold, `${JSON.stringify({ pid: record.pid, build: record.build })}\n`));
 		return hold;
 	} catch {
 		return null;
 	}
 }
 
+/** A diagnostic write that fails leaves no record, which every reader already treats as no live process. */
+function settleQuietly(write: Promise<unknown>): void {
+	write.catch(() => {});
+}
+
 /**
- * Only long-lived Clio processes register; read-only CLI commands never create state.
+ * Only long-lived Clio processes register; read-only CLI commands never create state. The record and the hold are
+ * written durably but not awaited: their four fsyncs were about a quarter of the boot span on the main thread, and
+ * each reader already skips a record that is missing or names a dead process.
  */
 export function registerRunningBuild(surface: "gui" | "tui" | "acp" | "run"): void {
 	if (!runningBuildId) return;
@@ -125,7 +132,7 @@ export function registerRunningBuild(surface: "gui" | "tui" | "acp" | "run"): vo
 			build: runningBuildId,
 			surface,
 		};
-		safeResourceWrite(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+		settleQuietly(safeResourceWriteAsync(file, `${JSON.stringify(record)}\n`, { mode: 0o600 }));
 		const hold = holdBuildFiles(record);
 		process.once("exit", () => {
 			try {
