@@ -25,7 +25,7 @@ import {
 	statedRetryWaitMs,
 } from "../domains/session/retry.js";
 import { LOCAL_CONTEXT_OVERFLOW_PREFIX } from "../engine/apis/output-budget.js";
-import type { AgentMessage, ImageContent, MutableAgentState } from "../engine/types.js";
+import type { AgentMessage, EngineModel, ImageContent, MutableAgentState, Usage } from "../engine/types.js";
 import type { TerminalAssistantFailure } from "./chat-loop-messages.js";
 import {
 	CONTEXT_OVERFLOW_STOP_NOTICE_KEY,
@@ -200,6 +200,38 @@ export function rewriteStallAbortMessage(
 	failure.stopReason = stage !== null ? "aborted" : "error";
 	failure.errorMessage = reason;
 	return true;
+}
+
+/**
+ * The terminal event the first-token watchdog pushes into a request it gives up on, before it aborts the run. The
+ * request's stream settles on it at once, whether or not the provider honours the abort, so the retry starts at the
+ * limit; the stream takes nothing after a terminal event, so whatever the original request sends later, a late
+ * completion included, is dropped and one logical result reaches the turn (MD11).
+ */
+export function stalledRequestEnd(model: Pick<EngineModel, "api" | "provider" | "id">, reason: string) {
+	const usage: Usage = {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		totalTokens: 0,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+	return {
+		type: "error" as const,
+		reason: "aborted" as const,
+		error: {
+			role: "assistant" as const,
+			content: [],
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage,
+			stopReason: "aborted" as const,
+			errorMessage: reason,
+			timestamp: Date.now(),
+		},
+	};
 }
 
 export function recoveryAttemptHasOutput(messages: ReadonlyArray<AgentMessage>): boolean {
