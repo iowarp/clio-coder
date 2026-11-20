@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Value } from "typebox/value";
 import { processIdentityAlive } from "../../core/process-identity.js";
+import { SIDE_SURFACES, type SurfaceId } from "../../core/side-surfaces.js";
 import { cacheBreakLoss } from "../../core/telemetry/cache-break.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import { telemetryOwner } from "../../core/telemetry/context.js";
@@ -27,7 +28,7 @@ import type {
 	WhyStoppedV1,
 } from "../../core/telemetry/dto.js";
 import { factRef, parseFactRef, TELEMETRY_DTO_VERSION } from "../../core/telemetry/dto.js";
-import type { TurnNoAnswerCause } from "../../core/telemetry/enums.js";
+import type { AgentRole, TurnNoAnswerCause } from "../../core/telemetry/enums.js";
 import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EventPayload, JournalEventName } from "../../core/telemetry/events.js";
 import type { Fact, FactSum } from "../../core/telemetry/fact.js";
@@ -4119,12 +4120,78 @@ export function emptyTaskMemorySpendSummary(): TaskMemorySpendSummary {
 	};
 }
 
-/** Fold memory decisions and their call facts from the same journal records (#434). */
-export function foldTaskMemorySpend(records: readonly TelemetryRecord[]): TaskMemorySpendSummary {
+/**
+ * One side surface's calls as its journal holds them: every attempt by disposition, each usage field with its unknown
+ * count as coverage, and the summed service time of its settled attempts (memory design 4.1).
+ */
+export interface SideSurfaceFold {
+	surface: SurfaceId;
+	role: AgentRole;
+	/** Attempts that reached a model: sent, whatever came back. */
+	exercised: number;
+	/** `unexercised` when no attempt reached a model, which is never a pass. */
+	status: "exercised" | "unexercised";
+	totals: CallTotals;
+	/** Summed attempt service time; overlapping calls each count, so this is never time saved. */
+	serviceMs: number;
+}
+
+export interface SideSurfacesFold {
+	/** One row per `SIDE_SURFACES` entry, in table order. */
+	surfaces: SideSurfaceFold[];
+	/** Side-agent calls journaled with no purpose, by role: what attribution has not reached yet. */
+	residual: Array<{ role: AgentRole; totals: CallTotals }>;
+	/** The `/memory` spend line: its steps from `memory.step_decided`, its tokens from every memory-role call. */
+	memory: TaskMemorySpendSummary;
+}
+
+const NOT_SIDE_ROLES: ReadonlySet<AgentRole> = new Set(["main", "coordinator", "worker"]);
+
+/** Fold every side call and the memory decisions they serve from the same journal records (#434, memory design 4.1). */
+export function foldSideSurfaces(records: readonly TelemetryRecord[]): SideSurfacesFold {
+	const folded = foldCallJournal(records).attempts;
+	// The journal fold keeps a start's request identity only; purpose is read from the records that carry it.
+	const purposes = new Map<string, SurfaceId>();
+	for (const record of records)
+		if ((record.k === "call.started" || record.k === "call.settled") && record.data.purpose !== undefined)
+			purposes.set(record.data.attemptId, record.data.purpose);
+	const bySurface = new Map<SurfaceId, FoldedAttempt[]>();
+	const unpurposed = new Map<AgentRole, FoldedAttempt[]>();
+	for (const attempt of folded) {
+		if (NOT_SIDE_ROLES.has(attempt.agent.role)) continue;
+		const purpose = purposes.get(attempt.started.attemptId);
+		if (purpose === undefined)
+			unpurposed.set(attempt.agent.role, [...(unpurposed.get(attempt.agent.role) ?? []), attempt]);
+		else bySurface.set(purpose, [...(bySurface.get(purpose) ?? []), attempt]);
+	}
+	const surfaces = SIDE_SURFACES.map(({ id, role }): SideSurfaceFold => {
+		const attempts = bySurface.get(id) ?? [];
+		const exercised = attempts.filter(({ settled }) => settled !== null && settled.disposition !== "never_sent").length;
+		return {
+			surface: id,
+			role,
+			exercised,
+			status: exercised > 0 ? "exercised" : "unexercised",
+			totals: foldCalls(attempts),
+			serviceMs: attempts.reduce((sum, { settled }) => sum + (settled?.stages.settle ?? 0), 0),
+		};
+	});
+	const residual = [...unpurposed]
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([role, attempts]) => ({ role, totals: foldCalls(attempts) }));
+	return { surfaces, residual, memory: foldMemorySpend(records, folded) };
+}
+
+/** Memory decisions and their call facts; a memory-role call no decision links is still spent, so it is counted too. */
+function foldMemorySpend(
+	records: readonly TelemetryRecord[],
+	folded: readonly FoldedAttempt[],
+): TaskMemorySpendSummary {
 	const summary = emptyTaskMemorySpendSummary();
 	const attempts = new Map<string, FoldedAttempt>();
-	for (const attempt of foldCallJournal(records).attempts) attempts.set(attempt.started.attemptId, attempt);
+	for (const attempt of folded) attempts.set(attempt.started.attemptId, attempt);
 	const seen = new Set<string>();
+	const linkedAttempts = new Set<string>();
 	const value = (fact: Fact<number>) => (fact.kind === "measured" || fact.kind === "estimated" ? fact.value : 0);
 	for (const row of records) {
 		if (row.k !== "memory.step_decided") continue;
@@ -4140,6 +4207,7 @@ export function foldTaskMemorySpend(records: readonly TelemetryRecord[]): TaskMe
 		if (record.calls?.length) {
 			const linked: FoldedAttempt[] = [];
 			for (const ref of record.calls) {
+				linkedAttempts.add(ref.attemptId);
 				const key = `${telemetryOwner(row.ctx)}/${ref.attemptId}`;
 				if (seen.has(key)) continue;
 				seen.add(key);
@@ -4165,6 +4233,13 @@ export function foldTaskMemorySpend(records: readonly TelemetryRecord[]): TaskMe
 		summary.modelMs += value(record.latencyMs);
 		summary.slowestStepMs = Math.max(summary.slowestStepMs, value(record.latencyMs));
 	}
+	// Observation, reflection, retention and classification calls decide no step, and were missing from this line.
+	const unlinked = foldCalls(
+		folded.filter((attempt) => attempt.agent.role === "memory" && !linkedAttempts.has(attempt.started.attemptId)),
+	);
+	summary.inputTokens = sumFactSums([summary.inputTokens, unlinked.usage.input]);
+	summary.outputTokens = sumFactSums([summary.outputTokens, unlinked.usage.output]);
+	summary.totalTokens = sumFactSums([summary.totalTokens, unlinked.totalTokens]);
 	summary.hitRate = summary.llmSteps === 0 ? 0 : summary.injections / summary.llmSteps;
 	return summary;
 }

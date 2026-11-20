@@ -179,8 +179,10 @@ export function createTurnKeepalive(deps: TurnKeepaliveDeps): TurnKeepalive {
 		let message: CacheKeepaliveReply | null = null;
 		let error: string | null = null;
 		let call: KeepaliveRefresh["call"];
-		// A refresh is a prewarm call: the journal owns its facts, so readers never miss keepalive spend (#434).
-		const scope = await openCallScope(deps.callJournal?.(current.runtime), current.request.model);
+		// A refresh is a prewarm-role call with its own purpose: the journal owns its facts, so readers never miss keepalive
+		// spend (#434) and never count it as a prewarm.
+		const journal = deps.callJournal?.(current.runtime);
+		const scope = await openCallScope(journal && { ...journal, purpose: "keepalive" }, current.request.model);
 		try {
 			scope.startAttempt({ roundKind: "normal", toolChoice: "unknown" });
 			const send = () => scope.withContext(() => replay(current.request, current.outputTokens, current.controller.signal));

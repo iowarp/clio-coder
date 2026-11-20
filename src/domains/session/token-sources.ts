@@ -1,4 +1,5 @@
 import { recordedToolResultNotes } from "../../core/reminder-framing.js";
+import type { SurfaceId } from "../../core/side-surfaces.js";
 import type { AgentRole } from "../../core/telemetry/enums.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { Fact } from "../../core/telemetry/fact.js";
@@ -41,7 +42,9 @@ export type TokenSource =
 	| "reminders"
 	| "history"
 	| `tool:${string}`
-	| `role:${ChargedRole}`;
+	| `role:${ChargedRole}`
+	/** A side role's calls that named their surface: one row per purpose (memory design 4.1). */
+	| `role:${ChargedRole}/${SurfaceId}`;
 
 export interface TokenSourceRow {
 	source: TokenSource;
@@ -155,10 +158,11 @@ function tokenSourceLabel(source: TokenSource): string {
 			return "extension effects (reminders/annotations)";
 		case "history":
 			return "history";
-		default:
-			return source.startsWith("role:")
-				? `${source.slice("role:".length)} calls`
-				: `tool results: ${source.slice("tool:".length)}`;
+		default: {
+			if (!source.startsWith("role:")) return `tool results: ${source.slice("tool:".length)}`;
+			const [role, purpose] = source.slice("role:".length).split("/", 2);
+			return purpose === undefined ? `${role} calls` : `${role} calls (${purpose})`;
+		}
 	}
 }
 
@@ -378,7 +382,7 @@ function inputOf(
 ): TokenSourceInput {
 	const sum: RowAccumulator = { cached: 0, fresh: 0, total: 0, unsplit: 0, unsplitCalls: 0 };
 	for (const [source, row] of rows) {
-		if (role !== undefined && (role === "main" ? source.startsWith("role:") : source !== `role:${role}`)) continue;
+		if (role !== undefined && (role === "main" ? source.startsWith("role:") : !ofRole(source, role))) continue;
 		sum.cached += row.cached;
 		sum.fresh += row.fresh;
 		sum.total += row.total;
@@ -389,6 +393,11 @@ function inputOf(
 
 function isSideRole(role: AgentRole): role is SideRole {
 	return role !== "main" && role !== "coordinator" && role !== "worker";
+}
+
+/** Whether a row belongs to a side role: its own row, or one of its purpose rows. */
+function ofRole(source: TokenSource, role: ChargedRole): boolean {
+	return source === `role:${role}` || source.startsWith(`role:${role}/`);
 }
 
 function rolesOf(
@@ -409,6 +418,8 @@ function rolesOf(
 /** A side-agent or worker call waiting for the turn it is charged to. */
 interface SideCharge {
 	role: ChargedRole;
+	/** The surface the call named, when it named one; its row is split from the role's. */
+	purpose?: SurfaceId;
 	usage: CallUsage | null;
 	invoked: boolean;
 	/** Calls the usage covers: a ledger checkpoint's usage sums its summary streams. */
@@ -518,10 +529,14 @@ function tokenSourcesReport(
 		const split = usage.cacheRead !== null;
 		tally(turn, charge.role, usage.output, charge.calls, split);
 		const row = callRow(total, Math.min(total, usage.cacheRead ?? 0), split);
-		addRow(turn.rows, `role:${charge.role}`, { ...row, unsplitCalls: split ? 0 : charge.calls });
+		addRow(turn.rows, charge.purpose === undefined ? `role:${charge.role}` : `role:${charge.role}/${charge.purpose}`, {
+			...row,
+			unsplitCalls: split ? 0 : charge.calls,
+		});
 	};
 	const sideCharge = (record: TelemetryRecord<"call.settled">): SideCharge => ({
 		role: record.ctx.agent.role as SideRole,
+		...(record.data.purpose !== undefined ? { purpose: record.data.purpose } : {}),
 		usage: journalUsage(record),
 		invoked: record.data.disposition !== "never_sent",
 		calls: 1,
@@ -652,7 +667,10 @@ function tokenSourcesReport(
 	for (const record of workerCalls) {
 		const at = startedAt.get(record.data.attemptId) ?? record.t;
 		const turn = [...turns].reverse().find((candidate) => candidate.at <= at) ?? turns[0];
-		if (turn !== undefined) chargeSide(turn, { ...sideCharge(record), role: "worker" });
+		if (turn !== undefined) {
+			const { purpose: _purpose, ...charge } = sideCharge(record);
+			chargeSide(turn, { ...charge, role: "worker" });
+		}
 	}
 
 	const sessionRows = new Map<TokenSource, RowAccumulator>();

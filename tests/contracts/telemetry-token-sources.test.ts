@@ -4,8 +4,13 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { renderTokenSources } from "../../src/cli/telemetry-tokens.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { SurfaceId } from "../../src/core/side-surfaces.js";
+import { withTelemetryContext } from "../../src/core/telemetry/context.js";
+import type { AgentRole } from "../../src/core/telemetry/enums.js";
 import { makeTelemetryRecord, type TelemetryRecord } from "../../src/core/telemetry/envelope.js";
-import type { CallSettled } from "../../src/core/telemetry/schemas.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
+import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
+import type { CallSettled, CallStarted } from "../../src/core/telemetry/schemas.js";
 import { encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
@@ -13,15 +18,24 @@ import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js"
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
+import { safetyJudgedPayload } from "../../src/domains/safety/decision-events.js";
+import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { loadTokenSourcesReport } from "../../src/domains/session/token-sources.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
 import { telemetryRunDirectory, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { foldSideSurfaces } from "../../src/domains/telemetry/read-model.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
+import {
+	capturedJudgeCallId,
+	createSideRequestAdmission,
+	withJudgeCallCapture,
+	withSidePurpose,
+} from "../../src/entry/side-request-admission.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 import { goldenSessionJournal, telemetryCall } from "../harness/telemetry-view.js";
@@ -519,6 +533,167 @@ it("charges a dispatched worker's calls from its linked run journal to the turn 
 		);
 		ok(/source\s+cache read\s+fresh\s+total/u.test(renderTokenSources(report, true)), renderTokenSources(report, true));
 	} finally {
+		env.restore();
+	}
+});
+
+it("names every side producer by purpose: one row per purpose under its role, unknown never-sent and unsettled usage, an unpurposed residual, and the judge's own call beside its parent (memory MD1)", async () => {
+	const env = await isolateClioEnv("clio-coder-token-sources-purpose-");
+	const started: CallStarted[] = [];
+	const unsubscribe = telemetryHub().subscribe("call.started", (payload) => {
+		started.push(payload);
+	});
+	try {
+		const sessionId = "token-sources-purpose";
+		const at = (second: number) => `2026-01-01T00:00:${String(second).padStart(2, "0")}.000Z`;
+		const call = (
+			role: AgentRole,
+			purpose: SurfaceId | undefined,
+			usage: { input: number | null; output: number | null },
+			disposition?: CallSettled["disposition"],
+		) =>
+			telemetryCall(sessionId, { role, at: at(3), usage, ...(disposition ? { disposition } : {}) }).map((record) =>
+				purpose !== undefined && (record.k === "call.started" || record.k === "call.settled")
+					? ({ ...record, data: { ...record.data, purpose } } as TelemetryRecord)
+					: record,
+			);
+		// One known invocation per producer this slice names, as each journals it.
+		const producers: Array<[AgentRole, SurfaceId]> = [
+			["memory", "memory.observe"],
+			["memory", "memory.reflect"],
+			["memory", "memory.bank"],
+			["memory", "memory.correct"],
+			["memory", "memory.lesson"],
+			["memory", "memory.retain"],
+			["memory", "memory.history"],
+			["memory", "memory.classify"],
+			["compaction", "compaction.history"],
+			["compaction", "compaction.split"],
+			["compaction", "compaction.live"],
+			["compaction", "compaction.native"],
+			["safety-judge", "judge"],
+			["system-one", "judge.screen"],
+		];
+		const records = [
+			...producers.flatMap(([role, purpose], index) => call(role, purpose, { input: 100 + index, output: 10 })),
+			...call("memory", "memory.bank", { input: null, output: null }, "never_sent"),
+			...call("memory", "memory.correct", { input: null, output: null }, "sent_unsettled"),
+			...call("helper", undefined, { input: 7, output: 1 }),
+		];
+
+		const fold = foldSideSurfaces(records);
+		const surface = (id: SurfaceId) => fold.surfaces.find((row) => row.surface === id);
+		for (const [role, purpose] of producers) {
+			strictEqual(`${surface(purpose)?.role}:${surface(purpose)?.status}`, `${role}:exercised`, purpose);
+			strictEqual(surface(purpose)?.totals.usage.input.measured, 100 + producers.findIndex(([, id]) => id === purpose));
+		}
+		strictEqual(surface("triage")?.status, "unexercised", "a surface that made no call is never a pass");
+		const bank = surface("memory.bank")?.totals;
+		strictEqual(`${bank?.logicalCalls}/${bank?.neverSent}/${surface("memory.bank")?.exercised}`, "2/1/1");
+		const correct = surface("memory.correct")?.totals;
+		strictEqual(correct?.sentUnsettled, 1);
+		ok((correct?.usage.output.unknownCount ?? 0) > 0, "a sent-unsettled sibling stays unknown, never zero");
+		strictEqual(
+			fold.residual.map(({ role, totals }) => `${role}:${totals.logicalCalls}`).join(","),
+			"helper:1",
+			"only the call that named no purpose is residual",
+		);
+
+		const header = scanTelemetrySegment(goldenSessionJournal(sessionId)).rows.find((row) => row.kind === "header");
+		ok(header?.kind === "header");
+		const journalDirectory = telemetrySessionDirectory(clioStateDir(), sessionId);
+		mkdirSync(journalDirectory, { recursive: true });
+		writeFileSync(
+			join(journalDirectory, "journal.jsonl"),
+			Buffer.concat([header.header, ...records].map(encodeTelemetryLine)),
+		);
+		const message = (turnId: string, second: number, role: string, payload: Record<string, unknown>) => ({
+			kind: "message",
+			turnId,
+			parentTurnId: null,
+			timestamp: at(second),
+			role,
+			payload,
+		});
+		const lines = [
+			{ type: "session", version: 6, id: sessionId, timestamp: at(0), cwd: env.dir },
+			message("u1", 1, "user", { text: "go" }),
+			message("a1", 2, "assistant", {
+				role: "assistant",
+				content: [{ type: "text", text: "ok" }],
+				usage: { input: 400, output: 20 },
+			}),
+		];
+		const directory = join(clioStateDir(), "sessions", "token-sources-repo", sessionId);
+		mkdirSync(directory, { recursive: true });
+		writeFileSync(join(directory, "current.jsonl"), `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+		const report = loadTokenSourcesReport(clioStateDir(), sessionId);
+		ok(report, "the session ledger loads");
+		const [turn] = report.turns;
+		const row = turn?.rows.find((item) => item.source === "role:memory/memory.bank");
+		strictEqual(`${row?.label}:${row?.total}`, "memory calls (memory.bank):102", JSON.stringify(turn?.rows));
+		ok(turn?.rows.some((item) => item.source === "role:safety-judge/judge"));
+		ok(
+			turn?.rows.some((item) => item.source === "role:helper"),
+			"an unpurposed call keeps its role's row",
+		);
+		ok(!turn?.rows.some((item) => item.source === "role:memory"), "every memory call named its purpose");
+		// The split is by purpose inside a role; the role's own tally is unchanged.
+		const memory = turn?.roles.find((role) => role.role === "memory");
+		strictEqual(`${memory?.calls}/${memory?.unmeasuredCalls}`, "8/1");
+		const memoryRows = turn?.rows.filter((item) => item.source.startsWith("role:memory/")) ?? [];
+		strictEqual(
+			memoryRows.reduce((sum, item) => sum + item.total, 0),
+			memory?.input.total,
+		);
+		ok(renderTokenSources(report, true).includes("memory calls (memory.observe)"), renderTokenSources(report, true));
+
+		// The judge's own call joins its tokens; the parent it judged for stands beside it, and the screen names its own.
+		const admit = (role: "safety-judge" | "system-one") =>
+			createSideRequestAdmission({
+				providers: { getTarget: () => ({ id: "judge-target", runtime: "fixture" }) as never },
+				scheduling: { admitPaidRequest: async () => {} } as unknown as SchedulingContract,
+				getCeilingUsd: () => 0,
+				currentSession: () => sessionId,
+				repoIdentity: () => "token-sources-repo",
+				telemetry: {
+					acquireTelemetrySession: async () => ({
+						journaled: true,
+						context: { sessionId, agent: { role, id: sessionId } },
+						release: async () => {},
+					}),
+				} as unknown as TelemetryContract,
+				role,
+			});
+		const signal = new AbortController().signal;
+		const parent = { callId: newCallId(), attemptId: newAttemptId() };
+		const payload = await withTelemetryContext({ sessionId, agent: { role: "main", id: sessionId }, ...parent }, () =>
+			withJudgeCallCapture(async () => {
+				(
+					await withSidePurpose("judge.screen", () => admit("system-one")({ targetId: "judge-target", model: "m", signal }))
+				)(null);
+				(await admit("safety-judge")({ targetId: "judge-target", model: "m", signal }))(null);
+				const judgeCallId = capturedJudgeCallId();
+				return safetyJudgedPayload({
+					sessionId,
+					tool: "bash",
+					actionClass: "exec",
+					verdict: "allow",
+					latencyMs: 1,
+					...(judgeCallId !== undefined ? { judgeCallId } : {}),
+				});
+			}),
+		);
+		const judgeCall = started.find((item) => item.purpose === "judge");
+		ok(judgeCall, JSON.stringify(started));
+		ok(
+			started.some((item) => item.purpose === "judge.screen"),
+			JSON.stringify(started),
+		);
+		strictEqual(payload.judgeCallId, judgeCall.callId);
+		strictEqual(payload.parentCallId, parent.callId);
+	} finally {
+		unsubscribe();
 		env.restore();
 	}
 });

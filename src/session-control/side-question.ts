@@ -2,6 +2,8 @@ import type { CallObservation } from "../core/call-failure.js";
 import { trackCallFetch } from "../core/call-failure.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
 import { rememberOAuthCallFailure, withOAuthRefresh } from "../core/oauth-retry.js";
+import type { SurfaceId } from "../core/side-surfaces.js";
+import type { AgentRole } from "../core/telemetry/enums.js";
 import type { AdmissionHold, CallJournalOptions, CallScope } from "../domains/telemetry/call-scope.js";
 import { openCallScope } from "../domains/telemetry/call-scope.js";
 /**
@@ -348,9 +350,19 @@ function schemaBindingFor(input: OutOfTurnRoundInput): SchemaBinding | null {
 	return dialect === null ? null : { dialect, ...input.responseSchema };
 }
 
+/**
+ * The surface a side round's role names on its own. `helper` carries more than one surface (triage and `/draft`), so
+ * its callers name theirs.
+ */
+const ROLE_PURPOSE: Partial<Record<AgentRole, SurfaceId>> = { btw: "btw", handoff: "handoff" };
+
 /** The shared round. See {@link OutOfTurnRoundInput}. */
 export async function runOutOfTurnRound(input: OutOfTurnRoundInput): Promise<SideQuestionResult> {
-	const scope = await openCallScope(input.telemetry, input.model);
+	const purpose = input.telemetry?.purpose ?? (input.telemetry ? ROLE_PURPOSE[input.telemetry.role] : undefined);
+	const scope = await openCallScope(
+		input.telemetry && purpose !== undefined ? { ...input.telemetry, purpose } : input.telemetry,
+		input.model,
+	);
 	try {
 		return await withOAuthRefresh(input, (auth) => runOutOfTurnAttempt({ ...input, ...auth }, scope));
 	} finally {

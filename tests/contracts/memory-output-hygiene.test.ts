@@ -8,6 +8,7 @@ import {
 } from "../../src/domains/memory/task-memory-policy.js";
 
 const input: TaskMemoryPolicyInput = {
+	purpose: "memory.correct",
 	task: "Implement duration helper",
 	trajectory: [],
 	deterministicTrigger: true,

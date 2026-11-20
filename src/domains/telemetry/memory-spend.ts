@@ -11,7 +11,7 @@ import {
 	telemetrySessionsDirectory,
 } from "./paths.js";
 import type { TaskMemorySpendSummary } from "./read-model.js";
-import { foldTaskMemorySpend } from "./read-model.js";
+import { foldSideSurfaces } from "./read-model.js";
 
 const cache = new Map<string, { fingerprint: string; summary: TaskMemorySpendSummary }>();
 
@@ -64,7 +64,7 @@ export function readTaskMemorySpendSummary(stateDir: string = clioStateDir()): T
 			unreadableFiles += 1;
 		} // Keep other scopes' known subtotal and retry failed reads (#434).
 	}
-	const summary = foldTaskMemorySpend(records);
+	const summary = foldSideSurfaces(records).memory;
 	summary.readableFiles = readableFiles;
 	summary.unreadableFiles = unreadableFiles;
 	summary.invalidRows = invalidRows;

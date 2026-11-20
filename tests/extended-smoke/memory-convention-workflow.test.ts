@@ -90,7 +90,13 @@ test("operator promotion persists a convention and only approval admits it into 
 					])}</operations><context_for_action>Remember the inspected convention.</context_for_action>`,
 				}),
 			},
-			{ task: `${lesson}\n${sourceText}`, trajectory: [], deterministicTrigger: false, maxTokens: 2000 },
+			{
+				purpose: "memory.bank",
+				task: `${lesson}\n${sourceText}`,
+				trajectory: [],
+				deterministicTrigger: false,
+				maxTokens: 2000,
+			},
 		);
 		strictEqual(capture.reason, "uncited");
 		strictEqual(capture.reminder, null);

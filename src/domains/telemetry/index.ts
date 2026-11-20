@@ -66,7 +66,7 @@ export {
 	type EnqueuedRun,
 	emptyTaskMemorySpendSummary,
 	explain,
-	foldTaskMemorySpend,
+	foldSideSurfaces,
 	READ_MODEL_FOLD,
 	runCostReport,
 	runRowTelemetry,
