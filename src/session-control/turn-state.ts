@@ -39,6 +39,7 @@ import type {
 import type { createEngineAgent } from "../engine/agent.js";
 import type { MainRequestRecord } from "../engine/in-prefix-summary.js";
 import type { AgentMessage } from "../engine/types.js";
+import type { CompletionDeclaration } from "../tools/finish.js";
 import type { AskUserToolPolicy } from "../tools/registry.js";
 import type { ToolMarkupRepromptBudget } from "./chat-loop-messages.js";
 import { RunEvidenceLog } from "./run-evidence.js";
@@ -322,6 +323,12 @@ export interface ChatTurnState {
 	turnSharedWorkerNote: boolean;
 	/** Results from a detached batch were collected into this turn; feeds turn_end metadata. */
 	turnCollectedDetachedBatch: boolean;
+	/** The completion this submitted turn declared through `finish`, or null; feeds turn_end metadata (fleet design 4.3). */
+	turnCompletion: CompletionDeclaration | null;
+	/** A tool other than `finish` ran since the operator's prompt; a continuation of that prompt keeps it. */
+	turnCalledWork: boolean;
+	/** The one pinned `finish` round an unattended turn gets is spent; a continuation of that prompt keeps it. */
+	finishRoundSpent: boolean;
 	currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
 	currentTurnConstraints: TurnConstraints | undefined;
 	/** Who started the current submitted turn; hooks read it on prompt_submit, turn_start and turn_end. */
@@ -355,6 +362,7 @@ export type TurnRuntimeState = TurnStateView<
 	| "activeUserTurnId"
 	| "continuation"
 	| "currentAskUserPolicy"
+	| "currentTurnOrigin"
 	| "lastRunSnapshot"
 	| "replayedContextMessages"
 	| "routeMove"
@@ -375,6 +383,9 @@ export type TurnRuntimeState = TurnStateView<
 	| "turnToolNames"
 	| "turnCallsDone"
 	| "turnCollectedDetachedBatch"
+	| "turnCompletion"
+	| "turnCalledWork"
+	| "finishRoundSpent"
 >;
 
 /** turn-middleware: reads the turn's facts for its hooks; a hard block sets the tool-prose abort reason. */
@@ -389,6 +400,7 @@ export type TurnMiddlewareState = TurnStateView<
 	| "toolBudgetLock"
 	| "turnSharedWorkerNote"
 	| "turnCollectedDetachedBatch"
+	| "turnCompletion"
 	| "turnToolCalls"
 	| "turnToolNames",
 	"toolProseAbortReason"
@@ -480,6 +492,9 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		turnCallsDone: [],
 		turnSharedWorkerNote: false,
 		turnCollectedDetachedBatch: false,
+		turnCompletion: null,
+		turnCalledWork: false,
+		finishRoundSpent: false,
 		currentPendingSkillPolicy: undefined,
 		currentTurnConstraints: undefined,
 		currentTurnOrigin: null,

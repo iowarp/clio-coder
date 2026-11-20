@@ -45,6 +45,7 @@ export const COORDINATOR_DIRECT_TOOLS: ReadonlySet<string> = new Set([
 	ToolNames.Verify,
 	ToolNames.AskUser,
 	ToolNames.Consult,
+	ToolNames.Finish,
 ]);
 
 export function coordinatorToolPlacement(name: string): ToolPlacement {
@@ -88,6 +89,7 @@ export const TOOL_PLACEMENT: Readonly<Record<BuiltinToolName, ToolPlacement>> = 
 	[ToolNames.Panes]: "direct",
 	[ToolNames.Music]: "direct",
 	[ToolNames.Limitation]: "direct",
+	[ToolNames.Finish]: "direct",
 	[ToolNames.Decide]: "direct",
 	[ToolNames.Consult]: "direct",
 	[ToolNames.Vision]: "gateway",

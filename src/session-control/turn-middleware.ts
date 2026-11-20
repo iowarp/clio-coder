@@ -410,6 +410,24 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		return null;
 	};
 
+	/**
+	 * The newest reply text of this turn: a pinned `finish` round may carry none, so the reply it declares is the text
+	 * before it. Host reminder inserts are crossed; the operator's own message ends the search.
+	 */
+	const lastAssistantReplyText = (messages: ReadonlyArray<AgentMessage>): string => {
+		for (let index = messages.length - 1; index >= 0; index -= 1) {
+			const message = messages[index];
+			if (!message || typeof message !== "object" || !("role" in message)) continue;
+			if (message.role === "assistant") {
+				const text = extractText(message);
+				if (text.trim().length > 0) return text;
+			} else if (message.role === "user" && !extractText(message).trimStart().startsWith("<system-reminder>")) {
+				return "";
+			}
+		}
+		return "";
+	};
+
 	const turnStartInput = (
 		agentRuntime: AgentRuntime,
 		promptText: string,
@@ -529,9 +547,12 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 
 		async fireTurnEnd(agentRuntime, messages, terminalToolResult): Promise<void> {
 			if (!deps.middleware) return;
+			// A turn `finish` ended closes on the reply the model wrote beside it (fleet design 4.3): that text is the
+			// final answer, as a settled stop turn's would be. Any other terminal tool's result stands in for the reply.
+			const declared = terminalToolResult?.toolName === ToolNames.Finish;
 			const message = terminalToolResult === undefined ? lastAssistantMessage(messages) : null;
 			if (message === null && terminalToolResult === undefined) return;
-			const text = message === null ? "" : extractText(message);
+			const text = declared ? lastAssistantReplyText(messages) : message === null ? "" : extractText(message);
 			// Empty error/abort completions still close a tool-bearing turn. Let
 			// lifecycle observers settle their state even without final prose.
 			const stopReason = message === null ? "stop" : (message as { stopReason?: unknown }).stopReason;
@@ -549,6 +570,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				turnMode: state.currentTurnConstraints?.mode ?? "",
 				toolsLocked: state.synthesisToolLock || state.toolBudgetLock,
 				...turnOriginMetadata(state.currentTurnOrigin),
+				...(state.turnCompletion !== null ? { completionState: state.turnCompletion.state } : {}),
 			};
 			// The final call's input includes cache tokens and measures the context
 			// a plan-close continuation would repeat (#431).

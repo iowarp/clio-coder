@@ -89,6 +89,12 @@ import {
 import type { AgentEvent, AgentMessage, CodexConfiguration, EngineModel, Usage } from "../engine/types.js";
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
 import { closeAskUserInterviewOnAssistantTurn } from "../tools/ask-user.js";
+import {
+	completionOfToolResult,
+	FINISH_DECLARATION_REMINDER,
+	finishRoundDue,
+	finishSiblingRefusal,
+} from "../tools/finish.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 import type { ChatNoticeEvent } from "./chat-loop.js";
 import {
@@ -1327,7 +1333,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const capRefusal = deps.runCaps?.admitToolCalls(calls.length);
 				return capRefusal !== undefined ? { reason: capRefusal } : undefined;
 			},
-			beforeToolCall: async ({ assistantMessage, toolCall }) => selfCompactSiblingRefusal(toolCall, assistantMessage),
+			beforeToolCall: async ({ assistantMessage, toolCall }) =>
+				selfCompactSiblingRefusal(toolCall, assistantMessage) ?? finishSiblingRefusal(toolCall, assistantMessage),
 			beforeStreamRequest: stageAdmission(async ({ model, context: request, options: streamOptions }, hold) => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
 				callTracking = null;
@@ -1772,8 +1779,28 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				stallSuspendDepth -= 1;
 				lastActivityAt = performance.now();
 			}
-			if (!currentRun() || !state.continuation.requested || state.activeInterruptReason !== null) return undefined;
+			if (!currentRun() || state.activeInterruptReason !== null) return undefined;
 			if (turn.message.stopReason === "error" || turn.message.stopReason === "aborted") return undefined;
+			if (!state.continuation.requested) {
+				// Fleet design 4.3: an unattended turn that did work and ended undeclared gets one round pinned to finish.
+				if (
+					!finishRoundDue({
+						headless: deps.headless === true,
+						origin: state.currentTurnOrigin?.origin,
+						declared: state.turnCompletion !== null,
+						calledWork: state.turnCalledWork,
+						spent: state.finishRoundSpent,
+						toolsLocked: state.synthesisToolLock || state.toolBudgetLock,
+						endedOnTerminalTool: terminal !== null,
+						finishAttached: localRuntime.agent.state.tools.some((tool) => tool.name === ToolNames.Finish),
+					})
+				)
+					return undefined;
+				state.finishRoundSpent = true;
+				middlewareToolChoice.apply([{ kind: "require_tool", toolName: ToolNames.Finish }]);
+				requiredToolReminder = FINISH_DECLARATION_REMINDER;
+				return { action: "continue" };
+			}
 			state.continuation.carryIntoRun();
 			return { action: "continue" };
 		};
@@ -1879,6 +1906,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// that ran, which for the coordinator is usually behind gateway op=call.
 				const effective = effectiveToolCall(event.toolName, event.args);
 				state.turnToolNames.push(effective.toolName);
+				if (effective.toolName !== ToolNames.Finish) state.turnCalledWork = true;
 				startedCallLabels.set(event.toolCallId, toolCallLabel(effective.toolName, effective.args));
 			} else if (event.type === "tool_execution_end") {
 				toolsInFlight = Math.max(0, toolsInFlight - 1);
@@ -2307,6 +2335,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			if (enrichedEvent.type === "tool_execution_end") {
 				persistence.appendToolResultTurn(enrichedEvent);
+				// The typed completion declaration (fleet design 4.3): read from the settled result, never from reply text.
+				const completion = enrichedEvent.isError
+					? null
+					: completionOfToolResult(enrichedEvent.toolName, enrichedEvent.result);
+				if (completion !== null) state.turnCompletion = completion;
 				pendingTerminalToolResult =
 					(enrichedEvent.result as { terminate?: boolean } | undefined)?.terminate === true
 						? { toolCallId: enrichedEvent.toolCallId, toolName: enrichedEvent.toolName }

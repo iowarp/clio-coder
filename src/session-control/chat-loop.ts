@@ -3496,6 +3496,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.turnCallsDone = [];
 				state.turnSharedWorkerNote = isWorkerShareNote(text);
 				state.turnCollectedDetachedBatch = false;
+				state.turnCompletion = null;
+				if (options.requestContinuation !== true) {
+					state.turnCalledWork = false;
+					state.finishRoundSpent = false;
+				}
 				state.continuation.beginPrompt({
 					requestContinuation: options.requestContinuation === true,
 					yoloContinuation: options.yoloContinuation === true,
