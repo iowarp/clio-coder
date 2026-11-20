@@ -2974,12 +2974,31 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		};
 	};
 
+	/**
+	 * A verdict is the triage firing on either route: `acted` when its relabel or interrupt applied, `expired` when the
+	 * queue moved on before it could (memory design 4.5). A round with no verdict fired nothing.
+	 */
+	const settleTriage = (
+		sessionId: string | undefined,
+		verdicts: ReadonlyArray<TriageVerdict>,
+		applied: string | null,
+	) => {
+		if (verdicts.length === 0 || sessionId === undefined) return;
+		outcomeCollector.settleHostFiring(
+			sessionId,
+			"triage",
+			applied === null ? "expired" : "acted",
+			applied === null ? { kind: "none" } : { kind: "receipt", ref: applied },
+		);
+	};
+
 	const runTriage = async (): Promise<void> => {
 		if (triageInFlight || !state.streaming || !state.runtime) return;
 		const triage = deps.getSettings().chat.steering.triage;
 		const asked: TriageEntry[] = queues.entries().map((entry) => ({ id: entry.id, text: entry.text, kind: entry.kind }));
 		if (asked.length < triageFloor(triage, deps.systemOne)) return;
 		triageInFlight = true;
+		const sessionId = deps.session?.current()?.id;
 		try {
 			await runTriageRound({
 				triage,
@@ -2988,7 +3007,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				task: () => deps.currentOperatorTask?.() ?? "",
 				previous: () => (state.runtime ? lastAssistantText(state.runtime.agent.state.messages) : ""),
 				current: () => state.streaming && triageSnapshotMatches(asked, queues.entries()),
-				apply: (verdicts) => applyTriage(verdicts, triage.autoInterrupt),
+				apply: (verdicts) => settleTriage(sessionId, verdicts, applyTriage(verdicts, triage.autoInterrupt)),
+				expired: (verdicts) => settleTriage(sessionId, verdicts, null),
 				side: () => runSideTriage(asked),
 			});
 		} catch {
@@ -3051,23 +3071,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				result.text,
 				asked.map((entry) => entry.id),
 			);
-			// A verdict is the triage firing: `acted` when its relabel or interrupt applied, `expired` when the queue moved
-			// on before it could (memory design 4.5). A round with no verdict fired nothing.
-			const settleTriage = (applied: string | null): void => {
-				const sessionId = origin?.id;
-				if (verdicts.length === 0 || sessionId === undefined) return;
-				outcomeCollector.settleHostFiring(
-					sessionId,
-					"triage",
-					applied === null ? "expired" : "acted",
-					applied === null ? { kind: "none" } : { kind: "receipt", ref: applied },
-				);
-			};
 			if (!triageSnapshotMatches(asked, queues.entries())) {
-				settleTriage(null);
+				settleTriage(origin?.id, verdicts, null);
 				return;
 			}
-			settleTriage(applyTriage(verdicts, triage.autoInterrupt));
+			settleTriage(origin?.id, verdicts, applyTriage(verdicts, triage.autoInterrupt));
 		} finally {
 			clearTimeout(deadline);
 		}
