@@ -2052,6 +2052,69 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("scrolls the terminal for a one-row transcript scroll and paints only the rows that differ", () => {
+		const terminal = new RenderingTerminal();
+		const tui = new TuiAltScreen(terminal);
+		const root = buildLayout(
+			{
+				banner: new Text("banner", 0, 0),
+				chat: new Text(Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n"), 0, 0),
+				editor: new Text("editor", 0, 0),
+				footer: new Text("footer", 0, 0),
+			},
+			{ mode: "fullscreen", fullscreenScrollbar: "always" },
+		);
+		tui.setLayoutRoot(root);
+		// A terminal that knows only what the renderer writes: row moves, row clears, scroll regions and scrolls.
+		const rows = Array.from({ length: terminal.rows }, () => "");
+		let cursor = 0;
+		let top = 0;
+		let bottom = terminal.rows - 1;
+		const replay = (output: string) => {
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: the control sequences are the subject
+			const tokens = /\x1b\[(\d*)(?:;(\d*))?([rSTHJK])|\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|[^\x1b]+/gu;
+			for (const [token, first, second, final] of output.matchAll(tokens)) {
+				if (final === "H") cursor = Number(first) - 1;
+				else if (final === "r") {
+					top = first ? Number(first) - 1 : 0;
+					bottom = second ? Number(second) - 1 : terminal.rows - 1;
+					cursor = 0;
+				} else if (final === "S" || final === "T") {
+					const count = Number(first || 1);
+					const region = rows.splice(top, bottom - top + 1);
+					const blank = Array.from({ length: count }, () => "");
+					const moved = final === "S" ? [...region.slice(count), ...blank] : [...blank, ...region.slice(0, -count)];
+					rows.splice(top, 0, ...moved);
+				} else if (final === "J") rows.fill("");
+				else if (final === "K") rows[cursor] = "";
+				else if (!token.startsWith("\x1b")) rows[cursor] = `${rows[cursor]}${token}`;
+			}
+		};
+		const painted = () => tui.getScreenLines().map((line) => stripTerminalSequences(line).trimEnd());
+		tui.start();
+		try {
+			tui.renderNow(true);
+			replay(terminal.writes.join(""));
+			for (const wheel of ["\x1b[<64;2;2M", "\x1b[<64;2;2M", "\x1b[<72;2;2M", "\x1b[<65;2;2M"]) {
+				terminal.writes.length = 0;
+				terminal.input(wheel);
+				tui.renderNow();
+				const frame = terminal.writes.join("");
+				replay(frame);
+				deepStrictEqual(
+					rows.map((row) => row.trimEnd()),
+					painted(),
+				);
+				if (wheel === "\x1b[<64;2;2M") {
+					ok(frame.includes("\x1b[1T"), "one notch up scrolls the transcript rows down one");
+					ok(frame.split("\x1b[2K").length - 1 < 5, "only the exposed row and changed bar cells repaint");
+				}
+			}
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("keeps a scrolled-up reader at their place when the width changes", () => {
 		const terminal = new RenderingTerminal();
 		terminal.columns = 120;
