@@ -89,8 +89,8 @@ describe("telemetry share names the flag it refuses", { concurrency: 2 }, () => 
 
 describe("config and version refuse what they do not take", { concurrency: 2 }, () => {
 	for (const [args, refusal] of [
-		[["config", "--jsn"], /error: unknown flag: --jsn\n/],
-		[["config", "inspect", "extra"], /error: unexpected argument: extra\n/],
+		[["config", "--jsn"], /^clio-coder config inspect: unknown flag: --jsn\nsee: clio-coder config inspect --help\n/],
+		[["config", "inspect", "extra"], /^clio-coder config inspect: unexpected argument: extra\nsee: clio-coder config inspect --help\n/],
 		[["version", "--bogus"], /error: unknown flag: --bogus\n/],
 	] as const) {
 		it(`clio-coder ${args.join(" ")} exits 2 naming it`, async () => {
