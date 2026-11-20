@@ -1575,16 +1575,17 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			undelivered: settlement.undelivered.map(projectDispatchedRunOutcome),
 		});
 	}
-	// The turn has settled. Nothing between here and the seal yields to a
-	// timer, so a deadline that has not fired by now never will, and one that
-	// did has already put the coordinator into shutdown, which the first branch
-	// below reads.
-	options.deadline?.settle();
-	// An interrupted turn has nothing to accept, and a shutdown stops the checks.
+	// An interrupted turn has nothing to accept, and a shutdown stops the checks. The deadline stays armed
+	// through them: its expiry starts the shutdown, whose drain aborts the check in flight (CLI-P6).
 	const verify =
 		options.verify !== undefined && !termination.isShuttingDown() && result.abortReason === null
 			? await runHeadlessVerifyChecks(options.verify, termination)
 			: null;
+	// The turn, any repair turn and the checks have settled. Nothing between here and the seal yields to a
+	// timer, so a deadline that has not fired by now never will, and one that
+	// did has already put the coordinator into shutdown, which the first branch
+	// below reads.
+	options.deadline?.settle();
 	if (verify !== null && mode === "text") {
 		for (const check of verify) process.stderr.write(`${formatHeadlessVerifyResult(check)}\n`);
 	}
