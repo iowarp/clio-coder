@@ -103,6 +103,7 @@ export {
 } from "./run-history.js";
 export type { SettledRunRecord } from "./run-record.js";
 export {
+	readRunJournalRecords,
 	readRunRecord,
 	readRunRecordAsync,
 	readSettledRun,

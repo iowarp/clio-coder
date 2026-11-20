@@ -79,6 +79,17 @@ export async function readRunRecordAsync(stateDir: string, runId: string): Promi
 	return record(runId, await readCallJournal(directory), scope);
 }
 
+/**
+ * The records a run's journal holds, live or sealed, without folding them; empty when the run has no journal beneath
+ * the state root. Recovery folds an abandoned run's call records from them (FL-24).
+ */
+export function readRunJournalRecords(stateDir: string, runId: string): readonly TelemetryRecord[] {
+	assertSafeId(runId, "run");
+	const directory = telemetryRunDirectory(stateDir, runId);
+	if (!withinStateRoot(stateDir, directory)) return [];
+	return readCallJournalSync(directory).records.map(({ record }) => record);
+}
+
 /** The run's record when it settled; a run with no run.settled did not finish, which is what recovery needs to know. */
 export function readSettledRun(stateDir: string, runId: string): SettledRunRecord | null {
 	const run = readRunRecord(stateDir, runId);
