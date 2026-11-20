@@ -652,6 +652,15 @@ function recordContextSnapshot(sessionId: string, snapshot: ContextSnapshot): vo
 	);
 }
 
+/**
+ * The error name of the post-tool guard's clean stop, when one tool result alone still overflows after compaction.
+ * Pi keeps only the message, so the turn runtime reads the name off the throw to journal the harness's own cause.
+ */
+export const OVERSIZED_RESULT_STOP = "ClioOversizedResultStop";
+
+const oversizedResultStop = (message: string): Error =>
+	Object.assign(new Error(message), { name: OVERSIZED_RESULT_STOP });
+
 export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const { state, middleware } = deps;
 	const activeEntries = () => activePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
@@ -3981,7 +3990,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					const reason = err instanceof Error ? err.message : String(err);
 					const aborted = signal?.aborted || (err instanceof Error && err.name === "AbortError");
 					const oversize = requireFit && !aborted ? overflowStop(agentRuntime) : null;
-					if (oversize !== null) throw new Error(oversize);
+					if (oversize !== null) throw oversizedResultStop(oversize);
 					if (requireFit || aborted)
 						throw new Error(`[CLIO Coder] post-tool context guard could not compact before continuation: ${reason}`);
 					// Optional compaction: the request still fits, so the run goes on and the fit check below stays the stop.
@@ -4002,7 +4011,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// so the first publication already describes it.
 			const afterView = attempted ? refreshLiveBudget() : beforeView;
 			const oversize = mustFit ? overflowStop(agentRuntime) : null;
-			if (oversize !== null) throw new Error(oversize);
+			if (oversize !== null) throw oversizedResultStop(oversize);
 			const after = fitFigures(afterView);
 			if (knownWindow && !requestFits(after.input, after.reserve, afterView.effectiveWindow)) {
 				throw new Error(

@@ -122,7 +122,7 @@ import {
 } from "./repetition-detector.js";
 import type { ModelRequestFacts, ModelRequestSlots } from "./status-types.js";
 import { assessToolProseLoop, runtimeNarratesToolCalls, shouldAssessToolProse } from "./tool-prose-loop.js";
-import type { ExpectedColdReason, TurnContext } from "./turn-context.js";
+import { type ExpectedColdReason, OVERSIZED_RESULT_STOP, type TurnContext } from "./turn-context.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
 import type { TurnPersistence } from "./turn-persistence.js";
 import type { AgentRuntime, ChatLoopTarget, PreInvocationStage, TurnRuntimeState } from "./turn-state.js";
@@ -948,6 +948,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		};
 		// Who stopped an aborted reply when the route did not: its message and its call settlement name the same cause.
 		// An actor flag counts only while its reason is live, so a later harness stop never inherits an earlier Esc (x7-3).
+		/** The harness cause of a clean stop the post-tool guard threw, read once by the failure it produced. */
+		let guardStopCause: FailureCause | null = null;
 		const harnessAbortCause = (): FailureCause | undefined =>
 			state.routeMove !== null
 				? "route_moved"
@@ -1620,6 +1622,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 
 		handle.agent.prepareNextTurnWithContext = async (_completed, signal?: AbortSignal) => {
 			stallSuspendDepth += 1;
+			guardStopCause = null;
 			try {
 				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				if (deps.hasQueuedSteering?.()) await deps.continuity?.pause();
@@ -1637,7 +1640,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					handoffChanged ||
 					continued ||
 					requirementChanged;
-				const update = await context.postToolContinuationGuard(localRuntime, signal, contextChanged);
+				const update = await context
+					.postToolContinuationGuard(localRuntime, signal, contextChanged)
+					.catch((error: unknown) => {
+						// Clio's guard, not the route, ended the turn (CLI-3).
+						if (error instanceof Error && error.name === OVERSIZED_RESULT_STOP) guardStopCause = "oversized_tool_result";
+						throw error;
+					});
 				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				const restored = context.installMemoryRestoration(localRuntime);
 				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
@@ -1930,7 +1939,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					});
 					// A harness stop is no transport failure: the record keeps its shape and names the harness's cause (bt-26 N2a).
 					const harnessCause =
-						terminal.stopReason === "aborted" && state.streamStallReason === null ? harnessAbortCause() : undefined;
+						terminal.stopReason === "aborted" && state.streamStallReason === null
+							? harnessAbortCause()
+							: terminal.stopReason === "error"
+								? (guardStopCause ?? undefined)
+								: undefined;
+					guardStopCause = null;
 					Object.assign(message, {
 						failure:
 							!failure.invoked && preInvocationStage === "budget admission"

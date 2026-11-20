@@ -205,6 +205,7 @@ export const NEVER_OFFER_CAUSES: ReadonlySet<FailureCause> = new Set<FailureCaus
 	"turn_timeout",
 	"output_cap",
 	"loop_guard",
+	"oversized_tool_result",
 	"shutdown",
 	"budget_wait_aborted",
 	"admission_refused",
