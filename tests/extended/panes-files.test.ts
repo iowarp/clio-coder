@@ -353,6 +353,7 @@ describe("contracts/files pane bridge", () => {
 		let draft = "";
 		let onEvent: YaziSessionOptions["onEvent"] | null = null;
 		let onStopped: YaziSessionOptions["onStopped"] | null = null;
+		let onChooser: YaziSessionOptions["onChooser"] | null = null;
 		const bridge = createYaziBridge({
 			mux: host.mux,
 			getDraft: () => draft,
@@ -363,11 +364,13 @@ describe("contracts/files pane bridge", () => {
 			notice: (_level, text) => notices.push(text),
 			getCwd: () => "/w",
 			getSettings: () => ({ mode: "companion", profile: "managed", followCwd: false }),
+			pickToken: () => "tok",
 			statPath: () => "file",
 			livenessMs: 60_000,
 			async openSession(options) {
 				onEvent = options.onEvent;
 				onStopped = options.onStopped ?? null;
+				onChooser = options.onChooser;
 				const pane = await host.mux.openUtilityPane({ argv: ["yazi"], cwd: options.cwd, label: "files" });
 				if (!pane) return { status: "unavailable", reason: "refused" };
 				return {
@@ -403,6 +406,8 @@ describe("contracts/files pane bridge", () => {
 			draft: () => draft,
 			pick: (token: string, path: string) =>
 				onEvent?.({ kind: "clio-coder-pick", sender: "1", receiver: "1", values: [token, path] }),
+			cd: (cwd: string) => onEvent?.({ kind: "cd", sender: "1", receiver: "1", tab: "0", cwd }),
+			choose: (paths: string[], cwd: string) => onChooser?.({ paths, cwd }),
 			gone: () => onStopped?.("pane-gone"),
 		};
 	}
@@ -426,6 +431,17 @@ describe("contracts/files pane bridge", () => {
 		strictEqual(host.calls.at(-1), "focus:self");
 		strictEqual(wired.bridge.isOpen(), false);
 		strictEqual(host.records.length, 0);
+	});
+
+	it("names a pick from a subdirectory relative to the workspace, not the pane's directory", async () => {
+		const host = fakeMux();
+		const wired = bridgeWith(host);
+		await wired.bridge.open();
+		wired.cd("/w/src");
+		wired.pick("tok", "/w/src/inner.txt");
+		strictEqual(wired.draft(), "@src/inner.txt");
+		wired.choose(["other.txt"], "/w/src");
+		strictEqual(wired.draft(), "@src/inner.txt @src/other.txt");
 	});
 
 	it("inserts a token-matched pick as an @ mention and hands the keyboard back", async () => {
