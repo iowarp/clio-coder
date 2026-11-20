@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve } from "node:path";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { effectiveToolCall, expandChainMessages } from "../../tools/surface.js";
 
 export type SessionArtifactTool = "artifact" | "write" | "edit";
@@ -36,7 +37,7 @@ function normalizedWorkspacePath(path: string, workspace: string): string | null
 	const root = resolve(workspace);
 	const target = isAbsolute(path) ? resolve(path) : resolve(root, path);
 	const rel = relative(root, target);
-	if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) return target;
+	if (rel === "" || !relativePathEscapes(rel)) return target;
 	return null;
 }
 
