@@ -1,7 +1,7 @@
 import { parseRunCliArgs } from "./args.js";
 
 export const RUN_USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--resume <id|prefix|name>|--continue] [--fork] [--name <text>] [--fail-on-noop] [--timeout <duration>] [--verify "<cmd>" [--verify-timeout <duration>]] [--max-cost-usd <N>] [--max-requests <N>] [--max-tool-calls <N>] [--sandbox required] [--require-priced] [--answers <file.yaml>] [--agent <recipe-id>] [--] "<task>"\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--output-format text|json|stream-json] [--resume <id|prefix|name>|--continue] [--fork] [--name <text>] [--fail-on-noop] [--timeout <duration>] [--verify "<cmd>" [--verify-timeout <duration>]] [--max-cost-usd <N>] [--max-requests <N>] [--max-tool-calls <N>] [--sandbox required] [--require-priced] [--answers <file.yaml>] [--agent <recipe-id>] [--] "<task>"\n';
 
 export const RUN_HELP = `clio-coder run [flags] [--] "<task>"
 
@@ -34,16 +34,9 @@ Flags:
   --frequency-penalty <N>   one-run frequency penalty override
   --repeat-penalty <N>      one-run repeat penalty override
   --max-context-tokens <N>  cap this run's context budget without enlarging the server window
-  --json                    stream JSONL frames, one JSON object per line; the first is a "session" header
-                            carrying schemaVersion; the last is {"type":"run_end",...} with the run's exitCode
-                            and outcome, or with --agent {"type":"result",...}
-  --json-events <mode>      full: progress and final answer in turn_end.message.content
-                            terminal: accounting and final answer in turn_end.text
-                            implies --json; refused with --agent
   --output-format <format>  text|json|stream-json: schema v2 output. json writes one {"type":"run_end",
                             "schemaVersion":2,...} envelope with exitCode, outcome and causes[]; stream-json
-                            writes a v2 session frame, the event frames, then that envelope; refused with
-                            --json and --json-events
+                            writes a v2 session frame, the event frames, then that envelope
   -o, --output-last-message <path>
                             with --output-format json|stream-json, write the final answer there on exit 0
   --output-schema <file.json>
@@ -120,7 +113,8 @@ when using --cwd.
 A headless turn starts a fresh session unless --resume or --continue names one
 to append to. A named session that cannot be resumed fails the run: an answer
 written without the history the caller asked for is worse than no answer. The
-session id is reported on stderr, and as the "session" event under --json.
+session id is reported on stderr, and as the "session" event under
+--output-format stream-json.
 
 --verify declares a check for this run alone, named run-acceptance (then
 run-acceptance-2, ...); nothing is written to .clio-coder/verifiers.yaml. The
@@ -128,8 +122,9 @@ finish gate treats it like a declared verifier: when the agent changes files
 and then runs the command through bash, as a whole && segment, it counts as a
 check. After the turn, the run itself runs each check with bash and reports it
 as {id, command, exitCode, passed, durationMs, timedOut, ranAfterLastEdit} in
-the terminal turn_end's "verify" array, in a {"type":"verify"} frame under
---json-events full, and on stderr in text mode. ranAfterLastEdit says whether
+a {"type":"verify"} frame under --output-format stream-json, in the run_end
+envelope's "verify" under --output-format json|stream-json, and on stderr in
+text mode. ranAfterLastEdit says whether
 the agent ran the check after its last edit. A failed check does not change
 the run's exit code. An interrupted run skips the checks.
 
@@ -190,8 +185,8 @@ run, and 1 for every other failure.
 
 A turn that ends by writing an artifact (plan/review/report) has no assistant
 message after it, because writing the artifact is the answer. Text mode prints
-that tool's result line, naming what was written and where; --json carries the
-artifact content itself in the event stream.
+that tool's result line, naming what was written and where; --output-format
+stream-json carries the artifact content itself in the event stream.
 `;
 
 /**
@@ -199,8 +194,7 @@ artifact content itself in the event stream.
  * other leaves'. Returns null when the arguments ask for a run.
  */
 export function answerRunHelp(args: ReadonlyArray<string>): number | null {
-	const parsed = parseRunCliArgs(args);
-	if (!parsed.help) return null;
-	(parsed.json ? process.stderr : process.stdout).write(RUN_HELP);
+	if (!parseRunCliArgs(args).help) return null;
+	process.stdout.write(RUN_HELP);
 	return 0;
 }

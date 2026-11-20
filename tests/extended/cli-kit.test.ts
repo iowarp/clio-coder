@@ -169,7 +169,7 @@ test("run exit precedence: the highest applying row sets the exit code and leads
 	equal(resolveRunExit([], { displayed: true }).outcome, "displayed");
 	// An exit-2 refusal is named by the diagnostic it wrote; anything else stays not_started.
 	for (const [diagnostics, code] of [
-		[["clio-coder run: --output-format cannot be combined with --json or --json-events"], "flag_conflict"],
+		[["clio-coder run: --deny-tools removes every tool --allow-tools names (read)"], "flag_conflict"],
 		[["clio-coder run: not configured: no model target is saved; run `clio-coder configure`"], "not_configured"],
 		[
 			[
@@ -182,6 +182,7 @@ test("run exit precedence: the highest applying row sets the exit code and leads
 		[["clio-coder run: empty task"], "empty_task"],
 		[["clio-coder run: `-` reads the task from stdin, but stdin is a terminal"], "empty_task"],
 		[["clio-coder run: unknown option: --bogus"], "unknown_flag"],
+		[["clio-coder run: unknown option: --json (removed in 0.8.5; use --output-format json|stream-json)"], "unknown_flag"],
 		[["clio-coder run: task file schemaVersion: this release reads version 1, got 2"], "schema_unsupported"],
 		[["clio-coder run: --systemone applies to the main agent, not --agent dispatch"], "flag_conflict"],
 		[

@@ -98,7 +98,14 @@ for (const scenario of ["clean", "recovered", "terminal-error"] as const) {
 			initializeScratchHome(scratch.dir);
 			seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), fixture.url, "yolo");
 			const direct = await run(
-				["run", "--json", "--autonomy", "yolo", "Write a report artifact containing exactly: fixture report"],
+				[
+					"run",
+					"--output-format",
+					"stream-json",
+					"--autonomy",
+					"yolo",
+					"Write a report artifact containing exactly: fixture report",
+				],
 				workspace,
 				env,
 			);
@@ -203,7 +210,7 @@ test("built headless artifact: a completed dispatch seals its assessment under a
 		// Pinned the way an outer harness pins it: an empty directory with no runs.json.
 		const stateDir = mkdtempSync(join(scratch.dir, "pinned-state-"));
 		const direct = await run(
-			["run", "--json", "--autonomy", "yolo", "Dispatch a worker, then write a report artifact"],
+			["run", "--output-format", "stream-json", "--autonomy", "yolo", "Dispatch a worker, then write a report artifact"],
 			workspace,
 			{ ...env, CLIO_CODER_STATE_DIR: stateDir },
 		);

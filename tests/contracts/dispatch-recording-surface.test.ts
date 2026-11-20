@@ -55,7 +55,7 @@ it("advertises and parses opt-in recording with shared defaults and per-task fal
 });
 
 it("CLI --record is opt-in, parses beside --agent, and refuses a main-agent run before boot", async () => {
-	const args = parseRunCliArgs(["--agent", "scout", "--record", "--json", "Inspect sources"]);
+	const args = parseRunCliArgs(["--agent", "scout", "--record", "--output-format", "json", "Inspect sources"]);
 	equal(args.record, true);
 	equal(args.agentId, "scout");
 	equal(args.json, true);

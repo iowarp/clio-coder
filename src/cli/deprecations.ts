@@ -86,9 +86,6 @@ const viaModule = (old: string, replacement: string, where: string, kind: Deprec
 /** One row per section 9 spelling, in the section's order. */
 export const DEPRECATED_SPELLINGS: ReadonlyArray<DeprecatedSpelling> = [
 	viaDispatcher("--acp", "acp", (words) => words[0] === "--acp"),
-	viaModule("run --json", "run --output-format stream-json", "src/cli/run.ts", "migration"),
-	viaModule("run --json-events full", "run --output-format stream-json", "src/cli/run.ts", "migration"),
-	viaModule("run --json-events terminal", "run --output-format json", "src/cli/run.ts", "migration"),
 	// The warning also feeds the run's failure record, so it keeps run's own `clio-coder run:` prefix.
 	viaModule("run --session <id>", "run --resume <id>", "src/cli/args.ts", "identical"),
 	viaModule("fleet run --json", "fleet run --output-format stream-json", "src/cli/fleet.ts", "migration"),

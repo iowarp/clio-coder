@@ -34,7 +34,7 @@ function run(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
 	});
 }
 
-// `run --json` elides streamed text from message_end, and the prose stream may
+// `run --output-format stream-json` elides streamed text from message_end, and the prose stream may
 // flush a held-back tail as its own delta, so read the reassembled answer.
 function streamedText(stdout: string): string {
 	return stdout
@@ -73,7 +73,7 @@ test("built native timing includes delayed response headers", async () => {
 		seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), fixture.url, "yolo");
 		const prompt = "Write timing-probe.txt containing exactly native timing fixture followed by a newline.";
 		const direct = await run(
-			["--no-context-files", "--no-skills", "run", "--json", "--autonomy", "yolo", prompt],
+			["--no-context-files", "--no-skills", "run", "--output-format", "stream-json", "--autonomy", "yolo", prompt],
 			workspace,
 			env,
 		);

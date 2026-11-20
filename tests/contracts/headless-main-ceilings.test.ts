@@ -14,7 +14,7 @@ import { makeScratchHome } from "../harness/scratch-env.js";
 
 /**
  * The headless main agent's enforced ceilings, read the way a host bridge
- * reads them: from the terminal json-events frame, never from prose.
+ * reads them: from the schema v2 envelope and the sealed receipt, never from prose.
  */
 async function terminalFrame(t: TestContext, toolCall: OpenAICompatToolCallScript, flags: string[]) {
 	const scratch = makeScratchHome("clio-headless-ceilings-");
@@ -31,7 +31,7 @@ async function terminalFrame(t: TestContext, toolCall: OpenAICompatToolCallScrip
 	const fixture = await startOpenAICompatFixture("done", { toolCall });
 	t.after(() => closeServer(fixture.server));
 	seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), fixture.url, "default");
-	const run = await runCli(["--no-context-files", "run", ...flags, "--json-events", "terminal", "Do the task."], {
+	const run = await runCli(["--no-context-files", "run", ...flags, "--output-format", "json", "Do the task."], {
 		env,
 		cwd: scratch.dir,
 	});
@@ -41,20 +41,22 @@ async function terminalFrame(t: TestContext, toolCall: OpenAICompatToolCallScrip
 		.filter((line) => line.startsWith("{"))
 		.map((line) => JSON.parse(line) as Record<string, unknown>);
 	const end = frames.at(-1);
-	ok(end && end.type === "turn_end", run.stdout);
-	return { code: run.code, end, dir: scratch.dir };
+	ok(end && end.type === "run_end" && end.schemaVersion === 2, run.stdout);
+	return { code: run.code, end, dir: scratch.dir, receipt: sealedReceipt(join(scratch.dir, "state")).receipt };
 }
 
 test("run --read-only denies the main agent's write and reports the ceiling that refused it", {
 	timeout: 30_000,
 }, async (t) => {
-	const { code, end, dir } = await terminalFrame(t, { name: "write", arguments: { path: "out.txt", content: "x" } }, [
-		"--read-only",
-	]);
+	const { code, end, dir, receipt } = await terminalFrame(
+		t,
+		{ name: "write", arguments: { path: "out.txt", content: "x" } },
+		["--read-only"],
+	);
 	strictEqual(code, 0);
 	strictEqual(existsSync(join(dir, "out.txt")), false);
 	strictEqual(end.outcome, "succeeded");
-	const attempts = (end.safety as { blockedAttempts: Array<Record<string, unknown>> }).blockedAttempts;
+	const attempts = receipt.settled.blockedAttempts as unknown as Array<Record<string, unknown>>;
 	deepStrictEqual(
 		attempts.map(({ tool, actionClass, reasonCode, permissionRequired }) => ({
 			tool,
@@ -82,14 +84,15 @@ test("run --read-only answers in full after a shell write and leaves the workspa
 test("a headless run reports an ask it could not put to anyone as a permission request", {
 	timeout: 30_000,
 }, async (t) => {
-	const { code, end, dir } = await terminalFrame(
+	const { code, end, dir, receipt } = await terminalFrame(
 		t,
 		{ name: "bash", arguments: { command: "curl -X POST http://127.0.0.1:9/never" } },
 		[],
 	);
 	strictEqual(code, 1);
 	strictEqual(end.outcome, "failed");
-	const safety = end.safety as {
+	// The v2 envelope carries no safety summary; the sealed receipt is the record a host reads it from.
+	const safety = receipt.settled as unknown as {
 		decisions: { permissionRequested: number };
 		blockedAttempts: Array<Record<string, unknown>>;
 		permissionRequestedAttempts?: Array<Record<string, unknown>>;
@@ -101,13 +104,7 @@ test("a headless run reports an ask it could not put to anyone as a permission r
 		safety.permissionRequestedAttempts?.map(({ tool, permissionRequired }) => ({ tool, permissionRequired })),
 		[{ tool: "bash", permissionRequired: true }],
 	);
-	// The sealed record lists the same ask, and its tools row does not count it as a blocked call (bt-15 c14a).
-	const { receipt } = sealedReceipt(join(dir, "state"));
-	deepStrictEqual(receipt.settled.blockedAttempts, []);
-	deepStrictEqual(
-		receipt.settled.permissionRequestedAttempts?.map(({ tool }) => tool),
-		[safety.permissionRequestedAttempts?.[0]?.tool],
-	);
+	// The sealed record's tools row does not count the ask as a blocked call (bt-15 c14a).
 	strictEqual(receipt.settled.tools.find((row) => row.tool === "bash")?.blocked, 0);
 	// FX-3: the row still sums, and evidence counts the refused ask as a call that did not run, as the run line does.
 	strictEqual(receipt.settled.tools.find((row) => row.tool === "bash")?.asked, 1);

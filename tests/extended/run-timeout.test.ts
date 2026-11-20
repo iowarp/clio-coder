@@ -212,16 +212,27 @@ describe("clio-coder run --timeout", () => {
 				{ kind: "tool", name: "bash", arguments: { command: "grep -qx 5 calc.txt && echo OK" } },
 			],
 			"default",
-			["--json-events", "terminal", "--verify", "grep -qx 5 calc.txt", "--verify", "exit 3", "--verify-timeout", "30"],
+			[
+				"--output-format",
+				"stream-json",
+				"--verify",
+				"grep -qx 5 calc.txt",
+				"--verify",
+				"exit 3",
+				"--verify-timeout",
+				"30",
+			],
 		);
 		strictEqual(turn.code, 0, turn.stderr);
 		doesNotMatch(turn.stdout, /ran no check/);
-		const end = JSON.parse(turn.stdout.trim().split("\n").at(-1) ?? "{}") as {
-			type?: string;
-			verify?: Array<Record<string, unknown>>;
-		};
-		strictEqual(end.type, "turn_end");
-		const [accepted, failing] = end.verify ?? [];
+		// The stream's verify frame: each check as the run ran it after the turn, in flag order.
+		const frame = turn.stdout
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { type?: string; checks?: Array<Record<string, unknown>> })
+			.find((event) => event.type === "verify");
+		ok(frame, turn.stdout);
+		const [accepted, failing] = frame.checks ?? [];
 		ok(typeof accepted?.durationMs === "number");
 		strictEqual(
 			JSON.stringify({ ...accepted, durationMs: 0 }),

@@ -476,7 +476,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			strictEqual(JSON.parse(doctor.stdout).ok, true);
 
 			const prompt = "CLI_CORE_ONE_TURN";
-			const turn = await runCli(["--no-context-files", "--no-skills", "run", "--json-events", "terminal", prompt], {
+			const turn = await runCli(["--no-context-files", "--no-skills", "run", "--output-format", "stream-json", prompt], {
 				env: scratch.env,
 			});
 			strictEqual(turn.code, 0, turn.stderr);
@@ -485,10 +485,13 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 				.split("\n")
 				.map((line) => JSON.parse(line) as Record<string, unknown>);
 			const types = events.map((event) => event.type);
-			for (const type of ["session", "turn_start", "agent_end", "turn_end"]) ok(types.includes(type), turn.stdout);
-			const settled = [...events].reverse().find((event) => event.type === "turn_end");
+			for (const type of ["session", "turn_start", "agent_end", "turn_end", "run_end"])
+				ok(types.includes(type), turn.stdout);
+			const settled = events.at(-1);
+			strictEqual(settled?.type, "run_end");
+			strictEqual(settled?.schemaVersion, 2);
 			strictEqual(settled?.exitCode, 0);
-			strictEqual(settled?.text, "core reply");
+			strictEqual((settled?.result as { text?: string } | undefined)?.text, "core reply");
 			ok(typeof settled?.endedAt === "string");
 			ok(
 				requests.some((request) => JSON.stringify(request.messages).includes(prompt)),

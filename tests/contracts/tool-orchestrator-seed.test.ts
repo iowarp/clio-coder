@@ -43,10 +43,13 @@ describe("tool-orchestrator seed", { concurrency: false }, () => {
 			seedOpenAICompatToolOrchestrator(scratch.configDir, fixture.url, seeded);
 			const marker = `SEEDED_AUTONOMY_${seeded.toUpperCase()}_${(flag ?? "none").toUpperCase()}`;
 			const autonomyArgs = flag ? ["--autonomy", flag] : [];
-			const result = await runCli(["--no-context-files", "--no-skills", "run", ...autonomyArgs, "--json", marker], {
-				env: scratch.env,
-				cwd: scratch.root,
-			});
+			const result = await runCli(
+				["--no-context-files", "--no-skills", "run", ...autonomyArgs, "--output-format", "stream-json", marker],
+				{
+					env: scratch.env,
+					cwd: scratch.root,
+				},
+			);
 			strictEqual(result.code, 0, result.stderr);
 
 			const request = fixture.requests.find((entry) => JSON.stringify(entry.messages).includes(marker));

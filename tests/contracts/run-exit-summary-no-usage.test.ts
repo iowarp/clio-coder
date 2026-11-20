@@ -99,9 +99,7 @@ test("a v2 run_end counts a safety-judge side call in usage.side and usage.total
 	const callIdOf = (records: TelemetryRecord[]) =>
 		records.flatMap((record) => (record.k === "call.started" ? [record.data.callId] : []));
 	const { stdout } = await captured(() =>
-		withRunResultV2({ format: "json", mode: "main", verify: [] }, () =>
-			runStub(false, { mode: "json", jsonEvents: "full", runUsage }),
-		),
+		withRunResultV2({ format: "json", mode: "main", verify: [] }, () => runStub(false, { mode: "json", runUsage })),
 	);
 	const lines = stdout.trim().split("\n");
 	const envelope = JSON.parse(lines[lines.length - 1] ?? "{}") as {

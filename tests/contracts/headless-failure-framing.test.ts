@@ -35,7 +35,7 @@ const answerMessage = (text: string): object => ({
 async function stdoutAfterCitationCheck(
 	answer: string,
 	reply: string,
-	mode: "text" | "json" | "json-full",
+	mode: "text" | "json",
 	stderr: string[] = [],
 ): Promise<string> {
 	let handler: (event: unknown) => void = () => {};
@@ -82,8 +82,7 @@ async function stdoutAfterCitationCheck(
 			chat as never,
 			{
 				prompt: "x",
-				mode: mode === "text" ? "text" : "json",
-				...(mode === "json" ? { jsonEvents: "terminal" as const } : {}),
+				mode,
 				shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
 			} as never,
 		);
@@ -108,10 +107,8 @@ test("a reply to a citation check that holds only corrections keeps the answer i
 				.filter(Boolean)
 				.map((line) => JSON.parse(line))
 				.filter((frame) => frame.type === "turn_end");
-		const [end] = frames(await stdoutAfterCitationCheck(answer, reply, "json"));
-		strictEqual(end.text, `${answer}\n\n${reply}`);
-		// Full mode's last turn_end.message is where its answer lives (bt-29).
-		const full = frames(await stdoutAfterCitationCheck(answer, reply, "json-full")).at(-1);
+		// The JSON stream's last turn_end.message is where its answer lives (bt-29); schema v2 reframes it.
+		const full = frames(await stdoutAfterCitationCheck(answer, reply, "json")).at(-1);
 		strictEqual(full.message.content[0].text, `${answer}\n\n${reply}`);
 	} finally {
 		env.restore();
@@ -313,7 +310,6 @@ async function writtenCallRun(
 			{
 				prompt: "How many rows?",
 				mode: format === undefined ? "text" : "json",
-				...(format !== undefined ? { jsonEvents: "full" as const } : {}),
 				shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
 			} as never,
 		);
@@ -322,7 +318,7 @@ async function writtenCallRun(
 			format !== undefined
 				? await withRunResultV2({ format, mode: "main", verify: [] }, run)
 				: output !== undefined
-					? await withRunFailureReporting(false, run, false, output)
+					? await withRunFailureReporting(run, output)
 					: await run();
 		return { code, stdout: stdout.join(""), stderr: stderr.join("") };
 	} finally {

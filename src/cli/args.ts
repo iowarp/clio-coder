@@ -35,15 +35,16 @@ export interface RunSamplingArgs {
 	repeatPenalty?: number;
 }
 
-export type RunJsonEventsMode = "full" | "terminal";
-
 export interface RunCliArgs {
 	/** Explicit display capture for --agent dispatch; omitted preserves the default. */
 	record?: boolean;
 	constraints?: TurnConstraints;
 	help: boolean;
+	/**
+	 * The run writes JSON (`--output-format json|stream-json`). The parser leaves it false: runClioRun sets it for schema
+	 * v2, whose writer reframes the JSON stream underneath. `--json` and `--json-events` were removed in 0.8.5.
+	 */
 	json: boolean;
-	jsonEvents: RunJsonEventsMode;
 	target?: string;
 	model?: string;
 	thinking?: JobThinkingLevel;
@@ -101,7 +102,7 @@ export interface RunCliArgs {
 	verifyTimeoutSeconds?: number;
 	/** `--answers`: the file that scripts the author's answers for a headless run. */
 	answersFile?: string;
-	/** `--output-format`: schema v2 output; absent keeps `--json`, `--json-events` and text output unchanged. */
+	/** `--output-format`: schema v2 output; absent keeps text output unchanged. */
 	outputFormat?: RunOutputFormat;
 	/** `-o/--output-last-message`: the file that receives the final answer when the run exits 0. */
 	outputLastMessage?: string;
@@ -250,7 +251,6 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		help: false,
 		readOnly: false,
 		json: false,
-		jsonEvents: "full",
 		required: [],
 		noSkills: false,
 		continueSession: false,
@@ -263,9 +263,6 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		diagnostics: [],
 	};
 
-	let jsonEventsGiven = false;
-	let jsonGiven = false;
-	let outputFormatGiven = false;
 	for (let i = 0; i < argv.length; i += 1) {
 		const arg = argv[i];
 		const need = (flag: string): string | null => {
@@ -295,15 +292,20 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			parsed.worktree = true;
 			continue;
 		}
-		if (arg === "--json") {
-			jsonGiven = true;
-			parsed.json = true;
+		// Removed in 0.8.5 (maintainer ruling): an unknown option (C17 `unknown_flag`) that names its replacement. A
+		// `--json-events` value is taken with it so the refusal names the flag alone.
+		if (arg === "--json" || arg === "--json-events" || arg?.startsWith("--json-events=")) {
+			if (arg === "--json-events" && (argv[i + 1] === "full" || argv[i + 1] === "terminal")) i += 1;
+			parsed.diagnostics.push({
+				type: "error",
+				slug: "unknown_flag",
+				message: `unknown option: ${arg === "--json" ? arg : "--json-events"} (removed in 0.8.5; use --output-format json|stream-json)`,
+			});
 			continue;
 		}
 		// Read where it stands, before any other flag is judged, so a run whose other flags fail still frames that
 		// failure in the format it asked for.
 		if (arg === "--output-format" || arg?.startsWith("--output-format=")) {
-			outputFormatGiven = true;
 			const value = arg === "--output-format" ? need(arg) : arg.slice("--output-format=".length);
 			if (value !== null) {
 				if (isRunOutputFormat(value)) parsed.outputFormat = value;
@@ -336,16 +338,6 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--trust-task-file") {
 			parsed.trustTaskFile = true;
-			continue;
-		}
-		if (arg === "--json-events") {
-			jsonEventsGiven = true;
-			const value = need(arg);
-			if (value !== null) {
-				parsed.json = true;
-				if (value === "full" || value === "terminal") parsed.jsonEvents = value;
-				else parsed.diagnostics.push({ type: "error", message: "--json-events must be one of: full|terminal" });
-			}
 			continue;
 		}
 		if (arg === "--target") {
@@ -660,30 +652,6 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 	}
 	if (parsed.failOnVerify === true && parsed.verify.length === 0) {
 		parsed.diagnostics.push({ type: "error", message: "--fail-on-verify applies only with --verify" });
-	}
-	// Only the main-agent stream reads the mode (cli/modes/print.ts); a dispatch
-	// took the flag and printed its usual stream.
-	if (parsed.agentId !== undefined && jsonEventsGiven) {
-		parsed.diagnostics.push({
-			type: "error",
-			message: "--json-events applies to the main agent; use --json with --agent dispatch",
-		});
-	}
-	// The v1 and v2 surfaces are separate contracts; one run speaks one of them.
-	// The v1 projection is frozen (SPEC 6.6); a plan in JSON is the v2 envelope's.
-	if (parsed.dryRun === true && (jsonGiven || jsonEventsGiven)) {
-		parsed.diagnostics.push({
-			type: "error",
-			slug: "flag_conflict",
-			message: "--dry-run prints its plan as JSON with --output-format json, not --json or --json-events",
-		});
-	}
-	if (outputFormatGiven && (jsonGiven || jsonEventsGiven)) {
-		parsed.diagnostics.push({
-			type: "error",
-			slug: "flag_conflict",
-			message: "--output-format cannot be combined with --json or --json-events",
-		});
 	}
 	const toolConflict = parsed.constraints === undefined ? undefined : toolLimitConflict(parsed.constraints);
 	if (toolConflict !== undefined)

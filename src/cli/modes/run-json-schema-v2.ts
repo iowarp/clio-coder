@@ -1,7 +1,8 @@
 /**
  * Headless run output, schema v2 (`run --output-format text|json|stream-json`).
  *
- * v1 (`--json`, `--json-events`) stays frozen in `run-json-schema.ts`. v2 adds a
+ * v1, the internal frames v2 reframes, stays in `run-json-schema.ts` (its `--json` and `--json-events` spellings were
+ * removed in 0.8.5). v2 adds a
  * typed result envelope as the last frame, a `causes[]` list in place of one
  * failure string, per-check verify states, and an exit code chosen by one
  * precedence function. An absent value is an absent key: v2 never sends `null`

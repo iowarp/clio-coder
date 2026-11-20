@@ -4,14 +4,13 @@ import path from "node:path";
 import { readClioVersion } from "../core/package-root.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import { redactUrlCredentials } from "../domains/safety/redaction.js";
-import { serializeJsonLine, setFrameProjector, writeFrame } from "./modes/jsonl.js";
+import { serializeJsonLine, setFrameProjector } from "./modes/jsonl.js";
 import type {
 	RunJsonDispatchedRunOutcome,
 	RunJsonDispatchSettlementFrame,
 	RunJsonFrame,
 	RunJsonResultFrame,
 	RunJsonRunEndFrame,
-	RunJsonTerminalTurnEndFrame,
 	RunJsonVerifyFrame,
 	RunJsonVerifyResult,
 } from "./modes/run-json-schema.js";
@@ -39,13 +38,6 @@ interface RunFailureState {
 }
 
 const runFailureState = new AsyncLocalStorage<RunFailureState>();
-
-/** A full-mode `run --json` stream ends with exactly one `run_end` (S-51); the headless run notes the one it wrote. */
-let runEndWritten = false;
-
-export function noteRunEndWritten(): void {
-	runEndWritten = true;
-}
 
 export function writeRunDiagnostic(text: string): void {
 	// A diagnostic can quote a failure's message, and it reaches stderr and a turn_end frame's error alike (#446).
@@ -84,9 +76,7 @@ const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
 	[/^clio-coder run: .* apply to the main-agent task/u, "flag_conflict"],
 	[/^clio-coder run: @\S+: image attachments go to the main agent, not --agent dispatch/u, "flag_conflict"],
 	[/^clio-coder run: fleet dispatch flags require --agent /u, "flag_conflict"],
-	[/--output-format cannot be combined with --json or --json-events/u, "flag_conflict"],
 	[/--deny-tools removes every tool --allow-tools names /u, "flag_conflict"],
-	[/--dry-run prints its plan as JSON with --output-format json/u, "flag_conflict"],
 	// SPEC 6.2, 6.3: the task envelope's refusals (src/cli/task-envelope.ts).
 	[/--task-file carries the task and its attachments/u, "task_file_conflict"],
 	[/^clio-coder run: task file key \S+ is also given as /u, "task_flag_conflict"],
@@ -119,80 +109,15 @@ export function startRunOutput(): void {
 	if (state) state.pending = false;
 }
 
+/**
+ * A text-mode run (no `--output-format json|stream-json`, whose writer is withRunResultV2): `-o` keeps v2's semantics
+ * (SPEC 6.6, CLI-P14, CLI-P22) and leaves every byte text mode prints as it was written.
+ */
 export async function withRunFailureReporting(
-	json: boolean,
 	run: () => Promise<number>,
-	fullMainStream = false,
 	output?: OutputLastMessageRequest,
 ): Promise<number> {
-	// CLI-P14, CLI-P22: `-o` beside --json or in text mode keeps v2's semantics (SPEC 6.6) and leaves every v1 frame and
-	// every byte text mode prints as it was written.
-	const execute = output === undefined ? run : () => withOutputLastMessage(output, json, run);
-	if (!json) return execute();
-	const state: RunFailureState = { pending: true };
-	const startedAt = new Date().toISOString();
-	runEndWritten = false;
-	const runEndFrame = (exitCode: number): RunJsonRunEndFrame => ({
-		type: "run_end",
-		startedAt,
-		endedAt: new Date().toISOString(),
-		exitCode,
-		error: state.diagnostic || `clio-coder run failed (exit ${exitCode})`,
-		outcome: exitCode === 124 ? "timed_out" : "failed",
-	});
-	const runEndOwed = (exitCode: number): boolean => {
-		if (!fullMainStream || exitCode === 0 || isStdoutDead() || runEndWritten) return false;
-		runEndWritten = true;
-		return true;
-	};
-	const failureFrame = (exitCode: number): RunJsonTerminalTurnEndFrame => ({
-		type: "turn_end",
-		startedAt,
-		endedAt: new Date().toISOString(),
-		exitCode,
-		text: "",
-		error: state.diagnostic || `clio-coder run failed before output started (exit ${exitCode})`,
-		outcome: exitCode === 124 ? "timed_out" : "failed",
-	});
-	// Audit finding 9: coordinated boot shutdown calls process.exit, which cannot await a stdout flush.
-	const onExit = (exitCode: number): void => {
-		if (exitCode === 0 || isStdoutDead()) return;
-		if (state.pending) {
-			state.pending = false;
-			writeSync(1, `${JSON.stringify(failureFrame(exitCode))}\n`);
-		}
-		if (runEndOwed(exitCode)) writeSync(1, `${JSON.stringify(runEndFrame(exitCode))}\n`);
-	};
-	process.once("exit", onExit);
-	return runFailureState.run(state, async () => {
-		try {
-			const code = await execute();
-			let wrote = false;
-			if (state.pending && code !== 0) {
-				state.pending = false;
-				writeFrame(failureFrame(code));
-				wrote = true;
-			}
-			if (runEndOwed(code)) {
-				writeFrame(runEndFrame(code));
-				wrote = true;
-			}
-			if (wrote) await flushRawStdout();
-			return code;
-		} catch (error) {
-			const diagnostic = redactUrlCredentials(error instanceof Error ? error.message : String(error));
-			if (state.pending) {
-				state.pending = false;
-				state.diagnostic = diagnostic;
-				writeFrame(failureFrame(1));
-			}
-			if (runEndOwed(1)) writeFrame({ ...runEndFrame(1), error: state.diagnostic || diagnostic });
-			if (!isStdoutDead()) await flushRawStdout();
-			throw error;
-		} finally {
-			process.off("exit", onExit);
-		}
-	});
+	return output === undefined ? run() : withOutputLastMessage(output, run);
 }
 
 /** The answer text mode printed on stdout, the validated structured JSON when there is one; `-o` holds it (CLI-P22). */
@@ -204,27 +129,15 @@ export function noteTextAnswer(text: string): void {
 }
 
 /**
- * SPEC 6.6 `-o` outside schema v2: the stale file goes at preflight, a missing directory is exit 2 before the run, and
- * the answer is written by temp file and rename only on exit 0. v1 JSON reads the answer from its `turn_end` frames,
- * text mode from what it printed; a failed write is exit 1.
+ * SPEC 6.6 `-o` in text mode: the stale file goes at preflight, a missing directory is exit 2 before the run, and the
+ * answer, what text mode printed, is written by temp file and rename only on exit 0; a failed write is exit 1.
  */
-async function withOutputLastMessage(
-	output: OutputLastMessageRequest,
-	json: boolean,
-	run: () => Promise<number>,
-): Promise<number> {
+async function withOutputLastMessage(output: OutputLastMessageRequest, run: () => Promise<number>): Promise<number> {
 	const resolved = resolveOutputTarget(output);
 	if (!prepareOutputTarget(resolved)) return 2;
-	let text = "";
 	structuredNote = undefined;
 	textAnswer = undefined;
-	if (json)
-		setFrameProjector((frame) => {
-			const answer = turnAnswer(frame);
-			if (answer !== null) text = answer;
-			return frame;
-		});
-	const answer = (): string => (json ? (structuredAnswerJson() ?? text) : (textAnswer ?? ""));
+	const answer = (): string => textAnswer ?? "";
 	// CLI-P22: a coordinated shutdown ends a successful run with process.exit before run() returns, as under v2; the
 	// file is still written then, synchronously, and a failed write still moves the exit code to 1.
 	let settled = false;
@@ -244,7 +157,6 @@ async function withOutputLastMessage(
 		code = await run();
 	} finally {
 		process.off("exit", onExit);
-		if (json) setFrameProjector(null);
 	}
 	if (settle(code)) return code;
 	writeRunDiagnostic(`clio-coder run: --output-last-message could not be written: ${resolved}\n`);
@@ -285,11 +197,9 @@ function writeOutputFile(resolved: string, bytes: string): boolean {
 	}
 }
 
-/** The answer a v1 `turn_end` frame carries: what text mode prints on stdout. */
+/** The answer a streamed `turn_end` frame carries in its assistant message: what text mode prints on stdout. */
 function turnAnswer(frame: RunJsonFrame): string | null {
-	if (frame.type !== "turn_end") return null;
-	const carried = (frame as { text?: unknown }).text;
-	return answerText(frame) ?? (typeof carried === "string" ? carried : null);
+	return frame.type === "turn_end" ? answerText(frame) : null;
 }
 
 /** What the headless main agent tells a v2 writer directly: facts no v1 frame carries. */
@@ -314,11 +224,6 @@ interface StructuredNoteV2 {
 }
 
 let structuredNote: StructuredNoteV2 | undefined;
-
-/** The validated `--output-schema` JSON the run noted, which `-o` holds instead of the answer text (SPEC 6.8). */
-function structuredAnswerJson(): string | undefined {
-	return structuredNote?.json;
-}
 
 /** Hand the v2 writer the structured-output verdict (main or `--agent`); a no-op shape for runs without the flag. */
 export function noteStructuredV2(note: StructuredNoteV2): void {

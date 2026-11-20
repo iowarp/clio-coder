@@ -39,15 +39,27 @@ describe("headless run --autonomy", { concurrency: false }, () => {
 	}
 
 	it("compiles a headless run at the --autonomy level instead of the saved one", async () => {
-		const saved = await runCli(["--no-context-files", "--no-skills", "run", "--json", "HEADLESS_AUTONOMY_SAVED"], {
-			env: scratch.env,
-			cwd: scratch.root,
-		});
+		const saved = await runCli(
+			["--no-context-files", "--no-skills", "run", "--output-format", "stream-json", "HEADLESS_AUTONOMY_SAVED"],
+			{
+				env: scratch.env,
+				cwd: scratch.root,
+			},
+		);
 		strictEqual(saved.code, 0, saved.stderr);
 		match(systemPromptFor("HEADLESS_AUTONOMY_SAVED"), /Autonomy: default\./u);
 
 		const overridden = await runCli(
-			["--no-context-files", "--no-skills", "run", "--autonomy", "yolo", "--json", "HEADLESS_AUTONOMY_FLAG"],
+			[
+				"--no-context-files",
+				"--no-skills",
+				"run",
+				"--autonomy",
+				"yolo",
+				"--output-format",
+				"stream-json",
+				"HEADLESS_AUTONOMY_FLAG",
+			],
 			{ env: scratch.env, cwd: scratch.root },
 		);
 		strictEqual(overridden.code, 0, overridden.stderr);
