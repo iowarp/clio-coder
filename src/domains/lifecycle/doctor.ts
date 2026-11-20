@@ -87,9 +87,15 @@ function tightenToOwnerOnly(path: string): number | null {
 /**
  * The win32 "credentials" row from the file's `icacls` listing: an allow ACE
  * for anyone beyond the account, SYSTEM and Administrators lets another local
- * account read or replace the key, which `--fix` removes.
+ * account read or replace the key, which `--fix` removes. `removed` names the
+ * principals a `--fix` in this run took off the ACL.
  */
-export function windowsCredentialsFinding(path: string, acl: WindowsAclRead, account: WindowsAccount): DoctorFinding {
+export function windowsCredentialsFinding(
+	path: string,
+	acl: WindowsAclRead,
+	account: WindowsAccount,
+	removed: readonly string[] = [],
+): DoctorFinding {
 	if ("error" in acl) {
 		return {
 			ok: true,
@@ -99,7 +105,10 @@ export function windowsCredentialsFinding(path: string, acl: WindowsAclRead, acc
 		};
 	}
 	const extras = extraAclPrincipals(acl.output, path, account);
-	if (extras.length === 0) return { ok: true, name: "credentials", detail: path };
+	if (extras.length === 0) {
+		const detail = removed.length === 0 ? path : `${path}; removed ${removed.join(", ")} from its ACL`;
+		return { ok: true, name: "credentials", detail };
+	}
 	return {
 		ok: true,
 		level: "warn",
@@ -492,6 +501,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 	let repairFailure: string | null = null;
 	let settingsRepair: SettingsRepairResult | null = null;
 	let settingsTightenedFrom: number | null = null;
+	let credentialsAclRemoved: string[] = [];
 	const rootsTightened: string[] = [];
 	if (options.fix) {
 		// A repair that throws used to take the whole report with it, so the one
@@ -525,8 +535,12 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 			const credentialsPath = join(resolveClioDirs().config, "credentials.yaml");
 			if (existsSync(credentialsPath)) {
 				chmodSync(credentialsPath, 0o600);
+				// Who held an ACE before the repair, so the row can say what it removed.
+				const before = process.platform === "win32" ? readWindowsAcl(credentialsPath) : null;
 				const aclFailure = applyOwnerOnlyAcl(credentialsPath);
 				if (aclFailure !== null) throw new Error(`could not make ${credentialsPath} owner-only: ${aclFailure}`);
+				if (before !== null && "output" in before)
+					credentialsAclRemoved = extraAclPrincipals(before.output, credentialsPath, currentWindowsAccount());
 			}
 		} catch (error) {
 			repairFailure = error instanceof Error ? error.message : String(error);
@@ -695,7 +709,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 				// which other accounts can read or replace the key.
 				findings.push(
 					damage === null
-						? windowsCredentialsFinding(creds, readWindowsAcl(creds), currentWindowsAccount())
+						? windowsCredentialsFinding(creds, readWindowsAcl(creds), currentWindowsAccount(), credentialsAclRemoved)
 						: { ok: false, name: "credentials", detail: damage },
 				);
 			} else {
