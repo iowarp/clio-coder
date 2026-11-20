@@ -1625,6 +1625,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			messagePath.queueEvent(event);
 			steerInterrupter.poke();
 		},
+		recordHostMessage: (source, message) => {
+			hostInserts.record(source, [message]);
+		},
 	});
 
 	const hostInserts = createHostInserts({
@@ -1646,6 +1649,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		stepTurnEnd: () => stepTurnEnd(),
 		hostCompletionFacts: () => (headlessObservation?.stopped() === true ? ["observation_budget"] : []),
 		suppressFirings: (firingIds) => outcomeCollector.suppressFirings(firingIds),
+		queueHostMessage: (text, source) => queues.queueHostMessage(text, source),
+	});
+	// A reminder an after_tool rule emits for this session's call rides the next tool-batch boundary (X6).
+	const detachBoundaryReminders = deps.toolRegistry?.onToolBoundaryReminders?.((reminders, input) => {
+		if (input.sessionId === undefined || input.sessionId === deps.session?.current()?.id)
+			middleware.applyToolBoundaryReminders(reminders);
 	});
 
 	try {
@@ -1872,7 +1881,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		readSessionEntries: deps.readSessionEntries,
 		getSettings: deps.getSettings,
 		middlewareToolChoice,
-		consumePersistedEcho: (text) => queues.consumePersistedEcho(text),
+		// A host message the queue handed over is already written as a host insert; it files no user turn.
+		consumePersistedEcho: (text) => queues.acknowledgeHostInjected(text) || queues.consumePersistedEcho(text),
 		removeQueuedMirrorEntry: (text) => queues.acknowledgeInjected(text)?.origin,
 		promptCachePayloadForAssistant: (usage, backend, anthropicResponse, transport) =>
 			context.promptCachePayloadForAssistant(usage, backend, anthropicResponse, transport),
@@ -4949,6 +4959,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			unsubscribeSynthesisLock?.();
 			unsubscribeToolBudgetLock?.();
 			detachOutcomeLedger?.();
+			detachBoundaryReminders?.();
 			unsubscribePrewarmCompaction();
 			prewarm.dispose();
 			keepalive.dispose();

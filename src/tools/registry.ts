@@ -37,6 +37,7 @@ import type {
 	MiddlewareHookInput,
 	MiddlewareHookResult,
 	MiddlewareMetadataValue,
+	MiddlewareReminderSeverity,
 	ToolCallLanding,
 } from "../domains/middleware/types.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
@@ -994,6 +995,21 @@ export interface ToolRegistry {
 	 * call, so neither needs a state here. Returns an unsubscribe handle.
 	 */
 	onAdmissionReview?(listener: (event: AdmissionReviewEvent) => void): () => void;
+	/**
+	 * Subscribe to the reminders synchronous after_tool middleware emitted for a call, for the session that delivers
+	 * them at the tool-batch boundary. Returns an unsubscribe handle.
+	 */
+	onToolBoundaryReminders?(
+		listener: (reminders: ReadonlyArray<ToolBoundaryReminder>, input: MiddlewareHookInput) => void,
+	): () => void;
+}
+
+/** An `inject_reminder` emitted at after_tool, with the rule that emitted it. */
+export interface ToolBoundaryReminder {
+	message: string;
+	ruleId: string;
+	severity?: MiddlewareReminderSeverity;
+	audience?: "model";
 }
 
 /** One step of the safety judge's hold on a started call, keyed by the engine's tool call id. */
@@ -1215,6 +1231,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		(call: ClassifierCall, decision: SafetyDecision, meta: PermissionRequiredMeta) => void
 	>();
 	const admissionReviewListeners = new Set<(event: AdmissionReviewEvent) => void>();
+	const boundaryReminderListeners = new Set<
+		(reminders: ReadonlyArray<ToolBoundaryReminder>, input: MiddlewareHookInput) => void
+	>();
 	let approvalRequestCounter = 0;
 	const approvalRequestToken = randomBytes(4).toString("hex");
 
@@ -1639,7 +1658,8 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		if (!deps.middleware) return [];
 		const input = hookInput(hook, spec, call, decision, options, result, resultDigest);
 		const startedAt = performance.now();
-		const effects = noteGuardRule(deps.middleware.runHook(input));
+		const ran = deps.middleware.runHook(input);
+		const effects = noteGuardRule(ran);
 		options?.onHookTime?.(performance.now() - startedAt);
 		try {
 			deps.onMiddlewareEffects?.(effects, input);
@@ -1647,7 +1667,38 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			// A provider-routing sink is advisory to this call. It may narrow the
 			// next request, but it must never throw through tool admission.
 		}
+		if (hook === "after_tool" && boundaryReminderListeners.size > 0) passBoundaryReminders(ran, input);
 		return effects;
+	};
+
+	/**
+	 * An `inject_reminder` a synchronous after_tool registration emits is no annotation, so this call's result does
+	 * not carry it. It passes through to the session that owns the run, which delivers it at the tool-batch boundary
+	 * (exploration design 3.3, X6). Each reminder names the rule that emitted it.
+	 */
+	const passBoundaryReminders = (ran: MiddlewareHookResult, input: MiddlewareHookInput): void => {
+		const reminders: ToolBoundaryReminder[] = [];
+		let offset = 0;
+		for (const rule of ran.fired ?? []) {
+			for (const effect of ran.effects.slice(offset, offset + rule.effects.length)) {
+				if (effect.kind !== "inject_reminder") continue;
+				reminders.push({
+					message: effect.message,
+					ruleId: rule.ruleId,
+					...(effect.severity !== undefined ? { severity: effect.severity } : {}),
+					...(effect.audience !== undefined ? { audience: effect.audience } : {}),
+				});
+			}
+			offset += rule.effects.length;
+		}
+		if (reminders.length === 0) return;
+		for (const listener of boundaryReminderListeners) {
+			try {
+				listener(reminders, input);
+			} catch {
+				// Delivery is the session's; its failure never changes this call.
+			}
+		}
 	};
 
 	/**
@@ -3009,6 +3060,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			admissionReviewListeners.add(listener);
 			return () => {
 				admissionReviewListeners.delete(listener);
+			};
+		},
+		onToolBoundaryReminders(listener) {
+			boundaryReminderListeners.add(listener);
+			return () => {
+				boundaryReminderListeners.delete(listener);
 			};
 		},
 	};

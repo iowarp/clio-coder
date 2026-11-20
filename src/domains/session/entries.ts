@@ -159,6 +159,7 @@ export const HOST_INSERT_SOURCES = [
 	"repetition-recovery",
 	"thinking-length-recovery",
 	"synthesis-recovery",
+	"read-streak",
 ] as const;
 export type HostInsertSource = (typeof HOST_INSERT_SOURCES)[number];
 

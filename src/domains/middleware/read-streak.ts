@@ -28,6 +28,12 @@ import { type MiddlewareEffect, type MiddlewareHookInput, metadataNumber, turnCa
  * per session, so a continuation or a budget roll neither resets nor double
  * counts it; an operator's own turn and a session change reset it. Both
  * classifiers are passed in, so this domain imports no engine module.
+ *
+ * Channels (X6). The first note rides the read that crossed the line, as a
+ * tool-result note. The second and last notes, the answer note and the
+ * standalone serial note are `inject_reminder` effects: the main session
+ * delivers one at the tool-batch boundary as a host-framed user message,
+ * the channel the weakest models answer.
  */
 
 export const READ_STREAK_REGISTRATION_ID = "nudge.read-streak";
@@ -164,6 +170,11 @@ function outerChain(input: MiddlewareHookInput): boolean {
 	);
 }
 
+/** A note for the model alone, delivered at the tool-batch boundary as a host message where the session has one. */
+function hostNote(message: string): MiddlewareEffect {
+	return { kind: "inject_reminder", message, severity: "info", audience: "model" };
+}
+
 type CallEffect = "read" | "progress" | "other";
 
 export function createReadStreakRegistration(deps: {
@@ -239,12 +250,14 @@ export function createReadStreakRegistration(deps: {
 				state.serialNoted = true;
 			}
 			context?.evidence?.(STREAK_EVIDENCE);
-			return [{ kind: "annotate_tool_result", message, severity: "info" }];
+			return [
+				state.reads === FIRST_NOTE ? { kind: "annotate_tool_result", message, severity: "info" } : hostNote(message),
+			];
 		}
 		if (surface.canWrite && state.serial === SERIAL_ROUNDS && !state.serialNoted) {
 			state.serialNoted = true;
 			context?.evidence?.(SERIAL_EVIDENCE);
-			return [{ kind: "annotate_tool_result", message: serialNote(state.serial), severity: "info" }];
+			return [hostNote(serialNote(state.serial))];
 		}
 		return NONE;
 	};
