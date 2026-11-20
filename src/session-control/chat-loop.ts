@@ -1851,7 +1851,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	if (deps.turnOutcomeCollector === undefined) deps.middlewareRegistrar?.registerHook(outcomeCollector);
 	/** Settles every firing that costs a round, against the requests and typed facts that follow it (memory design 4.1). */
 	const detachOutcomeLedger = deps.bus
-		? outcomeCollector.attachLedger(deps.bus, () => deps.session?.current()?.id)
+		? outcomeCollector.attachLedger(
+				deps.bus,
+				() => deps.session?.current()?.id,
+				() => middleware.heldFirings(),
+			)
 		: null;
 
 	/**
@@ -2102,10 +2106,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		sessionId: () => deps.session?.current()?.id,
 		sessionOrigin: () => deps.session?.current() ?? null,
 		onModelRequestSent: (call) => {
-			messagePath.requestSent(call);
-			// The taken reminders rode this request, except any no longer current when it was composed.
-			middleware.takenRemindersSent();
-			outcomeCollector.requestSent(call.callId);
+			if (call !== null) messagePath.requestSent(call);
+			// Journaled or not, this request carried exactly what the middleware held for it, and admits only that.
+			outcomeCollector.requestSent(call?.callId ?? null, middleware.requestCarried());
 		},
 		onModelCallSettled: (facts) => messagePath.callSettled(facts),
 		requestCursor: () =>
@@ -3007,7 +3010,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				task: () => deps.currentOperatorTask?.() ?? "",
 				previous: () => (state.runtime ? lastAssistantText(state.runtime.agent.state.messages) : ""),
 				current: () => state.streaming && triageSnapshotMatches(asked, queues.entries()),
-				apply: (verdicts) => settleTriage(sessionId, verdicts, applyTriage(verdicts, triage.autoInterrupt)),
+				apply: (verdicts) =>
+					settleTriage(sessionId, verdicts, applyTriage(verdicts, triage.autoInterrupt)),
 				expired: (verdicts) => settleTriage(sessionId, verdicts, null),
 				side: () => runSideTriage(asked),
 			});
@@ -3350,8 +3354,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					mono: submittedAt,
 				});
 			let turnLease: TelemetrySessionLease | undefined;
-			/** The reminders this submit took for its request; a return before sending it suppresses their firings. */
-			let takenReminders: (() => string) | undefined;
+			/**
+			 * What this submit holds for its requests (the taken buffer, an armed tool choice, a flushed continuation, the
+			 * awaited gate's effects); a return before a request carries them suppresses their firings.
+			 */
+			const turnHolds = middleware.beginTurnHolds();
 			try {
 				await sessionResetSettlement;
 				if (!admissionCurrent()) return;
@@ -3684,7 +3691,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						...context.pinnedContextDelta(agentRuntime),
 					].filter((part) => part.length > 0),
 				);
-				takenReminders = reminderProjection;
 				// Pending skill requests are plain visible text in the user message
 				// itself: persisted in the ledger, no hidden prompt machinery.
 				const skillPreamble = pendingSkillRequestPreamble(pendingSkillRequests, agentRuntime.agent.state.tools);
@@ -4533,7 +4539,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 			} finally {
 				await turnLease?.release();
-				if (takenReminders !== undefined) middleware.releaseTakenReminders(takenReminders);
+				middleware.releaseTurnHolds(turnHolds);
 				returnUnstarted();
 				if (pathMessage && !promptStarted && options.queued === undefined) messagePath.neverStarted(pathMessage);
 				if (submitOwner === owner) {

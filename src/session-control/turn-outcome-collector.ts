@@ -35,12 +35,18 @@ export interface TurnOutcomeCollector extends MiddlewareHookRegistration {
 	/**
 	 * Start the outcome ledger on `hub`: it reads the settling firings of the session `currentSession` names off their
 	 * `middleware.fired` rows, and the loop guard's escalations, and writes one `surface.settled` per firing. A firing
-	 * joins the ledger under that session even before any hook of its turn ran (memory design 4.1, 4.6). The returned
-	 * stop settles every firing still open, as the session it belonged to is over.
+	 * joins the ledger under that session even before any hook of its turn ran (memory design 4.1, 4.6). `held` names
+	 * the firings whose effect still waits for a later request (a buffered reminder, an armed tool choice); at a turn's
+	 * end every other firing no request carried settles `suppressed`. The returned stop settles every firing still
+	 * open, as the session it belonged to is over.
 	 */
-	attachLedger(hub: TelemetryHub, currentSession: () => string | undefined): () => void;
-	/** A main request was sent: every firing waiting for admission rode it. */
-	requestSent(callId: string): void;
+	attachLedger(hub: TelemetryHub, currentSession: () => string | undefined, held: () => ReadonlySet<string>): () => void;
+	/**
+	 * A main request went out, journaled under `callId` or unjournaled (null). It admits the firings named in `carried`,
+	 * whose effects its composition holds, and the turn's own tool-hook firings, whose blocked result or tool choice
+	 * rides the next request of their run. Nothing else waiting is admitted.
+	 */
+	requestSent(callId: string | null, carried: ReadonlyArray<string>): void;
 	/** These firings' effects never entered a request (a spent nudge, a released buffer, an ended turn). */
 	suppressFirings(firingIds: ReadonlyArray<string>): void;
 	/**
@@ -63,6 +69,8 @@ interface OpenFiring {
 	surface: string;
 	/** A block settles `recovered` or `exhausted`; anything else that settles is a nudge, `acted` or `ignored`. */
 	kind: "nudge" | "block";
+	/** Fired by a tool hook: its effect rides the next request of its own run, or none. */
+	inRun: boolean;
 	sessionId: string;
 	turnId?: string;
 	/** The blocked call's identity: its own later success is not a recovery. */
@@ -142,6 +150,7 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 	// --- outcome ledger (memory design 4.1, 4.6) ---
 	let hub: TelemetryHub | null = null;
 	let currentSession: () => string | undefined = () => undefined;
+	let held: () => ReadonlySet<string> = () => new Set();
 	const open = new Map<string, OpenFiring>();
 	const identities = new Map<string, string>();
 	let admissions = 0;
@@ -167,16 +176,17 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		else settle(firing, "ignored", { kind: "none" });
 	};
 	/**
-	 * The admitted firings settle with the turn that carried them. A block is an effect inside its own turn, so one no
-	 * request carried before its turn ended never enters one: it is exhausted when the turn's tool use ended, otherwise
-	 * suppressed. A later turn's request does not carry it.
+	 * The admitted firings settle with the turn that carried them. A firing no request carried before its turn ended
+	 * never enters one unless its effect still waits in the buffer for the next request (a delayed nudge): a block is
+	 * exhausted when the turn's tool use ended, and every other one is suppressed. A later turn's request carries none.
 	 */
 	const endTurn = (): void => {
+		const waiting = held();
 		for (const firing of [...open.values()]) {
 			if (firing.admitted !== null) settleEnded(firing);
 			else if (firing.kind === "block" && firing.exhausted !== undefined)
 				settle(firing, "exhausted", { kind: "scope-end", ref: firing.exhausted });
-			else if (firing.kind === "block") settle(firing, "suppressed", { kind: "none" });
+			else if (!waiting.has(firing.firingId)) settle(firing, "suppressed", { kind: "none" });
 		}
 		turnExhausted = null;
 	};
@@ -242,6 +252,7 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 			firingId: payload.firingId,
 			surface: payload.ruleId,
 			kind: block ? "block" : "nudge",
+			inRun: payload.hook === "before_tool" || payload.hook === "after_tool",
 			sessionId: ctx.sessionId,
 			...(ctx.turnId !== undefined ? { turnId: ctx.turnId } : {}),
 			...(identity !== undefined ? { identity } : {}),
@@ -268,9 +279,10 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		hooks: ["turn_start", "before_tool", "after_tool", "turn_end"],
 		evidence: "observer:turn-outcome@turn",
 		clarificationStreak: () => previousClarificationStreak,
-		attachLedger(target, session) {
+		attachLedger(target, session, waiting) {
 			hub = target;
 			currentSession = session;
+			held = waiting;
 			const stops = [
 				target.subscribe("middleware.fired", (payload, ctx) => onFired(payload, ctx)),
 				target.subscribe("safety.loop_blocked", (payload, ctx) => {
@@ -287,12 +299,13 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 				if (hub === target) hub = null;
 			};
 		},
-		requestSent(callId) {
-			let carried = false;
-			for (const firing of [...open.values()]) {
-				if (firing.admitted !== null) continue;
-				if (!carried) admissions += 1;
-				carried = true;
+		requestSent(callId, carried) {
+			const named = new Set(carried);
+			let any = false;
+			for (const firing of open.values()) {
+				if (firing.admitted !== null || !(firing.inRun || named.has(firing.firingId))) continue;
+				if (!any) admissions += 1;
+				any = true;
 				firing.admitted = admissions;
 				firing.admittedIn = callId;
 			}
@@ -306,7 +319,15 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		settleHostFiring(owner, surface, outcome, fact) {
 			if (hub === null) return null;
 			const firingId = nextFiringId(owner);
-			const firing: OpenFiring = { firingId, surface, kind: "nudge", sessionId: owner, admittedIn: null, admitted: null };
+			const firing: OpenFiring = {
+				firingId,
+				surface,
+				kind: "nudge",
+				inRun: false,
+				sessionId: owner,
+				admittedIn: null,
+				admitted: null,
+			};
 			open.set(firingId, firing);
 			settle(firing, outcome, fact);
 			return firingId;

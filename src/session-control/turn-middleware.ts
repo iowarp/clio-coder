@@ -135,17 +135,29 @@ export interface TurnMiddleware {
 	flushPendingReminders(): string;
 	/**
 	 * Take the buffer for the turn's request. `leading` yields host-owned turn text that opens the block (turn scope,
-	 * prompt delta). The taken reminders wait for that request: `takenRemindersSent` when it goes out, or
-	 * `releaseTakenReminders` when the turn that took them ends without sending it.
+	 * prompt delta). The taken reminders wait for that request: `requestCarried` when it goes out, or the submit's
+	 * `releaseTurnHolds` when it ends without sending it.
 	 */
 	takePendingReminderProjection(leading?: () => readonly string[]): () => string;
 	/**
-	 * The request the last projection was composed into went out. A taken reminder its last composition left out (no
-	 * longer current) never entered it, so its firing settles `suppressed`; the rest ride that request.
+	 * A submit starts holding effects for its requests: what an earlier submit still holds was abandoned with it and
+	 * settles `suppressed`. The returned token releases this submit's holds and no later one's.
 	 */
-	takenRemindersSent(): void;
-	/** The turn that took the buffer into `projection` ended before sending it: no taken reminder entered a request. */
-	releaseTakenReminders(projection: () => string): void;
+	beginTurnHolds(): number;
+	/**
+	 * The submit `token` began ended: what it held for a request that never went out (a taken buffer, an armed tool
+	 * choice, a flushed continuation, an awaited gate's effects) never entered one. Buffered reminders stay for the next
+	 * request.
+	 */
+	releaseTurnHolds(token: number): void;
+	/**
+	 * A main request went out: the settling firings whose effects it carries (the taken reminders its last composition
+	 * held, an armed tool choice, a flushed continuation). A taken reminder the composition left out as no longer
+	 * current never entered it and settles `suppressed`. Each firing is named once.
+	 */
+	requestCarried(): string[];
+	/** The settling firings whose effect still waits for a request: buffered, taken, armed, flushed or gated. */
+	heldFirings(): ReadonlySet<string>;
 	clearPendingReminders(): void;
 	/**
 	 * Deliver a reminder produced after its own turn boundary already closed.
@@ -218,29 +230,48 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 	// can also drain at a native tool-batch boundary; session switches clear all.
 	const pendingReminders: PendingReminder[] = [];
 	/** The reminders the last projection took, and the ones its latest composition carried, until its request goes out. */
-	let taken: { entries: PendingReminder[]; carried: Set<PendingReminder>; projection?: () => string } | null = null;
-	const releaseFirings = (removed: ReadonlyArray<{ firingIds?: string[] }>): void => {
-		const ids = removed.flatMap((entry) => entry.firingIds ?? []);
+	let taken: { entries: PendingReminder[]; carried: Set<PendingReminder> } | null = null;
+	/** Settling firings whose effect is in place for the next main request: a tool choice, a flushed continuation. */
+	const armed = new Set<string>();
+	/** The awaited turn_start gate's firings, from the gate until fireTurnStart applies their effects. */
+	const gated = new Set<string>();
+	/** The submit whose holds these are; a release from any other is not this one's to make. */
+	let holdToken = 0;
+	const entryFirings = (entries: ReadonlyArray<PendingReminder>): string[] =>
+		entries.flatMap((entry) => entry.firingIds ?? []);
+	const heldFirings = (): Set<string> =>
+		new Set([...entryFirings(pendingReminders), ...entryFirings(taken?.entries ?? []), ...armed, ...gated]);
+	/** Settle `suppressed` the firings of `ids` whose effect nothing holds any longer. */
+	const releaseFirings = (ids: ReadonlyArray<string>): void => {
 		if (ids.length === 0) return;
-		const carried = new Set(pendingReminders.flatMap((entry) => entry.firingIds ?? []));
-		const released = ids.filter((id) => !carried.has(id));
+		const held = heldFirings();
+		const released = [...new Set(ids)].filter((id) => !held.has(id));
 		if (released.length > 0) deps.suppressFirings?.(released);
 	};
-	/** Settle the taken reminders: those `kept` rode the request, every other one never entered a request. */
-	const settleTaken = (kept: ReadonlySet<PendingReminder>): void => {
-		if (taken === null) return;
-		const rode = new Set([...kept].flatMap((entry) => entry.firingIds ?? []));
-		const dropped = taken.entries.filter((entry) => !kept.has(entry));
+	/** Settle the taken reminders: those `kept` rode the request, whose firings it returns; the rest entered none. */
+	const settleTaken = (kept: ReadonlySet<PendingReminder>): string[] => {
+		if (taken === null) return [];
+		const rode = new Set(entryFirings([...kept]));
+		const dropped = entryFirings(taken.entries.filter((entry) => !kept.has(entry)));
 		taken = null;
 		// A firing whose reminder and continuation are separate entries entered the request if either did.
-		releaseFirings(dropped.map((entry) => ({ firingIds: (entry.firingIds ?? []).filter((id) => !rode.has(id)) })));
+		releaseFirings(dropped.filter((id) => !rode.has(id)));
+		return [...rode];
+	};
+	/** What the submits so far held for a request that never went out entered none; the buffer stays. */
+	const abandonHeld = (): void => {
+		const ids = [...armed, ...gated];
+		armed.clear();
+		gated.clear();
+		settleTaken(new Set());
+		releaseFirings(ids);
 	};
 	const dropStale = () => {
-		const removed: Array<{ firingIds?: string[] }> = [];
+		const removed: PendingReminder[] = [];
 		for (let index = pendingReminders.length - 1; index >= 0; index--) {
 			if (pendingReminders[index]?.isCurrent?.() === false) removed.push(...pendingReminders.splice(index, 1));
 		}
-		releaseFirings(removed);
+		releaseFirings(entryFirings(removed));
 	};
 
 	/** True when the message is in the buffer afterwards, its own entry or an identical one already there. */
@@ -561,7 +592,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		firings: ReadonlyMap<MiddlewareEffect, string> = new Map(),
 	): void => {
 		middlewareToolChoice.apply(effects);
-		// A tool-choice effect shapes this turn's request; a reminder enters it when buffered. Nothing else applies here.
+		// A tool-choice effect is armed for the turn's next request; a reminder enters it when buffered. Nothing else
+		// applies here.
 		const entered = new Set<string>();
 		for (const effect of effects) {
 			const firingId = firings.get(effect);
@@ -570,7 +602,10 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					entered.add(firingId);
 			} else if (effect.kind === "notify_operator") {
 				notifyOperator(effect.message, effect.key);
-			} else if ((effect.kind === "lock_tools" || effect.kind === "require_tool") && firingId) entered.add(firingId);
+			} else if ((effect.kind === "lock_tools" || effect.kind === "require_tool") && firingId) {
+				armed.add(firingId);
+				entered.add(firingId);
+			}
 		}
 		suppressUnentered(firings, entered);
 	};
@@ -629,7 +664,9 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			// verifies every plugin tree once for all turn_start registrations.
 			const started = withPluginDiscoveryPass(() => runMiddlewareTurnHook(input));
 			applyTurnStartEffects(started.effects, started.firings);
-			if (awaited !== undefined) applyTurnStartEffects(awaited.effects, awaited.firings);
+			if (awaited === undefined) return;
+			for (const firingId of awaited.firings.values()) gated.delete(firingId);
+			applyTurnStartEffects(awaited.effects, awaited.firings);
 		},
 
 		async awaitTurnStart(agentRuntime, promptText, pendingSkillRequestCount = 0, userTurnId): Promise<TurnStartGate> {
@@ -642,9 +679,14 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				const firings = firingsOf(result);
 				const refusal = effects.find((effect) => effect.kind === "block_tool");
 				// A refused turn sends no request, so nothing its gate fired can enter one.
-				if (refusal !== undefined) suppressUnentered(firings, new Set());
-				// An admitted turn's effects keep their firings, so the ones that never enter its request settle suppressed.
-				return refusal !== undefined ? { refusal: refusal.reason } : { refusal: null, effects, firings };
+				if (refusal !== undefined) {
+					suppressUnentered(firings, new Set());
+					return { refusal: refusal.reason };
+				}
+				// An admitted turn's gate holds its firings until fireTurnStart applies them; a submit that returns first
+				// releases them unsent.
+				for (const firingId of firings.values()) gated.add(firingId);
+				return { refusal: null, effects, firings };
 			} catch (error) {
 				reportHookFailure(input.hook, error);
 			}
@@ -733,11 +775,11 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			// Observation is not recovery authority. No reminder or continuation
 			// may restart a failed or operator-canceled foreground turn.
 			if (stopReason === "aborted") {
-				const removed: Array<{ firingIds?: string[] }> = [];
+				const removed: PendingReminder[] = [];
 				for (let index = pendingReminders.length - 1; index >= 0; index--) {
 					if (pendingReminders[index]?.deferred) removed.push(...pendingReminders.splice(index, 1));
 				}
-				releaseFirings(removed);
+				releaseFirings(entryFirings(removed));
 			}
 			if (stopReason === "error" || stopReason === "aborted") {
 				suppressUnentered(firings, entered);
@@ -810,35 +852,44 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			const entries = pendingReminders.splice(0);
 			const own: NonNullable<typeof taken> = { entries, carried: new Set() };
 			taken = own;
-			const projection = (): string => {
+			return (): string => {
 				const current = entries.filter((entry) => entry.isCurrent?.() !== false);
 				own.carried = new Set(current);
 				const messages = [...new Set([...leading(), ...current.map((entry) => entry.message)])];
 				return messages.length ? systemReminderBlock(messages) : "";
 			};
-			own.projection = projection;
-			return projection;
 		},
-		takenRemindersSent(): void {
-			if (taken !== null) settleTaken(taken.carried);
+		beginTurnHolds(): number {
+			abandonHeld();
+			holdToken += 1;
+			return holdToken;
 		},
-		releaseTakenReminders(projection): void {
-			// Another turn's projection is its own to settle.
-			if (taken?.projection === projection) settleTaken(new Set());
+		releaseTurnHolds(token): void {
+			// A later submit's holds are its own to release.
+			if (token === holdToken) abandonHeld();
 		},
+		requestCarried(): string[] {
+			const rode = taken === null ? [] : settleTaken(taken.carried);
+			const carried = [...new Set([...armed, ...rode])];
+			armed.clear();
+			return carried;
+		},
+		heldFirings,
 		flushPendingReminders(): string {
 			dropStale();
 			if (pendingReminders.length === 0) return "";
 			// Severity affects host actions, not the text delivered to the model.
 			// A paired continuation/info and reminder/warn still needs one copy.
 			const messages = [...new Set(pendingReminders.map((entry) => entry.message))];
-			pendingReminders.length = 0;
+			// The flushed text rides the run's next request; a run that ends first releases it unsent.
+			for (const firingId of entryFirings(pendingReminders.splice(0))) armed.add(firingId);
 			return systemReminderBlock(messages);
 		},
 
 		clearPendingReminders(): void {
-			settleTaken(new Set());
-			releaseFirings(pendingReminders.splice(0));
+			const buffered = entryFirings(pendingReminders.splice(0));
+			abandonHeld();
+			releaseFirings(buffered);
 		},
 
 		injectDeferredReminder(message, severity = "advisory", isCurrent, source = "reminder"): void {
