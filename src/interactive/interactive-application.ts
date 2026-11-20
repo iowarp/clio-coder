@@ -77,6 +77,7 @@ import { presentContextCommands } from "./context-command-presentation.js";
 import { dispatchCouncilThroughRegistry } from "./council-dispatch.js";
 import { createDetachedBatchWake, detachedBatchDecisions } from "./detached-batch-wake.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
+import { dockTop } from "./dock.js";
 import { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS, RESTORED_DRAFT_NOTICE } from "./editor-submit.js";
 import { renderExitSummary, renderExitWithoutConversation } from "./exit-summary.js";
 import { createExitSummaryCollector } from "./exit-summary-collector.js";
@@ -1318,11 +1319,33 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		for (const controller of submitExpansions) controller.abort();
 		return true;
 	};
-	// The arcade egg owns every key while it is open; closing it hands the TUI back as it was.
+	// The arcade egg owns every key while it is open; closing it hands the TUI back as it was. An approval or an
+	// ask_user card puts it away with the board kept, and the trigger phrase brings it back where it stopped.
 	let arcade: ArcadeSession | null = null;
+	const arcadeNeedsOperator = (): boolean =>
+		overlayLifecycle?.getState() === "permission-confirm" || dockTop(tui)?.frame.dockAwaitingInput?.() === true;
 	const openArcadeEgg = (text: string): boolean => {
 		if (!isArcadeTrigger(text) || arcade?.isOpen()) return false;
-		arcade = openArcadeOverlay(tui);
+		if (arcade?.isPaused()) {
+			if (!arcade.resume())
+				notifications.add({
+					level: "info",
+					key: "arcade:paused",
+					text: "Ms. Clio waits until Clio's question is answered",
+					ttlMs: 4_000,
+				});
+			return true;
+		}
+		arcade = openArcadeOverlay(tui, {
+			needsOperator: arcadeNeedsOperator,
+			onPause: () =>
+				notifications.add({
+					level: "info",
+					key: "arcade:paused",
+					text: "Ms. Clio paused: Clio needs you · type the phrase again to play on",
+					ttlMs: 6_000,
+				}),
+		});
 		return true;
 	};
 
