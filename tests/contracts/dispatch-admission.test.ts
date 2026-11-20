@@ -768,6 +768,7 @@ describe("dispatch admission boundary", () => {
 			for (const [task, paths] of [
 				[`Read \`${root}/paper/method.md\` and report`, ["paper/method.md"]],
 				[`Read "${root}/paper/method.md" and report`, ["paper/method.md"]],
+				[`List "${root}/paper/background/" and report`, ["paper/background"]],
 			] as const) {
 				const { request, notices } = normalized(task);
 				strictEqual(notices.length, 1, task);
@@ -792,7 +793,10 @@ describe("dispatch admission boundary", () => {
 	it("normalizes write_roots: [] and undeclared builders in a parallel batch to read-only runs with notices (XR-60, row 146, M2)", () => {
 		const auto = { approvedAuthorities: ["read-only" as const], authorityBasis: "yolo-policy" as const };
 		const resolveIntent = (raw: unknown) => {
-			const roots = (raw as { write_roots?: string[] } | undefined)?.write_roots ?? [];
+			const declared = raw as { write_roots?: string[]; verification?: Array<{ check: string }> } | undefined;
+			// As intent resolution does, "." names the whole workspace and resolves to no root.
+			const roots = (declared?.write_roots ?? []).filter((root) => !/^\.\/?$/u.test(root));
+			const checks = (declared?.verification ?? []).map(({ check }) => ({ check, timeoutMs: 1_000 }));
 			return {
 				ok: true as const,
 				intent: {
@@ -800,9 +804,9 @@ describe("dispatch admission boundary", () => {
 					readRoots: [],
 					relevantPaths: [],
 					expectedOutputs: [],
-					verification: [],
+					verification: checks,
 				} as unknown as NonNullable<Parameters<typeof resolveDispatchPathScope>[0]["intent"]>,
-				resolvedVerification: [],
+				resolvedVerification: checks.map((entry) => ({ ...entry, argv: ["true"], cwd: process.cwd() })),
 			};
 		};
 		const specs = [
@@ -810,8 +814,13 @@ describe("dispatch admission boundary", () => {
 			{ id: "debugger", capabilityClass: "verification" },
 			{ id: "scout", capabilityClass: "read-only" },
 		] as unknown as AgentSpec[];
-		const normalized = (args: Record<string, unknown>) => {
-			const parsed = dispatchRequestsFromArgs(args, { auto, resolveIntent, workspaceRoot: process.cwd() });
+		const normalized = (args: Record<string, unknown>, named: string[] = []) => {
+			const parsed = dispatchRequestsFromArgs(args, {
+				auto,
+				resolveIntent,
+				workspaceRoot: process.cwd(),
+				operatorNamedChecks: () => named,
+			});
 			ok(parsed.ok, JSON.stringify(parsed));
 			const requests = [...parsed.requests];
 			const notices = normalizeDispatchAdmission({ args, requests, positions: parsed.positions, mode: "parallel", specs });
@@ -887,6 +896,32 @@ describe("dispatch admission boundary", () => {
 			[true, false],
 		);
 		strictEqual(beside.requests[0]?.executionRole, "researcher");
+		// Evidence of a write keeps the builder: an explicit "." write root, or a check the operator named in the turn.
+		const coderBesideScout = (intent?: Record<string, unknown>) => ({
+			mode: "parallel",
+			tasks: [
+				{ agent: "coder", task: "Fix the cache", ...(intent !== undefined ? { intent } : {}) },
+				{ agent: "scout", task: "Map the tests" },
+			],
+		});
+		const dotted = normalized(coderBesideScout({ write_roots: ["."] }));
+		const checked = normalized(coderBesideScout(), ["test"]);
+		const declaredNone = normalized(coderBesideScout({ write_roots: [] }), ["test"]);
+		deepStrictEqual(
+			[dotted, checked, declaredNone].map(({ requests }) => [
+				requests[0]?.readOnly === true,
+				requests[0]?.executionRole,
+				(requests[0]?.resolvedVerification ?? []).map((entry) => entry.check),
+			]),
+			[
+				[false, "builder", []],
+				[false, "builder", ["test"]],
+				[true, "builder", []],
+			],
+		);
+		deepStrictEqual([dotted.notices, checked.notices], [[], []]);
+		// The explicit no-write declaration stands, and the check it drops is named.
+		match(declaredNone.notices.join("\n"), /checks the operator named \(test\) do not run on it/u);
 		// A single task is not a batch, and writers: 1 asks for serialized writers: both left alone.
 		const serialized = normalized({
 			mode: "parallel",

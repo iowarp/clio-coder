@@ -51,6 +51,28 @@ function declaresEmptyWriteRoots(itemArgs: Record<string, unknown>): boolean {
 }
 
 /**
+ * The member named a write root. `write_roots: ["."]` names the whole workspace, and intent
+ * resolution drops the entry because an empty list already means no boundary, so the
+ * resolved roots cannot tell it from a member that declared nothing.
+ */
+function declaresWriteRoots(itemArgs: Record<string, unknown>): boolean {
+	const roots = isRecord(itemArgs.intent) ? itemArgs.intent.write_roots : undefined;
+	return (
+		(Array.isArray(roots) && roots.length > 0) || (Array.isArray(itemArgs.writeRoots) && itemArgs.writeRoots.length > 0)
+	);
+}
+
+/** Check ids on the parsed request: the operator's named checks parse merged in, since callers exclude a member's own. */
+function attachedChecks(request: DispatchRequest): string[] {
+	return [
+		...new Set([
+			...(request.intent?.verification ?? []).map((entry) => entry.check),
+			...(request.resolvedVerification ?? []).map((entry) => entry.check),
+		]),
+	];
+}
+
+/**
  * Run the request read-only. Verification on it can only be the operator's
  * named checks parse merged in (callers exclude a member that declared its
  * own), and a read-only run changes nothing for them to judge.
@@ -123,15 +145,23 @@ export function normalizeDispatchAdmission(input: DispatchNormalizeInput): strin
 		const itemArgs = memberArgs(index);
 		const capabilityClass = classes.get(request.agentId);
 		if (!mayRunReadOnly(request, itemArgs, capabilityClass) || !declaresEmptyWriteRoots(itemArgs)) continue;
+		const dropped = attachedChecks(request);
 		requests[index] = readOnly(request);
-		if (capabilityClass === "read-only") continue;
+		if (capabilityClass === "read-only" && dropped.length === 0) continue;
+		// The coordinator's explicit no-write declaration stands; the operator's checks it drops are named.
+		const checks =
+			dropped.length > 0
+				? ` The checks the operator named (${dropped.join(", ")}) do not run on it: a read-only run changes nothing for them to judge.`
+				: "";
 		notices.push(
-			`${NOTICE_PREFIX} ${label(index)} runs read-only: its intent.write_roots: [] declares no writes, so it gets the read-only tool surface and changes no files; declare write roots or use worktree: true for a task that writes.`,
+			`${NOTICE_PREFIX} ${label(index)} runs read-only: its intent.write_roots: [] declares no writes, so it gets the read-only tool surface and changes no files; declare write roots or use worktree: true for a task that writes.${checks}`,
 		);
 	}
 
 	// Row 146 (DESIGN 4.7): in a parallel batch a builder that declared nothing to write or produce is
 	// inspection: role explorer (`researcher` in ExecutionRole), no writes. writers: 1 asks for serialized writers.
+	// The reading is inferred, so it yields to evidence of a write: a named write root ("." included) or a check
+	// the operator named in the turn, which expects a change for the merge gate to judge.
 	if (mode === "parallel" && requests.length > 1 && args.writers !== 1) {
 		for (const [index, request] of requests.entries()) {
 			const itemArgs = memberArgs(index);
@@ -141,6 +171,8 @@ export function normalizeDispatchAdmission(input: DispatchNormalizeInput): strin
 				capabilityClass === undefined ||
 				capabilityClass === "read-only" ||
 				!mayRunReadOnly(request, itemArgs, capabilityClass) ||
+				declaresWriteRoots(itemArgs) ||
+				attachedChecks(request).length > 0 ||
 				canonicalWriteRoots(request).length > 0 ||
 				(request.intent?.expectedOutputs.length ?? 0) > 0
 			)

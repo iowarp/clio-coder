@@ -19,7 +19,8 @@ const SCHEME_URI_RE = /\b(?!file:)[A-Za-z][A-Za-z0-9+.-]+:\/\/\S+/giu;
 // A home path (`~/notes/plan.md`) names the operator's home, never a repository path. Left in, the token grammar
 // starts at its slash and reads `/notes/plan.md`, an absolute path the prose never wrote.
 const HOME_PATH_RE = /(?<![\w.~/-])~\/[^\s"'`)]*/gu;
-const POSIX_ABSOLUTE_TOKEN_RE = /(?:^|[\s("'`])((?:\/[\w.~+-]+)+)/gu;
+// Group 2 holds a directory's trailing slash, so a quoted "<root>/src/" closes right after the match.
+const POSIX_ABSOLUTE_TOKEN_RE = /(?:^|[\s("'`])((?:\/[\w.~+-]+)+)(\/?)/gu;
 const WINDOWS_ABSOLUTE_TOKEN_RE = /(?:^|[\s("'])([A-Za-z]:[\\/][^\s"']+)/gu;
 // A sentence that ends on a path ("... in /repo/src.") puts its period on the token.
 const TRAILING_SENTENCE_DOTS_RE = /(?<=[^/.])\.+$/u;
@@ -271,8 +272,8 @@ export const WORKING_DIRECTORY_PHRASE = "the working directory";
  * token outside the workspace stays absolute, and legacy inference still refuses it. The
  * leading-slash reading applies only when no such host path exists and the workspace holds it,
  * so "/etc/passwd" stays as written. A token opened by a quote or backtick is rewritten only when
- * that quote closes right after it: a quoted path that runs on ("<root> archive/a.md") names
- * another place, so it stays as written for inference to refuse.
+ * that quote closes right after it or after its trailing slash: a quoted path that runs on
+ * ("<root> archive/a.md") names another place, so it stays as written for inference to refuse.
  */
 export function relativizeWorkspaceAbsoluteTokens(
 	text: string,
@@ -280,25 +281,28 @@ export function relativizeWorkspaceAbsoluteTokens(
 ): { text: string; rewrites: Array<{ from: string; to: string }> } {
 	const base = resolve(root);
 	const rewrites: Array<{ from: string; to: string }> = [];
-	const rewritten = text.replace(POSIX_ABSOLUTE_TOKEN_RE, (match: string, raw: string, offset: number) => {
-		const prefix = match.slice(0, match.length - raw.length);
-		const opener = prefix.at(-1);
-		if ((opener === '"' || opener === "'" || opener === "`") && text[offset + match.length] !== opener) return match;
-		const token = raw.replace(TRAILING_SENTENCE_DOTS_RE, "");
-		const trailing = raw.slice(token.length);
-		const local = relative(base, token);
-		let to: string | null = null;
-		if (local === "") to = WORKING_DIRECTORY_PHRASE;
-		else if (local !== ".." && !local.startsWith("../") && !isAbsolute(local)) to = local;
-		else {
-			const anchored = token.slice(1);
-			const walks = anchored.split("/").some((segment) => segment === ".." || segment === ".");
-			if (!walks && !existsSync(token) && existsSync(resolve(base, anchored))) to = anchored;
-		}
-		if (to === null) return match;
-		rewrites.push({ from: token, to });
-		return `${prefix}${to}${trailing}`;
-	});
+	const rewritten = text.replace(
+		POSIX_ABSOLUTE_TOKEN_RE,
+		(match: string, raw: string, slash: string, offset: number) => {
+			const prefix = match.slice(0, match.length - raw.length - slash.length);
+			const opener = prefix.at(-1);
+			if ((opener === '"' || opener === "'" || opener === "`") && text[offset + match.length] !== opener) return match;
+			const token = raw.replace(TRAILING_SENTENCE_DOTS_RE, "");
+			const trailing = raw.slice(token.length);
+			const local = relative(base, token);
+			let to: string | null = null;
+			if (local === "") to = WORKING_DIRECTORY_PHRASE;
+			else if (local !== ".." && !local.startsWith("../") && !isAbsolute(local)) to = local;
+			else {
+				const anchored = token.slice(1);
+				const walks = anchored.split("/").some((segment) => segment === ".." || segment === ".");
+				if (!walks && !existsSync(token) && existsSync(resolve(base, anchored))) to = anchored;
+			}
+			if (to === null) return match;
+			rewrites.push({ from: token, to });
+			return `${prefix}${to}${trailing}${to === WORKING_DIRECTORY_PHRASE ? "" : slash}`;
+		},
+	);
 	return { text: rewritten, rewrites };
 }
 
