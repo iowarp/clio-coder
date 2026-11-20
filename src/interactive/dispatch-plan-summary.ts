@@ -17,6 +17,8 @@ export interface PlanMember {
 	target: string | null;
 	model: string | null;
 	task: string | null;
+	/** The bounds the plan signs for this worker's run, in the plan's own words; null when it states none. */
+	limits: string | null;
 }
 
 export interface PlanSummary {
@@ -34,6 +36,7 @@ const HEAD = /^dispatch plan: topology=(\S+) tasks=(\d+)/u;
 const TASK =
 	/^\s+\d+\.(?: role=(\S+))? agent=(\S+)(?: target=(\S+))?(?: model=(\S+))?.*? task_preview=("(?:[^"\\]|\\.)*")/u;
 const COUNCIL = /^\s+council label=(\S+)/u;
+const LIMITS = /^\s+limits: (.+)$/u;
 const COST = /^advisory session cost baseline: (.+)$/u;
 const DEADLINE = /^deadline: (.+)$/u;
 
@@ -69,6 +72,7 @@ export function readDispatchPlan(text: string): PlanSummary | null {
 				target: task[3] ?? null,
 				model: task[4] ?? null,
 				task: preview(task[5] ?? ""),
+				limits: null,
 			});
 			continue;
 		}
@@ -76,6 +80,11 @@ export function readDispatchPlan(text: string): PlanSummary | null {
 		const last = members.at(-1);
 		if (council && last) {
 			last.label = council[1] ?? last.label;
+			continue;
+		}
+		const limits = LIMITS.exec(line);
+		if (limits && last) {
+			last.limits = limits[1] ?? null;
 			continue;
 		}
 		const costLine = COST.exec(line);
@@ -143,15 +152,23 @@ function headlineNamesTask(summary: PlanSummary): boolean {
 export function planFacts(summary: PlanSummary): Array<{ label: string; value: string }> {
 	const route = (member: PlanMember): string =>
 		[member.target, member.model].filter((part): part is string => part !== null).join(" · ");
+	// Bounds every worker shares are stated once under the members; differing ones follow their worker.
+	const firstLimits = summary.members[0]?.limits ?? null;
+	const sharedLimits =
+		firstLimits !== null && summary.members.every((member) => member.limits === firstLimits) ? firstLimits : null;
 	return [
 		...(summary.sharedTask !== null && !headlineNamesTask(summary) ? [{ label: "task", value: summary.sharedTask }] : []),
-		...summary.members.map((member, index) => ({
-			label: member.label ?? `#${index + 1}`,
-			value: [
-				`${member.agent}${route(member).length > 0 ? ` on ${route(member)}` : ""}`,
-				...(summary.sharedTask === null && member.task !== null ? [member.task] : []),
-			].join(": "),
-		})),
+		...summary.members.flatMap((member, index) => [
+			{
+				label: member.label ?? `#${index + 1}`,
+				value: [
+					`${member.agent}${route(member).length > 0 ? ` on ${route(member)}` : ""}`,
+					...(summary.sharedTask === null && member.task !== null ? [member.task] : []),
+				].join(": "),
+			},
+			...(sharedLimits === null && member.limits !== null ? [{ label: "limits", value: member.limits }] : []),
+		]),
+		...(sharedLimits !== null ? [{ label: "limits", value: sharedLimits }] : []),
 		...(summary.cost !== null ? [{ label: "cost", value: summary.cost }] : []),
 		...(summary.deadline !== null ? [{ label: "deadline", value: summary.deadline }] : []),
 	];

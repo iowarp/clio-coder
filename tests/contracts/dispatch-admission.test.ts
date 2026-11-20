@@ -51,6 +51,7 @@ import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claud
 import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import copilotSdkRuntime from "../../src/domains/providers/runtimes/copilot/copilot-sdk.js";
 import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { planFacts, readDispatchPlan } from "../../src/interactive/dispatch-plan-summary.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { dispatchRequestsFromArgs } from "../../src/tools/dispatch-arguments.js";
 import { normalizeDispatchAdmission } from "../../src/tools/dispatch-normalize.js";
@@ -288,6 +289,13 @@ describe("dispatch admission boundary", () => {
 			unpriced,
 			/limits: unpriced route: each response stops at 600 s, and the run has no wall-clock bound unless timeout_ms is set; Clio stops it at 300 tool calls/u,
 		);
+		// The approval card's Plan rows carry the same limits text the plan signs, once when both workers share it.
+		const card = readDispatchPlan(unpriced);
+		ok(card);
+		const cardLimits = planFacts(card).filter((fact) => fact.label === "limits");
+		strictEqual(cardLimits.length, 1, unpriced);
+		ok(unpriced.split("\n").includes(`    limits: ${cardLimits[0]?.value}`), unpriced);
+		match(cardLimits[0]?.value ?? "", /Clio stops it at 300 tool calls/u);
 		match(
 			await planText(copilotSdkRuntime, "gpt-6-luna", 0, { timeout_ms: 120000 }),
 			/limits: unpriced route: each response stops at 600 s, and the call's timeout_ms stops the run within 120000 ms; Clio stops it at 300 tool calls/u,
