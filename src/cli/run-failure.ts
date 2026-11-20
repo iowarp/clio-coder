@@ -136,6 +136,18 @@ interface MainRunNoteV2 {
 
 let v2Started: number | null = null;
 let v2StreamJson = false;
+/** Steer frames read before the session frame went out; null once it has. */
+let heldSteer: string[] | null = null;
+let textSummary = false;
+
+/** `--output-format text` asks the main run for one stderr summary line once it settles. */
+export function requestRunTextSummary(): void {
+	textSummary = true;
+}
+
+export function runTextSummaryRequested(): boolean {
+	return textSummary;
+}
 let mainRunNote: MainRunNoteV2 = {};
 
 /** True while a `--output-format json|stream-json` run is being written, so v1 runs pay for nothing v2 reads. */
@@ -158,7 +170,9 @@ export function noteSteerV2(line: number, accepted: boolean): void {
 	const frame: RunSteerFrameV2 = accepted
 		? { type: "steer", line, status: "accepted" }
 		: { type: "steer", line, status: "refused", reason: "no turn was streaming to take the line" };
-	writeRawStdout(serializeJsonLine(frame));
+	// The session frame is always first: a line read before it waits for it.
+	if (heldSteer !== null) heldSteer.push(serializeJsonLine(frame));
+	else writeRawStdout(serializeJsonLine(frame));
 }
 
 /** A `run --output-format json|stream-json` request, as far as the v2 writer needs it. */
@@ -228,6 +242,13 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
 			// v2 never sends null: a pending session has no `id` key at all.
 			const rewritten: Record<string, unknown> = { ...frame, schemaVersion: RUN_RESULT_SCHEMA_VERSION };
 			for (const [key, value] of Object.entries(rewritten)) if (value === null) delete rewritten[key];
+			const held = heldSteer;
+			heldSteer = null;
+			// writeFrame writes the returned session frame synchronously; held steer frames follow it.
+			if (held !== null && held.length > 0)
+				queueMicrotask(() => {
+					if (!isStdoutDead()) writeRawStdout(held.join(""));
+				});
 			return rewritten;
 		}
 		case "turn_end": {
@@ -333,6 +354,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	const seen: SeenFrames = { text: "", live: [], undelivered: [] };
 	v2Started = performance.now();
 	v2StreamJson = request.format === "stream-json";
+	heldSteer = [];
 	mainRunNote = {};
 	let written = false;
 	let outputTarget: string | undefined;
@@ -389,7 +411,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 						cwd: process.cwd(),
 					})
 				: "";
-		return { lines: pending + serializeJsonLine(envelope), exitCode: resolution.exitCode };
+		return { lines: pending + (heldSteer ?? []).join("") + serializeJsonLine(envelope), exitCode: resolution.exitCode };
 	};
 	// A coordinated shutdown calls process.exit, which cannot await a flush; the envelope still goes out.
 	const onExit = (exitCode: number): void => {

@@ -12,6 +12,7 @@ import type { RunOwnerTelemetryContext } from "../../core/telemetry/context.js";
 import { mainAgent } from "../../core/telemetry/context.js";
 import type { CallFilter } from "../../core/telemetry/dto.js";
 import { isUnreportedUsageNotice } from "../../core/telemetry/pricing.js";
+import { renderCompactCount, renderUsdSum } from "../../core/telemetry/render.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
@@ -86,7 +87,13 @@ import { toolResultText } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from "../run-answers.js";
-import { noteMainRunV2, noteRunEndWritten, noteSteerV2, runResultV2Active } from "../run-failure.js";
+import {
+	noteMainRunV2,
+	noteRunEndWritten,
+	noteSteerV2,
+	runResultV2Active,
+	runTextSummaryRequested,
+} from "../run-failure.js";
 import { setupSteerChannel } from "../steer-channel.js";
 import {
 	type DispatchedRunsSettlement,
@@ -1069,6 +1076,13 @@ const CHILD_CALL_ROLES: CallFilter["roles"] = ["worker"];
  * The schema v2 envelope's usage: `main` is the fold the run ledger records; `children` and `total` are the same fold
  * over the dispatched workers' calls and over both. `children` is absent when no worker call was recorded.
  */
+/** The `--output-format text` stderr line: session, outcome, requests, tokens in/out and spend. */
+function runTextSummaryLine(sessionId: string | null, outcome: RunOutcome, usage: Pick<RunCallUsage, "sums">): string {
+	const { apiCalls, usd, usage: tokens } = usage.sums;
+	const cost = usd.coverage.measured === 0 && usd.coverage.estimated === 0 ? "unpriced" : renderUsdSum(usd, false);
+	return `clio-coder run: session ${sessionId ?? "none"} · ${outcome} · ${renderCompactCount(apiCalls)} requests · ${renderCompactCount(tokens.input)}/${renderCompactCount(tokens.output)} tokens · ${cost}\n`;
+}
+
 async function noteRunUsageV2(options: HeadlessMainAgentOptions, from: string, main: RunCallUsage): Promise<void> {
 	const children = (await options.runUsage?.(from, CHILD_CALL_ROLES).catch(() => null)) ?? null;
 	if (children === null || children.callIds.length === 0) {
@@ -1146,6 +1160,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			// A read model that cannot answer leaves the message fold for the row; the run still settles (#434).
 			const calls = (await options.runUsage?.(startedAt).catch(() => null)) ?? null;
 			if (calls !== null && runResultV2Active()) await noteRunUsageV2(options, startedAt, calls);
+			if (runTextSummaryRequested())
+				process.stderr.write(
+					runTextSummaryLine(chat.getSessionId(), terminal.outcome, calls ?? runUsageFromCalls(runStats.calls)),
+				);
 			const dispatchRuns =
 				options.readEntries !== undefined
 					? standingDispatchRuns(options.readEntries(), entriesBefore, process.cwd(), options.scratchRoots ?? [])

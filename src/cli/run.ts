@@ -52,7 +52,13 @@ import type { RunJsonAdmissionRefusedFrame, RunJsonAgentFrame } from "./modes/ru
 import { RUN_JSON_SCHEMA_VERSION } from "./modes/run-json-schema.js";
 import { flushRawStdout, handleRunStdoutErrors, restoreStdout, takeOverStdout } from "./output-guard.js";
 import { loadScriptedAnswers } from "./run-answers.js";
-import { startRunOutput, withRunFailureReporting, withRunResultV2, writeRunDiagnostic } from "./run-failure.js";
+import {
+	requestRunTextSummary,
+	startRunOutput,
+	withRunFailureReporting,
+	withRunResultV2,
+	writeRunDiagnostic,
+} from "./run-failure.js";
 import { RUN_HELP as HELP, RUN_USAGE as USAGE } from "./run-help.js";
 import { formatDispatchHumanOutput, verifierVerdict } from "./run-output.js";
 import { setupSteerChannel } from "./steer-channel.js";
@@ -381,6 +387,8 @@ export async function runClioRun(
 		process.stderr.write(
 			"clio-coder run: --json and --json-events are deprecated (removed in 0.9.0); use --output-format json|stream-json for schema v2\n",
 		);
+	} else if (parsed.outputFormat === "text" && parsed.agentId === undefined) {
+		requestRunTextSummary();
 	}
 	const fullMainStream = parsed.json && parsed.agentId === undefined && parsed.jsonEvents !== "terminal";
 	const execute = async (): Promise<number> => {
