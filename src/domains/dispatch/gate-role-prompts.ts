@@ -18,6 +18,27 @@ import {
 export const COUNCIL_MIN_MEMBERS = 2;
 export const COUNCIL_MAX_MEMBERS = 5;
 
+/**
+ * A seat whose target the providers domain reports unusable right now (health
+ * down, not available) sits as a failed seat rather than refusing the council,
+ * and the live seats still deliberate. The reason is admission's own words.
+ * Null for any other refusal, which still refuses the whole council.
+ */
+export function councilSeatDownReason(error: unknown): string | null {
+	const message = error instanceof Error ? error.message : String(error);
+	const match = /^dispatch: (target '[^']*' unavailable: .+)$/su.exec(message);
+	return match?.[1] === undefined ? null : `seat not run: ${match[1]}`;
+}
+
+/** The refusal when down seats leave fewer live seats than the council floor. */
+export function councilTooFewLiveSeats(
+	total: number,
+	down: ReadonlyArray<{ readonly label: string; readonly reason: string }>,
+): string {
+	const seats = down.map((seat) => `${seat.label}: ${seat.reason}`).join("; ");
+	return `council_too_few_live_seats: ${total - down.length} of ${total} seats live, a council needs ${COUNCIL_MIN_MEMBERS}; ${seats}`;
+}
+
 export const REVIEWER_GATE_PROMPT = [
 	"You are a strict, read-only reviewer of one implementation run.",
 	"Inspect the supplied result and repository state with read-only tools.",

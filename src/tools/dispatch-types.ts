@@ -39,6 +39,8 @@ export interface DispatchCouncilSettings {
 	memberDeadlineMs?: number;
 	judge?: DispatchCompeteSettings["judge"];
 	resolvedTasks?: ReadonlyArray<ResolvedDispatchPlanArtifact["tasks"][number]>;
+	/** Seats admission found down; they sit as failed seats and are never dispatched. */
+	downSeats?: ReadonlyArray<{ label: string; reason: string }>;
 }
 
 export interface DispatchReviewSettings {

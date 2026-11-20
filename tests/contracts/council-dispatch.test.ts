@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import { validateSettings } from "../../src/core/config.js";
 import { HEADLESS_PERMISSION_DENIED_REASON } from "../../src/core/headless-permission.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import type { CouncilReport } from "../../src/domains/agents/result-contract.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { resolveDispatchPathScope } from "../../src/domains/dispatch/path-scope.js";
 import type { RunResultDraft } from "../../src/domains/dispatch/types.js";
@@ -280,6 +281,70 @@ test("a council with one answer and one failed member reports partial, not faile
 	} as never;
 	const outcome = await dispatchCouncilThroughRegistry(registry, { mode: "council" });
 	deepStrictEqual(outcome.status === "error" ? outcome.partial : outcome, { answered: 1, total: 2, failed: ["broken"] });
+});
+
+test("a seat whose target is down sits as a failed seat while the live seats deliberate; fewer than two live is refused (FL-4)", async () => {
+	const seated: DispatchRequest[] = [];
+	const downMessage = "dispatch: target 'deadend' unavailable: health down: ECONNREFUSED";
+	const tool = createDispatchTool({
+		dispatch: {
+			preview: (request: DispatchRequest) => {
+				if (request.target === "deadend") throw new Error(downMessage);
+				return {
+					agentId: request.agentId,
+					targetId: request.target,
+					wireModelId: "m",
+					runtimeId: "openai-compat",
+					node: { id: "local", kind: "local" },
+					routeApproval: null,
+				};
+			},
+			costCeilingUsd: () => 0,
+			dispatch: async (request: DispatchRequest) => {
+				if (request.target === "deadend") throw new Error(downMessage);
+				seated.push(request);
+				const runId = `run-${seated.length}-${request.council?.label}`;
+				const receipt = {
+					...fixtureReceiptDraft(fixtureEnvelope(runId)),
+					agentId: request.agentId,
+					...(request.council ? { council: request.council } : {}),
+					...(request.gate ? { gate: request.gate } : {}),
+				} as RunResultDraft;
+				const events = (async function* () {
+					yield { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "yes" }] } };
+				})();
+				return { runId, events, finalPromise: Promise.resolve(receipt) };
+			},
+			abort() {},
+			getRun: () => undefined,
+		} as unknown as DispatchContract,
+		getAgentSpecs: () => [{ id: "scout" }] as never,
+		getAutonomy: () => "yolo",
+	});
+	const members = (labels: string[]) =>
+		labels.map((label) => ({ label, target: label === "dead" ? "deadend" : "mini" }));
+	const result = await tool.run(
+		{ mode: "council", members: members(["a", "b", "dead"]), rounds: 2, task: "t" },
+		{} as never,
+	);
+	deepStrictEqual(
+		seated.map((request) => `${request.council?.label}@${request.council?.round}`),
+		["a@1", "b@1", "a@2", "b@2"],
+	);
+	match(seated.find((request) => request.council?.round === 2)?.briefing ?? "", /\[dead\] failed in prior round/u);
+	const report = (result.details as { council?: CouncilReport } | undefined)?.council;
+	deepStrictEqual(
+		report?.members.filter((member) => member.round === 2).map((member) => [member.label, member.failed?.reason ?? null]),
+		[
+			["a", null],
+			["b", null],
+			["dead", "seat not run: target 'deadend' unavailable: health down: ECONNREFUSED"],
+		],
+	);
+	seated.length = 0;
+	const refused = await tool.run({ mode: "council", members: members(["a", "dead"]), task: "t" }, {} as never);
+	deepStrictEqual(seated, []);
+	match(refused.kind === "error" ? refused.message : "", /council_too_few_live_seats: 1 of 2 .*health down/u);
 });
 
 test("a judge council admits round 2 and the judge when host text names an endpoint or a result object (bt-47 CF-a, CF-b)", async () => {
