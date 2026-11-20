@@ -2173,16 +2173,17 @@ describe("production compaction controls", () => {
 		["## Goal\nRepair MPI exchange\n## Constraints & Preferences\nKeep rank order.", "heading_set"],
 		[syntheticCompactionSummary("Repair MPI exchange").replace("### Blocked", "### Risks"), "heading_set"],
 		[`\`\`\`markdown\n${syntheticCompactionSummary("Repair MPI exchange")}\n\`\`\``, "heading_set"],
-		[`${syntheticCompactionSummary("Repair MPI exchange")}\n\`\`\`text\nopen`, "unclosed_fence"],
+		[`\`\`\`text\nopen\n${syntheticCompactionSummary("Repair MPI exchange")}`, "unclosed_fence"],
 	];
 	for (const [text, defect] of malformed) {
-		it("refuses normally stopped malformed history without publishing a checkpoint, journaling why", async () => {
+		it("refuses malformed history after one corrective retry without publishing a checkpoint, journaling why", async () => {
 			const f = fixture(true, true, true);
 			f.response.text = text;
 			const before = f.entries();
 			await rejects(f.run(), /incomplete history checkpoint/);
 			deepStrictEqual(f.entries(), before);
-			strictEqual(f.calls.length, 1);
+			strictEqual(f.calls.length, 2, "one retry, then the refusal stands");
+			match(f.calls[1]?.user ?? "", /incomplete history checkpoint/);
 			deepStrictEqual(foregroundStreamUsage(), {});
 			const [settled] = await f.journalOutcomes();
 			deepStrictEqual(
@@ -2191,6 +2192,35 @@ describe("production compaction controls", () => {
 			);
 		});
 	}
+
+	it("retries a defective checkpoint once with the validator's message and saves the corrected one (CLI-P5)", async () => {
+		const f = fixture(true, true, true);
+		const valid = syntheticCompactionSummary("Repair MPI exchange");
+		f.response.beforeReturn = () => {
+			f.response.text = f.calls.length === 1 ? valid.replace("### Blocked", "### Risks") : valid;
+		};
+		await f.run();
+		strictEqual(f.calls.length, 2);
+		doesNotMatch(f.calls[0]?.user ?? "", /incomplete history checkpoint/);
+		match(f.calls[1]?.user ?? "", /incomplete history checkpoint/);
+		const saved = f.entries().find((entry) => entry.kind === "compactionSummary");
+		ok(saved?.kind === "compactionSummary");
+		match(saved.summary, /### Blocked/);
+		const [settled] = await f.journalOutcomes();
+		strictEqual(settled?.data.outcome, "committed");
+		strictEqual(settled?.data.callIds.length, 2, "the retry is a journaled compaction call");
+	});
+
+	it("closes a trailing unclosed fence without a second call (CLI-P5)", async () => {
+		const f = fixture(true, true, true);
+		f.response.text = `${syntheticCompactionSummary("Repair MPI exchange")}\n\`\`\`text\nopen`;
+		await f.run();
+		strictEqual(f.calls.length, 1, "no second summary call");
+		const saved = f.entries().find((entry) => entry.kind === "compactionSummary");
+		ok(saved?.kind === "compactionSummary");
+		match(saved.summary, /```text\nopen\n```/);
+		strictEqual((await f.journalOutcomes())[0]?.data.outcome, "committed");
+	});
 
 	it("repairs a checkpoint whose required headings arrive out of order instead of discarding it (FX-6)", async () => {
 		const f = fixture(true, true, true);
@@ -2235,7 +2265,8 @@ describe("production compaction controls", () => {
 			if (f.calls.length === 2) f.response.text = "";
 		};
 		await rejects(f.run(), /empty.*summary|no summary/);
-		strictEqual(f.calls.length, 2);
+		// The empty split reply is asked for once more (CLI-P5); the retry is empty too, so the refusal stands.
+		strictEqual(f.calls.length, 3);
 		strictEqual(f.entries().filter((entry) => entry.kind === "compactionSummary").length, 0);
 	});
 	it("keeps late spending on the originating session when the current session changes", async () => {

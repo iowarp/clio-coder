@@ -111,9 +111,11 @@ const HISTORY_HEADINGS = [
  * Validate the history checkpoint, never the intentionally different split-turn prompt. A checkpoint with every
  * required heading once, outside code fences, but out of order is repaired: each heading's section, through the line
  * before the next required heading, moves into the required order, so a paid summary is not discarded for its order
- * alone (FX-6). A missing or repeated heading or an open fence is refused.
+ * alone (FX-6). A fence still open at the end is closed there, which costs no call (CLI-P5); a missing or repeated
+ * heading, including one the closed fence holds, is refused.
  */
-function checkedHistorySummary(text: string): string {
+function checkedHistorySummary(summary: string): string {
+	let text = summary;
 	const lines = text.split(/\r?\n/);
 	const found: Array<{ heading: string; line: number }> = [];
 	let fence: { character: string; length: number } | undefined;
@@ -141,9 +143,14 @@ function checkedHistorySummary(text: string): string {
 			defect,
 		);
 	};
-	if (fence) refuse("unclosed_fence");
+	const closed = fence !== undefined;
+	if (fence) {
+		const marker = fence.character.repeat(fence.length);
+		lines.push(marker);
+		text = `${text}\n${marker}`;
+	}
 	if (found.length !== HISTORY_HEADINGS.length || new Set(found.map((entry) => entry.heading)).size !== found.length)
-		refuse("heading_set");
+		refuse(closed ? "unclosed_fence" : "heading_set");
 	if (found.every((entry, index) => entry.heading === HISTORY_HEADINGS[index])) return text;
 	const sections = new Map(
 		found.map((entry, index) => [entry.heading, lines.slice(entry.line, found[index + 1]?.line ?? lines.length)]),
@@ -152,6 +159,15 @@ function checkedHistorySummary(text: string): string {
 		...lines.slice(0, found[0]?.line ?? 0),
 		...HISTORY_HEADINGS.flatMap((heading) => sections.get(heading) ?? []),
 	].join("\n");
+}
+
+/** The request a refused checkpoint is asked for again with: the original request and what the validator said. */
+function checkpointRetryText(userText: string, error: unknown, history: boolean): string {
+	const reason = (error instanceof Error ? error.message : String(error)).replace(/[.\s]+$/u, "");
+	const format = history
+		? ` Use each of these headings exactly once, in this order, outside code fences: ${HISTORY_HEADINGS.join(", ")}.`
+		: "";
+	return `${userText}\n\n<checkpoint-rejected>\nYour previous reply to this request was rejected: ${reason}. Write the complete checkpoint again.${format}\n</checkpoint-rejected>`;
 }
 
 /** One invoked summary stream, including failed calls that produce no checkpoint. */
@@ -1826,23 +1842,47 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		declineMemoryOffer?.("live-prefix-cheaper");
 		memoryOffer = null;
 	} else commitMemoryOffer?.();
+	// A reply the checkpoint validator refuses is asked for once more with the refusal in the request, on every pass
+	// (CLI-P5). The retry is an ordinary summary call; a failed call (provider, window, cap, stop) is never retried.
+	const checkedSummary = async (userText: string, history: boolean, check: (text: string) => string) => {
+		let request = userText;
+		for (let attempt = 0; ; attempt++) {
+			const reply = await runSummaryStream(input, request, systemPrompt, maxTokens);
+			usage = addCompactionUsage(usage, reply.usage);
+			try {
+				return check(reply.text);
+			} catch (error) {
+				if (attempt > 0 || compactionFailureOf(error, false).cause !== "checkpoint_format") throw error;
+				input.signal?.throwIfAborted();
+				request = checkpointRetryText(userText, error, history);
+			}
+		}
+	};
 	if (!liveCovered && historyText !== undefined) {
-		const historySummary = await runSummaryStream(input, historyText, systemPrompt, maxTokens);
-		usage = addCompactionUsage(usage, historySummary.usage);
-		if (historySummary.text.length === 0)
-			throw tagCompactionFailure(new Error("compaction returned an empty history summary"), "checkpoint_format", "empty");
-		summaryParts.push(checkedHistorySummary(historySummary.text));
+		summaryParts.push(
+			await checkedSummary(historyText, true, (text) => {
+				if (text.length === 0)
+					throw tagCompactionFailure(
+						new Error("compaction returned an empty history summary"),
+						"checkpoint_format",
+						"empty",
+					);
+				return checkedHistorySummary(text);
+			}),
+		);
 	}
 	if (!liveCovered && prefixText !== undefined) {
-		const prefixSummary = await runSummaryStream(input, prefixText, systemPrompt, maxTokens);
-		usage = addCompactionUsage(usage, prefixSummary.usage);
-		if (prefixSummary.text.length === 0)
-			throw tagCompactionFailure(
-				new Error("compaction returned an empty split-turn summary"),
-				"checkpoint_format",
-				"empty",
-			);
-		summaryParts.push(`**Turn Context (split turn):**\n\n${prefixSummary.text}`);
+		summaryParts.push(
+			await checkedSummary(prefixText, false, (text) => {
+				if (text.length === 0)
+					throw tagCompactionFailure(
+						new Error("compaction returned an empty split-turn summary"),
+						"checkpoint_format",
+						"empty",
+					);
+				return `**Turn Context (split turn):**\n\n${text}`;
+			}),
+		);
 	}
 
 	if (memoryOffer !== null && !(memoryOffer as MemoryCompactionOffer).isCurrent())
