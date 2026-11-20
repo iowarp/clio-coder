@@ -67,6 +67,13 @@ import { traceBoot } from "../core/boot-trace.js";
 import { incompleteInstallationAdvice } from "../core/incomplete-installation.js";
 import { installProxyFromEnv } from "../core/proxy-env.js";
 import { extractGlobalFlags, parseFlags, printError } from "./argv.js";
+import {
+	deprecatedSpelling,
+	deprecationNotice,
+	isDeprecatedPath,
+	TOMBSTONE_COMMANDS,
+	tombstoneFor,
+} from "./deprecations.js";
 
 const HELP = `CLIO Coder command line
 
@@ -74,117 +81,104 @@ Coding agent for HPC and scientific-software work, part of IOWarp's CLIO ecosyst
 science. CLIO stands for Context Layer for Input/Output, named for the Greek muse of history.
 
 Usage:
-  clio-coder                      start interactive repository chat
-  clio-coder acp                  serve CLIO Coder as an ACP v1 agent over stdio
-  clio-coder --acp                alias for clio-coder acp
+  clio-coder [options]            start interactive repository chat (options below)
   clio-coder run [flags] <task>   run one headless main-agent turn
-  clio-coder --version, -v        print the CLIO Coder version
-  clio-coder --api-key <key>      override the active target API key for this run
-  clio-coder --no-context-files, -nc  skip main-session project context preload
-  clio-coder --skill <path>       make one explicit skill available for this session, repeatable
-  clio-coder --no-skills          disable skill discovery while still honoring --skill
-  clio-coder --with-panes         join the current pane host as a guest instead of opening CLIO Coder's own
-  clio-coder --autonomy <level>   start this interactive session at default|yolo
-  clio-coder --allow-tools <names>     limit this interactive session's tools; none disables all
-  clio-coder --delegate-tools <names>  limit the tools this session's workers may hold
-  clio-coder --deny-tools <names>      remove these tools from this interactive session
-  clio-coder --max-context-tokens <N>  cap this interactive session's context budget, as for clio-coder run
-  clio-coder --session-file <path>     keep this session's live state (working, idle, awaiting) in a JSON file; the exit record lands there too
-  clio-coder --resume, -r [id]    open on a session by id, unique id prefix or name; without one, open the session picker
-  clio-coder --continue, -c       open on this project's most recent session
-  clio-coder --fork               with --resume <id> or --continue: open on a new branch of that session, leaving it untouched
+  clio-coder acp                  serve CLIO Coder as an ACP v1 agent over stdio
+  clio-coder help [<command>] [--json]  one command's help, or the command manifest as JSON
+  clio-coder schema <name>        print one published JSON schema
+  clio-coder version [--json]     print the CLIO Coder version (also --version, -v)
+
+Sessions and fleet runs:
+  clio-coder session <verb>       list, show, export, fork, compact, rename, remove or end sessions
+  clio-coder fleet <verb>         run playbooks; list, wait on, verify, land or cancel runs; admission
+  clio-coder playbook <verb>      list, author, validate, and graph playbooks
+  clio-coder evidence list|inspect <runId>  list runs or inspect one run's sealed evidence
+  clio-coder telemetry <verb>     read session and run telemetry, cost, quota and health
+
+Setup:
   clio-coder configure            interactive first-run/configuration wizard
   clio-coder targets              list configured targets, health, auth, and capabilities
-  clio-coder targets add          add a target interactively or via flags
-  clio-coder targets use <id>     set chat and fleet defaults to a target
-  clio-coder targets profile      set a named fleet profile
-  clio-coder targets remove <id>  remove a target
-  clio-coder targets rename <old> <new>  rename a target
   clio-coder models [search]      list models for configured targets
-  clio-coder auth list|status|login|logout [target-or-runtime]
-  clio-coder doctor [--fix]       diagnose state; --fix creates or repairs it
-  clio-coder paths [--json]       print resolved config/data/cache directories
+  clio-coder auth <verb>          list, check, sign in to or sign out of targets and runtimes
   clio-coder config inspect [--json]  inspect effective customization and provenance
-  clio-coder config trust <surface>  review or approve project safety, hooks, settings, extensions, or plugins
-  clio-coder reset                recover or wipe CLIO Coder state
-  clio-coder context              show project context status (CLIO-CODER.md, preload, codemap)
-  clio-coder context init [--preview|--heuristic]  explore the repo and bootstrap CLIO-CODER.md and codemap
-  clio-coder context refresh [--wiki]  re-index the codemap and optionally update the Markdown wiki
-  clio-coder context wiki [--update] [--status] [--depth auto|simple|medium|detailed] [--target <id>] [--model <id>]
-  clio-coder context reset [--all] [--yes]  clear accumulated project context artifacts
-  clio-coder context index [--json]  build the codemap index without model calls
-  clio-coder context map [--out <path>] [--json]  create a native interactive HTML codebase map
-  clio-coder context replay --sessions <path>...  compare working-set policies over CLIO Coder ledgers
-  clio-coder context working-set --session <id|path>  inspect one session's working-set state
-  clio-coder context working-set --verify <id|path>  verify each attempt against the receipt taken at send
-  clio-coder uninstall            remove CLIO Coder: its state, settings and launcher
-  clio-coder upgrade              upgrade CLIO Coder and run pending migrations
-  clio-coder gui                  open the alpha graphical application; 'gui background restart' after an upgrade
-  clio-coder agents               list discovered agent recipes
-  clio-coder agents validate      report every unresolved reference in the repo's recipes, skills and fleet bindings
-  clio-coder playbook list|new|validate|graph|commands  list, author, validate, and graph playbooks
-  clio-coder fleet nodes|run|status|view|events|code-steps|decisions|verify|land|cancel|drain|resume  run playbooks on the fleet; inspect, verify, land, or cancel runs; admission control
-  clio-coder evidence list|inspect <runId>  list runs or inspect one run's sealed evidence
-  clio-coder memory               list, propose, promote, approve, reject, or prune memory
-  clio-coder claims [show <id>|export|import <file>|compact]  list, share or compact the project's recorded claims and worker disputes
-  clio-coder arena run|show|vote|list|standings  run one prompt on 2 to 4 contenders, vote blind, read standings
-  clio-coder campaign run          run one seeded project across a roster of models; per-entry gates, refusals, tokens, wall time
-  clio-coder research start|resume|status|report|list  hill climb a check's metric within a budget; inspect or regrade campaigns
-  clio-coder semantic             configure, qualify, manage inboxes, refresh, reembed, search, or inspect the semantic index (beta)
-  clio-coder session list|terminate <id> [--force]  open sessions on this state dir from any host; end or release one
-  clio-coder session history|show|export|artifacts|rename|fork|rm  persisted sessions in this directory (--all-projects widens reads)
-  clio-coder report [bug|feature|question]|status|show|send|forget|selftest|security  preview, then send a report to the maintainers
-  clio-coder usage report         cross-session usage facts and opportunities (experimental)
-  clio-coder telemetry inspect|calls|cost|cache|timeline|why-stopped|explain  read session and run telemetry (--json for the DTO)
-  clio-coder telemetry insights [--project [<dir>]]  per-project research task categories and autonomy, a local heuristic
-  clio-coder telemetry tokens --session <id> [--by-source]  per-turn input tokens, cached and fresh, split by source
-  clio-coder telemetry consent|share|import|prune|verify  manage research content consent; share or import telemetry archives; apply retention; verify a sealed scope or archive
-  clio-coder systemone status|use|off|check  System One decisions: choose and check an engine (experimental)
-  clio-coder extensions           install, list, enable, disable, or remove extension packages
-  clio-coder library              register, install, update, import, inspect, and manage packages of every kind
-  clio-coder mcp list|test|trust|untrust  list, test and trust declared MCP servers
-  clio-coder store tags|ls|stat|history|verify|put|get|rm-tag|adopt|where  inspect, verify and manage this project's store
-  clio-coder tasks                list, add, hand, finish, or drop project operator tasks
-  clio-coder verifiers            discover, inspect, author, validate, edit, or dry-run project checks
-  clio-coder tools list|status|install|remove <id>  pinned external programs CLIO Coder can drive
-  clio-coder interop inspect --json  detected external coding agents and how far each one is wired
-  clio-coder panes install|theme  repair CLIO Coder's pane host (herdr) or print CLIO Coder's theme as a herdr block
-  clio-coder dev <command>        harness instruments and power-user surfaces; run 'clio-coder dev' for the list
-  clio-coder --demo|--no-demo      full welcome and guidance, or compact startup for this session
-  clio-coder --help, -h           this message
-  clio-coder --help --all         this message plus every command under 'clio-coder dev'
+  clio-coder doctor [--fix]       diagnose state; --fix creates or repairs it
+  clio-coder paths|reset|uninstall|upgrade  directories, state recovery, removal, upgrade
+  clio-coder gui                  open the alpha graphical application
+
+Project and library:
+  clio-coder context <verb>       CLIO-CODER.md, codemap, wiki and working set for this project
+  clio-coder agents|tasks|verifiers|memory|claims|store  recipes, tasks, checks, memory, claims, store
+  clio-coder library|extensions|mcp|share  packages, extension authoring, MCP servers, archives
+  clio-coder tools|interop|panes  pinned programs, external coding agents, the pane host
+  clio-coder arena|campaign|research|semantic|systemone  model trials, metric climbs, search, System One
+  clio-coder report|usage         reports to the maintainers, cross-session usage facts
+  clio-coder dev <command>        harness instruments and power-user surfaces
+
+Interactive options:
+  --resume, -r [id]  --continue, -c  --fork  --session-file <path>  --demo|--no-demo  --with-panes
+  --autonomy default|yolo  --allow-tools|--deny-tools|--delegate-tools <names>  --max-context-tokens <N>
+  --api-key <key>  --skill <path>  --no-skills  --no-context-files, -nc
+
+Run 'clio-coder <command> --help' for one command, 'clio-coder --help --all' for every command path.
 `;
 
 /**
  * Commands that answer a question about the harness rather than about the
- * user's own work, and the opt-in alpha graphical application, which is for
- * power users and not a default surface.
- *
- * Nothing here is removed or deprecated. An agent driving Clio over bash can
- * reach a wider surface than a person reading a help screen can hold, so the
- * capability stays and only the default listing shrinks: every name below still
- * resolves at the top level, and `clio-coder --help --all` prints all of it.
+ * user's own work. Their top-level spellings still resolve through 0.8.x with
+ * one deprecation notice (`deprecations.ts`) and are removed in 0.9.0.
  */
 const DEV_COMMANDS: ReadonlyArray<{ name: string; summary: string }> = [
 	{ name: "components", summary: "list, snapshot, or diff harness components" },
 	{ name: "evolve", summary: "create, validate, or summarize change manifests" },
-	{ name: "share", summary: "export or import CLIO Coder project/resource archives" },
-	{ name: "gui", summary: "start the opt-in alpha graphical application" },
 	{ name: "flywheel", summary: "print the maintainers' ranked backlog from shared usage" },
 ];
+
+/** `dev share` and `dev gui` keep resolving in 0.8.x; both are top-level commands, so the listing leaves them out. */
+const UNLISTED_DEV_COMMANDS: ReadonlySet<string> = new Set(["share", "gui"]);
 
 const DEV_HELP = `CLIO Coder harness instruments and power-user surfaces
 
 Usage:
 ${DEV_COMMANDS.map((entry) => `  clio-coder dev ${entry.name.padEnd(20)}${entry.summary}`).join("\n")}
 
-Each also resolves without the 'dev' prefix, so existing scripts and agent
-callers keep working. The prefix exists so the default help stays the set of
-commands a person needs to read.
+The spellings without the 'dev' prefix still work through 0.8.x with a
+deprecation notice on stderr, and are removed in 0.9.0.
 `;
 
-function helpText(all: boolean): string {
-	return all ? `${HELP}\n${DEV_HELP}` : HELP;
+/**
+ * `--help --all`: the root help, then every non-hidden command path, read from the light specs and the manifest
+ * alone so it loads no command implementation. Deprecated spellings are left out (SPEC section 5).
+ */
+async function fullHelpText(): Promise<string> {
+	const [{ COMMAND_SPECS }, { NESTED_LEAVES, TOP_LEVEL_USAGE }] = await Promise.all([
+		import("./specs/table.js"),
+		import("./specs/manifest.js"),
+	]);
+	const nested = new Map<string, { summary: string; usage: string }>();
+	for (const [path, summary, usage] of NESTED_LEAVES) nested.set(path, { summary, usage });
+	const listed: string[] = [];
+	for (const [name, load] of Object.entries(COMMAND_SPECS)) {
+		const module: { spec: { summary: string; hidden: boolean } } & Record<string, unknown> = await load();
+		if (module.spec.hidden) continue;
+		for (const list of [module.leaves, module.leafSpecs]) {
+			if (!Array.isArray(list)) continue;
+			for (const leaf of list as Array<{ path: string[]; summary: string }>) {
+				const key = leaf.path.join(" ");
+				nested.set(key, { summary: leaf.summary, usage: nested.get(key)?.usage ?? key });
+			}
+		}
+		const entries = [{ path: name, summary: module.spec.summary, usage: TOP_LEVEL_USAGE[name] ?? name }];
+		for (const [path, leaf] of [...nested].sort(([a], [b]) => a.localeCompare(b))) {
+			const words = path.split(" ");
+			if (words[0] !== name || isDeprecatedPath(words)) continue;
+			entries.push({ path, summary: leaf.summary, usage: leaf.usage.length > 0 ? leaf.usage : path });
+		}
+		for (const entry of entries) {
+			listed.push(`  clio-coder ${entry.usage}`);
+			if (entry.summary.length > 0) listed.push(`      ${entry.summary}`);
+		}
+	}
+	return `${HELP}\nEvery command path:\n${listed.join("\n")}\n\n${DEV_HELP}`;
 }
 
 /** Engines floor from package.json; npm only warns on EBADENGINE, so the CLI
@@ -280,7 +274,7 @@ async function main(argv: string[]): Promise<number> {
 	// `paths -v` is the command's own unknown flag, not a version request.
 	const root = new Set(rootFlags);
 	if (root.has("--help") || root.has("-h")) {
-		process.stdout.write(helpText(root.has("--all")));
+		process.stdout.write(root.has("--all") ? await fullHelpText() : HELP);
 		return 0;
 	}
 	if (root.has("--version") || root.has("-v")) {
@@ -359,6 +353,16 @@ async function main(argv: string[]): Promise<number> {
 		});
 	}
 
+	// A removed command answers every invocation, `--help` included, before any command's own help (C1).
+	const tombstone = tombstoneFor([subcommand, ...subArgs]);
+	if (tombstone !== undefined) {
+		process.stderr.write(`clio-coder ${tombstone.path.join(" ")}: ${tombstone.reason}\nuse: ${tombstone.pointer}\n`);
+		return 2;
+	}
+	// The global `--acp` reaches here rewritten to `acp`; the first of the two words in argv says which was typed.
+	const spelledAcpFlag = subcommand === "acp" && argv.find((arg) => arg === "acp" || arg === "--acp") === "--acp";
+	const deprecated = deprecatedSpelling(spelledAcpFlag ? ["--acp", ...subArgs] : [subcommand, ...subArgs]);
+	if (deprecated !== undefined) process.stderr.write(deprecationNotice(deprecated));
 	return dispatch(subcommand, subArgs, bootOptions);
 }
 
@@ -428,7 +432,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 				process.stdout.write(DEV_HELP);
 				return 0;
 			}
-			if (!DEV_COMMANDS.some((entry) => entry.name === devSubcommand)) {
+			if (!DEV_COMMANDS.some((entry) => entry.name === devSubcommand) && !UNLISTED_DEV_COMMANDS.has(devSubcommand)) {
 				printError(`unknown dev command: ${devSubcommand}`);
 				process.stdout.write(DEV_HELP);
 				return 2;
@@ -514,12 +518,10 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	],
 ]);
 
-// Retired commands are not dispatchable, but remain command-shaped tombstones
+// Removed commands are not dispatchable, but remain command-shaped tombstones
 // so top-level value flags cannot consume them and accidentally boot another mode.
-const RETIRED_SUBCOMMANDS = new Set<string>(["context-init", "context-index", "context-clear"]);
-
 function isCommandToken(token: string): boolean {
-	return COMMAND_HANDLERS.has(token) || RETIRED_SUBCOMMANDS.has(token);
+	return COMMAND_HANDLERS.has(token) || TOMBSTONE_COMMANDS.has(token);
 }
 
 /**
@@ -562,7 +564,7 @@ async function dispatch(subcommand: string, subArgs: string[], bootOptions: CliB
 	// the stream the caller was capturing for output, next to an error on the one
 	// it was probably not reading. `clio-coder --help` is the request for this
 	// text, and it still answers on stdout with exit 0.
-	process.stderr.write(helpText(false));
+	process.stderr.write(HELP);
 	return 2;
 }
 

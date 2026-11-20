@@ -38,7 +38,7 @@ export async function readPipedStdin(hasPromptSource = false, explicit = false):
 			cleanup();
 			if (chunks.length > 0 && hasPromptSource && !explicit) {
 				process.stderr.write(
-					"clio-coder run: reading stdin beside a prompt without `-` is deprecated; pass `-` to include it\n",
+					"clio-coder: deprecated: run <task> with piped stdin and no -; use clio-coder run <task> - (removed in 0.9.0)\n",
 				);
 			}
 			resolve(chunks.length > 0 ? Buffer.concat(chunks).toString("utf8") : undefined);

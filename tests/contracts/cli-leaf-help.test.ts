@@ -9,6 +9,7 @@ import { equal, match, ok } from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { DEPRECATED_SPELLINGS } from "../../src/cli/deprecations.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 const ENTRY = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
@@ -167,4 +168,94 @@ describe("lifecycle leaves refuse with one diagnostic and, under --json, one fai
 		equal(result.status, 1, result.stderr);
 		equal(JSON.parse(result.stdout).error.code, "not_found");
 	});
+});
+
+// CLI SPEC L12: the root page, the full listing, tombstones before any help interceptor (C1), and deprecated aliases.
+describe("root help, tombstones and deprecated spellings", { concurrency: 4 }, () => {
+	it("root --help is at most 45 lines and names the core commands", async () => {
+		const result = await cli(["--help"]);
+		equal(result.status, 0, result.stderr);
+		ok(result.stdout.trimEnd().split("\n").length <= 45, result.stdout);
+		for (const name of ["run", "acp", "session", "fleet", "config", "help"]) {
+			match(result.stdout, new RegExp(`^  clio-coder ${name}\\b`, "mu"), name);
+		}
+	});
+
+	it("--help --all lists every command path and leaves deprecated spellings out", async () => {
+		const result = await cli(["--help", "--all"]);
+		equal(result.status, 0, result.stderr);
+		for (const path of [
+			"clio-coder fleet list",
+			"clio-coder fleet admission",
+			"clio-coder fleet wait <fleetRootId> [--timeout <duration>] [--json]",
+			"clio-coder session compact",
+			"clio-coder help",
+			"clio-coder schema",
+			"clio-coder dev components",
+		]) {
+			ok(result.stdout.includes(path), path);
+		}
+		ok(!/clio-coder (fleet drain|fleet resume|targets add|ext |semantic inbox-)/u.test(result.stdout), result.stdout);
+	});
+
+	for (const args of [["context-init"], ["context-init", "--help"], ["fleet", "inspect", "--help"]]) {
+		it(`clio-coder ${args.join(" ")} is a tombstone: exit 2 with a pointer`, async () => {
+			const result = await cli(args);
+			equal(result.status, 2, result.stderr);
+			equal(result.stdout, "");
+			match(result.stderr, /was removed[^\n]*\nuse: clio-coder /u);
+		});
+	}
+
+	it("help run --topics prints the run prose that run --help no longer carries", async () => {
+		const [topics, help] = await Promise.all([cli(["help", "run", "--topics"]), cli(["run", "--help"])]);
+		equal(topics.status, 0, topics.stderr);
+		match(topics.stdout, /^--cwd enters <dir>/u);
+		ok(!help.stdout.includes("--cwd enters <dir>"), help.stdout);
+		ok(help.stdout.includes("help run --topics"));
+	});
+
+	it("the deprecation table classes every section 9 spelling, four of them migration", () => {
+		equal(DEPRECATED_SPELLINGS.filter((row) => row.class === "migration").length, 4);
+		for (const row of DEPRECATED_SPELLINGS) {
+			ok(row.notice !== "dispatcher" || row.matches !== undefined, row.old);
+			ok(row.notice === "dispatcher" || row.where !== undefined, row.old);
+		}
+	});
+
+	for (const [old, current] of [
+		[
+			["--acp", "--help"],
+			["acp", "--help"],
+		],
+		[
+			["ext", "--help"],
+			["extensions", "--help"],
+		],
+		[
+			["export", "--help"],
+			["share", "export", "--help"],
+		],
+		[
+			["targets", "workers"],
+			["targets", "profile", "list"],
+		],
+		[
+			["evolve", "--help"],
+			["dev", "evolve", "--help"],
+		],
+		[
+			["fleet", "resume"],
+			["fleet", "admission", "open"],
+		],
+	] as const) {
+		it(`clio-coder ${old.join(" ")} equals ${current.join(" ")} plus one deprecation line`, async () => {
+			const [before, after] = await Promise.all([cli(old), cli(current)]);
+			equal(before.status, after.status, before.stderr);
+			equal(before.stdout, after.stdout);
+			const notices = before.stderr.split("\n").filter((line) => line.startsWith("clio-coder: deprecated:"));
+			equal(notices.length, 1, before.stderr);
+			ok(!after.stderr.includes("deprecated"), after.stderr);
+		});
+	}
 });

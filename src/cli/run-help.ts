@@ -101,7 +101,11 @@ Flags:
   --skill <path>            make one explicit skill available for this run, repeatable
   --no-skills               disable skill discovery while still honoring --skill
 
---cwd enters <dir> before anything reads the working directory: settings
+Run 'clio-coder help run --topics' for --cwd, sessions, --verify, --answers, no-op, --timeout and exit codes.
+`;
+
+/** The run topics `clio-coder help run --topics` prints (SPEC 6.15). */
+export const RUN_TOPICS = `--cwd enters <dir> before anything reads the working directory: settings
 layers, context files, skills, @file references, the session ledger, and every
 tool path. A run started with --cwd <dir> behaves as if it had been started in
 <dir>, so relative paths in other arguments resolve there too. A directory the

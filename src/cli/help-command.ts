@@ -440,6 +440,10 @@ export async function runHelpCommand(args: ReadonlyArray<string>): Promise<numbe
 			return EXIT_CODES.notStarted;
 		}
 	}
+	if (topics) {
+		process.stdout.write((await import("./run-help.js")).RUN_TOPICS);
+		return EXIT_CODES.success;
+	}
 	if (json) {
 		const leaves =
 			words.length === 0
