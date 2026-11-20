@@ -33,6 +33,8 @@ const MEASURED_FILE_MAX_BYTES = 2 * 1024 * 1024;
 /** Newest numeric tool results carried per checkpoint. */
 const RESULTS_MAX = 8;
 const SUBJECT_MAX_CHARS = 72;
+/** A hidden result this short, whitespace folded, rides its refs line verbatim instead of only by ref. */
+const LITERAL_MAX_CHARS = 160;
 const HASH_CHARS = 12;
 
 const BLOCK = /\n*<exact-facts\b[^>]*>\n([\s\S]*?)\n<\/exact-facts>\n*/giu;
@@ -220,6 +222,13 @@ function collectResults(entries: ReadonlyArray<SessionEntry>): string[] {
 	return unique.slice(-RESULTS_MAX);
 }
 
+/** The whole body of a short hidden result, quoted, or "" when it is longer, blocked or empty. */
+function literalOf(entry: SessionEntry): string {
+	if (entry.kind !== "message" || !isRecord(entry.payload) || entry.payload.outcome === "blocked") return "";
+	const flat = resultText(entry.payload.result).replace(/\s+/gu, " ").trim();
+	return flat.length > 0 && flat.length <= LITERAL_MAX_CHARS ? ` value=${JSON.stringify(flat)}` : "";
+}
+
 /**
  * The `<exact-facts>` block for a checkpoint over `entries`: every file
  * `fileOps` names, modified first, measured against `cwd` when it is known,
@@ -245,15 +254,16 @@ export function formatExactFacts(
 		return `${operation} ${filePath}${index < MEASURED_FILES_MAX ? measureFile(filePath, cwd) : ""}${ref}`;
 	});
 	const refs = hidden
-		.filter((row) => row.toolName !== "read")
+		.filter((row) => row.toolName !== "read" && row.toolName !== "assistant")
 		.slice(-RESULTS_MAX)
-		.map((row) => oneLine(`${row.ref} ${row.toolName} ${row.path ?? ""}`, 240));
+		.map((row) => `${oneLine(`${row.ref} ${row.toolName} ${row.path ?? ""}`, 240)}${literalOf(row.entry)}`);
 	const results = collectResults(entries);
 	if (files.length === 0 && refs.length === 0 && results.length === 0) return "";
 	// No re-read advice here: a live 20k-window run took it as an order and re-read whole
 	// files until each read forced another compaction. The edit guard asks at the edit.
+	const replies = hidden.some((row) => row.toolName === "assistant") ? ", including earlier assistant replies," : "";
 	const lines = [
-		`Measured by Clio at this checkpoint, not by the summarizer; where the summary disagrees, these values hold.${hidden.length > 0 ? ' Values the summary did not keep are recallable by passing a ref below to context(scope="recall"); without ref it lists every one.' : ""}`,
+		`Measured by Clio at this checkpoint, not by the summarizer; where the summary disagrees, these values hold.${hidden.length > 0 ? ` Values the summary did not keep${replies} are recallable by passing a ref below to context(scope="recall"); without ref it lists every one.` : ""}`,
 		...files,
 		...(refs.length > 0 ? [REFS_HEADING, ...refs] : []),
 		...(results.length > 0 ? [RESULTS_HEADING, ...results] : []),

@@ -5,6 +5,7 @@
 
 import { ceilChars } from "../../session/context-accounting.js";
 import type { MessageEntry, SessionEntry } from "../../session/entries.js";
+import { messageText } from "../../session/message-projection.js";
 import { filterEntriesToActivePath } from "../../session/tree/active-path.js";
 import {
 	type ContextRecallFields,
@@ -35,6 +36,11 @@ function isToolResultEntry(entry: SessionEntry): entry is MessageEntry {
 	return entry.kind === "message" && entry.role === "tool_result";
 }
 
+/** An assistant turn's own reply text: never its thinking or tool calls. Empty for any other entry. */
+function assistantProse(entry: SessionEntry): string {
+	return entry.kind === "message" && entry.role === "assistant" ? messageText(entry).trim() : "";
+}
+
 export function resolveRecall(
 	entries: ReadonlyArray<SessionEntry>,
 	view: WorkingSetView,
@@ -48,6 +54,16 @@ export function resolveRecall(
 	const entry = active.find((candidate) => candidate.turnId === key);
 	if (entry === undefined) {
 		return { ok: false, error: { kind: "not_on_active_path", ref: key } };
+	}
+	// A summary keeps a reply's gist, not its wording: the reply text a cut hid is recallable like a tool result.
+	const prose = assistantProse(entry);
+	if (prose.length > 0) {
+		if (compactionCut(active).visible.some((candidate) => candidate.turnId === key))
+			return { ok: false, error: { kind: "visible", ref: key } };
+		return {
+			ok: true,
+			result: { ref: parsed, state: "summarized", entry, body: prose, tokens: ceilChars(prose.length) },
+		};
 	}
 	if (!isToolResultEntry(entry) || hasLegacyCompactionMarker(entry.payload)) {
 		return { ok: false, error: { kind: "unavailable", ref: key } };
@@ -133,7 +149,7 @@ export function buildRecallFields(
 }
 
 export interface RecallDiscoveryOptions {
-	/** Case-insensitive terms matched against ref, tool name, and path. */
+	/** Case-insensitive terms matched against ref, tool name, and path; a row matching any term is listed. */
 	query?: string;
 	/** Default 8, maximum 12. */
 	limit?: number;
@@ -151,7 +167,18 @@ export interface RecallableRefListing {
 	nextOffset?: number;
 }
 
-/** Recallable active-path results context no longer shows, or with `keptFrom` a cut there hides, in ledger order. */
+interface RecallableRow {
+	ref: string;
+	toolName: string;
+	path: string | undefined;
+	state: "summarized" | "evicted";
+	entry: SessionEntry;
+}
+
+/**
+ * Recallable active-path results context no longer shows, or with `keptFrom` a cut there hides, in ledger order,
+ * with the assistant replies a cut hid as `toolName: "assistant"` rows.
+ */
 export function recallableRefs(
 	entries: ReadonlyArray<SessionEntry>,
 	view: WorkingSetView,
@@ -161,7 +188,11 @@ export function recallableRefs(
 	const kept = options.keptFrom === undefined ? compactionCut(active).visible : entries.slice(options.keptFrom);
 	const visible = new Set(kept.map((entry) => entry.turnId));
 	const callPaths = callPathsByToolCallId(active);
-	return active.filter(isToolResultEntry).flatMap((entry) => {
+	return active.flatMap((entry): RecallableRow[] => {
+		if (assistantProse(entry).length > 0 && !visible.has(entry.turnId)) {
+			return [{ ref: entry.turnId, toolName: "assistant", path: undefined, state: "summarized", entry }];
+		}
+		if (!isToolResultEntry(entry)) return [];
 		const evicted = view.evicted.get(entry.turnId);
 		// An eviction a checkpoint keeps still shows its marker.
 		const shown = visible.has(entry.turnId) && (evicted === undefined || options.keptFrom !== undefined);
@@ -174,7 +205,7 @@ export function recallableRefs(
 	});
 }
 
-/** Stable ledger-order pages for the same active path and query. */
+/** Stable pages for the same active path and query: ledger order, or matched-term count then ledger order. */
 export function recallableRefListing(
 	entries: ReadonlyArray<SessionEntry>,
 	view: WorkingSetView,
@@ -187,10 +218,16 @@ export function recallableRefListing(
 			: 8;
 	const offset =
 		typeof options.offset === "number" && Number.isSafeInteger(options.offset) ? Math.max(0, options.offset) : 0;
-	const matches = recallableRefs(entries, view, options).filter((row) => {
-		const metadata = `${row.ref} ${row.entry.turnId} ${row.toolName} ${row.path ?? ""}`.toLowerCase();
-		return terms.every((term) => metadata.includes(term));
-	});
+	// Any term matches, so a query naming several files or facts lists each; rows matching more terms come first,
+	// ledger order within a count.
+	const matches = recallableRefs(entries, view, options)
+		.map((row) => {
+			const metadata = `${row.ref} ${row.entry.turnId} ${row.toolName} ${row.path ?? ""}`.toLowerCase();
+			return { row, hits: terms.filter((term) => metadata.includes(term)).length };
+		})
+		.filter(({ hits }) => terms.length === 0 || hits > 0)
+		.sort((a, b) => b.hits - a.hits)
+		.map(({ row }) => row);
 	// Keep each row bounded even for unusual tool/path metadata.
 	const refs = matches.slice(offset, offset + limit).map((row) => {
 		const label = `${row.toolName}${row.path === undefined ? "" : ` ${row.path}`}`.replace(/\s+/g, " ").slice(0, 240);
@@ -241,7 +278,7 @@ export function recallErrorMessage(
 		case "unavailable": {
 			const entry = active.find((candidate) => candidate.turnId === error.ref);
 			if (entry !== undefined && isThinkingEntry(entry)) {
-				return `ref ${error.ref} is an assistant turn; thinking is not recallable.${listing}`;
+				return `ref ${error.ref} is an assistant turn with no reply text; thinking is not recallable.${listing}`;
 			}
 			return `ref ${error.ref} has no recallable original tool result (unsupported entry or legacy destructive compaction).${listing}`;
 		}

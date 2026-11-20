@@ -156,9 +156,25 @@ describe("working-set ledger boundary", () => {
 		strictEqual(refused.error.kind, "not_on_active_path");
 		strictEqual(recallableRefListing(entries, otherView, { activeLeafTurnId: "other" }).total, 0);
 		doesNotMatch(recallErrorMessage(refused.error, entries, otherView, "other"), /src\/a.ts/);
-		const thinking = resolveRecall(entries, otherView, "other", "other");
+		const shown = resolveRecall(entries, otherView, "other", "other");
+		ok(!shown.ok);
+		strictEqual(shown.error.kind, "visible");
+		const thinker: MessageEntry = { ...message("a2", "a1", "assistant"), payload: { thinking: "hidden" } };
+		const replies: SessionEntry[] = [
+			message("u1", null, "user"),
+			message("a1", "u1", "assistant"),
+			thinker,
+			message("u2", "a2", "user"),
+			{ ...(entries[3] as SessionEntry), parentTurnId: "u2" },
+		];
+		const replyView = foldWorkingSet(replies, "summary");
+		const reply = resolveRecall(replies, replyView, "a1", "summary");
+		ok(reply.ok);
+		strictEqual(reply.result.body, "a1");
+		strictEqual(reply.result.state, "summarized");
+		const thinking = resolveRecall(replies, replyView, "a2", "summary");
 		ok(!thinking.ok);
-		match(recallErrorMessage(thinking.error, entries, otherView, "other"), /thinking is not recallable/);
+		match(recallErrorMessage(thinking.error, replies, replyView, "summary"), /thinking is not recallable/);
 		const legacy = result("legacy", "u2");
 		legacy.payload = { result: "old marker", contextCompaction: {} };
 		const withLegacy = [...entries, legacy];
@@ -216,6 +232,9 @@ describe("working-set ledger boundary", () => {
 		ok(query.kind === "ok");
 		match(query.output, /r9 \(/);
 		doesNotMatch(query.output, /r1 \(/);
+		// CTX-5: any term matches, so a query naming two files lists both; a term matching nothing drops nothing.
+		const both = recallableRefListing(entries, foldWorkingSet(entries), { query: "file9.ts file3.ts FACT" });
+		deepStrictEqual([both.total, both.refs.map((row) => row.split(" ")[0])], [2, ["r3", "r9"]]);
 		strictEqual(recorded.length, 0, "discovery must not create churn records");
 		strictEqual(recallableRefListing(entries, foldWorkingSet(entries), { limit: 100 }).refs.length, 12);
 		const recalled = await tool.run({ scope: "recall", ref: "r9" });

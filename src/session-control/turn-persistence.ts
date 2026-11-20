@@ -13,6 +13,7 @@ import type { FactSum } from "../core/telemetry/fact.js";
 import { sumFactSums, sumFacts } from "../core/telemetry/pricing.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import { noteAnthropicStreamQuota, noteCodexStreamQuota } from "../domains/quota/index.js";
+import { endpointDigest } from "../domains/session/context-accounting.js";
 import type { SessionContract, TurnInput } from "../domains/session/contract.js";
 import type { BudgetBlockData, SessionEntry } from "../domains/session/entries.js";
 import { BUDGET_BLOCK_ENTRY, IN_RUN_CONTINUATION_ENTRY } from "../domains/session/entries.js";
@@ -213,6 +214,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		if (explainInterruptedAssistant(message, state.activeInterruptReason)) state.interruptedAssistantMessage = message;
 		const failure = terminalFailureFromAssistantMessage(message);
 		const payload = assistantSessionPayload(message, failure);
+		const endpoint = endpointDigest(state.runtime?.agent?.state.model?.baseUrl);
+		if (endpoint !== undefined) payload.baseUrlDigest = endpoint;
 		const failureRoute = (message as { failureRoute?: unknown }).failureRoute;
 		if (failure && failureRoute !== undefined) payload.failureRoute = failureRoute;
 		// Only the host argument can mark a closure; provider fields cannot opt into this presentation (#430).

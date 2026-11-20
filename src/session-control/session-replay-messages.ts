@@ -295,6 +295,7 @@ export function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number)
 			"api",
 			"provider",
 			"model",
+			"baseUrlDigest",
 			"responseModelIdObservation",
 			"responseModel",
 			"responseId",
