@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { type AclHost, applyOwnerOnlyAcl } from "../../../core/owner-only-acl.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { withStateFileLock, withStateFileLockSync } from "../../../core/state-file-lock.js";
 import { resolveClioDirs } from "../../../core/xdg.js";
@@ -14,9 +15,22 @@ import type { AuthStorageBackend, LockResult } from "./storage.js";
 // fsync the hand-rolled variants lacked. The explicit chmod pins the file to
 // exactly 0o600: safeResourceWrite creates its temp with mode 0o600, which umask
 // can still narrow, so we re-assert the secret's mode after the rename.
-function atomicWriteSecret(absPath: string, contents: string): void {
+// On Windows the mode protects nothing: the renamed file carries the ACL it
+// inherited from the config directory, so it is made owner-only after each
+// write. A failure keeps the written credentials, warns once, and doctor
+// reports the ACL.
+let aclWarningShown = false;
+
+function atomicWriteSecret(absPath: string, contents: string, aclHost: AclHost): void {
 	safeResourceWrite(absPath, contents, { encoding: "utf8", mode: 0o600 });
 	chmodSync(absPath, 0o600);
+	const aclFailure = applyOwnerOnlyAcl(absPath, aclHost);
+	if (aclFailure !== null && !aclWarningShown) {
+		aclWarningShown = true;
+		process.stderr.write(
+			`warning: could not make ${absPath} owner-only (${aclFailure}); other local accounts may be able to read it. Run \`clio-coder doctor\`.\n`,
+		);
+	}
 }
 
 export function authStoragePath(): string {
@@ -24,7 +38,10 @@ export function authStoragePath(): string {
 }
 
 export class FileAuthStorageBackend implements AuthStorageBackend {
-	constructor(private readonly path: string = authStoragePath()) {}
+	constructor(
+		private readonly path: string = authStoragePath(),
+		private readonly aclHost: AclHost = {},
+	) {}
 
 	describe(): string {
 		return this.path;
@@ -53,7 +70,7 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 			const current = this.read();
 			const { result, next } = fn(current);
 			if (next !== undefined) {
-				atomicWriteSecret(this.path, next);
+				atomicWriteSecret(this.path, next, this.aclHost);
 			}
 			return result;
 		});
@@ -73,7 +90,7 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 				const { result, next } = await fn(current);
 				options?.signal?.throwIfAborted();
 				if (next !== undefined) {
-					atomicWriteSecret(this.path, next);
+					atomicWriteSecret(this.path, next, this.aclHost);
 				}
 				return result;
 			},

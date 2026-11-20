@@ -5,6 +5,14 @@ import type { SettingsScalarRepair } from "../../core/config.js";
 import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
 import { copilotKeychainOnlyDetail } from "../../core/copilot-keychain.js";
 import { detectNewerHome, initializeClioHome } from "../../core/init.js";
+import {
+	applyOwnerOnlyAcl,
+	currentWindowsAccount,
+	extraAclPrincipals,
+	readWindowsAcl,
+	type WindowsAccount,
+	type WindowsAclRead,
+} from "../../core/owner-only-acl.js";
 import { readClioVersion } from "../../core/package-root.js";
 import { relativePathEscapes } from "../../core/path-containment.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
@@ -74,6 +82,30 @@ function tightenToOwnerOnly(path: string): number | null {
 	if (!isWiderThanOwnerOnly(mode)) return null;
 	chmodSync(path, 0o600);
 	return mode;
+}
+
+/**
+ * The win32 "credentials" row from the file's `icacls` listing: an allow ACE
+ * for anyone beyond the account, SYSTEM and Administrators lets another local
+ * account read or replace the key, which `--fix` removes.
+ */
+export function windowsCredentialsFinding(path: string, acl: WindowsAclRead, account: WindowsAccount): DoctorFinding {
+	if ("error" in acl) {
+		return {
+			ok: true,
+			level: "warn",
+			name: "credentials",
+			detail: foldDetail(`${path}; could not read its ACL: ${acl.error}`),
+		};
+	}
+	const extras = extraAclPrincipals(acl.output, path, account);
+	if (extras.length === 0) return { ok: true, name: "credentials", detail: path };
+	return {
+		ok: true,
+		level: "warn",
+		name: "credentials",
+		detail: `${path} ACL also grants ${extras.join(", ")} (run \`clio-coder doctor --fix\` to make it owner-only)`,
+	};
 }
 
 const FOREIGN_SKILL_SOURCES = new Set<SkillSource>(["agents", "claude", "codex", "copilot", "opencode"]);
@@ -493,6 +525,8 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 			const credentialsPath = join(resolveClioDirs().config, "credentials.yaml");
 			if (existsSync(credentialsPath)) {
 				chmodSync(credentialsPath, 0o600);
+				const aclFailure = applyOwnerOnlyAcl(credentialsPath);
+				if (aclFailure !== null) throw new Error(`could not make ${credentialsPath} owner-only: ${aclFailure}`);
 			}
 		} catch (error) {
 			repairFailure = error instanceof Error ? error.message : String(error);
@@ -657,9 +691,13 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 			const damage = credentialsDamage();
 			if (process.platform === "win32") {
 				// Windows reports every writable file as 666 and chmod cannot narrow
-				// it, so the mode said nothing and failed doctor on every native install.
-				// The profile directory's ACL is what protects the file there.
-				findings.push({ ok: damage === null, name: "credentials", detail: damage ?? creds });
+				// it, so the mode says nothing there; the file's ACL is what decides
+				// which other accounts can read or replace the key.
+				findings.push(
+					damage === null
+						? windowsCredentialsFinding(creds, readWindowsAcl(creds), currentWindowsAccount())
+						: { ok: false, name: "credentials", detail: damage },
+				);
 			} else {
 				const mode = statSync(creds).mode & 0o777;
 				findings.push({
