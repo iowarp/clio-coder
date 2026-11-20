@@ -4,9 +4,11 @@ import { homedir, hostname, tmpdir } from "node:os";
 import path from "node:path";
 import type { DelegationAgentConfig } from "../../core/defaults.js";
 import { processAlive, processBirthToken, processIdentityAlive } from "../../core/process-identity.js";
+import { GENERATED_TOOL_ENV_KEYS } from "../../core/tool-env-controls.js";
 
-/** Clio-owned directory (0700) under the temp root that holds one `run-*` dir per agy launch. */
+/** Clio-owned directory (0700, one per user) under the temp root that holds one `run-*` dir per agy launch. */
 const ROOT_NAME = "clio-coder-agy";
+const RUN_PREFIX = "run-";
 const MARKER = "owner.json";
 /** Always set for agy, over any entry value: no self-update mid-run, file-backed storage, unbuffered helpers. */
 const FORCED: Readonly<Record<string, string>> = {
@@ -59,12 +61,13 @@ function pidNamespace(): string | null {
 	}
 }
 
-/** Create the root 0700, or accept an existing one only when it is a real directory this user owns. */
+/** Create this user's root 0700, or accept an existing one only when it is a real directory this user owns. */
 function ownedRoot(parent: string): string {
-	const root = path.join(parent, ROOT_NAME);
+	const uid = process.getuid?.();
+	// Per user, so another account's root in a shared temp dir never blocks a launch.
+	const root = path.join(parent, uid === undefined ? ROOT_NAME : `${ROOT_NAME}-${uid}`);
 	mkdirSync(root, { recursive: true, mode: 0o700 });
 	const stat = lstatSync(root);
-	const uid = process.getuid?.();
 	if (!stat.isDirectory() || (uid !== undefined && stat.uid !== uid))
 		throw new Error(`Antigravity temp root ${root} is not a directory owned by this user`);
 	if (process.platform !== "win32" && (stat.mode & 0o077) !== 0) chmodSync(root, 0o700);
@@ -90,9 +93,10 @@ function parseMarker(text: string): OwnerMarker | null {
 }
 
 /**
- * Remove launch dirs left by crashed runs (agy unpacks about 1 GB into each). A dir goes only when its marker parses,
- * names this host and pid namespace, and both the Clio owner (pid and birth token) and the recorded agy child are
- * gone. Anything else, including a dir without a marker, is left alone.
+ * Remove launch dirs left by crashed runs (agy unpacks about 1 GB into each). A `run-*` dir goes only when its marker
+ * parses, names this host and pid namespace, records the agy child, and both the Clio owner (pid and birth token) and
+ * that child are gone. Anything else, including a marker written before the child pid was recorded (a crash between
+ * spawn and recordChild could leave agy running), is left alone: a leak, never a deletion of a live dir.
  */
 async function sweepOrphans(root: string, namespace: string | null): Promise<void> {
 	if (namespace === null) return;
@@ -104,13 +108,14 @@ async function sweepOrphans(root: string, namespace: string | null): Promise<voi
 	}
 	await Promise.all(
 		names.map(async (name) => {
+			if (!name.startsWith(RUN_PREFIX)) return;
 			const dir = path.join(root, name);
 			try {
 				if (!(await lstat(dir)).isDirectory()) return;
 				const marker = parseMarker(await readFile(path.join(dir, MARKER), "utf8"));
 				if (marker === null || marker.host !== hostname() || marker.namespace !== namespace) return;
+				if (marker.childPid === undefined || processAlive(marker.childPid)) return;
 				if (processIdentityAlive({ host: marker.host, pid: marker.pid, birthToken: marker.birthToken }) !== false) return;
-				if (marker.childPid !== undefined && processAlive(marker.childPid)) return;
 				await rm(dir, { recursive: true, force: true });
 			} catch {
 				// Unreadable or vanished: leave it.
@@ -121,15 +126,16 @@ async function sweepOrphans(root: string, namespace: string | null): Promise<voi
 
 /**
  * Launch facts for an `agy acp` peer: `~` in the profile flags resolved against the child's HOME, an environment
- * overlay that is exactly the entry's own `env` plus the forced keys (credentials the adapter resolved for other
- * peers never reach agy), and a private temp dir with an owner marker.
+ * overlay that is the entry's own `env`, the forced keys and the autonomy ceiling and confinement pin the shared tool
+ * controls read (they only tighten; credentials the adapter resolved for other peers never reach agy), and a private
+ * temp dir with an owner marker.
  */
 export function prepareAntigravityLaunch(
 	agent: DelegationAgentConfig,
 	overlay: Record<string, string> = {},
 ): AntigravityLaunch {
 	const env: Record<string, string> = {};
-	for (const name of Object.keys(agent.env ?? {})) {
+	for (const name of [...Object.keys(agent.env ?? {}), ...GENERATED_TOOL_ENV_KEYS]) {
 		const value = overlay[name];
 		if (value !== undefined) env[name] = value;
 	}
@@ -144,7 +150,7 @@ export function prepareAntigravityLaunch(
 	const root = ownedRoot(env.TMPDIR ? env.TMPDIR : tmpdir());
 	const namespace = pidNamespace();
 	const sweep = sweepOrphans(root, namespace);
-	const dir = mkdtempSync(path.join(root, "run-"));
+	const dir = mkdtempSync(path.join(root, RUN_PREFIX));
 	const marker: OwnerMarker = {
 		version: 1,
 		host: hostname(),
