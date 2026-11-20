@@ -2,7 +2,6 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { type ClioSettings, readSettings } from "../core/config.js";
-import { readDispatchScopeNotice } from "../core/dispatch-scope-notice.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { FileReferenceError, readFileArgsAsync } from "../core/file-references.js";
 import { setAutonomousCommitProcess } from "../core/git-commit-attribution.js";
@@ -13,42 +12,19 @@ import { telemetryHub } from "../core/telemetry/hub.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { clioDataDir } from "../core/xdg.js";
 import { autonomyCeilingRefusal, yoloRootRefusal } from "../core/yolo-host.js";
-import { AgentsDomainModule } from "../domains/agents/index.js";
-import { audienceRefusalStandIn, isUserOriginAudienceRefusal } from "../domains/agents/spec.js";
-import { ConfigDomainModule } from "../domains/config/index.js";
-import { createContextDomainModule } from "../domains/context/runtime.js";
+import type { isUserOriginAudienceRefusal } from "../domains/agents/spec.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
-import { agentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
-import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
-import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import type { RunResult } from "../domains/dispatch/types.js";
-import { WORKER_PROCESS_CLEANUP_BOUND_MS } from "../domains/dispatch/worker-spawn.js";
-import { ExtensionsDomainModule } from "../domains/extensions/index.js";
-import { ensureClioState } from "../domains/lifecycle/index.js";
-import { buildDispatchMemorySection } from "../domains/memory/index.js";
-import { createPromptsDomainModule } from "../domains/prompts/index.js";
-import { prepareListedModelCapabilities } from "../domains/providers/background-model-metadata.js";
-import { resolveEffectivePricing } from "../domains/providers/catalog.js";
-import { ProvidersDomainModule } from "../domains/providers/index.js";
 import { runtimeNotRegistered } from "../domains/providers/retired-runtimes.js";
-import { loadSkills, ResourcesDomainModule } from "../domains/resources/index.js";
-import { SafetyDomainModule } from "../domains/safety/index.js";
 import { redactUrlCredentials } from "../domains/safety/redaction.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SessionCostCeilingError } from "../domains/scheduling/budget.js";
-import { SchedulingDomainModule } from "../domains/scheduling/index.js";
-import { SessionDomainModule } from "../domains/session/index.js";
-import { TelemetryDomainModule } from "../domains/telemetry/index.js";
 import type { ImageContent } from "../engine/types.js";
 import type { HeadlessRunDeadline } from "../entry/boot-options.js";
-import { assistantTextFromEvent } from "../tools/dispatch-event-text.js";
 import { isToolProfileName } from "../tools/profiles.js";
-import { WORKER_EXIT_PERMISSION_REQUIRED } from "../worker/spec-contract.js";
 import { type RunCliArgs, requestedRunLimits, sandboxRequiredRefusal } from "./args.js";
-import { runClioCommand } from "./clio.js";
 import { classifyDefaultTarget } from "./default-target.js";
 import { buildInitialMessage, readPipedStdin } from "./initial-message.js";
-import { createJsonCredentialScrub, projectDispatchJsonEvent } from "./modes/json-stream.js";
 import { writeFrame } from "./modes/jsonl.js";
 import type { RunJsonAdmissionRefusedFrame, RunJsonAgentFrame } from "./modes/run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "./modes/run-json-schema.js";
@@ -63,10 +39,8 @@ import {
 	writeRunDiagnostic,
 } from "./run-failure.js";
 import { RUN_HELP as HELP, RUN_USAGE as USAGE } from "./run-help.js";
-import { formatDispatchHumanOutput, verifierVerdict } from "./run-output.js";
 import { setupSteerChannel } from "./steer-channel.js";
 import { parseRunArgsWithTaskFile } from "./task-envelope.js";
-import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 
 /**
  * Enter the directory `--cwd` names, the way `acp --cwd` does. Everything a run
@@ -301,8 +275,11 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<
  * path, not a skill package, or validation failure such as a missing
  * description). Exported for contracts tests.
  */
-function explicitSkillPathErrors(skillPaths: ReadonlyArray<string>): string[] {
+async function explicitSkillPathErrors(skillPaths: ReadonlyArray<string>): Promise<string[]> {
 	const errors: string[] = [];
+	// The skill loader's graph loads only when a --skill path is given.
+	if (skillPaths.length === 0) return errors;
+	const { loadSkills } = await import("../domains/resources/index.js");
 	for (const skillPath of skillPaths) {
 		const list = loadSkills({ disableDiscovery: true, explicitSkillPaths: [skillPath] });
 		if (list.items.length > 0) continue;
@@ -351,7 +328,7 @@ async function headlessSlashPreflight(
 	const { parseSlashCommand } = await import("../session-control/slash-commands.js");
 	const command = parseSlashCommand(task);
 	if (command.kind === "skill-invocation") {
-		const { expandPromptTemplateInput, loadPromptTemplates, parsePendingSkillRequests } = await import(
+		const { expandPromptTemplateInput, loadPromptTemplates, loadSkills, parsePendingSkillRequests } = await import(
 			"../domains/resources/index.js"
 		);
 		const skillRequest = parsePendingSkillRequests(task, loadSkills({ cwd: process.cwd(), ...skillOptions }), {
@@ -559,7 +536,7 @@ async function executeRunCommand(
 				// An explicit --skill path is a contract: a path that is missing or loads
 				// no valid skill fails the run before any model invocation instead of
 				// silently degrading to whatever skills discovery finds.
-				const skillPathErrors = explicitSkillPathErrors(skillPaths);
+				const skillPathErrors = await explicitSkillPathErrors(skillPaths);
 				if (skillPathErrors.length > 0) {
 					for (const message of skillPathErrors) {
 						writeRunDiagnostic(`clio-coder run: --skill ${message}\n`);
@@ -649,6 +626,8 @@ async function executeRunCommand(
 						writeRunDiagnostic(`clio-coder run: target '${parsed.target}' not found in settings.targets\n`);
 						return 2;
 					}
+					// The boot path's graph loads here, after every pre-boot refusal above has had its say.
+					const { runClioCommand } = await import("./clio.js");
 					takeOverStdout();
 					try {
 						const code = await runClioCommand({
@@ -783,6 +762,33 @@ async function runDispatch(
 			`clio-coder run: --target ${parsed.target} takes precedence; --agent-runtime ${parsed.agentRuntime} will be ignored\n`,
 		);
 	}
+
+	// The dispatch graph loads after the usage checks above, in the order these were once static imports.
+	const { readDispatchScopeNotice } = await import("../core/dispatch-scope-notice.js");
+	const { AgentsDomainModule } = await import("../domains/agents/index.js");
+	const { audienceRefusalStandIn } = await import("../domains/agents/spec.js");
+	const { ConfigDomainModule } = await import("../domains/config/index.js");
+	const { createContextDomainModule } = await import("../domains/context/runtime.js");
+	const { agentRoleFactsResolver, requestExecutionRole } = await import("../domains/dispatch/execution-role.js");
+	const { createDispatchDomainModule } = await import("../domains/dispatch/index.js");
+	const { configureRunEventJournal } = await import("../domains/dispatch/run-event-journal.js");
+	const { WORKER_PROCESS_CLEANUP_BOUND_MS } = await import("../domains/dispatch/worker-spawn.js");
+	const { ExtensionsDomainModule } = await import("../domains/extensions/index.js");
+	const { ensureClioState } = await import("../domains/lifecycle/index.js");
+	const { buildDispatchMemorySection } = await import("../domains/memory/index.js");
+	const { createPromptsDomainModule } = await import("../domains/prompts/index.js");
+	const { prepareListedModelCapabilities } = await import("../domains/providers/background-model-metadata.js");
+	const { resolveEffectivePricing } = await import("../domains/providers/catalog.js");
+	const { ProvidersDomainModule } = await import("../domains/providers/index.js");
+	const { ResourcesDomainModule } = await import("../domains/resources/index.js");
+	const { SafetyDomainModule } = await import("../domains/safety/index.js");
+	const { SchedulingDomainModule } = await import("../domains/scheduling/index.js");
+	const { SessionDomainModule } = await import("../domains/session/index.js");
+	const { TelemetryDomainModule } = await import("../domains/telemetry/index.js");
+	const { assistantTextFromEvent } = await import("../tools/dispatch-event-text.js");
+	const { createJsonCredentialScrub, projectDispatchJsonEvent } = await import("./modes/json-stream.js");
+	const { formatDispatchHumanOutput, verifierVerdict } = await import("./run-output.js");
+	const { createCliWorkerHooks } = await import("./worker-extension-hooks.js");
 
 	ensureClioState();
 	let effectiveSettings: Readonly<ClioSettings> | undefined;
@@ -1126,7 +1132,7 @@ async function runDispatch(
 		await dispatch.drain();
 		await workerHooks.drain();
 		await workerHooks.dispose();
-		return await stopDomains(signalExit ?? (schemaMismatch ? 1 : mapExitCode(receipt)));
+		return await stopDomains(signalExit ?? (schemaMismatch ? 1 : await mapExitCode(receipt)));
 	} catch (err) {
 		unsubscribeScopeNotices();
 		if (cleanupSteer) {
@@ -1148,7 +1154,7 @@ async function runDispatch(
 			// Asking for an agent reserved for internal orchestration is an admission
 			// refusal like any other, and no model was called. Matched against the
 			// refusal the spec's own audience produces, not against failure text at large.
-			isAdmissionRefusal(msg, failedSpec);
+			await isAdmissionRefusal(msg, failedSpec);
 		const exitCode = err instanceof SessionCostCeilingError ? SESSION_COST_CEILING_EXIT_CODE : refused ? 2 : 1;
 		const refusedFrame = admissionRefusedFrame(parsed, msg, refused, exitCode);
 		if (refusedFrame !== null) {
@@ -1160,12 +1166,13 @@ async function runDispatch(
 }
 
 /** Whether a dispatch failure is an admission refusal: no worker started and no model was called. */
-function isAdmissionRefusal(
+async function isAdmissionRefusal(
 	msg: string,
 	failedSpec: Parameters<typeof isUserOriginAudienceRefusal>[0] | null | undefined,
-): boolean {
+): Promise<boolean> {
+	const spec = await import("../domains/agents/spec.js");
 	return (
-		(failedSpec ? isUserOriginAudienceRefusal(failedSpec, msg) : false) ||
+		(failedSpec ? spec.isUserOriginAudienceRefusal(failedSpec, msg) : false) ||
 		/target '.+' not found/.test(msg) ||
 		msg.includes("unknown agent recipe") ||
 		msg.includes("admission") ||
@@ -1202,19 +1209,19 @@ function shadowStandInCommand(parsed: RunCliArgs, standIn: string): string {
 	return parts.join(" ");
 }
 
-/** Exit codes a dispatched run's result passes to the shell unchanged; every other failure is 1. */
-const PASS_THROUGH_EXIT_CODES: ReadonlySet<number> = new Set([
-	0,
-	2,
-	WORKER_EXIT_PERMISSION_REQUIRED,
-	SESSION_COST_CEILING_EXIT_CODE,
-]);
-
-export function mapExitCode(r: RunResult): number {
+/**
+ * A dispatched run's exit status. Exit codes the result passes to the shell unchanged are 0, 2, the worker's
+ * permission-required code and the session cost ceiling; every other failure is 1. Async because the verifier
+ * reader and the worker contract load only once a dispatched run has settled.
+ */
+export async function mapExitCode(r: RunResult): Promise<number> {
+	const { verifierVerdict } = await import("./run-output.js");
+	const { WORKER_EXIT_PERMISSION_REQUIRED } = await import("../worker/spec-contract.js");
 	// A verifier that reported a failed verdict makes `run --agent verifier ... && deploy` stop, though its run succeeded.
 	if (r.exitCode === 0 && verifierVerdict(r)?.verdict === "fail") return 1;
 	// So does a check the run saw fail after its last edit, which seals quality `fail` (bt-27); a baseline red from
 	// before any edit seals no failure (x1-5).
 	if (r.exitCode === 0 && r.quality.resultContract?.quality === "fail") return 1;
-	return PASS_THROUGH_EXIT_CODES.has(r.exitCode) ? r.exitCode : 1;
+	const passThrough = new Set([0, 2, WORKER_EXIT_PERMISSION_REQUIRED, SESSION_COST_CEILING_EXIT_CODE]);
+	return passThrough.has(r.exitCode) ? r.exitCode : 1;
 }

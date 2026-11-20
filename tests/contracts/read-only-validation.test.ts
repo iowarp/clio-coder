@@ -549,7 +549,7 @@ it("requires observed final outcomes to settle mutation-report failures", () => 
 	}
 });
 
-it("an observed red judges only the tree it ran on, and respelled runs of one check settle each other (bt-27)", () => {
+it("an observed red judges only the tree it ran on, and respelled runs of one check settle each other (bt-27)", async () => {
 	const seal = (steps: ReadonlyArray<readonly [string, string, boolean?]>, validations: unknown[]) => {
 		const recorder = createRunEffectsRecorder(process.cwd());
 		for (const [id, command, failed] of steps) {
@@ -689,7 +689,7 @@ it("an observed red judges only the tree it ran on, and respelled runs of one ch
 	const exitCode = (quality: string) =>
 		mapExitCode({ exitCode: 0, quality: { resultContract: { quality } } } as unknown as RunResult);
 	strictEqual(
-		exitCode(
+		await exitCode(
 			seal(
 				[
 					["fix", "edit"],
@@ -700,7 +700,7 @@ it("an observed red judges only the tree it ran on, and respelled runs of one ch
 		),
 		1,
 	);
-	strictEqual(exitCode(seal([["base", "pytest", true]], [{ ...red, name: "pytest" }, green]).quality), 0);
+	strictEqual(await exitCode(seal([["base", "pytest", true]], [{ ...red, name: "pytest" }, green]).quality), 0);
 });
 
 it("a green claim against a red latest verify on the final tree seals fail, as the bash equivalent does (bt-27)", () => {
