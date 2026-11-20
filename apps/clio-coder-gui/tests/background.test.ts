@@ -13,6 +13,7 @@ import {
 	preferBackground,
 	restartBackground,
 	restartBackgroundIfIdle,
+	rotateBackgroundToken,
 	startBackground,
 	startCurrentBackground,
 	stopBackground,
@@ -640,4 +641,44 @@ test("every start of the background app draws a new launch token, so an earlier 
 	await stopApp();
 	assert.equal((await stat(files.unitFile)).mtimeMs, unit.mtimeMs, "the unit file is left alone");
 	assert.equal((await stat(files.config)).mode & 0o777, 0o600);
+});
+
+test("token rotation publishes under a lock, so concurrent starts leave one token its manifest blesses", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "clio-web-background-race-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const directory = join(root, "background"),
+		files = backgroundPaths(directory),
+		lock = join(root, ".background.publish.lock");
+	const config = await newBackgroundConfig(4317, launch, join(root, "desktop"));
+	let enabled = false;
+	const control: typeof controlService = async (action) => {
+		if (action === "enable") enabled = true;
+		return `FragmentPath=${enabled ? files.unitFile : ""}\nActiveState=inactive\nUnitFileState=enabled\nMainPID=0\n`;
+	};
+	await installBackground(directory, config, control, async () => {});
+	// Another live start holds the lock: this rotation waits instead of interleaving its renames with it.
+	await writeFile(lock, `${process.pid}\n`, { mode: 0o600 });
+	let settled = false;
+	const waiting = rotateBackgroundToken(files.config).finally(() => {
+		settled = true;
+	});
+	await new Promise((resolve) => setTimeout(resolve, 200));
+	assert.equal(settled, false);
+	assert.equal((await readBackgroundConfig(files.config)).token, config.token);
+	await rm(lock);
+	const released = await waiting;
+	assert.equal((await readBackgroundConfig(files.config)).token, released.token);
+	// A lock whose holder exited is taken over.
+	const exited = spawn(process.execPath, ["-e", ""]);
+	await new Promise((resolve) => exited.once("exit", resolve));
+	await writeFile(lock, `${exited.pid}\n`, { mode: 0o600 });
+	const rotated = await Promise.all(Array.from({ length: 6 }, () => rotateBackgroundToken(files.config)));
+	assert.ok(rotated.some((next) => next.token === config.token) === false);
+	// Ownership still verifies: the next start rotates instead of refusing the setup.
+	assert.ok(await rotateBackgroundToken(files.config));
+	assert.deepEqual(
+		(await readdir(root)).filter((name) => name.startsWith(".")),
+		[],
+		"no staging or lock is left behind",
+	);
 });
