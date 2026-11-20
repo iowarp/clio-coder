@@ -244,7 +244,7 @@ const rows: Row[] = [
 			session: localModel(),
 		},
 		present: [
-			"You are Clio Coder",
+			"You are CLIO Coder",
 			"Autonomy: default.",
 			"# Coordinator",
 			"# Skills",
@@ -448,7 +448,7 @@ const rows: Row[] = [
 			absent: [
 				...gated(!gateway, gatewayAnchors),
 				...gated(!context, contextAnchors),
-				"# Clio Coder documentation routing",
+				"# CLIO Coder documentation routing",
 				"only the operator activates or installs a skill",
 				'context(scope="docs")',
 				'context(scope="library")',
@@ -508,11 +508,11 @@ const rows: Row[] = [
 				? []
 				: [
 						"# User control and understanding",
-						'Questions about Clio Coder itself: gateway(op="call", capability="clio_docs"',
+						'Questions about CLIO Coder itself: gateway(op="call", capability="clio_docs"',
 					],
 			absent: [
-				"# Clio Coder documentation routing",
-				"# Clio Coder settings routing",
+				"# CLIO Coder documentation routing",
+				"# CLIO Coder settings routing",
 				...(headless ? ["# User control and understanding", "# Answering questions about Clio", "clio_docs"] : []),
 			],
 		}),

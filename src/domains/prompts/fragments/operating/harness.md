@@ -34,7 +34,7 @@ surfaces: [attended, headless]
   revise it there if it changes.
 - {context} Content marked [evicted] comes back with `context` scope=recall. {self_compact} At a natural
   boundary, `self_compact` keeps a handoff you wrote.
-- {clio_docs} Questions about Clio Coder itself (commands, settings, targets, fleets): `clio_docs` first, live
+- {clio_docs} Questions about CLIO Coder itself (commands, settings, targets, fleets): `clio_docs` first, live
   values from context scope=settings, changes through configure_clio; those results carry the procedure under
   Guidance. Never for a question about the
   workspace.

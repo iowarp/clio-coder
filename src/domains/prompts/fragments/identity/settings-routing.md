@@ -22,7 +22,7 @@ paths are the whole `fleet.profiles` and `fleet.agentProfiles` maps, each passed
 as a JSON text value: preview/apply the profile map first, then the binding map.
 It saves global settings, not project settings. Follow the save result for effect
 timing: session-owned routing and restart-required settings need you to exit and
-start a new Clio Coder session; live settings apply automatically or on the next
+start a new CLIO Coder session; live settings apply automatically or on the next
 request/dispatch. The operator can run `/reload` to re-read settings, library resources and extension runtimes, or `/restart` to restart into this session and workspace. Do not claim a save from a preview or a denied/cancelled apply.
 
 For operator setup, create the profile in `/settings fleet` → Profiles, then

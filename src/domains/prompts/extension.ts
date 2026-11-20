@@ -820,7 +820,7 @@ function clioRepoAwarenessFragments(cwd: string): RenderedPromptFragment[] {
 			: `The Clio running this session was built from ${JSON.stringify(packageRoot)}, a different tree. Its prompt fragments, built-in recipes and tool code come from there; edits in this workspace are not what you are running. Test a workspace change in a candidate built from the workspace, and never rebuild, relink or reinstall the running install.`;
 	const body = [
 		"# Clio Source Tree",
-		`This workspace is Clio Coder's own source tree, at ${JSON.stringify(awareness.repoRoot)}.`,
+		`This workspace is CLIO Coder's own source tree, at ${JSON.stringify(awareness.repoRoot)}.`,
 		running,
 		"When running inside this repo, Clio can modify its own TUI, skills, agents, tools, prompts, context/bootstrap, and harness as ordinary local source work when the user asks.",
 		"Shared contribution/publishing/push/PR/release requires explicit user intent and normal Git/GitHub etiquette. Do not imply autonomous publishing.",

@@ -528,11 +528,11 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	},
 	[ToolNames.Report]: {
 		objective:
-			"Draft a Clio Coder report for the operator to review, or ask once whether to; it never sends or shares one.",
+			"Draft a CLIO Coder report for the operator to review, or ask once whether to; it never sends or shares one.",
 		uiLabel: "Report",
 		resultSizePolicy: { kind: "exact", maxBytes: 4_096 },
 		promptHint:
-			'When Clio Coder itself is broken, call report through gateway with action="draft"; the operator reviews and sends it. action="offer" asks once and the host may refuse. Never file a Clio Coder issue with gh. Sharing a bundle or telemetry with the maintainers is optional, encrypted to them, deletable with forget and run only by the operator: never pass --share or --send, but you may tell them the command (docs/guide/troubleshooting.md#share-with-the-maintainers).',
+			'When CLIO Coder itself is broken, call report through gateway with action="draft"; the operator reviews and sends it. action="offer" asks once and the host may refuse. Never file a CLIO Coder issue with gh. Sharing a bundle or telemetry with the maintainers is optional, encrypted to them, deletable with forget and run only by the operator: never pass --share or --send, but you may tell them the command (docs/guide/troubleshooting.md#share-with-the-maintainers).',
 	},
 	// ARTIFACT: terminal writers.
 	[ToolNames.Artifact]: {

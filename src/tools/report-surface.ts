@@ -7,7 +7,7 @@ import type { ToolSurface } from "./lazy-tool.js";
 export const reportToolSurface = {
 	name: ToolNames.Report,
 	description:
-		'Draft a report about Clio Coder itself for the operator to review, or ask the operator once whether to draft one. action="draft" saves the draft and puts it in front of the operator; the harness adds versions and what it recorded. action="offer" asks first, and the host may refuse. This tool never sends anything.',
+		'Draft a report about CLIO Coder itself for the operator to review, or ask the operator once whether to draft one. action="draft" saves the draft and puts it in front of the operator; the harness adds versions and what it recorded. action="offer" asks first, and the host may refuse. This tool never sends anything.',
 	parameters: Type.Object({
 		action: StringEnum(["offer", "draft"], { description: "offer asks the operator once; draft writes the report." }),
 		kind: StringEnum([...REPORT_KINDS], { description: "What kind of report." }),
@@ -19,7 +19,7 @@ export const reportToolSurface = {
 		not_known: Type.Array(Type.String(), {
 			description: "Everything you did not verify. Required; may be empty.",
 		}),
-		area: Type.Optional(StringEnum([...REPORT_AREAS], { description: "The part of Clio Coder it concerns." })),
+		area: Type.Optional(StringEnum([...REPORT_AREAS], { description: "The part of CLIO Coder it concerns." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "sequential",
