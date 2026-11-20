@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { installDiagnosticSink } from "../../src/core/diagnostics.js";
+import { relaunchScript } from "../../src/core/relaunch-script.js";
 import { sumFacts, sumPricing } from "../../src/core/telemetry/pricing.js";
 import { terminalBackground } from "../../src/core/terminal-background.js";
 import { roleHex } from "../../src/core/theme-roles.js";
@@ -249,6 +250,30 @@ describe("contracts/panes files surface", () => {
 				detail: "opencode was not found",
 			});
 			strictEqual(requests.length, 1);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("opens a Clio peer with this install's launcher, never the clio-coder on PATH (FX-14.9)", async () => {
+		const { mux, requests } = fakeMux();
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-peer-self-"));
+		try {
+			const panes = createPanesRuntime({
+				mux,
+				getSettings: () => filesEnabled,
+				getDispatchSnapshot: () => SNAPSHOT,
+				getCwd: () => root,
+				resolveBinaryPath: (name) => (name === "clio-coder" ? "/other/install/bin/clio-coder" : null),
+			});
+			const script = process.argv[1] ?? "";
+			strictEqual((await panes.handoff({ peer: "clio" })).status, "opened");
+			deepStrictEqual(requests[0]?.argv, [process.execPath, relaunchScript(script)]);
+			strictEqual(
+				panes.peers?.().find((entry) => entry.peer === "clio")?.found,
+				true,
+				"the running Clio is always there to open",
+			);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

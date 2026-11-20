@@ -908,6 +908,8 @@ async function recordHeadlessMainAgentRun(input: {
 	costCap?: RunResultCostCap;
 	/** `run --verify` results; they seal as the run's host verdict. */
 	acceptance?: ReadonlyArray<RunJsonVerifyResult> | null;
+	/** `run --verify` checks a shutdown stopped before they finished; they seal as not run. */
+	stoppedChecks?: ReadonlyArray<{ id: string; command: string }>;
 	/** Passing dispatch run records still standing at the end, as the observed line names them (bt-verify7a). */
 	dispatchRuns?: ReadonlyArray<string>;
 }): Promise<void> {
@@ -963,7 +965,7 @@ async function recordHeadlessMainAgentRun(input: {
 		...typedValidationFactsFromObservedEffects(input.stats.runEffects.snapshot()),
 	];
 	const unclassified = unclassifiedAfterLastCheck(input.stats.runEffects.snapshot());
-	const hostVerification = acceptanceHostVerification(input.acceptance ?? [], snapshot.cwd);
+	const hostVerification = acceptanceHostVerification(input.acceptance ?? [], snapshot.cwd, input.stoppedChecks ?? []);
 	const verification = creditStandingDispatchRuns(
 		deriveRunVerification({ toolStats, typedValidations }, { checkFreshness }),
 		input.dispatchRuns ?? [],
@@ -1201,6 +1203,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	const recordRun = (
 		terminal: HeadlessTerminalOutcome,
 		acceptance: ReadonlyArray<RunJsonVerifyResult> | null = null,
+		stoppedChecks: ReadonlyArray<{ id: string; command: string }> = [],
 	): Promise<void> => {
 		if (sealed !== null) return sealed;
 		const endedAt = new Date().toISOString();
@@ -1227,6 +1230,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				calls,
 				...(options.costCap !== undefined ? { costCap: options.costCap } : {}),
 				acceptance,
+				stoppedChecks,
 				dispatchRuns,
 			});
 		})().catch((error: unknown) => {
@@ -1322,17 +1326,22 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		queueFrame({ type: "run_end", ...runVerdict(terminal, new Date().toISOString()) });
 	};
 
-	const sealInterruptedRun = async (): Promise<void> => {
+	// A shutdown seals the `--verify` checks that finished with their results and the rest as stopped by it. The checks
+	// run in flag order and stop at a shutdown, so the finished ones are a prefix. Null: the checks' drain overran its
+	// budget, so which finished is unknown and none is sealed.
+	const sealInterruptedRun = async (finished: ReadonlyArray<RunJsonVerifyResult> | null = []): Promise<void> => {
 		await frameChain;
 		const interrupted = interruptedTerminal();
 		writeRunEnd(interrupted);
 		await frameChain;
-		await recordRun(interrupted);
+		await recordRun(interrupted, finished, finished === null ? [] : stoppedVerifyChecks(finished));
 		// A timeout or signal exits after this hook, so a reader that is behind still gets whole lines and the run_end.
 		await flushRawStdout();
 	};
 	// `run --verify` checks, once started; a shutdown during them seals from a hook behind their own drain (CLI-P8).
 	let verifyRun: Promise<RunJsonVerifyResult[]> | null = null;
+	const stoppedVerifyChecks = (finished: ReadonlyArray<RunJsonVerifyResult>) =>
+		options.verify?.checks.slice(finished.length) ?? [];
 	// Registered after the composition root's chat drain hook, which disposes
 	// the loop and awaits settlement, so the stats folded below are final by
 	// the time this runs. Queued frames reach stdout before the seal.
@@ -1589,8 +1598,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				// run_end (CLI-P8). A drain past its budget leaves the frame out rather than the run_end.
 				termination.onDrain(async () => {
 					const stopped = new Promise<null>((resolve) => setImmediate(() => resolve(null)));
-					writeVerifyFrame(await Promise.race([(verifyRun ?? stopped).catch(() => null), stopped]));
-					await sealInterruptedRun();
+					const finished = await Promise.race([(verifyRun ?? stopped).catch(() => null), stopped]);
+					writeVerifyFrame(finished);
+					await sealInterruptedRun(finished);
 				});
 			},
 			...(onForceExit !== undefined ? { onForceExit } : {}),
@@ -1835,8 +1845,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	writeVerifyFrame(verify);
 
 	await frameChain;
-	// A shutdown seals no acceptance, whichever of this path and the drain arrives first.
-	await recordRun(terminal, termination.isShuttingDown() ? null : verify);
+	// A shutdown seals what the drain would, whichever of this path and the drain arrives first.
+	if (termination.isShuttingDown()) await recordRun(terminal, verify ?? [], stoppedVerifyChecks(verify ?? []));
+	else await recordRun(terminal, verify);
 
 	if (stderrMessage !== null) {
 		process.stderr.write(`${stderrMessage}\n`);

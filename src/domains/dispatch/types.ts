@@ -929,9 +929,10 @@ export interface RunHostVerificationCheck {
 	 * Set when the check never started, so its exit code reports no run: `refused` before launch (a reproduce
 	 * precondition), `unconfigured` (a sealed check without its parameters), or `spawn-failed` (no process could be
 	 * created). `nothing-changed` is a lint or format check skipped because the task changed no file under it; its
-	 * exit code is 0 but it judged nothing. Absent when it started, and on receipts sealed before the field existed.
+	 * exit code is 0 but it judged nothing. `shutdown` is a `run --verify` check a deadline or signal stopped before it
+	 * finished, whose result was discarded. Absent when it started, and on receipts sealed before the field existed.
 	 */
-	notRun?: "refused" | "unconfigured" | "spawn-failed" | "nothing-changed";
+	notRun?: "refused" | "unconfigured" | "spawn-failed" | "nothing-changed" | "shutdown";
 	outputTail: string;
 	artifactPath?: string;
 	/** Structured verdict of a numeric-compare or perf-budget check; absent for a command check. Covered by the receipt digest through `hostVerification`. */

@@ -104,24 +104,42 @@ export function formatHeadlessVerifyResult(result: RunJsonVerifyResult): string 
 /**
  * The acceptance checks as the run's host verdict, sealed the way dispatch seals its declared checks, so the receipt
  * and `evidence inspect` judge the run by the same checks its output reported (x1-4). Null when no check ran.
+ * `stopped` are the checks a shutdown cut off: they seal as not run, so the run is never `verified` without them and
+ * never `rejected` for them alone.
  */
 export function acceptanceHostVerification(
 	results: ReadonlyArray<RunJsonVerifyResult>,
 	cwd: string,
+	stopped: ReadonlyArray<{ id: string; command: string }> = [],
 ): RunHostVerification | null {
-	if (results.length === 0) return null;
+	if (results.length === 0 && stopped.length === 0) return null;
+	// The argv the check ran under: runBashCommand adds pipefail, so the seal names it too (CLI-4).
+	const argv = (command: string) => ["bash", "-o", "pipefail", "-c", command];
+	const failed = results.some((result) => !result.passed);
 	return {
-		status: results.every((result) => result.passed) ? "verified" : "rejected",
-		checks: results.map((result) => ({
-			check: result.id,
-			// The argv the check ran under: runBashCommand adds pipefail, so the seal names it too (CLI-4).
-			argv: ["bash", "-o", "pipefail", "-c", result.command],
-			cwd,
-			// A check that did not pass never seals exit 0, whether it timed out, was capped or ended by a signal.
-			exitCode: result.passed ? 0 : result.exitCode !== null && result.exitCode !== 0 ? result.exitCode : 1,
-			durationMs: result.durationMs,
-			memo: false,
-			outputTail: "",
-		})),
+		status: failed ? "rejected" : stopped.length > 0 ? "skipped" : "verified",
+		...(!failed && stopped.length > 0 ? { reason: "shutdown" } : {}),
+		checks: [
+			...results.map((result) => ({
+				check: result.id,
+				argv: argv(result.command),
+				cwd,
+				// A check that did not pass never seals exit 0, whether it timed out, was capped or ended by a signal.
+				exitCode: result.passed ? 0 : result.exitCode !== null && result.exitCode !== 0 ? result.exitCode : 1,
+				durationMs: result.durationMs,
+				memo: false,
+				outputTail: "",
+			})),
+			...stopped.map((check) => ({
+				check: check.id,
+				argv: argv(check.command),
+				cwd,
+				exitCode: 1,
+				durationMs: 0,
+				memo: false,
+				notRun: "shutdown" as const,
+				outputTail: "",
+			})),
+		],
 	};
 }

@@ -21,6 +21,7 @@ import { isAbsolute, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ClioSettings } from "../core/config.js";
+import { relaunchScript } from "../core/relaunch-script.js";
 import { clioStateDir, resolveClioDirs } from "../core/xdg.js";
 import type { DispatchSnapshot } from "../domains/dispatch/contract.js";
 import { newestRunFeedRunId, runFeedPath } from "../domains/dispatch/run-feed.js";
@@ -452,7 +453,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 		peers() {
 			return PANE_PEER_IDS.map((peer) => {
 				const binary = panePeerBinary(peer);
-				return { peer, binary, found: probe(binary) !== null };
+				return { peer, binary, found: peer === "clio" || probe(binary) !== null };
 			});
 		},
 
@@ -478,7 +479,8 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 				};
 			}
 			const binary = panePeerBinary(request.peer);
-			const binaryPath = probe(binary);
+			// A Clio peer is this install, which a clio-coder on PATH may not be (FX-14.9).
+			const binaryPath = request.peer === "clio" ? process.execPath : probe(binary);
 			if (binaryPath === null) {
 				return {
 					status: "missing-binary",
@@ -488,7 +490,8 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 					detail: `${binary} was not found`,
 				};
 			}
-			const argv = [binaryPath];
+			const script = process.argv[1];
+			const argv = request.peer === "clio" && script !== undefined ? [binaryPath, relaunchScript(script)] : [binaryPath];
 			if (brief) {
 				// A second Clio takes no prompt on its command line; its task is typed in.
 				if (request.peer === "clio") {
