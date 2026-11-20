@@ -285,11 +285,7 @@ export function SignInStep({ view, busy, send }: StepProps<Of<"signin">>) {
 	return (
 		<Step
 			title={`Sign in to ${view.provider}`}
-			lede={
-				<p>
-					{view.lede} The command-line tool stores the result, and this page never sees it.
-				</p>
-			}
+			lede={<p>{view.lede} The command-line tool stores the result, and this page never sees it.</p>}
 			actions={
 				<>
 					{view.connect ? (

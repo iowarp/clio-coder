@@ -328,9 +328,7 @@ export function stepFor(prompt: Prompt): StepView {
 				note: lines.find((line) => /^Sign-in stores credentials/u.test(line)) ?? null,
 				connect,
 				later: byLabel(prompt, /^Later$/u),
-				lede: connect?.hint
-					? `CLIO Coder ${connect.hint}.`
-					: "CLIO Coder signs you in through its command-line tool.",
+				lede: connect?.hint ? `CLIO Coder ${connect.hint}.` : "CLIO Coder signs you in through its command-line tool.",
 			};
 		}
 		if (title === "How should Clio get the API key?")
