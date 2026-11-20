@@ -132,40 +132,33 @@ export function maskCommandOutput(text: string, known: readonly string[], ending
 	return `${maskWhole(head, known, "cut-off")}[... ${count} bytes omitted ...]\n${tail.text}`;
 }
 
-/** A single line longer than this commits at its last whitespace, so a stream with no newlines stays linear. */
-const LINE_COMMIT_CHARS = 64 * 1024;
-/** A run with no whitespace longer than this commits all but its last few kilobytes, which is longer than any credential. */
-const RUN_COMMIT_CHARS = 64 * 1024;
+/**
+ * Committed text is masked in blocks of at most this many characters. Where a block ends is decided from the block's own
+ * text, never from where a piece of the stream happened to end: a quoted value's lead reads across a line break, and a
+ * literal marker anywhere in a block changes how its quoted values are marked, so masking the same lines in different
+ * groups gave different text (CLI-P3).
+ */
+const BLOCK_CHARS = 64 * 1024;
+/** A block with no whitespace ends this far short of its limit, which is longer than any credential. */
 const RUN_KEEP_CHARS = 4 * 1024;
 const PEM_END_KEEP_CHARS = 128;
-
-function lastBreak(text: string, re: RegExp): number {
-	for (let at = text.length - 1; at >= 0; at -= 1) if (re.test(text.charAt(at))) return at;
-	return -1;
-}
+// The last whitespace character of a text, found in one scan from the front.
+const LAST_SPACE_RE = /\s(?=\S*$)/u;
 
 /**
  * Mask a stream as it is appended. {@link push} returns the masked text that became final and {@link frame} what is still
- * pending, held back where it may end inside a credential. Committed text is masked once, and where pending text breaks is
- * tracked as it arrives, so the whole stream costs one pass however many pieces and frames it has.
+ * pending, held back where it may end inside a credential. Text commits in blocks whose ends depend only on the text, so
+ * the same stream masks to the same text however it is split into pieces, and a large stream is masked a block at a time.
  */
 export class CommandOutputMask {
 	private pending = "";
-	/** Indexes into {@link pending} of its last newline and its last whitespace, or -1. */
-	private lastNewline = -1;
-	private lastSpace = -1;
 	/** A private key's header was committed without its footer, so everything up to the footer is already masked. */
 	private inPrivateKey = false;
 
 	constructor(private readonly known: readonly string[]) {}
 
 	push(text: string): string {
-		const base = this.pending.length;
 		this.pending += text;
-		const newline = text.lastIndexOf("\n");
-		if (newline >= 0) this.lastNewline = base + newline;
-		const space = lastBreak(text, /\s/u);
-		if (space >= 0) this.lastSpace = base + space;
 		let out = "";
 		for (;;) {
 			if (this.inPrivateKey) {
@@ -201,23 +194,33 @@ export class CommandOutputMask {
 
 	private drop(count: number): void {
 		this.pending = this.pending.slice(count);
-		this.lastNewline = this.lastNewline >= count ? this.lastNewline - count : -1;
-		this.lastSpace = this.lastSpace >= count ? this.lastSpace - count : -1;
 	}
 
-	/** How much of the pending text can be masked now and never revisited, or 0. */
+	/**
+	 * How much of the pending text can be masked now and never revisited, or 0. Only a full block commits, and only its own
+	 * text places the cut: after its last newline, else its last whitespace, else short of its end inside a run.
+	 */
 	private commitCut(): number {
-		const text = this.pending;
-		let cut = this.lastNewline + 1;
-		if (cut === 0 && text.length > LINE_COMMIT_CHARS) cut = this.lastSpace + 1;
-		if (cut === 0 && text.length > RUN_COMMIT_CHARS) cut = text.length - RUN_KEEP_CHARS;
-		if (cut === 0) return 0;
-		// Every pattern closes at whitespace except one naming a credential before it, a known value holding whitespace,
-		// and a forced cut inside a run, so the cut steps back ahead of whichever is open there.
+		if (this.pending.length <= BLOCK_CHARS) return 0;
+		const block = this.pending.slice(0, BLOCK_CHARS);
+		const space = LAST_SPACE_RE.exec(block);
+		for (const cut of [block.lastIndexOf("\n") + 1, space === null ? 0 : space.index + 1, BLOCK_CHARS - RUN_KEEP_CHARS]) {
+			if (cut === 0) continue;
+			const settled = this.settledCut(block, cut);
+			if (settled > 0) return settled;
+		}
+		return 0;
+	}
+
+	/**
+	 * Every pattern closes at whitespace except one naming a credential before it, a known value holding whitespace, and a
+	 * cut inside a run, so the cut steps back ahead of whichever is open there.
+	 */
+	private settledCut(text: string, cut: number): number {
 		const before = text.slice(Math.max(0, cut - CREDENTIAL_LEAD_CHARS), cut);
 		const lead = CREDENTIAL_LEAD_RE.exec(before);
-		if (lead !== null) cut -= before.length - lead.index;
-		return cut <= 0 ? 0 : openSecretStart(text.slice(0, cut), this.known);
+		const settled = lead === null ? cut : cut - (before.length - lead.index);
+		return settled <= 0 ? 0 : openSecretStart(text.slice(0, settled), this.known);
 	}
 }
 
