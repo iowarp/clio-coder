@@ -1,6 +1,11 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { compact } from "../../src/domains/session/compaction/compact.js";
+import type { FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
+import {
+	COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE,
+	type CompactionCallObservation,
+	compact,
+} from "../../src/domains/session/compaction/compact.js";
 import { estimateTokens } from "../../src/domains/session/compaction/tokens.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
@@ -94,5 +99,207 @@ describe("overflow compaction of a retained suffix", () => {
 		strictEqual(calls, 1);
 		ok(overflow.summary.length > 0, "a request that cannot fit otherwise gets the rewrite");
 		strictEqual(overflow.emptyReason, undefined);
+	});
+});
+
+// MD10: a split fold's history and split-turn summaries on a route with a second slot free.
+describe("split fold summaries on a capacity-two route", () => {
+	type Mode =
+		| "pass"
+		| "history-fails-split-held"
+		| "split-fails-history-held"
+		| "split-done-history-fails"
+		| "hold-throws"
+		| "parked-in-admission";
+	const turns = () => new Promise<void>((resolve) => setImmediate(resolve));
+	// Resolves on abort, or after a bounded wait so a missing wake fails an assertion instead of hanging the file.
+	const abortOf = async (signal: AbortSignal) => {
+		const aborted = new Promise<boolean>((resolve) =>
+			signal.addEventListener("abort", () => resolve(true), { once: true }),
+		);
+		const bounded = (async () => {
+			for (let turn = 0; turn < 2000 && !signal.aborted; turn++) await turns();
+			return signal.aborted;
+		})();
+		return signal.aborted || (await Promise.race([aborted, bounded]));
+	};
+	async function fold(capacity: 1 | 2, mode: Mode = "pass") {
+		const faux = registerEngineFauxProvider({
+			api: "split-fold-fixture",
+			models: [{ id: "summary" }],
+			tokensPerSecond: 0,
+		});
+		const requests: string[] = [];
+		const startsSeenAtSettle: Record<string, number> = {};
+		const calls: CompactionCallObservation[] = [];
+		let started = 0;
+		let settled = 0;
+		let releases = 0;
+		let settledAtRelease = -1;
+		let parkedWoken = false;
+		let admissions = 0;
+		const offerFailures: number[] = [];
+		const respond = (): FauxResponseFactory => async (context, options, _state, resolved) => {
+			// Normalized: message timestamps are send times, not request content.
+			const user = JSON.stringify(context.messages.map(({ timestamp: _sent, ...rest }) => rest));
+			const split = user.includes(JSON.stringify(COMPACTION_TURN_PREFIX_PROMPT_TEMPLATE).slice(1, 40));
+			const kind = split ? "split" : "history";
+			requests.push(JSON.stringify({ kind, user, maxTokens: options?.maxTokens }));
+			started += 1;
+			// Hold each response until both requests started; a serial build never sees the second start.
+			for (let turn = 0; turn < 200 && started < 2; turn++) await turns();
+			startsSeenAtSettle[kind] = started;
+			let stopReason: "stop" | "error" = "stop";
+			if (mode === "parked-in-admission") stopReason = "error";
+			else if (kind === "history" && mode === "split-fails-history-held") {
+				ok(options?.signal, "the history request carries a signal");
+				await abortOf(options.signal);
+			} else if (kind === "history") {
+				// The split reply settles first, so installation order is the code's, not the arrival's.
+				for (let turn = 0; turn < 200 && settled === 0 && started === 2; turn++) await turns();
+				if (mode !== "pass") stopReason = "error";
+			} else if (mode === "history-fails-split-held") {
+				ok(options?.signal, "the split request carries a signal");
+				await abortOf(options.signal);
+			} else if (mode === "split-fails-history-held") stopReason = "error";
+			settled += 1;
+			return {
+				role: "assistant",
+				content: [{ type: "text", text: split ? "Split detail" : syntheticCompactionSummary("History goal") }],
+				api: resolved.api,
+				provider: resolved.provider,
+				model: resolved.id,
+				stopReason,
+				...(stopReason === "error" ? { errorMessage: `${kind} summary failed` } : {}),
+				timestamp: Date.now(),
+				usage: {
+					input: 10,
+					output: 5,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 15,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+			};
+		};
+		faux.setResponses([respond(), respond()]);
+		const resolved = faux.getModel("summary");
+		ok(resolved);
+		const entries: SessionEntry[] = chain([
+			message("user-0", "user", { text: "Earlier work" }),
+			message("user-1", "user", { text: "Continue" }),
+			message("tail", "assistant", { text: "tail ".repeat(2000) }),
+		]);
+		try {
+			const result = await compact({
+				entries,
+				model: { ...resolved, contextWindow: 32768, maxTokens: 4096 },
+				keepRecentTokens: 100,
+				onCall: (call) => calls.push(call),
+				// Declined offers still hear the fold's failure, once each.
+				offerMemory: () => {
+					const index = offerFailures.push(0) - 1;
+					return {
+						text: "",
+						receipt: {} as never,
+						isCurrent: () => false,
+						onOutcome: (outcome) => {
+							if (outcome.kind === "failed") offerFailures[index] = (offerFailures[index] ?? 0) + 1;
+						},
+					};
+				},
+				// One admission passes; a later one parks until its own call's signal wakes it, as a ceiling wait does.
+				...(mode === "parked-in-admission"
+					? {
+							beforeSummaryCall: async (_hold: unknown, signal?: AbortSignal) => {
+								admissions += 1;
+								if (admissions === 1) return;
+								ok(signal, "admission receives the call's signal");
+								parkedWoken = await abortOf(signal);
+								signal.throwIfAborted();
+							},
+						}
+					: {}),
+				holdSecondSummarySlot: () => {
+					if (mode === "hold-throws") throw new Error("slot hold failed");
+					return capacity === 2
+						? () => {
+								releases += 1;
+								settledAtRelease = settled;
+							}
+						: null;
+				},
+			}).then(
+				(value) => ({ value }),
+				(error: unknown) => ({ error }),
+			);
+			return {
+				result,
+				requests: requests.sort(),
+				startsSeenAtSettle,
+				calls,
+				releases,
+				settledAtRelease,
+				parkedWoken,
+				offerFailures,
+			};
+		} finally {
+			faux.unregister();
+		}
+	}
+
+	it("overlaps the two summaries, installs history first, and commits nothing when either fails", async () => {
+		const serial = await fold(1);
+		const concurrent = await fold(2);
+		ok("value" in serial.result && "value" in concurrent.result);
+		strictEqual(concurrent.result.value.isSplitTurn, true);
+		deepStrictEqual(concurrent.startsSeenAtSettle, { history: 2, split: 2 }, "both start before either settles");
+		deepStrictEqual(serial.startsSeenAtSettle, { history: 1, split: 2 }, "capacity one runs them in sequence");
+		deepStrictEqual(concurrent.requests, serial.requests, "request content equals the serial build's");
+		strictEqual(concurrent.result.value.summary, serial.result.value.summary);
+		const summary = concurrent.result.value.summary;
+		ok(summary.indexOf("History goal") < summary.indexOf("**Turn Context (split turn):**"), summary);
+		strictEqual(concurrent.result.value.usage?.apiCalls, 2);
+		strictEqual(concurrent.releases, 1);
+		strictEqual(concurrent.settledAtRelease, 2, "the slot is released after both requests settle");
+
+		const cancelled = await fold(2, "history-fails-split-held");
+		ok("error" in cancelled.result && /history summary failed/.test(String(cancelled.result.error)));
+		deepStrictEqual(cancelled.calls.map((call) => call.outcome).sort(), ["aborted", "error"]);
+		strictEqual(cancelled.releases, 1);
+		ok(cancelled.offerFailures.length > 0);
+		ok(
+			cancelled.offerFailures.every((count) => count === 1),
+			`each offer hears one failure: ${cancelled.offerFailures}`,
+		);
+
+		const mirrored = await fold(2, "split-fails-history-held");
+		ok("error" in mirrored.result && /split summary failed/.test(String(mirrored.result.error)));
+		deepStrictEqual(mirrored.calls.map((call) => call.outcome).sort(), ["aborted", "error"]);
+		strictEqual(mirrored.releases, 1);
+		ok(mirrored.offerFailures.every((count) => count === 1));
+
+		const thrown = await fold(2, "hold-throws");
+		ok("error" in thrown.result && /slot hold failed/.test(String(thrown.result.error)));
+		strictEqual(thrown.calls.length, 0, "nothing is sent");
+		ok(thrown.offerFailures.length > 0);
+		ok(
+			thrown.offerFailures.every((count) => count === 1),
+			"a throwing hold still fails the offers",
+		);
+
+		// A sibling's failure wakes the other while it is parked in admission, so the pair settles and the slot frees.
+		const parked = await fold(2, "parked-in-admission");
+		ok("error" in parked.result && /summary failed/.test(String(parked.result.error)));
+		strictEqual(parked.parkedWoken, true);
+		strictEqual(parked.calls.length, 1, "the parked request is never sent");
+		strictEqual(parked.releases, 1);
+		ok(parked.offerFailures.every((count) => count === 1));
+
+		const charged = await fold(2, "split-done-history-fails");
+		ok("error" in charged.result && /history summary failed/.test(String(charged.result.error)));
+		const done = charged.calls.find((call) => call.outcome === "success");
+		ok(done, "the completed sibling reports its call");
+		ok(((done.usage as { totalTokens?: number }).totalTokens ?? 0) > 0, "and is charged its usage");
 	});
 });
