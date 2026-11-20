@@ -177,6 +177,7 @@ import {
 	resolveDeliveryTools,
 	sanitizeLockedSynthesisMessage,
 	withLockedSynthesisDirective,
+	withRequestTailDirective,
 	workerLoopBlockBudget,
 } from "./loop-guard.js";
 import { registerClioOAuthProviders } from "./oauth.js";
@@ -1315,6 +1316,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				updates: Array<{ at: number; message: SystemMessage }>;
 		  }
 		| undefined;
+	// Whether the first round's system prompt carried the helper protocol. Off native routes every later round keeps that
+	// prompt byte for byte, so the prefix cache survives the handoff; phase notes ride the request tail (FL-16).
+	let helperProtocolInPrefix: boolean | undefined;
 	// The terminal handoff names its tool in the request, so it keeps the tool
 	// surface that a synthesis lock would otherwise remove.
 	const terminalHandoffActive = (api: string): boolean =>
@@ -1499,16 +1503,35 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					(tool) => tool.name !== INTERNAL_HELPER_RESULT_TOOL || helperExposedThisRound || helperDeclaredFromStart,
 				),
 			};
-			const helperPrompt =
-				helperExposedThisRound || helperDeclaredFromStart
-					? `${currentContext.systemPrompt ?? ""}\n\n# Internal helper protocol\nReturn the result by calling ${INTERNAL_HELPER_RESULT_TOOL} alone with the result object as arguments. Successful submission ends the run; no narrative report is needed.${!helperDeclaredFromStart && (synthesisToolLock || helperTerminalPhase) ? " Work tools are disabled. Earlier tool-use instructions apply only to the completed work phase; only the terminal handoff remains available. Do not invent missing evidence." : ""}`
+			const helperOnRequest = helperExposedThisRound || helperDeclaredFromStart;
+			const helperProtocol = `Return the result by calling ${INTERNAL_HELPER_RESULT_TOOL} alone with the result object as arguments. Successful submission ends the run; no narrative report is needed.`;
+			const helperLockedNote =
+				!helperDeclaredFromStart && (synthesisToolLock || helperTerminalPhase)
+					? "Work tools are disabled. Earlier tool-use instructions apply only to the completed work phase; only the terminal handoff remains available. Do not invent missing evidence."
+					: "";
+			helperProtocolInPrefix ??= helperOnRequest;
+			const withProtocol = (note: string) =>
+				`${currentContext.systemPrompt ?? ""}\n\n# Internal helper protocol\n${helperProtocol}${note ? ` ${note}` : ""}`;
+			// Native routes slice the protocol back out of this prompt into a mid-conversation section below; every other
+			// route keeps the first round's prompt and carries a protocol or note that arrived later on the tail.
+			const systemPrompt = nativeToolChanges
+				? helperOnRequest
+					? withProtocol(helperLockedNote)
+					: currentContext.systemPrompt
+				: helperProtocolInPrefix
+					? withProtocol("")
 					: currentContext.systemPrompt;
-			const systemPrompt = helperExposedThisRound || helperDeclaredFromStart ? helperPrompt : currentContext.systemPrompt;
+			const helperTail =
+				nativeToolChanges || !helperOnRequest
+					? ""
+					: [helperProtocolInPrefix ? "" : `Internal helper protocol: ${helperProtocol}`, helperLockedNote]
+							.filter((part) => part.length > 0)
+							.join(" ");
 			// A synthesis lock without the helper handoff carries its directive on the
 			// request tail, so the system prompt keeps the work phase's bytes and a
 			// prefix cache survives the lock.
 			const synthesisDirective =
-				synthesisToolLock && !(helperExposedThisRound || helperDeclaredFromStart)
+				synthesisToolLock && !helperOnRequest
 					? { requiredResult: input.resultContract ? resultContractShape(input.resultContract) : undefined }
 					: undefined;
 			const window = input.runtimeResolution?.capabilities.contextWindow ?? currentModel.contextWindow;
@@ -1519,9 +1542,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			);
 			// Priced with the tail directive the round will carry; only the estimate sees it here.
 			const pricedSystemPrompt =
-				synthesisDirective === undefined
-					? (systemPrompt ?? "")
-					: `${systemPrompt ?? ""}\n\n${lockedSynthesisDirective(synthesisDirective.requiredResult)}`;
+				synthesisDirective !== undefined
+					? `${systemPrompt ?? ""}\n\n${lockedSynthesisDirective(synthesisDirective.requiredResult)}`
+					: helperTail
+						? `${systemPrompt ?? ""}\n\n${helperTail}`
+						: (systemPrompt ?? "");
 			const pressure = {
 				messages: currentContext.messages,
 				overheadTokens: reminders.reduce((sum, reminder) => sum + estimateAgentMessageTokens(reminder as AgentMessage), 0),
@@ -1715,9 +1740,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						const attemptContext = anchorContextAtInputTokens(
 							synthesisDirective !== undefined
 								? withLockedSynthesisDirective(attempt.context, synthesisDirective.requiredResult)
-								: middlewareChoice.kind === "none" && attempt.options?.toolChoice === "auto"
-									? withLockedSynthesisDirective(attempt.context)
-									: attempt.context,
+								: helperTail
+									? withRequestTailDirective(attempt.context, helperTail)
+									: middlewareChoice.kind === "none" && attempt.options?.toolChoice === "auto"
+										? withLockedSynthesisDirective(attempt.context)
+										: attempt.context,
 							inputTokens,
 						);
 						const fetchImpl = attempt.options?.fetch ?? ((url, init) => globalThis.fetch(url, init));
