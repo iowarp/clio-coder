@@ -39,6 +39,8 @@ describe("reminders gate on the turn's callable tools", () => {
 		// Nor one whose prose alone states read-only scope (bt-22b).
 		const prose = `This is a read-only task: do not create, modify or delete any file.\n${ENUMERATED}`;
 		deepStrictEqual(reminder.evaluate({ ...step, text: prose }), []);
+		// Nor `Line N:` labels, which number content, not steps (SF-14).
+		deepStrictEqual(reminder.evaluate({ ...step, text: "Fix these.\nLine 1: a\nLine 2: b\nLine 3: c" }), []);
 		// The skipped turn did not spend the session's one reminder.
 		const effects = reminder.evaluate(turn(surface(ToolNames.Tasks)));
 		strictEqual(effects.length, 1);
