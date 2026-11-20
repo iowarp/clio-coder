@@ -10,8 +10,9 @@ import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 const engineAi = createEngineAi();
 
-// Inception /v1/models, 2026-10-20: Pi has no Inception catalog. /v1/models publishes no
-// rates, so Mercury 3's zero cost marks it unpriced; operators set `pricing:` on the target.
+// Inception /v1/models, 2026-10-20: Pi has no Inception catalog, so Clio carries these rows.
+// Mercury 3 list rates (USD per MTok), https://www.inceptionlabs.ai/blog/introducing-mercury-3:
+// list, not the launch discount, so a cost cap never under-counts a run.
 const MERCURY_3: Model<"openai-completions"> = {
 	id: "mercury-3",
 	name: "Inception: Mercury 3",
@@ -20,7 +21,7 @@ const MERCURY_3: Model<"openai-completions"> = {
 	baseUrl: "https://api.inceptionlabs.ai/v1",
 	reasoning: false,
 	input: ["text"],
-	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	cost: { input: 0.2, output: 0.7, cacheRead: 0.02, cacheWrite: 0 },
 	contextWindow: 1000000,
 	maxTokens: 131072,
 };
