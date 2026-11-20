@@ -87,7 +87,7 @@ const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 		kind: "authorization",
 		// An opaque credential has no shape of its own, so the header or scheme naming it is the signal. A bare
 		// `bearer <word>` needs a digit to stay out of prose, and `$TOKEN` falls outside the value charset.
-		re: /\b((?:authorization\s*(?:["']\s*)?[:=]\s*["']?(?:bearer|basic|token)\s+)|(?:bearer\s+)(?=[A-Za-z0-9._~+/-]*\d))([A-Za-z0-9._~+/-]{8,}=*)/gi,
+		re: /\b((?:authorization\s*(?:["']\s*)?[:=]\s*["']?(?:bearer|basic|token|apikey)\s+)|(?:bearer\s+)(?=[A-Za-z0-9._~+/-]*\d))([A-Za-z0-9._~+/-]{8,}=*)/gi,
 	},
 	{
 		kind: "assignment",
@@ -101,7 +101,10 @@ const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 		// A key spans one run of name characters and always reaches the run's end, so only the run's first word can
 		// start a match and the secret word need only be found once. Two stars around the word took 7.6 s on 8 KB of
 		// `token-`, and `\\s*["']?\\s*` split a run of spaces every possible way.
-		re: /\b(?<=(?:^|[^A-Za-z0-9_-])-*)(?=[A-Za-z0-9_-]*?(?:api[_-]?key|apikey|secret|token|passwd|password|credential))([A-Za-z0-9_-]*\s*(?:["']\s*)?[:=]\s*["']?)(?![A-Za-z_][\w.]*\((?:[\s"'{[)]|$))([^\s"'`;,&|<>]{8,})/gi,
+		//
+		// A bare `pass` or `pwd` is prose or the working directory (`first pass: lint`, `PWD=/home/a`), so each needs a
+		// qualifier: `DB_PASS`, `PGPASS` and `MYSQL_PWD` hide their values as display redaction does, `tests_passed` keeps its.
+		re: /\b(?<=(?:^|[^A-Za-z0-9_-])-*)(?=[A-Za-z0-9_-]*?(?:api[_-]?key|apikey|(?:account|access)[_-]?key|secret|token|pass(?:wd|word|phrase)|[A-Za-z0-9][_-]?pass(?![a-z])|[_-]pwd(?![a-z])|credential))([A-Za-z0-9_-]*\s*(?:["']\s*)?[:=]\s*["']?)(?![A-Za-z_][\w.]*\((?:[\s"'{[)]|$))([^\s"'`;,&|<>]{8,})/gi,
 	},
 ];
 
@@ -137,7 +140,7 @@ function secretShapeHolds(kind: string, value: string): boolean {
 
 /** The assignment pattern's key half, for a key that arrives as a JSON property name. */
 const SECRET_PROPERTY_NAME =
-	/(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*$)[A-Za-z0-9_-]*?(?:api[_-]?key|apikey|secret|token|passwd|password|credential)/i;
+	/(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*$)[A-Za-z0-9_-]*?(?:api[_-]?key|apikey|(?:account|access)[_-]?key|secret|token|pass(?:wd|word|phrase)|[A-Za-z0-9][_-]?pass(?![a-z])|[_-]pwd(?![a-z])|credential)/i;
 
 /**
  * A known value shorter than this is too likely to be ordinary text (a word,
