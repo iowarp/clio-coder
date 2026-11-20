@@ -4,9 +4,9 @@ import { type AgentSpec, isUserVisibleAgent } from "../domains/agents/spec.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
-import { printError } from "./shared.js";
+import { writeCliFailure } from "./kit/json-out.js";
 
-const HELP = `clio-coder agents [--json] [--all]
+const HELP = `clio-coder agents [list] [--json] [--all]
 clio-coder agents validate [--json]
 
 List user-facing agent specs from built-in, plugin, user, and project recipes.
@@ -27,12 +27,19 @@ export async function runAgentsCommand(args: ReadonlyArray<string>): Promise<num
 		return 0;
 	}
 	if (args[0] === "validate") return runAgentsValidate(args.slice(1));
-	const json = args.includes("--json");
-	const all = args.includes("--all");
-	const unknown = args.find((arg) => arg !== "--json" && arg !== "--all");
+	// `list` is the list verb every other group spells (C14); the bare form stays the default read.
+	const listVerb = args[0] === "list";
+	const options = listVerb ? args.slice(1) : args;
+	const json = options.includes("--json");
+	const all = options.includes("--all");
+	const unknown = options.find((arg) => arg !== "--json" && arg !== "--all");
 	if (unknown) {
-		printError(`unknown flag: ${unknown}`);
-		process.stderr.write(HELP);
+		writeCliFailure({
+			path: listVerb ? ["agents", "list"] : ["agents"],
+			slug: unknown.startsWith("-") ? "unknown_flag" : "unknown_command",
+			message: unknown.startsWith("-") ? `unknown flag: ${unknown}` : `unknown agents command: ${unknown}`,
+			json,
+		});
 		return 2;
 	}
 	ensureClioState();
@@ -60,8 +67,12 @@ async function runAgentsValidate(args: ReadonlyArray<string>): Promise<number> {
 	const json = args.includes("--json");
 	const unknown = args.find((arg) => arg !== "--json");
 	if (unknown) {
-		printError(`unknown flag: ${unknown}`);
-		process.stderr.write(HELP);
+		writeCliFailure({
+			path: ["agents", "validate"],
+			slug: unknown.startsWith("-") ? "unknown_flag" : "usage",
+			message: unknown.startsWith("-") ? `unknown flag: ${unknown}` : `unexpected argument: ${unknown}`,
+			json,
+		});
 		return 2;
 	}
 	ensureClioState();
