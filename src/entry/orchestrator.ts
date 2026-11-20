@@ -1413,10 +1413,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			};
 		},
 		usableHistoryTokens: () => liveHistory()?.usable ?? 0,
-		historyPressure: () => {
-			const live = liveHistory();
-			return live === null || live.usable <= 0 ? null : live.used / live.usable;
-		},
+		foldPlanner: () => ({ live: chat, compaction: getCurrentSettings().context.compaction }),
 		client: createBackgroundMemoryRouting(
 			providers,
 			() => effectiveSettingsForDispatch?.(),

@@ -1,3 +1,5 @@
+import type { BudgetInspection } from "../budget/inspection.js";
+
 /**
  * The two questions ContextFold §3.4 keeps apart. Economic pressure asks
  * whether context is large enough to be worth reducing; it reads the live
@@ -122,4 +124,52 @@ export function summaryOutputCap(input: {
 }): number | undefined {
 	if (!(input.window > 0) || input.window >= SMALL_WINDOW_TOKENS) return undefined;
 	return Math.max(input.admissibleReserve, input.configured ?? 0);
+}
+
+/**
+ * Where the next automatic fold would send the history it reads. `live` asks the summary inside the main route's
+ * cached prefix, `portable` sends history to a separate summary request, `native` is the provider's own compaction,
+ * `none` means no automatic fold fires.
+ */
+export type FoldPath = "live" | "portable" | "native" | "none";
+
+/** The fold planner's projection: the path, and pressure against the trigger in the same units (shares of the window). */
+export interface FoldProjection {
+	readonly path: FoldPath;
+	/** The next request's input as a share of the route's window. */
+	readonly pressure: number;
+	/** The share at which the automatic fold fires, counting its reserve. */
+	readonly trigger: number;
+}
+
+/** What the chat loop publishes that the projection reads: its live budget and its context ledger. */
+export interface FoldPlannerView {
+	inspectLiveBudget(): BudgetInspection;
+	contextLedger(): { readonly compactionAuto: boolean; readonly compactionThreshold: number | null };
+}
+
+/**
+ * Project the next automatic fold from the chat loop's published live budget, its context ledger's trigger and the
+ * compaction settings. Null while the live budget is unavailable or only a persisted capture exists: the projection
+ * is unknown. The path is the planner's own: native as the compaction flow enables it, live only when the live budget
+ * reports the live-prefix request available. A live request the fold later refuses on price or fit, which cannot be
+ * known ahead, takes the portable path then; this projection cannot see that and names it live.
+ */
+export function foldProjection(
+	planner: FoldPlannerView,
+	compaction: { readonly provider?: string | undefined; readonly model?: string | null | undefined },
+): FoldProjection | null {
+	const budget = planner.inspectLiveBudget();
+	if (budget.status !== "available" || budget.view.historical || budget.view.inputTokens === null) return null;
+	const view = budget.view;
+	const input = view.inputTokens;
+	const window = view.effectiveWindow ?? 0;
+	const pressure = window > 0 && input !== null ? input / window : 0;
+	const ledger = planner.contextLedger();
+	const trigger = ledger.compactionThreshold;
+	if (!ledger.compactionAuto || !(window > 0) || trigger === null)
+		return { path: "none", pressure, trigger: trigger ?? 1 };
+	if (compaction.provider === "native" && !compaction.model && view.runtimeId === "openai-codex")
+		return { path: "native", pressure, trigger };
+	return { path: budget.livePrefixSummary?.() === true ? "live" : "portable", pressure, trigger };
 }

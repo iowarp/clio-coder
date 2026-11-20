@@ -68,9 +68,17 @@ export interface MemoryCompactionOffer {
 	readonly text: string;
 	readonly receipt: MemoryConsumptionReceipt;
 	readonly isCurrent: () => boolean;
-	/** The compactor chose this offer; the request sizes it priced the choice on. */
+	/** The compactor chose this offer; the request sizes it priced the choice on. Use is credited only on commit. */
 	readonly onUse?: (use: MemoryOfferUse) => void;
+	/**
+	 * The compactor's own verdict once it issued this offer: declined, with its reason, or failed with the summary.
+	 * A committed fold reports itself through the context-commit notice, never here.
+	 */
+	readonly onOutcome?: (outcome: MemoryOfferOutcome) => void;
 }
+
+/** What a fold did with an offer it was given, short of a commit. */
+export type MemoryOfferOutcome = { readonly kind: "declined"; readonly reason: string } | { readonly kind: "failed" };
 
 /** Estimated summarizer input with the ordinary slice and with the offer substituted (SPEC R15). */
 export interface MemoryOfferUse {

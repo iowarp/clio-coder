@@ -608,9 +608,18 @@ export interface ChatSettings extends WorkerTarget {
 	steering: SteeringSettings;
 }
 
+/** One switch per memory side surface; each field lands with the slice that implements it. */
+export interface MemorySurfaceSettings {
+	/**
+	 * Observation preparation for a predicted fold. Off by default as a policy choice: its cost is measured and its
+	 * benefit is not. `context.memory.observations.enabled: true` still turns it on when this key is unset.
+	 */
+	observe: "off" | "on";
+}
+
 export interface MemorySettings {
 	enabled: boolean;
-	observations: { enabled: boolean };
+	surfaces: MemorySurfaceSettings;
 	target: string | null;
 	model: string | null;
 	/** Thinking level of the memory side call; `off` sends no reasoning request. */
@@ -869,7 +878,7 @@ export const DEFAULT_SETTINGS = {
 		} as DurableCompactionSettings,
 		memory: {
 			enabled: true,
-			observations: { enabled: false },
+			surfaces: { observe: "off" },
 			target: null as string | null,
 			model: null as string | null,
 			thinkingLevel: "off" as ThinkingLevel,
@@ -1098,8 +1107,8 @@ context:
     provider: off
   memory:
     enabled: true
-    observations:
-      enabled: false
+    surfaces:
+      observe: off
     target: null
     model: null
     thinkingLevel: off

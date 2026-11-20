@@ -1,7 +1,9 @@
 import { readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import type { MemoryCommitScope } from "./commit-state.js";
+import type { FoldPlannerView } from "../context/fold/pressure.js";
+import { foldProjection } from "../context/fold/pressure.js";
+import type { MemoryCommitScope, SuccessfulMemoryContextCommit } from "./commit-state.js";
 import type { RetentionStatus } from "./completion-retention.js";
 import {
 	EMPTY_RETENTION,
@@ -15,6 +17,7 @@ import type {
 	MemoryContract,
 	MemoryObservationCommands,
 	MemoryOfferInput,
+	MemoryOfferOutcome,
 	MemoryOfferUse,
 	MemoryPromptSelection,
 	ObservationSource,
@@ -75,18 +78,23 @@ export interface MemoryRuntimeInfrastructure {
 	 * Session owns the reading.
 	 */
 	closedLessonSource?(sessionId: string): { scope: MemoryCommitScope; source: CompletedLessonSource } | null;
-	settings(): { enabled: boolean; observations: { enabled: boolean }; maxOutputTokens: number; timeoutMs: number };
+	settings(): { enabled: boolean; surfaces: { observe: "off" | "on" }; maxOutputTokens: number; timeoutMs: number };
 	/** Session owns active ancestry, original bytes and checkpoint lineage. */
 	source(): ObservationSource | null;
 	usableHistoryTokens(): number;
 	/**
-	 * Fraction of the main route's usable history capacity the live context
-	 * occupies (0 to 1 and beyond), or null when unknown. Preparation waits
-	 * until compaction is plausibly near; most sessions end before it. A port
-	 * that answers null defers new preparation; leaving it unwired removes the
-	 * gate.
+	 * The fold planner the chat loop publishes and the compaction settings,
+	 * read lazily; memory projects the next automatic fold from them
+	 * (`foldProjection`). Preparation runs only for a fold that sends history to
+	 * a portable summary request, and only once pressure is within
+	 * `OBSERVATION_FOLD_MARGIN` of the trigger; most sessions end before it. A
+	 * projection the live budget cannot make defers new preparation; leaving
+	 * the port unwired removes the gate.
 	 */
-	historyPressure?(): number | null;
+	foldPlanner?(): {
+		live: FoldPlannerView;
+		compaction: { readonly provider?: string | undefined; readonly model?: string | null | undefined };
+	};
 	/** Preparation can use its own route before an actor exists; offers still require the actual compactor's fit. */
 	observerHistoryTokens?(): number;
 	client: {
@@ -135,12 +143,12 @@ const OBSERVATION_RESERVED_ARTIFACTS = 4;
 const OBSERVATION_WRAPPER_TOKENS = 48;
 const OBSERVATION_MIN_NOTE_TOKENS = 64;
 /**
- * No preparation below this share of usable main-route history: a session
- * that never nears compaction never pays for notes it cannot use. The share
- * leaves the ordinary idle cadence time to cover the backlog before the
- * compaction threshold (0.9 of the window by default).
+ * No preparation until pressure is within this share of the window below the
+ * automatic fold's trigger: a session that never nears a fold never pays for
+ * notes it cannot use. Uncalibrated: calibrating it needs held-out sessions that
+ * do and do not fold naturally, scored for false preparations and missed folds.
  */
-const OBSERVATION_PRESSURE_START = 0.4;
+const OBSERVATION_FOLD_MARGIN = 0.15;
 /**
  * Smallest source group worth a model call. The observer's fixed cost (its
  * prompt and a full note set) is paid per call, so a group may span user
@@ -188,6 +196,10 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	#usage: TaskMemoryStepUsage | null = null;
 	#durationMs: number | null = null;
 	#reflection = false;
+	/** Offer declines of the fold in progress, keyed by the checkpoint it reads; it settles at its commit. */
+	#fold: { key: string; declines: Set<string> } | null = null;
+	/** Committed folds in a row that declined the offer for no gain; two stop preparation for the session. */
+	#declinedFolds = 0;
 	#disposed = false;
 	#enabled = false;
 	#retention: RetentionStatus = EMPTY_RETENTION;
@@ -362,6 +374,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				if (verdict !== "accepted" && verdict !== "duplicate") return;
 				if (input.memoryReceipt) this.consume(input.commitId, input.memoryReceipt);
 				if (verdict === "duplicate") return verdict;
+				if (input.kind === "summary") this.#foldCommitted(input.outcome, input.memoryReceipt !== undefined);
 				this.#invalidate("checkpoint-changed");
 				return verdict;
 			},
@@ -444,6 +457,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		this.#consumed.clear();
 		this.#commits.clear();
 		this.#attempts.clear();
+		this.#fold = null;
+		this.#declinedFolds = 0;
 		this.#lastCommit = null;
 		this.#lastReceipt = null;
 		this.#retention = EMPTY_RETENTION;
@@ -454,8 +469,10 @@ export class MemoryRuntime implements MemoryObservationCommands {
 
 	#source(): ObservationSource | null {
 		const infra = this.#infrastructure;
-		const enabled = !!infra && infra.settings().enabled && infra.settings().observations.enabled;
+		const enabled = !!infra && infra.settings().enabled && infra.settings().surfaces.observe === "on";
 		if (this.#enabled && !enabled) this.#invalidate("disabled");
+		// Declines recorded while observing settle nothing once observation is off.
+		if (!enabled) this.#fold = null;
 		this.#enabled = enabled;
 		if (!infra || !enabled || this.#disposed) return null;
 		const source = infra.source();
@@ -517,22 +534,35 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			this.#lastReason = "insufficient-budget";
 			return null;
 		}
+		// Two folds in a row that declined the offer for no gain end preparation for the session.
+		if (this.#declinedFolds >= 2) {
+			this.#lastReason = "folds-declined";
+			return null;
+		}
 		// Null from a wired port means the live budget view is unavailable (before
 		// the first measured turn, or only a persisted one), and an unknown budget
 		// defers new preparation (SPEC R13): the observer's own capacity says
 		// nothing about how near the main route's compaction is. Reflection over
 		// batches already prepared still runs. An unwired port is a bare runtime
 		// with no live budget to consult, which prepares ungated.
-		const pressure = infra.historyPressure === undefined ? undefined : infra.historyPressure();
-		if (pressure !== undefined && pressure !== null && pressure < OBSERVATION_PRESSURE_START) {
-			this.#lastReason = "below-pressure";
-			return null;
+		const planner = infra.foldPlanner?.();
+		const projection = planner === undefined ? undefined : foldProjection(planner.live, planner.compaction);
+		if (projection !== undefined && projection !== null) {
+			// A fold in the live prefix, a native one, or none declines every offer: no call can pay off.
+			if (projection.path !== "portable") {
+				this.#lastReason = `fold-${projection.path}`;
+				return null;
+			}
+			if (projection.pressure < projection.trigger - OBSERVATION_FOLD_MARGIN) {
+				this.#lastReason = "below-margin";
+				return null;
+			}
 		}
 		this.#makeArtifactRoom(source, infra.stateDir());
 		const ready = this.#ready(source);
 		// New preparation stops short of the cap; the reserved slots are for consolidation.
 		const hasRoom = this.#batches.length < OBSERVATION_MAX_BATCHES - OBSERVATION_RESERVED_ARTIFACTS;
-		if (hasRoom && pressure !== null) {
+		if (hasRoom && projection !== null) {
 			const covered = new Set(ready.flatMap((batch) => batch.coverage.flatMap((unit) => unit.refs)));
 			// Half the source budget, between 256 and the ceiling: a small window
 			// still prepares its tool units, a large one no longer pays per turn.
@@ -576,7 +606,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 					return { source, units: inputs.flatMap((batch) => batch.coverage), revision: reflectionRevision, inputs };
 			}
 		}
-		if (pressure === null) this.#lastReason = "pressure-unknown";
+		if (projection === null) this.#lastReason = "pressure-unknown";
 		else if (!hasRoom) this.#lastReason = "artifact-limit";
 		return null;
 	}
@@ -697,7 +727,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			!controller.signal.aborted &&
 			guard() &&
 			this.#enabled &&
-			!!this.#infrastructure?.settings().observations.enabled &&
+			this.#infrastructure?.settings().surfaces.observe === "on" &&
 			!!this.#infrastructure?.settings().enabled;
 		let usage: TaskMemoryStepUsage | null = null;
 		const recordUsage = (next: TaskMemoryStepUsage) => {
@@ -1165,6 +1195,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	offerCompaction(input: MemoryOfferInput) {
 		const current = this.#source();
 		if (!current || !this.#registration) return null;
+		// One fold reads one checkpoint; a retried fold keeps its key, a committed one moves it.
+		const fold = observationDigest([input.source.sessionId, input.source.branchAnchorTurnId, input.source.checkpoint]);
 		const guard = this.#registration.isContentCurrent();
 		// The closure checks its own issuance: cancellation, navigation, disabling
 		// and any other invalidation clear the registry, and a cleared offer stays
@@ -1175,20 +1207,23 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			const live =
 				guard() &&
 				this.#enabled &&
-				!!this.#infrastructure?.settings().observations.enabled &&
+				this.#infrastructure?.settings().surfaces.observe === "on" &&
 				!!this.#infrastructure?.settings().enabled;
 			// Revocation is permanent: an offer seen invalid once never comes back.
 			if (!live) this.#issued.delete(issued.offerId);
 			return live;
 		});
 		if (!offer) {
+			const offerable = this.#offerable(current).length;
 			this.#lastReason = "no-eligible-gain";
 			this.#event("offer-declined", {
 				reason: "no-eligible-gain",
-				offerable: this.#offerable(current).length,
+				offerable,
 				units: input.source.units.length,
 				incompleteUnits: input.source.units.filter((unit) => !unit.complete).length,
 			});
+			// A fold with nothing prepared declined nothing; one whose prepared notes could not gain did.
+			if (offerable > 0) this.#foldDeclined(fold, "no-eligible-gain");
 			return null;
 		}
 		if (this.#issued.size >= 4) this.#issued.delete(this.#issued.keys().next().value ?? "");
@@ -1196,13 +1231,39 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		this.#issued.set(offer.receipt.offerId, offer.receipt);
 		return Object.freeze({
 			...offer,
+			// Choosing the offer is not using it: use is credited when the checkpoint carrying its receipt commits.
 			onUse: (use: MemoryOfferUse) =>
 				this.#event("offer-used", {
 					receipt: offer.receipt,
 					originalInputTokens: use.originalInputTokens,
 					substitutedInputTokens: use.substitutedInputTokens,
 				}),
+			onOutcome: (outcome: MemoryOfferOutcome) => {
+				if (outcome.kind === "declined") this.#foldDeclined(fold, outcome.reason);
+				// A failed fold settles nothing; its retry reads the same checkpoint and decides again.
+				else if (this.#fold?.key === fold) this.#fold = null;
+			},
 		});
+	}
+
+	#foldDeclined(key: string, reason: string): void {
+		if (this.#fold?.key !== key) this.#fold = { key, declines: new Set() };
+		this.#fold.declines.add(reason);
+	}
+
+	/**
+	 * A fold settles when its summary commits. Its declines count only against the checkpoint they were made on, the
+	 * one this runtime last read; a failed attempt has already cleared its own, and an eviction-only commit settles
+	 * nothing. A no-gain or no-eligible-gain decline with no receipt extends the run; any other summary commit resets
+	 * it. Two in a row stop preparation for the session, and the stop stays until the scope resets.
+	 */
+	#foldCommitted(outcome: SuccessfulMemoryContextCommit["outcome"], used: boolean): void {
+		const pending = this.#fold;
+		this.#fold = null;
+		if (outcome !== "summarized" || this.#declinedFolds >= 2) return;
+		const declines = pending !== null && pending.key === this.#loadedScope ? pending.declines : undefined;
+		if (!used && (declines?.has("no-gain") || declines?.has("no-eligible-gain"))) this.#declinedFolds += 1;
+		else this.#declinedFolds = 0;
 	}
 
 	consume(commitId: string, receipt: MemoryConsumptionReceipt): void {
