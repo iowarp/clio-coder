@@ -49,6 +49,8 @@ import { deterministicSampling } from "./provider-payload.js";
 import type { EngineModel } from "./types.js";
 
 export { providerCheckpointCompatibility } from "./apis/openai-compaction.js";
+// The compaction summary's stall watchdog ends its first-token window where the main turn does (CLI-P9).
+export { hasAssistantGenerationDelta } from "./generation-delta.js";
 export { StringEnum };
 
 /** #416: keep optional Claude discovery behind the existing provider engine seam. */
