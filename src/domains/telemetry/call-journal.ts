@@ -42,6 +42,7 @@ import {
 	telemetryBundlePath,
 	telemetryJournalFiles,
 	telemetryJournalPath,
+	telemetrySealMarkerPath,
 	telemetrySegmentFile,
 	telemetrySegmentSequence,
 	telemetrySessionDirectory,
@@ -54,6 +55,7 @@ import {
 	removeInterruptedObjectWrites,
 	SEAL_EVENTS,
 	scopeBundleManifest,
+	sealMarkerBytes,
 	telemetryScopeOf,
 	verifyTelemetryScope,
 	walkTelemetryChain,
@@ -321,10 +323,12 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 			// A damaged segment cannot be chained or sealed; its records still read, and new calls still journal.
 			let intact = rotatedRead && rotatedScans.every((rotatedScan) => rotatedScan.corruptOffset === null);
 			const bundlePath = telemetryBundlePath(options.directory);
+			const markerPath = telemetrySealMarkerPath(options.directory);
 			// An object write a stopped process left half done is not an object; the lock makes it abandoned (#434).
 			await removeInterruptedObjectWrites(options.directory);
-			// A sealed scope must still verify before this writer makes it live, so reopening never launders an edit.
-			if (existsSync(bundlePath)) {
+			// A sealed scope must still verify before this writer makes it live, so reopening never launders an edit; a
+			// scope that lost its bundle is held to the seal its marker names (RL-7).
+			if (existsSync(bundlePath) || existsSync(markerPath)) {
 				const verdict = verifyTelemetryScope(await readTelemetryScopeFiles(options.directory));
 				if (verdict.status === "failed")
 					throw new Error(`sealed telemetry scope does not verify: ${describeSealMismatch(verdict.mismatch)}`);
@@ -693,6 +697,8 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 						objects,
 						seal: { recordId: record.id, head: telemetryChainHead(chain) as string },
 					});
+					// The marker lands first, so whenever the bundle names this seal the marker does too (RL-7).
+					await safeResourceWriteAsync(markerPath, sealMarkerBytes(manifest, chain.lines), { mode: 0o600 });
 					await safeResourceWriteAsync(bundlePath, `${JSON.stringify(manifest, null, "\t")}\n`, { mode: 0o600 });
 					sealCurrent = true;
 					if (subscribed(hubOwner))

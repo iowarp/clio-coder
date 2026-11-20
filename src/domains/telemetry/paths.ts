@@ -8,6 +8,7 @@ import { assertSafeId } from "../../core/safe-id.js";
  *   sessions/<sessionId>/journal.jsonl   plus objects/
  *   runs/<runId>/journal.jsonl           plus objects/ when a run stores one
  *   <scope>/bundle.json                  only while the scope is sealed
+ *   <scope>/sealed.json                  the scope's last seal, kept while it is live again (RL-7)
  *   consent.json
  *   install.json                         this installation's random id, minted by its first share
  *   imported/<installId>/telemetry/      scopes `telemetry import` placed, laid out as this root is
@@ -91,6 +92,16 @@ export const TELEMETRY_BUNDLE_FILE = "bundle.json";
 /** A sealed scope's manifest; a live scope has none (#434). */
 export function telemetryBundlePath(scopeDirectory: string): string {
 	return join(scopeDirectory, TELEMETRY_BUNDLE_FILE);
+}
+
+export const TELEMETRY_SEAL_MARKER_FILE = "sealed.json";
+
+/**
+ * The scope's last seal, written with every seal and never removed by an append, so a scope whose bundle and sealed
+ * history are both gone still says a seal once landed (RL-7).
+ */
+export function telemetrySealMarkerPath(scopeDirectory: string): string {
+	return join(scopeDirectory, TELEMETRY_SEAL_MARKER_FILE);
 }
 
 export function telemetryObjectsDirectory(scopeDirectory: string): string {

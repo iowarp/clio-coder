@@ -18,6 +18,7 @@ import {
 	telemetryProcessesDirectory,
 	telemetryRoot,
 	telemetryRunsDirectory,
+	telemetrySealMarkerPath,
 	telemetrySessionsDirectory,
 } from "./paths.js";
 
@@ -80,6 +81,8 @@ interface SessionTelemetry {
 	/** The session's `meta.json` in its store, which says whether its owner is alive; null when no store holds it. */
 	meta: string | null;
 	bundle: FileInfo | null;
+	/** `sealed.json`, removed first with the session so a partial prune never leaves it vouching for less (RL-7). */
+	marker: FileInfo | null;
 	sealed: boolean;
 	journalStamp: JournalStamp | null;
 	segments: FileInfo[];
@@ -205,22 +208,24 @@ async function readSessionTelemetry(
 	const entries = await names(directory);
 	const segmentNames = telemetryJournalFiles(entries);
 	const bundle = await info(telemetryBundlePath(directory));
+	const marker = await info(telemetrySealMarkerPath(directory));
 	const objectsDirectory = telemetryObjectsDirectory(directory);
 	const objectNames = (await realDirectory(objectsDirectory))
 		? (await names(objectsDirectory)).filter((name) => OBJECT_FILE.test(name))
 		: [];
-	if (segmentNames.length === 0 && objectNames.length === 0 && bundle === null) return null;
+	if (segmentNames.length === 0 && objectNames.length === 0 && bundle === null && marker === null) return null;
 	const session: SessionTelemetry = {
 		directory,
 		sessionId,
 		meta,
 		bundle,
+		marker,
 		sealed: bundle !== null,
 		journalStamp,
 		segments: [],
 		objects: new Map(),
 		lastWriteMs: bundle?.mtimeMs ?? 0,
-		bytes: bundle?.bytes ?? 0,
+		bytes: (bundle?.bytes ?? 0) + (marker?.bytes ?? 0),
 		refs: new Map(),
 		runs: new Set(),
 		parent: null,
@@ -288,7 +293,9 @@ async function readScopeTelemetry(directory: string, id: string): Promise<ScopeT
 	const objectNames = (await realDirectory(objectsDirectory))
 		? (await names(objectsDirectory)).filter((name) => OBJECT_FILE.test(name))
 		: [];
+	// The seal marker goes first, so a prune cut short never leaves it naming a seal whose files are gone (RL-7).
 	const paths = [
+		telemetrySealMarkerPath(directory),
 		...segmentNames.map((name) => join(directory, name)),
 		telemetryBundlePath(directory),
 		...objectNames.map((name) => join(objectsDirectory, name)),
@@ -397,7 +404,12 @@ export async function planTelemetryPrune(
 			meta: session.meta,
 			journalStamp: session.journalStamp,
 		};
-		for (const file of [...(session.bundle ? [session.bundle] : []), ...session.segments, ...session.objects.values()])
+		for (const file of [
+			...(session.marker ? [session.marker] : []),
+			...(session.bundle ? [session.bundle] : []),
+			...session.segments,
+			...session.objects.values(),
+		])
 			plan.remove.push({ ...file, reason, owner });
 	}
 
