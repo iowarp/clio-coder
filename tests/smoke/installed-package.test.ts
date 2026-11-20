@@ -254,7 +254,16 @@ Compute the requested coefficient and report the value in one line.
 		);
 		const result = await run(
 			bin,
-			["run", "--agent", "replay-fixture", "--agent-profile", "replay", "--json", "Compute the coefficient."],
+			[
+				"run",
+				"--agent",
+				"replay-fixture",
+				"--agent-profile",
+				"replay",
+				"--output-format",
+				"stream-json",
+				"Compute the coefficient.",
+			],
 			cwd,
 			{ ...isolatedEnv(home), CLIO_CODER_REPLAY_FIXTURE_KEY: "fixture" },
 		);

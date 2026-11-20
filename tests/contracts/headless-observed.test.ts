@@ -225,7 +225,6 @@ async function headlessRun(
 			{
 				prompt: "fix it",
 				mode,
-				...(mode === "json" ? { jsonEvents: "terminal" as const } : {}),
 				readEntries: () => entries,
 				shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
 			} as never,
@@ -237,26 +236,13 @@ async function headlessRun(
 	return { code, stdout: out.join(""), stderr: err.join("") };
 }
 
-test("a headless run that wrote and then ran a failing check says so on stderr and in turn_end.observed", async () => {
+test("a headless run that wrote and then ran a failing check says so on stderr", async () => {
 	const env = await isolateClioEnv("headless-observed-");
 	try {
 		const text = await headlessRun("text");
 		strictEqual(text.code, 0);
 		strictEqual(text.stdout, "Done with the fix.\n");
 		match(text.stderr, /clio-coder run: observed: 2 tool calls, 0 refused · 1 write · check failed: python/u);
-		const json = await headlessRun("json");
-		const frame = json.stdout
-			.trim()
-			.split("\n")
-			.map((line) => JSON.parse(line) as { type?: string; exitCode?: number; observed?: unknown })
-			.find((line) => line.type === "turn_end" && typeof line.exitCode === "number");
-		ok(frame, json.stdout);
-		const observed = frame.observed as { writes: number; checks: Array<{ passed: boolean }> };
-		strictEqual(observed.writes, 1);
-		deepStrictEqual(
-			observed.checks.map((check) => check.passed),
-			[false],
-		);
 	} finally {
 		env.restore();
 	}

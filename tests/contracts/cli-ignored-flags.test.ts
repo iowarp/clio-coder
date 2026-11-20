@@ -208,12 +208,25 @@ describe("fleet run", () => {
 	});
 });
 
-describe("run --agent", () => {
-	it("refuses --json-events, which only the main-agent stream reads", () => {
-		const parsed = parseRunCliArgs(["--agent", "scout", "--json-events", "terminal", "Inspect"]);
-		match(parsed.diagnostics.map((entry) => entry.message).join(" "), /--json-events.*main agent/u);
-		const mainAgent = parseRunCliArgs(["--json-events", "terminal", "Inspect"]);
-		deepStrictEqual(mainAgent.diagnostics, []);
+describe("run --json and --json-events (removed in 0.8.5)", () => {
+	it("refuses every spelling as unknown_flag naming --output-format, beside any other flag", () => {
+		for (const [argv, flag] of [
+			[["--json", "Inspect"], "--json"],
+			[["--json-events", "full", "Inspect"], "--json-events"],
+			[["--json-events", "terminal", "Inspect"], "--json-events"],
+			[["--json-events=terminal", "Inspect"], "--json-events"],
+			[["--agent", "scout", "--json", "Inspect"], "--json"],
+			[["--output-format", "json", "--json", "Inspect"], "--json"],
+		] as const) {
+			const parsed = parseRunCliArgs(argv);
+			const errors = parsed.diagnostics.filter((entry) => entry.type === "error");
+			deepStrictEqual(
+				errors.map((entry) => [entry.slug, entry.message]),
+				[["unknown_flag", `unknown option: ${flag} (removed in 0.8.5; use --output-format json|stream-json)`]],
+				argv.join(" "),
+			);
+			deepStrictEqual(parsed.messages, ["Inspect"], argv.join(" "));
+		}
 	});
 });
 

@@ -25,15 +25,13 @@ function ownsStdoutErrors(command: string, subArgs: ReadonlyArray<string>): bool
 }
 
 /**
- * The run output format from a lexical argv scan, read before any parser loads: a v1 `--json`/`--json-events`
- * or a v2 `--output-format json|stream-json` makes the run's failures JSON documents, so their usage errors stay
- * with run.js. Words after `--` are task text.
+ * The run output format from a lexical argv scan, read before any parser loads: `--output-format json|stream-json`
+ * makes the run's failures JSON documents, so their usage errors stay with run.js. Words after `--` are task text.
  */
 function runWantsJsonOutput(args: ReadonlyArray<string>): boolean {
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i] ?? "";
 		if (arg === "--") return false;
-		if (arg === "--json" || arg === "--json-events" || arg.startsWith("--json-events=")) return true;
 		const format = arg === "--output-format" ? args[i + 1] : arg.startsWith("--output-format=") ? arg.slice(16) : null;
 		if (format === "json" || format === "stream-json") return true;
 	}

@@ -89,8 +89,11 @@ describe("resuming a session keeps the route it ran on", { timeout: 180_000 }, (
 	it("lets an explicit --model beat the resumed route", async () => {
 		saveChatModel("mock-model");
 		strictEqual(await turn(["pick a colour"]), "mock-model");
-		strictEqual(await turn(["--continue", "--json", "--model", "other-model", "and another"]), "other-model");
-		// The --json session frame names the route the run is on, not the one the session stored (B-52).
+		strictEqual(
+			await turn(["--continue", "--output-format", "stream-json", "--model", "other-model", "and another"]),
+			"other-model",
+		);
+		// The stream-json session frame names the route the run is on, not the one the session stored (B-52).
 		strictEqual(JSON.parse(lastStdout.split("\n")[0] ?? "").model, "other-model");
 		deepStrictEqual(readChatRoute(), { target: "mock-chat", model: "mock-model" });
 		// The flag moved the session, so the session's newest route is the flag's.

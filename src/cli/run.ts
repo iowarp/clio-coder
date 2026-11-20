@@ -369,19 +369,11 @@ export async function runClioRun(
 	const v2Format =
 		parsed.outputFormat === "json" || parsed.outputFormat === "stream-json" ? parsed.outputFormat : undefined;
 	if (v2Format !== undefined) {
-		// Schema v2 runs the v1 JSON machinery as a full stream and reframes it at the writer (run-failure.ts); the
-		// parser already refused --json and --json-events beside --output-format.
+		// Schema v2 runs the JSON machinery as a full stream and reframes it at the writer (run-failure.ts).
 		parsed.json = true;
-		parsed.jsonEvents = "full";
-	} else if (parsed.json) {
-		// The v1 stream stays byte-identical on stdout; the deprecation is a single stderr line.
-		process.stderr.write(
-			"clio-coder run: --json and --json-events are deprecated (removed in 0.9.0); use --output-format json|stream-json for schema v2\n",
-		);
 	} else if (parsed.outputFormat === "text" && parsed.agentId === undefined) {
 		requestRunTextSummary();
 	}
-	const fullMainStream = parsed.json && parsed.agentId === undefined && parsed.jsonEvents !== "terminal";
 	const execute = async (): Promise<number> => {
 		try {
 			return await executeRunCommand(parsed, options);
@@ -407,10 +399,9 @@ export async function runClioRun(
 			execute,
 		);
 	}
+	// Text output: the v2 writer is the only JSON writer, so this wrapper adds only text mode's `-o`.
 	return withRunFailureReporting(
-		parsed.json,
 		execute,
-		fullMainStream,
 		parsed.outputLastMessage !== undefined
 			? { path: parsed.outputLastMessage, ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}) }
 			: undefined,
@@ -655,7 +646,6 @@ async function executeRunCommand(
 								...(borrowed !== null && parsed.json ? { routeNotice: borrowed.notice } : {}),
 								...(parsed.constraints ? { constraints: parsed.constraints } : {}),
 								mode: parsed.json ? "json" : "text",
-								jsonEvents: parsed.jsonEvents,
 								...(noSkills ? { noSkills: true } : {}),
 								...(skillPaths.length > 0 ? { skillPaths } : {}),
 								...(assembled.images && assembled.images.length > 0 ? { images: assembled.images } : {}),

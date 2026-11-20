@@ -88,7 +88,6 @@ test("a headless run hands prompt_submit the typed /name line, not the template 
 				prompt: expansion.text,
 				...(display ? { display } : {}),
 				mode: "json",
-				jsonEvents: "terminal",
 				shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
 			} as never,
 		);

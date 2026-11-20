@@ -205,7 +205,8 @@ for (const scenario of ["dependent-repair", "exhausted"] as const) {
 			const result = await run(
 				[
 					"run",
-					"--json",
+					"--output-format",
+					"stream-json",
 					"--autonomy",
 					"yolo",
 					"Use a read-only Scout then Documenter pipeline for grid.py; report the explanation or a precise limitation.",

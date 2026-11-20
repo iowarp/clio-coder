@@ -81,7 +81,7 @@ const GROUPS: Readonly<Record<string, Readonly<Record<string, EnvelopeLeaf>>>> =
 		requirePriced: leaf("boolean", ["--require-priced"], switchFlag("--require-priced")),
 	},
 	output: {
-		format: leaf("string", ["--output-format", "--json", "--json-events"], valueFlag("--output-format")),
+		format: leaf("string", ["--output-format"], valueFlag("--output-format")),
 		lastMessage: leaf("string", ["--output-last-message"], valueFlag("--output-last-message")),
 	},
 };

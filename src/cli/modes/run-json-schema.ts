@@ -1,11 +1,12 @@
 import type { ToolRoundRecord } from "../../engine/types.js";
 
 /**
- * The `clio-coder run --json` wire schema.
+ * The headless run's internal JSON frame schema (v1).
  *
- * Every stdout line of a `--json` run is one compact JSON object matching
- * `RunJsonFrame`. The first line is the `session` header, which carries
- * `schemaVersion` so a consumer can refuse a stream it was not written for.
+ * `run --json` and `--json-events` were removed in 0.8.5: these frames are no longer a public stream. A run under
+ * `--output-format json|stream-json` writes them underneath and the schema v2 writer (`run-failure.ts`) reframes
+ * them; `run --agent` and the arena read the same shapes. Every line is one compact JSON object matching
+ * `RunJsonFrame`; the first is the `session` header, which carries `schemaVersion`.
  * This module holds types and the version constant only, so any surface can
  * import it without pulling the chat loop or a renderer into its graph.
  *
@@ -168,7 +169,7 @@ export interface RunJsonAgentEndFrame {
 	usage: RunJsonSegmentUsage;
 }
 
-/** The streamed `turn_end` of `--json-events full`, carrying the final answer text. */
+/** The streamed `turn_end` of a full JSON stream, carrying the final answer text. */
 export interface RunJsonTurnEndFrame {
 	type: "turn_end";
 	message: RunJsonMessage;
@@ -211,47 +212,9 @@ export type RunJsonChatLoopFrame =
 // Frames the headless driver builds itself (main agent)
 // ---------------------------------------------------------------------------
 
-/** Synthesized by `--json-events terminal`; the streamed `turn_start` has no `startedAt`. */
-export interface RunJsonTerminalTurnStartFrame {
-	type: "turn_start";
-	startedAt: string;
-}
-
 /**
- * Synthesized by `--json-events terminal` as the last frame. It shares its
- * `type` with the streamed `turn_end` but the two never share a stream: the
- * terminal mode withholds the streamed one. `exitCode` tells them apart.
- */
-export interface RunJsonTerminalTurnEndFrame {
-	toolRounds?: ToolRoundRecord[];
-	type: "turn_end";
-	startedAt: string;
-	endedAt: string;
-	exitCode: number;
-	text: string;
-	error?: string;
-	/** The run's outcome: `succeeded`, `failed`, `canceled` or `timed_out`. */
-	outcome?: RunResult["outcome"];
-	/** Machine-readable failure detail such as `noop` or `limitation`. */
-	outcomeDetail?: string;
-	/** The run's safety summary; a `permissionRequired` attempt needed an approval the run could not give. */
-	safety?: Pick<
-		NonNullable<RunResult["safety"]>,
-		"decisions" | "blockedAttempts" | "blockedAttemptsTruncated" | "guardBlockedAttempts" | "permissionRequestedAttempts"
-	>;
-	/** A yolo run's window, its halt and the calls it left for the operator (ob-yolo D7). */
-	autonomy?: AutonomyReport;
-	/** `run --verify`: each check as the run ran it after the turn, in flag order. */
-	verify?: RunJsonVerifyResult[];
-	/** How a step template's pipeline ended; `done: false` is a pipeline the run left with steps to go (bt-15). */
-	stepPipeline?: StepPipelineEnd;
-	/** What the harness saw the run do (tool calls, refusals, writes, standing checks); absent when no tool ran. */
-	observed?: { toolCalls: number; refused: number; writes: number; checks: Array<{ name: string; passed: boolean }> };
-}
-
-/**
- * The host's verdict on a full-mode `run --json` stream, always its last line (S-51). The model's own `turn_end` and
- * `agent_end` say how the model stopped; this says whether the run succeeded, and carries the terminal frame's verdict.
+ * The host's verdict on a full JSON stream, always its last line (S-51). The model's own `turn_end` and `agent_end`
+ * say how the model stopped; this says whether the run succeeded. The schema v2 writer reads it and withholds it.
  */
 export interface RunJsonRunEndFrame {
 	type: "run_end";
@@ -261,7 +224,11 @@ export interface RunJsonRunEndFrame {
 	error?: string;
 	outcome: RunResult["outcome"];
 	outcomeDetail?: string;
-	safety?: RunJsonTerminalTurnEndFrame["safety"];
+	/** The run's safety summary; a `permissionRequired` attempt needed an approval the run could not give. */
+	safety?: Pick<
+		NonNullable<RunResult["safety"]>,
+		"decisions" | "blockedAttempts" | "blockedAttemptsTruncated" | "guardBlockedAttempts" | "permissionRequestedAttempts"
+	>;
 	stepPipeline?: StepPipelineEnd;
 }
 
@@ -279,13 +246,13 @@ export interface RunJsonVerifyResult {
 	ranAfterLastEdit: boolean;
 }
 
-/** The `run --verify` results a `--json-events full` stream ends with. */
+/** The `run --verify` results a full JSON stream ends with. */
 export interface RunJsonVerifyFrame {
 	type: "verify";
 	checks: RunJsonVerifyResult[];
 }
 
-/** The yolo audit a streamed `--json` run ends with: the window, its halt and the calls left for the operator. */
+/** The yolo audit a JSON stream ends with: the window, its halt and the calls left for the operator. */
 export interface RunJsonAutonomyFrame extends AutonomyReport {
 	type: "autonomy";
 }
@@ -358,13 +325,11 @@ export interface RunJsonResultFrame {
 // The stream
 // ---------------------------------------------------------------------------
 
-/** Frames of a main-agent `run --json` stream. */
+/** Frames of a main-agent JSON stream, which the schema v2 writer reframes. */
 export type RunJsonMainFrame =
 	| RunJsonMainSessionFrame
 	| RunJsonPendingMainSessionFrame
 	| RunJsonChatLoopFrame
-	| RunJsonTerminalTurnStartFrame
-	| RunJsonTerminalTurnEndFrame
 	| RunJsonRunEndFrame
 	| RunJsonDispatchScopeNoticeFrame
 	| RunJsonDispatchSettlementFrame

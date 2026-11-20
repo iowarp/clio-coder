@@ -7,7 +7,7 @@ import {
 	projectDispatchJsonEvent,
 } from "../../src/cli/modes/json-stream.js";
 import { prefixHeadlessFailure, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
-import { withRunFailureReporting, writeRunDiagnostic } from "../../src/cli/run-failure.js";
+import { withRunResultV2, writeRunDiagnostic } from "../../src/cli/run-failure.js";
 import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-journal.js";
@@ -398,7 +398,6 @@ const SAFE_URL = "https://alice:[redacted]@git.example.com/r.git";
 /** Run a headless turn over a stub chat that settles one message, and read what reached stdout. */
 async function headlessStdout(
 	mode: "text" | "json",
-	jsonEvents: string | undefined,
 	message: object,
 	events: object[] = [],
 	stderr: string[] = [],
@@ -440,7 +439,6 @@ async function headlessStdout(
 			{
 				prompt: "x",
 				mode,
-				...(jsonEvents !== undefined ? { jsonEvents } : {}),
 				shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
 			} as never,
 		);
@@ -463,17 +461,17 @@ test("a headless main-agent answer hides URL credentials at both exits", async (
 	const shown = `Use ${SAFE_URL} to clone, BASE_TOKENS=100 and --token to pass`;
 	const env = await isolateClioEnv("url-surfaces-headless-");
 	try {
-		const text = await headlessStdout("text", undefined, assistantAnswer(answer));
+		const text = await headlessStdout("text", assistantAnswer(answer));
 		ok(!text.includes("hunter2"), text);
 		ok(text.includes(shown), text);
-		const terminal = await headlessStdout("json", "terminal", assistantAnswer(answer));
+		const terminal = await headlessStdout("json", assistantAnswer(answer));
 		ok(!terminal.includes("hunter2"), terminal);
 		ok(terminal.includes(shown), terminal);
-		const whole = await headlessStdout("text", undefined, assistantAnswer("open http://localhost:8080"));
+		const whole = await headlessStdout("text", assistantAnswer("open http://localhost:8080"));
 		ok(whole.includes("open http://localhost:8080"), whole);
-		const cut = await headlessStdout("text", undefined, assistantAnswer("see https://u:hunter", "length"));
+		const cut = await headlessStdout("text", assistantAnswer("see https://u:hunter", "length"));
 		ok(!cut.includes("hunter"), cut);
-		const endFrame = await headlessStdout("json", "terminal", assistantAnswer("see https://u:hunter", "length"));
+		const endFrame = await headlessStdout("json", assistantAnswer("see https://u:hunter", "length"));
 		ok(!endFrame.includes("hunter"), endFrame);
 	} finally {
 		env.restore();
@@ -685,18 +683,15 @@ test("a provider's error reaches no headless surface with its URL password, in a
 	const env = await isolateClioEnv("url-surfaces-error-");
 	try {
 		const failed = { role: "assistant", stopReason: "error", errorMessage: FAILED_FETCH, content: [] };
-		for (const [mode, jsonEvents] of [
-			["text", undefined],
-			["json", "full"],
-			["json", "terminal"],
-		] as const) {
+		for (const mode of ["text", "json"] as const) {
 			const stderr: string[] = [];
-			const stdout = await headlessStdout(mode, jsonEvents, failed, [], stderr);
-			const where = `${mode}/${jsonEvents}`;
+			const stdout = await headlessStdout(mode, failed, [], stderr);
+			const where = mode;
 			ok(!stdout.includes("hunter2"), `${where} stdout: ${stdout}`);
 			ok(!stderr.join("").includes("hunter2"), `${where} stderr: ${stderr.join("")}`);
 			ok(stderr.join("").includes(SAFE_FETCH), `${where} stderr: ${stderr.join("")}`);
-			if (jsonEvents === "terminal") {
+			// The JSON stream's run_end, which the schema v2 writer reads, carries the error.
+			if (mode === "json") {
 				const end = stdout.trim().split("\n").at(-1) ?? "";
 				strictEqual((JSON.parse(end) as { error?: string }).error, SAFE_FETCH);
 			}
@@ -706,7 +701,7 @@ test("a provider's error reaches no headless surface with its URL password, in a
 	}
 });
 
-test("a run that fails before its output carries no URL password on stderr or its turn_end frame", async () => {
+test("a run that fails before its output carries no URL password on stderr or its schema v2 envelope", async () => {
 	const written: string[] = [];
 	const write = process.stdout.write;
 	const writeError = process.stderr.write;
@@ -719,13 +714,13 @@ test("a run that fails before its output carries no URL password on stderr or it
 	process.stderr.write = capture;
 	try {
 		strictEqual(
-			await withRunFailureReporting(true, async () => {
+			await withRunResultV2({ format: "json", mode: "main", verify: [] }, async () => {
 				writeRunDiagnostic(`clio-coder run failed: ${FAILED_FETCH}\n`);
 				return 1;
 			}),
 			1,
 		);
-		await withRunFailureReporting(true, async () => {
+		await withRunResultV2({ format: "json", mode: "main", verify: [] }, async () => {
 			throw new Error(FAILED_FETCH);
 		}).catch(() => {});
 	} finally {
@@ -750,14 +745,14 @@ test("a blocked call's reason and a transcript notice carry no URL password on a
 			result: { content: [] },
 		};
 		const notice = { type: "notice", surface: "transcript", text: "retry https://alice:hunter2@h.example/r" };
-		const terminal = await headlessStdout("json", "terminal", assistantAnswer("done"), [blocked, notice]);
+		const terminal = await headlessStdout("json", assistantAnswer("done"), [blocked, notice]);
 		ok(!terminal.includes("hunter2"), terminal);
 		const end = JSON.parse(terminal.trim().split("\n").at(-1) ?? "") as {
 			safety: { blockedAttempts: { reason?: string }[] };
 		};
 		strictEqual(end.safety.blockedAttempts[0]?.reason, `refused ${SAFE_URL}, BASE_TOKENS=100`);
 		const stderr: string[] = [];
-		const text = await headlessStdout("text", undefined, assistantAnswer("done"), [notice], stderr);
+		const text = await headlessStdout("text", assistantAnswer("done"), [notice], stderr);
 		ok(!`${text}${stderr.join("")}`.includes("hunter2"), stderr.join(""));
 		ok(stderr.join("").includes("retry https://alice:[redacted]@h.example/r"), stderr.join(""));
 	} finally {
@@ -963,12 +958,12 @@ test("a reply cut off inside an opaque token shows none of it at any headless or
 	const env = await isolateClioEnv("url-surfaces-opaque-");
 	try {
 		const answer = assistantAnswer(OPAQUE, "length");
-		const text = await headlessStdout("text", undefined, answer);
+		const text = await headlessStdout("text", answer);
 		ok(!text.includes("abcdef0123"), text);
 		ok(text.includes("clone https://"), text);
-		const terminal = await headlessStdout("json", "terminal", answer);
+		const terminal = await headlessStdout("json", answer);
 		ok(!terminal.includes("abcdef0123"), terminal);
-		const finished = await headlessStdout("text", undefined, assistantAnswer(OPAQUE));
+		const finished = await headlessStdout("text", assistantAnswer(OPAQUE));
 		ok(finished.includes(OPAQUE), finished);
 
 		const update = (inner: object): unknown =>

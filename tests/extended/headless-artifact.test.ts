@@ -325,7 +325,7 @@ for (const scenario of [
 		shutdown: true,
 	},
 ] as const) {
-	for (const mode of ["text", "full", "terminal"] as const) {
+	for (const mode of ["text", "full"] as const) {
 		test(`headless settlement: ${scenario.name} (${mode})`, async (t) => {
 			let stdout = "";
 			let stderr = "";
@@ -385,7 +385,6 @@ for (const scenario of [
 				const code = await runHeadlessMainAgent(chat as ChatLoop, {
 					prompt: "fixture report",
 					mode: mode === "text" ? "text" : "json",
-					jsonEvents: mode === "full" ? "full" : "terminal",
 					shutdown,
 					...("acceptance" in scenario
 						? {
@@ -472,22 +471,23 @@ for (const scenario of [
 						match(stdout, /"stopReason":"length"/);
 						match(stdout, /"rawStopReason":"length"/);
 					}
-					if (mode === "terminal") {
+					// The host's run_end verdict, which the schema v2 writer reads, carries the failure.
+					if (mode === "full") {
 						const end = stdout
 							.split("\n")
 							.filter(Boolean)
 							.map((line) => JSON.parse(line))
-							.find((event) => event.type === "turn_end");
+							.find((event) => event.type === "run_end");
 						strictEqual(end.exitCode, 1);
 						strictEqual(end.error, envelope.outcomeDetail);
 					}
 				}
-				if ("decisions" in scenario && mode === "terminal") {
+				if ("decisions" in scenario && mode === "full") {
 					const end = stdout
 						.split("\n")
 						.filter(Boolean)
 						.map((line) => JSON.parse(line))
-						.find((event) => event.type === "turn_end");
+						.find((event) => event.type === "run_end");
 					deepStrictEqual(end.safety.decisions, scenario.decisions);
 					// bt-15 c12b, c13a: guard blocks and refused asks list apart from the safety refusals, as the decisions count them.
 					if ("attempts" in scenario) {

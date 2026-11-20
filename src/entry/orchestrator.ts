@@ -3904,7 +3904,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					? { pendingSkillRequests: parsedSkillRequest.pendingSkillRequests }
 					: {}),
 				mode: options.headless.mode ?? "text",
-				...(options.headless.jsonEvents ? { jsonEvents: options.headless.jsonEvents } : {}),
 				...(options.headless.routeNotice ? { routeNotice: options.headless.routeNotice } : {}),
 				...(options.headless.steerChannel ? { steerChannel: options.headless.steerChannel } : {}),
 				...(options.headless.failOnNoop === true ? { failOnNoop: true } : {}),

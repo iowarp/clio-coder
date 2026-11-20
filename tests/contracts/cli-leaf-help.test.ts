@@ -240,8 +240,8 @@ describe("root help, tombstones and deprecated spellings", { concurrency: 4 }, (
 		ok(help.stdout.includes("help run --topics"));
 	});
 
-	it("the deprecation table classes every section 9 spelling, twelve of them migration", () => {
-		equal(DEPRECATED_SPELLINGS.filter((row) => row.class === "migration").length, 12);
+	it("the deprecation table classes every section 9 spelling, nine of them migration", () => {
+		equal(DEPRECATED_SPELLINGS.filter((row) => row.class === "migration").length, 9);
 		for (const row of DEPRECATED_SPELLINGS) {
 			ok(row.notice !== "dispatcher" || row.matches !== undefined, row.old);
 			ok(row.notice === "dispatcher" || row.where !== undefined, row.old);

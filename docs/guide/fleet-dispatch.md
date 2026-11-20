@@ -807,7 +807,7 @@ run finalizes, so `monitor(mode="collect")` returns the settled application resu
 A merge that lands a commit is announced to the operator, since no card asks first. When
 the run settles, attached or detached, CLIO Coder raises a `worker_merged` notice reading
 `<agent> <run id> merged <sha> onto <branch>`: the TUI shows it as a Fleet row in the
-transcript, headless `run` prints it to stderr as `clio-coder run: ...`, `run --json` writes a
+transcript, headless `run` prints it to stderr as `clio-coder run: ...`, `run --output-format stream-json` writes a
 `dispatch_scope_notice` frame with level `info`, and ACP forwards it as
 `run.scope_notice_raised`. The worker card also keeps its `merged <sha> onto <branch>` line. A
 preserved, conflicted, withheld or refused application, and a merge whose branch held no
@@ -1151,7 +1151,7 @@ list would pass 32 entries. A dispatch that cannot pause for a decision settles 
 detail naming the re-dispatch, with `intent.write_roots` including the paths.
 
 Each scope notice reaches every operator surface: the terminal transcript, headless
-stderr in text mode and a `dispatch_scope_notice` event in `--json`, the ACP
+stderr in text mode and a `dispatch_scope_notice` event in `--output-format stream-json`, the ACP
 `dispatch.scopeNotice` event for a client that opted into events, and the GUI's
 **Dispatch scope** row. The open session also records it as a `clio-coder.scope-notice`
 entry under the turn it followed, so `/fork` and `/tree` keep it on that branch. The transcript row for a dispatch summarizes `intent` on one line,

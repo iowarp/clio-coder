@@ -85,8 +85,7 @@ export interface BootOptions {
 		images?: ReadonlyArray<ImageContent>;
 		workingContextPaths?: ReadonlyArray<string>;
 		mode?: "text" | "json";
-		jsonEvents?: "full" | "terminal";
-		/** The sentence naming a route borrowed for this run only; `--json` carries it as a notice frame. */
+		/** The sentence naming a route borrowed for this run only; a JSON run carries it as a notice frame. */
 		routeNotice?: string;
 		target?: string;
 		model?: string;

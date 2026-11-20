@@ -1,4 +1,4 @@
-import { doesNotMatch, match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,12 +23,16 @@ it("headless commands refuse interactive actions before boot while preserving sk
 		NO_COLOR: "1",
 	};
 	const run = (task: string) =>
-		spawnSync(process.execPath, [CLI, "run", "--target", "headless-slash-missing-target", "--json", task], {
-			cwd: root,
-			env,
-			encoding: "utf8",
-			timeout: 15_000,
-		});
+		spawnSync(
+			process.execPath,
+			[CLI, "run", "--target", "headless-slash-missing-target", "--output-format", "stream-json", task],
+			{
+				cwd: root,
+				env,
+				encoding: "utf8",
+				timeout: 15_000,
+			},
+		);
 	try {
 		for (const task of [
 			"/context compact retain constraints",
@@ -48,7 +52,9 @@ it("headless commands refuse interactive actions before boot while preserving sk
 			strictEqual(result.error, undefined, task);
 			strictEqual(result.status, 2, `${task}: ${result.stderr}`);
 			match(result.stderr, /interactive commands are not supported by clio-coder run/, task);
-			doesNotMatch(result.stdout, /"type":"(?:session|agent_start)"/, task);
+			// Schema v2 frames even a refusal before boot: a pending session frame and the envelope, never an agent turn.
+			doesNotMatch(result.stdout, /"type":"agent_start"/, task);
+			match(result.stdout, /"pending":true/, task);
 			strictEqual(existsSync(join(root, "state", "sessions")), false, task);
 		}
 		// A missing explicit target stops these after command preflight but before
@@ -102,7 +108,7 @@ it("headless run prints a display-only template to stdout and exits without boot
 			strictEqual(result.stdout, "━━━ pkg ━━━\n /pkg:help   This help\n", task);
 			doesNotMatch(result.stderr, /not found|is not a command/, task);
 			strictEqual(existsSync(join(root, "state", "sessions")), false, `${task}: no session was created`);
-			const json = spawnSync(process.execPath, [CLI, "run", "--json", task], {
+			const json = spawnSync(process.execPath, [CLI, "run", "--output-format", "stream-json", task], {
 				cwd: root,
 				env,
 				encoding: "utf8",
@@ -110,12 +116,19 @@ it("headless run prints a display-only template to stdout and exits without boot
 			});
 			strictEqual(json.error, undefined, task);
 			strictEqual(json.status, 0, `${task}: ${json.stderr}`);
-			strictEqual(json.stdout, "", `${task}: display-only output must preserve JSONL stdout`);
-			strictEqual(
-				json.stderr,
-				"clio-coder run: --json and --json-events are deprecated (removed in 0.9.0); use --output-format json|stream-json for schema v2\n━━━ pkg ━━━\n /pkg:help   This help\n",
-				task,
+			// Display-only output stays off the JSONL stream: a pending session frame, then the succeeded envelope.
+			const frames = json.stdout
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as { type?: string; exitCode?: number; result?: { text?: string } });
+			deepStrictEqual(
+				frames.map((frame) => frame.type),
+				["session", "run_end"],
+				`${task}: display-only output must preserve JSONL stdout`,
 			);
+			strictEqual(frames[1]?.exitCode, 0, task);
+			strictEqual(frames[1]?.result?.text, "", task);
+			strictEqual(json.stderr, "━━━ pkg ━━━\n /pkg:help   This help\n", task);
 		}
 	} finally {
 		rmSync(root, { recursive: true, force: true });

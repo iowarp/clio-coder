@@ -149,7 +149,11 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 			settings.fleet.default.target = "mock-chat";
 			settings.fleet.default.model = "mock-model";
 			writeFileSync(settingsPath, stringify(settings));
-			const result = await run(["run", "--json", "--autonomy", "yolo", fixture.prompt], workspace, env);
+			const result = await run(
+				["run", "--output-format", "stream-json", "--autonomy", "yolo", fixture.prompt],
+				workspace,
+				env,
+			);
 			// A Scout that exhausts its repairs is a dispatched worker that did not deliver.
 			strictEqual(result.code, scenario === "exhausted" ? 1 : 0, result.stderr);
 			const requests = server.requests.filter((request) => request.stream !== false);

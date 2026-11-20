@@ -128,7 +128,7 @@ describe("clio-coder run --cwd", () => {
 		const { scratch, fixture } = await writingHome();
 		for (const args of [
 			["run", "--cwd"],
-			["run", "--cwd", "--json", "Write the proof file."],
+			["run", "--cwd", "--output-format", "stream-json", "Write the proof file."],
 		]) {
 			const turn = await runCli(args, { env: scratch.env, cwd: scratch.root });
 			strictEqual(turn.code, 2, turn.stderr);

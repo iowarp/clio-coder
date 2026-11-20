@@ -212,16 +212,27 @@ describe("clio-coder run --timeout", () => {
 				{ kind: "tool", name: "bash", arguments: { command: "grep -qx 5 calc.txt && echo OK" } },
 			],
 			"default",
-			["--json-events", "terminal", "--verify", "grep -qx 5 calc.txt", "--verify", "exit 3", "--verify-timeout", "30"],
+			[
+				"--output-format",
+				"stream-json",
+				"--verify",
+				"grep -qx 5 calc.txt",
+				"--verify",
+				"exit 3",
+				"--verify-timeout",
+				"30",
+			],
 		);
 		strictEqual(turn.code, 0, turn.stderr);
 		doesNotMatch(turn.stdout, /ran no check/);
-		const end = JSON.parse(turn.stdout.trim().split("\n").at(-1) ?? "{}") as {
-			type?: string;
-			verify?: Array<Record<string, unknown>>;
-		};
-		strictEqual(end.type, "turn_end");
-		const [accepted, failing] = end.verify ?? [];
+		// The stream's verify frame: each check as the run ran it after the turn, in flag order.
+		const frame = turn.stdout
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { type?: string; checks?: Array<Record<string, unknown>> })
+			.find((event) => event.type === "verify");
+		ok(frame, turn.stdout);
+		const [accepted, failing] = frame.checks ?? [];
 		ok(typeof accepted?.durationMs === "number");
 		strictEqual(
 			JSON.stringify({ ...accepted, durationMs: 0 }),
@@ -278,14 +289,15 @@ describe("clio-coder run --timeout", () => {
 		strictEqual(check?.reason, "deadline");
 	});
 
-	// v1 has no skipped row, so its verify frame lists the checks that finished; it still precedes run_end (CLI-P8).
+	// Under stream-json the verify frame lists the checks that finished; it still precedes run_end (CLI-P8).
 	for (const cut of [
 		{ by: "a deadline", code: 124, check: "touch started && sleep 30", flags: ["--timeout", "4"] },
 		{ by: "a SIGTERM", code: 143, check: "touch started && kill -TERM $PPID && sleep 30", flags: [] },
 	]) {
-		it(`v1 --json: ${cut.by} during a --verify check writes the verify frame before run_end, nothing after`, async () => {
+		it(`stream-json: ${cut.by} during a --verify check writes the verify frame before run_end, nothing after`, async () => {
 			const { turn, scratch } = await headlessTurn([], "default", [
-				"--json",
+				"--output-format",
+				"stream-json",
 				"--verify",
 				"true",
 				"--verify",

@@ -50,7 +50,7 @@ Interactive sessions, headless main-agent `run`, and `run --agent` exit `128 + s
 
 ## `--help` and flag positioning
 
-Subcommand `--help` exits `0` with zero side effects or network probes, writing to `stdout` — except `clio-coder run --help --json` and `clio-coder run --help --json-events <mode>`, which write help to `stderr` so `stdout` stays clean ([run-help.ts](../../src/cli/run-help.ts)).
+Subcommand `--help` exits `0` with zero side effects or network probes, writing to `stdout`; `clio-coder run --help` does so under `--output-format json|stream-json` too ([run-help.ts](../../src/cli/run-help.ts)).
 
 ### Flag positioning
 
@@ -72,22 +72,22 @@ Startup flag rules ([index.ts](../../src/cli/index.ts), [argv.ts](../../src/cli/
 `clio-coder run` writes only the final answer (or NDJSON frames) to `stdout`; all diagnostics, permission denials, `observed` summaries, `--verify` results, `Recording manifest (relative to Clio state): <path>` (`--agent --record`), and pre-send attachment interrupts (`clio-coder run: interrupted while reading file attachments; nothing was sent`, exit `130`) go to `stderr` ([print.ts](../../src/cli/modes/print.ts), [run.ts](../../src/cli/run.ts)). Argument validation precedes state reads (`#123`).
 - Unconfirmed permissions in headless mode return `HEADLESS_PERMISSION_DENIED_REASON` (`clio-coder run cannot confirm permission requests; rerun interactively to approve this action.`) as a tool error so the model can adapt or call `limitation` ([headless-permission.ts](../../src/core/headless-permission.ts)).
 - Runs that called `>= 1` tool emit one `stderr` line after completion (`headless-observed.ts`):
-  `clio-coder run: observed: <N> tool call(s), <M> refused [· <W> write(s)] [· check(s) passed: <names>] [· check(s) failed: <names>] [· <U> unclassified command(s) ran after a standing check] [· no check observed after the last write | no checks declared in the workspace]` (max 3 check names per list; does not alter stdout or exit code). A passing dispatch run record that no later write retired is named among the passed checks as `run <id> agent <agent>`, as on the task board. An unclassified call is one the check classifier (`check-classifier.ts`) reads as neither a check, an inspection nor a mutation, such as `node codemod.mjs` or an MCP tool. It neither settles nor clears a standing check, so it is only counted while any check that ran before it still stands; `turn_end.observed.unclassifiedAfterLastCheck` and the run receipt's `unclassifiedAfterLastCheck` (count plus up to 5 redacted commands) carry it too. A check chained to an unknown program in one command, such as `cargo build && ./target/debug/app`, reads as mixed: it settles no pass and retires a standing one, so run the check as its own command (known limit).
-- `--verify "<cmd>"` runs each check after the turn settles, logs to `stderr`, and emits `verify` (`--json-events full`) or `turn_end.verify` (`--json-events terminal`); it does not override the run's exit code ([print.ts](../../src/cli/modes/print.ts)).
+  `clio-coder run: observed: <N> tool call(s), <M> refused [· <W> write(s)] [· check(s) passed: <names>] [· check(s) failed: <names>] [· <U> unclassified command(s) ran after a standing check] [· no check observed after the last write | no checks declared in the workspace]` (max 3 check names per list; does not alter stdout or exit code). A passing dispatch run record that no later write retired is named among the passed checks as `run <id> agent <agent>`, as on the task board. An unclassified call is one the check classifier (`check-classifier.ts`) reads as neither a check, an inspection nor a mutation, such as `node codemod.mjs` or an MCP tool. It neither settles nor clears a standing check, so it is only counted while any check that ran before it still stands; the run receipt's `unclassifiedAfterLastCheck` (count plus up to 5 redacted commands) carries it too. A check chained to an unknown program in one command, such as `cargo build && ./target/debug/app`, reads as mixed: it settles no pass and retires a standing one, so run the check as its own command (known limit).
+- `--verify "<cmd>"` runs each check after the turn settles, logs to `stderr`, and reports each check in the `run_end` envelope's `verify.checks` under `--output-format json|stream-json` (plus a `verify` frame under `stream-json`); it does not override the run's exit code ([print.ts](../../src/cli/modes/print.ts)).
 
 ### Failures before output starts
 
-When `--json` or `--json-events` fails before writing any frame (`stdout` still empty), the failure wrapper emits `{"type":"turn_end","startedAt":...,"endedAt":...,"exitCode":<n>,"text":"","error":...,"outcome":...}` (`outcome` is `timed_out` for exit `124`, else `failed`) so `stdout` is never empty on non-zero exit. In full mode, a `run_end` frame follows ([run-failure.ts](../../src/cli/run-failure.ts)).
+When a run under `--output-format json|stream-json` fails before its turn starts, including a usage error, it still writes the `run_end` envelope (after a pending `session` frame under `stream-json`), whose `causes` name the failure, so `stdout` is never empty on non-zero exit ([run-failure.ts](../../src/cli/run-failure.ts)).
 
 ### The `run_end` frame
 
-Every full-mode `clio-coder run --json` / `--json-events full` stream ends with one `run_end` frame (`RUN_JSON_SCHEMA_VERSION = 1`), including after `--timeout` or signals:
+Every `clio-coder run --output-format stream-json` stream ends with one `run_end` result envelope (`schemaVersion: 2`), and `--output-format json` writes that envelope alone, including after `--timeout` or signals ([run-json-schema-v2.ts](../../src/cli/modes/run-json-schema-v2.ts)):
 
 ```json
-{"type":"run_end","startedAt":"...","endedAt":"...","exitCode":1,"outcome":"failed","outcomeDetail":"noop","error":"...","safety":{}}
+{"type":"run_end","schemaVersion":2,"mode":"main","startedAt":"...","endedAt":"...","exitCode":1,"outcome":"failed","outcomeDetail":"noop","causes":[{"code":"noop"}],"result":{"text":"","artifacts":[]},"verify":{"requested":0,"checks":[]},"dispatch":{"runs":[],"live":[],"undelivered":[]}}
 ```
 
-`outcome` is `succeeded`, `failed`, `canceled`, or `timed_out`; `outcomeDetail`, `error`, and `safety` are present when applicable. After a step template's turns, `stepPipeline` names the step tool and says whether it signalled `done`; a pipeline left unfinished keeps the outcome and carries `stoppedBy` (`cap` for the yolo continuation cap with a step still running, `unreported` when the last turn at the cap made no step call and ended on its own summary, so the step tool simply never signalled `done`, `cancel` or `failure` when a cancel or a failed turn ended it, `turn` for a turn nothing continued). Always judge overall success/failure from `run_end` (full mode) or the synthesized `turn_end` (terminal mode), not from model-level `agent_end` ([run-json-schema.ts](../../src/cli/modes/run-json-schema.ts)).
+`outcome` is `succeeded`, `failed`, `canceled`, `timed_out`, `previewed` (`--dry-run`) or `displayed`; `causes` lists every fact that ended the run, winner first, and `outcomeDetail` names the winner. After a step template's turns, the sealed run record (not the envelope) keeps `stepPipeline`, which names the step tool and says whether it signalled `done`; a pipeline left unfinished keeps the outcome and carries `stoppedBy` (`cap` for the yolo continuation cap with a step still running, `unreported` when the last turn at the cap made no step call and ended on its own summary, so the step tool simply never signalled `done`, `cancel` or `failure` when a cancel or a failed turn ended it, `turn` for a turn nothing continued). Always judge overall success/failure from `run_end`, not from model-level `agent_end` ([run-json-schema.ts](../../src/cli/modes/run-json-schema.ts)).
 
 ### Dispatched agent output (`clio-coder run --agent`)
 
@@ -101,12 +101,12 @@ In text mode (`formatDispatchHumanOutput`, [run-output.ts](../../src/cli/run-out
 6. **`result:` summary line**:
    `result: <runId> agent=<id> exit=<n>[ verdict=<v>][ failed_checks=<N>][ verification=unverified not_verified=<N>] target=<id> requested_model_id=<wireId>[ response_model_id_observation=...][ gateway=litellm route=...] tokens=<n>[ reasoning=<n>][ error=<msg>] start=<iso> end=<iso>`
 
-With `--json`, `stdout` emits NDJSON frames ([run-json-schema.ts](../../src/cli/modes/run-json-schema.ts)):
-- `session` (`mode: "agent"`, `agentId`, `schemaVersion: 1`, `cwd`, `clioCoderVersion`, `runId` once known),
+With `--output-format stream-json`, `stdout` emits NDJSON frames ([run-json-schema-v2.ts](../../src/cli/modes/run-json-schema-v2.ts)); `--output-format json` writes only the final envelope:
+- `session` (`mode: "agent"`, `agentId`, `schemaVersion: 2`, `cwd`, `clioCoderVersion`),
 - worker events and `dispatch_scope_notice` frames (`peer_instructions_stale` warning, `worker_merged` info),
-- final `result` frame (`{"type":"result","result":{...}}`, plus optional `recording`, `verdict`, `failedChecks`), or `{"type":"admission_refused","agentId":...,"message":...,"exitCode":2}` if admission refused dispatch before spawning any worker ([run.ts](../../src/cli/run.ts)).
+- final `run_end` envelope (`mode: "agent"`, `agentId`, the answer in `result.text`, the sealed `RunResult` in `dispatch.runs`); an admission refusal before any worker spawned ends with a `run_end` whose `exitCode` is `2` ([run.ts](../../src/cli/run.ts)).
 
-Note: `--agent` refuses `--autonomy` (use `--read-only`), `--json-events` (use `--json`), `--session`, `--continue`, `--max-cost-usd`, `--fail-on-noop`, `--verify`, `--answers`, `--turn-mode`, `--allow-tools`, `--delegate-tools`, and `--no-delegate` with exit `2` ([run.ts](../../src/cli/run.ts)).
+Note: `--agent` refuses `--autonomy` (use `--read-only`), `--session`, `--continue`, `--max-cost-usd`, `--fail-on-noop`, `--verify`, `--answers`, `--turn-mode`, `--allow-tools`, `--delegate-tools`, and `--no-delegate` with exit `2` ([run.ts](../../src/cli/run.ts)).
 
 ### Worker permission refusals (exit 3)
 
@@ -117,13 +117,13 @@ Dispatched workers obey `fleet.permissions.mode` (`judge` default, `deny`, `main
 - `fleet.permissions.mode: fail` exits `3` immediately on the first permission denial of any class.
 - Dispatch records `permission_required` in route history and blocks identical re-dispatch within the same user turn.
 
-## JSON output formats (`--json` and `--json-events`)
+## JSON output formats (`--json` and `--output-format`)
 
 | Command | Flag(s) | Output schema / contract |
 | --- | --- | --- |
-| `run` | `--json` / `--json-events full` | NDJSON deltas without growing message snapshots (`#122`): `session` (`schemaVersion: 1`), `agent_start`, `turn_start`, `message_start`, `text_delta`, `thinking_delta`, `message_end` (`{streamed: true, textLength\|thinkingLength}`), `tool_execution_start\|update\|end` (gateway calls add `via: "gateway"`; chain steps add `parentToolCallId`), `turn_end` (retains final `text` blocks without thinking bodies), `agent_end`, `dispatch_scope_notice`, `dispatch_settlement`, optional `autonomy`/`verify`, final flushed `run_end`. Unknown `type` values must be tolerated ([json-stream.ts](../../src/cli/modes/json-stream.ts), [run-json-schema.ts](../../src/cli/modes/run-json-schema.ts)). |
-| `run` | `--json-events terminal` | NDJSON: `session`, synthesized `turn_start`, filtered `agent_end` + `notice`, synthesized `turn_end` (`startedAt`, `endedAt`, `exitCode`, `text`, optional `error`, `outcome`, `outcomeDetail`, `safety`, `toolRounds`, `autonomy`, `verify`, `observed`). Omits tool execution and `run_end`. |
-| `run --agent` | `--json` | NDJSON worker stream ending with `result` or `admission_refused`. |
+| `run` | `--output-format stream-json` | NDJSON deltas without growing message snapshots (`#122`): `session` (`schemaVersion: 2`), `agent_start`, `turn_start`, `message_start`, `text_delta`, `thinking_delta`, `message_end` (`{streamed: true, textLength\|thinkingLength}`), `tool_execution_start\|update\|end` (gateway calls add `via: "gateway"`; chain steps add `parentToolCallId`), `turn_end` (retains final `text` blocks without thinking bodies), `agent_end`, `dispatch_scope_notice`, `dispatch_settlement`, optional `autonomy`/`verify`, final flushed `run_end` result envelope. Unknown `type` values must be tolerated ([json-stream.ts](../../src/cli/modes/json-stream.ts), [run-json-schema-v2.ts](../../src/cli/modes/run-json-schema-v2.ts)). |
+| `run` | `--output-format json` | One JSON document: the `run_end` result envelope (`exitCode`, `outcome`, `causes`, `result.text`, `verify`, `dispatch`, `usage`, `timings`). |
+| `run --agent` | `--output-format json\|stream-json` | NDJSON worker stream (`stream-json`) ending with the `run_end` envelope, or that envelope alone (`json`). |
 | `doctor` | `--json` | `{ ok, fix, deep, findings: [{ ok, name, level, detail }] }`. |
 | `upgrade`, `reset`, `uninstall` | `--json` | `{ command, title, method?, status ("success"\|"skipped"\|"dry-run"\|"error"), items, steps, warnings, errors, advice, summary? }` ([lifecycle-presenter.ts](../../src/cli/lifecycle-presenter.ts)). |
 | `session list` | `--json` | `{ stateDir, staleAfterMs, sessions: [{ ..., ageMs, skewMs, state }], malformed, clockOffsetMs }` ([session.ts](../../src/cli/session.ts)). |

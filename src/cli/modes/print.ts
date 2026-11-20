@@ -99,7 +99,6 @@ const PERMISSION_REQUIRED_EXIT_CODE = 3;
 import {
 	noteDispatchSupersededV2,
 	noteMainRunV2,
-	noteRunEndWritten,
 	noteSteerV2,
 	noteStructuredV2,
 	noteTextAnswer,
@@ -170,8 +169,7 @@ export interface HeadlessMainAgentOptions {
 	sampling?: HeadlessSamplingOverrides;
 	pendingSkillRequests?: ReadonlyArray<PendingSkillRequest>;
 	mode?: "text" | "json";
-	jsonEvents?: "full" | "terminal";
-	/** A route borrowed for this run only, written as the first notice frame in `--json` mode. */
+	/** A route borrowed for this run only, written as the first notice frame in JSON mode. */
 	routeNotice?: string;
 	steerChannel?: string;
 	getSessionHeader?: () => RunJsonMainSessionFrame | null;
@@ -198,7 +196,7 @@ export interface HeadlessMainAgentOptions {
 	deadline?: HeadlessRunDeadline;
 	/** `clio-coder run --verify`: acceptance checks the run itself runs once the turn settled. */
 	verify?: HeadlessVerifyOptions;
-	/** The session's active path, so the run can say which checks it saw stand (`observed:` on stderr, `turn_end.observed`). */
+	/** The session's active path, so the run can say which checks it saw stand (`observed:` on stderr). */
 	readEntries?: () => ReadonlyArray<unknown>;
 	/** `safety.scratchRoots`: a check logged under one changes no tree (x5-4). */
 	scratchRoots?: ReadonlyArray<string>;
@@ -861,23 +859,8 @@ export function prefixHeadlessFailure(
 	);
 }
 
-/**
- * The events `--json-events terminal` lets through, alongside the `turn_start`
- * and `turn_end` frames this mode synthesizes itself.
- *
- * The mode carries terminal accounting and the final answer on synthesized
- * `turn_end.text`. It omits prompts, thinking, and per-step progress, which
- * `--json-events full` carries. It never admits whole `message_end` frames:
- * those include injected reminders and intermediate content.
- *
- * `turn_end` is deliberately absent even though the mode emits one. The
- * synthesized frame carries `startedAt`, `endedAt`, `exitCode`, and `text`; the streamed
- * event of the same name carries the turn's assistant message instead. Letting
- * both through would put two different shapes behind one `type` on one stream.
- */
 /** How long an agent_end frame waits for the journal to hold its calls before it reports the message fold. */
 const SEGMENT_USAGE_WAIT_MS = 5_000;
-const TERMINAL_JSON_EVENT_TYPES = new Set(["agent_end", "notice"]);
 
 function isMainAgentRunKind(value: string): value is RunKind {
 	return value === "http" || value === "sdk" || value === "subprocess";
@@ -1163,7 +1146,6 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	noteMainRunV2({ runId, sessionReady: true });
 	if (options.costCap !== undefined) noteMainRunV2({ unpricedRoutes: options.costCap.unpricedRoutes });
 	const mode = options.mode ?? "text";
-	const jsonEvents = options.jsonEvents ?? "full";
 	const startedAt = new Date().toISOString();
 	let result: HeadlessMainAgentResult = {
 		outputExhausted: false,
@@ -1311,7 +1293,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		const stepPipeline = chat.stepPipeline?.() ?? null;
 		return stepPipeline === null ? {} : { stepPipeline };
 	};
-	// The host's verdict, one builder for terminal mode's turn_end and full mode's run_end so the two cannot drift.
+	// The host's verdict, which the JSON stream's run_end carries (S-51).
 	const runVerdict = (terminal: HeadlessTerminalOutcome, endedAt: string) => ({
 		startedAt,
 		endedAt,
@@ -1333,9 +1315,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// A full stream's last line says whether the run succeeded, which the model's own turn_end cannot (S-51).
 	let runEndWritten = false;
 	const writeRunEnd = (terminal: HeadlessTerminalOutcome): void => {
-		if (mode !== "json" || jsonEvents === "terminal" || runEndWritten) return;
+		if (mode !== "json" || runEndWritten) return;
 		runEndWritten = true;
-		noteRunEndWritten();
 		writeJsonHeader(true, true);
 		queueFrame({ type: "run_end", ...runVerdict(terminal, new Date().toISOString()) });
 	};
@@ -1359,7 +1340,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	});
 
 	// Fresh sessions acquire their identity during submit, after admission notices
-	// and terminal turn_start can arrive. Keep those frames behind their header.
+	// can arrive. Keep those frames behind their header.
 	const pendingJsonFrames: QueuedFrame[] = [];
 	let jsonHeaderWritten = false;
 	const writeMainFrame = (frame: QueuedFrame): void => {
@@ -1403,7 +1384,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// A full stream's one `verify` frame, ahead of run_end on every path; nothing follows run_end (CLI-P8).
 	let verifyFrameWritten = false;
 	const writeVerifyFrame = (checks: RunJsonVerifyResult[] | null): void => {
-		if (checks === null || mode !== "json" || jsonEvents === "terminal" || verifyFrameWritten || runEndWritten) return;
+		if (checks === null || mode !== "json" || verifyFrameWritten || runEndWritten) return;
 		verifyFrameWritten = true;
 		writeJsonHeader(true);
 		writeMainFrame({ type: "verify", checks });
@@ -1411,13 +1392,6 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	if (mode === "json" && options.routeNotice) {
 		writeMainFrame({ type: "notice", level: "info", surface: "transcript", text: options.routeNotice });
 	}
-	let terminalTurnStartWritten = false;
-	const writeTerminalTurnStart = (): void => {
-		if (terminalTurnStartWritten) return;
-		terminalTurnStartWritten = true;
-		writeJsonHeader(true);
-		writeMainFrame({ type: "turn_start", startedAt });
-	};
 	// A text-mode run has no `session` event, so the id a later `--session`
 	// would name is written to stderr the moment it exists. Stdout stays the
 	// assistant's answer alone.
@@ -1441,16 +1415,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			const frames = jsonProjector
 				.project(event)
 				.map((frame) => segmentFrame(turnEndAfterCitationCheck(frame, result.citationCheckedAnswer), messages));
-			if (jsonEvents === "terminal") {
-				writeTerminalTurnStart();
-				writeJsonHeader(true);
-				if (TERMINAL_JSON_EVENT_TYPES.has(event.type)) {
-					for (const frame of frames) writeMainFrame(frame);
-				}
-			} else {
-				writeJsonHeader(true);
-				for (const frame of frames) writeMainFrame(frame);
-			}
+			writeJsonHeader(true);
+			for (const frame of frames) writeMainFrame(frame);
 		}
 		if (mode === "text" && event.type === "retry_status" && event.status.phase === "scheduled") {
 			const { attempt, delayMs = 0, retryAfterMs } = event.status;
@@ -1506,8 +1472,6 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		const notice = readDispatchScopeNotice(payload);
 		if (notice === null) return;
 		if (mode === "json") {
-			// The terminal stream carries only the events a driver reads at the end.
-			if (jsonEvents === "terminal") return;
 			writeJsonHeader(true);
 			writeMainFrame({ type: "dispatch_scope_notice", ...notice });
 			return;
@@ -1551,7 +1515,6 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		!(result.endedQuietly && !result.sawTerminatingToolResult) &&
 		(result.text.length > 0 || result.sawTerminatingToolResult);
 	try {
-		if (mode === "json" && jsonEvents === "terminal") writeTerminalTurnStart();
 		const submitOptions = {
 			...(options.display ? { display: options.display } : {}),
 			...(options.constraints ? { constraints: options.constraints } : {}),
@@ -1655,7 +1618,6 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 					scratchRoots: options.scratchRoots ?? [],
 				})
 			: null;
-	const endedAt = new Date().toISOString();
 	// Every exit of the answer. A reply the token limit stopped can end inside a URL, which a terminating tool's result cannot (#446).
 	const settledAnswer = (answer: string): string =>
 		redactFinalUrlCredentials(answer, result.sawTerminatingToolResult || !result.outputExhausted);
@@ -1860,28 +1822,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		});
 	}
 	const autonomy = mode === "json" ? (options.autonomy?.() ?? null) : null;
-	if (autonomy !== null && jsonEvents !== "terminal") {
+	if (autonomy !== null) {
 		writeJsonHeader(true);
 		writeMainFrame({ type: "autonomy", ...autonomy });
 	}
 	writeVerifyFrame(verify);
-
-	if (mode === "json" && jsonEvents === "terminal") {
-		writeJsonHeader(true);
-		writeMainFrame({
-			type: "turn_end",
-			...runVerdict(terminal, endedAt),
-			text: settledAnswer(
-				result.sawTerminatingToolResult
-					? result.terminatingToolText
-					: answerAfterCitationCheck(result.citationCheckedAnswer, result.text),
-			),
-			...(runStats.toolRounds.length > 0 ? { toolRounds: runStats.toolRounds } : {}),
-			...(autonomy !== null ? { autonomy } : {}),
-			...(verify !== null ? { verify } : {}),
-			...(observed !== null && observed.toolCalls > 0 ? { observed } : {}),
-		});
-	}
 
 	await frameChain;
 	// A shutdown seals no acceptance, whichever of this path and the drain arrives first.
