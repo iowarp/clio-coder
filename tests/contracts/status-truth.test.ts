@@ -2865,6 +2865,25 @@ test("Reply from names only a route that replied; an admission that never sent p
 	strictEqual(assistantModelLabel(answered, "mock-router"), "mock-router · cold-b");
 });
 
+test("Reply from stays off a first reply from the configured route and names one from elsewhere", () => {
+	let model = "gpt-6-luna";
+	const panel = createChatPanel({ getRunTarget: () => "copilot", getRunModel: () => model });
+	const reply = (wire: string): void => {
+		panel.appendUser("hi");
+		panel.applyEvent({ type: "agent_start" } as never);
+		const message = { role: "assistant", provider: "openai-completions", model: wire, content: [], usage: {} };
+		panel.applyEvent({ type: "message_start", message } as never);
+		const done = { ...message, content: [{ type: "text", text: "Done." }], stopReason: "stop" };
+		panel.applyEvent({ type: "message_end", message: done } as never);
+		panel.applyEvent({ type: "agent_end", messages: [done] } as never);
+	};
+	reply("gpt-6-luna");
+	doesNotMatch(screen(panel), /Reply from/u, screen(panel));
+	model = "gpt-6-sol";
+	reply("gpt-6-sol");
+	match(screen(panel), /Reply from copilot · gpt-6-sol/u, screen(panel));
+});
+
 test("the exit summary counts a finished worker whose validation failed as Fleet does, never as succeeded", async () => {
 	const { composeTrustStatus } = await import("../../src/domains/evidence/trust-status.js");
 	const { renderExitSummary } = await import("../../src/interactive/exit-summary.js");
