@@ -400,6 +400,15 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		'git commit -m "$(date) config trust fix"',
 	])
 		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).kind, "allow", command);
+	// An authority-class refusal sends the model to the operator, never into a script or file that runs it.
+	for (const command of [
+		"clio-coder config trust safety",
+		'H=$(mktemp -d); git commit -m "run clio-coder config trust safety"',
+	]) {
+		const reasons = (engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).reasons ?? []).join("\n");
+		match(reasons, /only the operator makes this change/u, command);
+		doesNotMatch(reasons, /write tool|pass the file/u, command);
+	}
 	const edit = { tool: ToolNames.Write, args: { path: join(home.dir, "config", "runtimes", "local.js"), content: "x" } };
 	strictEqual(engine.evaluate(edit, "yolo", OPERATOR_YOLO).reasonCode, "yolo-floor:clio-owned-state");
 	// CLI-H4: a Clio variable pinned to a scratch home is judged by that path; every route back to the real one blocks.

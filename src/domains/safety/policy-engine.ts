@@ -155,6 +155,8 @@ import { gateProjectSafetyPolicy, workspaceTrustDirectory } from "./workspace-tr
 import {
 	MAX_RAW_TEXT_BYTES,
 	pinnedClioCommand,
+	YOLO_FLOOR_AUTHORITY_REMEDY,
+	YOLO_FLOOR_AUTHORITY_RULE_IDS,
 	YOLO_FLOOR_PACK_RULE_IDS,
 	YOLO_FLOOR_REASON_PREFIX,
 	YOLO_FLOOR_RULE_IDS,
@@ -1217,7 +1219,12 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		) => ({
 			ruleId: hit.match.ruleId,
 			reasonCode: `${YOLO_FLOOR_REASON_PREFIX}${hit.match.ruleId}`,
-			reasons: [...reasons, hit.match.reason, "the yolo floor holds at every autonomy level"],
+			reasons: [
+				...reasons,
+				hit.match.reason,
+				...(YOLO_FLOOR_AUTHORITY_RULE_IDS.has(hit.match.ruleId) ? [YOLO_FLOOR_AUTHORITY_REMEDY] : []),
+				"the yolo floor holds at every autonomy level",
+			],
 			match: hit.match,
 			policySource: hit.source,
 			...(floorBasis !== undefined ? { floorBasis } : {}),
@@ -1256,7 +1263,11 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const hit =
 				commandFloorHit([candidate], [candidate], callCwd, trees) ?? (read === null ? null : floorMatch(read, "read"));
 			if (hit !== null) {
-				const reason = `matched ${YOLO_FLOOR_RULE_IDS.rawText}: ${RAW_TEXT_REASON}: "${candidate.slice(0, 200)}" is a floor command even if it is only quoted data (fail-closed); write that text to a file with the write tool and pass the file`;
+				// Moving an operator-only command into a file changes nothing: the script scan refuses it there too (CLI-P31).
+				const remedy = YOLO_FLOOR_AUTHORITY_RULE_IDS.has(hit.match.ruleId)
+					? YOLO_FLOOR_AUTHORITY_REMEDY
+					: "write that text to a file with the write tool and pass the file";
+				const reason = `matched ${YOLO_FLOOR_RULE_IDS.rawText}: ${RAW_TEXT_REASON}: "${candidate.slice(0, 200)}" is a floor command even if it is only quoted data (fail-closed); ${remedy}`;
 				return held(
 					{ match: { ...hit.match, ruleId: YOLO_FLOOR_RULE_IDS.rawText, reason }, source: hit.source },
 					[hit.match.reason],

@@ -47,6 +47,17 @@ export const YOLO_FLOOR_RULE_IDS = {
 	rawText: "yolo-floor-raw-text",
 } as const;
 
+/** Floor rules that refuse a change only the operator makes: Clio's trust, settings and own trees (CLI-P31). */
+export const YOLO_FLOOR_AUTHORITY_RULE_IDS: ReadonlySet<string> = new Set([
+	YOLO_FLOOR_RULE_IDS.trustAuthority,
+	YOLO_FLOOR_RULE_IDS.settingsAuthority,
+	YOLO_FLOOR_RULE_IDS.clioOwned,
+]);
+
+/** The remedy an authority-class refusal gives: the operator acts, and no script, file or wrapper stands in for them. */
+export const YOLO_FLOOR_AUTHORITY_REMEDY =
+	"only the operator makes this change: ask them to run it themselves; a script, a file or any wrapper that runs it is refused the same way";
+
 /** Every reason code a floor block carries starts with this. */
 export const YOLO_FLOOR_REASON_PREFIX = "yolo-floor:";
 
