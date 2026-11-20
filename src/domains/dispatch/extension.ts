@@ -681,8 +681,9 @@ interface ActiveRun {
 	/** Hard termination used by the reconciler; for native workers this is the SIGTERM→SIGKILL path. */
 	kill: () => void;
 	/**
-	 * Send operator guidance to a live-input HTTP/SDK worker. Returns false when
-	 * the channel is gone. Absent for single-shot subprocess and ACP runs.
+	 * Send operator guidance to a live-input HTTP/SDK worker, or to an ACP peer
+	 * that takes it as another prompt (agy). Returns false when the channel is
+	 * gone. Absent for single-shot subprocess runs and other ACP peers.
 	 */
 	steer?: (text: string) => boolean;
 	/**
@@ -7245,6 +7246,10 @@ export function createDispatchBundle(
 		let outcomeCode: RunOutcomeCode | null = null;
 		let reportedSpoofedOutcome = false;
 		let runIdForPermissionAudit: string | null = null;
+		// Steering provenance as a native run keeps it: one entry per message the peer took as another prompt, closed
+		// once the peer answers that prompt; the prose itself is never kept.
+		const steeringProvenance: RunSteeringProvenance[] = [];
+		let steeringProvenanceClosed = false;
 		const outputCapture = createWorkerOutputCapture({
 			maxBytes: workerOutputCaptureBytes(
 				dispatchResultContract(req, req.agentId && maybeAgents ? maybeAgents.getSpec(req.agentId) : null),
@@ -7294,8 +7299,18 @@ export function createDispatchBundle(
 					requestId?: string;
 					mode?: "deny" | "fail" | "escalate";
 					source?: "operator" | "timeout" | "policy" | "remembered";
+					sequence?: unknown;
 				};
 			};
+			if (event.type === "clio_coder_steer_received" && !steeringProvenanceClosed) {
+				const pending = steeringProvenance.find(
+					(entry) => entry.sequence === event.payload?.sequence && !entry.acknowledged,
+				);
+				if (pending !== undefined) {
+					pending.acknowledged = true;
+					pending.acknowledgedAt = new Date().toISOString();
+				}
+			}
 			if (event.type === "clio_coder_tool_start" && event.payload && typeof event.payload.tool === "string") {
 				recordToolStart(inFlightTools, event.payload);
 			}
@@ -7507,6 +7522,21 @@ export function createDispatchBundle(
 		});
 
 		const startedAt = envelope.startedAt;
+		// A peer that takes guidance as another prompt (agy 1.5.0 and later) gets a steer, recorded like a native one.
+		const steerAcp =
+			(send: (text: string) => boolean) =>
+			(text: string): boolean => {
+				const canonicalText = text.trim();
+				if (steeringProvenanceClosed || canonicalText.length === 0 || !send(canonicalText)) return false;
+				steeringProvenance.push({
+					sequence: steeringProvenance.length + 1,
+					bytes: Buffer.byteLength(canonicalText, "utf8"),
+					contentHash: sha256(canonicalText),
+					sentAt: new Date().toISOString(),
+					acknowledged: false,
+				});
+				return true;
+			};
 		let resolveFinal!: (receipt: RunResult) => void;
 		let rejectFinal!: (error: unknown) => void;
 		const finalPromise = new Promise<RunResult>((res, rej) => {
@@ -7519,6 +7549,7 @@ export function createDispatchBundle(
 			req,
 			abort: acp.abort,
 			kill: acp.kill,
+			...(acp.steer !== undefined ? { steer: steerAcp(acp.steer) } : {}),
 			promise: acp.promise.then(
 				() => undefined,
 				() => undefined,
@@ -7557,6 +7588,7 @@ export function createDispatchBundle(
 			outcome: RunOutcome,
 			outcomeDetail: string | null,
 			capturedOutput: RunResultOutput | undefined,
+			steering: ReadonlyArray<RunSteeringProvenance>,
 		): RunResultDraft => {
 			// The peer's own reports reach the run journal as run.usage_reported, so the call fold is the run's spend;
 			// a run whose telemetry never arrived stays unknown (#434).
@@ -7592,6 +7624,7 @@ export function createDispatchBundle(
 				...(lifecycle.pipeline ? { pipeline: lifecycle.pipeline } : {}),
 				...(lifecycle.briefing ? { briefing: lifecycle.briefing } : {}),
 				...(req.contextSeed ? { workerContext: structuredClone(req.contextSeed.provenance) } : {}),
+				...(steering.length > 0 ? { steering: steering.map((entry) => ({ ...entry })) } : {}),
 				...(req.gate !== undefined ? { gate: req.gate } : {}),
 				...(req.council !== undefined ? { council: req.council } : {}),
 				...(req.plan !== undefined ? { plan: req.plan } : {}),
@@ -7768,6 +7801,9 @@ export function createDispatchBundle(
 					}
 				}
 				const capturedOutput = outputCapture.snapshot();
+				// Closed before the receipt snapshot, so a late acknowledgement cannot race the sealed facts.
+				steeringProvenanceClosed = true;
+				const steering = steeringProvenance.map((entry) => ({ ...entry }));
 				if (finalOutcome === "succeeded" && !hasDurableFinalOutput(capturedOutput)) {
 					finalOutcome = "failed";
 					outcomeCode = "worker_final_output_missing";
@@ -7811,7 +7847,15 @@ export function createDispatchBundle(
 				};
 				const failureClass = classifyFailure(evidence, classifiedResult, finalOutcome, outcomeCode);
 				const contextOverflow = isContextOverflowFailure(failureClass, classifiedResult, outcomeCode);
-				const receiptDraft = buildReceiptDraft(result, endedAt, status, finalOutcome, finalDetail, capturedOutput);
+				const receiptDraft = buildReceiptDraft(
+					result,
+					endedAt,
+					status,
+					finalOutcome,
+					finalDetail,
+					capturedOutput,
+					steering,
+				);
 				const terminal = resolveRunTerminalReason(evidence, outcomeCode);
 				resolvedTerminal = terminal;
 				Object.assign(receiptDraft, runSettlementReceiptFields(terminal, callUsage?.snapshot()));
@@ -7826,6 +7870,7 @@ export function createDispatchBundle(
 					sessionId: receiptDraft.sessionId,
 					spend: receiptDraft.spend,
 					spendSums: receiptDraft.spendSums,
+					...(steering.length > 0 ? { steering: steering.map((entry) => ({ ...entry })) } : {}),
 					sessionShellHash: receiptDraft.sessionShellHash ?? null,
 					dynamicHash: receiptDraft.dynamicHash ?? null,
 					heartbeatAt: heartbeatIso(acp.heartbeatAt),
@@ -12737,6 +12782,11 @@ export function createDispatchBundle(
 				throw new Error(`steer: run '${runId}' (${run.runtimeKind}:${run.runtimeId}) does not support live steering`);
 			}
 			if (!run.steer(trimmed)) {
+				if (run.runtimeKind === "acp-delegation") {
+					throw new Error(
+						`steer: run '${runId}' (${run.runtimeKind}:${run.runtimeId}) no longer accepts input; the delegated agent has no turn running that takes guidance`,
+					);
+				}
 				throw new Error(`steer: run '${runId}' no longer accepts input; the worker has exited or its stdin is closed`);
 			}
 		},

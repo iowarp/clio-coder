@@ -524,9 +524,15 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			settledTurn.push(response);
 			return response;
 		});
-		// Awaited after the turn's own prompt; this only keeps an early rejection from going unhandled.
-		tracked.catch(() => {});
 		steerPrompts.push(tracked);
+		// The peer answering the steer prompt is its acceptance; the sequence counts the steers sent into this run, as
+		// dispatch numbers its provenance. Registered before the turn awaits it, so the ack precedes the settle, and the
+		// rejection handler keeps an early rejection from going unhandled.
+		const sequence = steerPrompts.length;
+		tracked.then(
+			() => emit({ type: "clio_coder_steer_received", payload: { chars: body.length, sequence } }),
+			() => {},
+		);
 		return true;
 	};
 	const promise = (async (): Promise<AcpDelegationResult> => {

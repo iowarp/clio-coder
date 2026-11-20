@@ -1,8 +1,10 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
-import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { fileURLToPath } from "node:url";
+import { DEFAULT_SETTINGS, type WorkerPermissionMode } from "../../src/core/defaults.js";
+import type { DispatchBundleOptions } from "../../src/domains/dispatch/extension.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -238,4 +240,76 @@ it("seals native and ACP runs, and their failed finalizations, byte for byte as 
 	const text = JSON.stringify(actual, null, "\t");
 	if (process.env.CLIO_DISPATCH_GOLDEN === "update") writeFileSync(GOLDEN, `${text}\n`);
 	strictEqual(text, JSON.stringify(JSON.parse(readFileSync(GOLDEN, "utf8")), null, "\t"));
+});
+
+/**
+ * One dispatched run of the row-224 `agy acp` stand-in: its first prompt asks "Which branch?" (main, topic) and stays
+ * open until a steer prompt arrives, so every run steers once it has seen the question. The profile and HOME live in
+ * the scratch home, never the operator's ~/.gemini.
+ */
+async function agyDispatch(
+	name: string,
+	options: Pick<DispatchBundleOptions, "operatorAsk"> = {},
+	mode?: WorkerPermissionMode,
+) {
+	const dir = join(process.env.CLIO_CODER_HOME ?? "", name);
+	mkdirSync(dir, { recursive: true });
+	const log = join(dir, "frames.jsonl");
+	const agy = join(dir, "agy");
+	const fixture = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
+	writeFileSync(agy, `#!/bin/sh\nexec "${process.execPath}" "${fixture}" agy "${log}" 1.5.13 ok\n`, { mode: 0o755 });
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.fleet.retry.maxRetries = 0;
+	if (mode !== undefined) settings.fleet.permissions.mode = mode;
+	settings.integrations.externalAgents.entries = [
+		{
+			id: "agy-fixture",
+			command: agy,
+			args: ["acp", "--gemini-dir", "~/.gemini", "--app-data-dir", "antigravity-cli"],
+			env: { HOME: dir },
+			toolGovernance: "clio-coder-policy",
+		},
+	];
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), options);
+	await bundle.extension.start();
+	try {
+		const run = await bundle.contract.dispatch({
+			agentId: "agy-fixture",
+			task: "pick a branch",
+			executionRole: "researcher",
+			requestOrigin: "internal",
+		});
+		const questions: unknown[] = [];
+		for await (const event of run.events) {
+			const typed = event as { type?: string; payload?: unknown };
+			if (typed.type !== "clio_coder_peer_question") continue;
+			questions.push(typed.payload);
+			bundle.contract.steer(run.runId, "use the topic branch");
+		}
+		const receipt = await run.finalPromise;
+		const frames = readFileSync(log, "utf8")
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { id?: unknown; method?: string; result?: unknown });
+		return { receipt, questions, frames };
+	} finally {
+		await bundle.extension.stop?.();
+	}
+}
+
+it("steers an agy delegation through its own session/prompt and seals the steer's provenance (row 228)", {
+	skip: process.platform === "win32",
+}, async () => {
+	const { receipt, frames } = await agyDispatch("steer");
+	const steering = receipt.steering ?? [];
+	strictEqual(steering.length, 1, JSON.stringify(receipt.outcomeDetail));
+	strictEqual(steering[0]?.sequence, 1);
+	strictEqual(steering[0]?.bytes, Buffer.byteLength("use the topic branch"));
+	strictEqual(steering[0]?.acknowledged, true);
+	deepStrictEqual(
+		frames.filter((frame) => frame.method === "session/prompt").length,
+		2,
+		"the steer goes out as a second session/prompt",
+	);
+	ok(!frames.some((frame) => frame.method === "session/cancel"));
 });

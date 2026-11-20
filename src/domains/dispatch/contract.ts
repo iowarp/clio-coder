@@ -620,9 +620,11 @@ export interface DispatchContract {
 	 * assignment id addresses its current attempt. The text is sent as a JSON
 	 * line on the worker's open stdin and injected into its transcript at the
 	 * next loop boundary; the worker acknowledges runtime acceptance with a
-	 * `clio_coder_steer_received` event. Throws with an operator-facing message when
-	 * the run is unknown or inactive, when the runtime is a single-shot
-	 * subprocess or ACP delegation, or when the worker's stdin is already gone.
+	 * `clio_coder_steer_received` event. An ACP peer that takes guidance as
+	 * another `session/prompt` (agy 1.5.0 and later) is sent one, acknowledged when
+	 * the peer answers it. Throws with an operator-facing message when the run is
+	 * unknown or inactive, when the runtime is a single-shot subprocess or an ACP
+	 * peer without that channel or turn, or when the worker's stdin is already gone.
 	 */
 	steer(runId: string, text: string): void;
 
