@@ -69,6 +69,20 @@ export function writeRunRefusal(text: string): void {
 
 /** Pre-work refusals that carry a narrower cause than `not_started`, known by the diagnostic each one writes. */
 const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
+	// SPEC C17: an option `run` does not take, including a global or interactive-only flag written after `run`.
+	[/^clio-coder run: unknown option: /u, "unknown_flag"],
+	[
+		/^clio-coder run: \S+ (?:is a global option and must come before the subcommand|applies only to the interactive session)/u,
+		"unknown_flag",
+	],
+	// SPEC 6.2: no task text, from an empty pipe, a terminal with no task, or `-` on a terminal.
+	[/^clio-coder run: empty task/u, "empty_task"],
+	[/^clio-coder run: `-` reads the task from stdin, but stdin is a terminal/u, "empty_task"],
+	// SPEC 6.4 mode matrix: a main-only input given with --agent, or a dispatch-only flag without it.
+	[/^clio-coder run: .* (?:applies|apply) to the main agent/u, "flag_conflict"],
+	[/^clio-coder run: .* apply to the main-agent task/u, "flag_conflict"],
+	[/^clio-coder run: @\S+: image attachments go to the main agent, not --agent dispatch/u, "flag_conflict"],
+	[/^clio-coder run: fleet dispatch flags require --agent /u, "flag_conflict"],
 	[/--output-format cannot be combined with --json or --json-events/u, "flag_conflict"],
 	[/--deny-tools removes every tool --allow-tools names /u, "flag_conflict"],
 	[/--dry-run prints its plan as JSON with --output-format json/u, "flag_conflict"],
@@ -77,6 +91,8 @@ const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
 	[/^clio-coder run: task file key \S+ is also given as /u, "task_flag_conflict"],
 	[/^clio-coder run: task file carries .*pass --trust-task-file/u, "task_authority"],
 	[/^clio-coder run: task file output\.schema: /u, "schema_unsupported"],
+	// SPEC 6.6: an envelope version this release does not read.
+	[/^clio-coder run: task file schemaVersion: /u, "schema_unsupported"],
 	[/^clio-coder run: not configured: /u, "not_configured"],
 	// SPEC 6.8: a schema `--output-schema` cannot enforce, refused before any model call.
 	[/^clio-coder run: --output-schema: /u, "schema_unsupported"],
@@ -315,6 +331,8 @@ interface SeenFrames {
 	/** Milliseconds from the run's start to the loop's first `agent_start` and first streamed delta, as written. */
 	firstRequestMs?: number;
 	firstTokenMs?: number;
+	/** The last assistant message ended in the provider's error (not a harness stop): SPEC 6.5 row 8 `provider_error`. */
+	providerError?: boolean;
 }
 
 const LIMIT_CODES: ReadonlyArray<RunCauseCode> = [
@@ -386,6 +404,12 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
 		case "run_end":
 			seen.runEnd = frame as RunJsonRunEndFrame;
 			return null;
+		case "message_end": {
+			const message = (frame as { message?: { role?: string; stopReason?: unknown; harnessStopped?: unknown } }).message;
+			if (message?.role === "assistant")
+				seen.providerError = message.stopReason === "error" && message.harnessStopped !== true;
+			break;
+		}
 		case "result": {
 			const result = frame as RunJsonResultFrame;
 			seen.receipt = result.result;
@@ -461,6 +485,9 @@ function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, reque
 				return [{ code: "verdict_failed", failedChecks: seen.failedChecks ?? [], ...message }];
 			const work = WORK_CODES.find((entry) => entry === detail);
 			if (work !== undefined) return [{ code: work, ...message }];
+			// SPEC 6.5 row 8: the provider's error ended the run; a harness stop or admission refusal stays run_failed.
+			if (detail === undefined && request.mode === "main" && seen.providerError === true)
+				return [{ code: "provider_error", ...message }];
 			if (request.mode === "agent" && seen.receipt !== undefined)
 				return [{ code: "worker_failed", exitCode: 1, ...message }];
 			return [{ code: "run_failed", ...message }];

@@ -263,9 +263,12 @@ test("a dispatch whose worker started and failed is not reported as never starte
 });
 
 /** A headless run whose answer ends on a call it only wrote out, as the turn runtime stamps it; v2 when `format` is set. */
-async function writtenCallRun(format?: "json"): Promise<{ code: number; stdout: string; stderr: string }> {
+async function writtenCallRun(
+	format?: "json",
+	override?: Record<string, unknown>,
+): Promise<{ code: number; stdout: string; stderr: string }> {
 	let handler: (event: unknown) => void = () => {};
-	const reply = {
+	const reply = override ?? {
 		...answerMessage(
 			'The file holds 50 data rows.\n<tool_call>{"name":"read","arguments":{"path":"data.csv"}}</tool_call>',
 		),
@@ -340,4 +343,22 @@ test("an answer ending on a written call stays exit 0 in v1 and fails as no_answ
 	strictEqual(envelope.causes?.[0]?.code, "no_answer");
 	match(envelope.causes?.[0]?.message ?? "", /written read call/u);
 	strictEqual(v2.stderr.split("written read call").length - 1, 1, v2.stderr);
+});
+
+test("a provider error that ends the run is provider_error under v2 and unchanged in v1 (CLI-P12)", async (t) => {
+	const env = await isolateClioEnv("headless-provider-error-");
+	t.after(() => env.restore());
+	const failed = { ...answerMessage(""), content: [], stopReason: "error", errorMessage: "429 Too Many Requests" };
+	const v1 = await writtenCallRun(undefined, failed);
+	strictEqual(v1.code, 1, v1.stderr);
+	match(v1.stderr, /429 Too Many Requests/u);
+	const v2 = await writtenCallRun("json", failed);
+	strictEqual(v2.code, 1, v2.stderr);
+	const envelope = JSON.parse(v2.stdout.trim().split("\n").at(-1) ?? "{}") as {
+		outcomeDetail?: string;
+		causes?: Array<{ code: string; message?: string }>;
+	};
+	strictEqual(envelope.causes?.[0]?.code, "provider_error", v2.stdout);
+	strictEqual(envelope.outcomeDetail, "provider_error");
+	match(envelope.causes?.[0]?.message ?? "", /429 Too Many Requests/u);
 });

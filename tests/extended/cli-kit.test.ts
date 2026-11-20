@@ -178,7 +178,18 @@ test("run exit precedence: the highest applying row sets the exit code and leads
 			"session_live",
 		],
 		[["clio-coder run: failed to resume session 019a: session file is unreadable"], "not_started"],
-		[["clio-coder run: empty task"], "not_started"],
+		// CLI-P12: the C17 slugs a refusal before boot names.
+		[["clio-coder run: empty task"], "empty_task"],
+		[["clio-coder run: `-` reads the task from stdin, but stdin is a terminal"], "empty_task"],
+		[["clio-coder run: unknown option: --bogus"], "unknown_flag"],
+		[["clio-coder run: task file schemaVersion: this release reads version 1, got 2"], "schema_unsupported"],
+		[["clio-coder run: --systemone applies to the main agent, not --agent dispatch"], "flag_conflict"],
+		[
+			[
+				"clio-coder run: --turn-mode, --allow-tools, --deny-tools, --delegate-tools, and --no-delegate apply to the main-agent task",
+			],
+			"flag_conflict",
+		],
 	] as const)
 		equal(startRefusalCause(diagnostics).code, code, diagnostics[0]);
 });
