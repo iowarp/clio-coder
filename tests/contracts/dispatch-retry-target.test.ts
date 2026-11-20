@@ -37,12 +37,18 @@ async function retryFleet(
 		windows?: Readonly<Record<string, number>>;
 		maxRetries?: number;
 		report?: object;
+		models?: ReadonlyArray<string>;
 		onSpawn?: (spec: WorkerSpec) => void;
 	} = {},
 ) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.safety.sandbox = "off";
-	settings.targets = targetIds.map((id) => ({ id, runtime: "openai", defaultModel: "gpt-4o" }));
+	settings.targets = targetIds.map((id) => ({
+		id,
+		runtime: "openai",
+		defaultModel: "gpt-4o",
+		...(options.models !== undefined ? { wireModels: [...options.models] } : {}),
+	}));
 	settings.fleet.default.target = "default";
 	settings.fleet.default.model = "gpt-4o";
 	settings.fleet.retry.maxRetries = options.maxRetries ?? 1;
@@ -144,28 +150,39 @@ describe("retry target selection", () => {
 		}
 	});
 
-	it("does not rerun a pinned model that left its obligation unmet (ruling 5)", async () => {
+	it("does not rerun the model that left its obligation unmet when no other model is eligible (ruling 5)", async () => {
+		// Two targets serving one model: another target is not another model.
 		const fleet = await retryFleet(["default", "other"], new Set(), new Set());
 		try {
 			const scope = declaredScopeIntent({ readRoots: ["src/"] });
 			ok(scope.ok);
-			const first = await fleet.bundle.contract.dispatch({
-				...REQUEST,
-				cwd: scratch.dir,
-				intent: scope.intent,
-				target: "default",
-			});
-			await fleet.bundle.contract.assignments?.get(first.runId)?.terminal;
-			const assignment = fleet.bundle.contract.assignments?.get(first.runId);
+			const settle = async (request: Partial<DispatchRequest>) => {
+				const first = await fleet.bundle.contract.dispatch({
+					...REQUEST,
+					cwd: scratch.dir,
+					intent: scope.intent,
+					...request,
+				});
+				await fleet.bundle.contract.assignments?.get(first.runId)?.terminal;
+				return fleet.bundle.contract.assignments?.get(first.runId);
+			};
+			const pinned = await settle({ target: "default" });
 			deepStrictEqual(fleet.spawned, ["default"]);
-			strictEqual(assignment?.status, "failed");
-			match(assignment?.outcomeDetail ?? "", /^obligation observed-evidence unmet, not retried because failover is none/u);
+			strictEqual(pinned?.status, "failed");
+			match(pinned?.outcomeDetail ?? "", /^obligation observed-evidence unmet, not retried because failover is none/u);
+			const automatic = await settle({});
+			deepStrictEqual(fleet.spawned, ["default", "default"], "one attempt, no second spawn");
+			strictEqual(automatic?.status, "failed");
+			strictEqual(
+				automatic?.outcomeDetail,
+				"obligation observed-evidence unmet, not retried because no other eligible model can take it, and default/gpt-4o left it unmet",
+			);
 		} finally {
 			await fleet.bundle.extension.stop?.();
 		}
 	});
 
-	it("retries an idle builder's unmet obligation in its kept task worktree, then discards it", async () => {
+	it("retries an idle builder's unmet obligation on another model in its kept task worktree", async () => {
 		const repo = join(scratch.dir, "repo");
 		mkdirSync(repo);
 		const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "pipe" });
@@ -175,12 +192,13 @@ describe("retry target selection", () => {
 		writeFileSync(join(repo, "base.txt"), "base");
 		git("add", ".");
 		git("commit", "-qm", "base");
-		const trees: Array<{ path: string | undefined; present: boolean }> = [];
+		const trees: Array<{ path: string | undefined; present: boolean; model: string }> = [];
 		const fleet = await retryFleet(["default"], new Set(), new Set(), {
 			report: { mutatedPaths: [], validations: [], summary: "nothing to change" },
+			models: ["gpt-4o-mini"],
 			onSpawn: (spec) => {
 				const path = spec.taskWorktree?.path;
-				trees.push({ path, present: path !== undefined && existsSync(path) });
+				trees.push({ path, present: path !== undefined && existsSync(path), model: spec.wireModelId });
 			},
 		});
 		try {
@@ -195,7 +213,16 @@ describe("retry target selection", () => {
 			await fleet.bundle.contract.assignments?.get(first.runId)?.terminal;
 			strictEqual(trees.length, 2, "the unmet obligation retries once");
 			ok(trees[0]?.path !== undefined);
-			deepStrictEqual(trees[1], { path: trees[0]?.path, present: true }, "the retry runs in the kept worktree");
+			deepStrictEqual(
+				trees.map((tree) => tree.model),
+				["gpt-4o", "gpt-4o-mini"],
+				"the retry runs on the other model",
+			);
+			deepStrictEqual(
+				trees[1],
+				{ path: trees[0]?.path, present: true, model: "gpt-4o-mini" },
+				"the retry runs in the kept worktree",
+			);
 			strictEqual(existsSync(trees[0].path), false, "the idle worktree goes once no retry remains");
 		} finally {
 			await fleet.bundle.extension.stop?.();

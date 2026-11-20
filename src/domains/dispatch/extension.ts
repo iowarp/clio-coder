@@ -5161,17 +5161,17 @@ export function createDispatchBundle(
 		const maxRetries =
 			unmetObligation !== undefined ? Math.min(configuredRetries, OBLIGATION_RETRY_LIMIT) : configuredRetries;
 		const baseDecision = decideRetry(failureClass, memberRetryAttempt(run), maxRetries);
-		// Ruling 5 retries an unmet obligation only on another model, and a pinned route has no other.
-		if (unmetObligation !== undefined && baseDecision.retry && failoverModeFor(run.req) === "none") {
-			retryBackoff.delete(controlRoot);
-			return {
-				scheduled: false,
-				settlementDetail: `obligation ${unmetObligation} unmet, not retried because failover is none, which pins the route to the model that left it unmet`,
-			};
+		let plannedRoute: DispatchFailoverCandidate | null = null;
+		if (unmetObligation !== undefined && baseDecision.retry) {
+			const plan = planObligationRetry(run, unmetObligation, baseDecision);
+			if ("settlementDetail" in plan) {
+				retryBackoff.delete(controlRoot);
+				return { scheduled: false, settlementDetail: plan.settlementDetail };
+			}
+			plannedRoute = plan.route;
 		}
 		// An exact manual route may be retried, but no route component may drift.
 		let decision = recovery.retryDecisionWithinFailover(baseDecision, failoverModeFor(run.req));
-		let overflowRoute: DispatchFailoverCandidate | null = null;
 		let overflowReason: string | null = null;
 		if (contextOverflow && !decision.retry) {
 			const plan = planOverflowRetry(run, currentRetryReason, maxRetries);
@@ -5179,7 +5179,7 @@ export function createDispatchBundle(
 				retryBackoff.delete(controlRoot);
 				return { scheduled: false, settlementDetail: plan.settlementDetail };
 			}
-			overflowRoute = plan.route;
+			plannedRoute = plan.route;
 			overflowReason = plan.reason;
 			decision = { retry: true, excludedRouteParts: [], qualityEscalation: null, reasonCode: "retry-context-overflow" };
 		}
@@ -5247,7 +5247,7 @@ export function createDispatchBundle(
 			retryQueue.delete(run.runId);
 			// Ownership starts at scheduling, covering admission before a handle
 			// exists and terminal receipt work after the handle arrives.
-			executeRetry(run, attempt, reason, decision, overflowRoute, failureClassWords(failureClass)).then(
+			executeRetry(run, attempt, reason, decision, plannedRoute, failureClassWords(failureClass)).then(
 				settleCanceled,
 				rejectContinuation,
 			);
@@ -5358,7 +5358,8 @@ export function createDispatchBundle(
 		attempt: number,
 		reason = "retry",
 		decision: RetryDecision = decideRetry("internal", memberRetryAttempt(run), assignmentPolicyFor(run.req).maxRetries),
-		overflowRoute: DispatchFailoverCandidate | null = null,
+		/** A route chosen at scheduling, by a context overflow or an unmet obligation. */
+		plannedRoute: DispatchFailoverCandidate | null = null,
 		moveReason = reason,
 		continuation: WriteRootContinuation = {},
 	): Promise<void> {
@@ -5399,7 +5400,7 @@ export function createDispatchBundle(
 		retryReasons.set(reasonKey, reason);
 		try {
 			if (failoverModeFor(run.req) === "approved") {
-				const candidates = overflowRoute !== null ? [overflowRoute] : approvedRetryCandidates(run, decision);
+				const candidates = plannedRoute !== null ? [plannedRoute] : approvedRetryCandidates(run, decision);
 				if (run.req.routeApproval === undefined) {
 					const candidate = candidates[0] as DispatchFailoverCandidate;
 					retryReq.agentId = candidate.agentId;
@@ -5446,9 +5447,9 @@ export function createDispatchBundle(
 					retryReq.model = run.wireModelId;
 					retryReq.node = run.node?.id ?? "local";
 				}
-				if (overflowRoute !== null) {
-					retryReq.target = overflowRoute.target;
-					retryReq.model = overflowRoute.model;
+				if (plannedRoute !== null) {
+					retryReq.target = plannedRoute.target;
+					retryReq.model = plannedRoute.model;
 				}
 				// Automatic placement re-selects only the failed route component.
 				if (excludesNode) {
@@ -5468,7 +5469,8 @@ export function createDispatchBundle(
 						delete retryReq.target;
 					}
 				}
-				if (decision.excludedRouteParts.includes("model")) delete retryReq.model;
+				// A planned route already moved off the failed model; placement would be free to pick it again.
+				if (plannedRoute === null && decision.excludedRouteParts.includes("model")) delete retryReq.model;
 				if (decision.excludedRouteParts.includes("runtime")) delete retryReq.workerRuntime;
 			}
 			const handle = await dispatchRetryAcrossAlternates(run, retryReq, tryAlternates, moveReason);
@@ -5924,13 +5926,15 @@ export function createDispatchBundle(
 	 * breaker is neither open nor probing. With minContextWindow the route may
 	 * also be another model on the failed target, and its effective context
 	 * window must be strictly larger than minContextWindow. allowed narrows the
-	 * routes further, as an approved envelope does.
+	 * routes further, as an approved envelope does. otherModel instead admits
+	 * any target, failed one included, whose route resolves to another model.
 	 */
 	function eligibleAlternateRoute(
 		run: ActiveRun,
 		req: DispatchRequest,
 		minContextWindow?: number,
 		allowed?: (candidate: DispatchFailoverCandidate) => boolean,
+		otherModel = false,
 	): (DispatchFailoverCandidate & { contextWindow: number }) | null {
 		const settings = getEffectiveSettings();
 		const failed = {
@@ -5940,9 +5944,11 @@ export function createDispatchBundle(
 			endpointIdentityHash: "",
 		};
 		const routes = configuredJointTargets(settings?.targets ?? [], failed, endpointIdentityHash).filter((route) =>
-			minContextWindow === undefined
-				? route.targetId !== run.targetId
-				: route.targetId !== run.targetId || route.modelId !== run.wireModelId,
+			otherModel
+				? route.modelId !== run.wireModelId
+				: minContextWindow === undefined
+					? route.targetId !== run.targetId
+					: route.targetId !== run.targetId || route.modelId !== run.wireModelId,
 		);
 		const windows = new Map<string, number>();
 		const probes: RouteAvailability[] = routes.map((route) => {
@@ -5957,6 +5963,9 @@ export function createDispatchBundle(
 				}
 				if (identity.targetId === run.targetId && identity.wireModelId === run.wireModelId) {
 					return { candidate, unavailable: "route resolved to the failed route" };
+				}
+				if (otherModel && identity.wireModelId === run.wireModelId) {
+					return { candidate, unavailable: "route resolved to the failed model" };
 				}
 				// Admission refuses a target that is down or unusable, so choosing one spent the retry on a refusal
 				// while a healthy alternate sat later in the configured order.
@@ -5984,6 +5993,42 @@ export function createDispatchBundle(
 		});
 		const chosen = firstAvailableRouteCandidate(probes);
 		return chosen === null ? null : { ...chosen, contextWindow: windows.get(`${chosen.target}\0${chosen.model}`) ?? 0 };
+	}
+
+	/**
+	 * Ruling 5 retries an unmet obligation once, and only on another model:
+	 * the route that retry runs on, or why there is none. A pinned route has
+	 * no other model, an approved plan moves only inside its envelope, and
+	 * automatic failover takes the first eligible route with a different wire
+	 * model on any target.
+	 */
+	function planObligationRetry(
+		run: ActiveRun,
+		obligation: Obligation,
+		decision: RetryDecision,
+	): { route: DispatchFailoverCandidate } | { settlementDetail: string } {
+		const unmet = (because: string) => ({
+			settlementDetail: `obligation ${obligation} unmet, not retried because ${because}`,
+		});
+		const mode = failoverModeFor(run.req);
+		if (mode === "none") return unmet("failover is none, which pins the route to the model that left it unmet");
+		const node = run.node?.id ?? "local";
+		if (mode === "approved") {
+			let candidates: DispatchFailoverCandidate[] = [];
+			try {
+				candidates = approvedRetryCandidates(run, decision);
+			} catch {
+				// An envelope with no next candidate has no other model either.
+			}
+			const route = candidates.find((candidate) => candidate.model !== run.wireModelId);
+			return route !== undefined
+				? { route }
+				: unmet(`the approved failover envelope has no model other than ${run.wireModelId}, which left it unmet`);
+		}
+		const route = eligibleAlternateRoute(run, run.req, undefined, undefined, true);
+		return route !== null
+			? { route: { agentId: route.agentId, target: route.target, model: route.model, node } }
+			: unmet(`no other eligible model can take it, and ${run.targetId}/${run.wireModelId} left it unmet`);
 	}
 
 	/**
