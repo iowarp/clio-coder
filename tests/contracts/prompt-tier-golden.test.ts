@@ -212,6 +212,17 @@ describe("prompts.profile v2 (S-82)", () => {
 		ok(!session("headless-default").systemPrompt.includes(mermaid), "headless");
 	});
 
+	it("tells only a session with `job` in its map to wait through a job (S-89)", () => {
+		const jobWait = "Once the job exists, end your turn";
+		const bashWait = "cannot own a job, so there wait inside one bash call";
+		for (const confinement of [{}, { yoloConfinement: "unconfined" }]) {
+			const headless = session("headless-yolo", confinement).systemPrompt;
+			ok(!headless.includes(jobWait) && !headless.includes("with a `job` through the gateway"), "headless");
+			ok(headless.includes(bashWait), "headless keeps the bash wait");
+			ok(session("attended-yolo", confinement).systemPrompt.includes(jobWait), "attended");
+		}
+	});
+
 	it("compact profile drops map examples under a 48k window (S-87)", () => {
 		const full = session("attended-default", { contextWindow: 200_000 }).systemPrompt;
 		const compact = session("attended-default", { contextWindow: 32_768 }).systemPrompt;
