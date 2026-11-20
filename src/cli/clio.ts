@@ -100,7 +100,7 @@ export async function runClioCommand(
 			process.stderr.write(`clio-coder: ${match.miss}\n`);
 			return 2;
 		}
-		options = { ...options, resume: { kind: "id", id: match.id } };
+		options = { ...options, resume: { ...options.resume, id: match.id } };
 	}
 	// Bare `clio` (no subcommand) boots interactive mode implicitly, but only
 	// when stdin is a real TTY. Piped or /dev/null stdin (used by verify.ts,

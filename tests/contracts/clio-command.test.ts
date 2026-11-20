@@ -109,3 +109,13 @@ it("--continue and -c ask for the latest session, as run --continue does", () =>
 	deepStrictEqual(extractGlobalFlags(["--continue"]).resume, { kind: "latest" });
 	deepStrictEqual(extractGlobalFlags(["-c"]).resume, { kind: "latest" });
 });
+
+it("--fork rides on --resume <id> or --continue, and --session points at --resume (SPEC L3, CLI-1)", () => {
+	deepStrictEqual(extractGlobalFlags(["--resume", "abc", "--fork"]).resume, { kind: "id", id: "abc", fork: true });
+	deepStrictEqual(extractGlobalFlags(["--fork", "-c"]).resume, { kind: "latest", fork: true });
+	strictEqual(typeof extractGlobalFlags(["--fork"]).error, "string");
+	strictEqual(typeof extractGlobalFlags(["--resume", "--fork"]).error, "string", "the picker names no session to fork");
+	const session = extractGlobalFlags(["--session", "abc"]).error ?? "";
+	strictEqual(session.startsWith("unknown global option: --session"), true, session);
+	strictEqual(session.includes("clio-coder --resume <id|prefix|name>"), true, session);
+});

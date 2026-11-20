@@ -1,7 +1,7 @@
 import { parseRunCliArgs } from "./args.js";
 
 export const RUN_USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--timeout <seconds>] [--verify "<cmd>" [--verify-timeout <seconds>]] [--max-cost-usd <N>] [--answers <file.yaml>] [--agent <recipe-id>] [--] "<task>"\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--resume <id|prefix|name>|--continue] [--fork] [--name <text>] [--fail-on-noop] [--timeout <seconds>] [--verify "<cmd>" [--verify-timeout <seconds>]] [--max-cost-usd <N>] [--answers <file.yaml>] [--agent <recipe-id>] [--] "<task>"\n';
 
 export const RUN_HELP = `clio-coder run [flags] [--] "<task>"
 
@@ -43,9 +43,13 @@ Flags:
   -o, --output-last-message <path>
                             with --output-format json|stream-json, write the final answer there on exit 0
   --steer-channel <path>    read live steering lines from a FIFO or appended regular file
-  --session <id>            append this turn to an existing session
+  --resume, -r <session>    append this turn to an existing session, by id, unique id prefix or name;
+                            exit 2 when another process holds it open (--session is a deprecated alias)
   --continue                append this turn to the most recent session for this cwd; after a yolo
                             autonomous-cap (exit 4) or judge-streak (exit 3) stop it resumes with a fresh window
+  --fork                    with --resume or --continue: branch a new session from that one's last committed
+                            turn and run there; the parent is read, never written, and may be open elsewhere
+  --name <text>             name this run's session (the new, resumed or forked one)
   --fail-on-noop            also exit 1 when tools ran and none succeeded; a text-only answer or an answer/proposal
                             turn is not a no-op (see below)
   --timeout <seconds>       wall-clock limit for the whole run; exit 124 on expiry
@@ -79,7 +83,7 @@ CLIO_CODER_STATE_DIR, and CLIO_CODER_CACHE_DIR are not resolved before the
 chdir, so a relative value lands under <dir>. Pass absolute paths in them
 when using --cwd.
 
-A headless turn starts a fresh session unless --session or --continue names one
+A headless turn starts a fresh session unless --resume or --continue names one
 to append to. A named session that cannot be resumed fails the run: an answer
 written without the history the caller asked for is worse than no answer. The
 session id is reported on stderr, and as the "session" event under --json.

@@ -40,7 +40,10 @@ export interface HeadlessRunDeadline {
 }
 
 /** The session an interactive boot opens on: one id, the latest with a model turn, or the `/resume` picker. */
-export type StartupResume = { kind: "id"; id: string } | { kind: "latest" } | { kind: "picker" };
+export type StartupResume =
+	| { kind: "id"; id: string; fork?: boolean }
+	| { kind: "latest"; fork?: boolean }
+	| { kind: "picker" };
 
 export interface BootOptions {
 	/** Interactive demo guidance override for this session. */
@@ -92,7 +95,10 @@ export interface BootOptions {
 		noSkills?: boolean;
 		skillPaths?: ReadonlyArray<string>;
 		steerChannel?: string;
-		resumeSession?: { kind: "id"; id: string } | { kind: "latest" };
+		/** `run --resume|--continue`; `fork` branches a new session from it and never writes it (`run --fork`). */
+		resumeSession?: { kind: "id"; id: string; fork?: boolean } | { kind: "latest"; fork?: boolean };
+		/** `run --name`: written as the run's session opens, whether created, resumed or forked. */
+		sessionName?: string;
 		/** `clio-coder run --fail-on-noop`: a no-op run exits 1 with outcome failed. */
 		failOnNoop?: boolean;
 		/** `clio-coder run --max-cost-usd`: priced spend the run may add on top of what its session already spent. */

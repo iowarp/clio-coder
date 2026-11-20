@@ -317,6 +317,11 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			context.bus.emit("session.resume_started", { sessionId, at: Date.now() });
 			state = resumed.state;
 			currentTurnId = leafTurnId;
+			if (pendingName !== null) {
+				const name = pendingName;
+				pendingName = null;
+				contract.setName(name);
+			}
 			emitResume(resumed.state.meta.id, "resume", resumed.state.meta);
 			return resumed.state.meta;
 		},
@@ -349,10 +354,13 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		},
 		forkFrom(sessionId, input) {
 			// The parent is read from its file and never written; it may be open elsewhere (SPEC L3, 6.7).
+			// A pending `run --name` is part of the fork's creation, so a named fork never exists unnamed.
+			const name = input?.name ?? pendingName ?? undefined;
 			const { next, nodes } = forkSessionAtRest(sessionId, {
 				...(input?.atTurnId !== undefined ? { atTurnId: input.atTurnId } : {}),
-				...(input?.name !== undefined ? { name: input.name } : {}),
+				...(name !== undefined ? { name } : {}),
 			});
+			pendingName = null;
 			if (state) {
 				const prior = state;
 				emitPark(prior.meta.id, "fork", prior.meta);

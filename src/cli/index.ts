@@ -89,8 +89,9 @@ Usage:
   clio-coder --delegate-tools <names>  limit the tools this session's workers may hold
   clio-coder --max-context-tokens <N>  cap this interactive session's context budget, as for clio-coder run
   clio-coder --session-file <path>     keep this session's live state (working, idle, awaiting) in a JSON file; the exit record lands there too
-  clio-coder --resume, -r [id]    open on a session by id or unique id prefix; without one, open the session picker
+  clio-coder --resume, -r [id]    open on a session by id, unique id prefix or name; without one, open the session picker
   clio-coder --continue, -c       open on this project's most recent session
+  clio-coder --fork               with --resume <id> or --continue: open on a new branch of that session, leaving it untouched
   clio-coder configure            interactive first-run/configuration wizard
   clio-coder targets              list configured targets, health, auth, and capabilities
   clio-coder targets add          add a target interactively or via flags
@@ -130,6 +131,7 @@ Usage:
   clio-coder research start|resume|status|report|list  hill climb a check's metric within a budget; inspect or regrade campaigns
   clio-coder semantic             configure, qualify, manage inboxes, refresh, reembed, search, or inspect the semantic index (beta)
   clio-coder session list|terminate <id> [--force]  open sessions on this state dir from any host; end or release one
+  clio-coder session history|show|export|artifacts|rename|fork|rm  persisted sessions in this directory (--all-projects widens reads)
   clio-coder report [bug|feature|question]|status|show|send|forget|selftest|security  preview, then send a report to the maintainers
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
   clio-coder telemetry inspect|calls|cost|cache|timeline|why-stopped|explain  read session and run telemetry (--json for the DTO)
@@ -322,7 +324,7 @@ async function main(argv: string[]): Promise<number> {
 	if (resume !== undefined && subcommand) {
 		printError(
 			subcommand === "run"
-				? "--resume and --continue apply to the interactive session only; for a headless turn use: clio-coder run --session <id> or clio-coder run --continue"
+				? "--resume and --continue apply to the interactive session only; for a headless turn pass them after run: clio-coder run --resume <id> or clio-coder run --continue"
 				: "--resume and --continue apply to the interactive session only; start clio-coder without a subcommand.",
 		);
 		return 2;

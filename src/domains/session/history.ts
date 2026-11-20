@@ -61,13 +61,18 @@ export function resolveSessionIdForCwd(cwd: string, idOrPrefix: string): string 
 	const dir = join(clioStateDir(), "sessions", cwdHash(cwd));
 	if (!existsSync(dir)) return idOrPrefix;
 	const matches: string[] = [];
+	// A session name, the way `/resume` resolves one (SPEC L3, C13), from meta.json, which every rename stamps (#443).
+	const named: string[] = [];
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {
 		if (!entry.isDirectory()) continue;
 		const metaPath = join(dir, entry.name, "meta.json");
 		let id: unknown;
+		let name: unknown;
 		try {
 			if (!statSync(metaPath).isFile()) continue;
-			id = (JSON.parse(readFileSync(metaPath, "utf8")) as Partial<SessionMeta> | null)?.id;
+			const meta = JSON.parse(readFileSync(metaPath, "utf8")) as Partial<SessionMeta> | null;
+			id = meta?.id;
+			name = meta?.name;
 		} catch {
 			// A missing or malformed meta.json is not a recorded session, as in listSessionsForCwd.
 			continue;
@@ -75,12 +80,12 @@ export function resolveSessionIdForCwd(cwd: string, idOrPrefix: string): string 
 		if (typeof id !== "string") continue;
 		if (id === idOrPrefix) return id;
 		if (id.startsWith(idOrPrefix)) matches.push(id);
+		if (name === idOrPrefix) named.push(id);
 	}
 	if (matches.length === 0) {
-		// No id or prefix: a session name, the way `/resume` resolves one (SPEC L3, C13).
-		const named = listSessionsForCwd(cwd).filter((meta) => meta.name === idOrPrefix);
-		if (named.length === 1 && named[0]) return named[0].id;
-		return named.length === 0 ? idOrPrefix : { ambiguous: named.map((meta) => meta.id) };
+		if (named.length === 1 && named[0]) return named[0];
+		if (named.length === 0) return idOrPrefix;
+		matches.push(...named);
 	}
 	if (matches.length === 1) return matches[0] as string;
 	const candidates = new Set(matches);

@@ -128,7 +128,10 @@ export interface SessionContract {
 	 * the child's creation.
 	 */
 	forkFrom(sessionId: string, input?: { atTurnId?: string; name?: string }): SessionMeta;
-	/** Name the current session, or the next one `create()` opens when none is current (`run --name`). */
+	/**
+	 * Name the current session; with none current, the name waits for the next `create()`, `resume()` or
+	 * `forkFrom()`, which writes it as part of opening that session (`run --name`).
+	 */
 	nameSession(name: string): void;
 	/**
 	 * Return a serializable snapshot of the tree for a given session (defaults

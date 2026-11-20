@@ -84,9 +84,10 @@ export function sessionRemovalRefusal(sessionId: string): SessionRemovalRefusal 
 
 /**
  * Remove a session at rest. The tombstone runs under the session's state lock and re-checks the meta.json owner,
- * so a resume that claimed the session after {@link sessionRemovalRefusal} read it still wins.
+ * so a resume that claimed the session after {@link sessionRemovalRefusal} read it still wins. A session that never
+ * ended (a crashed run) is refused there too and throws; nothing is announced as deleted until the removal lands.
  */
 export function removeSessionAtRest(sessionId: string): void {
-	noteSessionDeleted(sessionId);
 	removeSessionDirectory(sessionId);
+	noteSessionDeleted(sessionId);
 }

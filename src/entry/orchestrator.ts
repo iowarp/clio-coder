@@ -1012,7 +1012,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		termination.onDrain(unbindActivity);
 		termination.onDrain(bus.subscribe("session.reattached", () => flushPackageActivities()));
 	}
-	// A headless `--session`/`--continue`, or the interactive `--resume <id>`/`--continue`, resolves here, where the
+	// A headless `--resume`/`--continue`, or the interactive `--resume <id>`/`--continue`, resolves here, where the
 	// session domain exists. Headless it is a hard requirement: a caller that asked to continue a conversation must not
 	// receive an answer written without that conversation's history. Interactive, a miss opens a fresh session.
 	const requestedResume = options.headless ? options.headless.resumeSession : options.resume;
@@ -1034,10 +1034,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 	}
 	const resumeId = resolvedResumeId ?? (interactive ? consumeRestartIntent(clioStateDir(), process.cwd()) : undefined);
+	if (options.headless?.sessionName !== undefined) session?.nameSession(options.headless.sessionName);
 	let resumedSessionAtBoot = false;
 	if (resumeId && session && headlessResumeFailure === null) {
 		try {
-			session.resume(resumeId);
+			if (requestedResume?.kind !== "picker" && requestedResume?.fork === true) session.forkFrom(resumeId);
+			else session.resume(resumeId);
 			resumedSessionAtBoot = true;
 		} catch (err) {
 			const detail = err instanceof Error ? err.message : String(err);

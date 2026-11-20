@@ -469,14 +469,16 @@ async function executeRunCommand(
 				return 2;
 			}
 			if (parsed.sessionId !== undefined && parsed.continueSession) {
-				writeRunDiagnostic("clio-coder run: --session and --continue name different sessions; pass one\n");
+				writeRunDiagnostic("clio-coder run: --resume and --continue name different sessions; pass one\n");
 				process.stderr.write(USAGE);
 				return 2;
 			}
 			// A dispatched agent runs in its own worker with its own transcript,
 			// so there is no main-agent session for it to continue.
 			if ((parsed.sessionId !== undefined || parsed.continueSession) && parsed.agentId !== undefined) {
-				writeRunDiagnostic("clio-coder run: --session and --continue apply to the main agent, not --agent dispatch\n");
+				writeRunDiagnostic(
+					"clio-coder run: --resume, --continue, --fork and --name apply to the main agent; a worker has its own transcript\n",
+				);
 				process.stderr.write(USAGE);
 				return 2;
 			}
@@ -632,10 +634,17 @@ async function executeRunCommand(
 								...(deadline !== undefined ? { deadline } : {}),
 								...(answers !== undefined ? { answers } : {}),
 								...(parsed.sessionId !== undefined
-									? { resumeSession: { kind: "id" as const, id: parsed.sessionId } }
+									? {
+											resumeSession: {
+												kind: "id" as const,
+												id: parsed.sessionId,
+												...(parsed.forkSession ? { fork: true } : {}),
+											},
+										}
 									: parsed.continueSession
-										? { resumeSession: { kind: "latest" as const } }
+										? { resumeSession: { kind: "latest" as const, ...(parsed.forkSession ? { fork: true } : {}) } }
 										: {}),
+								...(parsed.sessionName !== undefined ? { sessionName: parsed.sessionName } : {}),
 							},
 						});
 						await flushRawStdout();
