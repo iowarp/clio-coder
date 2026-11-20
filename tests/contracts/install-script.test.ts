@@ -45,7 +45,7 @@ function run(args: string[], env: Record<string, string> = {}) {
 }
 
 describe("contracts/install-script", () => {
-	it("the hosted bootstrap writes its downloads only inside its own private directory, never beside it", () => {
+	it("the hosted bootstrap writes its downloads only inside its own private directory, and keeps a downloader on a relative PATH entry", () => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-coder-bootstrap-"));
 		try {
 			const bin = join(scratch, "bin");
@@ -65,8 +65,10 @@ describe("contracts/install-script", () => {
 			);
 			chmodSync(join(bin, "mktemp"), 0o755);
 			chmodSync(join(bin, "curl"), 0o755);
+			// ./bin is relative, so the stub curl is found only if it is resolved before the cd; the proxy stops a real one.
 			const result = spawnSync("sh", [join(ROOT, "scripts", "installer-bootstrap", "install.sh"), "--channel", "beta"], {
-				env: { HOME: scratch, PATH: `${bin}:/usr/bin:/bin`, TMPDIR: temp, LANG: "C" },
+				cwd: scratch,
+				env: { HOME: scratch, PATH: "./bin:/usr/bin:/bin", TMPDIR: temp, LANG: "C", https_proxy: "none://unreachable" },
 				encoding: "utf8",
 			});
 			strictEqual(result.status, 0, result.stderr);
