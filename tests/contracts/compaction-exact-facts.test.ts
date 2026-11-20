@@ -100,7 +100,10 @@ describe("compaction exact facts", () => {
 		const block = blocks[0]?.[1] ?? "";
 		match(block, new RegExp(`^read src/a\\.ts lines=40 sha256=${short(`${helpers(40)}\n`)} ref=r-call_read$`, "m"));
 		match(block, /^Measured by Clio[^\n]*ref below to context\(scope="recall"\)[^\n]*\n/);
-		match(block, /^refs:\nr-call_grep grep src\/a\.ts\nr-call_test bash\nresults:$/m);
+		match(
+			block,
+			/^refs:\nr-call_grep grep src\/a\.ts value="matches"\nr-call_test bash value="suite: 57 passed, 3 failed, 2 skipped \(62 total\)"\nresults:$/m,
+		);
 		match(block, /^grep `\^export function` src\/a\.ts: 40 matches call=call_grep$/m);
 		match(block, /^bash `node check\.mjs`: exit=1, 57 passed, 3 failed, 2 skipped, 62 total call=call_test$/m);
 		doesNotMatch(result.summary, /lines=39|<read-files>/);
