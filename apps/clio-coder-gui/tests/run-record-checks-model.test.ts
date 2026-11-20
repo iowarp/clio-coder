@@ -188,13 +188,22 @@ test("a read-only scout keeps verification not applicable beside a quality pass"
 });
 
 test("host checks list each command with its exit or why it did not run, reuse and output", () => {
+	const reusedTypecheck = {
+		check: "typecheck",
+		argv: ["pnpm", "tsc"],
+		cwd: "/r",
+		exitCode: 0,
+		durationMs: 812,
+		memo: true,
+		outputTail: "",
+	};
 	const rows = byKey({
 		...verifiedTool,
 		hostVerification: {
 			status: "rejected",
 			strategy: "batch-settled",
 			checks: [
-				{ check: "typecheck", argv: ["pnpm", "tsc"], cwd: "/r", exitCode: 0, durationMs: 812, memo: true, outputTail: "" },
+				reusedTypecheck,
 				{
 					check: "unit",
 					argv: ["pnpm", "test"],
@@ -225,13 +234,20 @@ test("host checks list each command with its exit or why it did not run, reuse a
 	assert.deepEqual(
 		host?.items.map((item) => [item.name, item.word, item.facts, item.output ?? null]),
 		[
-			["typecheck", "Passed", ["exit 0", "812 ms", "reused result"], null],
+			["typecheck", "Reused", ["exit 0", "812 ms", "not run for this run: an earlier run's pass was reused"], null],
 			["unit", "Failed", ["exit 1", "4100 ms", "evidence from run run-2"], "1 failing"],
 			["repro", "Did not run", ["did not run: its process could not start", "0 ms"], null],
 		],
 	);
+	assert.equal(host?.items[0]?.tone, "unverified");
 	assert.equal(host?.items[2]?.tone, "warn");
 	assert.equal(new Set(host?.items.map((item) => item.id)).size, 3);
+	const reusedOnly = byKey({
+		...verifiedTool,
+		hostVerification: { status: "verified", strategy: "single", checks: [reusedTypecheck] },
+	}).get("host");
+	assert.equal(reusedOnly?.word, "Passed");
+	assert.match(reusedOnly?.meaning ?? "", /1 check reused an earlier run's pass instead of running for this run\./);
 });
 
 test("an enforced response schema reports its own pass or failure", () => {
