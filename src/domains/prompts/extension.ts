@@ -4,6 +4,7 @@ import type { ClioSettings } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import type { AgentsContract } from "../agents/contract.js";
 import { listPlaybooks } from "../agents/playbook.js";
 import { type AgentSpec, isUserVisibleAgent, SHADOW_AGENT_OPERATOR_STAND_IN } from "../agents/spec.js";
@@ -542,7 +543,7 @@ function normalizeWorkingContextPaths(cwd: string, paths: ReadonlyArray<string>)
 	const normalized = new Set<string>();
 	for (const filePath of paths) {
 		const rel = isAbsolute(filePath) ? relative(cwd, filePath) : filePath;
-		if (!rel || rel.startsWith("..") || isAbsolute(rel)) continue;
+		if (!rel || relativePathEscapes(rel)) continue;
 		normalized.add(rel.replace(/\\/g, "/"));
 	}
 	return [...normalized].sort();
