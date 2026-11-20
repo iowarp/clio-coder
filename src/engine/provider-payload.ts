@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type {
 	AnthropicOptions,
 	AssistantMessage,
@@ -14,6 +16,8 @@ import type {
 	SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import { safeResourceWrite } from "../core/safe-resource-write.js";
+import { clioStatePath } from "../core/xdg.js";
 import { resolvedRequestContext } from "./context.js";
 import type { EngineModel, ToolRoundRecord } from "./types.js";
 
@@ -314,8 +318,9 @@ function toolsRemovedRound(
  * prefill instead of rendering a new tool block (dynamo measured about 0.9 s
  * against 0.15 s warm). The narrowed "required" request rides along as the
  * fallback for a server that rejects the object form (llama.cpp, LM Studio);
- * that rejection, or a reply that ignores the choice, is remembered per target
- * and model, and later handoffs there narrow from the start.
+ * that rejection, or a reply that ignores the choice, is remembered per target,
+ * endpoint and model in the state root, and later handoffs there, in this
+ * process or a later one, narrow from the start.
  */
 function requiredRound(
 	model: EngineModel,
@@ -383,6 +388,58 @@ function choiceKey(model: EngineModel, targetId: string, kind: "forced" | "named
 	return JSON.stringify([targetId, model.api, model.provider, model.baseUrl, model.id, kind]);
 }
 
+/**
+ * Completions endpoints that refused or ignored the named handoff choice, kept in the state root so a later process
+ * on the same target, endpoint and model sends the narrowed request at once instead of paying the refused round
+ * again (dynamo: LM Studio behind LiteLLM). Pi declares no tool_choice capability for completions, so the first
+ * refusal is the only source. Best effort: an unreadable or unwritable file costs that one round again. A mark
+ * expires after a week, so a backend swapped behind the same endpoint is asked again.
+ */
+const NAMED_CHOICE_MARK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function namedChoiceMarksPath(): string {
+	return join(clioStatePath(), "tool-choice-routes.json");
+}
+
+function readNamedChoiceMarks(): Record<string, { reason: string; at: number }> {
+	const marks: Record<string, { reason: string; at: number }> = {};
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(namedChoiceMarksPath(), "utf8"));
+		if (typeof parsed !== "object" || parsed === null) return marks;
+		const now = Date.now();
+		for (const [key, value] of Object.entries(parsed)) {
+			const { reason, at } = (value ?? {}) as { reason?: unknown; at?: unknown };
+			if (typeof reason === "string" && typeof at === "number" && now - at < NAMED_CHOICE_MARK_TTL_MS) {
+				marks[key] = { reason, at };
+			}
+		}
+	} catch {
+		/* No file yet, or a damaged one: nothing learned. */
+	}
+	return marks;
+}
+
+function namedChoiceRejection(model: EngineModel, targetId: string): string | undefined {
+	const key = choiceKey(model, targetId, "named");
+	const known = rejectedChoices.get(key);
+	if (known !== undefined) return known;
+	const persisted = readNamedChoiceMarks()[key]?.reason;
+	if (persisted !== undefined) rejectedChoices.set(key, persisted);
+	return persisted;
+}
+
+function rememberNamedChoiceRejection(model: EngineModel, targetId: string, reason: string): void {
+	const key = choiceKey(model, targetId, "named");
+	rejectedChoices.set(key, reason);
+	try {
+		const marks = readNamedChoiceMarks();
+		marks[key] = { reason, at: Date.now() };
+		safeResourceWrite(namedChoiceMarksPath(), `${JSON.stringify(marks, null, 2)}\n`, { mode: 0o600 });
+	} catch {
+		/* Kept for this process only. */
+	}
+}
+
 /** Apply the first round that changes this request; later rounds are fallbacks. */
 export function applyToolRounds(
 	model: EngineModel,
@@ -396,7 +453,7 @@ export function applyToolRounds(
 		const rejection = rejectedChoices.get(choiceKey(model, targetId, round.kind === "required" ? "forced" : "none"));
 		const namedRejection =
 			round.kind === "required" && round.handoff === true && model.api === "openai-completions"
-				? rejectedChoices.get(choiceKey(model, targetId, "named"))
+				? namedChoiceRejection(model, targetId)
 				: undefined;
 		let controlled = applyToolRound(model, context, options, round, rejection, namedRejection);
 		if (controlled === undefined) continue;
@@ -494,7 +551,7 @@ export function streamToolRound(
 					(message.stopReason === "stop" || message.stopReason === "toolUse") &&
 					!message.content.some((block) => block.type === "toolCall" && block.name === named)
 				) {
-					rejectedChoices.set(choiceKey(model, targetId, "named"), NAMED_CHOICE_IGNORED);
+					rememberNamedChoiceRejection(model, targetId, NAMED_CHOICE_IGNORED);
 				}
 			},
 			() => {},
@@ -560,10 +617,8 @@ export function streamToolRound(
 					}
 					const reason = (message.split("\n\n")[0] ?? message).slice(0, 512);
 					const fallback = controlled.fallback;
-					rejectedChoices.set(
-						choiceKey(model, targetId, fallback !== undefined ? "named" : choice === "none" ? "none" : "forced"),
-						reason,
-					);
+					if (fallback !== undefined) rememberNamedChoiceRejection(model, targetId, reason);
+					else rejectedChoices.set(choiceKey(model, targetId, choice === "none" ? "none" : "forced"), reason);
 					const retry: ControlledRequest =
 						fallback !== undefined
 							? { ...fallback, ...(controlled.toolRounds ? { toolRounds: controlled.toolRounds } : {}) }

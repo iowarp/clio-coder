@@ -1,5 +1,9 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { engineStreamSimple } from "../../src/engine/api-registry.js";
@@ -205,4 +209,22 @@ test("completions: a terminal handoff names its tool over the full list and narr
 	);
 	strictEqual(after.body.tool_choice, "required");
 	deepStrictEqual([after.record?.choice, after.record?.downgradeReason], ["required", rejection]);
+	// The mark is kept in the state root, so a fresh process on the same target, endpoint and model narrows at once.
+	ok(readFileSync(join(env.dir, "state", "tool-choice-routes.json"), "utf8").includes("Invalid tool_choice"));
+	const script = `
+		const { applyToolRounds } = await import(${JSON.stringify(new URL("../../src/engine/provider-payload.ts", import.meta.url).href)});
+		const { engineModels } = await import(${JSON.stringify(new URL("../../src/engine/models.ts", import.meta.url).href)});
+		const model = engineModels.getModel("openrouter", "google/gemini-2.5-flash");
+		const context = { messages: [], tools: ["read", "extension_desk__next_step"].map((name) => ({ name, description: name, parameters: {} })) };
+		const controlled = applyToolRounds(model, context, {}, [${JSON.stringify(handoff)}], ${JSON.stringify(targetId)});
+		process.stdout.write(JSON.stringify([controlled.options?.toolChoice, controlled.context.tools.map((entry) => entry.name), controlled.toolRounds[0].downgradeReason, controlled.fallback === undefined]));
+	`;
+	const { stdout } = await promisify(execFile)(
+		process.execPath,
+		["--import", "tsx", "--input-type=module", "-e", script],
+		{
+			env: process.env,
+		},
+	);
+	deepStrictEqual(JSON.parse(stdout), ["required", ["extension_desk__next_step"], rejection, true]);
 });
