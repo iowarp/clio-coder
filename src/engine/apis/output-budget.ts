@@ -2,6 +2,7 @@ import type { Api, AssistantMessage, Context, Model, StreamOptions } from "@eare
 import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
 import { estimateMessageTokens, estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { CLIO_MIN_MAX_OUTPUT_TOKENS } from "../../core/context-floor.js";
+import { defaultOutputLimit } from "../../core/output-bound.js";
 import { SMALL_WINDOW_TOKENS } from "../../domains/context/fold/pressure.js";
 import { ceilChars, estimateAgentMessageTokens, toolSchemaChars } from "../../domains/session/context-accounting.js";
 import { normalizeContext, resolvedRequestContext } from "../context.js";
@@ -293,7 +294,6 @@ function requestedOutputCeiling(
 	model: Pick<Model<Api>, "contextWindow" | "maxTokens"> & { clioCoder?: unknown },
 	options: Pick<StreamOptions, "maxTokens"> | undefined,
 ): number {
-	const contextWindow = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
 	const modelLimit = model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY;
 	// Precedence for the requested ceiling when the caller gave no explicit
 	// maxTokens: the global default, then the profile's recommendation, then the
@@ -301,10 +301,12 @@ function requestedOutputCeiling(
 	// floor instead of requesting its entire remaining context window. Math.min
 	// below clamps the result down to every known boundary, so frontier providers
 	// with a known cap never receive a larger max_tokens value.
-	const defaultLimit =
-		globalDefaultMaxOutputTokens > 0
-			? globalDefaultMaxOutputTokens
-			: (recommendedOutputTokens(model, contextWindow) ?? (model.maxTokens > 0 ? modelLimit : DEFAULT_MAX_OUTPUT_TOKENS));
+	const contextWindow = model.contextWindow > 0 ? model.contextWindow : Number.POSITIVE_INFINITY;
+	const defaultLimit = defaultOutputLimit(
+		model,
+		globalDefaultMaxOutputTokens,
+		recommendedOutputTokens(model, contextWindow),
+	);
 	const requested = options?.maxTokens ?? defaultLimit;
 	return Math.min(requested, modelLimit);
 }

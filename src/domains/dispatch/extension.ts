@@ -2,6 +2,7 @@ import { readCallFailure } from "../../core/call-failure.js";
 import { claudeAuthEnvironment, withClaudeCredential } from "../../core/claude-environment.js";
 import { writeDiagnostic, writeHeadlessDiagnostic } from "../../core/diagnostics.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
+import { routeOutputBound } from "../../core/output-bound.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
 import {
 	noCallRunUsageFacts,
@@ -515,6 +516,7 @@ import {
 	verifyCallStart,
 } from "./run-findings.js";
 import { detectRunIdentity } from "./run-identity.js";
+import { planCardLimits } from "./run-limits.js";
 import { finishRunResult, settleUnfinishedRun } from "./run-settlement.js";
 import type { RunTelemetryJournal } from "./run-telemetry.js";
 import {
@@ -962,13 +964,15 @@ function sealRouteDecision(draft: RunResultDraft, decision: RouteDecisionV1): Ru
 export const UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD = 1;
 
 /**
- * Output-token figure the admission estimate prices a route against. Settings
- * always carry `defaults.maxTokens`; the fallback covers the callers that
- * admit a route before settings are resolved, and it defers to the one place
- * that owns the default rather than restating the number here.
+ * Output-token figure the admission estimate prices a route against: the
+ * route's own output bound (routeOutputBound), so an unset chat.maxOutputTokens
+ * prices the model's cap and not one token (M6).
  */
-function admissionMaxOutputTokens(settings: EffectiveSettings): number {
-	return settings?.chat.maxOutputTokens ?? DEFAULT_SETTINGS.chat.maxOutputTokens;
+function admissionMaxOutputTokens(settings: EffectiveSettings, capabilities: CapabilityFlags | null): number {
+	return routeOutputBound(
+		{ contextWindow: capabilities?.contextWindow ?? 0, maxTokens: capabilities?.maxTokens ?? 0 },
+		settings?.chat.maxOutputTokens ?? DEFAULT_SETTINGS.chat.maxOutputTokens,
+	);
 }
 
 /** Unpriced and zero-rate routes pass the session cost ceiling at admission, and the ceiling stop spares them. */
@@ -3486,8 +3490,8 @@ function workerSandboxFor(input: {
 
 /**
  * True when the local OS sandbox confines every command this worker runs to
- * its write roots: a native worker, no fleet node that could host it
- * elsewhere, the sandbox not turned off, and bubblewrap usable here. Write-root
+ * its write roots: a native worker placed on this host, the sandbox not turned
+ * off, and bubblewrap usable here. Write-root
  * confinement then need not refuse shell, verify and run_script by name, so a
  * writer given file write roots can still run the project's tests. The worker
  * derives the same answer from its WorkerSpec (engine/worker-runtime.ts).
@@ -3495,11 +3499,18 @@ function workerSandboxFor(input: {
 function osSandboxConfinesWrites(
 	runtimeKind: RuntimeDescriptor["kind"],
 	settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+	placement: () => RunNodeIdentity,
 ): boolean {
-	if (runtimeKind !== "http" || (settings?.fleet.nodes?.length ?? 0) > 0) return false;
+	if (runtimeKind !== "http") return false;
 	if ((settings?.safety.sandbox ?? "auto") === "off") return false;
 	const availability = sandboxAvailability();
-	return availability.available && availability.backend === "bwrap";
+	if (!availability.available || availability.backend !== "bwrap") return false;
+	// This probe answers only for a worker this host runs; a placement the preview cannot settle confines nothing (M6).
+	try {
+		return placement().kind === "local";
+	} catch {
+		return false;
+	}
 }
 
 /** The sandbox sentence for the worker's safety line, probed on this host. */
@@ -4776,10 +4787,17 @@ export function createDispatchBundle(
 		req: DispatchRequest,
 		pricing: EffectivePricing,
 		settings: EffectiveSettings,
-		prompt: Pick<DispatchLifecycleStage, "systemPrompt" | "dynamicPromptMessages">,
+		prompt: Pick<DispatchLifecycleStage, "systemPrompt" | "dynamicPromptMessages"> & {
+			target?: Pick<ResolvedTarget, "modelCapabilities">;
+		},
 		signal?: AbortSignal,
 	): Promise<void> {
-		const estimateUsd = conservativeRouteAdmissionEstimateUsd(pricing, admissionMaxOutputTokens(settings), req, prompt);
+		const estimateUsd = conservativeRouteAdmissionEstimateUsd(
+			pricing,
+			admissionMaxOutputTokens(settings, prompt.target?.modelCapabilities ?? null),
+			req,
+			prompt,
+		);
 		const intentRefusal = intentCeilingRefusal(req, estimateUsd);
 		if (intentRefusal !== null) refuseForBudget(intentRefusal);
 		if (budgetExemptRoute(pricing)) return;
@@ -6432,7 +6450,9 @@ export function createDispatchBundle(
 			isHoareResultContract(dispatchResultContract(req, recipe));
 		await assertStoreGrantAdmissible(req, readOnly);
 		assertDenyToolsEnforceable(target.runtime, req.denyTools);
-		const writeConfined = pathScope.writeBoundaries.length > 0 && !osSandboxConfinesWrites(target.runtime.kind, settings);
+		const writeConfined =
+			pathScope.writeBoundaries.length > 0 &&
+			!osSandboxConfinesWrites(target.runtime.kind, settings, () => previewNode(req).node);
 		const effectiveTools = withLedgerToolNarrowing(
 			effectiveToolNames(
 				admission.allowedTools,
@@ -8073,7 +8093,7 @@ export function createDispatchBundle(
 			endpoint,
 			conservativeRouteAdmissionEstimateUsd(
 				lifecycle.target.effectivePricing,
-				admissionMaxOutputTokens(settings),
+				admissionMaxOutputTokens(settings, lifecycle.target.modelCapabilities),
 				req,
 				lifecycle,
 			),
@@ -11190,7 +11210,9 @@ export function createDispatchBundle(
 		const mcpRuntimeRefusal = workerMcpRuntimeRefusal(req.agentId, admission.allowedTools, target.runtime);
 		if (mcpRuntimeRefusal !== null) throw new Error(mcpRuntimeRefusal);
 		assertDenyToolsEnforceable(target.runtime, req.denyTools);
-		const writeConfined = pathScope.writeBoundaries.length > 0 && !osSandboxConfinesWrites(target.runtime.kind, settings);
+		const writeConfined =
+			pathScope.writeBoundaries.length > 0 &&
+			!osSandboxConfinesWrites(target.runtime.kind, settings, () => previewNode(req).node);
 		const effectiveTools = withLedgerToolNarrowing(
 			effectiveToolNames(
 				admission.allowedTools,
@@ -11240,7 +11262,7 @@ export function createDispatchBundle(
 			getProtectedArtifactState(),
 		);
 		assertWorkerHooksCarried(target.runtime, effectiveTools);
-		resolveEffectiveWorkerBudget({
+		const budget = resolveEffectiveWorkerBudget({
 			req,
 			recipeId: recipe.id,
 			declared: agentSpec.budget,
@@ -11253,6 +11275,9 @@ export function createDispatchBundle(
 				isHoareResultContract(dispatchResultContract(req, recipe)),
 		});
 		const endpoint = endpointCapacityForTarget(target.target.id);
+		const outputBoundTokens = admissionMaxOutputTokens(settings, target.modelCapabilities);
+		const costUpperBoundUsd = conservativeRouteAdmissionEstimateUsd(target.effectivePricing, outputBoundTokens, req);
+		const costUpperBoundKnown = target.effectivePricing.pricedBy !== "none";
 		const resolution: DispatchPlanTaskResolution = {
 			agentId: req.agentId,
 			specFingerprint: agentSpecFingerprint(agentSpec),
@@ -11265,13 +11290,17 @@ export function createDispatchBundle(
 			toolSignature: toolSignatureOf(effectiveTools),
 			endpointIdentityHash: endpointIdentityHash(target.target.url),
 			settingsFingerprint: computeSettingsFingerprint(settings ?? null),
-			costUpperBoundUsd: conservativeRouteAdmissionEstimateUsd(
-				target.effectivePricing,
-				admissionMaxOutputTokens(settings),
-				req,
-			),
-			costUpperBoundKnown: target.effectivePricing.pricedBy !== "none",
+			costUpperBoundUsd,
+			costUpperBoundKnown,
 			routeApproval: null,
+			limits: planCardLimits({
+				priced: costUpperBoundKnown,
+				costUpperBoundUsd,
+				outputBoundTokens,
+				budget,
+				nativeWorker: target.runtime.kind === "http",
+				responseSeconds: (settings ?? DEFAULT_SETTINGS).safety.limits.workerResponseSeconds,
+			}),
 		};
 		return {
 			resolution,

@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { createAdmissionQueue } from "../../src/domains/dispatch/admission-queue.js";
 import {
+	budgetLimitWords,
 	cloneRunToolBudgetEnvelope,
 	resolveToolBudgetEnvelope,
 	workerBudgetFromEnvelope,
@@ -34,11 +35,12 @@ const base = {
 it("main overrides recipe recommendations and baseline, with truthful immutable round trips", () => {
 	const envelope = resolveToolBudgetEnvelope({
 		...base,
+		hardCap: 300,
 		request: { toolCalls: 100, readReserve: 10, retryRevision: { toolCalls: 200, readReserve: 20 } },
 	});
 	equal(envelope.effective.mode, "advisory");
 	equal(envelope.effective.toolCalls, 100);
-	equal(envelope.effective.hardCap, 3);
+	equal(envelope.effective.hardCap, 300);
 	equal(envelope.enforcement.perTool, "advisory");
 	deepStrictEqual(cloneRunToolBudgetEnvelope(JSON.parse(JSON.stringify(envelope))), envelope);
 	ok(Object.isFrozen(envelope.effective));
@@ -308,6 +310,26 @@ describe("dispatch advisory admission and explicit authority", () => {
 			await priced.extension.stop?.();
 		}
 	});
+	it("prices a route's admission estimate at its output bound, never at one token (M6)", async () => {
+		const estimate = async (maxOutputTokens: number) => {
+			const settings = structuredClone(DEFAULT_SETTINGS);
+			settings.targets = [{ id: "api", runtime: "anthropic", defaultModel: "claude-haiku-5-5" }];
+			settings.fleet.default = { ...settings.fleet.default, target: "api", model: "claude-haiku-5-5" };
+			settings.chat.maxOutputTokens = maxOutputTokens;
+			const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: anthropic }));
+			await bundle.extension.start();
+			try {
+				const preview = bundle.contract.preview?.({ ...request, agentId: "coder", executionRole: "builder" });
+				ok(preview?.costUpperBoundKnown);
+				return preview.costUpperBoundUsd;
+			} finally {
+				await bundle.extension.stop?.();
+			}
+		};
+		const [unset, small, larger] = [await estimate(0), await estimate(100), await estimate(200)];
+		ok(larger > small, `${larger} > ${small}`);
+		ok(unset > larger, `an unset budget prices the model's own output cap: ${unset} > ${larger}`);
+	});
 	it("previews the run's store-grant, budget, remote-node and outside-read admission (FL-13)", async () => {
 		const cwd = realpathSync(mkdtempSync(join(tmpdir(), "fl13-preview-")));
 		let node: RunNodeIdentity = { id: "local", kind: "local" };
@@ -359,7 +381,33 @@ describe("dispatch advisory admission and explicit authority", () => {
 		equal(workerBudgetFromEnvelope(admitted).ceiling, 50);
 		const noMaximum = { ...base, policy: { toolCalls: 50, readReserve: 5, synthesis: false }, hardCap: 400 };
 		equal(workerBudgetFromEnvelope(resolveToolBudgetEnvelope(noMaximum)).ceiling, 400);
-		equal(workerBudgetFromEnvelope(resolveToolBudgetEnvelope({ ...noMaximum, hardCap: 30 })).ceiling, 50);
+		// The operator's cap holds against the recipe's own estimate and a request alike (M6).
+		equal(workerBudgetFromEnvelope(resolveToolBudgetEnvelope({ ...noMaximum, hardCap: 30 })).ceiling, 30);
+		const raised = resolveToolBudgetEnvelope({ ...advisory, request: { toolCalls: 1000, readReserve: 2 } });
+		equal(workerBudgetFromEnvelope(raised).ceiling, 150);
+		ok(raised.reasons.some((reason) => reason.code === "global-cap-clamp"));
+		deepStrictEqual(cloneRunToolBudgetEnvelope(JSON.parse(JSON.stringify(raised))), raised);
+		// The card's growth note follows the revision left after the cap: none when the cap folded it away.
+		const growth = (hardCap: number) =>
+			budgetLimitWords(
+				resolveToolBudgetEnvelope({
+					...advisory,
+					hardCap,
+					request: { toolCalls: 50, readReserve: 2, retryRevision: { toolCalls: 200, readReserve: 2 } },
+				}),
+			);
+		equal(
+			growth(150),
+			"planned for about 50 tool calls; Clio stops it at 150 (lowered to Clio's overall limit; about 150 if it has to redo its answer)",
+		);
+		equal(growth(50), "Clio stops it at 50 tool calls (lowered to Clio's overall limit)");
+		ok(
+			!resolveToolBudgetEnvelope({
+				...advisory,
+				hardCap: 50,
+				request: { toolCalls: 50, readReserve: 2, retryRevision: { toolCalls: 200, readReserve: 2 } },
+			}).reasons.some((reason) => reason.code === "revision-growth-authorized"),
+		);
 
 		let observed: unknown;
 		const bundle = makeDispatchBundle(dispatchStubContext(), {
@@ -376,6 +424,7 @@ describe("dispatch advisory admission and explicit authority", () => {
 					task: "Edit fixture.",
 					executionRole: "builder",
 					requestOrigin: "internal",
+					budget: { toolCalls: 1000, readReserve: 0 },
 				}),
 				/fixture launch/u,
 			);
@@ -384,7 +433,7 @@ describe("dispatch advisory admission and explicit authority", () => {
 		}
 		const spec = observed as { budget: Record<string, unknown> };
 		equal(spec.budget.mode, "advisory");
-		equal(typeof parseWorkerSpec(spec).budget.ceiling, "number");
+		equal(parseWorkerSpec(spec).budget.ceiling, DEFAULT_SETTINGS.fleet.limits.toolCallsPerRun);
 		throws(
 			() => parseWorkerSpec({ ...spec, budget: { ...spec.budget, mode: "enforced" } }),
 			/ceiling applies only to advisory budgets/u,

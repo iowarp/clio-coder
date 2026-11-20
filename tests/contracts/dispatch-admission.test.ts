@@ -48,7 +48,10 @@ import {
 	type RuntimeDescriptor,
 } from "../../src/domains/providers/index.js";
 import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
+import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
+import copilotSdkRuntime from "../../src/domains/providers/runtimes/copilot/copilot-sdk.js";
 import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { planFacts, readDispatchPlan } from "../../src/interactive/dispatch-plan-summary.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { dispatchRequestsFromArgs } from "../../src/tools/dispatch-arguments.js";
 import { normalizeDispatchAdmission } from "../../src/tools/dispatch-normalize.js";
@@ -236,6 +239,78 @@ describe("dispatch admission boundary", () => {
 
 	beforeEach(async () => isolateDispatchState());
 	afterEach(() => restoreDispatchState());
+
+	it("states each run's bounds on the plan card: a priced estimate at the output bound, else only the timers and tool ceiling it has (M6)", async () => {
+		const planText = async (
+			runtime: RuntimeDescriptor,
+			model: string,
+			maxOutputTokens = 0,
+			extra: Record<string, unknown> = {},
+		) => {
+			const settings = structuredClone(DEFAULT_SETTINGS);
+			settings.targets = [
+				{
+					id: "api",
+					runtime: runtime.id,
+					defaultModel: model,
+					...(runtime.kind === "subprocess" ? { trustedUnmediated: true } : {}),
+				},
+			];
+			settings.fleet.default = { ...settings.fleet.default, target: "api", model };
+			settings.chat.maxOutputTokens = maxOutputTokens;
+			const context = dispatchStubContext({ settings, runtime });
+			const bundle = makeDispatchBundle(context);
+			await bundle.extension.start();
+			try {
+				const tool = createDispatchTool({
+					dispatch: bundle.contract,
+					getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
+					getAutonomy: () => "yolo",
+				});
+				const prepared = tool.prepareAdmissionArguments?.({
+					agent: "coder",
+					mode: "sequential",
+					budget: { toolCalls: 1000, readReserve: 0 },
+					tasks: [{ task: "Rename the helper." }, { task: "Update its callers." }],
+					...extra,
+				});
+				ok(prepared);
+				strictEqual(prepared[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT], undefined);
+				const text = tool.describeDispatchPlan?.(prepared).text ?? "";
+				tool.disposeAdmissionArguments?.(prepared);
+				return text;
+			} finally {
+				await bundle.extension.stop?.();
+			}
+		};
+		// A Copilot subscription route has no rates: its card names only the bounds that do stop it.
+		const unpriced = await planText(copilotSdkRuntime, "gpt-6-luna");
+		match(
+			unpriced,
+			/limits: unpriced route: each response stops at 600 s, and the run has no wall-clock bound unless timeout_ms is set; Clio stops it at 300 tool calls/u,
+		);
+		// The approval card's Plan rows carry the same limits text the plan signs, once when both workers share it.
+		const card = readDispatchPlan(unpriced);
+		ok(card);
+		const cardLimits = planFacts(card).filter((fact) => fact.label === "limits");
+		strictEqual(cardLimits.length, 1, unpriced);
+		ok(unpriced.split("\n").includes(`    limits: ${cardLimits[0]?.value}`), unpriced);
+		match(cardLimits[0]?.value ?? "", /Clio stops it at 300 tool calls/u);
+		match(
+			await planText(copilotSdkRuntime, "gpt-6-luna", 0, { timeout_ms: 120000 }),
+			/limits: unpriced route: each response stops at 600 s, and the call's timeout_ms stops the run within 120000 ms; Clio stops it at 300 tool calls/u,
+		);
+		// An external one-shot worker's tool calls are not counted, so no tool ceiling is promised.
+		const external = await planText(claudeCodeRuntime, "claude-haiku-5-5");
+		match(external, /limits: .*one launch whose tool calls Clio cannot count, so no tool ceiling applies/u);
+		ok(!/Clio stops it at/u.test(external), external);
+		const priced = (maxOutputTokens: number) => planText(anthropic, "claude-haiku-5-5", maxOutputTokens);
+		const estimate = (text: string) => /limits: cost (~\S+ est) per model call at a (\d+)-token output bound/u.exec(text);
+		const [small, large] = [estimate(await priced(100)), estimate(await priced(4000))];
+		strictEqual(small?.[2], "100");
+		strictEqual(large?.[2], "4000");
+		ok(small?.[1] !== large?.[1], `${small?.[1]} moves with the output bound to ${large?.[1]}`);
+	});
 
 	it("preserves declared intent through admission when briefing quotes an absolute workspace", async () => {
 		const context = dispatchStubContext();

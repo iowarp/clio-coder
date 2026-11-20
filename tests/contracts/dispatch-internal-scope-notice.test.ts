@@ -211,6 +211,41 @@ it("a worker placed on this host expects its sandbox backend even with fleet nod
 	}
 });
 
+it("a local writer with write roots keeps bash and verify when fleet nodes are configured (M6)", async (t) => {
+	const availability = sandboxAvailability();
+	if (!availability.available || availability.backend !== "bwrap") return t.skip("no bubblewrap on this host");
+	const env = await isolateClioEnv("placed-here-confined-");
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.fleet.nodes = [{ id: "gpu1", host: "gpu1.invalid", maxWorkers: 1 }];
+	const tools: Array<ReadonlyArray<string>> = [];
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+		spawnWorker: (spec) => {
+			tools.push(spec.allowedTools);
+			throw new Error("fixture: placed");
+		},
+		resolveNode: () => ({ node: localNodeIdentity() }),
+		previewNode: () => ({ node: localNodeIdentity() }),
+	});
+	try {
+		await bundle.extension.start();
+		const scope = declaredScopeIntent({ writeRoots: ["src/duration.js"] });
+		ok(scope.ok);
+		const request = {
+			agentId: "coder",
+			executionRole: "builder" as const,
+			task: "Implement duration parsing and run npm test.",
+			cwd: env.dir,
+			intent: scope.intent,
+		};
+		await rejects(bundle.contract.dispatch(request), /fixture: placed/u);
+		ok(tools[0]?.includes(ToolNames.Bash), JSON.stringify(tools[0]));
+		ok(tools[0]?.includes(ToolNames.Verify), JSON.stringify(tools[0]));
+	} finally {
+		await bundle.extension.stop?.();
+		env.restore();
+	}
+});
+
 it("names the deny permit a judge-mode dispatch runs with when no safety judge is seated (N2)", async () => {
 	const env = await isolateClioEnv("judge-withheld-notice-");
 	const settings = structuredClone(DEFAULT_SETTINGS);

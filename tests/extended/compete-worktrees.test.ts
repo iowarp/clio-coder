@@ -97,7 +97,8 @@ for (const agent of ["scout", "coder"] as const) {
 			spawnWorker: (spec, options) => {
 				const scout = spec.agentId === "scout";
 				strictEqual(spec.budget.mode, scout ? "enforced" : "advisory");
-				strictEqual(spec.budget.toolCalls, scout ? 36 : 1000);
+				// The 1000 requested is held at the operator's cap (M6).
+				strictEqual(spec.budget.toolCalls, scout ? 36 : settings.fleet.limits.toolCallsPerRun);
 				const cwd = options?.cwd;
 				ok(cwd);
 				const judge = spec.agentId === "verifier";

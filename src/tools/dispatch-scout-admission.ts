@@ -258,6 +258,7 @@ export function prepareScoutContinuation(input: {
 			failover: "none",
 			routeApproval: null,
 			...(proposal.resolution.checkedAtRun === undefined ? {} : { checkedAtRun: [...proposal.resolution.checkedAtRun] }),
+			...(proposal.resolution.limits === undefined ? {} : { limits: proposal.resolution.limits }),
 			agentSelection: selection,
 			stepId: step.id,
 			dependencies: [...step.dependencies],

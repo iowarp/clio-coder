@@ -181,11 +181,15 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 		}
 	}
 	const forceSynthesis = input.nativeReadOnlyResearch === true && input.enforcement !== "external-one-shot";
+	// An advisory native run stops at fleet.limits.toolCallsPerRun: a request may plan for less, never for more (M6).
+	const advisoryCap =
+		!forceSynthesis && input.enforcement !== "external-one-shot" ? input.hardCap : Number.POSITIVE_INFINITY;
 	const revisionCeiling = phaseKind === null ? request?.retryRevision : undefined;
-	if (!forceSynthesis && revisionCeiling !== undefined && !samePhase(revisionCeiling, selected)) {
+	const requestedPeak = Math.max(selected.toolCalls, revisionCeiling?.toolCalls ?? 0);
+	if (requestedPeak > advisoryCap) {
 		reasons.push({
-			code: "revision-growth-authorized",
-			detail: `a result-contract revision may grow from ${selected.toolCalls}/${selected.readReserve} to the advisory estimate ${revisionCeiling.toolCalls}/${revisionCeiling.readReserve}`,
+			code: "global-cap-clamp",
+			detail: `the ${requestedPeak} tool calls estimated were held at fleet.limits.toolCallsPerRun ${input.hardCap}`,
 		});
 	}
 
@@ -197,7 +201,7 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 				// scouts retain their established research synthesis allowance.
 				input.recipeId === "context-bootstrap" ? selected.toolCalls : READ_ONLY_RESEARCH_SYNTHESIS_TOOL_CALLS,
 			)
-		: selected.toolCalls;
+		: Math.min(selected.toolCalls, advisoryCap);
 	if (forceSynthesis) {
 		reasons.push({
 			code: "read-only-research-synthesis",
@@ -230,7 +234,16 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 			});
 			revisionReadReserve = 0;
 		}
-		effectiveRevision = { toolCalls: revisionCeiling.toolCalls, readReserve: revisionReadReserve };
+		const revisionToolCalls = Math.min(revisionCeiling.toolCalls, advisoryCap);
+		revisionReadReserve = Math.min(revisionReadReserve, Math.max(0, revisionToolCalls - 1));
+		// A revision the cap folds onto the base phase grows nothing and is dropped, with no growth reason.
+		if (revisionToolCalls > toolCalls || (revisionToolCalls === toolCalls && revisionReadReserve > readReserve)) {
+			effectiveRevision = { toolCalls: revisionToolCalls, readReserve: revisionReadReserve };
+			reasons.push({
+				code: "revision-growth-authorized",
+				detail: `a result-contract revision may grow from ${toolCalls}/${readReserve} to ${revisionToolCalls}/${revisionReadReserve}`,
+			});
+		}
 	}
 
 	const authoredMaximum = input.policy.maximum ?? input.policy;
@@ -276,7 +289,8 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 /**
  * The budget a worker enforces. An advisory envelope gains a hard ceiling at
  * `fleet.limits.toolCallsPerRun`, tightened to the recipe's explicit maximum
- * when it declares one, and never below the estimate or revision the request was admitted with.
+ * when it declares one, and never below the estimate or revision the request was admitted with,
+ * which resolution already holds at the cap.
  */
 export function workerBudgetFromEnvelope(envelope: RunToolBudgetEnvelope): RunToolBudgetEnvelope["effective"] & {
 	ceiling?: number;
@@ -511,11 +525,18 @@ export function budgetLimitWords(envelope: RunToolBudgetEnvelope): string {
 	}
 	const budget = workerBudgetFromEnvelope(envelope);
 	const codes = new Set(envelope.reasons.map((reason) => reason.code));
+	// Growth is worded from the revision the run holds after the cap, never from the reason codes the estimate
+	// produced: a cap that folded the revision onto the base phase leaves nothing to grow into (M6).
+	const revision = budget.revision;
 	const notes = [
 		...(codes.has("global-cap-clamp") ? ["lowered to Clio's overall limit"] : []),
-		...(codes.has("retry-growth-authorized") || codes.has("revision-growth-authorized")
-			? ["more if it has to redo its answer"]
-			: []),
+		...(revision === undefined
+			? []
+			: [
+					revision.toolCalls > budget.toolCalls
+						? `about ${revision.toolCalls} if it has to redo its answer`
+						: "more reads if it has to redo its answer",
+				]),
 	];
 	const stop = budget.mode === "advisory" ? (budget.ceiling ?? budget.hardCap) : budget.hardCap;
 	// A plan that equals the stop is one number, said once: `about 20; stops at 20` read as two limits.
