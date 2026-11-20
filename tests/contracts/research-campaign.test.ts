@@ -371,7 +371,7 @@ describe("research yolo", () => {
 		const entry = join(dir, "fake-run.cjs");
 		writeFileSync(
 			entry,
-			`process.stdout.write(JSON.stringify({ type: "turn_end", exitCode: 0, text: process.env.${YOLO_CONFINEMENT_PIN_ENV} ?? "unpinned" }) + "\\n");\n`,
+			`process.stdout.write(JSON.stringify({ type: "run_end", schemaVersion: 2, exitCode: 0, outcome: "succeeded", causes: [], result: { text: process.env.${YOLO_CONFINEMENT_PIN_ENV} ?? "unpinned", artifacts: [] } }) + "\\n");\n`,
 		);
 		const runner = createSpawnAgentRunner(entry, []);
 		strictEqual((await runner({ worktree: dir, prompt: "p", autonomy: "yolo" })).summary, "contained");
@@ -407,21 +407,27 @@ describe("research yolo", () => {
 		strictEqual(campaign.agent.autonomy, "yolo");
 		const argv = agentRunArgv({ worktree: "/w", prompt: "p", autonomy: "yolo" });
 		strictEqual(argv[argv.indexOf("--autonomy") + 1], "yolo");
-		// The terminal frame a contained yolo `run --json --json-events terminal` writes.
+		strictEqual(argv[argv.indexOf("--output-format") + 1], "stream-json");
+		ok(!argv.includes("--json-events") && !argv.includes("--json"), argv.join(" "));
+		// The frames a contained yolo `run --output-format stream-json` writes: its audit frame, then the v2 envelope.
 		const stream = [
-			JSON.stringify({ type: "session", id: "s1" }),
+			JSON.stringify({ type: "session", schemaVersion: 2, id: "s1" }),
 			JSON.stringify({
-				type: "turn_end",
+				type: "autonomy",
+				confinement: "contained",
+				usage: { toolCalls: 4, activeMs: 10, tokens: 100 },
+				halted: null,
+				openDecisions: [{ seq: 3, tool: "bash", command: "git push origin main", kind: "ask", rule: "git-push" }],
+				openDecisionsOmitted: 0,
+			}),
+			JSON.stringify({
+				type: "run_end",
+				schemaVersion: 2,
+				sessionId: "s1",
 				exitCode: 0,
-				outcome: "completed",
-				text: "Hypothesis: a smaller value lowers the score",
-				autonomy: {
-					confinement: "contained",
-					usage: { toolCalls: 4, activeMs: 10, tokens: 100 },
-					halted: null,
-					openDecisions: [{ seq: 3, tool: "bash", command: "git push origin main", kind: "ask", rule: "git-push" }],
-					openDecisionsOmitted: 0,
-				},
+				outcome: "succeeded",
+				causes: [],
+				result: { text: "Hypothesis: a smaller value lowers the score", artifacts: [] },
 			}),
 		].join("\n");
 		const runs: string[] = [];
@@ -436,6 +442,12 @@ describe("research yolo", () => {
 		deepStrictEqual(runs, ["yolo"]);
 		const view = summarizeCampaign(campaign.project, campaign.id);
 		strictEqual(view.iterations[0]?.outcome, "ratcheted");
+		deepStrictEqual(view.iterations[0]?.agent, {
+			exitCode: 0,
+			sessionId: "s1",
+			outcome: "succeeded",
+			summary: "Hypothesis: a smaller value lowers the score",
+		});
 		deepStrictEqual(view.iterations[0]?.autonomy?.openDecisions, [
 			{ tool: "bash", kind: "ask", rule: "git-push", command: "git push origin main" },
 		]);
