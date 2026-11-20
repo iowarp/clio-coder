@@ -30,7 +30,7 @@ test("a yolo session dispatches a default worker as version 8 and rejects a wire
 			strictEqual(spec.specVersion, WORKER_SPEC_HOOKLESS_VERSION);
 			throws(
 				() => parseWorkerSpec({ ...spec, specVersion: WORKER_SPEC_HOOKLESS_VERSION - 1 }),
-				/is not one this worker reads .*different Clio Coder builds/u,
+				/is not one this worker reads .*different CLIO Coder builds/u,
 			);
 			throw new Error("worker spec observed");
 		},

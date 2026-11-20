@@ -19,7 +19,7 @@ export interface RestartSessionDeps {
 /** Why a restart cannot be requested from `cwd`; null when the workspace is the tree this Clio runs from. */
 export function restartSessionWorkspaceRefusal(cwd: string, packageRoot = runningPackageRoot()): string | null {
 	const repo = detectClioCoderRepo(cwd).repoRoot;
-	if (!repo) return "the workspace is not Clio Coder's source tree";
+	if (!repo) return "the workspace is not CLIO Coder's source tree";
 	if (resolve(repo) !== resolve(packageRoot)) return "this session does not run from the workspace's build";
 	return null;
 }

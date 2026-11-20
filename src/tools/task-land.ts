@@ -297,7 +297,7 @@ function squashCommit(plan: TaskLandPlan, source: string, message: string | unde
 	}
 	const subjects = shas.map((sha) => git(plan.root, ["log", "-1", "--format=%s", sha]));
 	return {
-		message: `${subjects.at(-1) ?? `Clio Coder task ${plan.runId}`}\n\nSquashes ${shas.length} commits from ${plan.branch}:\n${subjects.map((subject) => `- ${subject}`).join("\n")}\n\nClio Coder task ${plan.runId}`,
+		message: `${subjects.at(-1) ?? `CLIO Coder task ${plan.runId}`}\n\nSquashes ${shas.length} commits from ${plan.branch}:\n${subjects.map((subject) => `- ${subject}`).join("\n")}\n\nCLIO Coder task ${plan.runId}`,
 		env: {},
 	};
 }
@@ -311,7 +311,7 @@ export function executeTaskLand(
 	if (tipNow !== plan.tip) throw new Error(`${plan.branch} moved since it was planned; plan again`);
 	let source = plan.tip;
 	if (plan.uncommitted > 0 && plan.worktree !== null) {
-		commitWorktreePath(plan.worktree.path, COMMIT_IDENTITY, `Clio Coder task ${plan.runId}`, {
+		commitWorktreePath(plan.worktree.path, COMMIT_IDENTITY, `CLIO Coder task ${plan.runId}`, {
 			// Only what the run's commit left out stays out. The run journal keeps tool
 			// outcomes without their paths, so a run that never reached that commit has
 			// no record of what it wrote and every untracked file lands.

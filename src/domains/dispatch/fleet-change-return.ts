@@ -96,7 +96,7 @@ interface RemoteCommitIdentity {
  */
 function remoteCommitAttribution(w: TaskWorktree): { identity: RemoteCommitIdentity; message: string } {
 	const { author, committer } = hostCommitIdents(w.root, COMMIT_IDENTITY);
-	const message = `Clio Coder remote task ${w.runId}`;
+	const message = `CLIO Coder remote task ${w.runId}`;
 	const authorship = autonomousLandAuthorship(w.root);
 	if (authorship === null) return { identity: { author, committer }, message };
 	return {

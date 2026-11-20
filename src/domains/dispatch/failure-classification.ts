@@ -135,7 +135,7 @@ export function honestWorkerSpecSkewText(text: string): string {
 	return text.replace(
 		RELEASED_SPEC_VERSION_REFUSAL,
 		(_match, sent: string, reads: string) =>
-			`WorkerSpec version ${sent} is not one this worker reads (it reads ${reads}). The dispatching session and this node run different Clio Coder builds; upgrade the older one, or dispatch to another node.`,
+			`WorkerSpec version ${sent} is not one this worker reads (it reads ${reads}). The dispatching session and this node run different CLIO Coder builds; upgrade the older one, or dispatch to another node.`,
 	);
 }
 
