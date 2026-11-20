@@ -20,6 +20,7 @@ import {
 	type RunCauseCode,
 	type RunExitFact,
 	type RunResultEnvelopeV2,
+	type RunSteerFrameV2,
 	type RunUsageV2,
 	resolveRunExit,
 	signalForExitCode,
@@ -134,6 +135,7 @@ interface MainRunNoteV2 {
 }
 
 let v2Started: number | null = null;
+let v2StreamJson = false;
 let mainRunNote: MainRunNoteV2 = {};
 
 /** True while a `--output-format json|stream-json` run is being written, so v1 runs pay for nothing v2 reads. */
@@ -148,6 +150,15 @@ export function noteMainRunV2(note: { runId?: string; usage?: RunUsageV2; sessio
 	if (note.usage !== undefined) mainRunNote.usage = note.usage;
 	if (note.sessionReady === true && mainRunNote.sessionReadyMs === undefined)
 		mainRunNote.sessionReadyMs = Math.round(performance.now() - v2Started);
+}
+
+/** One steer frame per channel line the reader took, written only under `--output-format stream-json`. */
+export function noteSteerV2(line: number, accepted: boolean): void {
+	if (!v2StreamJson || isStdoutDead()) return;
+	const frame: RunSteerFrameV2 = accepted
+		? { type: "steer", line, status: "accepted" }
+		: { type: "steer", line, status: "refused", reason: "no turn was streaming to take the line" };
+	writeRawStdout(serializeJsonLine(frame));
 }
 
 /** A `run --output-format json|stream-json` request, as far as the v2 writer needs it. */
@@ -321,6 +332,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	const startedAt = new Date(started).toISOString();
 	const seen: SeenFrames = { text: "", live: [], undelivered: [] };
 	v2Started = performance.now();
+	v2StreamJson = request.format === "stream-json";
 	mainRunNote = {};
 	let written = false;
 	let outputTarget: string | undefined;
@@ -427,6 +439,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 		} finally {
 			process.off("exit", onExit);
 			setFrameProjector(null);
+			v2StreamJson = false;
 		}
 	});
 }

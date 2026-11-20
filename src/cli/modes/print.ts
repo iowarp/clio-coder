@@ -86,7 +86,7 @@ import { toolResultText } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from "../run-answers.js";
-import { noteMainRunV2, noteRunEndWritten, runResultV2Active } from "../run-failure.js";
+import { noteMainRunV2, noteRunEndWritten, noteSteerV2, runResultV2Active } from "../run-failure.js";
 import { setupSteerChannel } from "../steer-channel.js";
 import {
 	type DispatchedRunsSettlement,
@@ -1414,8 +1414,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	);
 	let cleanupSteer: (() => void) | undefined;
 	if (options.steerChannel) {
-		cleanupSteer = setupSteerChannel(options.steerChannel, (line) => {
-			chat.steer(line);
+		cleanupSteer = setupSteerChannel(options.steerChannel, (line, lineNumber) => {
+			noteSteerV2(lineNumber, chat.steer(line));
 		});
 	}
 	try {
