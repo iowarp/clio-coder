@@ -505,20 +505,29 @@ describe("read windowed reader", () => {
 		strictEqual((second.details?.observation as Observation).totalCount, null);
 	});
 
-	it("rolls a headless run's spent pool at its next tool batch and keeps the attended turn's refusal (CLI-P42)", async () => {
+	it("rolls a headless run's spent pool at its next tool batch, escalates an unbatched call and keeps the attended refusal (CLI-P42)", async () => {
 		configureGuardrails({ readMaxBytes: 1024, observationTurnBudgetBytes: 1024 });
 		const path = join(scratch.dir, "headless.txt");
 		writeFileSync(path, "alpha\nbeta\n");
 		const turn = { sessionId: "read-headless", turnId: scratch.dir };
 		const pool = createHeadlessObservationPool();
-		const read = async (batch: string) => {
-			const result = await readTool.run({ path }, { ...turn, ...pool.invokeOptions(batch) });
-			return result.kind === "ok" ? result.output : result.message;
+		const read = async (batch: string | undefined, target = path) => {
+			const result = await readTool.run({ path: target }, { ...turn, ...pool.invokeOptions(batch) });
+			return result.kind === "ok" ? result.output : `error: ${result.message}`;
 		};
+		// A read that leaves less than a slice spends the pool with no refusal; the next batch still gets a fresh one.
 		strictEqual(await read("batch-1"), "alpha\nbeta\n");
-		match(await read("batch-1"), /did not run\. The turn continues automatically after this batch with a fresh budget/);
-		strictEqual(pool.stopped(), true);
+		strictEqual(pool.stopped(), false);
 		strictEqual(await read("batch-2"), "alpha\nbeta\n");
+		match(await read("batch-2"), /did not run\. The turn continues automatically after this batch with a fresh budget/);
+		strictEqual(pool.stopped(), true);
+		// A call outside any model response never rolls the pool, so its refusals escalate on the fourth.
+		for (let n = 1; n <= 3; n += 1) match(await read(undefined), /^\[observation budget exhausted for this turn/);
+		match(await read(undefined), /^error: observation budget exhausted .* This is the 4th call to hit it/);
+		// A read that fails returns nothing, so the run still stopped; one that returns clears it.
+		match(await read("batch-3", join(scratch.dir, "missing.txt")), /^error: /);
+		strictEqual(pool.stopped(), true);
+		strictEqual(await read("batch-3"), "alpha\nbeta\n");
 		strictEqual(pool.stopped(), false);
 		// The same turn without the headless pool still finds its own per-turn pool spent.
 		const attended = await readTool.run({ path }, turn);

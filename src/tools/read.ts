@@ -894,10 +894,15 @@ export const readTool: ToolSpec = {
 		// (an optionless reservation is untracked): the "full: <path>" escape
 		// hatch appears exactly when the pool is exhausted, so charging these
 		// reads to it made the hatch a dead end. The per-call byte cap still
-		// bounds each slice.
+		// bounds each slice. A headless run's tracker still hears that the read returned (CLI-P42).
 		const requestedBytes = narrowReadBytes(pathArg, request);
+		const poolEvent = options?.observationPoolEvent;
 		const reservation = isSessionOffloadPath(filePath, options?.sessionId)
-			? reserveObservation(readMaxBytes(), undefined, requestedBytes)
+			? reserveObservation(
+					readMaxBytes(),
+					poolEvent === undefined ? undefined : { observationPoolEvent: poolEvent },
+					requestedBytes,
+				)
 			: reserveObservation(readMaxBytes(), options, requestedBytes);
 		// Charge the cap in the same synchronous step as the reservation: the stat
 		// below awaits, and parallel siblings reserving meanwhile must see this

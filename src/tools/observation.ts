@@ -7,7 +7,7 @@ import {
 import { OBSERVATION_WIDTH_SCALE_CEILING } from "../core/turn-budget-width.js";
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
 import type { ImageContent } from "../engine/types.js";
-import type { ToolInvokeOptions, ToolResult } from "./registry.js";
+import type { ObservationPoolEvent, ToolInvokeOptions, ToolResult } from "./registry.js";
 import { offloadPointer, writeToolOffload } from "./result-shaping.js";
 import { formatSize } from "./truncate.js";
 import { byteLength } from "./truncate-utf8.js";
@@ -136,6 +136,8 @@ export interface ObservationReservation {
 	 * marks the pool spent, so it rolls at the next tool batch while the turn runs on (CLI-P42).
 	 */
 	roll?: () => void;
+	/** A headless run's tracker for this call (CLI-P42): told when the call returns and when that drains the pool. */
+	poolEvent?: (event: ObservationPoolEvent) => void;
 }
 
 // A `next` continuation is a compact call fragment (`limit=200`, `offset=451`).
@@ -223,36 +225,57 @@ function budgetKey(options: ToolInvokeOptions | undefined): string | null {
  * bound the window. Attended turns never build one, so their per-turn pool is unchanged.
  */
 export interface HeadlessObservationPool {
-	/** The pool options for one tool call of the model response `batchId` names. */
-	invokeOptions(batchId: string | undefined): Pick<ToolInvokeOptions, "observationPoolEpoch" | "observationPoolSpent">;
-	/** A new operator prompt: nothing pending from an earlier one. */
-	reset(): void;
-	/** Whether the last observation call the pool answered was refused: what the run could not read. */
+	/**
+	 * The pool options for one tool call of the model response `batchId` names. A call outside any model response (a
+	 * host or internal call) charges the current pool and never rolls it, so its refusals escalate as in any turn.
+	 */
+	invokeOptions(batchId: string | undefined): Pick<ToolInvokeOptions, "observationPoolEpoch" | "observationPoolEvent">;
+	/**
+	 * A new operator prompt: nothing pending from an earlier one. A later submit of the same host run (`runId`), such as
+	 * an `--output-schema` repair turn, keeps the run's state, so its seal keeps the fact.
+	 */
+	reset(runId?: string): void;
+	/** Whether the run's last observation calls were refused with no later call returning: what the run could not read. */
 	stopped(): boolean;
 }
 
 export function createHeadlessObservationPool(): HeadlessObservationPool {
 	let epoch = 0;
-	// The batch whose calls found the pool spent; the first call of a later batch rolls it.
+	// The batch whose calls spent the pool (a refusal, or a return that left less than a slice); a later batch rolls it.
 	let spentIn: string | null = null;
+	// The batch a refusal landed in: a sibling of that batch returning does not clear it.
+	let refusedIn: string | null = null;
 	let refused = false;
+	let run: string | undefined;
 	return {
 		invokeOptions(batchId) {
-			const batch = batchId ?? "";
-			if (spentIn !== null && batch !== spentIn) {
+			if (batchId === undefined) return epoch > 0 ? { observationPoolEpoch: epoch } : {};
+			if (spentIn !== null && batchId !== spentIn) {
 				epoch += 1;
 				spentIn = null;
 			}
+			const callEpoch = epoch;
 			return {
 				...(epoch > 0 ? { observationPoolEpoch: epoch } : {}),
-				observationPoolSpent: (spent) => {
-					refused = spent;
-					if (spent && spentIn === null) spentIn = batch;
+				observationPoolEvent: (event) => {
+					if (event === "delivered") {
+						if (refusedIn !== batchId) refused = false;
+						return;
+					}
+					if (event === "refused") {
+						refused = true;
+						refusedIn = batchId;
+					}
+					if (spentIn === null && callEpoch === epoch) spentIn = batchId;
 				},
 			};
 		},
-		reset() {
+		reset(runId) {
+			if (runId !== undefined && runId === run) return;
+			run = runId;
+			epoch = 0;
 			spentIn = null;
+			refusedIn = null;
 			refused = false;
 		},
 		stopped: () => refused,
@@ -295,6 +318,8 @@ export function reserveObservation(
 		...(template === undefined ? {} : { template }),
 		...(boundNote === undefined ? {} : { boundNote }),
 	};
+	const poolEvent = options?.observationPoolEvent;
+	const tracked = poolEvent === undefined ? {} : { poolEvent };
 	if (key === null) {
 		return {
 			key,
@@ -308,6 +333,7 @@ export function reserveObservation(
 			committed: false,
 			settled: false,
 			...bound,
+			...tracked,
 		};
 	}
 	const state = turnBudgets.get(key) ?? { usedBytes: 0, reservedBytes: 0, lastSeenAt: Date.now(), exhaustedStreak: 0 };
@@ -316,13 +342,12 @@ export function reserveObservation(
 	pruneBudgetMap();
 	const remaining = Math.max(0, limitBytes - state.usedBytes - state.reservedBytes);
 	if (remaining < MIN_BUDGET_SLICE_BYTES) {
-		const spent = options?.observationPoolSpent;
 		const roll =
 			options?.turnBudgetContinues === true
 				? options.observationBudgetRoll
-				: spent === undefined
+				: poolEvent === undefined
 					? undefined
-					: () => spent(true);
+					: () => poolEvent("refused");
 		return {
 			key,
 			limitBytes,
@@ -341,7 +366,6 @@ export function reserveObservation(
 	// A call that got a slice is progress, so the exhausted streak starts over.
 	// Only an unbroken run of short-circuits reaches the terminal failure.
 	state.exhaustedStreak = 0;
-	options?.observationPoolSpent?.(false);
 	const callCapBytes = Math.min(askBytes, remaining);
 	return {
 		key,
@@ -355,6 +379,7 @@ export function reserveObservation(
 		committed: false,
 		settled: false,
 		...bound,
+		...tracked,
 	};
 }
 
@@ -584,6 +609,20 @@ function jsonStubBudgetNote(reservation: ObservationReservation): string {
 }
 
 /**
+ * A headless run's call that returned its result (CLI-P42): the run read something, and when what it returned left the
+ * pool under one slice, the pool is spent and rolls at the next tool batch without waiting for a refusal.
+ */
+function reportPoolDelivery(reservation: ObservationReservation): void {
+	const poolEvent = reservation.poolEvent;
+	if (poolEvent === undefined || reservation.exhausted) return;
+	poolEvent("delivered");
+	if (reservation.key === null) return;
+	const state = turnBudgets.get(reservation.key);
+	if (state === undefined) return;
+	if (reservation.limitBytes - state.usedBytes - state.reservedBytes < MIN_BUDGET_SLICE_BYTES) poolEvent("drained");
+}
+
+/**
  * Close out an observation: offload the full rendering when truncated, append
  * exactly one notice line (text) or substitute the parseable stub (json), and
  * charge the turn pool. Untruncated results get no notice.
@@ -631,6 +670,7 @@ export function finalizeObservation(input: ObservationInput): ToolResult {
 	const shownBytes =
 		byteLength(output) + (input.images ?? []).reduce((bytes, image) => bytes + byteLength(image.data), 0);
 	recordSpentBytes(input.reservation, shownBytes);
+	reportPoolDelivery(input.reservation);
 	const budget = budgetDetails(input.reservation);
 	const observation: Observation = {
 		tool: input.tool,
