@@ -88,8 +88,8 @@ describe("resolveEffectivePricing", () => {
 
 	it("leaves an all-zero catalog row unknown on a paid cloud route instead of a catalog $0", () => {
 		const target = { id: "inception", runtime: "inception" };
-		deepStrictEqual(resolveEffectivePricing(target, inception, "mercury-3"), { rates: null, pricedBy: "none" });
-		strictEqual(resolveEffectivePricing(target, inception, "mercury-decide").pricedBy, "catalog");
+		for (const model of ["mercury-3", "mercury-decide"])
+			strictEqual(resolveEffectivePricing(target, inception, model).pricedBy, "catalog");
 		const openrouter = { id: "openrouter", tier: "cloud" } as const;
 		strictEqual(resolveEffectivePricing({ id: "or", runtime: "openrouter" }, openrouter, "auto").pricedBy, "none");
 		const free = resolveEffectivePricing({ id: "or", runtime: "openrouter" }, openrouter, "google/gemma-4-31b-it:free");

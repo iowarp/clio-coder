@@ -11,6 +11,8 @@ import {
 } from "../../src/cli/args.js";
 import { runClioRun } from "../../src/cli/run.js";
 import { runLimitsV2, startRefusalCause } from "../../src/cli/run-failure.js";
+import { dryRunPricingRefusal } from "../../src/cli/run-plan.js";
+import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { pinRunSettings, RUN_OVERRIDES_ENV, requirePricedRefusal } from "../../src/core/run-overrides.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
@@ -18,6 +20,8 @@ import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { factKnownValue } from "../../src/core/telemetry/known.js";
 import type { CallStarted } from "../../src/core/telemetry/schemas.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
+import { calculatePricingCostUsd, resolveEffectivePricing } from "../../src/domains/providers/catalog.js";
+import inception from "../../src/domains/providers/runtimes/cloud/inception.js";
 import { createRunCostCap, runCostCeilingUsd, sessionCeilingReached } from "../../src/domains/scheduling/budget.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import {
@@ -235,6 +239,36 @@ test("--dry-run --require-priced refuses an unpriced route exactly as the run wo
 		match(stderr, /--require-priced: routes this run can reach have no known pricing: proxy\/gpt-x; declare targets/u);
 	} finally {
 		process.chdir(original);
+		home.restore();
+	}
+});
+
+test("--require-priced admits a mercury-3 run and --max-cost-usd bounds it at Inception list rates (PV-6)", async () => {
+	const home = await isolateClioEnv("clio-mercury-priced-");
+	const raw = {
+		version: 2,
+		targets: [{ id: "inception", runtime: "inception", defaultModel: "mercury-3" }],
+		chat: { target: "inception", model: "mercury-3" },
+	};
+	mkdirSync(path.join(home.dir, "config"), { recursive: true });
+	writeFileSync(path.join(home.dir, "config", "settings.yaml"), JSON.stringify(raw));
+	try {
+		const parsed = parseRunCliArgs(["--require-priced", "--max-cost-usd", "1", "--no-delegate", "x"]);
+		const { settings, issues } = validateSettings(raw);
+		deepStrictEqual(issues, []);
+		strictEqual(await dryRunPricingRefusal(parsed, settings), undefined);
+		const target = settings.targets[0];
+		ok(target);
+		const { rates, pricedBy } = resolveEffectivePricing(target, inception, "mercury-3");
+		strictEqual(pricedBy, "catalog");
+		deepStrictEqual(rates, { input: 0.2, output: 0.7, cacheRead: 0.02, cacheWrite: 0 });
+		// One call: 1M fresh input, 500K cache read, 100K output is $0.28 at list, half that at the launch discount.
+		const callUsd = calculatePricingCostUsd(rates, { input: 1_000_000, cacheRead: 500_000, output: 100_000 });
+		ok(Math.abs(callUsd - 0.28) < 1e-12, `call ${callUsd}`);
+		const ceiling = runCostCeilingUsd({ spentUsd: 0, runMaxUsd: parsed.maxCostUsd ?? 0, configuredUsd: 0 });
+		strictEqual(sessionCeilingReached(3 * callUsd, ceiling), false);
+		strictEqual(sessionCeilingReached(4 * callUsd, ceiling), true);
+	} finally {
 		home.restore();
 	}
 });
