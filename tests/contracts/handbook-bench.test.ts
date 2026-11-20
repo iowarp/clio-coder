@@ -2,7 +2,13 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
-import { replayTask, scoreHandbook, scoreReplay, unsafeEnvironment } from "../../scripts/handbook-bench.mjs";
+import {
+	mainToolCalls,
+	replayTask,
+	scoreHandbook,
+	scoreReplay,
+	unsafeEnvironment,
+} from "../../scripts/handbook-bench.mjs";
 
 it("keys a replay task by the commit's files and scores a matching and a straying diff", () => {
 	const task = replayTask(
@@ -47,4 +53,19 @@ it("counts duplicate pairs, invalid citations and tree contradictions in a handb
 	ok(unsafeEnvironment({ TMPDIR: tree, CLIO_CODER_HOME: "/h/.config/clio-coder" }, "/h"));
 	strictEqual(unsafeEnvironment({ TMPDIR: tree }, "/h"), null);
 	ok(unsafeEnvironment({}, "/h"));
+});
+
+it("counts a v2 main stream's tool calls as the harness does: chains by their steps, cut-off calls as none", () => {
+	strictEqual(
+		mainToolCalls([
+			{ type: "session", schemaVersion: 2, id: "s" },
+			{ type: "tool_execution_end", toolCallId: "a" },
+			{ type: "tool_execution_end", toolCallId: "chain" },
+			{ type: "tool_execution_end", toolCallId: "chain:1", parentToolCallId: "chain" },
+			{ type: "tool_execution_end", toolCallId: "chain:2", parentToolCallId: "chain" },
+			{ type: "tool_execution_end", toolCallId: "cut", notRun: "output_limit" },
+			{ type: "run_end", schemaVersion: 2, result: { text: "done", artifacts: [] } },
+		]),
+		3,
+	);
 });
