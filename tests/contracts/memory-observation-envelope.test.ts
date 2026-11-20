@@ -324,15 +324,27 @@ test("the observer prepares only near a portable fold, stops after two declined 
 		turn(2);
 		await runtime.runIdleStep();
 		strictEqual(calls, 2, "one declined fold does not stop preparation");
-		strictEqual(offer("x"), null);
+		// An issued offer declined for no gain, then the raw summary fails: the retry commits with no offer and the
+		// failed attempt's decline counts nothing (it would have stopped preparation here).
+		const tied = offer("word ".repeat(20_000));
+		ok(tied);
+		tied.onOutcome?.({ kind: "declined", reason: "no-gain" });
+		tied.onOutcome?.({ kind: "failed" });
 		commit();
 		turn(3);
 		await runtime.runIdleStep();
-		strictEqual(calls, 2, "two declined folds in a row stop preparation for the session");
-		commit(chosen.receipt);
+		strictEqual(calls, 3, "a failed attempt's decline does not settle at a later commit");
+		strictEqual(offer("x"), null);
+		commit();
+		strictEqual(offer("x"), null);
+		commit();
 		turn(4);
 		await runtime.runIdleStep();
-		strictEqual(calls, 2, "the stop holds for the session");
+		strictEqual(calls, 3, "two declined folds in a row stop preparation for the session");
+		commit(chosen.receipt);
+		turn(5);
+		await runtime.runIdleStep();
+		strictEqual(calls, 3, "the stop holds for the session");
 	} finally {
 		runtime.dispose();
 		rmSync(dir, { recursive: true, force: true });

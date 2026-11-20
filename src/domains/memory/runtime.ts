@@ -1,8 +1,9 @@
 import { readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { type FoldPlannerView, foldProjection } from "../context/fold/pressure.js";
-import type { MemoryCommitScope } from "./commit-state.js";
+import type { FoldPlannerView } from "../context/fold/pressure.js";
+import { foldProjection } from "../context/fold/pressure.js";
+import type { MemoryCommitScope, SuccessfulMemoryContextCommit } from "./commit-state.js";
 import type { RetentionStatus } from "./completion-retention.js";
 import {
 	EMPTY_RETENTION,
@@ -373,7 +374,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				if (verdict !== "accepted" && verdict !== "duplicate") return;
 				if (input.memoryReceipt) this.consume(input.commitId, input.memoryReceipt);
 				if (verdict === "duplicate") return verdict;
-				if (input.kind === "summary") this.#foldCommitted(input.memoryReceipt !== undefined);
+				if (input.kind === "summary") this.#foldCommitted(input.outcome, input.memoryReceipt !== undefined);
 				this.#invalidate("checkpoint-changed");
 				return verdict;
 			},
@@ -470,6 +471,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		const infra = this.#infrastructure;
 		const enabled = !!infra && infra.settings().enabled && infra.settings().surfaces.observe === "on";
 		if (this.#enabled && !enabled) this.#invalidate("disabled");
+		// Declines recorded while observing settle nothing once observation is off.
+		if (!enabled) this.#fold = null;
 		this.#enabled = enabled;
 		if (!infra || !enabled || this.#disposed) return null;
 		const source = infra.source();
@@ -1249,14 +1252,16 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	}
 
 	/**
-	 * A fold settles when its checkpoint commits. One that declined the offer for no gain, by memory's measure or the
-	 * compactor's, and used none extends the run; any other commit resets it. Two in a row stop preparation for the
-	 * session, and the stop stays until the scope resets.
+	 * A fold settles when its summary commits. Its declines count only against the checkpoint they were made on, the
+	 * one this runtime last read; a failed attempt has already cleared its own, and an eviction-only commit settles
+	 * nothing. A no-gain or no-eligible-gain decline with no receipt extends the run; any other summary commit resets
+	 * it. Two in a row stop preparation for the session, and the stop stays until the scope resets.
 	 */
-	#foldCommitted(used: boolean): void {
-		const declines = this.#fold?.declines;
+	#foldCommitted(outcome: SuccessfulMemoryContextCommit["outcome"], used: boolean): void {
+		const pending = this.#fold;
 		this.#fold = null;
-		if (this.#declinedFolds >= 2) return;
+		if (outcome !== "summarized" || this.#declinedFolds >= 2) return;
+		const declines = pending !== null && pending.key === this.#loadedScope ? pending.declines : undefined;
 		if (!used && (declines?.has("no-gain") || declines?.has("no-eligible-gain"))) this.#declinedFolds += 1;
 		else this.#declinedFolds = 0;
 	}

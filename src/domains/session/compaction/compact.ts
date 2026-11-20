@@ -18,7 +18,7 @@ import {
 	buildUserText,
 	COMPACTION_SYSTEM_PROMPT,
 } from "../../memory/compaction-prompts.js";
-import type { MemoryCompactionOffer, MemoryConsumptionReceipt } from "../../memory/contract.js";
+import type { MemoryCompactionOffer, MemoryConsumptionReceipt, MemoryOfferOutcome } from "../../memory/contract.js";
 import { observationEvent, observationTracing, traceObservation } from "../../memory/observation-events.js";
 import type { AdmissionHold, CallJournalOptions, CallScope } from "../../telemetry/call-scope.js";
 import { openCallScope } from "../../telemetry/call-scope.js";
@@ -1774,6 +1774,21 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			? checkpointRoom
 			: checkpointRoom - (historyRoom ?? 0);
 	let memoryOffer: MemoryCompactionOffer | null = null;
+	// Every offer memory issued for this fold, chosen or declined: a fold that fails tells each of them, so a decline
+	// from a failed attempt never settles at a later commit.
+	const issuedOffers: MemoryCompactionOffer[] = [];
+	// The hook is memory's bookkeeping. A throw from it must never stop the raw fallback or replace the summary's own
+	// error, so it is swallowed here and its result ignored.
+	const tellOffer = (offer: MemoryCompactionOffer, outcome: MemoryOfferOutcome): void => {
+		try {
+			offer.onOutcome?.(outcome);
+		} catch {
+			// Ignored: see above.
+		}
+	};
+	const offersFailed = (): void => {
+		for (const offer of issuedOffers) tellOffer(offer, { kind: "failed" });
+	};
 	// Recorded only once a portable request carrying the offer is sent, so a
 	// request skipped as a repeat or replaced by a cheaper live prefix leaves no
 	// offer-used event behind.
@@ -1835,8 +1850,9 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		const raw = build(ordinary);
 		if (memoryOffer !== null || input.offerMemory === undefined) return raw;
 		const offer = input.offerMemory(rawSlice, ordinary, slice);
+		if (offer) issuedOffers.push(offer);
 		const declined = (reason: string, facts: Record<string, unknown> = {}) => {
-			offer?.onOutcome?.({ kind: "declined", reason });
+			if (offer) tellOffer(offer, { kind: "declined", reason });
 			observationEvent("offer-declined", { reason, split, entries: slice.length, ...facts });
 			if (observationTracing()) traceObservation("offer-declined", { reason, split, entries: slice.length, ...facts });
 			return raw;
@@ -1939,12 +1955,19 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			}),
 		)
 		.digest("hex");
-	if (input.skipSummaryDigest === summaryDigest) return { ...emptyResult("repeat-no-gain"), summaryDigest };
+	if (input.skipSummaryDigest === summaryDigest) {
+		// No checkpoint comes of this fold, so its offers settle nothing.
+		offersFailed();
+		return { ...emptyResult("repeat-no-gain"), summaryDigest };
+	}
 	const summaryParts: string[] = [];
 	let usage: CompactionUsage | undefined;
 	// T4: on the live main route the summary can be asked inside the cached request prefix, as one call that also
 	// covers a split turn. It is priced against the portable texts with memory's substitute already in them.
-	const live = await chooseLivePrefix();
+	const live = await chooseLivePrefix().catch((error: unknown) => {
+		offersFailed();
+		throw error;
+	});
 	let liveCovered = false;
 	if (live) {
 		try {
@@ -1962,6 +1985,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			summaryParts.push(checkedHistorySummary(liveSummary.text));
 			liveCovered = true;
 		} catch (error) {
+			if (input.signal?.aborted) offersFailed();
 			input.signal?.throwIfAborted();
 			// The failed call reported its own usage; the portable requests below still produce the checkpoint.
 			if (observationTracing())
@@ -1976,8 +2000,6 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	} else commitMemoryOffer?.();
 	// A reply the checkpoint validator refuses is asked for once more with the refusal in the request, on every pass
 	// (CLI-P5). The retry is an ordinary summary call; a failed call (provider, window, cap, stop) is never retried.
-	// A fold that fails after choosing an offer tells it; a fold that commits reports itself through the commit notice.
-	const offerFailed = () => (memoryOffer as MemoryCompactionOffer | null)?.onOutcome?.({ kind: "failed" });
 	const checkedSummary = async (userText: string, history: boolean, check: (text: string) => string) => {
 		let request = userText;
 		for (let attempt = 0; ; attempt++) {
@@ -1988,7 +2010,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 				systemPrompt,
 				maxTokens,
 			).catch((error: unknown) => {
-				offerFailed();
+				offersFailed();
 				throw error;
 			});
 			usage = addCompactionUsage(usage, reply.usage);
@@ -1996,7 +2018,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 				return check(reply.text);
 			} catch (error) {
 				if (attempt > 0 || compactionFailureOf(error, false).cause !== "checkpoint_format") {
-					offerFailed();
+					offersFailed();
 					throw error;
 				}
 				input.signal?.throwIfAborted();
@@ -2032,7 +2054,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	}
 
 	if (memoryOffer !== null && !(memoryOffer as MemoryCompactionOffer).isCurrent()) {
-		offerFailed();
+		offersFailed();
 		throw new Error("memory offer became stale during compaction");
 	}
 
