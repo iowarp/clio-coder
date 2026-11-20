@@ -31,6 +31,26 @@ describe("fleet cancel requests", () => {
 	});
 	afterEach(() => scratch.restore());
 
+	/** Run the command with stdout captured and stderr silenced. */
+	const cancel = async (args: string[], options: { settleWaitMs?: number } = {}) => {
+		const written: string[] = [];
+		const write = process.stdout.write;
+		const writeErr = process.stderr.write;
+		process.stdout.write = ((chunk: string) => {
+			written.push(chunk);
+			return true;
+		}) as typeof process.stdout.write;
+		process.stderr.write = (() => true) as typeof process.stderr.write;
+		let code: number;
+		try {
+			code = await runFleetCancel(args, options);
+		} finally {
+			process.stdout.write = write;
+			process.stderr.write = writeErr;
+		}
+		return { code, out: written.join("") };
+	};
+
 	it("hands the owner a request for its run exactly once and removes the file", () => {
 		const path = join(clioStateDir(), "cancel-requests", "run-active.json");
 		writeRunCancelRequest("run-active", "operator stop");
@@ -66,24 +86,6 @@ describe("fleet cancel requests", () => {
 		strictEqual(readFleetRootRecord("fleet-aa0001")?.state, "sealed");
 		strictEqual(matchFleetRootIds("fleet-aa").length, 2);
 		strictEqual(matchFleetRootIds("fleet-aa0001").join(), "fleet-aa0001");
-		const cancel = async (args: string[]) => {
-			const written: string[] = [];
-			const write = process.stdout.write;
-			const writeErr = process.stderr.write;
-			process.stdout.write = ((chunk: string) => {
-				written.push(chunk);
-				return true;
-			}) as typeof process.stdout.write;
-			process.stderr.write = (() => true) as typeof process.stderr.write;
-			let code: number;
-			try {
-				code = await runFleetCancel(args);
-			} finally {
-				process.stdout.write = write;
-				process.stderr.write = writeErr;
-			}
-			return { code, out: written.join("") };
-		};
 		for (let i = 0; i < 2; i++) {
 			const { code, out } = await cancel(["fleet-aa0001", "--json"]);
 			strictEqual(code, 0);
@@ -105,6 +107,65 @@ describe("fleet cancel requests", () => {
 			const failure = JSON.parse(out);
 			deepStrictEqual([failure.version, failure.ok, failure.error.code], [1, false, slug]);
 		}
+	});
+
+	// C19: the exit agrees with the report's state. Sealed (now or before) exits 0, accepted but settling exits 75,
+	// and a malformed id is a usage error.
+	it("exits 0 for an already sealed run, 75 while a run or root is still settling, and 2 for a malformed id", async () => {
+		ensureClioState();
+		const ledger = openLedger();
+		const created = () =>
+			ledger.create({
+				agentId: "scout",
+				executionRole: "researcher",
+				task: "cancel exit",
+				targetId: "local",
+				wireModelId: "model",
+				runtimeId: "openai",
+				runtimeKind: "http",
+				sessionId: null,
+				cwd: scratch.dir,
+			});
+		const done = created();
+		ledger.update(done.id, { status: "failed", outcome: "failed", endedAt: new Date().toISOString() });
+		const live = created();
+		ledger.update(live.id, {
+			status: "running",
+			lineage: { parentRunId: null, rootRunId: live.id, depth: 0, attempt: 0 },
+		});
+		await ledger.persist();
+		// This process is the live owner, and it never applies the request.
+		await registerAssignment(live.id);
+
+		for (let i = 0; i < 2; i++) {
+			const { code, out } = await cancel([done.id, "--json"]);
+			const report = JSON.parse(out);
+			deepStrictEqual(
+				[code, report.version, report.action, report.state, report.outcome],
+				[0, 1, "already_sealed", "sealed", "failed"],
+			);
+		}
+		strictEqual(takeRunCancelRequest(done.id), null);
+		const sealedText = await cancel([done.id]);
+		deepStrictEqual([sealedText.code, sealedText.out], [0, `run ${done.id} had already sealed failed\n`]);
+
+		const pending = await cancel([live.id, "--json"], { settleWaitMs: 0 });
+		const report = JSON.parse(pending.out);
+		deepStrictEqual([pending.code, report.action, report.state, report.owner], [75, "requested", "pending", "alive"]);
+		const pendingText = await cancel([live.id], { settleWaitMs: 0 });
+		strictEqual(pendingText.code, 75);
+		strictEqual(pendingText.out.startsWith(`cancel requested for run ${live.id};`), true);
+		strictEqual(takeRunCancelRequest(live.id)?.runId, live.id);
+
+		writeFleetRootRecord({ rootId: "fleet-bb0001", playbook: "demo", cwd: scratch.dir });
+		const root = await cancel(["fleet-bb0001", "--json"], { settleWaitMs: 0 });
+		const rootReport = JSON.parse(root.out);
+		deepStrictEqual([root.code, rootReport.action, rootReport.state], [75, "requested", "pending"]);
+		strictEqual(readRootCancelRequest("fleet-bb0001")?.rootId, "fleet-bb0001");
+
+		const malformed = await cancel(["bad id!", "--json"]);
+		const failure = JSON.parse(malformed.out);
+		deepStrictEqual([malformed.code, failure.ok, failure.error.code], [2, false, "usage"]);
 	});
 
 	// A hosted worker publishes the main run as its lineage root, and a running attempt is not yet among the

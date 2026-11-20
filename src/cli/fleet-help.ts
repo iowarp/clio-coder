@@ -103,9 +103,12 @@ step starts and its running steps are canceled.
   --reason <text>  record why the run was canceled
 
 A run's owning process aborts it and the command waits up to 15s for it to seal
-canceled; it exits 1 while the request is still pending. When the owner is gone
-it terminates the orphaned worker's process group and settles the run itself.
-A fleet root that already sealed exits 0 with its recorded outcome.
+canceled. When the owner is gone it terminates the orphaned worker's process
+group and settles the run itself. A run or root that already sealed reports its
+recorded outcome.
+
+Exit codes: 0 sealed (now or already), 75 cancel accepted but still settling,
+1 the cancel failed or nothing matched, 2 usage.
 `,
 };
 
