@@ -120,6 +120,21 @@ describe("evidence integrity boundary", () => {
 		match(labels, /refused_cause=approval_timeout:1 \(a call waited for approval and no one answered in time\)/u);
 	});
 
+	it("reads mutations:no when the only state change was refused and a shell call left the tree unmoved (FL-1)", () => {
+		const draft = fixtureReceiptDraft(fixtureEnvelope("refused-only-mutation"));
+		draft.toolStats = [
+			{ tool: "bash", count: 2, ok: 1, errors: 0, blocked: 1, totalDurationMs: 1 },
+			{ tool: "limitation", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 1 },
+		];
+		draft.toolActivity = { calls: 3, succeeded: 2, failed: 0, blocked: 1, mutatingSucceeded: true };
+		match(runEvidenceLabels(finishedRun(draft), PRODUCER_INTEGRITY).join(" "), /blocked:1 mutations:yes/u);
+		draft.checkoutChanges = { cwd: "/repo", changedPaths: [], attribution: "observed-delta" };
+		match(runEvidenceLabels(finishedRun(draft), PRODUCER_INTEGRITY).join(" "), /blocked:1 mutations:no/u);
+		draft.toolStats.push({ tool: "edit", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 1 });
+		match(runEvidenceLabels(finishedRun(draft), PRODUCER_INTEGRITY).join(" "), /mutations:yes/u);
+	});
+
+
 	it("treats run ids as identities, never paths", async () => {
 		for (const id of ["../receipt", "nested/receipt", "/absolute"]) {
 			await rejects(inspectRunEvidence("/state", id), /invalid run id|path separators/);

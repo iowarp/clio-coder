@@ -10,6 +10,7 @@ import {
 } from "../../src/domains/dispatch/failure-classification.js";
 import type { RunTerminationEvidence } from "../../src/domains/dispatch/outcome.js";
 import {
+	blockedStateChangingCalls,
 	blockedWriteAttempts,
 	recordToolFinish,
 	summarizeToolActivity,
@@ -125,6 +126,26 @@ describe("dispatch failure classification", () => {
 		match(workerNoWorkDetail(input) ?? "", /ms cannot parse compound strings/);
 		strictEqual(workerNoWorkDetail({ ...input, mutatedPathCount: 1 }), null);
 		strictEqual(workerNoWorkDetail({ ...input, finalText: "Already implemented; no changes needed." }), null);
+	});
+
+	it("fails an edit worker on refusals only when every state-changing call was refused and it did not report no change was needed (FL-1)", () => {
+		const classify = (tool: string): ActionClass => (tool === "read" ? "read" : "execute");
+		const stats = (...rows: Array<Partial<ToolCallStat> & { tool: string }>): Map<string, ToolCallStat> =>
+			new Map(rows.map((row) => [row.tool, { count: 0, ok: 0, errors: 0, blocked: 0, totalDurationMs: 0, ...row }]));
+		const refusedOnly = stats({ tool: "read", count: 3, ok: 3 }, { tool: "bash", count: 1, blocked: 1 });
+		strictEqual(blockedStateChangingCalls(refusedOnly, classify), 1);
+		const ranAndFailed = stats({ tool: "bash", count: 2, errors: 1, blocked: 1 });
+		strictEqual(blockedStateChangingCalls(ranAndFailed, classify), 0);
+		const input = {
+			activity: { calls: 4, succeeded: 3, failed: 0, blocked: 1, mutatingSucceeded: false },
+			limitationRecorded: false,
+			mutatedPathCount: 0,
+			blockedStateChanging: 1,
+			finalText: "Done: the parser now handles the case.",
+		};
+		match(workerNoWorkDetail(input) ?? "", /refused by policy and nothing changed/u);
+		const noChange = JSON.stringify({ mutatedPaths: [], summary: "No changes needed: the parser already handles it." });
+		strictEqual(workerNoWorkDetail({ ...input, finalText: noChange }), null);
 	});
 
 	it("does not retry no-work outcomes or charge the provider breaker", () => {

@@ -19,6 +19,7 @@ import {
 	normalizeTrustStatus,
 	type RunIntegrity,
 } from "../domains/evidence/trust-status.js";
+import { classify } from "../domains/safety/action-classifier.js";
 import { telemetryObjectRef } from "../domains/telemetry/objects.js";
 import { telemetryObjectsDirectory, telemetryRunDirectory } from "../domains/telemetry/paths.js";
 import { readRunRecord } from "../domains/telemetry/run-record.js";
@@ -243,6 +244,19 @@ function admissionLabels(run: FinishedRun): string[] {
 }
 
 /**
+ * Whether a state-changing call of the run landed. `mutatingSucceeded` counts any successful shell call, so a worker
+ * whose only write was refused read `mutations:yes` beside a passing `git status`. A shell call may have changed
+ * anything, so it counts until the run's measured tree delta says the tree did not move, the rule
+ * `blockedWriteAttempts` settles the run's outcome by; a write-class call that succeeded always counts.
+ */
+function mutationLanded(run: FinishedRun, activity: NonNullable<FinishedRun["facts"]["toolActivity"]>): boolean {
+	if (!activity.mutatingSucceeded) return false;
+	const delta = run.delivered?.worktree?.changedPaths ?? run.delivered?.checkoutChanges?.changedPaths;
+	if (delta === undefined || delta.length > 0) return true;
+	return run.facts.tools.some((stat) => stat.ok > 0 && classify({ tool: stat.tool }).actionClass === "write");
+}
+
+/**
  * Sealed work facts for the run line. `exit=0` alone has proven to be a
  * misleading headline: a worker that never executed a call, or whose every
  * mutating call was blocked, still exits 0 and still claims in prose that it
@@ -253,14 +267,15 @@ function activityLabels(run: FinishedRun, status: CanonicalTrustStatus): string[
 	const labels: string[] = [];
 	const activity = run.facts.toolActivity;
 	if (activity !== null) {
+		const landed = mutationLanded(run, activity);
 		labels.push(
 			`work=calls:${activity.calls} ok:${activity.succeeded} failed:${activity.failed} blocked:${activity.blocked} mutations:${
-				activity.mutatingSucceeded ? "yes" : "no"
+				landed ? "yes" : "no"
 			}${(run.unfinishedCalls ?? 0) > 0 ? ` unfinished:${run.unfinishedCalls}` : ""}`,
 		);
 		// The case this whole label set exists for: the task was to change
 		// something and nothing changed, under an exit code that says success.
-		if (!activity.mutatingSucceeded && isMutationClassRun(run, status)) labels.push("mutation_effect=none");
+		if (!landed && isMutationClassRun(run, status)) labels.push("mutation_effect=none");
 	}
 	// A timed-out ask is always denied. Without its cause, a refused call read as a policy or routing refusal (bt-11 t).
 	const timedOut = run.facts.escalations?.timedOut ?? 0;
