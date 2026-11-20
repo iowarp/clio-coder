@@ -737,6 +737,33 @@ function grepLineVisible(keys: ReadonlySet<string>, file: string, line: number):
 	return keys.has(`${file}\0${line}`);
 }
 
+/** Recalls of this run's own evicted observations past which the host steps in once (CLI-H3). */
+const THRASH_RECALL_LIMIT = 4;
+/** Share of the window a request may reach without any workspace change before the host steps in once (CLI-H3). */
+const THRASH_CONTEXT_FRACTION = 0.8;
+const THRASH_CHANGED_PATHS_SHOWN = 10;
+
+/** The one host turn a thrashing worker gets: what the host saw, then write now or report what it has. */
+function thrashHostNote(cause: "recall" | "context", recalls: number, canWrite: boolean): string {
+	const seen =
+		cause === "recall"
+			? `this run has recalled its own evicted observations ${recalls} times`
+			: `this run's context passed ${Math.round(THRASH_CONTEXT_FRACTION * 100)}% of the model window without a workspace change`;
+	const ask = canWrite
+		? "Write the change now from what you already hold, or stop and return a partial report that names what is done, what is left and the files involved."
+		: "Stop gathering and return your report now, marking what is unfinished.";
+	return `Host note: ${seen}. Recalling or re-reading more will not make room; the run fails when the window is full. ${ask}`;
+}
+
+/** The paths an exhausted run changed, for its outcome detail, so the parent knows what the partial work touched. */
+function exhaustedChangesDetail(mutatedPaths: ReadonlySet<string>, cwd: string): string {
+	if (mutatedPaths.size === 0) return "changed nothing before stopping";
+	const shown = [...mutatedPaths].sort().slice(0, THRASH_CHANGED_PATHS_SHOWN);
+	const names = shown.map((file) => path.relative(cwd, file) || file).join(", ");
+	const more = mutatedPaths.size - shown.length;
+	return `changed before stopping: ${names}${more > 0 ? ` (+${more} more)` : ""}`;
+}
+
 /** Return the admitted worker specification budget unchanged. */
 function resolveWorkerRuntimeBudget(input: Pick<WorkerRunInput, "budget">): WorkerBudget {
 	return input.budget;
@@ -834,6 +861,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	let callUsageReported = false;
 	let lockedSynthesisReprompts = 0;
 	let workerBoundFailure: string | null = null;
+	// CLI-H3: recalls of this run's evictions, the window the last request was fitted to, whether a request reached
+	// the thrash share of it, and whether the one host turn has gone out.
+	let evictedRecalls = 0;
+	const pendingRecallCalls = new Set<string>();
+	let contextPressureWindow = 0;
+	let contextPressureCrossed = false;
+	let thrashNudged = false;
 	// Last HTTP status a provider answered. Pi's error messages drop it on some
 	// APIs (openai-codex keeps only the body text), and the dispatch retry policy
 	// needs it to tell a rejected request from a transient failure.
@@ -1332,6 +1366,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		},
 		// Every fold decision is journaled under the run and forwarded on its receipt-bearing telemetry frame.
 		onDecision: (decision) => {
+			if (contextPressureWindow > 0 && decision.tokensBefore >= contextPressureWindow * THRASH_CONTEXT_FRACTION)
+				contextPressureCrossed = true;
 			if (input.telemetryContext) telemetryHub().emit("context.fold", decision, input.telemetryContext);
 		},
 	});
@@ -1516,15 +1552,26 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				},
 			};
 			let messages: AgentMessage[];
+			contextPressureWindow = window;
 			try {
 				messages = contextGuard(pressure);
 			} catch (error) {
 				if (error instanceof WorkerContextExhaustedError) {
 					workerBoundFailure = error.message;
-					emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "worker_context_exhausted" } });
+					// The parent seals this with the run's last narration, so a run that dies at the wall still hands back
+					// what it changed (CLI-H3).
+					emit({
+						type: "clio_coder_run_outcome",
+						payload: {
+							outcomeCode: "worker_context_exhausted",
+							detail: exhaustedChangesDetail(runEffects.snapshot().mutatedPaths, contractCwd),
+						},
+					});
 				}
 				throw error;
 			}
+			// A request admitted without a fold reports no decision, so the thrash share reads the admitted count too.
+			if (window > 0 && contextGuard.inputTokens >= window * THRASH_CONTEXT_FRACTION) contextPressureCrossed = true;
 			// Stable sampling applies to every context-generation round, terminal
 			// repairs included. It merges over the caller's options so it beats quirk
 			// profiles and run overrides, which the adapters apply underneath.
@@ -1997,6 +2044,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			} else if (call.toolName === ToolNames.Grep || call.toolName === ToolNames.Bash) {
 				// A bash `grep -n` reports the lines it printed as observedLines, as the grep tool does (FL-12).
 				pendingGrepCalls.add(event.toolCallId);
+			} else if (
+				call.toolName === ToolNames.Context &&
+				call.args?.scope === "recall" &&
+				typeof call.args.ref === "string"
+			) {
+				pendingRecallCalls.add(event.toolCallId);
 			}
 		}
 		if (event.type === "tool_execution_end") {
@@ -2008,6 +2061,45 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				if (grepped) recordObservedGrep((event.result as { details?: unknown } | null)?.details);
 			}
 			observeChainChildren(event.toolName, event.result);
+			// Only a recall that returned an archived observation brings evicted content back.
+			if (pendingRecallCalls.delete(event.toolCallId) && event.isError !== true) evictedRecalls += 1;
+			// One host turn per run, delivered after this tool batch, never once the run is answering or bound.
+			const cause =
+				evictedRecalls > THRASH_RECALL_LIMIT
+					? ("recall" as const)
+					: contextPressureCrossed && runEffects.snapshot().mutatedPaths.size === 0
+						? ("context" as const)
+						: null;
+			if (
+				cause !== null &&
+				!thrashNudged &&
+				!synthesisToolLock &&
+				!helperTerminalPhase &&
+				workerBoundFailure === null &&
+				refusalReportRound === null
+			) {
+				thrashNudged = true;
+				const canWrite =
+					input.readOnly !== true && activeWorkerTools.some((tool) => tool === ToolNames.Edit || tool === ToolNames.Write);
+				agent.steer({ role: "user", content: thrashHostNote(cause, evictedRecalls, canWrite), timestamp: Date.now() });
+				process.stderr.write(
+					`[worker] thrash guard: ${cause === "recall" ? `${evictedRecalls} recalls of evicted observations` : "context past the thrash share with no change"}; told the worker to write now or report\n`,
+				);
+				if (input.telemetryContext)
+					telemetryHub().emit(
+						"middleware.fired",
+						{
+							hook: "after_tool",
+							phase: "sync",
+							ruleId: "worker.thrash",
+							effects: ["inject_reminder"],
+							severity: "warn",
+							evidence: cause === "recall" ? "count:evicted-recall@worker" : "share:context-window@worker",
+							...(cause === "recall" ? { tool: ToolNames.Context } : {}),
+						},
+						input.telemetryContext,
+					);
+			}
 		}
 		// Synthesis-locked run: the round ships no tool surface, so a model that
 		// calls a tool anyway lands its chat template's tool-call syntax in the

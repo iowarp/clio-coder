@@ -1776,6 +1776,46 @@ function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | u
 	return `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(token, presentation.label)}`;
 }
 
+/** Share of the worker's window its last reply occupied; warning tone from this share up (CLI-H3). */
+const CONTEXT_FILL_WARNING = 0.8;
+
+/** A live worker's context fill ahead of its activity, so a parent sees a run filling up before it hits the wall. */
+function withContextFill(theme: ClioTheme, row: DispatchBoardRow, cell: TableCell): TableCell {
+	const window = row.contextWindow ?? 0;
+	if (row.lastContextTokens === null || !(window > 0)) return cell;
+	const fill = row.lastContextTokens / window;
+	const label = theme.fg(
+		fill >= CONTEXT_FILL_WARNING ? "warning" : "muted",
+		`ctx ${Math.min(100, Math.round(fill * 100))}%`,
+	);
+	return { ...cell, text: cell.text.length > 0 ? `${label} · ${cell.text}` : label };
+}
+
+function liveActivityCell(
+	theme: ClioTheme,
+	row: DispatchBoardRow,
+	room: number | undefined,
+	task: string | null,
+): TableCell {
+	const progress = row.progress;
+	if (progress) {
+		if (progress.awaitingApproval === true) {
+			return { text: approvalWaitWords(progress, room === undefined ? {} : { room }), tone: "warning" };
+		}
+		if (progress.currentAction) return { text: theme.base("body", actionPhrase(progress.currentAction, "running")) };
+		const words = sanitizeCallTargetText(workerActivityWords(progress, { history: row.routeFirstOutput ?? null }));
+		const line =
+			progress.phase === "writing"
+				? firstLine(redactStreamingSecretString(progress.tailText, progress.completed === true))
+				: "";
+		// A worker writing its JSON report says it is writing; the report's first line is not prose.
+		const tail = isStructuredAnswerText(line) ? "" : line;
+		return { text: `${theme.fg("dispatchAction", words)}${tail ? ` ${theme.fg("assistantProse", tail)}` : ""}` };
+	}
+	if (row.currentTool) return { text: `${sanitizeCallTargetText(row.currentTool)} running` };
+	return { text: task ?? "" };
+}
+
 /** What a run is doing, or how it ended, in one clause the row may clip. `room` picks an approval wait's form. */
 function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number, room?: number): TableCell {
 	if (row.plan !== undefined) {
@@ -1785,27 +1825,10 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number, r
 	switch (row.status) {
 		case "running":
 		case "stale":
-		case "cancelling": {
+			return withContextFill(theme, row, liveActivityCell(theme, row, room, task));
+		case "cancelling":
 			// The worker is being stopped; its last phase would read as work finishing normally.
-			if (row.status === "cancelling") return { text: "waiting for it to exit", tone: "warning" };
-			const progress = row.progress;
-			if (progress) {
-				if (progress.awaitingApproval === true) {
-					return { text: approvalWaitWords(progress, room === undefined ? {} : { room }), tone: "warning" };
-				}
-				if (progress.currentAction) return { text: theme.base("body", actionPhrase(progress.currentAction, "running")) };
-				const words = sanitizeCallTargetText(workerActivityWords(progress, { history: row.routeFirstOutput ?? null }));
-				const line =
-					progress.phase === "writing"
-						? firstLine(redactStreamingSecretString(progress.tailText, progress.completed === true))
-						: "";
-				// A worker writing its JSON report says it is writing; the report's first line is not prose.
-				const tail = isStructuredAnswerText(line) ? "" : line;
-				return { text: `${theme.fg("dispatchAction", words)}${tail ? ` ${theme.fg("assistantProse", tail)}` : ""}` };
-			}
-			if (row.currentTool) return { text: `${sanitizeCallTargetText(row.currentTool)} running` };
-			return { text: task ?? "" };
-		}
+			return { text: "waiting for it to exit", tone: "warning" };
 		case "retrying":
 			return row.retry
 				? {
