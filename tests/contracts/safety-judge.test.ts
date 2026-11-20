@@ -629,43 +629,75 @@ test("the judge reads typed messages and ask_user answers in ledger order, so th
 
 	// An approval is a scope: the chosen option's own words reach the judge beside the question's command,
 	// a gateway call included, and the judge is told a variant inside them is operator-named (FX-36).
+	// The card reads as ask_user normalized it, so padding in the call's arguments still binds.
 	const asked = "Run the live check unsandboxed? Command: bash scripts/live/resume.sh";
 	const options = [
 		{
-			label: "Yes, run resume.sh unsandboxed",
-			description: "Runs scripts/live/resume.sh and its reruns under $TMPDIR/live",
+			label: "  Yes, run resume.sh unsandboxed ",
+			description: " Runs scripts/live/resume.sh and its reruns under $TMPDIR/live ",
 		},
 		{ label: "No", description: "Skip the live check" },
 	];
-	entries = [
+	const gatewayRound = (questions: unknown[], answers: unknown[]): SessionEntry[] => [
 		entry("u1", null, "user", { text: "Prove it with the live resume check." }),
 		entry("c1", "u1", "tool_call", {
 			toolCallId: "k1",
 			name: ToolNames.Gateway,
-			args: { op: "call", capability: ToolNames.AskUser, args: { questions: [{ question: asked, options }] } },
+			args: { op: "call", capability: ToolNames.AskUser, args: { questions } },
 		}),
 		entry("r1", "c1", "tool_result", {
 			toolCallId: "k1",
 			toolName: ToolNames.Gateway,
 			isError: false,
-			result: {
-				details: {
-					capability: ToolNames.AskUser,
-					answers: [
-						{ question: asked, answer: "Yes, run resume.sh unsandboxed", options: ["Yes, run resume.sh unsandboxed"] },
-					],
-				},
-			},
+			result: { details: { capability: ToolNames.AskUser, answers } },
 		}),
 	];
+	const yes = "Yes, run resume.sh unsandboxed";
+	entries = gatewayRound([{ question: ` ${asked}\n`, options }], [{ question: asked, answer: yes, options: [yes] }]);
 	await review("r1");
 	match(
 		prompts[2] ?? "",
-		/the operator answered: Yes, run resume\.sh unsandboxed\nThe option "Yes, run resume\.sh unsandboxed" says: Runs scripts\/live\/resume\.sh and its reruns under \$TMPDIR\/live/u,
+		/the operator answered: Yes, run resume\.sh unsandboxed\nThe option "Yes, run resume\.sh unsandboxed" says: Runs scripts\/live\/resume\.sh and its reruns under \$TMPDIR\/live\n/u,
 	);
 	doesNotMatch(prompts[2] ?? "", /Skip the live check/u);
 	match(systems[2] ?? "", /a command quoted in the question is one example of the action they approved/u);
 	match(systems[2] ?? "", /an outward step such as a push, publish, upload or message that the approval does not name/u);
+
+	// Two questions on one card with the same text and label, one answered: which card was answered is
+	// ambiguous, so neither description rides along.
+	entries = gatewayRound(
+		[
+			{ question: asked, options: [{ label: yes, description: "Runs resume.sh once" }] },
+			{ question: asked, options: [{ label: yes, description: "Runs every script under scripts/" }] },
+		],
+		[{ question: asked, answer: yes, options: [yes] }],
+	);
+	await review("r1");
+	match(prompts[3] ?? "", /the operator answered: Yes, run resume\.sh unsandboxed/u);
+	doesNotMatch(prompts[3] ?? "", /The option|Runs resume\.sh once|Runs every script/u);
+
+	// What an option says is the agent's text: the judge reads it, but a description that speaks of the
+	// sandbox under a question and label that do not never stands in for the operator's word on an escape.
+	const plain = "Run the live check? Command: bash scripts/live/resume.sh";
+	entries = gatewayRound(
+		[{ question: plain, options: [{ label: "Yes, run it", description: "Runs resume.sh outside the sandbox" }] }],
+		[{ question: plain, answer: "Yes, run it", options: ["Yes, run it"] }],
+	);
+	const escaped = await seat.review({
+		tool: ToolNames.Bash,
+		args: { command: "PROMPT=hi bash scripts/live/resume.sh", unsandboxed: true },
+		decision: {
+			kind: "ask",
+			classification: { actionClass: "execute", reasons: [SANDBOX_ESCAPE_REASON] },
+			rejection: { short: "asks", detail: SANDBOX_ESCAPE_REASON, hints: [] },
+			policy: { ruleId: SANDBOX_ESCAPE_RULE_ID, reasons: [SANDBOX_ESCAPE_REASON] } as unknown as SafetyPolicyDecision,
+		},
+		approvalAuthority: "operator",
+		turnId: "r1",
+	});
+	match(prompts[4] ?? "", /The option "Yes, run it" says: Runs resume\.sh outside the sandbox/u);
+	strictEqual(escaped.kind, "park");
+	match(escaped.kind === "park" ? escaped.gateReason : "", /no operator message uses the word sandbox or unconfined/u);
 });
 
 test("safety.judge parses from user settings and a project layer cannot set its rules", async (t) => {

@@ -17,6 +17,7 @@ import {
 	resolveSafetyJudgeConfig,
 	type SafetyJudgeCompletion,
 	type SafetyJudgeNote,
+	type SafetyJudgeOperatorMessage,
 	type SafetyJudgeScreen,
 	type SafetyJudgeSeat,
 } from "../domains/safety/safety-judge.js";
@@ -27,6 +28,7 @@ import { activePath, extendsSnapshot, findLastEntry } from "../domains/session/t
 import type { EngineDestination, SystemOne } from "../domains/system-one/index.js";
 import type { JudgeScreenResult } from "../domains/system-one/points/index.js";
 import { JUDGE_SCREEN_POINT, judgeScreenResults } from "../domains/system-one/points/index.js";
+import { type AskUserQuestion, normalizeAskUserQuestions } from "../tools/ask-user.js";
 import { effectiveToolCall, expandChainMessages } from "../tools/surface.js";
 import { capturedJudgeCallId, withJudgeCallCapture, withSidePurpose } from "./side-request-admission.js";
 
@@ -41,7 +43,8 @@ export const SAFETY_JUDGE_NOTE_CUSTOM_TYPE = "clio-coder.safety-judge";
  * prompt, follow-up and observation, and a yolo continuation are skipped, and
  * injected reminders and expansions are stripped by `operatorTextOfUserPayload`.
  * And what the operator answered on an ask_user round, a gateway call or chain
- * step included, with what the options they chose say (`operatorAnswersOfToolResult`). Assistant messages, thinking and
+ * step included, with what the options they chose say as context beside their words
+ * (`operatorAnswersOfToolResult`). Assistant messages, thinking and
  * every other tool result never reach the judge.
  *
  * `currentTurnId` is the turn the judged call serves, from the chat loop's
@@ -54,7 +57,7 @@ export function operatorMessagesForJudge(
 	entries: ReadonlyArray<SessionEntry>,
 	leafTurnId?: string,
 	currentTurnId?: string,
-): string[] {
+): SafetyJudgeOperatorMessage[] {
 	let path = activePath(entries, leafTurnId);
 	const holds = (rows: ReadonlyArray<SessionEntry>) =>
 		findLastEntry(rows, (entry) => entry.turnId === currentTurnId) !== undefined;
@@ -71,12 +74,12 @@ export function operatorMessagesForJudge(
 	return [...fold.texts];
 }
 
-/** The questions each ask_user call put, by call id, so its answer reads with the option text the operator chose. */
-type AskedQuestions = Map<string, ReadonlyArray<unknown>>;
+/** The questions each ask_user call put, as ask_user normalized them, by call id, so its answer reads with the option text the operator chose. */
+type AskedQuestions = Map<string, ReadonlyArray<AskUserQuestion>>;
 
 interface JudgeFold {
 	path: ReadonlyArray<SessionEntry>;
-	texts: string[];
+	texts: SafetyJudgeOperatorMessage[];
 	asked: AskedQuestions;
 }
 
@@ -91,8 +94,8 @@ let judgeFold: JudgeFold | null = null;
 function operatorTextsOf(
 	path: ReadonlyArray<SessionEntry>,
 	asked: AskedQuestions,
-): { texts: string[]; asked: AskedQuestions } {
-	const texts: string[] = [];
+): { texts: SafetyJudgeOperatorMessage[]; asked: AskedQuestions } {
+	const texts: SafetyJudgeOperatorMessage[] = [];
 	for (const entry of expandChainMessages(path)) {
 		if (entry.kind !== "message") continue;
 		if (entry.role === "tool_call") {
@@ -117,44 +120,71 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function rememberAskedQuestions(payload: unknown, asked: AskedQuestions): void {
 	if (!isRecord(payload) || typeof payload.toolCallId !== "string" || typeof payload.name !== "string") return;
 	const call = effectiveToolCall(payload.name, payload.args);
-	if (call.toolName === ToolNames.AskUser && Array.isArray(call.args?.questions))
-		asked.set(payload.toolCallId, call.args.questions);
+	if (call.toolName !== ToolNames.AskUser || call.args === undefined) return;
+	// The card the operator saw is what ask_user made of these arguments, trimmed by its own rules.
+	const { questions } = normalizeAskUserQuestions(call.args);
+	if (questions !== undefined) asked.set(payload.toolCallId, questions);
+}
+
+/** The one entry `matches` admits, or nothing when none or several do. */
+function onlyMatch<T>(entries: ReadonlyArray<T>, matches: (entry: T) => boolean): T | undefined {
+	const found = entries.filter(matches);
+	return found.length === 1 ? found[0] : undefined;
 }
 
 /**
  * What the options the operator chose say, as the call that asked put them. The
  * operator read these words on the card, so an approval carries the script, paths
- * and purpose its option states, not only the label (FX-36).
+ * and purpose its option states, not only the label (FX-36). The answer binds to
+ * its own question: by position when every question was answered (ask_user keeps
+ * question order and drops only empty answers), else by a question text no other
+ * question on the card shares; an option binds by a label no other option on that
+ * question shares. Anything ambiguous adds nothing.
  */
-function chosenOptionText(questions: ReadonlyArray<unknown> | undefined, question: string, chosen: unknown): string {
+function chosenOptionText(
+	questions: ReadonlyArray<AskUserQuestion> | undefined,
+	answered: { count: number; index: number },
+	question: string,
+	chosen: unknown,
+): string {
 	if (questions === undefined || !Array.isArray(chosen)) return "";
-	const asked = questions.find((entry) => isRecord(entry) && entry.question === question);
-	if (!isRecord(asked) || !Array.isArray(asked.options)) return "";
+	const text = question.trim();
+	const card =
+		answered.count === questions.length
+			? questions[answered.index]
+			: onlyMatch(questions, (entry) => entry.question === text);
+	if (card?.options === undefined || card.question !== text) return "";
+	const options = card.options;
 	const said = chosen.flatMap((label) => {
-		const option = (asked.options as unknown[]).find((entry) => isRecord(entry) && entry.label === label);
-		if (!isRecord(option) || typeof option.description !== "string" || option.description.trim().length === 0) return [];
-		return [`The option "${String(label)}" says: ${option.description.trim()}`];
+		if (typeof label !== "string") return [];
+		const option = onlyMatch(options, (entry) => entry.label === label.trim());
+		return option?.description === undefined ? [] : [`The option "${option.label}" says: ${option.description}`];
 	});
-	return said.length === 0 ? "" : `\n${said.join("\n")}`;
+	return said.join("\n");
 }
 
 /**
  * What the operator answered in one recorded ask_user result. A round Clio
  * answered for an absent operator (#421), a cancelled round and an answer Clio
  * picked (`auto`) are no operator's word, as the registry's own reading holds.
+ * What a chosen option says is the agent's text, so it rides as context: the
+ * judge reads it, and no guard that needs the operator's own words counts it.
  */
-function operatorAnswersOfToolResult(payload: unknown, asked: AskedQuestions): string[] {
+function operatorAnswersOfToolResult(payload: unknown, asked: AskedQuestions): SafetyJudgeOperatorMessage[] {
 	if (!isRecord(payload) || typeof payload.toolName !== "string" || payload.isError === true) return [];
 	const details = isRecord(payload.result) && isRecord(payload.result.details) ? payload.result.details : undefined;
 	if (details === undefined || effectiveToolCall(payload.toolName, undefined, details).toolName !== ToolNames.AskUser)
 		return [];
 	if (details.unattended !== undefined || details.cancelled === true || !Array.isArray(details.answers)) return [];
 	const questions = typeof payload.toolCallId === "string" ? asked.get(payload.toolCallId) : undefined;
-	return details.answers.flatMap((raw: unknown) => {
+	const answers: unknown[] = details.answers;
+	return answers.flatMap((raw: unknown, index): SafetyJudgeOperatorMessage[] => {
 		if (!isRecord(raw) || raw.auto === true) return [];
 		const { question, answer } = raw;
 		if (typeof question !== "string" || typeof answer !== "string" || answer.trim().length === 0) return [];
-		return [`Asked "${question}", the operator answered: ${answer}${chosenOptionText(questions, question, raw.options)}`];
+		const words = `Asked "${question}", the operator answered: ${answer}`;
+		const context = chosenOptionText(questions, { count: answers.length, index }, question, raw.options);
+		return [context.length > 0 ? { words, context } : words];
 	});
 }
 

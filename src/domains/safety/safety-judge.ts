@@ -323,6 +323,14 @@ export type SafetyJudgeScreen = (request: {
 	signal: AbortSignal;
 }) => Promise<{ source: string } | null> | null;
 
+/**
+ * One operator message for the judge. A string is the operator's own words. `context` is
+ * agent-authored text the operator saw beside their words, such as what an ask_user option
+ * they chose says: the judge reads it after the words, but no guard that needs the operator's
+ * own words (the sandbox mention, an outside path they spelled) ever counts it.
+ */
+export type SafetyJudgeOperatorMessage = string | { readonly words: string; readonly context: string };
+
 export interface SafetyJudgeDeps {
 	config: () => SafetyJudgeConfig;
 	complete: SafetyJudgeCompletion;
@@ -332,7 +340,7 @@ export interface SafetyJudgeDeps {
 	 * through the turn the call serves when the call names it. Never assistant
 	 * text or tool output.
 	 */
-	operatorMessages: (call: { turnId?: string }) => ReadonlyArray<string>;
+	operatorMessages: (call: { turnId?: string }) => ReadonlyArray<SafetyJudgeOperatorMessage>;
 	/** The current session, so block counts never carry from one session to another. */
 	session: () => string | null;
 	consequences?: (call: ClassifierCall) => ReadonlyArray<string>;
@@ -452,9 +460,11 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 				}
 				const system = safetyJudgeSystemPrompt(config);
 				const turn = subject.turnId !== undefined ? { turnId: subject.turnId } : {};
-				const operatorMessages = boundOperatorMessages(safeRead(() => deps.operatorMessages(turn), []));
+				const { shown: operatorMessages, words: operatorWords } = boundOperatorMessages(
+					safeRead(() => deps.operatorMessages(turn), []),
+				);
 				prompted = { operatorMessages: operatorMessages.length };
-				const user = safetyJudgeUserPrompt({ operatorMessages, subject, consequences });
+				const user = safetyJudgeUserPrompt({ operatorMessages, operatorWords, subject, consequences });
 
 				const controller = new AbortController();
 				const timeoutMs = deps.timeoutMs ?? SAFETY_JUDGE_TIMEOUT_MS;
@@ -533,12 +543,13 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 					const source = parsed.rule === OPERATOR_NAMED_RULE ? null : screened.source;
 					// A sandbox escape runs as the operator, with their credentials: a repository file or
 					// the model's own reading cannot grant it, so any other allow goes to the operator.
-					// operator-named stands only when an operator message the judge read speaks of the sandbox.
+					// operator-named stands only when the operator's own words the judge read speak of the sandbox,
+					// never the agent-authored text of an option they chose.
 					const citedOperator = parsed.rule === OPERATOR_NAMED_RULE;
 					const unnamedEscape =
 						source === null &&
 						asksToLeaveSandbox(subject.decision) &&
-						!(citedOperator && operatorMentionsSandbox(operatorMessages));
+						!(citedOperator && operatorMentionsSandbox(operatorWords));
 					record({
 						...base,
 						...prompted,
@@ -571,7 +582,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 					subject.worker === undefined &&
 					!HANDOFF_EXCLUDED_RULES.has(parsed.rule) &&
 					asksToLeaveSandbox(subject.decision)
-						? operatorNamedOutsideTargets(subject, operatorMessages)
+						? operatorNamedOutsideTargets(subject, operatorWords)
 						: [];
 				if (namedTargets.length > 0) {
 					record({ ...base, ...prompted, verdict: "block", rule: parsed.rule, latencyMs, namedTarget: "parked" });
@@ -742,25 +753,40 @@ function safetyJudgeRefusal(
  * (up to a hard ceiling), then older messages while they fit the budget, the
  * first one that does not fit cut to what is left.
  */
-function boundOperatorMessages(messages: ReadonlyArray<string>, budgetBytes = SAFETY_JUDGE_OPERATOR_BYTES): string[] {
-	const texts = messages.map((text) => text.trim()).filter((text) => text.length > 0);
+function boundOperatorMessages(
+	messages: ReadonlyArray<SafetyJudgeOperatorMessage>,
+	budgetBytes = SAFETY_JUDGE_OPERATOR_BYTES,
+): { shown: string[]; words: string[] } {
+	const texts = messages.flatMap((message) => {
+		const words = (typeof message === "string" ? message : message.words).trim();
+		const context = typeof message === "string" ? "" : message.context.trim();
+		if (words.length === 0) return [];
+		return [{ words, shown: context.length > 0 ? `${words}\n${context}` : words }];
+	});
+	// The words open what is shown, so a cut keeps of them exactly what the judge read.
+	const cut = (text: { words: string; shown: string }, maxBytes: number) => {
+		const shown = headBytes(text.shown, maxBytes);
+		if (shown === text.shown) return text;
+		const head = shown.slice(0, -1);
+		return { shown, words: head.length >= text.words.length ? text.words : `${head}…` };
+	};
 	const newest = texts.at(-1);
-	if (newest === undefined) return [];
-	const kept = [headBytes(newest, NEWEST_MESSAGE_MAX_BYTES)];
-	let used = Buffer.byteLength(kept[0] as string, "utf8");
+	if (newest === undefined) return { shown: [], words: [] };
+	const kept = [cut(newest, NEWEST_MESSAGE_MAX_BYTES)];
+	let used = Buffer.byteLength(kept[0]?.shown ?? "", "utf8");
 	for (let index = texts.length - 2; index >= 0 && kept.length < OPERATOR_MESSAGE_LIMIT; index -= 1) {
-		const text = texts[index] as string;
-		const size = Buffer.byteLength(text, "utf8");
+		const text = texts[index] as { words: string; shown: string };
+		const size = Buffer.byteLength(text.shown, "utf8");
 		if (used + size <= budgetBytes) {
 			kept.unshift(text);
 			used += size;
 			continue;
 		}
 		const left = budgetBytes - used;
-		if (left >= 200) kept.unshift(headBytes(text, left));
+		if (left >= 200) kept.unshift(cut(text, left));
 		break;
 	}
-	return kept;
+	return { shown: kept.map((text) => text.shown), words: kept.map((text) => text.words) };
 }
 
 function headBytes(text: string, maxBytes: number): string {
@@ -838,6 +864,8 @@ function rootsSection(roots: SafetyJudgeRoots): string {
 /** The dynamic part: the operator's messages, then the call. */
 function safetyJudgeUserPrompt(input: {
 	operatorMessages: ReadonlyArray<string>;
+	/** The operator's own words in those messages, without the context shown beside them. */
+	operatorWords: ReadonlyArray<string>;
 	subject: Pick<SafetyJudgeSubject, "tool" | "args" | "decision" | "worker" | "mcpTool">;
 	consequences: ReadonlyArray<string>;
 }): string {
@@ -872,7 +900,7 @@ function safetyJudgeUserPrompt(input: {
 			? [`MCP tool, trusted with action class ${boundedLine(subject.mcpTool.actionClass, 40)}`]
 			: []),
 		...(askRule !== undefined ? [`rule that asked: ${askRule}`] : []),
-		...operatorNamedOutsideTargets(subject, input.operatorMessages).map(
+		...operatorNamedOutsideTargets(subject, input.operatorWords).map(
 			(target) => `operator-named path: an operator message spells ${boundedLine(target, 200)} verbatim`,
 		),
 	];
