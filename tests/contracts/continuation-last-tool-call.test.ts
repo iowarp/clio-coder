@@ -22,9 +22,12 @@ const SECRET = "sk-ant-api03-continuationfixture0123456789abcdefghijklmnop";
 /**
  * A yolo turn the tool budget stopped after a failed bash call, through the real chat loop and turn runtime. With
  * `declared`, the same turn also calls `finish` alone while a required tool is still pending, and the fixture records
- * the turn runtime's finishTurn decision.
+ * the turn runtime's finishTurn decision. With `handover`, an operator message is queued when that declared turn
+ * finishes and carries the run into a second, undeclared turn that ends with a required tool still pending.
  */
-async function stoppedTurn(dir: string, declared: boolean) {
+async function stoppedTurn(dir: string, mode: "undeclared" | "declared" | "handover") {
+	const declared = mode !== "undeclared";
+	let queued = false;
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	const context = dispatchStubContext({ settings });
@@ -89,6 +92,7 @@ async function stoppedTurn(dir: string, declared: boolean) {
 				},
 				abort() {},
 				clearAllQueues() {},
+				hasQueuedMessages: () => queued,
 				async continue() {
 					throw new Error("the fixture never retries");
 				},
@@ -149,7 +153,30 @@ async function stoppedTurn(dir: string, declared: boolean) {
 							result,
 							isError: false,
 						} as unknown as AgentEvent);
+						queued = mode === "handover";
 						decisions.push(await agent.finishTurn?.({ message, toolResults: [] }));
+						if (mode === "handover") {
+							// The engine carries the run on with the queued message: a new turn that declares nothing.
+							queued = false;
+							await listener({ type: "turn_start" });
+							await push({
+								role: "user",
+								content: [{ type: "text", text: "also update the notes" }],
+								timestamp: Date.now(),
+							} as AgentMessage);
+							toolChoice.apply([{ kind: "require_tool", toolName: "verify" }]);
+							const next = {
+								role: "assistant",
+								content: [{ type: "text", text: "Updated." }],
+								stopReason: "stop",
+								toolRounds: [{ kind: "required", toolName: "verify", choice: "auto" }],
+								timestamp: Date.now(),
+							} as unknown as AgentMessage;
+							await push(next);
+							decisions.push(await agent.finishTurn?.({ message: next, toolResults: [] }));
+							await listener({ type: "agent_end", messages: [next] });
+							return;
+						}
 						await listener({ type: "agent_end", messages: [message] });
 						return;
 					}
@@ -176,13 +203,13 @@ async function stoppedTurn(dir: string, declared: boolean) {
 		loop.dispose();
 		await loop.whenSettled();
 	}
-	return { submitted, decisions };
+	return { submitted, decisions, entries };
 }
 
 test("a continuation's prompt_submit names the last tool call; an operator prompt does not", async (t) => {
 	const scratch = await isolateClioEnv("clio-coder-continuation-call-");
 	t.after(() => scratch.restore());
-	const { submitted } = await stoppedTurn(scratch.dir, false);
+	const { submitted } = await stoppedTurn(scratch.dir, "undeclared");
 
 	strictEqual(submitted.length, 2);
 	const [operator, continuation] = submitted;
@@ -262,9 +289,22 @@ test("a continuation's prompt_submit names the last tool call; an operator promp
 test("a turn declared through finish is never continued: no required-tool round, no yolo continuation (FX-38)", async (t) => {
 	const scratch = await isolateClioEnv("clio-coder-continuation-declared-");
 	t.after(() => scratch.restore());
-	const { submitted, decisions } = await stoppedTurn(scratch.dir, true);
+	const { submitted, decisions } = await stoppedTurn(scratch.dir, "declared");
 	// The pending require_tool asked for no further request, and the tool budget it crossed resubmitted nothing.
 	deepStrictEqual(decisions, [undefined]);
 	strictEqual(submitted.length, 1);
 	strictEqual(submitted[0]?.origin.origin, "operator");
+
+	// A queued operator message carries the run past the declared turn: that turn still settles (its terminal row is
+	// written before the handed-over message), and the declaration does not outlive it, so the undeclared next turn
+	// still takes its required-tool round.
+	const handover = await stoppedTurn(scratch.dir, "handover");
+	deepStrictEqual(handover.decisions, [undefined, { action: "continue" }]);
+	const rowOf = (match: (payload: Record<string, unknown>) => boolean) =>
+		handover.entries.findIndex(
+			(entry) => entry.kind === "message" && match((entry as { payload: Record<string, unknown> }).payload ?? {}),
+		);
+	const terminal = rowOf((payload) => payload.terminalToolResult === true && payload.toolCallId === "call-f");
+	const followUp = rowOf((payload) => payload.text === "also update the notes");
+	ok(terminal >= 0 && followUp > terminal, `terminal row ${terminal}, follow-up row ${followUp}`);
 });
