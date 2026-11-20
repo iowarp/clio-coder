@@ -16,7 +16,7 @@ import {
 	observedToolCallOrigin,
 	ownerTelemetryContext,
 	telemetryContext,
-	toolCallBatchId,
+	toolCallBatch,
 } from "../core/telemetry/context.js";
 import type { FailureCause, TurnNoAnswerCause } from "../core/telemetry/enums.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
@@ -1481,8 +1481,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			abortCause: () => state.activeInterruptReason ?? state.toolProseAbortReason,
 			...observedToolCallOrigin(state.runtime?.agent.state.messages ?? [], toolCallId),
 		};
-		const batch = toolCallBatchId(state.runtime?.agent.state.messages ?? [], toolCallId);
-		if (batch !== undefined) options.correlationId = batch;
+		const batch = toolCallBatch(state.runtime?.agent.state.messages ?? [], toolCallId);
+		if (batch !== undefined) {
+			options.correlationId = batch.id;
+			options.batchSize = batch.size;
+		}
 		const hostRun = hostRunContext.getStore();
 		if (hostRun !== undefined) options.hostRun = hostRun;
 		const sessionId = deps.session?.current()?.id ?? null;

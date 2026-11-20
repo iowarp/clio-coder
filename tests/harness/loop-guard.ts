@@ -36,7 +36,8 @@ export interface GuardCall {
 /**
  * Drives a loop guard over `calls` in turn `turn-1`. A batch runs every
  * before_tool first, as a parallel response does, then settles each admitted
- * call. Returns each call's admission and every block reason in order.
+ * call. A batch's calls carry its size, as chat-loop's invoke options do.
+ * Returns each call's admission and every block reason in order.
  */
 export function runGuardScenario(
 	options: Omit<CreateLoopGuardRegistrationOptions, "safety">,
@@ -79,7 +80,11 @@ export function runGuardScenario(
 				.evaluate({
 					...base(call),
 					hook: "before_tool",
-					metadata: { ...traitsOf(call), callFingerprint: hashToolCall(call.tool, call.args) },
+					metadata: {
+						...traitsOf(call),
+						callFingerprint: hashToolCall(call.tool, call.args),
+						...(batch === undefined ? {} : { batchSize: round.length }),
+					},
 				} as MiddlewareHookInput)
 				.find((effect) => effect.kind === "block_tool");
 			if (block?.kind === "block_tool") reasons.push(block.reason);

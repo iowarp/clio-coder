@@ -743,6 +743,25 @@ function turnCallsByTool(byTool: ReadonlyMap<string, number>): string {
 }
 
 /**
+ * What a soft-budget refusal asks of the model. When a continuation turn
+ * follows (yolo), the reply is a progress note, never a closing summary: a lane
+ * that read the old wording ended on "both items are fixed" while the refused
+ * checks waited for the continuation (CLI-H1).
+ */
+function turnBudgetRefusalTail(continues: boolean, byTool: ReadonlyMap<string, number>): string {
+	const next = continues
+		? `A continuation turn follows automatically with a fresh tool budget and runs the next calls. End this reply ` +
+			`with a short progress note: what is done, and the calls the continuation must run, including any refused here. ` +
+			`Do not claim the work is finished.`
+		: `Summarize what you have found so far in the required result format, state the single next step you propose, ` +
+			`and end your reply.`;
+	return (
+		`Every further tool call this turn will be blocked, so do not retry these calls and do not substitute ` +
+		`others. ${next}\n${turnCallsByTool(byTool)}`
+	);
+}
+
+/**
  * The refusal a step-policy turn gets once its step tool already ran: the call
  * did not run, tools are locked, and the reply is the state summary the next
  * turn starts from (WTF-P 0.8.3 C5).
@@ -842,6 +861,13 @@ export interface CreateLoopGuardRegistrationOptions {
 	 * {@link toolCallCap} instead.
 	 */
 	turnToolCallBudget?: OrchTurnToolCallBudget | (() => OrchTurnToolCallBudget);
+	/**
+	 * Orchestrator only: whether a turn the soft budget ends is continued in a
+	 * new turn without the operator (yolo). The soft refusal then says a
+	 * continuation follows, so the model writes a progress note instead of a
+	 * closing summary (CLI-H1).
+	 */
+	turnBudgetContinues?: () => boolean;
 	/**
 	 * When the per-turn loop-block budget is exhausted, lock tool use for the
 	 * rest of the turn instead of cancelling it outright. Every further call is
@@ -951,6 +977,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const callsByTurn = new Map<string, number>();
 	/** Per turn: calls by effective tool (a gateway call counts as its capability), named in the budget refusal. */
 	const callsByToolByTurn = new Map<string, Map<string, number>>();
+	/**
+	 * Per turn: the last parallel batch judged against the soft budget, the
+	 * attempts made before it and whether it was refused whole. A batch that
+	 * would cross the budget runs none of its calls, so the model never gets a
+	 * partial batch it mistakes for finished work (CLI-H1).
+	 */
+	const budgetBatchByTurn = new Map<string, { batch: string; size: number; spent: number; refused: boolean }>();
 	/** Per turn under a step policy: its step tool succeeded ("done"), then a second call locked the turn ("locked"). */
 	const stepByTurn = new Map<string, "done" | "locked">();
 	/**
@@ -1476,6 +1509,35 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		};
 	};
 
+	/**
+	 * The batch this call belongs to when the soft budget refuses it whole: a
+	 * parallel response judged once, at its first call, by whether all of it
+	 * fits the calls the turn has left. A batch wider than the whole budget
+	 * can never fit a turn, so it keeps the per-call cut instead of being
+	 * refused again in every continuation.
+	 */
+	const refusedBudgetBatch = (
+		input: MiddlewareHookInput,
+		turnKey: string,
+		soft: number,
+	): { size: number; spent: number } | null => {
+		const batch = input.correlationId;
+		const size = input.metadata?.batchSize;
+		if (batch === undefined || typeof size !== "number" || !(size > 1)) return null;
+		let judged = budgetBatchByTurn.get(turnKey);
+		if (judged?.batch !== batch) {
+			const spent = callsByTurn.get(turnKey) ?? 0;
+			while (!budgetBatchByTurn.has(turnKey) && budgetBatchByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
+				const oldest = budgetBatchByTurn.keys().next().value;
+				if (typeof oldest !== "string") break;
+				budgetBatchByTurn.delete(oldest);
+			}
+			judged = { batch, size, spent, refused: spent < soft && spent + size > soft && size <= soft };
+			budgetBatchByTurn.set(turnKey, judged);
+		}
+		return judged.refused ? judged : null;
+	};
+
 	const evaluateTurnBudget = (input: MiddlewareHookInput, now: number): ReadonlyArray<MiddlewareEffect> | null => {
 		const resolved = resolveTurnBudget(input);
 		if (resolved === undefined) return null;
@@ -1483,6 +1545,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		const bound = resolved.template === undefined ? undefined : { template: resolved.template };
 		const source = resolved.source;
 		const turnKey = input.turnId ?? NO_TURN_BUCKET;
+		const refusedBatch = refusedBudgetBatch(input, turnKey, turnBudget.soft);
 		const callsThisTurn = bumpBoundedCounter(callsByTurn, turnKey);
 		let byTool = callsByToolByTurn.get(turnKey);
 		if (byTool === undefined) {
@@ -1503,6 +1566,24 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		// attempts, then attempt hard + 1 ends the turn.
 		const firstRefusal = turnBudget.soft + 1;
 		const stopAttempt = turnBudget.hard + 1;
+		const continues = options.turnBudgetContinues?.() === true;
+		if (refusedBatch !== null) {
+			// The whole batch is refused, its siblings included: they were emitted
+			// before the model saw any refusal, so none of them escalates to the
+			// hard ceiling. The first refusal raises the turn's tool-budget lock.
+			if (callsThisTurn === refusedBatch.spent + 1)
+				emitBudgetEvent(input, turnBudget, refusedBatch.spent + refusedBatch.size, false, now, bound);
+			return [
+				{
+					kind: "block_tool",
+					reason:
+						`tool-call budget: this parallel batch of ${refusedBatch.size} tool calls would take the turn past its soft budget ` +
+						`of ${turnBudget.soft} (${refusedBatch.spent} made${source}), so no call in the batch ran. ` +
+						turnBudgetRefusalTail(continues, byTool),
+					severity: "hard-block",
+				},
+			];
+		}
 		if (callsThisTurn >= stopAttempt) {
 			// Hard ceiling: interrupt the turn the same way the block budget does.
 			// The bus event drives chat.cancel() in the interactive layer; the
@@ -1532,9 +1613,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					kind: "block_tool",
 					reason:
 						`tool-call budget: this turn has made its ${turnBudget.soft} tool calls (soft budget ${turnBudget.soft}${source}), so this call did not run. ` +
-						`Every further tool call this turn will be blocked, so do not retry this call and do not substitute ` +
-						`another one. Summarize what you have found so far in the required result format, state the single next step you ` +
-						`propose, and end your reply.\n${turnCallsByTool(byTool)}`,
+						turnBudgetRefusalTail(continues, byTool),
 					severity: "hard-block",
 				},
 			];
@@ -2016,7 +2095,11 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				if (rejudge) return [];
 				if (chainWrapper) {
 					const soft = resolveTurnBudget(input)?.budget.soft;
-					if (soft === undefined || (callsByTurn.get(turnKey) ?? 0) < soft) return [];
+					if (
+						soft === undefined ||
+						((callsByTurn.get(turnKey) ?? 0) < soft && refusedBudgetBatch(input, turnKey, soft) === null)
+					)
+						return [];
 				}
 				return evaluateTurnBudget(input, now) ?? [];
 			};

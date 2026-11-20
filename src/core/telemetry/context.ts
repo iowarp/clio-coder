@@ -218,11 +218,15 @@ export function observedToolCallOrigin(
 
 /**
  * The model response that emitted a tool call, named by that response's first
- * tool-call id, so calls one response emitted in parallel share it. The loop
- * guard counts a round once and spares the siblings of a turn's first block
- * (WTF-P 0.8.3 A2).
+ * tool-call id, so calls one response emitted in parallel share it, and how
+ * many calls that response emitted. The loop guard counts a round once, spares
+ * the siblings of a turn's first block (WTF-P 0.8.3 A2), and admits or refuses
+ * a batch whole at the per-turn soft budget (CLI-H1).
  */
-export function toolCallBatchId(messages: readonly unknown[], toolCallId: string | undefined): string | undefined {
+export function toolCallBatch(
+	messages: readonly unknown[],
+	toolCallId: string | undefined,
+): { id: string; size: number } | undefined {
 	if (!toolCallId) return undefined;
 	for (let index = messages.length - 1; index >= 0; index--) {
 		const message = messages[index];
@@ -234,7 +238,7 @@ export function toolCallBatchId(messages: readonly unknown[], toolCallId: string
 		);
 		if (!calls.some((block) => block.id === toolCallId)) continue;
 		const first = calls[0]?.id;
-		return typeof first === "string" ? `model-response:${first}` : undefined;
+		return typeof first === "string" ? { id: `model-response:${first}`, size: calls.length } : undefined;
 	}
 	return undefined;
 }
