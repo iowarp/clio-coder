@@ -14,7 +14,8 @@ import type { RunEffects } from "../../domains/safety/run-effects.js";
  * dispatch only as a write (bt-verify7a).
  * `noChecksDeclared` is set when no check stands and a `verify` call found none declared or derivable in the workspace.
  * `unclassifiedAfterLastCheck` counts the calls the check classifier could not read that ran after the oldest check
- * outcome still standing: they neither settled nor cleared it, so the line names them beside it.
+ * outcome still standing: they neither settled nor cleared it, so the line names them beside it. `unclassifiedFailed`
+ * names the ones that ran and failed, standing check or not, and the count leaves them out (x8-2).
  */
 export interface HeadlessObserved {
 	toolCalls: number;
@@ -23,6 +24,7 @@ export interface HeadlessObserved {
 	checks: Array<{ name: string; passed: boolean }>;
 	noChecksDeclared?: true;
 	unclassifiedAfterLastCheck?: number;
+	unclassifiedFailed?: { count: number; commands: string[] };
 }
 
 const NAME_LIMIT = 80;
@@ -44,7 +46,10 @@ export function observeHeadlessRun(input: {
 	entries: ReadonlyArray<unknown>;
 	start: number;
 	/** The run's recorded effects: bash checks under their full command, verify checks under their id (x4-1). */
-	effects: Pick<RunEffects, "validationOutcomes" | "checkOutcomes" | "unclassifiedAfterLastCheck">;
+	effects: Pick<
+		RunEffects,
+		"validationOutcomes" | "checkOutcomes" | "unclassifiedAfterLastCheck" | "unclassifiedFailed"
+	>;
 	toolCalls: number;
 	refused: number;
 	writes: number;
@@ -70,7 +75,12 @@ export function observeHeadlessRun(input: {
 			checks.push({ name: run, passed: true });
 	const noChecksDeclared = input.toolCalls > 0 && checks.length === 0 && verifyFoundNoChecks(own);
 	// The receipt's own rule: the recorder lists a call only while an outcome stands, so both surfaces count one list (x6-6).
-	const unclassified = unclassifiedAfterLastCheck(input.effects)?.count ?? 0;
+	// A red one is listed regardless and named apart, redacted as the receipt redacts it (x8-2).
+	const failedCount = input.effects.unclassifiedFailed?.length ?? 0;
+	const failed = unclassifiedAfterLastCheck({
+		unclassifiedAfterLastCheck: [...new Set(input.effects.unclassifiedFailed ?? [])],
+	});
+	const unclassified = (unclassifiedAfterLastCheck(input.effects)?.count ?? 0) - failedCount;
 	return {
 		toolCalls: input.toolCalls,
 		refused: input.refused,
@@ -78,15 +88,16 @@ export function observeHeadlessRun(input: {
 		checks,
 		...(noChecksDeclared ? { noChecksDeclared: true as const } : {}),
 		...(unclassified > 0 ? { unclassifiedAfterLastCheck: unclassified } : {}),
+		...(failed !== null ? { unclassifiedFailed: failed } : {}),
 	};
 }
 
-function names(list: ReadonlyArray<string>): string {
+function names(list: ReadonlyArray<string>, total = list.length): string {
 	const shown = list.slice(0, NAMES_SHOWN).map((name) => {
 		const clean = sanitizeCallTargetText(name);
 		return clean.length > NAME_LIMIT ? `${clean.slice(0, NAME_LIMIT - 1)}…` : clean;
 	});
-	const rest = list.length - shown.length;
+	const rest = total - shown.length;
 	return rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(", ");
 }
 
@@ -99,6 +110,9 @@ export function formatHeadlessObservedLine(observed: HeadlessObserved): string |
 	const failed = observed.checks.filter((check) => !check.passed).map((check) => check.name);
 	if (passed.length > 0) parts.push(`check${passed.length === 1 ? "" : "s"} passed: ${names(passed)}`);
 	if (failed.length > 0) parts.push(`check${failed.length === 1 ? "" : "s"} failed: ${names(failed)}`);
+	const red = observed.unclassifiedFailed;
+	if (red !== undefined && red.count > 0)
+		parts.push(`unclassified command${red.count === 1 ? "" : "s"} failed: ${names(red.commands, red.count)}`);
 	const unclassified = observed.unclassifiedAfterLastCheck ?? 0;
 	if (unclassified > 0)
 		parts.push(`${unclassified} unclassified command${unclassified === 1 ? "" : "s"} ran after a standing check`);
