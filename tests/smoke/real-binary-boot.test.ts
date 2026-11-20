@@ -168,7 +168,7 @@ async function run(
 
 async function reachEditor(cli: RunningCli): Promise<void> {
 	try {
-		await cli.waitFor(/Ask Clio/u, 30_000);
+		await cli.waitFor(/Ask CLIO Coder/u, 30_000);
 		cli.child.stdin.write("\u0004");
 		const exit = await cli.waitForExit();
 		strictEqual(exit.code, 0, cli.output().slice(-2_000));
@@ -299,7 +299,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 
 			const cli = launch(["--autonomy", "default"], { ...home.env, CLIO_CODER_INTERACTIVE: "1" });
 			try {
-				await cli.waitFor(/Ask Clio/u, 30_000);
+				await cli.waitFor(/Ask CLIO Coder/u, 30_000);
 				cli.child.stdin.write("AUTONOMY_DEFAULT_OVERRIDES_SAVED_YOLO\r");
 				await cli.waitFor(/Autonomy fixture confirmed/u, 30_000);
 				// The reply and its summary paint before the turn settles its ledger and
@@ -348,8 +348,8 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 			await answer(cli, /Orchestrator model \(number or id\) \[[^\]]+\]:/u);
 			await answer(cli, /Fleet model \(number or id\) \[[^\]]+\]:/u);
 			for (;;) {
-				const next = await cli.waitFor(/Ask Clio|Add [^\n]+\? \[y\/N\]:/u, 30_000);
-				if (next[0].startsWith("Ask Clio")) break;
+				const next = await cli.waitFor(/Ask CLIO Coder|Add [^\n]+\? \[y\/N\]:/u, 30_000);
+				if (next[0].startsWith("Ask CLIO Coder")) break;
 				cli.child.stdin.write("n\n");
 			}
 			cli.child.stdin.write("\u0004");

@@ -183,7 +183,7 @@ export function createSessionFileRecorder(deps: {
 	const now = (): Date => deps.now?.() ?? new Date();
 	const warn = (error: unknown): void => {
 		(deps.warn ?? ((line) => process.stderr.write(`${line}\n`)))(
-			`Clio Coder: could not write the session record to ${deps.path}: ${error instanceof Error ? error.message : String(error)}`,
+			`CLIO Coder: could not write the session record to ${deps.path}: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	};
 	const readSnapshot = (): ExitSummarySnapshot | null => {

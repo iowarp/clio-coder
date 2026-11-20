@@ -278,7 +278,7 @@ function recoveryText(
 	}
 	const sections = records.map((record) => `[queued ${record.sequence}] ${record.rawText}`);
 	if (draft.length > 0) sections.push(`[draft] ${draft}`);
-	return `Clio Coder recovered input from an interrupted boot; copy and resubmit after restart:\n${sections.join("\n")}`;
+	return `CLIO Coder recovered input from an interrupted boot; copy and resubmit after restart:\n${sections.join("\n")}`;
 }
 
 export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOptions): TerminalLease {
@@ -414,8 +414,8 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		lease.writeDiagnostic(
 			"stderr",
 			advice
-				? `Clio Coder: ${advice}\n`
-				: `Clio Coder: unexpected error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+				? `CLIO Coder: ${advice}\n`
+				: `CLIO Coder: unexpected error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
 		);
 		void termination.shutdown(1);
 	};
@@ -437,7 +437,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 			try {
 				write(
 					"stderr",
-					`Clio Coder: terminal shutdown failed: ${error instanceof Error ? error.message : String(error)}\n`,
+					`CLIO Coder: terminal shutdown failed: ${error instanceof Error ? error.message : String(error)}\n`,
 				);
 			} catch {
 				// Every restoration path was already attempted; there is no safer sink.
@@ -538,7 +538,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		if (alreadyTruncated) return;
 		if (deferred) deferredDiagnosticsTruncated = true;
 		else diagnosticsTruncated = true;
-		target.push({ stream: "stderr", text: "Clio Coder: additional boot diagnostics were truncated.\n" });
+		target.push({ stream: "stderr", text: "CLIO Coder: additional boot diagnostics were truncated.\n" });
 	};
 
 	const lease: TerminalLease = {
@@ -628,7 +628,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 				if (bootAbort.signal.aborted) return;
 				lease.writeDiagnostic(
 					"stderr",
-					`Clio Coder: queued boot submission failed: ${error instanceof Error ? error.message : String(error)}\n`,
+					`CLIO Coder: queued boot submission failed: ${error instanceof Error ? error.message : String(error)}\n`,
 				);
 			});
 			return true;
