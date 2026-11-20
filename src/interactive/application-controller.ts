@@ -316,7 +316,7 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 				}
 			}
 			release("terminal stop", () => deps.stopUi());
-			release("parked calls", () => deps.cancelParkedCalls("Clio Coder shutting down"));
+			release("parked calls", () => deps.cancelParkedCalls("CLIO Coder shutting down"));
 			// Reported here rather than as each step fails: the terminal is down by
 			// now, so a diagnostic cannot land on top of a TUI still painting. It
 			// also has to precede onShutdown, which exits the process.

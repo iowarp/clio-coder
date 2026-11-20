@@ -44,7 +44,7 @@ const REPORT_SHARE_NOTE =
 export const AGENT_DRAFT_LIMIT = 3;
 
 const OFFER_QUESTION =
-	"This looks like a problem in Clio Coder itself. Should I draft a report? You read every word before anything is sent.";
+	"This looks like a problem in CLIO Coder itself. Should I draft a report? You read every word before anything is sent.";
 const OFFER_OPTIONS = { draft: "Draft it", later: "Not now", never: "Don't ask again" } as const;
 
 export interface ReportToolSession {

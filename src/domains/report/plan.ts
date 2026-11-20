@@ -43,7 +43,7 @@ export interface ReportPlan {
 	destination: string;
 	rendered: RenderedReport;
 	masks: ReportMask[];
-	/** "Masked by Clio: 1 host name, 2 paths. No secrets recognized." */
+	/** "Masked by CLIO Coder: 1 host name, 2 paths. No secrets recognized." */
 	maskSummary: string;
 	/** The network actions sending takes, in order, as sentences. */
 	actions: string[];
@@ -96,7 +96,7 @@ function planActions(kind: ReportKind, transport: ReportPlanTransport, shared: b
 			`post the text you reviewed as ${where} from ${who}`,
 		];
 	}
-	const file = "write the text you reviewed to a file in Clio's state directory";
+	const file = "write the text you reviewed to a file in CLIO Coder's state directory";
 	if (transport.kind === "browser")
 		return [file, `open ${DESTINATION} in your browser with that text filled in; nothing is posted until you submit it`];
 	return [file, `print the link to post it at ${DESTINATION} yourself; nothing goes over the network`];
@@ -128,7 +128,7 @@ export function maskSummary(masks: ReadonlyArray<ReportMask>): string {
 	const secrets = totals.get("secret") ?? 0;
 	totals.delete("secret");
 	const parts = [...totals.entries()].map(([kind, count]) => maskNoun(kind, count));
-	const head = parts.length > 0 ? `Masked by Clio: ${parts.join(", ")}.` : "Nothing needed masking.";
+	const head = parts.length > 0 ? `Masked by CLIO Coder: ${parts.join(", ")}.` : "Nothing needed masking.";
 	return `${head} ${secrets > 0 ? `${maskNoun("secret", secrets)} redacted; those stay masked.` : "No secrets recognized."}`;
 }
 
@@ -168,7 +168,7 @@ export interface ComposeReportInput {
 	surface: ReportSurface;
 	title?: string;
 	happened?: string;
-	/** The session the report is about; its observations fill "What Clio observed". */
+	/** The session the report is about; its observations fill "What CLIO Coder observed". */
 	session?: { id: string; observations: ReadonlyArray<ReportObservation>; facts?: ReportSessionFacts } | null;
 	environment?: ReportEnvironment;
 	/** The offer the operator answered with /report: its trigger, cause and fingerprint replace the derived ones. */
@@ -205,7 +205,7 @@ export function composeReportDraft(input: ComposeReportInput): ReportDraft {
 	// Its escapes and hidden characters are stripped, or the gate refuses text the review cannot show.
 	const happened =
 		input.happened?.trim() ||
-		(crash ? `Clio Coder crashed: ${crash.name}: ${stripHiddenText(crash.message)}`.trim() : "");
+		(crash ? `CLIO Coder crashed: ${crash.name}: ${stripHiddenText(crash.message)}`.trim() : "");
 	return {
 		id: newReportId(now.getTime()),
 		createdAt: now.toISOString(),
@@ -234,7 +234,7 @@ export function composeReportDraft(input: ComposeReportInput): ReportDraft {
 const TEMPLATE_GUIDE = [
 	"<!--",
 	"Write what happened below. Lines inside comments like this one are removed.",
-	"After you save, Clio masks paths, host names and secrets again and shows the exact text before anything is sent.",
+	"After you save, CLIO Coder masks paths, host names and secrets again and shows the exact text before anything is sent.",
 	"-->",
 ];
 
@@ -526,7 +526,7 @@ export function sentLine(result: SendResult): string {
 	}
 }
 
-export const REPORT_THANKS = "Thank you. Reports like this are how Clio gets fixed.";
+export const REPORT_THANKS = "Thank you. Reports like this are how CLIO Coder gets fixed.";
 export const REPORT_DRAFT_SAVED = "saved as a draft; /report status";
 
 /** One report as every status view lists it: the outbox, plus saved drafts the outbox has no entry for. */
@@ -585,7 +585,7 @@ export function reportRows(stateDir: string): ReportRow[] {
 
 /**
  * Delete what this machine keeps of a report: a draft and its bundle, or, for a posted report, its diagnostic bundle.
- * The public issue itself is refused: Clio cannot withdraw a public post. One whose last create may have been filed
+ * The public issue itself is refused: CLIO Coder cannot withdraw a public post. One whose last create may have been filed
  * waits until `report send` checks GitHub and finds nothing.
  */
 export function forgetReport(
@@ -603,11 +603,11 @@ export function forgetReport(
 	if (entry?.state === "sent") {
 		const left = `${id} already left this machine${entry.url !== null ? ` (${entry.url})` : ""}`;
 		if (entry.bundle === null)
-			return { ok: false, reason: `${left}. Clio cannot withdraw a public report; edit or close it on GitHub.` };
+			return { ok: false, reason: `${left}. CLIO Coder cannot withdraw a public report; edit or close it on GitHub.` };
 		deleteReportBundle(stateDir, id);
 		return {
 			ok: true,
-			message: `deleted the diagnostic bundle of ${id} from this machine. The report itself ${left.slice(id.length + 1)}; Clio cannot withdraw it, so edit or close it on GitHub`,
+			message: `deleted the diagnostic bundle of ${id} from this machine. The report itself ${left.slice(id.length + 1)}; CLIO Coder cannot withdraw it, so edit or close it on GitHub`,
 		};
 	}
 	if (entry?.state === "sending")

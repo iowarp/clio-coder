@@ -1425,7 +1425,7 @@ export function applyTaskWorktree(input: {
 		ignoredAuthored = ignoredAuthoredPaths(worktree.path, input.authoredPaths);
 		accounted = ignoredAuthored.length > 0 ? { ...input.preview, ignored: ignoredAuthored } : input.preview;
 	} else {
-		const taskLine = `Clio Coder task ${worktree.runId}`;
+		const taskLine = `CLIO Coder task ${worktree.runId}`;
 		// The validated message is already stripped; this is the sink, and only
 		// Clio's managed hook may write trailers onto the operator's branch.
 		const authored =

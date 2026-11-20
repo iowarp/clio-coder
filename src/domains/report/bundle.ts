@@ -38,7 +38,7 @@ export type ConsentScope = (typeof CONSENT_SCOPES)[number];
 /** At least one scope: a bundle is never built without the reporter's restated consent. */
 export type ConsentScopes = readonly [ConsentScope, ...ConsentScope[]];
 export type BundleContent = "none" | "transcript";
-export const CONSENT_TEXT_VERSION = 2;
+export const CONSENT_TEXT_VERSION = 3;
 export const TRANSCRIPT_TURNS_DEFAULT = 3;
 export const TRANSCRIPT_TURNS_MAX = 10;
 /** A bundle stays in the reports directory this long after it was sent (D-REPORT 5.8). */
@@ -115,8 +115,8 @@ export const REPORT_BUNDLE_ENVELOPE_SCHEMA = Type.Object(
 			{
 				scopes: Type.Array(vocabulary(CONSENT_SCOPES), { minItems: 1, uniqueItems: true }),
 				content: vocabulary(["none", "transcript"] as const),
-				// Bundles saved under version 1 stay readable.
-				textVersion: Type.Union([Type.Literal(1), Type.Literal(CONSENT_TEXT_VERSION)]),
+				// Bundles saved under versions 1 and 2 stay readable.
+				textVersion: Type.Union([Type.Literal(1), Type.Literal(2), Type.Literal(CONSENT_TEXT_VERSION)]),
 				textSha256: HASH,
 				grantedAt: Type.String({ pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$" }),
 			},

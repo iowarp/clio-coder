@@ -243,7 +243,7 @@ export function renderExitWithoutConversation(
 	tty: boolean,
 ): string[] {
 	if (resolveExitSummaryStyle(preference, outputStyle) === "off") return [];
-	const line = "Clio Coder · no conversation this visit, so there is nothing to resume.";
+	const line = "CLIO Coder · no conversation this visit, so there is nothing to resume.";
 	return [tty ? clioTheme().fg("annotation", line) : line];
 }
 
@@ -294,7 +294,7 @@ export function renderExitSummary(
 			: ["To resume:", resumeCommand].flatMap((row) => wrapTextWithAnsi(row, room));
 	const resumeLines = resumeRows.map((row) => theme?.fg("commandHint", row) ?? row);
 	const visitTime = `${formatCompactMs(snapshot.wallMs)} this visit`;
-	if (!tty) lines.push(`Clio Coder · Session ${style === "report" ? "report" : "summary"} · this visit`);
+	if (!tty) lines.push(`CLIO Coder · Session ${style === "report" ? "report" : "summary"} · this visit`);
 	// Session names can be arbitrarily long; keep identity from consuming the page.
 	lines.push(truncateToWidth(paint(`Session: ${sanitizeCallTargetText(session)}`, "Session: ".length), room));
 	// Tokens, cost and verified outcomes cover every visit and branch the session paid for, workers included, so their
@@ -468,7 +468,7 @@ export function renderExitSummary(
 	return theme
 		? frame(
 				theme,
-				`${brandMark(theme)} ${theme.style("wordmark", "Clio Coder", { bold: true })} ${theme.fg("brandCopper", style === "report" ? "· Session report" : "· Session summary")}`,
+				`${brandMark(theme)} ${theme.style("wordmark", "CLIO Coder", { bold: true })} ${theme.fg("brandCopper", style === "report" ? "· Session report" : "· Session summary")}`,
 				lines,
 				Math.max(4, Math.floor(width)),
 				// Whole or absent: `t…` in the corner said nothing; the Time row still says `this visit`.

@@ -622,7 +622,7 @@ function readMetaFile(path: string): ClioSessionMeta {
 	const parsed = JSON.parse(raw) as Record<string, unknown>;
 	const clioCoderVersion = parsed.clioCoderVersion ?? parsed.clioVersion;
 	if (typeof clioCoderVersion !== "string" || clioCoderVersion.length === 0) {
-		throw new Error(`session metadata has no Clio Coder version: ${path}`);
+		throw new Error(`session metadata has no CLIO Coder version: ${path}`);
 	}
 	const { clioVersion: _legacyVersion, ...canonical } = parsed;
 	return { ...canonical, clioCoderVersion } as unknown as ClioSessionMeta;

@@ -64,7 +64,7 @@ const KILL_ACTIONS = [
 // finds the cursor by those markers rather than by an SGR sequence.
 const FAKE_CURSOR_BLANK = renderFakeCursor(" ");
 const FAKE_CURSOR_START = FAKE_CURSOR_BLANK.slice(0, FAKE_CURSOR_BLANK.indexOf(" "));
-const EMPTY_PROMPT = `Ask Clio${GLYPH.ellipsis}  / for commands`;
+const EMPTY_PROMPT = `Ask CLIO Coder${GLYPH.ellipsis}  / for commands`;
 const CONFIRM_PROMPT = "A parked call is waiting for your decision";
 const PREPARING_PROMPT = "Clio has your prompt and is preparing the turn";
 const COMPACTING_PROMPT = "Clio is compacting the session context";
@@ -292,7 +292,7 @@ function renderEmptyPrompt(line: string, width: number, theme: ClioTheme, text =
 	const available = Math.max(0, width - 1);
 	const invitation =
 		text === EMPTY_PROMPT
-			? `${theme.fg("inputPlaceholder", `Ask Clio${GLYPH.ellipsis}  `)}${theme.fg("commandHint", "/ for commands")}`
+			? `${theme.fg("inputPlaceholder", `Ask CLIO Coder${GLYPH.ellipsis}  `)}${theme.fg("commandHint", "/ for commands")}`
 			: theme.fg("inputPlaceholder", text);
 	const prompt = truncateToWidth(invitation, available, GLYPH.ellipsis, false);
 	const consumed = visibleWidth(prompt);

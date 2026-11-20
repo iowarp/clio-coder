@@ -25,7 +25,7 @@ const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const CLI = join(ROOT, "dist", "cli", "index.js");
 const CTRL_C = "\x03";
 /** The editor placeholder. Both stages paint it; Stage 0 is live once it appears. */
-const EDITOR = "Ask Clio";
+const EDITOR = "Ask CLIO Coder";
 /** Only the hydrated shell paints workspace facts; Stage 0 has no footer. */
 const HYDRATED = /no Git branch/u;
 const BRACKETED_PASTE_OFF = "\x1b[?2004l";

@@ -326,7 +326,7 @@ describe("System One's thinking switch reaches the wire", () => {
 		await channel.batch({ system: "s", user: "u" }, {}, 1);
 		strictEqual(headers.length, 1);
 		strictEqual(headers[0]?.get("http-referer"), "https://github.com/iowarp/clio-coder");
-		strictEqual(headers[0]?.get("x-openrouter-title"), "Clio Coder");
+		strictEqual(headers[0]?.get("x-openrouter-title"), "CLIO Coder");
 		strictEqual(headers[0]?.get("x-openrouter-categories"), "cli-agent");
 	});
 });

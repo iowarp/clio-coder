@@ -50,11 +50,11 @@ function reply(): ReturnType<typeof createAssistantMessageEventStream> {
 
 function assertClio(identity: ClientIdentity | undefined): void {
 	ok(identity, "request carries an identity");
-	strictEqual(identity.attribution?.name, "Clio Coder");
+	strictEqual(identity.attribution?.name, "CLIO Coder");
 	const headers = getIdentityHeaders({ provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1" }, identity);
 	match(headers["User-Agent"] ?? "", /^clio-coder\//u);
 	strictEqual(headers["HTTP-Referer"], "https://github.com/iowarp/clio-coder");
-	strictEqual(headers["X-OpenRouter-Title"], "Clio Coder");
+	strictEqual(headers["X-OpenRouter-Title"], "CLIO Coder");
 }
 
 test("agent turns override Pi's default pi attribution with Clio's identity", async () => {

@@ -129,7 +129,7 @@ function encodedLength(value: string): number {
 	return new URLSearchParams({ v: value }).toString().length - 2;
 }
 
-const CUT_NOTE = "\n\n_Cut to fit a link. The full report is in the file Clio wrote; paste the rest here._";
+const CUT_NOTE = "\n\n_Cut to fit a link. The full report is in the file CLIO Coder wrote; paste the rest here._";
 /** Below this much room for `problem`, optional fields give way first. */
 const PROBLEM_FLOOR = 600;
 

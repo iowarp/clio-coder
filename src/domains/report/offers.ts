@@ -226,7 +226,7 @@ export function crashCandidate(record: CrashRecord): OfferCandidate {
 		trigger: "crash",
 		cause,
 		fingerprint: crashFingerprint(record),
-		text: `Clio crashed last time (${cause} in ${crashSite(record)}). If you'd like to help fix it, ${OFFER_TAIL}`,
+		text: `CLIO Coder crashed last time (${cause} in ${crashSite(record)}). If you'd like to help fix it, ${OFFER_TAIL}`,
 		crash: record,
 	};
 }
@@ -251,7 +251,7 @@ export function createOfferTriggers(version: string) {
 							trigger: "internal",
 							cause,
 							fingerprint: reportFingerprint({ trigger: "internal", cause, version }),
-							text: `Clio stopped on an internal error (that one is on Clio, not you). If you'd like to help fix it, ${OFFER_TAIL}`,
+							text: `CLIO Coder stopped on an internal error (that one is on CLIO Coder, not you). If you'd like to help fix it, ${OFFER_TAIL}`,
 						}
 					: null;
 			if (NEVER_OFFER_CAUSES.has(cause) || seen !== REPEAT_THRESHOLD) return null;
@@ -259,7 +259,7 @@ export function createOfferTriggers(version: string) {
 				trigger: "repeated",
 				cause,
 				fingerprint: reportFingerprint({ trigger: "repeated", cause, version }),
-				text: `${REPEAT_THRESHOLD} turns this session ended on ${cause}. If that looks like Clio's fault, ${OFFER_TAIL}`,
+				text: `${REPEAT_THRESHOLD} turns this session ended on ${cause}. If that looks like CLIO Coder's fault, ${OFFER_TAIL}`,
 			};
 		},
 		domainFailed(name: string): OfferCandidate | null {
@@ -270,7 +270,7 @@ export function createOfferTriggers(version: string) {
 				trigger: "internal",
 				cause,
 				fingerprint: reportFingerprint({ trigger: "internal", cause, version }),
-				text: `Part of Clio (${name}) failed to start. If you'd like to help fix it, ${OFFER_TAIL}`,
+				text: `Part of CLIO Coder (${name}) failed to start. If you'd like to help fix it, ${OFFER_TAIL}`,
 			};
 		},
 		compactionSettled(outcome: string): OfferCandidate | null {
@@ -293,7 +293,7 @@ export type OfferTriggers = ReturnType<typeof createOfferTriggers>;
 
 /** The one stderr line a headless run prints after a turn ended on Clio Coder's own fault. */
 export const HEADLESS_OFFER_LINE =
-	"clio-coder: this looks like a Clio Coder fault; `clio-coder report --last` shows what a report would send";
+	"clio-coder: this looks like a CLIO Coder fault; `clio-coder report --last` shows what a report would send";
 
 export interface HeadlessOfferInput {
 	stateDir: string;

@@ -428,7 +428,7 @@ test("/report previews as text with no transport call, and a read-only ceiling r
 		bundle: { sha256: "0".repeat(64), scopes: ["debug"], content: "none" },
 	});
 	const forgot = await control.invoke({ command: "report", argv: ["forget", draftId] });
-	assert.match(forgot.lines.join("\n"), /deleted the diagnostic bundle of .*Clio cannot withdraw it/);
+	assert.match(forgot.lines.join("\n"), /deleted the diagnostic bundle of .*CLIO Coder cannot withdraw it/);
 	assert.deepEqual(
 		commands.filter((command) => command.startsWith(gh)),
 		[],

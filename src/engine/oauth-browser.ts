@@ -29,7 +29,7 @@ function canonicalMark(): string {
 	if (markImage !== undefined) return markImage;
 	try {
 		const data = readFileSync(join(resolvePackageRoot(), MARK_PATH)).toString("base64");
-		markImage = `<img src="data:image/webp;base64,${data}" alt="Clio Coder" width="59" height="64">`;
+		markImage = `<img src="data:image/webp;base64,${data}" alt="CLIO Coder" width="59" height="64">`;
 	} catch {
 		// A missing mark leaves a text-only page; sign-in itself does not depend on it.
 		markImage = "";
@@ -52,7 +52,7 @@ function renderPage(ok: boolean, message: string, details?: string): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Clio Coder</title>
+<title>CLIO Coder</title>
 <style>
 :root{color-scheme:dark;--paper:#000000;--ink:#f0ece1;--muted:#a3998a;--accent:#00d4db;--alert:#ee852f}
 @media (prefers-color-scheme: light){:root{color-scheme:light;--paper:#f3eee4;--ink:#1a1612;--muted:#524a42;--accent:#0a666c;--alert:#9a4812}}
@@ -132,7 +132,7 @@ async function startOAuthCallback(options: {
 			return;
 		}
 		settled = true;
-		send(200, renderPage(true, `Signed in to ${providerName}. You can close this tab and return to Clio Coder.`));
+		send(200, renderPage(true, `Signed in to ${providerName}. You can close this tab and return to CLIO Coder.`));
 		resolveWait(`${redirectUri}${url.search}`);
 	};
 	const servers = await listenLoopback(options.port, handler);

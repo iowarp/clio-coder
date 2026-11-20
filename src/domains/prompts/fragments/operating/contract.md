@@ -1,7 +1,7 @@
 ---
 id: operating.contract
 version: 1
-description: Constitutional operating posture shared by every Clio Coder prompt
+description: Constitutional operating posture shared by every CLIO Coder prompt
 ---
 
 # Operating Contract

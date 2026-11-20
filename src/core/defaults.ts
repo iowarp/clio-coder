@@ -989,7 +989,7 @@ export const DEFAULT_SETTINGS = {
  * writers serialize the schema directly, and comments do not survive the
  * first programmatic write.
  */
-export const DEFAULT_SETTINGS_YAML = `# Clio Coder settings. Written once on first install.
+export const DEFAULT_SETTINGS_YAML = `# CLIO Coder settings. Written once on first install.
 # This file uses the version-2 human information architecture.
 # Docs: https://github.com/iowarp/clio-coder
 

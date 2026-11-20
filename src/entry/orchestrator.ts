@@ -388,7 +388,7 @@ function bannerConfigurationLine(): string {
 function buildBanner(): string {
 	const clio = readClioVersionLabel();
 	return `
-  ${chalk.cyan("Clio Coder")}
+  ${chalk.cyan("CLIO Coder")}
   ${chalk.dim(`v${clio} · CLIO: Context Layer for I/O · HPC & scientific software`)}
   ${bannerConfigurationLine()}
 `;
@@ -1001,7 +1001,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 	if (!providers || !dispatch || !telemetry || !safety || !middleware || !middlewareRegistrar) {
 		bootStderr(
-			"Clio Coder: chat mode requires safety + middleware + providers + dispatch + telemetry contracts; aborting.\n",
+			"CLIO Coder: chat mode requires safety + middleware + providers + dispatch + telemetry contracts; aborting.\n",
 		);
 		await termination.shutdown(1);
 		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
@@ -2035,7 +2035,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			await providers.probeAllLive();
 		} catch (err) {
 			bootStderr(
-				`Clio Coder: model refresh failed; resolving cached catalog: ${err instanceof Error ? err.message : String(err)}\n`,
+				`CLIO Coder: model refresh failed; resolving cached catalog: ${err instanceof Error ? err.message : String(err)}\n`,
 			);
 		}
 		const selected = resolveModelReference(
@@ -2054,7 +2054,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			if (options.headless.thinking === undefined && selected.ref.thinkingLevel) {
 				initialRoutingSettings.chat.thinkingLevel = selected.ref.thinkingLevel;
 			}
-			if (selected.warning) bootStderr(`Clio Coder: ${selected.warning}\n`);
+			if (selected.warning) bootStderr(`CLIO Coder: ${selected.warning}\n`);
 		} else if (selected.error || options.apiKey) {
 			const exitCode = options.apiKey || /^no models match|not chat-eligible/u.test(selected.error ?? "") ? 2 : 1;
 			writeRunDiagnostic(
@@ -2468,13 +2468,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			route: options.headless?.target !== undefined || options.headless?.model !== undefined,
 			thinking: options.headless?.thinking !== undefined,
 		});
-		if (notice !== null) bootStderr(`Clio Coder: ${notice}\n`);
+		if (notice !== null) bootStderr(`CLIO Coder: ${notice}\n`);
 	}
 	if (options.apiKey) {
 		const target = resolveTarget(providers, getCurrentSettings().chat.target);
 		const runtime = target ? providers.getRuntime(target.runtime) : null;
 		if (!target || !runtime) {
-			bootStderr("Clio Coder: --api-key supplied but no active orchestrator target could be resolved; refusing.\n");
+			bootStderr("CLIO Coder: --api-key supplied but no active orchestrator target could be resolved; refusing.\n");
 			await termination.shutdown(2);
 			return { exitCode: 2, bootTimeMs: timer.snapshot().totalMs };
 		}
@@ -2505,7 +2505,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// Advisory only.
 			}
 		} else {
-			bootStderr(`Clio Coder: ${notice}\n`);
+			bootStderr(`CLIO Coder: ${notice}\n`);
 		}
 	});
 	termination.onDrain(() => unsubscribeResumedRoute());
@@ -2911,7 +2911,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				leafTurnId = session.leafId(resumedMeta.id);
 			} catch (err) {
 				bootStderr(
-					`Clio Coder: failed to read resumed session tree ${resumedMeta.id}: ${err instanceof Error ? err.message : String(err)}\n`,
+					`CLIO Coder: failed to read resumed session tree ${resumedMeta.id}: ${err instanceof Error ? err.message : String(err)}\n`,
 				);
 			}
 			try {
@@ -2926,7 +2926,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			} catch (err) {
 				chat.resetForSession(leafTurnId);
 				bootStderr(
-					`Clio Coder: failed to replay resumed session context ${resumedMeta.id}: ${err instanceof Error ? err.message : String(err)}\n`,
+					`CLIO Coder: failed to replay resumed session context ${resumedMeta.id}: ${err instanceof Error ? err.message : String(err)}\n`,
 				);
 			}
 		}

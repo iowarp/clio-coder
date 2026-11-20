@@ -39,7 +39,7 @@ import {
 } from "../overlay-frame.js";
 import { clioTheme, GLYPH, positionRow, sectionRule, selectionRow } from "../theme/index.js";
 
-export const REPORT_REVIEW_TITLE = "Report to Clio Coder's maintainers";
+export const REPORT_REVIEW_TITLE = "Report to CLIO Coder's maintainers";
 
 export type ReportReviewStep = "review" | "masks" | "attach" | "bundle" | "send" | "sending" | "duplicates" | "done";
 
@@ -481,7 +481,7 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 				];
 			}
 			case "masks": {
-				const lines = [...head, sectionRule(theme, w, "What Clio masked")];
+				const lines = [...head, sectionRule(theme, w, "What CLIO Coder masked")];
 				maskList().forEach((mask, index) => {
 					const secret = mask.id === SECRET_MASK_ID;
 					const masked = secret || !draft.unmasked.includes(mask.id);

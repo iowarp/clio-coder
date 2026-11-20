@@ -84,9 +84,9 @@ describe("gateway in the session prompt", () => {
 			const lines = compiled.systemPrompt.split("\n");
 			ok(
 				compiled.systemPrompt.includes(
-					'Questions about Clio Coder itself: gateway(op="call", capability="clio_docs", args={query:"<the question>"}) first',
+					'Questions about CLIO Coder itself: gateway(op="call", capability="clio_docs", args={query:"<the question>"}) first',
 				),
-				"The compiled prompt routes documented Clio Coder behavior through gateway before answering or searching the workspace.",
+				"The compiled prompt routes documented CLIO Coder behavior through gateway before answering or searching the workspace.",
 			);
 			doesNotMatch(
 				compiled.systemPrompt,

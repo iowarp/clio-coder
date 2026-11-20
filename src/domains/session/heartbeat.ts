@@ -408,7 +408,7 @@ export function startSessionHeartbeat(input: { meta: ClioSessionMeta; writer: Cl
 			if (fenced && (current === null || sameOwner(current, owner))) removeQuietly(releasedFencePath(meta.id));
 			const by = fence ? printable(`${fence.by.user}@${fence.by.host}`) : "another process";
 			end(
-				`Clio Coder: session ${meta.id} was released by ${by}${fence ? ` (${printable(fence.reason)})` : ""}; this process no longer owns it and wrote nothing more.`,
+				`CLIO Coder: session ${meta.id} was released by ${by}${fence ? ` (${printable(fence.reason)})` : ""}; this process no longer owns it and wrote nothing more.`,
 			);
 			return;
 		}
@@ -416,7 +416,7 @@ export function startSessionHeartbeat(input: { meta: ClioSessionMeta; writer: Cl
 		if (request !== null) {
 			end(
 				printable(
-					`Clio Coder: terminated by ${request.by.user}@${request.by.host}${request.reason ? `: ${request.reason}` : ""}`,
+					`CLIO Coder: terminated by ${request.by.user}@${request.by.host}${request.reason ? `: ${request.reason}` : ""}`,
 				),
 			);
 			return;

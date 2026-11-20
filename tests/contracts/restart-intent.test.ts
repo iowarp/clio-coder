@@ -150,7 +150,7 @@ test("restart_session: a card at default, refused at yolo and outside the runnin
 		const repo = process.cwd();
 		assert.equal(restartSessionWorkspaceRefusal(repo), null);
 		assert.match(restartSessionWorkspaceRefusal(repo, home.dir) ?? "", /another build|does not run from/);
-		assert.match(restartSessionWorkspaceRefusal(home.dir) ?? "", /not Clio Coder's source tree/);
+		assert.match(restartSessionWorkspaceRefusal(home.dir) ?? "", /not CLIO Coder's source tree/);
 
 		let autonomy: "default" | "yolo" = "default";
 		const tool = createRestartSessionTool({ getCwd: () => repo, getAutonomy: () => autonomy });

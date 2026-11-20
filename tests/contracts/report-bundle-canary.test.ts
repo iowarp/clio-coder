@@ -212,10 +212,10 @@ test("a projected record still matches its event's schema under every report pro
 		canaryRefusal([hit("environment.model")], undefined, { modelsKept: true }),
 		/a model id contains this machine's target name, in report\.json\.environment\.model; build it again with --anonymize-models/u,
 	);
-	match(canaryRefusal([hit("environment.model")]), /This is a Clio Coder bug/u);
+	match(canaryRefusal([hit("environment.model")]), /This is a CLIO Coder bug/u);
 	match(
 		canaryRefusal([hit("environment.model"), hit("environment.cwd")], undefined, { modelsKept: true }),
-		/Clio Coder bug/u,
+		/CLIO Coder bug/u,
 	);
 });
 
@@ -719,7 +719,7 @@ test("report --bundle mechanics shows its consent text, keeps the bundle only on
 		ok(err.includes("--bundle mechanics needs --consent debug"), err);
 		strictEqual(await report("--bundle", "mechanics", "--consent", "debug", "--transcript", "--dry-run"), 0);
 		ok(out.includes("Transcript: the last 2 of 2 turns, tool arguments and output left out"), out);
-		ok(out.includes("By sending the bundle you agree to:\n  The maintainers of Clio Coder may read this bundle"), out);
+		ok(out.includes("By sending the bundle you agree to:\n  The maintainers of CLIO Coder may read this bundle"), out);
 		ok(
 			out.includes("  The bundle includes the last turns of this conversation") && !out.includes("cannot be recalled"),
 			out,
@@ -760,7 +760,7 @@ test("report --bundle mechanics shows its consent text, keeps the bundle only on
 		out = "";
 		ok(existsSync(reportBundlePath(stateDir, sent)));
 		strictEqual(await runReport(["forget", sent], deps), 0);
-		ok(!existsSync(reportBundlePath(stateDir, sent)) && out.includes("Clio cannot withdraw it"), out);
+		ok(!existsSync(reportBundlePath(stateDir, sent)) && out.includes("CLIO Coder cannot withdraw it"), out);
 		strictEqual(outboxEntry(stateDir, sent)?.state, "sent");
 		strictEqual(await runReport(["forget", sent], deps), 1);
 
@@ -871,7 +871,7 @@ test("report --share uploads the bundle sealed as a secret gist, names it in the
 		strictEqual(await report("--bundle", "mechanics", "--consent", "dataset", "--share", "--dry-run"), 0);
 		match(out, /bundle: gist:<created on send>#shr_[0-9a-f]{16}\nconsent: debug,dataset\n/u);
 		ok(out.includes("upload the bundle encrypted to the maintainers as a secret gist"), out);
-		ok(out.includes("Once it is 180 days old, Clio Coder deletes it the next time you run"), out);
+		ok(out.includes("Once it is 180 days old, CLIO Coder deletes it the next time you run"), out);
 		strictEqual(gists.length, 0);
 
 		gistFails = true;
@@ -891,7 +891,7 @@ test("report --share uploads the bundle sealed as a secret gist, names it in the
 		strictEqual(gists.length, 1);
 		const shared = gists[0] as GistRequest;
 		strictEqual(shared.public, false);
-		strictEqual(shared.description, `Clio Coder encrypted share ${shareId}`);
+		strictEqual(shared.description, `CLIO Coder encrypted share ${shareId}`);
 		const envelope = JSON.parse(shared.files[`clio-share-${shareId}.json`]?.content ?? "{}");
 		strictEqual(envelope.format, "clio-coder.share.sealed");
 		strictEqual(envelope.kid, "d7aad758f9cb9edc");

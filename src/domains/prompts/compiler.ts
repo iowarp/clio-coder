@@ -374,7 +374,7 @@ export function renderSessionPostureUpdate(table: FragmentTable, level: string, 
 	const contract = renderToolContractBlock(inputs, level);
 	const hasEnding = contract.includes("## Ending a turn");
 	return [
-		"[Clio Coder host policy update]",
+		"[CLIO Coder host policy update]",
 		"Effective for the following turn and subsequent turns. This supersedes the compiled # Safety posture, all earlier posture updates, and the posture-dependent turn-ending and settings-change guidance. Other instructions still apply.",
 		"# Safety",
 		renderSafetySection(safety, level, inputs.headless === true, inputs.yoloConfinement),
@@ -742,10 +742,10 @@ class FragmentPicker {
 
 /** How every capability is called; stated once, ahead of the entries it governs. */
 const HARNESS_ROUTING_ROW =
-	'Questions about Clio Coder itself: gateway(op="call", capability="clio_docs", args={query:"<the question>"}) first, live values from gateway(op="call", capability="context", args={scope:"settings"}), changes through configure_clio; those results and clio_library kind=playbook or kind=agent carry the procedure under Guidance. Never for a question about the workspace.';
+	'Questions about CLIO Coder itself: gateway(op="call", capability="clio_docs", args={query:"<the question>"}) first, live values from gateway(op="call", capability="context", args={scope:"settings"}), changes through configure_clio; those results and clio_library kind=playbook or kind=agent carry the procedure under Guidance. Never for a question about the workspace.';
 
 const SETTINGS_ROUTING_ROW =
-	'Questions about Clio Coder\'s own settings, targets, profiles or limits: gateway(op="call", capability="context", args={scope:"settings"}) for live values; the result carries the procedure under Guidance.';
+	'Questions about CLIO Coder\'s own settings, targets, profiles or limits: gateway(op="call", capability="context", args={scope:"settings"}) for live values; the result carries the procedure under Guidance.';
 
 const GATEWAY_CALLING_RULE =
 	'Call a (gateway) entry with gateway(op="call", capability="<name>", args={...}); naming it does not attach it. With no arguments shown, gateway(op="describe", capability="<name>") first; never guess argument names. Not listed: gateway(op="find", query="<two to four words>"). Discovery grants no authority.';

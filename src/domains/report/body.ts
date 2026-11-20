@@ -164,7 +164,7 @@ export function renderReport(
 	const env = draft.environment;
 	const environment = scrub(
 		[
-			`- Clio Coder: ${env.clioCoder}`,
+			`- CLIO Coder: ${env.clioCoder}`,
 			`- Platform: ${env.platform}`,
 			`- Node: ${env.node}`,
 			`- Install: ${env.install}`,

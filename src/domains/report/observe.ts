@@ -69,7 +69,7 @@ export function renderObservation(observation: ReportObservation): string {
 		case "crash": {
 			const frames = observation.values.frames.slice(0, 5).map(frame);
 			const top = frames.length > 0 ? `; top frames ${frames.map((item) => `\`${item}\``).join(", ")}` : "";
-			return `Clio Coder crashed with \`${word(observation.values.name)}\`${top}.`;
+			return `CLIO Coder crashed with \`${word(observation.values.name)}\`${top}.`;
 		}
 	}
 }

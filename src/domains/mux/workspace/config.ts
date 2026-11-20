@@ -91,7 +91,7 @@ export function renderWorkspaceConfig(input: WorkspaceConfigInput): string {
 		...(input.shell.defaultShell === null ? [] : [`default_shell = ${toml(input.shell.defaultShell)}`]),
 		`shell_mode = ${toml(input.shell.shellMode)}`,
 	];
-	return `# Written by Clio Coder for its private pane host. Edits here are overwritten.
+	return `# Written by CLIO Coder for its private pane host. Edits here are overwritten.
 # Your own herdr config and sessions are never touched.
 onboarding = false
 
@@ -109,7 +109,7 @@ prefix = ${prefix}
 ${UNBOUND_KEYS.map((key) => `${key} = ""`).join("\n")}
 
 [ui]
-window_title = "Clio Coder: {workspace}"
+window_title = "CLIO Coder: {workspace}"
 prompt_new_tab_name = false
 hide_tab_bar_when_single_tab = true
 sidebar_start_collapsed = true

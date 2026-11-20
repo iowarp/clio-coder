@@ -503,7 +503,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 		findings.push({ ok: false, name: "repair", detail: `--fix could not finish: ${repairFailure}` });
 	}
 	const version = getVersionInfo();
-	findings.push({ ok: true, name: "Clio Coder version", detail: readClioVersionLabel() });
+	findings.push({ ok: true, name: "CLIO Coder version", detail: readClioVersionLabel() });
 	const installation = inspectInstallation();
 	findings.push(installMethodFinding(installation));
 	findings.push({ ok: true, name: "node version", detail: version.node });

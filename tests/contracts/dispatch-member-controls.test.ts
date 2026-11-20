@@ -952,7 +952,7 @@ describe("dispatch member controls", () => {
 			strictEqual(f.workers.length, 1);
 			match(
 				settled.outcomeDetail ?? "",
-				/WorkerSpec version 9 is not one this worker reads .*different Clio Coder builds/u,
+				/WorkerSpec version 9 is not one this worker reads .*different CLIO Coder builds/u,
 			);
 			ok(!(settled.outcomeDetail ?? "").includes("Re-dispatch"));
 		} finally {

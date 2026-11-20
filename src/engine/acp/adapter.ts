@@ -480,7 +480,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 					clientCapabilities: {},
 					clientInfo: {
 						name: "clio-coder",
-						title: "Clio Coder",
+						title: "CLIO Coder",
 						version: input.clientVersion ?? "0.0.0-dev",
 					},
 				},

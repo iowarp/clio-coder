@@ -233,7 +233,7 @@ test("project configuration that is not applied leads the action row and stays o
 	ok(header.includes("dynamo · qwen3.8-27b") && header.includes(reminder), header);
 	// Narrow, the reminder outlasts the product name; the route outlasts both.
 	const narrow = rows(launchpad, 72)[0] ?? "";
-	ok(narrow.includes("dynamo · qwen3.8-27b") && narrow.includes(reminder) && !narrow.includes("Clio Coder"), narrow);
+	ok(narrow.includes("dynamo · qwen3.8-27b") && narrow.includes(reminder) && !narrow.includes("CLIO Coder"), narrow);
 });
 
 test("a malformed CLIO-CODER.md points at the read-only view, never at a regenerating command", () => {
@@ -411,7 +411,7 @@ test("the session header keeps the route when everything else has to go", () => 
 	}
 	// Wide enough, identity sits next to the wordmark rather than trailing the row.
 	const wide = rows(component, 120)[0] ?? "";
-	match(wide, /^>C_ Clio Coder v\d+\.\d+\.\d+(?:-(?:dev · source|rc\.\d+|snapshot\.\d{12}\.g[0-9a-f]{7}))? · dynamo/u);
+	match(wide, /^>C_ CLIO Coder v\d+\.\d+\.\d+(?:-(?:dev · source|rc\.\d+|snapshot\.\d{12}\.g[0-9a-f]{7}))? · dynamo/u);
 });
 
 test("the collapsed header drops readiness, latency and onboarding", () => {
@@ -1100,7 +1100,7 @@ test("the instant shell uses the finished welcome footprint without hydration co
 	ok(wide.includes("YOLO · contained · never waits"));
 	ok(wide.includes("Checking project awareness"));
 	match(wide, /v\d+\.\d+\.\d+/u);
-	ok(boot.render(120).map(stripTerminalSequences)[0]?.includes("Clio Coder"));
+	ok(boot.render(120).map(stripTerminalSequences)[0]?.includes("CLIO Coder"));
 });
 
 test("the welcome box closes at the viewport edge on narrow and wide terminals", () => {
@@ -1164,7 +1164,7 @@ test("the narrow launchpad sets the compact letters on one band, or the brand in
 		const lines = rows(banner(), width);
 		for (const line of lines) ok(visibleWidth(line) <= width, `${width}: ${line}`);
 		if (width < 57) {
-			ok(lines[0]?.includes("Clio Coder"), `${width}: ${lines[0]}`);
+			ok(lines[0]?.includes("CLIO Coder"), `${width}: ${lines[0]}`);
 			ok(lines[0]?.includes(`v${readClioVersion()}`));
 			ok(!lines.at(-2)?.includes(`v${readClioVersion()}`));
 		} else {

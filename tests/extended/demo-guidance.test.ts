@@ -59,7 +59,7 @@ test("footer tips expire, have cooldown, respect custom keys, and do not repeat"
 		contextBusy: false,
 		dashboardKey: "ctrl+x",
 	};
-	match(hints(input) ?? "", /Ask Clio how it works · \? keys · Ctrl\+G every action/);
+	match(hints(input) ?? "", /Ask CLIO Coder how it works · \? keys · Ctrl\+G every action/);
 	strictEqual(hints({ ...input, now: 10_001 }), null);
 	strictEqual(hints({ ...input, now: 59_999, agentActive: true }), null);
 	match(hints({ ...input, now: 60_000, agentActive: true }) ?? "", /ctrl\+x → Activity/);
@@ -107,9 +107,9 @@ test("the launchpad shows only the welcome tip, and none where its own hint colu
 		onShown: (id: string) => shown.push(id),
 	};
 	const hints = createDemoHints();
-	match(hints(input) ?? "", /Ask Clio how it works/);
+	match(hints(input) ?? "", /Ask CLIO Coder how it works/);
 	// It holds while the launchpad is up and counts once for the session.
-	match(hints({ ...input, now: 30_000 }) ?? "", /Ask Clio how it works/);
+	match(hints({ ...input, now: 30_000 }) ?? "", /Ask CLIO Coder how it works/);
 	deepStrictEqual(shown, ["welcome"]);
 	// Once the launchpad goes, the welcome is spent and a specific tip may follow.
 	const { launchpad: _gone, ...after } = input;
@@ -135,9 +135,9 @@ test("a tip counted in its last session stays up when a notice interrupts it", (
 		},
 	};
 	const hints = createDemoHints();
-	match(hints(input) ?? "", /Ask Clio how it works/);
+	match(hints(input) ?? "", /Ask CLIO Coder how it works/);
 	strictEqual(hints({ ...input, now: 1_000, quiet: true }), null);
-	match(hints({ ...input, now: 20_000 }) ?? "", /Ask Clio how it works/);
+	match(hints({ ...input, now: 20_000 }) ?? "", /Ask CLIO Coder how it works/);
 	strictEqual(shown.welcome, FOOTER_TIP_LIFETIME);
 	strictEqual(createDemoHints()(input), null);
 });

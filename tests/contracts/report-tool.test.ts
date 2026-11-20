@@ -129,7 +129,7 @@ describe("report guidance in the prompt", () => {
 		}).systemPrompt;
 
 	it("renders only for an attended session that registered report", () => {
-		const marker = "Reporting Clio Coder's own problems";
+		const marker = "Reporting CLIO Coder's own problems";
 		ok(prompt(false, [ToolNames.Report]).includes(marker));
 		ok(!prompt(false, [ToolNames.ClioDocs]).includes(marker));
 		ok(!prompt(true, [ToolNames.Report]).includes(marker));
@@ -138,7 +138,7 @@ describe("report guidance in the prompt", () => {
 });
 
 describe("gh bypass nudge", () => {
-	it("notes /report on a gh issue against Clio Coder and stays quiet elsewhere", () => {
+	it("notes /report on a gh issue against CLIO Coder and stays quiet elsewhere", () => {
 		ok(clioIssueNudge("gh issue create --repo iowarp/clio-coder --title x").includes(CLIO_REPORT_NUDGE));
 		ok(clioIssueNudge("gh api repos/iowarp/clio-coder/issues -f title=x").includes(CLIO_REPORT_NUDGE));
 		strictEqual(clioIssueNudge("gh issue create --repo octo/api --title x"), "");

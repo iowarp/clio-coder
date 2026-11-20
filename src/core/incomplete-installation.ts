@@ -76,7 +76,7 @@ export function incompleteInstallationAdvice(err: unknown, options: IncompleteIn
 	return [
 		`${message}`,
 		"",
-		"This Clio Coder installation is incomplete: the command's own module is missing from",
+		"This CLIO Coder installation is incomplete: the command's own module is missing from",
 		`${outputDir}`,
 		"Reinstall to restore it, using the line that matches how you installed:",
 		"  npm install -g @iowarp/clio-coder    # npm install",
@@ -102,6 +102,6 @@ export function incompleteInstallationAcpAdvice(
 			? "this Clio agent loaded a build that has since been replaced; restart the agent from your editor to load the new build"
 			: found.kind === "checkout_incomplete"
 				? "this Clio checkout build is incomplete; run pnpm run build in the checkout, then restart the agent from your editor"
-				: "this Clio Coder installation is incomplete; reinstall @iowarp/clio-coder, then restart the agent from your editor";
+				: "this CLIO Coder installation is incomplete; reinstall @iowarp/clio-coder, then restart the agent from your editor";
 	return { reason: found.kind, message };
 }

@@ -53,7 +53,7 @@ export function createDemoHints() {
 			counted.add(id);
 			input.onShown?.(id);
 		};
-		const welcome = `Ask Clio how it works ${GLYPH.dot} ? keys ${GLYPH.dot} ${input.menuKey ?? "Ctrl+G"} every action ${GLYPH.dot} /help`;
+		const welcome = `Ask CLIO Coder how it works ${GLYPH.dot} ? keys ${GLYPH.dot} ${input.menuKey ?? "Ctrl+G"} every action ${GLYPH.dot} /help`;
 		if (input.launchpad !== undefined) {
 			// Before the first prompt only the welcome tip speaks, and only where the launchpad has no hint column.
 			if (input.launchpad === "hints" || learned("/help") || retired("welcome")) return null;

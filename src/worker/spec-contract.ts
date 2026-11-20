@@ -1066,7 +1066,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	const version = spec.specVersion;
 	if (typeof version !== "number" || !WORKER_SPEC_VERSIONS.includes(version)) {
 		throw new Error(
-			`WorkerSpec version ${String(version)} is not one this worker reads (it reads ${WORKER_SPEC_VERSIONS.join(" and ")}). The dispatching session and this node run different Clio Coder builds; upgrade the older one, or dispatch to another node.`,
+			`WorkerSpec version ${String(version)} is not one this worker reads (it reads ${WORKER_SPEC_VERSIONS.join(" and ")}). The dispatching session and this node run different CLIO Coder builds; upgrade the older one, or dispatch to another node.`,
 		);
 	}
 	if (version === WORKER_SPEC_HOOKLESS_VERSION && spec.extensionHooks !== undefined) {

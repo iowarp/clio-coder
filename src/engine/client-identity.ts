@@ -13,7 +13,7 @@ let identity: ClientIdentity | undefined;
 export function clioClientIdentity(): ClientIdentity {
 	identity ??= {
 		userAgent: { custom: `clio-coder/${readClioVersion()} (${platform()} ${release()}; ${arch()})` },
-		attribution: { name: "Clio Coder", url: "https://github.com/iowarp/clio-coder", categories: ["cli-agent"] },
+		attribution: { name: "CLIO Coder", url: "https://github.com/iowarp/clio-coder", categories: ["cli-agent"] },
 	};
 	return identity;
 }

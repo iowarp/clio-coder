@@ -65,7 +65,7 @@ function storeBackendRecordPath(): string {
 function parseRecord(value: unknown): StoreBackendRecord | string {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return "it is not a JSON object";
 	const raw = value as Record<string, unknown>;
-	if (raw.v !== 1) return `it has version ${JSON.stringify(raw.v)}; this Clio Coder reads version 1`;
+	if (raw.v !== 1) return `it has version ${JSON.stringify(raw.v)}; this CLIO Coder reads version 1`;
 	if (raw.backend !== "local" && raw.backend !== "clio-core")
 		return `its backend ${JSON.stringify(raw.backend)} is neither "local" nor "clio-core"`;
 	const record: StoreBackendRecord = { v: 1, backend: raw.backend };
@@ -387,7 +387,7 @@ export async function attachClioCore(
 		info: true,
 		detail: lifecycle
 			? `clio_run ensure and release (${tools.clioRun}); client ${storeClientId()}${selection.stopIfLast === true ? ", stops the daemon when last" : ""}`
-			: `attach only: ${tools.clioRun ?? "no clio_run"} has no ensure; Clio Coder never starts or stops the daemon`,
+			: `attach only: ${tools.clioRun ?? "no clio_run"} has no ensure; CLIO Coder never starts or stops the daemon`,
 	});
 
 	let port = clioCoreDaemonPort(selection.config);

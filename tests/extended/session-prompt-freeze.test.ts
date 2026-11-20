@@ -429,7 +429,7 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 			const tail = await assertPrefixKept(f.requests[0] as Context, f.requests[1] as Context);
 			const items = JSON.parse(tail) as Array<{ type?: string; role?: string; content?: unknown }>;
 			const text = (item: { content?: unknown }) => (typeof item.content === "string" ? item.content : "");
-			const policy = items.find((item) => text(item).startsWith("[Clio Coder host policy update]"));
+			const policy = items.find((item) => text(item).startsWith("[CLIO Coder host policy update]"));
 			ok(policy, tail);
 			strictEqual(policy.role, "developer");
 			ok(text(policy).includes("Autonomy: yolo."), tail);

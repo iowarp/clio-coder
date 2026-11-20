@@ -34,7 +34,7 @@ function richWelcomeEnabled(demo: boolean | undefined, style: OutputStyle = "sta
 }
 
 export const WELCOME_TAGLINES = [
-	"Ask Clio how to use or extend it.",
+	"Ask CLIO Coder how to use or extend it.",
 	"The pursuit of excellence does not need justification. Your code does!",
 	"Understanding comes before change.",
 	"Created by researchers who love to code.",
@@ -364,7 +364,7 @@ function sessionRow(theme: ClioTheme, stats: WelcomeDashboardStats, version: str
 		"footerIdentity",
 		plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel, { abbreviate: false })),
 	);
-	const identity = `${theme.style("wordmark", "Clio Coder", { bold: true })} ${versionTag}`;
+	const identity = `${theme.style("wordmark", "CLIO Coder", { bold: true })} ${versionTag}`;
 	const units: Unit[] = [
 		{
 			text: visibleWidth(identity) + visibleWidth(route) + 3 <= room ? identity : versionTag,
@@ -654,7 +654,7 @@ export function buildWelcomeDashboardLines(
 		room >= 36 ? wrapTextWithAnsi(theme.fg("body", tagline), room - inset.length).map((row) => `${inset}${row}`) : [];
 	const gap = titleBrand ? "" : " ".repeat(Math.max(1, room - visibleWidth(action) - visibleWidth(versionTag)));
 	const title = titleBrand
-		? `${brandMark(theme)} ${theme.style("wordmark", "Clio Coder", { bold: true })} ${theme.fg("brandCopper", `v${version}`)}`
+		? `${brandMark(theme)} ${theme.style("wordmark", "CLIO Coder", { bold: true })} ${theme.fg("brandCopper", `v${version}`)}`
 		: "";
 	return frame(
 		theme,
@@ -680,7 +680,7 @@ function compactLaunchpad(
 ): string[] {
 	const room = Math.max(1, width - 4);
 	const fit = (text: string): string => truncateToWidth(text, room, GLYPH.ellipsis, false);
-	const title = `${brandMark(theme)} ${theme.style("wordmark", "Clio Coder", { bold: true })} ${theme.fg("brandCopper", `v${version}`)}`;
+	const title = `${brandMark(theme)} ${theme.style("wordmark", "CLIO Coder", { bold: true })} ${theme.fg("brandCopper", `v${version}`)}`;
 	const actionLine = (): string => actionRow(theme, stats, room);
 	if (tight) {
 		const route = theme.fg("footerIdentity", plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel)));

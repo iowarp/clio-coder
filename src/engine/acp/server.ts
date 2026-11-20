@@ -4173,7 +4173,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 				protocolVersion: 1,
 				agentInfo: {
 					name: "clio-coder",
-					title: "Clio Coder",
+					title: "CLIO Coder",
 					...(features.version !== undefined ? { version: features.version } : {}),
 				},
 				agentCapabilities: {
@@ -4441,7 +4441,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 						? [
 								{
 									id: "clio-login",
-									name: "Clio Coder Target Auth & Setup",
+									name: "CLIO Coder Target Auth & Setup",
 									description: "Configure models, API keys, and target endpoints in terminal",
 									type: "terminal",
 									args: ["auth", "login"],
