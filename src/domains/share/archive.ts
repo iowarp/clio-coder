@@ -407,7 +407,7 @@ function parseArchive(raw: unknown): ClioShareArchive {
 		raw.formatVersion !== 1 ||
 		!isRecord(raw.manifest)
 	) {
-		throw new Error("not a Clio share archive v1");
+		throw new Error("not a CLIO Coder share archive v1");
 	}
 	if (
 		(raw.manifest.format !== "clio-coder.share.v1" && raw.manifest.format !== "clio.share.v1") ||
@@ -792,7 +792,7 @@ function versionDiagnostics(archive: ClioShareArchive): ShareDiagnostic[] {
 		return [
 			{
 				type: "warning",
-				message: `archive was created by Clio ${archive.manifest.clioCoderVersion}; current Clio is ${current}`,
+				message: `archive was created by CLIO Coder ${archive.manifest.clioCoderVersion}; current CLIO Coder is ${current}`,
 			},
 		];
 	}
