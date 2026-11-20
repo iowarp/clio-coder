@@ -97,7 +97,7 @@ describe("playbook CLI variables", () => {
 
 	it("validates and graphs a code step's variable argument from --var", () => {
 		const bare = captured(() => runPlaybookValidate(["stage"]));
-		strictEqual(bare.code, 1, bare.stdout + bare.stderr);
+		strictEqual(bare.code, 2, bare.stdout + bare.stderr);
 		match(bare.stderr, /missing variable fixture/);
 		const valid = captured(() => runPlaybookValidate(["stage", "--var", "fixture=r7", "--json"]));
 		strictEqual(valid.code, 0, valid.stdout + valid.stderr);
@@ -119,12 +119,31 @@ describe("playbook CLI variables", () => {
 		writeFileSync(join(root, "stage.md"), readFileSync(inside, "utf8"));
 		for (const spelling of ["./stage.md", join(root, "stage.md"), ".clio-coder/playbooks/../../stage.md"]) {
 			const refused = captured(() => runPlaybookValidate([spelling, "--var", "fixture=r7"]));
-			strictEqual(refused.code, 1, `${spelling}: ${refused.stdout}${refused.stderr}`);
+			strictEqual(refused.code, 2, `${spelling}: ${refused.stdout}${refused.stderr}`);
 			match(refused.stderr, /playbook path refused: .* pass a playbook name \(hello for .*hello\.md\) or a builtin name/);
 		}
 		const missing = captured(() => runPlaybookValidate(["absent.md"]));
-		strictEqual(missing.code, 1);
+		strictEqual(missing.code, 2);
 		match(missing.stderr, /playbook not found: .*absent\.md \(and no builtin named 'absent'\); pass a playbook name/);
+	});
+
+	it("exits 2 for a parse, schema, or unknown-dependency error in text and --json (SPEC L7a row 7)", () => {
+		const path = join(root, ".clio-coder", "playbooks", "stage.md");
+		const source = readFileSync(path, "utf8");
+		const broken: ReadonlyArray<[string, RegExp]> = [
+			["---\nversion: 3\nsteps: [ {kind: agent\n---\n", /invalid YAML/],
+			[source.replace("scope: readonly", "scope: everywhere"), /stage\.md: \/steps\/0/],
+			[source.replace("dependencies: []", "dependencies: [absent]"), /unknown dependency 'absent'/],
+		];
+		for (const [text, diagnostic] of broken) {
+			writeFileSync(path, text);
+			const plain = captured(() => runPlaybookValidate(["stage", "--var", "fixture=r7"]));
+			strictEqual(plain.code, 2, plain.stdout + plain.stderr);
+			match(plain.stderr, diagnostic);
+			const json = captured(() => runPlaybookValidate(["stage", "--var", "fixture=r7", "--json"]));
+			strictEqual(json.code, 2, json.stdout + json.stderr);
+			match(json.stdout, /"valid": false/);
+		}
 	});
 
 	it("preflights a route from the trusted project settings layer fleet run reads", () => {
@@ -157,7 +176,8 @@ describe("playbook CLI variables", () => {
 		// Version 5 enforces write boundaries, which compare a git checkout.
 		execFileSync("git", ["init", "-q"], { cwd: root });
 		const untrusted = captured(() => runPlaybookValidate(["routed"]));
-		strictEqual(untrusted.code, 1);
+		// SPEC L7a row 7: exit 2, as `fleet run routed` refuses it.
+		strictEqual(untrusted.code, 2);
 		// The preflight fleet run shares, so the diagnostic reads the same from both commands.
 		match(untrusted.stderr, /preflight failed: unknown target 'project-route' at step 'build'/);
 		recordProjectSurfaceTrust(root, "settings", captureProjectSurface(root, "settings").contentHash as string);
@@ -176,7 +196,7 @@ describe("playbook CLI variables", () => {
 				),
 			);
 			const result = captured(() => runPlaybookValidate(["stage", "--var", "fixture=r7", "--json"]));
-			strictEqual(result.code, 1, result.stdout + result.stderr);
+			strictEqual(result.code, 2, result.stdout + result.stderr);
 			match(result.stdout, /reserved for Clio internal orchestration/);
 		}
 	});
