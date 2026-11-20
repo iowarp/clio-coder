@@ -442,6 +442,8 @@ export interface AcpDelegationResult {
 	stopReason: string;
 	/** True when the turn request hit its configured timeout. */
 	timedOut?: boolean;
+	/** The peer needs its own sign-in before it opens a session; the operator runs `loginCommand` once. */
+	authRequired?: { loginCommand: string };
 	failureMessage?: string;
 	delegation: {
 		acpSessionId: string | null;

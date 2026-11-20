@@ -90,9 +90,143 @@ function advertisesClientCapability(capabilities) {
 	return walk(capabilities);
 }
 
+/**
+ * An `agy acp` 1.5 stand-in: argv is `agy <log> <version> <ok|auth|abort|null>`. Every frame it receives is appended
+ * to the log. The first prompt asks a fixed-choice question; in `ok` mode it first sends `interaction_` requests:
+ * tool-shaped ones (an execute command, a path or a URL under kind other or none) and questions whose locations are
+ * null or empty. In `ok` mode the first steer prompt ends at max_tokens; the second makes the turn answer end_turn,
+ * then a later update arrives, then the second steer fails. In `abort` mode a steer makes the turn answer end_turn and
+ * is never answered itself. In `null` mode a steer is answered with a null result, then the turn with end_turn.
+ */
+const agyState = { firstPrompt: undefined, steers: 0, answered: false };
+function agyUpdate(text) {
+	send({
+		jsonrpc: "2.0",
+		method: "session/update",
+		params: {
+			sessionId: "agy-session",
+			update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+		},
+	});
+}
+function agy(request) {
+	appendFileSync(process.argv[3], `${JSON.stringify(request)}\n`);
+	const scenario = process.argv[5];
+	if (request.method === "initialize") {
+		send({
+			jsonrpc: "2.0",
+			id: request.id,
+			result: {
+				protocolVersion: 1,
+				agentCapabilities: { _meta: { antigravity: { systemPrompt: { append: true } } } },
+				agentInfo: { name: "Antigravity ACP Server", version: process.argv[4] },
+			},
+		});
+	} else if (request.method === "session/new") {
+		send(
+			scenario === "auth"
+				? { jsonrpc: "2.0", id: request.id, error: { code: -32000, message: "Authentication required" } }
+				: {
+						jsonrpc: "2.0",
+						id: request.id,
+						result: {
+							sessionId: "agy-session",
+							...(scenario === "abort"
+								? {
+										configOptions: [
+											{
+												id: "mode",
+												name: "Mode",
+												category: "mode",
+												type: "select",
+												currentValue: "plan",
+												options: [
+													{ value: "default", name: "Default" },
+													{ value: "plan", name: "Plan" },
+												],
+											},
+										],
+									}
+								: {
+										modes: {
+											currentModeId: "accept-edits",
+											availableModes: [
+												{ id: "default", name: "Default" },
+												{ id: "accept-edits", name: "Accept edits" },
+											],
+										},
+									}),
+						},
+					},
+		);
+	} else if (request.method === "session/set_mode" || request.method === "session/set_config_option") {
+		send({ jsonrpc: "2.0", id: request.id, result: {} });
+	} else if (request.method === "session/cancel") {
+		if (!agyState.answered) send({ jsonrpc: "2.0", id: agyState.firstPrompt, result: { stopReason: "cancelled" } });
+	} else if (request.method === "session/prompt" && agyState.firstPrompt === undefined) {
+		agyState.firstPrompt = request.id;
+		const ask = (id, toolCall) =>
+			send({
+				jsonrpc: "2.0",
+				id,
+				method: "session/request_permission",
+				params: {
+					sessionId: "agy-session",
+					toolCall,
+					options: [
+						{ optionId: "allow", name: "Allow", kind: "allow_once" },
+						{ optionId: "reject", name: "Reject", kind: "reject_once" },
+					],
+				},
+			});
+		if (scenario === "ok") {
+			ask("tool-1", { toolCallId: "interaction_2", title: "Run it", kind: "execute", rawInput: { command: "echo hi" } });
+			ask("tool-2", { toolCallId: "interaction_3", title: "Read it", kind: "other", rawInput: { path: "README.md" } });
+			ask("tool-3", { toolCallId: "interaction_4", title: "Fetch it", rawInput: { url: "https://example.com" } });
+			ask("question-2", { toolCallId: "interaction_5", title: "Null locations?", kind: "other", locations: null });
+			ask("question-3", { toolCallId: "interaction_6", title: "No locations?", locations: [] });
+		}
+		send({
+			jsonrpc: "2.0",
+			id: "question-1",
+			method: "session/request_permission",
+			params: {
+				sessionId: "agy-session",
+				toolCall: { toolCallId: "interaction_1", title: "Which branch?", kind: "other" },
+				options: [
+					{ optionId: "main", name: "main", kind: "allow_once", _meta: { "agy.security.warning": "pushes to main" } },
+					{ optionId: "topic", name: "topic", kind: "allow_once" },
+				],
+			},
+		});
+	} else if (request.method === "session/prompt" && scenario === "ok") {
+		agyState.steers += 1;
+		if (agyState.steers === 1) {
+			agyUpdate("steered");
+			send({ jsonrpc: "2.0", id: request.id, result: { stopReason: "max_tokens", usage: { inputTokens: 5 } } });
+			return;
+		}
+		send({ jsonrpc: "2.0", id: agyState.firstPrompt, result: { stopReason: "end_turn", usage: { inputTokens: 7 } } });
+		setTimeout(50).then(() => agyUpdate("initial-done"));
+		setTimeout(150).then(() => send({ jsonrpc: "2.0", id: request.id, error: { code: -32603, message: "steer lost" } }));
+	} else if (request.method === "session/prompt" && scenario === "abort") {
+		// The turn answers while this steer stays pending; the test aborts on the update that follows.
+		agyState.answered = true;
+		send({ jsonrpc: "2.0", id: agyState.firstPrompt, result: { stopReason: "end_turn" } });
+		agyUpdate("turn-answered");
+	} else if (request.method === "session/prompt" && scenario === "null") {
+		send({ jsonrpc: "2.0", id: request.id, result: null });
+		send({ jsonrpc: "2.0", id: agyState.firstPrompt, result: { stopReason: "end_turn" } });
+	}
+}
+
 for await (const line of createInterface({ input: process.stdin })) {
 	const request = JSON.parse(line);
 	if (mode === "cancel-connect") appendFileSync(process.argv[3], `${request.method}\n`);
+	if (mode === "agy") {
+		agy(request);
+		continue;
+	}
 	if (request.id === undefined) continue;
 	if (request.method === "initialize") {
 		if (mode === "cancel-connect" && process.argv[4]) while (!existsSync(process.argv[4])) await setTimeout(5);
