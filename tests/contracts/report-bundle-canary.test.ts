@@ -16,6 +16,8 @@ import {
 	canaryRefusal,
 	canaryScan,
 	composeReportDraft,
+	forgetIntakeBundle,
+	intakeReportBundle,
 	issueCanaryHits,
 	type LocalIdentity,
 	outboxEntry,
@@ -24,6 +26,7 @@ import {
 	type ReportBundleEnvelope,
 	type ReportCommandRunner,
 	type ReportDraft,
+	readIntakeIndex,
 	readShareReceipts,
 	reportBundlePath,
 	reportMarkdownPath,
@@ -36,6 +39,7 @@ import {
 } from "../../src/domains/report/index.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import {
+	packTelemetryArchive,
 	telemetrySessionDirectory,
 	unpackTelemetryArchive,
 	verifyShareArchive,
@@ -1017,5 +1021,96 @@ test("a settled call's journaled request structure digests leave no share below 
 		};
 		ok(projected.cache !== undefined, label);
 		strictEqual(Object.hasOwn(projected.cache, "structure"), false, label);
+	}
+});
+
+test("intake keeps a received bundle only once it verifies, at 0600 outside git, and never one forgotten (R-20)", async () => {
+	const root = mkdtempSync(join(tmpdir(), "report-intake-"));
+	try {
+		const stateDir = join(root, "state");
+		const store = join(root, "store");
+		const draft = await liveSession(stateDir, "ses_intake");
+		const built = await buildBundle(draft, {
+			consent: { scopes: ["debug"] },
+			identity: IDENTITY,
+			stateDir,
+			writer: WRITER,
+			write: false,
+		});
+		const meta = {
+			shareId: "shr_00112233445566aa",
+			issue: 7,
+			keyId: "d7aad758f9cb9edc",
+			now: new Date("2026-11-20T12:00:00Z"),
+		};
+		const repack = (changes: Record<string, Buffer>) =>
+			packTelemetryArchive(
+				built.members.map((entry) => ({ path: entry.path, bytes: changes[entry.path] ?? entry.bytes })),
+				0,
+			);
+		const reason = (outcome: ReturnType<typeof intakeReportBundle>) =>
+			outcome.kind === "refused" ? outcome.reason : `kept: ${outcome.kind}`;
+		// A telemetry member its envelope hash does not name.
+		const telemetry = member(built.members, "telemetry.tar.gz");
+		const flipped = Buffer.from(telemetry);
+		flipped[flipped.length - 1] = (flipped[flipped.length - 1] ?? 0) ^ 1;
+		match(reason(intakeReportBundle(store, repack({ "telemetry.tar.gz": flipped }), meta)), /does not match the sha256/u);
+		// A tampered inner archive whose envelope hash was updated to match: the archive itself no longer verifies.
+		const inner = unpackTelemetryArchive(telemetry);
+		const victim = inner.find((entry) => entry.path.endsWith(".jsonl"));
+		ok(victim, inner.map((entry) => entry.path).join(","));
+		const forged = packTelemetryArchive(
+			inner.map((entry) =>
+				entry === victim ? { path: entry.path, bytes: Buffer.concat([entry.bytes, Buffer.from("\n")]) } : entry,
+			),
+			0,
+		);
+		const rehashed = Buffer.from(JSON.stringify({ ...built.envelope, telemetrySha256: sha(forged) }));
+		match(
+			reason(intakeReportBundle(store, repack({ "telemetry.tar.gz": forged, "report.json": rehashed }), meta)),
+			/the telemetry does not verify/u,
+		);
+		// An envelope outside its schema.
+		const loose = Buffer.from(JSON.stringify({ ...built.envelope, reporter: "zqxuser" }));
+		match(reason(intakeReportBundle(store, repack({ "report.json": loose }), meta)), /does not match its schema/u);
+		deepStrictEqual(readIntakeIndex(store), []);
+		strictEqual(existsSync(join(store, "bundles")), false);
+
+		const stored = intakeReportBundle(store, built.bytes, meta);
+		strictEqual(stored.kind, "stored");
+		ok(stored.kind === "stored" && stored.acknowledgment.includes("consent: debug"), JSON.stringify(stored));
+		const path = join(store, "bundles", `${draft.id}.tar.gz`);
+		deepStrictEqual(readFileSync(path), built.bytes);
+		strictEqual(statSync(path).mode & 0o777, 0o600);
+		strictEqual(statSync(join(store, "bundles")).mode & 0o777, 0o700);
+		ok(
+			readFileSync(join(store, "bundles", ".gitignore"), "utf8")
+				.split("\n")
+				.includes("*"),
+		);
+		deepStrictEqual(readIntakeIndex(store), [
+			{
+				reportId: draft.id,
+				shareId: meta.shareId,
+				issue: 7,
+				receivedOn: "2026-11-20",
+				clioCoder: built.envelope.environment.clioCoder,
+				keyId: meta.keyId,
+				sha256: built.sha256,
+				scopes: ["debug"],
+				content: "none",
+				status: "held",
+				expiresOn: "2027-05-19",
+			},
+		]);
+		strictEqual(intakeReportBundle(store, built.bytes, meta).kind, "indexed");
+
+		strictEqual(forgetIntakeBundle(store, draft.id).held, true);
+		strictEqual(existsSync(path), false);
+		strictEqual(readIntakeIndex(store)[0]?.status, "forgotten");
+		strictEqual(intakeReportBundle(store, built.bytes, meta).kind, "excluded");
+		strictEqual(existsSync(path), false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
 	}
 });

@@ -649,6 +649,46 @@ export function readSavedBundle(stateDir: string, id: string): SavedBundle | nul
 	return { bytes, sha256: sha256(bytes), clioCoder: valid.environment.clioCoder, consent: valid.consent };
 }
 
+/**
+ * A bundle the maintainers received (R-20), checked from its own bytes before anything keeps it: both members present,
+ * the envelope matches its schema, the telemetry and transcript match the hashes the envelope records, and the inner
+ * telemetry archive verifies. Throws with the first problem; the reporter is asked to resend with that reason.
+ */
+export function verifyReceivedBundle(bytes: Buffer): ReportBundleEnvelope {
+	let members: ReturnType<typeof unpackTelemetryArchive>;
+	try {
+		members = unpackTelemetryArchive(bytes);
+	} catch (error) {
+		throw new Error(`not a report bundle: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	const member = (name: string) => members.find((entry) => entry.path === name)?.bytes ?? null;
+	const envelopeBytes = member(MEMBER_ENVELOPE);
+	const telemetry = member(MEMBER_TELEMETRY);
+	if (envelopeBytes === null || telemetry === null)
+		throw new Error(`not a report bundle: it needs ${MEMBER_ENVELOPE} and ${MEMBER_TELEMETRY}`);
+	let envelope: unknown;
+	try {
+		envelope = JSON.parse(envelopeBytes.toString("utf8"));
+	} catch {
+		throw new Error(`${MEMBER_ENVELOPE} is not JSON`);
+	}
+	const problem = envelopeProblem(envelope);
+	if (problem !== null) throw new Error(problem);
+	const valid = envelope as ReportBundleEnvelope;
+	if (sha256(telemetry) !== valid.telemetrySha256)
+		throw new Error(`${MEMBER_TELEMETRY} does not match the sha256 its envelope records`);
+	const transcript = member(MEMBER_TRANSCRIPT);
+	if ((transcript === null) !== (valid.transcriptSha256 === null))
+		throw new Error(
+			`${MEMBER_TRANSCRIPT} is ${transcript === null ? "missing" : "present"} but its envelope says otherwise`,
+		);
+	if (transcript !== null && sha256(transcript) !== valid.transcriptSha256)
+		throw new Error(`${MEMBER_TRANSCRIPT} does not match the sha256 its envelope records`);
+	const failure = verifyShareArchive(telemetry).failure;
+	if (failure !== null) throw new Error(`the telemetry does not verify: ${failure}`);
+	return valid;
+}
+
 /** Remove a report's bundle file and its outbox record. True when a file was removed. */
 export function deleteReportBundle(stateDir: string, id: string): boolean {
 	const path = reportBundlePath(stateDir, id);

@@ -106,6 +106,18 @@ export {
 	setReplyCheck,
 	takeFixedReportNotices,
 } from "./follow-up.js";
+export {
+	bundleDeletionRequest,
+	forgetIntakeBundle,
+	INTAKE_CLOSED_RETENTION_DAYS,
+	INTAKE_MAX_AGE_DAYS,
+	type IntakeIndexLine,
+	type IntakeOutcome,
+	type IntakeStatus,
+	intakeReportBundle,
+	readIntakeIndex,
+	sweepIntakeStore,
+} from "./intake.js";
 export { observeSession, observeSessionAsync, type ReportObservation, renderObservation } from "./observe.js";
 export {
 	createOfferTriggers,

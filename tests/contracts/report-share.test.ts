@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,8 +8,10 @@ import { runFlywheelCommand } from "../../src/cli/flywheel.js";
 import { runTelemetryShare } from "../../src/cli/telemetry-share.js";
 import type { TelemetryContext } from "../../src/core/telemetry/context.js";
 import {
+	bundleDeletionComment,
 	openShare,
 	type ReportCommandRunner,
+	readIntakeIndex,
 	readShareReceipts,
 	type SealedShare,
 	type SharePlaintext,
@@ -528,13 +530,167 @@ test("dev flywheel prints the ranked backlog and pulls a pointed-at share with t
 		const key = join(root, "intake.pem");
 		writeFileSync(key, vector.recipient.privateKeyPem);
 		out = "";
-		strictEqual(await flywheel("--pull", "all", "--key", key, "--out", root), 0);
-		deepStrictEqual(readFileSync(join(root, `${shareId}.tar.gz`)), bundle);
+		err = "";
+		const store = join(root, "store");
+		strictEqual(await flywheel("--pull", "all", "--key", key, "--out", store), 1);
+		// Bytes that do not verify as a report bundle are kept nowhere; the resend comment is printed, never posted (R-20).
+		ok(err.includes(`${shareId}: not stored: not a report bundle`), err);
+		ok(out.includes("Please send it again."), out);
+		strictEqual(existsSync(join(store, "bundles")), false);
+		strictEqual(existsSync(join(root, `${shareId}.tar.gz`)), false);
 		ok(out.includes(`${gone}: gist`) && out.includes("its sender forgot it"), out);
 		deepStrictEqual(issuePages.splice(0), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-		out = "";
-		strictEqual(await flywheel("--pull", shareId, "--key", key, "--out", root), 0);
-		ok(out.includes("report bundle already at"), out);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+const NOW = new Date("2026-11-20T12:00:00Z");
+const daysAgo = (days: number) => new Date(NOW.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
+const rid = (n: number) => `rpt_${String(n).padStart(26, "0")}`;
+
+/** A store holding six bundles: lines the sweep, a reporter's request and a stranger's request each decide. */
+function seedIntakeStore(store: string): void {
+	mkdirSync(join(store, "bundles"), { recursive: true });
+	const held = (n: number, issue: number | null, scopes: string[], receivedDaysAgo: number) => {
+		writeFileSync(join(store, "bundles", `${rid(n)}.tar.gz`), `bundle ${n}`);
+		return {
+			reportId: rid(n),
+			shareId: `shr_${String(n).padStart(16, "0")}`,
+			issue,
+			receivedOn: daysAgo(receivedDaysAgo).slice(0, 10),
+			clioCoder: "0.8.5",
+			keyId: "d7aad758f9cb9edc",
+			sha256: "0".repeat(64),
+			scopes,
+			content: "none",
+			status: "held",
+			expiresOn: null,
+		};
+	};
+	const index = [
+		held(1, 11, ["debug"], 120),
+		held(2, 12, ["debug", "dataset"], 120),
+		held(3, 13, ["debug"], 10),
+		held(4, null, ["debug"], 181),
+		held(5, 14, ["debug"], 10),
+		held(6, 15, ["debug"], 10),
+	];
+	writeFileSync(join(store, "index.jsonl"), index.map((line) => `${JSON.stringify(line)}\n`).join(""));
+}
+
+const statuses = (store: string) =>
+	Object.fromEntries(readIntakeIndex(store).map((line) => [line.reportId, line.status]));
+const bundleKept = (store: string, n: number) => existsSync(join(store, "bundles", `${rid(n)}.tar.gz`));
+
+test("dev flywheel --sweep expires debug-only bundles past retention and forgets on the reporter's own request (R-20)", async () => {
+	const root = await mkdtemp(join(tmpdir(), "flywheel-sweep-"));
+	try {
+		const store = join(root, "store");
+		seedIntakeStore(store);
+		const calls: string[][] = [];
+		const issue = (number: number, author: string, closedDaysAgo: number | null) => ({
+			number,
+			body: "",
+			closed_at: closedDaysAgo === null ? null : daysAgo(closedDaysAgo),
+			user: { login: author },
+		});
+		const run: ReportCommandRunner = async (_file, args) => {
+			calls.push([...args]);
+			const reply = (value: unknown) => ({ exitCode: 0, stdout: JSON.stringify(value), stderr: "", timedOut: false });
+			const joined = args.join(" ");
+			if (joined.includes("labels=has-bundle"))
+				return reply([
+					issue(11, "rep11", 91),
+					issue(12, "rep12", 91),
+					issue(13, "rep13", null),
+					issue(14, "rep14", null),
+					issue(15, "rep15", null),
+				]);
+			if (joined.includes("discussions(first: 100"))
+				return reply({ data: { repository: { discussions: { pageInfo: { hasNextPage: false }, nodes: [] } } } });
+			if (joined.includes("issues/14/comments"))
+				return reply([
+					{ body: "Thanks for the fix.", user: { login: "rep14" } },
+					{ body: bundleDeletionComment(rid(5)), user: { login: "rep14" } },
+				]);
+			if (joined.includes("issues/15/comments"))
+				return reply([{ body: bundleDeletionComment(rid(6)), user: { login: "drive-by" } }]);
+			if (/issues\/\d+\/comments/u.test(joined)) return reply([]);
+			return { exitCode: 1, stdout: "", stderr: `unexpected ${joined}`, timedOut: false };
+		};
+		let out = "";
+		let err = "";
+		const code = await runFlywheelCommand(["--sweep", "--store", store], {
+			run,
+			findGh: () => "/usr/bin/gh",
+			env: {},
+			cwd: root,
+			now: () => NOW,
+			stdout: (text) => {
+				out += text;
+			},
+			stderr: (text) => {
+				err += text;
+			},
+		});
+		strictEqual(code, 0, err);
+		deepStrictEqual(statuses(store), {
+			[rid(1)]: "expired",
+			[rid(2)]: "held",
+			[rid(3)]: "held",
+			[rid(4)]: "expired",
+			[rid(5)]: "forgotten",
+			[rid(6)]: "held",
+		});
+		deepStrictEqual(
+			[1, 2, 3, 4, 5, 6].map((n) => bundleKept(store, n)),
+			[false, true, true, false, false, true],
+		);
+		strictEqual(readFileSync(join(store, "exclusions.txt"), "utf8"), `${rid(5)}\n`);
+		ok(out.includes(`drive-by asked on #15`) && out.includes(`--forget ${rid(6)}`), out);
+		// Every gh call is a read: nothing is posted for the maintainer.
+		ok(
+			calls.every((args) => args[0] === "api" && !args.includes("-X") && !args.includes("--method")),
+			JSON.stringify(calls),
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("dev flywheel --forget deletes a stored bundle on request without gh and keeps it out of every later pull (R-20)", async () => {
+	const root = await mkdtemp(join(tmpdir(), "flywheel-forget-"));
+	try {
+		const store = join(root, "store");
+		seedIntakeStore(store);
+		let out = "";
+		const forget = (id: string) =>
+			runFlywheelCommand(["--forget", id, "--store", store], {
+				findGh: () => null,
+				env: {},
+				cwd: root,
+				stdout: (text) => {
+					out += text;
+				},
+				stderr: () => {},
+			});
+		strictEqual(await forget(rid(2)), 0);
+		strictEqual(statuses(store)[rid(2)], "forgotten");
+		strictEqual(bundleKept(store, 2), false);
+		ok(out.includes(`The diagnostic bundle for report ${rid(2)} is deleted`), out);
+		strictEqual(await forget(rid(9)), 0);
+		ok(out.includes(`${rid(9)}: not in the store; recorded`), out);
+		deepStrictEqual(readFileSync(join(store, "exclusions.txt"), "utf8").split("\n").filter(Boolean), [rid(2), rid(9)]);
+		strictEqual(
+			readFileSync(join(store, "bundles", ".gitignore"), "utf8")
+				.split("\n")
+				.includes("*"),
+			true,
+		);
+		// The seeded bundles/ was made with the default mode; the store tightens it.
+		strictEqual(statSync(join(store, "bundles")).mode & 0o777, 0o700);
+		strictEqual(await forget("rpt_nope"), 2);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
