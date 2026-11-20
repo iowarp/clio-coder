@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { prefixHeadlessFailure, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
+import { createToolCallIdMinter } from "../../src/cli/modes/run-json-schema-v2.js";
 import { completionExitCode, withRunFailureReporting, withRunResultV2 } from "../../src/cli/run-failure.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { CITATION_CHECK_PREFIX } from "../../src/domains/safety/citation-grounding.js";
@@ -264,7 +265,7 @@ test("a dispatch whose worker started and failed is not reported as never starte
 
 /** A headless run whose answer ends on a call it only wrote out, as the turn runtime stamps it; v2 when `format` is set. */
 async function writtenCallRun(
-	format?: "json",
+	format?: "json" | "stream-json",
 	override?: Record<string, unknown>,
 	output?: { path: string; cwd: string },
 	extra: {
@@ -274,6 +275,10 @@ async function writtenCallRun(
 		declared?: Record<string, unknown>;
 		/** The host's seal, as the chat loop reports it after turn_end. */
 		sealed?: Record<string, unknown>;
+		/** Runs the turn dispatched, given the main run's id; `steered` names the ones steer canceled. */
+		children?: { runs: (rootRunId: string) => object[]; steered?: ReadonlySet<string> };
+		/** Events the turn emits before its reply's message_end. */
+		before?: object[];
 	} = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
 	let handler: (event: unknown) => void = () => {};
@@ -283,14 +288,17 @@ async function writtenCallRun(
 		),
 		clioCoderWrittenCalls: ["read"],
 	};
+	let rootRunId = "";
 	const stub: Record<string, unknown> = {
 		onEvent: (next: (event: unknown) => void) => {
 			handler = next;
 			return () => {};
 		},
 		getSessionId: () => null,
-		submit: async () => {
+		submit: async (_prompt: string, options?: { hostRun?: { runId?: string } }) => {
+			rootRunId = options?.hostRun?.runId ?? "";
 			handler({ type: "agent_start" });
+			for (const event of extra.before ?? []) handler(event);
 			handler({ type: "message_end", message: reply });
 			if (extra.declared !== undefined) {
 				handler({ type: "tool_execution_start", toolCallId: "f1", toolName: "finish", args: extra.declared });
@@ -337,6 +345,14 @@ async function writtenCallRun(
 				prompt: "How many rows?",
 				mode: format === undefined ? "text" : "json",
 				shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
+				...(extra.children !== undefined
+					? {
+							dispatch: {
+								listRuns: () => extra.children?.runs(rootRunId) ?? [],
+								canceledBySteer: (id: string) => extra.children?.steered?.has(id) === true,
+							},
+						}
+					: {}),
 			} as never,
 		);
 	try {
@@ -523,5 +539,113 @@ test("a declared not_done or partly_done keeps exit 0, rides the envelope, and -
 		state: "unknown",
 		limitations: [],
 		unverified: [],
+	});
+});
+
+test("a v2 run_end lists every child run the main agent dispatched, a steer cancel as canceled (row 164)", async (t) => {
+	const env = await isolateClioEnv("headless-dispatch-runs-");
+	t.after(() => env.restore());
+	const child =
+		(id: string, agentId: string, outcome: string, second: number, parentRunId?: string) => (rootRunId: string) => ({
+			id,
+			agentId,
+			task: `task of ${id}`,
+			status: outcome === "succeeded" ? "completed" : "failed",
+			outcome,
+			startedAt: `2026-11-20T00:00:0${second}.000Z`,
+			endedAt: `2026-11-20T00:00:0${second + 1}.000Z`,
+			lineage: { rootRunId, parentRunId: parentRunId ?? rootRunId, attempt: parentRunId ? 1 : 0, depth: 1 },
+		});
+	// Listed newest first, as a ledger may; the envelope lists them oldest first.
+	const children = {
+		runs: (root: string) =>
+			[
+				child("steered", "coder", "failed", 4),
+				child("retry", "debugger", "succeeded", 3, "first"),
+				child("scouted", "scout", "succeeded", 2),
+				child("first", "debugger", "failed", 1),
+			].map((make) => make(root)),
+		steered: new Set(["steered"]),
+	};
+	const pong = answerMessage("pong") as Record<string, unknown>;
+	const v2 = await writtenCallRun("json", pong, undefined, { children });
+	strictEqual(v2.code, 0, v2.stderr);
+	const envelope = JSON.parse(v2.stdout.trim().split("\n").at(-1) ?? "{}") as {
+		dispatch?: { runs?: Array<Record<string, unknown>>; undelivered?: unknown[] };
+	};
+	deepStrictEqual(
+		envelope.dispatch?.runs?.map(({ runId, agentId, outcome }) => [runId, agentId, outcome]),
+		[
+			["first", "debugger", "failed"],
+			["scouted", "scout", "succeeded"],
+			["retry", "debugger", "succeeded"],
+			["steered", "coder", "canceled"],
+		],
+	);
+	match(String(envelope.dispatch?.runs?.[3]?.outcomeDetail), /canceled through steer/u);
+	deepStrictEqual(envelope.dispatch?.undelivered, []);
+	// No children: an empty list, as before.
+	const alone = await writtenCallRun("json", pong);
+	deepStrictEqual((JSON.parse(alone.stdout.trim()) as { dispatch?: { runs?: unknown[] } }).dispatch?.runs, []);
+});
+
+test("v2 stream-json tool frames carry Clio's tc_<turn>_<n> id and the provider's beside it (CLI-8)", async (t) => {
+	const env = await isolateClioEnv("headless-tool-call-ids-");
+	t.after(() => env.restore());
+	const call = (id: string, name: string) => ({ type: "toolCall", id, name, arguments: {} });
+	const asks = (...calls: object[]) => ({ ...answerMessage(""), stopReason: "toolUse", content: calls });
+	const result = { content: [{ type: "text", text: "ok" }], details: {} };
+	const ran = (id: string, toolName: string) => [
+		{ type: "tool_execution_start", toolCallId: id, toolName, args: {} },
+		{ type: "tool_execution_end", toolCallId: id, toolName, result, isError: false },
+	];
+	const first = asks(call("call_B", "read"), call("call_A", "grep"));
+	// The second turn's provider numbers its calls again from the same id.
+	const second = asks(call("call_B", "read"));
+	const before = [
+		{ type: "turn_start" },
+		{ type: "message_end", message: first },
+		// Parallel execution settles out of the message's order; the ids follow the message.
+		...ran("call_A", "grep"),
+		...ran("call_B", "read"),
+		{ type: "message_end", message: { role: "toolResult", toolCallId: "call_B", toolName: "read", content: [] } },
+		{ type: "turn_end", message: first, toolResults: [] },
+		{ type: "turn_start" },
+		{ type: "message_end", message: second },
+		...ran("call_B", "read"),
+	];
+	const pong = answerMessage("pong") as Record<string, unknown>;
+	const v2 = await writtenCallRun("stream-json", pong, undefined, { before });
+	strictEqual(v2.code, 0, v2.stderr);
+	const frames = v2.stdout
+		.trim()
+		.split("\n")
+		.map((line) => JSON.parse(line) as Record<string, unknown> & { message?: Record<string, unknown> });
+	deepStrictEqual(
+		frames
+			.filter((frame) => String(frame.type).startsWith("tool_execution_"))
+			.map((frame) => [frame.type, frame.toolCallId, frame.providerToolCallId]),
+		[
+			["tool_execution_start", "tc_1_2", "call_A"],
+			["tool_execution_end", "tc_1_2", "call_A"],
+			["tool_execution_start", "tc_1_1", "call_B"],
+			["tool_execution_end", "tc_1_1", "call_B"],
+			["tool_execution_start", "tc_2_1", "call_B"],
+			["tool_execution_end", "tc_2_1", "call_B"],
+		],
+	);
+	const toolResult = frames.find((frame) => frame.message?.role === "toolResult")?.message;
+	deepStrictEqual([toolResult?.toolCallId, toolResult?.providerToolCallId], ["tc_1_1", "call_B"]);
+	// The model's own toolCall blocks keep the provider's id as sent.
+	match(v2.stdout, /"type":"toolCall","id":"call_A"/u);
+	// A gateway chain step names its parent by Clio's id; its provider id is the chain call's.
+	const mint = createToolCallIdMinter();
+	mint({ type: "turn_start" });
+	mint({ type: "tool_execution_start", toolCallId: "gw" });
+	deepStrictEqual(mint({ type: "tool_execution_end", toolCallId: "gw:s2", parentToolCallId: "gw" }), {
+		type: "tool_execution_end",
+		toolCallId: "tc_1_1:s2",
+		parentToolCallId: "tc_1_1",
+		providerToolCallId: "gw",
 	});
 });

@@ -104,7 +104,11 @@
 			"type": "object",
 			"required": ["runs", "live", "undelivered"],
 			"properties": {
-				"runs": { "type": "array", "items": { "type": "object" } },
+				"runs": {
+					"description": "A main run: every child run the main agent dispatched, retried attempts included, oldest first; a run the agent canceled through steer reads outcome canceled. With --agent: the one sealed receipt.",
+					"type": "array",
+					"items": { "$ref": "#/$defs/dispatchedRun" }
+				},
 				"live": { "type": "array", "items": { "type": "object" } },
 				"undelivered": { "type": "array", "items": { "type": "object" } },
 				"superseded": { "type": "array", "items": { "type": "object" } }
@@ -213,6 +217,20 @@
 				"exitCode": { "type": "integer" },
 				"durationMs": { "type": "number" },
 				"ranAfterLastEdit": { "type": "boolean" }
+			}
+		},
+		"dispatchedRun": {
+			"type": "object",
+			"required": ["runId", "agentId"],
+			"properties": {
+				"runId": { "type": "string" },
+				"agentId": { "type": "string" },
+				"outcome": {
+					"type": "string",
+					"description": "The run's terminal outcome; absent for a run still live when waiting stopped."
+				},
+				"outcomeCode": { "type": ["string", "null"] },
+				"outcomeDetail": { "type": ["string", "null"] }
 			}
 		}
 	}
