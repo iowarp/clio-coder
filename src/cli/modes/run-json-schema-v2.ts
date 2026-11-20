@@ -25,6 +25,9 @@ const CAUSE_ORDER = [
 	"deadline",
 	"reader_closed",
 	"flag_conflict",
+	"task_file_conflict",
+	"task_flag_conflict",
+	"task_authority",
 	"not_configured",
 	"schema_unsupported",
 	"session_live",
@@ -96,6 +99,9 @@ function exitCodeFor(cause: RunCause): number {
 		case "reader_closed":
 			return EXIT_CODES.readerClosed;
 		case "flag_conflict":
+		case "task_file_conflict":
+		case "task_flag_conflict":
+		case "task_authority":
 		case "not_configured":
 		case "schema_unsupported":
 		case "session_live":

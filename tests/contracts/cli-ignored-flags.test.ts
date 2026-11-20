@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { after, afterEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseRunCliArgs } from "../../src/cli/args.js";
+import { parseRunArgsWithTaskFile } from "../../src/cli/task-envelope.js";
 import {
 	snapshotTurnConstraints,
 	turnAllowsTool,
@@ -400,5 +401,63 @@ describe("fleet detach and wait flags (SPEC L7b)", () => {
 			await closeServer(fixture.server);
 			scratch.cleanup();
 		}
+	});
+});
+
+describe("run --task-file envelope (SPEC 6.3)", () => {
+	const envelope = (name: string, body: unknown): string => {
+		const file = join(home.dir, `${name}.task.json`);
+		writeFileSync(file, typeof body === "string" ? body : JSON.stringify(body));
+		return file;
+	};
+	const refusal = async (args: string[]): Promise<{ slug: string | undefined; message: string }> => {
+		const parsed = await parseRunArgsWithTaskFile(args);
+		const error = parsed.diagnostics.find((diagnostic) => diagnostic.type === "error");
+		return { slug: error?.slug, message: error?.message ?? "" };
+	};
+
+	it("merges the envelope's task and flags into the run arguments", async () => {
+		const file = envelope("ok", { schemaVersion: 1, task: "say hi", route: { model: "m1" } });
+		const parsed = await parseRunArgsWithTaskFile(["--task-file", file]);
+		equal(parsed.diagnostics.filter((diagnostic) => diagnostic.type === "error").length, 0);
+		deepStrictEqual(parsed.messages, ["say hi"]);
+		equal(parsed.model, "m1");
+	});
+
+	it("refuses a key given in the file and on the command line, naming the dotted path", async () => {
+		const file = envelope("conflict", { schemaVersion: 1, task: "say hi", route: { model: "m1" } });
+		const { slug, message } = await refusal(["--model", "m2", "--task-file", file]);
+		equal(slug, "task_flag_conflict");
+		match(message, /route\.model/);
+	});
+
+	it("refuses an unknown key, malformed JSON and a schemaVersion other than 1 as usage", async () => {
+		const unknown = await refusal([
+			"--task-file",
+			envelope("unknown", { schemaVersion: 1, task: "x", route: { bogus: 1 } }),
+		]);
+		equal(unknown.slug, "usage");
+		match(unknown.message, /route\.bogus/);
+		equal((await refusal(["--task-file", envelope("bad", "{")])).slug, "usage");
+		equal((await refusal(["--task-file", envelope("v2", { schemaVersion: 2, task: "x" })])).slug, "usage");
+	});
+
+	it("refuses argv text, @file and - beside --task-file", async () => {
+		const file = envelope("ok2", { schemaVersion: 1, task: "x" });
+		for (const extra of [["text"], [`@${file}`], ["-"]])
+			equal((await refusal(["--task-file", file, ...extra])).slug, "task_file_conflict");
+	});
+
+	it("refuses verify without --trust-task-file and accepts it with the flag", async () => {
+		const file = envelope("verify", { schemaVersion: 1, task: "x", verify: [{ command: "true" }] });
+		equal((await refusal(["--task-file", file])).slug, "task_authority");
+		const trusted = await parseRunArgsWithTaskFile(["--trust-task-file", "--task-file", file]);
+		equal(trusted.diagnostics.filter((diagnostic) => diagnostic.type === "error").length, 0);
+	});
+
+	it("hands an inline output schema to the run as an object", async () => {
+		const file = envelope("schema", { schemaVersion: 1, task: "x", output: { schema: { type: "array" } } });
+		const parsed = await parseRunArgsWithTaskFile(["--task-file", file]);
+		equal(typeof parsed.outputSchema, "object");
 	});
 });

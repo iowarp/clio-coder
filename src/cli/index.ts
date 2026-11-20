@@ -490,6 +490,8 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["uninstall", async (subArgs) => (await import("./uninstall.js")).runUninstallCommand(subArgs)],
 	["upgrade", async (subArgs) => (await import("./upgrade.js")).runUpgradeCommand(subArgs)],
 	["version", async (subArgs) => (await import("./version.js")).runVersionCommand(subArgs)],
+	["help", async (subArgs) => (await import("./help-command.js")).runHelpCommand(subArgs)],
+	["schema", async (subArgs) => (await import("./schema.js")).runSchemaCommand(subArgs)],
 	[
 		"worker",
 		async () => {

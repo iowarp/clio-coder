@@ -25,9 +25,19 @@ const MAX_ERRORS = 20;
 /**
  * Read and check the schema file: JSON, at most 64 KiB, an object root (`type: "object"`), `$ref` only into this
  * document's `#/$defs/`, and a schema the host validator accepts. No provider dialect subset applies here: the host,
- * not the provider, enforces the schema.
+ * not the provider, enforces the schema. A task envelope's inline `output.schema` (SPEC 6.3) takes the same checks,
+ * its serialized size standing in for the file's.
  */
-export async function loadOutputSchema(file: string): Promise<OutputSchemaLoad> {
+export async function loadOutputSchema(
+	source: string | { readonly inline: unknown; readonly label: string },
+): Promise<OutputSchemaLoad> {
+	if (typeof source !== "string") {
+		const size = Buffer.byteLength(JSON.stringify(source.inline) ?? "", "utf8");
+		if (size > RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES)
+			return { ok: false, reason: `${source.label} is larger than ${RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES} bytes` };
+		return checkOutputSchema(source.inline);
+	}
+	const file = source;
 	let raw: string;
 	try {
 		if (statSync(file).size > RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES)
@@ -42,6 +52,10 @@ export async function loadOutputSchema(file: string): Promise<OutputSchemaLoad> 
 	} catch (error) {
 		return { ok: false, reason: `${file} is not JSON: ${error instanceof Error ? error.message : String(error)}` };
 	}
+	return checkOutputSchema(value);
+}
+
+async function checkOutputSchema(value: unknown): Promise<OutputSchemaLoad> {
 	if (typeof value !== "object" || value === null || Array.isArray(value))
 		return { ok: false, reason: 'the schema must be a JSON object whose root type is "object"' };
 	const root = (value as Record<string, unknown>).type;
