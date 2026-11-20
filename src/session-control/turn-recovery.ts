@@ -80,6 +80,8 @@ export interface RetryForecast {
 	maxAttempts: number;
 	providerWaits?: number;
 	onProviderWait?: boolean;
+	/** A harness recovery runs next (a re-prompt after a stopped repetition), not this request again: nothing waits. */
+	recovery?: true;
 }
 
 export interface RetryStatusEvent {
