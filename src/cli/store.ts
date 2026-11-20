@@ -42,7 +42,9 @@ import {
 	type StoreProbeRow,
 	writeStoreBackendRecord,
 } from "../domains/store/selection.js";
-import { formatColumns, printError } from "./shared.js";
+import { confirmAction } from "./kit/confirm.js";
+import { writeCliFailure } from "./kit/json-out.js";
+import { formatColumns } from "./shared.js";
 
 const HELP = `clio-coder store <command>
 
@@ -547,7 +549,7 @@ function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
 			else if (arg === "--stop-if-last") parsed.stopIfLast = true;
 			else parsed.hashLarge = true;
 		} else if (arg.startsWith("-") && arg.length > 1) {
-			throw new UsageError(`unknown option ${arg}`);
+			throw new UsageError(arg.startsWith("-") ? `unknown flag: ${arg}` : `unknown option ${arg}`);
 		} else {
 			parsed.positional.push(arg);
 		}
@@ -795,13 +797,16 @@ async function executeStore(sub: string, args: ParsedArgs, cwd: string, signal: 
 		}
 		case "rm": {
 			const { tag, blob } = parseRef(first);
-			const data = await storeRemoveBlob(cwd, tag, blob, args.yes);
+			const yes = args.yes || (await confirmedOnTerminal(`Delete ${tag}:${blob} from the store?`));
+			const data = await storeRemoveBlob(cwd, tag, blob, yes);
 			const what = `${data.ref} (${bytesLabel(data.bytes)})`;
 			if (!data.deleted) return { code: 0, data, text: `Would delete ${what}. Nothing deleted; rerun with --yes.` };
 			return { code: 0, data, text: `Deleted ${what}; its records remain.` };
 		}
 		case "rm-tag": {
-			const data = await storeRemoveTag(cwd, checkTagArg(first), args.yes);
+			const tag = checkTagArg(first);
+			const yes = args.yes || (await confirmedOnTerminal(`Delete tag ${tag} and every blob in it?`));
+			const data = await storeRemoveTag(cwd, tag, yes);
 			const what = `tag ${data.tag}: ${data.blobs} blob(s), ${bytesLabel(data.bytes)}${data.records ? ", and its records" : ""}`;
 			if (!data.deleted) return { code: 0, data, text: `Would delete ${what}. Nothing deleted; rerun with --yes.` };
 			return { code: 0, data, text: `Deleted ${what}.` };
@@ -843,10 +848,38 @@ async function executeStore(sub: string, args: ParsedArgs, cwd: string, signal: 
 	}
 }
 
+const STORE_COMMANDS = new Set([
+	"tags",
+	"ls",
+	"stat",
+	"history",
+	"verify",
+	"put",
+	"get",
+	"rm",
+	"rm-tag",
+	"adopt",
+	"where",
+	"backend",
+]);
+
+/**
+ * Without --yes a person at a terminal is asked (C8); a decline or no terminal keeps the v1 answer, a preview that
+ * deletes nothing and exits 0, since C8's exit 2 and 1 there change an exit code (NIGHT-DECISIONS 2).
+ */
+async function confirmedOnTerminal(question: string): Promise<boolean> {
+	return (await confirmAction({ question, yes: false })).proceed;
+}
+
 export async function runStoreCommand(argv: ReadonlyArray<string>): Promise<number> {
-	if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) {
+	if (argv.includes("--help") || argv.includes("-h")) {
 		process.stdout.write(HELP);
-		return argv.length === 0 ? 2 : 0;
+		return 0;
+	}
+	if (argv.length === 0) {
+		// The bare group is a usage error: its help goes to stderr with the same exit 2 (C2, I-07).
+		process.stderr.write(HELP);
+		return 2;
 	}
 	const json = argv.includes("--json");
 	const controller = new AbortController();
@@ -860,12 +893,22 @@ export async function runStoreCommand(argv: ReadonlyArray<string>): Promise<numb
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		const code = error instanceof UsageError ? 2 : 1;
+		const sub = argv.find((arg) => !arg.startsWith("-"));
+		const failurePath = ["store", ...(sub !== undefined && STORE_COMMANDS.has(sub) ? [sub] : [])];
+		const slug = message.startsWith("unknown flag")
+			? "unknown_flag"
+			: message.startsWith("unknown store command")
+				? "unknown_command"
+				: code === 2
+					? "usage"
+					: "io";
+		// One diagnostic and a help pointer on stderr (C3). The --json document keeps v1's ok, message and reason
+		// and adds the C5 version and error.
+		writeCliFailure({ path: failurePath, slug, message, json: false });
 		if (json) {
 			const reason = error instanceof StoreRefusal ? { reason: error.reason } : {};
-			process.stdout.write(`${JSON.stringify({ ok: false, message, ...reason }, null, 2)}\n`);
-		} else {
-			printError(`store: ${message}`);
-			if (code === 2) process.stderr.write("  run 'clio-coder store --help' for usage\n");
+			const document = { version: 1, ok: false, message, ...reason, error: { code: slug, message } };
+			process.stdout.write(`${JSON.stringify(document, null, 2)}\n`);
 		}
 		return code;
 	} finally {
