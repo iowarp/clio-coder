@@ -33,11 +33,12 @@ export interface TurnOutcomeCollector extends MiddlewareHookRegistration {
 	clarificationStreak(): number;
 	recordControl(record: TurnControlRecord): void;
 	/**
-	 * Start the outcome ledger on `hub`: it reads this session's settling firings off their `middleware.fired` rows and
-	 * the loop guard's escalations, and writes one `surface.settled` per firing. The returned stop settles every firing
-	 * still open, as the session it belonged to is over (memory design 4.1, 4.6).
+	 * Start the outcome ledger on `hub`: it reads the settling firings of the session `currentSession` names off their
+	 * `middleware.fired` rows, and the loop guard's escalations, and writes one `surface.settled` per firing. A firing
+	 * joins the ledger under that session even before any hook of its turn ran (memory design 4.1, 4.6). The returned
+	 * stop settles every firing still open, as the session it belonged to is over.
 	 */
-	attachLedger(hub: TelemetryHub): () => void;
+	attachLedger(hub: TelemetryHub, currentSession: () => string | undefined): () => void;
 	/** A main request was sent: every firing waiting for admission rode it. */
 	requestSent(callId: string): void;
 	/** These firings' effects never entered a request (a spent nudge, a released buffer, an ended turn). */
@@ -73,8 +74,6 @@ interface OpenFiring {
 	credit?: SettlementFact;
 	/** The loop guard escalation that ended the turn's tool use, when one did. */
 	exhausted?: string;
-	/** The turn it fired in has ended, so an exhausted block settles as soon as a request carries it. */
-	turnOver?: true;
 }
 
 const IDENTITY_LIMIT = 64;
@@ -142,6 +141,7 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 	const harnessReads = new Map<string, number>();
 	// --- outcome ledger (memory design 4.1, 4.6) ---
 	let hub: TelemetryHub | null = null;
+	let currentSession: () => string | undefined = () => undefined;
 	const open = new Map<string, OpenFiring>();
 	const identities = new Map<string, string>();
 	let admissions = 0;
@@ -166,22 +166,50 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		else if (firing.kind === "block" && firing.credit !== undefined) settle(firing, "recovered", firing.credit);
 		else settle(firing, "ignored", { kind: "none" });
 	};
-	/** The admitted firings settle with the turn that carried them; an exhausted block waits only for its request. */
+	/**
+	 * The admitted firings settle with the turn that carried them. A block is an effect inside its own turn, so one no
+	 * request carried before its turn ended never enters one: it is exhausted when the turn's tool use ended, otherwise
+	 * suppressed. A later turn's request does not carry it.
+	 */
 	const endTurn = (): void => {
 		for (const firing of [...open.values()]) {
 			if (firing.admitted !== null) settleEnded(firing);
-			else if (firing.exhausted !== undefined) firing.turnOver = true;
+			else if (firing.kind === "block" && firing.exhausted !== undefined)
+				settle(firing, "exhausted", { kind: "scope-end", ref: firing.exhausted });
+			else if (firing.kind === "block") settle(firing, "suppressed", { kind: "none" });
 		}
 		turnExhausted = null;
 	};
 	/** A session is over: nothing it left waiting can enter a request now. */
 	const closeSession = (): void => {
 		for (const firing of [...open.values()]) {
-			if (firing.admitted !== null || firing.exhausted !== undefined) settleEnded(firing);
+			if (firing.admitted !== null) settleEnded(firing);
+			else if (firing.kind === "block" && firing.exhausted !== undefined)
+				settle(firing, "exhausted", { kind: "scope-end", ref: firing.exhausted });
 			else settle(firing, "suppressed", { kind: "none" });
 		}
 		identities.clear();
 		turnExhausted = null;
+	};
+	/** The collector now follows `id`: what the earlier session left open settles with it. */
+	const enterSession = (id: string): void => {
+		if (id === sessionId) return;
+		closeSession();
+		succeededKeys.clear();
+		harnessReads.clear();
+		sessionId = id;
+	};
+	/**
+	 * Whether a ledger event belongs to this loop's session: the one it runs now, known from the loop rather than from a
+	 * later hook, so a firing before the first turn's hooks (an awaited turn_start, a compaction) still joins it. A
+	 * worker's forwarded event belongs to its run, and an event with no session to none of this loop's requests.
+	 */
+	const ownSession = (ctx: TelemetryContext | undefined): ctx is TelemetryContext & { sessionId: string } => {
+		if (ctx?.runId !== undefined || !ctx?.sessionId) return false;
+		const current = currentSession() ?? sessionId;
+		if (current === undefined || ctx.sessionId !== current) return false;
+		enterSession(current);
+		return true;
 	};
 	/**
 	 * One terminal fact credits one firing: the most recently admitted claimant. Every other claimant of the same fact
@@ -207,9 +235,7 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		payload: { firingId?: string; hook: string; ruleId: string; effects: ReadonlyArray<string> },
 		ctx: TelemetryContext | undefined,
 	): void => {
-		// A worker's forwarded firings belong to its run, not to this session's requests.
-		if (payload.firingId === undefined || ctx?.runId !== undefined || !ctx?.sessionId || ctx.sessionId !== sessionId)
-			return;
+		if (payload.firingId === undefined || !ownSession(ctx)) return;
 		const block = payload.effects.includes("block_tool");
 		const identity = block && ctx.toolCallId !== undefined ? identities.get(ctx.toolCallId) : undefined;
 		const firing: OpenFiring = {
@@ -230,9 +256,9 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		// An observe-only compaction point discards every effect, so none can enter a request.
 		if (payload.hook === "on_compaction") settle(firing, "suppressed", { kind: "none" });
 	};
-	/** A lockout, a stop or a crossed tool budget ends the turn's tool use: its blocks cannot recover now. */
+	/** A lockout, a stop or a crossed tool budget of this session ends the turn's tool use: its blocks cannot recover now. */
 	const onExhausted = (event: string, ctx: TelemetryContext | undefined): void => {
-		if (ctx?.runId !== undefined || (ctx?.sessionId != null && ctx.sessionId !== sessionId)) return;
+		if (!ownSession(ctx)) return;
 		turnExhausted ??= event;
 		for (const firing of open.values()) if (firing.kind === "block") firing.exhausted ??= event;
 	};
@@ -242,14 +268,18 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		hooks: ["turn_start", "before_tool", "after_tool", "turn_end"],
 		evidence: "observer:turn-outcome@turn",
 		clarificationStreak: () => previousClarificationStreak,
-		attachLedger(target) {
+		attachLedger(target, session) {
 			hub = target;
+			currentSession = session;
 			const stops = [
 				target.subscribe("middleware.fired", (payload, ctx) => onFired(payload, ctx)),
 				target.subscribe("safety.loop_blocked", (payload, ctx) => {
 					if (payload.disposition !== "block") onExhausted(`safety.loop_blocked:${payload.disposition}`, ctx);
 				}),
-				target.subscribe("safety.tool_budget_exceeded", (_payload, ctx) => onExhausted("safety.tool_budget_exceeded", ctx)),
+				// A rolled crossing is a silent roll: its batch still runs, so the turn's tool use did not end.
+				target.subscribe("safety.tool_budget_exceeded", (payload, ctx) => {
+					if (payload.rolled !== true) onExhausted("safety.tool_budget_exceeded", ctx);
+				}),
 			];
 			return () => {
 				for (const stop of stops) stop();
@@ -265,7 +295,6 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 				carried = true;
 				firing.admitted = admissions;
 				firing.admittedIn = callId;
-				if (firing.turnOver === true) settleEnded(firing);
 			}
 		},
 		suppressFirings(firingIds) {
@@ -326,12 +355,7 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 			}
 		},
 		evaluate(input) {
-			if (input.sessionId !== undefined && input.sessionId !== sessionId) {
-				closeSession();
-				succeededKeys.clear();
-				harnessReads.clear();
-				sessionId = input.sessionId;
-			}
+			if (input.sessionId !== undefined) enterSession(input.sessionId);
 			if (input.hook === "turn_start") {
 				// A turn that ended without a turn_end hook still ended; what it carried settles before this one starts.
 				endTurn();

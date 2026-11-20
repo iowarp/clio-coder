@@ -161,7 +161,7 @@ describe("middleware hook boundary", () => {
 				});
 			}),
 		];
-		const detach = collector.attachLedger(hub);
+		const detach = collector.attachLedger(hub, () => sessionId);
 		const hook = (input: MiddlewareHookInput) => middleware.runHook({ sessionId, ...input });
 		const ids = () => fired.flatMap((row) => (row.firingId === undefined ? [] : [row.firingId]));
 		const call = (turnId: string, toolName: string, toolCallId: string, toolArgs: Record<string, unknown>) => {

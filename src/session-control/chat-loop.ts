@@ -1851,7 +1851,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
 	if (deps.turnOutcomeCollector === undefined) deps.middlewareRegistrar?.registerHook(outcomeCollector);
 	/** Settles every firing that costs a round, against the requests and typed facts that follow it (memory design 4.1). */
-	const detachOutcomeLedger = deps.bus ? outcomeCollector.attachLedger(deps.bus) : null;
+	const detachOutcomeLedger = deps.bus
+		? outcomeCollector.attachLedger(deps.bus, () => deps.session?.current()?.id)
+		: null;
 
 	/**
 	 * A recovery exchange is a durable insert (F13): the record holds the exact pair, stands for the stopped reply
