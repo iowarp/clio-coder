@@ -70,7 +70,7 @@ it("leaves the base not compared when the linked base tree cannot resolve the ch
 	strictEqual(existsSync(join(stateDir, "dispatch-verification-base")), false);
 });
 
-it("seals a compete candidate's check that could not start as not run, never a rejection, and compares a failure on its base (M10a)", async () => {
+it("seals a compete candidate's check that could not start for a host cause as not run, a cwd the candidate deleted as a rejection, and compares a failure on its base (M10a)", async () => {
 	const root = mkdtempSync(join(tmpdir(), "clio-coder-host-verification-base-"));
 	scratches.push(root);
 	const project = join(root, "project");
@@ -78,12 +78,15 @@ it("seals a compete candidate's check that could not start as not run, never a r
 	mkdirSync(project, { recursive: true });
 	mkdirSync(stateDir, { recursive: true });
 	writeFileSync(join(project, "a.txt"), "a\n");
+	mkdirSync(join(project, "pkg"));
+	writeFileSync(join(project, "pkg", "b.txt"), "b\n");
 	git(project, "init", "-q", "-b", "main");
 	git(project, "config", "user.name", "Host Verification Base");
 	git(project, "config", "user.email", "host-verification@example.invalid");
 	git(project, "add", "-A");
 	git(project, "commit", "-q", "-m", "baseline");
 	const base = git(project, "rev-parse", "HEAD").trim();
+	rmSync(join(project, "pkg"), { recursive: true });
 	const checks: ResolvedCheck[] = [
 		{ check: "passes", cwd: project, timeoutMs: 5_000, argv: [process.execPath, "-e", "process.exit(0)"] },
 		{ check: "absent", cwd: project, timeoutMs: 5_000, argv: [join(project, "no-such-tool")] },
@@ -99,6 +102,36 @@ it("seals a compete candidate's check that could not start as not run, never a r
 	strictEqual(candidate?.status, "skipped");
 	strictEqual(candidate?.reason, "check_not_started");
 	strictEqual(hostVerificationRejection(candidate), null);
+	// A cwd the candidate deleted from its worktree was the candidate's doing: the check rejects it, naming the path.
+	// One the starting commit never had is not, and stays not run.
+	const gone: ResolvedCheck = {
+		check: "pkg",
+		cwd: join(project, "pkg"),
+		timeoutMs: 5_000,
+		argv: [process.execPath, "-e", "process.exit(0)"],
+	};
+	const never: ResolvedCheck = { ...gone, check: "never", cwd: join(project, "never") };
+	const removed = await runHostVerification({
+		runId: "candidate-removed",
+		request: { resolvedVerification: [checks[0] as ResolvedCheck, gone], candidateWorktree },
+		workerSuccessful: true,
+		stateDir,
+	});
+	strictEqual(removed?.status, "rejected");
+	strictEqual(removed?.checks[1]?.notRun, undefined);
+	ok(removed?.reason?.includes(join(project, "pkg")), removed?.reason);
+	ok(
+		hostVerificationRejection(removed)?.detail.includes(join(project, "pkg")),
+		hostVerificationRejection(removed)?.detail,
+	);
+	const untracked = await runHostVerification({
+		runId: "candidate-untracked",
+		request: { resolvedVerification: [never], candidateWorktree },
+		workerSuccessful: true,
+		stateDir,
+	});
+	strictEqual(untracked?.status, "skipped");
+	strictEqual(untracked?.reason, "check_not_started");
 	// A failure the candidate's base has too is compared there, as a task worktree's is.
 	const red: ResolvedCheck = {
 		check: "red",

@@ -11,10 +11,11 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { ClioSettings } from "../../core/config.js";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { PATH_BOUNDARY_MAX_ENTRIES, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { sandboxAvailability } from "../../core/sandbox/availability.js";
 import { sandboxEnvPolicy } from "../../core/sandbox/env-scrub.js";
@@ -853,11 +854,13 @@ export function hostVerificationRejection(
 	return {
 		outcomeCode: "host_verification_rejected",
 		detail:
-			(failedCheck === undefined
-				? "host verification rejected"
-				: failedCheck.report !== undefined
-					? `host verification check '${failedCheck.check}' rejected: ${failedCheck.report.summary}`
-					: `host verification check '${failedCheck.check}' rejected with exit code ${failedCheck.exitCode}`) +
+			(verification.reason !== undefined
+				? `host verification rejected: ${verification.reason}`
+				: failedCheck === undefined
+					? "host verification rejected"
+					: failedCheck.report !== undefined
+						? `host verification check '${failedCheck.check}' rejected: ${failedCheck.report.summary}`
+						: `host verification check '${failedCheck.check}' rejected with exit code ${failedCheck.exitCode}`) +
 			(failedCheck === undefined
 				? "; the base was not compared"
 				: `; ${hostCheckBaseNote(failedCheck)}. The host ran this check; rejection is not evidence that the worker skipped validation.`),
@@ -1253,6 +1256,32 @@ export function hostVerificationSandbox(
 	});
 }
 
+/**
+ * A path a compete candidate's check needs that the candidate removed: the check's cwd, or a numeric-compare input,
+ * missing from the candidate's worktree while the commit the worktree started from has it (M10a). Undefined when
+ * nothing is missing, or when that commit never had the path (an untracked or ignored file the worktree never
+ * received), which is not the candidate's doing.
+ */
+function candidateRemovedPath(
+	candidate: NonNullable<DispatchRequest["candidateWorktree"]>,
+	check: ResolvedCheck,
+): string | undefined {
+	const inputs = check.kind === "numeric-compare" ? (check.numeric?.inputs ?? []) : [];
+	for (const path of [check.cwd, ...inputs]) {
+		const rel = relative(candidate.path, path);
+		if (rel === "" || relativePathEscapes(rel) || existsSync(path)) continue;
+		try {
+			const object = `${candidate.base}:${rel.split(sep).join("/")}`;
+			execFileSync("git", internalGitArgv(["-C", candidate.root, "cat-file", "-e", object]), {
+				stdio: "ignore",
+				timeout: 30_000,
+			});
+			return path;
+		} catch {}
+	}
+	return undefined;
+}
+
 export async function runHostVerification(input: {
 	runId: string;
 	request: Pick<DispatchRequest, "resolvedVerification" | "taskWorktree" | "candidateWorktree">;
@@ -1271,7 +1300,27 @@ export async function runHostVerification(input: {
 	const stateDir = input.stateDir ?? clioStateDir();
 	const env = input.env ?? process.env;
 	const results: RunHostVerificationCheck[] = [];
+	const removedPaths: string[] = [];
 	for (const [index, resolvedCheck] of taskChecks(input.request).entries()) {
+		const removed =
+			input.request.candidateWorktree === undefined
+				? undefined
+				: candidateRemovedPath(input.request.candidateWorktree, resolvedCheck);
+		if (removed !== undefined) {
+			// The candidate deleted what its check needs: a verdict on the candidate, not a host failure (M10a).
+			const reason = `check '${resolvedCheck.check}' cannot start: '${removed}' is missing from the candidate's worktree but exists in the commit it started from`;
+			results.push({
+				check: resolvedCheck.check,
+				argv: [...resolvedCheck.argv],
+				cwd: resolvedCheck.cwd,
+				exitCode: 1,
+				durationMs: 0,
+				memo: false,
+				outputTail: outputTail(`${reason}; nothing ran`),
+			});
+			removedPaths.push(reason);
+			continue;
+		}
 		const outcome = await runResolvedCheck({
 			runId: input.runId,
 			index,
@@ -1285,7 +1334,9 @@ export async function runHostVerification(input: {
 		results.push(outcome.check);
 	}
 	if (input.request.candidateWorktree !== undefined) {
-		// A compete candidate's check that never started judged nothing: it is not run, never a rejection (M10a).
+		if (removedPaths.length > 0) return { status: "rejected", reason: removedPaths.join("; "), checks: results };
+		// A compete candidate's check that never started for a host cause (spawn failure, refusal, no configuration,
+		// shutdown) judged nothing: it is not run, never a rejection (M10a).
 		const judged = results.filter((check) => check.notRun === undefined || check.notRun === "nothing-changed");
 		if (judged.length < results.length && judged.every((check) => check.exitCode === 0)) {
 			return { status: "skipped", reason: "check_not_started", checks: results };
