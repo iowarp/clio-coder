@@ -363,7 +363,7 @@ test("the session report names where a resumed transcript's replay broke the cac
 	const snapshot = { ...base, spend: exitSpend(view, "1970-01-01T00:00:00.000Z") };
 	match(
 		renderExitSummary(snapshot, "report", 160, false).join("\n"),
-		/^Cache: .* · resumed transcript differed at message\[1\]:assistant \(1 break, 9,000 re-prefilled\)$/mu,
+		/^Cache: .* · resumed transcript differed at message\[1\]:assistant \(1 break, up to 9,000 re-prefilled\)$/mu,
 	);
 	collector.dispose();
 });

@@ -14,7 +14,7 @@ import type {
 } from "../core/telemetry/dto.js";
 import { parseFactRef } from "../core/telemetry/dto.js";
 import { AgentRole, Disposition } from "../core/telemetry/enums.js";
-import { renderCount, unreportedCacheReadWords } from "../core/telemetry/render.js";
+import { renderCount, renderUpperBound, unreportedCacheReadWords } from "../core/telemetry/render.js";
 import { clioStateDir } from "../core/xdg.js";
 import {
 	loadRunCallsTelemetrySource,
@@ -167,6 +167,8 @@ function sealLine(seal: SealVerdict | null): string {
 }
 
 const show = (quantity: Quantity) => quantity.display;
+/** A re-prefill or its bill, worded as the upper bound the journal records (CTX-16). */
+const bound = (quantity: Quantity) => renderUpperBound(quantity.fact, quantity.display);
 
 /** A close only the ledger recorded has no reason, so none is printed (#434 §6.1). */
 function lifetimeState(lifetime: SessionTelemetryV1["lifetime"]): string {
@@ -294,11 +296,11 @@ function printCache(dto: CacheReportV1): string {
 			: []),
 		`verdicts  hot ${v.hot} · partial ${v.partial} · cold ${v.cold} · small ${v.small} · unknown ${v.unknown}`,
 		...(unreported === null ? [] : [`reads     ${unreported}`]),
-		`tokens    cache read ${show(dto.cacheRead)} · cache write ${show(dto.cacheWrite)} · uncached prefill ${show(dto.uncachedPrefill)} · re-prefilled ${show(dto.rePrefilled)}`,
-		`bill      ${show(dto.breakUsd)}`,
+		`tokens    cache read ${show(dto.cacheRead)} · cache write ${show(dto.cacheWrite)} · uncached prefill ${show(dto.uncachedPrefill)} · re-prefilled ${bound(dto.rePrefilled)}`,
+		`bill      ${bound(dto.breakUsd)}`,
 		...(dto.engineFloor ?? []).map(
 			(floor) =>
-				`engine floor  ${floor.route} resumes at ${renderCount(floor.granularity)}-token blocks: ${floor.calls} calls hot (engine-floor), engine floor re-prefill ${renderCount(floor.rePrefilled)}`,
+				`engine floor  ${floor.route} resumes at ${renderCount(floor.granularity)}-token blocks: ${floor.calls} calls hot (engine-floor), engine floor re-prefill ${renderUpperBound(floor.rePrefilled, renderCount(floor.rePrefilled))}`,
 		),
 	];
 	if (dto.breaks.length > 0)
@@ -312,8 +314,8 @@ function printCache(dto: CacheReportV1): string {
 					row.share?.display ?? "unknown",
 					row.expectedColdReasons.join(",") || "unattributed",
 					row.firstDivergentSection.display,
-					show(row.rePrefilled),
-					show(row.breakUsd),
+					bound(row.rePrefilled),
+					bound(row.breakUsd),
 				]),
 			]).trimEnd(),
 		);
@@ -322,7 +324,7 @@ function printCache(dto: CacheReportV1): string {
 			"",
 			formatColumns([
 				["cause", "breaks", "re-prefilled", "bill"],
-				...dto.byCause.map((row) => [row.cause, String(row.breaks), show(row.rePrefilled), show(row.breakUsd)]),
+				...dto.byCause.map((row) => [row.cause, String(row.breaks), bound(row.rePrefilled), bound(row.breakUsd)]),
 			]).trimEnd(),
 		);
 	return `${lines.join("\n")}\n`;
@@ -427,13 +429,15 @@ function printWhyStopped(dto: WhyStoppedV1): string {
 	return `session ${dto.sessionId}: ${dto.state}\n${dto.findings.map((line) => `  ${line}`).join("\n")}\n`;
 }
 
+const UPPER_BOUND_METRICS: ReadonlySet<string> = new Set(["rePrefilled", "breakUsd"]);
+
 function printExplanation(dto: ExplanationV1): string {
 	const ids = (label: string, values: readonly string[]) =>
 		values.length === 0
 			? []
 			: [`${label} (${values.length}): ${values.slice(0, 8).join(" ")}${values.length > 8 ? " …" : ""}`];
 	return `${[
-		`${dto.ref} = ${dto.value.display}`,
+		`${dto.ref} = ${UPPER_BOUND_METRICS.has(parseFactRef(dto.ref)?.metric ?? "") ? bound(dto.value) : dto.value.display}`,
 		`rule: ${dto.rule}`,
 		`fold version ${dto.foldVersion}`,
 		...ids("calls", dto.from.callIds),

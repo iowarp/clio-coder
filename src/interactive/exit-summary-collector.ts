@@ -4,6 +4,7 @@ import { relativePathEscapes } from "../core/path-containment.js";
 import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
+import { renderUpperBound } from "../core/telemetry/render.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { plainOutcomeLabel, settledRunCaveat, TOOL_GUARD_REASON_CODE } from "../domains/dispatch/failure-headline.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
@@ -301,7 +302,7 @@ function replayWords(replay: ReturnType<TelemetryView["cache"]>["replayMismatch"
 			? fact.kind === "measured" || fact.kind === "estimated"
 			: fact.unknownCount === 0 && fact.absentCount === 0;
 	const facts = [`${replay.breaks} ${replay.breaks === 1 ? "break" : "breaks"}`];
-	if (known) facts.push(`${replay.rePrefilled.display} re-prefilled`);
+	if (known) facts.push(`${renderUpperBound(fact, replay.rePrefilled.display)} re-prefilled`);
 	return `resumed transcript differed at ${replay.firstDivergentSection.display} (${facts.join(", ")})`;
 }
 

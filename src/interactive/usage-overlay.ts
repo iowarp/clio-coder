@@ -3,6 +3,7 @@ import type { FactMetric, Quantity, RunTelemetryV1 } from "../core/telemetry/dto
 import { factRef } from "../core/telemetry/dto.js";
 import type { AgentRole } from "../core/telemetry/enums.js";
 import { factKnownValue } from "../core/telemetry/known.js";
+import { renderUpperBound } from "../core/telemetry/render.js";
 import type { VerifiedOutcomeCount } from "../domains/evidence/verified-outcomes.js";
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { RecallTelemetry, SessionEntry } from "../domains/session/index.js";
@@ -264,8 +265,12 @@ function summaryBlock(
 			...(cached && style === "detailed"
 				? [
 						["uncached prefill", usageFigure(cache.uncachedPrefill)] as const,
-						["re-prefilled", usageFigure(cache.rePrefilled), `${cache.breaks.length} breaks`] as const,
-						["cache-break bill", usageFigure(cache.breakUsd)] as const,
+						[
+							"re-prefilled",
+							renderUpperBound(cache.rePrefilled.fact, usageFigure(cache.rePrefilled)),
+							`${cache.breaks.length} breaks`,
+						] as const,
+						["cache-break bill", renderUpperBound(cache.breakUsd.fact, usageFigure(cache.breakUsd))] as const,
 						[
 							"cache verdicts",
 							`hot ${v.hot} · partial ${v.partial} · cold ${v.cold} · small ${v.small} · unknown ${v.unknown}`,

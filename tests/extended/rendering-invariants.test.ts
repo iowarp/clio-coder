@@ -1145,7 +1145,7 @@ describe("Pi TUI compatibility", () => {
 		const handle = openContextOverlay(tui, ledger, { telemetry: { live: () => view, subscribe: () => () => {} } });
 		try {
 			const plain = (dockTop(tui)?.frame.renderDockBody(120, 60) ?? []).map(stripTerminalSequences).join("\n");
-			match(plain, /backend partly reused · re-prefilled 3,000 · cache read 9,000/u);
+			match(plain, /backend partly reused · re-prefilled up to 3,000 · cache read 9,000/u);
 			doesNotMatch(plain, /backend reused/u);
 		} finally {
 			handle.hide();
@@ -1198,7 +1198,7 @@ describe("Pi TUI compatibility", () => {
 		const handle = openContextOverlay(tui, ledger, { telemetry: { live: () => view, subscribe: () => () => {} } });
 		try {
 			const plain = (dockTop(tui)?.frame.renderDockBody(140, 60) ?? []).map(stripTerminalSequences).join("\n");
-			match(plain, /backend partly reused · re-prefilled 3,000 · server cache read 6,000 · uncached prefill 4,000/u);
+			match(plain, /backend partly reused · re-prefilled up to 3,000 · server cache read 6,000 · uncached prefill 4,000/u);
 			match(plain, /server prefill: 4,000 evaluated · 6,000 cached · 120 ms/u);
 			doesNotMatch(plain, /does not report cache reads/u);
 		} finally {
