@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -419,6 +420,34 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 			strictEqual(assessment.reason, exitCode === 0 ? "validation_evidence" : "unvalidated_mutation");
 			deepStrictEqual(assessment.mutatedPaths, ["tests/x.test.mjs"]);
 		}
+	});
+
+	it("counts no scratch, unexpanded, outside or git-ignored shell redirect as a changed file (FX-1)", (t) => {
+		const root = mkdtempSync(join(tmpdir(), "finish-scratch-"));
+		t.after(() => rmSync(root, { recursive: true, force: true }));
+		const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
+		execFileSync("git", ["init", "-q"], { cwd: root, env });
+		writeFileSync(join(root, ".gitignore"), "dist/\n");
+		const command = [
+			"npm run lint > $TMPDIR/lint.log",
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: an unexpanded shell variable in the command text.
+			"git diff > ${OUT}/src.patch",
+			"echo x > /dev/null",
+			`echo x > ${join(tmpdir(), "outside.txt")}`,
+			"echo x > dist/bundle.js",
+			"echo x > src/a.ts",
+		].join("; ");
+		const assessment = assessFinishContract({
+			sessionEntries: [
+				userMessage("user-1"),
+				toolCall("shell", ToolNames.Bash, { command }),
+				toolResult("shell", ToolNames.Bash, false),
+				assistantMessage("assistant-1", "Done."),
+			],
+			assistantTurnId: "assistant-1",
+			workspaceRoot: root,
+		});
+		deepStrictEqual(assessment.mutatedPaths, ["src/a.ts"]);
 	});
 
 	it("credits no bash, verify, operator or declared pass a later edit retired, nor the high-rigor gate (x8-1)", (t) => {
