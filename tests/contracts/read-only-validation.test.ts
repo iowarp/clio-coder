@@ -23,7 +23,7 @@ import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
 import { type CallVerdict, classifyCall, settleCheckCall } from "../../src/domains/safety/check-classifier.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
-import { extractCommandDeleteTargets } from "../../src/domains/safety/protected-artifacts.js";
+import { extractCommandDeleteTargets, setValidationWrappers } from "../../src/domains/safety/protected-artifacts.js";
 import { checkOutputReader, createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { clearTaskGates, configureTaskGates } from "../../src/tools/verify/task-gates.js";
 
@@ -1449,6 +1449,11 @@ it("wrapped and alternate spellings of a check read as that check, and a green a
 		"make -C sub test",
 		"pnpm --filter web vitest run",
 		"yarn workspace web jest",
+		// FX-44: a transparent prefix spelled with a path, and `time` with its options.
+		"/usr/bin/timeout 300 npm test",
+		"/usr/bin/env CI=1 npm test",
+		"time -p npm test",
+		"/usr/bin/time -v npm test",
 	]) {
 		const call = read(command);
 		deepStrictEqual([call.verdict, call.changesTree], ["check", false], command);
@@ -1482,6 +1487,32 @@ it("wrapped and alternate spellings of a check read as that check, and a green a
 		strictEqual(gate(command), "engage/unvalidated_mutation", command);
 	}
 	deepStrictEqual(extractCommandDeleteTargets("timeout 5 rm -rf build"), ["build"]);
+	// FX-44: a declared wrapper, by path tail or basename, is read through to the check it runs, and the whole command's
+	// exit is that check's; an undeclared script, a wrapper running no check, echo and printf stay unvalidated.
+	setValidationWrappers([".mine/bin/test-slot.sh", "ci.sh", "echo"]);
+	try {
+		for (const command of [
+			"/repo/.mine/bin/test-slot.sh corepack pnpm -s run test:file tests/a.test.ts",
+			"./scripts/ci.sh --quiet -- timeout 300 npm test",
+		]) {
+			const call = read(command);
+			deepStrictEqual([call.verdict, call.changesTree], ["check", false], command);
+			strictEqual(settleCheckCall(call, true, "error", true).settled, true, command);
+			strictEqual(gate(command), "ok/validation_evidence", command);
+		}
+		strictEqual(read("./scripts/ci.sh npm test").check, "npm test");
+		for (const command of [
+			"test-slot.sh npm test",
+			"ci.sh ls",
+			"ci.sh echo npm test",
+			"echo npm test",
+			"printf npm test",
+		])
+			strictEqual(gate(command), "engage/unvalidated_mutation", command);
+	} finally {
+		setValidationWrappers([]);
+	}
+	strictEqual(gate("./scripts/ci.sh npm test"), "engage/unvalidated_mutation");
 });
 
 it("the review gate reads a verifier report that closes prose containing braces, and nothing weaker", () => {

@@ -2423,6 +2423,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"sandboxPassEnv",
 				"sandboxUnixSockets",
 				"snapshots",
+				"validationWrappers",
 				"unattendedAfterSeconds",
 				"yoloAccepted",
 				"yoloConfinement",
@@ -2461,6 +2462,16 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					settings.safety.sandboxPassEnv = parsed.filter((name) => {
 						const valid = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(name);
 						if (!valid) issues.add("safety.sandboxPassEnv", `${name}: not an environment variable name`);
+						return valid;
+					});
+				}
+			}
+			if ("validationWrappers" in safety) {
+				const parsed = expectStringArray(issues, "safety.validationWrappers", safety.validationWrappers);
+				if (parsed !== undefined) {
+					settings.safety.validationWrappers = parsed.filter((entry) => {
+						const valid = entry.trim().length > 0 && entry === entry.trim();
+						if (!valid) issues.add("safety.validationWrappers", `${JSON.stringify(entry)}: not a script path or name`);
 						return valid;
 					});
 				}

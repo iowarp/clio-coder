@@ -721,6 +721,15 @@ export interface SafetySettings {
 	 */
 	snapshots: WorkspaceSnapshotMode;
 	/**
+	 * Repository wrapper scripts read as transparent when Clio decides whether a
+	 * shell command ran a check: an entry with a slash matches that script path,
+	 * a bare name matches the script's basename. The wrapper and its leading
+	 * options are skipped, so `scripts/test-slot.sh pnpm run test:file x`
+	 * counts as the check it runs; the whole command's exit still decides the
+	 * result. echo and printf are never wrappers.
+	 */
+	validationWrappers: string[];
+	/**
 	 * Seconds an attended permission card or ask_user round waits for the
 	 * operator before Clio resolves it and the turn continues: a parked call is
 	 * denied, an unanswered question takes its recommended option unless that
@@ -930,6 +939,7 @@ export const DEFAULT_SETTINGS = {
 		sandboxPassEnv: [] as string[],
 		sandboxUnixSockets: "block" as UnixSocketMode,
 		snapshots: "auto" as WorkspaceSnapshotMode,
+		validationWrappers: [] as string[],
 		unattendedAfterSeconds: 300,
 		yoloAccepted: false,
 		yoloConfinement: "contained" as YoloConfinement,
@@ -1181,6 +1191,9 @@ safety:
   sandboxUnixSockets: block
   # Git snapshots before the agent changes files, restored with /rewind: auto | off.
   snapshots: auto
+  # Wrapper scripts (a path, or a bare basename) that run a check with the
+  # words after them, so a wrapper before pnpm test counts as validation.
+  validationWrappers: []
   # Seconds a permission card or ask_user question waits for you before Clio
   # resolves it and keeps working: the call is denied, the question takes its
   # recommended option unless that option leaves the workspace. 0 waits

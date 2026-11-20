@@ -272,6 +272,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"url",
 	"use",
 	"user",
+	"validationWrappers",
 	"version",
 	"vision",
 	"warm",

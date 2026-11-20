@@ -15,12 +15,14 @@ import {
 import { mergeFlowRestrictions } from "./information-flow.js";
 import { createLoopState, type LoopDetectorState, observe as observeLoop } from "./loop-detector.js";
 import { createSafetyPolicyEngine, type SafetyPolicyEngine } from "./policy-engine.js";
+import { setValidationWrappers } from "./protected-artifacts.js";
 import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "./scope.js";
 
 export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyContract> {
 	let policyEngine: SafetyPolicyEngine | null = null;
 	let loopState: LoopDetectorState = createLoopState();
 	let unsubscribeSessionParked: (() => void) | null = null;
+	let unsubscribeWrappers: (() => void) | null = null;
 
 	function activePolicyEngine(): SafetyPolicyEngine {
 		policyEngine ??= createSafetyPolicyEngine();
@@ -43,6 +45,11 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 	const extension: DomainExtension = {
 		async start() {
 			policyEngine = createSafetyPolicyEngine();
+			// The shell reader looks through the declared wrappers when it names a check (FX-44); a change applies at once.
+			const config = context.getContract("config");
+			setValidationWrappers(config?.get().safety.validationWrappers ?? []);
+			unsubscribeWrappers =
+				config?.onChange("hotReload", ({ settings }) => setValidationWrappers(settings.safety.validationWrappers)) ?? null;
 			unsubscribeSessionParked = context.bus.subscribe("session.parked", () => {
 				// Authorship is per session: the next session asks again for the parked one's outside files.
 				clearSessionAuthoredFiles();
@@ -51,6 +58,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 		async stop() {
 			unsubscribeSessionParked?.();
 			unsubscribeSessionParked = null;
+			unsubscribeWrappers?.();
+			unsubscribeWrappers = null;
 		},
 	};
 

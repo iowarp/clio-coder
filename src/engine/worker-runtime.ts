@@ -122,6 +122,7 @@ import {
 	mergeFlowRestrictions,
 	resolveModelDestination,
 } from "../domains/safety/information-flow.js";
+import { setValidationWrappers } from "../domains/safety/protected-artifacts.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import { createRunEffectsRecorder, recordToolExecutionEffects } from "../domains/safety/run-effects.js";
 import type {
@@ -817,6 +818,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// Same mirroring for guardrail policy: the fresh process needs its settings
 	// projection installed before any registry or tool construction reads it.
 	configureGuardrails(guardrailValuesFromSettings(workerSettings));
+	// The worker's own check readings look through the same declared wrappers as the parent's (FX-44).
+	setValidationWrappers(workerSettings.safety.validationWrappers);
 	const fauxModel = registerFauxFromEnv();
 	// Workers are bounded runs against an admission-verified recipe surface.
 	// They have no operator to widen a missing tool, so the active surface is
