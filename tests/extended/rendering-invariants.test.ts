@@ -1612,6 +1612,28 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("stops a fullscreen selection highlight before the scrollbar column", () => {
+		const terminal = new RenderingTerminal();
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer);
+		const text = Array.from({ length: 60 }, (_, row) => `row ${row} ${"x".repeat(60)}`).join("\n");
+		tui.setLayoutRoot(new ScrollView(new Text(text, 0, 0), { primary: true, follow: "end", scrollbar: "always" }));
+		tui.start();
+		try {
+			tui.renderNow(true);
+			terminal.input("\x1b[<0;1;3M");
+			terminal.input(`\x1b[<32;${terminal.columns};8M`);
+			tui.renderNow();
+			for (const row of tui.getScreenLines().slice(3, 7)) {
+				const bar = Math.max(row.lastIndexOf("│"), row.lastIndexOf("┃"), row.lastIndexOf("█"));
+				ok(row.includes("\x1b[7m"), "the row is selected");
+				ok(bar > row.lastIndexOf("\x1b[27m"), `the bar is outside the highlight: ${JSON.stringify(row)}`);
+			}
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("keeps one neutral copy flash over SSH however many selections land", async () => {
 		const saved = { SSH_CONNECTION: process.env.SSH_CONNECTION, DISPLAY: process.env.DISPLAY };
 		process.env.SSH_CONNECTION = "client 0 server 0";

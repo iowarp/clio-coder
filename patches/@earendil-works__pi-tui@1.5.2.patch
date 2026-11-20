@@ -165,7 +165,7 @@ index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..afb8bdc52e3ca93cbd00033837c910cd
      private copyTextToClipboard;
      private applySearchTextHighlight;
 diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
-index 3567a4350ab0da56276289d422b58d46e4882949..3f3a3b1e126d386ddcaae1d7cfc1f24871cc1bb2 100644
+index 3567a4350ab0da56276289d422b58d46e4882949..1e1d83b098cc490e40587c9113d940769897fa18 100644
 --- a/dist/tui-alt-screen.js
 +++ b/dist/tui-alt-screen.js
 @@ -32,7 +32,8 @@ const COPY_ERROR_FLASH_DURATION_MS = 5000;
@@ -229,6 +229,17 @@ index 3567a4350ab0da56276289d422b58d46e4882949..3f3a3b1e126d386ddcaae1d7cfc1f248
      async copySelectionToClipboard() {
          const text = this.getActiveSelectionText();
          if (!text)
+@@ -1373,6 +1390,10 @@ export class TuiAltScreen extends TuiBase {
+             maxRow = Math.min(screen.length - 1, box.rect.y + box.rect.height - 1, box.clip.y + box.clip.height - 1);
+             minColumn = Math.max(0, box.rect.x, box.clip.x);
+             maxColumn = Math.min(this.terminal.columns, box.rect.x + box.rect.width, box.clip.x + box.clip.width);
++            // The scrollbar column is not content: stop the highlight before it, as applySearchHighlights does.
++            const scrollbarColumn = getScrollbarGeometry(box)?.column;
++            if (scrollbarColumn !== undefined)
++                maxColumn = Math.min(maxColumn, scrollbarColumn);
+             screenSelection = {
+                 start: {
+                     ...selection.start,
 diff --git a/dist/tui-main-screen.d.ts b/dist/tui-main-screen.d.ts
 index 6ab7f63586dfa034ec6c30a40d475909d2d950e2..e7141bd93604bab7db31fcd7dfd0a4603ef9f34d 100644
 --- a/dist/tui-main-screen.d.ts
