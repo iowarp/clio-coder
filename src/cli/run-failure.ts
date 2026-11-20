@@ -58,7 +58,8 @@ export function writeRunDiagnostic(text: string): void {
 /** Pre-work refusals that carry a narrower cause than `not_started`, known by the diagnostic each one writes. */
 const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
 	[/--output-format cannot be combined with --json or --json-events/u, "flag_conflict"],
-	[/--allow-tools and --deny-tools both name /u, "flag_conflict"],
+	[/--deny-tools removes every tool --allow-tools names /u, "flag_conflict"],
+	[/--dry-run prints its plan as JSON with --output-format json/u, "flag_conflict"],
 	[/^clio-coder run: not configured: /u, "not_configured"],
 	// The orchestrator's resume refusal when another process holds the session (SPEC L3, 6.7; liveSessionRefusal).
 	[/^clio-coder run: failed to resume session \S+: session \S+ is open in another process /u, "session_live"],
@@ -173,6 +174,13 @@ export function runTextSummaryRequested(): boolean {
 	return textSummary;
 }
 let mainRunNote: MainRunNoteV2 = {};
+/** `--dry-run`: the plan the v2 envelope carries with outcome `previewed` (CLI-L4). */
+let runPlan: Readonly<Record<string, unknown>> | undefined;
+
+/** Hand the v2 writer a `--dry-run` plan; a no-op for v1 runs. */
+export function noteRunPlan(plan: object): void {
+	if (v2Started !== null) runPlan = { ...plan };
+}
 
 /** True while a `--output-format json|stream-json` run is being written, so v1 runs pay for nothing v2 reads. */
 export function runResultV2Active(): boolean {
@@ -389,11 +397,13 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	v2StreamJson = request.format === "stream-json";
 	heldSteer = [];
 	mainRunNote = {};
+	runPlan = undefined;
 	let written = false;
 	let outputTarget: string | undefined;
 	const envelopeLines = (code: number, extra: RunExitFact[] = []): { lines: string; exitCode: number } => {
 		const skipReason = code === 124 ? "deadline" : signalForExitCode(code) !== null ? "interrupted" : "turn_failed";
 		const resolution = resolveRunExit([...exitFacts(code, seen, state, request), ...extra]);
+		const previewed = runPlan !== undefined && resolution.causes.length === 0;
 		const session = seen.session;
 		const runId = session?.runId ?? mainRunNote.runId ?? seen.receipt?.runId;
 		const usage = mainRunNote.usage;
@@ -419,7 +429,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			endedAt: new Date().toISOString(),
 			durationMs: Date.now() - started,
 			exitCode: resolution.exitCode,
-			outcome: resolution.outcome,
+			outcome: previewed ? "previewed" : resolution.outcome,
 			...(resolution.causes[0] !== undefined ? { outcomeDetail: resolution.causes[0].code } : {}),
 			causes: resolution.causes,
 			result: { text: seen.text, artifacts: [] },
@@ -435,9 +445,10 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			verify: { requested: request.verify.length, checks: verifyChecksV2(request.verify, seen.verify, skipReason) },
 			dispatch: { runs: seen.receipt !== undefined ? [seen.receipt] : [], live: seen.live, undelivered: seen.undelivered },
 			timings,
+			...(previewed && runPlan !== undefined ? { plan: runPlan } : {}),
 		};
 		const pending =
-			request.format === "stream-json" && session === undefined
+			request.format === "stream-json" && session === undefined && !previewed
 				? serializeJsonLine({
 						type: "session",
 						schemaVersion: RUN_RESULT_SCHEMA_VERSION,

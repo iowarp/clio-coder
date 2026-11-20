@@ -25,8 +25,8 @@ Serve CLIO Coder as an Agent Client Protocol v1 agent over stdio.
   --allow-tools NAMES      Limit the session's tools to these comma-separated
                            capabilities, as clio-coder run does; none disables all.
   --delegate-tools NAMES   Limit the tools the session's dispatched workers may hold.
-  --deny-tools NAMES       Remove these capabilities from the session's tools; a name
-                           may not also be in --allow-tools.
+  --deny-tools NAMES       Remove these capabilities from the session's tools, also
+                           from an --allow-tools list; denying all of it is refused.
   --read-only              Hold every session to the read-only ceiling: no file
                            outside the CLIO Coder home changes.
   auth login               Open interactive Quick Connect for terminal ACP authentication.

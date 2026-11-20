@@ -57,8 +57,10 @@ export function toolLimitConflict(limits: {
 	readonly allowedTools?: readonly string[];
 	readonly deniedTools?: readonly string[];
 }): string | undefined {
-	const both = (limits.allowedTools ?? []).filter((name) => limits.deniedTools?.includes(name) === true);
-	return both.length > 0
-		? `--allow-tools and --deny-tools both name ${both.join(", ")}; pass each tool in one of them`
+	const allowed = limits.allowedTools;
+	if (allowed === undefined || allowed.length === 0) return undefined;
+	// Denial subtracts from the allow list; denying every allowed name leaves a run with no tool, which is a conflict.
+	return allowed.every((name) => limits.deniedTools?.includes(name) === true)
+		? `--deny-tools removes every tool --allow-tools names (${allowed.join(", ")}); the run would have none`
 		: undefined;
 }

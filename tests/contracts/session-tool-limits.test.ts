@@ -86,7 +86,11 @@ test("--deny-tools removes a tool from the session, every scoped turn and a work
 	assert.equal(turnAllowsTool(turn, "read"), true);
 	assert.equal(turnDelegatesTool(turn, "bash"), false);
 	assert.equal(turnDelegatesTool({ ...turn, delegatedTools: ["bash"] }, "bash"), true);
-	assert.match(extractGlobalFlags(["--allow-tools", "read", "--deny-tools", "read"]).error ?? "", /both name read/);
+	assert.match(
+		extractGlobalFlags(["--allow-tools", "read", "--deny-tools", "read"]).error ?? "",
+		/removes every tool --allow-tools names \(read\)/,
+	);
+	assert.equal(extractGlobalFlags(["--allow-tools", "read,bash", "--deny-tools", "bash"]).error, undefined);
 });
 
 test("a TUI /run to an external agent under --delegate-tools read dispatches a worker limited to read", async () => {

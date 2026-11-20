@@ -570,6 +570,15 @@ async function executeRunCommand(
 					const borrowed = await borrowHeadlessRoute(parsed.target, parsed.model);
 					if (typeof borrowed === "number") return borrowed;
 					if (borrowed !== null) process.stderr.write(`clio-coder run: ${borrowed.notice}\n`);
+					// --dry-run (CLI-L4): resolve and print, before any session, model call or --verify command.
+					if (parsed.dryRun === true) {
+						const { buildRunPlan, writeRunPlan } = await import("./run-plan.js");
+						const settings = borrowed?.settings ?? readSettings();
+						return writeRunPlan(
+							parsed,
+							buildRunPlan(parsed, settings, parsed.verifyTimeoutSeconds ?? DEFAULT_VERIFY_TIMEOUT_SECONDS),
+						);
+					}
 					// No route at all is a configuration refusal before any work: exit 2 under the v2 opt-in. v1 (no
 					// --output-format) keeps its boot diagnostic and exit 1 until 0.9.0.
 					if (borrowed === null && parsed.target === undefined && parsed.outputFormat !== undefined) {

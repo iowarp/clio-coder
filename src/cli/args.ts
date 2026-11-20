@@ -76,6 +76,8 @@ export interface RunCliArgs {
 	failOnNoop: boolean;
 	/** `--fail-on-verify`: a failed or timed-out `--verify` check fails the run. */
 	failOnVerify?: boolean;
+	/** `--dry-run`: print what the run would do, with no session, model call or `--verify` command. */
+	dryRun?: boolean;
 	/** Priced spend this run may add, in US dollars; with `--agent`, the bound on that one worker run. */
 	maxCostUsd?: number;
 	/** `--worktree` (`--agent` only): run the worker in a task worktree kept for review. */
@@ -152,6 +154,7 @@ function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 	const mainOnly: Array<[boolean, string]> = [
 		[parsed.failOnNoop, "--fail-on-noop"],
 		[parsed.failOnVerify === true, "--fail-on-verify"],
+		[parsed.dryRun === true, "--dry-run"],
 		[parsed.verify.length > 0, "--verify"],
 		[parsed.answersFile !== undefined, "--answers"],
 		[parsed.systemOne !== undefined, "--systemone"],
@@ -465,6 +468,10 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			parsed.failOnVerify = true;
 			continue;
 		}
+		if (arg === "--dry-run") {
+			parsed.dryRun = true;
+			continue;
+		}
 		if (arg === "--max-cost-usd") {
 			const value = need(arg);
 			if (value !== null) {
@@ -518,6 +525,14 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		});
 	}
 	// The v1 and v2 surfaces are separate contracts; one run speaks one of them.
+	// The v1 projection is frozen (SPEC 6.6); a plan in JSON is the v2 envelope's.
+	if (parsed.dryRun === true && (jsonGiven || jsonEventsGiven)) {
+		parsed.diagnostics.push({
+			type: "error",
+			slug: "flag_conflict",
+			message: "--dry-run prints its plan as JSON with --output-format json, not --json or --json-events",
+		});
+	}
 	if (outputFormatGiven && (jsonGiven || jsonEventsGiven)) {
 		parsed.diagnostics.push({
 			type: "error",

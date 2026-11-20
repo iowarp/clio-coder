@@ -20,8 +20,8 @@ Flags:
   --record                  save a bounded redacted display asciicast for --agent dispatch
   --turn-mode <mode>        main-agent workflow: answer|proposal|change; not an authorization grant
   --allow-tools <names>     main-agent capability allowlist, comma-separated; none disables all tools
-  --deny-tools <names>      remove these capabilities from the main agent's tools, comma-separated; a name may
-                            not also be in --allow-tools; without --delegate-tools workers lose them too
+  --deny-tools <names>      remove these capabilities from the main agent's tools, comma-separated, also from an
+                            --allow-tools list (denying all of it is exit 2); without --delegate-tools workers lose them too
   --no-delegate             forbid main-agent dispatch for this task and its continuations
   --delegate-tools <names>  tools dispatched workers may hold, independent of --allow-tools; none gives workers no tools
   --temperature <N>         one-run sampler override for supported local/OpenAI-compatible runtimes
@@ -62,6 +62,9 @@ Flags:
                             runs over fails
   --fail-on-verify          exit 1 (cause verify_failed) when a --verify check failed or timed out; a check a
                             cancellation or the deadline skipped never counts
+  --dry-run                 print what the run would do (route, tools, autonomy, sandbox, limits, --verify checks
+                            with authority host) and exit 0: no session, no model call, no check runs; with
+                            --output-format json it is the v2 envelope with outcome previewed and plan
   --max-cost-usd <N>        priced spend this run may add: main agent, compaction and dispatched workers are each
                             admitted only while under it, and running workers are stopped when it is reached; exit 4
                             when it stops the run. Spend can pass it by the model calls already in flight then: one per

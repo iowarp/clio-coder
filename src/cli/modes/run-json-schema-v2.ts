@@ -264,4 +264,6 @@ export interface RunResultEnvelopeV2 {
 		undelivered: RunJsonDispatchedRunOutcome[];
 	};
 	timings: { sessionReadyMs?: number; firstRequestMs?: number; firstTokenMs?: number };
+	/** `--dry-run`: what the run would do; present only with outcome `previewed`. */
+	plan?: Readonly<Record<string, unknown>>;
 }
