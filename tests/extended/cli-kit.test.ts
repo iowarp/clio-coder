@@ -287,6 +287,37 @@ test("-o beside v1 --json writes the answer on exit 0, removes a stale file othe
 	}
 });
 
+test("the v2 dry-run plan leaves out an absent value instead of sending null (CLI-P15)", async () => {
+	const env = await isolateClioEnv("cli-kit-dry-run-plan-");
+	try {
+		const script = `
+			const { withRunResultV2 } = await import(${JSON.stringify(resolve("src/cli/run-failure.ts"))});
+			const { writeRunPlan } = await import(${JSON.stringify(resolve("src/cli/run-plan.ts"))});
+			const plan = {
+				route: { target: "t", model: null, thinking: "off" },
+				sandbox: { mode: "auto", available: true, backend: "bwrap", reason: null },
+				limits: { timeoutSeconds: null, maxCostUsd: 1, requested: {}, enforced: ["maxCostUsd"] },
+				verify: [],
+			};
+			await withRunResultV2({ format: "json", mode: "main", verify: [] }, async () => writeRunPlan({ outputFormat: "json" }, plan));
+		`;
+		const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+			env: { ...process.env, HOME: env.dir },
+			encoding: "utf8",
+		});
+		const envelope = JSON.parse(child.stdout.trim().split("\n").at(-1) ?? "{}") as { outcome?: string; plan?: unknown };
+		equal(envelope.outcome, "previewed", child.stdout + child.stderr);
+		deepStrictEqual(envelope.plan, {
+			route: { target: "t", thinking: "off" },
+			sandbox: { mode: "auto", available: true, backend: "bwrap" },
+			limits: { maxCostUsd: 1, requested: {}, enforced: ["maxCostUsd"] },
+			verify: [],
+		});
+	} finally {
+		env.restore();
+	}
+});
+
 test("json-out writes the C6 failure document and the C3 diagnostic", () => {
 	const out: string[] = [];
 	const err: string[] = [];

@@ -77,9 +77,21 @@ export function buildRunPlan(
 	};
 }
 
-/** Prints the plan: under `--output-format` the v2 envelope carries it as `plan`, else it is JSON on stdout. */
+/** SPEC 6.6 v2 row: an absent value is an absent key, so v2 never sends `null` for an optional field (CLI-P15). */
+function withoutNulls(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(withoutNulls);
+	if (value === null || typeof value !== "object") return value;
+	const kept: Record<string, unknown> = {};
+	for (const [key, field] of Object.entries(value)) if (field !== null) kept[key] = withoutNulls(field);
+	return kept;
+}
+
+/**
+ * Prints the plan: under `--output-format` the v2 envelope carries it as `plan` with absent values left out, else it
+ * is JSON on stdout as before.
+ */
 export function writeRunPlan(parsed: RunCliArgs, plan: RunPlan): number {
-	if (parsed.outputFormat !== undefined) noteRunPlan(plan);
+	if (parsed.outputFormat !== undefined) noteRunPlan(withoutNulls(plan) as object);
 	else process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
 	return 0;
 }
