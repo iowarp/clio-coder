@@ -152,6 +152,7 @@ import {
 import { gateProjectSafetyPolicy, workspaceTrustDirectory } from "./workspace-trust.js";
 import {
 	MAX_RAW_TEXT_BYTES,
+	pinnedClioCommand,
 	YOLO_FLOOR_PACK_RULE_IDS,
 	YOLO_FLOOR_REASON_PREFIX,
 	YOLO_FLOOR_RULE_IDS,
@@ -1110,7 +1111,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				reason: `matched ${YOLO_FLOOR_RULE_IDS.settingsAuthority}: ${SETTINGS_AUTHORITY_REASON}`,
 			});
 		}
-		if (clioOwnedMutation({ tool: ToolNames.Bash, args: { command } }, callCwd, command, trees)) {
+		// A Clio variable the command pins to a literal path is judged by that path (CLI-H4).
+		const owned = pinnedClioCommand(command);
+		if (clioOwnedMutation({ tool: ToolNames.Bash, args: { command: owned } }, callCwd, owned, trees)) {
 			return floorMatch({
 				ruleId: YOLO_FLOOR_RULE_IDS.clioOwned,
 				reason: `matched ${YOLO_FLOOR_RULE_IDS.clioOwned}: writes into or deletes Clio's own config, data, state or trust records, which only the operator changes`,
