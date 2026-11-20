@@ -43,12 +43,17 @@ export interface PreparedBranchEntries {
 	post: SessionEntry[];
 }
 
+/**
+ * Keeps a body's head and tail around the omission marker, so a value near the
+ * end of a long read reaches the summarizer as well as its opening does.
+ */
 function truncate(text: string, max: number, seen: boolean): string {
 	if (text.length <= max) return text;
 	const read = seen
 		? "the assistant read this result in full"
 		: "clipped before the assistant read it, so a narrow re-read is expected";
-	return `${text.slice(0, max)}\n\n[... ${text.length - max} more characters not shown here; ${read}]`;
+	const head = Math.ceil(max / 2);
+	return `${text.slice(0, head)}\n\n[... ${text.length - max} more characters not shown here; ${read}]\n\n${text.slice(text.length - (max - head))}`;
 }
 
 /** Keeps a message's head and tail around an omission marker; the ledger keeps the raw turn. */

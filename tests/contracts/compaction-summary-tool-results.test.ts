@@ -95,13 +95,17 @@ describe("split-turn checkpoint input keeps a whole read the summarizer can fit"
 		doesNotMatch(text, /more characters not shown here; the assistant read this result in full/);
 	});
 
-	it("caps a read at what fits a small window, above the floor", async () => {
+	it("caps a read at what fits a small window, above the floor, keeping its head and tail", async () => {
 		// Output room is half the 4000 window; the estimate gets a 20% margin.
 		const { text, tokens } = await summaryInput(4000);
 		ok(tokens <= (4000 - 2000) * 0.8, `${tokens} estimated tokens`);
-		match(text, /x \* 74 \+ 15/);
-		doesNotMatch(text, /x \* 83 \+ 25/);
-		match(text, /more characters not shown here; the assistant read this result in full/);
+		match(text, /x \* 31 \+ 5/);
+		// CTX-5: the last helper sits past any head-only cap and still reaches the summarizer.
+		match(text, /x \* 40 \+ 30/);
+		const omitted = Number(
+			/\[\.\.\. (\d+) more characters not shown here; the assistant read this result in full\]/.exec(text)?.[1],
+		);
+		ok(omitted > 0 && omitted < modC.length - 2000, `${omitted} characters omitted`);
 	});
 
 	// bt3 RV-G: one oversized read was summarized before any model call saw it, under a marker
