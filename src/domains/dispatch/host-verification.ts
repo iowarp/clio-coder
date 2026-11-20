@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
@@ -13,7 +14,7 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { ClioSettings } from "../../core/config.js";
-import { internalGitArgv } from "../../core/internal-git.js";
+import { internalGitArgv, withoutRepositoryEnv } from "../../core/internal-git.js";
 import { PATH_BOUNDARY_MAX_ENTRIES, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import { relativePathEscapes } from "../../core/path-containment.js";
 import { runCommandVector } from "../../core/safe-exec.js";
@@ -1256,28 +1257,54 @@ export function hostVerificationSandbox(
 	});
 }
 
+/** What sits at a path, as the mode of its tree entry at a commit names it. */
+function treeEntryKind(mode: string): string {
+	if (mode === "040000" || mode === "160000") return "directory";
+	return mode === "120000" ? "symbolic link" : "file";
+}
+
 /**
- * A path a compete candidate's check needs that the candidate removed: the check's cwd, or a numeric-compare input,
- * missing from the candidate's worktree while the commit the worktree started from has it (M10a). Undefined when
- * nothing is missing, or when that commit never had the path (an untracked or ignored file the worktree never
- * received), which is not the candidate's doing.
+ * A path a compete candidate's check needs that the candidate broke: the check's cwd, or a numeric-compare input,
+ * tracked in the commit the worktree started from but missing from the worktree or replaced by another type (a file
+ * by a directory, a directory by a file or link), so the check cannot start or provenance refuses it (M10a). The
+ * reason names the path; undefined when nothing is broken, or when that commit never had the path (an untracked or
+ * ignored file the worktree never received), which is not the candidate's doing.
  */
-function candidateRemovedPath(
+function candidateBrokenPath(
 	candidate: NonNullable<DispatchRequest["candidateWorktree"]>,
 	check: ResolvedCheck,
 ): string | undefined {
 	const inputs = check.kind === "numeric-compare" ? (check.numeric?.inputs ?? []) : [];
 	for (const path of [check.cwd, ...inputs]) {
 		const rel = relative(candidate.path, path);
-		if (rel === "" || relativePathEscapes(rel) || existsSync(path)) continue;
+		if (rel === "" || relativePathEscapes(rel)) continue;
+		let entry: string;
 		try {
-			const object = `${candidate.base}:${rel.split(sep).join("/")}`;
-			execFileSync("git", internalGitArgv(["-C", candidate.root, "cat-file", "-e", object]), {
-				stdio: "ignore",
+			const args = ["-C", candidate.root, "ls-tree", "-z", "--full-tree", candidate.base, "--", rel.split(sep).join("/")];
+			entry = execFileSync("git", internalGitArgv(args), {
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
 				timeout: 30_000,
+				env: { ...withoutRepositoryEnv(), GIT_LITERAL_PATHSPECS: "1" },
 			});
-			return path;
-		} catch {}
+		} catch {
+			continue;
+		}
+		const mode = entry.slice(0, entry.indexOf(" "));
+		if (mode === "") continue;
+		const was = treeEntryKind(mode);
+		const stat = lstatSync(path, { throwIfNoEntry: false });
+		if (stat === undefined)
+			return `'${path}' is missing from the candidate's worktree but exists in the commit it started from`;
+		const now = stat.isSymbolicLink()
+			? "symbolic link"
+			: stat.isDirectory()
+				? "directory"
+				: stat.isFile()
+					? "file"
+					: "special file";
+		if (now !== was)
+			return `'${path}' is a ${now} in the candidate's worktree but a ${was} in the commit it started from`;
 	}
 	return undefined;
 }
@@ -1300,15 +1327,15 @@ export async function runHostVerification(input: {
 	const stateDir = input.stateDir ?? clioStateDir();
 	const env = input.env ?? process.env;
 	const results: RunHostVerificationCheck[] = [];
-	const removedPaths: string[] = [];
+	const brokenPaths: string[] = [];
 	for (const [index, resolvedCheck] of taskChecks(input.request).entries()) {
-		const removed =
+		const broken =
 			input.request.candidateWorktree === undefined
 				? undefined
-				: candidateRemovedPath(input.request.candidateWorktree, resolvedCheck);
-		if (removed !== undefined) {
-			// The candidate deleted what its check needs: a verdict on the candidate, not a host failure (M10a).
-			const reason = `check '${resolvedCheck.check}' cannot start: '${removed}' is missing from the candidate's worktree but exists in the commit it started from`;
+				: candidateBrokenPath(input.request.candidateWorktree, resolvedCheck);
+		if (broken !== undefined) {
+			// The candidate broke what its check needs: a verdict on the candidate, not a host failure (M10a).
+			const reason = `check '${resolvedCheck.check}' cannot start: ${broken}`;
 			results.push({
 				check: resolvedCheck.check,
 				argv: [...resolvedCheck.argv],
@@ -1318,7 +1345,7 @@ export async function runHostVerification(input: {
 				memo: false,
 				outputTail: outputTail(`${reason}; nothing ran`),
 			});
-			removedPaths.push(reason);
+			brokenPaths.push(reason);
 			continue;
 		}
 		const outcome = await runResolvedCheck({
@@ -1334,7 +1361,7 @@ export async function runHostVerification(input: {
 		results.push(outcome.check);
 	}
 	if (input.request.candidateWorktree !== undefined) {
-		if (removedPaths.length > 0) return { status: "rejected", reason: removedPaths.join("; "), checks: results };
+		if (brokenPaths.length > 0) return { status: "rejected", reason: brokenPaths.join("; "), checks: results };
 		// A compete candidate's check that never started for a host cause (spawn failure, refusal, no configuration,
 		// shutdown) judged nothing: it is not run, never a rejection (M10a).
 		const judged = results.filter((check) => check.notRun === undefined || check.notRun === "nothing-changed");

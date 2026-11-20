@@ -70,7 +70,7 @@ it("leaves the base not compared when the linked base tree cannot resolve the ch
 	strictEqual(existsSync(join(stateDir, "dispatch-verification-base")), false);
 });
 
-it("seals a compete candidate's check that could not start for a host cause as not run, a cwd the candidate deleted as a rejection, and compares a failure on its base (M10a)", async () => {
+it("seals a compete candidate's check that could not start for a host cause as not run, a cwd or input the candidate deleted or retyped as a rejection, and compares a failure on its base (M10a)", async () => {
 	const root = mkdtempSync(join(tmpdir(), "clio-coder-host-verification-base-"));
 	scratches.push(root);
 	const project = join(root, "project");
@@ -132,6 +132,28 @@ it("seals a compete candidate's check that could not start for a host cause as n
 	});
 	strictEqual(untracked?.status, "skipped");
 	strictEqual(untracked?.reason, "check_not_started");
+	// A tracked input the candidate replaced with a directory is broken the same way: provenance would refuse it.
+	rmSync(join(project, "a.txt"));
+	mkdirSync(join(project, "a.txt"));
+	const swapped: ResolvedCheck = {
+		...(checks[0] as ResolvedCheck),
+		check: "num",
+		kind: "numeric-compare",
+		numeric: { reference: join(root, "ref.json"), tolerance: { absolute: 0 }, inputs: [join(project, "a.txt")] },
+	};
+	const retyped = await runHostVerification({
+		runId: "candidate-retyped",
+		request: { resolvedVerification: [swapped], candidateWorktree },
+		workerSuccessful: true,
+		stateDir,
+	});
+	strictEqual(retyped?.status, "rejected");
+	strictEqual(retyped?.checks[0]?.notRun, undefined);
+	ok(retyped?.reason?.includes(`'${join(project, "a.txt")}' is a directory`), retyped?.reason);
+	ok(
+		hostVerificationRejection(retyped)?.detail.includes(join(project, "a.txt")),
+		hostVerificationRejection(retyped)?.detail,
+	);
 	// A failure the candidate's base has too is compared there, as a task worktree's is.
 	const red: ResolvedCheck = {
 		check: "red",
