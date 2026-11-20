@@ -131,7 +131,7 @@ const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
 /** The reason a reply cut off by shutdown carries in place of the transport's abort text (bt-26). */
 const SHUTDOWN_STOP_REASON = "[CLIO Coder] stopped the request because CLIO Coder shut down before it finished.";
 type StreamAdmission = NonNullable<NonNullable<Parameters<typeof createEngineAgent>[0]>["beforeStreamRequest"]>;
-type AdmissionHold = { waitedOn?: "budget"; inputTokens?: number; anchored?: boolean };
+type AdmissionHold = { waitedOn?: "budget"; inputTokens?: number; anchored?: boolean; outputReserveTokens?: number };
 type MiddlewareChoice = ReturnType<MiddlewareToolChoiceControl["current"]>;
 
 /** An attempt's tool rounds. A locked round has no named tool to require; it is text-only. */
@@ -1354,6 +1354,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				hold.inputTokens = input;
 				hold.anchored = anchored !== null;
 				const output = resolveFitOutputReserve(localRuntime, input);
+				hold.outputReserveTokens = output;
 				if (view.effectiveWindow !== null && !requestFits(input, output, view.effectiveWindow))
 					return {
 						block: true,

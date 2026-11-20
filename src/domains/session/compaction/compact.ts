@@ -154,8 +154,12 @@ export interface CompactInput extends SideCallAuth {
 	checkpointTokenFigures?: (entry: Readonly<Omit<CompactionSummaryEntry, "timestamp">>) => {
 		tokensBefore: number;
 		tokensAfter: number;
-		/** Tokens `tokensAfter` sits below the automatic trigger; journaled on `compaction.settled`. */
+		/** Tokens `tokensAfter` sits below the automatic trigger, 0 at or above it; journaled on `compaction.settled`. */
 		headroomTokens?: number;
+		/** Tokens `tokensAfter` still sits above the automatic trigger. */
+		overTriggerTokens?: number;
+		/** The output reserve a request of `tokensAfter` input is fitted with. */
+		fitReserveTokens?: number;
 	};
 	checkpointForSummary?:
 		| ((summaryRef: string, tokensBefore: number, tokensAfter: number) => ContinuityCheckpointPayload)
@@ -287,6 +291,10 @@ export interface CompactResult {
 	summaryDigest?: string;
 	/** Set on an empty result that made no summarizer call. */
 	emptyReason?: CompactEmptyReason;
+	/** The output cap the summary request was sent with, when one was set. */
+	summaryMaxTokens?: number;
+	/** The checkpoint room the summary request stated, when it stated one. */
+	summaryRoomTokens?: number;
 	skillContext?: SkillContextCheckpoint;
 	userContext?: PreservedUserContext;
 	/** Generated summary text. Empty when there was nothing to summarize. */
@@ -1836,6 +1844,8 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			(summarizePriorSuffix ? conversationMessages(priorSuffix) : 0),
 		isSplitTurn: cut.isSplitTurn,
 		summaryDigest,
+		...(maxTokens !== undefined ? { summaryMaxTokens: maxTokens } : {}),
+		...(checkpointRoom !== undefined ? { summaryRoomTokens: checkpointRoom } : {}),
 		...(memoryOffer !== null ? { memoryReceipt: (memoryOffer as MemoryCompactionOffer).receipt } : {}),
 		...(usage !== undefined ? { usage } : {}),
 		...(skillContext !== undefined ? { skillContext } : {}),

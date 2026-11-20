@@ -1258,11 +1258,27 @@ describe("production compaction controls", () => {
 				leaf = state.lastTurnId ?? leaf;
 			}
 		}
-		const outcomes = (await f.journalOutcomes()).map((row) => row.data as { outcome: string; headroomTokens?: number });
+		const outcomes = (await f.journalOutcomes()).map(
+			(row) =>
+				row.data as {
+					outcome: string;
+					headroomTokens?: number;
+					overTriggerTokens?: number;
+					fitReserveTokens?: number;
+					summaryOutputCap?: number;
+					summaryRoomTokens?: number;
+				},
+		);
 		deepStrictEqual(
 			outcomes.map((row) => row.outcome),
 			cycles.map(() => "committed"),
 		);
+		// CTX-2: a commit journals the reserve it is fitted with and the summary's stated room, and never a negative headroom.
+		for (const row of outcomes) {
+			ok((row.headroomTokens ?? -1) >= 0 && (row.fitReserveTokens ?? 0) > 0, JSON.stringify(row));
+			ok(row.overTriggerTokens === undefined || row.headroomTokens === 0, JSON.stringify(row));
+			ok((row.summaryRoomTokens ?? 0) > 0, JSON.stringify(row));
+		}
 		for (const [index, row] of outcomes.entries()) {
 			const cycle = cycles[index];
 			if (cycle) cycle.headroom = row.headroomTokens ?? 0;
@@ -1894,7 +1910,14 @@ describe("production compaction controls", () => {
 		strictEqual(persisted.callIds?.length, f.calls.length);
 		deepStrictEqual(
 			(await f.journalOutcomes()).map((row) => row.data),
-			[{ callIds: persisted.callIds, outcome: "committed", checkpointTurnId: persisted.turnId }],
+			[
+				{
+					callIds: persisted.callIds,
+					outcome: "committed",
+					checkpointTurnId: persisted.turnId,
+					summaryOutputCap: f.calls[0]?.maxTokens,
+				},
+			],
 		);
 	});
 	it("reads the configured system prompt at call time, separate from focus", async () => {

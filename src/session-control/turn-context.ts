@@ -2653,10 +2653,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								},
 							);
 							const tokensAfter = liveContextEstimate(agentRuntime, pendingUserText, messages).tokens;
+							const triggerTokens = route.triggerTokens(tokensAfter);
+							// A cut that still sits above the trigger states by how much, never as negative headroom (CTX-2).
 							return {
 								tokensBefore: footerTokensBefore,
 								tokensAfter,
-								headroomTokens: route.triggerTokens(tokensAfter) - tokensAfter,
+								headroomTokens: Math.max(0, triggerTokens - tokensAfter),
+								...(tokensAfter > triggerTokens ? { overTriggerTokens: tokensAfter - triggerTokens } : {}),
+								fitReserveTokens: resolveFitOutputReserve(agentRuntime, tokensAfter),
 							};
 						},
 						beforeSummaryCall: async (hold) => {

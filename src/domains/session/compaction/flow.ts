@@ -350,6 +350,9 @@ export async function runCompactionFlow(
 		} finally {
 			releaseEndpointSlot();
 		}
+		// What the summary request was sent with, journaled whatever the outcome (CTX-2).
+		if (result.summaryMaxTokens !== undefined) closure.summaryOutputCap = Math.round(result.summaryMaxTokens);
+		if (result.summaryRoomTokens !== undefined) closure.summaryRoomTokens = Math.round(result.summaryRoomTokens);
 		if (budget?.signal?.aborted) {
 			budget.signal.throwIfAborted();
 		}
@@ -445,12 +448,11 @@ export async function runCompactionFlow(
 		// figures are available, applying only the current replay's reduction (#422).
 		entry.tokensBefore = Math.max(result.tokensBefore, replayBefore);
 		entry.tokensAfter = entry.tokensBefore + replayAfter - replayBefore;
-		let headroomTokens: number | undefined;
+		let figures: ReturnType<NonNullable<CompactionFlowBudget["checkpointTokenFigures"]>> | undefined;
 		if (budget?.checkpointTokenFigures) {
-			const figures = budget.checkpointTokenFigures(entry);
+			figures = budget.checkpointTokenFigures(entry);
 			entry.tokensBefore = figures.tokensBefore;
 			entry.tokensAfter = figures.tokensAfter;
-			headroomTokens = figures.headroomTokens;
 		}
 		if (budget?.checkpointForSummary) {
 			entry.continuity = budget.checkpointForSummary(entry.turnId, entry.tokensBefore, entry.tokensAfter ?? 0);
@@ -507,7 +509,10 @@ export async function runCompactionFlow(
 		}
 		session.flushAppends?.();
 		closure.outcome = "committed";
-		if (headroomTokens !== undefined) closure.headroomTokens = Math.round(headroomTokens);
+		if (figures?.headroomTokens !== undefined) closure.headroomTokens = Math.max(0, Math.round(figures.headroomTokens));
+		if (figures?.overTriggerTokens !== undefined && figures.overTriggerTokens > 0)
+			closure.overTriggerTokens = Math.round(figures.overTriggerTokens);
+		if (figures?.fitReserveTokens !== undefined) closure.fitReserveTokens = Math.round(figures.fitReserveTokens);
 		return { ...result, checkpointId: entry.turnId };
 	} finally {
 		if (lease && callIds.size > 0)
