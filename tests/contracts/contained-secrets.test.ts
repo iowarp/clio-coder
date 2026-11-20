@@ -8,6 +8,7 @@ import { runBashCommand } from "../../src/core/bash-exec.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { holdsNamedCredential, scrubSandboxEnv } from "../../src/core/sandbox/env-scrub.js";
 import { mainSandboxPolicy, planMainSandboxSpawn } from "../../src/core/sandbox/main-session.js";
+import { withMountAliases } from "../../src/core/sandbox/mount-aliases.js";
 import { discoverSecretMasks } from "../../src/core/sandbox/secret-files.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
@@ -133,6 +134,30 @@ test("secret discovery masks an ignored .env and a private key, not templates, p
 		"certs/x.pem:file",
 		"deploy/.aws:directory",
 	]);
+});
+
+test("a secret an enclosing sandbox already bound /dev/null over gains no aliases, so /dev/null stays writable", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-mount-aliases-")));
+	mkdirSync(join(root, "b"));
+	writeFileSync(join(root, "b", "secret"), "");
+	// /dev/zero stands in for a secret path that a nested launch sees as the enclosing sandbox's devtmpfs /null bind.
+	const mountinfo = join(root, "mountinfo");
+	writeFileSync(
+		mountinfo,
+		[
+			"20 1 0:6 / /dev rw - devtmpfs none rw",
+			"21 20 0:6 /null /dev/null rw - devtmpfs none rw",
+			"22 20 0:6 /null /dev/zero rw - devtmpfs none rw",
+			`30 1 8:1 /x ${join(root, "a")} rw - ext4 /dev/sda rw`,
+			`31 1 8:1 /x ${join(root, "b")} rw - ext4 /dev/sda rw`,
+		].join("\n"),
+	);
+	const masks = [
+		{ path: "/dev/zero", kind: "file" as const },
+		{ path: join(root, "a", "secret"), kind: "file" as const },
+	];
+	// The real file's second mount is still an alias; the device's other binds are not.
+	deepStrictEqual(withMountAliases(masks, mountinfo), [...masks, { path: join(root, "b", "secret"), kind: "file" }]);
 });
 
 test("task worktrees nested in a checkout past the walk budget leave its .env and their own secrets masked", () => {
