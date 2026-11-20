@@ -5,6 +5,7 @@ import { clioStateDir } from "../core/xdg.js";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
 import { readAgentLedger, renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-store.js";
+import { ANSWER_BUDGET_BYTES } from "../domains/dispatch/handback.js";
 import type { DispatchOwnership } from "../domains/dispatch/ownership.js";
 import { UNVERIFIABLE_RUN_VERIFICATION } from "../domains/dispatch/run-findings.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
@@ -20,11 +21,10 @@ import type { MonitorToolDeps } from "./monitor.js";
 import type { ToolResult } from "./registry.js";
 import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
 import {
-	COMPACT_ANSWER_BYTES,
 	compactAnswer,
 	compactHelperResultLines,
 	type FinishedRun,
-	RECORD_ANSWER_MAX_BYTES,
+	runAnswerBudgetBytes,
 	runEvidenceLabels,
 	runHelperResult,
 	workerTextLabel,
@@ -121,34 +121,9 @@ interface CollectedRunRow extends CollectRow {
 	evidence: DurableRunEvidence;
 }
 
-/** One run's answer size as its collect line would print it whole: the helper result, else the delivered text. */
-function rowAnswerBytes(row: CollectedRunRow): number {
-	const run = row.evidence.run;
-	if (run === null) return 0;
-	const helper = runHelperResult(run, row.evidence.integrity);
-	if (helper !== null) return Buffer.byteLength(JSON.stringify(helper.data), "utf8");
-	return Buffer.byteLength(run.delivered?.output?.text ?? "", "utf8");
-}
-
-/**
- * Each row's answer budget. Succeeded runs share RECORD_ANSWER_MAX_BYTES, smallest answer first, so room a short
- * answer leaves goes to a longer one; no run gets less than COMPACT_ANSWER_BYTES (XR-62).
- */
-function collectAnswerShares(rows: ReadonlyArray<CollectedRunRow>): number[] {
-	const shares = rows.map(() => COMPACT_ANSWER_BYTES);
-	const succeeded = rows
-		.flatMap((row, index) => (row.run?.outcome === "succeeded" ? [{ index, bytes: rowAnswerBytes(row) }] : []))
-		.sort((a, b) => a.bytes - b.bytes);
-	let left = RECORD_ANSWER_MAX_BYTES;
-	for (const [position, entry] of succeeded.entries()) {
-		const share = Math.max(COMPACT_ANSWER_BYTES, Math.min(entry.bytes, Math.floor(left / (succeeded.length - position))));
-		shares[entry.index] = share;
-		left = Math.max(0, left - share);
-	}
-	return shares;
-}
-
-function collectRunLine(row: CollectedRunRow, answerBytes: number): string[] {
+function collectRunLine(row: CollectedRunRow): string[] {
+	// The answer budget sealed at dispatch, the number the sync result showed and the worker was told (M3).
+	const answerBytes = row.evidence.run !== null ? runAnswerBudgetBytes(row.evidence.run) : ANSWER_BUDGET_BYTES;
 	// The route warnings the dispatch result printed, read back from the sealed record (FL-6).
 	const routeWarnings = (row.evidence.run?.facts.routeWarnings ?? []).map(
 		(message) => `  route_warning ${row.runId}: ${message}`,
@@ -339,7 +314,6 @@ export async function collectRuns(
 		}
 	}
 	const collectedRows: CollectedRunRow[] = rows.map((row) => ({ ...row, evidence: durableRunEvidence(row.run) }));
-	const answerShares = collectAnswerShares(collectedRows);
 	// A background batch shows the attempts a retry recovered from, as a foreground dispatch result does (FL-9).
 	const failedAttempts = rows.flatMap((row) =>
 		row.run === null
@@ -361,7 +335,7 @@ export async function collectRuns(
 				failedAttempts.filter((entry) => entry.recoveredBy === row.runId),
 			),
 		),
-		...collectedRows.flatMap((row, index) => collectRunLine(row, answerShares[index] ?? COMPACT_ANSWER_BYTES)),
+		...collectedRows.flatMap((row) => collectRunLine(row)),
 		...(board !== null ? ["", board] : []),
 		...(batchId.length > 0 && !collected
 			? ["", "note: the batch record could not be marked collected; it stays open for a later collect."]

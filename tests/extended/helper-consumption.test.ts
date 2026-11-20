@@ -71,7 +71,7 @@ test("compact helper consumption preserves unmeasured quality and withholds fail
 	strictEqual(runHelperResult(finishedRun(draft), PRODUCER_INTEGRITY), null);
 });
 
-test("a helper result past its byte budget shows whole leading findings, the count and bytes shown, and the record call (XR-62)", () => {
+test("a helper result past its byte budget shows whole leading findings, the count and bytes shown, and the answer call (XR-62, M3)", () => {
 	const envelope = fixtureEnvelope("helper-findings-cut");
 	const draft = fixtureReceiptDraft(envelope);
 	ok(draft.quality);
@@ -102,7 +102,7 @@ test("a helper result past its byte budget shows whole leading findings, the cou
 	ok(runHelperResult(run, PRODUCER_INTEGRITY), "the scout report is a helper result");
 	const cut = compactHelperResultLines(run, PRODUCER_INTEGRITY, 2000)?.join("\n") ?? "";
 	const notice = new RegExp(
-		`helper result excerpt: showing (\\d+) of 40 findings, (\\d+) of ${Buffer.byteLength(text)} bytes; the whole result is in monitor\\(mode="record", run_id="${receipt.runId}"\\)`,
+		`helper result excerpt: showing (\\d+) of 40 findings, (\\d+) of ${Buffer.byteLength(text)} bytes; the whole result is in monitor\\(mode="answer", run_id="${receipt.runId}"\\)`,
 		"u",
 	);
 	const shown = notice.exec(cut);

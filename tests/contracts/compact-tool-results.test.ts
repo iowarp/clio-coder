@@ -189,10 +189,10 @@ it("a dispatch result is compact by default and monitor(mode=record) returns the
 		const compact = ok_(await dispatch.run({ agent: "coder", task: "Explain the stencils.", intent }, {}));
 		const run = bundle.contract.listRuns()[0];
 		ok(run);
-		ok(!compact.includes(REPORT_TAIL), "the compact form leaves the answer's tail out");
+		// A lone run's answer budget is 12,000 bytes, so the compact form carries this report whole (M3).
+		ok(compact.includes(REPORT_TAIL), "the compact form fits the answer in the run's budget");
 		match(compact, new RegExp(`- ${run.id} agent=coder exit=0`), "the run line keeps its key facts");
 		match(compact, /^ {2}worker (claims|output)/mu, "the trust line stays");
-		match(compact, new RegExp(`the whole answer is in monitor\\(mode="record", run_id="${run.id}"\\)`));
 		// The run line keeps what the run delivered and leaves setup diagnostics to the record. Its task declares
 		// write_roots: [], so it ran read-only (XR-60) and its trust names no validation rather than an inferred one.
 		match(compact, /trust="sealed; no validation observed/u);

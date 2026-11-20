@@ -355,19 +355,80 @@ it("round-trips a 1200-word cited Coder explanation through dispatch, the receip
 		if (result.kind !== "ok") return;
 		const run = bundle.contract.listRuns()[0];
 		ok(run);
-		// The default dispatch return is compact; the sealed record holds the whole report (WTF-P 0.8.3 C3).
-		ok(!result.output.includes("Stencil note 10."));
-		match(result.output, new RegExp(`the whole answer is in monitor\\(mode="record", run_id="${run.id}"\\)`, "u"));
+		// A lone run's compact return shows its whole 12,000-byte answer budget, the one its collect and record use (M3).
+		ok(result.output.includes("Stencil note 10."), result.output);
+		ok(!/answer excerpt/u.test(result.output), result.output);
 		const record = await monitor.run({ mode: "record", run_id: run.id }, {});
 		ok(record.kind === "ok" && record.output.includes("Stencil note 10."));
 		const collected = await monitor.run({ mode: "collect", run_ids: [run.id] }, {});
 		strictEqual(collected.kind, "ok");
 		if (collected.kind !== "ok") return;
-		// A lone succeeded run takes the whole 12 KB batch budget, so collect delivers the answer whole (XR-62).
+		// A lone run's 12 KB answer budget delivers the answer whole at collect too (XR-62, M3).
 		ok(Buffer.byteLength(output, "utf8") > 2000 && Buffer.byteLength(output, "utf8") < 12_000);
 		ok(collected.output.includes("Stencil note 10."), collected.output);
 		ok(!/answer excerpt|helper result excerpt/u.test(collected.output), collected.output);
 		ok(!collected.output.includes("stored output truncated"));
+	} finally {
+		await bundle.extension.stop?.();
+	}
+});
+
+it("fixes one answer budget per run at dispatch: told to the worker, sealed, and the same at sync, collect and record (M3)", {
+	timeout: 20_000,
+}, async () => {
+	const body = (name: string, bytes: number) =>
+		report(`${`${name} note. `.repeat(Math.ceil(bytes / (name.length + 7))).slice(0, bytes)} ${name} closing.`);
+	const outputs = [body("Alpha", 2_800), body("Bravo", 3_200), body("Charlie", 10_000)];
+	const { bundle, dispatch, monitor, specs } = setup(outputs);
+	await bundle.extension.start();
+	try {
+		const result = await dispatch.run(
+			{
+				tasks: ["Explain alpha.", "Explain bravo.", "Explain charlie."].map((task) => ({ agent: "coder", task })),
+				intent,
+			},
+			{},
+		);
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		// Three runs share 12,000 bytes: each worker is told 4,000 and each seal carries it.
+		strictEqual(specs.length, 3);
+		for (const spec of specs) {
+			const told = spec.dynamicPromptMessages?.find((message) => message.id === "dispatch-answer-budget");
+			match(told?.body ?? "", /first 4000 bytes of your final answer/u);
+		}
+		const sealedRun = (output: string) => {
+			for (const run of bundle.contract.listRuns()) {
+				const receipt = readVerifiedRun(clioStateDir(), run.id);
+				if (receipt && resolvedRunResult(receipt).output?.text === output) return { runId: run.id, receipt };
+			}
+			throw new Error("no sealed run carries the expected output");
+		};
+		const [alpha, bravo, charlie] = outputs.map(sealedRun);
+		ok(alpha && bravo && charlie);
+		for (const { receipt } of [alpha, bravo, charlie]) strictEqual(receipt.settled.answerBudgetBytes, 4_000);
+		const pointer = `the whole answer is in monitor(mode="answer", run_id=${JSON.stringify(charlie.runId)})`;
+		const collected = await monitor.run(
+			{ mode: "collect", run_ids: [alpha.runId, bravo.runId, charlie.runId], timeout_ms: 5_000 },
+			{},
+		);
+		strictEqual(collected.kind, "ok");
+		if (collected.kind !== "ok") return;
+		for (const [label, view] of [
+			["sync", result.output],
+			["collect", collected.output],
+		] as const) {
+			ok(view.includes("Alpha closing.") && view.includes("Bravo closing."), `${label} shows the short answers whole`);
+			ok(!view.includes("Charlie closing."), `${label} cuts the long answer at its budget`);
+			match(view, /answer excerpt: (\d+) of \d+ bytes/u, label);
+			ok(Number(/answer excerpt: (\d+) of/u.exec(view)?.[1]) <= 4_000, label);
+			ok(view.includes(pointer), `${label} names the call that returns the rest`);
+		}
+		const record = await monitor.run({ mode: "record", run_id: charlie.runId }, {});
+		ok(record.kind === "ok" && !record.output.includes("Charlie closing."), "the record shows the same budget");
+		ok(record.kind === "ok" && record.output.includes("answer cut at 4000 bytes"));
+		const answer = await monitor.run({ mode: "answer", run_id: charlie.runId }, {});
+		ok(answer.kind === "ok" && answer.output === outputs[2], "mode=answer returns the sealed answer alone");
 	} finally {
 		await bundle.extension.stop?.();
 	}

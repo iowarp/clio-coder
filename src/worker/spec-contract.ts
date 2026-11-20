@@ -11,6 +11,7 @@ import { snapshotTurnConstraints, type TurnConstraints } from "../core/turn-cons
 import type { ResultContract } from "../domains/agents/result-contract.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
+import type { RunRole } from "../domains/dispatch/obligation.js";
 import type { MiddlewareEffectKind, MiddlewareHook, MiddlewareSnapshot } from "../domains/middleware/index.js";
 import type {
 	CapabilityFlags,
@@ -182,6 +183,8 @@ interface WorkerSpecFields {
 	 * than trusted as free text.
 	 */
 	product?: AgentProduct;
+	/** The run's role, resolved once at dispatch; it picks the context share of the run's handback round (M3). */
+	role?: RunRole;
 	/**
 	 * The agent ledger this run coordinates on, present only when the dispatch
 	 * unit has more than one concurrent peer. `sequence` is the board watermark
@@ -383,6 +386,14 @@ const TOOL_PROFILE_NAMES = [
 	"council-read-only",
 ] as const satisfies ReadonlyArray<ToolProfileName>;
 const WORKER_PRODUCTS = ["orientation"] as const satisfies ReadonlyArray<AgentProduct>;
+const WORKER_RUN_ROLES = [
+	"explorer",
+	"builder",
+	"checker",
+	"reviewer",
+	"judge",
+	"seat",
+] as const satisfies ReadonlyArray<RunRole>;
 const TARGET_LIFECYCLES = ["user-managed", "clio-coder-managed"] as const;
 const RESIDENCY_ROLES = ["chat", "memory", "worker", "target-default"] as const satisfies ReadonlyArray<ResidencyRole>;
 const MIDDLEWARE_HOOKS = [
@@ -1180,6 +1191,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	}
 	readOptionalEnum(spec, "toolProfile", "WorkerSpec", TOOL_PROFILE_NAMES);
 	readOptionalEnum(spec, "product", "WorkerSpec", WORKER_PRODUCTS);
+	readOptionalEnum(spec, "role", "WorkerSpec", WORKER_RUN_ROLES);
 	if (
 		spec.onPermission !== undefined &&
 		spec.onPermission !== "deny" &&

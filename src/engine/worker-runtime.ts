@@ -91,6 +91,8 @@ import {
 } from "../domains/agents/result-contract.js";
 import { nodeResultContractFilesystem } from "../domains/agents/result-contract-filesystem.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
+import { HANDBACK_CONTEXT_SHARE, HANDBACK_NOTE_SHARE } from "../domains/dispatch/handback.js";
+import type { RunRole } from "../domains/dispatch/obligation.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import { createMiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import { shouldRequestStalledTurnContinuation } from "../domains/middleware/stalled-turn.js";
@@ -279,6 +281,11 @@ export interface WorkerRunInput {
 	helperResult?: true;
 	/** What this run delivers; decides which delivery tools the reserve keeps live. */
 	product?: AgentProduct;
+	/**
+	 * Where the run sits in the work graph, resolved once at dispatch. It alone picks the share of the usable window
+	 * at which the run enters its handback round (M3); a run without one (a direct caller) keeps the CLI-H3 host turn.
+	 */
+	role?: RunRole;
 	/**
 	 * The run's agent-ledger port, present only when this run was dispatched
 	 * alongside concurrent peers. The ledger tool is registered either way.
@@ -741,11 +748,13 @@ const THRASH_CONTEXT_FRACTION = 0.8;
 const THRASH_CHANGED_PATHS_SHOWN = 10;
 
 /** The one host turn a thrashing worker gets: what the host saw, then write now or report what it has. */
-function thrashHostNote(cause: "recall" | "context", recalls: number, canWrite: boolean): string {
+function thrashHostNote(cause: "recall" | "context", recalls: number, canWrite: boolean, roleShare: boolean): string {
 	const seen =
 		cause === "recall"
 			? `this run has recalled its own evicted observations ${recalls} times`
-			: `this run's context passed ${Math.round(THRASH_CONTEXT_FRACTION * 100)}% of the model window without a workspace change`;
+			: roleShare
+				? `this run's context passed ${Math.round(HANDBACK_NOTE_SHARE * 100)}% of its usable context without a workspace change`
+				: `this run's context passed ${Math.round(THRASH_CONTEXT_FRACTION * 100)}% of the model window without a workspace change`;
 	const ask = canWrite
 		? "Write the change now from what you already hold, or stop and return a partial report that names what is done, what is left and the files involved."
 		: "Stop gathering and return your report now, marking what is unfinished.";
@@ -1215,6 +1224,26 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		[...observedReadRanges.entries()].flatMap(([key, spans]) =>
 			spans.map(([start, end]) => `${path.relative(contractCwd, key) || key}:${start}-${end}`),
 		);
+	/** The run's next round is its handback round; the bound that triggered it is journaled as its kind (M3). */
+	const enterHandback = (bound: "context"): void => {
+		synthesisToolLock = true;
+		process.stderr.write(
+			`[worker] handback: ${bound} reached the ${input.role ?? "run"}'s share; the next round reports\n`,
+		);
+		if (input.telemetryContext)
+			telemetryHub().emit(
+				"middleware.fired",
+				{
+					hook: "turn_start",
+					phase: "sync",
+					ruleId: "worker.handback",
+					effects: ["lock_tools"],
+					severity: "info",
+					evidence: `bound:${bound}@worker`,
+				},
+				input.telemetryContext,
+			);
+	};
 	/**
 	 * A refusal whose reason is a run bound. Direct calls reach this through
 	 * their blocked finish; a chain child the bound refused reaches it through
@@ -1593,6 +1622,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			}
 			// A request admitted without a fold reports no decision, so the thrash share reads the admitted count too.
 			if (window > 0 && contextGuard.inputTokens >= window * THRASH_CONTEXT_FRACTION) contextPressureCrossed = true;
+			// M3: a run with a role hands back at its role's share of the usable window instead of dying at the wall.
+			if (window > 0 && input.role !== undefined && !synthesisToolLock) {
+				const usable =
+					window - requestOutputReserve(currentModel, currentModel.maxTokens, window, contextGuard.inputTokens);
+				if (contextGuard.inputTokens >= usable * HANDBACK_NOTE_SHARE) contextPressureCrossed = true;
+				if (contextGuard.inputTokens >= usable * HANDBACK_CONTEXT_SHARE[input.role]) enterHandback("context");
+			}
 			// Stable sampling applies to every context-generation round, terminal
 			// repairs included. It merges over the caller's options so it beats quirk
 			// profiles and run overrides, which the adapters apply underneath.
@@ -2119,7 +2155,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				thrashNudged = true;
 				const canWrite =
 					input.readOnly !== true && activeWorkerTools.some((tool) => tool === ToolNames.Edit || tool === ToolNames.Write);
-				agent.steer({ role: "user", content: thrashHostNote(cause, evictedRecalls, canWrite), timestamp: Date.now() });
+				agent.steer({
+					role: "user",
+					content: thrashHostNote(cause, evictedRecalls, canWrite, input.role !== undefined),
+					timestamp: Date.now(),
+				});
 				process.stderr.write(
 					`[worker] thrash guard: ${cause === "recall" ? `${evictedRecalls} recalls of evicted observations` : "context past the thrash share with no change"}; told the worker to write now or report\n`,
 				);

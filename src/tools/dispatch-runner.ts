@@ -136,7 +136,6 @@ import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
 import { leftUncommittedReport } from "./task-worktree.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import {
-	COMPACT_ANSWER_BYTES,
 	checksAreReviewJudgments,
 	compactAnswer,
 	compactEvidenceLabels,
@@ -144,6 +143,7 @@ import {
 	finishedRun,
 	finishedRunTrustStatus,
 	PRODUCER_INTEGRITY,
+	runAnswerBudgetBytes,
 	runEvidenceLabels,
 	runHelperResult,
 	runResultPath,
@@ -806,7 +806,6 @@ export function formatDispatchOutput(
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
 	const recovered = runs.filter((run) => (run.failedAttempts?.length ?? 0) > 0);
 	const shareBytes = Math.max(1024, Math.floor(maxOutputBytes / Math.max(1, runs.length)));
-	const perRunOutputBytes = form === "compact" ? Math.min(shareBytes, COMPACT_ANSWER_BYTES) : shareBytes;
 	// Integrity failures and the spot-check reminder lead the summary: the
 	// truncation below keeps the head and drops the tail, and neither warning
 	// may be hidden behind a successful process outcome or a long answer.
@@ -845,6 +844,8 @@ export function formatDispatchOutput(
 		...runs.flatMap((run, index) => {
 			const { receipt } = run;
 			const view = finishedRun(receipt);
+			// Compact shows the answer budget sealed at dispatch (M3); full is the caller's own max_output_bytes share.
+			const perRunOutputBytes = form === "compact" ? runAnswerBudgetBytes(view) : shareBytes;
 			const helperLines = compactHelperResultLines(view, PRODUCER_INTEGRITY, perRunOutputBytes);
 			if (helperLines !== null) return helperLines;
 			const note = successNote(receipt);

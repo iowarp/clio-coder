@@ -8,6 +8,7 @@ import {
 	resultContractAuthorship,
 	type StructuredHelperResult,
 } from "../domains/agents/result-contract.js";
+import { sealedAnswerBudgetBytes } from "../domains/dispatch/handback.js";
 import { hostCheckBaseNote, hostCheckNotRunNote } from "../domains/dispatch/host-verification-note.js";
 import { settleFinishedRun } from "../domains/dispatch/run-settlement.js";
 import type { RunResult, RunResultDraft } from "../domains/dispatch/types.js";
@@ -67,6 +68,7 @@ export interface FinishedRun {
 		| "escalations"
 		| "worktree"
 		| "routeWarnings"
+		| "answerBudgetBytes"
 	>;
 	delivered: RunResultObject | null;
 	/** The run's journaled assessment; null when the run has none or the producer has not read it back. */
@@ -125,34 +127,29 @@ function taskWorktreeLines(run: FinishedRun): string[] {
 }
 
 /**
- * The answer budget of a run in a compact dispatch or collect result (WTF-P 0.8.3 C3). The run line, the trust or
- * verdict line and the evidence notices carry the run's key facts; the answer itself is an excerpt, and the sealed
- * record holds the whole of it.
+ * The bytes of a run's answer its parent sees in a compact dispatch result, a collect and the run record: the number
+ * sealed at dispatch and told to the worker (M3), or a lone run's budget for a run sealed before it was.
  */
-export const COMPACT_ANSWER_BYTES = 2000;
+export function runAnswerBudgetBytes(run: FinishedRun): number {
+	return sealedAnswerBudgetBytes(run.facts.answerBudgetBytes);
+}
 
-/**
- * The most a run record prints of an answer, and the answer budget a collect shares across a batch's succeeded runs,
- * so a 2-3 run batch delivers whole answers (XR-62).
- */
-export const RECORD_ANSWER_MAX_BYTES = 12_000;
-
-/** Where the whole answer of a compacted run is read. */
-function fullRecordPointer(runId: string): string {
-	return `monitor(mode="record", run_id=${JSON.stringify(runId)})`;
+/** Where the rest of a cut answer is read. */
+function fullAnswerPointer(runId: string): string {
+	return `monitor(mode="answer", run_id=${JSON.stringify(runId)})`;
 }
 
 /**
  * An answer cut to `maxBytes` at a line boundary when one falls in its second half, followed by how much was cut
  * and where the rest is. An answer within the budget is returned whole.
  */
-export function compactAnswer(text: string, runId: string, maxBytes = COMPACT_ANSWER_BYTES): string {
+export function compactAnswer(text: string, runId: string, maxBytes: number): string {
 	const total = Buffer.byteLength(text, "utf8");
 	if (total <= maxBytes) return text;
 	const head = truncateUtf8(text, maxBytes, "");
 	const lineEnd = head.lastIndexOf("\n");
 	const kept = lineEnd >= head.length / 2 ? head.slice(0, lineEnd) : head;
-	return `${kept}\n[answer excerpt: ${Buffer.byteLength(kept, "utf8")} of ${total} bytes; the whole answer is in ${fullRecordPointer(runId)}]`;
+	return `${kept}\n[answer excerpt: ${Buffer.byteLength(kept, "utf8")} of ${total} bytes; the whole answer is in ${fullAnswerPointer(runId)}]`;
 }
 
 /**
@@ -163,7 +160,7 @@ function helperResultExcerpt(data: unknown, runId: string, maxBytes: number): st
 	const whole = JSON.stringify(data);
 	const total = Buffer.byteLength(whole, "utf8");
 	if (total <= maxBytes) return whole;
-	const rest = `of ${total} bytes; the whole result is in ${fullRecordPointer(runId)}]`;
+	const rest = `of ${total} bytes; the whole result is in ${fullAnswerPointer(runId)}]`;
 	const findings =
 		typeof data === "object" && data !== null && Array.isArray((data as { findings?: unknown }).findings)
 			? (data as { findings: unknown[] }).findings
@@ -197,7 +194,7 @@ export function compactHelperResultLines(run: FinishedRun, integrity: RunIntegri
 		// The run's own work counters: without them a helper result hides `mutations:no` on an edit task (FX-4).
 		...activityLabels(run, finishedRunTrustStatus(run, integrity)).map((label) => `  ${label}`),
 		...taskWorktreeLines(run),
-		`  Run record available on demand: ${fullRecordPointer(run.runId)}.`,
+		`  Run record available on demand: monitor(mode="record", run_id=${JSON.stringify(run.runId)}).`,
 		...skillLoadLabels(run).map((label) => `  ${label}`),
 	];
 }

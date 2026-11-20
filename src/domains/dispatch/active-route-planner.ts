@@ -31,6 +31,8 @@ export function routeValidationProjection(
 		// Generated-context sampling and its synthesis deadline are host-owned, outside model-authored job arguments.
 		sampling,
 		synthesisAt,
+		// The batch's answer budget is fixed by the dispatch tool, never by model arguments (M3).
+		answerBudgetBytes,
 		turnConstraints,
 		contextSeed,
 		systemPrompt,
@@ -86,6 +88,7 @@ export function routeValidationProjection(
 			...(record !== undefined ? { record } : {}),
 			...(sampling !== undefined ? { sampling } : {}),
 			...(synthesisAt !== undefined ? { synthesisAt } : {}),
+			...(answerBudgetBytes !== undefined ? { answerBudgetBytes } : {}),
 			...(turnConstraints !== undefined ? { turnConstraints } : {}),
 			...(contextSeed !== undefined ? { contextSeed } : {}),
 			...(systemPrompt !== undefined ? { systemPrompt } : {}),

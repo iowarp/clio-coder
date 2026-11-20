@@ -423,6 +423,7 @@ export function settleFinishedRun(
 					}
 				: {}),
 			...routeWarningsOf(receipt),
+			...(receipt.answerBudgetBytes !== undefined ? { answerBudgetBytes: receipt.answerBudgetBytes } : {}),
 			worktree: receipt.worktree
 				? { apply: receipt.worktree.apply, applied: receipt.worktree.applied, snapshot: receipt.worktree.snapshot ?? null }
 				: null,
