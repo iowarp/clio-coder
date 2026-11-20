@@ -22,12 +22,31 @@ describe("session-start facts", () => {
 			ok(fresh.length <= SESSION_START_FACTS_MAX_CHARS, `${fresh.length} characters`);
 			match(fresh, /Session context:/);
 			match(fresh, /Derive conversation history from this session's record/);
-			match(fresh, /Git: branch/, "a long commit subject must not evict the branch fact");
+			match(fresh, /Git at session start: branch/, "a long commit subject must not evict the branch fact");
 			const resumed = sessionStartFacts(env.dir, "existing-session", Date.now() + 3_600_000, workspace)
 				.slice(1)
 				.join("\n");
 			doesNotMatch(resumed, /this new conversation contained no assistant messages/);
 			strictEqual(resumed, fresh);
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("labels the git lines as a session-start snapshot, never as the tree's current state", async () => {
+		const env = await isolateClioEnv("clio-session-facts-");
+		try {
+			const workspace = {
+				...emptyWorkspaceSnapshot(env.dir),
+				isGit: true,
+				branch: "main",
+				dirty: false,
+				recentCommits: [{ sha: "b".repeat(40), subject: "feat: x" }],
+			};
+			const lines = sessionStartFacts(env.dir, "", Date.now(), workspace);
+			ok(lines.includes('- Git at session start: branch "main", clean tree.'), lines.join("\n"));
+			ok(lines.includes('- Last commit at session start: "feat: x".'), lines.join("\n"));
+			doesNotMatch(lines.join("\n"), /^- (Git|Last commit):/m);
 		} finally {
 			env.restore();
 		}

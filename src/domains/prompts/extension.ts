@@ -610,7 +610,9 @@ function quotedFact(text: string, maxChars: number): string {
  * Facts every session should start with and none had: the tree's git state,
  * the evidence bar this repo declares, the one earlier recorded session in
  * this workspace, and where this conversation's record begins. Captured once
- * per session and framed into its first user message (`renderSessionContext`). The prior-session line is
+ * per session and framed into its first user message (`renderSessionContext`), so the git lines say they
+ * are a session-start snapshot: a final answer after the turn's own edits read "clean tree" as current (PV-11).
+ * The prior-session line is
  * attributed and says it is a record, never shared memory: models otherwise
  * narrate another window's `git log` as "what we did last time", or confess
  * to claims made in sessions they cannot see.
@@ -633,10 +635,10 @@ export function sessionStartFacts(
 				: null,
 		].filter((part): part is string => part !== null);
 		facts.push(
-			`- Git: ${workspace.branch === null ? "detached HEAD" : `branch ${quotedFact(workspace.branch, 50)}`}${state.length > 0 ? `, ${state.join(", ")}` : ""}.`,
+			`- Git at session start: ${workspace.branch === null ? "detached HEAD" : `branch ${quotedFact(workspace.branch, 50)}`}${state.length > 0 ? `, ${state.join(", ")}` : ""}.`,
 		);
 		const last = workspace.recentCommits[0];
-		if (last) commitFact = `- Last commit: ${quotedFact(last.subject, 55)}.`;
+		if (last) commitFact = `- Last commit at session start: ${quotedFact(last.subject, 55)}.`;
 	}
 	try {
 		const rigor = rigorResolution({ cwd, override: parseRigorOverride(process.env.CLIO_CODER_RIGOR) });
