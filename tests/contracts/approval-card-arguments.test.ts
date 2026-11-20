@@ -124,6 +124,18 @@ describe("approval card arguments of an uncurated tool", () => {
 		}
 	});
 
+	it("keeps a plain key=value and counts one quoted assignment once (SF-6)", () => {
+		for (const plain of ["key=value", "sort_key=name", "monkey=banana", "max_tokens=128"]) {
+			strictEqual(redactSecretString(plain), plain);
+		}
+		for (const secret of ["API_KEY=x", "OPENAI_KEY=x", "PGPASSWORD=x", "authToken=x"]) {
+			ok(redactSecretString(secret).endsWith("=[redacted]"), secret);
+		}
+		const tally = createRedactionTally();
+		redactSecretsText('TOKEN="abcdefghijkl"', tally);
+		strictEqual(tally.count, 1);
+	});
+
 	it("masks an adjacent quoted assignment whole in the display redactor", () => {
 		ok(!redactSecretString("API_KEY=\"\"'opaque-session-12345' run").includes("opaque-session"));
 	});
