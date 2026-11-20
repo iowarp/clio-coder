@@ -251,13 +251,16 @@ async function agyDispatch(
 	name: string,
 	options: Pick<DispatchBundleOptions, "operatorAsk"> = {},
 	mode?: WorkerPermissionMode,
+	scenario: "steer" | "null" | "labels" = "steer",
 ) {
 	const dir = join(process.env.CLIO_CODER_HOME ?? "", name);
 	mkdirSync(dir, { recursive: true });
 	const log = join(dir, "frames.jsonl");
 	const agy = join(dir, "agy");
 	const fixture = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
-	writeFileSync(agy, `#!/bin/sh\nexec "${process.execPath}" "${fixture}" agy "${log}" 1.5.13 steer\n`, { mode: 0o755 });
+	writeFileSync(agy, `#!/bin/sh\nexec "${process.execPath}" "${fixture}" agy "${log}" 1.5.13 ${scenario}\n`, {
+		mode: 0o755,
+	});
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;
 	if (mode !== undefined) settings.fleet.permissions.mode = mode;
@@ -312,17 +315,28 @@ it("steers an agy delegation through its own session/prompt and seals the steer'
 		"the steer goes out as a second session/prompt",
 	);
 	ok(!frames.some((frame) => frame.method === "session/cancel"));
+
+	// A steer the peer answers with a null result (no stop reason) is sent and recorded, but never acknowledged.
+	const nulled = await agyDispatch("steer-null", {}, undefined, "null");
+	strictEqual(nulled.receipt.steering?.length, 1);
+	strictEqual(nulled.receipt.steering?.[0]?.acknowledged, false);
 });
 
 it("parks an agy question on the operator's ask surface and answers the picked optionId, else cancelled (row 228)", {
 	skip: process.platform === "win32",
 }, async () => {
 	const asked: Array<{ question: string; options?: Array<{ label: string }>; fixedChoices?: boolean }> = [];
+	const askedAs: Array<{ origin?: string; signal: boolean }> = [];
+	let pick = "topic";
 	const operatorAsk: NonNullable<DispatchBundleOptions["operatorAsk"]> = {
 		available: () => true,
-		ask: async (questions) => {
+		ask: async (questions, invokeOptions) => {
 			asked.push(...questions);
-			return { answers: [{ question: questions[0]?.question ?? "", answer: "topic", options: ["topic"] }] };
+			askedAs.push({
+				...(invokeOptions?.origin !== undefined ? { origin: invokeOptions.origin } : {}),
+				signal: invokeOptions?.signal !== undefined,
+			});
+			return { answers: [{ question: questions[0]?.question ?? "", answer: pick, options: [pick] }] };
 		},
 	};
 	const answered = await agyDispatch("answered", { operatorAsk });
@@ -330,6 +344,8 @@ it("parks an agy question on the operator's ask surface and answers the picked o
 	ok(asked[0]?.question.includes("Which branch?") && asked[0].question.includes("pushes to main"), asked[0]?.question);
 	deepStrictEqual(asked[0]?.options, [{ label: "main" }, { label: "topic" }]);
 	strictEqual(asked[0]?.fixedChoices, true);
+	// A harness card: the run's signal dismisses it and its answer stays out of the main transcript.
+	deepStrictEqual(askedAs, [{ origin: "harness", signal: true }]);
 	deepStrictEqual(answered.frames.find((frame) => frame.id === "question-1" && frame.method === undefined)?.result, {
 		outcome: { outcome: "selected", optionId: "topic" },
 	});
@@ -351,4 +367,13 @@ it("parks an agy question on the operator's ask surface and answers the picked o
 		outcome: { outcome: "cancelled" },
 	});
 	strictEqual((denied.questions[0] as { answer?: string } | undefined)?.answer, "cancelled");
+
+	// A repeated label gets its optionId, and a counter when that collides with a real label; a blank name shows the
+	// optionId. Every option stays on the card and the pick maps back to its own optionId.
+	pick = "x (b 2)";
+	const labelled = await agyDispatch("labels", { operatorAsk }, undefined, "labels");
+	deepStrictEqual(asked.at(-1)?.options, [{ label: "x" }, { label: "x (b)" }, { label: "x (b 2)" }, { label: "d" }]);
+	deepStrictEqual(labelled.frames.find((frame) => frame.id === "question-1" && frame.method === undefined)?.result, {
+		outcome: { outcome: "selected", optionId: "b" },
+	});
 });

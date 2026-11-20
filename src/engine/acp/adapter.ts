@@ -577,17 +577,26 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		} catch {
 			return false;
 		}
+		// A write that failed or found stdin closed closes the transport and rejects the request: nothing reached the peer.
+		if (transport.closed) {
+			sent.catch(() => {});
+			return false;
+		}
 		const tracked = sent.then((response) => {
 			settledTurn.push(response);
 			return response;
 		});
 		steerPrompts.push(tracked);
-		// The peer answering the steer prompt is its acceptance; the sequence counts the steers sent into this run, as
-		// dispatch numbers its provenance. Registered before the turn awaits it, so the ack precedes the settle, and the
-		// rejection handler keeps an early rejection from going unhandled.
+		// The peer answering the steer prompt with a real stop (not cancelled, not a null result) is its acceptance; the
+		// sequence counts the steers sent into this run, as dispatch numbers its provenance. Registered before the turn
+		// awaits it, so the ack precedes the settle, and the rejection handler keeps an early rejection from going unhandled.
 		const sequence = steerPrompts.length;
 		tracked.then(
-			() => emit({ type: "clio_coder_steer_received", payload: { chars: body.length, sequence } }),
+			(response) => {
+				const stop = isRecord(response) ? response.stopReason : undefined;
+				if (aborted || typeof stop !== "string" || stop.length === 0 || stop === "cancelled") return;
+				emit({ type: "clio_coder_steer_received", payload: { chars: body.length, sequence } });
+			},
 			() => {},
 		);
 		return true;
@@ -794,6 +803,8 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			};
 		} catch (err) {
 			promptInFlight = false;
+			// A pick made during the termination grace belongs to a dead run: answer parked questions cancelled first.
+			releaseParkedQuestions();
 			const termination = await beginForceTermination();
 			const baseMessage = `ACP delegation failed: ${authFailure ?? errorMessage(err)}`;
 			const message = termination.exited

@@ -316,7 +316,10 @@ export function createAntigravityShims(input: {
 				)
 				.map((option) => ({
 					optionId: option.optionId,
-					label: bounded(typeof option.name === "string" ? option.name : option.optionId, MAX_CHOICE_CHARS),
+					label: bounded(
+						typeof option.name === "string" && option.name.trim().length > 0 ? option.name : option.optionId,
+						MAX_CHOICE_CHARS,
+					),
 				}));
 			return {
 				questionId: bounded(id, 128),
