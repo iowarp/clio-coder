@@ -9,9 +9,9 @@
  * 211 bytes to 112 with only the new entry left.
  */
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { FileAuthStorageBackend } from "../../src/domains/providers/auth/backend-file.js";
 import { InMemoryAuthStorageBackend } from "../../src/domains/providers/auth/backend-memory.js";
@@ -198,6 +198,30 @@ describe("contracts/auth storage durability", () => {
 		strictEqual(reopened.get("mistral")?.type, "api_key");
 		ok(readFileSync(path, "utf8").includes("sk-not-a-real-key-three"), "the replacement key is the one persisted");
 		ok(!readFileSync(path, "utf8").includes("sk-not-a-real-key-two"), "the removed credential is gone");
+	});
+
+	it("makes the file owner-only with icacls after a write on win32 and runs nothing on POSIX (FX-24)", () => {
+		const calls: Array<[string, string[]]> = [];
+		const exec = (program: string, args: readonly string[]): string => {
+			calls.push([win32.basename(program), [...args]]);
+			return program.endsWith("whoami.exe") ? '"ZBOOK\\akougk","S-1-5-21-1-2-3-1001"\r\n' : "";
+		};
+		new AuthStorage(new FileAuthStorageBackend(path, { platform: "win32", exec })).setApiKey(
+			"openai",
+			"sk-not-a-real-key",
+		);
+		deepStrictEqual(calls, [
+			["whoami.exe", ["/user", "/fo", "csv", "/nh"]],
+			["icacls.exe", [path, "/inheritance:r", "/grant:r", "*S-1-5-21-1-2-3-1001:F", "*S-1-5-18:F"]],
+		]);
+
+		calls.length = 0;
+		new AuthStorage(new FileAuthStorageBackend(path, { platform: "linux", exec })).setApiKey(
+			"mistral",
+			"sk-not-a-real-key",
+		);
+		deepStrictEqual(calls, [], "POSIX keeps the chmod alone");
+		strictEqual(statSync(path).mode & 0o777, 0o600);
 	});
 
 	/**

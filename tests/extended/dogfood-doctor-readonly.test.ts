@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { windowsCredentialsFinding } from "../../src/domains/lifecycle/doctor.js";
 import { FileAuthStorageBackend } from "../../src/domains/providers/auth/backend-file.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
 
@@ -183,6 +184,27 @@ describe("contracts/DOG-001 doctor credential reads", () => {
 		deepStrictEqual(reopened.get("first-provider"), first.get("first-provider"));
 		deepStrictEqual(reopened.get("second-provider"), stale.get("second-provider"));
 		deepStrictEqual(readdirSync(join(root, "config")), ["credentials.yaml"]);
+	});
+
+	it("warns on a Windows credentials ACL that grants another principal and names it (FX-24)", () => {
+		const file = "C:\\clio-rl1-acltest\\config\\credentials.yaml";
+		const account = { name: "ZBOOK\\akougk", sid: "S-1-5-21-1-2-3-1001" };
+		const listing = (aces: string[]): string =>
+			`${file} ${aces.join(`\r\n${" ".repeat(file.length + 1)}`)}\r\n\r\nSuccessfully processed 1 files; Failed processing 0 files\r\n`;
+		const owned = ["NT AUTHORITY\\SYSTEM:(F)", "BUILTIN\\Administrators:(I)(F)", "ZBOOK\\akougk:(F)"];
+		deepStrictEqual(windowsCredentialsFinding(file, { output: listing(owned) }, account), {
+			ok: true,
+			name: "credentials",
+			detail: file,
+		});
+		const finding = windowsCredentialsFinding(
+			file,
+			{ output: listing([...owned, "BUILTIN\\Users:(I)(RX)", "Everyone:(DENY)(W)"]) },
+			account,
+		);
+		strictEqual(finding.level, "warn");
+		strictEqual(finding.name, "credentials");
+		match(finding.detail, /ACL also grants BUILTIN\\Users \(run `clio-coder doctor --fix`/);
 	});
 
 	it("reads the committed snapshot while a writer holds the lock without disturbing the writer", async () => {

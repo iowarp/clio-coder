@@ -14,6 +14,7 @@ import {
 } from "../domains/lifecycle/migrations/registry-ids.js";
 import { isDevVersion } from "./build-info.js";
 import { DEFAULT_SETTINGS_YAML, SETTINGS_FILE_MODE } from "./defaults.js";
+import { applyOwnerOnlyAcl } from "./owner-only-acl.js";
 import { readClioVersion } from "./package-root.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
@@ -188,6 +189,8 @@ export function initializeClioHome(): InitReport {
 				{ encoding: "utf8", mode: 0o600 },
 			);
 			chmodSync(credentialsPath, 0o600);
+			// On Windows the mode is not access control; a failure here shows in doctor.
+			applyOwnerOnlyAcl(credentialsPath);
 			created.push(credentialsPath);
 		});
 	}
