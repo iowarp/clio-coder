@@ -280,13 +280,15 @@ export function callSettlementFromMessage(
 			firstDivergentSection: unobserved,
 			expectedColdReasons: [],
 			rePrefilledTokens: unobserved,
-			// Input is the uncached prefill only beside a measured cache read; a provider that omits its reads reports
-			// the whole prompt there (#434).
+			// Beside a measured cache read, the write bucket is prefilled too. It already includes the 1h subset.
+			// A provider that omits its reads may report the whole prompt as input (#434).
 			uncachedPrefillTokens:
 				neverSent || !terminal
 					? unobserved
 					: counts.cacheRead.kind === "measured"
-						? counts.input
+						? counts.input.kind === "measured" && counts.cacheWrite.kind === "measured"
+							? { ...counts.input, value: counts.input.value + counts.cacheWrite.value }
+							: counts.input
 						: { kind: "unknown", reason: "provider-omitted" },
 			verdict: "unknown",
 		},
