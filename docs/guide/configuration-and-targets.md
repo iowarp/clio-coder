@@ -191,7 +191,7 @@ This inventory lists compiled defaults and selected optional settings in the ver
 | `chat.retry.baseDelayMs` | `2000` | next turn |
 | `chat.retry.maxDelayMs` | `60000` | next turn |
 | `chat.retry.streamStallMs` | `180000` | next turn |
-| `chat.retry.firstTokenStallMs` | `600000` | next turn; local and self-hosted endpoints only, because a hosted (cloud or subscription) route aborts a call with no first token after `chat.retry.streamStallMs` |
+| `chat.retry.firstTokenStallMs` | `600000` | next turn; local and self-hosted endpoints only, because a hosted (cloud or subscription) route aborts a call with no first token after `chat.retry.streamStallMs`, or sooner once it has shown 5 first tokens in the running process: max(30 s, 10 times their p95), never past `chat.retry.streamStallMs` |
 | `chat.steering.triage.enabled` | `false` | next turn |
 | `chat.steering.triage.target` | `null` | next turn |
 | `chat.steering.triage.model` | `null` | next turn |
