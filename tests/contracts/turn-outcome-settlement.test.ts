@@ -1,12 +1,19 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { validPayload } from "../../src/core/telemetry/events.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
+import { newCallId } from "../../src/core/telemetry/ids.js";
 import { factKnownValue } from "../../src/core/telemetry/known.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { createUnbackedWorkerClaimRegistration } from "../../src/domains/middleware/dispatch-nudge.js";
-import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
+import { createExplorationNudgeRegistrations, createMiddlewareBundle } from "../../src/domains/middleware/index.js";
+import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import { callChangesTree } from "../../src/domains/safety/check-classifier.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
@@ -14,7 +21,9 @@ import type { TelemetryContract } from "../../src/domains/telemetry/contract.js"
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import type { TurnOutcomeRecord } from "../../src/domains/turn-control/index.js";
+import { callRepeatsAsRead } from "../../src/engine/loop-guard.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
+import { createThrashOutcome } from "../../src/engine/worker-thrash-outcome.js";
 import type { CreateChatLoopDeps } from "../../src/session-control/chat-loop.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { createTurnOutcomeCollector } from "../../src/session-control/turn-outcome-collector.js";
@@ -498,4 +507,173 @@ it("continuation state has one owner: a nudge per prompt, carried or resubmitted
 		ok(checkTurnStateOwnership(module, source)[0]?.startsWith("rule16:"), source);
 	deepStrictEqual(checkTurnStateOwnership("src/engine/acp/server.ts", "active.continuation = null;"), []);
 	deepStrictEqual(checkTurnStateOwnership("src/session-control/turn-state.ts", "state.turnStop = null;"), []);
+});
+
+it("exploration notes settle acted, ignored and moot, and the turn records its read streak (exploration design X4)", async () => {
+	const scratch = await isolateClioEnv("clio-coder-exploration-outcome-");
+	const sessionId = "x4-exploration";
+	const hub = telemetryHub();
+	const settled = new Map<string, { surface: string; outcome: string; admittedIn: string | null; fact: unknown }>();
+	const fired: Array<{ ruleId: string; firingId?: string }> = [];
+	const stops = [
+		hub.subscribe("middleware.fired", (payload, ctx) => {
+			if (ctx?.sessionId === sessionId) fired.push(payload);
+		}),
+		hub.subscribe("surface.settled", (payload, ctx) => {
+			if (ctx?.sessionId !== sessionId) return;
+			ok(validPayload("surface.settled", payload), JSON.stringify(payload));
+			ok(!settled.has(payload.firingId), `settled twice: ${payload.firingId}`);
+			const { surface, outcome, admittedIn, fact } = payload;
+			settled.set(payload.firingId, { surface, outcome, admittedIn, fact });
+		}),
+	];
+	const collector = createTurnOutcomeCollector();
+	const detach = collector.attachLedger(
+		hub,
+		() => sessionId,
+		() => new Set(),
+	);
+	try {
+		for (const area of ["alpha", "beta", "gamma"]) {
+			mkdirSync(join(scratch.dir, area));
+			writeFileSync(join(scratch.dir, area, "notes.md"), "notes\n");
+		}
+		const middleware = createMiddlewareBundle({
+			registrations: [
+				collector,
+				...createExplorationNudgeRegistrations({
+					workspaceRoot: () => scratch.dir,
+					readStreak: { repeatsAsRead: callRepeatsAsRead, changesTree: callChangesTree },
+					readStreakObserver: collector,
+				}),
+			],
+		}).contract;
+		const hook = (input: MiddlewareHookInput) => middleware.runHook({ sessionId, ...input });
+		const areas = ["alpha", "beta", "gamma"];
+		let calls = 0;
+		/** One model round: its calls, then the request that carries their results; returns that request's id. */
+		const round = (
+			tools: ReadonlyArray<{ name: string; args?: Record<string, unknown>; details?: Record<string, unknown> }>,
+		) => {
+			for (const tool of tools) {
+				calls += 1;
+				const toolCallId = `t-${calls}`;
+				const toolArgs = tool.args ?? { path: join(scratch.dir, areas[calls % 3] ?? "alpha", "notes.md") };
+				hook({ hook: "before_tool", turnId: "u1", toolName: tool.name, toolCallId, toolArgs });
+				hook({
+					hook: "after_tool",
+					turnId: "u1",
+					toolName: tool.name,
+					toolCallId,
+					toolArgs,
+					...(tool.details !== undefined ? { toolResultDetails: tool.details } : {}),
+					metadata: { resultKind: "ok", batchSize: tools.length },
+				});
+			}
+			const callId = newCallId();
+			collector.requestSent(callId, []);
+			return callId;
+		};
+		const reads = (count: number) => Array.from({ length: count }, () => ({ name: "read" }));
+		const firingOf = (ruleId: string, nth = 0) => fired.filter((row) => row.ruleId === ruleId)[nth]?.firingId ?? "";
+		hook({
+			hook: "turn_start",
+			turnId: "u1",
+			metadata: { userTurnId: "u1", turnOrigin: "operator", activeToolNames: "read,edit,tasks,ask_user,dispatch" },
+		});
+		// Ten reads across three areas draw the scout note; the dispatch the model starts after it acts on it.
+		let surveyCarried = "";
+		for (let index = 0; index < 4; index += 1) surveyCarried = round(reads(3));
+		round([
+			{
+				name: "dispatch",
+				args: { agent: "scout", task: "survey" },
+				details: { mode: "parallel", runs: [{ runId: "run-1", agentId: "scout" }] },
+			},
+		]);
+		// The dispatch reset the streak. Twenty-five reads draw the first note; the edit after it acts on it.
+		for (let index = 0; index < 5; index += 1) round(reads(5));
+		round([{ name: "edit", args: { path: join(scratch.dir, "alpha", "notes.md") } }]);
+		// The streak starts again: its first note sees four single-read rounds, which draw the serial-round note. One
+		// more single read leaves that open; the next round of two reads acts on it. Ten reads after the ladder note
+		// with no decision leave it ignored, at the tenth and not before.
+		for (let index = 0; index < 4; index += 1) round(reads(5));
+		const ladderCarried = round(reads(5));
+		for (let index = 0; index < 5; index += 1) round(reads(1));
+		round(reads(2));
+		round(reads(2));
+		strictEqual(settled.get(firingOf("nudge.read-streak", 1)), undefined, "nine reads after the note");
+		round(reads(1));
+		strictEqual(settled.get(firingOf("nudge.read-streak", 1))?.outcome, "ignored", "ten reads after the note");
+		// Read forty draws the second note, which the turn's end leaves moot.
+		const lastCarried = round(reads(5));
+		hook({ hook: "turn_end", turnId: "a1", metadata: { userTurnId: "u1" } });
+
+		const outcome = (firingId: string) => settled.get(firingId);
+		deepStrictEqual(outcome(firingOf("nudge.scout-survey")), {
+			surface: "nudge.scout-survey",
+			outcome: "acted",
+			admittedIn: surveyCarried,
+			fact: { kind: "receipt", ref: "t-13" },
+		});
+		strictEqual(outcome(firingOf("nudge.read-streak", 0))?.outcome, "acted");
+		deepStrictEqual(outcome(firingOf("nudge.read-streak", 0))?.fact, { kind: "receipt", ref: "t-39" });
+		deepStrictEqual(outcome(firingOf("nudge.read-streak", 1)), {
+			surface: "nudge.read-streak",
+			outcome: "ignored",
+			admittedIn: ladderCarried,
+			fact: { kind: "none" },
+		});
+		deepStrictEqual(
+			outcome(firingOf("nudge.read-streak", 2))?.fact,
+			{ kind: "receipt", ref: "t-71" },
+			"the round of two reads after a single-read round answers the serial note",
+		);
+		deepStrictEqual(outcome(firingOf("nudge.read-streak", 3)), {
+			surface: "nudge.read-streak",
+			outcome: "moot",
+			admittedIn: lastCarried,
+			fact: { kind: "scope-end" },
+		});
+		strictEqual(fired.filter((row) => row.ruleId === "nudge.read-streak").length, 4);
+		strictEqual(settled.size, 5, "every exploration firing settles once");
+		deepStrictEqual(collector.take("u1").exploration, { maxReadStreak: 40, serialRounds: 5, notes: 4 });
+
+		// A worker settles its one thrash note itself, under its run: ten reads after the request that carried it.
+		const run = { sessionId: "x4-parent", runId: "run-x4", agent: { role: "worker" as const, id: "run-x4" } };
+		const workerSettled: unknown[] = [];
+		stops.push(
+			hub.subscribe("surface.settled", (payload, ctx) => {
+				if (ctx?.runId !== run.runId) return;
+				ok(validPayload("surface.settled", payload), JSON.stringify(payload));
+				workerSettled.push(payload);
+			}),
+		);
+		const thrash = createThrashOutcome({ context: run, mutatedPaths: () => 0 });
+		const thrashFiring = thrash.fire();
+		const thrashCarried = newCallId();
+		const event = (value: object) => thrash.observe(value as AgentEvent);
+		event({
+			type: "message_end",
+			message: { role: "assistant", callId: thrashCarried, content: [], stopReason: "toolUse" },
+		});
+		for (let index = 0; index < 10; index += 1) {
+			event({ type: "tool_execution_start", toolCallId: `w-${index}`, toolName: "read", args: { path: "a.ts" } });
+			event({ type: "tool_execution_end", toolCallId: `w-${index}`, toolName: "read", isError: false });
+		}
+		thrash.end([]);
+		deepStrictEqual(workerSettled, [
+			{
+				firingId: thrashFiring,
+				surface: "worker.thrash",
+				admittedIn: thrashCarried,
+				outcome: "ignored",
+				fact: { kind: "none" },
+			},
+		]);
+	} finally {
+		detach();
+		for (const stop of stops) stop();
+		scratch.restore();
+	}
 });

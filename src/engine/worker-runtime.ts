@@ -200,6 +200,7 @@ import {
 	workerRefusalLimitReason,
 	workerRefusalReportDirective,
 } from "./worker-refusals.js";
+import { createThrashOutcome } from "./worker-thrash-outcome.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
 
 /** Room left for the frame envelope under the 16 KiB control-lane bound, counted in the UTF-8 bytes the host limit counts. */
@@ -2038,6 +2039,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			agent.followUp(repairMessage as unknown as AgentMessage);
 		}
 	};
+	// X4: the thrash note's settlement, from the request that carries it to the write or report that answers it.
+	const thrashOutcome = createThrashOutcome({
+		context: input.telemetryContext,
+		mutatedPaths: () => runEffects.snapshot().mutatedPaths.size,
+	});
 	const unsubscribe = agent.subscribe(async (event) => {
 		if (
 			event.type === "message_end" &&
@@ -2107,6 +2113,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			usage.usageReported = reported;
 		}
 		if (event.type === "message_end" && isAssistantMessage(event.message)) workerTelemetry?.settle(event.message);
+		thrashOutcome.observe(event);
 		// Detect the whole terminal batch before any call is prepared/executed.
 		// beforeToolCall rejects every sibling, regardless of ordering or parallelism.
 		if (helperSchema !== null && event.type === "message_end" && isAssistantMessage(event.message)) {
@@ -2188,6 +2195,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					telemetryHub().emit(
 						"middleware.fired",
 						{
+							firingId: thrashOutcome.fire(),
 							hook: "after_tool",
 							phase: "sync",
 							ruleId: "worker.thrash",
@@ -3013,6 +3021,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			clearTimeout(synthesisTimer);
 			clearActiveEscalation();
 			unsubscribePermission();
+			thrashOutcome.end(agent.state.messages.slice(inheritedCount));
 			// Every server this run launched closes with it; teardown reports go to
 			// stderr inside the source, never to the NDJSON lane.
 			try {

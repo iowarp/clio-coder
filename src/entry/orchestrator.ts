@@ -2576,6 +2576,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	for (const registration of createExplorationNudgeRegistrations({
 		workspaceRoot: memoryWorkspaceRoot,
 		readStreak: { repeatsAsRead: callRepeatsAsRead, changesTree: callChangesTree },
+		readStreakObserver: turnOutcomeCollector,
 	}))
 		middlewareRegistrar.registerHook(registration);
 	middlewareRegistrar.registerHook(createUnbackedWorkerClaimRegistration());

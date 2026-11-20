@@ -37,7 +37,8 @@ const SECOND_NOTE = 40;
 const LAST_NOTE = 60;
 const SERIAL_ROUNDS = 4;
 const STREAK_EVIDENCE = "count:read-class-calls@no-progress-streak";
-const SERIAL_EVIDENCE = "count:single-read-rounds@no-progress-streak";
+/** The evidence class of the serial-round note, which settles on round width rather than on progress (3.4). */
+export const READ_STREAK_SERIAL_EVIDENCE = "count:single-read-rounds@no-progress-streak";
 const BATCH_SENTENCE = "Send the reads and searches you already know you need together in one round.";
 /** Compaction stages that may remove tool results from the request; a recall restores them instead. */
 const NON_FOLD_STAGES: ReadonlySet<string> = new Set(["working_set_recall"]);
@@ -66,6 +67,31 @@ export interface ReadStreakClassifiers {
 	): boolean;
 	/** The finish gate's reading of whether a bash call changed the workspace (`callChangesTree`). */
 	changesTree(toolName: string, args: Record<string, unknown> | undefined, cwd: string): boolean;
+}
+
+/**
+ * What the rule saw, reported to the outcome ledger so it settles the rule's notes and measures the turn from the
+ * rule's own reading of each call instead of a second classifier (exploration design 3.4, X4). A `call` is one model
+ * call the rule judged, with the streak after it and the rounds it added to a serial run; a `fold` is a compaction
+ * that may have removed earlier results.
+ */
+export type ReadStreakStep =
+	| {
+			kind: "call";
+			sessionId?: string;
+			toolName: string;
+			toolCallId?: string;
+			effect: CallEffect;
+			reads: number;
+			/** Rounds this call added to a serial run: all of them when the run reaches its length, then one each. */
+			serialRounds: number;
+			/** The note this call carries, if any. */
+			note: "ladder" | "serial" | null;
+	  }
+	| { kind: "fold"; sessionId?: string };
+
+export interface ReadStreakObserver {
+	observeReadStreak(step: ReadStreakStep): void;
 }
 
 interface TurnSurface {
@@ -167,6 +193,7 @@ function outerChain(input: MiddlewareHookInput): boolean {
 type CallEffect = "read" | "progress" | "other";
 
 export function createReadStreakRegistration(deps: {
+	observer?: ReadStreakObserver;
 	classifiers: ReadStreakClassifiers;
 	workspaceRoot?: () => string;
 }): MiddlewareHookRegistration {
@@ -214,6 +241,8 @@ export function createReadStreakRegistration(deps: {
 		return "other";
 	};
 
+	/** The note the call being judged now carries. */
+	let noted: "ladder" | "serial" | null = null;
 	const afterRead = (
 		input: MiddlewareHookInput,
 		context?: MiddlewareHookEvaluationContext,
@@ -239,11 +268,13 @@ export function createReadStreakRegistration(deps: {
 				state.serialNoted = true;
 			}
 			context?.evidence?.(STREAK_EVIDENCE);
+			noted = "ladder";
 			return [{ kind: "annotate_tool_result", message, severity: "info" }];
 		}
 		if (surface.canWrite && state.serial === SERIAL_ROUNDS && !state.serialNoted) {
 			state.serialNoted = true;
-			context?.evidence?.(SERIAL_EVIDENCE);
+			context?.evidence?.(READ_STREAK_SERIAL_EVIDENCE);
+			noted = "serial";
 			return [{ kind: "annotate_tool_result", message: serialNote(state.serial), severity: "info" }];
 		}
 		return NONE;
@@ -254,6 +285,7 @@ export function createReadStreakRegistration(deps: {
 		description: "ask for a decision after a long run of read-only calls with no edit, plan or question",
 		hooks: ["turn_start", "before_tool", "after_tool", "on_compaction"],
 		evidence: STREAK_EVIDENCE,
+		settles: true,
 		evaluate(input, context): ReadonlyArray<MiddlewareEffect> {
 			followSession(input.sessionId);
 			if (input.hook === "turn_start") {
@@ -264,7 +296,13 @@ export function createReadStreakRegistration(deps: {
 			}
 			if (input.hook === "on_compaction") {
 				const stage = input.metadata?.stage;
-				if (typeof stage !== "string" || !NON_FOLD_STAGES.has(stage)) state.folded = true;
+				if (typeof stage !== "string" || !NON_FOLD_STAGES.has(stage)) {
+					state.folded = true;
+					deps.observer?.observeReadStreak({
+						kind: "fold",
+						...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+					});
+				}
 				return NONE;
 			}
 			if (input.hook === "before_tool") {
@@ -284,15 +322,32 @@ export function createReadStreakRegistration(deps: {
 			if (input.metadata?.nested === true || input.metadata?.origin === "harness") return NONE;
 			if (input.metadata?.resultKind !== "ok") return NONE;
 			const effect = classify(input);
-			if (effect === "progress") {
-				reset();
-				return NONE;
-			}
-			if (effect === "other") {
-				state.serial = 0;
-				return NONE;
-			}
-			return afterRead(input, context);
+			let effects = NONE;
+			noted = null;
+			const serialBefore = state.serial;
+			if (effect === "progress") reset();
+			else if (effect === "other") state.serial = 0;
+			else effects = afterRead(input, context);
+			// A single-read round adds to the serial run: all of its rounds when it reaches its length, then one each.
+			const serialRounds =
+				state.serial !== serialBefore + 1
+					? 0
+					: state.serial === SERIAL_ROUNDS
+						? SERIAL_ROUNDS
+						: state.serial > SERIAL_ROUNDS
+							? 1
+							: 0;
+			deps.observer?.observeReadStreak({
+				kind: "call",
+				...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+				toolName: effectiveToolCall(input.toolName, input.toolArgs).toolName,
+				...(input.toolCallId !== undefined ? { toolCallId: input.toolCallId } : {}),
+				effect,
+				reads: state.reads,
+				serialRounds,
+				note: noted,
+			});
+			return effects;
 		},
 	};
 }

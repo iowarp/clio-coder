@@ -4,7 +4,15 @@ import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { SurfaceOutcome, SurfaceSettled } from "../core/telemetry/schemas.js";
 import { ToolNames } from "../core/tool-names.js";
 import { nextFiringId } from "../domains/middleware/fired-record.js";
-import type { MiddlewareHookInput, MiddlewareHookRegistration } from "../domains/middleware/index.js";
+import {
+	type MiddlewareHookInput,
+	type MiddlewareHookRegistration,
+	READ_STREAK_REGISTRATION_ID,
+	READ_STREAK_SERIAL_EVIDENCE,
+	type ReadStreakObserver,
+	type ReadStreakStep,
+	SCOUT_NUDGE_REGISTRATION_ID,
+} from "../domains/middleware/index.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import { dispatchKeysFromArgs } from "../domains/turn-control/index.js";
@@ -19,9 +27,14 @@ export interface CollectedTurn {
 	readonly harness: TurnOutcomeRecord["harness"];
 	readonly completion: TurnOutcomeRecord["completion"];
 	readonly previousClarificationStreak: number;
+	readonly exploration: NonNullable<TurnOutcomeRecord["exploration"]>;
 }
 
-export interface TurnOutcomeCollector extends MiddlewareHookRegistration {
+/**
+ * The ledger also hears the read-streak rule (exploration design 3.4, X4): each call it judged settles the rule's
+ * notes and measures the turn, so the ledger and the rule never read a call two ways.
+ */
+export interface TurnOutcomeCollector extends MiddlewareHookRegistration, ReadStreakObserver {
 	/** `current` is the id the turn runs under now: input queued mid-turn files its own user entry and moves it there. */
 	take(userTurnId: string, current?: string | null): CollectedTurn;
 	recordCompletion(
@@ -60,6 +73,27 @@ export interface TurnOutcomeCollector extends MiddlewareHookRegistration {
 
 type SettlementFact = SurfaceSettled["fact"];
 
+/**
+ * An exploration note's own settlement (exploration design 3.4, X4). A ladder note (`streak`) is acted on by a call
+ * that resets the streak and ignored after {@link NOTE_IGNORED_AFTER_READS} more reads; a serial-round note is acted
+ * on by a round with two or more reads, ignored after {@link NOTE_IGNORED_AFTER_ROUNDS} rounds without one, and moot
+ * when the streak resets first. Either is moot at a fold or when its turn ends. A scout-survey note is acted on by a
+ * dispatch that starts later in its turn and ignored when the turn ends without one.
+ */
+interface NoteSettlement {
+	rule: "streak" | "serial" | "survey";
+	/** Read-class calls since the request that carried the note. */
+	reads: number;
+	/** Rounds since that request with at least one judged call. */
+	rounds: number;
+	/** Judged calls and reads in the round now running. */
+	roundCalls: number;
+	roundReads: number;
+}
+
+const NOTE_IGNORED_AFTER_READS = 10;
+const NOTE_IGNORED_AFTER_ROUNDS = 3;
+
 /** A settling firing the ledger has not settled yet (memory design 4.1). */
 interface OpenFiring {
 	firingId: string;
@@ -79,6 +113,8 @@ interface OpenFiring {
 	credit?: SettlementFact;
 	/** The loop guard escalation that ended the turn's tool use, when one did. */
 	exhausted?: string;
+	/** Set for an exploration note, which settles by its own rule rather than by the shared credit. */
+	note?: NoteSettlement;
 }
 
 const IDENTITY_LIMIT = 64;
@@ -112,7 +148,14 @@ function emptyTurn(previousClarificationStreak: number): CollectedTurn {
 		harness: { runIds: [], reads: 0 },
 		completion: { decision: "not-assessed", mutatedPaths: 0, evidenceKinds: [] },
 		previousClarificationStreak,
+		exploration: { maxReadStreak: 0, serialRounds: 0, notes: 0 },
 	};
+}
+
+function noteRule(ruleId: string, evidence: string | undefined): NoteSettlement["rule"] | null {
+	if (ruleId === SCOUT_NUDGE_REGISTRATION_ID) return "survey";
+	if (ruleId !== READ_STREAK_REGISTRATION_ID) return null;
+	return evidence === READ_STREAK_SERIAL_EVIDENCE ? "serial" : "streak";
 }
 
 function dispatchRuns(details: MiddlewareHookInput["toolResultDetails"]): { agentIds: string[]; runIds: string[] } {
@@ -166,9 +209,13 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 			ctx,
 		);
 	};
-	/** A firing whose turn is over: a block by how its turn ended, a nudge `ignored` for want of a typed fact. */
+	/**
+	 * A firing whose turn is over: a block by how its turn ended, a nudge `ignored` for want of a typed fact. A streak
+	 * note whose turn ended first is moot: the turn's end, not the model, closed the streak it asked about.
+	 */
 	const settleEnded = (firing: OpenFiring): void => {
-		if (firing.kind === "block" && firing.exhausted !== undefined)
+		if (firing.note !== undefined && firing.note.rule !== "survey") settle(firing, "moot", { kind: "scope-end" });
+		else if (firing.kind === "block" && firing.exhausted !== undefined)
 			settle(firing, "exhausted", { kind: "scope-end", ref: firing.exhausted });
 		else if (firing.kind === "block" && firing.credit !== undefined) settle(firing, "recovered", firing.credit);
 		else settle(firing, "ignored", { kind: "none" });
@@ -227,6 +274,7 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 		const claimants = [...open.values()].filter(
 			(firing) =>
 				firing.admitted !== null &&
+				firing.note === undefined &&
 				(firing.kind === "nudge" ||
 					(firing.credit === undefined && firing.exhausted === undefined && firing.identity !== identity)),
 		);
@@ -239,11 +287,52 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 			else firing.credit = fact;
 		}
 	};
+	/** The admitted exploration notes of `owner`'s session that settle by `rules`. */
+	const openNotes = (owner: string | undefined, ...rules: ReadonlyArray<NoteSettlement["rule"]>): OpenFiring[] =>
+		[...open.values()].filter(
+			(firing) =>
+				firing.admitted !== null &&
+				firing.sessionId === owner &&
+				firing.note !== undefined &&
+				rules.includes(firing.note.rule),
+		);
+	/** One call the read-streak rule judged, against the notes the model has seen (exploration design 3.4). */
+	const settleNotes = (step: Extract<ReadStreakStep, { kind: "call" }>): void => {
+		const ref = step.toolCallId !== undefined ? { ref: step.toolCallId } : {};
+		const fact: SettlementFact =
+			step.toolName === ToolNames.Finish ? { kind: "declaration", ...ref } : { kind: "receipt", ...ref };
+		for (const firing of openNotes(step.sessionId, "streak", "serial")) {
+			const note = firing.note as NoteSettlement;
+			if (step.effect === "progress") {
+				settle(firing, note.rule === "streak" ? "acted" : "moot", fact);
+				continue;
+			}
+			note.roundCalls += 1;
+			if (step.effect !== "read") continue;
+			note.reads += 1;
+			note.roundReads += 1;
+			if (note.rule === "serial" && note.roundReads >= 2) settle(firing, "acted", fact);
+			else if (note.rule === "streak" && note.reads >= NOTE_IGNORED_AFTER_READS)
+				settle(firing, "ignored", { kind: "none" });
+		}
+	};
+	/** A request went out: the round the model answered the last one with is over. */
+	const closeRounds = (): void => {
+		for (const firing of open.values()) {
+			const note = firing.note;
+			if (note?.rule !== "serial" || firing.admitted === null) continue;
+			if (note.roundCalls > 0) note.rounds += 1;
+			note.roundCalls = 0;
+			note.roundReads = 0;
+			if (note.rounds >= NOTE_IGNORED_AFTER_ROUNDS) settle(firing, "ignored", { kind: "none" });
+		}
+	};
 	const onFired = (
-		payload: { firingId?: string; hook: string; ruleId: string; effects: ReadonlyArray<string> },
+		payload: { firingId?: string; hook: string; ruleId: string; effects: ReadonlyArray<string>; evidence?: string },
 		ctx: TelemetryContext | undefined,
 	): void => {
 		if (payload.firingId === undefined || !ownSession(ctx)) return;
+		const rule = noteRule(payload.ruleId, payload.evidence);
 		const block = payload.effects.includes("block_tool");
 		const identity = block && ctx.toolCallId !== undefined ? identities.get(ctx.toolCallId) : undefined;
 		const firing: OpenFiring = {
@@ -257,6 +346,7 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 			admittedIn: null,
 			admitted: null,
 			...(block && turnExhausted !== null ? { exhausted: turnExhausted } : {}),
+			...(rule !== null ? { note: { rule, reads: 0, rounds: 0, roundCalls: 0, roundReads: 0 } } : {}),
 		};
 		// A further block of the same call takes back a recovery an earlier block was credited with.
 		if (identity !== undefined)
@@ -298,6 +388,7 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 			};
 		},
 		requestSent(callId, carried) {
+			closeRounds();
 			const named = new Set(carried);
 			let any = false;
 			for (const firing of open.values()) {
@@ -352,6 +443,23 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 				},
 			};
 			harnessReads.delete(record.turnId);
+		},
+		observeReadStreak(step) {
+			if (step.kind === "fold") {
+				// The results the note pointed at may be gone, so what follows no longer answers it.
+				for (const firing of openNotes(step.sessionId, "streak", "serial")) settle(firing, "moot", { kind: "fold" });
+				return;
+			}
+			const measured = active.exploration;
+			active = {
+				...active,
+				exploration: {
+					maxReadStreak: Math.max(measured.maxReadStreak, step.reads),
+					serialRounds: measured.serialRounds + step.serialRounds,
+					notes: measured.notes + (step.note !== null ? 1 : 0),
+				},
+			};
+			settleNotes(step);
 		},
 		seedClarificationStreak(value) {
 			previousClarificationStreak = value;
@@ -438,6 +546,12 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 				const succeeded = input.metadata?.resultKind === "ok";
 				const runs = dispatchRuns(input.toolResultDetails);
 				if (!succeeded && runs.runIds.length === 0) return [];
+				// A dispatch that started answers the scout-survey note the model saw earlier in this turn.
+				for (const firing of openNotes(input.sessionId ?? sessionId, "survey"))
+					settle(firing, "acted", {
+						kind: "receipt",
+						...(input.toolCallId !== undefined ? { ref: input.toolCallId } : {}),
+					});
 				const keys = dispatchKeysFromArgs(args).map((key) => JSON.stringify([key.agentId, key.task]));
 				const duplicateDispatch = succeeded && keys.some((key) => succeededKeys.has(key));
 				if (succeeded) for (const key of keys) succeededKeys.add(key);
