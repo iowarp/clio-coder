@@ -1,4 +1,7 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, it, test } from "node:test";
 import {
 	parseRunCliArgs,
@@ -16,6 +19,13 @@ import type { CallStarted } from "../../src/core/telemetry/schemas.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createRunCostCap, runCostCeilingUsd, sessionCeilingReached } from "../../src/domains/scheduling/budget.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
+import {
+	loadOutputSchema,
+	OUTPUT_SCHEMA_REFUSAL_PREFIX,
+	structuredAnswerBody,
+	structuredRepairConstraints,
+	validateStructuredAnswer,
+} from "../../src/session-control/structured-finish.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -199,4 +209,46 @@ test("--require-priced: parsed into limits, carried to admission, and refuses on
 		startRefusalCause(["clio-coder run: --require-priced: routes this run can reach have no known pricing: a/b"]).code,
 		"not_configured",
 	);
+});
+
+test("--output-schema: refused schemas are schema_unsupported, and only a whole JSON answer validates (SPEC 6.8)", async () => {
+	strictEqual(parseRunCliArgs(["--output-schema", "s.json", "x"]).outputSchema, "s.json");
+	strictEqual(parseRunCliArgs(["--output-schema=s.json", "x"]).outputSchema, "s.json");
+	const dir = mkdtempSync(path.join(tmpdir(), "output-schema-"));
+	const file = (name: string, body: string): string => {
+		const full = path.join(dir, name);
+		writeFileSync(full, body);
+		return full;
+	};
+	const big: Record<string, unknown> = {};
+	for (let i = 0; i < 4000; i++) big[`k${i}`] = { type: "string" };
+	for (const refused of [
+		file("array.json", '{"type":"array"}'),
+		file("bool.json", "true"),
+		file("remote.json", '{"type":"object","properties":{"a":{"$ref":"https://x.test/s.json"}}}'),
+		file("big.json", JSON.stringify({ type: "object", properties: big })),
+	]) {
+		const loaded = await loadOutputSchema(refused);
+		ok(!loaded.ok, refused);
+		if (!loaded.ok)
+			strictEqual(startRefusalCause([`${OUTPUT_SCHEMA_REFUSAL_PREFIX}${loaded.reason}`]).code, "schema_unsupported");
+	}
+	const loaded = await loadOutputSchema(
+		file(
+			"ok.json",
+			'{"type":"object","description":"d","properties":{"n":{"$ref":"#/$defs/N"},"e":{"enum":["a","b"]}},"required":["n"],"$defs":{"N":{"type":"integer"}}}',
+		),
+	);
+	ok(loaded.ok);
+	if (!loaded.ok) return;
+	deepStrictEqual(await validateStructuredAnswer(loaded.schema, '```json\n{"n":1}\n```'), {
+		ok: true,
+		value: { n: 1 },
+		json: '{"n":1}',
+	});
+	strictEqual(structuredAnswerBody('Here it is: {"n":1}'), 'Here it is: {"n":1}');
+	strictEqual((await validateStructuredAnswer(loaded.schema, 'Here it is: {"n":1}')).ok, false);
+	strictEqual((await validateStructuredAnswer(loaded.schema, '{"n":"one"}')).ok, false);
+	strictEqual((await validateStructuredAnswer(loaded.schema, '{"n":1,"e":"c"}')).ok, false);
+	deepStrictEqual(structuredRepairConstraints(undefined).allowedTools, []);
 });

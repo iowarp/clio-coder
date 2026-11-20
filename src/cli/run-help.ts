@@ -44,6 +44,11 @@ Flags:
                             --json and --json-events
   -o, --output-last-message <path>
                             with --output-format json|stream-json, write the final answer there on exit 0
+  --output-schema <file.json>
+                            the final answer must be one JSON object valid against this schema (root type
+                            object, $ref only to #/$defs/, at most 64 KiB; else exit 2 schema_unsupported).
+                            The host validates it; the main agent gets one repair turn with no tools, --agent
+                            is validated once; a mismatch is exit 1 schema_mismatch
   --steer-channel <path>    read live steering lines from a FIFO or appended regular file
   --resume, -r <session>    append this turn to an existing session, by id, unique id prefix or name;
                             exit 2 when another process holds it open (--session is a deprecated alias)

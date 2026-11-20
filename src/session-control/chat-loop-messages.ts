@@ -1085,3 +1085,17 @@ export function detectOverflowFromState(agent: AgentStateView): ReturnType<typeo
 	}
 	return null;
 }
+
+// `run --output-schema` (SPEC 6.8) reaches the host's structured finish through this seam, so the CLI needs no new
+// Stage 0 seam; the module's own closure is core only and its validator loads by dynamic import.
+export {
+	loadOutputSchema,
+	OUTPUT_SCHEMA_REFUSAL_PREFIX,
+	outputSchemaInstruction,
+	type StructuredEnforcement,
+	type StructuredVerdict,
+	schemaMismatchMessage,
+	structuredRepairConstraints,
+	structuredRepairPrompt,
+	validateStructuredAnswer,
+} from "./structured-finish.js";

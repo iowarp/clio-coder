@@ -111,6 +111,8 @@ export interface BootOptions {
 		failOnVerify?: boolean;
 		/** `clio-coder run --on-permission fail`: the first refused ask ends the run with exit 3. */
 		onPermission?: "fail";
+		/** `clio-coder run --output-schema`: the checked JSON Schema the final answer must validate against. */
+		outputSchema?: Record<string, unknown>;
 		/** `clio-coder run --max-cost-usd`: priced spend the run may add on top of what its session already spent. */
 		maxCostUsd?: number;
 		/** `clio-coder run --timeout`: the armed wall-clock limit for the whole run. */

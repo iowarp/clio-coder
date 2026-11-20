@@ -72,6 +72,8 @@ const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
 	[/--deny-tools removes every tool --allow-tools names /u, "flag_conflict"],
 	[/--dry-run prints its plan as JSON with --output-format json/u, "flag_conflict"],
 	[/^clio-coder run: not configured: /u, "not_configured"],
+	// SPEC 6.8: a schema `--output-schema` cannot enforce, refused before any model call.
+	[/^clio-coder run: --output-schema: /u, "schema_unsupported"],
 	// SPEC 6.9: the preflight's refusal names the unpriced route; declaring its pricing is the fix.
 	[/^clio-coder run: --require-priced: /u, "not_configured"],
 	// The orchestrator's resume refusal when another process holds the session (SPEC L3, 6.7; liveSessionRefusal).
@@ -172,6 +174,24 @@ interface MainRunNoteV2 {
 	sessionReadyMs?: number;
 	/** Routes the run can reach whose cost `--max-cost-usd` cannot bound. */
 	unpricedRoutes?: string[];
+}
+
+/** SPEC 6.6/6.8: what `--output-schema` settled; absent for a run without the flag. */
+interface StructuredNoteV2 {
+	enforcedBy: "host" | "host+provider";
+	/** The validated object, only for an answer that matched. */
+	structured?: Record<string, unknown>;
+	/** The JSON text that matched, which `-o` holds. */
+	json?: string;
+	/** The validator's errors for an answer that still did not match. */
+	errors?: string[];
+}
+
+let structuredNote: StructuredNoteV2 | undefined;
+
+/** Hand the v2 writer the structured-output verdict (main or `--agent`); a no-op shape for runs without the flag. */
+export function noteStructuredV2(note: StructuredNoteV2): void {
+	structuredNote = note;
 }
 
 let v2Started: number | null = null;
@@ -409,6 +429,9 @@ function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, reque
 			return unnamed;
 		}
 		case 1: {
+			// SPEC 6.8: the answer did not match --output-schema; for --agent this outranks the worker's own exit.
+			if (structuredNote?.errors !== undefined && (detail === "schema_mismatch" || request.mode === "agent"))
+				return [{ code: "schema_mismatch", errors: structuredNote.errors, ...message }];
 			// `--fail-on-verify` (SPEC 6.10) ranks above a sealed verdict: the failed checks are what that verdict judged.
 			if (detail === "verify_failed") {
 				const checks = (seen.verify ?? []).filter((check) => !check.passed).map((check) => check.command);
@@ -441,6 +464,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	v2StreamJson = request.format === "stream-json";
 	heldSteer = [];
 	mainRunNote = {};
+	structuredNote = undefined;
 	runPlan = undefined;
 	let written = false;
 	let outputTarget: string | undefined;
@@ -477,7 +501,14 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			outcome: previewed ? "previewed" : resolution.outcome,
 			...(resolution.causes[0] !== undefined ? { outcomeDetail: resolution.causes[0].code } : {}),
 			causes: resolution.causes,
-			result: { text: seen.text, artifacts: [] },
+			result: {
+				text: seen.text,
+				artifacts: [],
+				...(structuredNote?.structured !== undefined && resolution.exitCode === 0
+					? { structured: structuredNote.structured }
+					: {}),
+				...(structuredNote !== undefined ? { enforcedBy: structuredNote.enforcedBy } : {}),
+			},
 			...(session?.target !== undefined || session?.model !== undefined
 				? {
 						route: {
@@ -513,7 +544,8 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 		outputSettled = true;
 		const temporary = `${outputTarget}.${process.pid}.tmp`;
 		try {
-			writeFileSync(temporary, `${seen.text}\n`);
+			// With --output-schema the file holds the validated JSON, the same bytes text mode prints (SPEC 6.8).
+			writeFileSync(temporary, `${structuredNote?.json ?? seen.text}\n`);
 			renameSync(temporary, outputTarget);
 			return [];
 		} catch {

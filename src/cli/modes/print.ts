@@ -78,9 +78,14 @@ import {
 	isThinkingOnlyLengthStop,
 	messageCallSpends,
 	proseBeforeWrittenCalls,
+	type StructuredVerdict,
+	schemaMismatchMessage,
+	structuredRepairConstraints,
+	structuredRepairPrompt,
 	THINKING_LENGTH_STOP_REASON,
 	turnCallsNotRunSentence,
 	turnNoAnswerSentence,
+	validateStructuredAnswer,
 } from "../../session-control/chat-loop-messages.js";
 import { TOOL_PLANES } from "../../tools/policy.js";
 import { toolResultText } from "../../tools/result-disposition.js";
@@ -95,6 +100,7 @@ import {
 	noteMainRunV2,
 	noteRunEndWritten,
 	noteSteerV2,
+	noteStructuredV2,
 	runResultV2Active,
 	runTextSummaryRequested,
 	writeRunRefusal,
@@ -149,6 +155,11 @@ export interface HeadlessShutdownHooks {
 
 export interface HeadlessMainAgentOptions {
 	prompt: string;
+	/**
+	 * `run --output-schema` (SPEC 6.8): the checked schema. The host validates the final answer, sends one repair
+	 * turn with no tools on a mismatch, and fails the run `schema_mismatch` when the repair does not match either.
+	 */
+	outputSchema?: Record<string, unknown>;
 	/** The line the operator typed when `prompt` is its expansion; prompt_submit hooks judge this line. */
 	display?: { text: string; note?: string };
 	constraints?: TurnConstraints;
@@ -1485,6 +1496,25 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			intake.close();
 		};
 	}
+	// `--output-schema`: null until judged, and when the turn ended in a way that already has its own cause.
+	// Assigned inside the submit callback, so the declared type is kept rather than narrowed to its initial null.
+	let structuredVerdict = null as StructuredVerdict | null;
+	const structuredCandidate = (): string =>
+		redactFinalUrlCredentials(
+			result.sawTerminatingToolResult && result.terminatingToolText.length > 0
+				? result.terminatingToolText
+				: answerAfterCitationCheck(result.citationCheckedAnswer, result.text),
+			true,
+		);
+	const structuredAnswerReady = (): boolean =>
+		!termination.isShuttingDown() &&
+		permissionStop === null &&
+		result.abortReason === null &&
+		result.error === null &&
+		!(result.outputExhausted && !result.sawTerminatingToolResult) &&
+		result.noAnswer === null &&
+		!(result.endedQuietly && !result.sawTerminatingToolResult) &&
+		(result.text.length > 0 || result.sawTerminatingToolResult);
 	try {
 		if (mode === "json" && jsonEvents === "terminal") writeTerminalTurnStart();
 		const submitOptions = {
@@ -1508,6 +1538,19 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				await chat.submit(options.prompt, Object.keys(submitOptions).length > 0 ? submitOptions : undefined);
 				// A triage stop interrupts this submit and delivers its message as a run of its own (bt-41).
 				await chat.whenSettled();
+				const schema = options.outputSchema;
+				if (schema === undefined) return;
+				// SPEC 6.8: the host judges only an answer the run would otherwise print; any other ending keeps its cause.
+				structuredVerdict = structuredAnswerReady() ? await validateStructuredAnswer(schema, structuredCandidate()) : null;
+				if (structuredVerdict === null || structuredVerdict.ok) return;
+				// One repair turn in the same run and session, under a tool ceiling of none; its requests count toward
+				// --max-requests and its spend toward --max-cost-usd like any other turn of the run.
+				await chat.submit(structuredRepairPrompt(structuredVerdict.errors), {
+					...submitOptions,
+					constraints: structuredRepairConstraints(options.constraints),
+				});
+				await chat.whenSettled();
+				structuredVerdict = structuredAnswerReady() ? await validateStructuredAnswer(schema, structuredCandidate()) : null;
 			},
 		);
 	} finally {
@@ -1688,6 +1731,16 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 					: answerAfterCitationCheck(result.citationCheckedAnswer, result.text);
 			stdoutMessage = answer.length > 0 ? settledAnswer(answer) : null;
 		}
+		// SPEC 6.8: an answer that still does not match outranks verify, noop and limitation (6.5 order); nothing
+		// reaches stdout or `-o`. A match prints the validated JSON alone.
+		if (structuredVerdict !== null && !structuredVerdict.ok) {
+			const failureMessage = schemaMismatchMessage(structuredVerdict.errors);
+			terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage, outcomeDetail: "schema_mismatch" };
+			stderrMessage = failureMessage;
+			stdoutMessage = null;
+		} else if (structuredVerdict?.ok === true && mode === "text" && terminal.exitCode === 0) {
+			stdoutMessage = structuredVerdict.json;
+		}
 		if (terminal.exitCode === 0 && !runStats.changeAsked) {
 			const notice = blockedCallsNotice(runStats);
 			if (notice !== null) stderrMessage = [stderrMessage, notice].filter(Boolean).join("\n");
@@ -1736,6 +1789,15 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		stdoutMessage = null;
 	}
 	const exitCode = terminal.exitCode;
+	if (options.outputSchema !== undefined) {
+		noteStructuredV2({
+			enforcedBy: "host",
+			...(structuredVerdict?.ok === true && exitCode === 0
+				? { structured: structuredVerdict.value, json: structuredVerdict.json }
+				: {}),
+			...(structuredVerdict !== null && !structuredVerdict.ok ? { errors: structuredVerdict.errors } : {}),
+		});
+	}
 	const autonomy = mode === "json" ? (options.autonomy?.() ?? null) : null;
 	if (autonomy !== null && jsonEvents !== "terminal") {
 		writeJsonHeader(true);
