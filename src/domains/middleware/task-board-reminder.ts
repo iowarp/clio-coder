@@ -43,13 +43,14 @@ export function taskBoardReminderMessage(steps: number, placement: "direct" | "g
  * enumerations count: a run of numeric markers ("1)", "2.", "(3)", "step 4:")
  * that starts at 1 and increments without gaps, or three or more bulleted
  * lines. Prose that merely mentions numbers never triggers, so the reminder
- * cannot fire on ordinary requests.
+ * cannot fire on ordinary requests; nor does a `Line 2:` label, which numbers
+ * content, not steps (SF-14).
  */
 export function countEnumeratedSteps(text: string | undefined): number {
 	const value = text ?? "";
 	if (value.trim().length === 0) return 0;
 	const markers: number[] = [];
-	const markerPattern = /(?:^|[\s(])(?:step\s+)?([1-9])\s*[).:]\s/gi;
+	const markerPattern = /(?:^|(?<!\blines?)[\s(])(?:step\s+)?([1-9])\s*[).:]\s/gi;
 	let match = markerPattern.exec(value);
 	while (match !== null) {
 		const digit = Number(match[1]);

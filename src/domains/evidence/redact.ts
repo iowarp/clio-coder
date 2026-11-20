@@ -244,6 +244,7 @@ export function redactCommandOutputSecrets(text: string, tally?: RedactionTally)
 }
 
 const QUOTED_MARKER = "[redacted]";
+const WHOLE_MARKER_RE = /^\[redacted(?::[a-z-]+)?\]$/u;
 const QUOTED_ASSIGNMENT_MARKER = "[redacted:assignment]";
 // A quoted header whose value only names a variable, `"Authorization: Bearer $TOKEN"`, which the quoted pass would hide.
 const QUOTED_HEADER_ENV_REFERENCE_RE =
@@ -309,6 +310,8 @@ export function redactSecretsText(
 	for (const pattern of SECRET_PATTERNS) {
 		out = out.replace(pattern.re, (...match: unknown[]) => {
 			if (!secretShapeHolds(pattern.kind, String(match[0]))) return String(match[0]);
+			// The quoted pass already hid and counted this value; matching its marker again counted one secret twice (SF-6).
+			if (pattern.kind === "assignment" && WHOLE_MARKER_RE.test(String(match[2]))) return String(match[0]);
 			if (pattern.kind === "assignment" && options?.keepAssignmentValue) {
 				const key = String(match[1]);
 				const before = String(match[4]).slice(0, Number(match[3]) + key.length);

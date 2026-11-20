@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isNonSourcePath, isProsePath } from "../../core/test-paths.js";
@@ -22,6 +23,7 @@ import {
 	detectValidationCommand,
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
+	heredocDataWriteTargets,
 	scanShellLike,
 	shellCommandWords,
 	splitSegments,
@@ -175,6 +177,10 @@ interface MutationCandidate {
 	paths: string[];
 	/** Targets the call wrote or created, as opposed to only removed. */
 	writes: string[];
+	/** Writes that stand even when the call exits nonzero ({@link heredocDataWriteTargets}). */
+	settledWrites: string[];
+	/** The targets are a shell command's, read from its text rather than named by a tool. */
+	shell: boolean;
 }
 
 /**
@@ -325,7 +331,10 @@ function assessMutationFinishContract(input: FinishContractInput, scope: Assessm
 	const assistantTurnId = input.assistantTurnId ?? null;
 	const { window } = scope;
 
-	const { paths: touchedPaths, written } = mutatingReceipts(window);
+	const { paths: touchedPaths, written } = mutatingReceipts(
+		window,
+		input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : undefined,
+	);
 	if (touchedPaths.length === 0) {
 		return { kind: "ok", reason: "no_mutation", evidence: [], mutatedPaths: touchedPaths };
 	}
@@ -808,18 +817,27 @@ function limitationToolCall(entry: unknown): ToolCallEvidenceCandidate | null {
  * turn. Grounded in the same mutation notion the action classifier records, so
  * the audit ledger and this gate stay consistent about what counts as a change.
  */
-export function mutatingReceipts(recent: ReadonlyArray<unknown>): { paths: string[]; written: Set<string> } {
+export function mutatingReceipts(
+	recent: ReadonlyArray<unknown>,
+	/** Where shell targets land: relative ones resolve against `cwd`, which defaults to the workspace root. */
+	place?: { workspaceRoot: string; cwd?: string },
+): { paths: string[]; written: Set<string> } {
 	const mutationCalls = new Map<string, MutationCandidate>();
 	const paths: string[] = [];
 	const seen = new Set<string>();
 	const written = new Set<string>();
+	const shellPaths = new Set<string>();
+	const toolPaths = new Set<string>();
 
 	for (const entry of capabilityEntries(recent)) {
 		// A user-run `!` bash execution is self-contained: it carries its own
 		// success signal, so any mutation targets count without a paired result.
 		const bashMutation = bashExecutionMutationPaths(entry);
 		if (bashMutation !== null) {
-			for (const path of bashMutation.paths) pushPath(paths, seen, path);
+			for (const path of bashMutation.paths) {
+				pushPath(paths, seen, path);
+				shellPaths.add(path);
+			}
 			for (const path of bashMutation.writes) written.add(path);
 			continue;
 		}
@@ -834,13 +852,84 @@ export function mutatingReceipts(recent: ReadonlyArray<unknown>): { paths: strin
 		if (resultId !== null) {
 			const candidate = mutationCalls.get(resultId);
 			if (candidate !== undefined) {
-				for (const path of candidate.paths) pushPath(paths, seen, path);
+				for (const path of candidate.paths) {
+					pushPath(paths, seen, path);
+					(candidate.shell ? shellPaths : toolPaths).add(path);
+				}
 				for (const path of candidate.writes) written.add(path);
 			}
+			continue;
+		}
+		// A here-document written ahead of a failing suite run is still on disk (SF-5).
+		const failedId = ranToNonzeroExitResultId(entry);
+		const failed = failedId === null ? undefined : mutationCalls.get(failedId);
+		for (const path of failed?.settledWrites ?? []) {
+			pushPath(paths, seen, path);
+			shellPaths.add(path);
+			written.add(path);
 		}
 	}
 
-	return { paths, written };
+	if (shellPaths.size === 0) return { paths, written };
+	const kept = workspaceShellTargets([...shellPaths], place);
+	const changes = (path: string): boolean => toolPaths.has(path) || !shellPaths.has(path) || kept.has(path);
+	return { paths: paths.filter(changes), written: new Set([...written].filter(changes)) };
+}
+
+/** A shell target with `~`, `$TMPDIR` and `$HOME` expanded, or null while it still names a variable or substitution. */
+function expandShellTarget(target: string): string | null {
+	const expanded = target
+		.replace(/^~(?=\/|$)/u, "$HOME")
+		.replace(
+			/\$\{(TMPDIR|HOME)\}|\$(TMPDIR|HOME)(?![A-Za-z0-9_])/gu,
+			(_match, braced?: string, bare?: string) => process.env[braced ?? bare ?? ""] || "\0",
+		);
+	return /[$`\0]/u.test(expanded) ? null : expanded;
+}
+
+/**
+ * The shell write targets that change the workspace. One that still names a variable or substitution (`$OUT/x`,
+ * `$(mktemp)`) names no workspace path, and once `~`, `$TMPDIR` and `$HOME` expand, one outside the workspace or one git
+ * ignores there leaves the tree as it was: a check's log or a scratch patch is no changed file (FX-1). Without a place
+ * only the unexpanded ones drop.
+ */
+function workspaceShellTargets(
+	targets: ReadonlyArray<string>,
+	place: { workspaceRoot: string; cwd?: string } | undefined,
+): Set<string> {
+	const inside = new Map<string, string>();
+	for (const target of targets) {
+		const expanded = expandShellTarget(target);
+		if (expanded === null) continue;
+		if (place === undefined) {
+			inside.set(target, "");
+			continue;
+		}
+		const absolute = resolve(place.cwd ?? place.workspaceRoot, expanded);
+		if (isWithinWorkspace(absolute, place.workspaceRoot))
+			inside.set(target, relative(resolve(place.workspaceRoot), absolute) || ".");
+	}
+	const ignored = place === undefined ? new Set<string>() : gitIgnoredPaths([...inside.values()], place.workspaceRoot);
+	return new Set([...inside].filter(([, local]) => !ignored.has(local)).map(([target]) => target));
+}
+
+/** The workspace-relative paths git ignores; none when there is no repository or no git, which proves nothing. */
+function gitIgnoredPaths(paths: ReadonlyArray<string>, workspaceRoot: string): Set<string> {
+	const asked = paths.filter((path) => path !== "" && path !== ".");
+	if (asked.length === 0) return new Set();
+	try {
+		const out = execFileSync("git", ["check-ignore", "-z", "--stdin"], {
+			cwd: workspaceRoot,
+			input: asked.join("\0"),
+			encoding: "utf8",
+			stdio: ["pipe", "pipe", "ignore"],
+			timeout: 5000,
+		});
+		return new Set(out.split("\0").filter((path) => path.length > 0));
+	} catch {
+		// Exit 1 means none is ignored.
+		return new Set();
+	}
 }
 
 /** Mutation targets for a tool call, empty for read-only/execute-only tools. */
@@ -871,7 +960,13 @@ function mutatingToolCall(entry: unknown): MutationCandidate | null {
 	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
 	if (toolCallId === null) return null;
 	const command = toolName === ToolNames.Bash && typeof args?.command === "string" ? args.command : null;
-	return { toolCallId, paths, writes: command === null ? paths : extractCommandWriteTargets(command) };
+	return {
+		toolCallId,
+		paths,
+		writes: command === null ? paths : extractCommandWriteTargets(command),
+		settledWrites: command === null ? [] : heredocDataWriteTargets(command),
+		shell: command !== null,
+	};
 }
 
 /**
@@ -1422,6 +1517,18 @@ function successfulToolResultId(entry: unknown): string | null {
 	const chainAdmission = asRecord(details?.chainAdmission);
 	if (chainAdmission?.outcome === "blocked" || chainAdmission?.outcome === "error") return null;
 	if (typeof details?.exitCode === "number" && details.exitCode !== 0) return null;
+	return stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]);
+}
+
+/** The id of a command that ran and exited nonzero; a refused or blocked call has no exit code. */
+function ranToNonzeroExitResultId(entry: unknown): string | null {
+	const record = asRecord(entry);
+	if (record?.kind !== "message" || record.role !== "tool_result") return null;
+	const payload = asRecord(record.payload);
+	if (payload === null || payload.outcome === "blocked" || typeof payload.blockReason === "string") return null;
+	const details = asRecord(asRecord(payload.result)?.details);
+	if (asRecord(details?.chainAdmission)?.outcome === "blocked") return null;
+	if (typeof details?.exitCode !== "number" || details.exitCode === 0) return null;
 	return stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]);
 }
 

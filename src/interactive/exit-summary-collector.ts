@@ -613,14 +613,18 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				}
 				if (call) {
 					const payload = { ...event };
-					noteFiles(mutatingReceipts([call.entry, { kind: "message", role: "tool_result", payload }]).paths, call.cwd);
+					const place = { workspaceRoot: process.cwd(), cwd: call.cwd };
+					noteFiles(
+						mutatingReceipts([call.entry, { kind: "message", role: "tool_result", payload }], place).paths,
+						call.cwd,
+					);
 					calls.delete(event.toolCallId);
 				}
 			}
 		},
 		observeRunResult,
 		observeLocalEntry(entry: unknown): void {
-			noteFiles(mutatingReceipts([entry]).paths);
+			noteFiles(mutatingReceipts([entry], { workspaceRoot: process.cwd() }).paths);
 		},
 		snapshot(): ExitSummarySnapshot | null {
 			const session = deps.session?.current();

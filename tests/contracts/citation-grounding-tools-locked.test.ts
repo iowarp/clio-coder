@@ -7,7 +7,10 @@ import { createCitationGroundingRegistration } from "../../src/domains/safety/ci
 import { bashObservedLines } from "../../src/tools/bash-observed-lines.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-function unbackedCitationTurnEnd(toolsLocked: boolean): ReadonlyArray<{ kind: string }> {
+function unbackedCitationTurnEnd(
+	toolsLocked: boolean,
+	text = "The rounding bug is at src/rates.mjs:42-48.",
+): ReadonlyArray<{ kind: string }> {
 	const registration = createCitationGroundingRegistration({ cwd: () => "/workspace" });
 	const read: MiddlewareHookInput = {
 		hook: "after_tool",
@@ -20,13 +23,18 @@ function unbackedCitationTurnEnd(toolsLocked: boolean): ReadonlyArray<{ kind: st
 	return registration.evaluate({
 		hook: "turn_end",
 		sessionId: "s1",
-		text: "The rounding bug is at src/rates.mjs:42-48.",
+		text,
 		metadata: { stopReason: "stop", userTurnId: "u1", toolsLocked },
 	});
 }
 
 test("the citation check asks for a numbered re-read while tools are available", () => {
 	assert.ok(unbackedCitationTurnEnd(false).length > 0);
+});
+
+test("a `Line N:` label after a named file is no citation, while prose `line N` still is (SF-14)", () => {
+	assert.deepEqual(unbackedCitationTurnEnd(false, "src/rates.mjs rounds twice.\nLine 42: return round(x);"), []);
+	assert.ok(unbackedCitationTurnEnd(false, "src/rates.mjs rounds twice, at line 42.").length > 0);
 });
 
 test("the citation check asks for no tool call once the loop guard has locked tools", () => {

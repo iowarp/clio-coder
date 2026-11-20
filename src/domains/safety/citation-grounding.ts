@@ -143,6 +143,11 @@ function withoutFencedCode(text: string): string {
 	return text.replace(/^(```|~~~)[^\n]*\n[\s\S]*?^\1[ \t]*$/gmu, (block) => block.replace(/[^\n]/gu, " "));
 }
 
+/** `Line 3:` opening a line labels the text after it, as a listing or an echoed request does; it cites nothing (SF-14). */
+function isLineLabel(text: string, start: number, end: number): boolean {
+	return text[end] === ":" && /^[ \t]*(?:[-*+][ \t]+)?$/u.test(text.slice(text.lastIndexOf("\n", start - 1) + 1, start));
+}
+
 function lineNumber(raw: string | undefined): number | null {
 	if (raw === undefined) return null;
 	const value = Number.parseInt(raw, 10);
@@ -157,7 +162,8 @@ function lineNumber(raw: string | undefined): number | null {
 function extractLineCitations(text: string, isFile: (written: string) => boolean = () => true): LineCitation[] {
 	const citations: LineCitation[] = [];
 	let lastPath: string | null = null;
-	for (const match of withoutFencedCode(text).matchAll(CITATION_SCAN)) {
+	const scanned = withoutFencedCode(text);
+	for (const match of scanned.matchAll(CITATION_SCAN)) {
 		const [, pathToken, pathStart, pathEnd, bareStart, bareEnd] = match;
 		if (pathToken !== undefined) {
 			if (isFile(pathToken)) lastPath = pathToken;
@@ -168,7 +174,7 @@ function extractLineCitations(text: string, isFile: (written: string) => boolean
 			continue;
 		}
 		const start = lineNumber(bareStart);
-		if (start === null || lastPath === null) continue;
+		if (start === null || lastPath === null || isLineLabel(scanned, match.index, match.index + match[0].length)) continue;
 		const end = lineNumber(bareEnd) ?? start;
 		citations.push({ path: lastPath, start, end: Math.max(start, end), bare: match[0] });
 	}
