@@ -7,7 +7,7 @@ import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { resolveClioDirs } from "../../src/core/xdg.js";
+import { clioStateDir, resolveClioDirs } from "../../src/core/xdg.js";
 import type { BudgetInspection } from "../../src/domains/context/budget/inspection.js";
 import {
 	EMPTY_CAPABILITIES,
@@ -16,6 +16,10 @@ import {
 } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
 import { LOCAL_CONTEXT_OVERFLOW_PREFIX } from "../../src/engine/apis/output-budget.js";
@@ -274,7 +278,11 @@ function harness(
 	let publishedInput: () => number | null = () => null;
 	let summaries = 0;
 	const providers = context.getContract("providers") as ProvidersContract;
+	const journals = createSessionJournals(clioStateDir(), () => {
+		throw new Error("fixture journal unavailable");
+	});
 	const loop = createChatLoop({
+		telemetry: { acquireTelemetrySession: journals.acquire } as unknown as TelemetryContract,
 		getSettings: () => settings,
 		providers,
 		knownTargets: () => new Set([target.id]),
@@ -319,12 +327,31 @@ function harness(
 	});
 	const notices = () =>
 		events.flatMap((event) => (event.type === "notice" ? [(event as { text?: string }).text ?? ""] : []));
+	/** The turn.settled records the session journaled. */
+	const settledTurns = async () => {
+		await journals.flush();
+		const sessionId = session.current()?.id;
+		ok(sessionId);
+		const read = await readCallJournal(telemetrySessionDirectory(clioStateDir(), sessionId));
+		return read.records.flatMap(({ record }) => (record.k === "turn.settled" ? [record.data] : []));
+	};
 	const close = async () => {
 		loop.dispose();
 		await loop.whenSettled();
 		await session.close();
 	};
-	return { settings, session, loop, events, notices, close, piCounts, published, summaries: () => summaries };
+	return {
+		settings,
+		session,
+		loop,
+		events,
+		notices,
+		close,
+		piCounts,
+		published,
+		summaries: () => summaries,
+		settledTurns,
+	};
 }
 
 const A1_ASK = `Read ${READS.join(", ")} in order, one read per round, each in full, then say done.\n\n${"Read guidance for the station fixture. ".repeat(700)}`;
@@ -789,6 +816,12 @@ it("drv-cf3a D-A: a protected read larger than the window ends the turn once, na
 		deepStrictEqual(
 			[stopped[0]?.failure?.stage, stopped[0]?.failure?.errorClass, stopped[0]?.failureRoute],
 			["harness", "oversized_tool_result", undefined],
+		);
+		// The journal names the guard's cause too, as a stop between calls that struck no call stage (bt-26 N2f).
+		const [settled] = await live.settledTurns();
+		deepStrictEqual(
+			[settled?.stopReason, settled?.terminal.cause, settled?.terminal.stage],
+			["error", "oversized_tool_result", null],
 		);
 		strictEqual(wire.requests.length, 2, "the oversized request never reaches the provider, and nothing retries it");
 		deepStrictEqual(refusals(live.notices()), []);
