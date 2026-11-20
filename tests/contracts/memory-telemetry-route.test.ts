@@ -181,7 +181,11 @@ test("the side-share governor admits three free calls, then refuses automatic ca
 	const begin = (context: typeof memoryContext | typeof mainContext, purpose?: "memory.lesson") =>
 		beginCall({ roundKind: "tools-removed", toolChoice: "none", target, ...(purpose ? { purpose } : {}) }, context);
 	// Every call bills like a 0x Copilot model: premium units measured, and zero.
-	const settle = (call: ReturnType<typeof begin>, output: number | null, extra: Record<string, unknown> = {}) =>
+	const settle = (
+		call: { settle: ReturnType<typeof begin>["settle"] },
+		output: number | null,
+		extra: Record<string, unknown> = {},
+	) =>
 		call.settle(
 			callSettlementFromMessage(
 				{
@@ -203,12 +207,14 @@ test("the side-share governor admits three free calls, then refuses automatic ca
 				"none",
 			),
 		);
-	// One process's governor over the real live read model, behind the settle barrier the telemetry contract has.
-	const processGovernor = () => {
+	// One process's governor over the real live read model, behind the settle barrier the telemetry contract has; with
+	// `unreadable`, that barrier throws.
+	const processGovernor = (unreadable = false) => {
 		const model = createLiveTelemetryModel({ stateDir: () => home.dir });
 		model.bind(sessionId);
 		const telemetry = {
 			settledSessionSpend: async () => {
+				if (unreadable) throw new Error("journal unreadable");
 				await journal.flush();
 				return model.settled();
 			},
@@ -217,7 +223,7 @@ test("the side-share governor admits three free calls, then refuses automatic ca
 		const governor = createBackgroundCallJournal(
 			{} as ProvidersContract,
 			() => undefined,
-			() => undefined,
+			() => ({ id: sessionId, cwdHash: "repo" }),
 			() => telemetry,
 		).sideShare;
 		ok(governor);
@@ -243,31 +249,44 @@ test("the side-share governor admits three free calls, then refuses automatic ca
 		const facts = governor.facts(await governor.journal(), purpose, memory);
 		return { facts, reason: decideWith(facts) };
 	};
+
+	// An unreadable journal fails closed: the current session's holds count, and its free calls stay three after they end.
+	const blind = processGovernor(true);
+	try {
+		const holds: Array<() => void> = [];
+		for (let call = 0; call < SIDE_SHARE_FREE_CALLS; call += 1) {
+			strictEqual((await decide(blind.governor)).reason, "admit");
+			holds.push(blind.governor.hold("memory.lesson", 2000, undefined));
+		}
+		strictEqual((await decide(blind.governor)).reason, "side_share", "held calls count; zero main admits only three");
+		for (const release of holds) release();
+		strictEqual((await decide(blind.governor)).reason, "side_share", "released, the three free calls are still spent");
+		strictEqual(
+			(await decide(blind.governor, "memory.classify")).reason,
+			"admit",
+			"an operator-requested call is exempt",
+		);
+	} finally {
+		blind.model.stop();
+	}
+
 	const first = processGovernor();
 	try {
 		const { governor } = first;
-		// Cold start, zero main output: the free calls run, held ones count for the next decision, then refusal.
-		const holds: Array<() => void> = [];
-		for (let call = 0; call < SIDE_SHARE_FREE_CALLS; call += 1) {
-			strictEqual((await decide(governor)).reason, "admit");
-			holds.push(governor.hold("memory.lesson", 2000, undefined));
-		}
-		strictEqual((await decide(governor)).reason, "side_share", "a zero main denominator admits only the free calls");
-		strictEqual((await decide(governor, "memory.classify")).reason, "admit", "an operator-requested call is exempt");
-		// A call another session holds is that session's spend.
-		const elsewhere = governor.hold("memory.lesson", 2000, { sessionId: "other", attemptId: newAttemptId() });
-		for (const release of holds) release();
-		strictEqual((await decide(governor)).facts.automaticCalls, 0, "unjournaled holds end with their call");
+		// Calls the process journal records (before any session) and calls another session holds are not this session's.
+		for (let call = 0; call < SIDE_SHARE_FREE_CALLS; call += 1)
+			governor.hold("memory.lesson", 2000, { sessionId: null, callId: newCallId() })();
+		const elsewhere = governor.hold("memory.lesson", 2000, { sessionId: "other", callId: newCallId() });
+		const cold = await decide(governor);
+		strictEqual(cold.facts.automaticCalls, 0, "process-journaled and other-session calls never count here");
+		strictEqual(cold.reason, "admit");
 		elsewhere();
 
 		settle(begin(mainContext), 10_000);
 		// Three journaled memory calls; the one without usage is charged its own request budget (500), not the setting.
 		for (const [index, output] of [100, 100, null].entries()) {
 			const call = begin(memoryContext, "memory.lesson");
-			const release = governor.hold("memory.lesson", output === null ? 500 : 2000, {
-				sessionId,
-				attemptId: call.attemptId,
-			});
+			const release = governor.hold("memory.lesson", output === null ? 500 : 2000, { sessionId, callId: call.callId });
 			if (index < 2) {
 				settle(call, output);
 				release();
@@ -289,6 +308,18 @@ test("the side-share governor admits three free calls, then refuses automatic ca
 		strictEqual(settled.facts.sideOutputTokens, 700);
 		deepStrictEqual(settled.facts.premium, { side: 0, main: 0 });
 		strictEqual(settled.reason, "admit", "700 over 10000 is under the share, and a 0x route's zero units refuse nothing");
+		// A retried call (a 401 attempt, then one that answered) is charged once, for what the retry measured.
+		const retried = begin(memoryContext, "memory.lesson");
+		const releaseRetried = governor.hold("memory.lesson", 2000, { sessionId, callId: retried.callId });
+		settle(retried, null);
+		const retry = retried.nextAttempt();
+		ok(retry);
+		settle(retry, 100);
+		releaseRetried();
+		const charged = await decide(governor);
+		strictEqual(charged.facts.automaticCalls, 4);
+		strictEqual(charged.facts.sideOutputTokens, 800, "the 401 attempt is not charged beside its retry");
+		strictEqual(charged.reason, "admit");
 		// A replayed settlement folds once.
 		const records = (await governor.journal()).records;
 		deepStrictEqual(
@@ -296,7 +327,7 @@ test("the side-share governor admits three free calls, then refuses automatic ca
 			foldSideShare(records, [], () => 2000).facts,
 		);
 		settle(begin(memoryContext, "memory.lesson"), 2000);
-		strictEqual((await decide(governor)).reason, "side_share", "2700 over 10000: a fourth useful call is refused");
+		strictEqual((await decide(governor)).reason, "side_share", "2800 over 10000: a further useful call is refused");
 	} finally {
 		first.model.stop();
 	}
@@ -304,7 +335,7 @@ test("the side-share governor admits three free calls, then refuses automatic ca
 	const second = processGovernor();
 	try {
 		const resumed = await decide(second.governor);
-		strictEqual(resumed.facts.automaticCalls, 4, "a resumed session continues its count");
+		strictEqual(resumed.facts.automaticCalls, 5, "a resumed session continues its count");
 		strictEqual(resumed.reason, "side_share");
 		const under = { ...resumed.facts, sideOutputTokens: 1 };
 		strictEqual(

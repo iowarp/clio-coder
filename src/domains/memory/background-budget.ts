@@ -210,35 +210,35 @@ function sideShareRefuses(facts: SideShareFacts): boolean {
 	return premium !== null && premium.side > 0 && (!(premium.main > 0) || premium.side / premium.main > facts.share);
 }
 
-/** An admitted memory call this process holds until the journal shows its attempt settled. */
+/** An admitted memory call this process holds until the journal shows it settled. */
 export interface SideShareHeld {
 	purpose: MemorySurfaceId;
 	/** The request's own output budget, charged while it is held. */
 	maxTokens: number;
-	/** The journaled attempt it is, when the call was journaled; null for one no journal records. */
-	attemptId: string | null;
+	/** The journaled call it is; null for one no journal records. */
+	callId: string | null;
 }
 
 /**
  * Fold the governor's counters from the session's own call journal, so a resumed session continues its count, plus the
  * calls this process holds. Only settled attempts are read from the journal, each once by attempt id: an attempt still
  * open there is either held here, and counted once from `held`, or the call being decided, which never counts itself. A
- * held call whose settled attempt the journal already shows is counted from the journal and reported in `covered`. A
- * never-sent attempt spent nothing and is not a call. A settled memory attempt without measured output counts its own
- * request budget (`budgetOf`), never zero.
+ * held call any of whose attempts the journal shows settled is counted from the journal and reported in `covered`. A
+ * never-sent attempt spent nothing and is not a call. A memory call is charged once: the measured output of its attempts,
+ * or, when none measured any (a 401 attempt and its retry included), its own request budget (`budgetOf`), never zero.
  */
 export function foldSideShare(
 	records: readonly TelemetryRecord[],
 	held: readonly SideShareHeld[],
-	budgetOf: (attemptId: string) => number,
+	budgetOf: (callId: string) => number,
 ): { facts: Omit<SideShareFacts, "share" | "automatic">; covered: SideShareHeld[] } {
 	const value = (fact: Fact<number> | undefined): number | null =>
 		fact !== undefined && (fact.kind === "measured" || fact.kind === "estimated") ? fact.value : null;
 	// A replayed or forked journal can repeat a settlement; the attempt id names it once.
 	const settled = new Map<string, TelemetryRecord<"call.settled">>();
 	for (const record of records) if (record.k === "call.settled") settled.set(record.data.attemptId, record);
-	const calls = new Set<string>();
-	let sideOutputTokens = 0;
+	const seen = new Set<string>();
+	const memoryCalls = new Map<string, { automatic: boolean; output: number | null }>();
 	let mainOutputTokens = 0;
 	const premium = { side: 0, main: 0 };
 	let premiumReported = false;
@@ -246,6 +246,7 @@ export function foldSideShare(
 		const role = record.ctx.agent.role;
 		if (role !== "memory" && role !== "main") continue;
 		const data = record.data;
+		seen.add(data.callId);
 		if (data.disposition === "never_sent") continue;
 		const output = value(data.usage?.output);
 		const units = value(data.billing?.premiumRequests);
@@ -255,17 +256,25 @@ export function foldSideShare(
 			premium.main += units ?? 0;
 			continue;
 		}
-		// A memory call journaled before purposes existed was automatic; only a named operator purpose is exempt.
-		if (data.purpose === undefined || !SIDE_SHARE_EXEMPT.has(data.purpose as MemorySurfaceId)) calls.add(data.callId);
-		sideOutputTokens += output ?? budgetOf(data.attemptId);
 		premium.side += units ?? 0;
+		// A memory call journaled before purposes existed was automatic; only a named operator purpose is exempt.
+		const automatic = data.purpose === undefined || !SIDE_SHARE_EXEMPT.has(data.purpose as MemorySurfaceId);
+		const call = memoryCalls.get(data.callId) ?? { automatic, output: null };
+		if (output !== null) call.output = (call.output ?? 0) + output;
+		memoryCalls.set(data.callId, call);
 	}
-	const covered = held.filter((call) => call.attemptId !== null && settled.has(call.attemptId));
+	let sideOutputTokens = 0;
+	let automaticCalls = 0;
+	for (const [callId, call] of memoryCalls) {
+		sideOutputTokens += call.output ?? budgetOf(callId);
+		if (call.automatic) automaticCalls += 1;
+	}
+	const covered = held.filter((call) => call.callId !== null && seen.has(call.callId));
 	const open = held.filter((call) => !covered.includes(call));
 	for (const call of open) sideOutputTokens += call.maxTokens;
 	return {
 		facts: {
-			automaticCalls: calls.size + open.filter((call) => !SIDE_SHARE_EXEMPT.has(call.purpose)).length,
+			automaticCalls: automaticCalls + open.filter((call) => !SIDE_SHARE_EXEMPT.has(call.purpose)).length,
 			sideOutputTokens,
 			mainOutputTokens,
 			premium: premiumReported ? premium : null,
