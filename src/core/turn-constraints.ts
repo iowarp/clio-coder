@@ -117,6 +117,12 @@ export interface TurnConstraints {
 	 * dispatch entirely (D8c). Absent means the parent's own set is the ceiling.
 	 */
 	readonly delegatedTools?: readonly string[];
+	/**
+	 * `--deny-tools`: capabilities removed from the tool set whatever else admits
+	 * them. They leave the parent's own set and the delegation ceiling that falls
+	 * back to it; an explicit `delegatedTools` list stays the worker ceiling.
+	 */
+	readonly deniedTools?: readonly string[];
 	readonly skills?: "allowed" | "disabled";
 	/**
 	 * Enforced read-only ceiling, as a read-only dispatch has: admission admits
@@ -142,6 +148,94 @@ export interface TurnConstraints {
 	 * continuation can scope it again against the route it then runs on.
 	 */
 	readonly dormantTurnPolicy?: TurnStepPolicy;
+	/**
+	 * `run --max-requests` and `--max-tool-calls`: per-run caps on the main
+	 * agent loop, counted across every turn of the run. Workers never inherit them.
+	 */
+	readonly runCaps?: RunCaps;
+}
+
+export interface RunCaps {
+	/** Provider requests the main agent loop sends, once per attempt. */
+	readonly maxRequests?: number;
+	/** Tool calls the main agent executes or has refused, each call of a batch separately. */
+	readonly maxToolCalls?: number;
+}
+
+export type RunCapCode = "max_requests" | "max_tool_calls";
+
+/** The cap a refusal reason names, or undefined for any other text. */
+export function runCapStopCode(reason: string): RunCapCode | undefined {
+	if (reason.startsWith("max_requests:")) return "max_requests";
+	if (reason.startsWith("max_tool_calls:")) return "max_tool_calls";
+	return undefined;
+}
+
+export interface RunCapCounter {
+	/** Before a main-loop request is sent: a refusal once the request cap or a fired tool cap stops the run. */
+	admitRequest(caps: RunCaps | undefined): string | undefined;
+	/** Before a tool batch runs: every call counts, and a batch that would pass the cap is refused whole. */
+	admitToolCalls(caps: RunCaps | undefined, count: number): string | undefined;
+}
+
+/**
+ * One run's request and tool-call counts. The narrowest caps any turn carried
+ * stay in force, so a later turn without them (a repair turn) still counts.
+ */
+export function createRunCapCounter(): RunCapCounter {
+	let active: RunCaps | undefined;
+	let requests = 0;
+	let toolCalls = 0;
+	let toolStop: string | undefined;
+	const remember = (caps: RunCaps | undefined): RunCaps | undefined => {
+		if (caps !== undefined) active = narrowerRunCaps(active, caps);
+		return active;
+	};
+	return {
+		admitRequest(caps) {
+			const limits = remember(caps);
+			if (toolStop !== undefined) return toolStop;
+			const limit = limits?.maxRequests;
+			if (limit !== undefined && requests >= limit)
+				return `max_requests: the run reached its --max-requests cap (limit ${limit}, observed ${requests}); no further request was sent.`;
+			requests += 1;
+			return undefined;
+		},
+		admitToolCalls(caps, count) {
+			const limit = remember(caps)?.maxToolCalls;
+			toolCalls += count;
+			if (toolStop !== undefined) return toolStop;
+			if (limit === undefined || toolCalls <= limit) return undefined;
+			toolStop = `max_tool_calls: the run reached its --max-tool-calls cap (limit ${limit}, observed ${toolCalls}); this batch did not run and the run stops.`;
+			return toolStop;
+		},
+	};
+}
+
+function narrowerRunCaps(first: RunCaps | undefined, second: RunCaps | undefined): RunCaps | undefined {
+	if (first === undefined) return second;
+	if (second === undefined) return first;
+	const lower = (a: number | undefined, b: number | undefined): number | undefined =>
+		a === undefined ? b : b === undefined ? a : Math.min(a, b);
+	const maxRequests = lower(first.maxRequests, second.maxRequests);
+	const maxToolCalls = lower(first.maxToolCalls, second.maxToolCalls);
+	return {
+		...(maxRequests === undefined ? {} : { maxRequests }),
+		...(maxToolCalls === undefined ? {} : { maxToolCalls }),
+	};
+}
+
+function isRunCaps(value: unknown): boolean {
+	if (value === undefined) return true;
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+	const caps = value as Record<string, unknown>;
+	const bound = (entry: unknown): boolean =>
+		entry === undefined || (typeof entry === "number" && Number.isSafeInteger(entry) && entry > 0);
+	return (
+		Object.keys(caps).every((key) => key === "maxRequests" || key === "maxToolCalls") &&
+		bound(caps.maxRequests) &&
+		bound(caps.maxToolCalls)
+	);
 }
 
 /** Template budget bounds; `template` names the prompt template that set them, for refusal text. */
@@ -215,11 +309,13 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 		(value.readOnly !== undefined && value.readOnly !== true) ||
 		!isToolNameList(value.allowedTools) ||
 		!isToolNameList(value.delegatedTools) ||
+		!isToolNameList(value.deniedTools) ||
 		!isSurfaceSources(value.toolSurfaceSources) ||
 		!isSurfaceSources(value.delegatedToolSurfaceSources) ||
 		!isTurnBudget(value.budget) ||
 		!isTurnStepPolicy(value.turnPolicy) ||
-		!isTurnStepPolicy(value.dormantTurnPolicy)
+		!isTurnStepPolicy(value.dormantTurnPolicy) ||
+		!isRunCaps(value.runCaps)
 	) {
 		throw new Error("Invalid explicit turn constraints");
 	}
@@ -238,9 +334,11 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 		...(value.delegatedTools === undefined
 			? {}
 			: { delegatedTools: Object.freeze([...new Set(value.delegatedTools)].sort()) }),
+		...(value.deniedTools === undefined ? {} : { deniedTools: Object.freeze([...new Set(value.deniedTools)].sort()) }),
 		...(value.budget === undefined ? {} : { budget: Object.freeze({ ...value.budget }) }),
 		...(value.turnPolicy === undefined ? {} : { turnPolicy: snapshotStepPolicy(value.turnPolicy) }),
 		...(value.dormantTurnPolicy === undefined ? {} : { dormantTurnPolicy: snapshotStepPolicy(value.dormantTurnPolicy) }),
+		...(value.runCaps === undefined ? {} : { runCaps: Object.freeze({ ...value.runCaps }) }),
 	});
 }
 
@@ -333,6 +431,11 @@ export function narrowTurnConstraints(
 		session.delegatedTools === undefined && turn.delegatedTools === undefined
 			? undefined
 			: intersectLists(session.delegatedTools ?? session.allowedTools, turn.delegatedTools ?? turn.allowedTools);
+	// A denial at any layer holds at every narrower one.
+	const deniedTools =
+		session.deniedTools === undefined && turn.deniedTools === undefined
+			? undefined
+			: [...new Set([...(session.deniedTools ?? []), ...(turn.deniedTools ?? [])])];
 	const delegation = session.delegation === "forbidden" ? "forbidden" : turn.delegation;
 	const skills = session.skills === "disabled" ? "disabled" : turn.skills;
 	// Once any layer is read-only every narrower one is too (Z1).
@@ -342,13 +445,16 @@ export function narrowTurnConstraints(
 	const mode = narrowerMode(session.mode, turn.mode);
 	const budget = narrowerBudget(session.budget, turn.budget);
 	const turnPolicy = turn.turnPolicy ?? session.turnPolicy;
+	const runCaps = narrowerRunCaps(session.runCaps, turn.runCaps);
 	return {
 		...(mode === undefined ? {} : { mode }),
+		...(runCaps === undefined ? {} : { runCaps }),
 		...(budget === undefined ? {} : { budget }),
 		...(turnPolicy === undefined ? {} : { turnPolicy }),
 		...(delegation === undefined ? {} : { delegation }),
 		...(skills === undefined ? {} : { skills }),
 		...(readOnly ? { readOnly: true as const } : {}),
+		...(deniedTools === undefined ? {} : { deniedTools }),
 		...(allowedTools === undefined
 			? {}
 			: {
@@ -446,6 +552,8 @@ export function turnScopeGuidance(constraints: TurnConstraints | undefined): str
 				: "Delegated workers may use no tools for this turn.",
 		);
 	}
+	if (constraints.deniedTools !== undefined && constraints.deniedTools.length > 0)
+		lines.push(`Denied capabilities for this task: ${[...new Set(constraints.deniedTools)].sort().join(", ")}.`);
 	const budget = constraints.budget;
 	if (budget?.toolCalls !== undefined || budget?.observationBytes !== undefined) {
 		// The limits the turn actually gets: a value above the operator's applies only up to its template ceiling.
@@ -490,11 +598,14 @@ export function turnScopeGuidance(constraints: TurnConstraints | undefined): str
 
 export function turnAllowsTool(constraints: TurnConstraints | undefined, capability: string): boolean {
 	if (constraints?.delegation === "forbidden" && capability === ToolNames.Dispatch) return false;
+	if (constraints?.deniedTools?.includes(capability) === true) return false;
 	return listAllowsTool(constraints?.allowedTools, capability);
 }
 
 /** Whether a dispatched worker may hold a tool under the parent's delegation ceiling. */
 export function turnDelegatesTool(constraints: TurnConstraints | undefined, capability: string): boolean {
+	// Without its own ceiling a worker's falls back to the parent's set, which the denial already narrowed.
+	if (constraints?.delegatedTools === undefined && constraints?.deniedTools?.includes(capability) === true) return false;
 	return listAllowsTool(constraints?.delegatedTools ?? constraints?.allowedTools, capability);
 }
 
@@ -511,12 +622,17 @@ export function workerTurnConstraints(constraints: TurnConstraints): TurnConstra
 		budget: _budget,
 		turnPolicy: _turnPolicy,
 		dormantTurnPolicy: _dormantTurnPolicy,
+		runCaps: _runCaps,
+		deniedTools,
 		...rest
 	} = constraints;
 	return Object.freeze({
 		...rest,
+		// An explicit delegation ceiling replaces the parent's set, denial included; without one the worker keeps the denial.
 		...(delegatedTools === undefined
-			? {}
+			? deniedTools === undefined
+				? {}
+				: { deniedTools }
 			: { allowedTools: delegatedTools, toolSurfaceSources: toolSurfaceSources(constraints, true) }),
 	});
 }

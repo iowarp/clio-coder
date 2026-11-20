@@ -233,6 +233,23 @@ export interface RunUsageV2 {
 	total?: RunCallUsage;
 }
 
+/**
+ * SPEC 6.9: the limits the run was asked for and the ones it enforces. A limit this build or route cannot enforce
+ * is refused at preflight, so `enforced` names every requested key; `cost` is present with `maxCostUsd`.
+ */
+export interface RunLimitsV2 {
+	requested: {
+		maxCostUsd?: number;
+		maxRequests?: number;
+		maxToolCalls?: number;
+		timeoutSeconds?: number;
+		requirePriced?: true;
+	};
+	enforced: string[];
+	/** `--max-cost-usd` is admission-based: spend can pass the cap by the calls in flight. */
+	cost?: { overshootPossible: true; unpricedCalls: number; unpricedRoutes: string[] };
+}
+
 export interface RunResultEnvelopeV2 {
 	type: "run_end";
 	schemaVersion: typeof RUN_RESULT_SCHEMA_VERSION;
@@ -264,4 +281,8 @@ export interface RunResultEnvelopeV2 {
 		undelivered: RunJsonDispatchedRunOutcome[];
 	};
 	timings: { sessionReadyMs?: number; firstRequestMs?: number; firstTokenMs?: number };
+	/** Present when the run was given any limit (SPEC 6.9). */
+	limits?: RunLimitsV2;
+	/** `--dry-run`: what the run would do; present only with outcome `previewed`. */
+	plan?: Readonly<Record<string, unknown>>;
 }

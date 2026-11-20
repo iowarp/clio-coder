@@ -11,7 +11,7 @@ import { resolve } from "node:path";
 import chalk from "chalk";
 import { colorDisabled } from "../core/terminal-preferences.js";
 import type { SessionToolLimits } from "../core/tool-limit-flags.js";
-import { parseToolLimitList, toolLimitConstraints } from "../core/tool-limit-flags.js";
+import { parseToolLimitList, toolLimitConflict, toolLimitConstraints } from "../core/tool-limit-flags.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { StartupResume } from "../entry/boot-options.js";
 
@@ -81,7 +81,7 @@ export interface GlobalCliFlags {
 	panes?: "with";
 	/** `--autonomy <level>` before any subcommand: one interactive session at that level. */
 	autonomy?: AutonomyLevel;
-	/** `--allow-tools`/`--delegate-tools` before any subcommand: the interactive session's tool limits. */
+	/** `--allow-tools`/`--delegate-tools`/`--deny-tools` before any subcommand: the interactive session's tool limits. */
 	toolLimits?: SessionToolLimits;
 	/** `--session-file <path>` before any subcommand, made absolute: where the interactive session keeps its live lane record and writes its exit record. */
 	sessionFile?: string;
@@ -230,7 +230,7 @@ export function extractGlobalFlags(
 			i += 1;
 			continue;
 		}
-		if (arg === "--allow-tools" || arg === "--delegate-tools") {
+		if (arg === "--allow-tools" || arg === "--delegate-tools" || arg === "--deny-tools") {
 			const value = argv[i + 1];
 			const names = value === undefined || isSubcommand(value) ? null : parseToolLimitList(arg, value);
 			if (names === null || "error" in names) return failed(names?.error ?? `${arg} requires a value`);
@@ -298,6 +298,8 @@ export function extractGlobalFlags(
 			return failed("--fork branches the session --resume <id> or --continue names; pass one of them");
 		resume = { ...resume, fork: true };
 	}
+	const toolConflict = toolLimits === undefined ? undefined : toolLimitConflict(toolLimits);
+	if (toolConflict !== undefined) return failed(toolConflict);
 	return {
 		noContextFiles,
 		noSkills,

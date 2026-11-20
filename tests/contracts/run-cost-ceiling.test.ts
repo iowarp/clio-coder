@@ -1,7 +1,14 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, test } from "node:test";
-import { parseRunCliArgs } from "../../src/cli/args.js";
+import {
+	parseRunCliArgs,
+	requestedRunLimits,
+	sandboxRequiredRefusal,
+	taskFileAuthorityRefusal,
+} from "../../src/cli/args.js";
+import { runLimitsV2, startRefusalCause } from "../../src/cli/run-failure.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { pinRunSettings, RUN_OVERRIDES_ENV, requirePricedRefusal } from "../../src/core/run-overrides.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { factKnownValue } from "../../src/core/telemetry/known.js";
@@ -17,6 +24,12 @@ test("clio-coder run --max-cost-usd bounds what the run adds, under any lower co
 	deepStrictEqual(
 		parseRunCliArgs(["--max-cost-usd", "0", "task"]).diagnostics.map((entry) => entry.message),
 		["--max-cost-usd must be a positive number of US dollars"],
+	);
+	// With --agent it bounds that one worker run (SPEC 6.9), and --worktree is an --agent flag.
+	deepStrictEqual(parseRunCliArgs(["--agent", "scout", "--max-cost-usd", "0.01", "--worktree", "x"]).diagnostics, []);
+	deepStrictEqual(
+		parseRunCliArgs(["--worktree", "x"]).diagnostics.map((entry) => entry.message),
+		["fleet dispatch flags require --agent <recipe-id>"],
 	);
 	// A continued session already spent $2; the run may add $1.50 more.
 	const ceiling = runCostCeilingUsd({ spentUsd: 2, runMaxUsd: 1.5, configuredUsd: 0 });
@@ -128,4 +141,62 @@ describe("--max-cost-usd and parallel dispatches", () => {
 			await bundle.extension.stop?.();
 		}
 	});
+});
+
+test("the --trust-task-file gate refuses verify, yolo and cwd in an untrusted envelope and nothing else", () => {
+	strictEqual(taskFileAuthorityRefusal({ task: "x", model: "m" }, false), undefined);
+	strictEqual(taskFileAuthorityRefusal({ task: "x", permissions: { autonomy: "default" } }, false), undefined);
+	match(taskFileAuthorityRefusal({ task: "x", verify: [] }, false) ?? "", /carries verify,.*--trust-task-file/);
+	match(
+		taskFileAuthorityRefusal({ task: "x", cwd: "/w", permissions: { autonomy: "yolo" } }, false) ?? "",
+		/carries permissions\.autonomy yolo, cwd/,
+	);
+	strictEqual(taskFileAuthorityRefusal({ task: "x", verify: [], cwd: "/w" }, true), undefined);
+});
+
+test("--agent --max-cost-usd 0.01 is a requested, enforced limit whose overshoot is possible (SPEC 6.9)", () => {
+	const parsed = parseRunCliArgs(["--agent", "scout", "--max-cost-usd", "0.01", "x"]);
+	deepStrictEqual(runLimitsV2(requestedRunLimits(parsed)), {
+		requested: { maxCostUsd: 0.01 },
+		enforced: ["maxCostUsd"],
+		cost: { overshootPossible: true, unpricedCalls: 0, unpricedRoutes: [] },
+	});
+	strictEqual(runLimitsV2(requestedRunLimits(parseRunCliArgs(["x"]))), undefined);
+});
+
+test("--sandbox required: only required parses, it pins safety.sandbox, and a host without a sandbox is refused", () => {
+	strictEqual(parseRunCliArgs(["--sandbox", "required", "x"]).sandboxRequired, true);
+	match(parseRunCliArgs(["--sandbox", "off", "x"]).diagnostics[0]?.message ?? "", /accepts only required/);
+	const pinned = { [RUN_OVERRIDES_ENV]: JSON.stringify({ sandbox: "required" }) };
+	for (const mode of ["off", "auto", "required"] as const) {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.safety.sandbox = mode;
+		strictEqual(pinRunSettings(settings, pinned).safety.sandbox, "required");
+	}
+	const untouched = structuredClone(DEFAULT_SETTINGS);
+	untouched.safety.sandbox = "off";
+	strictEqual(pinRunSettings(untouched, {}).safety.sandbox, "off");
+	strictEqual(sandboxRequiredRefusal({ available: true, reason: null }), undefined);
+	match(
+		sandboxRequiredRefusal({ available: false, reason: "bubblewrap (bwrap) is not installed" }) ?? "",
+		/--sandbox required, but no OS sandbox .*bwrap/,
+	);
+});
+
+test("--require-priced: parsed into limits, carried to admission, and refuses only an unpriced route", () => {
+	const parsed = parseRunCliArgs(["--require-priced", "--no-delegate", "x"]);
+	strictEqual(parsed.requirePriced, true);
+	deepStrictEqual(runLimitsV2(requestedRunLimits(parsed))?.enforced, ["requirePriced"]);
+	const required = { [RUN_OVERRIDES_ENV]: JSON.stringify({ requirePriced: true }) };
+	match(
+		requirePricedRefusal("none", "proxy/gpt-x", required) ?? "",
+		/^--require-priced: proxy\/gpt-x has no known pricing; declare targets\[\]\.pricing/,
+	);
+	for (const pricedBy of ["catalog", "target-rates", "free"])
+		strictEqual(requirePricedRefusal(pricedBy, "t/m", required), undefined);
+	strictEqual(requirePricedRefusal("none", "proxy/gpt-x", {}), undefined);
+	deepStrictEqual(
+		startRefusalCause(["clio-coder run: --require-priced: routes this run can reach have no known pricing: a/b"]).code,
+		"not_configured",
+	);
 });

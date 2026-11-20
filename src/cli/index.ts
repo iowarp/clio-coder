@@ -87,6 +87,7 @@ Usage:
   clio-coder --autonomy <level>   start this interactive session at default|yolo
   clio-coder --allow-tools <names>     limit this interactive session's tools; none disables all
   clio-coder --delegate-tools <names>  limit the tools this session's workers may hold
+  clio-coder --deny-tools <names>      remove these tools from this interactive session
   clio-coder --max-context-tokens <N>  cap this interactive session's context budget, as for clio-coder run
   clio-coder --session-file <path>     keep this session's live state (working, idle, awaiting) in a JSON file; the exit record lands there too
   clio-coder --resume, -r [id]    open on a session by id, unique id prefix or name; without one, open the session picker
@@ -312,8 +313,8 @@ async function main(argv: string[]): Promise<number> {
 		// A dropped tool limit would widen what the operator meant to allow.
 		printError(
 			subcommand === "run" || subcommand === "acp"
-				? `--allow-tools and --delegate-tools before a subcommand apply to the interactive session only; pass them after it: clio-coder ${subcommand} --allow-tools <names>`
-				: `--allow-tools and --delegate-tools apply to the interactive session, clio-coder run, and clio-coder acp; clio-coder ${subcommand} does not honor them.`,
+				? `--allow-tools, --deny-tools and --delegate-tools before a subcommand apply to the interactive session only; pass them after it: clio-coder ${subcommand} --allow-tools <names>`
+				: `--allow-tools, --deny-tools and --delegate-tools apply to the interactive session, clio-coder run, and clio-coder acp; clio-coder ${subcommand} does not honor them.`,
 		);
 		return 2;
 	}

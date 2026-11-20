@@ -2,7 +2,7 @@ import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { headlessRouteFailureText } from "../../core/gateway-routing.js";
 import { readClioVersion } from "../../core/package-root.js";
 import { reminderGist } from "../../core/reminder-gist.js";
-import { withRunOverrides } from "../../core/run-overrides.js";
+import { runOverrides, withRunOverrides } from "../../core/run-overrides.js";
 import {
 	type PendingSkillRequest,
 	type SkillActivation,
@@ -15,7 +15,7 @@ import { isUnreportedUsageNotice } from "../../core/telemetry/pricing.js";
 import { renderCompactCount, renderUsdSum } from "../../core/telemetry/render.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
-import type { TurnConstraints } from "../../core/turn-constraints.js";
+import { runCapStopCode, type TurnConstraints } from "../../core/turn-constraints.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
 import { mainAgentTerminalReason, runStatusForOutcome } from "../../domains/dispatch/outcome.js";
@@ -87,12 +87,17 @@ import { toolResultText } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from "../run-answers.js";
+
+/** `--on-permission fail` (SPEC 6.4): the approval-required exit a worker's refused ask already uses. */
+const PERMISSION_REQUIRED_EXIT_CODE = 3;
+
 import {
 	noteMainRunV2,
 	noteRunEndWritten,
 	noteSteerV2,
 	runResultV2Active,
 	runTextSummaryRequested,
+	writeRunRefusal,
 } from "../run-failure.js";
 import { createSteerIntake, setupSteerChannel } from "../steer-channel.js";
 import {
@@ -163,6 +168,15 @@ export interface HeadlessMainAgentOptions {
 	 * without recovery or a successful write, and explicit limitations, fail unconditionally.
 	 */
 	failOnNoop?: boolean;
+	/** `--fail-on-verify`: a `--verify` check that failed or timed out fails the run (`verify_failed`). */
+	failOnVerify?: boolean;
+	/**
+	 * Unpriced routes the run can reach: `main` is chat and compaction, `delegating` adds the fleet's. Read only under
+	 * `run --require-priced`, which refuses before the turn when any is listed (SPEC 6.9).
+	 */
+	unpricedRoutes?: (reach: "main" | "delegating") => string[];
+	/** `--on-permission`: `fail` ends the run with exit 3 at the first ask a headless run refuses; `deny` is today's. */
+	onPermission?: "deny" | "fail";
 	/**
 	 * `clio-coder run --timeout`. When it expired, the shutdown it started seals
 	 * outcome `timed_out` instead of `canceled`, so a driver can tell its own
@@ -824,7 +838,8 @@ export function prefixHeadlessFailure(
 	message: string,
 	notFromRoute = false,
 ): string {
-	if (notFromRoute || message.startsWith(`${SESSION_COST_CEILING_REASON}:`)) return message;
+	if (notFromRoute || message.startsWith(`${SESSION_COST_CEILING_REASON}:`) || runCapStopCode(message) !== undefined)
+		return message;
 	const snapshot = chat.lastRunSnapshot?.();
 	if (!snapshot) return message;
 	const route = [snapshot.runtimeId, snapshot.targetUrl].filter(Boolean).join(" ");
@@ -1099,10 +1114,21 @@ async function noteRunUsageV2(options: HeadlessMainAgentOptions, from: string, m
 }
 
 export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMainAgentOptions): Promise<number> {
+	if (runOverrides().requirePriced === true) {
+		const delegating = options.constraints?.delegation !== "forbidden";
+		const unpriced = options.unpricedRoutes?.(delegating ? "delegating" : "main") ?? [];
+		if (unpriced.length > 0) {
+			writeRunRefusal(
+				`clio-coder run: --require-priced: routes this run can reach have no known pricing: ${unpriced.join(", ")}; declare targets[].pricing for them${delegating ? " or add --no-delegate if only worker routes are listed" : ""}\n`,
+			);
+			return 2;
+		}
+	}
 	// Children need the authoritative parent before submit can invoke dispatch.
 	// The terminal writer reuses this identity whichever settlement path wins.
 	const runId = newRunId();
 	noteMainRunV2({ runId, sessionReady: true });
+	if (options.costCap !== undefined) noteMainRunV2({ unpricedRoutes: options.costCap.unpricedRoutes });
 	const mode = options.mode ?? "text";
 	const jsonEvents = options.jsonEvents ?? "full";
 	const startedAt = new Date().toISOString();
@@ -1360,6 +1386,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	const jsonProjector = createHeadlessJsonProjector();
 	// The cost cap's no-usage notice, repeated once in the exit summary when it fired this run.
 	let unreportedUsage: string | null = null;
+	/** `--on-permission fail`: the message of the first ask this headless run refused. */
+	let permissionStop: string | null = null;
 	const unsubscribe = chat.onEvent((event) => {
 		writeTextSessionId();
 		if (mode === "json") {
@@ -1397,7 +1425,18 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		if (event.type === "notice" && unreportedUsage === null && isUnreportedUsageNotice(event.text))
 			unreportedUsage = event.text;
 		recordRunEffect(runStats.runEffects, event);
+		const asksBefore = runStats.decisions.permissionRequested;
 		recordToolEnd(runStats, event);
+		// `--on-permission fail`: the first refused ask stops the turn once that call settles (SPEC 6.4).
+		if (
+			options.onPermission === "fail" &&
+			permissionStop === null &&
+			runStats.decisions.permissionRequested > asksBefore
+		) {
+			const tool = (event as { toolName?: unknown }).toolName;
+			permissionStop = `clio-coder run: --on-permission fail: ${typeof tool === "string" ? tool : "a tool call"} needed approval that a headless run cannot give`;
+			chat.cancel({ reason: permissionStop, atToolBoundary: true });
+		}
 		if (event.type === "message_end") {
 			if (event.message.role === "assistant") runStats.toolRounds.push(...readToolRounds(event.message));
 			// Usage is accrued per completed assistant message, the one place a
@@ -1554,12 +1593,15 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		stderrMessage = result.abortReason;
 	} else if (result.error) {
 		const budgetCeiling = result.error.startsWith(`${SESSION_COST_CEILING_REASON}:`);
+		// `--max-requests`/`--max-tool-calls` fired: a limit exit, as the cost ceiling is.
+		const runCap = runCapStopCode(result.error);
+		const limitDetail = budgetCeiling ? SESSION_COST_CEILING_REASON : runCap;
 		terminal = {
-			exitCode: budgetCeiling ? SESSION_COST_CEILING_EXIT_CODE : 1,
+			exitCode: limitDetail !== undefined ? SESSION_COST_CEILING_EXIT_CODE : 1,
 			outcome: "failed",
 			status: "failed",
 			failureMessage: result.error,
-			...(budgetCeiling ? { outcomeDetail: SESSION_COST_CEILING_REASON } : {}),
+			...(limitDetail !== undefined ? { outcomeDetail: limitDetail } : {}),
 		};
 		// Text mode printed the refusal's notice as it arrived; saying it twice
 		// reads as two failures.
@@ -1629,6 +1671,12 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			};
 			stderrMessage = failureMessage;
 		}
+		if (terminal.exitCode === 0 && options.failOnVerify === true && verify?.some((check) => !check.passed)) {
+			const failed = verify.filter((check) => !check.passed).map((check) => check.command);
+			const failureMessage = `clio-coder run: --fail-on-verify: ${failed.length} check(s) did not pass: ${failed.join("; ")}`;
+			terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage, outcomeDetail: "verify_failed" };
+			stderrMessage = failureMessage;
+		}
 		if (mode === "text") {
 			// A terminating tool ends the turn in place of an assistant message, so its
 			// result is the answer and any assistant text before it is mid-workflow
@@ -1663,6 +1711,17 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		stderrMessage = failureMessage;
 	}
 	// The run stopped on a question nobody scripted, whatever the stopped turn left behind; a signal still outranks it.
+	if (permissionStop !== null && !termination.isShuttingDown()) {
+		terminal = {
+			exitCode: PERMISSION_REQUIRED_EXIT_CODE,
+			outcome: "failed",
+			status: "failed",
+			failureMessage: permissionStop,
+			outcomeDetail: "permission_required",
+		};
+		stderrMessage = permissionStop;
+		stdoutMessage = null;
+	}
 	const unscripted = scripted !== undefined && !termination.isShuttingDown() ? scripted.unscripted() : null;
 	if (scripted !== undefined && unscripted !== null) {
 		const failureMessage = unscriptedRunMessage(scripted, unscripted);

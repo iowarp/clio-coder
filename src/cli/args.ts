@@ -1,11 +1,13 @@
 import { THINKING_LEVELS } from "../core/defaults.js";
 import { MAX_TIMER_DELAY_MS } from "../core/timers.js";
-import { parseToolLimitList, toolLimitConstraints } from "../core/tool-limit-flags.js";
+import { parseToolLimitList, toolLimitConflict, toolLimitConstraints } from "../core/tool-limit-flags.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { type AutonomyLevel, autonomyFromUserInput } from "../domains/safety/autonomy.js";
 import { globalFlagPositionHint, parseMaxContextTokens } from "./argv.js";
+import { parseDuration } from "./kit/duration.js";
 import type { ErrorSlug } from "./kit/slugs.js";
+import type { RunLimitsV2 } from "./modes/run-json-schema-v2.js";
 
 export interface CliArgDiagnostic {
 	type: "warning" | "error";
@@ -73,8 +75,24 @@ export interface RunCliArgs {
 	cwd?: string;
 	/** Fail a main-agent run whose receipt records a no-op. */
 	failOnNoop: boolean;
-	/** Priced spend this run may add, in US dollars. */
+	/** `--fail-on-verify`: a failed or timed-out `--verify` check fails the run. */
+	failOnVerify?: boolean;
+	/** `--on-permission`: `fail` ends the run with exit 3 at the first ask a headless run refuses. */
+	onPermission?: "deny" | "fail";
+	/** `--dry-run`: print what the run would do, with no session, model call or `--verify` command. */
+	dryRun?: boolean;
+	/** Priced spend this run may add, in US dollars; with `--agent`, the bound on that one worker run. */
 	maxCostUsd?: number;
+	/** `--max-requests`: main-loop provider requests this run may send. */
+	maxRequests?: number;
+	/** `--sandbox required`: tighten-only one-run `safety.sandbox` (main and `--agent`). */
+	sandboxRequired?: true;
+	/** `--require-priced`: refuse unpriced routes the run can reach, at preflight and at each dispatch admission. */
+	requirePriced?: true;
+	/** `--max-tool-calls`: tool calls the main agent may make or have refused in this run. */
+	maxToolCalls?: number;
+	/** `--worktree` (`--agent` only): run the worker in a task worktree kept for review. */
+	worktree?: boolean;
 	/** Wall-clock limit for the whole run, in seconds. */
 	timeoutSeconds?: number;
 	/** `--verify`: shell commands the run declares as its acceptance checks, in flag order. */
@@ -102,10 +120,10 @@ const IMAGE_ATTACHMENT = /\.(?:png|jpe?g|gif|webp)$/i;
  *
  * | input                                                          | main  | agent |
  * | -------------------------------------------------------------- | ----- | ----- |
- * | --record, --agent-profile, --agent-runtime, --tool-profile, --require | usage | ok |
- * | --turn-mode, --allow-tools, --delegate-tools, --no-delegate     | ok    | usage |
+ * | --record, --agent-profile, --agent-runtime, --tool-profile, --require, --worktree | usage | ok |
+ * | --turn-mode, --allow-tools, --deny-tools, --delegate-tools, --no-delegate | ok | usage |
  * | --resume, --session, --continue, --fork, --name                | ok    | usage |
- * | --max-cost-usd, --fail-on-noop, --verify, --answers            | ok    | usage |
+ * | --fail-on-noop, --verify, --answers                            | ok    | usage |
  * | --systemone                                                    | ok    | usage |
  * | @<image> (png, jpeg, gif, webp)                                | ok    | usage |
  * | --autonomy                                                     | ok    | usage |
@@ -126,12 +144,15 @@ function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 			parsed.agentProfile !== undefined ||
 			parsed.agentRuntime !== undefined ||
 			parsed.toolProfile !== undefined ||
+			parsed.worktree === true ||
 			parsed.required.length > 0;
 		if (dispatchOnly) errors.push("fleet dispatch flags require --agent <recipe-id>");
 		return errors;
 	}
 	if (parsed.constraints) {
-		errors.push("--turn-mode, --allow-tools, --delegate-tools, and --no-delegate apply to the main-agent task");
+		errors.push(
+			"--turn-mode, --allow-tools, --deny-tools, --delegate-tools, and --no-delegate apply to the main-agent task",
+		);
 	}
 	if (
 		parsed.sessionId !== undefined ||
@@ -142,8 +163,12 @@ function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 		errors.push("--resume, --continue, --fork and --name apply to the main agent; a worker has its own transcript");
 	}
 	const mainOnly: Array<[boolean, string]> = [
-		[parsed.maxCostUsd !== undefined, "--max-cost-usd"],
 		[parsed.failOnNoop, "--fail-on-noop"],
+		[parsed.failOnVerify === true, "--fail-on-verify"],
+		[parsed.onPermission !== undefined, "--on-permission"],
+		[parsed.dryRun === true, "--dry-run"],
+		[parsed.maxRequests !== undefined, "--max-requests"],
+		[parsed.maxToolCalls !== undefined, "--max-tool-calls"],
 		[parsed.verify.length > 0, "--verify"],
 		[parsed.answersFile !== undefined, "--answers"],
 		[parsed.systemOne !== undefined, "--systemone"],
@@ -157,6 +182,52 @@ function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 		}
 	}
 	return errors;
+}
+
+/**
+ * The `--trust-task-file` gate (SPEC 6.3, review H06). A task envelope is data a
+ * supervisor may have got from elsewhere; `verify` (host bash outside the agent's
+ * permissions and sandbox), `permissions.autonomy: "yolo"` and `cwd` widen what
+ * the host does. Returns the refusal (exit 2 `task_authority`) when the envelope
+ * carries any of them untrusted, else undefined. The same for a file and stdin.
+ */
+export function taskFileAuthorityRefusal(
+	envelope: Readonly<Record<string, unknown>>,
+	trusted: boolean,
+): string | undefined {
+	if (trusted) return undefined;
+	const permissions = envelope.permissions;
+	const yolo =
+		typeof permissions === "object" &&
+		permissions !== null &&
+		(permissions as Record<string, unknown>).autonomy === "yolo";
+	const widening = [
+		...(envelope.verify !== undefined ? ["verify"] : []),
+		...(yolo ? ["permissions.autonomy yolo"] : []),
+		...(envelope.cwd !== undefined ? ["cwd"] : []),
+	];
+	if (widening.length === 0) return undefined;
+	return `task file carries ${widening.join(", ")}, which widen what the host does; pass --trust-task-file to accept ${widening.length === 1 ? "it" : "them"}`;
+}
+
+/** `--sandbox required` on a host with no OS sandbox: the exit-2 refusal before boot, else undefined. */
+export function sandboxRequiredRefusal(availability: {
+	available: boolean;
+	reason: string | null;
+}): string | undefined {
+	if (availability.available) return undefined;
+	return `--sandbox required, but no OS sandbox is available on this host (${availability.reason ?? "no backend"}); install bubblewrap or drop --sandbox required`;
+}
+
+/** SPEC 6.9: the limits this run was given, as the v2 envelope and `--dry-run` list them under `limits.requested`. */
+export function requestedRunLimits(parsed: RunCliArgs): RunLimitsV2["requested"] {
+	return {
+		...(parsed.maxCostUsd !== undefined ? { maxCostUsd: parsed.maxCostUsd } : {}),
+		...(parsed.maxRequests !== undefined ? { maxRequests: parsed.maxRequests } : {}),
+		...(parsed.maxToolCalls !== undefined ? { maxToolCalls: parsed.maxToolCalls } : {}),
+		...(parsed.timeoutSeconds !== undefined ? { timeoutSeconds: parsed.timeoutSeconds } : {}),
+		...(parsed.requirePriced === true ? { requirePriced: true as const } : {}),
+	};
 }
 
 export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
@@ -203,6 +274,10 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--record") {
 			parsed.record = true;
+			continue;
+		}
+		if (arg === "--worktree") {
+			parsed.worktree = true;
 			continue;
 		}
 		if (arg === "--json") {
@@ -357,7 +432,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			parsed.constraints = { ...parsed.constraints, delegation: "forbidden" };
 			continue;
 		}
-		if (arg === "--allow-tools" || arg === "--delegate-tools") {
+		if (arg === "--allow-tools" || arg === "--delegate-tools" || arg === "--deny-tools") {
 			const value = need(arg);
 			if (value !== null) {
 				const names = parseToolLimitList(arg, value);
@@ -418,18 +493,11 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			}
 			continue;
 		}
-		if (arg === "--timeout") {
-			const value = need(arg);
+		if (arg === "--timeout" || arg?.startsWith("--timeout=")) {
+			const value = arg === "--timeout" ? need(arg) : arg.slice("--timeout=".length);
 			if (value !== null) {
-				const seconds = Number(value);
-				if (Number.isFinite(seconds) && seconds > 0 && seconds * 1000 <= MAX_TIMER_DELAY_MS) {
-					parsed.timeoutSeconds = seconds;
-				} else {
-					parsed.diagnostics.push({
-						type: "error",
-						message: `--timeout must be a positive number of seconds no greater than ${Math.floor(MAX_TIMER_DELAY_MS / 1000)}`,
-					});
-				}
+				const seconds = durationSeconds("--timeout", value, parsed);
+				if (seconds !== null) parsed.timeoutSeconds = seconds;
 			}
 			continue;
 		}
@@ -444,23 +512,56 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			}
 			continue;
 		}
-		if (arg === "--verify-timeout") {
-			const value = need(arg);
+		if (arg === "--verify-timeout" || arg?.startsWith("--verify-timeout=")) {
+			const value = arg === "--verify-timeout" ? need(arg) : arg.slice("--verify-timeout=".length);
 			if (value !== null) {
-				const seconds = Number(value);
-				if (Number.isFinite(seconds) && seconds > 0 && seconds * 1000 <= MAX_TIMER_DELAY_MS) {
-					parsed.verifyTimeoutSeconds = seconds;
-				} else {
-					parsed.diagnostics.push({
-						type: "error",
-						message: `--verify-timeout must be a positive number of seconds no greater than ${Math.floor(MAX_TIMER_DELAY_MS / 1000)}`,
-					});
-				}
+				const seconds = durationSeconds("--verify-timeout", value, parsed);
+				if (seconds !== null) parsed.verifyTimeoutSeconds = seconds;
 			}
 			continue;
 		}
 		if (arg === "--fail-on-noop") {
 			parsed.failOnNoop = true;
+			continue;
+		}
+		if (arg === "--fail-on-verify") {
+			parsed.failOnVerify = true;
+			continue;
+		}
+		if (arg === "--on-permission" || arg?.startsWith("--on-permission=")) {
+			const value = arg === "--on-permission" ? need(arg) : arg.slice("--on-permission=".length);
+			if (value === "deny" || value === "fail") parsed.onPermission = value;
+			else if (value !== null)
+				parsed.diagnostics.push({ type: "error", message: `--on-permission must be deny or fail, not ${value}` });
+			continue;
+		}
+		if (arg === "--dry-run") {
+			parsed.dryRun = true;
+			continue;
+		}
+		if (arg === "--require-priced") {
+			parsed.requirePriced = true;
+			continue;
+		}
+		if (arg === "--sandbox") {
+			const value = need(arg);
+			if (value === "required") parsed.sandboxRequired = true;
+			else if (value !== null)
+				parsed.diagnostics.push({
+					type: "error",
+					message: `--sandbox accepts only required (a one-run tightening of safety.sandbox), not ${value}`,
+				});
+			continue;
+		}
+		if (arg === "--max-requests" || arg === "--max-tool-calls") {
+			const value = need(arg);
+			if (value !== null) {
+				const count = /^[0-9]+$/.test(value) ? Number(value) : Number.NaN;
+				if (!Number.isSafeInteger(count) || count < 1)
+					parsed.diagnostics.push({ type: "error", message: `${arg} must be a positive whole number, not ${value}` });
+				else if (arg === "--max-requests") parsed.maxRequests = count;
+				else parsed.maxToolCalls = count;
+			}
 			continue;
 		}
 		if (arg === "--max-cost-usd") {
@@ -504,6 +605,9 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 	if (parsed.verifyTimeoutSeconds !== undefined && parsed.verify.length === 0) {
 		parsed.diagnostics.push({ type: "error", message: "--verify-timeout applies only with --verify" });
 	}
+	if (parsed.failOnVerify === true && parsed.verify.length === 0) {
+		parsed.diagnostics.push({ type: "error", message: "--fail-on-verify applies only with --verify" });
+	}
 	// Only the main-agent stream reads the mode (cli/modes/print.ts); a dispatch
 	// took the flag and printed its usual stream.
 	if (parsed.agentId !== undefined && jsonEventsGiven) {
@@ -513,6 +617,14 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		});
 	}
 	// The v1 and v2 surfaces are separate contracts; one run speaks one of them.
+	// The v1 projection is frozen (SPEC 6.6); a plan in JSON is the v2 envelope's.
+	if (parsed.dryRun === true && (jsonGiven || jsonEventsGiven)) {
+		parsed.diagnostics.push({
+			type: "error",
+			slug: "flag_conflict",
+			message: "--dry-run prints its plan as JSON with --output-format json, not --json or --json-events",
+		});
+	}
 	if (outputFormatGiven && (jsonGiven || jsonEventsGiven)) {
 		parsed.diagnostics.push({
 			type: "error",
@@ -520,7 +632,26 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			message: "--output-format cannot be combined with --json or --json-events",
 		});
 	}
+	const toolConflict = parsed.constraints === undefined ? undefined : toolLimitConflict(parsed.constraints);
+	if (toolConflict !== undefined)
+		parsed.diagnostics.push({ type: "error", slug: "flag_conflict", message: toolConflict });
 	return parsed;
+}
+
+/**
+ * A `--timeout`-style value (C11): `90`, `90s`, `15m`, `2h` or `500ms`; a bare number stays seconds. The run's
+ * timers cap what a value may be, so a larger one is refused rather than clamped.
+ */
+function durationSeconds(flag: string, value: string, parsed: RunCliArgs): number | null {
+	const duration = parseDuration(value, { bareUnit: "s" });
+	if (duration.ok && duration.ms <= MAX_TIMER_DELAY_MS) return duration.ms / 1000;
+	parsed.diagnostics.push({
+		type: "error",
+		message: duration.ok
+			? `${flag} must be no longer than ${Math.floor(MAX_TIMER_DELAY_MS / 1000)} seconds`
+			: `${flag}: ${duration.message}`,
+	});
+	return null;
 }
 
 function setNumberOption(

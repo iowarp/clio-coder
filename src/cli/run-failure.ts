@@ -19,6 +19,7 @@ import {
 	RUN_RESULT_SCHEMA_VERSION,
 	type RunCauseCode,
 	type RunExitFact,
+	type RunLimitsV2,
 	type RunResultEnvelopeV2,
 	type RunSteerFrameV2,
 	type RunUsageV2,
@@ -55,10 +56,24 @@ export function writeRunDiagnostic(text: string): void {
 	process.stderr.write(shown);
 }
 
+/**
+ * A refusal the main run makes after boot but before its turn (`--require-priced`): written like any diagnostic and
+ * kept for the exit-2 cause even though run output has started.
+ */
+export function writeRunRefusal(text: string): void {
+	writeRunDiagnostic(text);
+	const state = runFailureState.getStore();
+	if (state && !state.pending) state.diagnostics = [...(state.diagnostics ?? []), redactUrlCredentials(text).trim()];
+}
+
 /** Pre-work refusals that carry a narrower cause than `not_started`, known by the diagnostic each one writes. */
 const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
 	[/--output-format cannot be combined with --json or --json-events/u, "flag_conflict"],
+	[/--deny-tools removes every tool --allow-tools names /u, "flag_conflict"],
+	[/--dry-run prints its plan as JSON with --output-format json/u, "flag_conflict"],
 	[/^clio-coder run: not configured: /u, "not_configured"],
+	// SPEC 6.9: the preflight's refusal names the unpriced route; declaring its pricing is the fix.
+	[/^clio-coder run: --require-priced: /u, "not_configured"],
 	// The orchestrator's resume refusal when another process holds the session (SPEC L3, 6.7; liveSessionRefusal).
 	[/^clio-coder run: failed to resume session \S+: session \S+ is open in another process /u, "session_live"],
 ];
@@ -155,6 +170,8 @@ interface MainRunNoteV2 {
 	parentSessionId?: string;
 	usage?: RunUsageV2;
 	sessionReadyMs?: number;
+	/** Routes the run can reach whose cost `--max-cost-usd` cannot bound. */
+	unpricedRoutes?: string[];
 }
 
 let v2Started: number | null = null;
@@ -172,6 +189,33 @@ export function runTextSummaryRequested(): boolean {
 	return textSummary;
 }
 let mainRunNote: MainRunNoteV2 = {};
+/** `--dry-run`: the plan the v2 envelope carries with outcome `previewed` (CLI-L4). */
+let runPlan: Readonly<Record<string, unknown>> | undefined;
+
+/** Hand the v2 writer a `--dry-run` plan; a no-op for v1 runs. */
+export function noteRunPlan(plan: object): void {
+	if (v2Started !== null) runPlan = { ...plan };
+}
+
+/**
+ * SPEC 6.9 `limits`: what was requested and what is enforced. Every accepted limit is enforced, because one
+ * this build cannot enforce is refused at preflight. Undefined when no limit was given.
+ */
+export function runLimitsV2(
+	requested: RunLimitsV2["requested"] | undefined,
+	usage?: RunUsageV2,
+	unpricedRoutes?: ReadonlyArray<string>,
+): RunLimitsV2 | undefined {
+	if (requested === undefined || Object.keys(requested).length === 0) return undefined;
+	const spend = (usage?.total ?? usage?.main)?.sums.usd.coverage.unknown ?? 0;
+	return {
+		requested: { ...requested },
+		enforced: Object.keys(requested),
+		...(requested.maxCostUsd !== undefined
+			? { cost: { overshootPossible: true, unpricedCalls: spend, unpricedRoutes: [...(unpricedRoutes ?? [])] } }
+			: {}),
+	};
+}
 
 /** True while a `--output-format json|stream-json` run is being written, so v1 runs pay for nothing v2 reads. */
 export function runResultV2Active(): boolean {
@@ -184,8 +228,10 @@ export function noteMainRunV2(note: {
 	usage?: RunUsageV2;
 	sessionReady?: true;
 	parentSessionId?: string;
+	unpricedRoutes?: string[];
 }): void {
 	if (v2Started === null) return;
+	if (note.unpricedRoutes !== undefined) mainRunNote.unpricedRoutes = [...note.unpricedRoutes];
 	if (note.runId !== undefined) mainRunNote.runId = note.runId;
 	if (note.parentSessionId !== undefined) mainRunNote.parentSessionId = note.parentSessionId;
 	if (note.usage !== undefined) mainRunNote.usage = note.usage;
@@ -211,6 +257,8 @@ export interface RunResultV2Request {
 	outputLastMessage?: string;
 	cwd?: string;
 	timeoutSeconds?: number;
+	/** The limits the run was given (SPEC 6.9); the envelope carries them as `limits` when any is set. */
+	limits?: RunLimitsV2["requested"];
 }
 
 /** What the v1 frames told the v2 writer; the run itself still speaks v1 underneath. */
@@ -350,12 +398,22 @@ function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, reque
 			return [{ code: /judge/i.test(text ?? "") ? "judge_streak" : "permission_required", ...message }];
 		case 4: {
 			const limit = LIMIT_CODES.find((entry) => entry === detail);
-			if (limit !== undefined) return [{ code: limit, ...message }];
+			if (limit !== undefined) {
+				// A run cap's refusal names its numbers: "(limit N, observed M)".
+				const counts = /\(limit (\d+), observed (\d+)\)/.exec(text ?? "");
+				const payload = counts ? { limit: Number(counts[1]), observed: Number(counts[2]) } : {};
+				return [{ code: limit, ...payload, ...message }];
+			}
 			if (text?.startsWith("budget_ceiling:"))
 				return [{ code: /--max-cost-usd/.test(text) ? "max_cost_usd" : "session_cost_ceiling", ...message }];
 			return unnamed;
 		}
 		case 1: {
+			// `--fail-on-verify` (SPEC 6.10) ranks above a sealed verdict: the failed checks are what that verdict judged.
+			if (detail === "verify_failed") {
+				const checks = (seen.verify ?? []).filter((check) => !check.passed).map((check) => check.command);
+				return [{ code: "verify_failed", checks, ...message }];
+			}
 			if (seen.verdict === "failed" || (seen.failedChecks?.length ?? 0) > 0)
 				return [{ code: "verdict_failed", failedChecks: seen.failedChecks ?? [], ...message }];
 			const work = WORK_CODES.find((entry) => entry === detail);
@@ -383,11 +441,13 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	v2StreamJson = request.format === "stream-json";
 	heldSteer = [];
 	mainRunNote = {};
+	runPlan = undefined;
 	let written = false;
 	let outputTarget: string | undefined;
 	const envelopeLines = (code: number, extra: RunExitFact[] = []): { lines: string; exitCode: number } => {
 		const skipReason = code === 124 ? "deadline" : signalForExitCode(code) !== null ? "interrupted" : "turn_failed";
 		const resolution = resolveRunExit([...exitFacts(code, seen, state, request), ...extra]);
+		const previewed = runPlan !== undefined && resolution.causes.length === 0;
 		const session = seen.session;
 		const runId = session?.runId ?? mainRunNote.runId ?? seen.receipt?.runId;
 		const usage = mainRunNote.usage;
@@ -396,6 +456,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			...(seen.firstRequestMs !== undefined ? { firstRequestMs: seen.firstRequestMs } : {}),
 			...(seen.firstTokenMs !== undefined ? { firstTokenMs: seen.firstTokenMs } : {}),
 		};
+		const limits = runLimitsV2(request.limits, usage, mainRunNote.unpricedRoutes);
 		const envelope: RunResultEnvelopeV2 = {
 			type: "run_end",
 			schemaVersion: RUN_RESULT_SCHEMA_VERSION,
@@ -413,7 +474,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			endedAt: new Date().toISOString(),
 			durationMs: Date.now() - started,
 			exitCode: resolution.exitCode,
-			outcome: resolution.outcome,
+			outcome: previewed ? "previewed" : resolution.outcome,
 			...(resolution.causes[0] !== undefined ? { outcomeDetail: resolution.causes[0].code } : {}),
 			causes: resolution.causes,
 			result: { text: seen.text, artifacts: [] },
@@ -429,9 +490,11 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			verify: { requested: request.verify.length, checks: verifyChecksV2(request.verify, seen.verify, skipReason) },
 			dispatch: { runs: seen.receipt !== undefined ? [seen.receipt] : [], live: seen.live, undelivered: seen.undelivered },
 			timings,
+			...(limits !== undefined ? { limits } : {}),
+			...(previewed && runPlan !== undefined ? { plan: runPlan } : {}),
 		};
 		const pending =
-			request.format === "stream-json" && session === undefined
+			request.format === "stream-json" && session === undefined && !previewed
 				? serializeJsonLine({
 						type: "session",
 						schemaVersion: RUN_RESULT_SCHEMA_VERSION,

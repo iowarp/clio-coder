@@ -4,7 +4,14 @@ import { extractGlobalFlags } from "../../src/cli/argv.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { SessionToolLimits } from "../../src/core/tool-limit-flags.js";
-import { turnDelegatesTool } from "../../src/core/turn-constraints.js";
+import {
+	createRunCapCounter,
+	narrowTurnConstraints,
+	snapshotTurnConstraints,
+	turnAllowsTool,
+	turnDelegatesTool,
+	workerTurnConstraints,
+} from "../../src/core/turn-constraints.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
@@ -78,6 +85,21 @@ test("an interactive or ACP session's tool limits bound every turn, before and a
 	}
 });
 
+test("--deny-tools removes a tool from the session, every scoped turn and a worker ceiling that falls back to it", () => {
+	const limits = extractGlobalFlags(["--deny-tools", "bash"]).toolLimits;
+	assert.deepEqual(limits?.deniedTools, ["bash"]);
+	const turn = narrowTurnConstraints(limits, { allowedTools: ["read", "bash"] });
+	assert.equal(turnAllowsTool(turn, "bash"), false);
+	assert.equal(turnAllowsTool(turn, "read"), true);
+	assert.equal(turnDelegatesTool(turn, "bash"), false);
+	assert.equal(turnDelegatesTool({ ...turn, delegatedTools: ["bash"] }, "bash"), true);
+	assert.match(
+		extractGlobalFlags(["--allow-tools", "read", "--deny-tools", "read"]).error ?? "",
+		/removes every tool --allow-tools names \(read\)/,
+	);
+	assert.equal(extractGlobalFlags(["--allow-tools", "read,bash", "--deny-tools", "bash"]).error, undefined);
+});
+
 test("a TUI /run to an external agent under --delegate-tools read dispatches a worker limited to read", async () => {
 	const toolLimits = extractGlobalFlags(["--delegate-tools", "read"]).toolLimits;
 	assert.ok(toolLimits);
@@ -114,4 +136,25 @@ test("a TUI /run to an external agent under --delegate-tools read dispatches a w
 		loop.dispose();
 		await loop.whenSettled();
 	}
+});
+
+test("run caps survive snapshot and narrowing, stay with the main run, and count across turns", () => {
+	const caps = snapshotTurnConstraints({ mode: "change", runCaps: { maxRequests: 3, maxToolCalls: 2 } });
+	assert.deepEqual(caps?.runCaps, { maxRequests: 3, maxToolCalls: 2 });
+	assert.deepEqual(narrowTurnConstraints(caps, { runCaps: { maxRequests: 1 } })?.runCaps, {
+		maxRequests: 1,
+		maxToolCalls: 2,
+	});
+	assert.equal(caps === undefined ? "none" : workerTurnConstraints(caps).runCaps, undefined);
+	assert.throws(() => snapshotTurnConstraints({ runCaps: { maxRequests: 0 } }), /Invalid explicit turn constraints/);
+	const counter = createRunCapCounter();
+	assert.equal(counter.admitRequest(caps?.runCaps), undefined);
+	assert.equal(counter.admitToolCalls(caps?.runCaps, 2), undefined);
+	// A later turn without caps (a repair turn) still counts against the first turn's.
+	assert.equal(counter.admitRequest(undefined), undefined);
+	assert.match(counter.admitToolCalls(undefined, 1) ?? "", /^max_tool_calls: .*\(limit 2, observed 3\)/);
+	assert.match(counter.admitRequest(undefined) ?? "", /^max_tool_calls:/);
+	const requests = createRunCapCounter();
+	for (let sent = 0; sent < 3; sent += 1) assert.equal(requests.admitRequest({ maxRequests: 3 }), undefined);
+	assert.match(requests.admitRequest({ maxRequests: 3 }) ?? "", /^max_requests: .*\(limit 3, observed 3\)/);
 });

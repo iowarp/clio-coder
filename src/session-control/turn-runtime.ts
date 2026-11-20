@@ -340,6 +340,14 @@ export interface TurnRuntimeDeps {
 	 * batch settled and before the next model request: true ends the run (F-C16).
 	 */
 	stopAtToolBoundary?: () => boolean;
+	/**
+	 * Per-run main-loop caps (`run --max-requests`, `--max-tool-calls`): a refusal
+	 * reason ends the request or refuses the batch, undefined admits it.
+	 */
+	runCaps?: {
+		admitRequest(): string | undefined;
+		admitToolCalls(count: number): string | undefined;
+	};
 	middleware: TurnMiddleware;
 	retrySettings: () => RetrySettings;
 	/** Stable Clio session id forwarded only to gateway runtimes that understand it. */
@@ -1295,6 +1303,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			steeringMode: "all",
 			followUpMode: "all",
 			...(gatewaySessionId ? { sessionId: gatewaySessionId } : {}),
+			// Refused calls count toward the run's tool-call cap as executed ones do.
+			beforeToolBatch: ({ assistantMessage }) => {
+				const calls = assistantMessage.content.filter((block) => block.type === "toolCall");
+				const capRefusal = deps.runCaps?.admitToolCalls(calls.length);
+				return capRefusal !== undefined ? { reason: capRefusal } : undefined;
+			},
 			beforeToolCall: async ({ assistantMessage, toolCall }) => selfCompactSiblingRefusal(toolCall, assistantMessage),
 			beforeStreamRequest: stageAdmission(async ({ model, context: request, options: streamOptions }, hold) => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
@@ -1457,6 +1471,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					});
 				preInvocationStage = "admission";
 				const admission = deps.continuity?.admission() ?? { block: false };
+				// Counted only here, once nothing else blocks: the request is about to be sent.
+				const capRefusal = admission.block ? undefined : deps.runCaps?.admitRequest();
+				if (capRefusal !== undefined) return { block: true, reason: capRefusal };
 				admittedMessages = admission.block ? [] : resolved.messages;
 				admittedSystemPrompt = admission.block ? "" : (resolved.systemPrompt ?? "");
 				return admission;

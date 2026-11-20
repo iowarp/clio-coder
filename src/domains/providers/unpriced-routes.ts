@@ -21,19 +21,26 @@ export function resolveTarget(
  * takes. Paid-request admission checks only known or estimated pricing, so
  * the cap cannot bound these; LiteLLM stays unknown until its target declares
  * `pricing`. A model a coordinator names one-off is not known at boot.
+ *
+ * `reach` narrows the set to what `run --require-priced` checks before a main run (SPEC 6.9): `main` is the chat
+ * and compaction routes of a `--no-delegate` run, `delegating` adds the fleet default, profiles and roster members.
+ * Dispatch admission rechecks the route each worker actually resolves.
  */
 export function unpricedRunRoutes(
 	settings: Readonly<ClioSettings>,
 	providers: ProvidersContract | undefined,
+	reach: "all" | "delegating" | "main" = "all",
 ): string[] {
 	if (!providers) return [];
-	const routes: Array<{ target: string | null | undefined; model?: string | null | undefined }> = [
-		settings.chat,
-		settings.fleet.default,
-		...Object.values(settings.fleet.profiles),
-		...Object.values(settings.fleet.rosters).flatMap((roster) => roster.members),
-		...settings.targets.map((target) => ({ target: target.id })),
-	];
+	const routes: Array<{ target: string | null | undefined; model?: string | null | undefined }> = [settings.chat];
+	if (reach !== "main") {
+		routes.push(
+			settings.fleet.default,
+			...Object.values(settings.fleet.profiles),
+			...Object.values(settings.fleet.rosters).flatMap((roster) => roster.members),
+		);
+	}
+	if (reach === "all") routes.push(...settings.targets.map((target) => ({ target: target.id })));
 	const compaction = settings.context.compaction.model;
 	if (compaction) {
 		try {

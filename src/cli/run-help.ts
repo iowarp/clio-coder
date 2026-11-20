@@ -1,7 +1,7 @@
 import { parseRunCliArgs } from "./args.js";
 
 export const RUN_USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--resume <id|prefix|name>|--continue] [--fork] [--name <text>] [--fail-on-noop] [--timeout <seconds>] [--verify "<cmd>" [--verify-timeout <seconds>]] [--max-cost-usd <N>] [--answers <file.yaml>] [--agent <recipe-id>] [--] "<task>"\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--resume <id|prefix|name>|--continue] [--fork] [--name <text>] [--fail-on-noop] [--timeout <duration>] [--verify "<cmd>" [--verify-timeout <duration>]] [--max-cost-usd <N>] [--max-requests <N>] [--max-tool-calls <N>] [--sandbox required] [--require-priced] [--answers <file.yaml>] [--agent <recipe-id>] [--] "<task>"\n';
 
 export const RUN_HELP = `clio-coder run [flags] [--] "<task>"
 
@@ -20,6 +20,8 @@ Flags:
   --record                  save a bounded redacted display asciicast for --agent dispatch
   --turn-mode <mode>        main-agent workflow: answer|proposal|change; not an authorization grant
   --allow-tools <names>     main-agent capability allowlist, comma-separated; none disables all tools
+  --deny-tools <names>      remove these capabilities from the main agent's tools, comma-separated, also from an
+                            --allow-tools list (denying all of it is exit 2); without --delegate-tools workers lose them too
   --no-delegate             forbid main-agent dispatch for this task and its continuations
   --delegate-tools <names>  tools dispatched workers may hold, independent of --allow-tools; none gives workers no tools
   --temperature <N>         one-run sampler override for supported local/OpenAI-compatible runtimes
@@ -52,17 +54,37 @@ Flags:
   --name <text>             name this run's session (the new, resumed or forked one)
   --fail-on-noop            also exit 1 when tools ran and none succeeded; a text-only answer or an answer/proposal
                             turn is not a no-op (see below)
-  --timeout <seconds>       wall-clock limit for the whole run; exit 124 on expiry
+  --timeout <duration>      wall-clock limit for the whole run: 90, 90s, 15m, 2h or 500ms (a bare number is
+                            seconds); exit 124 on expiry
   --verify "<cmd>"          an acceptance check for this run only, repeatable: bash runs it in the run's cwd after
                             the turn, and the finish gate counts the agent's own run of it (see below)
-  --verify-timeout <secs>   limit for each --verify check (default 300); a check that runs over fails
+  --verify-timeout <dur>    limit for each --verify check (default 300s), a duration as --timeout; a check that
+                            runs over fails
+  --fail-on-verify          exit 1 (cause verify_failed) when a --verify check failed or timed out; a check a
+                            cancellation or the deadline skipped never counts
+  --on-permission deny|fail deny (default) refuses an ask a headless run cannot approve and lets the turn go on;
+                            fail ends the run at the first one: exit 3, cause permission_required
+  --dry-run                 print what the run would do (route, tools, autonomy, sandbox, limits, --verify checks
+                            with authority host) and exit 0: no session, no model call, no check runs; with
+                            --output-format json it is the v2 envelope with outcome previewed and plan
+  --sandbox required        tighten-only, this run: safety.sandbox required for the main agent and its workers; a
+                            host without an OS sandbox exits 2 before boot
+  --require-priced          refuse unpriced routes this run can reach (exit 2 naming them): chat and compaction
+                            with --no-delegate, the fleet routes too otherwise, the previewed route with --agent;
+                            each dispatch is also refused at admission when its resolved route is unpriced
+  --max-requests <N>        provider requests the main agent loop may send in this run, once per attempt (retries,
+                            compaction, side calls and workers do not count); exit 4, cause max_requests
+  --max-tool-calls <N>      tool calls the main agent may make in this run, refused ones and each call of a parallel
+                            batch included; a batch that would pass it does not run; exit 4, cause max_tool_calls.
+                            safety.limits.chatToolCallsPerTurn still applies per turn. Both are refused with --agent
   --max-cost-usd <N>        priced spend this run may add: main agent, compaction and dispatched workers are each
                             admitted only while under it, and running workers are stopped when it is reached; exit 4
                             when it stops the run. Spend can pass it by the model calls already in flight then: one per
                             running worker plus the main agent's. Unpriced routes are not bounded; stderr names each
                             configured one: chat, compaction, fleet default, fleet profiles (which recipe pins name),
                             roster members and every target at its default model. A model the main agent names for one
-                            dispatch is not checked
+                            dispatch is not checked. With --agent: the worker's route is admitted only when its
+                            conservative cost estimate is under N
   --answers <file.yaml>     answer the questions only the author may answer (extension interviews, operator_only
                             ask_user questions) from this file; an unanswered one ends the run with exit 5 (see below)
   --agent <recipe-id>       dispatch a fleet agent instead of the main agent
@@ -70,6 +92,7 @@ Flags:
   --agent-runtime <id>      pick the first fleet profile whose target uses this runtime
   --tool-profile <name>     restrict dispatched-agent tools: minimal-local|science-local|full-agent
   --require <capability>    capability the dispatch target must advertise (repeatable)
+  --worktree                run the --agent worker in a Clio-created task worktree, kept on its branch for review
   --skill <path>            make one explicit skill available for this run, repeatable
   --no-skills               disable skill discovery while still honoring --skill
 

@@ -221,6 +221,8 @@ describe("headless no-op contract through the built binary", () => {
 		packageScripts?: Record<string, string>;
 		turnMode?: "answer" | "proposal" | "change";
 		prompt?: string;
+		flags?: ReadonlyArray<string>;
+		settingsPatch?: (yaml: string) => string;
 	}) {
 		const scratch = headlessScratch("clio-coder-noop-");
 		scratches.push(scratch);
@@ -229,6 +231,10 @@ describe("headless no-op contract through the built binary", () => {
 		});
 		fixtures.push(fixture);
 		seedOpenAICompatToolOrchestrator(scratch.configDir, fixture.url, input.autonomy);
+		if (input.settingsPatch) {
+			const settingsPath = join(scratch.configDir, "settings.yaml");
+			writeFileSync(settingsPath, input.settingsPatch(readFileSync(settingsPath, "utf8")));
+		}
 		const project = join(scratch.root, "project");
 		mkdirSync(project);
 		writeFileSync(join(project, "sentinel.txt"), "blocked is harmless fixture text\n");
@@ -243,6 +249,7 @@ describe("headless no-op contract through the built binary", () => {
 				input.autonomy,
 				...(input.failOnNoop ? ["--fail-on-noop"] : []),
 				...(input.turnMode ? ["--turn-mode", input.turnMode] : []),
+				...(input.flags ?? []),
 				input.prompt ?? "Apply the change.",
 			],
 			{ env: scratch.env, cwd: project },
@@ -253,8 +260,70 @@ describe("headless no-op contract through the built binary", () => {
 		ok(envelope);
 		strictEqual(envelope.exitCode, turn.code, "the receipt and the process must agree on the exit code");
 		strictEqual(readFileSync(join(project, "sentinel.txt"), "utf8"), "blocked is harmless fixture text\n");
-		return { turn, envelope, project };
+		return { turn, envelope, project, fixture };
 	}
+
+	test("--on-permission fail ends the run at the first refused ask with exit 3 before another request", async () => {
+		const { turn, envelope, fixture } = await headlessTurn({
+			autonomy: "default",
+			steps: [deniedInline, deniedInline],
+			failOnNoop: false,
+			flags: ["--on-permission", "fail"],
+		});
+		strictEqual(turn.code, 3, turn.stderr);
+		strictEqual(envelope.outcomeDetail, "permission_required");
+		match(turn.stderr, /--on-permission fail: bash needed approval/);
+		// Main-loop requests carry the tool set; a side call (title, judge) carries none and is not a continuation.
+		const mainLoop = fixture.requests.filter((request) => Array.isArray(request.tools) && request.tools.length > 0);
+		strictEqual(mainLoop.length, 1);
+	});
+
+	const readSentinel = (id: string): OpenAICompatToolCallScript => ({
+		id,
+		name: "read",
+		arguments: { path: "sentinel.txt" },
+	});
+	const lastJson = (stdout: string): Record<string, unknown> =>
+		JSON.parse(stdout.trim().split("\n").filter(Boolean).at(-1) ?? "{}") as Record<string, unknown>;
+
+	test("--max-requests stops the main loop before the request past the cap: exit 4, cause max_requests", async () => {
+		const { turn, envelope, fixture } = await headlessTurn({
+			autonomy: "default",
+			steps: [readSentinel("r1"), readSentinel("r2"), readSentinel("r3")],
+			failOnNoop: false,
+			flags: ["--max-requests", "2", "--output-format", "json"],
+		});
+		strictEqual(turn.code, 4, turn.stderr);
+		strictEqual(envelope.outcomeDetail, "max_requests");
+		const mainLoop = fixture.requests.filter((request) => Array.isArray(request.tools) && request.tools.length > 0);
+		strictEqual(mainLoop.length, 2);
+		const causes = lastJson(turn.stdout).causes as Array<Record<string, unknown>>;
+		deepStrictEqual(
+			{ code: causes[0]?.code, limit: causes[0]?.limit, observed: causes[0]?.observed },
+			{ code: "max_requests", limit: 2, observed: 2 },
+		);
+		// SPEC 6.9: the envelope lists what was requested and what is enforced.
+		deepStrictEqual(lastJson(turn.stdout).limits, { requested: { maxRequests: 2 }, enforced: ["maxRequests"] });
+	});
+
+	test("--max-tool-calls refuses the batch past the cap and ends the run: exit 4, cause max_tool_calls", async () => {
+		const { turn, envelope, fixture } = await headlessTurn({
+			autonomy: "default",
+			steps: [readSentinel("t1"), readSentinel("t2"), readSentinel("t3")],
+			failOnNoop: false,
+			flags: ["--max-tool-calls", "1", "--output-format", "json"],
+		});
+		strictEqual(turn.code, 4, turn.stderr);
+		strictEqual(envelope.outcomeDetail, "max_tool_calls");
+		// Request 2 brought the refused call; no request follows it.
+		const mainLoop = fixture.requests.filter((request) => Array.isArray(request.tools) && request.tools.length > 0);
+		strictEqual(mainLoop.length, 2);
+		const causes = lastJson(turn.stdout).causes as Array<Record<string, unknown>>;
+		deepStrictEqual(
+			{ code: causes[0]?.code, limit: causes[0]?.limit, observed: causes[0]?.observed },
+			{ code: "max_tool_calls", limit: 1, observed: 2 },
+		);
+	});
 
 	for (const failOnNoop of [true, false]) {
 		test(`a run whose shell write was denied ${failOnNoop ? "fails under --fail-on-noop" : "also fails without the flag"}`, async () => {
@@ -414,6 +483,43 @@ describe("headless no-op contract through the built binary", () => {
 		strictEqual(envelope.outcome, "failed");
 		strictEqual(envelope.outcomeDetail, "noop");
 		match(turn.stderr, /no-op: the delegated task never started \([^)]*unknown fleet node 'no-such-node'/u);
+	});
+
+	test("--require-priced passes a priced main route and refuses an unpriced dispatch at admission, back to the model", async () => {
+		const { turn, fixture } = await headlessTurn({
+			autonomy: "default",
+			steps: [
+				{
+					id: "call-dispatch",
+					name: "dispatch",
+					arguments: { agent: "coder", task: "Apply the change.", target: "unpriced", model: "mock-model" },
+				},
+			],
+			failOnNoop: false,
+			reply: "The worker route was refused.",
+			flags: ["--require-priced"],
+			// mock-chat gains rates; a copy without them is a route no fleet setting names, so only admission sees it.
+			settingsPatch: (yaml) => {
+				const block = /^ {2}- id: mock-chat\n[\s\S]*?^ {6}- mock-model\n/m.exec(yaml)?.[0];
+				ok(block, "seeded mock-chat target block");
+				const priced = block.replace(
+					"    defaultModel: mock-model\n",
+					"    defaultModel: mock-model\n    pricing:\n      input: 1\n      output: 1\n",
+				);
+				return yaml.replace(block, priced + block.replace("id: mock-chat", "id: unpriced"));
+			},
+		});
+		doesNotMatch(turn.stderr, /routes this run can reach have no known pricing/);
+		const toolMessages = fixture.requests.flatMap((request) =>
+			(Array.isArray(request.messages) ? request.messages : []).filter(
+				(message) => (message as { role?: unknown }).role === "tool",
+			),
+		);
+		match(
+			JSON.stringify(toolMessages),
+			/admission denied: --require-priced: unpriced\/mock-model has no known pricing/,
+			turn.stderr,
+		);
 	});
 
 	test("--fail-on-noop is refused on the --agent path", async () => {

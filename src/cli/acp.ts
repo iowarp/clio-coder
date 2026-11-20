@@ -2,13 +2,13 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 import { MAX_TIMER_DELAY_MS } from "../core/timers.js";
 import type { SessionToolLimits } from "../core/tool-limit-flags.js";
-import { parseToolLimitList, toolLimitConstraints } from "../core/tool-limit-flags.js";
+import { parseToolLimitList, toolLimitConflict, toolLimitConstraints } from "../core/tool-limit-flags.js";
 import { createStdioServerTransport } from "../engine/acp/transport.js";
 import { runClioCommand } from "./clio.js";
 import { restoreStdout, takeOverStdout, writeRawStdout } from "./output-guard.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio-coder acp [--cwd PATH] [--permission-timeout MS] [--autonomy LEVEL] [--allow-tools NAMES] [--delegate-tools NAMES] [--read-only]
+const HELP = `clio-coder acp [--cwd PATH] [--permission-timeout MS] [--autonomy LEVEL] [--allow-tools NAMES] [--delegate-tools NAMES] [--deny-tools NAMES] [--read-only]
 clio-coder acp [--cwd PATH] auth login
 
 Serve CLIO Coder as an Agent Client Protocol v1 agent over stdio.
@@ -25,6 +25,8 @@ Serve CLIO Coder as an Agent Client Protocol v1 agent over stdio.
   --allow-tools NAMES      Limit the session's tools to these comma-separated
                            capabilities, as clio-coder run does; none disables all.
   --delegate-tools NAMES   Limit the tools the session's dispatched workers may hold.
+  --deny-tools NAMES       Remove these capabilities from the session's tools, also
+                           from an --allow-tools list; denying all of it is refused.
   --read-only              Hold every session to the read-only ceiling: no file
                            outside the CLIO Coder home changes.
   auth login               Open interactive Quick Connect for terminal ACP authentication.
@@ -72,7 +74,7 @@ export function parseAcpFlags(args: ReadonlyArray<string>): AcpFlags | string {
 			flags.readOnly = true;
 			continue;
 		}
-		if (arg === "--allow-tools" || arg === "--delegate-tools") {
+		if (arg === "--allow-tools" || arg === "--delegate-tools" || arg === "--deny-tools") {
 			if (value === undefined) return `${arg} needs comma-separated capability names, or none`;
 			const names = parseToolLimitList(arg, value);
 			if ("error" in names) return names.error;
@@ -80,6 +82,8 @@ export function parseAcpFlags(args: ReadonlyArray<string>): AcpFlags | string {
 				...flags.toolLimits,
 				...toolLimitConstraints(arg, names),
 			};
+			const conflict = toolLimitConflict(flags.toolLimits);
+			if (conflict !== undefined) return conflict;
 			index += 1;
 			continue;
 		}

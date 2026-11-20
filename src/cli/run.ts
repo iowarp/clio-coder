@@ -7,7 +7,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import { FileReferenceError, readFileArgsAsync } from "../core/file-references.js";
 import { setAutonomousCommitProcess } from "../core/git-commit-attribution.js";
 import { readClioVersion } from "../core/package-root.js";
-import { withRunOverrides } from "../core/run-overrides.js";
+import { requirePricedRefusal, withRunOverrides } from "../core/run-overrides.js";
 import { readStrictLayeredSettings, settingsSourceFor } from "../core/settings-layers.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { getTerminationCoordinator } from "../core/termination.js";
@@ -20,6 +20,7 @@ import { createContextDomainModule } from "../domains/context/runtime.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { agentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
+import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import { WORKER_PROCESS_CLEANUP_BOUND_MS } from "../domains/dispatch/worker-spawn.js";
@@ -28,6 +29,7 @@ import { ensureClioState } from "../domains/lifecycle/index.js";
 import { buildDispatchMemorySection } from "../domains/memory/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { prepareListedModelCapabilities } from "../domains/providers/background-model-metadata.js";
+import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import { runtimeNotRegistered } from "../domains/providers/retired-runtimes.js";
 import { loadSkills, ResourcesDomainModule } from "../domains/resources/index.js";
@@ -42,7 +44,7 @@ import type { HeadlessRunDeadline } from "../entry/boot-options.js";
 import { assistantTextFromEvent } from "../tools/dispatch-event-text.js";
 import { isToolProfileName } from "../tools/profiles.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../worker/spec-contract.js";
-import { parseRunCliArgs, type RunCliArgs } from "./args.js";
+import { parseRunCliArgs, type RunCliArgs, requestedRunLimits, sandboxRequiredRefusal } from "./args.js";
 import { runClioCommand } from "./clio.js";
 import { classifyDefaultTarget } from "./default-target.js";
 import { buildInitialMessage, readPipedStdin } from "./initial-message.js";
@@ -417,6 +419,7 @@ export async function runClioRun(
 				...(parsed.outputLastMessage !== undefined ? { outputLastMessage: parsed.outputLastMessage } : {}),
 				...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
 				...(parsed.timeoutSeconds !== undefined ? { timeoutSeconds: parsed.timeoutSeconds } : {}),
+				limits: requestedRunLimits(parsed),
 			},
 			execute,
 		);
@@ -441,6 +444,9 @@ async function executeRunCommand(
 		{
 			...(parsed.maxContextTokens !== undefined ? { maxContextTokens: parsed.maxContextTokens } : {}),
 			...(parsed.agentId !== undefined && parsed.sampling !== undefined ? { sampling: { ...parsed.sampling } } : {}),
+			// Tighten-only; workers inherit it with the rest of the transport.
+			...(parsed.sandboxRequired === true ? { sandbox: "required" as const } : {}),
+			...(parsed.requirePriced === true ? { requirePriced: true as const } : {}),
 		},
 		async () => {
 			if (parsed.help) {
@@ -459,9 +465,27 @@ async function executeRunCommand(
 				process.stderr.write(USAGE);
 				return 2;
 			}
+			if (parsed.sandboxRequired === true) {
+				// Decided before boot: a required sandbox the host lacks is a usage error, not a run that refuses every command.
+				const { sandboxAvailability } = await import("../core/sandbox/availability.js");
+				const refusal = sandboxRequiredRefusal(sandboxAvailability());
+				if (refusal !== undefined) {
+					writeRunDiagnostic(`clio-coder run: ${refusal}\n`);
+					return 2;
+				}
+			}
 			// Without --agent, --read-only is the main agent's enforced ceiling,
 			// carried in the task scope so every continuation keeps it.
 			if (parsed.readOnly && parsed.agentId === undefined) parsed.constraints = { ...parsed.constraints, readOnly: true };
+			// The per-run caps ride the task scope too, so a later turn of the run still counts.
+			if ((parsed.maxRequests !== undefined || parsed.maxToolCalls !== undefined) && parsed.agentId === undefined)
+				parsed.constraints = {
+					...parsed.constraints,
+					runCaps: {
+						...(parsed.maxRequests !== undefined ? { maxRequests: parsed.maxRequests } : {}),
+						...(parsed.maxToolCalls !== undefined ? { maxToolCalls: parsed.maxToolCalls } : {}),
+					},
+				};
 			if (parsed.constraints && parsed.agentId !== undefined) {
 				writeRunDiagnostic(
 					"clio-coder run: --turn-mode, --allow-tools, --delegate-tools, and --no-delegate apply to the main-agent task\n",
@@ -485,11 +509,6 @@ async function executeRunCommand(
 			// A worker's run settles inside the dispatch domain, where a
 			// failed outcome also feeds retry policy, so the no-op verdict stays a
 			// main-agent contract rather than a flag --agent would silently ignore.
-			if (parsed.maxCostUsd !== undefined && parsed.agentId !== undefined) {
-				writeRunDiagnostic("clio-coder run: --max-cost-usd applies to the main agent, not --agent dispatch\n");
-				process.stderr.write(USAGE);
-				return 2;
-			}
 			if (parsed.failOnNoop && parsed.agentId !== undefined) {
 				writeRunDiagnostic("clio-coder run: --fail-on-noop applies to the main agent, not --agent dispatch\n");
 				process.stderr.write(USAGE);
@@ -574,6 +593,15 @@ async function executeRunCommand(
 					const borrowed = await borrowHeadlessRoute(parsed.target, parsed.model);
 					if (typeof borrowed === "number") return borrowed;
 					if (borrowed !== null) process.stderr.write(`clio-coder run: ${borrowed.notice}\n`);
+					// --dry-run (CLI-L4): resolve and print, before any session, model call or --verify command.
+					if (parsed.dryRun === true) {
+						const { buildRunPlan, writeRunPlan } = await import("./run-plan.js");
+						const settings = borrowed?.settings ?? readSettings();
+						return writeRunPlan(
+							parsed,
+							buildRunPlan(parsed, settings, parsed.verifyTimeoutSeconds ?? DEFAULT_VERIFY_TIMEOUT_SECONDS),
+						);
+					}
 					// No route at all is a configuration refusal before any work: exit 2 under the v2 opt-in. v1 (no
 					// --output-format) keeps its boot diagnostic and exit 1 until 0.9.0.
 					if (borrowed === null && parsed.target === undefined && parsed.outputFormat !== undefined) {
@@ -622,6 +650,8 @@ async function executeRunCommand(
 								...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
 								...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
 								...(parsed.failOnNoop ? { failOnNoop: true } : {}),
+								...(parsed.failOnVerify === true ? { failOnVerify: true } : {}),
+								...(parsed.onPermission === "fail" ? { onPermission: "fail" as const } : {}),
 								...(parsed.maxCostUsd !== undefined ? { maxCostUsd: parsed.maxCostUsd } : {}),
 								...(parsed.verify.length > 0
 									? {
@@ -823,6 +853,11 @@ async function runDispatch(
 	if (parsed.required.length > 0) dispatchReq.requiredCapabilities = parsed.required;
 	if (noSkills) dispatchReq.noSkills = true;
 	if (skillPaths.length > 0) dispatchReq.skillPaths = skillPaths;
+	// As `/run --worktree`: an isolated task worktree, kept for review rather than merged.
+	if (parsed.worktree) Object.assign(dispatchReq, { worktree: true as const, apply: "preserve" as const });
+	// The one worker run's spend bound, checked at route admission against the route's conservative estimate.
+	if (parsed.maxCostUsd !== undefined)
+		dispatchReq.routingIntent = { ...defaultRoutingIntent(dispatchReq), maxCostUsd: parsed.maxCostUsd };
 	try {
 		const settings = effectiveSettings;
 		if (settings.integrations.projectResources?.trustProjectImports) {
@@ -859,7 +894,22 @@ async function runDispatch(
 	if (runProviders) {
 		let workerTargetId = dispatchReq.target;
 		try {
-			workerTargetId = dispatch.preview?.(dispatchReq).targetId ?? workerTargetId;
+			const preview = dispatch.preview?.(dispatchReq);
+			workerTargetId = preview?.targetId ?? workerTargetId;
+			// --require-priced (SPEC 6.9): the one previewed route; admission rechecks the route it resolves.
+			const target = preview !== undefined ? runProviders.getTarget(preview.targetId) : null;
+			const runtime = target ? runProviders.getRuntime(target.runtime) : null;
+			const refusal =
+				preview !== undefined && target && runtime
+					? requirePricedRefusal(
+							resolveEffectivePricing(target, runtime, preview.wireModelId).pricedBy,
+							`${preview.targetId}/${preview.wireModelId}`,
+						)
+					: undefined;
+			if (refusal !== undefined) {
+				writeRunDiagnostic(`clio-coder run: ${refusal}\n`);
+				return stopDomains(2);
+			}
 		} catch {
 			// Admission reports the refusal itself when the run starts.
 		}

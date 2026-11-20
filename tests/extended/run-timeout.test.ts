@@ -198,7 +198,7 @@ describe("clio-coder run --timeout", () => {
 		for (const value of ["0", "-3", "abc", "Infinity"]) {
 			const turn = await runCli(["run", "--timeout", value, "task"], { env: scratch.env, cwd: scratch.root });
 			strictEqual(turn.code, 2, `${value}: ${turn.stderr}`);
-			match(turn.stderr, /--timeout must be a positive number of seconds/);
+			match(turn.stderr, /--timeout: (duration must be greater than zero|expected a duration such as)/);
 		}
 		const missing = await runCli(["run", "--timeout"], { env: scratch.env, cwd: scratch.root });
 		strictEqual(missing.code, 2, missing.stderr);
@@ -239,5 +239,17 @@ describe("clio-coder run --timeout", () => {
 		strictEqual(failing?.exitCode, 3);
 		strictEqual(failing?.passed, false);
 		strictEqual(failing?.ranAfterLastEdit, false);
+	});
+
+	it("--fail-on-verify turns a failed check into exit 1 with cause verify_failed under v2", async () => {
+		const { turn } = await headlessTurn(
+			[{ kind: "tool", name: "write", arguments: { path: "calc.txt", content: "5\n" } }],
+			"default",
+			["--output-format", "json", "--verify", "grep -qx 5 calc.txt", "--verify", "exit 3", "--fail-on-verify"],
+		);
+		strictEqual(turn.code, 1, turn.stderr);
+		const envelope = JSON.parse(turn.stdout) as { causes?: Array<{ code?: string; checks?: string[] }> };
+		strictEqual(envelope.causes?.[0]?.code, "verify_failed");
+		strictEqual(JSON.stringify(envelope.causes?.[0]?.checks), JSON.stringify(["exit 3"]));
 	});
 });
