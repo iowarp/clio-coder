@@ -683,6 +683,18 @@ test("yolo reads a shell script by the floor alone and runs what it cannot read 
 		// Rewriting only the cwd copy leaves the PATH copy bash loads unchanged, so it is still read.
 		for (const command of ["source shadow.sh", ". shadow.sh", "echo ok > shadow.sh; source shadow.sh"])
 			strictEqual(judged(command).reasonCode, "yolo-floor:trust-authority", command);
+		// The script continues from the copy bash loads, the PATH one, so its `D` places the later relative child.
+		const sub = workspace("clio-yolo-script-sub-");
+		writeFileSync(join(sub, "child.sh"), "clio-coder config trust safety\n");
+		writeFileSync(join(onPath, "setup.sh"), `D=${sub}\n`);
+		writeFileSync(join(cwd, "setup.sh"), "true\n");
+		writeFileSync(join(cwd, "parent.sh"), 'source setup.sh\ncd "$D"\nsource ./child.sh\n');
+		strictEqual(judged("bash parent.sh").reasonCode, "yolo-floor:trust-authority");
+		// One copy's write does not hide a child another copy sources.
+		writeFileSync(join(onPath, "pick.sh"), `echo ok > ${join(sub, "child.sh")}\n`);
+		writeFileSync(join(cwd, "pick.sh"), `source ${join(sub, "child.sh")}\n`);
+		writeFileSync(join(cwd, "picker.sh"), "source pick.sh\n");
+		strictEqual(judged("bash picker.sh").reasonCode, "yolo-floor:trust-authority");
 	} finally {
 		process.env.PATH = savedPath;
 	}

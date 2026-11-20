@@ -69,27 +69,6 @@ export function forkScriptShell(shell: ScriptShell): ScriptShell {
 	};
 }
 
-/**
- * Continues `shell` from whichever alternative ran (CLI-P31): every directory
- * any of them may leave it in, and a variable only where all agree on its value.
- */
-export function joinScriptShells(shell: ScriptShell, outcomes: ReadonlyArray<ScriptShell>): void {
-	if (outcomes.length === 0) return;
-	const cwds = new Set<string>();
-	let unknown = false;
-	for (const outcome of outcomes) {
-		if (outcome.cwds === null) unknown = true;
-		else for (const cwd of outcome.cwds) cwds.add(cwd);
-	}
-	shell.cwds = unknown || cwds.size > MAX_SCRIPT_CWDS ? null : [...cwds];
-	const [first, ...rest] = outcomes as [ScriptShell, ...ScriptShell[]];
-	shell.vars = new Map(
-		[...first.vars].filter(([name, value]) => rest.every((outcome) => outcome.vars.get(name) === value)),
-	);
-	shell.exported = new Set(outcomes.flatMap((outcome) => [...outcome.exported]));
-	shell.poisoned = new Set(outcomes.flatMap((outcome) => [...outcome.poisoned]));
-}
-
 /** Compound commands open around a line of one file. */
 type Frame = "branch" | "loop" | "function" | "case-head" | "case-pattern" | "case-body";
 

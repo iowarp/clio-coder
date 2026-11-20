@@ -131,7 +131,6 @@ import {
 	childScriptShell,
 	commandMoveBases,
 	forkScriptShell,
-	joinScriptShells,
 	newScriptReader,
 	newScriptShell,
 	readScriptLine,
@@ -3843,6 +3842,10 @@ function isWrittenFirst(file: string, written: WrittenPaths): boolean {
 	return written.files.has(file) || [...written.trees].some((tree) => isSameOrDescendant(file, tree));
 }
 
+function copyWrittenPaths(written: WrittenPaths): WrittenPaths {
+	return { files: new Set(written.files), trees: new Set(written.trees) };
+}
+
 /** The nearest directory at or above `dir` that holds `.git`, else `dir`. */
 function gitWorkTree(dir: string): string {
 	for (let current = dir; ; current = path.dirname(current)) {
@@ -3971,13 +3974,12 @@ function scanScript(
 		commandWrittenPaths(read.expanded, cwds ?? [scan.callCwd], scan.written);
 		if (depth >= FLOOR_SCRIPT_NEST_DEPTH) continue;
 		for (const source of sources) {
-			// Candidates are alternatives: each sourced one runs from its own copy of the shell, and the script
-			// continues from all of them (CLI-P31).
-			const outcomes: ScriptShell[] = [];
+			// Every candidate is scanned for a refusal from its own copy of the shell and of the writes so far; bash
+			// loads the first one not written first, so the script continues from that copy alone (CLI-P31).
+			let loaded: { shell: ScriptShell; written: WrittenPaths } | null = null;
 			for (const candidate of scriptCandidates(source.path, cwds, source.sourced)) {
-				const branch = forkScriptShell(shell);
-				outcomes.push(branch);
-				if (candidate !== null && isWrittenFirst(candidate, scan.written)) continue;
+				if (candidate === null || isWrittenFirst(candidate, scan.written) || !regularFile(candidate)) continue;
+				const branch: ScriptScan = { ...scan, written: copyWrittenPaths(scan.written) };
 				// `source` runs in this shell; `bash`, `sh` and `exec` start a child that changes nothing here.
 				// A sourced file keeps the script's `$0`; a child shell gets the name it was run by.
 				const names: ScriptNames = source.stdin
@@ -3985,12 +3987,16 @@ function scanScript(
 					: source.sourced
 						? { zero: reader.names.zero, source: source.path }
 						: { zero: source.path, source: source.path };
-				const inner = source.sourced
-					? scanScript(candidate, scan, branch, newScriptReader(read.context, names), depth + 1)
-					: scanScript(candidate, scan, childScriptShell(shell, read.context), newScriptReader("plain", names), depth + 1);
+				const branchShell = source.sourced ? forkScriptShell(shell) : childScriptShell(shell, read.context);
+				const branchReader = newScriptReader(source.sourced ? read.context : "plain", names);
+				const inner = scanScript(candidate, branch, branchShell, branchReader, depth + 1);
 				if (inner !== null) return inner;
+				loaded ??= { shell: branchShell, written: branch.written };
 			}
-			if (source.sourced) joinScriptShells(shell, outcomes);
+			if (loaded === null) continue;
+			for (const file of loaded.written.files) scan.written.files.add(file);
+			for (const tree of loaded.written.trees) scan.written.trees.add(tree);
+			if (source.sourced) Object.assign(shell, loaded.shell);
 		}
 	}
 	return null;
