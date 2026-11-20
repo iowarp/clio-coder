@@ -457,6 +457,8 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 		try {
 			await tty.expect("Esc or q quit");
 			tty.send(ENTER);
+			await tty.expect("What do you have?");
+			tty.send(DOWN.repeat(4) + ENTER);
 			await tty.expect("Where does your model come from?");
 			tty.send(DOWN + ENTER);
 			await tty.expect("Which provider or app do you use?");

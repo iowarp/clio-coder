@@ -21,6 +21,7 @@ import {
 	resolveCopilotSdkEntry,
 } from "../../src/domains/lifecycle/copilot-sdk-install.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { findPinnedTool, resolveVendoredBinary } from "../../src/domains/toolchain/index.js";
 import { runParkedInterview } from "../../src/tools/extension-interview.js";
 import { type HeadlessScratch, headlessScratch } from "../harness/headless-run.js";
 import {
@@ -332,7 +333,7 @@ describe("campaign metrics fold", () => {
 });
 
 describe("campaign entry components", () => {
-	it("an entry reads the operator's installed SDK, and a missing one names the operator's directory", async (t) => {
+	it("an entry reads the operator's installed SDK and vendored tools, and a missing SDK names the operator's directory", async (t) => {
 		const env = await isolateClioEnv("clio-campaign-components-");
 		t.after(env.restore);
 		delete process.env.CLIO_CODER_CLAUDE_SDK_DIR;
@@ -344,14 +345,22 @@ describe("campaign entry components", () => {
 			JSON.stringify({ name: COPILOT_SDK_PACKAGE, version: COPILOT_SDK_VERSION, type: "module", exports: "./sdk.mjs" }),
 		);
 		writeFileSync(join(sdk, "sdk.mjs"), "export class CopilotClient {}\n");
+		const operatorTools = join(env.dir, "operator-data", "tools");
+		const herdr = findPinnedTool("herdr");
+		ok(herdr !== null);
+		const herdrBinary = join(operatorTools, herdr.id, herdr.version, herdr.primaryBinary);
+		mkdirSync(join(herdrBinary, ".."), { recursive: true });
+		writeFileSync(herdrBinary, "#!/bin/sh\n");
 		const configDir = process.env.CLIO_CODER_CONFIG_DIR ?? "";
-		const roots = entryRoots(join(env.dir, "out", "01-luna", "home"), configDir, operatorComponents);
+		const roots = entryRoots(join(env.dir, "out", "01-luna", "home"), configDir, operatorComponents, operatorTools);
 		Object.assign(process.env, entryRootEnv(roots));
 		resetXdgCache();
 
 		const entry = resolveCopilotSdkEntry();
 		ok(entry !== null, "the entry resolves the operator's copilot-sdk");
 		strictEqual(realpathSync(entry), realpathSync(join(sdk, "sdk.mjs")));
+		// A vendored tool the operator installed resolves from their toolchain root, not the entry's empty one.
+		strictEqual(resolveVendoredBinary("herdr")?.binaryPath, herdrBinary);
 
 		// Without the component, the install hint names the operator's directory, never the entry's throwaway home.
 		for (const [error, dir] of [
@@ -363,5 +372,6 @@ describe("campaign entry components", () => {
 		}
 		deepStrictEqual(readdirSync(operatorComponents), ["copilot-sdk"]);
 		strictEqual(existsSync(join(roots.data, "components")), false);
+		strictEqual(existsSync(join(roots.data, "tools")), false);
 	});
 });

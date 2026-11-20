@@ -9,6 +9,7 @@ import type { SessionEntry } from "../session/entries.js";
 import { payloadObject } from "../session/message-projection.js";
 import { loadSessionTelemetrySource } from "../session/telemetry-source.js";
 import { loadTokenSourcesReport, type TokenSourcesReportV1 } from "../session/token-sources.js";
+import { OPERATOR_TOOLS_ENV } from "../toolchain/paths.js";
 
 /** The loop guard's middleware registration id (`LOOP_GUARD_REGISTRATION_ID` in src/engine/loop-guard.ts). */
 const LOOP_GUARD_RULE_ID = "guard.loop";
@@ -120,7 +121,8 @@ export function foldCampaignMetrics(
 /**
  * The Clio roots one entry's run used: the operator's config, and data, state and cache under the entry's home.
  * `components` is the operator's installed components directory, which the entry resolves runtime SDKs from and
- * never writes.
+ * never writes. `tools` is the operator's toolchain root (`<data>/tools`), where the entry looks for a
+ * vendored tool binary after its own, read-only.
  */
 export interface EntryRoots {
 	home: string;
@@ -129,9 +131,15 @@ export interface EntryRoots {
 	state: string;
 	cache: string;
 	components: string;
+	tools: string;
 }
 
-export function entryRoots(home: string, operatorConfig: string, operatorComponents: string): EntryRoots {
+export function entryRoots(
+	home: string,
+	operatorConfig: string,
+	operatorComponents: string,
+	operatorTools: string,
+): EntryRoots {
 	return {
 		home,
 		config: operatorConfig,
@@ -139,6 +147,7 @@ export function entryRoots(home: string, operatorConfig: string, operatorCompone
 		state: join(home, "state"),
 		cache: join(home, "cache"),
 		components: operatorComponents,
+		tools: operatorTools,
 	};
 }
 
@@ -154,6 +163,7 @@ export function entryRootEnv(roots: EntryRoots): Record<string, string> {
 		CLIO_CODER_STATE_DIR: roots.state,
 		CLIO_CODER_CACHE_DIR: roots.cache,
 		[OPERATOR_COMPONENTS_ENV]: roots.components,
+		[OPERATOR_TOOLS_ENV]: roots.tools,
 	};
 }
 
