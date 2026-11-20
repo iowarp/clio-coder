@@ -473,11 +473,30 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		`M="\${TMPDIR}/measure"; d=$M/tpl/rows; rm -rf "\${d}"`,
 		'H=$(mktemp -d "$TMPDIR/probe-XXXXXX"); rm -rf "$H"',
 		'H=$(mktemp -d); rm -rf "$H"',
-		'cd "$TMPDIR" && mkdir -p probe-rows; rm -rf probe-rows',
+		'cd "$TMPDIR" && mkdir -p probe-rows && rm -rf probe-rows',
 	]) {
 		const decision = engine.evaluate(bash(command), "default", { ...atDefault, snapshots: false });
 		strictEqual(decision.kind, "allow", `${command}: ${decision.reasonCode} ${decision.reasons.join("; ")}`);
 		strictEqual(verdict(command, "yolo").startsWith("allow/yolo-admitted:"), false, command);
+	}
+	// A failed cd leaves the shell in the workspace, where a delete after `;` or a newline still runs, and a TMPDIR that
+	// is no directory never moves the shell: each keeps the .git block and the workspace snapshot ask.
+	const absentTemp = join(temp, "xr43-absent");
+	for (const [command, env] of [
+		['cd "$TMPDIR"; rm -rf .git', temp],
+		['cd "$TMPDIR"\nrm -rf src', temp],
+		['cd "$TMPDIR" && mkdir -p x; rm -rf .git', temp],
+		['cd "$TMPDIR" && rm -rf .git', absentTemp],
+	] as const) {
+		process.env.TMPDIR = env;
+		try {
+			strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
+			const decision = engine.evaluate(bash(command), "default", { ...atDefault, snapshots: false });
+			strictEqual(decision.kind, "ask", command);
+			match(decision.reasons.join("; "), /deletes (?:\.git|src) with no workspace snapshot/u, command);
+		} finally {
+			process.env.TMPDIR = temp;
+		}
 	}
 	// XR-43: a link into the workspace, planted in the same call or an earlier one, keeps the delete review.
 	const linkDir = mkdtempSync(join(temp, "xr43-"));
