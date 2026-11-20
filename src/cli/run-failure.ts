@@ -265,16 +265,29 @@ let mainRunNote: MainRunNoteV2 = {};
 /** CLI-5: dispatched failures a later dispatch of the same task delivered, for the envelope's `dispatch.superseded`. */
 let supersededRuns: RunDispatchedRunV2[] = [];
 
-/** Hand the v2 writer the superseded dispatched failures; a no-op for v1 runs. */
-export function noteDispatchSupersededV2(runs: ReadonlyArray<RunJsonDispatchedRunOutcome>): void {
-	if (v2Started === null) return;
-	supersededRuns = runs.map((run) => ({
+/** Every run the main agent dispatched, for the envelope's `dispatch.runs` (row 164); `--agent` lists its receipt instead. */
+let dispatchedRuns: RunDispatchedRunV2[] = [];
+
+function dispatchedRunV2(run: RunJsonDispatchedRunOutcome): RunDispatchedRunV2 {
+	return {
 		runId: run.runId,
 		agentId: run.agentId,
 		...(run.outcome !== null ? { outcome: run.outcome } : {}),
 		...(run.outcomeCode !== null ? { outcomeCode: run.outcomeCode } : {}),
 		...(run.outcomeDetail !== null ? { outcomeDetail: run.outcomeDetail } : {}),
-	}));
+	};
+}
+
+/** Hand the v2 writer the superseded dispatched failures; a no-op for v1 runs. */
+export function noteDispatchSupersededV2(runs: ReadonlyArray<RunJsonDispatchedRunOutcome>): void {
+	if (v2Started === null) return;
+	supersededRuns = runs.map(dispatchedRunV2);
+}
+
+/** Hand the v2 writer every run the main agent dispatched, as they settled; a no-op for v1 runs. */
+export function noteDispatchRunsV2(runs: ReadonlyArray<RunJsonDispatchedRunOutcome>): void {
+	if (v2Started === null) return;
+	dispatchedRuns = runs.map(dispatchedRunV2);
 }
 /** `--dry-run`: the plan the v2 envelope carries with outcome `previewed` (CLI-L4). */
 let runPlan: Readonly<Record<string, unknown>> | undefined;
@@ -580,6 +593,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	heldSteer = [];
 	mainRunNote = {};
 	supersededRuns = [];
+	dispatchedRuns = [];
 	structuredNote = undefined;
 	runPlan = undefined;
 	runCompletion = undefined;
@@ -639,7 +653,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			...(usage !== undefined ? { usage } : {}),
 			verify: { requested: request.verify.length, checks: verifyChecksV2(request.verify, seen.verify, skipReason) },
 			dispatch: {
-				runs: seen.receipt !== undefined ? [seen.receipt] : [],
+				runs: seen.receipt !== undefined ? [seen.receipt] : dispatchedRuns,
 				live: seen.live,
 				undelivered: seen.undelivered,
 				...(supersededRuns.length > 0 ? { superseded: supersededRuns } : {}),

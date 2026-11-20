@@ -335,7 +335,11 @@ export interface RunResultEnvelopeV2 {
 	safety?: MainRunSettlementV2["safety"];
 	verify: MainRunSettlementV2["verify"];
 	dispatch: {
-		runs: RunResult[];
+		/**
+		 * Main run (row 164): every child run the main agent dispatched, retried attempts included, oldest first, each with
+		 * its own outcome; a run the agent canceled through steer reads `canceled`. `--agent`: the one sealed receipt.
+		 */
+		runs: Array<RunResult | RunDispatchedRunV2>;
 		live: RunJsonDispatchedRunOutcome[];
 		undelivered: RunJsonDispatchedRunOutcome[];
 		/** CLI-5: failed runs a later dispatch of the same task delivered; they do not fail the run. Absent when none. */
