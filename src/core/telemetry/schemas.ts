@@ -1234,6 +1234,11 @@ export const RunSettledSchema = Type.Object(
 		 * sealed reader names them as the dispatch result did (FL-6). Absent when there were none and in older journals.
 		 */
 		routeWarnings: Type.Optional(Type.Array(diagnostic, { maxItems: 16 })),
+		/**
+		 * Bytes of the run's answer its parent sees at sync, collect and record, fixed at dispatch and told to the
+		 * worker (M3). Absent in older journals, which read as a lone run's budget.
+		 */
+		answerBudgetBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 })),
 		/** The isolated writer checkout's verdict; its path, branch and changed paths are in the result object. */
 		worktree: nullable(
 			Type.Object(

@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { workerAgent } from "../../src/core/telemetry/context.js";
 import {
 	createTelemetryForwarder,
 	readWorkerTelemetryFrame,
@@ -22,6 +23,7 @@ import { captureWorkerContext, completeHistoryLength, contextHash } from "../../
 import { persistWorkerContextSeed } from "../../src/domains/context/worker/store.js";
 import { renderMarker } from "../../src/domains/context/working-set/marker.js";
 import { createWorkerOutputCapture } from "../../src/domains/dispatch/event-pump.js";
+import type { RunRole } from "../../src/domains/dispatch/obligation.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
@@ -679,7 +681,16 @@ type FauxStep = {
 async function runFauxWorker(
 	dir: string,
 	step: (done: number, requests: number) => FauxStep,
-	options: { agentId: string; task: string; allowedTools: ToolName[]; readOnly?: boolean; contextWindow?: number },
+	options: {
+		agentId: string;
+		task: string;
+		allowedTools: ToolName[];
+		readOnly?: boolean;
+		contextWindow?: number;
+		role?: RunRole;
+		runId?: string;
+		mutationReport?: true;
+	},
 ): Promise<{ requests: string[]; events: unknown[]; exitCode: number }> {
 	const requests: string[] = [];
 	const server = createServer(async (req, res) => {
@@ -731,6 +742,13 @@ async function runFauxWorker(
 				budget: { mode: "advisory", toolCalls: 60, readReserve: 0, synthesis: true, hardCap: 80 },
 				noSkills: true,
 				cwd: dir,
+				...(options.role !== undefined ? { role: options.role } : {}),
+				...(options.mutationReport === true
+					? { helperResult: true as const, resultContract: { kind: "mutation-report" as const } }
+					: {}),
+				...(options.runId !== undefined
+					? { telemetryContext: { sessionId: null, runId: options.runId, agent: workerAgent(options.runId) } }
+					: {}),
 			},
 			(event) => void events.push(event),
 		);
@@ -839,6 +857,116 @@ test("a worker past 80% of its window with no change is told once to report, unl
 		ok(writer.requests.length > 2, "the writer reached requests past 80%");
 		ok(!writer.requests.some((request) => request.includes("Host note:")), "a worker that wrote gets no host turn");
 	} finally {
+		env.restore();
+	}
+});
+
+test("every role with a result hands back at its context share, whatever tools it holds (M3)", {
+	timeout: 30_000,
+}, async () => {
+	const env = await isolateClioEnv("clio-coder-worker-handback-");
+	const fired: Array<{ runId: string; ruleId: string; evidence?: string }> = [];
+	const unsubscribe = telemetryHub().subscribe("middleware.fired", (payload, context) => {
+		const runId = (context as { runId?: string } | undefined)?.runId ?? "";
+		fired.push({ runId, ruleId: payload.ruleId, ...(payload.evidence ? { evidence: payload.evidence } : {}) });
+	});
+	try {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.context.compaction.threshold = 0.95;
+		mkdirSync(join(env.dir, "config"), { recursive: true });
+		writeFileSync(join(env.dir, "config/settings.yaml"), JSON.stringify(settings));
+		// 65,536 less the 8,192 output reserve leaves 57,344 usable: 42,000 is past 0.70 of it, 50,000 past 0.85.
+		const tools = (requests: string[]) =>
+			requests.map((raw) => (JSON.parse(raw) as { tools?: unknown[] }).tools?.length ?? 0);
+		const reads = (tokens: (done: number) => number) => (done: number) => ({
+			call: done < 3 ? { name: "read", arguments: { path: `${"abc"[done]}.txt` } } : null,
+			promptTokens: tokens(done),
+		});
+		// An explorer holding write (a delivery tool) still hands back at 0.70: the role decides, not the tool list.
+		const explorer = await runFauxWorker(
+			env.dir,
+			reads(() => 42_000),
+			{
+				agentId: "scout",
+				task: "Review a.txt, b.txt and c.txt.",
+				allowedTools: ["read", "write"],
+				contextWindow: 65_536,
+				role: "explorer",
+				runId: "run-handback-explorer",
+			},
+		);
+		equal(explorer.exitCode, 0);
+		const explorerTools = tools(explorer.requests);
+		ok((explorerTools[0] ?? 0) > 0 && explorerTools.at(-1) === 0, JSON.stringify(explorerTools));
+		ok(explorerTools.length < 5, "the explorer's next round after the 0.70 request is its handback");
+		ok(
+			(explorer.requests[explorerTools.indexOf(0)] ?? "").includes("Current execution phase: final synthesis"),
+			"the text-only crossing round carries the locked-synthesis directive",
+		);
+		ok(
+			!explorer.events.some(
+				(event) => (event as { payload?: { outcomeCode?: string } }).payload?.outcomeCode === "worker_context_exhausted",
+			),
+		);
+		deepStrictEqual(
+			fired.filter((entry) => entry.runId === "run-handback-explorer" && entry.ruleId === "worker.handback"),
+			[{ runId: "run-handback-explorer", ruleId: "worker.handback", evidence: "bound:context@worker" }],
+		);
+		// A builder at 0.70 is told once to write or report and keeps its tools; it hands back at 0.85.
+		const builder = await runFauxWorker(
+			env.dir,
+			reads((done) => (done < 2 ? 42_000 : 50_000)),
+			{
+				agentId: "coder",
+				task: "Check a.txt, b.txt and c.txt, then write out.txt.",
+				allowedTools: ["read", "write"],
+				contextWindow: 65_536,
+				role: "builder",
+				runId: "run-handback-builder",
+			},
+		);
+		equal(builder.exitCode, 0);
+		const builderTools = tools(builder.requests);
+		ok(builderTools.slice(0, 3).every((count) => count > 0) && builderTools.at(-1) === 0, JSON.stringify(builderTools));
+		const noted = builder.requests.filter((request) => request.includes("Host note:"));
+		ok(noted.length > 0, "the builder is told at 0.70");
+		match(noted[0] ?? "", /passed 70% of its usable context without a workspace change/);
+		ok(fired.some((entry) => entry.runId === "run-handback-builder" && entry.evidence === "bound:context@worker"));
+		// A builder that owes a mutation report, on a route that offers the helper only at the handoff: the crossing
+		// round itself offers the helper, and the run submits through it.
+		const report = { mutatedPaths: [], validations: [], summary: "Checked the three files.", commitMessage: null };
+		const structured = await runFauxWorker(
+			env.dir,
+			(done) =>
+				done < 3
+					? reads((read) => (read < 2 ? 42_000 : 50_000))(done)
+					: { call: { name: "clio_submit_result", arguments: report }, promptTokens: 50_000 },
+			{
+				agentId: "coder",
+				task: "Check a.txt, b.txt and c.txt, then report.",
+				allowedTools: ["read", "write"],
+				contextWindow: 65_536,
+				role: "builder",
+				mutationReport: true,
+			},
+		);
+		const names = (raw: string) =>
+			((JSON.parse(raw) as { tools?: Array<{ function?: { name?: string } }> }).tools ?? []).map(
+				(tool) => tool.function?.name,
+			);
+		ok(!names(structured.requests[0] ?? "{}").includes("clio_submit_result"), "the work phase hides the helper");
+		equal(structured.requests.length, 4, "three reads, then the crossing round submits");
+		const crossing = JSON.parse(structured.requests[3] ?? "{}") as { tool_choice?: { function?: { name?: string } } };
+		ok(names(structured.requests[3] ?? "{}").includes("clio_submit_result"), "the crossing round offers the helper");
+		equal(crossing.tool_choice?.function?.name, "clio_submit_result");
+		equal(structured.exitCode, 0);
+		const accepted = structured.events.filter(
+			(event) => (event as { type?: string }).type === "clio_coder_helper_result",
+		) as Array<{ payload: { kind?: string; data?: unknown } }>;
+		equal(accepted.length, 1);
+		equal(accepted[0]?.payload.kind, "mutation-report");
+	} finally {
+		unsubscribe();
 		env.restore();
 	}
 });

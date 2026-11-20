@@ -283,8 +283,11 @@ it("seals a conforming report larger than the receipt floor without truncation, 
 function setup(outputs: readonly string[]) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;
+	// A run that answers nothing must not cool the target down for the rest of its batch.
+	settings.fleet.retry.breakerThreshold = 100;
 	settings.safety.autonomy = "yolo";
-	const context = dispatchStubContext({ settings });
+	// Room for the twelve-run batch (M3).
+	const context = dispatchStubContext({ settings, scheduling: { maxWorkers: () => 12 } });
 	const agents = context.getContract("agents");
 	ok(agents);
 	const specs: WorkerSpec[] = [];
@@ -355,18 +358,173 @@ it("round-trips a 1200-word cited Coder explanation through dispatch, the receip
 		if (result.kind !== "ok") return;
 		const run = bundle.contract.listRuns()[0];
 		ok(run);
-		// The default dispatch return is compact; the sealed record holds the whole report (WTF-P 0.8.3 C3).
-		ok(!result.output.includes("Stencil note 10."));
-		match(result.output, new RegExp(`the whole answer is in monitor\\(mode="record", run_id="${run.id}"\\)`, "u"));
+		// A lone run's compact return shows its whole 12,000-byte answer budget, the one its collect and record use (M3).
+		ok(result.output.includes("Stencil note 10."), result.output);
+		ok(!/answer excerpt/u.test(result.output), result.output);
 		const record = await monitor.run({ mode: "record", run_id: run.id }, {});
 		ok(record.kind === "ok" && record.output.includes("Stencil note 10."));
 		const collected = await monitor.run({ mode: "collect", run_ids: [run.id] }, {});
 		strictEqual(collected.kind, "ok");
 		if (collected.kind !== "ok") return;
-		match(collected.output, /answer excerpt: \d+ of \d+ bytes; the whole answer is in monitor\(mode="record"/u);
+		// A lone run's 12 KB answer budget delivers the answer whole at collect too (XR-62, M3).
+		ok(Buffer.byteLength(output, "utf8") > 2000 && Buffer.byteLength(output, "utf8") < 12_000);
+		ok(collected.output.includes("Stencil note 10."), collected.output);
+		ok(!/answer excerpt|helper result excerpt/u.test(collected.output), collected.output);
 		ok(!collected.output.includes("stored output truncated"));
 	} finally {
 		await bundle.extension.stop?.();
+	}
+});
+
+it("fixes one answer budget per run at dispatch: told to the worker, sealed, and the same at sync, collect and record (M3)", {
+	timeout: 30_000,
+}, async () => {
+	const body = (name: string, bytes: number) =>
+		report(`${`${name} note. `.repeat(Math.ceil(bytes / (name.length + 7))).slice(0, bytes)} ${name} closing.`);
+	const outputs = [body("Alpha", 2_800), body("Bravo", 3_200), body("Charlie", 10_000)];
+	const { bundle, dispatch, monitor, specs } = setup(outputs);
+	await bundle.extension.start();
+	try {
+		const result = await dispatch.run(
+			{
+				tasks: ["Explain alpha.", "Explain bravo.", "Explain charlie."].map((task) => ({ agent: "coder", task })),
+				intent,
+			},
+			{},
+		);
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		// Three runs share 12,000 bytes: each worker is told 4,000 and each seal carries it.
+		strictEqual(specs.length, 3);
+		for (const spec of specs) {
+			const told = spec.dynamicPromptMessages?.find((message) => message.id === "dispatch-answer-budget");
+			match(told?.body ?? "", /first 4000 bytes of your final answer/u);
+		}
+		const sealedRun = (output: string) => {
+			for (const run of bundle.contract.listRuns()) {
+				const receipt = readVerifiedRun(clioStateDir(), run.id);
+				if (receipt && resolvedRunResult(receipt).output?.text === output) return { runId: run.id, receipt };
+			}
+			throw new Error("no sealed run carries the expected output");
+		};
+		const [alpha, bravo, charlie] = outputs.map(sealedRun);
+		ok(alpha && bravo && charlie);
+		for (const { receipt } of [alpha, bravo, charlie]) strictEqual(receipt.settled.answerBudgetBytes, 4_000);
+		const pointer = `the whole answer is in monitor(mode="answer", run_id=${JSON.stringify(charlie.runId)})`;
+		const collected = await monitor.run(
+			{ mode: "collect", run_ids: [alpha.runId, bravo.runId, charlie.runId], timeout_ms: 5_000 },
+			{},
+		);
+		strictEqual(collected.kind, "ok");
+		if (collected.kind !== "ok") return;
+		for (const [label, view] of [
+			["sync", result.output],
+			["collect", collected.output],
+		] as const) {
+			ok(view.includes("Alpha closing.") && view.includes("Bravo closing."), `${label} shows the short answers whole`);
+			ok(!view.includes("Charlie closing."), `${label} cuts the long answer at its budget`);
+			match(view, /answer excerpt: (\d+) of \d+ bytes/u, label);
+			ok(Number(/answer excerpt: (\d+) of/u.exec(view)?.[1]) <= 4_000, label);
+			ok(view.includes(pointer), `${label} names the call that returns the rest`);
+		}
+		const record = await monitor.run({ mode: "record", run_id: charlie.runId }, {});
+		ok(record.kind === "ok" && !record.output.includes("Charlie closing."), "the record shows the same budget");
+		ok(record.kind === "ok" && record.output.includes("answer cut at 4000 bytes"));
+		const answer = await monitor.run({ mode: "answer", run_id: charlie.runId }, {});
+		ok(answer.kind === "ok" && answer.output === outputs[2], "mode=answer returns the sealed answer alone");
+	} finally {
+		await bundle.extension.stop?.();
+	}
+	// Twelve runs at the 2,000-byte floor, each answering within it, overrun the 20,000-byte sync cap together: every
+	// run still shows its heading, and each the cap cuts names the call that returns its whole answer.
+	const names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett", "Kilo"];
+	const twelve = [...names, "Lima"].map((name) => body(name, 1_750));
+	for (const output of twelve) ok(Buffer.byteLength(output, "utf8") <= 2_000);
+	const batch = setup(twelve);
+	await batch.bundle.extension.start();
+	try {
+		const result = await batch.dispatch.run(
+			{ tasks: twelve.map((_, index) => ({ agent: "coder", task: `Explain part ${index + 1}.` })), intent },
+			{},
+		);
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		strictEqual(batch.specs.length, 12);
+		// The read-only normalization notices precede the formatted result outside its cap.
+		const formatted = result.output
+			.split("\n")
+			.filter((line) => !line.startsWith("[dispatch normalize]"))
+			.join("\n")
+			.trimStart();
+		const sealed = batch.bundle.contract.listRuns().flatMap((run) => {
+			const receipt = readVerifiedRun(clioStateDir(), run.id);
+			const text = receipt ? resolvedRunResult(receipt).output?.text : undefined;
+			return receipt && text !== undefined && twelve.includes(text) ? [{ runId: run.id, receipt, text }] : [];
+		});
+		strictEqual(sealed.length, 12);
+		let cut = 0;
+		for (const { runId, receipt, text } of sealed) {
+			strictEqual(receipt.settled.answerBudgetBytes, 2_000);
+			const closing = /"summary":"(\w+) note/u.exec(text)?.[1];
+			match(formatted, new RegExp(`^- ${runId} agent=coder`, "mu"), `${runId} keeps its heading`);
+			if (formatted.includes(`${closing} closing.`)) continue;
+			cut += 1;
+			ok(
+				formatted.includes(`monitor(mode="answer", run_id=${JSON.stringify(runId)})`),
+				`${runId} names where its whole answer is`,
+			);
+		}
+		ok(cut > 0, "the batch overran the cap");
+		ok(Buffer.byteLength(formatted, "utf8") <= 20_000, String(Buffer.byteLength(formatted, "utf8")));
+	} finally {
+		await batch.bundle.extension.stop?.();
+	}
+	// At max_output_bytes 1024 not even the twelve headings fit: no run vanishes, each shown run keeps its id, outcome and
+	// retrieval call, and one closing line names the rest. A run that sealed no answer points at its record instead.
+	const tight = setup(["", ...twelve.slice(1)]);
+	await tight.bundle.extension.start();
+	try {
+		const result = await tight.dispatch.run(
+			{
+				tasks: twelve.map((_, index) => ({ agent: "coder", task: `Explain part ${index + 1}.` })),
+				intent,
+				max_output_bytes: 1_024,
+			},
+			{},
+		);
+		// The silent run fails the batch, so the result is an error carrying the same formatted body.
+		const body = result.kind === "ok" ? result.output : result.message;
+		// The agent ledger board follows the runs outside their budget, as on every board dispatch.
+		const formatted = (body.split("\n\nagent ledger (")[0] ?? "")
+			.split("\n")
+			.filter((line) => !line.startsWith("[dispatch normalize]"))
+			.join("\n")
+			.trimStart();
+		ok(Buffer.byteLength(formatted, "utf8") <= 1_024, formatted);
+		const runIds = ((result.details as { terminalRunIds?: string[] } | undefined)?.terminalRunIds ?? []).slice();
+		strictEqual(runIds.length, 12);
+		const silent = runIds.find((runId) => {
+			const receipt = readVerifiedRun(clioStateDir(), runId);
+			return !twelve.includes((receipt ? resolvedRunResult(receipt).output?.text : undefined) ?? "");
+		});
+		ok(silent);
+		const answer = await tight.monitor.run({ mode: "answer", run_id: silent }, {});
+		ok(answer.kind === "error" || answer.output === "", "the silent run has no answer for mode=answer to return");
+		ok(formatted.includes(`monitor(mode="record", run_id=${JSON.stringify(silent)})`), formatted);
+		ok(!formatted.includes(`monitor(mode="answer", run_id=${JSON.stringify(silent)})`), formatted);
+		const omitted = /runs omitted by this result's 1024-byte cap; monitor\(mode="collect", run_ids=(\[[^\]]*\])\)/u.exec(
+			formatted,
+		);
+		const named = omitted?.[1] !== undefined ? (JSON.parse(omitted[1]) as string[]) : [];
+		ok(named.length > 0 && named.length < 12, formatted);
+		for (const runId of runIds) {
+			const shown = new RegExp(`^- ${runId} .*monitor\\(mode="(answer|record)", run_id="${runId}"\\)`, "mu").test(
+				formatted,
+			);
+			ok(shown !== named.includes(runId), `${runId} is shown with its retrieval call or named once as omitted`);
+		}
+	} finally {
+		await tight.bundle.extension.stop?.();
 	}
 });
 

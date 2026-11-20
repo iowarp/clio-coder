@@ -5,6 +5,7 @@ import { clioStateDir } from "../core/xdg.js";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
 import { readAgentLedger, renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-store.js";
+import { ANSWER_BUDGET_BYTES } from "../domains/dispatch/handback.js";
 import type { DispatchOwnership } from "../domains/dispatch/ownership.js";
 import { UNVERIFIABLE_RUN_VERIFICATION } from "../domains/dispatch/run-findings.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
@@ -20,10 +21,10 @@ import type { MonitorToolDeps } from "./monitor.js";
 import type { ToolResult } from "./registry.js";
 import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
 import {
-	COMPACT_ANSWER_BYTES,
 	compactAnswer,
 	compactHelperResultLines,
 	type FinishedRun,
+	runAnswerBudgetBytes,
 	runEvidenceLabels,
 	runHelperResult,
 	workerTextLabel,
@@ -121,12 +122,14 @@ interface CollectedRunRow extends CollectRow {
 }
 
 function collectRunLine(row: CollectedRunRow): string[] {
+	// The answer budget sealed at dispatch, the number the sync result showed and the worker was told (M3).
+	const answerBytes = row.evidence.run !== null ? runAnswerBudgetBytes(row.evidence.run) : ANSWER_BUDGET_BYTES;
 	// The route warnings the dispatch result printed, read back from the sealed record (FL-6).
 	const routeWarnings = (row.evidence.run?.facts.routeWarnings ?? []).map(
 		(message) => `  route_warning ${row.runId}: ${message}`,
 	);
 	if (row.evidence.run !== null) {
-		const helperLines = compactHelperResultLines(row.evidence.run, row.evidence.integrity, COMPACT_ANSWER_BYTES);
+		const helperLines = compactHelperResultLines(row.evidence.run, row.evidence.integrity, answerBytes);
 		if (helperLines !== null) return [...helperLines, ...routeWarnings];
 	}
 	const run = row.run;
@@ -156,7 +159,7 @@ function collectRunLine(row: CollectedRunRow): string[] {
 	lines.push(`  ${workerTextLabel(row.evidence.trustStatus, row.evidence.run)}`);
 	const output = row.evidence.run?.delivered?.output ?? null;
 	if (output) {
-		const capped = compactAnswer(output.text, row.runId);
+		const capped = compactAnswer(output.text, row.runId, answerBytes);
 		const qualifier = output.state === "partial" ? " (partial; the run did not complete this message)" : "";
 		const truncatedNote = output.truncated ? ` (stored output truncated; full text was ${output.bytes} bytes)` : "";
 		lines.push(`  agent output${qualifier}${truncatedNote}:`, ...capped.split("\n").map((line) => `  ${line}`));

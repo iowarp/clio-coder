@@ -86,6 +86,11 @@ export interface DispatchRequest extends JobSpec {
 	record?: boolean;
 	/** Generated context needs stable local sampling across identical runs. */
 	sampling?: "deterministic";
+	/**
+	 * Bytes of this run's answer the parent sees, fixed by the tool for the whole batch at dispatch (M3). Absent means a
+	 * lone run's budget. Never model-authored.
+	 */
+	answerBudgetBytes?: number;
 	/** Epoch ms when exploration ends and the worker must take its terminal round. */
 	synthesisAt?: number;
 	/** Inherited host policy, outside the model-authored JobSpec. */

@@ -315,6 +315,7 @@ async function main(): Promise<number> {
 		...(spec.resultContract !== undefined ? { resultContract: spec.resultContract } : {}),
 		...(spec.helperResult === true ? { helperResult: true } : {}),
 		...(spec.product !== undefined ? { product: spec.product } : {}),
+		...(spec.role !== undefined ? { role: spec.role } : {}),
 		agentLedger: ledgerPort,
 		...(spec.extensionHooks !== undefined && spec.extensionHooks.length > 0
 			? { extensionHookHost: { hooks: spec.extensionHooks, request: requestHook } }

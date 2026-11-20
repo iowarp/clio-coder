@@ -257,6 +257,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		validationGrounding: { claimed: "keep", grounded: "keep", ungrounded: "withhold", basis: "keep" },
 		unclassifiedAfterLastCheck: { count: "keep", commands: "withhold" },
 		routeWarnings: "withhold",
+		answerBudgetBytes: "keep",
 		stepPipeline: STEP_PIPELINE,
 	},
 	"run.feed_appended": {

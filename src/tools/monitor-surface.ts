@@ -6,7 +6,7 @@ import type { ToolSurface } from "./lazy-tool.js";
 export const monitorToolSurface = {
 	name: ToolNames.Monitor,
 	description:
-		"Inspect dispatched runs and session-owned interval jobs. scope=jobs lists jobs; job_id supports status/wait, including pending match delivery. Jobs expose occurrence evidence and never worker run records. For worker runs: status, peek, record, tools and wait observe; collect settles a detached batch before final synthesis.",
+		"Inspect dispatched runs and session-owned interval jobs. scope=jobs lists jobs; job_id supports status/wait, including pending match delivery. Jobs expose occurrence evidence and never worker run records. For worker runs: status, peek, record, answer, tools and wait observe; collect settles a detached batch before final synthesis.",
 	parameters: Type.Object({
 		scope: Type.Optional(StringEnum(["jobs"])),
 		job_id: Type.Optional(Type.String({ description: "Conversation-owned job ID; supports status/wait." })),
@@ -14,9 +14,9 @@ export const monitorToolSurface = {
 			Type.String({ description: "Run id from dispatch output or monitor list; omit with mode=list." }),
 		),
 		mode: Type.Optional(
-			StringEnum(["status", "peek", "record", "list", "wait", "collect", "tools"], {
+			StringEnum(["status", "peek", "record", "answer", "list", "wait", "collect", "tools"], {
 				description:
-					"Defaults to status with run_id and list without. tools lists a run's tool calls with outcomes and per-tool totals.",
+					"Defaults to status with run_id and list without. answer returns a run's whole sealed answer. tools lists a run's tool calls with outcomes and per-tool totals.",
 			}),
 		),
 		batch_id: Type.Optional(Type.String({ description: "Detached batch id (mode=collect)." })),

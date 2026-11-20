@@ -7,6 +7,7 @@ import {
 	formatEffectiveBudget,
 } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
+import { sealedAnswerBudgetBytes } from "../domains/dispatch/handback.js";
 import { type DispatchOwnership, dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { isTerminalRunEnvelope, type RunEnvelope } from "../domains/dispatch/types.js";
 import { summarizeTrustStatus, trustStateWord } from "../domains/evidence/trust-projection.js";
@@ -50,7 +51,6 @@ const LIST_LIMIT = 20;
 const PEEK_MAX_BYTES = 8 * 1024;
 const RECORD_MAX_BYTES = 14 * 1024;
 /** The answer leads a record and the JSON takes what is left, so the whole stays under the 16 KiB summary bound. */
-const RECORD_ANSWER_MAX_BYTES = 12_000;
 const WAIT_DEFAULT_TIMEOUT_MS = 60_000;
 const WAIT_MAX_TIMEOUT_MS = 10 * 60_000;
 /**
@@ -430,32 +430,80 @@ function runTools(deps: MonitorToolDeps, runId: string, ownership: DispatchOwner
 	};
 }
 
-function runRecord(deps: MonitorToolDeps, runId: string, ownership: DispatchOwnership): ToolResult {
+/** A settled run's record when this session may read it, else the error to return. */
+function settledRunRecord(
+	deps: MonitorToolDeps,
+	runId: string,
+	ownership: DispatchOwnership,
+):
+	| { error: ToolResult }
+	| {
+			run: RunEnvelope;
+			record: NonNullable<ReturnType<typeof loadRunRecord>>;
+			settled: NonNullable<NonNullable<ReturnType<typeof loadRunRecord>>["settled"]>;
+	  } {
 	const run = deps.dispatch.getRun(runId);
-	if (!run) return { kind: "error", message: `monitor: unknown run '${runId}'` };
+	if (!run) return { error: { kind: "error", message: `monitor: unknown run '${runId}'` } };
 	const unseen = unseenRunError(ownership, runId, run);
-	if (unseen !== null) return unseen;
+	if (unseen !== null) return { error: unseen };
 	const record = loadRunRecord(clioStateDir(), run.id);
 	if (record?.settled == null) {
 		return {
-			kind: "error",
-			message: `monitor: run '${runId}' has not settled (state=${run.outcome ?? run.status}); try mode="status" or mode="peek"`,
+			error: {
+				kind: "error",
+				message: `monitor: run '${runId}' has not settled (state=${run.outcome ?? run.status}); try mode="status" or mode="peek"`,
+			},
 		};
 	}
+	return { run, record, settled: record.settled };
+}
+
+/** The sealed answer text alone, the rest a compact dispatch result, collect or record cut at the run's budget (M3). */
+function runAnswer(deps: MonitorToolDeps, runId: string, ownership: DispatchOwnership): ToolResult {
+	const settled = settledRunRecord(deps, runId, ownership);
+	if ("error" in settled) return settled.error;
+	const { run, record } = settled;
+	const inspection = inspectRunTrustStatus(record);
+	// The deliverable is shown only under a seal that verifies; an open or failed seal vouches for none of it.
+	const answer =
+		inspection.integrity.state === "verified" && record.result?.state === "resolved" ? record.result.value.output : null;
+	if (answer === null) {
+		return {
+			kind: "error",
+			message: `monitor: run '${runId}' has no sealed answer to show (seal ${inspection.integrity.state}); mode="record" shows what it recorded`,
+		};
+	}
+	const text = truncateUtf8(
+		answer.text,
+		RECORD_MAX_BYTES,
+		`\n[answer cut at ${RECORD_MAX_BYTES} bytes; the whole text is output.text in ${durableRunEvidence(run).resultPath ?? "the run's result object"}]`,
+	);
+	return {
+		kind: "ok",
+		output: answer.truncated ? `${text}\n[stored truncated; the run's full text was ${answer.bytes} bytes]` : text,
+		details: { mode: "answer", runId, bytes: answer.bytes, state: answer.state },
+	};
+}
+
+function runRecord(deps: MonitorToolDeps, runId: string, ownership: DispatchOwnership): ToolResult {
+	const settled = settledRunRecord(deps, runId, ownership);
+	if ("error" in settled) return settled.error;
+	const { record } = settled;
 	const inspection = inspectRunTrustStatus(record);
 	const verified = inspection.integrity.state === "verified";
 	// The deliverable is shown only under a seal that verifies; an open or failed seal vouches for none of it.
 	const result = verified ? record.result : null;
 	const answer = result?.state === "resolved" ? result.value.output : null;
-	// A compact dispatch result points here for the whole answer, so it leads as plain text and the JSON below
-	// carries a stand-in instead of a second, escaped copy (WTF-P 0.8.3 C3).
+	// The answer leads as plain text at the budget sealed at dispatch (M3), and the JSON below carries a stand-in
+	// instead of a second, escaped copy (WTF-P 0.8.3 C3).
+	const answerBytes = sealedAnswerBudgetBytes(settled.settled.answerBudgetBytes);
 	const answerSection =
 		answer === null
 			? ""
 			: `answer (${answer.state}, ${answer.bytes} bytes${answer.truncated ? ", stored truncated" : ""}):\n${truncateUtf8(
 					answer.text,
-					RECORD_ANSWER_MAX_BYTES,
-					`\n[answer cut at ${RECORD_ANSWER_MAX_BYTES} bytes; the whole text is output.text in ${durableRunEvidence(run).resultPath ?? "the run's result object"}]`,
+					answerBytes,
+					`\n[answer cut at ${answerBytes} bytes, this run's answer budget; the rest is in monitor(mode="answer", run_id=${JSON.stringify(runId)})]`,
 				)}\n\nrun record:\n`;
 	const shown = {
 		seal: record.seal,
@@ -482,9 +530,9 @@ function runRecord(deps: MonitorToolDeps, runId: string, ownership: DispatchOwne
 			trust: summarizeTrustStatus(inspection.status),
 			...(verified
 				? {
-						evidenceVerification: record.settled.verification,
-						hostVerification: record.settled.hostVerification,
-						context: record.settled.context,
+						evidenceVerification: settled.settled.verification,
+						hostVerification: settled.settled.hostVerification,
+						context: settled.settled.context,
 					}
 				: {}),
 		},
@@ -656,6 +704,7 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 				mode !== "status" &&
 				mode !== "peek" &&
 				mode !== "record" &&
+				mode !== "answer" &&
 				mode !== "list" &&
 				mode !== "wait" &&
 				mode !== "collect" &&
@@ -663,7 +712,7 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 			) {
 				return {
 					kind: "error",
-					message: `monitor: mode must be status, peek, record, list, wait, collect, or tools; got '${mode}'`,
+					message: `monitor: mode must be status, peek, record, answer, list, wait, collect, or tools; got '${mode}'`,
 				};
 			}
 			if (mode === "list") {
@@ -717,6 +766,7 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 			if (mode === "status") return runStatus(deps, runId, ownership);
 			if (mode === "peek") return runPeek(deps, runId, ownership);
 			if (mode === "tools") return runTools(deps, runId, ownership);
+			if (mode === "answer") return runAnswer(deps, runId, ownership);
 			return runRecord(deps, runId, ownership);
 		},
 	};

@@ -552,7 +552,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 		max_output_bytes: Type.Optional(
 			Type.Number({
 				description:
-					'Unset, each run returns a compact form: key facts, trust line and an answer excerpt; monitor(mode="record") has the whole answer. Set, each run returns its full answer within this many bytes in total (default 20000).',
+					'Unset, each run returns a compact form: key facts, trust line and an answer excerpt; monitor(mode="record") shows it up to the sealed answer budget and monitor(mode="answer") returns the whole answer. Set, each run returns its full answer within this many bytes in total (default 20000).',
 			}),
 		),
 		result_summary_max_bytes: Type.Optional(

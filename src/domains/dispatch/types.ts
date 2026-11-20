@@ -1030,6 +1030,8 @@ export interface RunResult {
 	pathScope?: DispatchPathScopeProvenance;
 	/** Integrity-sealed recipe policy, invocation request, effective phase, and admission reasons. */
 	budget?: RunToolBudgetEnvelope;
+	/** Bytes of the answer the parent sees at sync, collect and record, fixed at dispatch (M3). Absent on older runs. */
+	answerBudgetBytes?: number;
 	/** Proof of briefing content without copying its prose into the receipt. */
 	briefing?: RunBriefingProvenance;
 	workerContext?: WorkerContextProvenance;

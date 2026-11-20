@@ -334,7 +334,7 @@ describe("monitor tool", () => {
 		const f = await fixture(scratch);
 		try {
 			const cases: Array<[Record<string, unknown>, RegExp]> = [
-				[{ mode: "follow" }, /mode must be status, peek, record, list, wait, collect, or tools; got 'follow'/],
+				[{ mode: "follow" }, /mode must be status, peek, record, answer, list, wait, collect, or tools; got 'follow'/],
 				[{ mode: "status" }, /needs run_id; call monitor\(mode="list"\) first/],
 				[{ mode: "peek", run_ids: ["a", "b"] }, /observes one run; got run_ids with 2 entries/],
 				[{ mode: "collect" }, /requires batch_id or a non-empty run_ids array/],

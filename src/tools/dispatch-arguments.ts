@@ -11,6 +11,7 @@ import { classifyAgentTask } from "../domains/dispatch/agent-candidates.js";
 import { cloneDispatchBudgetRequest } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
+import { answerBudgetForBatch } from "../domains/dispatch/handback.js";
 import type { DispatchIntent } from "../domains/dispatch/intent.js";
 import {
 	classifyDispatchIntentCompatibility,
@@ -518,6 +519,9 @@ export function dispatchRequestsFromArgs(
 			message: `dispatch: no tasks admitted; ${rejectedTasks.map((task) => `task ${task.position}: ${task.message}`).join("; ")}`,
 		};
 	}
+	// M3: the admitted runs share one answer budget, fixed here before any of them starts and told to each worker.
+	const answerBudgetBytes = answerBudgetForBatch(requests.length);
+	for (const request of requests) request.answerBudgetBytes = answerBudgetBytes;
 	return { ok: true, requests, positions, rejectedTasks };
 }
 
