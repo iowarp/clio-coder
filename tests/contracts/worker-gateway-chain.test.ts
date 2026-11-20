@@ -2,7 +2,6 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { existsSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
@@ -526,9 +525,6 @@ test("an unavailable verifier entry cannot rerun with changed arguments and stil
 		checks: [{ name: "python-pytest", passed: false, evidence: "uv.lock exists but .venv is missing; no test ran" }],
 	});
 	const verify = (args: Record<string, unknown>): Call => ({ name: "verify", arguments: JSON.stringify(args) });
-	// With no interpreter on PATH an unsynced uv project cannot fall back to one, so its runner needs provisioning.
-	const previousPath = process.env.PATH;
-	process.env.PATH = join(tmpdir(), "clio-coder-no-python-on-path");
 	const run = await runWorker(
 		[
 			[verify({ check: "python-pytest" })],
@@ -544,9 +540,7 @@ test("an unavailable verifier entry cannot rerun with changed arguments and stil
 			budget: { mode: "advisory", toolCalls: 2, readReserve: 0, synthesis: true, hardCap: 150, ceiling: 2 },
 		},
 		{ "pyproject.toml": "[tool.pytest.ini_options]\n", "uv.lock": "version = 1\n" },
-	).finally(() => {
-		process.env.PATH = previousPath;
-	});
+	);
 	const ends = run.events.filter((event) => event.type === "tool_execution_end") as Array<{
 		toolName: string;
 		result: { content: Array<{ text?: string }>; details: Record<string, unknown> };

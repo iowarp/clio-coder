@@ -45,8 +45,6 @@ export interface VerifierProvenance {
 	detail: string;
 	authority: VerifierProposalAuthority;
 	interpreter?: string;
-	/** How the runner's environment differs from the one the project locks, shown beside the check in the listing. */
-	environment?: string;
 }
 
 export interface VerifierAvailability {
@@ -340,39 +338,25 @@ function unittestStartDirectory(workspaceRoot: string): string | null {
 
 export function pythonProposals(workspaceRoot: string, diagnostics: string[]): RawProposal[] {
 	const proposals: RawProposal[] = [];
-	const uvLauncher = pythonLauncher(workspaceRoot);
-	const unprovisioned: VerifierAvailability = {
-		state: "needs-provisioning",
-		reason: "uv.lock exists but .venv is missing; bare uv run would sync dependencies under a no-install policy",
-		provisionCommand: ["uv", "sync"],
-	};
-	// FL-2: a uv project without .venv runs its `-m` runners on the interpreter a non-uv project would use, which
-	// provisions nothing; refusing them left a worker no way to run a suite that passes under python3 on PATH.
-	const fallback = uvLauncher.length === 2 ? pythonInterpreter(workspaceRoot, []) : null;
-	const launcher = fallback !== null ? [] : uvLauncher;
+	const launcher = pythonLauncher(workspaceRoot);
 	const resolvedInterpreter = pythonInterpreter(workspaceRoot, launcher);
 	const interpreter = resolvedInterpreter ?? "python";
 	const availability: VerifierAvailability | undefined =
 		launcher.length === 2
-			? unprovisioned
+			? {
+					state: "needs-provisioning",
+					reason: "uv.lock exists but .venv is missing; bare uv run would sync dependencies under a no-install policy",
+					provisionCommand: ["uv", "sync"],
+				}
 			: resolvedInterpreter === null
 				? { state: "unavailable", reason: "neither python nor python3 is executable on the worker PATH" }
 				: undefined;
 	const finish = (): RawProposal[] =>
-		proposals.map((proposal) => {
-			const own = proposal.availability ?? availability;
-			return {
-				...proposal,
-				provenance: {
-					...proposal.provenance,
-					...(resolvedInterpreter ? { interpreter: resolvedInterpreter } : {}),
-					...(fallback !== null && own === undefined
-						? { environment: `uv.lock has no .venv: runs on ${fallback}, not the locked environment` }
-						: {}),
-				},
-				...(own ? { availability: own } : {}),
-			};
-		});
+		proposals.map((proposal) => ({
+			...proposal,
+			provenance: { ...proposal.provenance, ...(resolvedInterpreter ? { interpreter: resolvedInterpreter } : {}) },
+			...(availability ? { availability } : {}),
+		}));
 	let pytestDependency = false;
 	const pyprojectPath = "pyproject.toml";
 	const pyproject = regularFileText(path.join(workspaceRoot, pyprojectPath), workspaceRoot);
@@ -435,9 +419,7 @@ export function pythonProposals(workspaceRoot: string, diagnostics: string[]): R
 					proposals.push({
 						preferredId: `python-${slug(name, "check")}`,
 						description: `Run declared Python entry point '${name}'`,
-						// An entry point exists only once uv installs the project, so the interpreter fallback cannot run it.
-						command: [...(fallback !== null ? uvLauncher : launcher), name],
-						...(fallback !== null ? { availability: unprovisioned } : {}),
+						command: [...launcher, name],
 						cwd: ".",
 						timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
 						tags: [slug(name.split(/[:.-]/u)[0] ?? "python", "python"), "python"],

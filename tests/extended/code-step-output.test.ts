@@ -224,9 +224,6 @@ it("fails the check without a repair when a changed test's known runner needs pr
 	writeFileSync(join(root, "uv.lock"), "version = 1\n");
 	mkdirSync(join(root, "tests"));
 	writeFileSync(join(root, "tests", "test_api.py"), "def test_api():\n    assert True\n");
-	// With no interpreter on PATH an unsynced uv project cannot fall back to one, so its runner needs provisioning.
-	const previousPath = process.env.PATH;
-	process.env.PATH = join(root, "no-python-on-path");
 	const outcome = await runCodeStep({
 		stepId: "check",
 		command: {
@@ -239,8 +236,6 @@ it("fails the check without a repair when a changed test's known runner needs pr
 		},
 		workspaceRoot: root,
 		mutatedPaths: ["tests/test_api.py"],
-	}).finally(() => {
-		process.env.PATH = previousPath;
 	});
 	strictEqual(outcome.report.passed, false);
 	strictEqual(outcome.report.checks[0]?.passed, true);

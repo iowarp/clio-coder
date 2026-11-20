@@ -167,9 +167,8 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 				const availability = check.availability
 					? ` [${check.availability.state}: ${check.availability.reason}${check.availability.provisionCommand ? `; operator: ${check.availability.provisionCommand.join(" ")}` : ""}]`
 					: "";
-				const environment = check.provenance.environment ? ` [${check.provenance.environment}]` : "";
 				lines.push(
-					`- ${check.id} [${check.tags.join(", ")}]: ${check.command.join(" ")}${args}  (${check.source.path})${environment}${availability}`,
+					`- ${check.id} [${check.tags.join(", ")}]: ${check.command.join(" ")}${args}  (${check.source.path})${availability}`,
 				);
 			}
 		}
