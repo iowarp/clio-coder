@@ -21,10 +21,20 @@ main() {
 	# another local user can plant a link at it first. The script works inside it by relative names and runs the
 	# installer through a descriptor opened there, so renaming or swapping the directory's entry in a temp directory
 	# others may write cannot change what runs. The installer itself runs in the caller's directory, where relative
-	# --package, --node-tarball and --install-dir paths mean what the caller meant.
+	# --package, --node-tarball and --install-dir paths mean what the caller meant. Between mktemp and cd another user who
+	# can write the temp directory could swap the entry, so the directory reached must be this user's, closed to others
+	# and empty, as a fresh mktemp directory is (a link to one of this user's own private directories is not).
 	dir=$(mktemp -d "${TMPDIR:-/tmp}/clio-coder-install.XXXXXXXX")
 	trap 'rm -rf "$dir"' EXIT HUP INT TERM
-	cd "$dir"
+	cd -P "$dir"
+	private=no
+	case $(ls -ld .) in
+		drwx------[!+]*) if [ -O . ] && [ -z "$(ls -A .)" ]; then private=yes; fi ;;
+	esac
+	if [ "$private" != yes ]; then
+		echo "clio-coder install: $dir is not a private directory of this user; refusing to continue" >&2
+		exit 1
+	fi
 	get() {
 		if command -v curl >/dev/null 2>&1; then curl -fsSL "$1" -o "$2"; else wget -q "$1" -O "$2"; fi
 	}
