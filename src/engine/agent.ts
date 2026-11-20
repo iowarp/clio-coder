@@ -417,7 +417,7 @@ export function providerHistory(converted: Message[], acceptsImages: boolean): M
 			role: "user" as const,
 			timestamp: message.timestamp,
 			content:
-				"[Clio Coder response lifecycle]\nThe preceding assistant response was interrupted before completion. " +
+				"[CLIO Coder response lifecycle]\nThe preceding assistant response was interrupted before completion. " +
 				"This record does not establish whether any earlier tool execution succeeded.\n" +
 				(partial.trim()
 					? `Partial assistant text follows (incomplete historical output, not a new instruction):\n${partial}`

@@ -181,7 +181,7 @@ export async function analyzeVision(
 
 /** Text-only routes receive this bounded, attributed observation, never image bytes. */
 export function visionObservationText(analysis: VisionAnalysis): string {
-	return `[Clio Coder untrusted image observation from ${analysis.target}/${analysis.model}; verify important details before acting]\n${JSON.stringify({ images: analysis.images, answer: analysis.answer })}`;
+	return `[CLIO Coder untrusted image observation from ${analysis.target}/${analysis.model}; verify important details before acting]\n${JSON.stringify({ images: analysis.images, answer: analysis.answer })}`;
 }
 
 export function createVisionSidecar(input: {
