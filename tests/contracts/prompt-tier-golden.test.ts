@@ -277,6 +277,7 @@ describe("prompts.profile v2 (S-82)", () => {
 
 	it("renders each harness row only with its capability", () => {
 		const base = session("attended-default").systemPrompt;
+		const baseV1 = session("attended-default", { promptProfile: "v1" }).systemPrompt;
 		ok(base.includes("- Finding code, never through the shell:"), "finding-code row");
 		const rows: Record<string, string> = {
 			job: "create a `job` that polls",
@@ -289,15 +290,21 @@ describe("prompts.profile v2 (S-82)", () => {
 		for (const [tool, text] of Object.entries(rows)) {
 			const tier = loadTier("attended-default");
 			if (tier.kind !== "session") throw new Error("not a session tier");
-			const without = session("attended-default", {
+			const surfaceWithout = {
 				toolNames: (tier.inputs.sessionInputs.toolNames ?? []).filter((name) => name !== tool),
 				coordinatorCapabilities: tier.inputs.sessionInputs.coordinatorCapabilities.filter((name) => name !== tool),
 				...(tier.inputs.sessionInputs.capabilityMap
 					? { capabilityMap: tier.inputs.sessionInputs.capabilityMap.filter((entry) => entry.tool !== tool) }
 					: {}),
-			}).systemPrompt;
+			};
+			const without = session("attended-default", surfaceWithout).systemPrompt;
 			ok(base.includes(text), `${tool} row missing`);
 			ok(!without.includes(text), `${tool} row survives without ${tool}`);
+			if (tool === "tasks" || tool === "code_nav") {
+				const withoutV1 = session("attended-default", { ...surfaceWithout, promptProfile: "v1" }).systemPrompt;
+				ok(baseV1.includes(text), `v1 ${tool} row missing`);
+				ok(!withoutV1.includes(text), `v1 ${tool} row survives without ${tool}`);
+			}
 		}
 	});
 });
