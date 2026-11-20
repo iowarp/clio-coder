@@ -105,36 +105,60 @@ test("unaffected thinking clamp notices keep their existing wording", () => {
 	strictEqual(thinkingNoteWords(clampedDownHigh), "high not offered");
 });
 
-test("/thinking resolves a typed level through the settings clamp and refuses only unknown words", () => {
+test("/thinking resolves a typed level through the settings clamp and refuses words the model does not take", () => {
 	const hit = kb.lookup("dynamo/qwen3.8-27b");
 	ok(hit);
-	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.chat = { ...settings.chat, target: "mini", model: "dynamo/qwen3.8-27b", thinkingLevel: "medium" };
-	const status = {
-		target: { id: "mini", runtime: "litellm", defaultModel: "dynamo/qwen3.8-27b" },
-		runtime: null,
-		capabilities: { ...EMPTY_CAPABILITIES, ...hit.entry.capabilities },
+	// No catalog profile is always-on, so one model id carries the same profile with that mechanism.
+	const alwaysOnHit = { ...hit, entry: { ...hit.entry, quirks: { thinking: { mechanism: "always-on" } } } };
+	const knowledgeBase = Object.assign(Object.create(kb), {
+		lookup: (id: string) => (id === "dynamo/always-on" ? alwaysOnHit : kb.lookup(id)),
+	});
+	const run = (model: string, typed: ReadonlyArray<string>) => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.chat = { ...settings.chat, target: "mini", model, thinkingLevel: "medium" };
+		const status = {
+			target: { id: "mini", runtime: "litellm", defaultModel: model },
+			runtime: null,
+			capabilities: { ...EMPTY_CAPABILITIES, ...hit.entry.capabilities },
+		};
+		const commits: string[] = [];
+		const runtime = createInteractiveSlashRuntime({
+			providers: { list: () => [status], knowledgeBase },
+			chat: {},
+			getSettings: () => settings,
+			onSetThinkingLevel: () => commits.push("onSetThinkingLevel writes settings.yaml"),
+			// The orchestrator wires commitSetting, so this is the branch a TUI session takes.
+			commitSetting: (id: string, next: typeof settings, scope: string, source: string) => {
+				commits.push(`${id}=${next.chat.thinkingLevel} ${scope} ${source}`);
+				settings.chat.thinkingLevel = next.chat.thinkingLevel;
+			},
+			refreshFooter() {},
+			requestRender() {},
+		} as unknown as InteractiveSlashRuntimeDeps);
+		const notices: string[] = [];
+		const ctx = { ...runtime.context, notice: (level: string, text: string) => notices.push(`${level}: ${text}`) };
+		for (const word of typed) dispatchSlashCommand(parseSlashCommand(`/thinking ${word}`), ctx);
+		return { notices, commits };
 	};
-	const runtime = createInteractiveSlashRuntime({
-		providers: { list: () => [status], knowledgeBase: kb },
-		chat: {},
-		getSettings: () => settings,
-		onSetThinkingLevel: (level: typeof settings.chat.thinkingLevel) => {
-			settings.chat.thinkingLevel = level;
-		},
-		refreshFooter() {},
-		requestRender() {},
-	} as unknown as InteractiveSlashRuntimeDeps);
-	const notices: string[] = [];
-	const ctx = { ...runtime.context, notice: (level: string, text: string) => notices.push(`${level}: ${text}`) };
-	for (const typed of ["high", "max", "bogus"]) dispatchSlashCommand(parseSlashCommand(`/thinking ${typed}`), ctx);
-	deepStrictEqual(notices, [
+	const effort = run("dynamo/qwen3.8-27b", ["high", "max", "bogus", "forced", "on"]);
+	const refused = (word: string, offered: string) =>
+		`error: thinking level "${word}" is not available here; try ${offered}`;
+	deepStrictEqual(effort.notices, [
 		"success: thinking: xhigh (high isn't offered by dynamo/qwen3.8-27b; using xhigh)",
 		"success: thinking: xhigh (max not offered)",
-		'error: thinking level "bogus" is not available here; try off, low, medium, xhigh',
+		refused("bogus", "off, low, medium, xhigh"),
+		// Another mechanism's label is not a level on an effort-levels model.
+		refused("forced", "off, low, medium, xhigh"),
+		refused("on", "off, low, medium, xhigh"),
 	]);
-	// Stored as typed, like chat.thinkingLevel in settings.yaml; the clamp decides what runs.
-	strictEqual(settings.chat.thinkingLevel, "max");
+	// Stored as typed at session scope, like chat.thinkingLevel in settings.yaml; the clamp decides what runs.
+	deepStrictEqual(effort.commits, [
+		"chat.thinkingLevel=high session slash-command",
+		"chat.thinkingLevel=max session slash-command",
+	]);
+	const alwaysOn = run("dynamo/always-on", ["off", "forced"]);
+	deepStrictEqual(alwaysOn.notices, [refused("off", "forced"), "success: thinking: forced"]);
+	deepStrictEqual(alwaysOn.commits, ["chat.thinkingLevel=high session slash-command"]);
 });
 
 test("actual gateway probe to engine stream disables reasoning while retaining gateway ownership", async () => {

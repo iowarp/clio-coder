@@ -20,7 +20,7 @@ import {
 	resolveModelRuntimeCapabilitiesForProviders,
 	type ThinkingLevel,
 	thinkingLevelChoiceLabel,
-	thinkingLevelFromChoiceLabel,
+	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
@@ -700,14 +700,14 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			const labelFor = (candidate: ThinkingLevel): string =>
 				thinkingLevelChoiceLabel(thinking?.mechanism ?? null, candidate);
 			const requested = level.trim().toLowerCase();
-			const match =
-				supported.find((candidate) => candidate === requested || labelFor(candidate) === requested) ??
-				thinkingLevelFromChoiceLabel(requested);
-			// Any known level is stored as chat.thinkingLevel and runs through the same clamp a
-			// settings value does (high on a model without high runs as xhigh, CLI-P29); only an
-			// unknown word, or a level on a model without thinking control, is refused.
-			const noThinking = !thinking || thinking.mechanism === "none";
-			if (!match || (noThinking && !supported.includes(match))) {
+			// Model labels (on, forced) match only this model's own levels; the fallback takes
+			// plain level names, which run through the same clamp a chat.thinkingLevel setting
+			// does (high on a model without high runs as xhigh, CLI-P29).
+			const listed = supported.find((candidate) => candidate === requested || labelFor(candidate) === requested);
+			const match = listed ?? VALID_THINKING_LEVELS.find((candidate) => candidate === requested);
+			// A model whose thinking cannot be switched (none, always-on) takes only its own level.
+			const fixed = !thinking || thinking.mechanism === "none" || thinking.mechanism === "always-on";
+			if (!match || (fixed && listed === undefined)) {
 				return { status: "unsupported", level, supported: supported.map(labelFor) };
 			}
 			// Session scope, like Alt+O: onSetThinkingLevel writes the level
