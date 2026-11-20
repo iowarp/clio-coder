@@ -682,6 +682,8 @@ export interface ChatPanelOptions {
 	getStopRequestedAt?: () => number | null;
 	/** The target the running turn was sent to, which the wire protocol on its messages does not say. */
 	getRunTarget?: () => string | null;
+	/** The model the running turn was sent to; a first reply from that route needs no `Reply from` row. */
+	getRunModel?: () => string | null;
 	/** What the current turn has spent on an operator-owned wait, which its receipt keeps apart from work. */
 	getHumanWaitMs?: () => number;
 	/** Keeps a settled run's operator wait in the session, so its resumed receipt can split the same way. */
@@ -3736,6 +3738,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const prior = transcript[index];
 				if (prior?.role === "assistant") before = prior.models?.at(-1);
 			}
+			// With no earlier reply, the route the turn was sent to is what a reply from elsewhere would differ from.
+			// A replay has no record of it, so a replayed first reply still names its route.
+			if (before === undefined && replayStampMs === undefined)
+				before = assistantModelLabel({ model: options.getRunModel?.() }, messageTarget()) ?? undefined;
 			assistant.sameModelAsBefore = before === model;
 		}
 		assistant.models ??= [];

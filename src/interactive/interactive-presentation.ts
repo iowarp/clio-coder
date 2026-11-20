@@ -508,6 +508,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const renderTrace = getActiveRenderTrace();
 	const chatPanel = factories.createChatPanel({
 		getRunTarget: () => deps.chat.lastRunSnapshot?.()?.targetId ?? null,
+		getRunModel: () => deps.chat.lastRunSnapshot?.()?.wireModelId ?? null,
 		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		// The TUI mode needs a restart to change, so the boot settings name the renderer for the panel's life (#453).
