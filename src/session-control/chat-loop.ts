@@ -3098,7 +3098,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							...(continuedMessage ? { continues: continuedMessage } : {}),
 						});
 						// Silent like any queued message: the queue panel is the signal, and the settle names it as it starts.
-						if (entry !== null) return;
+						// Triage labels it like any queued message; its pinned constraints keep it from interrupting or re-kinding.
+						if (queuedForTriage(entry)) return;
 					}
 					if (constrained) {
 						emitAdmissionNotice(
