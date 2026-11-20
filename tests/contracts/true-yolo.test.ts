@@ -673,6 +673,18 @@ test("yolo reads a shell script by the floor alone and runs what it cannot read 
 	])
 		strictEqual(judged(command).reasonCode, "yolo-floor:trust-authority", command);
 	strictEqual(judged(join(outside, "grant.py")).kind, "allow");
+	// `source name` reads the first PATH hit before the cwd, so a PATH-shadowed name is read wherever it is found.
+	const onPath = workspace("clio-yolo-script-path-");
+	writeFileSync(join(onPath, "shadow.sh"), "clio-coder config trust safety\n");
+	writeFileSync(join(cwd, "shadow.sh"), "echo ok\n");
+	const savedPath = process.env.PATH;
+	process.env.PATH = `${onPath}:${savedPath ?? ""}`;
+	try {
+		for (const command of ["source shadow.sh", ". shadow.sh"])
+			strictEqual(judged(command).reasonCode, "yolo-floor:trust-authority", command);
+	} finally {
+		process.env.PATH = savedPath;
+	}
 });
 
 // #421: Python lines are not shell; #407: a shell script at yolo meets only the floor.

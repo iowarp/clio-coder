@@ -3870,7 +3870,7 @@ function scanCommandScript(
 ): ScriptHit | null {
 	const operand = script.path;
 	if (/^[<>]\(/u.test(operand)) return null;
-	const candidates = scriptCandidates(operand, cwds);
+	const candidates = scriptCandidates(operand, cwds, script.sourced);
 	const files = candidates.filter((candidate): candidate is string => candidate !== null);
 	if (files.length < candidates.length) return null;
 	for (const file of files) {
@@ -3979,7 +3979,7 @@ function scanScript(
 		commandWrittenPaths(read.expanded, cwds ?? [scan.callCwd], scan.written);
 		if (depth >= FLOOR_SCRIPT_NEST_DEPTH) continue;
 		for (const source of sources) {
-			for (const candidate of scriptCandidates(source.path, cwds)) {
+			for (const candidate of scriptCandidates(source.path, cwds, source.sourced)) {
 				if (candidate !== null && isWrittenFirst(candidate, scan.written)) continue;
 				// `source` runs in this shell; `bash`, `sh` and `exec` start a child that changes nothing here.
 				// A sourced file keeps the script's `$0`; a child shell gets the name it was run by.
@@ -4002,15 +4002,48 @@ function scanScript(
  * The files a script operand can name from the directories the shell may be
  * in: the ones that exist, or the first candidate when none does, so its scan
  * reports it. A dynamic name, or a relative one from an unknown directory, is
- * a null candidate.
+ * a null candidate. A sourced name with no slash is looked up as bash does, on
+ * every PATH directory and then the directory, and every regular file found is
+ * a candidate (CLI-P31).
  */
-function scriptCandidates(operand: string, cwds: ReadonlyArray<string> | null): Array<string | null> {
+function scriptCandidates(operand: string, cwds: ReadonlyArray<string> | null, sourced = false): Array<string | null> {
 	if (/[$`*?[{]/u.test(operand)) return [null];
 	if (operand === "~" || operand.startsWith("~/") || path.isAbsolute(operand)) return [scriptPath(operand, "/")];
+	const local = cwds === null ? [] : [...new Set(cwds.map((cwd) => path.resolve(cwd, operand)))];
+	const exists = (candidate: string) => statSync(candidate, { throwIfNoEntry: false }) !== undefined;
+	if (sourced && !operand.includes("/")) {
+		const found = [
+			...new Set([...sourceSearchDirs(cwds).map((dir) => path.join(dir, operand)), ...local].filter(regularFile)),
+		];
+		if (found.length > 0) return found;
+	}
 	if (cwds === null) return [null];
-	const candidates = [...new Set(cwds.map((cwd) => path.resolve(cwd, operand)))];
-	const existing = candidates.filter((candidate) => statSync(candidate, { throwIfNoEntry: false }) !== undefined);
-	return existing.length > 0 ? existing : candidates.slice(0, 1);
+	const existing = local.filter(exists);
+	return existing.length > 0 ? existing : local.slice(0, 1);
+}
+
+/**
+ * The directories `source name` searches: those on the PATH bash commands run with and on this process's PATH, both,
+ * since either may be the one the command sees. A relative entry is placed from every directory the shell may be in.
+ */
+function sourceSearchDirs(cwds: ReadonlyArray<string> | null): string[] {
+	const dirs = new Set<string>();
+	for (const searchPath of [bashSearchPath(), process.env.PATH ?? null]) {
+		for (const entry of (searchPath ?? "").split(path.delimiter)) {
+			if (path.isAbsolute(entry)) dirs.add(entry);
+			else for (const cwd of cwds ?? []) dirs.add(path.resolve(cwd, entry));
+		}
+	}
+	return [...dirs];
+}
+
+/** Whether a path is a regular file now; a path the stat cannot reach is not. */
+function regularFile(candidate: string): boolean {
+	try {
+		return statSync(candidate, { throwIfNoEntry: false })?.isFile() === true;
+	} catch {
+		return false;
+	}
 }
 
 /** Clio's resolved config, data, state and cache trees, and the ways a command can spell them. */
