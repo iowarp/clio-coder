@@ -566,6 +566,14 @@ describe("read windowed reader", () => {
 		const settings = await createContextTool().run({ scope: "settings" }, invalid.options("batch-1"));
 		ok(settings.kind === "error" && /settings snapshot is unavailable/.test(settings.message), JSON.stringify(settings));
 		strictEqual(invalid.run.stopped(), false);
+		// A steer or triage submit names no host run; the run's later --output-schema repair turn keeps its fact.
+		const steered = await drained(`${scratch.dir}#steer`);
+		steered.run.reset("run_1");
+		steered.run.reset(undefined);
+		match(JSON.stringify(await readTool.run({ path }, steered.options("batch-2"))), /did not run/);
+		strictEqual(steered.run.stopped(), true);
+		steered.run.reset("run_1");
+		strictEqual(steered.run.stopped(), true);
 	});
 
 	it("charges parallel reads to the turn pool before any of them awaits", async () => {

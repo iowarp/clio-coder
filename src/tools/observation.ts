@@ -272,7 +272,9 @@ export function createHeadlessObservationPool(): HeadlessObservationPool {
 		},
 		reset(runId) {
 			if (runId !== undefined && runId === run) return;
-			run = runId;
+			// A submit that names no host run (a steer or triage interrupt) leaves the run it interrupted tracked, so that
+			// run's later repair turn still keeps what this one sets.
+			if (runId !== undefined) run = runId;
 			epoch = 0;
 			spentIn = null;
 			refusedIn = null;
