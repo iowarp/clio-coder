@@ -278,6 +278,9 @@ export function extractGlobalFlags(
 			i += 1;
 			continue;
 		}
+		if (arg === "-p" || arg === "--print" || arg === "--prompt") {
+			return failed(`unknown global option: ${arg}; for one headless task use clio-coder run "<task>"`);
+		}
 		return failed(`unknown global option: ${arg}`);
 	}
 	return {

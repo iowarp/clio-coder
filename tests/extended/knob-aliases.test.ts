@@ -86,7 +86,15 @@ describe("removed knob spellings", () => {
 			const parsed = parseRunCliArgs([alias, "value", "task"]);
 			assert.deepEqual(parsed.diagnostics, [{ type: "error", message: `unknown option: ${alias}` }]);
 		}
-		const canonical = parseRunCliArgs(["--agent-profile", "code", "--agent-runtime", "llamacpp", "task"]);
+		const canonical = parseRunCliArgs([
+			"--agent",
+			"scout",
+			"--agent-profile",
+			"code",
+			"--agent-runtime",
+			"llamacpp",
+			"task",
+		]);
 		assert.deepEqual(canonical.diagnostics, []);
 	});
 });

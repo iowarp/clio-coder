@@ -48,6 +48,8 @@ export interface RunCliArgs {
 	autonomy?: AutonomyLevel;
 	/** The one System One setting for this run: an engine name or `off`. */
 	systemOne?: string;
+	/** A bare `-`: read the task text from stdin until it ends, beside any prompt words. */
+	stdin?: boolean;
 	readOnly: boolean;
 	sampling?: RunSamplingArgs;
 	agentId?: string;
@@ -87,6 +89,62 @@ export interface RunCliArgs {
 }
 
 const VALID_THINKING: ReadonlyArray<JobThinkingLevel> = THINKING_LEVELS;
+
+const IMAGE_ATTACHMENT = /\.(?:png|jpe?g|gif|webp)$/i;
+
+/**
+ * The run leaf/mode matrix, checked by the light parser so a refusal exits 2 before `run.js` loads.
+ * Main mode is no `--agent`; agent mode is `--agent <recipe>` dispatch to a worker.
+ *
+ * | input                                                          | main  | agent |
+ * | -------------------------------------------------------------- | ----- | ----- |
+ * | --record, --agent-profile, --agent-runtime, --tool-profile, --require | usage | ok |
+ * | --turn-mode, --allow-tools, --delegate-tools, --no-delegate     | ok    | usage |
+ * | --session, --continue                                          | ok    | usage |
+ * | --max-cost-usd, --fail-on-noop, --verify, --answers            | ok    | usage |
+ * | --systemone                                                    | ok    | usage |
+ * | @<image> (png, jpeg, gif, webp)                                | ok    | usage |
+ * | --autonomy                                                     | ok    | usage |
+ * | --session with --continue                                      | usage | usage |
+ */
+function runModeMatrixErrors(parsed: RunCliArgs): string[] {
+	const errors: string[] = [];
+	if (parsed.sessionId !== undefined && parsed.continueSession) {
+		errors.push("--session and --continue name different sessions; pass one");
+	}
+	if (parsed.agentId === undefined) {
+		const dispatchOnly =
+			parsed.record === true ||
+			parsed.agentProfile !== undefined ||
+			parsed.agentRuntime !== undefined ||
+			parsed.toolProfile !== undefined ||
+			parsed.required.length > 0;
+		if (dispatchOnly) errors.push("fleet dispatch flags require --agent <recipe-id>");
+		return errors;
+	}
+	if (parsed.constraints) {
+		errors.push("--turn-mode, --allow-tools, --delegate-tools, and --no-delegate apply to the main-agent task");
+	}
+	if (parsed.sessionId !== undefined || parsed.continueSession) {
+		errors.push("--session and --continue apply to the main agent, not --agent dispatch");
+	}
+	const mainOnly: Array<[boolean, string]> = [
+		[parsed.maxCostUsd !== undefined, "--max-cost-usd"],
+		[parsed.failOnNoop, "--fail-on-noop"],
+		[parsed.verify.length > 0, "--verify"],
+		[parsed.answersFile !== undefined, "--answers"],
+		[parsed.systemOne !== undefined, "--systemone"],
+	];
+	for (const [present, flag] of mainOnly) {
+		if (present) errors.push(`${flag} applies to the main agent, not --agent dispatch`);
+	}
+	for (const file of parsed.fileArgs) {
+		if (IMAGE_ATTACHMENT.test(file)) {
+			errors.push(`@${file}: image attachments go to the main agent, not --agent dispatch`);
+		}
+	}
+	return errors;
+}
 
 export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 	const parsed: RunCliArgs = {
@@ -392,6 +450,10 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			if (value !== null) parsed.cwd = value;
 			continue;
 		}
+		if (arg === "-") {
+			parsed.stdin = true;
+			continue;
+		}
 		if (arg?.startsWith("-")) {
 			parsed.diagnostics.push({
 				type: "error",
@@ -405,6 +467,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 	}
 
+	for (const message of runModeMatrixErrors(parsed)) parsed.diagnostics.push({ type: "error", message });
 	if (parsed.agentId !== undefined && parsed.autonomy !== undefined) {
 		parsed.diagnostics.push({
 			type: "error",
