@@ -12,6 +12,8 @@ export interface LifecyclePresenterOptions {
 	plain?: boolean;
 	stream?: NodeJS.WritableStream;
 	inputStream?: NodeJS.ReadableStream;
+	/** Where a confirmation is asked under `json`, since stdout is the document. Defaults to stderr. */
+	promptStream?: NodeJS.WritableStream;
 	/** Terminal width used to wrap prose. Defaults to the stream's columns, else 80. */
 	columns?: number;
 }
@@ -135,6 +137,7 @@ export class LifecyclePresenter {
 	private readonly plain: boolean;
 	private readonly out: NodeJS.WritableStream;
 	private readonly in: NodeJS.ReadableStream;
+	private readonly promptOut: NodeJS.WritableStream;
 	private readonly columns: number;
 	private readonly report: LifecycleReport;
 	private lastBlock: Block | null = null;
@@ -147,6 +150,7 @@ export class LifecyclePresenter {
 		this.plain = options.plain ?? (!isTty || Boolean(process.env.NO_COLOR));
 		this.out = stream;
 		this.in = options.inputStream ?? defaultInput;
+		this.promptOut = options.promptStream ?? process.stderr;
 		// terminalColumns also reads $COLUMNS, so a piped or captured run can be
 		// told how wide it is instead of being pinned to 80.
 		this.columns = options.columns ?? terminalColumns(stream as { columns?: number | undefined });
@@ -369,14 +373,20 @@ export class LifecyclePresenter {
 	 * the failure mode was a `clio-coder uninstall` that printed its prompt and
 	 * then hung forever on Ctrl-D. Racing the `close` event settles that case as
 	 * "no", which is the only safe reading of an input that stopped talking.
+	 *
+	 * Under `json` the question goes to the prompt stream (stderr) in plain form,
+	 * because stdout carries the one document. `--json` never changes whether a
+	 * command acts (CLI convention C8); it used to answer "no" here unasked, so a
+	 * terminal run with `--json` and no `--yes` cancelled silently.
 	 */
 	async confirm(question: string, defaultYes = false): Promise<boolean> {
-		if (this.json) return false;
 		const hint = defaultYes ? "Y/n" : "y/N";
-		this.open("confirm");
-		const rl = createInterface({ input: this.in, output: this.out });
+		const out = this.json ? this.promptOut : this.out;
+		const plain = this.json || this.plain;
+		if (!this.json) this.open("confirm");
+		const rl = createInterface({ input: this.in, output: out });
 		try {
-			const promptStr = this.plain
+			const promptStr = plain
 				? `  ${question} [${hint}]: `
 				: `${chalk.cyan("◇")}  ${chalk.bold(question)} [${hint}]\n${chalk.cyan("│")}  `;
 			const answer = await new Promise<string | null>((resolve) => {
@@ -395,7 +405,7 @@ export class LifecyclePresenter {
 			if (answer === null) return false;
 			const normalized = answer.trim().toLowerCase();
 			const confirmed = normalized.length === 0 ? defaultYes : normalized === "y" || normalized === "yes";
-			this.out.write(this.plain ? `  ${confirmed ? "Yes" : "No"}\n` : `${chalk.cyan("│")}  ${confirmed ? "Yes" : "No"}\n`);
+			out.write(plain ? `  ${confirmed ? "Yes" : "No"}\n` : `${chalk.cyan("│")}  ${confirmed ? "Yes" : "No"}\n`);
 			return confirmed;
 		} finally {
 			rl.close();
