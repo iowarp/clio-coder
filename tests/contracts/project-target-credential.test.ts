@@ -1,11 +1,11 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { match, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { readLayeredSettings } from "../../src/core/settings-layers.js";
+import { readLayeredSettings, readStrictLayeredSettings } from "../../src/core/settings-layers.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { bootAuthStatus } from "../../src/domains/providers/auth/boot-status.js";
 import { type RuntimeAuthMetadata, resolveAuthTarget } from "../../src/domains/providers/auth/storage.js";
@@ -49,6 +49,59 @@ test("a trusted project's loopback target keeps the operator's key unless its ru
 	strictEqual(bootAuthStatus(openaiTarget, openai).available, false);
 	strictEqual(resolveAuthTarget(ollamaTarget, ollama).credentialRefusal, undefined);
 	strictEqual(bootAuthStatus(ollamaTarget, ollama).available, true);
+});
+
+test("a project targets list that drops a user-only target warns against the project file instead of refusing boot", async (t) => {
+	const home = await isolateClioEnv("clio-project-drops-target-");
+	t.after(() => home.restore());
+	const configDir = process.env.CLIO_CODER_CONFIG_DIR;
+	ok(configDir);
+	mkdirSync(configDir, { recursive: true });
+	const userTargets = [
+		"targets:",
+		"  - id: copilot",
+		"    runtime: github-copilot",
+		"  - id: litellm",
+		"    runtime: openai-compat",
+		"    url: http://127.0.0.1:9/v1",
+	];
+	const rosters = ["fleet:", "  rosters:", "    senior:", "      members:"];
+	for (const label of ["one", "two"]) rosters.push(`        - label: ${label}`, "          target: litellm");
+	writeFileSync(
+		join(configDir, "settings.yaml"),
+		[...userTargets, ...rosters, "safety:", "  judge:", "    target: litellm", "    model: dummy", ""].join("\n"),
+	);
+	const workspace = join(home.dir, "workspace");
+	mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
+	const localFile = join(workspace, ".clio-coder", "settings.local.yaml");
+	writeFileSync(
+		localFile,
+		"targets:\n  - id: copilot\n    runtime: github-copilot\n  - id: copilot-long\n    runtime: github-copilot\n",
+	);
+	const snapshot = captureProjectSurface(workspace, "settings");
+	ok(snapshot.contentHash);
+	recordProjectSurfaceTrust(workspace, "settings", snapshot.contentHash);
+
+	const layered = readStrictLayeredSettings(workspace);
+	strictEqual(
+		layered.settings.targets.some((target) => target.id === "litellm"),
+		false,
+		"no user route merged in",
+	);
+	strictEqual(layered.settings.safety.judge.target, null);
+	strictEqual(layered.settings.safety.judge.model, null);
+	strictEqual(layered.settings.fleet.rosters.senior, undefined);
+	const dropped = layered.issues.filter((issue) => issue.message.includes("'litellm'"));
+	strictEqual(dropped.length, 3);
+	ok(dropped.every((issue) => issue.origin === "project.local"));
+	strictEqual(layered.layers.find((layer) => layer.origin === "project.local")?.path, localFile);
+
+	// A route naming a target no layer declares is still the user file's error.
+	writeFileSync(
+		join(configDir, "settings.yaml"),
+		[...userTargets, "safety:", "  review:", "    target: ghost", ""].join("\n"),
+	);
+	throws(() => readStrictLayeredSettings(workspace), /safety\.review\.target: unknown target 'ghost'/);
 });
 
 // The stub listens on one of this host's non-loopback addresses, the case a loopback-only check would miss.

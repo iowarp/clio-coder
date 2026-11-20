@@ -812,6 +812,71 @@ function prepareProjectLayers(
 	return { projectFile, localFile, projectRaw, localRaw, project, local };
 }
 
+/**
+ * Arrays replace wholesale, so a project `targets:` list can leave a route the
+ * user layer set (the judge, the reviewer, a roster member) naming a target
+ * this checkout no longer has (CLI-P32). The user file is valid on its own, so
+ * the dangling reference is reported against the project layer that set
+ * `targets`, the route falls back to its default here, and the session boots.
+ * The user's targets are not merged back in: a trusted project gains no
+ * credential route it did not declare. A reference to a target the user layer
+ * never declared stays the user's own validation error.
+ */
+function downgradeProjectRemovedTargets(
+	merged: Record<string, unknown>,
+	userBlob: Record<string, unknown> | undefined,
+	validation: { settings: ClioSettings; issues: ReadonlyArray<SettingsIssue> },
+	targetsOrigin: SettingsOrigin,
+): { paths: Set<string>; issues: SettingsLayerIssue[] } {
+	const paths = new Set<string>();
+	const issues: SettingsLayerIssue[] = [];
+	const userIds = new Set(
+		(Array.isArray(userBlob?.targets) ? userBlob.targets : []).flatMap((entry) =>
+			isRecord(entry) && typeof entry.id === "string" ? [entry.id] : [],
+		),
+	);
+	const effectiveIds = new Set(validation.settings.targets.map((target) => target.id));
+	const removed = (path: string, value: unknown): value is string =>
+		typeof value === "string" &&
+		userIds.has(value) &&
+		!effectiveIds.has(value) &&
+		validation.issues.some((issue) => issue.path === path);
+	const note = (path: string, value: string, effect: string) => {
+		paths.add(path);
+		issues.push({
+			origin: targetsOrigin,
+			path,
+			message: `target '${value}' from user settings is not in this file's targets list; ${effect}`,
+		});
+	};
+	const safety = isRecord(merged.safety) ? merged.safety : {};
+	const judge = isRecord(safety.judge) ? safety.judge : {};
+	if (removed("safety.judge.target", judge.target)) {
+		note("safety.judge.target", judge.target, "the safety judge uses its default route in this checkout");
+		// The model was chosen for that target, so neither half of the route stays.
+		if (judge.model !== undefined && judge.model !== null) {
+			paths.add("safety.judge.model");
+			validation.settings.safety.judge.model = DEFAULT_SETTINGS.safety.judge.model;
+		}
+	}
+	const review = isRecord(safety.review) ? safety.review : {};
+	if (removed("safety.review.target", review.target)) {
+		note("safety.review.target", review.target, "the reviewer uses its default route in this checkout");
+	}
+	const fleet = isRecord(merged.fleet) ? merged.fleet : {};
+	for (const [rawName, roster] of Object.entries(isRecord(fleet.rosters) ? fleet.rosters : {})) {
+		if (!isRecord(roster) || !Array.isArray(roster.members)) continue;
+		const name = rawName.trim();
+		for (const [index, member] of roster.members.entries()) {
+			const path = `fleet.rosters.${name}.members[${index}].target`;
+			if (!isRecord(member) || !removed(path, member.target)) continue;
+			note(path, member.target, `roster '${name}' is unavailable in this checkout`);
+			delete validation.settings.fleet.rosters[name];
+		}
+	}
+	return { paths, issues };
+}
+
 function validateLayerStack(
 	user: RawLayer,
 	prepared: PreparedLayers,
@@ -819,11 +884,16 @@ function validateLayerStack(
 ): { settings: ClioSettings; sources: Record<string, SettingsOrigin> } {
 	const { merged, sources } = mergeLayersWithSources([user, prepared.project, prepared.local]);
 	const validation = validateSettings(merged);
+	let downgraded: Set<string> = new Set();
 	// Arrays replace wholesale, so a project layer that sets `targets` supplied every entry.
 	if (sources.targets === "project" || sources.targets === "project.local") {
 		noteProjectTargets(validation.settings.targets);
+		const removed = downgradeProjectRemovedTargets(merged, user.blob, validation, sources.targets);
+		downgraded = removed.paths;
+		issues.push(...removed.issues);
 	}
 	for (const issue of validation.issues) {
+		if (downgraded.has(issue.path)) continue;
 		issues.push({ origin: settingsSourceFor(sources, issue.path), path: issue.path, message: issue.message });
 	}
 	// AUD-2 finding 4: keep rejected input in diagnostics before attributing its fallback.
@@ -836,7 +906,8 @@ function validateLayerStack(
 			!deepEquals(raw, effective) &&
 			(!isRecord(effective) || !isRecord(raw)) &&
 			(!Array.isArray(effective) || !Array.isArray(raw)) &&
-			validation.issues.some((issue) => issue.path === settingPathSegments(path).join("."))
+			(downgraded.has(settingPathSegments(path).join(".")) ||
+				validation.issues.some((issue) => issue.path === settingPathSegments(path).join(".")))
 		) {
 			pruneSources(sources, path);
 			recordSources(effective, settingPathSegments(path), "built-in", sources);
