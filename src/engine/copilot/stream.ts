@@ -1143,12 +1143,24 @@ async function withListedModels(error: unknown, modelId: string): Promise<unknow
 	return new Error(`${message} GitHub Copilot lists these models for this account: ${ids.join(", ")}.`);
 }
 
-function plan(key: string, systemHash: string, core: ReadonlyArray<CoreMessage>, prints: ReadonlyArray<string>): Plan {
+/**
+ * `framed` says host framing follows the last message with transcript identity. An idle session that has
+ * seen every such message continues with that framing as its delta: an in-run continuation that only adds a
+ * reminder must not reseed the whole transcript (FX-5).
+ */
+function plan(
+	key: string,
+	systemHash: string,
+	core: ReadonlyArray<CoreMessage>,
+	prints: ReadonlyArray<string>,
+	framed: boolean,
+): Plan {
 	let best: Conversation | null = null;
 	for (const conversation of conversations) {
 		if (conversation.key !== key || conversation.busy || conversation.disposed) continue;
 		if (conversation.systemHash !== systemHash) continue;
-		if (conversation.synced.length >= prints.length) continue;
+		const caughtUp = conversation.synced.length === prints.length && framed && conversation.state === "idle";
+		if (conversation.synced.length >= prints.length && !caughtUp) continue;
 		if (!conversation.synced.every((print, index) => prints[index] === print)) continue;
 		if (!best || conversation.synced.length > best.synced.length) best = conversation;
 	}
@@ -1248,7 +1260,8 @@ async function runStep(
 	const kept = core.filter((message) => fingerprint(message) !== null);
 	const prints = kept.map((message) => fingerprint(message) as string);
 
-	let { conversation } = plan(key, systemHash, kept, prints);
+	const framed = core.length > 0 && fingerprint(core[core.length - 1] as CoreMessage) === null;
+	let { conversation } = plan(key, systemHash, kept, prints, framed);
 	const reused = conversation !== null;
 	// No open conversation fits: one an earlier process left for this Clio session may (bt-10).
 	const stored = conversation ? null : storedConversation(key, systemHash, kept, prints);
