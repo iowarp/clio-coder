@@ -1,9 +1,9 @@
-import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { prefixHeadlessFailure, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
-import { withRunFailureReporting, withRunResultV2 } from "../../src/cli/run-failure.js";
+import { completionExitCode, withRunFailureReporting, withRunResultV2 } from "../../src/cli/run-failure.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { CITATION_CHECK_PREFIX } from "../../src/domains/safety/citation-grounding.js";
 import type { ChatLoopRunSnapshot } from "../../src/session-control/chat-loop.js";
@@ -267,7 +267,12 @@ async function writtenCallRun(
 	format?: "json",
 	override?: Record<string, unknown>,
 	output?: { path: string; cwd: string },
-	extra: { snapshot?: Partial<ChatLoopRunSnapshot>; after?: object[] } = {},
+	extra: {
+		snapshot?: Partial<ChatLoopRunSnapshot>;
+		after?: object[];
+		exitCode?: true;
+		declared?: Record<string, unknown>;
+	} = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
 	let handler: (event: unknown) => void = () => {};
 	const reply = override ?? {
@@ -285,6 +290,21 @@ async function writtenCallRun(
 		submit: async () => {
 			handler({ type: "agent_start" });
 			handler({ type: "message_end", message: reply });
+			if (extra.declared !== undefined) {
+				handler({ type: "tool_execution_start", toolCallId: "f1", toolName: "finish", args: extra.declared });
+				handler({
+					type: "tool_execution_end",
+					toolCallId: "f1",
+					toolName: "finish",
+					isError: false,
+					outcome: "ok",
+					result: {
+						terminate: true,
+						content: [{ type: "text", text: "completion declared" }],
+						details: { completion: extra.declared },
+					},
+				});
+			}
 			handler({ type: "turn_end", message: reply, toolResults: [] });
 			handler({ type: "agent_end", messages: [reply] });
 			for (const event of extra.after ?? []) handler(event);
@@ -319,7 +339,10 @@ async function writtenCallRun(
 	try {
 		const code =
 			format !== undefined
-				? await withRunResultV2({ format, mode: "main", verify: [] }, run)
+				? await withRunResultV2(
+						{ format, mode: "main", verify: [], ...(extra.exitCode ? { exitCode: true as const } : {}) },
+						run,
+					)
 				: output !== undefined
 					? await withRunFailureReporting(run, output)
 					: await run();
@@ -429,4 +452,45 @@ test("a provider error that ends the run is provider_error under v2 and unchange
 	const recoveryEnvelope = JSON.parse(recoveryV2.stdout.trim().split("\n").at(-1) ?? "{}") as typeof envelope;
 	strictEqual(recoveryEnvelope.causes?.[0]?.code, "context_overflow", recoveryV2.stdout);
 	match(recoveryEnvelope.causes?.[0]?.message ?? "", /prompt is too long/u);
+});
+
+test("a declared not_done or partly_done keeps exit 0, rides the envelope, and --exit-code maps it to 1 (fleet design 4.3)", async (t) => {
+	const env = await isolateClioEnv("headless-completion-");
+	t.after(() => env.restore());
+	type Envelope = { exitCode?: number; outcome?: string; causes?: unknown[]; completion?: unknown };
+	const last = (stdout: string): Envelope => JSON.parse(stdout.trim().split("\n").at(-1) ?? "{}") as Envelope;
+	const declining = { ...answerMessage("Not done: the task names a schema I was not given.") };
+	const notDone = {
+		state: "not_done",
+		limitations: [{ what: "no schema given", why: "missing_access" }],
+		unverified: [],
+	};
+	const text = await writtenCallRun(undefined, declining, undefined, { declared: notDone });
+	strictEqual(text.code, 0, text.stderr);
+	// The reply beside finish stays the answer; the tool's own result text does not replace it.
+	match(text.stdout, /^Not done: the task names a schema/u);
+	strictEqual(completionExitCode(text.code, true), 1);
+	strictEqual(completionExitCode(text.code, false), 0);
+	const v2 = await writtenCallRun("json", declining, undefined, { declared: notDone });
+	strictEqual(v2.code, 0, v2.stderr);
+	deepStrictEqual(last(v2.stdout).completion, { state: "not_done", declared: true });
+	const mapped = await writtenCallRun("json", declining, undefined, { exitCode: true, declared: notDone });
+	strictEqual(mapped.code, 1, mapped.stderr);
+	strictEqual(last(mapped.stdout).exitCode, 1);
+	strictEqual(last(mapped.stdout).outcome, "succeeded");
+	deepStrictEqual(last(mapped.stdout).causes, []);
+	const partly = await writtenCallRun("json", declining, undefined, {
+		exitCode: true,
+		declared: { state: "partly_done" },
+	});
+	strictEqual(partly.code, 1, partly.stderr);
+	deepStrictEqual(last(partly.stdout).completion, { state: "partly_done", declared: true });
+	const done = await writtenCallRun("json", declining, undefined, { exitCode: true, declared: { state: "done" } });
+	strictEqual(done.code, 0, done.stderr);
+	// A plain answer declares nothing: declared false, exit 0 with or without the flag. Reply text is never read.
+	const plain = await writtenCallRun("json", answerMessage("Not done.") as Record<string, unknown>, undefined, {
+		exitCode: true,
+	});
+	strictEqual(plain.code, 0, plain.stderr);
+	deepStrictEqual(last(plain.stdout).completion, { state: "unknown", declared: false });
 });

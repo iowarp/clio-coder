@@ -78,6 +78,8 @@ export interface RunCliArgs {
 	failOnNoop: boolean;
 	/** `--fail-on-verify`: a failed or timed-out `--verify` check fails the run. */
 	failOnVerify?: boolean;
+	/** `--exit-code` (SPEC C19): a run that ends 0 with a declared completion `partly_done` or `not_done` exits 1. */
+	exitCodeVerdict?: boolean;
 	/** `--on-permission`: `fail` ends the run with exit 3 at the first ask a headless run refuses. */
 	onPermission?: "deny" | "fail";
 	/** `--dry-run`: print what the run would do, with no session, model call or `--verify` command. */
@@ -187,6 +189,7 @@ function runModeMatrixErrors(parsed: RunCliArgs): CliArgDiagnostic[] {
 	const mainOnly: Array<[boolean, string]> = [
 		[parsed.failOnNoop, "--fail-on-noop"],
 		[parsed.failOnVerify === true, "--fail-on-verify"],
+		[parsed.exitCodeVerdict === true, "--exit-code"],
 		[parsed.onPermission !== undefined, "--on-permission"],
 		[parsed.dryRun === true, "--dry-run"],
 		[parsed.maxRequests !== undefined, "--max-requests"],
@@ -560,6 +563,10 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--fail-on-verify") {
 			parsed.failOnVerify = true;
+			continue;
+		}
+		if (arg === "--exit-code") {
+			parsed.exitCodeVerdict = true;
 			continue;
 		}
 		if (arg === "--on-permission" || arg?.startsWith("--on-permission=")) {

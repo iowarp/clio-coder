@@ -279,6 +279,12 @@ export interface RunDispatchedRunV2 {
 	outcomeDetail?: string;
 }
 
+/** A main run's completion: the declared state, or `unknown` when the agent declared none. */
+export interface RunCompletionV2 {
+	state: "done" | "partly_done" | "not_done" | "unknown";
+	declared: boolean;
+}
+
 export interface RunResultEnvelopeV2 {
 	type: "run_end";
 	schemaVersion: typeof RUN_RESULT_SCHEMA_VERSION;
@@ -298,6 +304,12 @@ export interface RunResultEnvelopeV2 {
 	outcome: RunOutcomeV2;
 	outcomeDetail?: RunCauseCode;
 	causes: RunCause[];
+	/**
+	 * Fleet design 4.3: how the main agent declared the run ended through its `finish` tool, never read from the
+	 * answer text. `declared: false` with state `unknown` when it declared nothing. `run --exit-code` maps a declared
+	 * `partly_done` or `not_done` on an exit-0 run to 1. Present once a main run settles.
+	 */
+	completion?: RunCompletionV2;
 	/** `structured` and `enforcedBy` appear only with `--output-schema` (SPEC 6.6); `structured` only on exit 0. */
 	result: {
 		text: string;

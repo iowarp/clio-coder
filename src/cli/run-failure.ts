@@ -18,6 +18,7 @@ import type {
 import {
 	RUN_RESULT_SCHEMA_VERSION,
 	type RunCauseCode,
+	type RunCompletionV2,
 	type RunDispatchedRunV2,
 	type RunExitFact,
 	type RunLimitsV2,
@@ -124,6 +125,7 @@ export async function withRunFailureReporting(
 	run: () => Promise<number>,
 	output?: OutputLastMessageRequest,
 ): Promise<number> {
+	runCompletion = undefined;
 	return output === undefined ? run() : withOutputLastMessage(output, run);
 }
 
@@ -275,6 +277,26 @@ export function noteRunPlan(plan: object): void {
 }
 
 /**
+ * The settled main run's completion (fleet design 4.3): the state the agent declared through `finish`, or `unknown`
+ * with `declared: false` when it declared none. Absent until a main run settles.
+ */
+let runCompletion: RunCompletionV2 | undefined;
+
+/** The settled main run hands over its completion; the envelope carries it and `--exit-code` reads it. */
+export function noteRunCompletion(completion: RunCompletionV2): void {
+	runCompletion = completion;
+}
+
+/**
+ * `run --exit-code` (SPEC C19, ruling 7): a run that ended 0 with a declared `partly_done` or `not_done` exits 1;
+ * `done` and an undeclared run keep 0. Every other exit is unchanged, and without the flag the exit is the run's own.
+ */
+export function completionExitCode(code: number, exitCodeFlag: boolean): number {
+	const unfinished = runCompletion?.state === "partly_done" || runCompletion?.state === "not_done";
+	return exitCodeFlag && code === 0 && runCompletion?.declared === true && unfinished ? 1 : code;
+}
+
+/**
  * SPEC 6.9 `limits`: what was requested and what is enforced. Every accepted limit is enforced, because one
  * this build cannot enforce is refused at preflight. Undefined when no limit was given.
  */
@@ -338,6 +360,8 @@ export interface RunResultV2Request {
 	timeoutSeconds?: number;
 	/** The limits the run was given (SPEC 6.9); the envelope carries them as `limits` when any is set. */
 	limits?: RunLimitsV2["requested"];
+	/** `--exit-code` (SPEC C19): a declared completion `partly_done` or `not_done` exits 1. */
+	exitCode?: true;
 }
 
 /** What the v1 frames told the v2 writer; the run itself still speaks v1 underneath. */
@@ -549,6 +573,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	supersededRuns = [];
 	structuredNote = undefined;
 	runPlan = undefined;
+	runCompletion = undefined;
 	let written = false;
 	let outputTarget: string | undefined;
 	const envelopeLines = (code: number, extra: RunExitFact[] = []): { lines: string; exitCode: number } => {
@@ -564,6 +589,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			...(seen.firstTokenMs !== undefined ? { firstTokenMs: seen.firstTokenMs } : {}),
 		};
 		const limits = runLimitsV2(request.limits, usage, mainRunNote.unpricedRoutes);
+		const exitCode = completionExitCode(resolution.exitCode, request.exitCode === true);
 		const envelope: RunResultEnvelopeV2 = {
 			type: "run_end",
 			schemaVersion: RUN_RESULT_SCHEMA_VERSION,
@@ -580,10 +606,11 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			startedAt,
 			endedAt: new Date().toISOString(),
 			durationMs: Date.now() - started,
-			exitCode: resolution.exitCode,
+			exitCode,
 			outcome: previewed ? "previewed" : resolution.outcome,
 			...(resolution.causes[0] !== undefined ? { outcomeDetail: resolution.causes[0].code } : {}),
 			causes: resolution.causes,
+			...(runCompletion !== undefined ? { completion: runCompletion } : {}),
 			result: {
 				text: seen.text,
 				artifacts: [],
@@ -623,7 +650,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 						cwd: process.cwd(),
 					})
 				: "";
-		return { lines: pending + (heldSteer ?? []).join("") + serializeJsonLine(envelope), exitCode: resolution.exitCode };
+		return { lines: pending + (heldSteer ?? []).join("") + serializeJsonLine(envelope), exitCode };
 	};
 	// `-o` is written once, by temp file and rename, only for a run that ends exit 0; any other end leaves no file.
 	let outputSettled = false;
