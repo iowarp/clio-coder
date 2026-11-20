@@ -8,6 +8,9 @@ import {
 	withModelSkillActivation,
 } from "../../src/core/skill-activation.js";
 import { clioConfigDir as configDir } from "../../src/core/xdg.js";
+import type { CapabilityMatch } from "../../src/domains/middleware/capability-gate.js";
+import { createSkillsReminderRegistration } from "../../src/domains/middleware/skills-reminder.js";
+import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import { PLUGIN_SCHEMA } from "../../src/domains/plugins/discovery.js";
 import { clearPluginSnapshots, pluginContentDigest } from "../../src/domains/plugins/index.js";
 import { buildSkillCatalogView } from "../../src/domains/resources/skills/catalog-view.js";
@@ -482,5 +485,70 @@ describe("contracts/skills catalog through the context tool", () => {
 		const result = await tool.run({ scope: "skills" }, {});
 		ok(result.kind === "ok", JSON.stringify(result));
 		ok(!(result.output ?? "").includes("Marketplace ("), "a worker is offered no marketplace section");
+	});
+});
+
+describe("contracts/skills reminder ranking", () => {
+	it("ranks on the operator's task across host continuations, skips an unchanged list and drops loaded skills", () => {
+		const match = (id: string): CapabilityMatch => ({ id, description: `${id} workflow`, score: 1 });
+		const queries: string[] = [];
+		const rejected = new Set(["plotting"]);
+		let allowed: ReadonlyArray<string> | undefined;
+		const reminder = createSkillsReminderRegistration({
+			countModelVisibleSkills: () => 3,
+			modelMayActivateSkills: () => true,
+			verifyRankedSkills: (matches) => matches.filter((candidate) => !rejected.has(candidate.id)),
+			getTurnConstraints: () => (allowed === undefined ? undefined : { allowedTools: allowed }),
+			rankSkills: (query) => {
+				queries.push(query);
+				// The unrelated skill matches only the host's continuation boilerplate.
+				if (query.includes("previous turn stopped")) return [match("handoff-notes")];
+				return query.includes("parquet") ? [match("science-data"), match("plotting")] : [];
+			},
+		});
+		const turn = (text: string, origin: string): string => {
+			const effects = reminder.evaluate({
+				hook: "turn_start",
+				sessionId: "s1",
+				text,
+				metadata: { turnOrigin: origin, conversationMessages: 2 },
+			});
+			return effects.map((effect) => ("message" in effect ? effect.message : "")).join("\n");
+		};
+		const tool = (input: Omit<MiddlewareHookInput, "hook">): void => {
+			strictEqual(reminder.evaluate({ hook: "after_tool", ...input }).length, 0, "a tool boundary emits nothing");
+		};
+		const boilerplate =
+			"[CLIO Coder] The previous turn stopped: tool budget. Its work and tool results are above. Continue from where it stopped.";
+		ok(!reminder.hooks.includes("before_tool"), "the unread before_tool refinement is gone");
+
+		const first = turn("Summarize the columns of data/run.parquet as a table", "operator");
+		ok(first.includes("- science-data") && !first.includes("plotting"), "a rejected skill is not shown");
+		ok(first.includes("Load the one for the current step") && first.includes("another may follow"), first);
+		rejected.clear();
+		const verified = turn(boilerplate, "continuation");
+		ok(verified.includes("- plotting") && !verified.includes("handoff-notes"), "it is offered once it verifies");
+		strictEqual(turn(boilerplate, "continuation"), "", "an unchanged list is not re-sent");
+		ok(!queries.some((query) => query.includes("previous turn stopped")), "host text never becomes the query");
+
+		tool({ toolName: "gateway", metadata: { resultKind: "ok" } });
+		tool({ toolName: "data", metadata: { resultKind: "ok", nested: true } });
+		const loaded = {
+			name: "science-data",
+			path: "/skills/science-data/SKILL.md",
+			hash: "0".repeat(64),
+			source: "clio-coder",
+		};
+		tool({ toolName: "context", metadata: { resultKind: "ok" }, toolResultDetails: loaded });
+		const next = turn(boilerplate, "continuation");
+		strictEqual(queries.at(-1), "Summarize the columns of data/run.parquet as a table\ncontext data");
+		ok(next.includes("- plotting") && !next.includes("science-data") && !next.includes("handoff-notes"), next);
+		strictEqual(turn(boilerplate, "job"), "", "the list after the drop is not re-sent either");
+		for (let index = 0; index < 5; index++) tool({ toolName: "read", metadata: { resultKind: "ok" } });
+		strictEqual(turn(boilerplate, "continuation"), "");
+		strictEqual(queries.at(-1), "Summarize the columns of data/run.parquet as a table\nread", "five reads push data out");
+
+		allowed = ["read"];
+		strictEqual(turn("Plot the parquet columns as a histogram", "operator"), "", "no context tool, no skills advice");
 	});
 });
