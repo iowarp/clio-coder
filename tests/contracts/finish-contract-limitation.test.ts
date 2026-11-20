@@ -47,6 +47,28 @@ function toolResult(toolCallId: string, toolName: string, isError: boolean): unk
 	};
 }
 
+/** The high-rigor gate's turn_end effects for a session window and a final reply. */
+function highRigorGate(entries: unknown[], text: string) {
+	return createFinishContractRegistration({ readSessionEntries: () => entries, resolveRigor: () => "high" }).evaluate({
+		hook: "turn_end",
+		text,
+	});
+}
+
+/** Whether the gate withheld the completion and re-prompted the model. */
+function reprompted(effects: ReadonlyArray<{ kind: string }>): boolean {
+	return effects.some((effect) => effect.kind === "request_continuation");
+}
+
+/** The mutation window followed by one bash check call and its result. */
+function checkedWindow(command: string, isError = false): unknown[] {
+	return [
+		...mutationWindow(),
+		toolCall("bash-1", ToolNames.Bash, { command }),
+		toolResult("bash-1", ToolNames.Bash, isError),
+	];
+}
+
 /** A window that mutated one file and recorded no validation evidence. */
 function mutationWindow(): unknown[] {
 	return [
@@ -344,6 +366,36 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		deepStrictEqual(await high.evaluate({ hook: "turn_end", text: "Done." }), effects);
 		strictEqual(audits[2]?.reason, "validation_evidence");
 		deepStrictEqual(audits[2]?.verificationScope?.acceptance, [{ check: "test", state: "passed" }]);
+	});
+
+	it("credits a passing check spelled with output flags, corepack or a runner in front (CLI-P24)", async () => {
+		for (const command of [
+			"pnpm -s run typecheck",
+			"corepack pnpm run -s typecheck",
+			"corepack pnpm -s exec biome check src",
+			"npx tsc --noEmit",
+		]) {
+			strictEqual(reprompted(await highRigorGate(checkedWindow(command), "Done.")), false, command);
+		}
+	});
+
+	it("still fires when the check did not run, failed, ran before the edit, or was only named (CLI-P24)", async () => {
+		const before = [
+			userMessage("user-1"),
+			toolCall("bash-0", ToolNames.Bash, { command: "corepack pnpm -s run typecheck" }),
+			toolResult("bash-0", ToolNames.Bash, false),
+			toolCall("write-1", ToolNames.Write, { path: "src/thing.ts", content: "x" }),
+			toolResult("write-1", ToolNames.Write, false),
+		];
+		for (const [name, entries] of [
+			["no check", mutationWindow()],
+			["failed check", checkedWindow("corepack pnpm -s run typecheck", true)],
+			["check before the edit", before],
+			["echoed check", checkedWindow("echo corepack pnpm -s run typecheck")],
+			["corepack's own command", checkedWindow("corepack enable")],
+		] as const) {
+			strictEqual(reprompted(await highRigorGate([...entries], "Done.")), true, name);
+		}
 	});
 
 	it("waits on a step turn a step continuation follows and assesses the whole pipeline at its end (bt-12 #4)", async () => {

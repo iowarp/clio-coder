@@ -7,6 +7,7 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
+import { callVerdict } from "../../src/domains/safety/check-classifier.js";
 import type { SafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import {
 	createSafetyPolicyEngine,
@@ -15,7 +16,12 @@ import {
 } from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
 import type { ValidationCommandLabel } from "../../src/domains/safety/protected-artifacts.js";
-import { detectValidationCommand, VALIDATION_COMMAND_LABELS } from "../../src/domains/safety/protected-artifacts.js";
+import {
+	checkIdentity,
+	detectValidationCommand,
+	observedValidationCommand,
+	VALIDATION_COMMAND_LABELS,
+} from "../../src/domains/safety/protected-artifacts.js";
 import { createSessionCodeConsent } from "../../src/domains/safety/session-code-consent.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
@@ -116,6 +122,71 @@ describe("test runner vocabulary (#377)", () => {
 	after(() => {
 		rmSync(scratch, { recursive: true, force: true });
 		isolated.restore();
+	});
+
+	// CLI-P24: the spellings lanes run. Each row names the label the finish gate files the check under and asserts the
+	// call reads as a check, which is what lets the gate credit it.
+	const label = (command: string) => {
+		const detected = detectValidationCommand(command);
+		return detected.kind === "validation" ? detected.matched : null;
+	};
+	const identity = (command: string) => checkIdentity(observedValidationCommand(command));
+
+	it("keeps package-manager output flags out of a check's label and identity (CLI-P24)", () => {
+		for (const [command, plain] of [
+			["pnpm -s run typecheck", "pnpm run typecheck"],
+			["pnpm --silent run lint", "pnpm run lint"],
+			["pnpm run -s typecheck", "pnpm run typecheck"],
+			["pnpm --reporter=silent run lint", "pnpm run lint"],
+			["pnpm --loglevel error run lint", "pnpm run lint"],
+			["npm -q run typecheck", "npm run typecheck"],
+			["pnpm -s run test:file tests/a.test.ts", "pnpm run test:file tests/a.test.ts"],
+			["pnpm -s exec biome check src", "pnpm exec biome check src"],
+		] as const) {
+			strictEqual(label(command), label(plain), command);
+			notStrictEqual(label(command), null, command);
+			strictEqual(callVerdict(ToolNames.Bash, { command }), "check", command);
+			strictEqual(identity(command), identity(plain), command);
+		}
+		// A selector still names a different check.
+		notStrictEqual(identity("pnpm --filter gui run lint"), identity("pnpm run lint"));
+	});
+
+	it("reads corepack in front of a package manager as transparent (CLI-P24)", () => {
+		for (const command of [
+			"corepack pnpm run typecheck",
+			"corepack pnpm -s run test:file tests/a.test.ts",
+			"corepack pnpm run -s typecheck 2>&1 | tail -5",
+			"corepack npm test",
+		]) {
+			const bare = command.replace(/^corepack /u, "");
+			strictEqual(label(command), label(bare), command);
+			notStrictEqual(label(command), null, command);
+			strictEqual(callVerdict(ToolNames.Bash, { command }), "check", command);
+			strictEqual(identity(command), identity(bare), command);
+		}
+		// corepack's own commands run no check.
+		strictEqual(label("corepack enable"), null);
+		notStrictEqual(callVerdict(ToolNames.Bash, { command: "corepack enable" }), "check");
+	});
+
+	it("labels npx, pnpm exec and pnpm dlx by the checker they run (CLI-P24)", () => {
+		for (const [command, checker] of [
+			["npx biome check src", "biome check"],
+			["corepack pnpm -s exec biome check src", "biome check"],
+			["pnpm exec biome lint src", "biome lint"],
+			["npx tsc --noEmit", "tsc --noEmit"],
+			["pnpm exec tsc --noEmit", "tsc --noEmit"],
+			["pnpm dlx tsc --noEmit", "tsc --noEmit"],
+			["npx eslint .", "eslint"],
+			["yarn exec eslint src", "eslint"],
+		] as const) {
+			strictEqual(label(command), checker, command);
+			strictEqual(callVerdict(ToolNames.Bash, { command }), "check", command);
+		}
+		// A checker in a write mode is not a check, behind a runner or bare.
+		for (const command of ["pnpm exec biome check --write src", "npx eslint --fix .", "pnpm dlx tsc", "npx -c 'tsc'"])
+			strictEqual(label(command), null, command);
 	});
 
 	it("keeps the validation labels and the unattended test runners in step", () => {
