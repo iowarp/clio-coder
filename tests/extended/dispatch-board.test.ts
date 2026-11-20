@@ -69,6 +69,26 @@ it("keeps the council status word neutral while a running glyph carries action",
 	}
 });
 
+it("previews a council member's first real line on the compact body, past a code fence", () => {
+	const theme = clioTheme();
+	const status = { glyph: GLYPH.ok, label: "done", token: "success" as const };
+	const member = (runId: string, tailText: string) => ({
+		runId,
+		label: runId,
+		round: 1,
+		route: "blade/model",
+		status,
+		tailText,
+		droppedLines: 0,
+	});
+	const members = [member("a", '```json\n\n{"verdict": "ship"}\n```'), member("b", "Looks fine.")];
+	const group = { group: "review", members, synthesis: null, status, round: 1, elapsed: "3s" };
+	const rows = councilGroupBody(theme, group, 80, 2).map(stripTerminalSequences);
+	strictEqual(rows.length, 2, rows.join("\n"));
+	ok(rows[0]?.includes('{"verdict": "ship"}'), rows[0]);
+	ok(!rows[0]?.includes("```"), rows[0]);
+});
+
 const IDENTITY: DispatchEnqueuedPayload = {
 	runId: "board-run",
 	agentId: "coder",
