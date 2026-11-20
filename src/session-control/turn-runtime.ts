@@ -107,6 +107,7 @@ import {
 	sumRunUsage,
 	type ToolMarkupRepromptBudget,
 	terminalFailureFromAssistantMessage,
+	toolCallLabel,
 	toolNamesFromAgentState,
 	toolResultSummary,
 } from "./chat-loop-messages.js";
@@ -435,6 +436,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	>();
 	/** Calls of a response the output token limit cut off: the engine fails each unrun, so they are flagged as not run (bt-39 a). */
 	const cutOffToolCalls = new Set<string>();
+	/** Each started call's label until it settles; a call that ran without error joins `turnCallsDone`. */
+	const startedCallLabels = new Map<string, string>();
 	const toolTelemetry: ToolTelemetry = {
 		onFinish(event) {
 			if (event.toolCallId === undefined) return;
@@ -1703,7 +1706,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			const reprompt =
 				turn.message.stopReason === "stop" &&
 				!endedOnCancelledInterview(localRuntime.agent.state.messages.filter((message) => message !== turn.message))
-					? noAnswerReprompt(classifyTurnEnding([turn.message]))
+					? noAnswerReprompt(classifyTurnEnding([turn.message]), state.turnCallsDone)
 					: null;
 			const repromptBudget: ToolMarkupRepromptBudget | null =
 				reprompt !== null &&
@@ -1750,6 +1753,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			state.turnToolCalls = 0;
 			state.toolMarkupReprompt = rebaseToolMarkupReprompt(state.toolMarkupReprompt);
 			state.turnToolNames = [];
+			state.turnCallsDone = [];
 			middlewareToolChoice.reset();
 			let block: string | null = null;
 			try {
@@ -1835,7 +1839,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				state.turnToolCalls += 1;
 				// Turn-end detectors (#184 skill wait) reason about the capability
 				// that ran, which for the coordinator is usually behind gateway op=call.
-				state.turnToolNames.push(effectiveToolCall(event.toolName, event.args).toolName);
+				const effective = effectiveToolCall(event.toolName, event.args);
+				state.turnToolNames.push(effective.toolName);
+				startedCallLabels.set(event.toolCallId, toolCallLabel(effective.toolName, effective.args));
 			} else if (event.type === "tool_execution_end") {
 				toolsInFlight = Math.max(0, toolsInFlight - 1);
 				const startedAt = deps.toolStartTimes.get(event.toolCallId);
@@ -1848,6 +1854,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const admission = toolOutcomes.get(event.toolCallId);
 				toolOutcomes.delete(event.toolCallId);
 				const notRun = cutOffToolCalls.delete(event.toolCallId);
+				const callLabel = startedCallLabels.get(event.toolCallId);
+				startedCallLabels.delete(event.toolCallId);
+				if (callLabel !== undefined && !notRun && !event.isError) state.turnCallsDone.push(callLabel);
 				// The registry's own span is the one that means "how long the tool
 				// took": the engine's start-to-end frame also covers the operator,
 				// because a call awaiting a permission decision is parked between

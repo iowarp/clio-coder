@@ -3366,6 +3366,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.turnToolCalls = 0;
 				state.toolMarkupReprompt = rebaseToolMarkupReprompt(state.toolMarkupReprompt);
 				state.turnToolNames = [];
+				state.turnCallsDone = [];
 				state.turnSharedWorkerNote = isWorkerShareNote(text);
 				state.continuation.beginPrompt({
 					requestContinuation: options.requestContinuation === true,

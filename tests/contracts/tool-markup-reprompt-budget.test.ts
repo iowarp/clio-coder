@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import {
 	claimToolMarkupReprompt,
@@ -7,6 +7,7 @@ import {
 	rebaseToolMarkupReprompt,
 	TOOL_MARKUP_REPROMPT_CAP,
 	TOOL_MARKUP_REPROMPT_NOTICE_KEY,
+	toolCallLabel,
 } from "../../src/session-control/chat-loop-messages.js";
 
 test("written-out tool calls are capped only when back to back, and a real call resets the count", () => {
@@ -39,4 +40,21 @@ test("a reply with no answer and no call is re-prompted like a written-out call,
 	);
 	strictEqual(noAnswerReprompt({ kind: "quiet", toolsRan: 2 }), null);
 	strictEqual(noAnswerReprompt(null), null);
+});
+
+test("the written-out-call nudge names the calls that already ran this turn, so an applied edit is not redone (SC-1)", () => {
+	const ran = [toolCallLabel("edit", { path: "src/x.py" }), toolCallLabel("bash", { command: "pytest -q" })];
+	deepStrictEqual(ran, ["edit src/x.py", "bash `pytest -q`"]);
+	const reminder = noAnswerReprompt({ kind: "no_answer", cause: "tool_call_as_text", toolsRan: 2 }, ran)?.reminder ?? "";
+	ok(reminder.includes("edit src/x.py; bash `pytest -q`"), reminder);
+	ok(reminder.includes("do not repeat them"), reminder);
+	// Nothing ran: the nudge stays as it was, and an empty reply never lists calls.
+	ok(
+		!(noAnswerReprompt({ kind: "no_answer", cause: "tool_call_as_text", toolsRan: 0 }, [])?.reminder ?? "").includes(
+			"already ran",
+		),
+	);
+	ok(
+		!(noAnswerReprompt({ kind: "no_answer", cause: "empty", toolsRan: 2 }, ran)?.reminder ?? "").includes("already ran"),
+	);
 });

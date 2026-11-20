@@ -313,6 +313,8 @@ export interface ChatTurnState {
 	turnToolCalls: number;
 	/** Names of those calls, in order, so turn_end can tell a listing-only turn from a working one. */
 	turnToolNames: string[];
+	/** Labels of the calls that ran without error this turn, such as `edit src/x.py`; a written-out-call nudge names them. */
+	turnCallsDone: string[];
 	/** A `[worker result]` note the operator shared entered this turn, as the prompt or as a steer; feeds turn_end metadata. */
 	turnSharedWorkerNote: boolean;
 	currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
@@ -364,6 +366,7 @@ export type TurnRuntimeState = TurnStateView<
 	| "toolProseAssessedChars"
 	| "turnToolCalls"
 	| "turnToolNames"
+	| "turnCallsDone"
 >;
 
 /** turn-middleware: reads the turn's facts for its hooks; a hard block sets the tool-prose abort reason. */
@@ -463,6 +466,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		toolProseAssessedChars: 0,
 		turnToolCalls: 0,
 		turnToolNames: [],
+		turnCallsDone: [],
 		turnSharedWorkerNote: false,
 		currentPendingSkillPolicy: undefined,
 		currentTurnConstraints: undefined,

@@ -344,6 +344,7 @@ export const EMPTY_ANSWER_REPROMPT =
  */
 export function noAnswerReprompt(
 	ending: TurnEnding | null,
+	ranCalls: ReadonlyArray<string> = [],
 ): { reminder: string; notice: string; noticeKey: string } | null {
 	if (ending?.kind !== "no_answer") return null;
 	switch (ending.cause) {
@@ -351,7 +352,7 @@ export function noAnswerReprompt(
 		case "tool_call_as_text":
 		case "tool_call_announced":
 			return {
-				reminder: TOOL_MARKUP_REPROMPT,
+				reminder: withRanCalls(TOOL_MARKUP_REPROMPT, ranCalls),
 				notice: TOOL_MARKUP_REPROMPT_NOTICE,
 				noticeKey: TOOL_MARKUP_REPROMPT_NOTICE_KEY,
 			};
@@ -363,6 +364,39 @@ export function noAnswerReprompt(
 				noticeKey: EMPTY_ANSWER_REPROMPT_NOTICE_KEY,
 			};
 	}
+}
+
+/** The most recent calls a written-out-call nudge names; earlier ones are counted. */
+const RAN_CALLS_NAMED = 8;
+
+/**
+ * A nudge that names the calls this turn already ran. A model that wrote its
+ * next call as text was told only that nothing happened, read that as its
+ * earlier edit never landing, and applied it again (SC-1).
+ */
+function withRanCalls(reminder: string, ranCalls: ReadonlyArray<string>): string {
+	if (ranCalls.length === 0) return reminder;
+	const named = ranCalls.slice(-RAN_CALLS_NAMED);
+	const earlier = ranCalls.length - named.length;
+	const note = ` Only that written call failed to run. These calls already ran this turn and their effects are applied, so do not repeat them: ${named.join("; ")}${earlier > 0 ? ` (and ${earlier} earlier)` : ""}.`;
+	const close = reminder.lastIndexOf("</system-reminder>");
+	return close < 0 ? `${reminder}${note}` : `${reminder.slice(0, close)}${note}${reminder.slice(close)}`;
+}
+
+const CALL_LABEL_PATH_KEYS = ["path", "file_path", "file", "script"] as const;
+const CALL_LABEL_COMMAND_CHARS = 80;
+
+/** A short label for a call that ran: its tool and target path or command, such as `edit src/x.py`. */
+export function toolCallLabel(name: string, args: Record<string, unknown> | undefined): string {
+	for (const key of CALL_LABEL_PATH_KEYS) {
+		const value = args?.[key];
+		if (typeof value === "string" && value.trim().length > 0) return `${name} ${value.trim()}`;
+	}
+	const command = typeof args?.command === "string" ? args.command.replace(/\s+/gu, " ").trim() : "";
+	if (command.length === 0) return name;
+	const shown =
+		command.length > CALL_LABEL_COMMAND_CHARS ? `${command.slice(0, CALL_LABEL_COMMAND_CHARS - 3)}...` : command;
+	return `${name} \`${shown}\``;
 }
 
 /** At most this many no-answer re-prompts (written-out calls or empty replies) in a row, with no real call between. */
