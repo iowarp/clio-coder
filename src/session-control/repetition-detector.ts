@@ -183,6 +183,19 @@ export function repetitionRecoveryStage(state: {
 	return spent === 0 ? 1 : spent < REPETITION_RECOVERY_STAGES ? 2 : null;
 }
 
+/**
+ * What the stopped attempt's `message_end` and `agent_end` carry when a recovery follows: the attempt closes, the
+ * turn goes on, so it has no outcome of its own (bt-48-1). The shape is the retry ladder's forecast, which every
+ * reader already takes to mean exactly that.
+ */
+export function repetitionRecoveryForecast(stage: RepetitionRecoveryStage): {
+	attempt: number;
+	maxAttempts: number;
+	recovery: true;
+} {
+	return { attempt: stage, maxAttempts: REPETITION_RECOVERY_STAGES, recovery: true };
+}
+
 function repetitionRepromptText(stoppedFor: string, stage: RepetitionRecoveryStage): string {
 	const flood = stoppedFor.startsWith(TOOL_CALL_FLOOD_REASON_PREFIX);
 	const overrun = stoppedFor.startsWith(THINKING_OVERRUN_REASON_PREFIX);

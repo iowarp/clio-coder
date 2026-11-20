@@ -207,6 +207,7 @@ import {
 import { resolveFitOutputReserve, turnAdmissionRemedy } from "./output-reserve.js";
 import {
 	REPETITION_REPROMPT_NOTICE_KEY,
+	repetitionRecoveryForecast,
 	repetitionRecoveryStage,
 	repetitionRepromptMessages,
 } from "./repetition-detector.js";
@@ -1970,6 +1971,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			explainInterruptedAssistant(event.message, state.activeInterruptReason);
 			if (event.message.role === "assistant") {
 				attemptRetryForecast = state.runtime ? recovery.forecastRetry(state.runtime, event.message) : null;
+				// A reply the repetition check stopped, when a recovery follows, closes an attempt and not the turn (bt-48-1).
+				const repetitionStage =
+					attemptRetryForecast === null && (event.message as { stopReason?: unknown }).stopReason === "aborted"
+						? repetitionRecoveryStage(state)
+						: null;
+				if (repetitionStage !== null) attemptRetryForecast = repetitionRecoveryForecast(repetitionStage);
 				if (attemptRetryForecast !== null) Object.assign(event, { retryPending: attemptRetryForecast });
 			}
 			if (state.currentAskUserPolicy?.planOnly && event.message.role === "assistant") {

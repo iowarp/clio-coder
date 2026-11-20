@@ -738,6 +738,9 @@ it("a reply the repetition guard stops after a plain and a changed recovery fail
 		deepStrictEqual(changed?.chat_template_kwargs, { enable_thinking: false });
 		doesNotMatch(JSON.stringify(plain?.messages), /stopped again/u);
 		match(JSON.stringify(changed?.messages), /stopped again/u);
+		// One turn, one outcome footer, however many recoveries it took (bt-48-1).
+		const rendered = f.panel.render(120).map(stripTerminalSequences).join("\n");
+		strictEqual(rendered.split("⊘ Cancelled").length - 1, 1, rendered);
 		const envelope = [...(readRunJournal(join(env.dir, "state"))?.envelopes.values() ?? [])][0];
 		match(envelope?.outcomeDetail ?? "", /^\[CLIO Coder\] stopped a model response that kept repeating itself/u);
 		doesNotMatch(stderr.join(""), /target 'cancellation-fixture'|Request was aborted/u);
@@ -1175,7 +1178,11 @@ it("a looping stream is stopped and re-prompted once with a nudge, without resen
 		ok(retry.includes("clio_repetition_reprompt"), retry);
 		strictEqual(retry.includes("seven sections"), false, "the stopped loop is not sent back");
 		ok(f.events.some((event) => event.type === "notice" && event.key === "turn.repetition-reprompt"));
-		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
+		const rendered = f.panel.render(120).map(stripTerminalSequences).join("\n");
+		match(rendered, /PONG/u);
+		// The recovered turn ends once, as Done: the stopped attempt is not a Cancelled outcome (bt-48-1).
+		doesNotMatch(rendered, /Cancelled|✗ \[aborted\]/u);
+		strictEqual(rendered.split("✓ Done").length - 1, 1, rendered);
 	} finally {
 		await f.close();
 	}

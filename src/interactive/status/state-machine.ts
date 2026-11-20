@@ -746,6 +746,8 @@ function reduceEvent(prev: AgentStatus, event: StatusInputEvent, ctx: ReduceCont
 		case "agent_end": {
 			// A failed attempt recovery will retry closes that attempt, not the turn.
 			if (event.retryPending !== undefined) {
+				// A harness recovery starts at once, so the rail keeps saying what the turn is doing.
+				if (event.retryPending.recovery === true) return prev;
 				const { attempt, maxAttempts, providerWaits, onProviderWait } = event.retryPending;
 				const carried = prev.phase === "retrying" ? prev.retry : undefined;
 				return pushOverlay(prev, "retrying", ctx, {
