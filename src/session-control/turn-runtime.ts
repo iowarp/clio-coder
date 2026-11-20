@@ -32,6 +32,7 @@ import { createRequestStructures } from "../engine/request-structure.js";
 import { type AttemptReceipt, carriedCheckpoints, type RequestCursor } from "./attempt-receipt.js";
 import { firstTokenStallLimitMs } from "./chat-loop-policy.js";
 import { type ContinuityController, selfCompactSiblingRefusal } from "./continuity-controller.js";
+import { withSettledHistory } from "./message-list-digest.js";
 import { resolveFitOutputReserve, turnAdmissionRemedy } from "./output-reserve.js";
 import { prefixBlocksOf } from "./prefix-blocks.js";
 /**
@@ -1333,31 +1334,36 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					if (!handoff.block && handoff.correlationId)
 						return { block: true, reason: "Operator steering arrived during handoff preparation; handoff paused." };
 				}
-				const view = context.refreshLiveBudget();
-				const resolved = resolvedRequestContext(request);
-				admittedCursor = deps.requestCursor?.() ?? null;
-				// The first invocation as the send path builds it; a #426 retry after a rejection is not re-admitted.
-				const middlewareChoice = middlewareToolChoice.current();
-				const controlled = applyToolRounds(
-					model,
-					request,
-					streamOptions,
-					attemptToolRounds(state.synthesisToolLock, middlewareChoice),
-					localRuntime.targetId,
-				);
-				const actual = finalizeAttempt(
-					firstToolRoundAttempt(model, controlled, localRuntime.targetId),
-					state.synthesisToolLock,
-					middlewareChoice,
-				);
-				// The view is the one count: after an overflow fold that fit it publishes the A4 count, otherwise the live
-				// estimate. Admission sizes the request on it, and the provider-bound copy hands Pi's clamp the same figure
-				// on every main request, so Pi never refuses what admission passed (SPEC §0; cf-x6 r2 m3a residual).
-				context.takeOverflowInputPin?.();
+				// One settled stretch (SC-6): nothing from the view to the anchored count edits a message in place, so the
+				// anchored count reads the history the view just checked instead of walking every message again.
+				const { view, resolved, actual, anchored } = withSettledHistory(() => {
+					const view = context.refreshLiveBudget();
+					const resolved = resolvedRequestContext(request);
+					admittedCursor = deps.requestCursor?.() ?? null;
+					// The first invocation as the send path builds it; a #426 retry after a rejection is not re-admitted.
+					const middlewareChoice = middlewareToolChoice.current();
+					const controlled = applyToolRounds(
+						model,
+						request,
+						streamOptions,
+						attemptToolRounds(state.synthesisToolLock, middlewareChoice),
+						localRuntime.targetId,
+					);
+					const actual = finalizeAttempt(
+						firstToolRoundAttempt(model, controlled, localRuntime.targetId),
+						state.synthesisToolLock,
+						middlewareChoice,
+					);
+					// The view is the one count: after an overflow fold that fit it publishes the A4 count, otherwise the live
+					// estimate. Admission sizes the request on it, and the provider-bound copy hands Pi's clamp the same figure
+					// on every main request, so Pi never refuses what admission passed (SPEC §0; cf-x6 r2 m3a residual).
+					context.takeOverflowInputPin?.();
+					// With a measured anchor on this route the anchored count replaces the chars/4 floor, and what finalize
+					// added to the request (a synthesis directive) rides on it at chars/4 (bt3 drv-rv5).
+					const anchored = context.anchoredInputTokens?.(localRuntime) ?? null;
+					return { view, resolved, actual, anchored };
+				});
 				const counted = estimateInputTokensFromContext(actual);
-				// With a measured anchor on this route the anchored count replaces the chars/4 floor, and what finalize
-				// added to the request (a synthesis directive) rides on it at chars/4 (bt3 drv-rv5).
-				const anchored = context.anchoredInputTokens?.(localRuntime) ?? null;
 				const input =
 					anchored === null
 						? Math.max(counted, view.inputTokens ?? 0)
@@ -1664,7 +1670,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						throw error;
 					});
 				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
-				const restored = context.installMemoryRestoration(localRuntime);
+				// Retracting or installing only replaces or appends messages, so the install's second publication reads the
+				// history its first one checked (SC-6).
+				const restored = withSettledHistory(() => context.installMemoryRestoration(localRuntime));
 				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				// A tool hook changed a pinned block, or the guard's compaction dropped one: it rides the next request.
 				const pinned = context.appendPinnedContext(localRuntime);
