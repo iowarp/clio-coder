@@ -243,7 +243,9 @@ test("a v2 run refuses a --steer-channel it cannot open with exit 2 before the r
 			.split("\n")
 			.map((line) => JSON.parse(line) as { exitCode?: number; causes?: Array<{ code: string; message?: string }> });
 		equal(missing?.exitCode, 2);
-		equal(missing?.causes?.[0]?.code, "not_started");
+		// CLI-P22: C17's `io`, not the not_started fallback.
+		equal(missing?.causes?.[0]?.code, "io");
+		equal(directory?.causes?.[0]?.code, "io");
 		ok(missing?.causes?.[0]?.message?.endsWith("no-such-channel: no such file or FIFO"), child.stdout);
 		ok(directory?.causes?.[0]?.message?.endsWith("not a FIFO or regular file"), child.stdout);
 	} finally {

@@ -160,6 +160,7 @@
 				"not_configured",
 				"schema_unsupported",
 				"session_live",
+				"io",
 				"not_started",
 				"unscripted",
 				"permission_required",

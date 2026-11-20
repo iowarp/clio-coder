@@ -101,6 +101,8 @@ const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
 	[/^clio-coder run: --require-priced: /u, "not_configured"],
 	// The orchestrator's resume refusal when another process holds the session (SPEC L3, 6.7; liveSessionRefusal).
 	[/^clio-coder run: failed to resume session \S+: session \S+ is open in another process /u, "session_live"],
+	// SPEC 6.6, C17: a --steer-channel that cannot be opened is refused before boot (CLI-P22).
+	[/^clio-coder run: --steer-channel cannot be opened: /u, "io"],
 ];
 
 /** The cause of an exit-2 refusal before any work, from the diagnostics it wrote: the first that names one wins. */

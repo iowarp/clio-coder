@@ -17,8 +17,9 @@ export const RUN_RESULT_SCHEMA_VERSION = 2;
 /**
  * Every cause code, in precedence order. The first fact present sets the exit code; `causes[]` lists every fact,
  * winner first. `not_started` covers a request refused before any work (usage, configuration, admission), and
- * `run_failed` a failure no narrower code names. `flag_conflict`, `not_configured` and `session_live` (the resumed
- * session is open in another process) are the pre-work refusals with a narrower name of their own.
+ * `run_failed` a failure no narrower code names. `flag_conflict`, `not_configured`, `session_live` (the resumed
+ * session is open in another process) and `io` (a path the run needs cannot be opened) are the pre-work refusals with a
+ * narrower name of their own.
  */
 const CAUSE_ORDER = [
 	"interrupted",
@@ -33,6 +34,7 @@ const CAUSE_ORDER = [
 	"not_configured",
 	"schema_unsupported",
 	"session_live",
+	"io",
 	"not_started",
 	"unscripted",
 	"permission_required",
@@ -109,6 +111,7 @@ function exitCodeFor(cause: RunCause): number {
 		case "not_configured":
 		case "schema_unsupported":
 		case "session_live":
+		case "io":
 		case "not_started":
 			return EXIT_CODES.notStarted;
 		case "unscripted":
