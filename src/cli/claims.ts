@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { canonicalCheckout, checkoutHead } from "../core/project-root.js";
 import { clioDataDir } from "../core/xdg.js";
 import {
+	CLAIMS_LOG_MAX_CLAIMS,
 	type ClaimDisputeRecord,
 	type ClaimImportRecord,
 	type ClaimRecord,
@@ -12,6 +13,7 @@ import {
 	claimCheckLabel,
 	claimSealReader,
 	claimStatuses,
+	claimsEvicted,
 	claimsProjectRoot,
 	compactClaimsLog,
 	contradictionConditions,
@@ -133,6 +135,8 @@ interface LogView {
 	read: ClaimsLogRead;
 	/** How each claim stands against the sealed run it cites (D3-4). */
 	seal: (claim: ClaimRecord) => ClaimSealBinding;
+	/** Claims the count cap moved out of the log (MEM-3), or null when none was. */
+	evicted: { claims: number; path: string } | null;
 }
 
 function sealLine(claim: ClaimRecord, view: LogView): string {
@@ -372,6 +376,7 @@ function readJsonSummary(
 		disputes: read.disputes.map((dispute) => ({ ...dispute, status: "contested" })),
 		imports: read.imports.map((record) => ({ ...record, status: "inferred", label: importOriginLabel(record) })),
 		...(read.legacy.length > 0 ? { legacy: read.legacy } : {}),
+		...(view.evicted !== null ? { evicted: view.evicted } : {}),
 		skipped: {
 			unreadable: read.unreadable,
 			mismatched: read.mismatched,
@@ -505,6 +510,7 @@ export async function runClaimsCommand(args: string[]): Promise<number> {
 		statuses: claimStatuses(read.records, read.edges),
 		hypotheses: hypothesisStatuses(read.hypotheses, read.hypothesisTests),
 		seal: claimSealReader(),
+		evicted: claimsEvicted(read.project),
 	};
 	if (action === "list") {
 		let check: string | undefined;
@@ -572,6 +578,10 @@ export async function runClaimsCommand(args: string[]): Promise<number> {
 			lines.push(
 				"",
 				`also read: ${read.legacy.join(", ")} (linked worktree logs from before worktrees folded into this project)`,
+			);
+		if (view.evicted !== null)
+			lines.push(
+				`${view.evicted.claims} superseded claim${view.evicted.claims === 1 ? "" : "s"} evicted past the log's cap of ${CLAIMS_LOG_MAX_CLAIMS}, kept in ${view.evicted.path}`,
 			);
 		const skipped = skippedNote(read);
 		if (skipped !== null) lines.push(skipped);

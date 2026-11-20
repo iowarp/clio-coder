@@ -16,6 +16,7 @@ import { hypothesisSubject } from "../../src/domains/claims/hypotheses.js";
 import {
 	appendClaims,
 	bindHostVerificationHypotheses,
+	CLAIMS_LOG_MAX_CLAIMS,
 	type ClaimRecord,
 	claimCheckLabel,
 	claimFromVerifyResult,
@@ -23,6 +24,7 @@ import {
 	claimSealReader,
 	claimStatuses,
 	claimsDeliveryMessage,
+	claimsEvicted,
 	claimsLogPath,
 	claimsProjectRoot,
 	contradictionConditions,
@@ -351,6 +353,50 @@ describe("claims ledger (#406)", () => {
 				[claim.id],
 			);
 			assert.equal(read.unreadable, 1);
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("evicts the oldest superseded claims nothing names once an append crosses the count cap (MEM-3)", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			const claimAt = (index: number, passed: boolean, commit: number) => {
+				const built = claimFromVerifyResult({
+					details: {
+						...numericDetails(passed, passed ? "passed" : "failed"),
+						checkout: { commit: commit.toString(16).padStart(40, "0"), trackedTreeClean: true },
+					},
+					project,
+					at: new Date(Date.UTC(2026, 10, 1) + index * 1000).toISOString(),
+					source,
+				});
+				assert.ok(built);
+				return built;
+			};
+			// The first two disagree at one commit, so a contradiction names both; each later commit supersedes the last.
+			const history = [claimAt(0, true, 0), claimAt(1, false, 0)];
+			for (let index = 2; index < CLAIMS_LOG_MAX_CLAIMS; index++) history.push(claimAt(index, true, index));
+			const edges = deriveClaimEdges({ claims: [], edges: [] }, history);
+			mkdirSync(join(clioStateDir(), "claims"), { recursive: true });
+			writeFileSync(
+				claimsLogPath(project),
+				`${[...history, ...edges].map((record) => JSON.stringify(record)).join("\n")}\n`,
+			);
+			const newest = claimAt(CLAIMS_LOG_MAX_CLAIMS, true, CLAIMS_LOG_MAX_CLAIMS);
+			await appendClaims([newest]);
+			const read = readClaims(project);
+			const ids = new Set(read.records.map((record) => record.id));
+			assert.equal(read.records.length, 3072);
+			assert.ok(ids.has(newest.id) && ids.has(history[0]?.id ?? "") && ids.has(history[1]?.id ?? ""));
+			assert.equal(ids.has(history[2]?.id ?? ""), false, "the oldest superseded claim nothing names is evicted");
+			assert.ok(read.edges.every((edge) => ids.has(edge.from) && ids.has(edge.to)));
+			const evicted = claimsEvicted(project);
+			assert.equal(evicted?.claims, CLAIMS_LOG_MAX_CLAIMS + 1 - 3072);
+			match(readFileSync(evicted?.path ?? "", "utf8"), new RegExp(history[2]?.id ?? "missing"));
 		} finally {
 			env.restore();
 		}
