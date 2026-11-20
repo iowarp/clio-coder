@@ -226,6 +226,95 @@ test("a block returns the judge's refusal and never parks or runs", async () => 
 	strictEqual(parks.length, 0);
 });
 
+const TODAYS_REFUSAL_ROUTE =
+	"Do not retry this call or a reworded form of it. Take a route that stays inside the workspace and scratch roots, or record this open decision for your final reply and continue with the rest of the task.";
+
+test("a refused simple command keeps the plain refusal, separators inside quotes included", async () => {
+	for (const command of [UNRECOGNIZED, `${UNRECOGNIZED} --note "a; b && c | d"`]) {
+		const { registry, ran } = judgedRegistry(() => answer("block", "publish", "It uploads assets to a CDN."));
+		const verdict = await registry.invoke({ tool: ToolNames.Bash, args: { command } });
+		strictEqual(verdict.kind, "blocked");
+		if (verdict.kind !== "blocked") return;
+		strictEqual(
+			verdict.reason,
+			[
+				"Clio's safety judge blocked this bash call (rule publish): It uploads assets to a CDN.",
+				"The judge reviewed this call against the operator's own messages and did not find this action authorized.",
+				TODAYS_REFUSAL_ROUTE,
+			].join("\n"),
+		);
+		deepStrictEqual(ran, []);
+	}
+});
+
+test("a refused compound command names the sub-command the judge's reason quotes, and still runs nothing", async () => {
+	const command = `npm run build && ${UNRECOGNIZED} | tee sync.log`;
+	const { registry, ran, parks } = judgedRegistry(() =>
+		answer("block", "publish", `\`${UNRECOGNIZED}\` uploads assets to a CDN.`),
+	);
+	const verdict = await registry.invoke({ tool: ToolNames.Bash, args: { command } });
+	strictEqual(verdict.kind, "blocked");
+	if (verdict.kind !== "blocked") return;
+	match(verdict.reason, /safety judge blocked this bash call \(rule publish\)/u);
+	ok(
+		verdict.reason.includes(
+			`This is a compound command of 3 sub-commands, and the block is about the sub-command \`${UNRECOGNIZED}\`.`,
+		),
+		verdict.reason,
+	);
+	match(verdict.reason, /Run that sub-command as its own call, apart from the rest/u);
+	ok(!verdict.reason.includes(TODAYS_REFUSAL_ROUTE), verdict.reason);
+	strictEqual(verdict.denial?.code, "safety-judge:publish");
+	deepStrictEqual(ran, []);
+	strictEqual(parks.length, 0);
+});
+
+test("a refused compound names the sub-command Clio flags alone when the reason quotes none, else every one", async () => {
+	const judge = createSafetyJudge({
+		config: () => CONFIG,
+		complete: async () => ({
+			text: answer("block", "unclear", "Unclear home expansion plus removal of the temp home."),
+		}),
+		operatorMessages: () => ["run the extension conformance check"],
+		session: () => "session-1",
+		consequences: () => [],
+		record: () => {},
+	});
+	const review = (command: string) =>
+		judge.review({
+			tool: ToolNames.Bash,
+			args: { command },
+			decision: {
+				kind: "ask",
+				classification: { actionClass: "system_modify", reasons: ["delete-path-unresolved: $H"] },
+				rejection: { short: "asks", detail: "delete-path-unresolved: $H", hints: [] },
+			},
+			approvalAuthority: "operator",
+		});
+	const flagged = await review(
+		'CLIO_CODER_HOME="$H" node --import tsx src/cli/index.ts extensions test ~/projects/ext; rm -rf "$H"',
+	);
+	strictEqual(flagged.kind, "block");
+	if (flagged.kind !== "block") return;
+	ok(
+		flagged.refusal.includes(
+			'This is a compound command of 2 sub-commands, and the block is about the sub-command `rm -rf "$H"`.',
+		),
+		flagged.refusal,
+	);
+
+	const unsingled = await review("npm run build && npm test");
+	strictEqual(unsingled.kind, "block");
+	if (unsingled.kind !== "block") return;
+	ok(
+		unsingled.refusal.includes(
+			"This is a compound command of 2 sub-commands: `npm run build`; `npm test`. The judge's reason does not single one out.",
+		),
+		unsingled.refusal,
+	);
+	match(unsingled.refusal, /Run each sub-command as its own call/u);
+});
+
 test("no verdict parks for the operator with the judge's reason, or is denied headless", async () => {
 	const { registry, parks, ran } = judgedRegistry(() => "I am not sure.");
 	const pending = registry.invoke({ tool: ToolNames.Bash, args: { command: UNRECOGNIZED } });
