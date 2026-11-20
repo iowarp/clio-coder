@@ -31,3 +31,42 @@ test("a scheduled command the session admits directly is admitted for a job", as
 	const job = await registry.invoke({ tool: ToolNames.Job, args: {} });
 	strictEqual(job.kind, "ok", job.kind === "blocked" ? job.reason : "");
 });
+
+test("a scheduled probe bash would run contained is admitted and runs in the same sandbox (XR-12)", async () => {
+	const cwd = realpathSync(mkdtempSync(join(tmpdir(), "clio-job-admission-")));
+	const registry = createRegistry({
+		safety: createWorkerSafety({ cwd }),
+		autonomy: () => "default",
+		scratchRoots: () => [],
+		containment: () => ({ sandbox: true, snapshots: false }),
+	});
+	const runner = {
+		kind: "command" as const,
+		argv: ["python3", "-c", "import os; print(os.path.exists('out/done.flag'))"],
+		executableSha256: "x",
+	};
+	const effect = jobCommandEffect(runner, cwd)[0]?.call;
+	const seen: { bash?: boolean; job?: boolean } = {};
+	registry.register({
+		...bashTool,
+		run: async (_args, options) => {
+			seen.bash = options?.shellSandbox !== undefined;
+			return { kind: "ok", output: "" };
+		},
+	});
+	registry.register({
+		...bashTool,
+		name: ToolNames.Job,
+		hostEffectCalls: () => jobCommandEffect(runner, cwd),
+		run: async (_args, options) => {
+			seen.job = options?.shellSandbox !== undefined;
+			return { kind: "ok", output: "scheduled" };
+		},
+	});
+	const direct = await registry.invoke({ tool: ToolNames.Bash, args: { command: String(effect?.args?.command) } });
+	strictEqual(direct.kind, "ok", direct.kind === "blocked" ? direct.reason : "");
+	strictEqual(seen.bash, true);
+	const job = await registry.invoke({ tool: ToolNames.Job, args: {} });
+	strictEqual(job.kind, "ok", job.kind === "blocked" ? job.reason : "");
+	strictEqual(seen.job, true);
+});

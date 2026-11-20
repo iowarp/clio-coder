@@ -301,7 +301,12 @@ export function createJobTool(deps: JobToolDeps): {
 			if (artifact.kind === "error") return { kind: "error", message: artifact.message };
 			try {
 				if (artifact.kind === "execution") {
-					const result = await executeJobCommand(artifact.context, deps.autonomy?.(), deps.sandboxEnv?.());
+					const result = await executeJobCommand(
+						artifact.context,
+						deps.autonomy?.(),
+						deps.sandboxEnv?.(),
+						options?.shellSandbox,
+					);
 					return { kind: "ok", output: result.summary ?? result.outcome, details: { jobRunResult: result } };
 				}
 				const nowOwner = deps.owner();
