@@ -1,4 +1,4 @@
-import { deepStrictEqual, equal, match, ok } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, equal, match, ok } from "node:assert/strict";
 import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
@@ -250,6 +250,8 @@ it("admits an approved sibling-checkout Scout read once per run and records the 
 		const timedOut = await tool.run(timed);
 		equal(timedOut.kind, "error");
 		match(timedOut.kind === "error" ? timedOut.message : "", /detach cannot enforce timeout_ms/);
+		// The refused call carries no normalize notice promising an approval and a detached start (CLI-P34).
+		doesNotMatch(timedOut.kind === "error" ? timedOut.message : "", /dispatch normalize/);
 		deepStrictEqual(approvals, [root, root, root]);
 	} finally {
 		await bundle.extension.stop?.();
