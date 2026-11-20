@@ -1,10 +1,10 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { gzipSync } from "node:zlib";
-import { isDataRefusal, selectData, statsData } from "../../src/tools/data/index.js";
+import { deflateSync, gzipSync } from "node:zlib";
+import { inspectData, isDataRefusal, selectData, statsData } from "../../src/tools/data/index.js";
 import { chunkTiles, StatsAccumulator } from "../../src/tools/data/scientific-shared.js";
 import { extractPackageTarball } from "../../src/tools/data/tar-extract.js";
 
@@ -14,7 +14,8 @@ import { extractPackageTarball } from "../../src/tools/data/tar-extract.js";
  * arithmetic, the tarball extractor's refusals, and the chunk tile walk that
  * stats relies on to cover a selection exactly once. Files are written byte
  * by byte here; HDF5 and Parquet need their fetched readers and are checked
- * live instead.
+ * live instead. Zarr stores and ADIOS2 BP4/BP5 directories are hand-built
+ * too, laid out as zarr 3 and adios2 2.13 write them.
  */
 
 /** A minimal CDF writer: version 1 or 5, big-endian, every list present. */
@@ -120,6 +121,120 @@ function f64(values: number[]): Buffer {
 	const b = Buffer.alloc(values.length * 8);
 	for (const [index, value] of values.entries()) b.writeDoubleBE(value, index * 8);
 	return b;
+}
+
+function f32le(values: number[]): Buffer {
+	const b = Buffer.alloc(values.length * 4);
+	for (const [index, value] of values.entries()) b.writeFloatLE(value, index * 4);
+	return b;
+}
+
+function f64le(value: number): Buffer {
+	const b = Buffer.alloc(8);
+	b.writeDoubleLE(value);
+	return b;
+}
+
+function i32le(value: number): Buffer {
+	const b = Buffer.alloc(4);
+	b.writeInt32LE(value);
+	return b;
+}
+
+function u64le(...values: number[]): Buffer {
+	const b = Buffer.alloc(values.length * 8);
+	for (const [index, value] of values.entries()) b.writeBigUInt64LE(BigInt(value), index * 8);
+	return b;
+}
+
+function writeTree(root: string, files: Record<string, Buffer | string | object>): void {
+	for (const [name, body] of Object.entries(files)) {
+		const file = join(root, name);
+		mkdirSync(dirname(file), { recursive: true });
+		writeFileSync(file, Buffer.isBuffer(body) || typeof body === "string" ? body : JSON.stringify(body));
+	}
+}
+
+/** Little-endian byte builder whose slots can be patched once a pointer target is known. */
+class Bytes {
+	parts: number[] = [];
+	get length(): number {
+		return this.parts.length;
+	}
+	raw(buffer: Buffer | number[]): this {
+		this.parts.push(...buffer);
+		return this;
+	}
+	int(value: number, width: 2 | 4 | 8): this {
+		const b = Buffer.alloc(width);
+		if (width === 2) b.writeUInt16LE(value);
+		else if (width === 4) b.writeUInt32LE(value);
+		else b.writeBigUInt64LE(BigInt(value));
+		return this.raw(b);
+	}
+	str(text: string): this {
+		return this.int(text.length, 2).raw(Buffer.from(text));
+	}
+	patch(at: number, bytes: Buffer): void {
+		this.parts.splice(at, bytes.length, ...bytes);
+	}
+	buffer(): Buffer {
+		return Buffer.from(this.parts);
+	}
+}
+
+/** A 64-byte BP index or metadata header: little-endian flag 0 at byte 36, version at byte 37. */
+function bpHeader(version: 4 | 5): Bytes {
+	const header = Buffer.alloc(64);
+	header.write("ADIOS-BP v2.13.0 Index Table");
+	header[37] = version;
+	if (version === 5) header[40] = 0x6e;
+	return new Bytes().raw(header);
+}
+
+/** One BP4 index element: header, then characteristic sets of [id, payload] pairs. */
+function bp4Element(name: string, type: number, sets: Array<Array<[number, Buffer]>>): Buffer {
+	const body = new Bytes().int(0, 4).str("").str(name).raw([0x4b, 0, type]).int(sets.length, 8);
+	for (const set of sets) {
+		const chars = new Bytes();
+		for (const [id, payload] of set) chars.raw([id]).raw(payload);
+		body.raw([set.length]).int(chars.length, 4).raw(chars.buffer());
+	}
+	return new Bytes().int(body.length, 4).raw(body.buffer()).buffer();
+}
+
+function bp4Index(elements: Buffer[]): Buffer {
+	const all = Buffer.concat(elements);
+	return new Bytes().int(elements.length, 4).int(all.length, 8).raw(all).buffer();
+}
+
+/** An FFS version-2 format representation holding one little-endian subformat. */
+function ffsFormat(name: string, fields: Array<[string, string, number, number]>, recordLength: number): Buffer {
+	const strings = new Bytes();
+	const offsetOf = (text: string): number => {
+		const at = 28 + fields.length * 16 + strings.length;
+		strings.raw(Buffer.from(`${text}\0`));
+		return at;
+	};
+	const nameAt = offsetOf(name);
+	const table = new Bytes();
+	for (const [field, type, size, offset] of fields)
+		table.int(offsetOf(field), 4).int(offsetOf(type), 4).int(size, 4).int(offset, 4);
+	const head = Buffer.alloc(28);
+	head.writeUInt16BE(28 + table.length + strings.length, 0);
+	head[2] = 2;
+	head.writeUInt32LE(nameAt, 4);
+	head.writeUInt32LE(fields.length, 8);
+	head.writeUInt32LE(recordLength, 12);
+	head[16] = 8;
+	head[17] = 28;
+	return Buffer.concat([Buffer.alloc(8), head, table.buffer(), strings.buffer()]);
+}
+
+/** An FFS-encoded record: 12-byte format ID, 8-byte length, padding to 8, then the record and its out-of-line data. */
+function ffsRecord(id: Buffer, record: Bytes): Buffer {
+	const body = record.buffer();
+	return Buffer.concat([id, u64le(body.length), Buffer.alloc(4), body]);
 }
 
 function i16(values: number[]): Buffer {
@@ -332,6 +447,233 @@ describe("contracts/data-scientific", () => {
 				[0, 4],
 			],
 		);
+	});
+
+	it("reads a Zarr v3 store through gzip chunks, fills an unwritten chunk, and refuses blosc with the run_script route", async () => {
+		const root = join(dir, "v3.zarr");
+		const temp = {
+			zarr_format: 3,
+			node_type: "array",
+			shape: [3, 4],
+			data_type: "float32",
+			chunk_grid: { name: "regular", configuration: { chunk_shape: [2, 3] } },
+			chunk_key_encoding: { name: "default", configuration: { separator: "/" } },
+			fill_value: -999,
+			codecs: [
+				{ name: "bytes", configuration: { endian: "little" } },
+				{ name: "gzip", configuration: { level: 5 } },
+			],
+			attributes: { units: "K", _FillValue: -999 },
+			dimension_names: ["y", "x"],
+		};
+		writeTree(root, {
+			"zarr.json": { zarr_format: 3, node_type: "group", attributes: { title: "demo" } },
+			"temp/zarr.json": temp,
+			// Chunk (1, 1) is never written, so element [2, 3] reads as fill_value.
+			"temp/c/0/0": gzipSync(f32le([0, 1, 2, 4, 5, 6])),
+			"temp/c/0/1": gzipSync(f32le([3, 0, 0, 7, 0, 0])),
+			"temp/c/1/0": gzipSync(f32le([8, 9, 10, 0, 0, 0])),
+			"packed/zarr.json": {
+				...temp,
+				shape: [4],
+				chunk_grid: { name: "regular", configuration: { chunk_shape: [4] } },
+				codecs: [
+					{ name: "bytes", configuration: { endian: "little" } },
+					{ name: "blosc", configuration: {} },
+				],
+				dimension_names: ["x"],
+			},
+		});
+		const listing = (await inspectData(root)) as Record<string, unknown>;
+		ok(!isDataRefusal(listing), JSON.stringify(listing));
+		strictEqual(listing.variant, "Zarr v3");
+		const arrays = listing.variables as Array<Record<string, unknown>>;
+		deepStrictEqual(
+			arrays.map((array) => [array.path, array.compression, array.readable]),
+			[
+				["/packed", "blosc", false],
+				["/temp", "gzip", true],
+			],
+		);
+		deepStrictEqual(arrays[1]?.dims, ["y", "x"]);
+		const slab = (await selectData(root, { variable: "temp" })) as Record<string, unknown>;
+		deepStrictEqual(slab.values, [
+			[0, 1, 2, 3],
+			[4, 5, 6, 7],
+			[8, 9, 10, -999],
+		]);
+		const stats = (await statsData(root, { variable: "/temp", start: [1, 1], count: [2, 3] })) as Record<string, unknown>;
+		strictEqual(stats.fillCount, 1);
+		strictEqual(stats.validCount, 5);
+		strictEqual(stats.max, 10);
+		const refused = await selectData(root, { variable: "packed" });
+		ok(isDataRefusal(refused));
+		strictEqual(refused.reason, "unsupported-format");
+		ok(refused.message.includes("blosc") && refused.message.includes("run_script"));
+	});
+
+	it("reads a Zarr v2 array through zlib, a big-endian dtype and Fortran order", async () => {
+		const root = join(dir, "v2.zarr");
+		const array = (dtype: string, order: "C" | "F", compressor: object | null): object => ({
+			zarr_format: 2,
+			shape: [2, 3],
+			chunks: [2, 3],
+			dtype,
+			order,
+			compressor,
+			fill_value: 0,
+			filters: null,
+		});
+		const fortran = Buffer.alloc(24);
+		for (const [index, value] of [0, 3, 1, 4, 2, 5].entries()) fortran.writeInt32LE(value, index * 4);
+		writeTree(root, {
+			".zgroup": { zarr_format: 2 },
+			".zattrs": { title: "demo2" },
+			"big/.zarray": array(">i2", "C", { id: "zlib", level: 1 }),
+			"big/.zattrs": { _ARRAY_DIMENSIONS: ["y", "x"] },
+			"big/0.0": deflateSync(i16([1, 2, 3, -4, 5, 6])),
+			"ford/.zarray": array("<i4", "F", null),
+			"ford/0.0": fortran,
+		});
+		const big = (await selectData(root, { variable: "big" })) as Record<string, unknown>;
+		ok(!isDataRefusal(big), JSON.stringify(big));
+		deepStrictEqual(big.values, [
+			[1, 2, 3],
+			[-4, 5, 6],
+		]);
+		deepStrictEqual(big.dims, ["y", "x"]);
+		const ford = (await selectData(root, { variable: "ford" })) as Record<string, unknown>;
+		deepStrictEqual(ford.values, [
+			[0, 1, 2],
+			[3, 4, 5],
+		]);
+	});
+
+	it("inspects an ADIOS2 BP4 directory's variables, steps, block min and max, and attributes, and refuses select", async () => {
+		const root = join(dir, "out4.bp");
+		const md = bpHeader(4);
+		const index = bpHeader(4);
+		for (const step of [1, 2]) {
+			const stepTag: [number, Buffer] = [8, i32le(step)];
+			// Dimensions: rank, byte length, then count, shape and start per dimension.
+			const dims: [number, Buffer] = [4, Buffer.concat([Buffer.from([2, 48, 0]), u64le(2, 2, 0, 3, 3, 0)])];
+			const minmax: [number, Buffer] = [12, Buffer.concat([Buffer.from([1, 0]), f64le(step - 1), f64le(step + 4)])];
+			const variables = bp4Index([
+				bp4Element("T", 6, [[stepTag, dims, minmax]]),
+				bp4Element("n", 2, [[stepTag, [0, i32le(step * 10)]]]),
+			]);
+			const text = (value: string): Array<Array<[number, Buffer]>> => [[[0, new Bytes().str(value).buffer()]]];
+			const attributes = bp4Index(
+				step === 1 ? [bp4Element("T/units", 9, text("K")), bp4Element("desc", 9, text("probe"))] : [],
+			);
+			const variablesAt = md.length;
+			md.raw(variables);
+			const attributesAt = md.length;
+			md.raw(attributes);
+			index.raw(u64le(step, 0, 0, variablesAt, attributesAt, md.length, 0, 0));
+		}
+		writeTree(root, { "md.idx": index.buffer(), "md.0": md.buffer(), "data.0": Buffer.alloc(0) });
+		const result = (await inspectData(root)) as Record<string, unknown>;
+		ok(!isDataRefusal(result), JSON.stringify(result));
+		strictEqual(result.variant, "ADIOS2 BP4");
+		strictEqual(result.steps, 2);
+		deepStrictEqual(result.attributes, { desc: "probe" });
+		const [t, n] = result.variables as Array<Record<string, unknown>>;
+		deepStrictEqual(
+			[t?.path, t?.dtype, t?.kind, t?.shape, t?.blocks, t?.min, t?.max],
+			["T", "float64", "global array", [2, 3], 2, 0, 6],
+		);
+		deepStrictEqual(t?.steps, { count: 2, first: 0, last: 1 });
+		deepStrictEqual(t?.attributes, { units: "K" });
+		deepStrictEqual(n?.values, [
+			{ step: 0, value: 10 },
+			{ step: 1, value: 20 },
+		]);
+		const refused = await selectData(root, { variable: "T" });
+		ok(isDataRefusal(refused));
+		ok(refused.message.includes("run_script"));
+	});
+
+	it("inspects an ADIOS2 BP5 directory through its FFS metadata formats", async () => {
+		const root = join(dir, "out5.bp");
+		const metaId = Buffer.from("02000107ce4f9c91491cb4a7", "hex");
+		const attrId = Buffer.from("0200008d72b6d67f54032261", "hex");
+		// MetaArrayMM8 holds Dims, BlockCount, DBCount, then Shape, Count, Offset, DataBlockLocation and MinMax pointers.
+		const meta = ffsFormat(
+			"MetaData",
+			[
+				["BitFieldCount", "integer", 8, 0],
+				["BitField", "integer[BitFieldCount]", 8, 8],
+				["DataBlockSize", "integer", 8, 16],
+				["BPG_8_10_T", "MetaArrayMM8", 64, 24],
+				["BPg_n", "integer", 4, 88],
+			],
+			96,
+		);
+		const mmd = new Bytes();
+		for (const [id, rep] of [
+			[metaId, meta],
+			[attrId, ffsFormat("GenericAttributes", [], 32)],
+		] as const)
+			mmd.raw(u64le(id.length, rep.length)).raw(id).raw(rep);
+		const md = new Bytes();
+		// The writer map record: one writer, then its subfile.
+		const index = bpHeader(5)
+			.raw([0x77])
+			.raw(u64le(16, 1, 0));
+		for (const step of [0, 1]) {
+			const record = new Bytes().raw(Buffer.alloc(96));
+			record.patch(0, u64le(1));
+			record.patch(8, u64le(record.length));
+			// Bit 0 marks T present, bit 1 marks n present (step 0 only).
+			record.raw(u64le(step === 0 ? 0b11 : 0b01));
+			record.patch(24, u64le(2, 1, 2));
+			record.patch(48, u64le(record.length));
+			record.raw(u64le(2, 3));
+			record.patch(56, u64le(record.length));
+			record.raw(u64le(2, 3));
+			record.patch(80, u64le(record.length));
+			record.raw(f64le(step)).raw(f64le(step + 5));
+			if (step === 0) record.patch(88, i32le(42));
+			const metaBlock = ffsRecord(metaId, record);
+			let attrBlock: Buffer = Buffer.alloc(0);
+			if (step === 0) {
+				// One string attribute: StrAttrCount, StrAttrs -> {Name, ElementCount, Values -> [char *]}.
+				const generic = new Bytes().raw(Buffer.alloc(32));
+				generic.patch(16, u64le(1, generic.length));
+				const entry = generic.length;
+				generic.raw(Buffer.alloc(24));
+				generic.patch(entry, u64le(generic.length, 1));
+				// '>' is '0' plus type 14 (string), not an array.
+				generic.raw(Buffer.from(">T/units\0", "latin1"));
+				generic.patch(entry + 16, u64le(generic.length));
+				const values = generic.length;
+				generic.raw(Buffer.alloc(8));
+				generic.patch(values, u64le(generic.length));
+				generic.raw(Buffer.from("K\0", "latin1"));
+				attrBlock = ffsRecord(attrId, generic);
+			}
+			const position = md.length;
+			md.raw(u64le(16 + metaBlock.length + attrBlock.length, metaBlock.length, attrBlock.length));
+			md.raw(metaBlock).raw(attrBlock);
+			index.raw([0x73]).raw(u64le(24, position, md.length - position, 0));
+		}
+		writeTree(root, { "md.idx": index.buffer(), "md.0": md.buffer(), "mmd.0": mmd.buffer(), "data.0": Buffer.alloc(0) });
+		const result = (await inspectData(root)) as Record<string, unknown>;
+		ok(!isDataRefusal(result), JSON.stringify(result));
+		strictEqual(result.variant, "ADIOS2 BP5");
+		strictEqual(result.steps, 2);
+		strictEqual(result.writers, 1);
+		const [t, n] = result.variables as Array<Record<string, unknown>>;
+		deepStrictEqual(
+			[t?.path, t?.dtype, t?.kind, t?.shape, t?.blocks, t?.min, t?.max],
+			["T", "float64", "global array", [2, 3], 2, 0, 6],
+		);
+		deepStrictEqual(t?.attributes, { units: "K" });
+		deepStrictEqual([n?.path, n?.dtype, n?.kind, n?.values], ["n", "int32", "global value", [{ step: 0, value: 42 }]]);
+		const refused = await statsData(root, { variable: "T" });
+		ok(isDataRefusal(refused));
+		ok(refused.message.includes("run_script"));
 	});
 
 	it("walks chunk tiles that cover an unaligned selection exactly once", () => {

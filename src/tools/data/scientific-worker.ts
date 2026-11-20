@@ -1,10 +1,12 @@
 import { pathToFileURL } from "node:url";
 import { parentPort, workerData } from "node:worker_threads";
+import { inspectAdios2, selectAdios2, statsAdios2 } from "./adios2.js";
 import { type H5Library, inspectHdf5, selectHdf5, statsHdf5 } from "./hdf5.js";
 import { inspectNetcdf3, selectNetcdf3, statsNetcdf3 } from "./netcdf3.js";
 import { inspectParquet, type ParquetLibrary, selectParquet, statsParquet } from "./parquet.js";
 import type { ScientificReply, ScientificRequest, ScientificResult } from "./scientific-shared.js";
 import { DataRefusalError, refusal } from "./shared.js";
+import { inspectZarr, selectZarr, statsZarr } from "./zarr.js";
 
 /**
  * The reader worker: one thread per data call, so a long stats pass never
@@ -16,7 +18,7 @@ import { DataRefusalError, refusal } from "./shared.js";
 
 interface WorkerInput {
 	request: ScientificRequest;
-	/** Absolute path of the reader library's entry module; absent for NetCDF-3, which needs none. */
+	/** Absolute path of the reader library's entry module; absent for the native readers (NetCDF-3, Zarr, ADIOS2 BP). */
 	entry?: string;
 }
 
@@ -26,6 +28,16 @@ async function run(input: WorkerInput): Promise<ScientificResult> {
 		if (request.op === "inspect") return inspectNetcdf3(request);
 		if (request.op === "select") return selectNetcdf3(request);
 		return statsNetcdf3(request);
+	}
+	if (request.container === "zarr") {
+		if (request.op === "inspect") return inspectZarr(request);
+		if (request.op === "select") return selectZarr(request);
+		return statsZarr(request);
+	}
+	if (request.container === "bp4" || request.container === "bp5") {
+		if (request.op === "inspect") return inspectAdios2(request);
+		if (request.op === "select") return selectAdios2(request);
+		return statsAdios2(request);
 	}
 	if (entry === undefined) throw new Error(`no reader entry was given for ${request.container}`);
 	if (request.container === "hdf5") {

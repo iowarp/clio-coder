@@ -11,7 +11,18 @@ import { createReadStream, statSync } from "node:fs";
  * scan can never pass for the complete dataset.
  */
 
-export const DATA_FORMATS = ["csv", "tsv", "json", "jsonl", "sqlite", "hdf5", "netcdf", "parquet"] as const;
+export const DATA_FORMATS = [
+	"csv",
+	"tsv",
+	"json",
+	"jsonl",
+	"sqlite",
+	"hdf5",
+	"netcdf",
+	"parquet",
+	"zarr",
+	"adios2",
+] as const;
 export type DataFormat = (typeof DATA_FORMATS)[number];
 
 export function isDataFormat(value: unknown): value is DataFormat {

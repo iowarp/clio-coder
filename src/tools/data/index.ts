@@ -1,5 +1,6 @@
+import { existsSync, statSync } from "node:fs";
 import { open } from "node:fs/promises";
-import { extname } from "node:path";
+import { extname, join } from "node:path";
 import {
 	type CsvHeaderOption,
 	type CsvInspectResult,
@@ -111,6 +112,8 @@ const EXTENSION_FORMATS: Readonly<Record<string, DataFormat>> = {
 	".parquet": "parquet",
 	".parq": "parquet",
 	".pq": "parquet",
+	".zarr": "zarr",
+	".bp": "adios2",
 };
 
 // The SQLite header string, kept here so detection never loads the reader.
@@ -119,10 +122,41 @@ const HDF5_MAGIC = Buffer.from([0x89, 0x48, 0x44, 0x46, 0x0d, 0x0a, 0x1a, 0x0a])
 /** HDF5 allows a user block before the superblock, so its signature may sit at 0, 512, 1024, 2048, ... */
 const HDF5_SIGNATURE_OFFSETS = [0, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536];
 
-type ScientificFormat = "hdf5" | "netcdf" | "parquet";
+type ScientificFormat = "hdf5" | "netcdf" | "parquet" | "zarr" | "adios2";
 
 function isScientificFormat(format: DataFormat): format is ScientificFormat {
-	return format === "hdf5" || format === "netcdf" || format === "parquet";
+	return format === "hdf5" || format === "netcdf" || format === "parquet" || format === "zarr" || format === "adios2";
+}
+
+/** The format a directory holds: a Zarr store or node, or an ADIOS2 BP4/BP5 directory; null for anything else. */
+function directoryFormat(path: string): "zarr" | "adios2" | null {
+	if (["zarr.json", ".zgroup", ".zarray"].some((name) => existsSync(join(path, name)))) return "zarr";
+	if (existsSync(join(path, "md.idx")) && existsSync(join(path, "md.0"))) return "adios2";
+	return null;
+}
+
+function isDirectory(path: string): boolean {
+	try {
+		return statSync(path).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * statDataFile, except that a directory passes when it is a Zarr store or an
+ * ADIOS2 BP directory: both formats are directories of files, not one file.
+ */
+function statDataPath(path: string): { size: number } | DataRefusal {
+	if (isDirectory(path)) {
+		if (directoryFormat(path) !== null) return { size: 0 };
+		return refusal(
+			"not-a-file",
+			`${path} is a directory; the data tool reads a directory only as a Zarr store (zarr.json, .zgroup or .zarray) or an ADIOS2 BP4/BP5 directory (md.idx and md.0)`,
+			{ path },
+		);
+	}
+	return statDataFile(path);
 }
 type ScientificContainer = ScientificRequest["container"];
 
@@ -153,6 +187,24 @@ async function hasHdf5Signature(path: string): Promise<boolean> {
  * extension says.
  */
 async function scientificContainer(path: string, format: DataFormat): Promise<ScientificContainer | DataRefusal> {
+	if (format === "zarr" || format === "adios2") {
+		if (!isDirectory(path) || directoryFormat(path) !== format) {
+			const wanted =
+				format === "zarr"
+					? "a Zarr store is a directory holding zarr.json (v3) or .zgroup/.zarray (v2)"
+					: "an ADIOS2 BP4 or BP5 output is a directory holding md.idx and md.0; single-file BP3 is not read here, use run_script with the adios2 Python package or bpls";
+			return refusal("unsupported-format", `${path} is not read as ${format}: ${wanted}`, { path });
+		}
+		if (format === "zarr") return "zarr";
+		const version = (await readPrefix(join(path, "md.idx"), 1, 37))[0];
+		if (version === 4) return "bp4";
+		if (version === 5) return "bp5";
+		return refusal(
+			"unsupported-format",
+			`${path}/md.idx declares BP version ${version ?? "none"}; BP4 and BP5 are read here. Use run_script with the adios2 Python package or bpls`,
+			{ path },
+		);
+	}
 	const head = await readPrefix(path, 4, 0);
 	if (format === "parquet") {
 		if (head.toString("latin1") === "PAR1") return "parquet";
@@ -199,7 +251,7 @@ function scientificFields(options: ScientificOptions): Omit<ScientificRequest, "
 }
 
 export interface ScientificOptions {
-	/** HDF5/NetCDF: variable or group path; Parquet stats: column. */
+	/** HDF5/NetCDF/Zarr: variable or group path; ADIOS2: variable name; Parquet stats: column. */
 	variable?: string;
 	/** HDF5/NetCDF hyperslab, one entry per dimension. */
 	start?: number[];
@@ -225,6 +277,7 @@ export async function detectDataFormat(path: string, explicit?: string | null): 
 		const normalized = explicit.trim().toLowerCase();
 		return isDataFormat(normalized) ? normalized : null;
 	}
+	if (isDirectory(path)) return directoryFormat(path);
 	const byExtension = EXTENSION_FORMATS[extname(path).toLowerCase()];
 	if (byExtension !== undefined) return byExtension;
 	let text: string;
@@ -301,7 +354,7 @@ export async function inspectData(
 	path: string,
 	options: InspectDataOptions = {},
 ): Promise<InspectDataResult | DataRefusal> {
-	const stat = statDataFile(path);
+	const stat = statDataPath(path);
 	if ("ok" in stat) return stat;
 	const format = await detectDataFormat(path, options.format);
 	if (format === null) return unsupported(path, options.format);
@@ -309,7 +362,7 @@ export async function inspectData(
 		return runScientificOp("inspect", path, format, scientificFields(options), options.signal);
 	}
 	if (options.variable !== undefined) {
-		return refusal("invalid-argument", "variable applies to HDF5, NetCDF and Parquet files", { path });
+		return refusal("invalid-argument", "variable applies to HDF5, NetCDF, Zarr, ADIOS2 and Parquet data", { path });
 	}
 	const shared = {
 		...(options.sampleRows !== undefined ? { sampleRows: options.sampleRows } : {}),
@@ -371,7 +424,7 @@ export async function selectData(
 	path: string,
 	options: SelectDataOptions = {},
 ): Promise<SelectDataResult | DataRefusal> {
-	const stat = statDataFile(path);
+	const stat = statDataPath(path);
 	if ("ok" in stat) return stat;
 	const format = await detectDataFormat(path, options.format);
 	if (format === null) return unsupported(path, options.format);
@@ -446,7 +499,7 @@ export async function validateData(
 	path: string,
 	options: ValidateDataOptions = {},
 ): Promise<ValidateDataResult | DataRefusal> {
-	const stat = statDataFile(path);
+	const stat = statDataPath(path);
 	if ("ok" in stat) return stat;
 	const format = await detectDataFormat(path, options.format);
 	if (format === null) return unsupported(path, options.format);
@@ -472,6 +525,8 @@ export async function validateData(
 			case "hdf5":
 			case "netcdf":
 			case "parquet":
+			case "zarr":
+			case "adios2":
 				return refusal(
 					"invalid-argument",
 					`validate covers text formats; use op=inspect on a ${format === "sqlite" ? "SQLite database" : `${format} file`} instead`,
@@ -489,19 +544,19 @@ export interface StatsDataOptions extends ScientificOptions {
 }
 
 /**
- * Summary statistics over a declared selection of an HDF5 or NetCDF variable
+ * Summary statistics over a declared selection of an HDF5, NetCDF or Zarr variable
  * (a hyperslab) or a Parquet column (a row window), streamed under a byte cap
  * that the result reports when it cut the pass short.
  */
 export async function statsData(path: string, options: StatsDataOptions = {}): Promise<ScientificResult | DataRefusal> {
-	const stat = statDataFile(path);
+	const stat = statDataPath(path);
 	if ("ok" in stat) return stat;
 	const format = await detectDataFormat(path, options.format);
 	if (format === null) return unsupported(path, options.format);
 	if (!isScientificFormat(format)) {
 		return refusal(
 			"invalid-argument",
-			`stats covers HDF5, NetCDF and Parquet; for ${format} use op=inspect, or op=select with sql on SQLite`,
+			`stats covers HDF5, NetCDF, Zarr and Parquet; for ${format} use op=inspect, or op=select with sql on SQLite`,
 			{ path },
 		);
 	}

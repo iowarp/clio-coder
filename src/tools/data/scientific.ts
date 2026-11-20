@@ -34,7 +34,7 @@ export async function runScientific(
 ): Promise<ScientificResult | DataRefusal> {
 	const path = request.path;
 	let entry: string | undefined;
-	if (request.container !== "netcdf3") {
+	if (request.container === "hdf5" || request.container === "parquet") {
 		try {
 			entry = await ensureScientificReader(SCIENTIFIC_READERS[request.container === "hdf5" ? "hdf5" : "parquet"]);
 		} catch (error) {

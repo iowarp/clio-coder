@@ -17,15 +17,15 @@ import {
  * reader library.
  */
 
-export type ScientificFormat = "hdf5" | "netcdf" | "parquet";
+export type ScientificFormat = "hdf5" | "netcdf" | "parquet" | "zarr" | "adios2";
 export type ScientificOp = "inspect" | "select" | "stats";
 
 export interface ScientificRequest {
 	op: ScientificOp;
 	/** The container as sniffed: NetCDF-4 files arrive here as "hdf5". */
-	container: "hdf5" | "netcdf3" | "parquet";
+	container: "hdf5" | "netcdf3" | "parquet" | "zarr" | "bp4" | "bp5";
 	path: string;
-	/** HDF5/NetCDF variable or group path; Parquet column for stats. */
+	/** HDF5/NetCDF variable or group path, Zarr array or group path, ADIOS2 variable; Parquet column for stats. */
 	variable?: string;
 	start?: number[];
 	count?: number[];
