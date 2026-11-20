@@ -12,8 +12,8 @@ import { resolvePackagePathReference, resolvePackageReferences } from "../resour
  * logic, no partial rendering.
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { resolvePackageRoot } from "../../core/package-root.js";
@@ -1068,11 +1068,42 @@ function locatePlaybook(cwd: string, name: string): { path: string; source: Play
 	return null;
 }
 
-export function loadPlaybook(cwd: string, name: string): Playbook {
+function sameDirectory(left: string, right: string): boolean {
+	try {
+		return realpathSync(left) === realpathSync(right);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * The lookup name for what an operator typed. A bare name that resolves today keeps resolving; `hello.md` that
+ * does not falls back to `hello`; a path resolves only when it names an existing `.md` file directly in the
+ * project's playbooks directory, and then to that file's bare name, so a path never reaches a file the bare
+ * names could not.
+ */
+function playbookLookupName(cwd: string, raw: string): string {
+	const dir = projectPlaybooksDir(cwd);
+	if (!/[\\/]/.test(raw)) {
+		if (raw.length > 3 && raw.endsWith(".md") && locatePlaybook(cwd, raw) === null) return raw.slice(0, -3);
+		return raw;
+	}
+	const file = resolve(cwd, raw);
+	if (file.endsWith(".md") && existsSync(file) && statSync(file).isFile() && sameDirectory(dirname(file), dir)) {
+		return basename(file, ".md");
+	}
+	throw new Error(
+		`playbook path refused: ${raw} is not a .md file in ${dir}; pass a playbook name (hello for ${join(dir, "hello.md")}) or a builtin name`,
+	);
+}
+
+export function loadPlaybook(cwd: string, requested: string): Playbook {
+	const name = playbookLookupName(cwd, requested);
 	const located = locatePlaybook(cwd, name);
 	if (located === null) {
+		const dir = projectPlaybooksDir(cwd);
 		throw new Error(
-			`playbook not found: ${join(projectPlaybooksDir(cwd), `${name}.md`)} (and no builtin named '${name}')`,
+			`playbook not found: ${join(dir, `${name}.md`)} (and no builtin named '${name}'); pass a playbook name (hello for ${join(dir, "hello.md")}) or a builtin name`,
 		);
 	}
 	const playbook = resolvePlaybookReferences(parsePlaybook(readFileSync(located.path, "utf8"), located.path), located);

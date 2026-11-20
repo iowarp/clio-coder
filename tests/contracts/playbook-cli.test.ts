@@ -107,6 +107,23 @@ describe("playbook CLI variables", () => {
 		match(malformed.stderr, /--var requires key=value/);
 	});
 
+	it("resolves a .md name or a path in the project playbooks directory to the bare name, and refuses others", () => {
+		const inside = join(root, ".clio-coder", "playbooks", "stage.md");
+		for (const spelling of ["stage.md", ".clio-coder/playbooks/stage.md", inside]) {
+			const result = captured(() => runPlaybookValidate([spelling, "--var", "fixture=r7", "--json"]));
+			strictEqual(result.code, 0, `${spelling}: ${result.stdout}${result.stderr}`);
+		}
+		writeFileSync(join(root, "stage.md"), readFileSync(inside, "utf8"));
+		for (const spelling of ["./stage.md", join(root, "stage.md"), ".clio-coder/playbooks/../../stage.md"]) {
+			const refused = captured(() => runPlaybookValidate([spelling, "--var", "fixture=r7"]));
+			strictEqual(refused.code, 1, `${spelling}: ${refused.stdout}${refused.stderr}`);
+			match(refused.stderr, /playbook path refused: .* pass a playbook name \(hello for .*hello\.md\) or a builtin name/);
+		}
+		const missing = captured(() => runPlaybookValidate(["absent.md"]));
+		strictEqual(missing.code, 1);
+		match(missing.stderr, /playbook not found: .*absent\.md \(and no builtin named 'absent'\); pass a playbook name/);
+	});
+
 	it("preflights a route from the trusted project settings layer fleet run reads", () => {
 		writeFileSync(
 			join(root, ".clio-coder", "playbooks", "routed.md"),

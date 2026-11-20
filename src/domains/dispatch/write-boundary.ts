@@ -32,7 +32,17 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+	type BigIntStats,
+	existsSync,
+	fstatSync,
+	lstatSync,
+	mkdirSync,
+	readlinkSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { internalGitArgv, withoutRepositoryEnv } from "../../core/internal-git.js";
 import { asDirectoryPathBoundary, pathBoundaryEntryCovers } from "../../core/path-boundary.js";
@@ -396,6 +406,36 @@ export interface EnforceWriteBoundaryInput {
 	 * allowlist is blamed on the window.
 	 */
 	attribution?: WriteBoundaryAttribution;
+	/**
+	 * Descriptors whose regular-file targets are this process's own output, so a
+	 * change to them is never an outside change: `fleet run ... > s.jsonl` in the
+	 * checkout grows s.jsonl while every window runs. Defaults to stdout and stderr.
+	 */
+	ownOutputFds?: ReadonlyArray<number>;
+}
+
+/** Identity of each descriptor that writes a regular file; a pipe, a terminal or a closed descriptor has none. */
+function ownOutputFiles(fds: ReadonlyArray<number>): BigIntStats[] {
+	const files: BigIntStats[] = [];
+	for (const fd of fds) {
+		try {
+			const stats = fstatSync(fd, { bigint: true });
+			if (stats.isFile()) files.push(stats);
+		} catch {
+			// A closed or invalid descriptor writes no file.
+		}
+	}
+	return files;
+}
+
+function isOwnOutput(root: string, path: string, files: ReadonlyArray<BigIntStats>): boolean {
+	if (files.length === 0) return false;
+	try {
+		const stats = lstatSync(join(root, path), { bigint: true });
+		return stats.isFile() && files.some((file) => file.dev === stats.dev && file.ino === stats.ino);
+	} catch {
+		return false;
+	}
 }
 
 function canonicalVerdict(verdict: Omit<WriteBoundaryVerdict, "digest">): string {
@@ -488,7 +528,10 @@ function describeWriteBoundaryWindow(window: string): string {
 export function enforceWriteBoundary(input: EnforceWriteBoundaryInput): WriteBoundaryVerdict {
 	const allow = normalizeWriteBoundary(input.allow);
 	const changes = diffWorkspace(input.snapshot);
-	const outside = changes.filter((change) => !writeBoundaryCovers(allow, change.path));
+	const ownOutputs = ownOutputFiles(input.ownOutputFds ?? [1, 2]);
+	const outside = changes.filter(
+		(change) => !writeBoundaryCovers(allow, change.path) && !isOwnOutput(input.snapshot.root, change.path, ownOutputs),
+	);
 	const attributionComplete = input.attribution?.complete === true;
 	const attributionDowngrades: ReadonlyArray<WriteBoundaryAttributionDowngrade> = attributionComplete
 		? []
