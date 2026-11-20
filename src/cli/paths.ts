@@ -11,7 +11,7 @@ import {
 } from "../domains/lifecycle/install-method.js";
 import { describeTracking } from "../domains/lifecycle/install-plan.js";
 import { nativeAutoUpdatePolicy } from "../domains/lifecycle/native-update.js";
-import { printError } from "./shared.js";
+import { writeCliFailure } from "./kit/json-out.js";
 
 const HELP = `clio-coder paths [--json]
 
@@ -49,8 +49,14 @@ export function runPathsCommand(args: ReadonlyArray<string> = []): number {
 	const json = args.includes("--json");
 	const unknown = args.find((arg) => arg !== "--json");
 	if (unknown) {
-		printError(`unknown flag: ${unknown}`);
-		process.stderr.write(HELP);
+		// One diagnostic and a pointer at the help (C3); under --json the failure
+		// document goes to stdout (C6). The success document keeps its v1 shape.
+		writeCliFailure({
+			path: ["paths"],
+			slug: unknown.startsWith("-") ? "unknown_flag" : "usage",
+			message: unknown.startsWith("-") ? `unknown flag: ${unknown}` : `unexpected argument: ${unknown}`,
+			json,
+		});
 		return 2;
 	}
 	const dirs = resolveClioDirs();
