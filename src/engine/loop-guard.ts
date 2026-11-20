@@ -2162,11 +2162,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			const chainWrapper = isGatewayChain(hookInput.toolName ?? "", hookInput.toolArgs);
 			const turnBudgetEffects = (): ReadonlyArray<MiddlewareEffect> => {
 				if (rejudge) return [];
-				// A run that spent its turn's calls can still declare how it ended: a direct `finish` past the soft budget
-				// or the hard ceiling runs and spends nothing, at most FINISH_ATTEMPTS_PAST_BUDGET times a turn, so an
-				// invalid or varying declaration cannot spin. A gateway-wrapped finish cannot run, so it counts as any
-				// call does; the repeat and stagnation detectors still see every attempt (CLI-P43).
-				if (hookInput.toolName === ToolNames.Finish) {
+				// A run that spent its turn's calls can still declare how it ended: a direct `finish` called alone past the soft
+				// budget or the hard ceiling runs and spends nothing, at most FINISH_ATTEMPTS_PAST_BUDGET times a turn, so an
+				// invalid or varying declaration cannot spin. A gateway-wrapped finish cannot run, and a finish in a wider
+				// batch would end the turn over its refused siblings, so both count as any call does; the repeat and
+				// stagnation detectors still see every attempt (CLI-P43).
+				const batched = typeof input.metadata?.batchSize === "number" && input.metadata.batchSize > 1;
+				if (hookInput.toolName === ToolNames.Finish && !batched) {
 					const soft = resolveTurnBudget(input)?.budget.soft;
 					const spent = callsByTurn.get(turnKey) ?? 0;
 					if (
