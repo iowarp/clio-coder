@@ -1398,6 +1398,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			if (contextPressureWindow > 0 && decision.tokensBefore >= contextPressureWindow * THRASH_CONTEXT_FRACTION)
 				contextPressureCrossed = true;
 			if (input.telemetryContext) telemetryHub().emit("context.fold", decision, input.telemetryContext);
+			// A committed fold removed results the loop guard's read coverage counts as shown (X5).
+			if (decision.cause === "working_set_evict")
+				loopGuardRegistration.evaluate({ hook: "on_compaction", metadata: { stage: "working_set_evict" } });
 		},
 	});
 	// The constraint rides samplingParams, which the completions adapter merges
