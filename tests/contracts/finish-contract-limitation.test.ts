@@ -393,33 +393,42 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		}
 	});
 
-	it("reads a here-document written ahead of its suite run as the change and the check, passed or failed (SF-5)", () => {
-		const command =
-			"cat > tests/x.test.mjs <<'EOF' && npm test\nimport test from 'node:test';\ntest('x', () => {});\nEOF";
-		for (const exitCode of [0, 1]) {
-			const result = {
-				kind: "message",
-				role: "tool_result",
-				turnId: "suite",
-				payload: {
-					toolName: ToolNames.Bash,
-					toolCallId: "suite",
-					isError: exitCode !== 0,
-					result: { kind: exitCode === 0 ? "ok" : "error", details: { outcome: "nonzero", exitCode } },
-				},
-			};
-			const assessment = assessFinishContract({
-				sessionEntries: [
-					userMessage("user-1"),
-					toolCall("suite", ToolNames.Bash, { command }),
-					result,
-					assistantMessage("assistant-1", "Suite run."),
-				],
-				assistantTurnId: "assistant-1",
-			});
-			strictEqual(assessment.reason, exitCode === 0 ? "validation_evidence" : "unvalidated_mutation");
-			deepStrictEqual(assessment.mutatedPaths, ["tests/x.test.mjs"]);
-		}
+	it("reads a here-document written ahead of its suite run as the change and the check, passed or failed (SF-5, SF-6)", () => {
+		// The second is a recorded live call: the check names the file the here-document wrote, after earlier steps.
+		for (const [command, file] of [
+			[
+				"cat > tests/x.test.mjs <<'EOF' && npm test\nimport test from 'node:test';\ntest('x', () => {});\nEOF",
+				"tests/x.test.mjs",
+			],
+			[
+				"npm -v > $TMPDIR/v.log; echo y > out/x.js; cat > t.test.mjs <<'EOF' && node --test t.test.mjs\nimport test from 'node:test'; test('a',()=>{});\nEOF",
+				"t.test.mjs",
+			],
+		] as const)
+			for (const exitCode of [0, 1]) {
+				const result = {
+					kind: "message",
+					role: "tool_result",
+					turnId: "suite",
+					payload: {
+						toolName: ToolNames.Bash,
+						toolCallId: "suite",
+						isError: exitCode !== 0,
+						result: { kind: exitCode === 0 ? "ok" : "error", details: { outcome: "nonzero", exitCode } },
+					},
+				};
+				const assessment = assessFinishContract({
+					sessionEntries: [
+						userMessage("user-1"),
+						toolCall("suite", ToolNames.Bash, { command }),
+						result,
+						assistantMessage("assistant-1", "Suite run."),
+					],
+					assistantTurnId: "assistant-1",
+				});
+				strictEqual(assessment.reason, exitCode === 0 ? "validation_evidence" : "unvalidated_mutation", command);
+				ok(assessment.mutatedPaths.includes(file), command);
+			}
 	});
 
 	it("counts no scratch, unexpanded, outside or git-ignored shell redirect as a changed file (FX-1)", (t) => {
