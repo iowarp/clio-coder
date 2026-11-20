@@ -37,6 +37,7 @@ import {
 	type ClassifierCall,
 	classify,
 	normalizeCallPaths,
+	resolveScratchDeleteOperands,
 	STORE_UNGRANTED_ARG,
 } from "./action-classifier.js";
 import { downloadedFiles, findDeletesNotFollowing, removedAbsolutePaths, unpackedTargets } from "./command-readings.js";
@@ -105,6 +106,7 @@ import {
 	scriptLineSources,
 	shellCommandSteps,
 	shellScriptSources,
+	withoutDataHeredocBodies,
 } from "./protected-artifacts.js";
 import {
 	fetchCouldCarryLocalData,
@@ -1561,7 +1563,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		// A delete inside the workspace is undone only by the workspace snapshot
 		// taken before it: without one the operator's default asks for it even
 		// when contained, and with one the call is refused if that snapshot fails.
-		const workspaceDeletes = resort === undefined || command === null ? [] : deletesNeedingSnapshot(command, cwd);
+		const scratchProjection =
+			resort === undefined || command === null ? null : resolveScratchDeleteOperands(command).command;
+		const workspaceDeletes = scratchProjection === null ? [] : deletesNeedingSnapshot(scratchProjection, cwd);
 		if (resort !== undefined && !resort.snapshots && workspaceDeletes.length > 0) {
 			const reason = `deletes ${workspaceDeletes.slice(0, 3).join(", ")} with no workspace snapshot to undo it: the workspace is not a git work tree or safety.snapshots is off`;
 			deferred =
@@ -1591,9 +1595,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		// A delete that lands only inside scratch roots is disposable, and no workspace snapshot covers it.
 		const scratchOnly =
 			resort !== undefined &&
-			command !== null &&
+			scratchProjection !== null &&
 			workspaceDeletes.length === 0 &&
-			deletesOnlyScratch(command, resort.scratchRoots);
+			deletesOnlyScratch(scratchProjection, resort.scratchRoots);
 		// Every decision below settles the operator's default when it applies.
 		const settle = (decision: SafetyPolicyDecision): SafetyPolicyDecision =>
 			resort === undefined
@@ -2220,6 +2224,7 @@ function stripQuotes(token: string): string {
  * zero-access path appearing anywhere in the command is the signal.
  */
 function bashPathTokenCandidates(command: string): string[] {
+	command = withoutDataHeredocBodies(command, "stdin-only");
 	const candidates: string[] = [];
 	// `sh -c 'cat .env'` is one whitespace-bearing token below, skipped as prose,
 	// yet recognition judges exactly that inner script. Scan it as its own command.
@@ -2415,6 +2420,7 @@ const ROLE_PREFIX_WRAPPERS: ReadonlySet<string> = new Set([
  * with their roots so their walk can be judged.
  */
 function bashOperandRoles(command: string): BashOperandRoles {
+	command = withoutDataHeredocBodies(command, "stdin-only");
 	const roles: BashOperandRoles = { reads: [], pathOperands: new Set(), writes: [], searches: [] };
 	const inner = inlineShellScript(command);
 	if (inner !== null && inner !== command) {

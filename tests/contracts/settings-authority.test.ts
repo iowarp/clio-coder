@@ -94,7 +94,15 @@ test("a settings CLI call is blocked at default, unsandboxed or not, and on the 
 		"cat > y.ts <<'EOF'\nevent.key\nEOF",
 	])
 		strictEqual(engine.evaluate(bash(command)).kind, "allow", command);
+	// XR-43: a quoted commit message is not a file operand; real readers and unquoted substitutions still are.
+	const commitMessage = "git add src/x.ts && git commit -q -F - <<'EOF'\nMention credentials.yaml\nEOF\n";
+	for (const command of [commitMessage, "true <<-'EOF'\n\tcredentials.yaml\n\tEOF\n"]) {
+		strictEqual(engine.evaluate(bash(command), "default", OPERATOR_DEFAULT).kind, "allow", command);
+	}
 	for (const command of [
+		`${commitMessage}cat credentials.yaml`,
+		"bash <<'EOF'\ncat credentials.yaml\nEOF",
+		"git commit -F - <<EOF\n$(cat credentials.yaml)\nEOF",
 		"wc -c < nope.key",
 		"if head nope.key; then :; fi",
 		"od -c *.key",

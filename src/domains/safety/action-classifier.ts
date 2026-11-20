@@ -11,7 +11,7 @@ import { normalizedGitCommands } from "./git-command-normalization.js";
 import { inertQuotedMatch, matchesOnlyCommandText } from "./literal-exemption.js";
 import { isSameOrDescendant } from "./path-policy.js";
 import type { CommandPathEvent } from "./protected-artifacts.js";
-import { extractCommandPathWalks } from "./protected-artifacts.js";
+import { extractCommandPathWalks, scanShellLike, splitSegments } from "./protected-artifacts.js";
 
 /**
  * Deterministic action classifier for tool calls. Pure function, no I/O, no
@@ -379,8 +379,9 @@ function mergeBases(left: ShellBases, right: ShellBases): ShellBases {
  */
 function bashPathReasons(command: string, argCwd: string | undefined, scratchRoots?: ReadonlyArray<string>): string[] {
 	const reasons = new Set<string>();
-	for (const walk of extractCommandPathWalks(command)) {
-		for (const reason of walkPathReasons(walk, argCwd, scratchRoots)) reasons.add(reason);
+	const scratch = resolveScratchDeleteOperands(command);
+	for (const walk of extractCommandPathWalks(scratch.command)) {
+		for (const reason of walkPathReasons(walk, argCwd, scratchRoots, scratch.leadingCd)) reasons.add(reason);
 	}
 	return [...reasons];
 }
@@ -460,10 +461,9 @@ const TEMP_DIR_ASSIGNERS =
  * reference as text, or when TMPDIR is not the directory `tmpdir()` resolves to or is `/`, the home or above it.
  * Single-quoted and escaped references are text to the outer shell and stay as they are.
  */
-function expandTempDirReferences(command: string): string {
-	if (!command.includes("TMPDIR")) return command;
+function stableTempDir(): string | null {
 	const value = process.env.TMPDIR?.trim().replace(/(.)\/+$/u, "$1");
-	if (value === undefined || !path.isAbsolute(value) || !/^[\w./+@%,:-]+$/u.test(value)) return command;
+	if (value === undefined || !path.isAbsolute(value) || !/^[\w./+@%,:-]+$/u.test(value)) return null;
 	const temp = canonicalizePath(tmpdir());
 	const home = canonicalizePath(homedir());
 	if (
@@ -472,11 +472,20 @@ function expandTempDirReferences(command: string): string {
 		temp === "/" ||
 		(home !== null && isSameOrDescendant(home, temp))
 	)
-		return command;
+		return null;
+	return value;
+}
+
+function hasStableTempDirReferences(command: string): boolean {
 	const names = command.match(/\bTMPDIR\b/gu)?.length ?? 0;
 	const references = command.match(/\$\{TMPDIR\}|\$TMPDIR(?![A-Za-z0-9_])/gu)?.length ?? 0;
-	if (names !== references || TEMP_DIR_ASSIGNERS.test(command) || /<<-?\s*[^\s<;&|]*['"\\]|\$'/u.test(command))
-		return command;
+	return names === references && !TEMP_DIR_ASSIGNERS.test(command) && !/<<-?\s*[^\s<;&|]*['"\\]|\$'/u.test(command);
+}
+
+function expandTempDirReferences(command: string): string {
+	if (!command.includes("TMPDIR") || !hasStableTempDirReferences(command)) return command;
+	const value = stableTempDir();
+	if (value === null) return command;
 	let out = "";
 	let single = false;
 	let double = false;
@@ -504,6 +513,115 @@ function expandTempDirReferences(command: string): string {
 		}
 	}
 	return out;
+}
+
+const SCRATCH_WORD = String.raw`[\w./+@%,:-]*`;
+const SCRATCH_REFERENCE = new RegExp(String.raw`^\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))(/${SCRATCH_WORD})?$`, "u");
+const SCRATCH_LITERAL = new RegExp(`^${SCRATCH_WORD}$`, "u");
+const SCRATCH_ASSIGNMENT = /^([A-Za-z_]\w*)(\+?=)(.*)$/u;
+const SCRATCH_SPECIAL =
+	/^(?:BASH\w*|CDPATH|DIRSTACK|EUID|GLOBIGNORE|GROUPS|HISTCMD|IFS|LINENO|OPTIND|PATH|PIPESTATUS|POSIXLY_CORRECT|RANDOM|SECONDS|SHELLOPTS|SRANDOM|UID|_)$/u;
+const SCRATCH_CONTROL =
+	/^(?:if|then|elif|else|fi|case|esac|for|select|while|until|do|done|in|function|time|coproc|set|shopt|trap|hash|command|exec|printf|pushd|popd)$/u;
+
+function plainScratchWord(raw: string): string | null {
+	const word = raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1, -1) : raw;
+	return SCRATCH_LITERAL.test(word) || SCRATCH_REFERENCE.test(word) ? word : null;
+}
+
+/** A successful mktemp prints a fresh path. On failure only a bare operand is safe: "$H/x" could become /x. */
+function scratchTemplate(raw: string, temp: string): string | null {
+	const match = /^\$\(mktemp[ \t]+-d(?:[ \t]+(.+))?\)$/u.exec(raw);
+	if (match === null) return null;
+	if (match[1] === undefined) return `${temp}/tmp.XXXXXXXXXX`;
+	const relative = /^-t[ \t]+(.+)$/u.exec(match[1]);
+	const word = plainScratchWord(relative?.[1] ?? match[1]);
+	if (word === null || !SCRATCH_LITERAL.test(word) || !/X{3,}$/u.test(word)) return null;
+	return relative !== null && !word.includes("/") ? `${temp}/${word}` : word.startsWith(`${temp}/`) ? word : null;
+}
+
+/**
+ * XR-43: project operands only for the path classifier and the snapshot check, never for command execution or
+ * other rails. Only flat, literal shell syntax proves a binding. A conditional assignment or reassignment kills
+ * the old proof; substitutions other than the exact mktemp form, shell control flow and dynamic assigners leave
+ * the original command to the conservative walk.
+ */
+export function resolveScratchDeleteOperands(command: string): { command: string; leadingCd: string | null } {
+	const unchanged = { command, leadingCd: null };
+	if ((!command.includes("$") && !/^\s*cd\s/u.test(command)) || !/\b(?:rm|unlink|rmdir)\b/u.test(command))
+		return unchanged;
+	if (!hasStableTempDirReferences(command)) return unchanged;
+	const temp = stableTempDir();
+	if (temp === null) return unchanged;
+	const canonicalTemp = canonicalizePath(temp);
+	if (canonicalTemp === null) return unchanged;
+	const expanded = expandTempDirReferences(command);
+	const tokens = scanShellLike(expanded);
+	if (tokens.some((t) => t.operator && t.value !== ";" && t.value !== "&&")) return unchanged;
+	const segments = splitSegments(tokens);
+	const pins = new Map<string, { target: string; fresh: boolean }>();
+	const assigned = new Set<string>();
+	const edits: Array<{ start: number; end: number; target: string }> = [];
+	let leadingCd: string | null = null;
+	let hasDelete = false;
+	const underTemp = (word: string): boolean => {
+		if (word !== temp && !word.startsWith(`${temp}/`)) return false;
+		const resolved = canonicalizeRawPath(word, "/");
+		return resolved !== null && isUnderPrefix(resolved, canonicalTemp);
+	};
+	const resolve = (word: string): string | null => {
+		const ref = SCRATCH_REFERENCE.exec(word);
+		if (ref === null) return underTemp(word) ? word : null;
+		const pin = pins.get(ref[1] ?? ref[2] ?? "");
+		if (pin === undefined || (pin.fresh && ref[3] !== undefined)) return null;
+		const target = pin.target + (ref[3] ?? "");
+		return underTemp(target) ? target : null;
+	};
+	for (const [index, segment] of segments.entries()) {
+		const head = segment[0];
+		if (head === undefined) continue;
+		const raw = expanded.slice(head.start, head.end);
+		const assignment = SCRATCH_ASSIGNMENT.exec(raw);
+		if (assignment !== null) {
+			const [, name = "", op, rhs = ""] = assignment;
+			if (segment.length !== 1 || SCRATCH_SPECIAL.test(name)) return unchanged;
+			const word = plainScratchWord(rhs);
+			const template = scratchTemplate(rhs, temp);
+			if (word === null && template === null) return unchanged;
+			const target = template ?? (word === null ? null : resolve(word));
+			const before = expanded.slice(index === 0 ? 0 : (segments[index - 1]?.at(-1)?.end ?? 0), head.start);
+			if (!assigned.has(name) && op === "=" && !before.includes("&&") && target !== null && underTemp(target)) {
+				const ref = word === null ? null : SCRATCH_REFERENCE.exec(word);
+				const fromFresh = ref !== null && pins.get(ref[1] ?? ref[2] ?? "")?.fresh === true;
+				pins.set(name, { target, fresh: template !== null || fromFresh });
+			} else pins.delete(name);
+			assigned.add(name);
+			continue;
+		}
+		if (!/^[\w./+-]+$/u.test(raw) || SCRATCH_CONTROL.test(raw)) return unchanged;
+		if (segment.slice(1).some((t) => plainScratchWord(expanded.slice(t.start, t.end)) === null)) return unchanged;
+		if (raw === "cd" && index === 0 && segment.length === 2) {
+			const target = segment[1]?.value ?? "";
+			if (underTemp(target)) leadingCd = target;
+		}
+		if (!/^(?:rm|unlink|rmdir)$/u.test(raw)) continue;
+		hasDelete = true;
+		for (const token of segment.slice(1)) {
+			const word = plainScratchWord(expanded.slice(token.start, token.end));
+			if (word === null || !word.startsWith("$")) continue;
+			const target = resolve(word);
+			if (target !== null) edits.push({ start: token.start, end: token.end, target });
+		}
+	}
+	if (!hasDelete) return unchanged;
+	const projected: string[] = [];
+	let cursor = 0;
+	for (const { start, end, target } of edits) {
+		projected.push(expanded.slice(cursor, start), target);
+		cursor = end;
+	}
+	projected.push(expanded.slice(cursor));
+	return { command: projected.join(""), leadingCd };
 }
 
 function deleteEventReasons(
@@ -546,6 +664,7 @@ function walkPathReasons(
 	walk: ReadonlyArray<CommandPathEvent>,
 	argCwd: string | null | undefined,
 	scratchRoots?: ReadonlyArray<string>,
+	leadingScratchCd?: string | null,
 ): string[] {
 	const writeReasons = new Set<string>();
 	const cdReasons = new Set<string>();
@@ -555,7 +674,7 @@ function walkPathReasons(
 	// after it would otherwise resolve from the workspace it already left.
 	let escaped = false;
 	const escapedSubshells: boolean[] = [];
-	for (const event of walk) {
+	for (const [index, event] of walk.entries()) {
 		if (event.kind === "subshell") {
 			if (event.open) {
 				subshells.push(bases);
@@ -626,7 +745,12 @@ function walkPathReasons(
 					cdReasons.add(`bash-cd-outside-workspace: ${landing ?? target}`);
 					// Under the operator's yolo a cd into a scratch root becomes a base,
 					// so `cd /tmp/run && rm -rf out` is judged where it lands (#419).
-					if (landing !== null && (scratchRoots ?? []).some((root) => isUnderPrefix(landing, root))) landed.push(landing);
+					if (
+						landing !== null &&
+						((scratchRoots ?? []).some((root) => isUnderPrefix(landing, root)) ||
+							(index === 0 && target === leadingScratchCd && isUnderPrefix(landing, canonicalizeExistingPath(tmpdir()))))
+					)
+						landed.push(landing);
 					else escaped = true;
 				} else landed.push(landing);
 			}

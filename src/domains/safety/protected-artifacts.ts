@@ -769,10 +769,10 @@ function extractCommandPathWalk(command: string, topLevelHeredocs = true): Comma
  * here-document that cannot be removed, because it sits inside a substitution
  * or an `sh -c` script or has no word, leaves every later cd unmodeled.
  *
- * When every here-document is quoted and copied by `cat` or `tee` into a file,
- * no shell reads its body, so only the walk without bodies counts: `=>` in a
- * TypeScript body is not a redirect. A body fed to a shell, an interpreter,
- * a pipe, or any other command is still read as commands, and so is one whose
+ * When every here-document is quoted and feeds a known stdin sink or is copied
+ * by `cat` or `tee` into a file, only the walk without bodies counts: `=>` in a
+ * TypeScript body is not a redirect. A body that may feed a shell or an
+ * unknown command is still read as commands, and so is one whose
  * file a later command names, since that command may run it, or a script
  * file a step such as `make` may run without naming it.
  */
@@ -787,13 +787,33 @@ export function extractCommandPathWalks(command: string): CommandPathEvent[][] {
 
 /** Commands that copy a here-document to their output as text and run none of it. */
 const HEREDOC_DATA_CONSUMERS: ReadonlySet<string> = new Set(["cat", "tee"]);
+const HEREDOC_NON_READERS: ReadonlySet<string> = new Set([":", "true", "false", "echo", "printf", "pwd"]);
+type HeredocDataMode = "all" | "stdin-only";
+
+/** XR-43: only direct commands with known stdin semantics can make a body inert without copying it. */
+function isHeredocStdinData(head: ReadonlyArray<ShellToken>): boolean {
+	if (head.some((token) => token.operator || token.hiddenContent || (token.substitutions?.length ?? 0) > 0))
+		return false;
+	if (HEREDOC_NON_READERS.has(head[0]?.value ?? "")) return true;
+	if (head[0]?.value !== "git" || head[1]?.value !== "commit") return false;
+	const args = head.slice(2).map((token) => token.value);
+	const optionEnd = args.indexOf("--");
+	const options = optionEnd === -1 ? args : args.slice(0, optionEnd);
+	return options.some(
+		(arg, index) =>
+			arg === "--file=-" || arg === "-F-" || ((arg === "-F" || arg === "--file") && options[index + 1] === "-"),
+	);
+}
 
 /**
  * The files a quoted here-document's command copies it into, or null unless
- * that command is `cat` or `tee` with its standard output sent to a file, so
- * no pipe, process substitution, or descriptor can hand the text to a shell.
+ * the command copies data to a file or is a known stdin sink.
  */
-function heredocDataOutputs(tokens: ReadonlyArray<ShellToken>, operatorIndex: number): string[] | null {
+function heredocDataOutputs(
+	tokens: ReadonlyArray<ShellToken>,
+	operatorIndex: number,
+	dataMode?: HeredocDataMode,
+): string[] | null {
 	const separator = (token: ShellToken | undefined): boolean =>
 		token?.operator === true && COMMAND_SEPARATORS.has(token.value);
 	let start = operatorIndex;
@@ -802,6 +822,15 @@ function heredocDataOutputs(tokens: ReadonlyArray<ShellToken>, operatorIndex: nu
 	while (end < tokens.length && !separator(tokens[end])) end += 1;
 	const segment = tokens.slice(start, end);
 	if (segment.some((token) => (token.substitutions?.length ?? 0) > 0)) return null;
+	if (
+		isHeredocStdinData(tokens.slice(start, operatorIndex)) &&
+		!segment.slice(operatorIndex - start + 1).some((token) => token.operator) &&
+		tokens[end]?.value !== "|" &&
+		tokens[start - 1]?.value !== "|" &&
+		!heredocFeedsShell(tokens, operatorIndex)
+	)
+		return [];
+	if (dataMode === "stdin-only") return null;
 	const argv = shellCommandArguments(segment);
 	const commandIndex = commandTokenIndex(argv);
 	if (commandIndex === null || !HEREDOC_DATA_CONSUMERS.has(basenameToken(argv[commandIndex]))) return null;
@@ -896,9 +925,9 @@ function mayRunHeredocOutputs(command: string, outputs: ReadonlyArray<string>): 
 	return false;
 }
 
-/** A function, alias or PATH change in the command, bodies removed, may make `cat` or `tee` something that runs its input. */
+/** A redefined recipient need not treat stdin as data, even when its original command did. */
 function mayRedefineHeredocCopier(command: string): boolean {
-	return /\bPATH=|\balias\b|\bfunction\b|\(\s*\)/u.test(command);
+	return /\bPATH=|\b(?:alias|function|source|eval|enable|hash)\b|\(\s*\)|(?:^|[\s;&|])\.[ \t]/u.test(command);
 }
 
 /** More here-documents than this in one command are left in place. */
@@ -916,15 +945,21 @@ export function withoutHeredocBodies(command: string, keepSubstitutions = false)
 }
 
 /**
- * The command without its here-document bodies when every one is quoted data that `cat` or `tee` copies into a file and
- * nothing may redefine that copier; otherwise the command as written. Such a body is never this shell's command lines,
- * so its lines separate nothing (SF-5), even when a later step runs the file it wrote (`cat > t.test.mjs <<'EOF' && node
- * --test t.test.mjs`, SF-6): that step's status is its own, as for any file it runs.
+ * Omit quoted data fed to known stdin sinks or copied into files, unless another
+ * command may redefine the recipient. The floor needs every body to be known
+ * data, including copies by `cat` or `tee` whose output is run separately
+ * (SF-5, SF-6). The secret rail leaves file copies and ambiguous readers in
+ * place, but can omit known stdin data before them (XR-43).
  */
-export function withoutDataHeredocBodies(command: string): string {
-	const { text, dataOutputs } = removeHeredocBodies(command, false);
-	if (text === command || dataOutputs === null) return command;
-	if (scanShellLike(text).some((token) => token.operator && token.value === "<<")) return command;
+export function withoutDataHeredocBodies(command: string, mode: HeredocDataMode = "all"): string {
+	if (!command.includes("<<")) return command;
+	const { text, dataOutputs } = removeHeredocBodies(command, false, mode);
+	if (text === command) return command;
+	if (
+		mode === "all" &&
+		(dataOutputs === null || scanShellLike(text).some((token) => token.operator && token.value === "<<"))
+	)
+		return command;
 	return mayRedefineHeredocCopier(text) ? command : text;
 }
 
@@ -947,6 +982,7 @@ export function heredocDataWriteTargets(command: string): string[] {
 function removeHeredocBodies(
 	command: string,
 	keepSubstitutions: boolean,
+	dataMode?: HeredocDataMode,
 ): { text: string; dataOutputs: string[] | null } {
 	let text = command;
 	let dataOutputs: string[] | null = [];
@@ -969,7 +1005,10 @@ function removeHeredocBodies(
 			}
 			// `<<` with no word is a syntax error: bash runs nothing, so leave it as written.
 			if (word === undefined || word.operator) return { text, dataOutputs: null };
-			const outputs = word.quoted ? heredocDataOutputs(tokens, index) : null;
+			const outputs = word.quoted ? heredocDataOutputs(tokens, index, dataMode) : null;
+			// One physical line can introduce several bodies. If one is unknown,
+			// none of that line's bodies may be dropped from the data projection.
+			if (dataMode !== undefined && outputs === null) return { text, dataOutputs: null };
 			dataOutputs = outputs === null || dataOutputs === null ? null : [...dataOutputs, ...outputs];
 			const delimiter = stripTabs && text[word.start] === "-" ? word.value.slice(1) : word.value;
 			docs.push({ start: operator.start, end: word.end, word: delimiter, stripTabs, quoted: word.quoted });

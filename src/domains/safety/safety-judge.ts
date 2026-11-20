@@ -1036,7 +1036,7 @@ function normalizeVerdict(raw: string, rule: string | undefined, reason: string 
 	const cleanReason = boundedLine(reason ?? "", REASON_MAX_CHARS);
 	return {
 		verdict,
-		rule: cleanRule.length > 0 ? cleanRule : "unspecified",
+		rule: cleanRule === "rule-unclear" ? "unclear" : cleanRule || "unspecified",
 		reason: cleanReason.length > 0 ? cleanReason : "the judge gave no reason",
 	};
 }

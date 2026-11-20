@@ -441,6 +441,21 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		for (const mode of [undefined, "default", "yolo"] as const)
 			strictEqual(verdict(spelled, mode), verdict(literal, mode), `${spelled} at ${mode ?? "bare"}`);
 	}
+	// XR-43: each scratch cleanup reaches the ordinary yolo shell admission, not the delete judge.
+	for (const command of [
+		'B=$TMPDIR/base; mkdir -p "$B"; rm -rf "$B"',
+		`M="\${TMPDIR}/measure"; d=$M/tpl/rows; rm -rf "\${d}"`,
+		'H=$(mktemp -d "$TMPDIR/probe-XXXXXX"); rm -rf "$H"',
+		'H=$(mktemp -d); rm -rf "$H"',
+		'cd "$TMPDIR" && true; rm -rf probe-rows',
+	]) {
+		const decision = engine.evaluate(bash(command), "default", {
+			...atDefault,
+			snapshots: command.startsWith("cd "),
+		});
+		strictEqual(decision.kind, "allow", `${command}: ${decision.reasonCode} ${decision.reasons.join("; ")}`);
+		strictEqual(verdict(command, "yolo").startsWith("allow/yolo-admitted:"), false, command);
+	}
 	// A command that can reassign TMPDIR keeps it named at run time, so the delete-outside signal stays.
 	for (const command of [
 		`TMPDIR=${homedir()}; rm -rf "$TMPDIR/project"`,
@@ -448,6 +463,11 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		`TMPDIR=${process.cwd()}/.. rm -rf "$TMPDIR/x"`,
 		'read TMPDIR < /dev/null; rm -rf "$TMPDIR/x"',
 		`rm -rf "\${TMPDIR:=/}/etc"`,
+		'B=$TMPDIR/base; B=/etc; rm -rf "$B"',
+		'B=$TMPDIR/base; false && B=/etc; rm -rf "$B"',
+		'B=$TMPDIR/base; read B < /dev/null; rm -rf "$B"',
+		"B='$TMPDIR/base'; rm -rf \"$B\"",
+		'H=$(mktemp -d "$TMPDIR/probe-XXXXXX"); rm -rf "$H/etc"',
 	]) {
 		strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
 		strictEqual(verdict(command, "yolo"), "allow/yolo-admitted:damage-control:delete-outside-workspace", command);
