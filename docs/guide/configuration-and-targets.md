@@ -407,7 +407,7 @@ Inside a container, bubblewrap must be installed in the image, and the container
 
 | Key | Default | When it applies |
 | --- | --- | --- |
-| `prompts.profile` | `v1` | restart |
+| `prompts.profile` | `v1` | next turn |
 
 ### Model tiers
 

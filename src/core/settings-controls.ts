@@ -799,7 +799,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"prompts.profile": [
 		"Prompt profile",
-		"Main-agent system prompt text: v1 is the current text, v2 the D-02 rewrite under evaluation. Applies to the next session.",
+		"Main-agent system prompt text: v1 is the current text, v2 the D-02 rewrite under evaluation. Applies from the next turn, which rereads the whole prompt once.",
 	],
 	"report.offers": [
 		"Suggest reports",
