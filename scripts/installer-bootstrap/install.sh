@@ -17,8 +17,11 @@ main() {
 		esac
 	done
 	case "$version" in latest | beta | dev) channel=$version ;; esac
-	file=$(mktemp "${TMPDIR:-/tmp}/clio-coder-install.XXXXXXXX")
-	trap 'rm -f "$file" "$file.channel"' EXIT HUP INT TERM
+	# Both downloads live in a private directory: a name derived from a mktemp file sits in a shared directory where
+	# another local user can plant a link at it first.
+	dir=$(mktemp -d "${TMPDIR:-/tmp}/clio-coder-install.XXXXXXXX")
+	file=$dir/install.sh
+	trap 'rm -rf "$dir"' EXIT HUP INT TERM
 	get() {
 		if command -v curl >/dev/null 2>&1; then curl -fsSL "$1" -o "$2"; else wget -q "$1" -O "$2"; fi
 	}
@@ -27,8 +30,8 @@ main() {
 		beta | dev)
 			# Snapshots have no GitHub release. The beta installer resolves all three
 			# channels itself; a missing beta tag falls back to the stable asset.
-			if get https://registry.npmjs.org/@iowarp/clio-coder/beta "$file.channel"; then
-				rc=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file.channel" | head -n 1)
+			if get https://registry.npmjs.org/@iowarp/clio-coder/beta "$dir/channel"; then
+				rc=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$dir/channel" | head -n 1)
 				if printf '%s\n' "$rc" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'; then
 					url="https://github.com/iowarp/clio-coder/releases/download/v$rc/install.sh"
 				fi
