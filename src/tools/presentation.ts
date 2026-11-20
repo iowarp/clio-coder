@@ -316,6 +316,8 @@ function askedQuestions(args: ToolRowArgs): string | null {
 	if (args.action === "complete") return "the interview";
 	const questions = Array.isArray(args.questions) ? args.questions : [];
 	if (questions.length > 1) return `${questions.length} questions`;
+	// The row sees the raw args, before prepareArguments turns a bare string into { question }.
+	if (typeof questions[0] === "string") return questions[0].trim() || null;
 	const first = record(questions[0]);
 	return first === null ? null : text(first, "question");
 }
