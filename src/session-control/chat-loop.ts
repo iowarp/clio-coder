@@ -2502,13 +2502,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * request gives its endpoint slot back for the hold, because a paused request must not hold capacity.
 	 */
 	const sideCallAdmission =
-		(origin: ReturnType<SessionContract["current"]>, slot: EndpointSlot, signal?: AbortSignal) =>
+		(
+			origin: ReturnType<SessionContract["current"]>,
+			slot: EndpointSlot,
+			signal?: AbortSignal,
+			// An automatic round (triage) is refused at the ceiling; only an operator's own request parks for a raise.
+			waitForRaise = deps.headless !== true,
+		) =>
 		async (hold: AdmissionHold): Promise<void> => {
 			// Checked whatever the route's pricing: an unpriced route projects nothing, but the session's settled
 			// spend may already be at the ceiling.
 			const telemetry = telemetryContext();
 			await deps.scheduling?.admitPaidRequest?.({
-				waitForRaise: deps.headless !== true,
+				waitForRaise,
 				getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
 				onBlocked: () => {
 					hold.waitedOn = "budget";
@@ -2530,8 +2536,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * background-memory tier has to read that endpoint as busy (#229). The round
 	 * may release the slot while it waits and take it back before it sends.
 	 */
-	const withEndpointSlot = async <T>(runtime: AgentRuntime, round: (slot: EndpointSlot) => Promise<T>): Promise<T> => {
-		const endpointKey = modelEndpointKey(runtime.runtimeResolution.target, runtime.wireModelId);
+	const withEndpointKeySlot = async <T>(
+		endpointKey: string | null,
+		round: (slot: EndpointSlot) => Promise<T>,
+	): Promise<T> => {
 		let held: (() => void) | null = null;
 		const slot: EndpointSlot = {
 			acquire: () => {
@@ -2549,6 +2557,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			slot.release();
 		}
 	};
+
+	const withEndpointSlot = async <T>(runtime: AgentRuntime, round: (slot: EndpointSlot) => Promise<T>): Promise<T> =>
+		withEndpointKeySlot(modelEndpointKey(runtime.runtimeResolution.target, runtime.wireModelId), round);
 
 	const sideCallJournal = (
 		runtime:
@@ -2988,35 +2999,36 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// The queued texts carry whatever the operator inlined into them, so the
 			// round is admitted under the session's flow restrictions like any side round.
 			if ((deps.admitFlow?.(destination) ?? null) !== null) return;
-			const endpointKey = modelEndpointKey(resolved.target, resolved.wireModelId);
-			const release = endpointKey === null ? () => {} : registerForegroundStream(endpointKey);
 			const origin = deps.session?.current() ?? null;
-			let result: SideQuestionResult;
-			try {
-				result = await runOutOfTurnRound({
-					...sideCallJournal(resolved, "helper", origin),
-					admitFlow: () => deps.admitFlow?.(destination) ?? null,
-					model: resolved.model,
-					messages: [],
-					systemPrompt: TRIAGE_SYSTEM_PROMPT,
-					userText: triageUserText({
-						task: deps.currentOperatorTask?.() ?? "",
-						previous: state.runtime ? lastAssistantText(state.runtime.agent.state.messages) : "",
-						entries: asked,
+			// Each attempt passes the session cost ceiling as `/btw` does, and is refused there rather than parked: an
+			// automatic round never waits on the operator, and a refused one leaves the queue as they left it.
+			const result: SideQuestionResult = await withEndpointKeySlot(
+				modelEndpointKey(resolved.target, resolved.wireModelId),
+				(slot) =>
+					runOutOfTurnRound({
+						...sideCallJournal(resolved, "helper", origin),
+						purpose: "triage",
+						beforeRequest: sideCallAdmission(origin, slot, controller.signal, false),
+						admitFlow: () => deps.admitFlow?.(destination) ?? null,
+						model: resolved.model,
+						messages: [],
+						systemPrompt: TRIAGE_SYSTEM_PROMPT,
+						userText: triageUserText({
+							task: deps.currentOperatorTask?.() ?? "",
+							previous: state.runtime ? lastAssistantText(state.runtime.agent.state.messages) : "",
+							entries: asked,
+						}),
+						maxTokens: TRIAGE_MAX_TOKENS,
+						// A schema-bound classification; reasoning only spends the output budget, so
+						// `chat.steering.triage.thinkingLevel` defaults to off.
+						thinkingLevel: resolved.thinkingLevel,
+						responseSchema: { name: TRIAGE_SCHEMA_NAME, schema: TRIAGE_RESPONSE_SCHEMA },
+						runtimeId: resolved.runtimeId,
+						signal: controller.signal,
+						...(resolved.apiKey !== undefined ? { apiKey: resolved.apiKey } : {}),
+						...(resolved.refreshApiKey ? { refreshApiKey: resolved.refreshApiKey } : {}),
 					}),
-					maxTokens: TRIAGE_MAX_TOKENS,
-					// A schema-bound classification; reasoning only spends the output budget, so
-					// `chat.steering.triage.thinkingLevel` defaults to off.
-					thinkingLevel: resolved.thinkingLevel,
-					responseSchema: { name: TRIAGE_SCHEMA_NAME, schema: TRIAGE_RESPONSE_SCHEMA },
-					runtimeId: resolved.runtimeId,
-					signal: controller.signal,
-					...(resolved.apiKey !== undefined ? { apiKey: resolved.apiKey } : {}),
-					...(resolved.refreshApiKey ? { refreshApiKey: resolved.refreshApiKey } : {}),
-				});
-			} finally {
-				release();
-			}
+			);
 			if (result.aborted) return;
 			const verdicts = parseTriageAnswer(
 				result.text,
