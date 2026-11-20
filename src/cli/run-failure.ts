@@ -413,24 +413,33 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 				: "";
 		return { lines: pending + (heldSteer ?? []).join("") + serializeJsonLine(envelope), exitCode: resolution.exitCode };
 	};
-	// A coordinated shutdown calls process.exit, which cannot await a flush; the envelope still goes out.
+	// `-o` is written once, by temp file and rename, only for a run that ends exit 0; any other end leaves no file.
+	let outputSettled = false;
+	const writeOutputTarget = (code: number): RunExitFact[] => {
+		if (outputTarget === undefined || outputSettled || code !== 0) return [];
+		outputSettled = true;
+		const temporary = `${outputTarget}.${process.pid}.tmp`;
+		try {
+			writeFileSync(temporary, `${seen.text}\n`);
+			renameSync(temporary, outputTarget);
+			return [];
+		} catch {
+			rmSync(temporary, { force: true });
+			return [{ code: "output_write_failed", path: outputTarget }];
+		}
+	};
+	// A coordinated shutdown calls process.exit, which cannot await a flush or reach finish(): a successful run that
+	// ends that way still writes `-o` here, and a failed write still moves the exit code to the envelope's.
 	const onExit = (exitCode: number): void => {
+		const extra = writeOutputTarget(exitCode);
+		const out = envelopeLines(exitCode, extra);
+		if (extra.length > 0) process.exitCode = out.exitCode;
 		if (written || isStdoutDead()) return;
 		written = true;
-		writeSync(1, envelopeLines(exitCode).lines);
+		writeSync(1, out.lines);
 	};
 	const finish = async (code: number): Promise<number> => {
-		const extra: RunExitFact[] = [];
-		if (outputTarget !== undefined && code === 0) {
-			const temporary = `${outputTarget}.${process.pid}.tmp`;
-			try {
-				writeFileSync(temporary, `${seen.text}\n`);
-				renameSync(temporary, outputTarget);
-			} catch {
-				rmSync(temporary, { force: true });
-				extra.push({ code: "output_write_failed", path: outputTarget });
-			}
-		}
+		const extra = writeOutputTarget(code);
 		const out = envelopeLines(code, extra);
 		if (!written && !isStdoutDead()) {
 			written = true;
