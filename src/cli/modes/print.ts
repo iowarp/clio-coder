@@ -79,7 +79,6 @@ import {
 	isContextGuardStop,
 	isThinkingOnlyLengthStop,
 	messageCallSpends,
-	proseBeforeWrittenCalls,
 	type StructuredVerdict,
 	schemaMismatchMessage,
 	structuredRepairConstraints,
@@ -96,6 +95,7 @@ import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js"
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from "../run-answers.js";
 import { sealedFactsNotVerified } from "../run-output.js";
+import { answerAfterCitationCheck, replySegment, type TurnAnswerEntry, turnAnswer } from "./answer-segments.js";
 
 /** `--on-permission fail` (SPEC 6.4): the approval-required exit a worker's refused ask already uses. */
 const PERMISSION_REQUIRED_EXIT_CODE = 3;
@@ -242,7 +242,14 @@ export interface HeadlessMainAgentOptions {
 interface HeadlessMainAgentResult {
 	/** Latest assistant stop, superseded by subsequent continuation messages. */
 	outputExhausted: boolean;
+	/** The final user turn's replies (CLI-P43); never narration. Every output reads `printedAnswer`, not this. */
 	text: string;
+	/** Text the turn wrote beside a tool call, kept only for the ended-quietly diagnostic on stderr. */
+	narration: string;
+	/** The final user turn's settled assistant messages and citation checks, from which `text` is read (CLI-P43). */
+	answerEntries: TurnAnswerEntry[];
+	/** The terminating tool was `finish`, which closes the turn's replies instead of replacing them. */
+	terminatedByFinish: boolean;
 	error: string | null;
 	/**
 	 * True when the most recent tool result ended the turn via
@@ -294,9 +301,8 @@ interface HeadlessMainAgentResult {
 	/** The latest assistant stop is a length stop that produced only thinking; the chat loop already spent its one recovery. */
 	thinkingOnlyLength: boolean;
 	/**
-	 * The answer a citation check sent back for corrected line ranges. The
-	 * reply to that check can hold only the corrections, so the printed answer
-	 * keeps this one unless the reply restates it.
+	 * The answer a citation check sent back for corrected line ranges, which a full stream's turn_end after the check
+	 * carries (bt-29). The printed answer reads the check from `answerEntries` instead.
 	 */
 	citationCheckedAnswer: string | null;
 }
@@ -381,13 +387,17 @@ export function recordBlockedAttempt(
 	);
 }
 
-function assistantText(message: AgentMessage | undefined): string {
-	if (!message || typeof message !== "object" || message.role !== "assistant") return "";
-	const content = Array.isArray(message.content) ? message.content : [];
-	return content
-		.filter((item): item is { type: "text"; text: string } => item?.type === "text" && typeof item.text === "string")
-		.map((item) => item.text)
-		.join("");
+/**
+ * The run's one answer: what text mode prints, `-o` holds, `--output-schema` judges and the v2 envelope's `result.text`
+ * carries (CLI-P43). A turn that ended quietly has none. An artifact's terminating result is the whole answer, so
+ * chatter before it is not; `finish` closes the turn's replies, which stand, and its own result stands only for a
+ * turn that wrote no reply.
+ */
+function printedAnswer(result: HeadlessMainAgentResult): string {
+	if (result.endedQuietly && !result.sawTerminatingToolResult) return "";
+	if (!result.sawTerminatingToolResult) return result.text;
+	if (result.terminatedByFinish && result.text.length > 0) return result.text;
+	return result.terminatingToolText.length > 0 ? result.terminatingToolText : result.text;
 }
 
 export function assistantError(message: AgentMessage | undefined): string | null {
@@ -411,42 +421,6 @@ export function assistantError(message: AgentMessage | undefined): string | null
  * never masquerade as the assistant's answer, and an assistant message is
  * the answer only when its stop reason is not a failure.
  */
-/** Share of the checked answer's lines a reply must repeat to count as restating it. */
-const RESTATED_LINE_SHARE = 0.6;
-/** Share of one line's words a reply must carry for that line to count as repeated. */
-const RESTATED_WORD_SHARE = 0.6;
-
-function words(text: string): string[] {
-	return text.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
-}
-
-/**
- * The answer to print after a citation check. A reply that restates the
- * checked answer stands alone; a reply that holds only the corrections follows
- * the answer it corrects, as the transcript shows them, so the caller never
- * receives the corrections without the answer.
- */
-function answerAfterCitationCheck(checked: string | null, reply: string): string {
-	if (checked === null || checked.length === 0 || reply.length === 0 || reply === checked) return reply;
-	const lines = checked
-		.split("\n")
-		.map((line) => line.trim())
-		.filter((line) => line.length > 0);
-	// A rewrite that inserts citations into each line repeats no line verbatim, so a line also counts
-	// when the reply carries most of its words.
-	const replyWords = new Set(words(reply));
-	const repeated = lines.filter((line) => {
-		if (reply.includes(line)) return true;
-		const lineWords = new Set(words(line));
-		if (lineWords.size === 0) return false;
-		let carried = 0;
-		for (const word of lineWords) if (replyWords.has(word)) carried++;
-		return carried / lineWords.size >= RESTATED_WORD_SHARE;
-	}).length;
-	if (lines.length > 0 && repeated / lines.length >= RESTATED_LINE_SHARE) return reply;
-	return `${checked}\n\n${reply}`;
-}
-
 /**
  * A full stream's answer turn_end, carrying the checked answer by the same rule as stdout and the terminal turn_end:
  * a reply of only "citations confirmed" otherwise left scripts reading `turn_end.message` without the answer (bt-29).
@@ -455,7 +429,8 @@ function turnEndAfterCitationCheck(frame: RunJsonMainFrame, checked: string | nu
 	if (checked === null || frame.type !== "turn_end" || !("message" in frame) || frame.message.role !== "assistant")
 		return frame;
 	const content = frame.message.content;
-	if (content.some((block) => block.type === "toolCall")) return frame;
+	// A reply beside `finish` is a reply too, by the answer's own rule (CLI-P43).
+	if (replySegment(frame.message) === null) return frame;
 	const texts = content.flatMap((block) =>
 		block.type === "text" && typeof block.text === "string" ? [block.text] : [],
 	);
@@ -477,18 +452,13 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 		const result = event.result as { terminate?: boolean; content?: unknown } | undefined;
 		const terminate = result?.terminate === true && !event.isError;
 		const completion = event.isError ? null : completionOfToolResult(event.toolName, event.result);
-		// `finish` closes the reply the model wrote beside it, so that reply stays the answer; a forced declaring round
-		// carries no text of its own, and the reply before it stands.
-		if (completion !== null)
-			return {
-				...current,
-				completion,
-				sawTerminatingToolResult: terminate,
-				terminatingToolText: terminate ? (current.text.length > 0 ? current.text : toolResultText(result?.content)) : "",
-			};
+		// `finish` closes the turn's replies, which stay the answer (CLI-P43); its own result stands only for a turn
+		// that wrote nothing.
 		return {
 			...current,
+			...(completion !== null ? { completion } : {}),
 			sawTerminatingToolResult: terminate,
+			terminatedByFinish: terminate && completion !== null,
 			terminatingToolText: terminate ? toolResultText(result?.content) : "",
 		};
 	}
@@ -509,7 +479,10 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 				: { ...current, lastNotice: text, abortReason: text };
 		}
 		if (event.text.startsWith(CITATION_CHECK_PREFIX) && current.text.length > 0) {
-			return { ...current, lastNotice: text, citationCheckedAnswer: current.text };
+			return withAnswerEntries({ ...current, lastNotice: text, citationCheckedAnswer: current.text }, [
+				...current.answerEntries,
+				{ kind: "citation_check" },
+			]);
 		}
 		if (event.key === CONTEXT_OVERFLOW_STOP_NOTICE_KEY)
 			return { ...current, lastNotice: text, contextOverflow: "recovery" };
@@ -518,19 +491,27 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 	if (event.type === "agent_end") {
 		const messages = Array.isArray(event.messages) ? event.messages : [];
 		const ending = classifyTurnEnding(messages);
-		const last = [...messages].reverse().find((message) => message?.role === "assistant");
+		// A round the host forced after a reply (the finish round) that wrote nothing leaves the reply as the answer.
+		const answer = turnAnswer(current.answerEntries);
 		return {
 			...current,
+			// The written calls are stated on stderr; the answer already holds only the prose before them.
+			text: answer.text,
+			narration: answer.narration,
 			noAnswer: ending?.kind === "no_answer" ? turnNoAnswerSentence(ending) : null,
-			endedQuietly: ending?.kind === "quiet",
-			// The written calls are stated on stderr, so the printed answer is the prose before them, as the TUI shows it.
-			...(ending?.kind === "call_not_run"
-				? { callsNotRun: turnCallsNotRunSentence(ending), text: proseBeforeWrittenCalls(last, current.text).trimEnd() }
-				: { callsNotRun: null }),
+			endedQuietly: ending?.kind === "quiet" && !answer.replied,
+			callsNotRun: ending?.kind === "call_not_run" ? turnCallsNotRunSentence(ending) : null,
 		};
 	}
 	if (event.type !== "message_end") return current;
 	const message = event.message;
+	// The operator's prompt, a steer, a redirect or a repair starts the user turn whose replies are the answer
+	// (CLI-P43). A retry or recovery inside the turn sends no user message, and the one that delivers a citation check
+	// keeps the turn it checks.
+	if (message?.role === "user") {
+		if (current.answerEntries.at(-1)?.kind === "citation_check") return current;
+		return withAnswerEntries({ ...current, citationCheckedAnswer: null }, []);
+	}
 	if (message?.role !== "assistant") return current;
 	current = {
 		...current,
@@ -544,14 +525,20 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 		contextOverflow: isContextGuardStop(message) ? "guard" : null,
 		thinkingOnlyLength: isThinkingOnlyLengthStop(message),
 	};
-	const error = assistantError(message);
-	if (error) return { ...current, text: "", error };
-	const text = assistantText(message).trimEnd();
+	const entries = [...current.answerEntries, { kind: "message" as const, message }];
 	// A successful retry may contain only tool calls. It supersedes the prior
 	// provider error even without prose; the terminal tool/answer checks still
 	// decide whether the task completed. Tool-result messages cannot clear it.
-	if (text.length === 0) return { ...current, error: null };
-	return { ...current, text, error: null };
+	return withAnswerEntries({ ...current, error: assistantError(message) }, entries);
+}
+
+/** The turn's answer entries and the replies and narration they give; neither is written any other way (CLI-P43). */
+function withAnswerEntries(
+	current: HeadlessMainAgentResult,
+	answerEntries: TurnAnswerEntry[],
+): HeadlessMainAgentResult {
+	const answer = turnAnswer(answerEntries);
+	return { ...current, answerEntries, text: answer.text, narration: answer.narration };
 }
 
 function blankToolStat(tool: string): ToolCallStat {
@@ -1182,6 +1169,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	let result: HeadlessMainAgentResult = {
 		outputExhausted: false,
 		text: "",
+		narration: "",
+		answerEntries: [],
+		terminatedByFinish: false,
 		error: null,
 		sawTerminatingToolResult: false,
 		completion: null,
@@ -1197,6 +1187,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		thinkingOnlyLength: false,
 		citationCheckedAnswer: null,
 	};
+	// Schema v2's `result.text` and `-o` read the one printed answer text mode prints (CLI-P43).
+	noteMainRunV2({
+		answer: () =>
+			redactFinalUrlCredentials(printedAnswer(result), result.sawTerminatingToolResult || !result.outputExhausted),
+	});
 	const runStats: HeadlessMainAgentRunStats = {
 		toolRounds: [],
 		toolStats: new Map<string, ToolCallStat>(),
@@ -1539,13 +1534,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// `--output-schema`: null until judged, and when the turn ended in a way that already has its own cause.
 	// Assigned inside the submit callback, so the declared type is kept rather than narrowed to its initial null.
 	let structuredVerdict = null as StructuredVerdict | null;
-	const structuredCandidate = (): string =>
-		redactFinalUrlCredentials(
-			result.sawTerminatingToolResult && result.terminatingToolText.length > 0
-				? result.terminatingToolText
-				: answerAfterCitationCheck(result.citationCheckedAnswer, result.text),
-			true,
-		);
+	const structuredCandidate = (): string => redactFinalUrlCredentials(printedAnswer(result), true);
 	const structuredAnswerReady = (): boolean =>
 		!termination.isShuttingDown() &&
 		permissionStop === null &&
@@ -1726,24 +1715,23 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		// Text mode printed the chat loop's notice for a thinking-only stop as it arrived.
 		stderrMessage = mode === "text" && result.thinkingOnlyLength ? null : failureMessage;
-		if (mode === "text" && result.text.length > 0) stdoutMessage = settledAnswer(result.text);
+		if (mode === "text" && printedAnswer(result).length > 0) stdoutMessage = settledAnswer(printedAnswer(result));
 	} else if (result.noAnswer !== null) {
 		// Earlier chatter or a line of markup is not the answer the caller asked for, whatever it reads like.
 		const failureMessage = `clio-coder run: the turn ended without an answer. ${result.noAnswer}`;
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		stderrMessage = failureMessage;
 	} else if (result.endedQuietly && !result.sawTerminatingToolResult) {
-		// The classifier saw an empty closing message, so any text still held is narration written beside a tool call
-		// ("Let me read notes.txt first"), not the answer. It goes to stderr for a reader of the log, never stdout.
+		// The classifier saw an empty closing message and the turn has no reply, so the answer is empty; the narration
+		// written beside a tool call ("Let me read notes.txt first") goes to stderr for a reader of the log, never stdout.
 		const failureMessage =
 			"clio-coder run: the turn's tools ran but the model wrote no closing message, so there is no answer to print";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
-		const narration = Array.from(settledAnswer(result.text));
+		const narration = Array.from(settledAnswer(result.narration));
 		stderrMessage =
 			narration.length > 0
 				? `${failureMessage}\nclio-coder run: last text before the tools ran: ${narration.length > 400 ? `${narration.slice(0, 399).join("")}…` : narration.join("")}`
 				: failureMessage;
-		result = { ...result, text: "", citationCheckedAnswer: null };
 	} else if (result.text.length === 0 && !result.sawTerminatingToolResult) {
 		const failureMessage = "clio-coder run: provider stream ended without an assistant response or terminal tool result";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
@@ -1797,10 +1785,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			// result is the answer and any assistant text before it is mid-workflow
 			// chatter the model never offered as a reply. Printing that chatter instead
 			// hands the operator a dangling "let me try..." for a turn that succeeded.
-			const answer =
-				result.sawTerminatingToolResult && result.terminatingToolText.length > 0
-					? result.terminatingToolText
-					: answerAfterCitationCheck(result.citationCheckedAnswer, result.text);
+			const answer = printedAnswer(result);
 			stdoutMessage = answer.length > 0 ? settledAnswer(answer) : null;
 		}
 		// SPEC 6.8: an answer that still does not match outranks verify, noop and limitation (6.5 order); nothing
