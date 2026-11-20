@@ -2,15 +2,24 @@ import type { buildCustomizationGraph, CustomizationEntry } from "./config-inspe
 import { parseCommandFlags } from "./kit/flags.js";
 import { helpRequested } from "./kit/help.js";
 import { writeCliFailure } from "./kit/json-out.js";
-import { CONFIG_GET_HELP, CONFIG_HELP, CONFIG_SET_HELP, CONFIG_UNSET_HELP } from "./specs/config.js";
 
 type CustomizationGraph = ReturnType<typeof buildCustomizationGraph>;
 
-const LEAF_HELP: Readonly<Record<string, string>> = {
-	get: CONFIG_GET_HELP,
-	set: CONFIG_SET_HELP,
-	unset: CONFIG_UNSET_HELP,
-};
+type ConfigLeaf = "get" | "set" | "unset";
+const LEAVES: ReadonlySet<string> = new Set<ConfigLeaf>(["get", "set", "unset"]);
+
+/**
+ * The help text, from the spec module that `help --json` also loads. Only
+ * import() reaches ./specs/config.js, so the build keeps it one file instead of
+ * a re-export stub over a shared chunk, and `help --json` loads one file for it.
+ */
+async function configHelp(leaf?: ConfigLeaf): Promise<string> {
+	const specs = await import("./specs/config.js");
+	if (leaf === "get") return specs.CONFIG_GET_HELP;
+	if (leaf === "set") return specs.CONFIG_SET_HELP;
+	if (leaf === "unset") return specs.CONFIG_UNSET_HELP;
+	return specs.CONFIG_HELP;
+}
 
 function renderText(cwd: string, graph: CustomizationGraph): string {
 	const out: string[] = [`Effective customization for ${cwd}`, ""];
@@ -82,21 +91,20 @@ export async function runConfigCommand(args: ReadonlyArray<string> = []): Promis
 	const rest = at === -1 ? [...args] : [...args.slice(0, at), ...args.slice(at + 1)];
 	if (sub === "trust") {
 		if (helpRequested(rest)) {
-			process.stdout.write(CONFIG_HELP);
+			process.stdout.write(await configHelp());
 			return 0;
 		}
 		return (await import("./config-trust.js")).runConfigTrustCommand(rest);
 	}
-	const leafHelp = LEAF_HELP[sub];
-	if (leafHelp !== undefined) {
+	if (LEAVES.has(sub)) {
 		if (helpRequested(rest)) {
-			process.stdout.write(leafHelp);
+			process.stdout.write(await configHelp(sub as ConfigLeaf));
 			return 0;
 		}
-		return (await import("./config-set.js")).runConfigSettingCommand(sub as "get" | "set" | "unset", rest);
+		return (await import("./config-set.js")).runConfigSettingCommand(sub as ConfigLeaf, rest);
 	}
 	if (helpRequested(args)) {
-		process.stdout.write(CONFIG_HELP);
+		process.stdout.write(await configHelp());
 		return 0;
 	}
 	if (sub !== "inspect") {

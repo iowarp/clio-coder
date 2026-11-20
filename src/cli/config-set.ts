@@ -302,6 +302,12 @@ const SCOPES: Readonly<Record<Verb, readonly string[]>> = {
 const ARITY: Readonly<Record<Verb, number>> = { get: 1, set: 2, unset: 1 };
 
 export function runConfigSettingCommand(verb: Verb, args: ReadonlyArray<string>, cwd = process.cwd()): number {
+	// A verb named like an Object.prototype member (toString, constructor) is an unknown subcommand, refused as
+	// `config bogus` is, not looked up through the prototype.
+	if (!Object.hasOwn(SCOPES, verb)) {
+		writeCliFailure({ path: ["config"], slug: "unknown_command", message: `unknown subcommand: ${verb}`, json: false });
+		return EXIT_CODES.notStarted;
+	}
 	const commandPath = ["config", verb];
 	const jsonAsked = args.includes("--json");
 	const usage = (message: string, slug: ErrorSlug = "usage"): number => {
