@@ -89,6 +89,16 @@ function currentSeq(path: string): number {
 	}
 }
 
+/**
+ * What a hidden workers dock leaves behind, as the music pane names what keeps playing. "Still running" meant the
+ * dashboard, and read as a worker still running after the only one had finished (bt-48-14), so the notice names the
+ * live workers and says nothing more when there are none.
+ */
+export function workersDockHiddenNotice(runningWorkers: number): string {
+	const still = runningWorkers > 0 ? `, ${runningWorkers} worker${runningWorkers === 1 ? "" : "s"} still running` : "";
+	return `workers dock hidden${still}; the key shows it again, twice quickly closes it`;
+}
+
 export function createWatchPaneController(deps: WatchPaneDeps): PanesWatchController {
 	const selectionPath = deps.selectionPath ?? watchSelectionPath();
 	const tapPath = deps.tapPath === undefined ? watchTapPath() : deps.tapPath;

@@ -123,7 +123,7 @@ import { createWorkspaceSurfaces, WORKSPACE_LEAVE_KEY } from "./surfaces/registr
 import { renderView } from "./surfaces/view-renderer.js";
 import { followTerminalColors } from "./terminal-color-follow.js";
 import type { BootInteractivity, TerminalLease } from "./terminal-lease.js";
-import type { createWatchPaneController } from "./watch-pane.js";
+import { type createWatchPaneController, workersDockHiddenNotice } from "./watch-pane.js";
 import { WORKER_SETTLED_ENTRY } from "./worker-replay.js";
 import { createWorkspaceFacts } from "./workspace-facts.js";
 import type { createYaziBridge, YaziBridge } from "./yazi-bridge.js";
@@ -1966,11 +1966,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				const result = await workers.toggle();
 				if (result.status === "hidden") {
 					if (origin === "dock") await mux.focusSelf();
-					notify(
-						"info",
-						"workers dock hidden, still running; the key shows it again, twice quickly closes it",
-						"workers:hide",
-					);
+					notify("info", workersDockHiddenNotice(deps.dispatch.snapshot().running.length), "workers:hide");
 				} else if (result.status === "unavailable") {
 					// A dock that would not open or show (a pane too narrow, a refusing host)
 					// falls back to the Fleet Runs board, the workers surface without a dock.
