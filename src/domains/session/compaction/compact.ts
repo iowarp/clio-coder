@@ -210,7 +210,7 @@ export interface CompactInput extends SideCallAuth {
 	 * Admission after exact request-fit, before each provider call. Its time is the call's admission stage; it sets
 	 * `hold.waitedOn` when a ceiling held the call (#434).
 	 */
-	beforeSummaryCall?: ((hold: AdmissionHold) => void | Promise<void>) | undefined;
+	beforeSummaryCall?: ((hold: AdmissionHold, signal?: AbortSignal) => void | Promise<void>) | undefined;
 	/**
 	 * A split fold's second endpoint slot (MD10), asked once just before its history and split-turn summaries are sent.
 	 * A release means the route admits both now: they run concurrently and the release follows the later settle. Null,
@@ -1334,7 +1334,8 @@ async function runSummaryRequest(
 	if (maxTokens !== undefined) options.maxTokens = maxTokens;
 
 	input.signal?.throwIfAborted();
-	await scope.admit((hold) => input.beforeSummaryCall?.(hold));
+	// The call's own signal, so a split fold's sibling failure wakes a call parked in admission (MD10).
+	await scope.admit((hold) => input.beforeSummaryCall?.(hold, input.signal));
 	const timestamp = new Date().toISOString();
 	if (observationTracing())
 		traceObservation("compaction-input", {
@@ -1512,7 +1513,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		try {
 			if (!skillContext && input.entries.some((entry) => entry.kind === "skillActivation" && !entry.activation.runId))
 				throw new ProviderCompactionError("native-skills-unverified");
-			await scope.admit((hold) => input.beforeSummaryCall?.(hold));
+			await scope.admit((hold) => input.beforeSummaryCall?.(hold, input.signal));
 			input.signal?.throwIfAborted();
 			const native = await scope.withContext(() => providerCompaction((call) => observations.push(call), scope));
 			scope.settle({ stopReason: "stop", usage: native.usage });
@@ -2036,7 +2037,11 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 					offersFailed();
 					throw error;
 				}
-				call.signal?.throwIfAborted();
+				if (call.signal?.aborted) {
+					// Stopped between a refused reply and its retry: the fold fails here, so its offers hear so (MD10).
+					offersFailed();
+					call.signal.throwIfAborted();
+				}
 				request = checkpointRetryText(userText, error, history);
 			}
 		}
@@ -2058,10 +2063,15 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	// MD10: with a second slot free, a split fold's two portable summaries run together. The requests are the serial
 	// ones and the results install history first. A failure cancels the sibling and commits nothing; a sibling that
 	// already completed reported its own call, so it is still charged.
-	const releaseSecondSlot =
-		!liveCovered && historyText !== undefined && prefixText !== undefined
-			? (input.holdSecondSummarySlot?.() ?? null)
-			: null;
+	let releaseSecondSlot: (() => void) | null = null;
+	if (!liveCovered && historyText !== undefined && prefixText !== undefined) {
+		try {
+			releaseSecondSlot = input.holdSecondSummarySlot?.() ?? null;
+		} catch (error) {
+			offersFailed();
+			throw error;
+		}
+	}
 	if (releaseSecondSlot !== null && historyText !== undefined && prefixText !== undefined) {
 		const sibling = new AbortController();
 		const signal = input.signal ? AbortSignal.any([input.signal, sibling.signal]) : sibling.signal;
