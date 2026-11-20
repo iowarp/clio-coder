@@ -2275,6 +2275,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		stepRun: StepRun | null = null,
 	): YoloContinuation | null => {
 		if ((deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) !== "yolo") return null;
+		// `finish` is turn-terminal (fleet design 4.3, FX-38): the host never continues a declared turn, whatever stopped it.
+		if (state.turnCompletion !== null) return null;
 		const failed = state.continuation.stop;
 		// Continuing would send this provider a request before the time it named.
 		if (failed?.cause === "wait_past_budget") return null;
@@ -3581,6 +3583,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (options.requestContinuation !== true) {
 					state.turnCalledWork = false;
 					state.finishRoundSpent = false;
+					state.finishReplyRefused = false;
 					// Per operator prompt: a later submit of the same host run (an --output-schema repair) keeps the pool's fact.
 					if (options.yoloContinuation !== true && options.machineTurn === undefined)
 						headlessObservation?.reset(options.hostRun?.runId);

@@ -91,10 +91,13 @@ import type { AgentEvent, AgentMessage, CodexConfiguration, EngineModel, Usage }
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
 import { closeAskUserInterviewOnAssistantTurn } from "../tools/ask-user.js";
 import {
+	bareFinishVerdict,
 	completionOfToolResult,
 	FINISH_DECLARATION_REMINDER,
+	FINISH_WITHOUT_REPLY_REFUSAL,
 	finishRoundDue,
 	finishSiblingRefusal,
+	withoutReplyLimitation,
 } from "../tools/finish.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 import type { ChatNoticeEvent } from "./chat-loop.js";
@@ -1158,6 +1161,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let admittedMessages: readonly AgentMessage[] = [];
 		let admittedSystemPrompt = "";
 		let requiredToolReminder: string | null = null;
+		// FX-40: bare finish calls admitted after their user turn's one refusal; each declaration records the missing reply.
+		const bareFinishCalls = new Set<string>();
 		clearCurrentWatchdog();
 		let runIdentity = deps.turnIdentity?.();
 		// The user turn the run started under, so a call a steer moved to its own entry settles with it (bt-26 N2h).
@@ -1362,8 +1367,20 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const capRefusal = deps.runCaps?.admitToolCalls(calls.length);
 				return capRefusal !== undefined ? { reason: capRefusal } : undefined;
 			},
-			beforeToolCall: async ({ assistantMessage, toolCall }) =>
-				selfCompactSiblingRefusal(toolCall, assistantMessage) ?? finishSiblingRefusal(toolCall, assistantMessage),
+			beforeToolCall: async ({ assistantMessage, toolCall }) => {
+				const sibling =
+					selfCompactSiblingRefusal(toolCall, assistantMessage) ?? finishSiblingRefusal(toolCall, assistantMessage);
+				if (sibling !== undefined) return sibling;
+				const verdict = bareFinishVerdict(toolCall, assistantMessage, {
+					headless: deps.headless === true,
+					origin: state.currentTurnOrigin?.origin,
+					refusedThisTurn: state.finishReplyRefused,
+				});
+				if (verdict === "admit") bareFinishCalls.add(toolCall.id);
+				if (verdict !== "refuse") return undefined;
+				state.finishReplyRefused = true;
+				return { block: true, reason: FINISH_WITHOUT_REPLY_REFUSAL };
+			},
 			beforeStreamRequest: stageAdmission(async ({ model, context: request, options: streamOptions }, hold) => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
 				callTracking = null;
@@ -1796,7 +1813,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			) {
 				deps.queueHandOver?.atFinishTurn(final);
 			}
-			if (!final || localRuntime.agent.hasQueuedMessages?.() === true) return undefined;
+			// A declared turn still settles before a queued message carries the run on: its terminal row, turn_end and seal
+			// belong to it, and the returns after turn_end below hand the queue over (FX-38).
+			if (!final || (localRuntime.agent.hasQueuedMessages?.() === true && state.turnCompletion === null)) return undefined;
+			// `finish` is turn-terminal (fleet design 4.3, FX-38): a required tool still pending after a declared completion
+			// asks for nothing more.
+			if (state.turnCompletion !== null) requiredToolReminder = null;
 			if (requiredToolReminder !== null && currentRun() && state.activeInterruptReason === null) {
 				return { action: "continue" };
 			}
@@ -2402,7 +2424,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const completion = enrichedEvent.isError
 					? null
 					: completionOfToolResult(enrichedEvent.toolName, enrichedEvent.result);
-				if (completion !== null) state.turnCompletion = completion;
+				const bare = bareFinishCalls.delete(enrichedEvent.toolCallId);
+				if (completion !== null) state.turnCompletion = bare ? withoutReplyLimitation(completion) : completion;
 				pendingTerminalToolResult =
 					(enrichedEvent.result as { terminate?: boolean } | undefined)?.terminate === true
 						? { toolCallId: enrichedEvent.toolCallId, toolName: enrichedEvent.toolName }

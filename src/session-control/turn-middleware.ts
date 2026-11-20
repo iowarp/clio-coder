@@ -84,6 +84,15 @@ export interface AwaitedTurnStart {
 	readonly firings: ReadonlyMap<MiddlewareEffect, string>;
 }
 
+/** What a sealed fact still leaves open, in plain words, when no continuation note names it. */
+const COMPLETION_FACT_NOTES: Record<CompletionFact, string> = {
+	unvalidated_mutation: "the change has no validation evidence yet",
+	failed_check: "a check failed after the last change",
+	uncollected_run: "detached runs are still uncollected",
+	open_task: "tasks are still open",
+	observation_budget: "the observation pool refused the last reads, so what they would return was not read",
+};
+
 /** The awaited turn_start phase's answer: the turn's refusal, or the effects an admitted turn applies. */
 export type TurnStartGate = { refusal: string } | ({ refusal: null } & AwaitedTurnStart);
 
@@ -471,6 +480,26 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		);
 	};
 
+	/**
+	 * FX-38: a declared done the seal lowered, in one footer line, in place of the reminders that carried its facts. An
+	 * honest partly_done or not_done claimed no more than the facts allow, so it gets no line.
+	 */
+	const announceAssessment = (effects: ReadonlyArray<MiddlewareEffect>): void => {
+		const sealed = state.turnSealedCompletion;
+		if (!sealed?.declared || sealed.claimed !== "done" || sealed.assessed === "done") return;
+		const noteOf = (fact: CompletionFact): string => {
+			for (const effect of effects)
+				if (effect.kind === "request_continuation" && effect.fact === fact && effect.note) return effect.note;
+			return COMPLETION_FACT_NOTES[fact];
+		};
+		const open = [...new Set(sealed.facts.map(noteOf))].join("; ");
+		deps.emitFooterNotice(
+			"warning",
+			`declared done, assessed ${sealed.assessed.replace("_", " ")}: ${open}`,
+			"finish.assessed",
+		);
+	};
+
 	const notifyOperator = (message: string, key: string): void => {
 		if (deps.emitOperatorTip) deps.emitOperatorTip(message, key);
 		// `notify_operator` is the operator-only advisory channel. A tip is not part
@@ -797,7 +826,22 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					effect.kind === "inject_reminder" && pairedReminderPersists(effect) ? [effect.message] : [],
 				),
 			);
+			// FX-38: a declared turn is over, so a finish-gate reminder from any producer (one that tags a completion fact,
+			// footer advisories included, or voices a continuation the turn drops) is sealed, not delivered: the operator
+			// reads the assessment in one footer line and the model is not reminded. A model-only fact is context for the
+			// next turn and still rides its request; a factless advisory the footer already carries stays there.
+			const voiced = new Set(
+				declaredTurn ? effects.flatMap((effect) => (effect.kind === "request_continuation" ? [effect.message] : [])) : [],
+			);
+			const sealedOnly = (effect: MiddlewareEffect): boolean =>
+				declaredTurn &&
+				effect.kind === "inject_reminder" &&
+				effect.audience !== "model" &&
+				effect.severity !== "hard-block" &&
+				(effect.fact !== undefined || (pairedReminderPersists(effect) && voiced.has(effect.message)));
+			if (declaredTurn) announceAssessment(effects);
 			for (const effect of effects) {
+				if (sealedOnly(effect)) continue;
 				if (effect.kind === "inject_reminder") {
 					const carried = applyTurnEndReminder(
 						agentRuntime,
