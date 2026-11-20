@@ -1183,7 +1183,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				const settings = deps.getSettings?.();
 				if (!settings) return [];
 				const thinking = resolveThinkingCapability(deps.providers, settings);
-				const current = settings.chat.thinkingLevel ?? "off";
+				// What the route runs, not what the setting asked for: a level the model lacks resolves to another.
+				const current = thinking?.effectiveLevel ?? "off";
 				const levels = thinking?.supportedLevels ?? ["off"];
 				return [...levels]
 					.sort((a, b) => Number(b === current) - Number(a === current))
