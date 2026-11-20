@@ -819,8 +819,11 @@ test("a read-only run admits a dispatch, whose workers inherit read-only, and re
 		const admit = (tool: string, args: Record<string, unknown>) =>
 			evaluateAdmission({ principal, effects: [{ tool, args }], safety, constraints: { readOnly: true } });
 		strictEqual(admit(ToolNames.Dispatch, { agent: "scout", task: "map the repo" }).kind, "allow", principal);
-		const steer = admit(ToolNames.Steer, { run_id: "r1", message: "write it" });
+		const steer = admit(ToolNames.Steer, { run_id: "r1", action: "guide", message: "write it" });
 		strictEqual(steer.kind === "deny" && steer.code, "read_only", principal);
+		// Cancelling a run changes no file; the steer tool still refuses a run this session did not dispatch (CLI-P38).
+		const cancel = admit(ToolNames.Steer, { run_id: "r1", action: "cancel" });
+		strictEqual(cancel.kind, "allow", `${principal}: ${JSON.stringify(cancel)}`);
 	}
 });
 

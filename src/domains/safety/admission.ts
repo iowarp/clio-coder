@@ -6,6 +6,7 @@ import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { turnAllowsTool } from "../../core/turn-constraints.js";
 import { isTaskGateCall } from "../../tools/verify/task-gates.js";
 import type { ActionClass, ClassifierCall } from "./action-classifier.js";
+import { STEER_CANCEL_REASON } from "./action-classifier.js";
 import type { AutonomyExposure, AutonomyLevel } from "./autonomy.js";
 import { autonomyAskRejection, DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "./autonomy.js";
 import { autonomyCallInputs } from "./autonomy-inputs.js";
@@ -302,8 +303,10 @@ function toolInScope(allowed: ReadonlyArray<string> | ReadonlySet<string>, tool:
 
 /**
  * What a read-only run admits: a read, a shell command or verify check that
- * runs where it can change no user file, or a dispatch, whose workers inherit
- * the run's read-only constraint. For the main session the shell's place is
+ * runs where it can change no user file, a dispatch, whose workers inherit
+ * the run's read-only constraint, or a steer cancel, which stops a worker and
+ * writes nothing (the steer tool refuses a run this session did not dispatch).
+ * For the main session the shell's place is
  * the read-only sandbox its admission chose; for a worker, the OS sandbox its
  * spawn confines writes with, which every verify check's command runs under.
  */
@@ -312,6 +315,13 @@ function readOnlyEffect(call: ClassifierCall, decision: SafetyDecision, workerCo
 	if (actionClass === "read") return true;
 	if (actionClass === "git_destructive") return false;
 	if (call.tool === ToolNames.Dispatch && actionClass === "dispatch") return true;
+	if (
+		call.tool === ToolNames.Steer &&
+		actionClass === "dispatch" &&
+		decision.classification.reasons.includes(STEER_CANCEL_REASON)
+	) {
+		return true;
+	}
 	if (decision.policy?.shellSandbox?.readOnly === true) return true;
 	return (
 		workerConfined &&
