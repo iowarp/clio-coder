@@ -408,6 +408,16 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 	}
 	const staged = `export CLIO_CODER_HOME=${scratchHome}; mkdir -p $CLIO_CODER_HOME/state && echo x > "\${CLIO_CODER_HOME}/state/f"`;
 	strictEqual(engine.evaluate(bash(staged), "yolo", OPERATOR_YOLO).kind, "allow", staged);
+	// FX-8: a link the same command plants, and a copy into the home root itself, reach Clio's trees; a pinned scratch home does not.
+	for (const command of [
+		`ln -sfn ${join(home.dir, "state")} ${scratchHome}/st; echo x > ${scratchHome}/st/f`,
+		`cp -r src ${home.dir}/`,
+		`rsync -a src/ ${home.dir}/`,
+	]) {
+		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).reasonCode, "yolo-floor:clio-owned-state", command);
+	}
+	const pinnedCopy = `export CLIO_CODER_HOME=${scratchHome}; cp -r src $CLIO_CODER_HOME/`;
+	strictEqual(engine.evaluate(bash(pinnedCopy), "yolo", OPERATOR_YOLO).kind, "allow", pinnedCopy);
 	// FX-7: `$TMPDIR` is the temp directory this process runs commands with, so a scratch file there deletes as one.
 	const scratchRm = bash('rm -f "$TMPDIR/probe.test.ts"');
 	const atDefault = { level: "default", scratchRoots: [], sandbox: true, snapshots: true } as const;

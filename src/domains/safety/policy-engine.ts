@@ -1063,7 +1063,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	};
 	/** A write or delete into one of Clio's own trees, however the command spells or reaches it. */
 	const clioOwnedMutation = (call: ClassifierCall, callCwd: string, command: string | null, trees: ClioOwnedTrees) => {
-		const targets = pathPolicyTargets(call, callCwd).filter((target) => target.operation !== "read");
+		const scanned = pathPolicyTargets(call, callCwd).filter((target) => target.operation !== "read");
+		const targets = command === null ? scanned : [...scanned, ...sameCommandWriteTargets(command, scanned, callCwd)];
 		if (targets.length === 0) return false;
 		const spelled = targets.some(
 			(target) =>
@@ -1203,7 +1204,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		SafetyPolicyDecision,
 		"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
 	> | null => {
-		const trees = clioOwnedTrees();
+		const trees = clioOwnedTrees(cwd);
 		const held = (
 			hit: { match: DamageControlMatch; source: SafetyPolicySource },
 			reasons: string[] = [],
@@ -3972,13 +3973,28 @@ interface ClioOwnedTrees {
 	spellings: ReadonlyArray<string>;
 }
 
-function clioOwnedTrees(): ClioOwnedTrees {
+function clioOwnedTrees(workspace: string): ClioOwnedTrees {
 	const dirs = resolveClioDirs();
 	const roots = new Set<string>();
-	for (const dir of [dirs.config, dirs.data, dirs.state, dirs.cache]) {
+	const add = (dir: string) => {
 		roots.add(path.resolve(dir));
 		const canonical = canonicalizePath(dir);
 		if (canonical !== null) roots.add(canonical);
+	};
+	const trees = [dirs.config, dirs.data, dirs.state, dirs.cache];
+	for (const dir of trees) add(dir);
+	// The CLIO_CODER_HOME that holds these trees is Clio's as a whole, so `cp -r x <home>/` lands in it (FX-8). Not
+	// when it is the account's home, or holds the workspace, where it would claim every file the task edits.
+	const clioHome = process.env.CLIO_CODER_HOME?.trim();
+	if (clioHome !== undefined && path.isAbsolute(clioHome)) {
+		const resolvedHome = path.resolve(clioHome);
+		if (
+			path.dirname(resolvedHome) !== resolvedHome &&
+			resolvedHome !== path.resolve(homedir()) &&
+			!isSameOrDescendant(path.resolve(workspace), resolvedHome) &&
+			trees.some((dir) => isSameOrDescendant(path.resolve(dir), resolvedHome))
+		)
+			add(resolvedHome);
 	}
 	const home = homedir();
 	const spellings = new Set<string>(roots);
@@ -3988,6 +4004,90 @@ function clioOwnedTrees(): ClioOwnedTrees {
 		for (const prefix of ["~", "$HOME", `\${HOME}`]) spellings.add(`${prefix}${rest}`);
 	}
 	return { roots: [...roots], spellings: [...spellings] };
+}
+
+/**
+ * Write targets the floor reads beyond the general scan (FX-8): an `rsync` destination, and a write that goes through a
+ * symbolic link an `ln -s` in the same command plants, spelled at the link's target. The scan judges paths as they
+ * stand before the command runs, when that link does not exist yet. A link a cd places elsewhere resolves from `cwd`.
+ */
+function sameCommandWriteTargets(
+	command: string,
+	targets: ReadonlyArray<{ operation: PathPolicyOperation; path: string }>,
+	cwd: string,
+): Array<{ operation: PathPolicyOperation; path: string }> {
+	const found: Array<{ operation: PathPolicyOperation; path: string }> = [];
+	const links = new Map<string, { target: string; planted: number }>();
+	const literal = (word: string) => !/[$`]/u.test(word);
+	for (const step of shellCommandSteps(command, homedir())) {
+		const operands: string[] = [];
+		let targetDir: string | null = null;
+		let symbolic = false;
+		for (let index = 0, options = true; index < step.args.length; index += 1) {
+			const word = step.args[index] as string;
+			if (options && word === "--") options = false;
+			else if (options && word.startsWith("--")) {
+				if (word === "--symbolic") symbolic = true;
+				else if (word.startsWith("--target-directory=")) targetDir = word.slice("--target-directory=".length);
+				else if (word === "--target-directory" || word === "--suffix") {
+					if (word === "--target-directory") targetDir = step.args[index + 1] ?? null;
+					index += 1;
+				}
+			} else if (options && word.startsWith("-") && word.length > 1) {
+				if (step.executable !== "ln") continue;
+				if (word.includes("s")) symbolic = true;
+				const valued = /[tS]/u.exec(word);
+				if (valued !== null) {
+					const rest = word.slice(valued.index + 1);
+					if (rest.length === 0) index += 1;
+					const value = rest.length > 0 ? rest : (step.args[index] ?? null);
+					if (valued[0] === "t") targetDir = value;
+				}
+			} else operands.push(word);
+		}
+		if (step.executable === "rsync") {
+			const destination = operands.at(-1);
+			// `host:path` and `rsync://` are remote; a local destination is a path.
+			if (operands.length >= 2 && destination !== undefined && !/^[^/]*:/u.test(destination))
+				found.push({ operation: "write", path: destination });
+			continue;
+		}
+		if (step.executable !== "ln" || !symbolic || !operands.every(literal)) continue;
+		const plant = (link: string, source: string) => {
+			const at = path.resolve(cwd, link);
+			const entry = links.get(at);
+			links.set(at, { target: path.resolve(path.dirname(at), source), planted: (entry?.planted ?? 0) + 1 });
+		};
+		if (targetDir !== null) {
+			if (literal(targetDir)) for (const source of operands) plant(path.join(targetDir, path.basename(source)), source);
+		} else if (operands.length === 1) plant(path.basename(operands[0] as string), operands[0] as string);
+		else {
+			const destination = operands.at(-1) as string;
+			const sources = operands.slice(0, -1);
+			// One source may name the link itself or, when the destination is a directory, a link inside it.
+			if (sources.length === 1) plant(destination, sources[0] as string);
+			for (const source of sources) plant(path.join(destination, path.basename(source)), source);
+		}
+	}
+	if (links.size === 0) return found;
+	const seen = new Map<string, number>();
+	for (const target of targets) {
+		if (!literal(target.path)) continue;
+		const raw =
+			target.path === "~" || target.path.startsWith("~/") ? path.join(homedir(), target.path.slice(1)) : target.path;
+		const at = path.resolve(cwd, raw);
+		for (const [link, { target: linked, planted }] of links) {
+			if (at === link) {
+				// The `ln` step names its own link once; another write naming it writes through it.
+				const count = (seen.get(link) ?? 0) + 1;
+				seen.set(link, count);
+				if (count > planted) found.push({ operation: target.operation, path: linked });
+			} else if (isSameOrDescendant(at, link)) {
+				found.push({ operation: target.operation, path: path.join(linked, path.relative(link, at)) });
+			}
+		}
+	}
+	return found;
 }
 
 /** Commands that print names and metadata, never contents. */
