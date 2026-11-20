@@ -6,6 +6,7 @@ import { createReadOnlyExplorationNudgeRegistration } from "../../src/domains/mi
 import type { MiddlewareHookInput } from "../../src/domains/middleware/index.js";
 import { createMarketplaceOfferRegistration } from "../../src/domains/middleware/marketplace-offer.js";
 import { createPlanCloseRegistration } from "../../src/domains/middleware/plan-close.js";
+import { createScoutNudgeRegistration } from "../../src/domains/middleware/scout-nudge.js";
 import { createTaskBoardReminderRegistration } from "../../src/domains/middleware/task-board-reminder.js";
 import { createCitationGroundingRegistration } from "../../src/domains/safety/citation-grounding.js";
 
@@ -139,6 +140,38 @@ describe("reminders gate on the turn's callable tools", () => {
 		};
 		deepStrictEqual(followUp(SCOPED), []);
 		strictEqual(followUp(surface(ToolNames.Dispatch)).length, 1);
+	});
+
+	it("scout nudge fires once per turn after reads across three areas, only when dispatch is callable and unused", () => {
+		const survey = (names: string, areas: ReadonlyArray<string>, dispatchFirst = false) => {
+			const registration = createScoutNudgeRegistration({ workspaceRoot: () => process.cwd() });
+			registration.evaluate({ hook: "turn_start", metadata: { userTurnId: "u1", activeCapabilityNames: names } });
+			if (dispatchFirst)
+				registration.evaluate({ hook: "before_tool", turnId: "u1", toolName: ToolNames.Dispatch, toolArgs: {} });
+			return Array.from({ length: 12 }, (_, call) =>
+				registration.evaluate({
+					hook: "after_tool",
+					turnId: "u1",
+					toolName: ToolNames.Read,
+					toolArgs: { path: `${areas[call % areas.length]}/file-${call}.ts` },
+					metadata: { resultKind: "ok" },
+				}),
+			);
+		};
+		const threeAreas = ["src", "tests", "docs"];
+		const fired = survey(surface(ToolNames.Dispatch, ToolNames.Read), threeAreas);
+		// The tenth read crosses the line; the turn's one note is then spent.
+		deepStrictEqual(
+			fired.map((effects) => effects.length),
+			[0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+		);
+		const note = fired[9]?.[0];
+		ok(note?.kind === "annotate_tool_result" && note.message.includes('agent "scout"'));
+		ok(note.message.includes("src/, tests/, docs/"));
+		// No dispatch on the surface (a read-only or scoped session), two areas, or a dispatch already made: silent.
+		deepStrictEqual(survey(SCOPED, threeAreas).flat(), []);
+		deepStrictEqual(survey(surface(ToolNames.Dispatch), ["src", "tests"]).flat(), []);
+		deepStrictEqual(survey(surface(ToolNames.Dispatch), threeAreas, true).flat(), []);
 	});
 
 	it("citation grounding asks for a numbered re-read only when read and grep are callable", () => {
