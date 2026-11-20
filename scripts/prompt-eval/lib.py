@@ -112,7 +112,11 @@ def parse_headless(jsonl):
             if txt:
                 finals.append("\n".join(txt))
         elif t == "run_end":
+            # The schema v2 envelope (`run --output-format stream-json`): the run's exit and its final answer.
             exitc = e.get("exitCode")
+            answer = (e.get("result") or {}).get("text")
+            if answer:
+                finals.append(answer)
             blocked = ((e.get("safety") or {}).get("blockedAttempts")) or []
     if rounds == 0 and tools:
         rounds = max(1, len(usage) - 1)
@@ -121,7 +125,7 @@ def parse_headless(jsonl):
 
 
 def run_headless(cli, home, ws, prompt, target, model, extra=(), timeout=900):
-    cmd = ["node", cli, *extra, "run", "--json", "--target", target, "--model", model, "--timeout", str(timeout), "--", prompt]
+    cmd = ["node", cli, *extra, "run", "--output-format", "stream-json", "--target", target, "--model", model, "--timeout", str(timeout), "--", prompt]
     t0 = time.time()
     try:
         p = subprocess.run(cmd, cwd=ws, env=env_for(home), capture_output=True, text=True, timeout=timeout + 60)

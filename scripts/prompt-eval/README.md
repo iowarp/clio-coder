@@ -1,7 +1,7 @@
 # Main-agent prompt evaluation
 
 Runs Clio Coder against a fixed set of harness-use tasks and scores each run from its event stream: the
-headless `run --json` events, or ACP session updates for the tasks that need a session (7, 11, 12). Prose is
+headless `run --output-format stream-json` events, or ACP session updates for the tasks that need a session (7, 11, 12). Prose is
 scored only where a task is about prose, such as a closing offer. It compares `prompts.profile` values and
 reports pass rates per task, profile and model.
 

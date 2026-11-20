@@ -4,7 +4,7 @@
  * isolated homes and scores each run from its tool events.
  *
  * Two surfaces compile different main prompts: `run` drives `clio-coder run
- * --json` (headless tier), `acp` drives `clio-coder acp` over stdio (attended
+ * --output-format stream-json` (headless tier), `acp` drives `clio-coder acp` over stdio (attended
  * tier, the one a TUI, GUI or editor user gets). Every run gets a fresh copy of
  * the home template and of a small generated Python fixture project.
  *
@@ -476,7 +476,7 @@ function killTree(child: ChildProcess): void {
 }
 
 async function driveRun(opts: Options, evalCase: EvalCase, cwd: string, env: NodeJS.ProcessEnv): Promise<Driven> {
-	const args = [opts.clio, "run", "--json", "--timeout", String(opts.timeoutSec)];
+	const args = [opts.clio, "run", "--output-format", "stream-json", "--timeout", String(opts.timeoutSec)];
 	if (opts.target !== null) args.push("--target", opts.target);
 	if (opts.model !== null) args.push("--model", opts.model);
 	if (evalCase.approvesDispatchPlan === true) args.push("--autonomy", "yolo");
@@ -528,6 +528,11 @@ async function driveRun(opts: Options, evalCase: EvalCase, cwd: string, env: Nod
 			if (message.role !== "assistant") return;
 			const text = textOf(message.content);
 			if (text.trim().length > 0) driven.finalText = text;
+		}
+		// The schema v2 envelope ends the stream with the run's final answer.
+		if (frame.type === "run_end") {
+			const text = asRecord(frame.result).text;
+			if (typeof text === "string" && text.trim().length > 0) driven.finalText = text;
 		}
 	});
 	const timer = setTimeout(
