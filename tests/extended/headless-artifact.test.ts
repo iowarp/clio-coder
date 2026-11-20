@@ -499,10 +499,11 @@ for (const scenario of [
 							},
 							scenario.attempts,
 						);
-						// bt-15 c14a: the sealed tools row counts the refused ask as decisions does, never as a blocked call.
+						// bt-15 c14a: the sealed tools row counts the refused ask as decisions does, never as a blocked call;
+						// FX-3 lists it as asked so the row sums to its calls.
 						deepStrictEqual(
 							journal.runs[0]?.settled.tools.find((row) => row.tool === "bash"),
-							{ tool: "bash", calls: 2, ok: 0, errors: 0, blocked: 1 },
+							{ tool: "bash", calls: 2, ok: 0, errors: 0, blocked: 1, asked: 1 },
 						);
 					}
 				}
