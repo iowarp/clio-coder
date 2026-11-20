@@ -8,7 +8,7 @@
  * write) can belong to that frame.
  */
 
-import type { Terminal, TuiAltScreenOptions } from "@earendil-works/pi-tui";
+import type { Terminal, TuiAltScreenOptions, TuiStopOptions } from "@earendil-works/pi-tui";
 import { ApplicationInputTuiAltScreen, ApplicationInputTuiMainScreen } from "./application-input-tui.js";
 import { hasCopyMark, type SelectedRow, selectedRowsText, stripCopyMarks } from "./selection-text.js";
 
@@ -60,6 +60,61 @@ class DeferredRenderAdmission {
 		this.force = false;
 		this.release?.();
 		this.release = null;
+	}
+}
+
+/** A width change within this long of the one before belongs to the same window-edge drag. */
+const WIDTH_SETTLE_MS = 100;
+
+/**
+ * Coalesces a run of width changes into one re-wrap when it pauses.
+ *
+ * pi-tui asks for a frame on every resize event at its 16 ms throttle, and a frame at a new width re-wraps the whole
+ * transcript, about 150 ms at 19,000 rows, so dragging a window edge stuttered. The first width change after a quiet
+ * spell still renders at once. A change within `WIDTH_SETTLE_MS` of the one before starts or restarts one trailing
+ * render, and until it fires no frame paints at a width the last frame did not have. A height-only change, a forced
+ * request and a direct `renderNow` frame always paint.
+ */
+class WidthChangeCoalescer {
+	private paintedColumns: number | undefined;
+	private seenColumns: number | undefined;
+	private lastChangeAt = Number.NEGATIVE_INFINITY;
+	private trailing: ReturnType<typeof setTimeout> | undefined;
+	/** Set by a forced request or a direct frame, which must paint whatever the width did. */
+	bypass = false;
+
+	constructor(private readonly render: () => void) {}
+
+	/** Whether a frame at `columns` waits for the drag to pause. */
+	defer(columns: number): boolean {
+		if (this.paintedColumns === undefined || this.bypass) return false;
+		if (columns !== this.seenColumns) {
+			const now = Date.now();
+			const midDrag = now - this.lastChangeAt < WIDTH_SETTLE_MS;
+			this.seenColumns = columns;
+			this.lastChangeAt = now;
+			if (midDrag) {
+				this.cancel();
+				this.trailing = setTimeout(() => {
+					this.trailing = undefined;
+					this.render();
+				}, WIDTH_SETTLE_MS);
+				this.trailing.unref?.();
+			}
+		}
+		return this.trailing !== undefined && columns !== this.paintedColumns;
+	}
+
+	painted(columns: number): void {
+		this.paintedColumns = columns;
+		this.seenColumns ??= columns;
+		this.bypass = false;
+	}
+
+	cancel(): void {
+		if (this.trailing === undefined) return;
+		clearTimeout(this.trailing);
+		this.trailing = undefined;
 	}
 }
 
@@ -127,10 +182,22 @@ export class InstrumentedTuiMainScreen extends ApplicationInputTuiMainScreen {
 	) {
 		super(terminal, showHardwareCursor, logDirectory);
 		this.deferredAdmission = new DeferredRenderAdmission(renderAdmission, (force) => super.requestRender(force));
+		this.widthChanges = new WidthChangeCoalescer(() => this.requestRender());
 	}
 
 	override requestRender(force = false): void {
+		if (force) this.widthChanges.bypass = true;
 		if (!this.deferredAdmission.request(force)) super.requestRender(force);
+	}
+
+	override renderNow(force = false): void {
+		this.widthChanges.bypass = true;
+		super.renderNow(force);
+	}
+
+	override stop(options?: TuiStopOptions): void {
+		this.widthChanges.cancel();
+		super.stop(options);
 	}
 
 	/** A lone root needs no stacking, and `resolveFakeCursors` below already copies what the renderer will rewrite. */
@@ -175,6 +242,9 @@ export class InstrumentedTuiMainScreen extends ApplicationInputTuiMainScreen {
 
 	protected override doRender(): void {
 		this.deferredAdmission.settled();
+		const columns = this.terminal.columns;
+		if (this.widthChanges.defer(columns)) return;
+		this.widthChanges.painted(columns);
 		this.awaitingFrameRows = true;
 		if (this.renderObserver.isEnabled?.() === false) {
 			super.doRender();
@@ -222,6 +292,7 @@ export class InstrumentedTuiMainScreen extends ApplicationInputTuiMainScreen {
 
 	private currentFrame: unknown | undefined;
 	private readonly deferredAdmission: DeferredRenderAdmission;
+	private readonly widthChanges: WidthChangeCoalescer;
 	private readonly frameRows = new RegularFrameRows();
 	private awaitingFrameRows = false;
 	private keptRoot: unknown;
@@ -290,10 +361,22 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 		super(terminal, showHardwareCursor, logDirectory, options);
 		this.capturesMouse = options?.mouse ?? true;
 		this.deferredAdmission = new DeferredRenderAdmission(renderAdmission, (force) => super.requestRender(force));
+		this.widthChanges = new WidthChangeCoalescer(() => this.requestRender());
 	}
 
 	override requestRender(force = false): void {
+		if (force) this.widthChanges.bypass = true;
 		if (!this.deferredAdmission.request(force)) super.requestRender(force);
+	}
+
+	override renderNow(force = false): void {
+		this.widthChanges.bypass = true;
+		super.renderNow(force);
+	}
+
+	override stop(options?: TuiStopOptions): void {
+		this.widthChanges.cancel();
+		super.stop(options);
 	}
 
 	protected override beforeTerminalStart(): void {
@@ -309,6 +392,8 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 		// every row, so the old selection would highlight text the operator never chose.
 		// A height-only change moves no content row and keeps it.
 		const columns = this.terminal.columns;
+		if (this.widthChanges.defer(columns)) return;
+		this.widthChanges.painted(columns);
 		if (this.paintedColumns !== undefined && columns !== this.paintedColumns) this.resetTextSelection();
 		this.paintedColumns = columns;
 		if (this.renderObserver.isEnabled?.() === false) {
@@ -366,4 +451,5 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 	}
 
 	private readonly deferredAdmission: DeferredRenderAdmission;
+	private readonly widthChanges: WidthChangeCoalescer;
 }

@@ -1968,6 +1968,50 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("re-wraps a window-edge drag once it pauses and paints a height-only change at once", async (t) => {
+		t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+		const terminal = new RenderingTerminal();
+		const painted: number[] = [];
+		const observer = {
+			beginFrame: (fields: { columns: number }) => fields.columns,
+			endFrame: (columns: unknown) => void painted.push(columns as number),
+			beginPhase() {},
+			endPhase() {},
+		};
+		const tui = new InstrumentedTuiAltScreen(terminal, observer);
+		tui.setLayoutRoot(new ScrollView(new Text("word ".repeat(200), 0, 0), { primary: true }));
+		const frame = async (change: () => void) => {
+			change();
+			tui.requestRender();
+			await new Promise<void>((resolve) => process.nextTick(resolve));
+			t.mock.timers.tick(20);
+		};
+		tui.start();
+		try {
+			tui.renderNow(true);
+			await frame(() => {
+				terminal.columns = 70;
+			});
+			deepStrictEqual(painted, [80, 70], "the first width change after a quiet spell paints at once");
+			await frame(() => {
+				terminal.columns = 60;
+			});
+			await frame(() => {
+				terminal.columns = 50;
+			});
+			deepStrictEqual(painted, [80, 70], "a drag skips the re-wraps between its steps");
+			t.mock.timers.tick(100);
+			await frame(() => {});
+			deepStrictEqual(painted, [80, 70, 50], "the drag re-wraps once at its last width");
+			await frame(() => {
+				terminal.rows -= 4;
+			});
+			deepStrictEqual(painted, [80, 70, 50, 50]);
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("preserves themed scrollbars, wheel scrolling, follow-end, and the fixed dock", () => {
 		const terminal = new RenderingTerminal();
 		const tui = new TuiAltScreen(terminal);
