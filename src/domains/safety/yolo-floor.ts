@@ -130,33 +130,11 @@ export function yoloFloorExecutableHit(command: string): YoloFloorHit | null {
 	return null;
 }
 
-/** Runtimes and package runners that start Clio's CLI from an operand: `node dist/cli/index.js`, `npx @iowarp/clio-coder`. */
-const CLIO_RUNNERS: ReadonlySet<string> = new Set([
-	"node",
-	"nodejs",
-	"tsx",
-	"ts-node",
-	"bun",
-	"bunx",
-	"deno",
-	"npx",
-	"pnpx",
-	"npm",
-	"pnpm",
-	"yarn",
-	"corepack",
-]);
+/** Builtins that print their arguments as data: `echo config trust` names the words, it runs nothing. */
+const PRINTING_BUILTINS: ReadonlySet<string> = new Set(["echo", "printf"]);
 
 /** `config` flags whose next word is their value, as `src/cli/config.ts` reads them. */
 const CONFIG_VALUE_FLAGS: ReadonlySet<string> = new Set(["--hash", "--scope"]);
-
-/** A command word that is Clio's launcher by name, a script entry, or a program named only at run time. */
-function clioLauncherWord(word: string): boolean {
-	if (/[$`]/u.test(word)) return true;
-	if (/^@iowarp\/clio-coder(?:@\S*)?$/u.test(word)) return true;
-	const base = word.slice(word.lastIndexOf("/") + 1).toLowerCase();
-	return base === "clio-coder" || base === "clio-coder.cjs" || /\.[cm]?[jt]s$/u.test(base);
-}
 
 /** True when `args[at]` is `config` and the verb `config` reads after it is `trust`, outside a help request. */
 function configTrustAt(args: ReadonlyArray<string>, at: number): boolean {
@@ -173,14 +151,18 @@ function configTrustAt(args: ReadonlyArray<string>, at: number): boolean {
 	return false;
 }
 
-/** The launcher arguments of one step grant, revoke or pin workspace trust: every `config trust` form but help. */
-function stepGrantsTrust(executable: string, args: ReadonlyArray<string>): boolean {
+/**
+ * One step's argv grants, revokes or pins workspace trust: `config trust` in any program's arguments but a help
+ * request. The program name is not trusted, since a symlink, alias or wrapper can be Clio's launcher by any name.
+ * With `verbOnly`, `config` must be the program's own verb: its first positional, or one after only `--flag value`
+ * pairs, so a quotes-dropped reading does not take a message's words for an argv.
+ */
+function stepGrantsTrust(executable: string, args: ReadonlyArray<string>, verbOnly: boolean): boolean {
+	if (PRINTING_BUILTINS.has(executable)) return false;
 	const end = args.indexOf("--");
 	const options = end === -1 ? args : args.slice(0, end);
 	if (options.includes("--help") || options.includes("-h")) return false;
-	if (CLIO_RUNNERS.has(executable)) return args.some((_, at) => configTrustAt(args, at));
-	if (!clioLauncherWord(executable)) return false;
-	// The launcher's own verb: `config` is its first positional, or follows only `--flag value` pairs.
+	if (!verbOnly) return args.some((_, at) => configTrustAt(args, at));
 	for (let at = 0; at < args.length; at += 1) {
 		const word = args[at] as string;
 		if (word === "config") return configTrustAt(args, at);
@@ -191,15 +173,18 @@ function stepGrantsTrust(executable: string, args: ReadonlyArray<string>): boole
 }
 
 /**
- * True when a command runs Clio's `config trust` (CLI-P31): a parsed step whose program is Clio's launcher, a script
- * entry or a runtime that starts one, and whose CLI verb is `config trust`, not a help request. Words in a `for` list,
- * a `case` pattern, an `echo` or a quoted argument are data and never match. Steps follow `sh -c` scripts and
- * substitutions; a here-document that is not data copied to a file is read line by line, since a shell may run it.
+ * True when a command runs Clio's `config trust` (CLI-P31): a parsed step of any program whose arguments hold
+ * `config` with the verb `trust`, not a help request. Words in a `for` list, a `case` pattern, an `echo` or `printf`
+ * and a quoted argument are data and never match. Steps follow `sh -c` scripts and substitutions; a here-document
+ * that is not data copied to a file is read line by line, since a shell may run it. `rawText` marks a reading with
+ * its quotes dropped, where only `config` as the program's verb counts.
  */
-export function yoloFloorTrustGrant(command: string): boolean {
+export function yoloFloorTrustGrant(command: string, rawText = false): boolean {
 	const texts = [command];
 	if (/<<(?!<)/u.test(command)) texts.push(...withoutDataHeredocBodies(command).split(/\r?\n/u));
-	return texts.some((text) => shellCommandSteps(text).some((step) => stepGrantsTrust(step.executable, step.args)));
+	return texts.some((text) =>
+		shellCommandSteps(text).some((step) => stepGrantsTrust(step.executable, step.args, rawText)),
+	);
 }
 
 /** A script a command runs without naming a shell: a program run by path, or a file `source` or `.` reads. */

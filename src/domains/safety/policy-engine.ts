@@ -1098,6 +1098,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		commands: ReadonlyArray<string>,
 		callCwd: string,
 		trees: ClioOwnedTrees,
+		rawText = false,
 	): { match: DamageControlMatch; source: SafetyPolicySource } | null => {
 		const text = matchSourcedRule(texts, floorRules);
 		if (text !== null) return text;
@@ -1108,7 +1109,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const deleted = yoloFloorDeleteHit(candidate, callCwd, cwd);
 			if (deleted !== null) return floorMatch(deleted);
 		}
-		if (invokesTrustMutation(command)) {
+		if (invokesTrustMutation(command, rawText)) {
 			return floorMatch({
 				ruleId: YOLO_FLOOR_RULE_IDS.trustAuthority,
 				reason: `matched ${YOLO_FLOOR_RULE_IDS.trustAuthority}: workspace trust grants require the operator CLI`,
@@ -1263,7 +1264,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		for (const candidate of raw?.candidates ?? []) {
 			const read = credentialReadHit({ tool: ToolNames.Bash, args: { command: candidate } }, callCwd, candidate);
 			const hit =
-				commandFloorHit([candidate], [candidate], callCwd, trees) ?? (read === null ? null : floorMatch(read, "read"));
+				commandFloorHit([candidate], [candidate], callCwd, trees, true) ??
+				(read === null ? null : floorMatch(read, "read"));
 			if (hit !== null) {
 				// Moving an operator-only command into a file changes nothing: the script scan refuses it there too (CLI-P31).
 				const remedy = YOLO_FLOOR_AUTHORITY_RULE_IDS.has(hit.match.ruleId)
@@ -6045,11 +6047,11 @@ function rulePackHash(rules: ReadonlyArray<DamageControlRule>): string {
 	return createHash("sha256").update(JSON.stringify({ base }), "utf8").digest("hex");
 }
 
-function invokesTrustMutation(command: string): boolean {
+function invokesTrustMutation(command: string, rawText = false): boolean {
 	// Wrappers, package launchers, quoted argv and source-tree CLI invocations
 	// must not turn an operator-only grant into model authority; a loop list,
 	// a help request or quoted data is not a grant (CLI-P31).
-	return yoloFloorTrustGrant(command);
+	return yoloFloorTrustGrant(command, rawText);
 }
 
 function projectScriptPreview(command: string, cwd: string): string {

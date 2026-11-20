@@ -392,12 +392,15 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		"node dist/cli/index.js config trust settings",
 		"corepack pnpm exec tsx src/cli/index.ts config --scope project trust safety",
 		"bash <<EOF\nclio-coder config trust safety\nEOF",
+		// A symlink or alias names the launcher anything; the argv decides.
+		"./workspace-cli config trust safety",
 	])
 		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).reasonCode, "yolo-floor:trust-authority", command);
 	for (const command of [
 		'H=$(mktemp -d); for a in config get --help "config trust --help"; do HOME=$H node dist/cli/index.js $a; done',
 		"clio-coder config trust safety --help",
 		'git commit -m "$(date) config trust fix"',
+		"echo config trust safety",
 	])
 		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).kind, "allow", command);
 	// An authority-class refusal sends the model to the operator, never into a script or file that runs it.
