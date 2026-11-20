@@ -54,6 +54,7 @@ import { bindExecutionPlanEndpoints, type ExecutionPlan } from "../domains/dispa
 import { agentRoleFactsResolver, requestExecutionRole, withAttemptRole } from "../domains/dispatch/execution-role.js";
 import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
 import {
+	type FleetRootRecord,
 	fleetRootLogPath,
 	isFleetRootId,
 	readFleetRootRecord,
@@ -360,6 +361,8 @@ type FleetCost = FleetRunOutcome["totalCost"];
 /** What one fleet run learned on its way, for the fleet result document (6.13) every structured exit path writes. */
 interface FleetRunTrack {
 	rootId: string | null;
+	/** The resolved playbook name (`hello` for `hello.md`); null until the playbook loads, when the argument stands in. */
+	playbook: string | null;
 	planHash: string | null;
 	started: boolean;
 	documentWritten: boolean;
@@ -405,7 +408,7 @@ function fleetEndDocument(
 		type: "fleet_end",
 		schemaVersion: 1,
 		rootId: track.rootId,
-		playbook: options.name,
+		playbook: track.playbook ?? options.name,
 		planHash: track.planHash,
 		exitCode,
 		completion: { state: completionState, stopReason },
@@ -430,6 +433,7 @@ function fleetEndDocument(
 async function runFleet(options: FleetRunOptions, reporter: ReturnType<typeof createFleetReporter>): Promise<number> {
 	const track: FleetRunTrack = {
 		rootId: null,
+		playbook: null,
 		planHash: null,
 		started: false,
 		documentWritten: false,
@@ -491,6 +495,7 @@ async function runFleetTracked(
 	let commands: PlaybookCommandRegistry | null;
 	try {
 		playbook = loadPlaybook(process.cwd(), name);
+		track.playbook = playbook.name;
 		prompt = renderPlaybookPrompt(playbook.body, vars);
 		commands = loadPlaybookCommands(process.cwd());
 	} catch (err) {
@@ -1216,9 +1221,13 @@ async function runFleetDetached(args: ReadonlyArray<string>, options: FleetRunOp
 		ended.code = code ?? 1;
 	});
 	const limit = Date.now() + DETACH_ACCEPT_LIMIT_MS;
+	let accepted: FleetRootRecord;
 	for (;;) {
 		const record = readFleetRootRecord(rootId);
-		if (record !== null && record.owner.pid === child.pid) break;
+		if (record !== null && record.owner.pid === child.pid) {
+			accepted = record;
+			break;
+		}
 		if (ended.error !== null) return fail(`--detach could not start the fleet: ${ended.error.message}`);
 		if (ended.code !== undefined) return detachRefused(options, logPath, ended.code ?? 1);
 		if (Date.now() > limit) {
@@ -1234,7 +1243,7 @@ async function runFleetDetached(args: ReadonlyArray<string>, options: FleetRunOp
 	child.unref();
 	if (options.format === "text") {
 		process.stdout.write(
-			`fleet ${options.name}: accepted root=${rootId} pid=${child.pid} log=${logPath}\n  clio-coder fleet wait ${rootId}   wait for its result\n`,
+			`fleet ${accepted.playbook}: accepted root=${rootId} pid=${child.pid} log=${logPath}\n  clio-coder fleet wait ${rootId}   wait for its result\n`,
 		);
 	} else {
 		process.stdout.write(
@@ -1280,7 +1289,7 @@ function detachRefused(options: FleetRunOptions, logPath: string, code: number):
 					type: "fleet_end",
 					schemaVersion: 1,
 					rootId: null,
-					playbook: options.name,
+					playbook: resolvedPlaybookName(options.name),
 					planHash: null,
 					exitCode: code,
 					completion: { state: "refused", stopReason: null },
@@ -1294,6 +1303,16 @@ function detachRefused(options: FleetRunOptions, logPath: string, code: number):
 		);
 	}
 	return code;
+}
+
+/** The name fleet_started would carry for `requested` (`hello` for `hello.md`), or the argument when it does not load. */
+function resolvedPlaybookName(requested: string): string {
+	try {
+		return loadPlaybook(process.cwd(), requested).name;
+	} catch {
+		// A playbook that does not load has no resolved name; the refusal names what the operator typed.
+		return requested;
+	}
 }
 
 export async function runFleetCommand(args: ReadonlyArray<string>): Promise<number> {

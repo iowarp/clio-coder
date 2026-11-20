@@ -331,7 +331,7 @@ describe("fleet detach and wait flags (SPEC L7b)", () => {
 		match(result.stderr, /no fleet root matches/u);
 	});
 
-	it("fleet_end and fleet wait carry the plan hash the journal and fleet list record", {
+	it("fleet_end and fleet wait carry the plan hash and resolved playbook name the journal and fleet list record", {
 		timeout: 120_000,
 	}, async () => {
 		const scratch = headlessScratch("clio-coder-fleet-plan-hash-");
@@ -372,9 +372,13 @@ describe("fleet detach and wait flags (SPEC L7b)", () => {
 				].join("\n"),
 			);
 			const options = { env: scratch.env, cwd: project, timeoutMs: 90_000 };
-			const run = await runCli(["fleet", "run", "probe", "--output-format", "json"], options);
-			const end = JSON.parse(run.stdout.trim().split("\n").at(-1) ?? "{}");
+			// A .md spelling resolves to the bare playbook, and every surface names it as resolved.
+			const run = await runCli(["fleet", "run", "probe.md", "--output-format", "stream-json"], options);
+			const lines = run.stdout.trim().split("\n");
+			const streamed = JSON.parse(lines[0] ?? "{}");
+			const end = JSON.parse(lines.at(-1) ?? "{}");
 			equal(end.type, "fleet_end", run.stderr);
+			equal(streamed.type, "fleet_started", run.stdout);
 			const list = JSON.parse((await runCli(["fleet", "list", "--json"], options)).stdout);
 			const listed = list.roots.find((root: { rootId: string }) => root.rootId === end.rootId);
 			const eventsRun = await runCli(["fleet", "events", end.rootId, "--json"], options);
@@ -388,6 +392,10 @@ describe("fleet detach and wait flags (SPEC L7b)", () => {
 			const waited = JSON.parse((await runCli(["fleet", "wait", end.rootId, "--json"], options)).stdout);
 			ok(typeof end.planHash === "string" && end.planHash.length > 0, run.stdout);
 			deepStrictEqual([listed?.planHash, started?.planHash, waited.planHash], [end.planHash, end.planHash, end.planHash]);
+			deepStrictEqual(
+				[streamed.playbook, end.playbook, listed?.playbook, started?.fleet, waited.playbook],
+				["probe", "probe", "probe", "probe", "probe"],
+			);
 		} finally {
 			await closeServer(fixture.server);
 			scratch.cleanup();
