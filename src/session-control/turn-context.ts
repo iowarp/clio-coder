@@ -453,6 +453,8 @@ export interface TurnContext {
 		handoff?: ContinuityReductionHooks,
 		pendingUserIsOperator?: boolean,
 		providerFallbackReason?: string,
+		/** The id the pending prompt's user turn is reserved under, so this compaction is charged to that turn. */
+		pendingUserTurnId?: string,
 	): Promise<boolean>;
 	lastCompactionWasNoGain(): boolean;
 	/**
@@ -2152,6 +2154,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		handoff?: ContinuityReductionHooks,
 		pendingUserIsOperator = true,
 		providerFallbackReason?: string,
+		pendingUserTurnId?: string,
 	): Promise<boolean> => {
 		bindProviderCompaction(agentRuntime);
 		lastCompactionNoGain = false;
@@ -2510,10 +2513,20 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					| "onSummaryOutput"
 					| "checkpointForSummary"
 					| "checkpointTokenFigures"
+					| "chargeTurnId"
 			  >
 			| undefined = skillContextState !== undefined ? { skillContextState } : undefined;
 		if (pendingUserText !== undefined && state.activeUserTurnId === null && pendingUserIsOperator)
 			budget = { ...budget, pendingOperatorTurn: true };
+		// The calls are charged to the turn they serve: the pending prompt's, the open one, or, for a /compact between
+		// turns, the latest. Ledger order alone charged that last case to the next turn, and a discarded run by time.
+		const chargeTurnId =
+			pendingUserTurnId ??
+			state.activeUserTurnId ??
+			(pendingUserText === undefined
+				? findLastEntry(activeEntries(), (entry) => entry.kind === "message" && entry.role === "user")?.turnId
+				: undefined);
+		if (chargeTurnId !== undefined) budget = { ...budget, chargeTurnId };
 		// A summary written on this route shares its small window with the history it reads (bt-18).
 		const summaryCap = summaryOnChatRoute(agentRuntime, settings.context.compaction.model)
 			? resolveSummaryOutputCap(agentRuntime)

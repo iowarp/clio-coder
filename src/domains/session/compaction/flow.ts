@@ -60,6 +60,7 @@ export type CompactionFlowBudget = Pick<
 	| "retainedTargetTokens"
 	| "requireFit"
 	| "preserveUserTurnId"
+	| "chargeTurnId"
 	| "pendingOperatorTurn"
 	| "skillContextState"
 	| "signal"
@@ -224,7 +225,11 @@ export async function runCompactionFlow(
 	const entries = withProviderCheckpointMeasurements(filterEntriesToActivePath(session.readEntries(), activeLeafTurnId));
 	if (entries.length === 0) return null;
 	// Keep this owner alive through checkpoint publication, after individual streams close (#434).
-	const lease = await telemetry?.acquireTelemetrySession?.(meta, { role: "compaction", id: meta.id });
+	const lease = await telemetry?.acquireTelemetrySession?.(
+		meta,
+		{ role: "compaction", id: meta.id },
+		budget?.chargeTurnId,
+	);
 	const callIds = new Set<string>();
 	const closure: EventPayload<"compaction.settled"> = { callIds: [], outcome: "failed", checkpointTurnId: null };
 	try {
@@ -298,6 +303,7 @@ export async function runCompactionFlow(
 								origin: meta,
 								acquire: telemetry.acquireTelemetrySession,
 								role: "compaction",
+								...(budget?.chargeTurnId !== undefined ? { turnId: budget.chargeTurnId } : {}),
 								targetId: resolved.targetId,
 								runtimeId: resolved.runtimeId,
 								...pricingBasisFields(resolved),

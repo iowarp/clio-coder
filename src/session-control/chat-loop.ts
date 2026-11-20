@@ -3532,6 +3532,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						undefined,
 						undefined,
 						options.requestContinuation !== true,
+						undefined,
+						reservedUserTurnId,
 					);
 				} catch (err) {
 					// A new session or a dispose since submit owns the transcript now; this turn's notice and outcome
@@ -3619,6 +3621,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								undefined,
 								undefined,
 								options.requestContinuation !== true,
+								undefined,
+								reservedUserTurnId,
 							);
 						})
 						.catch((error: unknown) => {

@@ -16,6 +16,8 @@ export interface CallJournalOptions {
 	acquire: NonNullable<TelemetryContract["acquireTelemetrySession"]>;
 	/** The side agent making the call, named by the session it serves or, with no session, by the process (#434). */
 	role: AgentRole;
+	/** The turn the call serves, journaled on its context so accounting charges it there. */
+	turnId?: string;
 	targetId: string;
 	runtimeId: string;
 	pricedBy: EffectivePricing["pricedBy"];
@@ -31,7 +33,7 @@ export interface AdmissionHold {
 /** One logical helper call retains its originating writer across schema and auth retries (#434). */
 export async function openCallScope(options: CallJournalOptions | undefined, model: { api: string; id: string }) {
 	const acquired = options?.origin
-		? await options.acquire(options.origin, { role: options.role, id: options.origin.id })
+		? await options.acquire(options.origin, { role: options.role, id: options.origin.id }, options.turnId)
 		: undefined;
 	// A session writer that failed to open owns no call; its journal records the gap (#434). A call with no session is
 	// the process journal's.

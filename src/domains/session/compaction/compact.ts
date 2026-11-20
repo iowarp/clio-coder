@@ -218,6 +218,8 @@ export interface CompactInput extends SideCallAuth {
 	preserveUserTurnId?: string;
 	/** A new operator request is pending admission and is not yet in `entries`. */
 	pendingOperatorTurn?: boolean;
+	/** The turn this compaction's calls are journaled under and charged to; unset leaves the ledger order to decide. */
+	chargeTurnId?: string;
 	/**
 	 * Output the summarizer has streamed so far, estimated from the characters
 	 * received, beside the request's output cap when it sends one. Called as
