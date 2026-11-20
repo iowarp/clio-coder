@@ -4,8 +4,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlink
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
+import { AUTONOMY_HELP } from "../../src/core/settings-awareness.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
 import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
@@ -515,6 +517,30 @@ test("outside scratch roots, in a scratch repository's .git and on secret paths 
 	// Without the operator's scope (a worker, a grant, a command job) a scratch write keeps its ask.
 	const unscoped = evaluateAdmission({ principal: "main", effects: [write(join(scratch, "a.txt"))], safety });
 	strictEqual(unscoped.kind, "ask");
+});
+
+test("at default the main session reads outside the workspace, and replacing an existing outside file asks", (t) => {
+	const cwd = workspace("clio-contained-outside-ws-");
+	// A tracked repository file: it exists, and it lies outside the workspace and every scratch root.
+	const outside = fileURLToPath(new URL("../../package.json", import.meta.url));
+	// The typed tools resolve paths against the process cwd, which a session sets to its workspace.
+	const saved = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(saved));
+	const safety = createWorkerSafety({ cwd });
+	const operatorDefault: OperatorDefaultScope = { level: "default", scratchRoots: [], sandbox: false, snapshots: true };
+	const admit = (call: ClassifierCall) =>
+		evaluateAdmission({ principal: "main", effects: [call], safety, autonomy: "default", operatorDefault });
+	const read = admit({ tool: ToolNames.Read, args: { path: outside } });
+	strictEqual(read.kind, "allow");
+	strictEqual(read.decision.policy?.readScope, undefined);
+	const replace = admit({ tool: ToolNames.Write, args: { path: outside, content: "x" } });
+	strictEqual(replace.kind === "ask" && replace.approvalAuthority, "operator");
+	strictEqual(replace.decision.policy?.reasonCode, "outside-file-replacement");
+	strictEqual(admit({ tool: ToolNames.Write, args: { path: join(cwd, "a.txt"), content: "x" } }).kind, "allow");
+	// The posture the model is told states the same thing.
+	match(AUTONOMY_HELP.default, /read anywhere outside secret paths/);
+	ok(!/reads outside the workspace/.test(AUTONOMY_HELP.default));
 });
 
 test("a typed write to the workspace repository's hooks asks at default, and an ordinary workspace file runs", (t) => {
