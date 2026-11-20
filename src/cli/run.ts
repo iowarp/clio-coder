@@ -404,14 +404,14 @@ export async function runClioRun(
 			execute,
 		);
 	}
-	// Text output: the v2 writer is the only JSON writer, so this wrapper adds only text mode's `-o`.
-	const code = await withRunFailureReporting(
-		execute,
+	// Text output: the v2 writer is the only JSON writer, so this wrapper adds only text mode's `-o`. `-o` is written
+	// only on exit 0, so `--exit-code` maps the run's exit before the wrapper settles it.
+	return withRunFailureReporting(
+		async () => completionExitCode(await execute(), parsed.exitCodeVerdict === true),
 		parsed.outputLastMessage !== undefined
 			? { path: parsed.outputLastMessage, ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}) }
 			: undefined,
 	);
-	return completionExitCode(code, parsed.exitCodeVerdict === true);
 }
 
 async function executeRunCommand(
