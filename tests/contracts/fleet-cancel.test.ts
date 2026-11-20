@@ -5,7 +5,20 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { runFleetCancel } from "../../src/cli/fleet-cancel.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { getStoredAssignment, registerAssignment } from "../../src/domains/dispatch/assignment-store.js";
-import { takeRunCancelRequest, writeRunCancelRequest } from "../../src/domains/dispatch/cancel-requests.js";
+import {
+	clearRootCancelRequest,
+	readRootCancelRequest,
+	takeRunCancelRequest,
+	writeRootCancelRequest,
+	writeRunCancelRequest,
+} from "../../src/domains/dispatch/cancel-requests.js";
+import {
+	fleetRootState,
+	matchFleetRootIds,
+	readFleetRootRecord,
+	writeFleetResult,
+	writeFleetRootRecord,
+} from "../../src/domains/dispatch/fleet-root-record.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import type { RunLineage } from "../../src/domains/dispatch/types.js";
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
@@ -28,6 +41,57 @@ describe("fleet cancel requests", () => {
 		strictEqual(taken?.reason, "operator stop");
 		strictEqual(existsSync(path), false);
 		strictEqual(takeRunCancelRequest("run-active"), null);
+	});
+
+	it("keeps the first root cancel request, reads it without consuming it, and clears it", () => {
+		const first = writeRootCancelRequest("fleet-abc123", "first");
+		const again = writeRootCancelRequest("fleet-abc123", "second");
+		strictEqual(again.requestedAt, first.requestedAt);
+		strictEqual(readRootCancelRequest("fleet-abc123")?.reason, "first");
+		strictEqual(readRootCancelRequest("fleet-abc123")?.rootId, "fleet-abc123");
+		clearRootCancelRequest("fleet-abc123");
+		strictEqual(readRootCancelRequest("fleet-abc123"), null);
+	});
+
+	it("cancels a sealed fleet root idempotently and refuses an unknown or ambiguous one", async () => {
+		ensureClioState();
+		const record = writeFleetRootRecord({ rootId: "fleet-aa0001", playbook: "demo", cwd: scratch.dir });
+		writeFleetRootRecord({ rootId: "fleet-aa0002", playbook: "demo", cwd: scratch.dir });
+		strictEqual(fleetRootState(record, false), "running");
+		writeFleetResult("fleet-aa0001", {
+			type: "fleet_end",
+			exitCode: 0,
+			completion: { state: "completed", stopReason: null },
+		});
+		strictEqual(readFleetRootRecord("fleet-aa0001")?.state, "sealed");
+		strictEqual(matchFleetRootIds("fleet-aa").length, 2);
+		strictEqual(matchFleetRootIds("fleet-aa0001").join(), "fleet-aa0001");
+		const cancel = async (args: string[]) => {
+			const written: string[] = [];
+			const write = process.stdout.write;
+			const writeErr = process.stderr.write;
+			process.stdout.write = ((chunk: string) => {
+				written.push(chunk);
+				return true;
+			}) as typeof process.stdout.write;
+			process.stderr.write = (() => true) as typeof process.stderr.write;
+			let code: number;
+			try {
+				code = await runFleetCancel(args);
+			} finally {
+				process.stdout.write = write;
+				process.stderr.write = writeErr;
+			}
+			return { code, out: written.join("") };
+		};
+		for (let i = 0; i < 2; i++) {
+			const { code, out } = await cancel(["fleet-aa0001", "--json"]);
+			strictEqual(code, 0);
+			strictEqual(JSON.parse(out).action, "already_sealed");
+		}
+		strictEqual(readRootCancelRequest("fleet-aa0001"), null);
+		strictEqual((await cancel(["fleet-zz9999", "--json"])).code, 1);
+		strictEqual((await cancel(["fleet-aa", "--json"])).code, 1);
 	});
 
 	// A hosted worker publishes the main run as its lineage root, and a running attempt is not yet among the

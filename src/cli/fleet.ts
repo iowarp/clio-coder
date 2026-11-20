@@ -15,7 +15,10 @@
  * subset check, and the budget gate is open.
  */
 
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import type { FactSum } from "../core/telemetry/fact.js";
@@ -44,11 +47,19 @@ import {
 	formatEffectiveBudget,
 	type RunToolBudgetEnvelope,
 } from "../domains/dispatch/budget-envelope.js";
+import { clearRootCancelRequest, readRootCancelRequest } from "../domains/dispatch/cancel-requests.js";
 import { type CapacityDrain, capacityDrain, setCapacityDraining } from "../domains/dispatch/capacity-lease.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { bindExecutionPlanEndpoints, type ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { agentRoleFactsResolver, requestExecutionRole, withAttemptRole } from "../domains/dispatch/execution-role.js";
 import { compileFleetExecutionPlan } from "../domains/dispatch/fleet-plan.js";
+import {
+	fleetRootLogPath,
+	isFleetRootId,
+	readFleetRootRecord,
+	writeFleetResult,
+	writeFleetRootRecord,
+} from "../domains/dispatch/fleet-root-record.js";
 import {
 	createDispatchDomainModule,
 	type ExecuteFleetRunInput,
@@ -108,6 +119,8 @@ Subcommands:
        [--timeout <duration>]    stop the fleet when the deadline passes and exit 124 (bare number: seconds)
        [--max-cost-usd <usd>]    stop the fleet once settled steps spend this much and exit 4; the cap
                                 is the lower of this and the playbook's budgetUsd
+       [--detach]               start the fleet in the background and return once its root is recorded;
+                                json prints one fleet_accepted line
        [--json]                 deprecated: the per-step JSON lines of earlier releases
   status [--json] [--all]       show running, retrying, and total dispatch state
   list [--all-projects] [--limit N] [--json]
@@ -132,6 +145,12 @@ Subcommands:
   resume [--json]               alias of admission open
   cancel <runId> [--json] [--reason <text>]
                                 cancel one running run from any terminal
+  cancel <fleetRootId> [--json] [--reason <text>]
+                                stop a fleet root: no further step starts and its running steps are canceled;
+                                a root that already sealed exits 0 with its recorded outcome
+  wait <fleetRootId> [--timeout <duration>] [--json]
+                                wait for a fleet root to seal and print its fleet result; exits with the
+                                root's exit code, 1 when its owner died unsealed, 75 when --timeout expires
 
 Notes:
   Inspection defaults to this project. Pass --all to inspect machine-wide state.
@@ -177,6 +196,13 @@ function refuse(message: string): number {
 function newFleetRootId(): string {
 	return `fleet-${randomBytes(6).toString("hex")}`;
 }
+
+/** The hidden flag `--detach` re-executes with; it is not part of the documented surface. */
+const DETACHED_ROOT_FLAG = "--detached-root";
+const ROOT_CANCEL_POLL_MS = 250;
+const DETACH_POLL_MS = 50;
+/** Boot, preflight and the workspace lock come before the root record; past this the background start is abandoned. */
+const DETACH_ACCEPT_LIMIT_MS = 120_000;
 
 // ---------------------------------------------------------------------------
 // run
@@ -233,6 +259,10 @@ interface FleetRunOptions {
 	cwd?: string;
 	timeoutMs?: number;
 	maxCostUsd?: number;
+	/** `--detach`: start the root in a background process and return once its root record exists. */
+	detach: boolean;
+	/** Hidden `--detached-root <id>`: the background process `--detach` started runs the root its parent named. */
+	detachedRootId?: string;
 }
 
 const FLEET_RUN_USAGE =
@@ -246,14 +276,26 @@ function parseFleetRunArgs(args: ReadonlyArray<string>): FleetRunOptions | { err
 	// (`--resume <runId> <name>` used to run a playbook named after the run id)
 	// and an unknown flag is refused instead of running the playbook anyway.
 	let legacyJson = false;
+	let detach = false;
 	let name: string | undefined;
 	const values = new Map<string, string>();
-	const VALUE_OPTIONS = new Set(["--resume", "--output-format", "--cwd", "--timeout", "--max-cost-usd"]);
+	const VALUE_OPTIONS = new Set([
+		"--resume",
+		"--output-format",
+		"--cwd",
+		"--timeout",
+		"--max-cost-usd",
+		DETACHED_ROOT_FLAG,
+	]);
 	for (let index = 0; index < rest.length; index += 1) {
 		const arg = rest[index];
 		if (arg === undefined) continue;
 		if (arg === "--json") {
 			legacyJson = true;
+			continue;
+		}
+		if (arg === "--detach") {
+			detach = true;
 			continue;
 		}
 		const equals = arg.startsWith("--") ? arg.indexOf("=") : -1;
@@ -275,12 +317,19 @@ function parseFleetRunArgs(args: ReadonlyArray<string>): FleetRunOptions | { err
 		return { error: `--output-format takes text, json or stream-json, got '${format}'` };
 	}
 	if (format !== undefined && legacyJson) return { error: "--json and --output-format cannot be combined" };
+	if (detach && legacyJson) return { error: "--detach and --json cannot be combined; use --output-format json" };
+	const detachedRootId = values.get(DETACHED_ROOT_FLAG);
+	if (detachedRootId !== undefined && (detach || !isFleetRootId(detachedRootId))) {
+		return { error: `${DETACHED_ROOT_FLAG} is internal to --detach` };
+	}
 	const options: FleetRunOptions = {
 		name,
 		vars,
 		legacyJson,
 		format: format ?? "text",
 		formatGiven: format !== undefined,
+		detach,
+		...(detachedRootId !== undefined ? { detachedRootId } : {}),
 	};
 	const resumeId = values.get("--resume");
 	if (resumeId !== undefined) options.resumeId = resumeId;
@@ -304,6 +353,8 @@ function parseFleetRunArgs(args: ReadonlyArray<string>): FleetRunOptions | { err
 }
 
 type FleetStepOutcome = "succeeded" | "failed" | "replayed";
+/** `canceled` is a durable root cancel request (`fleet cancel <root>`). */
+type FleetStopCause = "deadline" | "max_cost_usd" | "canceled";
 type FleetCost = FleetRunOutcome["totalCost"];
 
 /** What one fleet run learned on its way, for the fleet result document (6.13) every structured exit path writes. */
@@ -313,7 +364,11 @@ interface FleetRunTrack {
 	started: boolean;
 	documentWritten: boolean;
 	steps: Array<{ stepId: string; runId: string | null; outcome: FleetStepOutcome }>;
-	stopCause: "deadline" | "max_cost_usd" | null;
+	stopCause: FleetStopCause | null;
+	/** The durable root record was written, so this process owns the root and persists its result at seal. */
+	rootRecorded: boolean;
+	/** The fleet result as of the final exit code, which is what the root persists. */
+	resultDocument: Record<string, unknown> | null;
 	/** USD the settled, non-replayed steps spent, folded by core so this surface sums no cost field. */
 	spent: FactSum;
 	totalCost: FleetCost | null;
@@ -380,6 +435,8 @@ async function runFleet(options: FleetRunOptions, reporter: ReturnType<typeof cr
 		documentWritten: false,
 		steps: [],
 		stopCause: null,
+		rootRecorded: false,
+		resultDocument: null,
 		spent: sumFactSums([]),
 		totalCost: null,
 		cleanRun: null,
@@ -400,6 +457,22 @@ async function runFleet(options: FleetRunOptions, reporter: ReturnType<typeof cr
 			...(lastFleetDiagnostic !== null ? { message: lastFleetDiagnostic } : {}),
 		};
 		reporter.stdout(`${JSON.stringify(fleetEndDocument(options, track, code, [cause]))}\n`);
+	}
+	if (track.rootRecorded && track.rootId !== null) {
+		const document =
+			track.resultDocument ??
+			fleetEndDocument(options, track, code, [
+				{ code: "run_failed", ...(lastFleetDiagnostic !== null ? { message: lastFleetDiagnostic } : {}) },
+			]);
+		try {
+			// The result before the sealed mark, so `fleet wait` never sees a sealed root without its document.
+			writeFleetResult(track.rootId, document);
+			clearRootCancelRequest(track.rootId);
+		} catch (err) {
+			reporter.stderr(
+				`clio-coder fleet: could not persist the fleet result for ${track.rootId}: ${err instanceof Error ? err.message : String(err)}\n`,
+			);
+		}
 	}
 	return code;
 }
@@ -493,7 +566,7 @@ async function runFleetTracked(
 		return exitWith(fail(`preflight failed: ${preflightError}`), () => loaded.stop());
 	}
 
-	const fleetRootId = newFleetRootId();
+	const fleetRootId = options.detachedRootId ?? newFleetRootId();
 	track.rootId = fleetRootId;
 	let plan: ExecutionPlan;
 	try {
@@ -638,7 +711,7 @@ async function runFleetTracked(
 	// --timeout and --max-cost-usd stop the fleet through this controller, beside the shutdown coordinator's signal, so
 	// the run seals aborted and this process still writes its result and returns 124 or 4 itself.
 	const limitStop = new AbortController();
-	const stopFleet = (cause: "deadline" | "max_cost_usd", message: string): void => {
+	const stopFleet = (cause: FleetStopCause, message: string): void => {
 		if (limitStop.signal.aborted) return;
 		track.stopCause = cause;
 		reporter.stderr(`clio-coder fleet run: ${message}\n`);
@@ -653,6 +726,26 @@ async function runFleetTracked(
 					Math.max(0, options.timeoutMs - performance.now()),
 				);
 	deadline?.unref();
+	// The root record names this process before any step is admitted, so `fleet wait`, `fleet cancel` and a `--detach`
+	// parent can find the root; from here every exit persists the fleet result.
+	try {
+		writeFleetRootRecord({ rootId: fleetRootId, playbook: playbook.name, cwd: process.cwd() });
+		track.rootRecorded = true;
+	} catch (err) {
+		clearTimeout(deadline);
+		return exitWith(
+			refuse(`cannot record fleet root ${fleetRootId}: ${err instanceof Error ? err.message : String(err)}`),
+			stopRun,
+		);
+	}
+	/** A durable root cancel request stops the fleet: checked now, before each step starts, and on a short poll. */
+	const checkRootCancel = (): void => {
+		if (limitStop.signal.aborted || readRootCancelRequest(fleetRootId) === null) return;
+		stopFleet("canceled", `cancel requested for fleet root ${fleetRootId}; stopping the fleet`);
+	};
+	checkRootCancel();
+	const cancelPoll = setInterval(checkRootCancel, ROOT_CANCEL_POLL_MS);
+	cancelPoll.unref();
 	/** The exit code the settled run returns, before a closed reader is weighed: signal, deadline, limit, failure. */
 	const settledExitCode = (cleanRun: boolean): number => {
 		if (shutdownSignal?.aborted === true) return getTerminationCoordinator().getExitCode();
@@ -680,6 +773,7 @@ async function runFleetTracked(
 					settings: fleetSettings,
 					vars,
 					...(resume !== undefined ? { resume } : {}),
+					beforeStepAdmission: checkRootCancel,
 					onStarted() {
 						track.started = true;
 						reporter.stderr(
@@ -812,7 +906,8 @@ async function runFleetTracked(
 		);
 	} catch (err) {
 		clearTimeout(deadline);
-		if (runSignal?.aborted && err === runSignal.reason) {
+		clearInterval(cancelPoll);
+		if (runSignal?.aborted && abortedBy(err, runSignal.reason)) {
 			track.cleanRun = false;
 			return finishFleetRun(options, reporter, track, settledExitCode(false), shutdownSignal?.aborted === true);
 		}
@@ -820,6 +915,7 @@ async function runFleetTracked(
 		return fleetFailureExitCode(err) === 1 ? refuse(message) : fail(message);
 	}
 	clearTimeout(deadline);
+	clearInterval(cancelPoll);
 	track.cleanRun = outcome.cleanRun;
 	track.totalCost = outcome.totalCost;
 
@@ -868,10 +964,14 @@ async function runFleetTracked(
 		// to guess that the viewer wants a per-step run id.
 		reporter.stdout(`  clio-coder fleet view ${fleetRootId}   step index with each step's run id\n`);
 	}
-	if (options.formatGiven) {
-		return finishFleetRun(options, reporter, track, settledExitCode(outcome.cleanRun), shutdownSignal?.aborted === true);
-	}
-	return settledExitCode(outcome.cleanRun);
+	// Text and the deprecated --json print nothing more here; this still resolves the result the root persists.
+	return finishFleetRun(options, reporter, track, settledExitCode(outcome.cleanRun), shutdownSignal?.aborted === true);
+}
+
+/** The plan stopped for `reason`: thrown as is, or by every step a canceled admission refused in one wave. */
+function abortedBy(err: unknown, reason: unknown): boolean {
+	if (err === reason) return true;
+	return err instanceof AggregateError && err.errors.length > 0 && err.errors.every((entry) => entry === reason);
 }
 
 /**
@@ -889,6 +989,8 @@ async function finishFleetRun(
 	const resolve = (): { exitCode: number; causes: RunCause[] } => {
 		const facts: RunCause[] = [];
 		if (signaled) facts.push({ code: "interrupted", signal: signalForExitCode(settledCode) });
+		// An operator cancel through `fleet cancel <root>` is an interruption without a signal.
+		if (track.stopCause === "canceled") facts.push({ code: "interrupted", signal: null, by: "fleet_cancel" });
 		if (track.stopCause === "deadline") facts.push({ code: "deadline", timeoutMs: track.limits.timeoutMs });
 		if (options.formatGiven && reporter.readerClosed()) facts.push({ code: "reader_closed" });
 		if (track.stopCause === "max_cost_usd") {
@@ -908,6 +1010,7 @@ async function finishFleetRun(
 	// A closed pipe reports EPIPE on a later tick than the write that found it.
 	await new Promise<void>((done) => setImmediate(done));
 	result = resolve();
+	track.resultDocument = fleetEndDocument(options, track, result.exitCode, result.causes);
 	return result.exitCode;
 }
 
@@ -1076,6 +1179,121 @@ function runAdmission(args: ReadonlyArray<string>): number {
 	return 0;
 }
 
+/**
+ * `fleet run --detach`: start the root in a background process with the same arguments and return once that process
+ * has written the root record naming itself. The background process logs beside the record and persists the fleet
+ * result at seal, which `fleet wait` prints. A start refused before the record exists answers as the foreground would.
+ */
+async function runFleetDetached(args: ReadonlyArray<string>, options: FleetRunOptions): Promise<number> {
+	const entry = process.argv[1];
+	if (entry === undefined) return fail("--detach cannot find this command's entry point");
+	ensureClioState();
+	const rootId = newFleetRootId();
+	const childArgs = args.filter((arg) => arg !== "--detach");
+	childArgs.push(DETACHED_ROOT_FLAG, rootId);
+	// A detached root always resolves its exit by 6.5, so `fleet wait` returns the code a structured run would.
+	if (!options.formatGiven) childArgs.push("--output-format", "json");
+	const logPath = fleetRootLogPath(rootId);
+	mkdirSync(dirname(logPath), { recursive: true });
+	const log = openSync(logPath, "a", 0o600);
+	const ended: { code: number | null | undefined; error: Error | null } = { code: undefined, error: null };
+	let child: ReturnType<typeof spawn>;
+	try {
+		child = spawn(process.execPath, [...process.execArgv, entry, "fleet", "run", ...childArgs], {
+			cwd: process.cwd(),
+			detached: true,
+			stdio: ["ignore", log, log],
+		});
+	} finally {
+		closeSync(log);
+	}
+	child.once("error", (error) => {
+		ended.error = error;
+	});
+	child.once("exit", (code) => {
+		ended.code = code ?? 1;
+	});
+	const limit = Date.now() + DETACH_ACCEPT_LIMIT_MS;
+	for (;;) {
+		const record = readFleetRootRecord(rootId);
+		if (record !== null && record.owner.pid === child.pid) break;
+		if (ended.error !== null) return fail(`--detach could not start the fleet: ${ended.error.message}`);
+		if (ended.code !== undefined) return detachRefused(options, logPath, ended.code ?? 1);
+		if (Date.now() > limit) {
+			try {
+				if (child.pid !== undefined) process.kill(-child.pid, "SIGTERM");
+			} catch {
+				// Already gone.
+			}
+			return refuse(`the detached fleet wrote no root record within ${DETACH_ACCEPT_LIMIT_MS / 1000}s; see ${logPath}`);
+		}
+		await new Promise((done) => setTimeout(done, DETACH_POLL_MS));
+	}
+	child.unref();
+	if (options.format === "text") {
+		process.stdout.write(
+			`fleet ${options.name}: accepted root=${rootId} pid=${child.pid} log=${logPath}\n  clio-coder fleet wait ${rootId}   wait for its result\n`,
+		);
+	} else {
+		process.stdout.write(
+			`${JSON.stringify({
+				type: "fleet_accepted",
+				schemaVersion: 1,
+				rootId,
+				pid: child.pid,
+				completion: { state: "accepted" },
+			})}\n`,
+		);
+	}
+	return 0;
+}
+
+/** The background process exited before it recorded the root: replay its diagnostics and its refusal document. */
+function detachRefused(options: FleetRunOptions, logPath: string, code: number): number {
+	let text = "";
+	try {
+		text = readFileSync(logPath, "utf8");
+	} catch {
+		// No output at all.
+	}
+	let document: Record<string, unknown> | null = null;
+	for (const line of text.split("\n")) {
+		if (line.length === 0) continue;
+		try {
+			const parsed: unknown = JSON.parse(line);
+			if (typeof parsed === "object" && parsed !== null && (parsed as { type?: unknown }).type === "fleet_end") {
+				document = parsed as Record<string, unknown>;
+				continue;
+			}
+		} catch {
+			// A diagnostic line.
+		}
+		process.stderr.write(`${line}\n`);
+	}
+	if (options.format !== "text") {
+		const cause: RunCause = { code: "not_started", message: `the detached fleet exited ${code} before it started` };
+		process.stdout.write(
+			`${JSON.stringify(
+				document ?? {
+					type: "fleet_end",
+					schemaVersion: 1,
+					rootId: null,
+					playbook: options.name,
+					planHash: null,
+					exitCode: code,
+					completion: { state: "refused", stopReason: null },
+					verdict: { aggregate: "fail", steps: [] },
+					usage: { steps: 0, succeededSteps: 0 },
+					cost: null,
+					causes: [cause],
+					limits: null,
+				},
+			)}\n`,
+		);
+	}
+	return code;
+}
+
 export async function runFleetCommand(args: ReadonlyArray<string>): Promise<number> {
 	const sub = args[0];
 	if (sub === "view" && (args.includes("--help") || args.includes("-h"))) {
@@ -1105,6 +1323,7 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 					"clio-coder fleet run: --json is deprecated; use --output-format stream-json for step events or json for one result document\n",
 				);
 			}
+			if (options.detach) return runFleetDetached(args.slice(1), options);
 			if (options.cwd !== undefined) {
 				// Before workspace conversion and playbook lookup, which both read the working directory.
 				try {
@@ -1151,6 +1370,8 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 			return (await import("./fleet-list.js")).runFleetList(args.slice(1));
 		case "cancel":
 			return (await import("./fleet-cancel.js")).runFleetCancel(args.slice(1));
+		case "wait":
+			return (await import("./fleet-wait.js")).runFleetWait(args.slice(1));
 		default:
 			process.stderr.write(`clio-coder fleet: unknown subcommand '${sub}'\n`);
 			process.stderr.write(HELP);
