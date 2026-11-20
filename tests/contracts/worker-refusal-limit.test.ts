@@ -113,7 +113,7 @@ describe("worker execute refusals", () => {
 		strictEqual(reported.result.exitCode, WORKER_EXIT_PERMISSION_REQUIRED, "a report does not lift the cap");
 		strictEqual(reported.requests, 4);
 		ok(JSON.stringify(reported.result.messages.at(-1)).includes("Changed a.py; tests pass."));
-		// A helper-result worker reports through its result tool, the one tool that round exposes and names (x2-3).
+		// A helper-result worker reports through its result tool, which that round names over the full list (x2-3, row 158).
 		const report = { mutatedPaths: [], validations: [], observations: ["./mark.sh was refused three times."] };
 		const helper = await runDenyWorker(
 			[[mark("one")], [mark("two")], [mark("three")], [{ name: "clio_submit_result", arguments: JSON.stringify(report) }]],
@@ -125,7 +125,10 @@ describe("worker execute refusals", () => {
 			helper.toolResults[2]?.includes("Submit your final result now by calling clio_submit_result"),
 			helper.toolResults[2],
 		);
-		deepStrictEqual(helper.lastTools, { tools: ["clio_submit_result"], choice: "required" });
+		deepStrictEqual(helper.lastTools, {
+			tools: ["bash", "clio_submit_result"],
+			choice: { type: "function", function: { name: "clio_submit_result" } },
+		});
 		strictEqual(helper.helperResults.length, 1);
 		const final = stuck.resolved.at(-1) ?? "";
 		ok(final.startsWith("permission refusal limit reached"), final);

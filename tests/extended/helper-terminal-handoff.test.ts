@@ -253,14 +253,31 @@ for (const scenario of scenarios) {
 				strictEqual(projectWorkerEventForStdout(accepted[0]), accepted[0]);
 				strictEqual(isReceiptBearingFrame(accepted[0]), true);
 			}
-			for (const request of requests.slice(scenario.terminalRound ?? (scenario.mutation ? requests.length : 1))) {
-				deepStrictEqual(
-					(request.tools ?? []).map((tool) => tool.function.name),
-					["clio_submit_result"],
-				);
-				if (scenario.mutation) ok((request.tools ?? [])[0]?.function.parameters);
-				strictEqual(request.tool_choice, "required");
+			// Completions keep the work surface at the handoff and name the result tool, so the prefill survives (row 158);
+			// a handoff reply that ignored the named choice narrows every later handoff on the route.
+			const firstTerminal = scenario.terminalRound ?? (scenario.mutation ? requests.length : 1);
+			let ignored = false;
+			for (const [index, request] of requests.entries()) {
+				if (index < firstTerminal) continue;
+				if (ignored) {
+					deepStrictEqual(
+						(request.tools ?? []).map((tool) => tool.function.name),
+						["clio_submit_result"],
+					);
+					strictEqual(request.tool_choice, "required");
+				} else {
+					deepStrictEqual(
+						(request.tools ?? []).map((tool) => tool.function.name),
+						["write", "clio_submit_result"],
+					);
+					if (!scenario.mutation) deepStrictEqual(request.tools, requests[0].tools);
+					deepStrictEqual(request.tool_choice, { type: "function", function: { name: "clio_submit_result" } });
+				}
+				if (scenario.mutation)
+					ok(request.tools?.find((tool) => tool.function.name === "clio_submit_result")?.function.parameters);
 				strictEqual(request.parallel_tool_calls, false);
+				const reply = scenario.rounds[index];
+				if (!Array.isArray(reply) || !reply.some((call) => call.name === "clio_submit_result")) ignored = true;
 			}
 			if (scenario.code === 1 && scenario.rounds.length === 3) {
 				const exhausted = events.filter(

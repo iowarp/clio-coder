@@ -149,3 +149,60 @@ test("codex: a rejected named choice falls back to auto over the same full tool 
 	strictEqual(prefix(after.body), prefix(plain.body));
 	deepStrictEqual([after.record?.choice, after.record?.downgradeReason], ["auto", rejection]);
 });
+
+test("completions: a terminal handoff names its tool over the full list and narrows only after a rejection", async (t) => {
+	const env = await isolateClioEnv("clio-coder-completions-handoff-");
+	t.after(() => env.restore());
+	const model = catalog("openrouter", "google/gemini-2.5-flash");
+	const targetId = "completions-handoff";
+	const handoff: ToolRound = { ...pinned, handoff: true };
+	const named = { type: "function", function: { name: "extension_desk__next_step" } };
+	const plain = await wire(model, [], "fixture", targetId);
+	const first = await wire(model, [handoff], "fixture", targetId);
+	strictEqual(JSON.stringify(first.body.tools), JSON.stringify(plain.body.tools));
+	deepStrictEqual(first.body.tool_choice, named);
+	strictEqual(first.body.parallel_tool_calls, false);
+	const sent: unknown[] = [];
+	const rejection = "400 Invalid tool_choice type: 'object'. Supported string values: none, auto, required";
+	const controlled = applyToolRounds(model, context(model), { apiKey: "fixture" }, [handoff], targetId);
+	const result = await streamToolRound(
+		model,
+		controlled,
+		(request) => {
+			sent.push([request.options?.toolChoice, request.context.tools?.map((entry) => entry.name)]);
+			const events = createAssistantMessageEventStream();
+			const message = {
+				role: "assistant" as const,
+				content: [],
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: { ...usage, cost: zeroCost },
+				stopReason: sent.length === 1 ? ("error" as const) : ("stop" as const),
+				...(sent.length === 1 ? { errorMessage: rejection } : {}),
+				timestamp: 4,
+			};
+			events.push(
+				message.stopReason === "error"
+					? { type: "error", reason: "error", error: message }
+					: { type: "done", reason: "stop", message },
+			);
+			events.end(message);
+			return events;
+		},
+		targetId,
+	).result();
+	strictEqual(result.stopReason, "stop");
+	deepStrictEqual(sent, [
+		[named, ["read", "write", "extension_desk__next_step"]],
+		["required", ["extension_desk__next_step"]],
+	]);
+	// The rejection is remembered: later handoffs on the route narrow from the start, as before row 158.
+	const after = await wire(model, [handoff], "fixture", targetId);
+	deepStrictEqual(
+		(after.body.tools as Array<{ function: { name: string } }>).map((entry) => entry.function.name),
+		["extension_desk__next_step"],
+	);
+	strictEqual(after.body.tool_choice, "required");
+	deepStrictEqual([after.record?.choice, after.record?.downgradeReason], ["required", rejection]);
+});

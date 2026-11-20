@@ -33,6 +33,8 @@ type CodexChoice = Choice<OpenAICodexResponsesOptions> | Extract<Choice<OpenAIRe
  * Studio, llama.cpp) answer HTTP 400 to the object form ("Invalid tool_choice
  * type: 'object'. Supported string values: none, auto, required"), so
  * completions use "required" over a one-tool surface, which is equivalent.
+ * A terminal handoff on completions asks with {@link completionsNamedChoice}
+ * first and keeps this spelling as its fallback.
  */
 const NAMED_CHOICE = {
 	"anthropic-messages": (name: string, rejected: boolean): Choice<AnthropicOptions> =>
@@ -59,6 +61,15 @@ const NAMED_CHOICE = {
 	"openai-completions": (_name: string, rejected: boolean): Choice<OpenAICompletionsOptions> =>
 		rejected ? "auto" : "required",
 } as const;
+
+/** The completions spelling of one named tool, which vLLM, SGLang and hosted OpenAI-compatible APIs constrain to. */
+const completionsNamedChoice = (name: string): Choice<OpenAICompletionsOptions> => ({
+	type: "function",
+	function: { name },
+});
+
+/** Why a completions route lost the named handoff choice when the reply, not the server, refused it. */
+const NAMED_CHOICE_IGNORED = "named tool_choice not honoured on this route";
 
 function isOpenAIResponsesApi(api: string): boolean {
 	return api === "openai-codex-responses" || api === "openai-responses";
@@ -116,6 +127,8 @@ export interface ControlledRequest {
 	toolRounds?: ToolRoundRecord[];
 	context: Context;
 	options: SimpleStreamOptions | undefined;
+	/** The request {@link streamToolRound} sends instead when the server rejects this one's named choice. */
+	fallback?: ControlledRequest;
 }
 
 type Payload = Record<string, unknown>;
@@ -295,6 +308,14 @@ function toolsRemovedRound(
  * cache (#423). The host retains a middleware requirement until its tool starts;
  * terminal handoffs additionally reject work calls and validate the result.
  * Bedrock Claude always narrows to the one tool.
+ *
+ * A worker's terminal handoff on completions keeps the full list too and names
+ * the tool in the object form, so a local engine reuses the work phase's
+ * prefill instead of rendering a new tool block (dynamo measured about 0.9 s
+ * against 0.15 s warm). The narrowed "required" request rides along as the
+ * fallback for a server that rejects the object form (llama.cpp, LM Studio);
+ * that rejection, or a reply that ignores the choice, is remembered per target
+ * and model, and later handoffs there narrow from the start.
  */
 function requiredRound(
 	model: EngineModel,
@@ -302,6 +323,7 @@ function requiredRound(
 	options: SimpleStreamOptions | undefined,
 	round: Extract<ToolRound, { kind: "required" }>,
 	rejection?: string,
+	namedRejection?: string,
 ): ControlledRequest | undefined {
 	const api = model.api;
 	const name = round.toolName;
@@ -327,7 +349,12 @@ function requiredRound(
 		}
 	}
 	if (round.handoff === true) next = withPayloadEdit(next, (payload) => singleCall(api, payload));
-	return { context: narrowed, options: next };
+	const request: ControlledRequest = { context: narrowed, options: next };
+	if (api === "openai-completions" && round.handoff === true && !automatic && namedRejection === undefined) {
+		const named = completionsNamedChoice(name) as NonNullable<SimpleStreamOptions["toolChoice"]>;
+		return { context, options: { ...next, toolChoice: named }, fallback: request };
+	}
+	return request;
 }
 
 function applyToolRound(
@@ -336,6 +363,7 @@ function applyToolRound(
 	options: SimpleStreamOptions | undefined,
 	round: ToolRound,
 	rejection?: string,
+	namedRejection?: string,
 ): ControlledRequest | undefined {
 	switch (round.kind) {
 		case "text-only":
@@ -343,7 +371,7 @@ function applyToolRound(
 		case "tools-removed":
 			return toolsRemovedRound(model, context, options);
 		case "required":
-			return requiredRound(model, context, options, round, rejection);
+			return requiredRound(model, context, options, round, rejection, namedRejection);
 	}
 }
 
@@ -351,7 +379,7 @@ function applyToolRound(
 // capabilities separate within each target and model so text locks survive (#426).
 const rejectedChoices = new Map<string, string>();
 
-function choiceKey(model: EngineModel, targetId: string, kind: "forced" | "none"): string {
+function choiceKey(model: EngineModel, targetId: string, kind: "forced" | "named" | "none"): string {
 	return JSON.stringify([targetId, model.api, model.provider, model.baseUrl, model.id, kind]);
 }
 
@@ -366,7 +394,11 @@ export function applyToolRounds(
 	for (const round of rounds) {
 		if (round === undefined) continue;
 		const rejection = rejectedChoices.get(choiceKey(model, targetId, round.kind === "required" ? "forced" : "none"));
-		let controlled = applyToolRound(model, context, options, round, rejection);
+		const namedRejection =
+			round.kind === "required" && round.handoff === true && model.api === "openai-completions"
+				? rejectedChoices.get(choiceKey(model, targetId, "named"))
+				: undefined;
+		let controlled = applyToolRound(model, context, options, round, rejection, namedRejection);
 		if (controlled === undefined) continue;
 		if (rejection !== undefined && controlled.options?.toolChoice === "none") {
 			controlled = { ...controlled, options: { ...controlled.options, toolChoice: "auto" } };
@@ -377,6 +409,7 @@ export function applyToolRounds(
 				: (controlled.options?.toolChoice ?? null);
 		const downgradeReason =
 			rejection ??
+			namedRejection ??
 			(round.kind === "required" && choice === "auto"
 				? model.api === "anthropic-messages" && claudeVersionAtLeast(model, { haiku: [5, 5] })
 					? "Anthropic cache-preserving tool routing (#423)"
@@ -446,16 +479,28 @@ export function streamToolRound(
 	observeRetry?: (message: AssistantMessage) => void,
 ): AssistantMessageEventStream {
 	const routeKey = choiceKey(model, targetId, "none");
+	const initial = controlled.toolRounds?.[0];
 	const observed = (request: ControlledRequest): AssistantMessageEventStream => {
 		const stream = invoke(request);
 		const choice = request.options?.toolChoice;
 		void stream.result().then(
-			(message) => noteCacheRead(routeKey, message, choice),
+			(message) => {
+				noteCacheRead(routeKey, message, choice);
+				// A server that accepts the named choice but does not constrain to it narrows later handoffs instead.
+				const named = initial?.toolName;
+				if (
+					request.fallback !== undefined &&
+					named !== undefined &&
+					(message.stopReason === "stop" || message.stopReason === "toolUse") &&
+					!message.content.some((block) => block.type === "toolCall" && block.name === named)
+				) {
+					rejectedChoices.set(choiceKey(model, targetId, "named"), NAMED_CHOICE_IGNORED);
+				}
+			},
 			() => {},
 		);
 		return stream;
 	};
-	const initial = controlled.toolRounds?.[0];
 	if (!initial) return observed(controlled);
 	const output = createAssistantMessageEventStream();
 	const first = firstToolRoundAttempt(model, controlled, targetId);
@@ -514,9 +559,18 @@ export function streamToolRound(
 						/* Telemetry cannot change provider retry behavior (#434). */
 					}
 					const reason = (message.split("\n\n")[0] ?? message).slice(0, 512);
-					rejectedChoices.set(choiceKey(model, targetId, choice === "none" ? "none" : "forced"), reason);
-					records.push({ ...initial, choice: "auto", attempt: 1, downgradeReason: reason });
-					source = invoke({ ...controlled, options: { ...controlled.options, toolChoice: "auto" } });
+					const fallback = controlled.fallback;
+					rejectedChoices.set(
+						choiceKey(model, targetId, fallback !== undefined ? "named" : choice === "none" ? "none" : "forced"),
+						reason,
+					);
+					const retry: ControlledRequest =
+						fallback !== undefined
+							? { ...fallback, ...(controlled.toolRounds ? { toolRounds: controlled.toolRounds } : {}) }
+							: { ...controlled, options: { ...controlled.options, toolChoice: "auto" } };
+					const retryChoice = retry.options?.toolChoice ?? null;
+					records.push({ ...initial, choice: retryChoice, attempt: 1, downgradeReason: reason });
+					source = invoke(retry);
 					for await (const retryEvent of source) output.push(annotate(retryEvent));
 					output.end(Object.assign(await source.result(), { toolRounds: records }));
 					return;
