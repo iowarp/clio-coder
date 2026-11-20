@@ -110,7 +110,6 @@ import type { PinnedContextBlock } from "../domains/extensions/pinned-context.js
 import {
 	createMiddlewareToolChoiceControl,
 	type MiddlewareContract,
-	type MiddlewareEffect,
 	type MiddlewareRegistrar,
 	type MiddlewareToolChoiceControl,
 } from "../domains/middleware/index.js";
@@ -254,7 +253,7 @@ import {
 import type { LiveContextUsage, TurnContextDeps } from "./turn-context.js";
 import { createTurnContext } from "./turn-context.js";
 import { createTurnKeepalive } from "./turn-keepalive.js";
-import { createTurnMiddleware } from "./turn-middleware.js";
+import { type AwaitedTurnStart, createTurnMiddleware } from "./turn-middleware.js";
 import type { TurnOutcomeCollector } from "./turn-outcome-collector.js";
 import { createTurnOutcomeCollector } from "./turn-outcome-collector.js";
 import { createTurnPersistence } from "./turn-persistence.js";
@@ -2104,6 +2103,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		sessionOrigin: () => deps.session?.current() ?? null,
 		onModelRequestSent: (call) => {
 			messagePath.requestSent(call);
+			// The taken reminders rode this request, except any no longer current when it was composed.
+			middleware.takenRemindersSent();
 			outcomeCollector.requestSent(call.callId);
 		},
 		onModelCallSettled: (facts) => messagePath.callSettled(facts),
@@ -3341,6 +3342,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					mono: submittedAt,
 				});
 			let turnLease: TelemetrySessionLease | undefined;
+			/** The reminders this submit took for its request; a return before sending it suppresses their firings. */
+			let takenReminders: (() => string) | undefined;
 			try {
 				await sessionResetSettlement;
 				if (!admissionCurrent()) return;
@@ -3461,7 +3464,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// decides before the turn spends anything (an image sidecar call, turn
 				// control) or buffers a reminder, so a refused turn leaves nothing for the
 				// next prompt. Its effects apply after the synchronous turn_start phase.
-				let turnStartEffects: ReadonlyArray<MiddlewareEffect> = [];
+				let awaitedTurnStart: AwaitedTurnStart | undefined;
 				if (options.requestContinuation !== true) {
 					markPreparationStep("turn-start");
 					const gate = await middleware.awaitTurnStart(agentRuntime, text, pendingSkillRequests.length, reservedUserTurnId);
@@ -3471,7 +3474,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						emitAdmissionNotice(gate.refusal, "turn-blocked", "warning");
 						return;
 					}
-					turnStartEffects = gate.effects;
+					awaitedTurnStart = gate;
 				}
 				const operatorText = text;
 				let sidecarObservation: string | null = null;
@@ -3654,7 +3657,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					pendingSkillRequests.length,
 					options.requestContinuation === true,
 					reservedUserTurnId,
-					turnStartEffects,
+					awaitedTurnStart,
 				);
 				// The turn's scope is host-framed text in its own user message, kept
 				// verbatim in history, never a recompile of the system prompt (#422).
@@ -3673,6 +3676,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						...context.pinnedContextDelta(agentRuntime),
 					].filter((part) => part.length > 0),
 				);
+				takenReminders = reminderProjection;
 				// Pending skill requests are plain visible text in the user message
 				// itself: persisted in the ledger, no hidden prompt machinery.
 				const skillPreamble = pendingSkillRequestPreamble(pendingSkillRequests, agentRuntime.agent.state.tools);
@@ -4521,6 +4525,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 			} finally {
 				await turnLease?.release();
+				if (takenReminders !== undefined) middleware.releaseTakenReminders(takenReminders);
 				returnUnstarted();
 				if (pathMessage && !promptStarted && options.queued === undefined) messagePath.neverStarted(pathMessage);
 				if (submitOwner === owner) {
