@@ -25,15 +25,18 @@ import {
 } from "./overlay-frame.js";
 import { type ClioTheme, clioTheme } from "./theme/index.js";
 
+/** An http(s) link: the operator copies it whole (a sign-in URL), so it is never shortened. */
+const LINK = /https?:\/\//;
+
 /**
  * A note wrapped on its words, with a word wider than the row (a settings path)
  * shortened in its middle so it stays one readable token instead of breaking
- * mid-word across two rows.
+ * mid-word across two rows. A link wraps across rows whole instead.
  */
 function wrapNote(line: string, width: number): string[] {
 	const room = Math.max(4, width);
 	const words = line.split(" ").map((word) => {
-		if (visibleWidth(word) <= room) return word;
+		if (visibleWidth(word) <= room || LINK.test(word)) return word;
 		const tail = Math.ceil((room - 1) * 0.6);
 		return `${word.slice(0, room - 1 - tail)}…${word.slice(word.length - tail)}`;
 	});
@@ -75,22 +78,29 @@ function askTone(theme: ClioTheme, row: string, index: number): string {
 /**
  * The head of a step too tall for its rows: the question, then as many lines
  * under it as fit, then the newest notes behind a row that counts the rest.
+ * Each note is kept whole or not at all, so a link never loses rows.
  */
 function questionFirst(
 	theme: ClioTheme,
-	notes: ReadonlyArray<string>,
+	notes: ReadonlyArray<ReadonlyArray<string>>,
 	asks: ReadonlyArray<string>,
 	room: number,
 	width: number,
 ): string[] {
 	const askRows = asks.slice(0, Math.max(1, Math.min(asks.length, room)));
 	const noteRoom = room - askRows.length;
-	if (noteRoom >= notes.length) return [...notes, ...askRows];
+	const all = notes.flat();
+	if (noteRoom >= all.length) return [...all, ...askRows];
 	if (noteRoom < 1) return askRows;
-	const left = notes.length - (noteRoom - 1);
+	const kept: string[] = [];
+	let left = notes.length;
+	for (let note = notes[left - 1]; note && kept.length + note.length <= noteRoom - 1; note = notes[left - 1]) {
+		kept.unshift(...note);
+		left -= 1;
+	}
 	return [
 		theme.fg("annotation", noteRow(`… ${left} earlier ${left === 1 ? "note" : "notes"}`, width)),
-		...notes.slice(left),
+		...kept,
 		...askRows,
 	];
 }
@@ -380,13 +390,17 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 		const fixed = problem.length + field.length;
 		const fullNotes = notes.flatMap((line) => wrapNote(line, width).map((row) => theme.fg("body", row)));
 		const fullAsks = asks.flatMap((line, index) => wrapNote(line, width).map((row) => askTone(theme, row, index)));
-		const shortNotes = notes.map((line) => theme.fg("body", noteRow(line, width)));
+		// A note with a link keeps every row of it, trimmed of blank rows; any other note shrinks to one marked row.
+		const shortNoteRows = notes.map((line) =>
+			(LINK.test(line) ? wrapNote(line.trim(), width) : [noteRow(line, width)]).map((row) => theme.fg("body", row)),
+		);
+		const shortNotes = shortNoteRows.flat();
 		const shortAsks = asks.map((line, index) => askTone(theme, noteRow(line, width), index));
 		if (pending.kind === "text") {
 			const head = [fullNotes, shortNotes].map((noteRows) => [...noteRows, ...fullAsks]);
 			const fit =
 				head.find((rows) => rows.length + fixed <= budget) ??
-				questionFirst(theme, shortNotes, shortAsks, budget - fixed, width);
+				questionFirst(theme, shortNoteRows, shortAsks, budget - fixed, width);
 			return [...fit, ...problem, ...field];
 		}
 		const choices = this.choices(pending);
@@ -410,7 +424,7 @@ export class TargetWizardSurface implements Component, RowBudgetedBody, Configur
 		const head =
 			tiers.find((tier) => tier.length + fixed + allChoiceRows <= budget) ??
 			tiers.find((tier) => tier.length + fixed + fewestChoiceRows <= budget) ??
-			questionFirst(theme, shortNotes, shortAsks, budget - fixed - fewestChoiceRows, width);
+			questionFirst(theme, shortNoteRows, shortAsks, budget - fixed - fewestChoiceRows, width);
 		const out = [...head, ...problem, ...field];
 		if (choices.length === 0) {
 			out.push(theme.fg("emptyState", "No matching choices"));

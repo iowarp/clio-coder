@@ -224,6 +224,36 @@ test("prefilled text, validation and back navigation stay inside the hosted prom
 	deepStrictEqual(await secret, { kind: "quit" });
 });
 
+test("a sign-in link stays whole under the masked paste-code prompt, older notes giving way first", async () => {
+	const body = new TargetWizardSurface(
+		() => {},
+		() => {},
+	);
+	const base = "https://auth.openai.com/oauth/authorize?response_type=code&client_id=app_x&state=";
+	const url = `${base}${"s".repeat(400 - base.length - "&originator=clio-coder".length)}&originator=clio-coder`;
+	strictEqual(url.length, 400);
+	body.report("note: first");
+	body.report("note: second");
+	body.report(`\nOpening your browser...\nIf it does not open, visit: ${url}\n`);
+	const code = body.text({
+		heading: "Paste verification code if browser callback does not complete automatically: ",
+		mask: true,
+	});
+	const joined = (): string =>
+		body
+			.render(80)
+			.map((row) => stripTerminalSequences(row).trimEnd())
+			.join("");
+	ok(joined().includes(url), "full dock keeps the URL whole");
+	body.setBodyRows(10);
+	const short = joined();
+	ok(short.includes(url), "short dock keeps the URL whole");
+	match(short, /… 2 earlier notes/);
+	match(short, /Paste verification code/);
+	body.cancel();
+	deepStrictEqual(await code, { kind: "quit" });
+});
+
 test("Settings mounts Add and Edit as docked prompts and tears them down with its parent (#385)", async () => {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.targets = [{ id: "local", runtime: "wizard-one", url: "http://localhost:9911", defaultModel: "model-a" }];
