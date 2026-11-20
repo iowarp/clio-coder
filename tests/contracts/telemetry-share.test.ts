@@ -21,12 +21,14 @@ import {
 	telemetryImportedStateDir,
 	telemetryObjectsDirectory,
 	telemetryProcessDirectory,
+	telemetryRunDirectory,
 	telemetrySessionDirectory,
 } from "../../src/domains/telemetry/paths.js";
 import { readTelemetryScopeFiles, verifyTelemetryScope } from "../../src/domains/telemetry/seal.js";
 import {
 	freshShareSource,
 	importShareArchive,
+	packShare,
 	planShare,
 	resolveShareScopes,
 	SHARE_PROFILE_NAMES,
@@ -578,12 +580,14 @@ test("a report plan's inventory lists the readable model ids and no target id (R
 	}
 });
 
-test("a report share anonymizes engine, step and digest ids and the record context, and clears the birth token", async () => {
+test("a report share anonymizes ids and the record context, and clears the birth token", async (t) => {
 	const root = await mkdtemp(join(tmpdir(), "telemetry-share-report-ids-"));
 	try {
 		const stateDir = join(root, "operator");
 		const sessionId = "ses_report";
+		const runId = "private-canary-run-id";
 		const main: TelemetryContext = { sessionId, agent: { role: "main", id: sessionId } };
+		const worker: TelemetryContext = { sessionId, runId, agent: { role: "worker", id: runId } };
 		const cwdHash = createHash("sha256").update("/home/opcanary/secret-proj").digest("hex").slice(0, 16);
 		const providerCall = ["toolu", "01CanaryProviderCall"].join("_");
 		await liveJournal(telemetrySessionDirectory(stateDir, sessionId), main, [
@@ -612,10 +616,13 @@ test("a report share anonymizes engine, step and digest ids and the record conte
 					callIds: [],
 				},
 			},
+			{ kind: "run.linked", data: { runId } },
+		]);
+		await liveJournal(telemetryRunDirectory(stateDir, runId), worker, [
 			{
 				kind: "code_step.settled",
 				data: {
-					runId: "run_1",
+					runId,
 					stepId: "deploy-nightingale",
 					commandId: "push-customer-ledger",
 					startedAt: "2026-01-01T00:00:00.000Z",
@@ -646,10 +653,64 @@ test("a report share anonymizes engine, step and digest ids and the record conte
 		await writeShare(plan, out);
 		const archive = await readFile(out);
 		const text = gunzipSync(archive).toString("utf8");
+		await t.test("no raw run id in any archive member name or body", () => {
+			ok(!text.includes(runId), runId);
+		});
 		for (const canary of ["canary-target", cwdHash, providerCall, "deploy-nightingale", "push-customer-ledger"])
 			ok(!text.includes(canary), canary);
-		strictEqual(verifyShareArchive(archive).failure, null);
 		const rows = scanTelemetrySegment(plan.scopes[0]?.journal ?? Buffer.alloc(0)).rows;
+		await t.test("the archive verifies with matching run paths, contexts and links", () => {
+			const verified = verifyShareArchive(archive);
+			strictEqual(verified.failure, null);
+			const run = verified.scopes.find((scope) => scope.kind === "run");
+			ok(run);
+			match(run.id, /^anon_[a-f0-9]{16}$/u);
+			const runRows = scanTelemetrySegment(run.files.segments[0]?.bytes ?? Buffer.alloc(0)).rows;
+			ok(runRows.some((row) => row.kind === "record" && row.record.k === "code_step.settled"));
+			for (const row of runRows) {
+				if (row.kind !== "record") continue;
+				strictEqual(row.record.ctx.runId, run.id);
+				strictEqual(row.record.ctx.agent.id, run.id);
+			}
+			const linked = rows.find((row) => row.kind === "record" && row.record.k === "run.linked");
+			ok(linked?.kind === "record");
+			strictEqual((linked.record.data as EventPayload<"run.linked">).runId, run.id);
+			strictEqual(linked.record.ctx.sessionId, sessionId);
+			strictEqual(linked.record.ctx.agent.id, sessionId);
+		});
+		await t.test("a 0.8.4 archive keeping raw run ids verifies; the same records from this version are refused", () => {
+			const run = plan.scopes.find((scope) => scope.kind === "run");
+			ok(run);
+			const runRows = scanTelemetrySegment(run.journal).rows;
+			const closing = runRows.at(-2);
+			const seal = runRows.at(-1);
+			ok(closing?.kind === "header" && seal?.kind === "record");
+			// The context 0.8.4 wrote: the run id and the worker agent it names left readable.
+			const raw = (ctx: TelemetryContext): TelemetryContext =>
+				ctx.runId === undefined ? ctx : { ...ctx, runId, agent: { role: "worker", id: runId } };
+			const lines = runRows.slice(0, -2).map((row) => {
+				ok(row.kind === "header" || row.kind === "record");
+				return row.kind === "header" ? row.header : { ...row.record, ctx: raw(row.record.ctx) };
+			});
+			const resealed = sealSharedScope({
+				scope: { kind: "run", id: runId },
+				lines: lines as Parameters<typeof sealSharedScope>[0]["lines"],
+				objects: run.objects,
+				profile: "report",
+				installId: plan.installId,
+				writer,
+				header: closing.header,
+				ctx: raw(seal.record.ctx),
+				now: new Date(),
+			});
+			const scopes = plan.scopes.map((scope) => (scope === run ? { ...scope, ...resealed, id: runId } : scope));
+			const written = (clioCoderVersion: string) => verifyShareArchive(packShare({ ...plan, clioCoderVersion, scopes }));
+			strictEqual(written("0.8.4").failure, null);
+			match(
+				written("0.8.5").failure ?? "",
+				new RegExp(`^run ${runId}: holds \\S+ with a context beyond the report projection$`, "u"),
+			);
+		});
 		const decided = rows.find((row) => row.kind === "record" && row.record.k === "system_one.decided");
 		ok(decided?.kind === "record");
 		strictEqual(decided.record.ctx.agent.role, "system-one");
