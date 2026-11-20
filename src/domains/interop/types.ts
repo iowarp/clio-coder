@@ -62,6 +62,11 @@ export interface InteropAgentKind {
 	/** Project-relative directories of rule files the context domain mines. */
 	ruleDirs?: ReadonlyArray<InteropRuleDir>;
 	acp?: InteropAcpRecipe;
+	/**
+	 * false: detection never runs the binary, not even `--version`; presence is resolved on disk only.
+	 * Antigravity unpacks about 1 GB per launch.
+	 */
+	versionProbe?: false;
 	/** Clio-managed worker runtime for this peer's headless CLI, when implemented. */
 	headlessRuntimeId?: string;
 	adoptionProvider?: AdoptionProvider;

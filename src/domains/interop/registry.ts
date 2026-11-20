@@ -209,6 +209,14 @@ export const INTEROP_AGENT_KINDS: ReadonlyArray<InteropAgentKind> = [
 		projectDir: ".gemini/antigravity-cli",
 		legacyProjectDirs: [".antigravitycli"],
 		instructionFiles: [],
+		// Shares the CLI's own login and store: agy keeps app data at <gemini-dir>/<app-data-dir>, here
+		// ~/.gemini/antigravity-cli. An isolated profile is an entry pointing these flags elsewhere. Clio expands `~`
+		// at launch (engine/acp/antigravity-launch.ts); agy never sees it.
+		acp: {
+			command: "agy",
+			args: ["acp", "--gemini-dir", "~/.gemini", "--app-data-dir", "antigravity-cli"],
+		},
+		versionProbe: false,
 		headlessRuntimeId: "antigravity-code",
 	},
 	{

@@ -4,8 +4,16 @@ import { PassThrough, Writable } from "node:stream";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import { promisify } from "node:util";
-import { AcpProcessError } from "../../src/engine/acp/errors.js";
-import { ACP_MAX_INPUT_LINE_BYTES, createStdioServerTransport } from "../../src/engine/acp/transport.js";
+import { AcpProcessError, AcpProtocolError } from "../../src/engine/acp/errors.js";
+import { AcpEventMapper } from "../../src/engine/acp/event-mapper.js";
+import {
+	ACP_MAX_INPUT_LINE_BYTES,
+	boundAcpSessionUpdate,
+	createStdioServerTransport,
+	createStdioTransport,
+	routeNonJsonRpcStdout,
+	type StdioTransportOptions,
+} from "../../src/engine/acp/transport.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 for (const scenario of ["drain", "overflow", "initial", "initial-ascii", "write-error", "fast"] as const) {
@@ -145,5 +153,147 @@ test("ACP rejects the first oversized frame that stalls an ordinary sink", async
 		transport.close();
 		input.destroy();
 		output.destroy();
+	}
+});
+
+test("ACP stdio hooks route stray stdout and bound tool updates, and leave every frame as sent when unset", async () => {
+	const update = {
+		sessionUpdate: "tool_call_update",
+		toolCallId: "call-1",
+		status: "completed",
+		content: [{ type: "content", content: { type: "image", mimeType: "image/png", data: "A".repeat(5_000) } }],
+		rawOutput: { output: "done", formatted_output: "done", log: "x".repeat(500), items: [1, 2, 3, 4, 5] },
+	};
+	const sent = { sessionId: "s-1", update };
+	// Before each reply the peer sends one heavy tool update. A noisy peer first prints an OAuth URL,
+	// a brace-prefixed fragment, a JSON-RPC-shaped log record, two malformed responses for the pending
+	// id and an overlong line, all of them no frame, then sends its reply behind a BOM.
+	const peer = `
+		const payload = JSON.parse(process.argv[1]);
+		const noisy = process.argv[2] === "noisy";
+		let buffer = "";
+		process.stdin.setEncoding("utf8");
+		process.stdin.on("data", (chunk) => {
+			buffer += chunk;
+			for (let at = buffer.indexOf("\\n"); at >= 0; at = buffer.indexOf("\\n")) {
+				const message = JSON.parse(buffer.slice(0, at));
+				buffer = buffer.slice(at + 1);
+				if (noisy) {
+					process.stdout.write("Open https://auth.example/device?code=PRIVATE-CODE&state=abc123 to sign in\\n");
+					process.stdout.write("{oauth} sign in\\n");
+					process.stdout.write('{"jsonrpc":"2.0","level":"info","message":"x"}\\n');
+					process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, error: {} }) + "\\n");
+					process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {}, error: null }) + "\\n");
+					process.stdout.write("z".repeat(10000) + "\\n");
+				}
+				process.stdout.write(JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: payload }) + "\\n");
+				process.stdout.write((noisy ? "\\uFEFF" : "") + JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { ok: true } }) + "\\n");
+			}
+		});
+	`;
+	const home = makeScratchHome("clio-coder-acp-hooks-");
+	const env = Object.fromEntries(
+		Object.entries(home.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+	);
+	const exchange = async (mode: "quiet" | "noisy", options: StdioTransportOptions) => {
+		const transport = createStdioTransport(process.execPath, ["-e", peer, JSON.stringify(sent), mode], {
+			...options,
+			env,
+		});
+		const updates: unknown[] = [];
+		const stderr: string[] = [];
+		transport.onNotification("session/update", (params) => updates.push(params));
+		transport.onStderr((chunk) => stderr.push(chunk));
+		try {
+			const result = await transport.request("initialize", {}, 5_000).then(
+				(value) => ({ value }),
+				(error: unknown) => ({ error }),
+			);
+			return { result, updates, stderr: stderr.join("") };
+		} finally {
+			await transport.forceTerminate();
+		}
+	};
+	const toolResult = (params: unknown) => {
+		const end = new AcpEventMapper().mapUpdate(params).find((event) => event.type === "tool_execution_end");
+		return (end as { result?: unknown } | undefined)?.result;
+	};
+	try {
+		// Unset hooks: frames arrive as sent, and a stray brace line still fails the pending request as before.
+		const plain = await exchange("quiet", {});
+		assert.deepEqual(plain.result, { value: { ok: true } });
+		assert.deepEqual(plain.updates, [sent]);
+		assert.equal(plain.stderr, "");
+		const plainNoisy = await exchange("noisy", {});
+		assert.ok("error" in plainNoisy.result && plainNoisy.result.error instanceof AcpProtocolError);
+		assert.equal(plainNoisy.stderr, "");
+
+		const budget = { maxNodes: 30, maxChars: 200 };
+		const hooked = await exchange("noisy", {
+			transformStdout: routeNonJsonRpcStdout,
+			transformSessionUpdate: (params) => boundAcpSessionUpdate(params, budget),
+		});
+		// The malformed responses never settle the pending id, and the BOM-prefixed reply still does.
+		assert.deepEqual(hooked.result, { value: { ok: true } });
+		const routed = hooked.stderr.split("\n");
+		assert.deepEqual(routed.slice(0, 5), [
+			"Open https://auth.example/device?code=[redacted]&state=[redacted] to sign in",
+			"{oauth} sign in",
+			'{"jsonrpc":"2.0","level":"info","message":"x"}',
+			'{"jsonrpc":"2.0","id":1,"error":{}}',
+			'{"jsonrpc":"2.0","id":1,"result":{},"error":null}',
+		]);
+		// The diagnostic cap holds the marker too.
+		assert.match(routed[5] ?? "", /^z+\[\d+ chars omitted\]$/);
+		assert.ok((routed[5] ?? "").length <= 4096);
+		assert.deepEqual(routed.slice(6), [""]);
+		const image = { type: "image", mimeType: "image/png", data: "" };
+		const imageMeta = { "clio-coder/omitted": { kind: "image", mimeType: "image/png", chars: 5_000 } };
+		// Keys, strings and markers share the 200 characters; the image keeps its shape with data emptied.
+		assert.deepEqual(hooked.updates, [
+			{
+				sessionId: "s-1",
+				update: {
+					sessionUpdate: "tool_call_update",
+					toolCallId: "call-1",
+					status: "completed",
+					content: [{ type: "content", content: { ...image, _meta: imageMeta } }],
+					rawOutput: { output: "done", log: `${"x".repeat(66)}[434 chars omitted]` },
+					_meta: { "clio-coder/omitted": { kind: "tool_payload", ...budget } },
+				},
+			},
+		]);
+
+		// An emptied image still yields no tool text, so the mapper falls back to rawOutput as before.
+		const imageUpdate = {
+			sessionId: "s-1",
+			update: {
+				sessionUpdate: "tool_call_update",
+				toolCallId: "img",
+				status: "completed",
+				content: [{ type: "content", content: { type: "image", mimeType: "image/png", data: "AAAA" } }],
+				rawOutput: { summary: "report saved" },
+			},
+		};
+		assert.deepEqual(toolResult(imageUpdate), { summary: "report saved" });
+		assert.deepEqual(toolResult(boundAcpSessionUpdate(imageUpdate)), { summary: "report saved" });
+		// The default budget bounds what is kept: a huge key and a long string both come back within it.
+		const tool = (fields: Record<string, unknown>) => ({
+			sessionId: "s-1",
+			update: { sessionUpdate: "tool_call_update", toolCallId: "big", ...fields },
+		});
+		const boundedUpdate = (fields: Record<string, unknown>) =>
+			(boundAcpSessionUpdate(tool(fields)) as { update: Record<string, unknown> }).update;
+		assert.deepEqual(boundedUpdate({ rawOutput: { ["k".repeat(1_000_000)]: 1 } }).rawOutput, { "[omitted]": "1 fields" });
+		const longText = boundedUpdate({ content: "x".repeat(65_537) }).content as string;
+		assert.ok(longText.length <= 64 * 1024);
+		assert.match(longText, /^x+\[\d+ chars omitted\]$/);
+		// Nothing to cut, or not a tool update: the same object comes back.
+		const small = { sessionId: "s-1", update: { sessionUpdate: "tool_call", toolCallId: "c", rawInput: { a: 1 } } };
+		assert.equal(boundAcpSessionUpdate(small), small);
+		const chunk = { sessionId: "s-1", update: { sessionUpdate: "agent_message_chunk", content: update.content[0] } };
+		assert.equal(boundAcpSessionUpdate(chunk), chunk);
+	} finally {
+		home.cleanup();
 	}
 });
