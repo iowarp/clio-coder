@@ -235,10 +235,10 @@ class FakeSession {
 			return;
 		}
 		if (prompt.includes("zero usage")) {
-			this.usage({ model: "fake-model", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
+			this.usage({ model: "fake-model", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 });
 		} else if (prompt.includes("partial credits")) {
 			this.metricsFail = true;
-			this.usage({ model: "fake-model", inputTokens: 10, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, copilotUsage: { totalNanoAiu: 700 } });
+			this.usage({ model: "fake-model", inputTokens: 10, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 1, copilotUsage: { totalNanoAiu: 700 } });
 			this.usage({ model: "fake-model", inputTokens: 10, outputTokens: 1, cacheReadTokens: 0 });
 		} else {
 			// Omits the cache counts: the uncached input and both cache counts are unknown, not zero.
@@ -1219,6 +1219,11 @@ test("usage facts keep per-field presence and billing coverage", async () => {
 	strictEqual(partial.billing?.premiumRequests.kind, "unknown", "no accounting answer is not zero");
 	strictEqual(partial.usage?.cacheWrite.kind, "unknown", "one of two calls omitted cache writes");
 	deepStrictEqual(partial.usage?.output, { kind: "measured", value: 2, source: "provider" });
+	// PV-4: the requested model served the step, so no response model is stamped; reasoning needs every call's count.
+	const served = await step({ messages: [user("zero usage")] }, "facts-session");
+	strictEqual(served.responseModel, undefined, "the requested model served the step");
+	strictEqual(served.usage.reasoning, 0, "every call reported its reasoning tokens");
+	strictEqual((await step({ messages: [user("partial credits")] }, "facts-session")).usage.reasoning, undefined);
 	disposeCopilotConversations("facts-session");
 });
 

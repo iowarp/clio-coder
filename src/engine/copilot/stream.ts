@@ -698,6 +698,8 @@ class Step {
 	private toolUse: string[] | null = null;
 	private usageEvents = 0;
 	private readonly fieldReports = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+	private reasoningReports = 0;
+	private reasoningSum = 0;
 	private nanoReports = 0;
 	private nanoSum = 0;
 	/** The model the runtime reported serving this step's calls (`assistant.usage.model`). */
@@ -723,7 +725,7 @@ class Step {
 
 	constructor(
 		private readonly stream: AssistantMessageEventStream,
-		model: Model<Api>,
+		private readonly model: Model<Api>,
 	) {
 		this.message = {
 			role: "assistant",
@@ -828,6 +830,14 @@ class Step {
 		if (outputTokens !== undefined) this.fieldReports.output += 1;
 		if (cacheRead !== undefined) this.fieldReports.cacheRead += 1;
 		if (cacheWrite !== undefined) this.fieldReports.cacheWrite += 1;
+		// Reasoning is part of the output; like the fields above it counts only when every call of the step sent it.
+		const reasoning = count(data.reasoningTokens);
+		if (reasoning !== undefined) {
+			this.reasoningReports += 1;
+			this.reasoningSum += reasoning;
+		}
+		if (this.reasoningReports === this.usageEvents) usage.reasoning = this.reasoningSum;
+		else delete usage.reasoning;
 		this.billing.modelCalls += 1;
 		const nano = count(data.copilotUsage?.totalNanoAiu);
 		if (nano !== undefined) {
@@ -835,8 +845,9 @@ class Step {
 			this.nanoSum += nano;
 		}
 		if (typeof data.model === "string" && data.model.trim().length > 0) {
-			this.message.responseModel = data.model;
 			this.servedModel = data.model.trim();
+			// As on the other adapters, the response model names only a model other than the one requested.
+			if (this.servedModel !== this.model.id) this.message.responseModel = this.servedModel;
 		}
 		if (typeof data.apiCallId === "string") this.message.responseId = data.apiCallId;
 		// A step is one model call (Copilot's built-ins are off), and the router keeps settled calls' reports
