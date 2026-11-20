@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { createSteerIntake } from "../../src/cli/steer-channel.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const childScript = `
@@ -249,4 +250,52 @@ it("regular appended steering preserves initial lines, partial-line framing, and
 		await reader.dispose();
 		rmSync(scratch, { recursive: true, force: true });
 	}
+});
+
+it("a line read before the first turn streams is queued and handed to that turn; one after it is refused", async () => {
+	let streaming = false;
+	const steered: string[] = [];
+	const listeners = new Set<(event: { type: string }) => void>();
+	const emit = (type: string) => {
+		for (const listener of listeners) listener({ type });
+	};
+	const notes: unknown[] = [];
+	const intake = createSteerIntake(
+		{
+			steer: (text) => streaming && steered.push(text) > 0,
+			onEvent: (handler) => {
+				listeners.add(handler);
+				return () => listeners.delete(handler);
+			},
+		},
+		(...note) => notes.push(note),
+	);
+	intake.take("first", 1);
+	intake.take("second", 3);
+	streaming = true;
+	emit("agent_start");
+	await Promise.resolve();
+	intake.take("live", 4);
+	streaming = false;
+	intake.take("late", 5);
+	intake.close();
+	deepStrictEqual(steered, ["first", "second", "live"]);
+	deepStrictEqual(notes, [
+		[1, "queued"],
+		[3, "queued"],
+		[1, "accepted"],
+		[3, "accepted"],
+		[4, "accepted"],
+		[5, "refused", "no turn was streaming to take the line"],
+	]);
+	strictEqual(listeners.size, 0);
+	// A held line the run never reached is refused at close.
+	const unreached: unknown[] = [];
+	const idle = createSteerIntake({ steer: () => false, onEvent: () => () => {} }, (...note) => unreached.push(note));
+	idle.take("never", 1);
+	idle.close();
+	deepStrictEqual(unreached, [
+		[1, "queued"],
+		[1, "refused", "the run settled before a turn took the line"],
+	]);
 });

@@ -185,11 +185,9 @@ export function noteMainRunV2(note: { runId?: string; usage?: RunUsageV2; sessio
 }
 
 /** One steer frame per channel line the reader took, written only under `--output-format stream-json`. */
-export function noteSteerV2(line: number, accepted: boolean): void {
+export function noteSteerV2(line: number, status: RunSteerFrameV2["status"], reason?: string): void {
 	if (!v2StreamJson || isStdoutDead()) return;
-	const frame: RunSteerFrameV2 = accepted
-		? { type: "steer", line, status: "accepted" }
-		: { type: "steer", line, status: "refused", reason: "no turn was streaming to take the line" };
+	const frame: RunSteerFrameV2 = { type: "steer", line, status, ...(reason !== undefined ? { reason } : {}) };
 	// The session frame is always first: a line read before it waits for it.
 	if (heldSteer !== null) heldSteer.push(serializeJsonLine(frame));
 	else writeRawStdout(serializeJsonLine(frame));
@@ -263,11 +261,13 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
 			const rewritten: Record<string, unknown> = { ...frame, schemaVersion: RUN_RESULT_SCHEMA_VERSION };
 			for (const [key, value] of Object.entries(rewritten)) if (value === null) delete rewritten[key];
 			const held = heldSteer;
-			heldSteer = null;
-			// writeFrame writes the returned session frame synchronously; held steer frames follow it.
-			if (held !== null && held.length > 0)
+			// writeFrame writes the returned session frame synchronously; held steer frames follow it, and a frame noted
+			// before they go out joins them, so a line's frames keep their order.
+			if (held !== null)
 				queueMicrotask(() => {
-					if (!isStdoutDead()) writeRawStdout(held.join(""));
+					if (heldSteer !== held) return;
+					heldSteer = null;
+					if (held.length > 0 && !isStdoutDead()) writeRawStdout(held.join(""));
 				});
 			return rewritten;
 		}

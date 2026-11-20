@@ -181,11 +181,15 @@ export function verifyChecksV2(
 	});
 }
 
-/** `stream-json` only: one frame per steer-channel line read before the turn settled. */
+/**
+ * `stream-json` only: one frame per steer-channel line the reader took. `accepted` and `refused` are final; a line
+ * read before the first turn streamed is `queued`, and gets one more frame, `accepted` once that turn takes it or
+ * `refused` when the run settles first.
+ */
 export interface RunSteerFrameV2 {
 	type: "steer";
 	line: number;
-	status: "accepted" | "refused";
+	status: "accepted" | "queued" | "refused";
 	reason?: string;
 }
 
