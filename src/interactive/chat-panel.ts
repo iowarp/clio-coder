@@ -110,7 +110,7 @@ import {
 import { modelNickname } from "./theme/labels.js";
 import { skinEpoch } from "./theme/tokens.js";
 import { type TranscriptDetailPolicy, transcriptDetail } from "./transcript-detail.js";
-import { type TurnSpend, turnHoldsCalls, turnSpend } from "./turn-spend.js";
+import { type TurnSpend, turnHoldsCalls, turnSpend, turnWorkersFact } from "./turn-spend.js";
 
 // Every fenced code block, top level or nested in a list or quote, reaches the
 // screen through pi-tui's Markdown component, which exposes the
@@ -2273,6 +2273,9 @@ function renderTurnUsageLine(
 		return [`${glyph}${dimLine(joinFacts([end, ...endedFact]), room)}`];
 	}
 	const spend = usage.spend;
+	// A turn that left workers running states their spend apart and live, so its outcome drops their count frozen at its end.
+	const shownOutcome = spend?.workers !== undefined && outcome.startsWith(TURN_ENDED) ? TURN_ENDED : outcome;
+	const workersFact = spend?.workers === undefined ? null : turnWorkersFact(spend.workers);
 	// A wait the provider asked for spends no retry, so the receipt keeps it apart: a count of them approached no limit.
 	const retries =
 		[
@@ -2304,7 +2307,7 @@ function renderTurnUsageLine(
 		const stated = moved !== null ? spend?.answer : spend;
 		// A narrow row loses the least useful facts whole, so it never ends on half an amount.
 		const rowFacts = [
-			`${outcome}${receiptDuration(usage)}`,
+			`${shownOutcome}${receiptDuration(usage)}`,
 			...(quiet === null ? [] : [quiet]),
 			...(usage.promptRecall === true ? [PROMPT_RECALL_FACT] : []),
 		];
@@ -2317,9 +2320,10 @@ function renderTurnUsageLine(
 			[stated?.tokens ?? null, stated?.cached != null ? `cached ${stated.cached}` : null].filter(Boolean).join(" · ") ||
 			null;
 		// Shown in this order; kept by rank, where a bare call count yields to the amounts it qualifies. Amounts too wide
-		// for the row leave a `…` in their place, so a narrow row never passes its call count off as the whole spend.
-		const ordered = [callsFact, coverageNote, amounts];
-		const rank = retries === null && moved === null ? [2, 1, 0] : [0, 1, 2];
+		// for the row leave a `…` in their place, so a narrow row never passes its call count off as the whole spend. A turn
+		// whose workers are stated apart also states its own cost, and their fact outranks the rest.
+		const ordered = [callsFact, coverageNote, amounts, workersFact === null ? null : (spend?.cost ?? null), workersFact];
+		const rank = [4, ...(retries === null && moved === null ? [2, 1, 0] : [0, 1, 2]), 3];
 		const kept = new Set<number>();
 		const fits = (index: number) => {
 			const trial = ordered.filter((_, at) => at === index || kept.has(at)) as string[];
@@ -2336,7 +2340,7 @@ function renderTurnUsageLine(
 		rowFacts.push(...(ordered.filter((fact, at) => fact != null && kept.has(at)) as string[]));
 		return [`${glyph}${dimLine(releaseSpaces(joinFacts([...rowFacts, ...endedFact])), room)}`, ...noAnswer];
 	}
-	const settled = `${outcome}${quiet === null ? "" : ` · ${quiet}`}${retries === null ? "" : ` · ${retries}`}${moved === null ? "" : ` · ${moved}`}${receiptDuration(usage)}`;
+	const settled = `${shownOutcome}${quiet === null ? "" : ` · ${quiet}`}${retries === null ? "" : ` · ${retries}`}${moved === null ? "" : ` · ${moved}`}${receiptDuration(usage)}`;
 	// Detailed states what the turn spent, one fact per field, as the read model
 	// folds the turn with its workers, so the line and the footer agree: the
 	// calls it made, input and output tokens in the compact token format, what
@@ -2357,6 +2361,7 @@ function renderTurnUsageLine(
 		facts.push(`reasoning ${reasoning.provenance === "provider" ? "" : "≈"}${compactReasoningTokens(reasoning.tokens)}`);
 	}
 	if (spend?.cost != null) facts.push(spend.cost);
+	if (workersFact !== null) facts.push(workersFact);
 	if (spend?.cacheRead == null && usage.coldReasons !== undefined && usage.coldReasons.length > 0) {
 		facts.push(`prompt read again after ${coldReasonList(usage.coldReasons)}`);
 	}
