@@ -1339,6 +1339,47 @@ describe("dispatch admission boundary", () => {
 			await bundle.extension.stop?.();
 		}
 	});
+
+	it("starts a dispatch-tool ACP delegation with only the caller's model, never the delegation's agent id", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.safety.autonomy = "yolo";
+		settings.fleet.retry.maxRetries = 0;
+		settings.integrations.externalAgents.entries = [
+			{ id: "models-peer", command: "mock-acp", args: [], toolGovernance: "clio-coder-policy" },
+		];
+		const started: Array<{ model?: string }> = [];
+		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
+			startAcpDelegationRun: (input) => {
+				started.push({ ...(input.model !== undefined ? { model: input.model } : {}) });
+				throw new Error("captured ACP start");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const tool = createDispatchTool({
+				getAgentSpecs: () => [],
+				dispatch: bundle.contract,
+				getAutonomy: () => "yolo",
+			});
+			const intent = { read_roots: ["README.md"], expected_outputs: [] };
+			const calls: Array<Record<string, unknown>> = [
+				{ agent: "models-peer", task: "Create pong.txt containing PONG", intent },
+				{ agent: "models-peer", task: "Create pong.txt containing PONG", intent, model: "gemini-3.8-flash" },
+			];
+			ok(tool.prepareAdmissionArguments);
+			for (const args of calls) {
+				// Production admission seals the resolved plan before the run; the plan pins its route onto the request.
+				const prepared = tool.prepareAdmissionArguments(args);
+				strictEqual(prepared[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT], undefined);
+				await tool.run(prepared, {});
+				tool.disposeAdmissionArguments?.(prepared);
+			}
+			// A peer offering a configOptions model list refuses any id it does not offer, the agent id included.
+			deepStrictEqual(started, [{}, { model: "gemini-3.8-flash" }]);
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
 	it("hands a slot to the next queued assignment when the holder is released early, and a second release is a no-op", async () => {
 		// A merge card waits on the operator after its worker exited; it releases the
 		// slot before waiting so other dispatches are not queued behind it.
