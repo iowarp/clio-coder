@@ -5294,7 +5294,7 @@ export function createDispatchBundle(
 		failureClass: FailureClass,
 		contextOverflow = false,
 		unmetObligation?: Obligation,
-	): void {
+	): boolean {
 		const controlAttempt = controlAttempts.get(run.runId);
 		if (controlAttempt !== undefined && run.lineage.depth > 0) controlAttempt.receipt = receipt;
 		const assignment = assignments.open(run.lineage.rootRunId, assignmentPolicyFor(run.req));
@@ -5311,7 +5311,7 @@ export function createDispatchBundle(
 			retryReason,
 		});
 		persistAssignment(recordAssignmentAttempt(assignment.id, run.runId), `${assignment.id}:attempt:${run.runId}`);
-		if (writeRootPark.park(run, receipt)) return;
+		if (writeRootPark.park(run, receipt)) return true;
 		const retry = maybeScheduleRetry(
 			run,
 			outcome,
@@ -5322,7 +5322,7 @@ export function createDispatchBundle(
 			retryReason,
 			unmetObligation,
 		);
-		if (retry.scheduled) return;
+		if (retry.scheduled) return true;
 		const currentStatus = assignments.get(assignment.id)?.status;
 		const terminalStatus =
 			currentStatus === "canceled" || outcome === "canceled"
@@ -5331,6 +5331,7 @@ export function createDispatchBundle(
 					? "succeeded"
 					: "failed";
 		settleAssignmentDurably(assignment.id, receipt, terminalStatus, retry.settlementDetail);
+		return false;
 	}
 
 	function assertRouteWithinApprovedEnvelope(req: DispatchRequest, effective: DispatchFailoverCandidate): void {
@@ -10529,10 +10530,14 @@ export function createDispatchBundle(
 					// mode, a failed run, a refused merge). Saying so on the claim keeps
 					// restart recovery from reading it as a crash.
 					try {
-						// A canceled run that never produced work leaves nothing to keep.
+						// A canceled run that never produced work leaves nothing to keep. An idle builder that left its
+						// obligation unmet keeps the tree until the retry decision below, since its retry runs in it.
 						if (
 							!(
-								(finalOutcome === "canceled" || (outcomeCode === "worker_no_work" && !writeRootPark.isStaged(envelope.id))) &&
+								(finalOutcome === "canceled" ||
+									(outcomeCode === "worker_no_work" &&
+										evidence.obligationUnmet === undefined &&
+										!writeRootPark.isStaged(envelope.id))) &&
 								discardIdleTaskWorktree(req.taskWorktree)
 							)
 						) {
@@ -10562,7 +10567,7 @@ export function createDispatchBundle(
 				});
 				await closeRunJournal();
 				emitTerminalDispatchEvent(finalizing, receipt, finalOutcome);
-				completeAssignmentAttempt(
+				const continues = completeAssignmentAttempt(
 					activeRun,
 					receipt,
 					finalOutcome,
@@ -10571,6 +10576,21 @@ export function createDispatchBundle(
 					contextOverflow,
 					evidence.obligationUnmet,
 				);
+				// The idle tree kept above goes once no retry will run in it.
+				if (
+					!continues &&
+					outcomeCode === "worker_no_work" &&
+					evidence.obligationUnmet !== undefined &&
+					req.taskWorktree !== undefined &&
+					worktreeReceipt?.applied !== true &&
+					!claimReleased
+				) {
+					try {
+						discardIdleTaskWorktree(req.taskWorktree);
+					} catch (discardError) {
+						reportDispatchDiagnostic(`discard idle task worktree ${req.taskWorktree.runId}`, discardError);
+					}
+				}
 				return receipt;
 			} catch (error) {
 				await failFinalization(

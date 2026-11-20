@@ -1,9 +1,12 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
-import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
+import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -29,9 +32,16 @@ async function retryFleet(
 	targetIds: ReadonlyArray<string>,
 	failing: ReadonlySet<string>,
 	vision: ReadonlySet<string>,
-	options: { failure?: string; windows?: Readonly<Record<string, number>>; maxRetries?: number } = {},
+	options: {
+		failure?: string;
+		windows?: Readonly<Record<string, number>>;
+		maxRetries?: number;
+		report?: object;
+		onSpawn?: (spec: WorkerSpec) => void;
+	} = {},
 ) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.safety.sandbox = "off";
 	settings.targets = targetIds.map((id) => ({ id, runtime: "openai", defaultModel: "gpt-4o" }));
 	settings.fleet.default.target = "default";
 	settings.fleet.default.model = "gpt-4o";
@@ -48,6 +58,7 @@ async function retryFleet(
 		heartbeatIntervalMs: 3_600_000,
 		spawnWorker: (spec) => {
 			spawned.push(spec.target.id);
+			options.onSpawn?.(spec);
 			const result: SpawnedWorkerResult = failing.has(spec.target.id)
 				? { exitCode: 1, signal: null, stderrTail: options.failure ?? HTTP_503 }
 				: { exitCode: 0, signal: null };
@@ -64,7 +75,7 @@ async function retryFleet(
 							message: {
 								role: "assistant",
 								stopReason: "stop",
-								content: JSON.stringify({ confirmedFacts: [], missingEvidence: [], nextInspections: [] }),
+								content: JSON.stringify(options.report ?? { confirmedFacts: [], missingEvidence: [], nextInspections: [] }),
 							},
 						};
 				})(),
@@ -149,6 +160,43 @@ describe("retry target selection", () => {
 			deepStrictEqual(fleet.spawned, ["default"]);
 			strictEqual(assignment?.status, "failed");
 			match(assignment?.outcomeDetail ?? "", /^obligation observed-evidence unmet, not retried because failover is none/u);
+		} finally {
+			await fleet.bundle.extension.stop?.();
+		}
+	});
+
+	it("retries an idle builder's unmet obligation in its kept task worktree, then discards it", async () => {
+		const repo = join(scratch.dir, "repo");
+		mkdirSync(repo);
+		const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "pipe" });
+		git("init", "-q");
+		git("config", "user.name", "Contract");
+		git("config", "user.email", "contract@example.invalid");
+		writeFileSync(join(repo, "base.txt"), "base");
+		git("add", ".");
+		git("commit", "-qm", "base");
+		const trees: Array<{ path: string | undefined; present: boolean }> = [];
+		const fleet = await retryFleet(["default"], new Set(), new Set(), {
+			report: { mutatedPaths: [], validations: [], summary: "nothing to change" },
+			onSpawn: (spec) => {
+				const path = spec.taskWorktree?.path;
+				trees.push({ path, present: path !== undefined && existsSync(path) });
+			},
+		});
+		try {
+			const first = await fleet.bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "Fix base.txt.",
+				requestOrigin: "internal",
+				cwd: repo,
+				worktree: true,
+			});
+			await fleet.bundle.contract.assignments?.get(first.runId)?.terminal;
+			strictEqual(trees.length, 2, "the unmet obligation retries once");
+			ok(trees[0]?.path !== undefined);
+			deepStrictEqual(trees[1], { path: trees[0]?.path, present: true }, "the retry runs in the kept worktree");
+			strictEqual(existsSync(trees[0].path), false, "the idle worktree goes once no retry remains");
 		} finally {
 			await fleet.bundle.extension.stop?.();
 		}
