@@ -97,6 +97,9 @@ const RUN_TIMEOUT_EXIT_CODE = 124;
 function armRunTimeout(seconds: number): HeadlessRunDeadline {
 	const coordinator = getTerminationCoordinator();
 	let expired = false;
+	// The budget counts from process start (performance.now() is measured from the time origin), so module
+	// load and boot spend it too and `--timeout N` bounds the caller's wall time.
+	const endsAt = seconds * 1000;
 	const timer = setTimeout(
 		() => {
 			if (coordinator.getPhase() !== "idle") return;
@@ -104,10 +107,9 @@ function armRunTimeout(seconds: number): HeadlessRunDeadline {
 			writeRunDiagnostic(`clio-coder run: timed out after ${seconds}s (--timeout)\n`);
 			void coordinator.shutdown(RUN_TIMEOUT_EXIT_CODE);
 		},
-		Math.ceil(seconds * 1000),
+		Math.max(0, Math.ceil(endsAt - performance.now())),
 	);
 	timer.unref();
-	const endsAt = performance.now() + seconds * 1000;
 	return {
 		seconds,
 		expired: () => expired,
@@ -229,7 +231,12 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<
 	| number
 > {
 	const messages = parsed.messages.length > 0 ? [parsed.messages.join(" ")] : [];
-	const stdinContent = await readPipedStdin(messages.length > 0 || parsed.fileArgs.length > 0);
+	if (parsed.stdin === true && process.stdin.isTTY) {
+		writeRunDiagnostic("clio-coder run: `-` reads the task from stdin, but stdin is a terminal\n");
+		process.stderr.write(USAGE);
+		return 2;
+	}
+	const stdinContent = await readPipedStdin(messages.length > 0 || parsed.fileArgs.length > 0, parsed.stdin === true);
 	// Boot has not armed the termination coordinator yet, so without this listener
 	// SIGINT killed the process by default while a PDF extraction ran on.
 	const interrupt = new AbortController();
@@ -565,6 +572,22 @@ async function executeRunCommand(
 					const borrowed = await borrowHeadlessRoute(parsed.target, parsed.model);
 					if (typeof borrowed === "number") return borrowed;
 					if (borrowed !== null) process.stderr.write(`clio-coder run: ${borrowed.notice}\n`);
+					// No route at all is a configuration refusal before any work: exit 2 under the v2 opt-in. v1 (no
+					// --output-format) keeps its boot diagnostic and exit 1 until 0.9.0.
+					if (borrowed === null && parsed.target === undefined && parsed.outputFormat !== undefined) {
+						let unconfigured = false;
+						try {
+							unconfigured = classifyDefaultTarget().kind === "no-target";
+						} catch {
+							// Unreadable settings keep the boot path's own diagnostic.
+						}
+						if (unconfigured) {
+							writeRunDiagnostic(
+								"clio-coder run: not configured: no model target is saved; run `clio-coder configure` or pass --target <id>\n",
+							);
+							return 2;
+						}
+					}
 					if (borrowed === null && parsed.target !== undefined && explicitTargetMissing(parsed.target)) {
 						writeRunDiagnostic(`clio-coder run: target '${parsed.target}' not found in settings.targets\n`);
 						return 2;
