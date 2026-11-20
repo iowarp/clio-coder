@@ -19,6 +19,7 @@ import { selectWorkerContext } from "../../src/domains/context/worker/select.js"
 import { captureWorkerContext, completeHistoryLength, contextHash } from "../../src/domains/context/worker/snapshot.js";
 import { persistWorkerContextSeed } from "../../src/domains/context/worker/store.js";
 import { renderMarker } from "../../src/domains/context/working-set/marker.js";
+import { createWorkerOutputCapture } from "../../src/domains/dispatch/event-pump.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
@@ -662,6 +663,96 @@ test("a first splice with no usage anchor is fitted at the transport's own count
 	} finally {
 		worker?.abort();
 		await worker?.promise;
+		env.restore();
+	}
+});
+
+test("a worker re-recalling its evictions is told once to write or report, and exhaustion seals its narration and changes (CLI-H3)", {
+	timeout: 30_000,
+}, async () => {
+	const env = await isolateClioEnv("clio-coder-worker-thrash-");
+	const requests: string[] = [];
+	// One write, three reads, then recalls in rotation, as run 3oja1uegz9ti did.
+	const server = createServer(async (req, res) => {
+		const raw = await readRequestBody(req);
+		requests.push(raw);
+		const body = JSON.parse(raw) as { messages?: Array<{ role?: string }> };
+		const done = (body.messages ?? []).filter((message) => message.role === "tool").length;
+		const call =
+			done === 0
+				? { name: "write", arguments: { path: "out.txt", content: "first half\n" } }
+				: done <= 3
+					? { name: "read", arguments: { path: `${"abc"[done - 1]}.txt` } }
+					: requests.length < 40
+						? { name: "context", arguments: { scope: "recall", ref: `r${(done % 3) + 1}` } }
+						: null;
+		// After the third read the provider counts a near-full request, so the reads leave; past the fifth recall it counts
+		// one larger than the window, so the next request cannot fit.
+		const usage = { prompt_tokens: done >= 10 ? 60_000 : done === 3 ? 27_500 : 1000, completion_tokens: 20 };
+		const frame = (data: unknown) => `data: ${JSON.stringify({ model: "fixture", ...(data as object) })}\n\n`;
+		const delta = call
+			? {
+					...(done >= 4 ? { content: `Checking r1 again (${done}).` } : {}),
+					tool_calls: [
+						{
+							index: 0,
+							id: `call-${done}`,
+							type: "function",
+							function: { ...call, arguments: JSON.stringify(call.arguments) },
+						},
+					],
+				}
+			: { content: "Complete." };
+		res.setHeader("content-type", "text/event-stream");
+		res.end(
+			`${frame({ choices: [{ index: 0, delta, finish_reason: call ? "tool_calls" : "stop" }], usage })}data: [DONE]\n\n`,
+		);
+	});
+	let worker: WorkerRunHandle | undefined;
+	const previousCwd = process.cwd();
+	try {
+		process.chdir(env.dir);
+		for (const name of ["a.txt", "b.txt", "c.txt"])
+			writeFileSync(join(env.dir, name), `${name} ${"pump output line of forty characters.\n".repeat(200)}`);
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const events: unknown[] = [];
+		worker = startWorkerRun(
+			{
+				agentId: "coder",
+				systemPrompt: "Do the assignment.",
+				task: "Finish out.txt from a.txt, b.txt and c.txt.",
+				target: { id: "fixture", runtime: "litellm", url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` },
+				runtime: litellm,
+				wireModelId: "fixture",
+				apiKey: "fixture",
+				modelCapabilities: { contextWindow: 32_768, maxTokens: 4096, tools: true },
+				allowedTools: ["write", "read", "context"],
+				writeRoots: [env.dir],
+				budget: { mode: "advisory", toolCalls: 60, readReserve: 0, synthesis: true, hardCap: 80 },
+				noSkills: true,
+				cwd: env.dir,
+			},
+			(event) => void events.push(event),
+		);
+		const outcome = await worker.promise;
+		notEqual(outcome.exitCode, 0);
+		const nudged = requests.filter((request) => request.includes("Host note:"));
+		ok(nudged.length > 0, "a request after the fifth recall carries the host turn");
+		equal(nudged.at(-1)?.split("Host note:").length, 2, "the host turn is injected once");
+		const exhausted = events.find(
+			(event) => (event as { payload?: { outcomeCode?: string } }).payload?.outcomeCode === "worker_context_exhausted",
+		) as { payload: { detail?: string } } | undefined;
+		match(exhausted?.payload.detail ?? "", /changed before stopping: out\.txt/);
+		const capture = createWorkerOutputCapture();
+		for (const event of events) capture.observe(event);
+		const sealed = capture.snapshot();
+		equal(sealed?.state, "partial");
+		match(sealed?.text ?? "", /^Checking r\d again \(\d+\)\.$/);
+	} finally {
+		worker?.abort();
+		await worker?.promise;
+		await closeServer(server);
+		process.chdir(previousCwd);
 		env.restore();
 	}
 });

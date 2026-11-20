@@ -273,6 +273,10 @@ export function createWorkerOutputCapture(options: WorkerOutputCaptureOptions = 
 	let partialBytes = 0;
 	let partialStored = 0;
 	let structuredOutput: RunResultOutput | undefined;
+	// The last text any assistant message carried, tool-use preambles included, and whether the worker reported
+	// its context exhausted: only then does that narration seal, as partial, in place of no text at all (CLI-H3).
+	let narration = "";
+	let contextExhausted = false;
 
 	return {
 		observe(event: unknown): void {
@@ -297,10 +301,22 @@ export function createWorkerOutputCapture(options: WorkerOutputCaptureOptions = 
 				structuredOutput = { ...boundedOutput("final", text, maxBytes), structured: structuredClone(structured) };
 				return;
 			}
+			if (
+				event.type === "clio_coder_run_outcome" &&
+				isRecord(event.payload) &&
+				event.payload.outcomeCode === "worker_context_exhausted"
+			) {
+				contextExhausted = true;
+				return;
+			}
 			if (event.type === "message_end") {
 				// Any message boundary flushes the in-flight stream: its deltas
 				// belong to the message that just completed.
 				const message = isRecord(event.message) ? event.message : null;
+				if (message?.role === "assistant") {
+					const said = assistantTextFromContent(message.content).trim();
+					if (said.length > 0) narration = said;
+				}
 				if (
 					message?.role === "assistant" &&
 					(message.clioCoderAbortReason === "worker_turn_timeout" ||
@@ -345,6 +361,7 @@ export function createWorkerOutputCapture(options: WorkerOutputCaptureOptions = 
 				};
 			}
 			if (finalText !== null) return boundedOutput("final", finalText, maxBytes);
+			if (contextExhausted && narration.length > 0) return boundedOutput("partial", narration, maxBytes);
 			return undefined;
 		},
 	};
