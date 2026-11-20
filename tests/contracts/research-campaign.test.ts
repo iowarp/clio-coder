@@ -256,7 +256,7 @@ describe("research campaign", () => {
 			};
 		};
 		const outcome = await runResearchCampaign(campaign, { agent });
-		strictEqual(outcome.reason, "max-iterations");
+		strictEqual(outcome.reason, "max-iterations", outcome.detail);
 		strictEqual(calls, 3);
 
 		const view = summarizeCampaign(campaign.project, campaign.id);
@@ -438,7 +438,7 @@ describe("research yolo", () => {
 				return parseAgentRunFrames(stream, 0, "");
 			},
 		});
-		strictEqual(outcome.reason, "max-iterations");
+		strictEqual(outcome.reason, "max-iterations", outcome.detail);
 		deepStrictEqual(runs, ["yolo"]);
 		const view = summarizeCampaign(campaign.project, campaign.id);
 		strictEqual(view.iterations[0]?.outcome, "ratcheted");
@@ -489,6 +489,8 @@ describe("research review fixes", () => {
 	it("stops at the wall deadline inside the agent run and while measuring, and never ratchets after it", async (t) => {
 		const env = await isolateClioEnv("clio-coder-research-home-");
 		t.after(() => env.restore());
+		// The injected clock decides the deadline; the loop's own deadline timer is fake, so real time never reaches it.
+		t.mock.timers.enable({ apis: ["setTimeout"] });
 		const repo = scratchRepo({
 			"value.txt": "100\n",
 			"score.js": scoreJs,
@@ -552,12 +554,14 @@ describe("research review fixes", () => {
 		];
 		let calls = 0;
 		const outcome = await runResearchCampaign(campaign, {
+			// Every candidate is archived unmeasured, so only the A/A check measures; it spawns nothing here.
+			measure: async () => ({ ok: true, value: 100 }),
 			agent: async (request) => {
 				edits[calls++]?.(request.worktree);
 				return done;
 			},
 		});
-		strictEqual(outcome.reason, "max-iterations");
+		strictEqual(outcome.reason, "max-iterations", outcome.detail);
 		deepStrictEqual(
 			summarizeCampaign(campaign.project, campaign.id).iterations.map((iteration) => iteration.outcome),
 			["protected", "protected", "protected", "protected"],
@@ -595,7 +599,7 @@ describe("research review fixes", () => {
 				return done;
 			},
 		});
-		strictEqual(outcome.reason, "max-iterations");
+		strictEqual(outcome.reason, "max-iterations", outcome.detail);
 		const view = summarizeCampaign(campaign.project, campaign.id);
 		deepStrictEqual(
 			view.iterations.map((iteration) => iteration.outcome),
@@ -714,6 +718,7 @@ describe("research review fixes", () => {
 		];
 		let calls = 0;
 		await runResearchCampaign(campaign, {
+			measure: async () => ({ ok: true, value: 100 }),
 			agent: async (request) => {
 				edits[calls++]?.(request.worktree);
 				return done;
@@ -773,12 +778,13 @@ describe("research review fixes", () => {
 		const [project1] = (await appendHypotheses(project, drafts)) ?? [];
 		ok(project1 !== undefined);
 		const campaign = openScore(repo, { maxIterations: 1, allowUnpriced: false }, ["sane"]);
-		await runResearchCampaign(campaign, {
+		const outcome = await runResearchCampaign(campaign, {
 			agent: async (request) => {
 				writeFileSync(join(request.worktree, "value.txt"), "50\n");
 				return done;
 			},
 		});
+		strictEqual(outcome.reason, "max-iterations", outcome.detail);
 		const view = summarizeCampaign(campaign.project, campaign.id);
 		deepStrictEqual(
 			view.iterations.map((iteration) => iteration.outcome),
@@ -817,6 +823,7 @@ describe("research review fixes", () => {
 		for (const path of ["bench", "aliases/next", "bench/run.js", "tools/run.js"])
 			ok(campaign.protected.includes(path), `${path} in ${campaign.protected.join(",")}`);
 		await runResearchCampaign(campaign, {
+			measure: async () => ({ ok: true, value: 100 }),
 			agent: async (request) => {
 				rmSync(join(request.worktree, "aliases/next"));
 				symlinkSync("../fake", join(request.worktree, "aliases/next"));
@@ -863,12 +870,13 @@ describe("research review fixes", () => {
 			},
 		];
 		let calls = 0;
-		await runResearchCampaign(campaign, {
+		const outcome = await runResearchCampaign(campaign, {
 			agent: async (request) => {
 				edits[calls++]?.(request.worktree);
 				return done;
 			},
 		});
+		strictEqual(outcome.reason, "max-iterations", outcome.detail);
 		const view = summarizeCampaign(campaign.project, campaign.id);
 		deepStrictEqual(
 			view.iterations.map((iteration) => iteration.outcome),
@@ -918,12 +926,13 @@ describe("research review fixes", () => {
 			},
 		];
 		let calls = 0;
-		await runResearchCampaign(campaign, {
+		const outcome = await runResearchCampaign(campaign, {
 			agent: async (request) => {
 				edits[calls++]?.(request.worktree);
 				return done;
 			},
 		});
+		strictEqual(outcome.reason, "max-iterations", outcome.detail);
 		const view = summarizeCampaign(campaign.project, campaign.id);
 		deepStrictEqual(
 			view.iterations.map((iteration) => iteration.outcome),
@@ -947,12 +956,13 @@ describe("research review fixes", () => {
 		mkdirSync(join(repo, "node_modules/dep"), { recursive: true });
 		writeFileSync(join(repo, "node_modules/dep/index.js"), "module.exports = 1;\n");
 		const campaign = openScore(repo, { maxIterations: 1, allowUnpriced: false }, ["dep"]);
-		await runResearchCampaign(campaign, {
+		const outcome = await runResearchCampaign(campaign, {
 			agent: async (request) => {
 				writeFileSync(join(request.worktree, "value.txt"), "50\n");
 				return done;
 			},
 		});
+		strictEqual(outcome.reason, "max-iterations", outcome.detail);
 		const view = summarizeCampaign(campaign.project, campaign.id);
 		deepStrictEqual(
 			view.iterations.map((iteration) => iteration.outcome),
@@ -998,12 +1008,13 @@ describe("research review fixes", () => {
 			},
 		];
 		let calls = 0;
-		await runResearchCampaign(campaign, {
+		const outcome = await runResearchCampaign(campaign, {
 			agent: async (request) => {
 				edits[calls++]?.(request.worktree);
 				return done;
 			},
 		});
+		strictEqual(outcome.reason, "max-iterations", outcome.detail);
 		const view = summarizeCampaign(campaign.project, campaign.id);
 		deepStrictEqual(
 			view.iterations.map((iteration) => iteration.outcome),
@@ -1059,12 +1070,13 @@ describe("research review fixes", () => {
 		for (const value of ["99\n", "98\n"]) {
 			const campaign = openScore(repo, { maxIterations: 1, allowUnpriced: false });
 			ids.push(campaign.id);
-			await runResearchCampaign(campaign, {
+			const outcome = await runResearchCampaign(campaign, {
 				agent: async (request) => {
 					writeFileSync(join(request.worktree, "value.txt"), value);
 					return done;
 				},
 			});
+			strictEqual(outcome.reason, "max-iterations", outcome.detail);
 		}
 		const claims = readClaims(claimsProjectRoot(repo));
 		ok(claims.records.filter((claim) => claim.verdict === "agrees").length >= 2);
@@ -1130,7 +1142,7 @@ describe("research sweeps", () => {
 				return done;
 			},
 		});
-		strictEqual(outcome.reason, "max-iterations");
+		strictEqual(outcome.reason, "max-iterations", outcome.detail);
 		const view = summarizeCampaign(campaign.project, campaign.id);
 		deepStrictEqual(
 			view.iterations.map((iteration) => iteration.outcome),
@@ -1213,7 +1225,7 @@ describe("research resume", () => {
 				return { ...done, exitCode: 130, outcome: "interrupted" };
 			},
 		});
-		strictEqual(outcome.reason, "stopped");
+		strictEqual(outcome.reason, "stopped", outcome.detail);
 		const kept = summarizeCampaign(campaign.project, campaign.id).best;
 		strictEqual(git(repo, "show", `${kept}:value.txt`), "50");
 
@@ -1227,7 +1239,7 @@ describe("research resume", () => {
 				return done;
 			},
 		});
-		strictEqual(resumed.reason, "max-iterations");
+		strictEqual(resumed.reason, "max-iterations", resumed.detail);
 		deepStrictEqual(parents, [kept]);
 		// One run on the best commit to learn the check output, then the iteration's pairs; no A/A pairs.
 		strictEqual(second.runs, 1 + 2 * campaign.objective.trials);
@@ -1255,13 +1267,14 @@ describe("research resume", () => {
 		const repo = scoreRepo();
 		const campaign = openScore(repo, { maxIterations: 2, allowUnpriced: false });
 		const controller = new AbortController();
-		await runResearchCampaign(campaign, {
+		const first = await runResearchCampaign(campaign, {
 			signal: controller.signal,
 			agent: async () => {
 				controller.abort();
 				return { ...done, exitCode: 130, outcome: "interrupted" };
 			},
 		});
+		strictEqual(first.reason, "stopped", first.detail);
 		// What a killed process leaves: no archive or stop for the iteration in flight, and its worktrees on disk.
 		const dir = join(campaign.project, ".clio-coder", "research", campaign.id);
 		const journalPath = join(dir, "journal.jsonl");
@@ -1293,7 +1306,7 @@ describe("research resume", () => {
 		rmSync(lockPath);
 
 		const outcome = await resumeResearchCampaign(campaign, { agent: async () => done });
-		strictEqual(outcome.reason, "max-iterations");
+		strictEqual(outcome.reason, "max-iterations", outcome.detail);
 		const view = summarizeCampaign(campaign.project, campaign.id);
 		deepStrictEqual(
 			view.iterations.map((iteration) => iteration.outcome),
@@ -1309,13 +1322,14 @@ describe("research resume", () => {
 		const repo = scoreRepo();
 		const campaign = openScore(repo, { maxIterations: 2, allowUnpriced: false });
 		const controller = new AbortController();
-		await runResearchCampaign(campaign, {
+		const first = await runResearchCampaign(campaign, {
 			signal: controller.signal,
 			agent: async () => {
 				controller.abort();
 				return { ...done, exitCode: 130, outcome: "interrupted" };
 			},
 		});
+		strictEqual(first.reason, "stopped", first.detail);
 		writeFileSync(join(repo, "value.txt"), "1\n");
 		git(repo, "commit", "-qam", "elsewhere");
 		git(repo, "update-ref", campaign.ref, "HEAD");
