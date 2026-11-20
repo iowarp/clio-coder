@@ -673,8 +673,10 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			const reminder: AgentMessage = { role: "user", content, timestamp: Date.now() };
 			if (deps.hostInserts) deps.hostInserts.insert(agentRuntime, "reminder", [reminder]);
 			else agentRuntime.agent.state.messages.push(reminder);
+			// The delivered text rides the run's next request, as a flushed buffer does, with the firings that joined it.
 			for (let index = pendingReminders.length - 1; index >= 0; index--) {
-				if (pendingReminders[index]?.deferred) pendingReminders.splice(index, 1);
+				if (!pendingReminders[index]?.deferred) continue;
+				for (const firingId of entryFirings(pendingReminders.splice(index, 1))) armed.add(firingId);
 			}
 			return true;
 		},

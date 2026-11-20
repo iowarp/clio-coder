@@ -142,6 +142,7 @@ describe("middleware hook boundary", () => {
 				nudge("nudge.a"),
 				nudge("nudge.b"),
 				nudge("nudge.memory", "Memory: recheck"),
+				nudge("nudge.bg", "background"),
 				registration("reminder.only", () => [{ kind: "inject_reminder", message: "count only" }], {
 					hooks: ["turn_end"],
 				}),
@@ -244,7 +245,7 @@ describe("middleware hook boundary", () => {
 				{ tool: "bash", repeatCount: 3, blocksThisTurn: 3, budget: 3, interrupted: false, disposition, at: 1 },
 				{ sessionId, agent: { role: "main", id: sessionId }, turnId },
 			);
-		const [c1, c2, cLocked, c3, c4, c5, c6, c7, c8, c10] = Array.from({ length: 10 }, () => newCallId());
+		const [c1, c2, cLocked, c3, c4, c5, c6, c7, c8, c10, c11, c12] = Array.from({ length: 12 }, () => newCallId());
 		try {
 			// Turn 0, before any hook of the session reached the collector: a compaction point's firing is suppressed.
 			// A submit returns after the awaited gate and before the turn starts: the gate's firings entered nothing.
@@ -360,6 +361,18 @@ describe("middleware hook boundary", () => {
 			send(c10);
 			await end("a8");
 			turns.releaseTurnHolds(holds);
+			// Turn 8: a nudge joins a deferred background reminder of the same text, and the tool batch boundary delivers
+			// that reminder, so the request after it carries the nudge's firing.
+			holds = turns.beginTurnHolds();
+			start("u8")();
+			send(c11);
+			turns.injectDeferredReminder("background continue", "info");
+			await end("a9", { "nudge.bg": "continue" });
+			const [d1] = next(1);
+			ok(await turns.prepareToolContinuation(runtime));
+			send(c12);
+			await end("a10");
+			turns.releaseTurnHolds(holds);
 			// Steering triage settles on its typed route: acted when the verdict applied, expired when the queue moved on.
 			for (const current of [true, false])
 				await runTriageRound({
@@ -402,6 +415,7 @@ describe("middleware hook boundary", () => {
 				[m1, "nudge.memory", "suppressed", null, "none"],
 				[w4, "gate.lock", "ignored", c10, "none"],
 				[w5, "gate.continue", "suppressed", null, "none"],
+				[d1, "nudge.bg", "ignored", c12, "none"],
 				[t1, "triage", "acted", null, "receipt"],
 				[t2, "triage", "expired", null, "none"],
 			];
