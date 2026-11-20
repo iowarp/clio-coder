@@ -618,6 +618,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		// rejects a record that is not a fixed point of this table.
 		legacy: { ...keep("outcome", "results", "priorState"), earliest: "id" },
 	},
+	"context.resumed": keep("priorTokens", "projectedTokens", "estimatedTokens", "inputSource"),
 	// An endpoint key is the provider URL, which can name a private host.
 	"memory.step_completed": { endpointKey: "endpoint", targetId: "model-id" },
 	"memory.step_decided": {

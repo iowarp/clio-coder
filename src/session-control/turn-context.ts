@@ -11,10 +11,11 @@ import { mainAgent, sessionTelemetryContext } from "../core/telemetry/context.js
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { factKnownValue } from "../core/telemetry/known.js";
 import type { CallMessageObserver } from "../core/telemetry/producer.js";
+import { clioStateDir } from "../core/xdg.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
 import type { MemoryInterventionRegistration } from "../domains/memory/intervention.js";
 import { compactionBudget, getCatalogModelForRuntime } from "../domains/providers/catalog.js";
-import { getLatestContextSnapshot } from "../domains/session/context-history.js";
+import { readSessionContextSnapshots } from "../domains/telemetry/index.js";
 import {
 	appendEnginePolicyMessage,
 	compactEngineCodex,
@@ -146,12 +147,12 @@ import {
 	contextUsageSnapshot,
 	endpointDigest,
 	estimateAgentContextBreakdown,
-	estimateAgentContextTokens,
 	estimateAgentMessageTokens,
 	latestUsableAssistantUsage,
 	reconcileSnapshot,
 	rehydrationRecord,
 	snapshotInputTokens,
+	usageAnchoredTokens,
 } from "../domains/session/context-accounting.js";
 import {
 	buildContextLedger,
@@ -416,6 +417,11 @@ export interface TurnContext {
 	 * asked what the budget is.
 	 */
 	refreshLiveBudget(pendingUserText?: string): LiveBudgetView;
+	/**
+	 * After `resetForSession` re-entered a history and the runtime published its next request, journal that
+	 * projected figure beside the session's last persisted measurement, once per reset (CLI-P37).
+	 */
+	journalResumedBudget?(view: LiveBudgetView): void;
 	/**
 	 * Disarm the A4 pin an overflow fold that fit armed. While armed, the
 	 * published view's `inputTokens` is the A4 count; the main request that
@@ -858,6 +864,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// conversation, the route, and the configuration are byte-identical. The
 	// pressure policy reuses a refusal only for this exact key.
 	let noUsefulCutBasisKey: string | null = null;
+	/** Set by `resetForSession`: the re-entered session and its last persisted measurement, until the journal reads it. */
+	let resumedBudget: { sessionId: string; priorTokens: number | null } | null = null;
 
 	// Cache-disturbance honesty (T3.3). Accumulate every known local-runtime
 	// disturbance and prefix-byte change since the last settled run. The next
@@ -1464,17 +1472,24 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					Math.max(0, breakdown.systemPromptTokens - anchor.systemPromptTokens) +
 					Math.max(0, breakdown.toolSchemaTokens - anchor.toolSchemaTokens)
 				: null;
-		const estimatedTokens =
-			reconciledTokens === null
-				? estimateAgentContextTokens(estimateInput) + pendingPolicyTokens
-				: breakdown.systemPromptTokens + breakdown.messageTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
+		// The structural projection (pending policy included) and, with no live anchor (a resume, or an anchor a
+		// rewrite dropped), the newest usable usage plus the delta since that call, each walked once.
+		const projection =
+			breakdown.systemPromptTokens + breakdown.messageTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
+		const usageFloor = reconciledTokens === null ? usageAnchoredTokens(estimateInput, breakdown) : null;
+		const estimatedTokens = usageFloor === null ? projection : Math.max(projection, usageFloor);
 		const ratio = routeTokenRatio(agentRuntime, observed);
+		const priced = (tokens: number): number => (ratio === 1 ? tokens : Math.ceil(tokens * ratio));
+		// The usage floor is already a provider count, so only the chars/4 projection takes the ratio (FX-31).
 		return {
 			// The estimate is a floor, not a competing verdict: it prices material
 			// the attested call never saw, so a provider count below it would be
 			// answering about a smaller conversation. It is priced at the route's
 			// measured chars per token when the route has one, else at chars/4.
-			tokens: Math.max(ratio === 1 ? estimatedTokens : Math.ceil(estimatedTokens * ratio), reconciledTokens ?? 0),
+			tokens:
+				usageFloor === null
+					? Math.max(priced(estimatedTokens), reconciledTokens ?? 0)
+					: Math.max(priced(projection), usageFloor),
 			estimatedTokens,
 			reconciledTokens,
 			contextWindow,
@@ -4572,6 +4587,22 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			bindMemoryScope();
 			budgetProducer.reset();
 			const session = deps.session?.current();
+			const snapshots = session ? readSessionContextSnapshots(clioStateDir(), session.id) : [];
+			const persisted = snapshots.at(-1) ?? null;
+			// The figure the session was last measured at, so the journal can set the resumed projection beside it: the
+			// newest reconciled snapshot, since a submit cancelled before usage leaves an estimated one after it.
+			let measured: (typeof snapshots)[number] | undefined;
+			for (let index = snapshots.length - 1; index >= 0 && measured === undefined; index -= 1) {
+				const snapshot = snapshots[index];
+				if (snapshot?.sources.total === "reconciled" && snapshot.reconciledTokens !== undefined) measured = snapshot;
+			}
+			resumedBudget = session
+				? {
+						sessionId: session.id,
+						priorTokens:
+							measured?.reconciledTokens !== undefined ? measured.reconciledTokens + measured.categories.streaming : null,
+					}
+				: null;
 			// The session's latest capture may describe the branch just left; a runtime captures the history now in place.
 			currentContextSnapshot = state.runtime
 				? captureRuntimeContextSnapshot(
@@ -4579,9 +4610,24 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						incomingBranchAnchorTurnId ?? "session",
 						deps.getSettings().context.compaction?.threshold ?? null,
 					)
-				: session
-					? getLatestContextSnapshot(session)
-					: null;
+				: persisted;
+		},
+
+		journalResumedBudget(view: LiveBudgetView): void {
+			const resumed = resumedBudget;
+			resumedBudget = null;
+			if (!resumed || view.historical || view.inputTokens === null) return;
+			if (deps.session?.current()?.id !== resumed.sessionId) return;
+			telemetryHub().emit(
+				"context.resumed",
+				{
+					...(resumed.priorTokens !== null ? { priorTokens: tokenCount(resumed.priorTokens) } : {}),
+					projectedTokens: tokenCount(view.inputTokens),
+					...(view.estimatedInputTokens !== null ? { estimatedTokens: tokenCount(view.estimatedInputTokens) } : {}),
+					inputSource: view.inputSource,
+				},
+				{ sessionId: resumed.sessionId, agent: mainAgent(resumed.sessionId) },
+			);
 		},
 
 		dispose(): void {

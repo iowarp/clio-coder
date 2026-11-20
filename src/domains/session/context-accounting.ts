@@ -281,13 +281,16 @@ export function estimateAgentContextBreakdown(input: AgentContextEstimateInput):
 	};
 }
 
-export function estimateAgentContextTokens(input: AgentContextEstimateInput): number {
-	const breakdown = estimateAgentContextBreakdown(input);
-	const projection =
-		breakdown.systemPromptTokens + breakdown.messageTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
-
+/**
+ * The newest usable provider usage plus only what was appended since that call and the pending ask, or null when
+ * no usable usage exists. The usage is already a measurement, so it is never priced at a route ratio again (FX-31).
+ */
+export function usageAnchoredTokens(
+	input: AgentContextEstimateInput,
+	breakdown: ContextUsageBreakdown = estimateAgentContextBreakdown(input),
+): number | null {
 	const usage = latestUsableAssistantUsage(input.messages);
-	if (!usage) return projection;
+	if (!usage) return null;
 	let trailingTokens = 0;
 	for (let index = usage.index + 1; index < input.messages.length; index += 1) {
 		const message = input.messages[index];
@@ -295,8 +298,15 @@ export function estimateAgentContextTokens(input: AgentContextEstimateInput): nu
 	}
 	// The provider's count already carries the system prompt and tool schemas; adding them again inflated
 	// every meter read after /fork or /resume dropped the live anchor.
-	const anchored = usage.tokens + trailingTokens + breakdown.pendingUserTokens;
-	return Math.max(projection, anchored);
+	return usage.tokens + trailingTokens + breakdown.pendingUserTokens;
+}
+
+export function estimateAgentContextTokens(input: AgentContextEstimateInput): number {
+	const breakdown = estimateAgentContextBreakdown(input);
+	const projection =
+		breakdown.systemPromptTokens + breakdown.messageTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
+	const anchored = usageAnchoredTokens(input, breakdown);
+	return anchored === null ? projection : Math.max(projection, anchored);
 }
 
 /**

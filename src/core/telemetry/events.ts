@@ -520,6 +520,7 @@ export const EVENTS = {
 	}),
 	"context.pruned": journal(S.ContextPrunedSchema, { tier: "operational", cc: "structural", scope: "session" }),
 	"context.fold": journal(S.ContextFoldSchema, { tier: "operational", cc: "structural", scope: "session" }),
+	"context.resumed": journal(S.ContextResumedSchema, { tier: "operational", cc: "content-free", scope: "session" }),
 	"context.recalled": journal(S.ContextRecalledSchema, { tier: "operational", cc: "structural", scope: "session" }),
 	"context.briefing_clipped": journal(S.ContextBriefingClippedSchema, {
 		tier: "operational",
