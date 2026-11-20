@@ -282,15 +282,21 @@ export function settleFinishedRun(
 		phaseTiming?: RunPhaseDurations;
 		/** How the run's step template pipeline ended, when the run drove one (bt-20). */
 		stepPipeline?: RunSettled["stepPipeline"];
+		/**
+		 * Refused asks per tool, counted exactly by a producer that lists only the first `BLOCKED_ATTEMPTS_LIMIT` in
+		 * `permissionRequestedAttempts`. Without it the list is counted, which falls short past the limit (SC-2).
+		 */
+		askedByTool?: ReadonlyMap<string, number>;
 	},
 ): RunSettlement {
 	const usage = input.usage ?? unobservedRunUsageFacts();
 	const host = receipt.hostVerification;
 	// An ask refused without an answer, as a --timeout abort denies one, is a permission request the way `decisions`
 	// counts it, not a blocked call. The tools row has no field for it, so it stays in `calls` only (bt-15 c14a).
-	const asked = new Map<string, number>();
-	for (const attempt of receipt.safety?.permissionRequestedAttempts ?? [])
-		asked.set(attempt.tool, (asked.get(attempt.tool) ?? 0) + 1);
+	const asked = new Map<string, number>(input.askedByTool ?? []);
+	if (input.askedByTool === undefined)
+		for (const attempt of receipt.safety?.permissionRequestedAttempts ?? [])
+			asked.set(attempt.tool, (asked.get(attempt.tool) ?? 0) + 1);
 	return redactedSettlement({
 		facts: {
 			version: 1,
@@ -590,6 +596,7 @@ export function finishRunResult(
 		frameType: string | null;
 		usage: RunUsageFacts | undefined;
 		stepPipeline?: RunSettled["stepPipeline"];
+		askedByTool?: ReadonlyMap<string, number>;
 	},
 ): FinishedRunResult {
 	if (draft.routingIntent === undefined) throw new Error(`run ${draft.runId} has no routing intent`);

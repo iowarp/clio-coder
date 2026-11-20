@@ -120,6 +120,27 @@ describe("evidence integrity boundary", () => {
 		match(labels, /refused_cause=approval_timeout:1 \(a call waited for approval and no one answered in time\)/u);
 	});
 
+	it("counts every refused ask out of the sealed tools row, past the 50 the receipt lists (SC-2)", () => {
+		const draft = fixtureReceiptDraft(fixtureEnvelope("asks-past-the-list"));
+		draft.toolStats = [{ tool: "bash", count: 61, ok: 0, errors: 0, blocked: 61, totalDurationMs: 1 }];
+		draft.safety = {
+			decisions: { allowed: 0, blocked: 1, permissionRequested: 60 },
+			blockedAttempts: [{ tool: "bash" }],
+			permissionRequestedAttempts: Array.from({ length: 50 }, () => ({ tool: "bash", permissionRequired: true })),
+		};
+		const settle = (askedByTool?: ReadonlyMap<string, number>) =>
+			settleFinishedRun(draft, {
+				terminal: { terminalReason: "completed" },
+				processExitCode: 0,
+				frameType: null,
+				usage: undefined,
+				...(askedByTool !== undefined ? { askedByTool } : {}),
+			}).facts.tools[0]?.blocked;
+		// The exact count the producer kept wins over the capped list; without it the list is all there is.
+		strictEqual(settle(new Map([["bash", 60]])), 1);
+		strictEqual(settle(), 11);
+	});
+
 	it("reads mutations:no when the only state change was refused and a shell call left the tree unmoved (FL-1)", () => {
 		const draft = fixtureReceiptDraft(fixtureEnvelope("refused-only-mutation"));
 		draft.toolStats = [
