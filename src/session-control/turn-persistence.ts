@@ -327,6 +327,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				origin: origin === undefined ? "operator" : "peer",
 				...(template !== undefined ? { template } : {}),
 			};
+			state.finishReplyRefused = false;
 			if (!deps.session) return;
 			if (!deps.session.current()) {
 				const settings = deps.getSettings();

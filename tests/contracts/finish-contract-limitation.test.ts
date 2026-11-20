@@ -21,12 +21,13 @@ import { runCheckFacts } from "../../src/domains/safety/observed-checks.js";
 import { checkOutputReader, createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { builtin } from "../../src/tools/builtin-tool-catalog.js";
 import {
+	bareFinishVerdict,
 	completionOfToolResult,
 	finishRoundDue,
 	finishSiblingRefusal,
 	finishTool,
-	finishWithoutReplyRefusal,
 	sealCompletion,
+	withoutReplyLimitation,
 } from "../../src/tools/finish.js";
 import { limitationTool } from "../../src/tools/limitation.js";
 import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
@@ -1078,27 +1079,32 @@ describe("the finish declaration (fleet design 4.3)", () => {
 			strictEqual(finishRoundDue({ ...turn, ...change }), false, JSON.stringify(change));
 	});
 
-	it("refuses an attended finish whose response carries no reply text, before it runs (FX-40)", () => {
+	it("refuses an attended finish whose response carries no reply text once per user turn (FX-40)", () => {
 		const finish = { name: ToolNames.Finish, arguments: { state: "done" } };
-		const attended = { headless: false, origin: "operator" };
+		const attended = { headless: false, origin: "operator", refusedThisTurn: false };
 		const bare = {
 			content: [{ type: "thinking", thinking: "done" }, { type: "text", text: " \n" }, { type: "toolCall" }],
 		};
-		const refusal = finishWithoutReplyRefusal(finish, bare, attended);
-		strictEqual(
-			refusal?.reason,
-			"finish did not run: this response has no reply text. Write your reply to the operator, then call finish.",
-		);
+		strictEqual(bareFinishVerdict(finish, bare, attended), "refuse");
+		// The turn's one refusal is spent: the next bare finish runs, and its declaration records the missing reply.
+		strictEqual(bareFinishVerdict(finish, bare, { ...attended, refusedThisTurn: true }), "admit");
+		deepStrictEqual(withoutReplyLimitation({ state: "done", limitations: [], unverified: [] }).limitations, [
+			{ what: "the response that declared completion carried no reply text for the operator", why: "other" },
+		]);
 		// A refused call carries no declaration in its result, so it seals nothing.
 		strictEqual(completionOfToolResult(ToolNames.Finish, { details: {} }), null);
 		const replied = { content: [{ type: "text", text: "pineapple" }, { type: "toolCall" }] };
-		strictEqual(finishWithoutReplyRefusal(finish, replied, attended), undefined);
-		strictEqual(finishWithoutReplyRefusal({ name: ToolNames.Read, arguments: {} }, bare, attended), undefined);
+		strictEqual(bareFinishVerdict(finish, replied, attended), null);
+		strictEqual(bareFinishVerdict({ name: ToolNames.Read, arguments: {} }, bare, attended), null);
 		for (const unattended of [
 			{ headless: true, origin: "operator" },
 			...["job", "continuation"].map((origin) => ({ headless: false, origin })),
 		])
-			strictEqual(finishWithoutReplyRefusal(finish, bare, unattended), undefined, JSON.stringify(unattended));
+			strictEqual(
+				bareFinishVerdict(finish, bare, { ...unattended, refusedThisTurn: false }),
+				null,
+				JSON.stringify(unattended),
+			);
 	});
 
 	it("assesses a textless declared done over an unvalidated edit as partly_done (fleet design 4.3)", () => {

@@ -213,7 +213,7 @@ async function stoppedTurn(dir: string, mode: "undeclared" | "declared" | "hando
 							name: "gateway",
 							arguments: { op: "call", capability: "finish", args: { state: "done" } },
 						});
-						// A second bare finish in the same user turn, which runs and declares.
+						// Refused once in this user turn: the next bare finish runs and declares.
 						await gate(finish);
 						const message = {
 							role: "assistant",
@@ -367,13 +367,19 @@ test("a turn declared through finish is never continued: no required-tool round,
 	ok(terminal >= 0 && followUp > terminal, `terminal row ${terminal}, follow-up row ${followUp}`);
 });
 
-test("an operator message handed into a continuation makes the turn attended (FX-40)", async (t) => {
+test("an attended finish with no reply text is refused once per user turn; a handed-over message is attended (FX-40)", async (t) => {
 	const scratch = await isolateClioEnv("clio-coder-continuation-bare-");
 	t.after(() => scratch.restore());
-	const { submitted, gates } = await stoppedTurn(scratch.dir, "bare");
+	const { submitted, gates, sealed } = await stoppedTurn(scratch.dir, "bare");
 	strictEqual(submitted[1]?.origin.origin, "continuation");
-	deepStrictEqual(gates.slice(0, 2), [
+	deepStrictEqual(gates, [
 		"ran",
 		"finish did not run: this response has no reply text. Write your reply to the operator, then call finish.",
+		"ran",
+	]);
+	// The bare finish that ran still declares, and the seal records that its response carried no reply.
+	strictEqual(sealed?.claimed, "done");
+	deepStrictEqual(sealed?.limitations, [
+		{ what: "the response that declared completion carried no reply text for the operator", why: "other" },
 	]);
 });

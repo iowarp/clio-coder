@@ -135,23 +135,36 @@ function unattendedTurn(turn: { headless: boolean; origin: string | undefined })
 
 /**
  * On an attended turn `finish` closes the reply the operator reads, so a response that carries no assistant text is
- * refused before it runs and declares nothing (FX-40). The check is typed: a non-empty text block in that response,
+ * refused before it runs and declares nothing (FX-40). The refusal runs before the registry, where no loop guard or
+ * turn budget sees it, so it happens at most once per user turn: a later bare finish in that turn runs, and its
+ * declaration records the missing reply as a limitation. The check is typed: a non-empty text block in that response,
  * never its wording. An unattended turn keeps a bare finish, which its pinned declaration round asks for.
  */
-export function finishWithoutReplyRefusal(
+export function bareFinishVerdict(
 	toolCall: { name: string; arguments: unknown },
 	assistantMessage: { content: ReadonlyArray<{ type: string; text?: unknown }> },
-	turn: { headless: boolean; origin: string | undefined },
-): { block: true; reason: string } | undefined {
-	if (unattendedTurn(turn)) return undefined;
-	if (effectiveToolCall(toolCall.name, toolCall.arguments).toolName !== ToolNames.Finish) return undefined;
+	turn: { headless: boolean; origin: string | undefined; refusedThisTurn: boolean },
+): "refuse" | "admit" | null {
+	if (unattendedTurn(turn)) return null;
+	if (effectiveToolCall(toolCall.name, toolCall.arguments).toolName !== ToolNames.Finish) return null;
 	const replied = assistantMessage.content.some(
 		(block) => block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0,
 	);
-	if (replied) return undefined;
+	if (replied) return null;
+	return turn.refusedThisTurn ? "admit" : "refuse";
+}
+
+export const FINISH_WITHOUT_REPLY_REFUSAL =
+	"finish did not run: this response has no reply text. Write your reply to the operator, then call finish.";
+
+/** The declaration of a bare finish admitted after its turn's one refusal, with the missing reply on record (FX-40). */
+export function withoutReplyLimitation(completion: CompletionDeclaration): CompletionDeclaration {
 	return {
-		block: true,
-		reason: "finish did not run: this response has no reply text. Write your reply to the operator, then call finish.",
+		...completion,
+		limitations: [
+			...completion.limitations,
+			{ what: "the response that declared completion carried no reply text for the operator", why: "other" },
+		],
 	};
 }
 
