@@ -45,6 +45,13 @@ describe("safety: read-then-fetch taint", () => {
 			strictEqual(after.ruleId, "secret-read-then-fetch");
 			// A bare address carries nothing built from local content.
 			strictEqual(policy.evaluate({ tool, args: { url: "https://example.com/" } }).kind, "allow");
+			const carriers = [
+				{ url: "https://QVBJX0tFWT1hYmMxMjM0NTY3.example.com/" },
+				{ url: "https://example.com/", headers: { "X-K": "abc123" } },
+				{ url: "https://example.com/", method: "POST", body: "API_KEY=abc123" },
+			];
+			for (const args of carriers) strictEqual(policy.evaluate({ tool, args }).kind, "ask", JSON.stringify(args));
+			strictEqual(policy.evaluate({ tool, args: { url: "https://docs.example.com/", headers: {} } }).kind, "allow");
 		});
 	}
 });
