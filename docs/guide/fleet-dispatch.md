@@ -2385,7 +2385,7 @@ separately limits the returned result, not the stored summary.
 The result a dispatch call or `monitor(mode="collect")` returns to the model is compact by
 default. Each run keeps its key facts, its trust or verdict line and its evidence notices,
 without the diagnostic route and context labels, and an excerpt of its answer of at most
-2,000 bytes, cut at a line boundary when one falls in its second half. A cut answer ends
+2,000 bytes (a collect shares 12,000 bytes across its succeeded runs instead), cut at a line boundary when one falls in its second half. A cut answer ends
 with `[answer excerpt: <kept> of <total> bytes; the whole answer is in monitor(mode="record", run_id="<runId>")]`,
 and the record mode leads with that answer. Setting `max_output_bytes` on a dispatch call
 returns the full form instead: each run's whole answer up to its share of that many bytes in

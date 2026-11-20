@@ -363,7 +363,10 @@ it("round-trips a 1200-word cited Coder explanation through dispatch, the receip
 		const collected = await monitor.run({ mode: "collect", run_ids: [run.id] }, {});
 		strictEqual(collected.kind, "ok");
 		if (collected.kind !== "ok") return;
-		match(collected.output, /answer excerpt: \d+ of \d+ bytes; the whole answer is in monitor\(mode="record"/u);
+		// A lone succeeded run takes the whole 12 KB batch budget, so collect delivers the answer whole (XR-62).
+		ok(Buffer.byteLength(output, "utf8") > 2000 && Buffer.byteLength(output, "utf8") < 12_000);
+		ok(collected.output.includes("Stencil note 10."), collected.output);
+		ok(!/answer excerpt|helper result excerpt/u.test(collected.output), collected.output);
 		ok(!collected.output.includes("stored output truncated"));
 	} finally {
 		await bundle.extension.stop?.();

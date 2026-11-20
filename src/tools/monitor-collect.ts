@@ -24,6 +24,7 @@ import {
 	compactAnswer,
 	compactHelperResultLines,
 	type FinishedRun,
+	RECORD_ANSWER_MAX_BYTES,
 	runEvidenceLabels,
 	runHelperResult,
 	workerTextLabel,
@@ -120,13 +121,40 @@ interface CollectedRunRow extends CollectRow {
 	evidence: DurableRunEvidence;
 }
 
-function collectRunLine(row: CollectedRunRow): string[] {
+/** One run's answer size as its collect line would print it whole: the helper result, else the delivered text. */
+function rowAnswerBytes(row: CollectedRunRow): number {
+	const run = row.evidence.run;
+	if (run === null) return 0;
+	const helper = runHelperResult(run, row.evidence.integrity);
+	if (helper !== null) return Buffer.byteLength(JSON.stringify(helper.data), "utf8");
+	return Buffer.byteLength(run.delivered?.output?.text ?? "", "utf8");
+}
+
+/**
+ * Each row's answer budget. Succeeded runs share RECORD_ANSWER_MAX_BYTES, smallest answer first, so room a short
+ * answer leaves goes to a longer one; no run gets less than COMPACT_ANSWER_BYTES (XR-62).
+ */
+function collectAnswerShares(rows: ReadonlyArray<CollectedRunRow>): number[] {
+	const shares = rows.map(() => COMPACT_ANSWER_BYTES);
+	const succeeded = rows
+		.flatMap((row, index) => (row.run?.outcome === "succeeded" ? [{ index, bytes: rowAnswerBytes(row) }] : []))
+		.sort((a, b) => a.bytes - b.bytes);
+	let left = RECORD_ANSWER_MAX_BYTES;
+	for (const [position, entry] of succeeded.entries()) {
+		const share = Math.max(COMPACT_ANSWER_BYTES, Math.min(entry.bytes, Math.floor(left / (succeeded.length - position))));
+		shares[entry.index] = share;
+		left = Math.max(0, left - share);
+	}
+	return shares;
+}
+
+function collectRunLine(row: CollectedRunRow, answerBytes: number): string[] {
 	// The route warnings the dispatch result printed, read back from the sealed record (FL-6).
 	const routeWarnings = (row.evidence.run?.facts.routeWarnings ?? []).map(
 		(message) => `  route_warning ${row.runId}: ${message}`,
 	);
 	if (row.evidence.run !== null) {
-		const helperLines = compactHelperResultLines(row.evidence.run, row.evidence.integrity, COMPACT_ANSWER_BYTES);
+		const helperLines = compactHelperResultLines(row.evidence.run, row.evidence.integrity, answerBytes);
 		if (helperLines !== null) return [...helperLines, ...routeWarnings];
 	}
 	const run = row.run;
@@ -156,7 +184,7 @@ function collectRunLine(row: CollectedRunRow): string[] {
 	lines.push(`  ${workerTextLabel(row.evidence.trustStatus, row.evidence.run)}`);
 	const output = row.evidence.run?.delivered?.output ?? null;
 	if (output) {
-		const capped = compactAnswer(output.text, row.runId);
+		const capped = compactAnswer(output.text, row.runId, answerBytes);
 		const qualifier = output.state === "partial" ? " (partial; the run did not complete this message)" : "";
 		const truncatedNote = output.truncated ? ` (stored output truncated; full text was ${output.bytes} bytes)` : "";
 		lines.push(`  agent output${qualifier}${truncatedNote}:`, ...capped.split("\n").map((line) => `  ${line}`));
@@ -311,6 +339,7 @@ export async function collectRuns(
 		}
 	}
 	const collectedRows: CollectedRunRow[] = rows.map((row) => ({ ...row, evidence: durableRunEvidence(row.run) }));
+	const answerShares = collectAnswerShares(collectedRows);
 	// A background batch shows the attempts a retry recovered from, as a foreground dispatch result does (FL-9).
 	const failedAttempts = rows.flatMap((row) =>
 		row.run === null
@@ -332,7 +361,7 @@ export async function collectRuns(
 				failedAttempts.filter((entry) => entry.recoveredBy === row.runId),
 			),
 		),
-		...collectedRows.flatMap((row) => collectRunLine(row)),
+		...collectedRows.flatMap((row, index) => collectRunLine(row, answerShares[index] ?? COMPACT_ANSWER_BYTES)),
 		...(board !== null ? ["", board] : []),
 		...(batchId.length > 0 && !collected
 			? ["", "note: the batch record could not be marked collected; it stays open for a later collect."]

@@ -20,7 +20,7 @@ import { listJobMonitor, runJobMonitor } from "./monitor-jobs.js";
 import { monitorToolSurface } from "./monitor-surface.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
-import type { FinishedRun } from "./worker-evidence.js";
+import { type FinishedRun, RECORD_ANSWER_MAX_BYTES } from "./worker-evidence.js";
 
 /**
  * The monitor tool: read-only visibility into known synchronous and detached
@@ -50,7 +50,6 @@ const LIST_LIMIT = 20;
 const PEEK_MAX_BYTES = 8 * 1024;
 const RECORD_MAX_BYTES = 14 * 1024;
 /** The answer leads a record and the JSON takes what is left, so the whole stays under the 16 KiB summary bound. */
-const RECORD_ANSWER_MAX_BYTES = 12_000;
 const WAIT_DEFAULT_TIMEOUT_MS = 60_000;
 const WAIT_MAX_TIMEOUT_MS = 10 * 60_000;
 /**

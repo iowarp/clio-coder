@@ -131,6 +131,12 @@ function taskWorktreeLines(run: FinishedRun): string[] {
  */
 export const COMPACT_ANSWER_BYTES = 2000;
 
+/**
+ * The most a run record prints of an answer, and the answer budget a collect shares across a batch's succeeded runs,
+ * so a 2-3 run batch delivers whole answers (XR-62).
+ */
+export const RECORD_ANSWER_MAX_BYTES = 12_000;
+
 /** Where the whole answer of a compacted run is read. */
 function fullRecordPointer(runId: string): string {
 	return `monitor(mode="record", run_id=${JSON.stringify(runId)})`;
@@ -149,6 +155,31 @@ export function compactAnswer(text: string, runId: string, maxBytes = COMPACT_AN
 	return `${kept}\n[answer excerpt: ${Buffer.byteLength(kept, "utf8")} of ${total} bytes; the whole answer is in ${fullRecordPointer(runId)}]`;
 }
 
+/**
+ * A helper result within `maxBytes` whole; past it, the leading findings that fit as whole JSON when the result
+ * carries a findings list, else a byte excerpt, followed by what was shown of the total and the call that reads it all.
+ */
+function helperResultExcerpt(data: unknown, runId: string, maxBytes: number): string {
+	const whole = JSON.stringify(data);
+	const total = Buffer.byteLength(whole, "utf8");
+	if (total <= maxBytes) return whole;
+	const rest = `of ${total} bytes; the whole result is in ${fullRecordPointer(runId)}]`;
+	const findings =
+		typeof data === "object" && data !== null && Array.isArray((data as { findings?: unknown }).findings)
+			? (data as { findings: unknown[] }).findings
+			: null;
+	if (findings !== null) {
+		for (let shown = findings.length - 1; shown > 0; shown--) {
+			const text = JSON.stringify({ ...(data as object), findings: findings.slice(0, shown) });
+			const bytes = Buffer.byteLength(text, "utf8");
+			if (bytes <= maxBytes)
+				return `${text}\n[helper result excerpt: showing ${shown} of ${findings.length} findings, ${bytes} ${rest}`;
+		}
+	}
+	const head = truncateUtf8(whole, maxBytes, "");
+	return `${head}\n[helper result excerpt: ${Buffer.byteLength(head, "utf8")} ${rest}`;
+}
+
 export function compactHelperResultLines(run: FinishedRun, integrity: RunIntegrity, maxBytes: number): string[] | null {
 	const result = runHelperResult(run, integrity);
 	if (result === null) return null;
@@ -162,7 +193,7 @@ export function compactHelperResultLines(run: FinishedRun, integrity: RunIntegri
 						: "  Content is contract-valid; its factual accuracy is not measured.",
 				]
 			: []),
-		`  ${truncateUtf8(JSON.stringify(result.data), maxBytes, "\n[helper result preview truncated; inspect the run record for the full result]")}`,
+		`  ${helperResultExcerpt(result.data, run.runId, maxBytes)}`,
 		// The run's own work counters: without them a helper result hides `mutations:no` on an edit task (FX-4).
 		...activityLabels(run, finishedRunTrustStatus(run, integrity)).map((label) => `  ${label}`),
 		...taskWorktreeLines(run),
