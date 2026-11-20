@@ -387,6 +387,31 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		strictEqual(decision.kind, "block", command);
 		strictEqual(decision.reasonCode, `yolo-floor:${ruleId}`, command);
 	}
+	// CLI-P31: only a parsed `config trust` argv is a grant; a loop list, a help request and quoted data are not.
+	for (const command of [
+		"node dist/cli/index.js config trust settings",
+		"corepack pnpm exec tsx src/cli/index.ts config --scope project trust safety",
+		"bash <<EOF\nclio-coder config trust safety\nEOF",
+		// A symlink or alias names the launcher anything; the argv decides.
+		"./workspace-cli config trust safety",
+	])
+		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).reasonCode, "yolo-floor:trust-authority", command);
+	for (const command of [
+		'H=$(mktemp -d); for a in config get --help "config trust --help"; do HOME=$H node dist/cli/index.js $a; done',
+		"clio-coder config trust safety --help",
+		'git commit -m "$(date) config trust fix"',
+		"echo config trust safety",
+	])
+		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).kind, "allow", command);
+	// An authority-class refusal sends the model to the operator, never into a script or file that runs it.
+	for (const command of [
+		"clio-coder config trust safety",
+		'H=$(mktemp -d); git commit -m "run clio-coder config trust safety"',
+	]) {
+		const reasons = (engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).reasons ?? []).join("\n");
+		match(reasons, /only the operator makes this change/u, command);
+		doesNotMatch(reasons, /write tool|pass the file/u, command);
+	}
 	const edit = { tool: ToolNames.Write, args: { path: join(home.dir, "config", "runtimes", "local.js"), content: "x" } };
 	strictEqual(engine.evaluate(edit, "yolo", OPERATOR_YOLO).reasonCode, "yolo-floor:clio-owned-state");
 	// CLI-H4: a Clio variable pinned to a scratch home is judged by that path; every route back to the real one blocks.
@@ -636,6 +661,74 @@ test("yolo reads a shell script by the floor alone and runs what it cannot read 
 	}
 	const runScript = { tool: ToolNames.RunScript, args: { interpreter: "sh", script: join(outside, "wipe.sh") } };
 	strictEqual(engine.evaluate(runScript, "yolo", OPERATOR_YOLO).kind, "block");
+	// CLI-P31: a script run by path or sourced is read as `bash x.sh` is; another interpreter's file is not shell.
+	writeFileSync(join(outside, "grant.sh"), "#!/usr/bin/env bash\nclio-coder config trust safety\n", { mode: 0o755 });
+	writeFileSync(join(outside, "grant.py"), '#!/usr/bin/env python3\nprint("clio-coder config trust safety")\n', {
+		mode: 0o755,
+	});
+	for (const command of [
+		join(outside, "grant.sh"),
+		`cd ${outside} && ./grant.sh`,
+		`source ${join(outside, "grant.sh")}`,
+	])
+		strictEqual(judged(command).reasonCode, "yolo-floor:trust-authority", command);
+	strictEqual(judged(join(outside, "grant.py")).kind, "allow");
+	// `source name` loads the first hit on the bash tool's PATH, else the cwd one. A fresh process whose login profile puts
+	// `bin` on that PATH while its own PATH alone leads with `other`, so the two differ as they can in a session.
+	const bin = workspace("clio-yolo-script-path-");
+	const other = workspace("clio-yolo-script-other-");
+	const home = workspace("clio-yolo-script-home-");
+	const sub = workspace("clio-yolo-script-sub-");
+	writeFileSync(join(home, ".bash_profile"), `export PATH=${bin}:"$PATH"\n`);
+	writeFileSync(join(sub, "child.sh"), "clio-coder config trust safety\n");
+	// Rewriting only the cwd copy leaves the PATH copy bash loads unchanged, so it is still read.
+	writeFileSync(join(bin, "shadow.sh"), "clio-coder config trust safety\n");
+	writeFileSync(join(cwd, "shadow.sh"), "echo ok\n");
+	// The script continues from the copy bash loads, the PATH one, so its `D` places the later relative child.
+	writeFileSync(join(bin, "setup.sh"), `D=${sub}\n`);
+	writeFileSync(join(cwd, "setup.sh"), "true\n");
+	writeFileSync(join(cwd, "parent.sh"), 'source setup.sh\ncd "$D"\nsource ./child.sh\n');
+	// One copy's write does not hide a child another copy sources.
+	writeFileSync(join(bin, "pick.sh"), `echo ok > ${join(sub, "child.sh")}\n`);
+	writeFileSync(join(cwd, "pick.sh"), `source ${join(sub, "child.sh")}\n`);
+	writeFileSync(join(cwd, "picker.sh"), "source pick.sh\n");
+	// Only this process's PATH holds a no-op init.sh; bash finds none on its own PATH and loads the cwd one, which sets D.
+	writeFileSync(join(other, "init.sh"), "true\n");
+	writeFileSync(join(cwd, "init.sh"), `D=${sub}\n`);
+	writeFileSync(join(cwd, "starter.sh"), 'source init.sh\nsource "$D/child.sh"\n');
+	const commands = [
+		"source shadow.sh",
+		". shadow.sh",
+		"echo ok > shadow.sh; source shadow.sh",
+		"bash parent.sh",
+		"bash picker.sh",
+		"bash starter.sh",
+	];
+	const root = process.cwd();
+	const probe = join(workspace("clio-yolo-script-probe-"), "probe.mts");
+	const source = (module: string) => JSON.stringify(join(root, module));
+	writeFileSync(
+		probe,
+		[
+			`import { bashSearchPath, bashSecretValues } from ${source("src/core/bash-exec.ts")};`,
+			`import { createSafetyPolicyEngine } from ${source("src/domains/safety/policy-engine.ts")};`,
+			`import { loadProjectSafetyPolicy } from ${source("src/domains/safety/project-policy.ts")};`,
+			"await bashSecretValues();",
+			`process.env.PATH = ${JSON.stringify(`${other}:`)} + process.env.PATH;`,
+			`const cwd = ${JSON.stringify(cwd)};`,
+			"const engine = createSafetyPolicyEngine({ cwd, projectPolicy: loadProjectSafetyPolicy(cwd) });",
+			`const codes = ${JSON.stringify(commands)}.map((command) =>`,
+			'\tengine.evaluate({ tool: "bash", args: { command } }, "yolo", { scratchRoots: [] }).reasonCode);',
+			`const searchPath = (bashSearchPath() ?? "").split(":");`,
+			`process.stdout.write(JSON.stringify([searchPath.includes(${JSON.stringify(bin)}), searchPath.includes(${JSON.stringify(other)}), ...codes]));`,
+		].join("\n"),
+	);
+	const out = execFileSync(process.execPath, ["--import", "tsx", probe], {
+		cwd: root,
+		env: { ...process.env, HOME: home },
+		encoding: "utf8",
+	});
+	deepStrictEqual(JSON.parse(out), [true, false, ...commands.map(() => "yolo-floor:trust-authority")]);
 });
 
 // #421: Python lines are not shell; #407: a shell script at yolo meets only the floor.

@@ -59,6 +59,16 @@ export function childScriptShell(shell: ScriptShell, context: ScriptContext): Sc
 	};
 }
 
+/** A copy of the shell for one alternative bash may take, such as one candidate file a `source` may load. */
+export function forkScriptShell(shell: ScriptShell): ScriptShell {
+	return {
+		cwds: shell.cwds === null ? null : [...shell.cwds],
+		vars: new Map(shell.vars),
+		exported: new Set(shell.exported),
+		poisoned: new Set(shell.poisoned),
+	};
+}
+
 /** Compound commands open around a line of one file. */
 type Frame = "branch" | "loop" | "function" | "case-head" | "case-pattern" | "case-body";
 

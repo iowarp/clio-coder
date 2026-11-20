@@ -374,6 +374,8 @@ export interface ShellCommandStep {
 	executable: string;
 	/** The command word is a relative path such as `./sbatch` or `bin/ssh`: a workspace file, not the CLI on PATH. */
 	relativePath?: true;
+	/** The command word as written, home expanded, when it names a file by path (`./x.sh`, `/opt/run`, `~/bin/x`). */
+	commandPath?: string;
 	/** Literal words after the command word, redirections removed. */
 	args: string[];
 	/** Targets of `>`-style redirects that replace the file's contents. `>>` is not listed. */
@@ -412,11 +414,13 @@ export function shellCommandSteps(command: string, home?: string): ShellCommandS
 			if (truncatingRedirects.length > 0) steps.push({ executable: "", args: [], truncatingRedirects });
 			continue;
 		}
+		const commandWord = argv[commandIndex] ?? "";
 		steps.push({
 			executable: basenameToken(argv[commandIndex]),
 			args: argv.slice(commandIndex + 1),
 			truncatingRedirects,
 			...(isRelativeCommandPath(argv[commandIndex]) ? { relativePath: true as const } : {}),
+			...(commandWord.includes("/") ? { commandPath: commandWord } : {}),
 		});
 	}
 	return steps;
