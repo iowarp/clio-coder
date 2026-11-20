@@ -132,6 +132,14 @@ test("memory list --json prints each record's review fields, pending and approve
 			records: [
 				{ ...base, id: "mem-00000000000000b1", key: "pending", lesson: "Pending lesson.", approved: false },
 				{ ...base, id: "mem-00000000000000b2", key: "approved", lesson: "Approved lesson.", approved: true },
+				{
+					...base,
+					id: "mem-00000000000000b3",
+					key: "kept",
+					lesson: "Kept lesson.",
+					approved: true,
+					approval: { by: "guardian", at: "2026-09-22T00:00:00.000Z" },
+				},
 			],
 		}),
 	);
@@ -141,10 +149,12 @@ test("memory list --json prints each record's review fields, pending and approve
 	deepStrictEqual(records.map((record) => [record.id, record.approved]).sort(), [
 		["mem-00000000000000b1", false],
 		["mem-00000000000000b2", true],
+		["mem-00000000000000b3", true],
 	]);
 	for (const record of records)
 		deepStrictEqual(Object.keys(record).sort(), [
 			"appliesWhen",
+			...(record.id === "mem-00000000000000b3" ? ["approval"] : []),
 			"approved",
 			"avoidWhen",
 			"confidence",
@@ -158,6 +168,24 @@ test("memory list --json prints each record's review fields, pending and approve
 		]);
 	const refused = run(["list", "--yaml"]);
 	strictEqual(refused.status, 2, refused.stdout + refused.stderr);
+	// CLI-10: audit by approver; a record approved before stamps existed was a person's review, as the prompt reads it.
+	const ids = (args: string[]) => {
+		const result = run(["list", ...args, "--json"]);
+		strictEqual(result.status, 0, result.stdout + result.stderr);
+		return (JSON.parse(result.stdout) as { records: { id: string }[] }).records.map((record) => record.id).join(",");
+	};
+	strictEqual(ids(["--approved-by", "guardian"]), "mem-00000000000000b3");
+	strictEqual(ids(["--approved-by", "operator"]), "mem-00000000000000b2");
+	strictEqual(run(["list", "--approved-by", "someone"]).status, 2);
+	const text = run(["list", "--approved-by", "guardian"]);
+	ok(
+		text.stdout.startsWith("1 memory record\n") && text.stdout.includes("approved by guardian at 2026-09-22"),
+		text.stdout,
+	);
+	ok(!text.stdout.includes("mem-00000000000000b2"), text.stdout);
+	const all = run(["list"]);
+	ok(all.stdout.startsWith("3 memory records\n"), all.stdout);
+	ok(all.stderr.includes("1 memory record pending review"), all.stderr);
 });
 
 test("propose --from-evidence refuses a run or dispatching session that carries a flow label", async () => {
