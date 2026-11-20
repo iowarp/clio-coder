@@ -130,6 +130,7 @@ import {
 	advanceScriptShell,
 	childScriptShell,
 	commandMoveBases,
+	forkScriptShell,
 	newScriptReader,
 	newScriptShell,
 	readScriptLine,
@@ -155,6 +156,8 @@ import { gateProjectSafetyPolicy, workspaceTrustDirectory } from "./workspace-tr
 import {
 	MAX_RAW_TEXT_BYTES,
 	pinnedClioCommand,
+	YOLO_FLOOR_AUTHORITY_REMEDY,
+	YOLO_FLOOR_AUTHORITY_RULE_IDS,
 	YOLO_FLOOR_PACK_RULE_IDS,
 	YOLO_FLOOR_REASON_PREFIX,
 	YOLO_FLOOR_RULE_IDS,
@@ -164,6 +167,9 @@ import {
 	yoloFloorDeleteHit,
 	yoloFloorExecutableHit,
 	yoloFloorRawCandidates,
+	yoloFloorScriptRuns,
+	yoloFloorShellScript,
+	yoloFloorTrustGrant,
 } from "./yolo-floor.js";
 
 export type SafetyPolicySource =
@@ -1093,6 +1099,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		commands: ReadonlyArray<string>,
 		callCwd: string,
 		trees: ClioOwnedTrees,
+		rawText = false,
 	): { match: DamageControlMatch; source: SafetyPolicySource } | null => {
 		const text = matchSourcedRule(texts, floorRules);
 		if (text !== null) return text;
@@ -1103,7 +1110,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const deleted = yoloFloorDeleteHit(candidate, callCwd, cwd);
 			if (deleted !== null) return floorMatch(deleted);
 		}
-		if (invokesTrustMutation(command)) {
+		if (invokesTrustMutation(command, rawText)) {
 			return floorMatch({
 				ruleId: YOLO_FLOOR_RULE_IDS.trustAuthority,
 				reason: `matched ${YOLO_FLOOR_RULE_IDS.trustAuthority}: workspace trust grants require the operator CLI`,
@@ -1216,7 +1223,12 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		) => ({
 			ruleId: hit.match.ruleId,
 			reasonCode: `${YOLO_FLOOR_REASON_PREFIX}${hit.match.ruleId}`,
-			reasons: [...reasons, hit.match.reason, "the yolo floor holds at every autonomy level"],
+			reasons: [
+				...reasons,
+				hit.match.reason,
+				...(YOLO_FLOOR_AUTHORITY_RULE_IDS.has(hit.match.ruleId) ? [YOLO_FLOOR_AUTHORITY_REMEDY] : []),
+				"the yolo floor holds at every autonomy level",
+			],
 			match: hit.match,
 			policySource: hit.source,
 			...(floorBasis !== undefined ? { floorBasis } : {}),
@@ -1253,9 +1265,14 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		for (const candidate of raw?.candidates ?? []) {
 			const read = credentialReadHit({ tool: ToolNames.Bash, args: { command: candidate } }, callCwd, candidate);
 			const hit =
-				commandFloorHit([candidate], [candidate], callCwd, trees) ?? (read === null ? null : floorMatch(read, "read"));
+				commandFloorHit([candidate], [candidate], callCwd, trees, true) ??
+				(read === null ? null : floorMatch(read, "read"));
 			if (hit !== null) {
-				const reason = `matched ${YOLO_FLOOR_RULE_IDS.rawText}: ${RAW_TEXT_REASON}: "${candidate.slice(0, 200)}" is a floor command even if it is only quoted data (fail-closed); write that text to a file with the write tool and pass the file`;
+				// Moving an operator-only command into a file changes nothing: the script scan refuses it there too (CLI-P31).
+				const remedy = YOLO_FLOOR_AUTHORITY_RULE_IDS.has(hit.match.ruleId)
+					? YOLO_FLOOR_AUTHORITY_REMEDY
+					: "write that text to a file with the write tool and pass the file";
+				const reason = `matched ${YOLO_FLOOR_RULE_IDS.rawText}: ${RAW_TEXT_REASON}: "${candidate.slice(0, 200)}" is a floor command even if it is only quoted data (fail-closed); ${remedy}`;
 				return held(
 					{ match: { ...hit.match, ruleId: YOLO_FLOOR_RULE_IDS.rawText, reason }, source: hit.source },
 					[hit.match.reason],
@@ -1282,6 +1299,19 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const budget = newScriptBudget();
 			for (const script of shellScriptSources(command) ?? []) {
 				const hit = scriptHit(scanCommandScript(script, line, callCwd, cwds, written, budget));
+				if (hit !== null) return hit;
+			}
+		}
+		// `./x.sh` and `source x.sh` run a file as `bash x.sh` does, so the floor reads it the same way (CLI-P31). A file
+		// the scan cannot read keeps the rails it meets today.
+		const runs = call.tool === ToolNames.Bash && command !== null ? yoloFloorScriptRuns(command) : [];
+		if (command !== null && runs.length > 0) {
+			const cwds = commandMoveBases(command, callCwd);
+			const written = commandWrittenPaths(command, cwds ?? [callCwd], newWrittenPaths());
+			const budget = newScriptBudget();
+			for (const run of runs) {
+				const source = { path: run.path, program: !run.sourced, sourced: run.sourced, stdin: false };
+				const hit = scriptHit(scanCommandScript(source, line, callCwd, cwds, written, budget, !run.sourced));
 				if (hit !== null) return hit;
 			}
 		}
@@ -3812,6 +3842,10 @@ function isWrittenFirst(file: string, written: WrittenPaths): boolean {
 	return written.files.has(file) || [...written.trees].some((tree) => isSameOrDescendant(file, tree));
 }
 
+function copyWrittenPaths(written: WrittenPaths): WrittenPaths {
+	return { files: new Set(written.files), trees: new Set(written.trees) };
+}
+
 /** The nearest directory at or above `dir` that holds `.git`, else `dir`. */
 function gitWorkTree(dir: string): string {
 	for (let current = dir; ; current = path.dirname(current)) {
@@ -3837,27 +3871,20 @@ function scanCommandScript(
 	cwds: string[] | null,
 	written: WrittenPaths,
 	budget: ScriptBudget,
+	shellOnly = false,
 ): ScriptHit | null {
 	const operand = script.path;
 	if (/^[<>]\(/u.test(operand)) return null;
-	const candidates = scriptCandidates(operand, cwds);
-	const files = candidates.filter((candidate): candidate is string => candidate !== null);
-	if (files.length < candidates.length) return null;
-	for (const file of files) {
-		if (isWrittenFirst(file, written)) return null;
-		let regular: boolean | undefined;
-		try {
-			regular = statSync(file, { throwIfNoEntry: false })?.isFile();
-		} catch {
-			// A path the stat cannot reach is not one the scan can call a regular file.
-			regular = false;
-		}
-		if (regular !== true) return null;
-	}
+	const candidates = scriptCandidates(operand, cwds, script.sourced);
+	if (candidates.includes(null)) return null;
+	// Each candidate is skipped on its own: rewriting one copy leaves another that bash may load (CLI-P31).
+	const files = (candidates as string[]).filter((file) => !isWrittenFirst(file, written) && regularFile(file));
 	// `bash x.sh` runs with `$0` as written; on standard input `$0` names the shell.
 	const name = operand === "~" || operand.startsWith("~/") ? expandPath(operand) : operand;
 	const names: ScriptNames = script.stdin ? { zero: null, source: null } : { zero: name, source: name };
 	for (const file of files) {
+		// A program run by path is read only when it is shell source; a binary or another interpreter is not (CLI-P31).
+		if (shellOnly && yoloFloorShellScript(file) !== true) continue;
 		const scan = scanNamedScript(file, floorLine, callCwd, cwds, budget, names);
 		if (scan !== null) return scan;
 	}
@@ -3947,8 +3974,12 @@ function scanScript(
 		commandWrittenPaths(read.expanded, cwds ?? [scan.callCwd], scan.written);
 		if (depth >= FLOOR_SCRIPT_NEST_DEPTH) continue;
 		for (const source of sources) {
-			for (const candidate of scriptCandidates(source.path, cwds)) {
-				if (candidate !== null && isWrittenFirst(candidate, scan.written)) continue;
+			// Every candidate is scanned for a refusal from its own copy of the shell and of the writes so far; bash
+			// loads the first one not written first, so the script continues from that copy alone (CLI-P31).
+			let loaded: { shell: ScriptShell; written: WrittenPaths } | null = null;
+			for (const candidate of scriptCandidates(source.path, cwds, source.sourced)) {
+				if (candidate === null || isWrittenFirst(candidate, scan.written) || !regularFile(candidate)) continue;
+				const branch: ScriptScan = { ...scan, written: copyWrittenPaths(scan.written) };
 				// `source` runs in this shell; `bash`, `sh` and `exec` start a child that changes nothing here.
 				// A sourced file keeps the script's `$0`; a child shell gets the name it was run by.
 				const names: ScriptNames = source.stdin
@@ -3956,11 +3987,16 @@ function scanScript(
 					: source.sourced
 						? { zero: reader.names.zero, source: source.path }
 						: { zero: source.path, source: source.path };
-				const inner = source.sourced
-					? scanScript(candidate, scan, shell, newScriptReader(read.context, names), depth + 1)
-					: scanScript(candidate, scan, childScriptShell(shell, read.context), newScriptReader("plain", names), depth + 1);
+				const branchShell = source.sourced ? forkScriptShell(shell) : childScriptShell(shell, read.context);
+				const branchReader = newScriptReader(source.sourced ? read.context : "plain", names);
+				const inner = scanScript(candidate, branch, branchShell, branchReader, depth + 1);
 				if (inner !== null) return inner;
+				loaded ??= { shell: branchShell, written: branch.written };
 			}
+			if (loaded === null) continue;
+			for (const file of loaded.written.files) scan.written.files.add(file);
+			for (const tree of loaded.written.trees) scan.written.trees.add(tree);
+			if (source.sourced) Object.assign(shell, loaded.shell);
 		}
 	}
 	return null;
@@ -3970,15 +4006,47 @@ function scanScript(
  * The files a script operand can name from the directories the shell may be
  * in: the ones that exist, or the first candidate when none does, so its scan
  * reports it. A dynamic name, or a relative one from an unknown directory, is
- * a null candidate.
+ * a null candidate. A sourced name with no slash is looked up as bash does, on
+ * every directory of the bash tool's PATH in its order and then the directory,
+ * and every regular file found is a candidate, the one bash loads first (CLI-P31).
  */
-function scriptCandidates(operand: string, cwds: ReadonlyArray<string> | null): Array<string | null> {
+function scriptCandidates(operand: string, cwds: ReadonlyArray<string> | null, sourced = false): Array<string | null> {
 	if (/[$`*?[{]/u.test(operand)) return [null];
 	if (operand === "~" || operand.startsWith("~/") || path.isAbsolute(operand)) return [scriptPath(operand, "/")];
+	const local = cwds === null ? [] : [...new Set(cwds.map((cwd) => path.resolve(cwd, operand)))];
+	const exists = (candidate: string) => statSync(candidate, { throwIfNoEntry: false }) !== undefined;
+	if (sourced && !operand.includes("/")) {
+		const found = [
+			...new Set([...sourceSearchDirs(cwds).map((dir) => path.join(dir, operand)), ...local].filter(regularFile)),
+		];
+		if (found.length > 0) return found;
+	}
 	if (cwds === null) return [null];
-	const candidates = [...new Set(cwds.map((cwd) => path.resolve(cwd, operand)))];
-	const existing = candidates.filter((candidate) => statSync(candidate, { throwIfNoEntry: false }) !== undefined);
-	return existing.length > 0 ? existing : candidates.slice(0, 1);
+	const existing = local.filter(exists);
+	return existing.length > 0 ? existing : local.slice(0, 1);
+}
+
+/**
+ * The directories `source name` searches, in bash's order: the PATH bash commands run with, alone, so the first hit is
+ * the file bash loads; this process's PATH only while the bash tool has none yet. A relative entry is placed from every
+ * directory the shell may be in.
+ */
+function sourceSearchDirs(cwds: ReadonlyArray<string> | null): string[] {
+	const dirs = new Set<string>();
+	for (const entry of (bashSearchPath() ?? process.env.PATH ?? "").split(path.delimiter)) {
+		if (path.isAbsolute(entry)) dirs.add(entry);
+		else for (const cwd of cwds ?? []) dirs.add(path.resolve(cwd, entry));
+	}
+	return [...dirs];
+}
+
+/** Whether a path is a regular file now; a path the stat cannot reach is not. */
+function regularFile(candidate: string): boolean {
+	try {
+		return statSync(candidate, { throwIfNoEntry: false })?.isFile() === true;
+	} catch {
+		return false;
+	}
 }
 
 /** Clio's resolved config, data, state and cache trees, and the ways a command can spell them. */
@@ -6015,16 +6083,11 @@ function rulePackHash(rules: ReadonlyArray<DamageControlRule>): string {
 	return createHash("sha256").update(JSON.stringify({ base }), "utf8").digest("hex");
 }
 
-function invokesTrustMutation(command: string): boolean {
+function invokesTrustMutation(command: string, rawText = false): boolean {
 	// Wrappers, package launchers, quoted argv and source-tree CLI invocations
-	// must not turn an operator-only grant into model authority.
-	const words = scanShellLikeDeep(command)
-		.filter((token) => !token.operator)
-		.map((token) => token.value);
-	return (
-		words.some((word, index) => word === "config" && words[index + 1] === "trust") ||
-		/\bconfig\s+trust\b/.test(inlineShellScript(command) ?? "")
-	);
+	// must not turn an operator-only grant into model authority; a loop list,
+	// a help request or quoted data is not a grant (CLI-P31).
+	return yoloFloorTrustGrant(command, rawText);
 }
 
 function projectScriptPreview(command: string, cwd: string): string {

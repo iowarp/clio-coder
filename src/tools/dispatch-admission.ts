@@ -8,7 +8,7 @@ import type {
 	DispatchRequest,
 } from "../domains/dispatch/contract.js";
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
-import { councilJudgeAgentId, gateDeciderAgentId } from "../domains/dispatch/execution-role.js";
+import { councilJudgeAgentId, gateDeciderAgentId, reviewDeciderAgentId } from "../domains/dispatch/execution-role.js";
 import {
 	COUNCIL_JUDGE_PROMPT,
 	COUNCIL_MAX_MEMBERS,
@@ -908,7 +908,9 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 					tasks.push(
 						resolveTask(
 							{
-								agentId: gateDeciderAgentId(reviewResult.review.reviewer),
+								agentId: reviewDeciderAgentId(reviewResult.review.reviewer, (id) =>
+									deps.getAgentSpecs().some((spec) => spec.id === id),
+								),
 								...(base.budget === undefined ? {} : { budget: base.budget }),
 								...(base.record === undefined ? {} : { record: base.record }),
 								executionRole: "reviewer",

@@ -173,7 +173,7 @@ describe("dispatch admission boundary", () => {
 		try {
 			const request = {
 				agentId: "scout",
-				task: "Report this repository's build and test commands.",
+				task: "Add a test that runs this repository's build commands.",
 				executionRole: "researcher" as const,
 				requestOrigin: "harness" as const,
 				readOnly: true,
@@ -413,8 +413,7 @@ describe("dispatch admission boundary", () => {
 
 	it("lets a typed intent that declares no writes outrank the prose classifier for a read-only recipe", () => {
 		const specs = [agent("scout", "read-only"), agent("coder", "workspace-edit")];
-		const task =
-			"Reconnaissance question: find every caller of shouldCompact; the fix will write the failing test first.";
+		const task = "Reconnaissance question: find every caller of shouldCompact; then write the failing test first.";
 		strictEqual(
 			assessCapabilityMismatch({
 				agentId: "scout",

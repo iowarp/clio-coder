@@ -558,13 +558,26 @@ export function createDetachedDispatchNudgeRegistration(
 				return [];
 			}
 			const ready = views.filter((view) => view.total > 0 && view.terminal >= view.total);
-			if (ready.length === 0) return [];
+			if (ready.length === 0) {
+				// Fleet design 4.3: a declared turn over a child still running has an uncollected run; nothing is ready
+				// to collect, so only the fact is sealed.
+				if (input.metadata?.completionState === undefined || views.length === 0) return [];
+				return [
+					{
+						kind: "inject_reminder",
+						audience: "model",
+						message: `[CLIO Coder] ${views.length} detached dispatch batch(es) are still running and uncollected; collect them with monitor before calling the work done.`,
+						fact: "uncollected_run",
+					},
+				];
+			}
 			return [
 				{
 					kind: "request_continuation",
 					note: "finished detached batches are waiting",
 					toolFree: true,
 					message: `Clio will collect ${ready.length} finished detached batch(es) before the next model call.`,
+					fact: "uncollected_run",
 				},
 			];
 		},

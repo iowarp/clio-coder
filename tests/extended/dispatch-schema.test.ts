@@ -6,6 +6,14 @@ import { describe, it } from "node:test";
 import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { resolveWorkerSandboxSpec } from "../../src/core/sandbox/worker-policy.js";
+import { renderAgentCatalogSectionsFromSpecs } from "../../src/domains/agents/catalog.js";
+import { DISPATCH_JOB_TABLE_TEXT } from "../../src/domains/agents/dispatch-jobs.js";
+import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
+import { validateResultContract } from "../../src/domains/agents/result-contract.js";
+import { nodeResultContractFilesystem } from "../../src/domains/agents/result-contract-filesystem.js";
+import { agentSpecPolicyErrors, normalizeAgentSpec } from "../../src/domains/agents/spec.js";
+import { assessCapabilityMismatch } from "../../src/domains/dispatch/capability-match.js";
+import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
 import { mergeOperatorNamedChecks, operatorNamedChecks } from "../../src/domains/dispatch/operator-checks.js";
 import { scoutReadWorkspace } from "../../src/domains/dispatch/scout-workspace.js";
 import { streamSimple } from "../../src/engine/ai.js";
@@ -85,7 +93,7 @@ describe("dispatch schema composition", () => {
 			rmSync(base, { recursive: true, force: true });
 		}
 	});
-	it("routes explicit reviews mentioning tests to the verifier without changing test-writing or explicit recipes", () => {
+	it("routes explicit reviews mentioning tests to the reviewer without changing test-writing or explicit recipes", () => {
 		const parsed = dispatchRequestsFromArgs(
 			{
 				agent: "auto",
@@ -101,8 +109,96 @@ describe("dispatch schema composition", () => {
 		assert.ok(parsed.ok);
 		assert.deepEqual(
 			parsed.requests.map((request) => request.agentId),
-			["verifier", "verifier", "tester", "coder"],
+			["reviewer", "reviewer", "tester", "coder"],
 		);
+	});
+
+	it("resolves an omitted agent from the job table, typed write scope outranking the prose classifier (M4)", () => {
+		const parsed = dispatchRequestsFromArgs(
+			{
+				tasks: [
+					"Map the modules that read fleet config.",
+					"Run the test suite and report any failures.",
+					"Diagnose the crash in the parser on empty input.",
+					"Fix the crash in src/parser.ts.",
+					"Add a regression test for the empty-input crash.",
+					{ task: "Map the modules that read fleet config.", intent: { write_roots: ["src"] } },
+					"Resolve the parser crash.",
+					"Where is the configuration loaded?",
+					{ task: "Implement the retry flag in src/config.ts.", intent: { write_roots: [], expected_outputs: [] } },
+					"Summarize the run record for run id 1yd79n91i9b0.",
+					"Do this now: fix the parser crash.",
+					"Can we add a retry flag to the configuration?",
+					"List the fields: address, postal code, and country.",
+					"List the result labels: correct, incorrect, and unknown.",
+					"Why does the parser crash? Which dependency do we need to patch?",
+					"Explain how the checkout service generates customer receipts.",
+				],
+			},
+			{
+				auto: { approvedAuthorities: ["read-only"], authorityBasis: "yolo-policy" },
+				resolveIntent: (raw) => {
+					const declared = normalizeDispatchIntent(raw, new Map());
+					return declared.ok ? { ok: true, intent: declared.intent, resolvedVerification: [] } : declared;
+				},
+			},
+		);
+		assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+		assert.deepEqual(
+			parsed.requests.map((request) => request.agentId),
+			[
+				"scout",
+				"verifier",
+				"debugger",
+				"coder",
+				"tester",
+				"coder",
+				"coder",
+				"scout",
+				"scout",
+				"provenance",
+				"coder",
+				"coder",
+				"scout",
+				"scout",
+				"debugger",
+				"scout",
+			],
+		);
+		// The fix family writes, so a pinned read-only scout on a repair is refused, not seated.
+		for (const task of ["Resolve the parser crash.", "Do this now: fix the parser crash."]) {
+			const pinnedScout = assessCapabilityMismatch({
+				agentId: "scout",
+				capabilityClass: "read-only",
+				task,
+				autoSelected: false,
+				resultContractKind: "scout-report",
+				specs: [],
+			});
+			assert.equal(pinnedScout?.verdict, "refuse", task);
+		}
+		assert.ok(parsed.requests.every((request) => request.agentSelection === undefined));
+		const tool = createDispatchTool({ getAgentSpecs: () => [] } as unknown as DispatchToolDeps);
+		assert.ok(tool.description.startsWith(DISPATCH_JOB_TABLE_TEXT));
+		assert.ok(renderAgentCatalogSectionsFromSpecs([]).stable.startsWith(DISPATCH_JOB_TABLE_TEXT));
+		assert.match(
+			DISPATCH_JOB_TABLE_TEXT,
+			/^Job table \([^)]*\): inspect=scout; review a diff=reviewer; run checks=verifier; diagnose a failure=debugger; add tests=tester; implement=coder;/u,
+		);
+		// The ruled reviewer: read-only by class, verify required, its verdict in the review gate's shape.
+		const reviewer = discoverAgentRecipes(process.cwd()).find((recipe) => recipe.id === "reviewer");
+		assert.ok(reviewer);
+		const spec = normalizeAgentSpec(reviewer);
+		assert.equal(spec.capabilityClass, "verification");
+		assert.deepEqual(agentSpecPolicyErrors(spec), []);
+		const verdict = validateResultContract({
+			contract: spec.resultContract,
+			output: '{"verdict":"pass","checks":[{"name":"diff","passed":true,"evidence":"src/a.ts:3 guards the empty case"}]}',
+			cwd: process.cwd(),
+			networkAllowed: false,
+			filesystem: nodeResultContractFilesystem(),
+		});
+		assert.equal(verdict.conformance, "pass");
 	});
 
 	it("attaches declared checks the operator named in the turn to every task's intent verification", () => {

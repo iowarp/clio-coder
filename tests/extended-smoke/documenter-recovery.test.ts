@@ -95,7 +95,10 @@ for (const scenario of ["dependent-repair", "exhausted"] as const) {
 					};
 					if (role === "parent") {
 						parentRounds += 1;
-						if (parentRounds === 1) {
+						if (parentRounds === 3) {
+							// The round pinned to finish (fleet design 4.3): a compliant model declares and does not repeat its reply.
+							tool = { name: "finish", arguments: { state: scenario === "exhausted" ? "not_done" : "done" } };
+						} else if (parentRounds === 1) {
 							tool = {
 								name: "dispatch",
 								arguments: {
@@ -219,7 +222,8 @@ for (const scenario of ["dependent-repair", "exhausted"] as const) {
 			strictEqual(result.code, scenario === "exhausted" ? 1 : 0, result.stderr);
 			doesNotMatch(result.stderr, /run record write failed/u);
 			strictEqual(readFileSync(join(workspace, "grid.py"), "utf8"), SOURCE);
-			strictEqual(parentRounds, 2);
+			// The dispatch round, the answer, and the round an unattended run that ended undeclared spends pinned to finish.
+			strictEqual(parentRounds, 3);
 			strictEqual(documenterRounds, scenario === "exhausted" ? 3 : 2);
 			const journal = readRunJournal(join(scratch.dir, "state"));
 			ok(journal);

@@ -14,6 +14,7 @@
  * clock, no engine state.
  */
 
+import { dispatchJobRecipe } from "../agents/dispatch-jobs.js";
 import { type ResultContract, withResultSummaryAllowance } from "../agents/result-contract.js";
 import type { AgentCapabilityClass } from "../agents/spec.js";
 
@@ -77,8 +78,8 @@ export interface ExecutionRoleInput {
  *      reviewer evidence, and a compete candidate is a builder no matter which
  *      candidate ordinal it holds.
  *   3. Outside a gate, the recipe's own typed contract decides. A declared
- *      `verifier-report` is the only contract that makes a direct run a
- *      verifier; a Debugger's `debugger-report` deliberately does not, because
+ *      `verifier-report` or `review-verdict` is the only contract that makes
+ *      a direct run a verifier; a Debugger's `debugger-report` deliberately does not, because
  *      the result schema distinguishes diagnosis from a gate verdict.
  *   4. A read-only recipe with no verifier contract is reconnaissance.
  */
@@ -89,7 +90,7 @@ export function deriveExecutionRole(input: ExecutionRoleInput): ExecutionRole {
 	if (input.gateRole === "synthesis") return "judge";
 	if (input.gateRole === "member") return "researcher";
 	if (input.gateRole === "builder" || input.gateRole === "candidate") return "builder";
-	if (input.resultContractKind === "verifier-report") return "verifier";
+	if (input.resultContractKind === "verifier-report" || input.resultContractKind === "review-verdict") return "verifier";
 	if (input.capabilityClass === "read-only") return "researcher";
 	return "builder";
 }
@@ -161,6 +162,18 @@ export const DEFAULT_GATE_DECIDER_AGENT_ID = "verifier";
 export function gateDeciderAgentId(requested: string | undefined): string {
 	const trimmed = requested?.trim() ?? "";
 	return trimmed.length > 0 ? trimmed : DEFAULT_GATE_DECIDER_AGENT_ID;
+}
+
+/**
+ * Resolve a review gate's decider: the job table's recipe for reviewing a
+ * diff, and the gate default only when this install lacks it. Like every gate
+ * decider it never falls back to the subject builder.
+ */
+export function reviewDeciderAgentId(requested: string | undefined, installed?: (id: string) => boolean): string {
+	const trimmed = requested?.trim() ?? "";
+	if (trimmed.length > 0) return trimmed;
+	const reviewer = dispatchJobRecipe("review");
+	return installed === undefined || installed(reviewer) ? reviewer : DEFAULT_GATE_DECIDER_AGENT_ID;
 }
 
 /**

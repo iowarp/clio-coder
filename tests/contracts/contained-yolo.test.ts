@@ -500,4 +500,12 @@ test("contained yolo's finish gate keeps its own nudge and records an exhausted 
 	await attended.finish();
 	strictEqual(attended.state.continuation.requested, false);
 	strictEqual(attended.state.continuation.verificationNudgeSpent, false);
+
+	// Fleet design 4.3: `finish` is turn-terminal; a declared done takes no further round, and the gate's fact is sealed.
+	const declared = finishGateTurn(true);
+	declared.state.turnCompletion = { state: "done", limitations: [], unverified: [] };
+	await declared.finish();
+	strictEqual(declared.state.continuation.requested, false);
+	strictEqual(declared.state.turnSealedCompletion?.assessed, "partly_done");
+	deepStrictEqual(declared.state.turnSealedCompletion?.facts, ["unvalidated_mutation"]);
 });

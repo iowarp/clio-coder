@@ -25,6 +25,8 @@ export interface HeadlessObserved {
 	noChecksDeclared?: true;
 	unclassifiedAfterLastCheck?: number;
 	unclassifiedFailed?: { count: number; commands: string[] };
+	/** The completion the agent declared through `finish` (fleet design 4.3); absent when it declared none. */
+	completion?: "done" | "partly_done" | "not_done";
 }
 
 const NAME_LIMIT = 80;
@@ -101,9 +103,9 @@ function names(list: ReadonlyArray<string>, total = list.length): string {
 	return rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(", ");
 }
 
-/** The one stderr line, or null for a run that called no tool. */
+/** The one stderr line, or null for a run that called no tool and declared no completion. */
 export function formatHeadlessObservedLine(observed: HeadlessObserved): string | null {
-	if (observed.toolCalls === 0) return null;
+	if (observed.toolCalls === 0 && observed.completion === undefined) return null;
 	const parts = [`${observed.toolCalls} tool call${observed.toolCalls === 1 ? "" : "s"}, ${observed.refused} refused`];
 	if (observed.writes > 0) parts.push(`${observed.writes} write${observed.writes === 1 ? "" : "s"}`);
 	const passed = observed.checks.filter((check) => check.passed).map((check) => check.name);
@@ -120,5 +122,6 @@ export function formatHeadlessObservedLine(observed: HeadlessObserved): string |
 		parts.push(
 			observed.noChecksDeclared ? "no checks declared in the workspace" : "no check observed after the last write",
 		);
+	if (observed.completion !== undefined) parts.push(`completion ${observed.completion}`);
 	return `clio-coder run: observed: ${parts.join(" · ")}`;
 }

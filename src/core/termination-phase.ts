@@ -10,3 +10,19 @@ export function terminationPhase(): TerminationPhase {
 export function setTerminationPhase(next: TerminationPhase): void {
 	phase = next;
 }
+
+let runDeadline: number | null = null;
+
+/**
+ * The `performance.now()` instant at which the headless run's `--timeout` shuts
+ * this process down, or null when no run deadline is armed. A tool arms its own
+ * wait against it when the wait starts, so no wait outlives the run (XR-12).
+ */
+export function runDeadlineAt(): number | null {
+	return runDeadline;
+}
+
+/** Armed by `clio-coder run --timeout` with its deadline instant; null disarms it once the run settles. */
+export function setRunDeadline(at: number | null): void {
+	runDeadline = at;
+}

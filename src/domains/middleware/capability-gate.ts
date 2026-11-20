@@ -13,9 +13,28 @@ export interface CapabilityRequest {
 	readonly task: string;
 	readonly workspace?: string;
 	readonly candidates: ReadonlyArray<CapabilityCandidate>;
+	/**
+	 * Candidates that shape the corpus statistics and the coverage ceiling but are
+	 * never returned: the tools already attached. Coverage stays measured against
+	 * the best tool the session has, not only the ones a hint may name, so moving
+	 * a tool onto the attached surface does not inflate the rest.
+	 */
+	readonly background?: ReadonlyArray<CapabilityCandidate>;
 	readonly limit?: number;
 	/** Candidate ids the workspace itself points at; they are kept and named whatever the task's words. */
 	readonly signalled?: ReadonlyArray<string>;
+}
+
+/** The session's tools split into those a hint may name and the attached ones that only shape coverage. */
+export function capabilityCorpus<Spec extends { name: string; description: string }>(
+	specs: ReadonlyArray<Spec>,
+	nameable: (spec: Spec) => boolean,
+): Required<Pick<CapabilityRequest, "candidates" | "background">> {
+	const entry = (spec: Spec): CapabilityCandidate => ({ id: spec.name, description: spec.description });
+	return {
+		candidates: specs.filter((spec) => nameable(spec)).map(entry),
+		background: specs.filter((spec) => !nameable(spec)).map(entry),
+	};
 }
 
 export interface CapabilityMatch extends CapabilityCandidate {
@@ -68,7 +87,7 @@ function rankCapabilitiesLexically(
 	const query = [...new Set(terms(request.task.slice(0, 8000)))];
 	if (query.length === 0) return [];
 	const facts = new Set(terms(request.workspace?.slice(0, 2000) ?? ""));
-	const docs = request.candidates.map((candidate) => {
+	const docs = [...request.candidates, ...(request.background ?? [])].map((candidate) => {
 		const words = terms(`${candidate.id} ${candidate.description} ${(candidate.triggers ?? []).join(" ")}`);
 		const weights = new Map<string, number>();
 		for (const [text, weight] of [
@@ -93,6 +112,7 @@ function rankCapabilitiesLexically(
 	const ceiling = query.reduce((sum, term) => sum + Math.max(0, ...scorers.map((bm25) => bm25(term))), 0);
 	return docs
 		.flatMap(({ candidate }, index) => {
+			if (index >= request.candidates.length) return [];
 			const bm25 = scorers[index] as (term: string) => number;
 			const taskScore = query.reduce((sum, term) => sum + bm25(term), 0);
 			if (taskScore <= 0) return [];

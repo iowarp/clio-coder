@@ -10,6 +10,7 @@ import { requirePricedRefusal, withRunOverrides } from "../core/run-overrides.js
 import { readStrictLayeredSettings, settingsSourceFor } from "../core/settings-layers.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { getTerminationCoordinator } from "../core/termination.js";
+import { setRunDeadline } from "../core/termination-phase.js";
 import { clioDataDir } from "../core/xdg.js";
 import { autonomyCeilingRefusal, yoloRootRefusal } from "../core/yolo-host.js";
 import type { isUserOriginAudienceRefusal } from "../domains/agents/spec.js";
@@ -31,6 +32,7 @@ import { RUN_JSON_SCHEMA_VERSION } from "./modes/run-json-schema.js";
 import { flushRawStdout, handleRunStdoutErrors, restoreStdout, takeOverStdout } from "./output-guard.js";
 import { loadScriptedAnswers } from "./run-answers.js";
 import {
+	completionExitCode,
 	noteStructuredV2,
 	noteTextAnswer,
 	requestRunTextSummary,
@@ -89,10 +91,15 @@ function armRunTimeout(seconds: number): HeadlessRunDeadline {
 		Math.max(0, Math.ceil(endsAt - performance.now())),
 	);
 	timer.unref();
+	// Tools arm their own waits against it, so no shell wait outlives the run (XR-12).
+	setRunDeadline(endsAt);
 	return {
 		seconds,
 		expired: () => expired,
-		settle: () => clearTimeout(timer),
+		settle: () => {
+			clearTimeout(timer);
+			setRunDeadline(null);
+		},
 		remainingMs: () => Math.max(0, endsAt - performance.now()),
 	};
 }
@@ -398,16 +405,19 @@ export async function runClioRun(
 				...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
 				...(parsed.timeoutSeconds !== undefined ? { timeoutSeconds: parsed.timeoutSeconds } : {}),
 				limits: requestedRunLimits(parsed),
+				...(parsed.exitCodeVerdict === true ? { exitCode: true as const } : {}),
 			},
 			execute,
 		);
 	}
-	// Text output: the v2 writer is the only JSON writer, so this wrapper adds only text mode's `-o`.
+	// Text output: the v2 writer is the only JSON writer, so this wrapper adds only text mode's `-o`. `-o` is written
+	// only on exit 0, so `--exit-code` maps the run's exit before the wrapper settles it.
 	return withRunFailureReporting(
-		execute,
+		async () => completionExitCode(await execute(), parsed.exitCodeVerdict === true),
 		parsed.outputLastMessage !== undefined
 			? { path: parsed.outputLastMessage, ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}) }
 			: undefined,
+		parsed.exitCodeVerdict === true,
 	);
 }
 

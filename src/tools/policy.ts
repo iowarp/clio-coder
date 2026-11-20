@@ -93,6 +93,7 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	// else: no filesystem, no shell. Read class so it never trips a safety
 	// gate; parallel because the call is pure and idempotent.
 	[ToolNames.Limitation]: { plane: "orchestrate", actionClass: "read", executionMode: "parallel" },
+	[ToolNames.Finish]: { plane: "orchestrate", actionClass: "read", executionMode: "sequential" },
 	// decide appends one decision-board entry to the session ledger and
 	// nothing else. Read class so it never trips a safety gate; sequential so
 	// two decisions in one batch never race the supersede lookup.
@@ -167,6 +168,8 @@ const VISION_BOUND_TOOLS = new Set<ToolName>([ToolNames.Vision]);
 const MEMORY_RECALL_BOUND_TOOLS = new Set<ToolName>([ToolNames.MemoryRecall]);
 /** Registered only on the orchestrator registry: an agent's report is the main session's, never a worker's. */
 const REPORT_BOUND_TOOLS = new Set<ToolName>([ToolNames.Report]);
+/** Registered only on the orchestrator registry: the main agent declares completion here, a worker in its report. */
+const FINISH_BOUND_TOOLS = new Set<ToolName>([ToolNames.Finish]);
 /** Registered only in Clio's own checkout, so no host can require it; workers still exclude it as interactive. */
 const SELF_REPO_BOUND_TOOLS = new Set<ToolName>([ToolNames.RestartSession]);
 
@@ -190,7 +193,8 @@ export function isWorkerSurfaceExcludedTool(name: ToolName): boolean {
 		DECISION_BOUND_TOOLS.has(name) ||
 		VISION_BOUND_TOOLS.has(name) ||
 		MEMORY_RECALL_BOUND_TOOLS.has(name) ||
-		REPORT_BOUND_TOOLS.has(name)
+		REPORT_BOUND_TOOLS.has(name) ||
+		FINISH_BOUND_TOOLS.has(name)
 	);
 }
 /** The RETRIEVE plane, omitted wholesale by a hermetic run (tools/network-policy.ts). */
@@ -281,6 +285,7 @@ export function validateBuiltinToolPolicy(
 		if (MUSIC_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (MEMORY_RECALL_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (REPORT_BOUND_TOOLS.has(tool)) required.delete(tool);
+		if (FINISH_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (SELF_REPO_BOUND_TOOLS.has(tool)) required.delete(tool);
 	}
 	for (const tool of required) {

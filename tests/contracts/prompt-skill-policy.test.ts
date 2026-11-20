@@ -9,7 +9,7 @@ import {
 } from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { TurnConstraints } from "../../src/core/turn-constraints.js";
-import { createCapabilityGate } from "../../src/domains/middleware/capability-gate.js";
+import { capabilityCorpus, createCapabilityGate } from "../../src/domains/middleware/capability-gate.js";
 import {
 	createSkillsReminderRegistration,
 	skillsReminderMessage,
@@ -220,12 +220,14 @@ it("names a gateway capability only for a strong match, and Clio's own only for 
 	t.after(() => env.restore());
 	const registry = createRegistry({ safety: createWorkerSafety({ cwd: env.dir }) });
 	registerAllTools(registry, { mcpCapabilities: false });
-	const candidates = registry.listGateway().map((spec) => ({ id: spec.name, description: spec.description }));
+	// As the session wires it: attached tools shape coverage and are never named.
+	const gateway = new Set(registry.listGateway().map((spec) => spec.name));
+	const { candidates, background } = capabilityCorpus(registry.listAll(), (spec) => gateway.has(spec.name));
 	const gate = createCapabilityGate();
 	const note = (task: string): string => {
 		const reminder = createSkillsReminderRegistration({
 			countModelVisibleSkills: () => 0,
-			rankCapabilities: (text) => gate.rank({ kind: "capabilities", task: text, limit: 3, candidates }),
+			rankCapabilities: (text) => gate.rank({ kind: "capabilities", task: text, limit: 3, candidates, background }),
 		});
 		const effects = reminder.evaluate({ hook: "turn_start", text: task, metadata: { conversationMessages: 0 } });
 		return effects.map((effect) => ("message" in effect ? effect.message : "")).join("\n");
@@ -246,12 +248,14 @@ it("names store and data on a data question once the project store holds a tag, 
 	t.after(() => env.restore());
 	const registry = createRegistry({ safety: createWorkerSafety({ cwd: env.dir }) });
 	registerAllTools(registry, { mcpCapabilities: false });
-	const candidates = registry.listGateway().map((spec) => ({ id: spec.name, description: spec.description }));
+	// As the session wires it: attached tools shape coverage and are never named.
+	const gateway = new Set(registry.listGateway().map((spec) => spec.name));
+	const { candidates, background } = capabilityCorpus(registry.listAll(), (spec) => gateway.has(spec.name));
 	const gate = createCapabilityGate({ cwd: () => env.dir });
 	const note = (task: string): string => {
 		const reminder = createSkillsReminderRegistration({
 			countModelVisibleSkills: () => 0,
-			rankCapabilities: (text) => gate.rank({ kind: "capabilities", task: text, limit: 3, candidates }),
+			rankCapabilities: (text) => gate.rank({ kind: "capabilities", task: text, limit: 3, candidates, background }),
 			cwd: () => env.dir,
 		});
 		const effects = reminder.evaluate({ hook: "turn_start", text: task, metadata: { conversationMessages: 0 } });

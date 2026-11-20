@@ -80,7 +80,9 @@ test("built native timing includes delayed response headers", async () => {
 		strictEqual(direct.code, 0, direct.stderr);
 		strictEqual(readFileSync(join(workspace, "timing-probe.txt"), "utf8"), CONTENT);
 		match(streamedText(direct.stdout), /TIMING_WRITE_COMPLETE/u);
-		strictEqual(fixture.requests.filter((request) => request.stream !== false).length, 2);
+		// The write and the answer, then the round an unattended run that ended undeclared spends pinned to finish
+		// (fleet design 4.3); the fixture answers it in text.
+		strictEqual(fixture.requests.filter((request) => request.stream !== false).length, 3);
 		const journal = readRunJournal(join(scratch.dir, "state"));
 		ok(journal);
 		strictEqual(journal.envelopes.size, 1);
@@ -96,7 +98,7 @@ test("built native timing includes delayed response headers", async () => {
 			const payload = entry.payload as Record<string, unknown>;
 			return payload.usage === undefined ? [] : [payload];
 		});
-		strictEqual(calls.length, 2, JSON.stringify(calls));
+		strictEqual(calls.length, 3, JSON.stringify(calls));
 		const timings = calls.map((call, index) => {
 			const timing = call.timing as { ttftMs: number | null; apiMs: number } | null | undefined;
 			ok(timing, `call ${index + 1} must persist invocation timing: ${JSON.stringify(call)}`);
