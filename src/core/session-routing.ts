@@ -447,17 +447,6 @@ export interface RoutingChangeNotice {
 	text: string;
 }
 
-/** Prefix of the keys that mark a notice about one model's residency on one target. */
-export const ROUTE_RESIDENCY_NOTICE_PREFIX = "route-residency:";
-
-/**
- * Key of the notice that the selected model is not resident, or still loading, on its target. It says something only
- * while that route is the session's: `/model` to another route retires it rather than leaving it naming the old model.
- */
-export function routeResidencyNoticeKey(target: string, model: string): string {
-	return `${ROUTE_RESIDENCY_NOTICE_PREFIX}${target}/${model}`;
-}
-
 /**
  * The two advisory notices a running session emits when an external writer
  * moves settings.yaml underneath it. One helper feeds every surface — the TUI

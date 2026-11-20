@@ -2,7 +2,6 @@ import { outputLimitCutOffToolCallIds } from "../core/assistant-output.js";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { isHostAuthored, rememberMessageCalls } from "../core/message-accounting.js";
 import { applyModelAdmission, type ModelAdmissionEvent } from "../core/model-admission.js";
-import { routeResidencyNoticeKey } from "../core/session-routing.js";
 import { mainAgent } from "../core/telemetry/context.js";
 import type { FailureCause } from "../core/telemetry/enums.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
@@ -656,8 +655,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		if (!notice) return;
 		if (announcedColdModels.has(notice.key)) return;
 		announcedColdModels.add(notice.key);
-		// Keyed to its route, so a surface that can retire it does once `/model` moves the session elsewhere.
-		deps.emitNotice(notice.message, "info", routeResidencyNoticeKey(targetId, wireModelId));
+		deps.emitNotice(notice.message);
 	};
 
 	const synthesizeModel = (target: ChatLoopTarget): EngineModel => {
