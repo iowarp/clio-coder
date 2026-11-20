@@ -5,9 +5,11 @@ import { performance } from "node:perf_hooks";
 import { mock, test } from "node:test";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
@@ -16,6 +18,7 @@ import {
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { firstTokenStallLimitMs, recordFirstTokenMs } from "../../src/domains/session/retry.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
+import { applyToolRounds, streamToolRound } from "../../src/engine/provider-payload.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import type { Model } from "../../src/engine/types.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
@@ -183,14 +186,16 @@ test("a streamed frame's rows do not keep earlier frames' rows alive", async () 
 
 /**
  * MD11 replay, on virtual time (timers, Date and performance.now advance only when the test ticks them).
- * Event sequence on a calibrated hosted route (5 first tokens of 2 s, so the limit is max(30 s, 10 x 2 s) = 30 s, well
+ * Event sequence on a calibrated hosted route (20 first tokens of 2 s, so the limit is max(30 s, 10 x 2 s) = 30 s, well
  * under the 180 s mid-stream window): request 1 gets no response and its server ignores the abort; the watchdog cuts it
- * at 30 s; the retry, request 2, asks for one tool call; request 1 then answers late, headers and a tool call of its own;
- * request 3, after the tool ran, starts its answer 25 s in, a healthy slow first token under the limit. Transport
- * assertions: three requests, the retry sent at the adaptive limit, one tool effect, one answer on screen, nothing of
- * the late completion, and the retry ladder's typed outcome `recovered`. The limit rows: a cold route (under 5 first
- * tokens) keeps the mid-stream window, a calibrated one takes max(30 s, 10 x p95) capped at it, and a local route keeps
- * its first-token window.
+ * at 30 s; the retry, request 2, starts 25 s in (a healthy slow first token under the limit) and asks for one tool call;
+ * request 1 then answers late, headers and a tool call of its own; the tool locks tools, and on this route, where
+ * "none" re-renders the prompt, request 3 is a compliance-first round the payload layer holds whole: its provider starts
+ * at 2 s and finishes at 40 s, so the turn sees its first token at 40 s, past the adaptive limit, and it is not cut.
+ * Transport assertions: three requests, the retry sent at the adaptive limit, one tool effect, one answer on screen,
+ * nothing of the late completion, and the retry ladder's typed outcome `recovered`. The limit rows: a cold route (under
+ * 5 first tokens) keeps the mid-stream window, a calibrated one takes max(30 s, 10 x p95) capped at it, and a local
+ * route keeps its first-token window.
  */
 test("a calibrated route's silent request is cut at the adaptive limit and leaves one answer and one tool effect", {
 	timeout: 60_000,
@@ -209,7 +214,44 @@ test("a calibrated route's silent request is cut at the adaptive limit and leave
 	process.chdir(project);
 	const target = { id: "md11-fixture", runtime: "openai-compat", url: "http://fixture.invalid:4000" };
 	const model = litellm.synthesizeModel(target, "md11-model", null) as Model<"openai-completions">;
-	for (let sample = 0; sample < 5; sample += 1) recordFirstTokenMs(target.id, model.id, 2_000);
+	for (let sample = 0; sample < 20; sample += 1) recordFirstTokenMs(target.id, model.id, 2_000);
+	// Mark the route as one where "none" re-renders the prompt, the way the payload layer learns it: a text-only round
+	// whose cache read collapsed. Its next text-only round is compliance-first, held whole until it completes.
+	const routeModel = { ...model, input: ["text" as const], contextWindow: 131072, maxTokens: 4096 };
+	const markRound = async (cacheRead: number, round: Parameters<typeof applyToolRounds>[3]) => {
+		const readTool = { name: "read", description: "read", parameters: Type.Object({}) };
+		const controlled = applyToolRounds(routeModel, { messages: [], tools: [readTool] }, undefined, round, target.id);
+		const reply = {
+			role: "assistant" as const,
+			content: [{ type: "text" as const, text: "ok" }],
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: 10,
+				output: 1,
+				cacheRead,
+				cacheWrite: 0,
+				totalTokens: 11 + cacheRead,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop" as const,
+			timestamp: 0,
+		};
+		await streamToolRound(
+			routeModel,
+			controlled,
+			() => {
+				const stream = createAssistantMessageEventStream();
+				stream.push({ type: "done", reason: "stop", message: reply });
+				stream.end(reply);
+				return stream;
+			},
+			target.id,
+		).result();
+	};
+	await markRound(8192, []);
+	await markRound(0, [{ kind: "text-only" }]);
 	const encoder = new TextEncoder();
 	const frame = (delta: Record<string, unknown>, finish: string | null = null) =>
 		encoder.encode(
@@ -242,19 +284,24 @@ test("a calibrated route's silent request is cut at the adaptive limit and leave
 			});
 		late.release?.();
 		if (sentAt.length === 2)
+			// A healthy slow first token, under the adaptive limit.
 			return sse((controller) => {
-				controller.enqueue(frame(toolCall("record-2")));
-				controller.enqueue(frame({}, "tool_calls"));
-				controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-				controller.close();
+				setTimeout(() => {
+					controller.enqueue(frame(toolCall("record-2")));
+					controller.enqueue(frame({}, "tool_calls"));
+					controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+					controller.close();
+				}, 25_000);
 			});
+		// The held round: its provider starts at 2 s and finishes at 40 s; the turn sees all of it at 40 s.
 		return sse((controller) => {
+			setTimeout(() => controller.enqueue(frame({ role: "assistant", content: "DONE_" })), 2_000);
 			setTimeout(() => {
-				controller.enqueue(frame({ role: "assistant", content: "DONE_ANSWER" }));
+				controller.enqueue(frame({ content: "ANSWER" }));
 				controller.enqueue(frame({}, "stop"));
 				controller.enqueue(encoder.encode("data: [DONE]\n\n"));
 				controller.close();
-			}, 25_000);
+			}, 40_000);
 		});
 	};
 	const settings = structuredClone(DEFAULT_SETTINGS);
@@ -270,13 +317,14 @@ test("a calibrated route's silent request is cut at the adaptive limit and leave
 		tier: "cloud",
 		auth: "none",
 		defaultCapabilities: { ...EMPTY_CAPABILITIES, chat: true, tools: true, contextWindow: 131072, maxTokens: 4096 },
-		synthesizeModel: () => ({ ...model, input: ["text"], contextWindow: 131072, maxTokens: 4096 }),
+		synthesizeModel: () => routeModel,
 	};
 	const context = dispatchStubContext({ settings, runtime });
 	const safety = context.getContract("safety");
 	ok(safety);
 	const registry = createRegistry({ safety, autonomy: () => "yolo" });
 	const toolRuns: string[] = [];
+	const toolChoice = createMiddlewareToolChoiceControl();
 	registry.register({
 		name: ToolNames.Read,
 		description: "Counts its effects",
@@ -284,6 +332,8 @@ test("a calibrated route's silent request is cut at the adaptive limit and leave
 		baseActionClass: "read",
 		async run() {
 			toolRuns.push("read");
+			// Its effect locks tools for the next round, which makes that round text-only.
+			toolChoice.apply([{ kind: "lock_tools" }]);
 			return { kind: "ok", output: "recorded" };
 		},
 	});
@@ -292,6 +342,7 @@ test("a calibrated route's silent request is cut at the adaptive limit and leave
 		providers: context.getContract("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		toolRegistry: registry,
+		middlewareToolChoice: toolChoice,
 		bus: context.bus,
 		// The turn runtime's own stream, with only its fetch swapped and the abort signal withheld from the provider,
 		// so only the watchdog can end request 1.
@@ -350,7 +401,15 @@ test("a calibrated route's silent request is cut at the adaptive limit and leave
 		);
 		deepStrictEqual(ran, ["record-2"], "only the retry's tool call ran");
 		const answers = events.flatMap((event) => (event.type === "text_delta" ? [event.delta] : []));
-		strictEqual(answers.join(""), "DONE_ANSWER", "one logical result; the 25 s first token was not cut");
+		strictEqual(answers.join(""), "DONE_ANSWER", "one logical result; neither the 25 s nor the held round was cut");
+		const lastRound = events.flatMap((event) =>
+			event.type === "message_end" && event.message.role === "assistant"
+				? [(event.message as { toolRounds?: Array<{ downgradeReason?: string }> }).toolRounds?.[0]?.downgradeReason]
+				: [],
+		);
+		strictEqual(lastRound.at(-1), "none re-renders the prompt on this route", "the last round was held whole");
+		const heldAfter = Date.now() - (sentAt[2] ?? 0);
+		ok(heldAfter >= 40_000, `the held round's output reached the turn after the adaptive limit: ${heldAfter} ms`);
 		const phases = events.flatMap((event) =>
 			event.type === "retry_status" ? [(event as { status: { phase: string } }).status.phase] : [],
 		);

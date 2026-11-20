@@ -1142,6 +1142,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// Each provider request's serial; the cut retires every request built up to it, so their callbacks go unheard (MD11).
 		let requestSerial = 0;
 		let retiredThrough = 0;
+		// The request in flight is a compliance-first tool round the payload layer holds whole until it completes, so the
+		// turn sees no first token while the provider streams; it keeps the mid-stream window and gives no sample (MD11).
+		let outputHeld = false;
 		// Where a request is before `onStreamInvocation`. A watchdog abort while
 		// `apiCallStartedAt` is null names this step, because no request has
 		// reached the provider it would otherwise blame (#423).
@@ -1186,6 +1189,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				tracking.start(currentModel.api, controlled.options?.transport);
 				let invokedAttempt = false;
 				const pinnedPrefix = enginePinnedPrefix(localRuntime.agent);
+				// The payload layer's own decision, read before it acts on it: a compliance-first round is held until done.
+				outputHeld = firstToolRoundAttempt(currentModel, controlled, localRuntime.targetId) !== controlled;
+				if (outputHeld && stallTimer !== null) {
+					const stallMs = deps.retrySettings().streamStallMs;
+					clearStallTimer();
+					if (stallMs > 0) armStallTimer(stallMs);
+				}
 				return streamToolRound(
 					currentModel,
 					controlled,
@@ -1526,6 +1536,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// rebuild; the journal's TTFT starts at send.end, the handoff to Pi's provider (#434).
 				apiCallStartedAt = performance.now();
 				apiCallFirstDeltaAt = null;
+				outputHeld = false;
 				modelCall?.stage("send", "start");
 				// The request is out, so its first token is held to the route's first-token limit from now; the run's
 				// timer was armed for the mid-stream window, which a calibrated hosted route undercuts (MD11).
@@ -1637,12 +1648,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			clearTimeout(stallTimer);
 			stallTimer = null;
 		};
-		// The silence the route's first token may keep: adaptive on a calibrated hosted route (MD11).
+		// The silence the route's first token may keep: adaptive on a calibrated hosted route, unless the round's output is
+		// held until it completes (MD11).
 		const firstTokenLimitMs = (retry: RetrySettings): number | null =>
 			firstTokenStallLimitMs(
 				retry,
 				deps.providers.getRuntime(localRuntime.runtimeId)?.tier,
-				routeFirstTokenSamples(localRuntime.targetId, localRuntime.wireModelId),
+				outputHeld ? [] : routeFirstTokenSamples(localRuntime.targetId, localRuntime.wireModelId),
 			);
 		clearCurrentWatchdog = clearStallTimer;
 		callWait = () =>
@@ -2172,7 +2184,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					apiCallFirstDeltaAt = eventClock;
 					modelCall?.mark("firstToken");
 					// The route's first-token limit adapts to what this process has seen it do (MD11).
-					if (apiCallStartedAt !== null)
+					if (apiCallStartedAt !== null && !outputHeld)
 						recordFirstTokenMs(localRuntime.targetId, localRuntime.wireModelId, eventClock - apiCallStartedAt);
 					// The timer may be armed for the longer first-token window; the
 					// stream is live now, so the mid-stream window applies from here.
