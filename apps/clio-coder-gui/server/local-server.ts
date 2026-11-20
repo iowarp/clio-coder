@@ -124,27 +124,26 @@ export async function clientCredential(
 	label: string,
 	caller = "",
 ): Promise<string | null> {
-	return (await openCredential(port, listenerPort, token, label, caller))?.held.credential ?? null;
+	return (await openCredential(port, listenerPort, token, label, caller))?.credential ?? null;
 }
-/** `proven` when this call proved the launch token to the listener; a held credential proves nothing about who answers now. */
 async function openCredential(
 	port: number,
 	listenerPort: number,
 	token: string,
 	label: string,
 	caller: string,
-): Promise<{ held: Held; proven: boolean } | null> {
+): Promise<Held | null> {
 	identity(port, token);
 	identity(listenerPort, token);
 	const key = `${port}:${listenerPort}:${token}:${caller}`;
 	const current = held.get(key);
-	if (current && performance.now() < current.refreshAt) return { held: current, proven: false };
+	if (current && performance.now() < current.refreshAt) return current;
 	if (current) {
 		const rotated = await exchange(port, listenerPort, "POST", "/api/auth/rotate", current.credential, {});
 		// A rotation keeps the client id; an answer naming another came from a listener this credential never opened.
 		const next =
 			rotated?.status === 200 && rotated.value?.clientId === current.clientId ? adopt(key, rotated.value) : null;
-		if (next) return { held: next, proven: false };
+		if (next) return next;
 	}
 	const issued = await exchange(port, listenerPort, "POST", "/api/auth/challenge", null, {});
 	const challenge = issued?.status === 200 ? issued.value?.challenge : undefined;
@@ -160,11 +159,9 @@ async function openCredential(
 	});
 	held.delete(key);
 	const answer = opened?.status === 200 ? opened.value?.serverProof : undefined;
-	const proven =
-		typeof answer === "string" && sameSecret(serverProof(token, challenge, listenerPort), answer)
-			? adopt(key, opened?.value ?? null)
-			: null;
-	return proven ? { held: proven, proven: true } : null;
+	return typeof answer === "string" && sameSecret(serverProof(token, challenge, listenerPort), answer)
+		? adopt(key, opened?.value ?? null)
+		: null;
 }
 function adopt(key: string, value: Record<string, unknown> | null): Held | null {
 	const { clientId, credential, rotateIn } = value ?? {};
@@ -184,18 +181,31 @@ export function dropClientCredential(port: number, listenerPort: number, token: 
  * token. A listener authenticates on its own Host, so a probe through a forward names the listener's
  * port rather than the forward's.
  */
-async function readMeta(port: number, token: string, listenerPort = port, label = "Launcher") {
+function readMeta(port: number, token: string, listenerPort = port, label = "Launcher") {
+	return appAnswer(port, listenerPort, token, label, "GET", "/api/meta");
+}
+/**
+ * The JSON value of a 200 answer on this process's credential, or null. A proof authenticates only its own
+ * exchange, and a program that took the port since answers whatever it likes, so an answer counts only when it
+ * names the client the proving app issued (`X-Clio-Client`, set on every authenticated answer). A refusal or an
+ * answer naming no such client drops the credential and exchanges the launch token once more.
+ */
+async function appAnswer(
+	port: number,
+	listenerPort: number,
+	token: string,
+	label: string,
+	method: "GET" | "POST",
+	path: string,
+	body?: unknown,
+) {
 	for (let attempt = 0; attempt < 2; attempt += 1) {
-		const opened = await openCredential(port, listenerPort, token, label, "");
-		if (opened === null) return null;
-		const answer = await exchange(port, listenerPort, "GET", "/api/meta", opened.held.credential);
-		// A restarted app forgot the held credential, and a program that took its port since answers whatever it likes:
-		// only the app that issued the credential names its client. Either way, exchange the launch token once more.
-		if (answer?.status === 401 || (answer?.status === 200 && !opened.proven && answer.client !== opened.held.clientId)) {
-			dropClientCredential(port, listenerPort, token);
-			continue;
-		}
-		return answer?.status === 200 ? answer.value : null;
+		const held = await openCredential(port, listenerPort, token, label, "");
+		if (held === null) return null;
+		const answer = await exchange(port, listenerPort, method, path, held.credential, body);
+		if (answer?.status === 200 && answer.client === held.clientId) return answer.value;
+		if (answer?.status !== 401 && answer?.status !== 200) return null;
+		dropClientCredential(port, listenerPort, token);
 	}
 	return null;
 }
@@ -298,13 +308,18 @@ export function proxyRequest(
  */
 export async function showPage(port: number, token: string, path?: string): Promise<WindowAnswer> {
 	identity(port, token);
-	const credential = await clientCredential(port, port, token, "Launcher");
-	if (credential === null) return "unknown";
-	const answer = await exchange(port, port, "POST", "/api/launch", credential, path === undefined ? {} : { path });
-	if (answer?.status === 401) dropClientCredential(port, port, token);
-	if (answer?.status !== 200) return "unknown";
+	const answer = await appAnswer(
+		port,
+		port,
+		token,
+		"Launcher",
+		"POST",
+		"/api/launch",
+		path === undefined ? {} : { path },
+	);
+	if (answer === null) return "unknown";
 	// An older app took a page and said nothing more, which then meant it was shown.
-	return answer.value?.shown === false ? "no-window" : "shown";
+	return answer.shown === false ? "no-window" : "shown";
 }
 /**
  * A single-use, short-lived ticket for the URL a launcher opens, so the launch token never sits in an
@@ -312,11 +327,7 @@ export async function showPage(port: number, token: string, path?: string): Prom
  */
 export async function launchTicket(port: number, token: string) {
 	identity(port, token);
-	const credential = await clientCredential(port, port, token, "Launcher");
-	if (credential === null) return null;
-	const answer = await exchange(port, port, "POST", "/api/auth/launch-ticket", credential, {});
-	if (answer?.status === 401) dropClientCredential(port, port, token);
-	const ticket = answer?.status === 200 ? answer.value?.ticket : undefined;
+	const ticket = (await appAnswer(port, port, token, "Launcher", "POST", "/api/auth/launch-ticket", {}))?.ticket;
 	return typeof ticket === "string" && /^[\w-]{43}$/.test(ticket) ? ticket : null;
 }
 /** With `current`, each attempt proves the token the app published last, since a starting app rotates it. */

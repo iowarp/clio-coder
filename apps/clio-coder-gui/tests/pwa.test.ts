@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { serverProof } from "../server/launch-proof.js";
-import { localServerReady } from "../server/local-server.js";
+import { dropClientCredential, launchTicket, localServerReady } from "../server/local-server.js";
 import { harness } from "./harness/app.js";
 
 test("installable assets are public and credential-free only in background mode; APIs remain authenticated", async (t) => {
@@ -79,6 +79,7 @@ test("background readiness authenticates the exact loopback endpoint and rejects
 			return;
 		}
 		assert.equal(req.url, "/api/meta");
+		res.setHeader("X-Clio-Client", "launcher-1");
 		assert.equal(req.headers.authorization, `Bearer ${mode === "legacy" ? legacyToken : credential}`);
 		if (mode === "redirect") {
 			res.writeHead(302, { Location: "https://example.invalid" });
@@ -107,6 +108,7 @@ test("background readiness authenticates the exact loopback endpoint and rejects
 
 test("a held credential's answer counts only from the app that issued it, so a listener that took the port after a restart is not ready", async (t) => {
 	const token = "s".repeat(43);
+	let named = true;
 	const app = createServer(async (req, res) => {
 		if (req.url === "/api/auth/challenge") return res.end(JSON.stringify({ challenge: "h".repeat(43), expiresIn: 60 }));
 		if (req.url === "/api/auth/clients") {
@@ -124,12 +126,24 @@ test("a held credential's answer counts only from the app that issued it, so a l
 				}),
 			);
 		}
-		res.setHeader("X-Clio-Client", "launcher-1");
-		res.end(JSON.stringify({ apiVersion: 1, pwa: true }));
+		if (named) res.setHeader("X-Clio-Client", "launcher-1");
+		res.end(JSON.stringify({ apiVersion: 1, pwa: true, ticket: "k".repeat(43) }));
 	});
 	await new Promise<void>((resolve) => app.listen(0, "127.0.0.1", resolve));
+	// Closed here too, so a failing assertion never leaves the listener holding the test process open.
+	t.after(() => {
+		app.closeAllConnections();
+		app.close(() => {});
+	});
 	const port = (app.address() as { port: number }).port;
 	assert.equal(await localServerReady(port, token), true);
+	assert.equal(await launchTicket(port, token), "k".repeat(43));
+	// The proof answers for its own exchange only: a listener that hands the port over right after it, so the next
+	// answer names no client this process holds, is not the app, for readiness and for the ticket a browser opens.
+	dropClientCredential(port, port, token);
+	named = false;
+	assert.equal(await localServerReady(port, token), false);
+	assert.equal(await launchTicket(port, token), null);
 	app.closeAllConnections();
 	await new Promise((resolve) => app.close(resolve));
 	// Another program takes the port in the restart gap and answers 200 to anything; it cannot prove the token.
