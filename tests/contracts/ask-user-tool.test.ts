@@ -1,25 +1,33 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { skillInstallOfferTag } from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import {
 	AWAY_ASK_WINDOW_MS,
 	askUserWindowMs,
 	YOLO_ASK_WINDOW_FLOOR_SECONDS,
 } from "../../src/domains/safety/unattended.js";
+import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
+import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { createAskUserToolPolicy } from "../../src/session-control/chat-loop-messages.js";
 import {
 	type AskUserQuestion,
 	type AskUserResult,
+	closeAskUserInterviewOnAssistantTurn,
 	UNATTENDED_ESCAPE_ANSWER,
 	UNATTENDED_FREE_TEXT_ANSWER,
 	UNATTENDED_OUTWARD_ANSWER,
 } from "../../src/tools/ask-user.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
-import { createRegistry, type ToolResult } from "../../src/tools/registry.js";
+import { type AskUserToolPolicy, createRegistry, type ToolResult } from "../../src/tools/registry.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 /**
@@ -533,6 +541,203 @@ describe("ask_user tool", () => {
 			f.policy.decisions.map(({ key, value, operator_choice }) => ({ key, value, operator_choice })),
 			[{ key: "hypothesis_choice", value: "H2", operator_choice: true }],
 		);
+	});
+
+	it("closes an answered interview implicitly on the next non-ask_user assistant turn without asking for action=complete (XR-5)", async () => {
+		const f = fixture([
+			{
+				answers: [
+					{
+						question: CACHE_QUESTION.question,
+						answer: "Capability tuple",
+						options: ["Capability tuple"],
+					},
+				],
+			},
+		]);
+		const answered = await f.call({ questions: [CACHE_QUESTION] });
+		if (answered.kind !== "ok") throw new Error("expected ok");
+		const interview = interviewOf(answered);
+		strictEqual(interview.event, "round_answered");
+		strictEqual(interview.status, "active");
+		ok(!/action=complete/i.test(answered.output), answered.output);
+		ok(!/modal remains open/i.test(answered.output), answered.output);
+		ok(!/action=complete/i.test(String(interview.next ?? "")), String(interview.next));
+
+		// Assistant messages that call ask_user (direct, gateway call, gateway chain) or fail keep the interview open.
+		const keepOpen: Array<{ role: "assistant"; content: unknown[]; stopReason: string }> = [
+			{
+				role: "assistant",
+				content: [{ type: "toolCall", name: ToolNames.AskUser, arguments: {} }],
+				stopReason: "toolUse",
+			},
+			{
+				role: "assistant",
+				content: [{ type: "toolCall", name: ToolNames.Gateway, arguments: { op: "call", capability: ToolNames.AskUser } }],
+				stopReason: "toolUse",
+			},
+			{
+				role: "assistant",
+				content: [
+					{
+						type: "toolCall",
+						name: ToolNames.Gateway,
+						arguments: { op: "chain", steps: [{ id: "a", capability: ToolNames.AskUser, args: {} }] },
+					},
+				],
+				stopReason: "toolUse",
+			},
+			{ role: "assistant", content: [{ type: "text", text: "error" }], stopReason: "error" },
+			{ role: "assistant", content: [{ type: "text", text: "aborted" }], stopReason: "aborted" },
+			{ role: "assistant", content: [{ type: "text", text: "cut off" }], stopReason: "length" },
+		];
+		for (const msg of keepOpen) {
+			strictEqual(await closeAskUserInterviewOnAssistantTurn(f.policy, msg), false);
+			strictEqual(f.policy.status, "active");
+		}
+
+		// The next settled assistant message with no ask_user call closes the interview with the derived decisions.
+		const closed = await closeAskUserInterviewOnAssistantTurn(f.policy, {
+			role: "assistant",
+			content: [{ type: "text", text: "Using capability tuple for the cache key." }],
+			stopReason: "stop",
+		});
+		strictEqual(closed, true);
+		strictEqual(f.policy.status, "complete");
+		strictEqual(f.policy.summary, undefined);
+		ok(typeof f.policy.endedAt === "string");
+		const transcript = JSON.parse(readFileSync(String(f.policy.transcriptPath), "utf8"));
+		strictEqual(transcript.status, "complete");
+		strictEqual(transcript.summary, undefined);
+		deepStrictEqual(
+			transcript.decisions.map((decision: { key: string; value: string }) => [decision.key, decision.value]),
+			[["cache_key", "Capability tuple"]],
+		);
+		strictEqual(interviewOf(await f.call({ questions: [{ question: "Follow-up?" }] })).event, "already_complete");
+	});
+
+	it("closes the interview through the chat loop when the model answers without a complete call (XR-5)", async () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.chat.prewarm = false;
+		const context = dispatchStubContext({ settings });
+		const target = settings.targets[0];
+		ok(target);
+		settings.chat.target = target.id;
+		settings.chat.model = target.defaultModel ?? "gpt-4o";
+		const registry = createRegistry({ safety: createWorkerSafety(), autonomy: () => "default" });
+		registerAllTools(registry, {
+			mcpCapabilities: false,
+			askUser: async () => ({
+				answers: [{ question: CACHE_QUESTION.question, answer: "Node id", options: ["Node id"] }],
+			}),
+		});
+		const entries: SessionEntry[] = [];
+		let leaf: string | null = null;
+		const session = {
+			current: () => ({ id: "xr5-session", cwd: scratch.dir, cwdHash: "xr5-repo" }),
+			tree: () => ({ leafId: leaf }),
+			leafId: () => leaf,
+			append(turn: TurnInput) {
+				const id = turn.id ?? `turn-${entries.length + 1}`;
+				leaf = id;
+				entries.push({
+					kind: "message",
+					turnId: id,
+					parentTurnId: turn.parentId,
+					timestamp: new Date().toISOString(),
+					role: turn.kind,
+					payload: turn.payload,
+				} as SessionEntry);
+				return { id };
+			},
+			appendEntry(entry: Parameters<SessionContract["appendEntry"]>[0]) {
+				const row = {
+					...entry,
+					turnId: `entry-${entries.length + 1}`,
+					timestamp: new Date().toISOString(),
+				} as SessionEntry;
+				entries.push(row);
+				return row;
+			},
+		} as unknown as SessionContract;
+		let finalized: AskUserToolPolicy | undefined;
+		const loop = createChatLoop({
+			getSettings: () => settings,
+			getAutonomy: () => "default",
+			providers: context.getContract("providers") as ProvidersContract,
+			knownTargets: () => new Set([target.id]),
+			session,
+			bus: context.bus,
+			readSessionEntries: () => entries,
+			toolRegistry: registry,
+			onAskUserFinalized: (policy) => {
+				finalized = policy;
+			},
+			createAgent: ((agentOptions: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
+				let listener: (event: AgentEvent) => unknown = () => {};
+				const state = { ...agentOptions?.initialState, messages: [] as AgentMessage[] };
+				return {
+					requestCorrelationId: () => undefined,
+					agent: {
+						state,
+						subscribe: (fn: (event: AgentEvent) => unknown) => {
+							listener = fn;
+							return () => {};
+						},
+						async prompt() {
+							await listener({ type: "agent_start" } as AgentEvent);
+							const askTool = state.tools?.find((tool) => tool.name === ToolNames.AskUser);
+							if (!askTool) throw new Error("ask_user tool missing from agent state");
+							const askMsg = {
+								role: "assistant",
+								content: [
+									{ type: "toolCall", id: "call-1", name: ToolNames.AskUser, arguments: { questions: [CACHE_QUESTION] } },
+								],
+								stopReason: "toolUse",
+							} as unknown as AgentMessage;
+							state.messages.push(askMsg);
+							await listener({ type: "message_end", message: askMsg } as AgentEvent);
+							const result = await askTool.execute("call-1", { questions: [CACHE_QUESTION] });
+							await listener({
+								type: "tool_execution_end",
+								toolCallId: "call-1",
+								toolName: ToolNames.AskUser,
+								result,
+								isError: false,
+							} as unknown as AgentEvent);
+							const replyMsg = {
+								role: "assistant",
+								content: [{ type: "text", text: "Keying the cache by node id." }],
+								stopReason: "stop",
+							} as unknown as AgentMessage;
+							state.messages.push(replyMsg);
+							await listener({ type: "message_end", message: replyMsg } as AgentEvent);
+							await listener({ type: "agent_end", messages: [...state.messages] } as AgentEvent);
+						},
+						abort() {},
+						followUp() {},
+						steer() {},
+						clearAllQueues() {},
+						waitForIdle: async () => {},
+					},
+				};
+			}) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+		});
+		try {
+			await loop.submit("Design the cache key.");
+		} finally {
+			loop.dispose();
+		}
+		ok(finalized, "onAskUserFinalized ran");
+		strictEqual(finalized.status, "complete");
+		strictEqual(finalized.summary, undefined, "closed implicitly, not by turn_finished fallback");
+		deepStrictEqual(
+			finalized.decisions.map((decision) => [decision.key, decision.value]),
+			[["cache_key", "Node id"]],
+		);
+		const transcript = JSON.parse(readFileSync(String(finalized.transcriptPath), "utf8"));
+		strictEqual(transcript.status, "complete");
+		strictEqual(transcript.summary, undefined);
 	});
 });
 
