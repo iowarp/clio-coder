@@ -100,7 +100,10 @@ export function coordinatorDispatchParameters() {
 		}),
 		intent: Type.Optional(intent),
 		// No `tags`: store grants are taught on demand (gateway describe dispatch); the canonical schema admits them.
-		briefing: Type.Optional(Type.String()),
+		// `context` stays off too, but a model cannot ask for a field it never saw, so a fork worker ran isolated (FL-5).
+		briefing: Type.Optional(
+			Type.String({ description: "Parent evidence. Parent history (context fork or splice): gateway describe dispatch." }),
+		),
 		// A plain string: this schema is checked before the canonical one, so an
 		// enum here would refuse the compete and council modes describe teaches.
 		// The last clause is the only cue that those modes exist at all.

@@ -113,6 +113,12 @@ describe("compact coordinator dispatch contract", () => {
 		deepStrictEqual(restore({ task: "Add sub", tasks: ["Other"] }), { task: "Add sub", tasks: ["Other"] });
 		deepStrictEqual(restore({ task: "Add sub" }), { task: "Add sub" });
 		// context is off the attached schema, so a grammar-constrained parser sends it JSON-encoded (bt-47 cf1h-D4).
+		ok(!Object.hasOwn(coordinatorDispatchParameters().properties, "context"), "context stays off the attached schema");
+		// The attached schema still names the field and where it is described, or a fork worker runs isolated (FL-5).
+		match(
+			JSON.stringify(coordinatorDispatchParameters().properties.briefing),
+			/context fork or splice\): gateway describe dispatch/u,
+		);
 		const canonical = buildDispatchParameters();
 		const fork = restore({ task: "Recall r1", context: '{"mode": "fork"}' });
 		deepStrictEqual(fork, { task: "Recall r1", context: { mode: "fork" } });
