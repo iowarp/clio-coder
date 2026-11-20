@@ -2442,7 +2442,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		} catch {
 			// The view below still prices the route's tools and the replayed history.
 		}
-		if (current()) context.refreshLiveBudget();
+		if (current()) {
+			const view = context.refreshLiveBudget();
+			context.journalResumedBudget?.(view);
+		}
 	};
 
 	const prepareOutOfTurnRound = async (

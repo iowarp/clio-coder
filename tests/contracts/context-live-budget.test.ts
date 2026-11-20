@@ -360,7 +360,7 @@ describe("live budget adapter", () => {
 				.split("\n")
 				.filter((line) => line.includes('"context.snapshotted"')).length;
 		};
-		return { state, runtime, settings, context, meta, snapshotLines, summaries: () => summaries };
+		return { state, runtime, settings, context, meta, snapshotLines, snapshotsFile, summaries: () => summaries };
 	}
 
 	/** Capture and reconcile a prompt, the way a submitted turn does. */
@@ -749,5 +749,39 @@ describe("live budget adapter", () => {
 		const after: LiveBudgetView = f.context.liveBudget();
 		strictEqual(after.branchAnchorTurnId, "leaf-from-resume");
 		ok(after.revision !== before.revision);
+	});
+
+	it("resumes at the figure the session left at and journals it beside the last measurement (CLI-P37)", async () => {
+		const f = fixture();
+		const model = f.runtime.agent.state.model;
+		ok(model);
+		Object.assign(model, { provider: "fixture" });
+		const statics = f.context.refreshLiveBudget().breakdown;
+		ok(statics);
+		// The route measures 1.3x chars/4 (the repro's copilot-long route measured 1.72x).
+		const measured = Math.round((statics.systemPromptTokens + statics.messageTokens + statics.toolSchemaTokens) * 1.3);
+		const reply = { ...assistant(), usage: usage(measured - 61, 61) } as AgentMessage;
+		f.runtime.agent.state.messages = [reply];
+		f.context.setCurrentSnapshot(f.context.captureRuntimeContextSnapshot(f.runtime, "t1", 0.85));
+		f.context.reconcileUsage(usage(measured - 61, 61));
+		f.context.flushReconciledSnapshot();
+		const beforeQuit = f.context.liveBudget();
+		strictEqual(beforeQuit.inputSource, "anchored-plus-estimated-tail");
+		await journals.flush();
+		// The resume replays the same history with no live anchor; the next request is published as on reopen.
+		f.context.resetForSession("leaf-from-resume");
+		const resumed = f.context.refreshLiveBudget();
+		f.context.journalResumedBudget?.(resumed);
+		strictEqual(resumed.inputSource, "estimated");
+		strictEqual(resumed.inputTokens, beforeQuit.inputTokens, "the resumed footer reads the pre-quit figure");
+		await journals.flush();
+		const records = readFileSync(f.snapshotsFile, "utf8")
+			.split("\n")
+			.filter((line) => line.includes('"context.resumed"'))
+			.map((line) => JSON.parse(line.split("\t")[0] ?? "") as { data: Record<string, unknown> });
+		deepStrictEqual(
+			records.map((record) => [record.data.priorTokens, record.data.projectedTokens]),
+			[[measured, resumed.inputTokens]],
+		);
 	});
 });

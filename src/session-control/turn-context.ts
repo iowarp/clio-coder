@@ -418,6 +418,11 @@ export interface TurnContext {
 	 */
 	refreshLiveBudget(pendingUserText?: string): LiveBudgetView;
 	/**
+	 * After `resetForSession` re-entered a history and the runtime published its next request, journal that
+	 * projected figure beside the session's last persisted measurement, once per reset (CLI-P37).
+	 */
+	journalResumedBudget?(view: LiveBudgetView): void;
+	/**
 	 * Disarm the A4 pin an overflow fold that fit armed. While armed, the
 	 * published view's `inputTokens` is the A4 count; the main request that
 	 * carries it disarms it.
@@ -859,6 +864,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// conversation, the route, and the configuration are byte-identical. The
 	// pressure policy reuses a refusal only for this exact key.
 	let noUsefulCutBasisKey: string | null = null;
+	/** Set by `resetForSession`: the re-entered session and its last persisted measurement, until the journal reads it. */
+	let resumedBudget: { sessionId: string; priorTokens: number | null } | null = null;
 
 	// Cache-disturbance honesty (T3.3). Accumulate every known local-runtime
 	// disturbance and prefix-byte change since the last settled run. The next
@@ -4582,6 +4589,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			bindMemoryScope();
 			budgetProducer.reset();
 			const session = deps.session?.current();
+			const persisted = session ? getLatestContextSnapshot(session) : null;
+			// The figure the session was last measured at, so the journal can set the resumed projection beside it.
+			resumedBudget = session
+				? {
+						sessionId: session.id,
+						priorTokens:
+							persisted?.sources.total === "reconciled" && persisted.reconciledTokens !== undefined
+								? persisted.reconciledTokens + persisted.categories.streaming
+								: null,
+					}
+				: null;
 			// The session's latest capture may describe the branch just left; a runtime captures the history now in place.
 			currentContextSnapshot = state.runtime
 				? captureRuntimeContextSnapshot(
@@ -4589,9 +4607,24 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						incomingBranchAnchorTurnId ?? "session",
 						deps.getSettings().context.compaction?.threshold ?? null,
 					)
-				: session
-					? getLatestContextSnapshot(session)
-					: null;
+				: persisted;
+		},
+
+		journalResumedBudget(view: LiveBudgetView): void {
+			const resumed = resumedBudget;
+			resumedBudget = null;
+			if (!resumed || view.historical || view.inputTokens === null) return;
+			if (deps.session?.current()?.id !== resumed.sessionId) return;
+			telemetryHub().emit(
+				"context.resumed",
+				{
+					...(resumed.priorTokens !== null ? { priorTokens: tokenCount(resumed.priorTokens) } : {}),
+					projectedTokens: tokenCount(view.inputTokens),
+					...(view.estimatedInputTokens !== null ? { estimatedTokens: tokenCount(view.estimatedInputTokens) } : {}),
+					inputSource: view.inputSource,
+				},
+				{ sessionId: resumed.sessionId, agent: mainAgent(resumed.sessionId) },
+			);
 		},
 
 		dispose(): void {

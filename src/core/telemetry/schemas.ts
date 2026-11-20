@@ -578,6 +578,22 @@ export const ContextPrunedSchema = Type.Object(
 	closed,
 );
 /**
+ * A session history re-entered with a runtime (resume, fork, tree navigation): the figure the session was last
+ * measured at beside the next request the resumed history projects, so a divergence between them is visible (CLI-P37).
+ */
+export const ContextResumedSchema = Type.Object(
+	{
+		/** The last persisted provider measurement of this session: its prompt tokens plus that call's output. */
+		priorTokens: Type.Optional(count),
+		/** The input the next request is budgeted at, the figure the footer, admission and the fold trigger read. */
+		projectedTokens: count,
+		/** The chars/4 figure of the same request. */
+		estimatedTokens: Type.Optional(count),
+		inputSource: vocabulary(["estimated", "anchored-plus-estimated-tail", "historical", "unknown"]),
+	},
+	closed,
+);
+/**
  * One fold checkpoint's decision (ContextFold CF-1): where it ran, what the route reports, and each stage it
  * reached with its outcome and the ledger record a commit wrote. A checkpoint under the trigger writes none.
  */
