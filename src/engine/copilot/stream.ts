@@ -709,6 +709,8 @@ class Step {
 	private readonly fieldReports = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 	private reasoningReports = 0;
 	private reasoningSum = 0;
+	/** Whether this step ran with thinking off (a non-reasoning model, or effort `none` sent), so a reasoning 0 is true. */
+	thinkingOff = false;
 	private nanoReports = 0;
 	private nanoSum = 0;
 	/** The model the runtime reported serving this step's calls (`assistant.usage.model`). */
@@ -970,11 +972,18 @@ class Step {
 			this.message.copilotBilling = { ...this.billing };
 		}
 		// A count is reported only when every call of the step sent it and no unplaceable report was mixed in.
+		// Copilot sends reasoningTokens 0 as a placeholder even while the model thinks, so a reasoning 0 is a
+		// measurement only when thinking was off; a nonzero count every call sent is one either way (PV-4).
+		const reported = (reports: number) => this.usageEvents > 0 && reports === this.usageEvents;
+		const reasoningMeasured = reported(this.reasoningReports) && (this.reasoningSum > 0 || this.thinkingOff);
 		(this.message.usage as { reportedFields?: string[] }).reportedFields = this.usageUncertain
 			? []
-			: Object.entries(this.fieldReports)
-					.filter(([, reports]) => this.usageEvents > 0 && reports === this.usageEvents)
-					.map(([field]) => field);
+			: [
+					...Object.entries(this.fieldReports)
+						.filter(([, reports]) => reported(reports))
+						.map(([field]) => field),
+					...(reasoningMeasured ? ["reasoning"] : []),
+				];
 		if (this.billing.modelCalls > 0) {
 			(this.message as { responseModelIdObservation?: unknown }).responseModelIdObservation = this.servedModel
 				? { state: "reported", reportedModelId: this.servedModel }
@@ -1276,6 +1285,8 @@ async function runStep(
 	const tools = getCurrentTools(context.messages);
 	const systemHash = hash(systemPrompt);
 	const reasoningEffort = reasoningEffortFor(model, options as SimpleStreamOptions | undefined);
+	// An omitted effort on a reasoning model leaves the runtime's default, which may think: not off.
+	step.thinkingOff = !model.reasoning || reasoningEffort === "none";
 	const contextTier = copilotContextTierFor(model);
 	// Messages that are only per-call host framing carry no transcript identity; they still reach the model.
 	const core = context.messages.filter((message): message is CoreMessage => message.role !== "system");
