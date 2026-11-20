@@ -20,6 +20,7 @@ import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { askYesNo } from "./ask.js";
 import { railPrefix } from "./configure-target.js";
 import { offerCopilotSignIn } from "./copilot-sign-in.js";
+import { jsonDocument, writeCliFailure, writeJson } from "./kit/json-out.js";
 import { createLifecyclePresenter } from "./lifecycle-presenter.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import {
@@ -52,8 +53,8 @@ import {
 } from "./shared.js";
 import { terminalColumns, wrapPlain } from "./text-layout.js";
 
-const USAGE = `usage: clio-coder auth list
-       clio-coder auth status [target-or-runtime]
+const USAGE = `usage: clio-coder auth list [--json]
+       clio-coder auth status [target-or-runtime] [--json]
        clio-coder auth login [target-or-runtime] [--api-key <value>] [--method browser|device]
        clio-coder auth logout [target-or-runtime]
 `;
@@ -103,8 +104,8 @@ function printConnectableListing(rows: ReadonlyArray<ConnectableProviderRow>): v
 	}
 }
 
-function printStatusLine(id: string, label: string, type: string | null, present: boolean, source: string): void {
-	process.stdout.write(formatColumns([[id, label, type ?? "-", present ? "present" : "absent", source]]));
+function statusCells(id: string, label: string, type: string | null, present: boolean, source: string): string[] {
+	return [id, label, type ?? "-", present ? "present" : "absent", source];
 }
 
 /**
@@ -121,13 +122,32 @@ function warnIfCredentialsDamaged(auth: ReturnType<typeof openAuthStorage>): voi
 	process.stderr.write("warning: entries below may be understated. Nothing will be written until it is repaired.\n");
 }
 
-function renderStatusRows(
+/** One credential row as `auth status --json` reports it; the text table prints the same cells. */
+function credentialJson(cells: ReadonlyArray<string>): Record<string, string | null> {
+	const [id = "", label = "", type = "-", state = "unknown", source = ""] = cells;
+	return { id, label, credentialType: type === "-" ? null : type, state, source };
+}
+
+/** `auth list --json`: the connectable runtimes, their connection and how many targets use each. */
+function connectableJson(rows: ReadonlyArray<ConnectableProviderRow>): Array<Record<string, unknown>> {
+	return rows.map((row) => ({
+		runtime: row.entry.runtimeId,
+		label: row.entry.label,
+		group: row.entry.group,
+		connected: row.status?.available === true,
+		source: row.status?.available ? row.status.source : null,
+		detail: row.status?.available ? (row.status.detail ?? null) : null,
+		targets: row.targetCount,
+	}));
+}
+
+function statusRows(
 	rows: ReadonlyArray<ConnectableProviderRow>,
 	auth: ReturnType<typeof openAuthStorage>,
 	extraRows: ReadonlyArray<string[]> = [],
-): string {
+): string[][] {
 	const targets = readSettings().targets;
-	return formatColumns([
+	return [
 		...rows.flatMap((row) => {
 			const status = row.status;
 			if (status === null) {
@@ -164,7 +184,7 @@ function renderStatusRows(
 			return [runtimeRow, ...targetRows];
 		}),
 		...extraRows,
-	]);
+	];
 }
 
 function defaultAuthTarget(rows: ReadonlyArray<ConnectableProviderRow>): string | undefined {
@@ -541,11 +561,17 @@ async function readHiddenLine(
 	}
 }
 
-async function runStatus(args: ReadonlyArray<string>): Promise<number> {
-	if (args.includes("--help") || args.includes("-h")) {
+async function runStatus(argv: ReadonlyArray<string>): Promise<number> {
+	if (argv.includes("--help") || argv.includes("-h")) {
 		process.stdout.write(USAGE);
 		return 0;
 	}
+	const json = argv.includes("--json");
+	const args = argv.filter((arg) => arg !== "--json");
+	const emit = (cells: ReadonlyArray<string[]>): void => {
+		if (json) writeJson(process.stdout, jsonDocument({ credentials: cells.map(credentialJson) }));
+		else process.stdout.write(formatColumns([...cells]));
+	};
 	if (args.some((arg) => arg.startsWith("-"))) {
 		printError(`unknown flag: ${args.find((arg) => arg.startsWith("-"))}`);
 		process.stderr.write(USAGE);
@@ -563,29 +589,29 @@ async function runStatus(args: ReadonlyArray<string>): Promise<number> {
 	if (target) {
 		const resolved = resolveCliProviderReference(target);
 		if (!resolved) {
-			printError(`unknown target or runtime: ${target}`);
+			const message = `unknown target or runtime: ${target}`;
+			if (json) writeCliFailure({ path: ["auth", "status"], slug: "not_found", message, json });
+			else printError(message);
 			return 2;
 		}
 		if (resolved.runtime.id === "copilot-sdk") {
 			// The credential is the official runtime's own login; ask the runtime who it is signed in as.
 			const copilot = await copilotAuthState(input.isTTY === true && output.isTTY === true);
-			printStatusLine(
-				resolved.authTarget.providerId,
-				resolved.runtime.displayName,
-				"seat",
-				copilot.present,
-				copilot.detail,
-			);
+			emit([
+				statusCells(resolved.authTarget.providerId, resolved.runtime.displayName, "seat", copilot.present, copilot.detail),
+			]);
 			return copilot.present ? 0 : 1;
 		}
 		const status = statusForResolvedTarget(resolved, auth);
-		printStatusLine(
-			resolved.authTarget.providerId,
-			resolved.runtime.displayName,
-			status.credentialType,
-			status.available,
-			status.detail ?? status.source,
-		);
+		emit([
+			statusCells(
+				resolved.authTarget.providerId,
+				resolved.runtime.displayName,
+				status.credentialType,
+				status.available,
+				status.detail ?? status.source,
+			),
+		]);
 		return status.available ? 0 : 1;
 	}
 
@@ -604,7 +630,7 @@ async function runStatus(args: ReadonlyArray<string>): Promise<number> {
 			copilot.detail,
 		]);
 	}
-	process.stdout.write(renderStatusRows(rows, auth, extraRows));
+	emit(statusRows(rows, auth, extraRows));
 	return 0;
 }
 
@@ -694,20 +720,25 @@ async function loginCopilotSdk(): Promise<number> {
 }
 
 export async function runAuthCommand(args: ReadonlyArray<string>): Promise<number> {
-	const subcommand = args[0] ?? "status";
-	const rest = args.slice(1);
+	// Bare `auth` is `auth status`, so `auth --json` is its JSON form.
+	const bareStatus = args[0] === "--json";
+	const subcommand = bareStatus ? "status" : (args[0] ?? "status");
+	const rest = bareStatus ? args : args.slice(1);
 	if (subcommand === "list") {
 		if (rest.includes("--help") || rest.includes("-h")) {
 			process.stdout.write(USAGE);
 			return 0;
 		}
-		if (rest.length > 0 && rest.some((arg) => arg !== "--help" && arg !== "-h")) {
-			printError("auth list takes no arguments");
+		const json = rest.includes("--json");
+		if (rest.some((arg) => arg !== "--json")) {
+			printError("auth list takes no arguments other than --json");
 			process.stderr.write(USAGE);
 			return 2;
 		}
 		warnIfCredentialsDamaged(openAuthStorage());
-		printConnectableListing(listConnectableProviderRows());
+		const rows = listConnectableProviderRows();
+		if (json) writeJson(process.stdout, jsonDocument({ runtimes: connectableJson(rows) }));
+		else printConnectableListing(rows);
 		return 0;
 	}
 	if (subcommand === "status") return runStatus(rest);
