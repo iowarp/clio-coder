@@ -18,6 +18,7 @@
 import { readFileSync } from "node:fs";
 import { availableParallelism, freemem, totalmem } from "node:os";
 import { dirname, join, relative } from "node:path";
+import { relativePathEscapes } from "../../core/path-containment.js";
 
 /** Which input decided the worker limit. */
 export type LocalCapacityBound = "configured" | "cpu" | "memory" | "cgroup" | "cap";
@@ -226,7 +227,7 @@ function cgroupCpuQuota(dir: string, root: string): number | null {
 		if (Number.isFinite(max) && max > 0 && Number.isFinite(period) && period > 0)
 			quota = Math.min(quota ?? Number.POSITIVE_INFINITY, Math.max(1, Math.ceil(max / period)));
 		const rest = relative(root, current);
-		if (rest === "" || rest.startsWith("..") || current === dirname(current)) break;
+		if (rest === "" || relativePathEscapes(rest) || current === dirname(current)) break;
 	}
 	return quota;
 }
