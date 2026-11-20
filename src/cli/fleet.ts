@@ -35,7 +35,6 @@ import {
 	PlaybookCommandRegistryMissingError,
 	renderPlaybookPrompt,
 } from "../domains/agents/index.js";
-import { isShadowAgent, userOriginAudienceRefusal } from "../domains/agents/spec.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ContextDomainModule } from "../domains/context/runtime.js";
 import {
@@ -86,6 +85,7 @@ import { EXIT_CODES } from "./kit/exit-codes.js";
 import { parseCommandFlags } from "./kit/flags.js";
 import { jsonDocument, writeCliFailure, writeJson } from "./kit/json-out.js";
 import { type RunCause, resolveRunExit, signalForExitCode } from "./modes/run-json-schema-v2.js";
+import { playbookAgents, playbookPreflightDiagnostic } from "./playbook-preflight.js";
 import { parsePlaybookVars } from "./playbook-vars.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 import { convertWorkspaceForCommand } from "./workspace-conversion.js";
@@ -191,70 +191,14 @@ interface FleetPreflightDeps {
 	budgetUsd: number | null;
 }
 
-/** Every agent a playbook dispatches, including both halves of every loop. */
-function playbookAgents(playbook: Playbook): Array<{ id: string; agent: string; scope: "readonly" | "workspace" }> {
-	const agents: Array<{ id: string; agent: string; scope: "readonly" | "workspace" }> = [];
-	for (const step of playbook.steps) {
-		if (step.kind === "agent") {
-			agents.push({ id: step.id, agent: step.agent, scope: step.scope });
-		} else if (step.kind === "gate") {
-			agents.push({ id: step.id, agent: step.agent, scope: "workspace" });
-		} else if (step.kind === "plan") {
-			agents.push({ id: step.id, agent: step.agent, scope: step.scope });
-			for (const agent of step.roster) {
-				agents.push({ id: `${step.id}.roster`, agent, scope: "readonly" });
-			}
-		} else if (step.kind === "loop") {
-			if (step.check.kind === "agent") {
-				agents.push({
-					id: `${step.id}.check`,
-					agent: step.check.agent,
-					scope: step.check.scope,
-				});
-			}
-			agents.push({
-				id: `${step.id}.repair`,
-				agent: step.repair.agent,
-				scope: step.repair.scope,
-			});
-		}
-	}
-	return agents;
-}
-
+/** The shared static preflight, then the checks only a booted session can make: step scope and session budget. */
 function preflightPlaybook(playbook: Playbook, deps: FleetPreflightDeps): string | null {
-	const targets = new Set(deps.settings.targets.map((target) => target.id));
-	const profiles = new Set(Object.keys(deps.settings.fleet?.profiles ?? {}));
-	const checkRoute = (id: string, route: { target?: string; profile?: string }): string | null => {
-		if (route.target !== undefined && !targets.has(route.target)) {
-			return `unknown target '${route.target}' at step '${id}'`;
-		}
-		if (route.profile !== undefined && !profiles.has(route.profile)) {
-			return `unknown profile '${route.profile}' at step '${id}'`;
-		}
-		return null;
-	};
-	for (const step of playbook.steps) {
-		if (step.kind === "agent" || step.kind === "gate" || step.kind === "plan") {
-			const error = checkRoute(step.id, step);
-			if (error !== null) return error;
-		}
-		if (step.kind !== "loop") continue;
-		if (step.check.kind === "agent") {
-			const error = checkRoute(`${step.id}.check`, step.check);
-			if (error !== null) return error;
-		}
-		const error = checkRoute(`${step.id}.repair`, step.repair);
-		if (error !== null) return error;
-	}
+	const shared = playbookPreflightDiagnostic(playbook, {
+		settings: deps.settings,
+		agentSpec: (id) => (deps.agents.get(id) ? deps.agents.getSpec(id) : undefined),
+	});
+	if (shared !== null) return shared;
 	for (const step of playbookAgents(playbook)) {
-		if (!deps.agents.get(step.agent)) {
-			return `unknown agent '${step.agent}' (step '${step.id}' must name a recipe from 'clio-coder agents')`;
-		}
-		const spec = deps.agents.getSpec(step.agent);
-		if (spec !== null && isShadowAgent(spec)) {
-			return `${userOriginAudienceRefusal(spec, null)} (step '${step.id}')`;
-		}
 		const requested = step.scope === "readonly" ? deps.safety.scopes.readonly : deps.safety.scopes.workspace;
 		if (!deps.safety.isSubset(requested, deps.safety.scopes.workspace)) {
 			return `step '${step.id}' scope '${step.scope}' exceeds the orchestrator scope`;

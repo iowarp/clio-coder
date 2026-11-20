@@ -138,7 +138,8 @@ describe("playbook CLI variables", () => {
 		execFileSync("git", ["init", "-q"], { cwd: root });
 		const untrusted = captured(() => runPlaybookValidate(["routed"]));
 		strictEqual(untrusted.code, 1);
-		match(untrusted.stderr, /unknown target 'project-route'/);
+		// The preflight fleet run shares, so the diagnostic reads the same from both commands.
+		match(untrusted.stderr, /preflight failed: unknown target 'project-route' at step 'build'/);
 		recordProjectSurfaceTrust(root, "settings", captureProjectSurface(root, "settings").contentHash as string);
 		const trusted = captured(() => runPlaybookValidate(["routed"]));
 		strictEqual(trusted.code, 0, `${trusted.stdout}${trusted.stderr}`);

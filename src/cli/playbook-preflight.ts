@@ -1,3 +1,4 @@
+import type { ClioSettings } from "../core/config.js";
 import { readStrictLayeredSettings } from "../core/settings-layers.js";
 import {
 	loadPlaybook,
@@ -20,6 +21,79 @@ export interface PlaybookPreflightResult {
 	checks: ReadonlyArray<{ check: "parse" | "graph" | "commands" | "agents" | "plan"; summary: string }>;
 }
 
+/** Every agent a playbook dispatches, including both halves of every loop. */
+export function playbookAgents(
+	playbook: Playbook,
+): Array<{ id: string; agent: string; scope: "readonly" | "workspace" }> {
+	const agents: Array<{ id: string; agent: string; scope: "readonly" | "workspace" }> = [];
+	for (const step of playbook.steps) {
+		if (step.kind === "agent") {
+			agents.push({ id: step.id, agent: step.agent, scope: step.scope });
+		} else if (step.kind === "gate") {
+			agents.push({ id: step.id, agent: step.agent, scope: "workspace" });
+		} else if (step.kind === "plan") {
+			agents.push({ id: step.id, agent: step.agent, scope: step.scope });
+			for (const agent of step.roster) {
+				agents.push({ id: `${step.id}.roster`, agent, scope: "readonly" });
+			}
+		} else if (step.kind === "loop") {
+			if (step.check.kind === "agent") {
+				agents.push({ id: `${step.id}.check`, agent: step.check.agent, scope: step.check.scope });
+			}
+			agents.push({ id: `${step.id}.repair`, agent: step.repair.agent, scope: step.repair.scope });
+		}
+	}
+	return agents;
+}
+
+/**
+ * The one preflight `playbook validate` and `fleet run` share: every step route names a known target and profile, and
+ * every agent is a known, non-shadow recipe. Returns the first diagnostic, or null. `agentSpec` answers undefined for
+ * an unknown agent. `fleet run` adds the checks that need a booted session (scope, budget) after this one.
+ */
+export function playbookPreflightDiagnostic(
+	playbook: Playbook,
+	deps: {
+		settings: Pick<Readonly<ClioSettings>, "targets" | "fleet">;
+		agentSpec: (id: string) => AgentSpec | null | undefined;
+	},
+): string | null {
+	const targets = new Set(deps.settings.targets.map((target) => target.id));
+	const profiles = new Set(Object.keys(deps.settings.fleet?.profiles ?? {}));
+	const checkRoute = (id: string, route: { target?: string; profile?: string }): string | null => {
+		if (route.target !== undefined && !targets.has(route.target)) {
+			return `unknown target '${route.target}' at step '${id}'`;
+		}
+		if (route.profile !== undefined && !profiles.has(route.profile)) {
+			return `unknown profile '${route.profile}' at step '${id}'`;
+		}
+		return null;
+	};
+	for (const step of playbook.steps) {
+		if (step.kind === "agent" || step.kind === "gate" || step.kind === "plan") {
+			const error = checkRoute(step.id, step);
+			if (error !== null) return error;
+		}
+		if (step.kind !== "loop") continue;
+		if (step.check.kind === "agent") {
+			const error = checkRoute(`${step.id}.check`, step.check);
+			if (error !== null) return error;
+		}
+		const error = checkRoute(`${step.id}.repair`, step.repair);
+		if (error !== null) return error;
+	}
+	for (const step of playbookAgents(playbook)) {
+		const spec = deps.agentSpec(step.agent);
+		if (spec === undefined) {
+			return `unknown agent '${step.agent}' (step '${step.id}' must name a recipe from 'clio-coder agents')`;
+		}
+		if (spec !== null && isShadowAgent(spec)) {
+			return `${userOriginAudienceRefusal(spec, null)} (step '${step.id}')`;
+		}
+	}
+	return null;
+}
+
 function discoverSpecs(cwd: string): AgentSpec[] {
 	return discoverAgentRecipes(cwd).map(normalizeAgentSpec);
 }
@@ -35,27 +109,8 @@ export function inspectPlaybook(name: string, vars?: Readonly<Record<string, str
 	// The same effective stack fleet run boots with, so a target or profile a
 	// trusted project layer declares validates here exactly as it runs there.
 	const settings = readStrictLayeredSettings(cwd).settings;
-	const targetIds = new Set(settings.targets.map((target) => target.id));
-	const profileIds = new Set(Object.keys(settings.fleet?.profiles ?? {}));
-	for (const step of playbook.steps) {
-		const positions =
-			step.kind === "loop"
-				? [
-						...(step.check.kind === "agent" ? [{ id: `${step.id}.check`, route: step.check }] : []),
-						{ id: `${step.id}.repair`, route: step.repair },
-					]
-				: step.kind === "agent" || step.kind === "gate" || step.kind === "plan"
-					? [{ id: step.id, route: step }]
-					: [];
-		for (const position of positions) {
-			if (position.route.target !== undefined && !targetIds.has(position.route.target)) {
-				throw new Error(`unknown target '${position.route.target}' at step '${position.id}'`);
-			}
-			if (position.route.profile !== undefined && !profileIds.has(position.route.profile)) {
-				throw new Error(`unknown profile '${position.route.profile}' at step '${position.id}'`);
-			}
-		}
-	}
+	const diagnostic = playbookPreflightDiagnostic(playbook, { settings, agentSpec: (id) => byId.get(id) });
+	if (diagnostic !== null) throw new Error(`preflight failed: ${diagnostic}`);
 	const plan = compileFleetExecutionPlan({
 		commands,
 		...(vars ? { vars } : {}),
