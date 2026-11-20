@@ -55,18 +55,65 @@ export const DEFAULT_RETRY_SETTINGS: RetrySettings = {
 	firstTokenStallMs: 600000,
 };
 
+/** First tokens a hosted route must have shown in this process before its first-token limit adapts to them. */
+const ADAPTIVE_FIRST_TOKEN_MIN_SAMPLES = 5;
+/** The adaptive limit never drops below this, however fast the route usually starts. */
+const ADAPTIVE_FIRST_TOKEN_FLOOR_MS = 30_000;
+/** The adaptive limit is this many times the route's p95 time to first token. */
+const ADAPTIVE_FIRST_TOKEN_FACTOR = 10;
+/** The newest first tokens kept per route; older ones stop describing it. */
+const FIRST_TOKEN_SAMPLES_KEPT = 64;
+
+/** Time to first token per route (target and wire model) observed by this process's main turns (MD11). */
+const firstTokenSamples = new Map<string, number[]>();
+
+function firstTokenRouteKey(targetId: string, modelId: string): string {
+	return `${targetId}\0${modelId}`;
+}
+
+/** Record one main call's time to first token on its route. Only a call that produced output is a sample. */
+export function recordFirstTokenMs(targetId: string, modelId: string, ms: number): void {
+	if (!Number.isFinite(ms) || ms < 0) return;
+	const key = firstTokenRouteKey(targetId, modelId);
+	const samples = firstTokenSamples.get(key) ?? [];
+	samples.push(ms);
+	if (samples.length > FIRST_TOKEN_SAMPLES_KEPT) samples.splice(0, samples.length - FIRST_TOKEN_SAMPLES_KEPT);
+	firstTokenSamples.set(key, samples);
+}
+
+/** The route's recorded times to first token in this process, oldest first. */
+export function routeFirstTokenSamples(targetId: string, modelId: string): readonly number[] {
+	return firstTokenSamples.get(firstTokenRouteKey(targetId, modelId)) ?? [];
+}
+
+/** Nearest-rank 95th percentile. */
+function p95(samples: readonly number[]): number {
+	const sorted = [...samples].sort((a, b) => a - b);
+	return sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)] ?? 0;
+}
+
 /**
  * The silence a call may keep before its first token, or null for no limit. The long first-token window exists for a
  * self-hosted server that slept and must reload and prefill cold; a hosted service has no model to load, so its first
  * token is held to the mid-stream window and a call that never starts is reported long before a run's own timeout.
- * The main turn's watchdog and the compaction summary's (CLI-P9) share this rule.
+ * Once a hosted route has shown `ADAPTIVE_FIRST_TOKEN_MIN_SAMPLES` first tokens in this process (`samples`), its limit
+ * is ten times their p95, at least 30 s and never past the mid-stream window, so a request the route would normally
+ * have started long ago is retried sooner; a cold route keeps the mid-stream window (MD11).
+ * The main turn's watchdog and the compaction summary's (CLI-P9) share this rule; the summary passes no samples.
  */
 export function firstTokenStallLimitMs(
 	retry: Pick<RetrySettings, "streamStallMs" | "firstTokenStallMs">,
 	tier: RuntimeTier | undefined,
+	samples: readonly number[] = [],
 ): number | null {
 	if (retry.streamStallMs <= 0 || retry.firstTokenStallMs <= 0) return null;
-	if (tier === "cloud" || tier === "subscription") return retry.streamStallMs;
+	if (tier === "cloud" || tier === "subscription") {
+		if (samples.length < ADAPTIVE_FIRST_TOKEN_MIN_SAMPLES) return retry.streamStallMs;
+		return Math.min(
+			retry.streamStallMs,
+			Math.max(ADAPTIVE_FIRST_TOKEN_FLOOR_MS, Math.ceil(ADAPTIVE_FIRST_TOKEN_FACTOR * p95(samples))),
+		);
+	}
 	return Math.max(retry.firstTokenStallMs, retry.streamStallMs);
 }
 
