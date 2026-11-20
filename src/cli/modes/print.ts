@@ -196,7 +196,7 @@ export interface HeadlessMainAgentOptions {
 	deadline?: HeadlessRunDeadline;
 	/** `clio-coder run --verify`: acceptance checks the run itself runs once the turn settled. */
 	verify?: HeadlessVerifyOptions;
-	/** The session's active path, so the run can say which checks it saw stand (`observed:` on stderr, `turn_end.observed`). */
+	/** The session's active path, so the run can say which checks it saw stand (`observed:` on stderr). */
 	readEntries?: () => ReadonlyArray<unknown>;
 	/** `safety.scratchRoots`: a check logged under one changes no tree (x5-4). */
 	scratchRoots?: ReadonlyArray<string>;
