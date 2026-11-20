@@ -165,7 +165,7 @@ index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..afb8bdc52e3ca93cbd00033837c910cd
      private copyTextToClipboard;
      private applySearchTextHighlight;
 diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
-index 3567a4350ab0da56276289d422b58d46e4882949..1e1d83b098cc490e40587c9113d940769897fa18 100644
+index 3567a4350ab0da56276289d422b58d46e4882949..f9af5ef03c061dc1be5290c171a700c1179a2d20 100644
 --- a/dist/tui-alt-screen.js
 +++ b/dist/tui-alt-screen.js
 @@ -32,7 +32,8 @@ const COPY_ERROR_FLASH_DURATION_MS = 5000;
@@ -192,7 +192,20 @@ index 3567a4350ab0da56276289d422b58d46e4882949..1e1d83b098cc490e40587c9113d94076
      toggleSearch() {
          if (this.activeSearch) {
              this.closeSearch();
-@@ -1163,7 +1171,13 @@ export class TuiAltScreen extends TuiBase {
+@@ -1063,7 +1071,11 @@ export class TuiAltScreen extends TuiBase {
+         const visibleTop = Math.max(0, box.rect.y, box.clip.y);
+         const visibleBottom = Math.min(this.terminal.rows - 1, box.rect.y + box.rect.height - 1, box.clip.y + box.clip.height - 1);
+         this.selectionDragPointer = { x: event.x, y: event.y };
+-        this.selectionAutoScrollDirection = event.y <= visibleTop ? -1 : event.y >= visibleBottom ? 1 : 0;
++        // Scroll only once the pointer leaves the view, so a selection can end on its edge rows. On the terminal's
++        // first or last row the pointer cannot go further, so that edge row itself still scrolls.
++        const scrollUp = event.y < visibleTop || (event.y === visibleTop && visibleTop === 0);
++        const scrollDown = event.y > visibleBottom || (event.y === visibleBottom && visibleBottom === this.terminal.rows - 1);
++        this.selectionAutoScrollDirection = scrollUp ? -1 : scrollDown ? 1 : 0;
+         if (this.selectionAutoScrollDirection === 0) {
+             this.stopSelectionAutoScroll();
+             return;
+@@ -1163,7 +1175,13 @@ export class TuiAltScreen extends TuiBase {
          }
          this.stopSelectionAutoScroll();
          this.selectionPressActive = true;
@@ -207,7 +220,7 @@ index 3567a4350ab0da56276289d422b58d46e4882949..1e1d83b098cc490e40587c9113d94076
              ? getScrollViewsAt(this.currentLayout, event.x, event.y)[0]
              : undefined;
          const anchor = this.getSelectionPoint(event, scrollView);
-@@ -1222,15 +1236,18 @@ export class TuiAltScreen extends TuiBase {
+@@ -1222,15 +1240,18 @@ export class TuiAltScreen extends TuiBase {
                  return undefined;
              sourceLines = box.scrollContentLines;
          }
@@ -229,7 +242,7 @@ index 3567a4350ab0da56276289d422b58d46e4882949..1e1d83b098cc490e40587c9113d94076
      async copySelectionToClipboard() {
          const text = this.getActiveSelectionText();
          if (!text)
-@@ -1373,6 +1390,10 @@ export class TuiAltScreen extends TuiBase {
+@@ -1373,6 +1394,10 @@ export class TuiAltScreen extends TuiBase {
              maxRow = Math.min(screen.length - 1, box.rect.y + box.rect.height - 1, box.clip.y + box.clip.height - 1);
              minColumn = Math.max(0, box.rect.x, box.clip.x);
              maxColumn = Math.min(this.terminal.columns, box.rect.x + box.rect.width, box.clip.x + box.clip.width);

@@ -6,15 +6,15 @@
 by pnpm's exact `patchedDependencies` entry.
 **pi-ai and pi-agent-core are unpatched.** The
 [Anthropic thread idle limit](#pi-ai-152-anthropic-thread-idle-limit) lives in Clio's engine.
-The pi-tui patch has twenty-three hunks in ten `dist/` files and applies to the
+The pi-tui patch has twenty-four hunks in ten `dist/` files and applies to the
 published, unmodified 1.5.2 package. It carries the semantic edit and search
 operations that stock 1.5.2 keeps private, the regular-screen render memo, the
 kept-rows hook that lets that memo skip rows Clio vouches for, the
 selection-text hook through which fullscreen copy rejoins wrapped prose, the
 selection entry points through which a drag selects past a modal overlay and the
 press check that keeps a selection beside an overlay on the transcript, the
-word joiners a fullscreen double-click selects across, and the selection
-highlight's stop at the scrollbar column.
+word joiners a fullscreen double-click selects across, the selection
+highlight's stop at the scrollbar column, and the drag auto-scroll edge.
 Everything else earlier
 revisions patched is now stock Pi or an engine module, as
 [recorded below](#what-was-removed). The table lists every
@@ -32,6 +32,7 @@ hunk total.
 | 1: `tui-alt-screen.js` | Selection anchor at a press beside an overlay | A press anchors the selection to the scroll view under it unless it lands on a rendered overlay's cells, so a drag over the transcript beside the search box, quick help or a modal card selects the transcript's content: it copies through `selectionText` without the glyph, gutter or wrap breaks, and it moves with the content when the transcript scrolls under the overlay. A press on an overlay's cells still selects screen rows. | Stock 1.5.2 anchors every press to screen rows while any overlay is visible, and the copy marks are stripped from screen rows, so the copy reverts to the painted rows. The check sits inside the private `handleSelectionMouseEvent`. |
 | 1: `tui-alt-screen.js` | `TERMINAL_WORD_SELECTION_JOINERS` gains `:` | A fullscreen double-click joins word segments across a colon as well as stock's `/`, `-`, `+`, `\`, `~`, `_` and `.`, so a double-clicked `https://example.com/path` keeps its scheme (stock copies `//example.com/path`) and `path/file.ts:120` selects as one word. A word with a trailing colon and `key:value` also select whole. | The set is a module constant, read only by the private `getWordSelection`. |
 | 1: `tui-alt-screen.js` | `applySelection` stops at the scrollbar column | A selection in a scroll view with a painted scrollbar highlights content cells only: the highlight ends before the bar's column, as `applySearchHighlights` already ends search highlights, so the bar never flashes inverse inside a selection. The copied text is unchanged. | Stock 1.5.2 bounds the highlight by the scroll box's full width, which includes the bar column, inside the private `applySelection`. |
+| 1: `tui-alt-screen.js` | `updateSelectionAutoScroll` edge rows | A drag scrolls its view only once the pointer leaves it: a pointer held on the view's first or last row no longer scrolls, so a selection can end on the bottom row of a scrolled-up transcript. Where that edge row is the terminal's first or last row, the pointer cannot go further, so holding it there still scrolls. The 50 ms tick and the clamping of the focus point into the view are unchanged. | Stock 1.5.2 counts the edge rows themselves as outside (`event.y <= visibleTop`, `event.y >= visibleBottom`), so holding the last transcript row ran the view away at about 20 rows a second. The test sits inside the private `updateSelectionAutoScroll`. |
 | 5: `tui-main-screen.js` | `TuiMainScreen` reset memo and Kitty image-row scans | A regular-screen frame reuses the reset output of every row whose raw string is unchanged, rewriting the memo in place and recording which rows are image rows, and the Kitty image scans (`collectKittyImageIds`, `expandChangedRangeForKittyImages`) visit only those rows. `resetRenderState` drops the memo. The memo's `applyLineResets` replaces the stock method, so it also removes stray cursor markers from a row before normalizing it, as stock 1.5.2 does. | Stock 1.0.0 normalizes every transcript row and scans all rows for image headers on every regular-screen frame, so the cost grows with the transcript. Measured [below](#measured-cost-of-the-render-memo): a 22.9k-row transcript costs 5.90 ms per keystroke frame stock against 0.62 ms patched. The scans are private methods, so no subclass can replace them. |
 | 1: `tui-main-screen.js` | `TuiMainScreen.doRender` OSC 133 strip | Run the marker strip only on a row that starts with `\x1b]133;`, so a frame makes no regex call for any other row. The pattern is anchored at the row start, so the output is unchanged. | Stock 1.5.2 calls `replace` with the anchored pattern on every row of every frame, which cost 3.25 ms of a frame while a 500 KB reply streamed (#428). The call sits inside `doRender`, so no subclass can skip it. |
 | 3: `tui-main-screen.d.ts`, `tui-main-screen.js` | `TuiMainScreen.keptRenderedRows` (protected hook, 0 by default) and `keptLeadingRows` | A subclass may report how many leading rendered rows are the very strings of the last frame's. `doRender` clamps that count to rows outside both frames' viewports, at an unchanged size and with no overlay, then takes those rows as the last frame stripped, reset and resolved them: the OSC 133 strip rewrites its own array in place from the first row not kept, `applyLineResets` copies the kept rows' output and image flags, and the diff loop starts below them. Clio's `InstrumentedTuiMainScreen` answers from the root's count (`src/interactive/kept-rows.ts`). | The strip, the reset memo's compare and the diff loop each visited every row of a 500 KB transcript on every frame although only the last rows change, and they sit inside `doRender`. A keystroke frame at reply-500k went from 1.19 ms to 0.13 ms p50 ([measured below](#measured-cost-of-the-kept-rows-hook)). |
@@ -48,9 +49,10 @@ auth boundary is Clio application code and adds no dependency patch.
 ## What was removed
 
 The patch carried 26 hunks before the Pi 1.0 adoption series and carries
-twenty-three now: thirteen kept from then, and the OSC 133 prefix check, the three
+twenty-four now: thirteen kept from then, and the OSC 133 prefix check, the three
 kept-rows hunks, the two selection-text hunks, the selection entry-point hunk,
-the overlay press hunk, the word-joiner hunk and the selection scrollbar hunk added since.
+the overlay press hunk, the word-joiner hunk, the selection scrollbar hunk and the
+auto-scroll edge hunk added since.
 The thirteen removed hunks fall into five groups.
 
 | Removed | Replaced by | Cost and evidence |

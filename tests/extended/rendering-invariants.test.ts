@@ -1634,6 +1634,44 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("lets a drag end on the last transcript row without scrolling, and scrolls once it leaves", (t) => {
+		t.mock.timers.enable({ apis: ["setInterval"] });
+		const terminal = new RenderingTerminal();
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer);
+		const chat = new Text(Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n"), 0, 0);
+		const chrome = {
+			banner: new Text("banner", 0, 0),
+			editor: new Text("editor", 0, 0),
+			footer: new Text("footer", 0, 0),
+		};
+		const root = buildLayout({ ...chrome, chat }, { mode: "fullscreen" });
+		ok(root instanceof VStack);
+		const scroll = root.children[0];
+		ok(scroll instanceof ScrollView);
+		tui.setLayoutRoot(root);
+		tui.start();
+		try {
+			tui.renderNow(true);
+			scroll.scrollTo(scroll.scrollTop - 30, { disableFollow: true });
+			tui.renderNow();
+			const screen = tui.getScreenLines().map(stripTerminalSequences);
+			let last = screen.length;
+			while (last > 0 && !/line \d/u.test(screen[last - 1] ?? "")) last--;
+			ok(last < terminal.rows, "the composer sits below the transcript");
+			const top = scroll.scrollTop;
+			terminal.input(`\x1b[<0;1;${last - 3}M`);
+			terminal.input(`\x1b[<32;4;${last}M`);
+			t.mock.timers.tick(500);
+			strictEqual(scroll.scrollTop, top, "held on the last transcript row");
+			terminal.input(`\x1b[<32;4;${last + 1}M`);
+			t.mock.timers.tick(500);
+			ok(scroll.scrollTop > top, "past the edge it scrolls");
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("keeps one neutral copy flash over SSH however many selections land", async () => {
 		const saved = { SSH_CONNECTION: process.env.SSH_CONNECTION, DISPLAY: process.env.DISPLAY };
 		process.env.SSH_CONNECTION = "client 0 server 0";
