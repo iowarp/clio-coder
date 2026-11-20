@@ -1173,7 +1173,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			if (child.capability === ToolNames.Read) {
 				const request = readCitationRequest(child.args);
 				if (request !== null) recordObservedRead(request, child.result, visibleText);
-			} else if (child.capability === ToolNames.Grep) {
+			} else if (child.capability === ToolNames.Grep || child.capability === ToolNames.Bash) {
 				recordObservedGrep(child.result.details, visibleText);
 			}
 		}
@@ -1994,7 +1994,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			if (call.toolName === ToolNames.Read) {
 				const request = readCitationRequest(call.args);
 				if (request !== null) pendingReadCitations.set(event.toolCallId, request);
-			} else if (call.toolName === ToolNames.Grep) {
+			} else if (call.toolName === ToolNames.Grep || call.toolName === ToolNames.Bash) {
+				// A bash `grep -n` reports the lines it printed as observedLines, as the grep tool does (FL-12).
 				pendingGrepCalls.add(event.toolCallId);
 			}
 		}
