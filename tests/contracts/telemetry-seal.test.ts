@@ -216,3 +216,40 @@ test("telemetry inspect shows a session seal that fails verification as failed",
 	});
 	ok(/^seal {6}failed: /m.test(result.stdout), `${result.stdout}\n${result.stderr}`);
 });
+
+function readCli(home: string, argv: string[]): { status: number | null; stdout: string; stderr: string } {
+	const script = `const { runTelemetryReadCommand } = await import(${JSON.stringify(new URL("../../src/cli/telemetry-read.ts", import.meta.url).href)}); process.exitCode = await runTelemetryReadCommand(${JSON.stringify(argv)});`;
+	return spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+		encoding: "utf8",
+		env: { ...process.env, ...scratchClioEnvVars(home) },
+	});
+}
+
+async function openedSession(home: string, id: string): Promise<void> {
+	const context: TelemetryContext = { sessionId: id, agent: { role: "main", id } };
+	const journal = await openCallJournal({
+		directory: telemetrySessionDirectory(join(home, "state"), id),
+		context,
+		writer: { clioCoderVersion: "0.0.0-test", piVersion: "test" },
+	});
+	journal.enqueue({
+		kind: "session.opened",
+		data: {},
+		ctx: context,
+		wallMs: Date.now(),
+		mono: performance.now(),
+	} as Parameters<typeof journal.enqueue>[0]);
+	ok(await journal.sealAndClose());
+}
+
+test("telemetry read verbs take a unique session id prefix and refuse an ambiguous one (C13)", async () => {
+	const home = await mkdtemp(join(tmpdir(), "telemetry-prefix-"));
+	await openedSession(home, "ses_prefix_alpha");
+	await openedSession(home, "ses_prefix_beta");
+	const unique = readCli(home, ["inspect", "ses_prefix_a", "--json"]);
+	strictEqual(unique.status, 0, unique.stderr);
+	strictEqual((JSON.parse(unique.stdout) as { sessionId: string }).sessionId, "ses_prefix_alpha");
+	const ambiguous = readCli(home, ["inspect", "ses_prefix_", "--json"]);
+	strictEqual(ambiguous.status, 1);
+	strictEqual(ambiguous.stdout, "");
+});

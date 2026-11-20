@@ -8,7 +8,8 @@ import type {
 } from "../domains/session/token-sources.js";
 import { loadTokenSourcesReport } from "../domains/session/token-sources.js";
 import { formatColumns } from "./argv.js";
-import { printError } from "./shared.js";
+import { writeCliFailure } from "./kit/json-out.js";
+import { resolveSessionSelector } from "./telemetry-target.js";
 
 export const TOKENS_HELP = `clio-coder telemetry tokens --session <id> [--by-source] [--json]
 
@@ -147,29 +148,32 @@ export function runTelemetryTokens(argv: ReadonlyArray<string>): number {
 			index += 1;
 		} else if (!arg.startsWith("--") && session === undefined) session = arg;
 		else {
-			printError(
-				arg === "--session" ? "telemetry tokens: --session needs one id" : `telemetry tokens: unexpected argument: ${arg}`,
-			);
-			process.stderr.write(TOKENS_HELP);
+			writeCliFailure({
+				path: ["telemetry", "tokens"],
+				slug: arg.startsWith("--") && arg !== "--session" ? "unknown_flag" : "usage",
+				message: arg === "--session" ? "--session needs one id" : `unexpected argument: ${arg}`,
+				json: argv.includes("--json"),
+			});
 			return 2;
 		}
 	}
-	if (session === undefined) {
-		printError("telemetry tokens needs --session <id>");
-		process.stderr.write(TOKENS_HELP);
-		return 2;
-	}
+	const fail = (slug: "usage" | "not_found" | "ambiguous" | "io", message: string, code: number): number => {
+		writeCliFailure({ path: ["telemetry", "tokens"], slug, message, json });
+		return code;
+	};
+	if (session === undefined) return fail("usage", "needs --session <id>", 2);
+	const stateDir = clioStateDir();
+	const selected = resolveSessionSelector(stateDir, session);
+	if ("miss" in selected)
+		return fail(selected.miss.startsWith("no session") ? "not_found" : "ambiguous", selected.miss, 1);
+	session = selected.id;
 	let report: TokenSourcesReportV1 | null;
 	try {
-		report = loadTokenSourcesReport(clioStateDir(), session);
+		report = loadTokenSourcesReport(stateDir, session);
 	} catch (error) {
-		printError(`cannot read session ${session}: ${error instanceof Error ? error.message : String(error)}`);
-		return 1;
+		return fail("io", `cannot read session ${session}: ${error instanceof Error ? error.message : String(error)}`, 1);
 	}
-	if (report === null) {
-		printError(`no session ${session} in ${clioStateDir()}`);
-		return 1;
-	}
+	if (report === null) return fail("not_found", `no session ${session} in ${stateDir}`, 1);
 	process.stdout.write(json ? `${JSON.stringify(report, null, 2)}\n` : renderTokenSources(report, bySource));
 	return 0;
 }
