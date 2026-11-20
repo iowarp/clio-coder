@@ -1397,8 +1397,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			model,
 		);
 		let reserve: number | undefined;
+		// A summary on the chat route may ride the live prefix at the turn's thinking, or go portable with thinking off,
+		// which resolves no higher; the reserve holds the larger. A thinking-off route reserves no reasoning (CTX-3).
 		const summaryReserve = (): number =>
-			(reserve ??= summaryOutputReserve(model, { summaryOnChatRoute: summaryOnChatRoute(agentRuntime, cfg?.model) }));
+			(reserve ??= summaryOutputReserve(model, {
+				summaryOnChatRoute: summaryOnChatRoute(agentRuntime, cfg?.model),
+				thinking: agentRuntime.runtimeResolution.effectiveThinkingLevel,
+			}));
 		const triggerReserve = (tokens: number): number =>
 			foldTriggerReserve({
 				window: agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
@@ -2717,7 +2722,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								{ free: agentRuntime.runtimeResolution.pricedBy === "free" },
 								prefixSignal,
 							);
-							return typeof prepared === "string" ? null : prepared;
+							if (typeof prepared === "string") return null;
+							// The live request keeps the turn's thinking, so its output cap is sized for it (CTX-3).
+							const thinkingLevel = agentRuntime.runtimeResolution.effectiveThinkingLevel;
+							return thinkingLevel !== undefined ? { ...prepared, thinkingLevel } : prepared;
 						},
 						...(summarySignal ? { signal: summarySignal } : {}),
 						...(automaticSummary && noGainSummaryDigest !== null ? { skipSummaryDigest: noGainSummaryDigest } : {}),

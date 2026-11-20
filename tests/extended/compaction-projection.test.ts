@@ -654,7 +654,7 @@ describe("compaction working-set provider boundary", () => {
 		strictEqual(calls[0]?.maxTokens, 13107);
 	});
 
-	it("gives a reasoning route its output limit until it reports a share, then the room plus that share", async () => {
+	it("gives a thinking summary its output limit until it reports a share, then the room plus that share", async () => {
 		const reasoning = { ...model(131072, 32768), reasoning: true, baseUrl: "https://reasoning-share.invalid" };
 		const caps: Array<number | undefined> = [];
 		// Faux usage carries no reasoning split, so the summarizer seam reports one directly.
@@ -668,6 +668,8 @@ describe("compaction working-set provider boundary", () => {
 		const input = {
 			entries: evictedHistory(),
 			model: reasoning,
+			// The reserve follows the summary's effective thinking, not the model's capability (CTX-3).
+			summaryThinkingLevel: "high" as const,
 			reserveTokens: 8192,
 			keepRecentTokens: 10000,
 			summarize,
