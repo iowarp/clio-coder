@@ -13,6 +13,7 @@ import type { ConfigContract } from "../../src/domains/config/index.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
 import { runMiddlewareRegistrations } from "../../src/domains/middleware/runtime.js";
 import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
+import type { MiddlewareEffect, MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import { renderSessionPostureUpdate } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { admissionAutonomy, effectiveYoloConfinement } from "../../src/domains/safety/autonomy.js";
@@ -422,7 +423,10 @@ test("contained yolo raises rigor to high, and an explicit CLIO_CODER_RIGOR stil
 	strictEqual(rigorResolution({ cwd, containedYolo: false }).rigor, "normal");
 });
 
-function finishGateTurn(contained: boolean) {
+function finishGateTurn(
+	contained: boolean,
+	options: { tools?: string[]; checks?: unknown[]; extra?: MiddlewareEffect[] } = {},
+) {
 	const entries: unknown[] = [
 		{ kind: "message", role: "user", turnId: "user-1", payload: { text: "change the file" } },
 		{
@@ -437,6 +441,7 @@ function finishGateTurn(contained: boolean) {
 			turnId: "write-1",
 			payload: { toolName: ToolNames.Write, toolCallId: "write-1", isError: false, result: { kind: "ok" } },
 		},
+		...(options.checks ?? []),
 	];
 	const audits: CompletionEvaluationInput[] = [];
 	const registration = createFinishContractRegistration({
@@ -456,12 +461,13 @@ function finishGateTurn(contained: boolean) {
 	const middleware = createTurnMiddleware({
 		state,
 		middleware: {
-			runHook: (input) => {
-				const result = runMiddlewareRegistrations(input, [registration]);
+			runHook: (input: MiddlewareHookInput) => {
+				const ran = runMiddlewareRegistrations(input, [registration]);
+				const result = { ...ran, effects: [...ran.effects, ...(options.extra ?? [])] };
 				for (const effect of result.effects) if (effect.kind === "request_continuation") nudges.push(effect.message);
 				return result;
 			},
-		} as MiddlewareContract,
+		} as unknown as MiddlewareContract,
 		middlewareToolChoice: createMiddlewareToolChoiceControl(),
 		emitNotice: (text) => notices.push(text),
 		emitFooterNotice: (_level, text, key) => {
@@ -473,7 +479,12 @@ function finishGateTurn(contained: boolean) {
 		wireModelId: "fixture",
 		runtimeId: "fixture",
 		runtimeResolution: {},
-		agent: { state: { tools: [{ name: ToolNames.Bash }, { name: ToolNames.Limitation }], messages: [] } },
+		agent: {
+			state: {
+				tools: (options.tools ?? [ToolNames.Bash, ToolNames.Limitation]).map((name) => ({ name })),
+				messages: [],
+			},
+		},
 	} as unknown as AgentRuntime;
 	const finish = () =>
 		middleware.fireTurnEnd(runtime, [
@@ -507,29 +518,60 @@ test("contained yolo's finish gate keeps its own nudge and records an exhausted 
 	strictEqual(attended.state.continuation.verificationNudgeSpent, false);
 
 	// Fleet design 4.3: `finish` is turn-terminal; a declared done takes no further round, and the gate's fact is sealed.
-	const declared = finishGateTurn(true);
-	declared.state.turnCompletion = { state: "done", limitations: [], unverified: [] };
-	await declared.finish();
-	strictEqual(declared.state.continuation.requested, false);
-	strictEqual(declared.state.turnSealedCompletion?.assessed, "partly_done");
-	deepStrictEqual(declared.state.turnSealedCompletion?.facts, ["unvalidated_mutation"]);
-	// FX-38: the gate's directive neither shows after the declared end nor rides the next request; the footer says why.
-	deepStrictEqual(declared.notices, []);
-	strictEqual(declared.middleware.flushPendingReminders(), "");
-	strictEqual(declared.footer.at(-1), "finish.assessed");
-	strictEqual(
-		declared.footerText.at(-1),
-		"declared done, assessed partly done: the change has no validation evidence yet",
-	);
-	// FX-38: a declared partly_done or not_done claims no completion, so nothing follows it, footer included.
-	for (const claim of ["partly_done", "not_done"] as const) {
-		const turn = finishGateTurn(true);
-		turn.state.turnCompletion = { state: claim, limitations: [], unverified: [] };
+	const unvalidated = "declared done, assessed partly done: the change has no validation evidence yet";
+	const declare = async (turn: ReturnType<typeof finishGateTurn>, state: "done" | "partly_done" | "not_done") => {
+		turn.state.turnCompletion = { state, limitations: [], unverified: [] };
 		await turn.finish();
 		strictEqual(turn.state.continuation.requested, false);
-		strictEqual(turn.state.turnSealedCompletion?.assessed, claim);
-		deepStrictEqual([turn.notices, turn.footer], [[], []]);
+		// FX-38: no finish-gate reminder shows after the declared end or rides the next request.
+		deepStrictEqual(turn.notices, []);
 		strictEqual(turn.middleware.flushPendingReminders(), "");
+		return turn;
+	};
+	const declared = await declare(finishGateTurn(true), "done");
+	strictEqual(declared.state.turnSealedCompletion?.assessed, "partly_done");
+	deepStrictEqual(declared.state.turnSealedCompletion?.facts, ["unvalidated_mutation"]);
+	// FX-38: one footer line per declared turn, the assessment, whichever reminder carried the fact.
+	deepStrictEqual([declared.footer, declared.footerText], [["finish.assessed"], [unvalidated]]);
+	// High rigor with no recovery in reach (no verification tool, no limitation) carries the fact on an advisory.
+	const unrecoverable = await declare(finishGateTurn(true, { tools: [] }), "done");
+	deepStrictEqual([unrecoverable.footer, unrecoverable.footerText], [["finish.assessed"], [unvalidated]]);
+	// FX-38: a declared partly_done or not_done claims no completion, so nothing follows it, footer included.
+	for (const claim of ["partly_done", "not_done"] as const) {
+		const turn = await declare(finishGateTurn(true), claim);
+		strictEqual(turn.state.turnSealedCompletion?.assessed, claim);
+		deepStrictEqual(turn.footer, []);
+	}
+	const cwd = process.cwd();
+	// Normal rigor without a quality policy, and a check that failed after the change, carry their facts on advisories.
+	const plain = realpathSync(mkdtempSync(join(tmpdir(), "clio-finish-plain-")));
+	process.chdir(plain);
+	try {
+		const advisory = await declare(finishGateTurn(false), "done");
+		deepStrictEqual([advisory.footer, advisory.footerText], [["finish.assessed"], [unvalidated]]);
+		const bash = (id: string, command: string, exitCode: number) => [
+			{
+				kind: "message",
+				role: "tool_call",
+				turnId: id,
+				payload: { name: ToolNames.Bash, toolCallId: id, args: { command } },
+			},
+			{
+				kind: "message",
+				role: "tool_result",
+				turnId: id,
+				payload: { toolName: ToolNames.Bash, toolCallId: id, isError: exitCode !== 0, result: { details: { exitCode } } },
+			},
+		];
+		const checks = [...bash("lint-1", "npm run lint", 0), ...bash("tsc-1", "npx tsc --noEmit", 2)];
+		const failed = await declare(finishGateTurn(false, { checks }), "done");
+		deepStrictEqual(failed.state.turnSealedCompletion?.facts, ["failed_check"]);
+		deepStrictEqual(
+			[failed.footer, failed.footerText],
+			[["finish.assessed"], ["declared done, assessed partly done: a check failed after the last change"]],
+		);
+	} finally {
+		process.chdir(cwd);
 	}
 	// FX-38: an unpaired finish-gate reminder (a project quality policy at normal rigor) follows no declaration either.
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-finish-quality-")));
@@ -538,22 +580,14 @@ test("contained yolo's finish gate keeps its own nudge and records an exhausted 
 		join(root, ".clio-coder", "quality.yaml"),
 		'version: 1\nrules:\n  - id: src\n    paths: ["src/**"]\n    checks: [test]\n',
 	);
-	const cwd = process.cwd();
 	process.chdir(root);
 	try {
 		const undeclared = finishGateTurn(false);
 		await undeclared.finish();
 		match(undeclared.notices.join("\n"), /project quality policy has outstanding checks/);
-		const quality = finishGateTurn(false);
-		quality.state.turnCompletion = { state: "done", limitations: [], unverified: [] };
-		await quality.finish();
-		deepStrictEqual(quality.notices, []);
-		strictEqual(quality.middleware.flushPendingReminders(), "");
+		const quality = await declare(finishGateTurn(false), "done");
 		strictEqual(quality.state.turnSealedCompletion?.assessed, "partly_done");
-		strictEqual(
-			quality.footerText.at(-1),
-			"declared done, assessed partly done: the change has no validation evidence yet",
-		);
+		deepStrictEqual([quality.footer, quality.footerText], [["finish.assessed"], [unvalidated]]);
 	} finally {
 		process.chdir(cwd);
 	}

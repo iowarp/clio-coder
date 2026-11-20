@@ -659,10 +659,10 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					effect.kind === "inject_reminder" && pairedReminderPersists(effect) ? [effect.message] : [],
 				),
 			);
-			// FX-38: a declared turn is over, so a finish-gate reminder from any producer (one that tags a completion fact
-			// or voices a continuation the turn drops) is sealed, not delivered: the operator reads the assessment in one
-			// footer line and the model is not reminded. A model-only fact is context for the next turn and still rides its
-			// request; an advisory the footer already carries stays there.
+			// FX-38: a declared turn is over, so a finish-gate reminder from any producer (one that tags a completion fact,
+			// footer advisories included, or voices a continuation the turn drops) is sealed, not delivered: the operator
+			// reads the assessment in one footer line and the model is not reminded. A model-only fact is context for the
+			// next turn and still rides its request; a factless advisory the footer already carries stays there.
 			const voiced = new Set(
 				declaredTurn ? effects.flatMap((effect) => (effect.kind === "request_continuation" ? [effect.message] : [])) : [],
 			);
@@ -670,8 +670,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				declaredTurn &&
 				effect.kind === "inject_reminder" &&
 				effect.audience !== "model" &&
-				pairedReminderPersists(effect) &&
-				(effect.fact !== undefined || voiced.has(effect.message));
+				effect.severity !== "hard-block" &&
+				(effect.fact !== undefined || (pairedReminderPersists(effect) && voiced.has(effect.message)));
 			if (declaredTurn) announceAssessment(effects);
 			for (const effect of effects) {
 				if (sealedOnly(effect)) continue;
