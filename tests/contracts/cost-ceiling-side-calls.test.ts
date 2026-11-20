@@ -24,7 +24,8 @@ import { createSessionJournals } from "../../src/domains/telemetry/session-journ
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { createSideRequestAdmission } from "../../src/entry/side-request-admission.js";
-import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
+import type { CreateChatLoopDeps } from "../../src/session-control/chat-loop.js";
+import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 type FauxSteps = Parameters<ReturnType<typeof registerEngineFauxProvider>["setResponses"]>[0];
@@ -347,24 +348,34 @@ it("the triage side round passes the cost ceiling under purpose triage, and the 
 		],
 	} as unknown as ProvidersContract;
 	let visionRequests = 0;
+	// The first answer reports its parts; the second, only a total.
+	const visionUsage = [
+		{ prompt_tokens: 40, completion_tokens: 12, prompt_tokens_details: { cached_tokens: 8 } },
+		{ total_tokens: 50 },
+	];
 	const sidecar = createVisionSidecar({
 		getSettings: () => visionSettings,
 		providers: visionProviders,
 		telemetry,
 		session,
 		fetchImpl: async () => {
+			const usage = visionUsage[visionRequests];
 			visionRequests += 1;
 			return Response.json({
 				model: "minicpm",
-				usage: { prompt_tokens: 40, completion_tokens: 12, prompt_tokens_details: { cached_tokens: 8 } },
+				usage,
 				choices: [{ message: { content: '{"images":[{"index":1,"description":"a pixel"}],"answer":"one"}' } }],
 			});
 		},
 	});
 	const image = { type: "image" as const, mimeType: "image/png", data: "aGVsbG8=" };
 	strictEqual((await sidecar.analyze([image], "Count")).answer, "one");
+	strictEqual((await sidecar.analyze([image], "Count")).answer, "one");
 	await rejects(sidecar.analyze([], "Count"), /images per question/u);
-	strictEqual(visionRequests, 1, "no image means no vision request");
+	const cancelled = new AbortController();
+	cancelled.abort();
+	await rejects(sidecar.analyze([image], "Count", cancelled.signal));
+	strictEqual(visionRequests, 2, "no image, or a request cancelled before it left, means no vision request");
 
 	await journals.flush();
 	const journal = await readCallJournal(telemetrySessionDirectory(clioStateDir(), sessionId));
@@ -381,13 +392,21 @@ it("the triage side round passes the cost ceiling under purpose triage, and the 
 	strictEqual(triage.length, 3, "the refused, the stale and the applied round each journal a triage call");
 	strictEqual(triage[0]?.disposition, "never_sent", "the refused round sent nothing");
 	const vision = byPurpose("vision");
-	strictEqual(vision.length, 1, "one image request, one vision call");
+	strictEqual(vision.length, 2, "two image requests, two vision calls; the cancelled one journals nothing");
 	strictEqual(vision[0]?.disposition, "settled");
 	deepStrictEqual(
 		[vision[0]?.usage?.input, vision[0]?.usage?.output, vision[0]?.usage?.cacheRead].map((fact) =>
 			fact?.kind === "measured" ? fact.value : fact?.kind,
 		),
 		[32, 12, 8],
+	);
+	// A total-only report is a measured call, its parts unknown, never zero.
+	strictEqual(vision[1]?.disposition, "settled");
+	deepStrictEqual(
+		[vision[1]?.usage?.total, vision[1]?.usage?.input, vision[1]?.usage?.output].map((fact) =>
+			fact?.kind === "measured" ? fact.value : fact?.kind,
+		),
+		[50, "unknown", "unknown"],
 	);
 	const fold = foldSideSurfaces(records);
 	strictEqual(fold.residual.length, 0, "every side call named its purpose");

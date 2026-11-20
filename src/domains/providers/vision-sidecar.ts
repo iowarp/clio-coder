@@ -4,7 +4,8 @@ import type { ClioSettings } from "../../core/config.js";
 import { pricingBasisFields } from "../../core/telemetry/pricing.js";
 import type { ImageContent } from "../../engine/types.js";
 import type { SessionContract } from "../session/contract.js";
-import { type CallScope, openCallScope } from "../telemetry/call-scope.js";
+import type { CallScope } from "../telemetry/call-scope.js";
+import { openCallScope } from "../telemetry/call-scope.js";
 import type { TelemetryContract } from "../telemetry/contract.js";
 import { targetRequiresAuth } from "./auth/index.js";
 import type { ProvidersContract } from "./contract.js";
@@ -146,12 +147,19 @@ const count = (value: unknown): number | null =>
 function settlementMessage(payload: unknown): Record<string, unknown> {
 	const raw = (payload && typeof payload === "object" ? payload : {}) as {
 		model?: unknown;
-		usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; prompt_tokens_details?: { cached_tokens?: unknown } };
+		usage?: {
+			prompt_tokens?: unknown;
+			completion_tokens?: unknown;
+			total_tokens?: unknown;
+			prompt_tokens_details?: { cached_tokens?: unknown };
+		};
 		choices?: Array<{ finish_reason?: unknown }>;
 	};
 	const prompt = count(raw.usage?.prompt_tokens);
 	const cached = count(raw.usage?.prompt_tokens_details?.cached_tokens);
 	const output = count(raw.usage?.completion_tokens);
+	// A server that reports only a total still measured the call; the settlement keeps it beside unknown parts.
+	const total = count(raw.usage?.total_tokens);
 	return {
 		role: "assistant",
 		stopReason: raw.choices?.[0]?.finish_reason === "length" ? "length" : "stop",
@@ -160,6 +168,7 @@ function settlementMessage(payload: unknown): Record<string, unknown> {
 			...(prompt !== null ? { input: Math.max(0, prompt - (cached ?? 0)) } : {}),
 			...(output !== null ? { output } : {}),
 			...(cached !== null ? { cacheRead: cached } : {}),
+			...(total !== null ? { totalTokens: total } : {}),
 			cacheReadField: cached !== null ? "sent" : "omitted",
 		},
 	};
@@ -188,6 +197,8 @@ export async function analyzeVision(
 		...images.map((image) => ({ type: "image_url", image_url: { url: `data:${image.mimeType};base64,${image.data}` } })),
 	];
 	const url = completionUrl(binding.url);
+	// A request cancelled before it leaves is no call at all, not one sent and left unsettled.
+	signal.throwIfAborted();
 	options.call?.startAttempt();
 	let response: Response;
 	try {
