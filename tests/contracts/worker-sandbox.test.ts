@@ -32,6 +32,21 @@ function run(file: string, args: string[]): Promise<{ code: number | null; outpu
 	});
 }
 
+test("a worker granted any network tool, web_read included, gets shell network (M6)", () => {
+	const network = (allowedTools: string[]) =>
+		resolveWorkerSandboxSpec({
+			mode: "auto",
+			readOnly: true,
+			cwd: clioHome.dir,
+			writeBoundaries: [],
+			allowedTools,
+			networkSetting: false,
+		})?.network;
+	assert.equal(network(["bash"]), false);
+	assert.equal(network(["bash", "web_fetch"]), true);
+	assert.equal(network(["bash", "web_read"]), true);
+});
+
 test("under bwrap a worker command writes only its writable root and cannot reach the network", async (t) => {
 	const availability = sandboxAvailability();
 	if (!availability.available || availability.backend !== "bwrap") {

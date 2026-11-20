@@ -47,12 +47,12 @@ function strictlyInside(root: string, candidate: string): boolean {
 
 /**
  * Network for worker commands follows the run's retrieval grant. A worker
- * trusted with web_fetch already has an egress channel, so an isolated shell
- * would protect nothing while breaking package installs; a worker without it
+ * trusted with web_fetch or web_read already has an egress channel, so an isolated shell
+ * would protect nothing while breaking package installs; a worker without either
  * gets an empty network namespace unless the operator opted in.
  */
 function workerSandboxNetwork(allowedTools: ReadonlyArray<string>, networkSetting: boolean): boolean {
-	return networkSetting || allowedTools.includes(ToolNames.WebFetch);
+	return networkSetting || allowedTools.includes(ToolNames.WebFetch) || allowedTools.includes(ToolNames.WebRead);
 }
 
 /** Paths inside a writable root that stay read-only, as in Codex's workspace-write mode. */
