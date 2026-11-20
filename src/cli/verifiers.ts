@@ -150,7 +150,9 @@ function checkCwd(parsed: ParsedAuthoringArgs): string | undefined | Error {
 	const deprecated = oneValue(parsed, "--cwd");
 	if (current !== undefined && deprecated !== undefined) return new Error("give --check-cwd or --cwd, not both");
 	if (deprecated !== undefined) {
-		process.stderr.write("clio-coder verifiers: --cwd is deprecated; use --check-cwd\n");
+		process.stderr.write(
+			"clio-coder: deprecated: verifiers --cwd; use clio-coder verifiers --check-cwd (removed in 0.9.0)\n",
+		);
 		return deprecated;
 	}
 	return current;

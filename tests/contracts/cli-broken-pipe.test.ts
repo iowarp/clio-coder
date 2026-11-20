@@ -3,6 +3,8 @@ import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { test } from "node:test";
 import { createFleetEventJournal } from "../../src/domains/dispatch/fleet-event-journal.js";
+import { openLedger } from "../../src/domains/dispatch/state.js";
+import { ensureClioState } from "../../src/domains/lifecycle/index.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 test("closed stdout quietly ends fleet journals, followers, and trace JSON with SIGPIPE status", async () => {
@@ -51,6 +53,52 @@ test("closed stdout quietly ends fleet journals, followers, and trace JSON with 
 			strictEqual(await closed, 141, args.join(" "));
 			strictEqual(stderr, "", args.join(" "));
 		}
+	} finally {
+		env.restore();
+	}
+});
+
+test("fleet status --json ends with SIGPIPE status when its reader takes one byte and closes (SPEC L7a)", async () => {
+	const env = await isolateClioEnv("cli-status-pipe-");
+	try {
+		ensureClioState();
+		const ledger = openLedger({ maxRuns: 1000 });
+		// Enough running rows that the one document outgrows the pipe buffer, so the write is pending when the reader closes.
+		for (let i = 0; i < 600; i += 1) {
+			const row = ledger.create({
+				agentId: "scout",
+				executionRole: "researcher",
+				task: `closed reader ${i}`,
+				targetId: "local",
+				wireModelId: "model",
+				runtimeId: "openai",
+				runtimeKind: "http",
+				sessionId: null,
+				cwd: env.dir,
+			});
+			ledger.update(row.id, { status: "running" });
+		}
+		await ledger.persist();
+		const child = spawn(process.execPath, [resolve("dist/cli/index.js"), "fleet", "status", "--json", "--all"], {
+			cwd: env.dir,
+			env: { ...process.env, HOME: env.dir },
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		let stderr = "";
+		child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+			stderr += chunk;
+		});
+		const closed = new Promise<number | null>((accept, reject) => {
+			child.once("error", reject);
+			child.once("close", accept);
+		});
+		const first = await new Promise<string>((accept) => {
+			child.stdout.once("readable", () => accept(String(child.stdout.read(1))));
+		});
+		child.stdout.destroy();
+		strictEqual(first, "{");
+		strictEqual(await closed, 141, stderr);
+		strictEqual(stderr, "");
 	} finally {
 		env.restore();
 	}
