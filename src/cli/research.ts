@@ -21,6 +21,7 @@ import {
 	summarizeCampaign,
 } from "../domains/research/index.js";
 import { printError } from "./argv.js";
+import { writeCliFailure } from "./kit/json-out.js";
 import { containedYoloRefusal } from "./contained-yolo-gate.js";
 import { installStopSignals, type StopSignals } from "./stop-signals.js";
 
@@ -192,7 +193,7 @@ function parseStart(args: ReadonlyArray<string>): StartFlags | string {
 					break;
 				}
 				default:
-					return `unknown option '${arg}'`;
+					return `unknown flag: ${arg}`;
 			}
 		} else return `unexpected argument '${arg}'`;
 	}
@@ -230,6 +231,28 @@ export function installResearchStopSignals(controller: AbortController, log: (li
 	return installStopSignals(controller, (name) => log(`${name} received; stopping after the current step`));
 }
 
+/** One diagnostic and a pointer to help, never the whole page (C3); `--json` adds the failure document. */
+function usageError(path: ReadonlyArray<string>, message: string, json: boolean): number {
+	writeCliFailure({
+		path: ["research", ...path],
+		slug: message.startsWith("unknown flag") ? "unknown_flag" : "usage",
+		message,
+		json,
+	});
+	return 2;
+}
+
+/** The C19 completion block: which budget, signal or failure ended this run. */
+function completionOf(outcome: ResearchRunOutcome): { state: "stopped"; stopReason: string } {
+	const reasons: Record<string, string> = {
+		"max-iterations": "max_iterations",
+		"max-wall-minutes": "max_wall",
+		"max-cost-usd": "max_cost",
+		stopped: "signal",
+	};
+	return { state: "stopped", stopReason: reasons[outcome.reason] ?? outcome.reason.replaceAll("-", "_") };
+}
+
 function exitFor(outcome: ResearchRunOutcome, stopCode: number): number {
 	if (outcome.reason === "stopped") return stopCode;
 	if (outcome.reason === "max-iterations" || outcome.reason === "max-wall-minutes" || outcome.reason === "max-cost-usd")
@@ -239,10 +262,7 @@ function exitFor(outcome: ResearchRunOutcome, stopCode: number): number {
 
 async function start(args: ReadonlyArray<string>, json: boolean): Promise<number> {
 	const flags = parseStart(args);
-	if (typeof flags === "string") {
-		printError(`research start: ${flags}`, HELP.split("\n")[1]);
-		return 2;
-	}
+	if (typeof flags === "string") return usageError(["start"], flags, json);
 	if (flags.autonomy === "yolo") {
 		const refusal = containedYoloRefusal("research");
 		if (refusal !== null) {
@@ -320,21 +340,22 @@ async function driveCampaign(
 		stops.dispose();
 	}
 	const view = summarizeCampaign(campaign.project, campaign.id);
-	console.log(json ? JSON.stringify(viewJson(view), null, 2) : campaignStatusLines(view).join("\n"));
+	// `completion` is additive: the v1 document keeps every field it had.
+	console.log(
+		json
+			? JSON.stringify({ ...viewJson(view), completion: completionOf(outcome) }, null, 2)
+			: campaignStatusLines(view).join("\n"),
+	);
 	return exitFor(outcome, stops.exitCode());
 }
 
 async function resume(operands: ReadonlyArray<string>, json: boolean): Promise<number> {
-	const usage = HELP.split("\n")[2];
+	const flag = operands.find((arg) => arg.startsWith("-"));
+	if (flag !== undefined) return usageError(["resume"], `unknown flag: ${flag}`, json);
 	const [id, extra] = operands;
-	if (id === undefined || extra !== undefined) {
-		printError("research resume: name one campaign id", usage);
-		return 2;
-	}
-	if (!isResearchCampaignId(id)) {
-		printError(`research resume: '${id}' is not a campaign id (r<yyyymmdd>-<hhmmss>-<hex>)`, usage);
-		return 2;
-	}
+	if (id === undefined || extra !== undefined) return usageError(["resume"], "name one campaign id", json);
+	if (!isResearchCampaignId(id))
+		return usageError(["resume"], `'${id}' is not a campaign id (r<yyyymmdd>-<hhmmss>-<hex>)`, json);
 	let campaign: ReturnType<typeof readCampaign>;
 	try {
 		campaign = readCampaign(researchProjectRoot(process.cwd()), id);
@@ -363,11 +384,12 @@ export async function runResearchCommand(args: string[]): Promise<number> {
 	if (action === "start") return start(operands, json);
 	if (action === "resume") return resume(operands, json);
 	const project = researchProjectRoot(process.cwd());
+	if (action.startsWith("-")) return usageError([], `unknown flag: ${action}`, json);
+	const flag = operands.find((arg) => arg.startsWith("-"));
+	if (flag !== undefined && ["list", "status", "report"].includes(action))
+		return usageError([action], `unknown flag: ${flag}`, json);
 	if (action === "list") {
-		if (operands.length > 0) {
-			printError(`research list: unexpected argument '${operands[0]}'`, HELP.split("\n")[5]);
-			return 2;
-		}
+		if (operands.length > 0) return usageError(["list"], `unexpected argument '${operands[0]}'`, json);
 		const views = listCampaigns(project);
 		if (json) {
 			console.log(
@@ -392,13 +414,12 @@ export async function runResearchCommand(args: string[]): Promise<number> {
 		return 0;
 	}
 	if (action === "status" || action === "report") {
-		if (operands.length > 1 || (action === "report" && operands.length === 0)) {
-			printError(
-				`research ${action}: name ${action === "report" ? "one campaign id" : "at most one campaign id"}`,
-				HELP.split("\n")[action === "report" ? 4 : 3],
+		if (operands.length > 1 || (action === "report" && operands.length === 0))
+			return usageError(
+				[action],
+				`name ${action === "report" ? "one campaign id" : "at most one campaign id"}`,
+				json,
 			);
-			return 2;
-		}
 		let id = operands[0];
 		if (id === undefined) {
 			const views = listCampaigns(project).filter((view) => !("error" in view));
@@ -409,10 +430,8 @@ export async function runResearchCommand(args: string[]): Promise<number> {
 			}
 			id = latest.campaign.id;
 		}
-		if (!isResearchCampaignId(id)) {
-			printError(`research ${action}: '${id}' is not a campaign id (r<yyyymmdd>-<hhmmss>-<hex>)`);
-			return 2;
-		}
+		if (!isResearchCampaignId(id))
+			return usageError([action], `'${id}' is not a campaign id (r<yyyymmdd>-<hhmmss>-<hex>)`, json);
 		try {
 			if (action === "status") {
 				const view = summarizeCampaign(project, id);
@@ -440,6 +459,6 @@ export async function runResearchCommand(args: string[]): Promise<number> {
 			return 1;
 		}
 	}
-	printError(`research: unknown subcommand '${action}'`, HELP.split("\n")[1]);
+	writeCliFailure({ path: ["research"], slug: "unknown_command", message: `unknown subcommand '${action}'`, json });
 	return 2;
 }
