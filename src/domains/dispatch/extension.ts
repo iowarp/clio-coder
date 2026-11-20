@@ -14,7 +14,12 @@ import { renderUsdEstimate, renderUsdLimit } from "../../core/telemetry/render.j
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { ToolRoundRecord } from "../../engine/types.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
-import { WORKER_EXTENSION_HOOKS_MAX, WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
+import {
+	WORKER_EXTENSION_HOOKS_MAX,
+	WORKER_PERMISSION_HOLD_VERSION,
+	WORKER_STDIN_FRAME_MAX_BYTES,
+	type WorkerPermissionHoldFrame,
+} from "../../worker/protocol.js";
 import {
 	type AcceptedWorkerSlates,
 	bindHostVerificationHypotheses,
@@ -676,6 +681,8 @@ interface ActiveRun {
 		binding?: WorkerDecisionBinding,
 		cause?: "timeout",
 	) => boolean;
+	/** Renew a held ask past the worker's backstop. False unless the worker announced the hold frame and took the line. */
+	holdPermission?: (requestId: string, holdMs: number) => boolean;
 	promise: Promise<void>;
 	recipe: AgentRecipe | null;
 	/** The permit this attempt ran under; a retry inherits it as a cap. Absent for ACP delegation. */
@@ -4308,6 +4315,7 @@ export function createDispatchBundle(
 						grantBroker.expire(record.requestId);
 						return true;
 					},
+					extend: (holdMs) => active.get(record.runId)?.holdPermission?.(record.workerRequestId, holdMs) ?? false,
 				});
 			}
 			// An operator rail goes straight to the operator's card when this
@@ -8414,6 +8422,20 @@ export function createDispatchBundle(
 						...(cause !== undefined ? { cause } : {}),
 					})
 			: undefined;
+		// Only a worker that announced this frame version is sent one: an older one drops the line, and its backstop
+		// would then deny a hold this process believes it extended.
+		const holdPermission = sendToWorker
+			? (requestId: string, holdMs: number): boolean => {
+					if (worker.attestation?.()?.permissionHold !== WORKER_PERMISSION_HOLD_VERSION) return false;
+					const frame: WorkerPermissionHoldFrame = {
+						type: "permission_hold",
+						version: WORKER_PERMISSION_HOLD_VERSION,
+						requestId,
+						holdMs: Math.ceil(holdMs),
+					};
+					return sendToWorker(frame);
+				}
+			: undefined;
 		const heartbeatAt = worker.heartbeatAt;
 		const workerEvents = worker.events;
 		// Put the harness's files back before anything reads the worktree's change. A held follower writes its overlay
@@ -8754,6 +8776,7 @@ export function createDispatchBundle(
 						windowMs,
 						fallback: spec.escalation.fallback,
 						deny: () => resolvePermission(requestId, "deny", undefined, "timeout"),
+						...(holdPermission !== undefined ? { extend: (holdMs: number) => holdPermission(requestId, holdMs) } : {}),
 					});
 				}
 				const ctx = isRecord(event.payload.decision) ? event.payload.decision : null;
@@ -9233,6 +9256,7 @@ export function createDispatchBundle(
 			kill: abort,
 			...(steer ? { steer } : {}),
 			...(resolvePermission ? { resolvePermission } : {}),
+			...(holdPermission ? { holdPermission } : {}),
 			promise: workerDone.then(
 				() => undefined,
 				() => undefined,

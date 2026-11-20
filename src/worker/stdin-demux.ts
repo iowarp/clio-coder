@@ -2,6 +2,8 @@ import {
 	type AgentLedgerEntry,
 	parseAgentLedgerEntry,
 	parseWorkerHookResult,
+	WORKER_PERMISSION_HOLD_LIMIT_MS,
+	WORKER_PERMISSION_HOLD_VERSION,
 	WORKER_STDIN_FRAME_MAX_BYTES,
 	type WorkerHookResultFrame,
 	withinFrameBudget,
@@ -44,6 +46,14 @@ export interface WorkerStdinDemux {
 	 * answer with no handler is dropped and counted.
 	 */
 	onHookResult(handler: (result: WorkerHookResultFrame) => void): void;
+	/**
+	 * Register the handler for hold renewals
+	 * (`{"type":"permission_hold","version":1,"requestId":"...","holdMs":N}`).
+	 * A hold only follows an ask the run opened after this was registered, so a
+	 * hold with no handler, another version, or a wait past the hold limit is
+	 * dropped and counted.
+	 */
+	onPermissionHold(handler: (hold: WorkerPermissionHold) => void): void;
 	/**
 	 * Resolve once the orchestrator's `admit` frame (`{"type":"admit","specDigest":"..."}`)
 	 * names `expectedDigest`. Rejects on a different or missing digest, on the
@@ -88,6 +98,22 @@ export interface WorkerPermissionDecision {
 	 * the worker then applies its fallback exactly as its own timer would.
 	 */
 	cause?: "timeout";
+}
+
+/** The parent answers the named ask within `holdMs` from now. */
+export interface WorkerPermissionHold {
+	requestId: string;
+	holdMs: number;
+}
+
+function parsePermissionHold(value: Record<string, unknown>): WorkerPermissionHold | null {
+	if (value.version !== WORKER_PERMISSION_HOLD_VERSION) return null;
+	if (typeof value.requestId !== "string" || value.requestId.length === 0) return null;
+	const holdMs = value.holdMs;
+	if (!Number.isSafeInteger(holdMs) || Number(holdMs) <= 0 || Number(holdMs) > WORKER_PERMISSION_HOLD_LIMIT_MS) {
+		return null;
+	}
+	return { requestId: value.requestId, holdMs: Number(holdMs) };
 }
 
 function parseDecisionBinding(value: unknown): WorkerDecisionBinding | null {
@@ -162,6 +188,7 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 	const pendingPermissionDecisions: WorkerPermissionDecision[] = [];
 	let ledgerDeltaHandler: ((entries: ReadonlyArray<AgentLedgerEntry>) => void) | null = null;
 	let hookResultHandler: ((result: WorkerHookResultFrame) => void) | null = null;
+	let holdHandler: ((hold: WorkerPermissionHold) => void) | null = null;
 	const pendingLedgerDeltas: Array<ReadonlyArray<AgentLedgerEntry>> = [];
 	let droppedLines = 0;
 	let channelCloseHandler: (() => void) | null = null;
@@ -308,6 +335,15 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 			hookResultHandler(result);
 			return;
 		}
+		if (typeof value === "object" && value !== null && (value as { type?: unknown }).type === "permission_hold") {
+			const hold = parsePermissionHold(value as Record<string, unknown>);
+			if (hold === null || holdHandler === null) {
+				droppedLines += 1;
+				return;
+			}
+			holdHandler(hold);
+			return;
+		}
 		if (typeof value === "object" && value !== null && (value as { type?: unknown }).type === "admit") {
 			// Only the first verdict counts; a repeat cannot revoke or re-grant it.
 			if (admittedDigest !== undefined) {
@@ -420,6 +456,9 @@ export function createWorkerStdinDemux(): WorkerStdinDemux {
 		},
 		onHookResult(handler: (result: WorkerHookResultFrame) => void): void {
 			hookResultHandler = handler;
+		},
+		onPermissionHold(handler: (hold: WorkerPermissionHold) => void): void {
+			holdHandler = handler;
 		},
 		onLedgerDelta(handler: (entries: ReadonlyArray<AgentLedgerEntry>) => void): void {
 			ledgerDeltaHandler = handler;

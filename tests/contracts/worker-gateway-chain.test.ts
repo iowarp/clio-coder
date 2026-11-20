@@ -59,6 +59,7 @@ async function runWorker(
 	rounds: Round[],
 	overrides: Partial<WorkerRunInput> = SCOUT,
 	files: Record<string, string> = { "overlays.ts": SOURCE },
+	onEvent?: (event: WorkerEvent, worker: WorkerRunHandle) => void,
 ) {
 	const env = await isolateClioEnv("clio-worker-gateway-chain-");
 	const previousCwd = process.cwd();
@@ -119,7 +120,10 @@ async function runWorker(
 				cwd: env.dir,
 				...overrides,
 			},
-			(event) => events.push(event),
+			(event) => {
+				events.push(event);
+				if (onEvent !== undefined && worker !== undefined) onEvent(event, worker);
+			},
 		);
 		const result = await worker.promise;
 		return { result, events, requests, bodies, dir: env.dir };
@@ -515,6 +519,36 @@ test("an escalation with no responder applies its fallback at once instead of wa
 	strictEqual(resolved[0]?.source, "policy");
 	strictEqual(resolved[0]?.mode, "deny");
 	ok(/no operator can answer worker escalations/u.test(resolved[0]?.reason ?? ""), resolved[0]?.reason);
+});
+
+test("a parent's hold moves a parked ask's backstop, so the ask waits for the answer instead of timing out", {
+	timeout: 20_000,
+}, async () => {
+	const bash: Call = { name: "bash", arguments: JSON.stringify({ command: "frobnicate --now" }) };
+	const answers: boolean[] = [];
+	const run = await runWorker(
+		[[bash], { text: "done" }],
+		{
+			allowedTools: ["bash"],
+			onPermission: "escalate",
+			escalation: { timeoutMs: 50, backstopMs: 50, fallback: "deny" },
+		},
+		undefined,
+		(event, worker) => {
+			if (event.type !== "clio_coder_permission_escalated") return;
+			const requestId = (event.payload as { requestId: string }).requestId;
+			answers.push(worker.holdPermission?.("another-ask", 60_000) ?? false);
+			answers.push(worker.holdPermission?.(requestId, 60_000) ?? false);
+			// Due after the 50 ms backstop, so timers run it only once the unmoved backstop would have denied.
+			setTimeout(() => answers.push(worker.resolvePermission?.(requestId, "deny") ?? false), 250);
+		},
+	);
+	deepStrictEqual(answers, [false, true, true], "only the parked ask is held, and the answer still reaches it");
+	const resolved = run.events.flatMap((event) =>
+		event.type === "clio_coder_permission_resolved" ? [event.payload] : [],
+	);
+	strictEqual(resolved.length, 1, JSON.stringify(resolved));
+	strictEqual(resolved[0]?.source, "operator");
 });
 
 test("an unavailable verifier entry cannot rerun with changed arguments and still synthesizes on cap", {

@@ -2,20 +2,26 @@
  * The time a person has to answer a worker's permission ask, owned by the
  * process that dispatched the worker.
  *
- * The worker cannot be told to wait longer without a new stdin frame, so the
- * parent runs the visible window here and answers with the existing
+ * The parent runs the visible window here and answers with the existing
  * `permission_decision` line, marked as a timeout so fallback deny and fallback
  * fail behave exactly as the worker's own timer does. The worker's timer stays
- * armed as a backstop past the longest wait this module allows, which bounds an
+ * armed as a backstop past the parent's latest possible answer, which bounds an
  * ask whose parent is wedged rather than gone. A parent that is gone closes the
  * worker's stdin, and the worker aborts on that without waiting for any timer.
+ *
+ * A first hold runs to the ceiling, inside the backstop the worker started
+ * with. A person still at the card can renew the hold past it only when the
+ * worker honors the `permission_hold` frame, which moves its backstop; every
+ * renewal stays within WORKER_PERMISSION_HOLD_LIMIT_MS of the ask opening.
  */
 
-/** The longest a held ask waits, counted from when it was opened. */
+import { WORKER_APPROVAL_BACKSTOP_MARGIN_MS, WORKER_PERMISSION_HOLD_LIMIT_MS } from "../../worker/protocol.js";
+
+/** The longest a first hold waits, counted from when the ask was opened; a renewal waits this long from the key that renewed it. */
 export const WORKER_APPROVAL_HOLD_CEILING_MS = 15 * 60_000;
 
-/** How far the worker's timer sits past the parent's latest possible answer, which also covers a backed-up event lane. */
-const WORKER_APPROVAL_BACKSTOP_MARGIN_MS = 60_000;
+/** A renewal that would gain less than this changes nothing, so a person typing at a card sends at most one hold frame a minute. */
+const WORKER_APPROVAL_RENEW_STEP_MS = 60_000;
 
 /** The whole wait a hold can reach, counted from when the ask was opened. */
 export function workerApprovalCeilingMs(windowMs: number): number {
@@ -51,6 +57,12 @@ export interface WorkerApprovalWindowInput {
 	decider?: WorkerApprovalDecider;
 	/** Send the timeout denial; false when the worker's channel is gone. */
 	deny(): boolean;
+	/**
+	 * Tell the worker the parent answers within `holdMs`, so its backstop moves
+	 * past that. False when the worker does not honor the frame or its channel
+	 * is gone; absent when the ask cannot be held past its ceiling.
+	 */
+	extend?(holdMs: number): boolean;
 }
 
 export interface WorkerApprovalWindowsDeps {
@@ -64,7 +76,11 @@ export interface WorkerApprovalWindowsDeps {
 export interface WorkerApprovalWindows {
 	open(input: WorkerApprovalWindowInput): void;
 	read(requestId: string): WorkerApprovalWindowView | null;
-	/** The person is present: the ask waits until its ceiling. A second hold changes nothing. */
+	/**
+	 * The person is present: the ask waits until its ceiling. A later hold renews
+	 * it to a ceiling away from now, within the hold limit, when the worker can
+	 * extend its backstop; otherwise it changes nothing.
+	 */
 	hold(requestId: string): boolean;
 	/** The person is present but looking at another card: a running window starts again, never past its ceiling. */
 	restart(requestId: string): boolean;
@@ -80,6 +96,9 @@ export interface WorkerApprovalWindows {
 }
 
 interface OpenWindow extends WorkerApprovalWindowInput {
+	openedAt: number;
+	/** No renewal reaches past this. */
+	limitAt: number;
 	ceilingAt: number;
 	ceilingMs: number;
 	deadline: number;
@@ -141,6 +160,8 @@ export function createWorkerApprovalWindows(deps: WorkerApprovalWindowsDeps): Wo
 			const ceilingMs = workerApprovalCeilingMs(input.windowMs);
 			const entry: OpenWindow = {
 				...input,
+				openedAt: at,
+				limitAt: at + Math.max(ceilingMs, WORKER_PERMISSION_HOLD_LIMIT_MS),
 				ceilingAt: at + ceilingMs,
 				ceilingMs,
 				deadline: at + input.windowMs,
@@ -158,9 +179,25 @@ export function createWorkerApprovalWindows(deps: WorkerApprovalWindowsDeps): Wo
 		},
 		hold(requestId) {
 			const entry = live(requestId);
-			if (entry === null || entry.held) return false;
-			entry.held = true;
-			entry.deadline = entry.ceilingAt;
+			if (entry === null) return false;
+			if (!entry.held) {
+				entry.held = true;
+				entry.deadline = entry.ceilingAt;
+				arm(entry);
+				changed(entry);
+				return true;
+			}
+			if (entry.extend === undefined) return false;
+			const at = deps.now();
+			const renewed = Math.min(at + WORKER_APPROVAL_HOLD_CEILING_MS, entry.limitAt);
+			// The last renewal may gain less than a step, so a held ask reaches its limit exactly.
+			if (renewed <= entry.deadline) return false;
+			if (renewed - entry.deadline < WORKER_APPROVAL_RENEW_STEP_MS && renewed < entry.limitAt) return false;
+			// The worker learns first: a deadline it was never told of would meet its backstop.
+			if (!entry.extend(renewed - at)) return false;
+			entry.deadline = renewed;
+			entry.ceilingAt = renewed;
+			entry.ceilingMs = renewed - entry.openedAt;
 			arm(entry);
 			changed(entry);
 			return true;
