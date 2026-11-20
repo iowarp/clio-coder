@@ -444,12 +444,14 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["ext", extensionsCommand],
 	[
 		"fleet",
-		async (subArgs) =>
-			subArgs[0] === "nodes"
-				? (await import("./fleet-nodes.js")).runFleetNodes(subArgs.slice(1))
-				: subArgs[0] === "land"
-					? (await import("./fleet-land.js")).runFleetLand(subArgs.slice(1))
-					: (await import("./fleet.js")).runFleetCommand(subArgs),
+		async (subArgs) => {
+			if (subArgs[0] === "nodes") return (await import("./fleet-nodes.js")).runFleetNodes(subArgs.slice(1));
+			if (subArgs[0] === "land") return (await import("./fleet-land.js")).runFleetLand(subArgs.slice(1));
+			// The group help answers from a leaf, before fleet.js and its domain graph load.
+			const help = (await import("./fleet-help.js")).answerFleetHelp(subArgs);
+			if (help !== null) return help;
+			return (await import("./fleet.js")).runFleetCommand(subArgs);
+		},
 	],
 	["playbook", async (subArgs) => (await import("./playbook.js")).runPlaybookCommand(subArgs)],
 	["library", async (subArgs) => (await import("./library.js")).runLibraryCommand(subArgs)],

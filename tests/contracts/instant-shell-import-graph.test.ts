@@ -120,6 +120,38 @@ test("run --help answers from a module that does not load the run command", () =
 	visit(owner[0]);
 });
 
+test("fleet --help answers from a module that does not load the fleet command", () => {
+	const metadata = readMetafile();
+	const owners = Object.entries(metadata.outputs).filter(([, output]) => "src/cli/fleet-help.ts" in output.inputs);
+	strictEqual(owners.length, 1, "build with pnpm build before checking the fleet help artifact");
+	const owner = owners[0];
+	ok(owner);
+	const seen = new Set<string>();
+	const visit = (name: string): void => {
+		if (seen.has(name)) return;
+		const output = metadata.outputs[name];
+		ok(output, `missing static output: ${name}`);
+		seen.add(name);
+		for (const source of Object.keys(output.inputs))
+			ok(
+				!/^src\/(?:cli\/fleet\.ts|domains\/(?:dispatch|providers|session)\/)/u.test(source),
+				`fleet help loads ${source}`,
+			);
+		for (const dependency of output.imports) {
+			if (dependency.kind === "dynamic-import") continue;
+			if (dependency.external)
+				ok(
+					!/^@earendil-works\/pi-(ai|agent-core)(?:\/|$)/u.test(dependency.path),
+					`fleet help loads the model/agent SDK: ${dependency.path}`,
+				);
+			else visit(dependency.path);
+		}
+	};
+	visit(owner[0]);
+	// 0.8.5 measured 2 chunks (133 files / 8,963,064 B loaded before fleet.ts stopped holding the help text).
+	ok(seen.size <= 16, `fleet help chunks: ${seen.size} > 16`);
+});
+
 test("headless run refuses before boot from a closure without the composition root or the model SDK", () => {
 	const metadata = readMetafile();
 	const owners = Object.entries(metadata.outputs).filter(([, output]) => "src/cli/run.ts" in output.inputs);
