@@ -347,7 +347,7 @@ test("loop guard block reasons restate a prior failure and name where the turn's
 		},
 		{
 			name:
-				"a parallel batch that would cross the soft budget runs none of its calls, and the refusal says a continuation follows (CLI-H1)",
+				"a parallel batch that crosses the soft budget when a continuation follows runs whole and rolls the turn (XR-6)",
 			guard: { turnToolCallBudget: () => ({ soft: 3, hard: 18 }) },
 			calls: rounds(
 				[read("a.md")],
@@ -359,14 +359,23 @@ test("loop guard block reasons restate a prior failure and name where the turn's
 				],
 				[{ ...read("d.md"), metadata: continues }],
 			),
-			admitted: [true, true, false, false, false, false],
+			admitted: [true, true, true, true, true, false],
 			reasons: [
-				["every", /continuation turn follows automatically/u],
-				["every", /Do not claim the work is finished/u],
-				["every", /end your reply\./u, false],
-				[0, /this parallel batch of 3 tool calls would take the turn past its soft budget of 3 \(2 made\), so no call/u],
-				[2, /no call in the batch ran/u],
-				[3, /this turn has made its 3 tool calls/u],
+				[0, /this turn has made its 3 tool calls/u],
+				[0, /continuation turn follows automatically/u],
+				[0, /end your reply\./u, false],
+			],
+		},
+		{
+			name: "a wide-parallel route's measured width scales the soft budget and the refusal names the scaling (CLI-P26)",
+			guard: { turnToolCallBudget: () => ({ soft: 3, hard: 18 }) },
+			calls: times(7, (index) => ({ ...read(`${index}.md`), metadata: { turnBudgetScale: 2 } })),
+			admitted: [true, true, true, true, true, true, false],
+			reasons: [
+				[
+					0,
+					/soft budget 6, safety\.limits\.chatToolCallsPerTurn 3 scaled x2\.0 for this route's measured calls per round/u,
+				],
 			],
 		},
 		{

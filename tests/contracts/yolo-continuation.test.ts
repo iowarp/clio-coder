@@ -18,6 +18,7 @@ const RATE_LIMITED = "429 rate_limit_error: This request would exceed your rate 
 /** What one model call does: cross the budget, lock the tools, both, finish, or throw. */
 type Step =
 	| "budget"
+	| "roll"
 	| "hard"
 	| "loop-stop"
 	| "esc-then-hard"
@@ -122,6 +123,17 @@ async function harness(script: readonly Step[], options: { autonomy?: "yolo" | "
 								at: Date.now(),
 							});
 						}
+						if (current === "roll") {
+							context.bus.emit("safety.tool_budget_exceeded", {
+								tool: "bash",
+								callsThisTurn: 61,
+								softBudget: 60,
+								hardCeiling: 75,
+								interrupted: false,
+								at: Date.now(),
+								rolled: true,
+							});
+						}
 						if (current === "loop-stop") {
 							context.bus.emit("safety.loop_blocked", {
 								tool: "bash",
@@ -197,6 +209,32 @@ describe("yolo continuation of a stopped turn (#445)", () => {
 				),
 				continuation,
 			);
+		} finally {
+			await run.close();
+		}
+	});
+
+	it("rolls a yolo turn past its budget without asking for a summary or saying it twice (XR-6, FX-30)", async () => {
+		const run = await harness(["roll", "roll", "done"]);
+		try {
+			await run.loop.submit("survey the repository");
+			await run.loop.whenSettled();
+			strictEqual(run.prompts.length, 3);
+			deepStrictEqual(pairs(run.continued), [
+				["tool_budget", 0],
+				["tool_budget", 0],
+			]);
+			const continuation = run.prompts[1] ?? "";
+			ok(continuation.includes("budget and rolled over"), continuation);
+			ok(continuation.includes("No summary is needed."), continuation);
+			ok(!continuation.includes("every tool the turn held is available again"), continuation);
+			// The roll's closing record is its notice; the generic "Continuing this turn" line does not repeat it.
+			const repeated = run.events.filter(
+				(event) =>
+					(event as { type?: string; key?: string }).type === "notice" &&
+					(event as { key?: string }).key === "turn.continued",
+			);
+			deepStrictEqual(repeated, []);
 		} finally {
 			await run.close();
 		}

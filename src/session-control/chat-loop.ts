@@ -21,6 +21,7 @@ import {
 import type { FailureCause, TurnNoAnswerCause } from "../core/telemetry/enums.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { pricesCalls, pricingBasisFields } from "../core/telemetry/pricing.js";
+import { routeCallsPerRound, turnBudgetWidthScale } from "../core/turn-budget-width.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import { turnSettlementFromCalls } from "../domains/telemetry/call-facts.js";
@@ -1181,6 +1182,8 @@ interface YoloContinuation {
 	step?: true;
 	/** What the continuation asks for, in place of "continue from where it stopped": a step continuation is a new step turn. */
 	next?: string;
+	/** A silent budget roll (XR-6): its closing record already told the transcript, so no second notice. */
+	rolled?: true;
 }
 
 const countsAgainstCap = (stop: YoloContinuation): boolean =>
@@ -1532,6 +1535,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			locked: state.synthesisToolLock,
 			continuations: state.continuation.yoloContinuations,
 		});
+		if (options.turnBudgetContinues) options.observationBudgetRoll = () => requestBudgetRoll("observation");
+		// The per-turn budgets follow this route's measured calls per round (CLI-P26).
+		const scale = turnBudgetWidthScale(
+			routeCallsPerRound(state.runtime?.agent.state.messages ?? [], state.runtime?.agent.state.model?.id),
+		);
+		if (scale > 1) options.turnBudgetScale = scale;
 		const hostRun = hostRunContext.getStore();
 		if (hostRun !== undefined) options.hostRun = hostRun;
 		const sessionId = deps.session?.current()?.id ?? null;
@@ -2009,6 +2018,23 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	/** A stop waiting for the running round's tool batch to settle (F-C16); cleared when the submit settles. */
 	let boundaryStop: ChatCancelOptions | null = null;
+	/**
+	 * The budget that rolls the running turn into a continuation at its tool boundary (XR-6): set when a turn a
+	 * continuation follows crosses its per-turn call or observation budget, read and cleared as the turn settles.
+	 */
+	let budgetRoll: "calls" | "observation" | null = null;
+	const requestBudgetRoll = (budget: "calls" | "observation"): void => {
+		if (budgetRoll !== null || !state.streaming) return;
+		budgetRoll = budget;
+		state.toolBudgetLock = true;
+		const what = budget === "calls" ? "tool-call" : "observation";
+		api.cancel({
+			reason: `[CLIO Coder] Turn budget rolled: this turn reached its per-turn ${what} budget, and the work continues in a fresh turn because autonomy is yolo.`,
+			source: "loop_guard",
+			auditReason: `turn budget roll: ${what}`,
+			atToolBoundary: true,
+		});
+	};
 	/** `run --max-requests`/`--max-tool-calls`: one count for the life of this loop, which is one headless run. */
 	const runCapCounter = createRunCapCounter();
 	const turnRuntime = createTurnRuntime({
@@ -2170,6 +2196,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const unsubscribeToolBudgetLock =
 		deps.bus?.subscribe("safety.tool_budget_exceeded", (payload) => {
 			state.toolBudgetLock = true;
+			if (payload?.rolled === true) requestBudgetRoll("calls");
 			if (typeof payload?.stepTool === "string")
 				stepPolicyStop = typeof payload.template === "string" ? { template: payload.template } : {};
 		}) ?? null;
@@ -2223,25 +2250,35 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			next: `This is a new step turn: first call ${stepTool} with the after value the last finished step reached, run the step it returns, then end the turn with a compact state summary. If ${stepTool} already said the pipeline is complete, say so and stop.`,
 		};
 		// A failure stop outranks a budget crossing in the same turn, so a failing turn cannot escape the cap on one.
+		// A budget roll is the guard's own boundary stop, not a loop: it continues uncounted like a budget crossing.
 		const stop: YoloContinuation | null =
 			failed ??
-			(guardInterrupted
-				? { cause: "loop_guard" as const, reason: "the loop guard stopped it" }
-				: state.synthesisToolLock
-					? { cause: "loop_guard" as const, reason: "the loop guard locked its tools" }
-					: state.toolBudgetLock
-						? stepStop !== null
-							? step
-							: { cause: "tool_budget" as const, reason: "it reached the per-turn tool budget" }
-						: stepRun !== null
-							? step
-							: null);
+			(budgetRoll !== null
+				? {
+						cause: "tool_budget" as const,
+						reason: `it reached the per-turn ${budgetRoll === "calls" ? "tool-call" : "observation"} budget and rolled over`,
+						next:
+							"Its last tool batch ran and the results are above; a call that did not run says so. Continue the work from there with a fresh budget. No summary is needed.",
+						rolled: true as const,
+					}
+				: guardInterrupted
+					? { cause: "loop_guard" as const, reason: "the loop guard stopped it" }
+					: state.synthesisToolLock
+						? { cause: "loop_guard" as const, reason: "the loop guard locked its tools" }
+						: state.toolBudgetLock
+							? stepStop !== null
+								? step
+								: { cause: "tool_budget" as const, reason: "it reached the per-turn tool budget" }
+							: stepRun !== null
+								? step
+								: null);
 		if (stop === null) return null;
 		if (stop.step === true && stepRun?.pipelineDone === true) return null;
 		if (countsAgainstCap(stop) && state.continuation.yoloContinuations >= TURN_CONTINUATION_CAP) return null;
 		// A turn whose tools were blocked turn-wide (the budget, its hard ceiling,
 		// or a synthesis lock) continues in a new turn that holds them again (F-C14).
-		const toolsWereLocked = failed === null && (state.toolBudgetLock || state.synthesisToolLock || guardInterrupted);
+		const toolsWereLocked =
+			failed === null && stop.rolled !== true && (state.toolBudgetLock || state.synthesisToolLock || guardInterrupted);
 		const detail = [
 			...(toolsWereLocked ? [TOOL_LOCK_RESET_DETAIL] : []),
 			...(stop.cause === "loop_guard" && guardFailure !== null ? [loopGuardContinuationDetail(guardFailure)] : []),
@@ -2304,11 +2341,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			{ cause: stop.cause, attempt, cap: TURN_CONTINUATION_CAP, at: Date.now() },
 			...(context === undefined ? [] : [ownerTelemetryContext({ sessionId: context })]),
 		);
-		emitNotice(
-			`Continuing this turn because autonomy is yolo${counted ? ` (${attempt} of ${TURN_CONTINUATION_CAP})` : ""}: ${stop.reason}.`,
-			"warning",
-			"turn.continued",
-		);
+		if (stop.rolled !== true)
+			emitNotice(
+				`Continuing this turn because autonomy is yolo${counted ? ` (${attempt} of ${TURN_CONTINUATION_CAP})` : ""}: ${stop.reason}.`,
+				"warning",
+				"turn.continued",
+			);
 		if (stop.cause === "retries_exhausted" || stop.cause === "compaction") {
 			const waited = await recovery.waitBeforeContinuation(
 				turnContinuationDelayMs(attempt, stop.retryAfterMs),
@@ -3894,6 +3932,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 				// 7. Run the prompt, then route the settled state through recovery.
 				boundaryStop = null;
+				budgetRoll = null;
 				state.streaming = true;
 				deps.autonomy?.turnStarted();
 				const foregroundOn = (runtime: AgentRuntime): (() => void) => {
@@ -4369,6 +4408,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						options.machineTurn === undefined && !canceled && !interviewDismissed && (admissionCurrent() || guardStopped)
 							? yoloContinuationDue(guardStopped, guardFailure, stepStop, stepRun)
 							: null;
+					budgetRoll = null;
 					if (options.machineTurn === undefined && generation === submitGeneration && continuation === null) {
 						const capSpent = state.continuation.yoloContinuations >= TURN_CONTINUATION_CAP;
 						// A last turn that made no step call and ended on its own summary did not stop mid-pipeline (N1).

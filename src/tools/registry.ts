@@ -613,6 +613,13 @@ export interface ToolInvokeOptions {
 	batchSize?: number;
 	/** Whether a turn the per-turn tool budget ends now continues without the operator; the soft refusal says so. */
 	turnBudgetContinues?: boolean;
+	/** Main session only: the route's measured width multiplier for the per-turn budgets (`turn-budget-width.ts`). */
+	turnBudgetScale?: number;
+	/**
+	 * Main session only, when a continuation follows: an exhausted observation pool asks the chat loop to roll the
+	 * turn at its tool boundary instead of asking the model to re-plan (XR-6).
+	 */
+	observationBudgetRoll?: () => void;
 	/** Session-effective ceiling for one tool result, read again before every invocation. */
 	toolResultMaxBytes?: number;
 	pendingSkillPolicy?: PendingSkillToolPolicy;
@@ -3509,6 +3516,7 @@ function buildToolHookInput(
 	if (budget?.toolCalls !== undefined) metadata.templateToolCalls = budget.toolCalls;
 	if (options?.batchSize !== undefined) metadata.batchSize = options.batchSize;
 	if (options?.turnBudgetContinues !== undefined) metadata.turnBudgetContinues = options.turnBudgetContinues;
+	if (options?.turnBudgetScale !== undefined) metadata.turnBudgetScale = options.turnBudgetScale;
 	if (turnPolicy !== undefined) metadata.templateStepTool = turnPolicy.stepTool;
 	const template = budget?.template ?? turnPolicy?.template;
 	if ((budget?.toolCalls !== undefined || turnPolicy !== undefined) && template) metadata.templateName = template;

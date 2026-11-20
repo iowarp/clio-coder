@@ -4,6 +4,7 @@ import {
 	resolveTemplateCeiling,
 	templateBudgetLimit,
 } from "../core/guardrails.js";
+import { OBSERVATION_WIDTH_SCALE_CEILING } from "../core/turn-budget-width.js";
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
 import type { ImageContent } from "../engine/types.js";
 import type { ToolInvokeOptions, ToolResult } from "./registry.js";
@@ -130,6 +131,8 @@ export interface ObservationReservation {
 	template?: string;
 	/** Which bound set `limitBytes` under a template budget, as notice text. */
 	boundNote?: string;
+	/** An exhausted pool in a turn a continuation follows: rolls the turn at its tool boundary (XR-6). */
+	roll?: () => void;
 }
 
 // A `next` continuation is a compact call fragment (`limit=200`, `offset=451`).
@@ -149,7 +152,9 @@ function boundContinuation(next: string | undefined): string | undefined {
 // about 37% of the window at four bytes a token. 128K is the smallest window
 // real work assumes, so the pool never drops below the 192 KB that window gets,
 // and it stops at 1 MB. A configured value other than the default is the
-// operator's own choice and applies exactly.
+// operator's own choice and applies exactly. A wide-parallel route's default
+// pool grows with its measured width, at most 1.5 times and still under 1 MB
+// (`turn-budget-width.ts`).
 const OBSERVATION_POOL_BYTES_PER_WINDOW_TOKEN = 1.5;
 const OBSERVATION_POOL_CEILING_BYTES = 1024 * 1024;
 
@@ -159,7 +164,8 @@ function operatorObservationLimit(options?: ToolInvokeOptions): number {
 	if (configured !== GUARDRAIL_DEFAULTS.observationTurnBudgetBytes || window === undefined || !(window > 0)) {
 		return configured;
 	}
-	const scaled = Math.floor(window * OBSERVATION_POOL_BYTES_PER_WINDOW_TOKEN);
+	const width = Math.min(OBSERVATION_WIDTH_SCALE_CEILING, Math.max(1, options?.turnBudgetScale ?? 1));
+	const scaled = Math.floor(window * OBSERVATION_POOL_BYTES_PER_WINDOW_TOKEN * width);
 	return Math.min(OBSERVATION_POOL_CEILING_BYTES, Math.max(configured, scaled));
 }
 
@@ -263,6 +269,7 @@ export function reserveObservation(
 	pruneBudgetMap();
 	const remaining = Math.max(0, limitBytes - state.usedBytes - state.reservedBytes);
 	if (remaining < MIN_BUDGET_SLICE_BYTES) {
+		const roll = options?.turnBudgetContinues === true ? options.observationBudgetRoll : undefined;
 		return {
 			key,
 			limitBytes,
@@ -275,6 +282,7 @@ export function reserveObservation(
 			committed: false,
 			settled: false,
 			...bound,
+			...(roll === undefined ? {} : { roll }),
 		};
 	}
 	// A call that got a slice is progress, so the exhausted streak starts over.
@@ -397,8 +405,12 @@ export function observationBudgetExhausted(input: {
 	hint: string;
 }): ToolResult {
 	const { tool, unit, reservation, subject, hint } = input;
-	const streak = bumpExhaustedStreak(reservation.key);
 	const spent = `${poolSpent(reservation)} of ${formatSize(reservation.limitBytes)}${templateBound(reservation)}`;
+	// A continuation follows: the turn rolls at this batch's tool boundary and the next turn has a fresh pool, so
+	// the model is told the call waits for it instead of being asked to re-plan or summarize (XR-6).
+	const rolled = reservation.roll !== undefined;
+	reservation.roll?.();
+	const streak = rolled ? 1 : bumpExhaustedStreak(reservation.key);
 	if (streak > MAX_EXHAUSTED_NOTICES_PER_TURN) {
 		const message =
 			`observation budget exhausted for this turn before ${tool} ${subject}: ${spent}. ` +
@@ -408,7 +420,10 @@ export function observationBudgetExhausted(input: {
 		recordSpentBytes(reservation, byteLength(message));
 		return { kind: "error", message };
 	}
-	const message = `observation budget exhausted for this turn before ${tool} ${subject}: ${spent}. ${hint}`;
+	const message = rolled
+		? `observation budget for this turn is spent before ${tool} ${subject} (${spent}), so this call did not run. ` +
+			`The turn continues automatically after this batch with a fresh budget; make this call again there.`
+		: `observation budget exhausted for this turn before ${tool} ${subject}: ${spent}. ${hint}`;
 	const output =
 		input.format === "json"
 			? JSON.stringify({ status: "unavailable", reason: "observation-budget-exhausted", message })

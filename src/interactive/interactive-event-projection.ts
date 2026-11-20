@@ -391,6 +391,9 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 					source: "loop_guard",
 					auditReason: toolBudgetAuditReason(event),
 				});
+			} else if (event.rolled === true) {
+				// A silent roll (XR-6): the turn's closing record is its one transcript notice.
+				return;
 			} else if (typeof event.stepTool === "string") {
 				deps.appendTranscriptNotice(
 					"info",
