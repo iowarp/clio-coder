@@ -2749,6 +2749,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const prewarm = createTurnPrewarm({
 		callJournal: (runtime, origin) => sideCallJournal(runtime, "prewarm", origin),
+		notice: (text) => emitNotice(text),
 		state,
 		getSettings: deps.getSettings,
 		providers: deps.providers,

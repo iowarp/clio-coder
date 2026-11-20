@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -17,7 +17,10 @@ beforeEach(async () => {
 });
 afterEach(() => scratch.restore());
 
-function fixture(budget: { maxInputTokens?: number; contextWindow?: number } = {}) {
+function fixture(
+	budget: { maxInputTokens?: number; contextWindow?: number } = {},
+	options: { unbound?: boolean } = {},
+) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = true;
 	settings.chat.target = "local";
@@ -39,6 +42,19 @@ function fixture(budget: { maxInputTokens?: number; contextWindow?: number } = {
 	});
 	let reservations = 0;
 	let visible = 0;
+	const notices: string[] = [];
+	const observeDeployment = async () => ({
+		observedAt: Date.now(),
+		backend: "llamacpp" as const,
+		model: "fixture",
+		build: "fixture",
+		epoch: null,
+		endpoint: target.url,
+		requestControls: ["cache_prompt" as const],
+		warm: "bounded" as const,
+		administration: "unsupported" as const,
+		reason: "fixture",
+	});
 	const warm = createTurnPrewarm({
 		state: createTurnState("off"),
 		getSettings: () => settings,
@@ -58,18 +74,9 @@ function fixture(budget: { maxInputTokens?: number; contextWindow?: number } = {
 		hasActiveDispatch: () => false,
 		prepareRuntime: async () => ({ ok: true, runtime, apiKey: "fixture" }),
 		applySessionTools: () => {},
-		observeDeployment: async () => ({
-			observedAt: Date.now(),
-			backend: "llamacpp",
-			model: "fixture",
-			build: "fixture",
-			epoch: null,
-			endpoint: target.url,
-			requestControls: ["cache_prompt"],
-			warm: "bounded",
-			administration: "unsupported",
-			reason: "fixture",
-		}),
+		// An unbound target goes through the real observation, which sends nothing without a binding.
+		...(options.unbound ? {} : { observeDeployment }),
+		notice: (text) => notices.push(text),
 		registerEndpointSlot: () => {
 			reservations += 1;
 			return () => {
@@ -82,7 +89,7 @@ function fixture(budget: { maxInputTokens?: number; contextWindow?: number } = {
 				started();
 			}),
 	});
-	return { warm, rounds, roundStarted, counts: () => ({ reservations, visible }) };
+	return { warm, rounds, roundStarted, notices, counts: () => ({ reservations, visible }) };
 }
 
 const completed: PrewarmRoundResult = {
@@ -92,6 +99,21 @@ const completed: PrewarmRoundResult = {
 	timing: { ttftMs: null, apiMs: 1 },
 	errorMessage: null,
 };
+
+test("prewarm on a local target that binds no cache.deployment says so once instead of skipping silently", async () => {
+	const f = fixture({}, { unbound: true });
+	try {
+		f.warm.schedule("session-start");
+		deepStrictEqual(await f.warm.settled(), { ran: false, reason: "deployment", detail: "deployment-unbound" });
+		f.warm.schedule("resume");
+		await f.warm.settled();
+		strictEqual(f.rounds.length, 0);
+		strictEqual(f.notices.length, 1, "one notice per target, not one per skipped trigger");
+		match(f.notices[0] ?? "", /chat\.prewarm is on, but target local binds no cache\.deployment/u);
+	} finally {
+		f.warm.dispose();
+	}
+});
 
 test("detached warming retains ownership and collapses repeated triggers to one latest round", async () => {
 	const f = fixture();

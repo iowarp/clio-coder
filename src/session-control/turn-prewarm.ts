@@ -101,6 +101,11 @@ export interface TurnPrewarmDeps {
 	/** Test seam. Production uses the real provider round. */
 	runPrewarm?: typeof runPrewarmRound;
 	observeDeployment?: typeof observeCacheDeployment;
+	/**
+	 * A transcript notice. The one pre-warm says out loud: `chat.prewarm` is on and the target binds no
+	 * `cache.deployment`, which no round can fix, so a skip that is otherwise diagnostics would read as a silent no-op.
+	 */
+	notice?: (text: string) => void;
 }
 
 export interface TurnPrewarm {
@@ -162,6 +167,8 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 	let lastFinished = 0;
 	let lastPrefix: string | null = null;
 	let lastSkip: string | null = null;
+	// Targets already told that pre-warm needs their `cache.deployment` binding: once per target per session.
+	const unboundNoticed = new Set<string>();
 	// Rounds a submit or a session switch let go of. Their result is still
 	// recorded, but it no longer describes the prefix the next turn will send, so
 	// it never reaches the `/context` line.
@@ -497,6 +504,13 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 					});
 				}
 				if (!outcome.ran && deps.getSettings().chat.prewarm && outcome.reason !== "surface") {
+					const targetId = deps.getSettings().chat.target;
+					if (outcome.detail === "deployment-unbound" && targetId && !unboundNoticed.has(targetId)) {
+						unboundNoticed.add(targetId);
+						deps.notice?.(
+							`[CLIO Coder] chat.prewarm is on, but target ${targetId} binds no cache.deployment, so CLIO Coder does not prewarm it. Bind its deployment (backend, controlUrl, model, build) under the target's cache settings, or set chat.prewarm to false.`,
+						);
+					}
 					const key = `${outcome.reason}:${outcome.detail ?? ""}`;
 					if (lastSkip !== key) {
 						lastSkip = key;
