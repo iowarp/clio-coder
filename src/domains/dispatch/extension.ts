@@ -923,6 +923,17 @@ const ADMISSION_INPUT_TOKEN_ESTIMATE = 4096;
 const ACP_TOOL_SIGNATURE = "acp:unobservable";
 const ACP_SPEC_FINGERPRINT = "acp:unobservable";
 /**
+ * An ACP delegation's route tuple names the agent id as its model, a stand-in for
+ * the peer's own default. A plan pin or an exact-mode retry stamps that tuple back
+ * onto the request, so a model equal to the agent id is dropped here and never asks
+ * the peer for a model it does not offer; only the caller's own model survives.
+ */
+function withoutDelegationStandInModel(req: DispatchRequest, agentId: string): DispatchRequest {
+	if (req.model !== agentId) return req;
+	const { model: _standIn, ...rest } = req;
+	return rest;
+}
+/**
  * Where the worker process ran when no fleet placement chose a node. This is the
  * worker's own host, never the host serving the model: a run against a remote
  * target from this machine is still a local node. Emitted on every run so a
@@ -7100,9 +7111,10 @@ export function createDispatchBundle(
 			enforcement: "external-one-shot",
 		});
 		publishDispatchPathScope(req, lifecycle.pathScope);
+		req = withoutDelegationStandInModel(req, lifecycle.agentConfig.id);
 		const targetId = `delegation:${lifecycle.agentConfig.id}`;
 		const runtimeId = "acp";
-		const wireModelId = lifecycle.agentConfig.id;
+		const wireModelId = req.model ?? lifecycle.agentConfig.id;
 		assertTargetNotCoolingDown(req, targetId, runtimeId, wireModelId, probeClaims);
 
 		if (req.contextSeed) persistWorkerContextSeed(req.contextSeed);
@@ -11283,7 +11295,7 @@ export function createDispatchBundle(
 				specFingerprint:
 					delegationRecipe !== null ? agentSpecFingerprint(normalizeAgentSpec(delegationRecipe)) : ACP_SPEC_FINGERPRINT,
 				targetId: `delegation:${lifecycle.agentConfig.id}`,
-				wireModelId: lifecycle.agentConfig.id,
+				wireModelId: withoutDelegationStandInModel(req, lifecycle.agentConfig.id).model ?? lifecycle.agentConfig.id,
 				runtimeId: "acp",
 				node: previewNode({ ...req, node: "local" }).node,
 				thinkingLevel: null,
