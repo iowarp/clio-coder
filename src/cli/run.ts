@@ -607,8 +607,14 @@ async function executeRunCommand(
 					if (borrowed !== null) process.stderr.write(`clio-coder run: ${borrowed.notice}\n`);
 					// --dry-run (CLI-L4): resolve and print, before any session, model call or --verify command.
 					if (parsed.dryRun === true) {
-						const { buildRunPlan, writeRunPlan } = await import("./run-plan.js");
+						const { buildRunPlan, dryRunPricingRefusal, writeRunPlan } = await import("./run-plan.js");
 						const settings = borrowed?.settings ?? readSettings();
+						// CLI-P16: a run the require-priced preflight would refuse is refused here too, not previewed.
+						const pricing = await dryRunPricingRefusal(parsed, settings);
+						if (pricing !== undefined) {
+							writeRunDiagnostic(pricing);
+							return 2;
+						}
 						const plan = buildRunPlan(parsed, settings, parsed.verifyTimeoutSeconds ?? DEFAULT_VERIFY_TIMEOUT_SECONDS);
 						// SPEC 6.8: the enforcement the run would use, before any spend.
 						const shown: typeof plan & { outputSchema?: { enforcedBy: "host" } } =

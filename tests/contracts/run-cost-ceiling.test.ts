@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it, test } from "node:test";
@@ -9,6 +9,7 @@ import {
 	sandboxRequiredRefusal,
 	taskFileAuthorityRefusal,
 } from "../../src/cli/args.js";
+import { runClioRun } from "../../src/cli/run.js";
 import { runLimitsV2, startRefusalCause } from "../../src/cli/run-failure.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { pinRunSettings, RUN_OVERRIDES_ENV, requirePricedRefusal } from "../../src/core/run-overrides.js";
@@ -28,6 +29,7 @@ import {
 } from "../../src/session-control/structured-finish.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 test("clio-coder run --max-cost-usd bounds what the run adds, under any lower configured ceiling", () => {
 	strictEqual(parseRunCliArgs(["--max-cost-usd", "1.5", "task"]).maxCostUsd, 1.5);
@@ -209,6 +211,32 @@ test("--require-priced: parsed into limits, carried to admission, and refuses on
 		startRefusalCause(["clio-coder run: --require-priced: routes this run can reach have no known pricing: a/b"]).code,
 		"not_configured",
 	);
+});
+
+test("--dry-run --require-priced refuses an unpriced route exactly as the run would, instead of previewing it (CLI-P16)", async (t) => {
+	const home = await isolateClioEnv("clio-dry-run-require-priced-");
+	const original = process.cwd();
+	const cwd = path.join(home.dir, "workspace");
+	mkdirSync(path.join(home.dir, "config"), { recursive: true });
+	mkdirSync(cwd);
+	writeFileSync(
+		path.join(home.dir, "config", "settings.yaml"),
+		"version: 2\ntargets:\n  - { id: proxy, runtime: litellm, url: 'http://127.0.0.1:9', defaultModel: gpt-x }\nchat:\n  target: proxy\n  model: gpt-x\n",
+	);
+	let stderr = "";
+	t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+		stderr += String(chunk);
+		return true;
+	});
+	process.chdir(cwd);
+	try {
+		const code = await runClioRun(["--dry-run", "--require-priced", "--no-delegate", "x"], { noContextFiles: true });
+		strictEqual(code, 2, stderr);
+		match(stderr, /--require-priced: routes this run can reach have no known pricing: proxy\/gpt-x; declare targets/u);
+	} finally {
+		process.chdir(original);
+		home.restore();
+	}
 });
 
 test("--output-schema: refused schemas are schema_unsupported, and only a whole JSON answer validates (SPEC 6.8)", async () => {
