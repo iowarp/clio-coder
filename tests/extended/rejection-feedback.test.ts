@@ -60,6 +60,14 @@ describe("formatModelRejection composes the model-facing blocked text", () => {
 		strictEqual(lines[lines.length - 1], PIVOT_LINE, "the pivot closes the bounded message");
 	});
 
+	it("wraps a sentence over the line cap with no quoted span instead of cutting its remedy (FL-10)", () => {
+		const remedy = "ask the operator to add a rule that allows it";
+		const reason = `permission denied by policy: ${"the call reached a path the workspace policy keeps closed ".repeat(6)}so ${remedy}`;
+		const lines = formatModelRejection(reason).split("\n");
+		for (const line of lines) ok(line.length <= 300, `line within the cap: ${line}`);
+		ok(lines.join(" ").includes(remedy), `the remedy survives whole: ${lines.join("\n")}`);
+	});
+
 	it("shortens a long quoted command, never the remedy after it", () => {
 		const heredoc = `cat > verify_slug_edge.py << EOF\n${"print(slugify('a b'))\n".repeat(12)}EOF`.slice(0, 200);
 		const remedy =

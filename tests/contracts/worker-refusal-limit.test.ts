@@ -156,6 +156,7 @@ const FAKE_SDK = `export function query({ options }) {
 		yield { type: "result", subtype: "success", is_error: false, result: "done", usage: {} };
 	})();
 	run.close = () => {};
+	run.interrupt = async () => {};
 	return run;
 }
 `;
@@ -170,7 +171,7 @@ describe("Claude SDK worker execute refusals", () => {
 		writeFileSync(join(sdkDir, "index.js"), FAKE_SDK);
 		process.env.CLIO_CODER_CLAUDE_SDK_DIR = join(env.dir, "sdk");
 		const run = async (commands: string[], onPermission: "deny" | "fail") => {
-			const script = { commands, verdicts: [] as Array<{ interrupt?: boolean }> };
+			const script = { commands, verdicts: [] as Array<{ interrupt?: boolean; message?: string }> };
 			(globalThis as { __clioFakeClaudeSdk?: unknown }).__clioFakeClaudeSdk = script;
 			const resolved: string[] = [];
 			const input = {
@@ -198,7 +199,14 @@ describe("Claude SDK worker execute refusals", () => {
 
 			const stuck = await run(["./mark.sh one", "./mark.sh two", "./mark.sh three", "./mark.sh four"], "deny");
 			strictEqual(stuck.result.exitCode, WORKER_EXIT_PERMISSION_REQUIRED);
-			strictEqual(stuck.resolved.length, 3, "the third refusal ends the run");
+			strictEqual(stuck.resolved.length, 3, "the call in the report reply never reaches the permission gate");
+			// FL-10: the third refusal leaves the model one reply to report, as on the native worker; a tool call there ends it.
+			strictEqual(stuck.verdicts[2]?.interrupt, false);
+			ok(stuck.verdicts[2]?.message?.includes("Reply now with your final report"), stuck.verdicts[2]?.message);
+			strictEqual(stuck.verdicts[3]?.interrupt, true);
+			const reported = await run(["./mark.sh one", "./mark.sh two", "./mark.sh three"], "deny");
+			strictEqual(reported.result.exitCode, WORKER_EXIT_PERMISSION_REQUIRED, "a report does not lift the cap");
+			ok(JSON.stringify(reported.result.messages.at(-1)).includes('"done"'), "the report reply reaches the result");
 			const final = stuck.resolved.at(-1) ?? "";
 			ok(final.startsWith("permission refusal limit reached"), final);
 			deepStrictEqual(
