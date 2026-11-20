@@ -221,6 +221,7 @@ describe("headless no-op contract through the built binary", () => {
 		packageScripts?: Record<string, string>;
 		turnMode?: "answer" | "proposal" | "change";
 		prompt?: string;
+		flags?: ReadonlyArray<string>;
 	}) {
 		const scratch = headlessScratch("clio-coder-noop-");
 		scratches.push(scratch);
@@ -243,6 +244,7 @@ describe("headless no-op contract through the built binary", () => {
 				input.autonomy,
 				...(input.failOnNoop ? ["--fail-on-noop"] : []),
 				...(input.turnMode ? ["--turn-mode", input.turnMode] : []),
+				...(input.flags ?? []),
 				input.prompt ?? "Apply the change.",
 			],
 			{ env: scratch.env, cwd: project },
@@ -253,8 +255,23 @@ describe("headless no-op contract through the built binary", () => {
 		ok(envelope);
 		strictEqual(envelope.exitCode, turn.code, "the receipt and the process must agree on the exit code");
 		strictEqual(readFileSync(join(project, "sentinel.txt"), "utf8"), "blocked is harmless fixture text\n");
-		return { turn, envelope, project };
+		return { turn, envelope, project, fixture };
 	}
+
+	test("--on-permission fail ends the run at the first refused ask with exit 3 before another request", async () => {
+		const { turn, envelope, fixture } = await headlessTurn({
+			autonomy: "default",
+			steps: [deniedInline, deniedInline],
+			failOnNoop: false,
+			flags: ["--on-permission", "fail"],
+		});
+		strictEqual(turn.code, 3, turn.stderr);
+		strictEqual(envelope.outcomeDetail, "permission_required");
+		match(turn.stderr, /--on-permission fail: bash needed approval/);
+		// Main-loop requests carry the tool set; a side call (title, judge) carries none and is not a continuation.
+		const mainLoop = fixture.requests.filter((request) => Array.isArray(request.tools) && request.tools.length > 0);
+		strictEqual(mainLoop.length, 1);
+	});
 
 	for (const failOnNoop of [true, false]) {
 		test(`a run whose shell write was denied ${failOnNoop ? "fails under --fail-on-noop" : "also fails without the flag"}`, async () => {

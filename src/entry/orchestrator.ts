@@ -3905,6 +3905,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(options.headless.steerChannel ? { steerChannel: options.headless.steerChannel } : {}),
 				...(options.headless.failOnNoop === true ? { failOnNoop: true } : {}),
 				...(options.headless.failOnVerify === true ? { failOnVerify: true } : {}),
+				...(options.headless.onPermission === "fail" ? { onPermission: "fail" as const } : {}),
 				...(options.headless.deadline !== undefined ? { deadline: options.headless.deadline } : {}),
 				...(options.headless.answers !== undefined ? { answers: options.headless.answers } : {}),
 				...(options.headless.verify !== undefined

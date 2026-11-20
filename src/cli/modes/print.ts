@@ -87,6 +87,10 @@ import { toolResultText } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from "../run-answers.js";
+
+/** `--on-permission fail` (SPEC 6.4): the approval-required exit a worker's refused ask already uses. */
+const PERMISSION_REQUIRED_EXIT_CODE = 3;
+
 import {
 	noteMainRunV2,
 	noteRunEndWritten,
@@ -165,6 +169,8 @@ export interface HeadlessMainAgentOptions {
 	failOnNoop?: boolean;
 	/** `--fail-on-verify`: a `--verify` check that failed or timed out fails the run (`verify_failed`). */
 	failOnVerify?: boolean;
+	/** `--on-permission`: `fail` ends the run with exit 3 at the first ask a headless run refuses; `deny` is today's. */
+	onPermission?: "deny" | "fail";
 	/**
 	 * `clio-coder run --timeout`. When it expired, the shutdown it started seals
 	 * outcome `timed_out` instead of `canceled`, so a driver can tell its own
@@ -1362,6 +1368,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	const jsonProjector = createHeadlessJsonProjector();
 	// The cost cap's no-usage notice, repeated once in the exit summary when it fired this run.
 	let unreportedUsage: string | null = null;
+	/** `--on-permission fail`: the message of the first ask this headless run refused. */
+	let permissionStop: string | null = null;
 	const unsubscribe = chat.onEvent((event) => {
 		writeTextSessionId();
 		if (mode === "json") {
@@ -1399,7 +1407,18 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		if (event.type === "notice" && unreportedUsage === null && isUnreportedUsageNotice(event.text))
 			unreportedUsage = event.text;
 		recordRunEffect(runStats.runEffects, event);
+		const asksBefore = runStats.decisions.permissionRequested;
 		recordToolEnd(runStats, event);
+		// `--on-permission fail`: the first refused ask stops the turn once that call settles (SPEC 6.4).
+		if (
+			options.onPermission === "fail" &&
+			permissionStop === null &&
+			runStats.decisions.permissionRequested > asksBefore
+		) {
+			const tool = (event as { toolName?: unknown }).toolName;
+			permissionStop = `clio-coder run: --on-permission fail: ${typeof tool === "string" ? tool : "a tool call"} needed approval that a headless run cannot give`;
+			chat.cancel({ reason: permissionStop, atToolBoundary: true });
+		}
 		if (event.type === "message_end") {
 			if (event.message.role === "assistant") runStats.toolRounds.push(...readToolRounds(event.message));
 			// Usage is accrued per completed assistant message, the one place a
@@ -1671,6 +1690,17 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		stderrMessage = failureMessage;
 	}
 	// The run stopped on a question nobody scripted, whatever the stopped turn left behind; a signal still outranks it.
+	if (permissionStop !== null && !termination.isShuttingDown()) {
+		terminal = {
+			exitCode: PERMISSION_REQUIRED_EXIT_CODE,
+			outcome: "failed",
+			status: "failed",
+			failureMessage: permissionStop,
+			outcomeDetail: "permission_required",
+		};
+		stderrMessage = permissionStop;
+		stdoutMessage = null;
+	}
 	const unscripted = scripted !== undefined && !termination.isShuttingDown() ? scripted.unscripted() : null;
 	if (scripted !== undefined && unscripted !== null) {
 		const failureMessage = unscriptedRunMessage(scripted, unscripted);

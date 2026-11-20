@@ -62,6 +62,8 @@ Flags:
                             runs over fails
   --fail-on-verify          exit 1 (cause verify_failed) when a --verify check failed or timed out; a check a
                             cancellation or the deadline skipped never counts
+  --on-permission deny|fail deny (default) refuses an ask a headless run cannot approve and lets the turn go on;
+                            fail ends the run at the first one: exit 3, cause permission_required
   --dry-run                 print what the run would do (route, tools, autonomy, sandbox, limits, --verify checks
                             with authority host) and exit 0: no session, no model call, no check runs; with
                             --output-format json it is the v2 envelope with outcome previewed and plan

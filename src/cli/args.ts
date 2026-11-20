@@ -76,6 +76,8 @@ export interface RunCliArgs {
 	failOnNoop: boolean;
 	/** `--fail-on-verify`: a failed or timed-out `--verify` check fails the run. */
 	failOnVerify?: boolean;
+	/** `--on-permission`: `fail` ends the run with exit 3 at the first ask a headless run refuses. */
+	onPermission?: "deny" | "fail";
 	/** `--dry-run`: print what the run would do, with no session, model call or `--verify` command. */
 	dryRun?: boolean;
 	/** Priced spend this run may add, in US dollars; with `--agent`, the bound on that one worker run. */
@@ -154,6 +156,7 @@ function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 	const mainOnly: Array<[boolean, string]> = [
 		[parsed.failOnNoop, "--fail-on-noop"],
 		[parsed.failOnVerify === true, "--fail-on-verify"],
+		[parsed.onPermission !== undefined, "--on-permission"],
 		[parsed.dryRun === true, "--dry-run"],
 		[parsed.verify.length > 0, "--verify"],
 		[parsed.answersFile !== undefined, "--answers"],
@@ -466,6 +469,13 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--fail-on-verify") {
 			parsed.failOnVerify = true;
+			continue;
+		}
+		if (arg === "--on-permission" || arg?.startsWith("--on-permission=")) {
+			const value = arg === "--on-permission" ? need(arg) : arg.slice("--on-permission=".length);
+			if (value === "deny" || value === "fail") parsed.onPermission = value;
+			else if (value !== null)
+				parsed.diagnostics.push({ type: "error", message: `--on-permission must be deny or fail, not ${value}` });
 			continue;
 		}
 		if (arg === "--dry-run") {
