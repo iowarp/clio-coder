@@ -14,16 +14,15 @@ export interface InitialMessageResult {
 }
 
 /**
- * Reads a non-TTY stdin. `explicit` is a bare `-` on the command line: the caller asked for stdin, so the read
- * waits for its end. Without it, a prompt source beside an open pipe that sends nothing gives up after 2 s, and
- * bytes that do arrive are still used (0.8.x) with a note that `-` is the spelling that will keep them.
+ * Reads a non-TTY stdin to its end. `run` calls it only for a bare `-` on the command line (SPEC 6.2, maintainer
+ * ruling of 2026-11-20): stdin is never read implicitly, so a pipe beside a task given as text is left alone and
+ * nothing waits on it.
  */
-export async function readPipedStdin(hasPromptSource = false, explicit = false): Promise<string | undefined> {
+export async function readPipedStdin(): Promise<string | undefined> {
 	if (process.stdin.isTTY || process.stdin.readableEnded || process.stdin.destroyed) return undefined;
 	return new Promise((resolve, reject) => {
 		const chunks: Buffer[] = [];
 		const cleanup = (): void => {
-			clearTimeout(firstByteTimeout);
 			process.stdin.off("data", onData);
 			process.stdin.off("end", onEnd);
 			process.stdin.off("error", onError);
@@ -31,30 +30,16 @@ export async function readPipedStdin(hasPromptSource = false, explicit = false):
 		};
 		const onData = (chunk: Buffer | string): void => {
 			if (chunk.length === 0) return;
-			clearTimeout(firstByteTimeout);
 			chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
 		};
 		const onEnd = (): void => {
 			cleanup();
-			if (chunks.length > 0 && hasPromptSource && !explicit) {
-				process.stderr.write(
-					"clio-coder: deprecated: run <task> with piped stdin and no -; use clio-coder run <task> - (removed in 0.9.0)\n",
-				);
-			}
 			resolve(chunks.length > 0 ? Buffer.concat(chunks).toString("utf8") : undefined);
 		};
 		const onError = (error: Error): void => {
 			cleanup();
 			reject(error);
 		};
-		const firstByteTimeout =
-			hasPromptSource && !explicit
-				? setTimeout(() => {
-						cleanup();
-						process.stderr.write("clio-coder run: no data on stdin after 2s; ignoring it (redirect </dev/null to skip)\n");
-						resolve(undefined);
-					}, 2000)
-				: undefined;
 		process.stdin.on("data", onData);
 		process.stdin.once("end", onEnd);
 		process.stdin.once("error", onError);
@@ -64,9 +49,8 @@ export async function readPipedStdin(hasPromptSource = false, explicit = false):
 
 /**
  * The first run's user message (SPEC 6.2): argv text, then `@file` blocks, then piped stdin. Stdin that follows argv
- * text is framed as a `<stdin>` block, the shape `<file name>` attachments use, whether it came through `-` or the
- * deprecated implicit read, so every spelling and output format assembles the same task (H23). With no argv text,
- * stdin is the task itself and stays unframed.
+ * text is framed as a `<stdin>` block, the shape `<file name>` attachments use, so every output format assembles the
+ * same task (H23). With no argv text, stdin is the task itself and stays unframed.
  */
 export function buildInitialMessage(input: InitialMessageInput): InitialMessageResult {
 	const parts: string[] = [];
