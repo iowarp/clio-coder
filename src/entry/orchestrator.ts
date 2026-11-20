@@ -232,7 +232,7 @@ import type { SessionContract, SessionMeta } from "../domains/session/contract.j
 import { activeDecisionRefs, createDecisionBoardStore } from "../domains/session/decision-board.js";
 import type { CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
 import { commitHandoff, type HandoffServiceDeps, prepareHandoff } from "../domains/session/handoff-service.js";
-import { SessionDomainModule } from "../domains/session/index.js";
+import { runHeadlessCompaction, SessionDomainModule } from "../domains/session/index.js";
 import { reconcilePendingProtectedArtifacts } from "../domains/session/protected-artifact-journal.js";
 import {
 	appendProtectedArtifactRegistryEvent,
@@ -3747,6 +3747,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	if (options.headless) {
 		recordBoot();
+		if (options.headless.compact) return runHeadlessCompaction(chat, options.headless.compact, { termination, timer });
 		// Operatorless: there is no TUI subscriber to turn a loop-guard interrupt
 		// into a run stop, so a degenerate local model would spin until an
 		// external timeout (each call blocked, the agent loop never aborted). Wire

@@ -1,5 +1,5 @@
 /**
- * `clio-coder session history|show|export|artifacts|rename|fork|rm`: persisted sessions from the shell (SPEC L3).
+ * `clio-coder session history|show|export|artifacts|rename|fork|rm|compact`: persisted sessions from the shell (SPEC L3, L3c).
  * `session list` and `terminate` stay in session.ts and are untouched; session.ts answers `--help` for these leaves
  * before this module loads (C1).
  *
@@ -12,10 +12,15 @@
  * | rename <s> <name> [--json]                                | name entry and meta.json| 1 session_live     | 0; 1 not_found/ambiguous; 2 usage      |
  * | fork <s> [--at <turnId>] [--name <n>] [--json]            | a new session           | allowed            | 0; 1 not_found/ambiguous/io; 2 usage   |
  * | rm <s> [--yes] [--json]                                   | removes the session     | 1 session_live     | 0; 1 not_found/ambiguous/session_has_children/declined; 2 usage/confirmation_required |
+ * | compact <s> [--instructions <text>] [--json]              | one compactionSummary   | 1 session_live     | 0; 1 not_found/ambiguous/io; 2 usage   |
  *
  * `<s>` is an id, unique id prefix or name (C13), resolved among this directory's sessions; `--all-projects`
- * widens reads only and is refused with exit 2 on rename, fork and rm. `--yes` skips rm's question and never
+ * widens reads only and is refused with exit 2 on rename, fork, rm and compact. `--yes` skips rm's question and never
  * overrides `session_live` or `session_has_children`.
+ *
+ * compact (SPEC L3c) boots a headless session on `<s>` that sends no turn and runs the `/context compact` summarizer
+ * once (`runHeadlessCompaction`). `before` and `after` count the entries the next resumed request replays; an exit 0
+ * with `compacted: false` means the summarizer found nothing to cut, and its notice says why.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -23,6 +28,7 @@ import { join, resolve } from "node:path";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { removeSessionAtRest, renameSessionAtRest, sessionRemovalRefusal } from "../domains/session/at-rest.js";
 import type { SessionMeta } from "../domains/session/contract.js";
+import { type HeadlessCompactionOutcome, replayedContextSize } from "../domains/session/headless-compact.js";
 import { listSessionsForCwd, listSessionWorkspaces } from "../domains/session/history.js";
 import { sessionLiveOwner } from "../domains/session/live-owner.js";
 import { resolveSessionTarget } from "../domains/session/names.js";
@@ -38,7 +44,7 @@ import { type FlagDeclarations, parseCommandFlags } from "./kit/flags.js";
 import { jsonDocument, writeCliFailure, writeJson } from "./kit/json-out.js";
 import type { ErrorSlug } from "./kit/slugs.js";
 
-export type SessionHistoryVerb = "history" | "show" | "export" | "artifacts" | "rename" | "fork" | "rm";
+export type SessionHistoryVerb = "history" | "show" | "export" | "artifacts" | "rename" | "fork" | "rm" | "compact";
 type Verb = SessionHistoryVerb;
 
 const FLAGS = {
@@ -59,6 +65,7 @@ const FLAGS = {
 		json: { kind: "boolean" },
 	},
 	rm: { "all-projects": { kind: "boolean" }, yes: { kind: "boolean", short: "y" }, json: { kind: "boolean" } },
+	compact: { "all-projects": { kind: "boolean" }, instructions: { kind: "value" }, json: { kind: "boolean" } },
 } as const satisfies Record<Verb, FlagDeclarations>;
 
 const ARITY: Record<Verb, { min: number; max: number; usage: string }> = {
@@ -69,6 +76,7 @@ const ARITY: Record<Verb, { min: number; max: number; usage: string }> = {
 	rename: { min: 2, max: 2, usage: "rename takes a session and a name" },
 	fork: { min: 1, max: 1, usage: "fork takes one session" },
 	rm: { min: 1, max: 1, usage: "rm takes one session" },
+	compact: { min: 1, max: 1, usage: "compact takes one session" },
 };
 
 class Failure {
@@ -125,7 +133,7 @@ export async function runSessionHistoryCommand(verb: Verb, args: ReadonlyArray<s
 		const arity = ARITY[verb];
 		if (positional.length < arity.min || positional.length > arity.max) throw usage(arity.usage);
 		const allProjects = flags["all-projects"] === true;
-		if (allProjects && (verb === "rename" || verb === "fork" || verb === "rm"))
+		if (allProjects && (verb === "rename" || verb === "fork" || verb === "rm" || verb === "compact"))
 			throw usage(`--all-projects is read-only; ${verb} resolves only among this directory's sessions`);
 		const out = (document: object, text: string): number => {
 			if (flags.json === true) writeJson(process.stdout, jsonDocument(document));
@@ -147,6 +155,8 @@ export async function runSessionHistoryCommand(verb: Verb, args: ReadonlyArray<s
 				return await fork(resolveSession(positional[0] as string, false), flags, out);
 			case "rm":
 				return await remove(resolveSession(positional[0] as string, false), flags.yes === true, out);
+			case "compact":
+				return await compact(resolveSession(positional[0] as string, false), flags, out);
 		}
 	} catch (error) {
 		const failure =
@@ -347,4 +357,102 @@ async function remove(meta: SessionMeta, yes: boolean, out: Out): Promise<number
 		);
 	removeSessionAtRest(meta.id);
 	return out({ sessionId: meta.id, removed: true }, `removed ${meta.id}`);
+}
+
+function replayed(sessionId: string): ReturnType<typeof replayedContextSize> {
+	const bundle = readTreeBundle(sessionId);
+	return replayedContextSize(bundle.entries, bundle.meta.pinnedLeafTurnId ?? undefined);
+}
+
+async function compact(
+	meta: SessionMeta,
+	flags: Record<string, string | boolean | undefined>,
+	out: Out,
+): Promise<number> {
+	const instructions = typeof flags.instructions === "string" ? flags.instructions : undefined;
+	if (instructions !== undefined && instructions.trim().length === 0) throw usage("--instructions takes non-empty text");
+	const owner = sessionLiveOwner(meta);
+	if (owner)
+		fail("session_live", `session ${meta.id} is open in another process (${ownerText(owner)})`, EXIT_CODES.failed);
+	const before = replayed(meta.id);
+	const [{ runClioCommand }, { restoreStdout, takeOverStdout }] = await Promise.all([
+		import("./clio.js"),
+		import("./output-guard.js"),
+	]);
+	// The boot's shutdown ends in process.exit, so the document is written from inside the boot, once, with stdout
+	// handed back for that write only; everything else the boot prints goes to stderr.
+	let reported = false;
+	const report = (document: () => number): number => {
+		if (reported) return EXIT_CODES.failed;
+		reported = true;
+		restoreStdout();
+		try {
+			return document();
+		} catch (error) {
+			const failure =
+				error instanceof Failure
+					? error
+					: new Failure("io", error instanceof Error ? error.message : String(error), EXIT_CODES.failed);
+			writeCliFailure({
+				path: ["session", "compact"],
+				slug: failure.slug,
+				message: failure.message,
+				json: flags.json === true,
+			});
+			return failure.exitCode;
+		} finally {
+			takeOverStdout();
+		}
+	};
+	const notCompacted = (why: string): never => fail("io", `session ${meta.id} was not compacted: ${why}`, 1);
+	// A boot that refuses the session (unreadable ledger, no route) exits from inside; this still says so.
+	const onExit = (code: number): void => {
+		report(() => notCompacted(`its headless session ended with exit ${code}`));
+	};
+	process.once("exit", onExit);
+	takeOverStdout();
+	try {
+		const code = await runClioCommand({
+			headless: {
+				prompt: "",
+				mode: "text",
+				resumeSession: { kind: "id", id: meta.id },
+				compact: {
+					...(instructions !== undefined ? { instructions } : {}),
+					onSettled: (outcome) => report(() => compactReport(meta.id, before, outcome, out)),
+				},
+			},
+		});
+		return reported ? code : report(() => notCompacted(`its headless session ended with exit ${code}`));
+	} finally {
+		process.off("exit", onExit);
+		restoreStdout();
+	}
+}
+
+/** The document `session compact` prints once the summarizer settled, read back from the ledger on disk. */
+function compactReport(
+	sessionId: string,
+	before: ReturnType<typeof replayedContextSize>,
+	outcome: HeadlessCompactionOutcome,
+	out: Out,
+): number {
+	if (outcome.failed)
+		return fail("io", outcome.errors.join("\n") || `compacting session ${sessionId} failed`, EXIT_CODES.failed);
+	const after = replayed(sessionId);
+	const compacted = after.checkpointTurnId !== null && after.checkpointTurnId !== before.checkpointTurnId;
+	// A notice explains an empty cut; beside a real one it is only boot chatter (an unknown window, a route note).
+	const notice = compacted ? "" : outcome.notices.join("\n");
+	return out(
+		{
+			sessionId,
+			compacted,
+			before: { entries: before.entries, tokens: compacted ? after.tokensBefore : null },
+			after: { entries: after.entries, tokens: compacted ? after.tokensAfter : null },
+			...(notice !== "" ? { notice } : {}),
+		},
+		compacted
+			? `compacted ${sessionId}: ${before.entries} -> ${after.entries} replayed entries`
+			: `nothing compacted in ${sessionId}${notice !== "" ? `: ${notice}` : ""}`,
+	);
 }

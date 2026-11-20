@@ -7,6 +7,7 @@ import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { ThinkingLevel } from "../domains/providers/index.js";
 import type { SessionVerifier } from "../domains/safety/finish-contract.js";
 import type { AutonomyLevel } from "../domains/safety/index.js";
+import type { HeadlessCompactionRequest } from "../domains/session/headless-compact.js";
 import type { AcpHandshake } from "../engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport, StdioServerTransportOptions } from "../engine/acp/transport.js";
 import type { ImageContent } from "../engine/types.js";
@@ -97,6 +98,11 @@ export interface BootOptions {
 		steerChannel?: string;
 		/** `run --resume|--continue`; `fork` branches a new session from it and never writes it (`run --fork`). */
 		resumeSession?: { kind: "id"; id: string; fork?: boolean } | { kind: "latest"; fork?: boolean };
+		/**
+		 * `session compact`: compact the resumed session once and end, sending no turn; `prompt` is unused. The
+		 * session is named by `resumeSession`.
+		 */
+		compact?: HeadlessCompactionRequest;
 		/** `run --name`: written as the run's session opens, whether created, resumed or forked. */
 		sessionName?: string;
 		/** `clio-coder run --fail-on-noop`: a no-op run exits 1 with outcome failed. */
