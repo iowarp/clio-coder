@@ -2,12 +2,14 @@ import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { isDeterministicOutcomeCode } from "../../src/domains/dispatch/backoff.js";
+import type { GateTopologyRole } from "../../src/domains/dispatch/execution-role.js";
 import {
 	affectsTargetBreaker,
 	classifyFailure,
 	decideRetry,
 	nodeComponentRemedy,
 } from "../../src/domains/dispatch/failure-classification.js";
+import { OBLIGATION_RETRY_LIMIT, resolveObligation, resolveRunRole } from "../../src/domains/dispatch/obligation.js";
 import type { RunTerminationEvidence } from "../../src/domains/dispatch/outcome.js";
 import {
 	blockedStateChangingCalls,
@@ -93,29 +95,44 @@ describe("dispatch failure classification", () => {
 		}
 	});
 
-	it("grades a read-scoped worker that executed no tool, its result report aside, as a retryable quality failure", () => {
+	it("resolves each run's obligation from its role and grades a zero-tool run against it, retrying once (M1)", () => {
 		// FX-19: scout 339cwh27ifkd's only call was its result report; it sealed succeeded, quality=unmeasured, failed=0.
 		const stats = new Map<string, ToolCallStat>();
 		recordToolFinish(stats, { tool: "clio_submit_result", outcome: "ok", actionClass: "read" });
+		const explorer = { capabilityClass: "read-only", readOnly: true };
+		const role = (gateRole?: GateTopologyRole, facts = explorer) => resolveRunRole({ gateRole, ...facts });
+		strictEqual(resolveObligation(role(), "scout-report", []), "observed-evidence");
+		strictEqual(resolveObligation(role(), "oracle-report", ["src"]), "observed-evidence");
+		strictEqual(resolveObligation(role(), "oracle-report", []), "answer");
+		// A gate's inherited read roots are what it may read, not its assignment: a zero-call judge owes cited evidence.
+		strictEqual(resolveObligation(role("judge"), "verifier-report", ["src"]), "cited-evidence");
+		strictEqual(resolveObligation(role("member"), "scout-report", ["src"]), "answer");
+		strictEqual(
+			resolveObligation(role(undefined, { capabilityClass: "verification", readOnly: true }), null, ["src"]),
+			"executed-checks",
+		);
+		strictEqual(
+			resolveObligation(role(undefined, { capabilityClass: "workspace-edit", readOnly: false }), "mutation-report", []),
+			"change-or-declared",
+		);
 		const scout = {
 			activity: summarizeToolActivity(stats, () => "read"),
-			readOnly: true,
-			capabilityClass: "read-only",
-			contractKind: "scout-report",
-			readRoots: [] as string[],
+			obligation: "observed-evidence" as const,
 			toolLaneObserved: true,
 		};
-		match(readScopedNoToolsReason(scout) ?? "", /no tools executed/);
-		match(readScopedNoToolsReason({ ...scout, contractKind: "research-report", readRoots: ["src"] }) ?? "", /no tools/);
-		strictEqual(readScopedNoToolsReason({ ...scout, contractKind: "research-report" }), null);
-		strictEqual(readScopedNoToolsReason({ ...scout, capabilityClass: "workspace-edit" }), null);
-		strictEqual(readScopedNoToolsReason({ ...scout, readOnly: false }), null);
+		match(readScopedNoToolsReason(scout) ?? "", /^obligation observed-evidence unmet: no tools executed/);
+		strictEqual(readScopedNoToolsReason({ ...scout, obligation: "cited-evidence" }), null);
 		strictEqual(readScopedNoToolsReason({ ...scout, toolLaneObserved: false }), null);
 		recordToolFinish(stats, { tool: "read", outcome: "ok", actionClass: "read" });
 		strictEqual(readScopedNoToolsReason({ ...scout, activity: summarizeToolActivity(stats, () => "read") }), null);
 		const failureClass = classifyFailure({ ...evidence, exitCode: 0, qualityGateFailure: true }, null, "failed", null);
 		strictEqual(failureClass, "model-quality");
-		strictEqual(decideRetry(failureClass, 0, 1).retry, true);
+		strictEqual(decideRetry(failureClass, 0, OBLIGATION_RETRY_LIMIT).retry, true);
+		strictEqual(decideRetry(failureClass, 1, OBLIGATION_RETRY_LIMIT).retry, false);
+		// A zero-tool builder's worker_no_work retries on another model only when it carries the unmet obligation.
+		const builder = { ...evidence, exitCode: 0, obligationUnmet: "change-or-declared" as const };
+		strictEqual(classifyFailure(builder, null, "failed", "worker_no_work"), "model-quality");
+		strictEqual(classifyFailure({ ...evidence, exitCode: 0 }, null, "failed", "worker_no_work"), "deterministic-task");
 	});
 
 	it("names an edit worker that ran no tool, or recorded a limitation and changed nothing, as having done no work", () => {

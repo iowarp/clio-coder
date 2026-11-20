@@ -1860,6 +1860,7 @@ async function runCompete(
 				),
 				// Candidate prose and receipt locators are evidence, not inferred authority.
 				// Read-only execution is enforced by the role/autonomy, not empty write roots.
+				// These roots are the subjects' scope, what the judge may read; its obligation is cited evidence, not reads (M1).
 				intent: narrowDispatchIntentToReadOnly(
 					base.intent ?? {
 						version: 2,

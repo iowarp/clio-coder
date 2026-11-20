@@ -200,6 +200,8 @@ export function classifyFailure(
 	if (evidence.abortedByOperator || outcome === "canceled") return "operator-cancel";
 	if (evidence.policyDenied !== null || outcome === "denied_by_policy") return "policy";
 	if (evidence.permissionFailure || evidence.exitCode === WORKER_EXIT_PERMISSION_REQUIRED) return "permission";
+	// Ruling 5: an unmet obligation is the model's, even under a deterministic code such as a builder's worker_no_work.
+	if (evidence.obligationUnmet !== undefined) return "model-quality";
 	if (isDeterministicOutcomeCode(code)) return "deterministic-task";
 	// #425: an unrepaired result can be retried, but its shape says nothing about endpoint health.
 	if (code === "result_contract_invalid") return "model-quality";

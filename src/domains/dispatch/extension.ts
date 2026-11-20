@@ -435,6 +435,7 @@ import {
 	taskRequestsTestRemoval,
 	taskWorktreeCommitMessage,
 } from "./merge-gate.js";
+import { OBLIGATION_RETRY_LIMIT, resolveObligation, resolveRunRole } from "./obligation.js";
 import { recoverAbandonedRuns } from "./orphan-recovery.js";
 import {
 	type ResolvedTerminalReason,
@@ -5133,6 +5134,7 @@ export function createDispatchBundle(
 		failureClass: FailureClass,
 		contextOverflow = false,
 		currentRetryReason: string | null = null,
+		obligationUnmet = false,
 	): RetryScheduleResult {
 		if (draining) return { scheduled: false };
 		const rootRunId = run.lineage.rootRunId;
@@ -5152,10 +5154,11 @@ export function createDispatchBundle(
 		}
 		// #231 gives each member its own configured retry budget, even when a
 		// sibling has already opened an assignment under the shared fleet root.
-		const maxRetries =
+		const configuredRetries =
 			assignments.get(controlRoot)?.policy.maxRetries ??
 			controlAttempts.get(controlRoot)?.maxRetries ??
 			assignmentPolicyFor(run.req).maxRetries;
+		const maxRetries = obligationUnmet ? Math.min(configuredRetries, OBLIGATION_RETRY_LIMIT) : configuredRetries;
 		const baseDecision = decideRetry(failureClass, memberRetryAttempt(run), maxRetries);
 		// An exact manual route may be retried, but no route component may drift.
 		let decision = recovery.retryDecisionWithinFailover(baseDecision, failoverModeFor(run.req));
@@ -5281,6 +5284,7 @@ export function createDispatchBundle(
 		detail: string | null,
 		failureClass: FailureClass,
 		contextOverflow = false,
+		obligationUnmet = false,
 	): void {
 		const controlAttempt = controlAttempts.get(run.runId);
 		if (controlAttempt !== undefined && run.lineage.depth > 0) controlAttempt.receipt = receipt;
@@ -5299,7 +5303,16 @@ export function createDispatchBundle(
 		});
 		persistAssignment(recordAssignmentAttempt(assignment.id, run.runId), `${assignment.id}:attempt:${run.runId}`);
 		if (writeRootPark.park(run, receipt)) return;
-		const retry = maybeScheduleRetry(run, outcome, detail, receipt, failureClass, contextOverflow, retryReason);
+		const retry = maybeScheduleRetry(
+			run,
+			outcome,
+			detail,
+			receipt,
+			failureClass,
+			contextOverflow,
+			retryReason,
+			obligationUnmet,
+		);
 		if (retry.scheduled) return;
 		const currentStatus = assignments.get(assignment.id)?.status;
 		const terminalStatus =
@@ -9714,6 +9727,17 @@ export function createDispatchBundle(
 					finalDetail = [finalDetail, `deterministic worker failure: ${outcomeCode}`].filter(Boolean).join("; ");
 					failureMessage = finalDetail;
 				}
+				const appliedResultContract = dispatchResultContract(req, lifecycle.recipe) ?? null;
+				// DESIGN 4.8: what the result must rest on, from the run's role. A gate's read roots are what it may read.
+				const runObligation = resolveObligation(
+					resolveRunRole({
+						gateRole: req.gate?.role,
+						capabilityClass: lifecycle.capabilityClass,
+						readOnly: lifecycle.readOnly,
+					}),
+					appliedResultContract?.kind ?? null,
+					req.intent?.readRoots ?? [],
+				);
 				// A write worker that stopped to ask for wider write roots changed
 				// nothing; whether the assignment continues is the request's decision.
 				if (
@@ -9795,11 +9819,20 @@ export function createDispatchBundle(
 						}
 					}
 				}
+				// Ruling 5: a builder that ran no tool over an unchanged tree left its obligation unmet, whichever side sealed it.
+				if (
+					outcomeCode === "worker_no_work" &&
+					runObligation === "change-or-declared" &&
+					lifecycle.runtimeKind !== "subprocess" &&
+					finishContract?.assessment.mutatedPaths.length === 0 &&
+					summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass).calls === 0
+				) {
+					evidence.obligationUnmet = runObligation;
+				}
 				// Close steering provenance before taking receipt snapshots. A late
 				// acknowledgement after the bounded drain cannot race the sealed facts.
 				const steering = snapshotSteeringProvenance();
 				const capturedOutput = outputCapture.snapshot();
-				const appliedResultContract = dispatchResultContract(req, lifecycle.recipe) ?? null;
 				// #425: a cut-off loop never reached contract repair, even if its process exited zero.
 				if (
 					finalOutcome === "succeeded" &&
@@ -9863,21 +9896,19 @@ export function createDispatchBundle(
 								resultContract.fact.quality === "pass"
 							? { ...resultContract.fact, quality: "unmeasured" }
 							: resultContract.fact;
-				// FX-19: a read-scoped worker that read nothing grades fail and seals failed, so retry and summaries count it.
+				// FX-19: a run owing observed evidence that read nothing grades fail and seals failed, so retry and summaries count it.
 				const noToolsReason =
 					finalOutcome === "succeeded"
 						? readScopedNoToolsReason({
 								activity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
-								readOnly: lifecycle.readOnly,
-								capabilityClass: lifecycle.capabilityClass,
-								contractKind: appliedResultContract?.kind ?? null,
-								readRoots: req.intent?.readRoots ?? [],
+								obligation: runObligation,
 								toolLaneObserved: lifecycle.runtimeKind !== "subprocess",
 							})
 						: null;
 				if (noToolsReason !== null) {
 					if (sealedResultContractFact !== null) sealedResultContractFact = { ...sealedResultContractFact, quality: "fail" };
 					evidence.qualityGateFailure = true;
+					evidence.obligationUnmet = runObligation;
 					finalOutcome = "failed";
 					finalDetail = noToolsReason;
 					failureMessage = noToolsReason;
@@ -10527,6 +10558,7 @@ export function createDispatchBundle(
 					receipt.outcomeDetail ?? finalDetail,
 					failureClass,
 					contextOverflow,
+					evidence.obligationUnmet !== undefined,
 				);
 				return receipt;
 			} catch (error) {
