@@ -525,8 +525,8 @@ const SCRATCH_ASSIGNMENT = /^([A-Za-z_]\w*)(\+?=)(.*)$/u;
  */
 const SCRATCH_SPECIAL =
 	/^(?:BASH\w*|CDPATH|CHILD_MAX|COLUMNS|COMP\w*|COPROC\w*|DIRSTACK|ENV|EPOCH\w*|EUID|EXECIGNORE|FCEDIT|FIGNORE|FUNCNAME|FUNCNEST|GLOB\w*|GROUPS|HIST\w*|histchars|HOME|HOST\w*|IFS|IGNOREEOF|INPUTRC|LANG|LC_\w*|LINENO|LINES|MACHTYPE|MAIL\w*|MAPFILE|OLDPWD|OPTARG|OPTERR|OPTIND|OSTYPE|PATH|PIPESTATUS|POSIXLY_CORRECT|PPID|PROMPT\w*|PS[0-4]|PWD|RANDOM|READLINE\w*|REPLY|SECONDS|SHELL|SHELLOPTS|SHLVL|SRANDOM|TIMEFORMAT|TMOUT|TMPDIR|UID|_)$/u;
-const SCRATCH_CONTROL =
-	/^(?:if|then|elif|else|fi|case|esac|for|select|while|until|do|done|in|function|time|coproc|set|shopt|trap|hash|command|exec|printf|pushd|popd|fc)$/u;
+/** The closed set of commands a projected call may run besides plain assignments; none of them can plant a link. */
+const SCRATCH_STEPS = /^(?:cd|mkdir|rm|rmdir|unlink)$/u;
 
 function plainScratchWord(raw: string): string | null {
 	const word = raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1, -1) : raw;
@@ -546,10 +546,12 @@ function scratchTemplate(raw: string, temp: string): string | null {
 
 /**
  * XR-43: project operands only for the path classifier and the snapshot check, never for command execution or
- * other rails. Only flat, literal shell syntax proves a binding. A conditional assignment or reassignment kills
- * the old proof; substitutions other than the exact mktemp form, shell control flow and dynamic assigners leave
- * the original command to the conservative walk. A name the shell manages is never pinned, and any cd but the
- * leading temp cd drops every pin.
+ * other rails. Only a closed allowlist projects: every step is a plain assignment, `mkdir [-p]` of a pinned or
+ * temp path, a leading cd to the temp root, or rm, rmdir or unlink; any other command, operator, substitution
+ * (but the exact mktemp form) or word leaves the original command to the conservative walk. A conditional
+ * assignment or reassignment kills the old proof, and a name the shell manages is never pinned. Text is no proof
+ * of where a path lands across calls, so every delete operand the projection vouches for is resolved through the
+ * real path of its deepest existing ancestor now, and one that leaves the real temp root fails the whole call closed.
  */
 export function resolveScratchDeleteOperands(command: string): { command: string; leadingCd: string | null } {
 	const unchanged = { command, leadingCd: null };
@@ -571,9 +573,16 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 	let hasDelete = false;
 	const underTemp = (word: string): boolean => {
 		if (word !== temp && !word.startsWith(`${temp}/`)) return false;
-		const resolved = canonicalizeRawPath(word, "/");
-		return resolved !== null && isUnderPrefix(resolved, canonicalTemp);
+		const suffix = word
+			.slice(temp.length)
+			.split("/")
+			.filter((part) => part !== "" && part !== ".");
+		if (suffix.includes("..")) return false;
+		// The real path now must be the lexical one: a link below the temp root, even one inside it, could lead out.
+		return canonicalizeRawPath(word, "/") === path.join(canonicalTemp, ...suffix);
 	};
+	const isTempRoot = (word: string): boolean =>
+		!word.startsWith("$") && path.isAbsolute(word) && canonicalizeRawPath(word, "/") === canonicalTemp;
 	const resolve = (word: string): string | null => {
 		const ref = SCRATCH_REFERENCE.exec(word);
 		if (ref === null) return underTemp(word) ? word : null;
@@ -603,20 +612,52 @@ export function resolveScratchDeleteOperands(command: string): { command: string
 			assigned.add(name);
 			continue;
 		}
-		if (!/^[\w./+-]+$/u.test(raw) || SCRATCH_CONTROL.test(raw)) return unchanged;
-		if (segment.slice(1).some((t) => plainScratchWord(expanded.slice(t.start, t.end)) === null)) return unchanged;
+		if (!SCRATCH_STEPS.test(raw)) return unchanged;
+		const operands = segment.slice(1);
+		const words = operands.map((t) => plainScratchWord(expanded.slice(t.start, t.end)));
+		if (words.some((word) => word === null)) return unchanged;
 		if (raw === "cd") {
-			const target = segment[1]?.value ?? "";
-			if (index === 0 && segment.length === 2 && underTemp(target)) leadingCd = target;
-			else pins.clear();
+			const target = words[0];
+			if (index !== 0 || words.length !== 1 || typeof target !== "string" || !isTempRoot(target)) return unchanged;
+			leadingCd = operands[0]?.value ?? null;
+			continue;
 		}
-		if (!/^(?:rm|unlink|rmdir)$/u.test(raw)) continue;
+		// A word relative to the leading temp cd lands under the temp root; any other relative word is the walk's.
+		const absolute = (word: string): string | null =>
+			path.isAbsolute(word) ? word : leadingCd !== null ? `${temp}/${word}` : null;
+		if (raw === "mkdir") {
+			for (const word of words as string[]) {
+				if (word === "-p") continue;
+				const target = word.startsWith("$") ? resolve(word) : absolute(word);
+				if (word.startsWith("-") || target === null || !underTemp(target)) return unchanged;
+			}
+			continue;
+		}
 		hasDelete = true;
-		for (const token of segment.slice(1)) {
-			const word = plainScratchWord(expanded.slice(token.start, token.end));
-			if (word === null || !word.startsWith("$")) continue;
-			const target = resolve(word);
-			if (target !== null) edits.push({ start: token.start, end: token.end, target });
+		let options = true;
+		for (const [offset, word] of (words as string[]).entries()) {
+			if (options && word === "--") {
+				options = false;
+				continue;
+			}
+			if (options && word.startsWith("-")) continue;
+			const token = operands[offset] as (typeof operands)[number];
+			if (word.startsWith("$")) {
+				const ref = SCRATCH_REFERENCE.exec(word);
+				// An unpinned name stays as text, and the walk keeps the delete unresolved.
+				if (ref === null || !pins.has(ref[1] ?? ref[2] ?? "")) continue;
+				const target = resolve(word);
+				if (target === null) return unchanged;
+				edits.push({ start: token.start, end: token.end, target });
+				continue;
+			}
+			const target = absolute(word);
+			if (
+				target !== null &&
+				(leadingCd !== null || target === temp || target.startsWith(`${temp}/`)) &&
+				!underTemp(target)
+			)
+				return unchanged;
 		}
 	}
 	if (!hasDelete) return unchanged;

@@ -447,7 +447,7 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		`M="\${TMPDIR}/measure"; d=$M/tpl/rows; rm -rf "\${d}"`,
 		'H=$(mktemp -d "$TMPDIR/probe-XXXXXX"); rm -rf "$H"',
 		'H=$(mktemp -d); rm -rf "$H"',
-		'cd "$TMPDIR" && true; rm -rf probe-rows',
+		'cd "$TMPDIR" && mkdir -p probe-rows; rm -rf probe-rows',
 	]) {
 		const decision = engine.evaluate(bash(command), "default", {
 			...atDefault,
@@ -455,6 +455,25 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		});
 		strictEqual(decision.kind, "allow", `${command}: ${decision.reasonCode} ${decision.reasons.join("; ")}`);
 		strictEqual(verdict(command, "yolo").startsWith("allow/yolo-admitted:"), false, command);
+	}
+	// XR-43: a link into the workspace, planted in the same call or an earlier one, keeps the delete review.
+	const linkDir = mkdtempSync(join(temp, "xr43-"));
+	t.after(() => rmSync(linkDir, { recursive: true, force: true }));
+	writeFileSync(join(cwd, "fixture.txt"), "x\n");
+	symlinkSync(cwd, join(linkDir, "prior"));
+	const rel = basename(linkDir);
+	for (const command of [
+		`B=$TMPDIR/${rel}/alias; ln -s ${cwd} "$TMPDIR/${rel}/alias"; rm -f "$B/fixture.txt"`,
+		`B=$TMPDIR/${rel}/prior; rm -f "$B/x"`,
+	]) {
+		const decision = engine.evaluate(bash(command), "default", { ...atDefault, snapshots: false });
+		strictEqual(
+			`${decision.kind}/${decision.reasonCode}`,
+			"ask/damage-control:delete-outside-workspace",
+			`${command}: ${decision.reasons.join("; ")}`,
+		);
+		match(decision.reasons.join("; "), /delete-path-unresolved: \$B\/.*with no workspace snapshot/u, command);
+		strictEqual(verdict(command, "yolo"), "allow/yolo-admitted:damage-control:delete-outside-workspace", command);
 	}
 	// A command that can reassign TMPDIR keeps it named at run time, so the delete-outside signal stays.
 	for (const command of [
