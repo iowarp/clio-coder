@@ -400,6 +400,7 @@ export async function runClioRun(
 				...(parsed.agentId !== undefined ? { agentId: parsed.agentId } : {}),
 				verify: parsed.verify,
 				...(parsed.outputLastMessage !== undefined ? { outputLastMessage: parsed.outputLastMessage } : {}),
+				...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
 				...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
 				...(parsed.timeoutSeconds !== undefined ? { timeoutSeconds: parsed.timeoutSeconds } : {}),
 				limits: requestedRunLimits(parsed),

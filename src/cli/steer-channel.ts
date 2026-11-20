@@ -116,6 +116,26 @@ export function setupSteerChannel(filePath: string, onLine: (line: string, lineN
 
 export type SteerLineStatus = "accepted" | "queued" | "refused";
 
+/**
+ * Why a `--steer-channel` path cannot be read, or undefined when it can (SPEC 6.6: "A channel that cannot be opened
+ * is exit 2 before boot"). The channel is a FIFO or a regular file the reader may read; nothing here opens a FIFO.
+ */
+export function steerChannelRefusal(filePath: string): string | undefined {
+	let stats: fs.Stats;
+	try {
+		stats = fs.statSync(filePath);
+	} catch (err) {
+		return (err as NodeJS.ErrnoException).code === "ENOENT" ? "no such file or FIFO" : String((err as Error).message);
+	}
+	if (!stats.isFIFO() && !stats.isFile()) return "not a FIFO or regular file";
+	try {
+		fs.accessSync(filePath, fs.constants.R_OK);
+	} catch {
+		return "not readable";
+	}
+	return undefined;
+}
+
 /** What a steer intake needs from the chat it steers. */
 interface SteerTarget {
 	steer(text: string): boolean;

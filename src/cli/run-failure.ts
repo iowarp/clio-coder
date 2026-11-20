@@ -29,6 +29,7 @@ import {
 	verifyChecksV2,
 } from "./modes/run-json-schema-v2.js";
 import { flushRawStdout, isStdoutDead, writeRawStdout } from "./output-guard.js";
+import { steerChannelRefusal } from "./steer-channel.js";
 
 interface RunFailureState {
 	pending: boolean;
@@ -311,6 +312,8 @@ export interface RunResultV2Request {
 	agentId?: string;
 	verify: ReadonlyArray<string>;
 	outputLastMessage?: string;
+	/** `--steer-channel`: refused before boot when it cannot be opened (SPEC 6.6). */
+	steerChannel?: string;
 	cwd?: string;
 	timeoutSeconds?: number;
 	/** The limits the run was given (SPEC 6.9); the envelope carries them as `limits` when any is set. */
@@ -636,6 +639,15 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			}
 			rmSync(resolved, { force: true });
 			outputTarget = resolved;
+		}
+		if (request.steerChannel !== undefined) {
+			const base = request.cwd !== undefined ? path.resolve(request.cwd) : process.cwd();
+			const channel = path.resolve(base, request.steerChannel);
+			const refusal = steerChannelRefusal(channel);
+			if (refusal !== undefined) {
+				writeRunDiagnostic(`clio-coder run: --steer-channel cannot be opened: ${channel}: ${refusal}\n`);
+				return finish(2);
+			}
 		}
 		setFrameProjector((frame) => projectV1Frame(frame, seen, request.format));
 		process.once("exit", onExit);
