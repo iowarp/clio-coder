@@ -107,10 +107,10 @@ import {
 	shellScriptSources,
 } from "./protected-artifacts.js";
 import {
+	fetchCouldCarryLocalData,
 	isOutboundWebTool,
 	isSecretBearingPath,
 	SECRET_READ_THEN_FETCH_RULE_ID,
-	urlCouldCarryLocalData,
 } from "./read-fetch-taint.js";
 import {
 	isReadScopeTool,
@@ -2094,13 +2094,13 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				secretRead &&
 				decision.kind === "allow" &&
 				isOutboundWebTool(rawCall.tool) &&
-				urlCouldCarryLocalData(rawCall.args?.url)
+				fetchCouldCarryLocalData(rawCall.args)
 			) {
 				return gateDecision("ask", decision, {
 					ruleId: SECRET_READ_THEN_FETCH_RULE_ID,
 					reasonCode: SECRET_READ_THEN_FETCH_RULE_ID,
 					reasons: [
-						`a secret-bearing file (${secretRead}) was read earlier in this session, and this URL has a query, fragment, userinfo or opaque path segment that could carry its contents outward`,
+						`a secret-bearing file (${secretRead}) was read earlier in this session, and this fetch has headers, a body, a query, fragment, userinfo, or an opaque path segment or host label that could carry its contents outward`,
 					],
 					policySource: "builtin-classifier",
 				});

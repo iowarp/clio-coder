@@ -7,11 +7,11 @@ import {
 
 /**
  * Read-then-fetch taint. Once a call that reads a secret-bearing file is
- * admitted, an outbound web_read or web_fetch whose URL has room for data
- * built from local content (a query string, a fragment, userinfo, or a long
- * opaque path segment) asks instead of running unasked. Under yolo the ask
- * goes to the judge, which refuses an exfiltrating fetch. A bare address
- * carries nothing and stays allowed.
+ * admitted, an outbound web_read or web_fetch that has room for data built
+ * from local content (request headers or a body, a query string, a fragment,
+ * userinfo, or a long opaque path segment or host label) asks instead of
+ * running unasked. Under yolo the ask goes to the judge, which refuses an
+ * exfiltrating fetch. A bare address carries nothing and stays allowed.
  */
 export const SECRET_READ_THEN_FETCH_RULE_ID = "secret-read-then-fetch";
 
@@ -37,11 +37,13 @@ export function isSecretBearingPath(target: string): boolean {
 	});
 }
 
-/** An opaque path segment this long can hold an encoded value. */
+/** An opaque path segment or host label this long can hold an encoded value. */
 const CARRIER_SEGMENT_MIN = 20;
 
+const isCarrier = (part: string): boolean => part.length >= CARRIER_SEGMENT_MIN && /^[A-Za-z0-9+=_%-]+$/.test(part);
+
 /** True when the URL has a place to put data drawn from local content. */
-export function urlCouldCarryLocalData(raw: unknown): boolean {
+function urlCouldCarryLocalData(raw: unknown): boolean {
 	if (typeof raw !== "string") return false;
 	let url: URL;
 	try {
@@ -51,9 +53,18 @@ export function urlCouldCarryLocalData(raw: unknown): boolean {
 		return true;
 	}
 	if (url.search.length > 1 || url.hash.length > 1 || url.username !== "" || url.password !== "") return true;
-	return url.pathname
-		.split("/")
-		.some((segment) => segment.length >= CARRIER_SEGMENT_MIN && /^[A-Za-z0-9+=_%-]+$/.test(segment));
+	return url.hostname.split(".").some(isCarrier) || url.pathname.split("/").some(isCarrier);
+}
+
+/** True when the fetch call's headers, body or URL have a place to put data drawn from local content. */
+export function fetchCouldCarryLocalData(args: Record<string, unknown> | undefined): boolean {
+	const headers = args?.["headers"];
+	if (headers !== undefined && headers !== null && (typeof headers !== "object" || Object.keys(headers).length > 0)) {
+		return true;
+	}
+	const body = args?.["body"];
+	if (body !== undefined && body !== null && body !== "") return true;
+	return urlCouldCarryLocalData(args?.["url"]);
 }
 
 export function isOutboundWebTool(tool: string): boolean {
