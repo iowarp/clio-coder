@@ -977,7 +977,8 @@ function carriedUserContext(
 	return !latestOperator || latestOperator.turnId === prior.userContext.turnId ? prior.userContext : undefined;
 }
 
-const CHECKPOINT_BUILT_BLOCK = /\n*<operator-notes\b[^>]*>[\s\S]*?<\/operator-notes\s*>\n*/giu;
+/** Blocks a host checkpoint rebuilds from the entries, including the path lists exact-facts replaced. */
+const CHECKPOINT_BUILT_BLOCK = /\n*<(operator-notes|read-files|modified-files)\b[^>]*>[\s\S]*?<\/\1\s*>\n*/giu;
 
 /**
  * A checkpoint the host writes without a model call. Its summary is the

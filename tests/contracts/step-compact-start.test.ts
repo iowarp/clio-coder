@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ModelTier } from "../../src/core/model-tier.js";
@@ -433,7 +433,7 @@ describe("step turns start from a compact state on small or uncached routes", ()
 					parentTurnId: "request",
 					timestamp,
 					summary:
-						'## Goal\nGOAL-MARKER finish the paper\n\n<operator-notes encoding="xml">\n- NOTE-MARKER keep APA style\n</operator-notes>\n\n<recallable-refs>\nREF-MARKER\n</recallable-refs>',
+						'## Goal\nGOAL-MARKER finish the paper\n\n<read-files>\ndocs/LEGACY-READ.md\n</read-files>\n\n<modified-files>\ndocs/LEGACY-EDIT.md\n</modified-files>\n\n<operator-notes encoding="xml">\n- NOTE-MARKER keep APA style\n</operator-notes>\n\n<recallable-refs>\nREF-MARKER\n</recallable-refs>',
 					tokensBefore: 100,
 					firstKeptTurnId: "",
 					userContext,
@@ -452,6 +452,10 @@ describe("step turns start from a compact state on small or uncached routes", ()
 		strictEqual(carried.summary.split("NOTE-MARKER").length, 2, carried.summary);
 		// A checkpoint written before refs moved into exact-facts carries its old refs block verbatim, once.
 		strictEqual(carried.summary.split("REF-MARKER").length, 2, carried.summary);
+		// Legacy path lists are rebuilt into exact-facts, never carried as well (CTX-10).
+		doesNotMatch(carried.summary, /<read-files>|<modified-files>/);
+		strictEqual(carried.summary.split("LEGACY-READ").length, 2, carried.summary);
+		strictEqual(carried.summary.split("LEGACY-EDIT").length, 2, carried.summary);
 		deepStrictEqual(carried.userContext, userContext);
 		// A later operator turn retires the old request, as native compaction does.
 		strictEqual(hostCheckpoint(entries(true), "Step checkpoint.").userContext, undefined);
