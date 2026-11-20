@@ -10,6 +10,7 @@ import {
 } from "../../core/skill-activation.js";
 import type { RunOwnerTelemetryContext } from "../../core/telemetry/context.js";
 import { mainAgent } from "../../core/telemetry/context.js";
+import type { CallFilter } from "../../core/telemetry/dto.js";
 import { isUnreportedUsageNotice } from "../../core/telemetry/pricing.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
@@ -85,7 +86,7 @@ import { toolResultText } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from "../run-answers.js";
-import { noteRunEndWritten } from "../run-failure.js";
+import { noteMainRunV2, noteRunEndWritten, runResultV2Active } from "../run-failure.js";
 import { setupSteerChannel } from "../steer-channel.js";
 import {
 	type DispatchedRunsSettlement,
@@ -182,8 +183,9 @@ export interface HeadlessMainAgentOptions {
 	 * The run's usage as the read model folds the session calls it made from `from` on: its turn's calls and the
 	 * compactions it ran, which happen outside the turn's event stream. run.settled and the ledger row both settle
 	 * from it, so they agree; null when no read model is bound, and the message fold stands for the row (#434).
+	 * `roles` widens the fold past the run's own main and compaction calls, for a schema v2 envelope's children.
 	 */
-	runUsage?: (from: string) => Promise<RunCallUsage | null>;
+	runUsage?: (from: string, roles?: CallFilter["roles"]) => Promise<RunCallUsage | null>;
 	/**
 	 * One agent segment's usage as the read model folds its calls once they are journaled, an interrupted call's
 	 * estimate included; null when the read model has none, and the message fold stands (#434).
@@ -1060,10 +1062,28 @@ function defaultShutdownHooks(): HeadlessShutdownHooks {
 	};
 }
 
+/** Dispatched workers' calls, which the main run's own fold leaves out. */
+const CHILD_CALL_ROLES: CallFilter["roles"] = ["worker"];
+
+/**
+ * The schema v2 envelope's usage: `main` is the fold the run ledger records; `children` and `total` are the same fold
+ * over the dispatched workers' calls and over both. `children` is absent when no worker call was recorded.
+ */
+async function noteRunUsageV2(options: HeadlessMainAgentOptions, from: string, main: RunCallUsage): Promise<void> {
+	const children = (await options.runUsage?.(from, CHILD_CALL_ROLES).catch(() => null)) ?? null;
+	if (children === null || children.callIds.length === 0) {
+		noteMainRunV2({ usage: { main, total: main } });
+		return;
+	}
+	const total = await options.runUsage?.(from, ["main", "compaction", ...(CHILD_CALL_ROLES ?? [])]).catch(() => null);
+	noteMainRunV2({ usage: { main, children, ...(total ? { total } : {}) } });
+}
+
 export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMainAgentOptions): Promise<number> {
 	// Children need the authoritative parent before submit can invoke dispatch.
 	// The terminal writer reuses this identity whichever settlement path wins.
 	const runId = newRunId();
+	noteMainRunV2({ runId, sessionReady: true });
 	const mode = options.mode ?? "text";
 	const jsonEvents = options.jsonEvents ?? "full";
 	const startedAt = new Date().toISOString();
@@ -1125,6 +1145,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		sealed = (async () => {
 			// A read model that cannot answer leaves the message fold for the row; the run still settles (#434).
 			const calls = (await options.runUsage?.(startedAt).catch(() => null)) ?? null;
+			if (calls !== null && runResultV2Active()) await noteRunUsageV2(options, startedAt, calls);
 			const dispatchRuns =
 				options.readEntries !== undefined
 					? standingDispatchRuns(options.readEntries(), entriesBefore, process.cwd(), options.scratchRoots ?? [])

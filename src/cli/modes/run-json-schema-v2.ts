@@ -211,6 +211,17 @@ export interface AgentRunSettlementV2 {
 	facts: RunExitFact[];
 }
 
+/**
+ * A run's spend, each part folded from the session telemetry the way the run ledger folds it: `main` is the run's own
+ * turn and compaction calls, `children` the dispatched workers' calls (absent when none were recorded), `total` both.
+ */
+export interface RunUsageV2 {
+	main: RunCallUsage;
+	children?: RunCallUsage;
+	/** Absent only when a fold over both parts could not be read beside the children's own. */
+	total?: RunCallUsage;
+}
+
 export interface RunResultEnvelopeV2 {
 	type: "run_end";
 	schemaVersion: typeof RUN_RESULT_SCHEMA_VERSION;
@@ -230,7 +241,7 @@ export interface RunResultEnvelopeV2 {
 	causes: RunCause[];
 	result: { text: string; artifacts: string[] };
 	route?: { target?: string; model?: string };
-	usage?: { main: RunCallUsage; total?: RunCallUsage };
+	usage?: RunUsageV2;
 	tools?: { calls: number; refused: number; writes: number };
 	safety?: MainRunSettlementV2["safety"];
 	verify: MainRunSettlementV2["verify"];

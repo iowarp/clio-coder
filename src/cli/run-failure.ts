@@ -20,6 +20,7 @@ import {
 	type RunCauseCode,
 	type RunExitFact,
 	type RunResultEnvelopeV2,
+	type RunUsageV2,
 	resolveRunExit,
 	signalForExitCode,
 	verifyChecksV2,
@@ -125,6 +126,30 @@ export async function withRunFailureReporting(
 	});
 }
 
+/** What the headless main agent tells a v2 writer directly: facts no v1 frame carries. */
+interface MainRunNoteV2 {
+	runId?: string;
+	usage?: RunUsageV2;
+	sessionReadyMs?: number;
+}
+
+let v2Started: number | null = null;
+let mainRunNote: MainRunNoteV2 = {};
+
+/** True while a `--output-format json|stream-json` run is being written, so v1 runs pay for nothing v2 reads. */
+export function runResultV2Active(): boolean {
+	return v2Started !== null;
+}
+
+/** Hand the v2 writer the run id, the folded usage or the moment the session was ready; a no-op for v1 runs. */
+export function noteMainRunV2(note: { runId?: string; usage?: RunUsageV2; sessionReady?: true }): void {
+	if (v2Started === null) return;
+	if (note.runId !== undefined) mainRunNote.runId = note.runId;
+	if (note.usage !== undefined) mainRunNote.usage = note.usage;
+	if (note.sessionReady === true && mainRunNote.sessionReadyMs === undefined)
+		mainRunNote.sessionReadyMs = Math.round(performance.now() - v2Started);
+}
+
 /** A `run --output-format json|stream-json` request, as far as the v2 writer needs it. */
 export interface RunResultV2Request {
 	format: "json" | "stream-json";
@@ -147,6 +172,9 @@ interface SeenFrames {
 	receipt?: RunResult;
 	failedChecks?: string[];
 	verdict?: string;
+	/** Milliseconds from the run's start to the loop's first `agent_start` and first streamed delta, as written. */
+	firstRequestMs?: number;
+	firstTokenMs?: number;
 }
 
 const LIMIT_CODES: ReadonlyArray<RunCauseCode> = [
@@ -171,6 +199,11 @@ function answerText(frame: RunJsonFrame): string | null {
 
 /** Read one v1 frame into `seen` and return what a v2 stream writes in its place; null withholds it. */
 function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResultV2Request["format"]): object | null {
+	const sinceStart = v2Started === null ? undefined : Math.round(performance.now() - v2Started);
+	if (frame.type === "agent_start" && seen.firstRequestMs === undefined && sinceStart !== undefined)
+		seen.firstRequestMs = sinceStart;
+	if ((frame.type === "text_delta" || frame.type === "thinking_delta") && seen.firstTokenMs === undefined)
+		if (sinceStart !== undefined) seen.firstTokenMs = sinceStart;
 	switch (frame.type) {
 		case "session": {
 			const header = frame as { id?: string | null; target?: string | null; model?: string | null; runId?: string };
@@ -287,13 +320,21 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	const started = Date.now();
 	const startedAt = new Date(started).toISOString();
 	const seen: SeenFrames = { text: "", live: [], undelivered: [] };
+	v2Started = performance.now();
+	mainRunNote = {};
 	let written = false;
 	let outputTarget: string | undefined;
 	const envelopeLines = (code: number, extra: RunExitFact[] = []): { lines: string; exitCode: number } => {
 		const skipReason = code === 124 ? "deadline" : signalForExitCode(code) !== null ? "interrupted" : "turn_failed";
 		const resolution = resolveRunExit([...exitFacts(code, seen, state.diagnostic, request), ...extra]);
 		const session = seen.session;
-		const runId = session?.runId ?? seen.receipt?.runId;
+		const runId = session?.runId ?? mainRunNote.runId ?? seen.receipt?.runId;
+		const usage = mainRunNote.usage;
+		const timings = {
+			...(mainRunNote.sessionReadyMs !== undefined ? { sessionReadyMs: mainRunNote.sessionReadyMs } : {}),
+			...(seen.firstRequestMs !== undefined ? { firstRequestMs: seen.firstRequestMs } : {}),
+			...(seen.firstTokenMs !== undefined ? { firstTokenMs: seen.firstTokenMs } : {}),
+		};
 		const envelope: RunResultEnvelopeV2 = {
 			type: "run_end",
 			schemaVersion: RUN_RESULT_SCHEMA_VERSION,
@@ -320,9 +361,10 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 						},
 					}
 				: {}),
+			...(usage !== undefined ? { usage } : {}),
 			verify: { requested: request.verify.length, checks: verifyChecksV2(request.verify, seen.verify, skipReason) },
 			dispatch: { runs: seen.receipt !== undefined ? [seen.receipt] : [], live: seen.live, undelivered: seen.undelivered },
-			timings: {},
+			timings,
 		};
 		const pending =
 			request.format === "stream-json" && session === undefined
