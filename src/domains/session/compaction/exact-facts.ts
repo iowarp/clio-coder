@@ -245,15 +245,16 @@ export function formatExactFacts(
 		return `${operation} ${filePath}${index < MEASURED_FILES_MAX ? measureFile(filePath, cwd) : ""}${ref}`;
 	});
 	const refs = hidden
-		.filter((row) => row.toolName !== "read")
+		.filter((row) => row.toolName !== "read" && row.toolName !== "assistant")
 		.slice(-RESULTS_MAX)
 		.map((row) => oneLine(`${row.ref} ${row.toolName} ${row.path ?? ""}`, 240));
 	const results = collectResults(entries);
 	if (files.length === 0 && refs.length === 0 && results.length === 0) return "";
 	// No re-read advice here: a live 20k-window run took it as an order and re-read whole
 	// files until each read forced another compaction. The edit guard asks at the edit.
+	const replies = hidden.some((row) => row.toolName === "assistant") ? ", including earlier assistant replies," : "";
 	const lines = [
-		`Measured by Clio at this checkpoint, not by the summarizer; where the summary disagrees, these values hold.${hidden.length > 0 ? ' Values the summary did not keep are recallable by passing a ref below to context(scope="recall"); without ref it lists every one.' : ""}`,
+		`Measured by Clio at this checkpoint, not by the summarizer; where the summary disagrees, these values hold.${hidden.length > 0 ? ` Values the summary did not keep${replies} are recallable by passing a ref below to context(scope="recall"); without ref it lists every one.` : ""}`,
 		...files,
 		...(refs.length > 0 ? [REFS_HEADING, ...refs] : []),
 		...(results.length > 0 ? [RESULTS_HEADING, ...results] : []),
