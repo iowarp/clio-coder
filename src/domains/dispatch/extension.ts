@@ -404,7 +404,7 @@ import {
 	hostVerificationSandbox,
 	runHostVerification,
 } from "./host-verification.js";
-import { renderDispatchIntentRequirements } from "./intent-requirements.js";
+import { renderChecksWithheldNotice, renderDispatchIntentRequirements } from "./intent-requirements.js";
 import { adaptJointRouteInput } from "./joint-route-adapter.js";
 import {
 	configuredJointNodes,
@@ -2056,8 +2056,8 @@ export interface WorkerDynamicContext {
 	projectReadTools?: boolean | null;
 	/** External runtimes do not promise the native read schema. */
 	projectExternalReadTools?: boolean;
-	/** True when the worker's admitted tools include bash or verify. */
-	shellToolsAdmitted?: boolean;
+	/** Check tools admission withheld because no OS sandbox enforces the run's write roots. */
+	checksWithheld?: ReadonlyArray<string>;
 	/** Render ledger call guidance only for a known, admitted native tool. */
 	ledgerToolAvailable?: boolean;
 	/** Structured CLIO-CODER.md fields; null when CLIO-CODER.md is absent or malformed. */
@@ -2226,9 +2226,11 @@ export function buildDynamicPromptMessages(
 	if (scope.length > 0) {
 		messages.push({ id: "dispatch-turn-scope", body: scope, contentHash: sha256(scope) });
 	}
-	const requirements = renderDispatchIntentRequirements(req.intent, {
-		shellAvailable: dynamicContext.shellToolsAdmitted === true,
-	});
+	const withheld = renderChecksWithheldNotice(dynamicContext.checksWithheld ?? [], req.intent);
+	if (withheld !== null) {
+		messages.push({ id: "dispatch-checks-withheld", body: withheld, contentHash: sha256(withheld) });
+	}
+	const requirements = renderDispatchIntentRequirements(req.intent);
 	if (requirements !== null) {
 		messages.push({ id: "dispatch-intent-requirements", body: requirements, contentHash: sha256(requirements) });
 	}
@@ -2472,6 +2474,8 @@ interface DispatchLifecycleStage {
 	/** Decision refs sealed on the request by the dispatch tool; null when the parent board was empty. */
 	decisionRefs: ReadonlyArray<string> | null;
 	projectContext: RunProjectContextProvenance;
+	/** Check tools withheld because no OS sandbox enforces the write roots; recorded on the run's ledger projection. */
+	checksWithheld?: ReadonlyArray<string>;
 	/** What to write over a delegated harness's instruction files in the run's task worktree; absent without an overlay. */
 	peerOverlay?: ReadonlyArray<{ file: string; content: string }>;
 	/** The run's prompt with the rules in the message instead, for when the overlay cannot be written at spawn. */
@@ -6218,6 +6222,10 @@ export function createDispatchBundle(
 			),
 			req,
 		);
+		// The check tools the write roots cost this run; the parent's dispatch result and the worker's prompt both name them (CLI-H2).
+		const checksWithheld = writeConfined
+			? admission.allowedTools.filter((tool) => WRITE_ROOT_REFUSED_TOOLS.has(tool) && tool !== ToolNames.Dispatch).sort()
+			: [];
 		if (writeConfined) {
 			context.bus.emit("run.scope_notice_raised", {
 				code: "write_roots_checks_withheld",
@@ -6401,7 +6409,7 @@ export function createDispatchBundle(
 						? targetToolCapability(target)
 						: false,
 			projectExternalReadTools: target.runtime.kind === "subprocess",
-			shellToolsAdmitted: effectiveTools.includes(ToolNames.Bash) || effectiveTools.includes(ToolNames.Verify),
+			...(checksWithheld.length > 0 ? { checksWithheld } : {}),
 			ledgerToolAvailable:
 				target.runtime.kind === "http" && targetToolCapability(target) && effectiveTools.includes(ToolNames.Ledger),
 			workspace: readWorkspaceRootFacts(cwd, req.taskWorktree?.root),
@@ -6488,6 +6496,7 @@ export function createDispatchBundle(
 			personaOverride,
 			decisionRefs: req.decisionRefs ?? null,
 			projectContext: projectContextProvenance,
+			...(checksWithheld.length > 0 ? { checksWithheld } : {}),
 			...(peerStale !== null ? { peerStale } : {}),
 			...(peer?.overlay !== undefined
 				? {
@@ -8941,7 +8950,7 @@ export function createDispatchBundle(
 		let identity!: ReturnType<typeof detectRunIdentity>;
 		try {
 			envelope = ledgerRef.create({
-				projection: runLedgerProjection(req, lifecycle.pathScope),
+				projection: runLedgerProjection(req, lifecycle.pathScope, lifecycle.checksWithheld),
 				...(req.runIdHint !== undefined ? { id: req.runIdHint } : {}),
 				agentId: req.agentId,
 				executionRole: withAttemptRole(req.executionRole, req.lineage?.attempt ?? 0),

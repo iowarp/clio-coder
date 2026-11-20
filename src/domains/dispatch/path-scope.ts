@@ -533,7 +533,11 @@ export function inferredScopeParentTokenNotice(scope: DispatchPathScope): Inferr
 }
 
 /** S8: display only admitted declarations, never paths inferred from task prose. */
-export function runLedgerProjection(req: DispatchRequest, scope: DispatchPathScope): RunLedgerProjection {
+export function runLedgerProjection(
+	req: DispatchRequest,
+	scope: DispatchPathScope,
+	checksWithheld: ReadonlyArray<string> = [],
+): RunLedgerProjection {
 	const source = req.intent !== undefined ? "intent" : (req.writeRoots?.length ?? 0) > 0 ? "legacy-write-roots" : "none";
 	return {
 		version: 1,
@@ -541,5 +545,6 @@ export function runLedgerProjection(req: DispatchRequest, scope: DispatchPathSco
 		readRoots: req.intent !== undefined ? [...req.intent.readRoots] : [],
 		writeRoots: source === "none" ? [] : [...scope.writeBoundaries],
 		scopeSource: source,
+		...(checksWithheld.length > 0 ? { checksWithheld: [...checksWithheld] } : {}),
 	};
 }
