@@ -246,13 +246,13 @@ test("a turn_start hook that fails under a block policy refuses the turn, and tu
 		agent: { state: { tools: [], messages: [] } },
 	} as unknown as AgentRuntime;
 	const reason = "extension desk turn_start hook failed: boom; the gate fails closed";
-	deepStrictEqual(await turns.awaitTurnStart(runtime, "write the intro"), reason);
+	deepStrictEqual((await turns.awaitTurnStart(runtime, "write the intro")).refusal, reason);
 	deepStrictEqual(notices, ["extension desk: turn_start hook failed: boom; it fails closed"]);
 	deepStrictEqual(outcomes, ["desk:turn_start:runtime-failed:block_turn"]);
 	// The runtime gone is the same failure under onError.
 	bridge.bind(null);
 	deepStrictEqual(
-		await turns.awaitTurnStart(runtime, "write the intro"),
+		(await turns.awaitTurnStart(runtime, "write the intro")).refusal,
 		reason.replace("failed: boom", "has no running runtime"),
 	);
 });
