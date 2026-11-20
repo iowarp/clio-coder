@@ -248,8 +248,8 @@ export interface CompactInput extends SideCallAuth {
 	model: EngineModel;
 	/**
 	 * The thinking level the portable summary request runs at: what its route resolves for a request with thinking off,
-	 * so an always-on model still reads as thinking. Only a level above off reserves reasoning room in the summary's
-	 * output cap (CTX-3). Absent reads as off, as the request asks.
+	 * so an always-on model still reads as thinking. Under `summaryOutputCap` only a level above off reserves reasoning
+	 * room in the summary's output cap (CTX-3); an uncapped summary keys on the model. Absent reads as off.
 	 */
 	summaryThinkingLevel?: ThinkingLevel;
 	/** API key for the model. Optional because local engines accept a fallback handled upstream. */
@@ -326,7 +326,7 @@ export interface CompactInput extends SideCallAuth {
 export interface LivePrefixSummary {
 	/** The route the request goes to; a compaction resolved to any other model cannot use it. */
 	model: { id: string; provider: string };
-	/** The turn's effective thinking level, which this request keeps; its output cap is sized for it (CTX-3). Absent reads as off. */
+	/** The turn's effective thinking level, which this request keeps; a capped request is sized for it (CTX-3). Absent reads as off. */
 	thinkingLevel?: ThinkingLevel;
 	/** Base-input-equivalent tokens the request costs before output, with `tail` as the appended message. */
 	inputCost(tail: string): number;
@@ -1690,9 +1690,9 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		// A capped summary on a small window keeps to the room its cap leaves, so a span above that still gains (bt-18).
 		const room = summaryOutputBudget(
 			input.model,
-			input.summaryThinkingLevel,
 			reserveTokens,
 			input.summaryOutputCap,
+			input.summaryThinkingLevel,
 		).summaryRoom;
 		if (span.reduce((tokens, entry) => tokens + estimateTokens(entry), 0) < room)
 			return { ...emptyResult("below-summary-room"), noGain: true };
@@ -1746,10 +1746,10 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		);
 	})();
 	// A fixed cap let reasoning consume it and the summary was never saved (pi upstream #9512); summaryOutputBudget
-	// sizes it per route, and each send at the thinking level it runs at: a summary with thinking off keeps no reasoning
-	// room, whatever the model could do (CTX-3).
+	// sizes it per route. Under a cap each send is sized at the thinking level it runs at: a capped summary with
+	// thinking off keeps no reasoning room, whatever the model could do (CTX-3). An uncapped one keys on the model.
 	const sendBudget = (thinking: ThinkingLevel | undefined) => {
-		const outputBudget = summaryOutputBudget(input.model, thinking, reserveTokens, input.summaryOutputCap);
+		const outputBudget = summaryOutputBudget(input.model, reserveTokens, input.summaryOutputCap, thinking);
 		const { summaryRoom } = outputBudget;
 		const checkpointRoom =
 			retainedRoom !== undefined && retainedRoom < summaryRoom ? retainedRoom : capped ? summaryRoom : undefined;

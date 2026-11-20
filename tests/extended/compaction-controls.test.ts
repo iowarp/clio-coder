@@ -1154,15 +1154,8 @@ describe("production compaction controls", () => {
 		strictEqual(await compactAt(53_000, "summary-target/summary"), 0);
 		strictEqual(await compactAt(175_000, "summary-target/summary"), 0);
 		strictEqual(await compactAt(185_000, "summary-target/summary"), 1);
-		// On the chat route with thinking off, the same reasoning model's summary reserves only its 13,107 room, which
-		// the threshold's headroom holds, so it fires at 0.9 x 200K (CTX-3); keyed on the model's capability it fired
-		// at 179K.
-		Object.assign(runtime.runtimeResolution, { effectiveThinkingLevel: "off" });
-		strictEqual(await compactAt(179_000, undefined), 0);
-		strictEqual(await compactAt(185_000, undefined), 1);
-		// A first summary that thinks keeps room for reasoning without claiming the whole output limit: its 26K
-		// reserve exceeds that headroom, so it fires at 200K - 26,214.
-		Object.assign(runtime.runtimeResolution, { effectiveThinkingLevel: "high" });
+		// On the chat route, the first summary keeps room for reasoning without claiming the whole output limit:
+		// its 26K reserve exceeds that headroom, so it fires at 200K - 26,214.
 		strictEqual(await compactAt(53_000, undefined), 0);
 		strictEqual(await compactAt(168_000, undefined), 0);
 		strictEqual(await compactAt(179_000, undefined), 1);
@@ -2931,7 +2924,7 @@ describe("compaction trigger output reservation", () => {
 		strictEqual(effectiveCompactionThreshold(0.9, 0, 26_214), 0.9);
 	});
 
-	it("bounds a thinking summary's reserve at half a known window, reserves none for thinking off (CTX-3), S1 follows the trigger and fit sits above it under 52,428 (bt-47 cf1j-b, D6, bt3 m2a, bt-18, ContextFold A1, A3, A5)", async () => {
+	it("bounds a reasoning route's summary reserve at half a known window, reserves none for a capped thinking-off summary (CTX-3), S1 follows the trigger and fit sits above it under 52,428 (bt-47 cf1j-b, D6, bt3 m2a, bt-18, ContextFold A1, A3, A5)", async () => {
 		const { effectiveCompactionThreshold } = await import("../../src/domains/session/compaction/auto.js");
 		const { evictionPressure, fitOutputReserve, foldTriggerReserve, summaryOutputCap } = await import(
 			"../../src/domains/context/fold/pressure.js"
@@ -2940,16 +2933,17 @@ describe("compaction trigger output reservation", () => {
 			"../../src/engine/apis/output-budget.js"
 		);
 		const { summaryOutputReserve } = await import("../../src/domains/session/compaction/summary-output.js");
-		// A chat route whose summary thinks, with no observed summary share, reserves ceil(0.8 x 16,384 / 0.5) = 26,214;
-		// the turn reserve sits below it. Old trigger: min(0.8, 1 - 26,214 / window) x window. S1 kept the raw 0.8 gate
-		// and 0.6 target on every window; under 52,428 its automatic pass now takes the trigger and 0.75 x the trigger (A3).
+		// A reasoning chat route with no observed summary share reserves ceil(0.8 x 16,384 / 0.5) = 26,214; the turn
+		// reserve sits below it. Old trigger: min(0.8, 1 - 26,214 / window) x window. S1 kept the raw 0.8 gate and 0.6
+		// target on every window; under 52,428 its automatic pass now takes the trigger and 0.75 x the trigger (A3).
 		const model = { provider: "a1-table", baseUrl: "http://a1.invalid", id: "a1", maxTokens: 128_000, reasoning: true };
 		// A non-reasoning route with a 4,096 output limit reserves 8,192 (the turn's), at most 0.2W on a 50K window, so
 		// its trigger fraction is the threshold and S1 keeps today's inputs though the window is under 52,428.
 		const small = { ...model, id: "a3-small", maxTokens: 4_096, reasoning: false };
-		// The reserve follows the summary call's effective thinking, not the model's capability (CTX-3): the same
-		// reasoning model with thinking off reserves only its 13,107 summary room, so its trigger is
-		// min(0.8, 1 - 13,107 / 64,000) x 64,000 = 50,893, not 64,000 - 26,214 = 37,786.
+		// Under its A5 cap (W < 52,428) a chat-route summary's reserve follows the summary call's effective thinking, not
+		// the model's capability (CTX-3): the same reasoning model with thinking off reserves only its 13,107 summary
+		// room, so on 40K its trigger is min(0.8, 1 - 13,107 / 40,000) x 40,000 = 26,893, not the half-window 20,000.
+		// From 52,428 the summary is uncapped and keys on the model, as ContextFold pins: thinking is not passed there.
 		const thinkingOff = { ...model, id: "ctx3-thinking-off" };
 		const table: Array<
 			[
@@ -2965,15 +2959,22 @@ describe("compaction trigger output reservation", () => {
 			[32_768, 16_384, 16_384, 12_288], // trigger was 6,554; S1 was 26,214.4 and 19,660.8
 			[40_000, 20_000, 20_000, 15_000], // trigger was 13,786; S1 was 32,000 and 24,000
 			[50_000, 0.8 * 50_000, 0.8 * 50_000, 0.6 * 50_000, small, "off"],
+			[40_000, 40_000 - 13_107, 40_000 - 13_107, 0.75 * (40_000 - 13_107), thinkingOff, "off"], // was 20,000 (CTX-3)
 			[64_000, 64_000 - 26_214, 0.8 * 64_000, 0.6 * 64_000],
-			[64_000, 64_000 - 13_107, 0.8 * 64_000, 0.6 * 64_000, thinkingOff, "off"], // was 64,000 - 26,214 (CTX-3)
 			[128_000, 128_000 - 26_214, 0.8 * 128_000, 0.6 * 128_000],
 			[200_000, 0.8 * 200_000, 0.8 * 200_000, 0.6 * 200_000],
 		];
 		for (const [window, expected, s1Threshold, s1Target, route = model, thinking = "high"] of table) {
 			const reserve = foldTriggerReserve({
 				window,
-				summaryReserve: () => summaryOutputReserve(route, { summaryOnChatRoute: true, thinking }),
+				summaryReserve: () =>
+					summaryOutputReserve(route, {
+						summaryOnChatRoute: true,
+						// The capped path, as turn-context takes it: only a summary under its A5 cap passes its thinking.
+						...(summaryOutputCap({ window, admissibleReserve: ADMISSIBLE_OUTPUT_RESERVE, configured: null }) !== undefined
+							? { capped: { thinking } }
+							: {}),
+					}),
 				turnReserve: () => 8_192,
 			});
 			const fraction = effectiveCompactionThreshold(0.8, window, reserve);
@@ -3027,7 +3028,7 @@ describe("compaction trigger output reservation", () => {
 			strictEqual(turnReserve, configured ?? Math.min(32_768, bound), `${window}: turn reserve`);
 			const reserve = foldTriggerReserve({
 				window,
-				summaryReserve: () => summaryOutputReserve(uncapped, { summaryOnChatRoute: true, thinking: "high" }),
+				summaryReserve: () => summaryOutputReserve(uncapped, { summaryOnChatRoute: true }),
 				turnReserve: () => turnReserve,
 			});
 			const trigger = effectiveCompactionThreshold(0.8, window, reserve) * window;
