@@ -177,7 +177,9 @@ export function createReadStreakRegistration(deps: {
 	surface?: TurnSurface;
 	/** A host channel of the run's own: it takes the second step, once per streak, and no ladder note follows it. */
 	secondStep?: (count: number) => void;
-}): MiddlewareHookRegistration {
+	/** Called whenever the streak starts over, so a host holding the second step can drop it. */
+	onReset?: () => void;
+}): MiddlewareHookRegistration & { resetStreak(): void } {
 	const state: StreakState = {
 		sessionId: undefined,
 		reads: 0,
@@ -192,6 +194,7 @@ export function createReadStreakRegistration(deps: {
 		state.serial = 0;
 		state.serialNoted = false;
 		state.folded = false;
+		deps.onReset?.();
 	};
 	const followSession = (sessionId: string | undefined): void => {
 		if (sessionId === undefined || sessionId === state.sessionId) return;
@@ -266,6 +269,8 @@ export function createReadStreakRegistration(deps: {
 
 	return {
 		id: READ_STREAK_REGISTRATION_ID,
+		// A run with no turn_start report (a worker) starts the streak over here when its operator steers it.
+		resetStreak: reset,
 		description: "ask for a decision after a long run of read-only calls with no edit, plan or question",
 		hooks: ["turn_start", "before_tool", "after_tool", "on_compaction"],
 		evidence: STREAK_EVIDENCE,

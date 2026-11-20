@@ -755,12 +755,13 @@ function thrashHostNote(
 	count: number,
 	canWrite: boolean,
 	roleShare: boolean,
+	canPlan: boolean,
 ): string {
 	const seen =
 		cause === "recall"
 			? `this run has recalled its own evicted observations ${count} times`
 			: cause === "streak"
-				? `this run has made ${count} read-only calls in a row without an edit or a plan update`
+				? `this run has made ${count} read-only calls in a row without an edit${canPlan ? " or a plan update" : ""}`
 				: roleShare
 					? `this run's context passed ${Math.round(HANDBACK_NOTE_SHARE * 100)}% of its usable context without a workspace change`
 					: `this run's context passed ${Math.round(THRASH_CONTEXT_FRACTION * 100)}% of the model window without a workspace change`;
@@ -887,8 +888,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	let contextPressureWindow = 0;
 	let contextPressureCrossed = false;
 	let thrashNudged = false;
-	// X3: the read-only streak a writer worker reached when the read-streak rule handed it the second step.
+	// X3: the read-only streak a writer worker reached when the read-streak rule handed it the second step, whether
+	// the streak note went out, and whether it still stands (no progress since), which holds back the other causes.
 	let readStreakEscalated = 0;
+	let streakNudged = false;
+	let streakNoteOpen = false;
 	// Last HTTP status a provider answered. Pi's error messages drop it on some
 	// APIs (openai-codex keeps only the body text), and the dispatch retry policy
 	// needs it to tell a rejected request from a transient failure.
@@ -979,19 +983,28 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	});
 	const seedLineage = seedRecallLineage(input.contextSeed);
 	// X3: a writer worker gets the main agent's read-streak rule. Its first note rides the tool result; the second
-	// step is this run's one thrash host note, with the streak as its cause.
+	// step is this run's thrash host note, with the streak as its cause. Writing means holding edit or write, not
+	// merely a delivery tool: an orientation run delivers through code_nav.
+	const workerCanWrite =
+		input.readOnly !== true && activeWorkerTools.some((tool) => tool === ToolNames.Edit || tool === ToolNames.Write);
+	const workerCanPlan = activeWorkerTools.includes(ToolNames.Tasks);
 	const readStreakRegistration =
-		deliveryTools.length > 0 && input.readOnly !== true
+		deliveryTools.length > 0 && workerCanWrite
 			? createReadStreakRegistration({
 					classifiers: { repeatsAsRead: callRepeatsAsRead, changesTree: callChangesTree },
 					workspaceRoot: () => input.cwd ?? process.cwd(),
 					surface: {
 						canWrite: true,
-						canPlan: activeWorkerTools.includes(ToolNames.Tasks),
+						canPlan: workerCanPlan,
 						canAsk: activeWorkerTools.includes(ToolNames.AskUser),
 					},
 					secondStep: (count) => {
 						readStreakEscalated = count;
+					},
+					// A later step of the same call (a chain's edit) that resets the streak withdraws the second step.
+					onReset: () => {
+						readStreakEscalated = 0;
+						streakNoteOpen = false;
 					},
 				})
 			: null;
@@ -2191,33 +2204,39 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			observeChainChildren(event.toolName, event.result);
 			// Only a recall that returned an archived observation brings evicted content back.
 			if (pendingRecallCalls.delete(event.toolCallId) && event.isError !== true) evictedRecalls += 1;
-			// One host turn per run, delivered after this tool batch, never once the run is answering or bound.
-			const cause =
+			// One recall or context host turn per run and one streak turn per run, delivered after this tool batch, never
+			// once the run is answering or bound. A standing streak note holds back the other causes until progress.
+			const thrashCause =
 				evictedRecalls > THRASH_RECALL_LIMIT
 					? ("recall" as const)
 					: contextPressureCrossed && runEffects.snapshot().mutatedPaths.size === 0
 						? ("context" as const)
-						: readStreakEscalated > 0
-							? ("streak" as const)
-							: null;
+						: null;
+			const cause =
+				thrashCause !== null && !thrashNudged && !streakNoteOpen
+					? thrashCause
+					: readStreakEscalated > 0 && !streakNudged && !thrashNudged
+						? ("streak" as const)
+						: null;
 			if (
 				cause !== null &&
-				!thrashNudged &&
 				!synthesisToolLock &&
 				!helperTerminalPhase &&
 				workerBoundFailure === null &&
 				refusalReportRound === null
 			) {
-				thrashNudged = true;
-				const canWrite =
-					input.readOnly !== true && activeWorkerTools.some((tool) => tool === ToolNames.Edit || tool === ToolNames.Write);
+				if (cause === "streak") {
+					streakNudged = true;
+					streakNoteOpen = true;
+				} else thrashNudged = true;
 				agent.steer({
 					role: "user",
 					content: thrashHostNote(
 						cause,
 						cause === "streak" ? readStreakEscalated : evictedRecalls,
-						canWrite,
+						workerCanWrite,
 						input.role !== undefined,
+						workerCanPlan,
 					),
 					timestamp: Date.now(),
 				});
@@ -3097,6 +3116,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		steer: (text: string) => {
 			const trimmed = text.trim();
 			if (trimmed.length === 0) return false;
+			// A worker reports no turn_start, so its operator's steer is where the read streak starts over.
+			readStreakRegistration?.resetStreak();
 			agent.steer(taskMessage(trimmed));
 			return true;
 		},
