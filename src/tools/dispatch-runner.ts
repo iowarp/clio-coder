@@ -592,8 +592,6 @@ interface CompletedRun {
 	 * is the runner's, not the run's, so its sealed receipt carries no worktree.
 	 */
 	leftUncommitted?: NonNullable<RunResult["worktree"]>["leftUncommitted"];
-	/** A writer recipe ran read-only because its task declared intent.write_roots: []. */
-	readOnlyByEmptyWriteRoots?: true;
 	summary: EventSummary;
 	/** Reviewer/judge output staged before its receipt settlement boundary. */
 	pendingGate?: PendingGateDecisionHandle;
@@ -702,13 +700,6 @@ function completeRun(
 		...(pendingGate !== undefined ? { pendingGate } : {}),
 		...(failedAttempts.length > 0 ? { failedAttempts } : {}),
 		...(envelope?.projection?.checksWithheld !== undefined ? { checksWithheld: envelope.projection.checksWithheld } : {}),
-		...(request?.readOnly === true &&
-		request.externalReadRoot === undefined &&
-		request.intent?.writeRoots.length === 0 &&
-		capabilityClass !== "read-only" &&
-		gateRole === undefined
-			? { readOnlyByEmptyWriteRoots: true as const }
-			: {}),
 	};
 }
 
@@ -824,9 +815,6 @@ export function formatDispatchOutput(
 				.flatMap((run) => [
 					nextHostValidationAction(run.receipt, run.readOnly === true),
 					checksWithheldNotice(run),
-					run.readOnlyByEmptyWriteRoots === true
-						? `${run.receipt.runId} (${run.receipt.agentId}) ran read-only: its task declared intent.write_roots: [], so it got the read-only tool surface and changed no files; declare write roots or use worktree: true for a task that writes.`
-						: null,
 					withheldMergeNotice(run.receipt),
 					mcpSandboxNoNetworkNotice(run.receipt),
 					...routeWarningLines(run.receipt),
@@ -3178,7 +3166,14 @@ export async function runDispatchTool(
 				};
 			}
 			try {
-				return await runDetached(deps, requests, options?.sessionId ?? null);
+				const started = await runDetached(deps, requests, options?.sessionId ?? null);
+				if (externalFailures.length === 0 || started.kind !== "ok") return started;
+				// An unapproved outside root drops only its own task; the approved ones run detached.
+				return {
+					kind: "error",
+					message: `${externalFailures}\n\n${started.output}`,
+					details: { ...started.details, rejectedTasks: rejectedExternal },
+				};
 			} catch (err) {
 				return { kind: "error", message: dispatchErrorMessage(err) };
 			}

@@ -51,6 +51,7 @@ import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claud
 import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { dispatchRequestsFromArgs } from "../../src/tools/dispatch-arguments.js";
+import { normalizeDispatchAdmission } from "../../src/tools/dispatch-normalize.js";
 import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT, describeDispatchPlan } from "../../src/tools/dispatch-plan.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -732,49 +733,107 @@ describe("dispatch admission boundary", () => {
 		}
 	});
 
-	it("reads an absolute token naming the workspace as its relative path and refuses only one outside it (XR-60)", () => {
+	it("normalizes absolute workspace paths before inference and leaves one outside the workspace to refuse (XR-60, M2)", () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-coder-path-scope-"));
+		type Request = Parameters<typeof resolveDispatchPathScope>[0];
+		const normalized = (task: string) => {
+			const requests = [{ agentId: "scout", cwd: root, task }] as unknown as Request[];
+			const notices = normalizeDispatchAdmission({
+				args: { tasks: [{ agent: "scout", task }] },
+				requests,
+				positions: [1],
+				mode: "parallel",
+				specs: [],
+			});
+			return { request: requests[0] as Request, notices };
+		};
 		try {
 			mkdirSync(join(root, "paper", "background"), { recursive: true });
-			const scope = (task: string) =>
-				resolveDispatchPathScope({ cwd: root, task } as Parameters<typeof resolveDispatchPathScope>[0]);
 			for (const [task, paths] of [
 				[`audit ${root} for leaks`, []],
 				[`audit the tree at ${root}.`, []],
 				[`read ${root}/paper/method.md and report`, ["paper/method.md"]],
 				["summarize /paper/background now", ["paper/background"]],
 			] as const) {
-				deepStrictEqual(scope(task).workingContextPaths, paths, task);
-				deepStrictEqual(scope(task).writeBoundaries, [], task);
+				const { request, notices } = normalized(task);
+				strictEqual(notices.length, 1, task);
+				match(
+					notices[0] ?? "",
+					/^\[dispatch normalize\] task 1 \(scout\): read absolute workspace paths as workspace-relative/u,
+				);
+				deepStrictEqual(resolveDispatchPathScope(request).workingContextPaths, paths, task);
+				deepStrictEqual(resolveDispatchPathScope(request).writeBoundaries, [], task);
 			}
-			throws(() => scope("read /etc/passwd now"), /legacy_scope_path_absolute/u);
-			throws(() => scope(`read ${dirname(root)}/elsewhere/a.md now`), /legacy_scope_path_absolute/u);
+			for (const task of ["read /etc/passwd now", `read ${dirname(root)}/elsewhere/a.md now`]) {
+				const { request, notices } = normalized(task);
+				deepStrictEqual(notices, [], task);
+				throws(() => resolveDispatchPathScope(request), /legacy_scope_path_absolute/u);
+			}
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
 	});
 
-	it("runs a task declaring intent.write_roots: [] read-only instead of refusing it as an undeclared writer (XR-60)", () => {
+	it("normalizes write_roots: [] and undeclared builders in a parallel batch to read-only runs with notices (XR-60, row 146, M2)", () => {
 		const auto = { approvedAuthorities: ["read-only" as const], authorityBasis: "yolo-policy" as const };
-		const resolveIntent = () => ({
-			ok: true as const,
-			intent: { writeRoots: [], readRoots: [], expectedOutputs: [], verification: [] } as unknown as NonNullable<
-				Parameters<typeof resolveDispatchPathScope>[0]["intent"]
-			>,
-			resolvedVerification: [],
-		});
-		const task = { agent: "coder", task: "Map the cache split", intent: { write_roots: [] } };
-		const parsed = dispatchRequestsFromArgs(
-			{ mode: "parallel", tasks: [task, task, task] },
-			{ auto, resolveIntent, workspaceRoot: process.cwd() },
-		);
-		ok(parsed.ok, JSON.stringify(parsed));
+		const resolveIntent = (raw: unknown) => {
+			const roots = (raw as { write_roots?: string[] } | undefined)?.write_roots ?? [];
+			return {
+				ok: true as const,
+				intent: {
+					writeRoots: roots,
+					readRoots: [],
+					relevantPaths: [],
+					expectedOutputs: [],
+					verification: [],
+				} as unknown as NonNullable<Parameters<typeof resolveDispatchPathScope>[0]["intent"]>,
+				resolvedVerification: [],
+			};
+		};
+		const specs = [
+			{ id: "coder", capabilityClass: "workspace-edit" },
+			{ id: "debugger", capabilityClass: "verification" },
+		] as unknown as AgentSpec[];
+		const normalized = (args: Record<string, unknown>) => {
+			const parsed = dispatchRequestsFromArgs(args, { auto, resolveIntent, workspaceRoot: process.cwd() });
+			ok(parsed.ok, JSON.stringify(parsed));
+			const requests = [...parsed.requests];
+			const notices = normalizeDispatchAdmission({ args, requests, positions: parsed.positions, mode: "parallel", specs });
+			return { requests, notices };
+		};
+		const empty = { agent: "coder", task: "Map the cache split", intent: { write_roots: [] } };
+		const declared = normalized({ mode: "parallel", tasks: [empty, empty, empty] });
 		deepStrictEqual(
-			parsed.requests.map((request) => request.readOnly),
+			declared.requests.map((request) => request.readOnly),
 			[true, true, true],
 		);
-		const specs = [{ id: "coder", capabilityClass: "workspace-write" }] as unknown as AgentSpec[];
-		strictEqual(parallelWriterConflict(parsed.requests, specs), null);
+		strictEqual(parallelWriterConflict(declared.requests, specs), null);
+		strictEqual(declared.notices.length, 3);
+		match(
+			declared.notices[0] ?? "",
+			/task 1 \(coder\) runs read-only: its intent\.write_roots: \[\] declares no writes/u,
+		);
+		// Row 146: a coder and a debugger with nothing declared would refuse the batch; both run as inspection.
+		const builders = normalized({
+			mode: "parallel",
+			tasks: [
+				{ agent: "coder", task: "Explain the cache split" },
+				{ agent: "debugger", task: "Diagnose the flaky collect" },
+				{ agent: "coder", task: "Fix a", intent: { write_roots: ["src/a/"] } },
+			],
+		});
+		deepStrictEqual(
+			builders.requests.map((request) => request.readOnly === true),
+			[true, true, false],
+		);
+		strictEqual(parallelWriterConflict(builders.requests, specs), null);
+		match(
+			builders.notices.join("\n"),
+			/task 2 \(debugger\) runs read-only: a builder in a parallel batch with no intent\.write_roots/u,
+		);
+		// A batch that admits as sent is left alone.
+		const lone = normalized({ mode: "parallel", tasks: [{ agent: "coder", task: "Fix b" }] });
+		deepStrictEqual([lone.requests[0]?.readOnly, lone.notices], [undefined, []]);
 		const writers = dispatchRequestsFromArgs(
 			{ mode: "parallel", tasks: ["Fix a", "Fix b"].map((text) => ({ agent: "coder", task: text })) },
 			{ auto, resolveIntent },

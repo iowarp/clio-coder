@@ -345,6 +345,10 @@ describe("gateway correction contracts", () => {
 			args: { op: "call", capability: ToolNames.Dispatch, args: { task: "map src" } },
 		});
 		ok(forwarded.kind === "ok" && forwarded.result.kind === "ok", JSON.stringify(forwarded));
+		match(
+			String(forwarded.result.modelContext),
+			/^\[dispatch normalize\] gateway op=call capability=dispatch was forwarded/u,
+		);
 		const refused = await registry.invoke({
 			tool: ToolNames.Gateway,
 			args: { op: "call", capability: ToolNames.Limitation, args: { task: "x" } },

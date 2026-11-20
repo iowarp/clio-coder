@@ -122,15 +122,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * True when the task explicitly declares it writes nothing: intent.write_roots
- * is an empty array, with no legacy writeRoots, verification or gate beside it.
+ * The arguments one batch member parses from: the shared fields, then the
+ * member's own, with a member intent layered over the shared intent. Null when
+ * there is no member at `index`. The normalize stage reads the same view.
  */
-function declaresNoWrites(args: Record<string, unknown>): boolean {
-	if (!isRecord(args.intent)) return false;
-	const roots = args.intent.write_roots;
-	if (!Array.isArray(roots) || roots.length > 0) return false;
-	if (Array.isArray(args.writeRoots) && args.writeRoots.length > 0) return false;
-	return !Object.hasOwn(args.intent, "verification") && !Object.hasOwn(args, "gate");
+export function dispatchTaskArgs(args: Record<string, unknown>, index: number): Record<string, unknown> | null {
+	const tasks = args.tasks;
+	if (!Array.isArray(tasks) || index < 0 || index >= tasks.length) return null;
+	const item: unknown = tasks[index];
+	const shared = { ...args };
+	Reflect.deleteProperty(shared, "tasks");
+	const itemArgs: Record<string, unknown> = isRecord(item) ? { ...shared, ...item } : { ...shared, task: item };
+	const sharedIntent = isRecord(shared.intent) ? shared.intent : null;
+	const itemIntent = isRecord(item) && Object.hasOwn(item, "intent") && isRecord(item.intent) ? item.intent : null;
+	if (sharedIntent !== null && itemIntent !== null) itemArgs.intent = { ...sharedIntent, ...itemIntent };
+	return itemArgs;
 }
 
 export function stringArg(args: Record<string, unknown>, ...names: string[]): string | undefined {
@@ -303,13 +309,6 @@ function dispatchRequestFromArgs(
 		request.extraReadRoots = workspace.extraReadRoots;
 	}
 	if (workspace.externalReadRoot !== undefined) {
-		if (args.detach === true)
-			return {
-				ok: false,
-				reason: "external_read_mode_unsupported",
-				message:
-					'external_read_mode_unsupported: an External Scout\'s approval is raised while the call is attached, so detach: true cannot carry an external read root. Send every such scout in one call without detach: dispatch({mode: "parallel", tasks: [{agent: "scout", task: "...", intent: {read_roots: ["..."]}}, ...]}); its tasks run in parallel.',
-			};
 		request.externalReadRoot = workspace.externalReadRoot;
 		request.readOnly = true;
 		if (Object.hasOwn(args, "gate"))
@@ -329,23 +328,9 @@ function dispatchRequestFromArgs(
 		}
 		rawIntent = { ...(isRecord(rawIntent) ? rawIntent : {}), verification: [{ check: args.gate.trim() }] };
 	}
-	// An explicit intent.write_roots: [] declares a task that writes nothing, so it
-	// runs on the read-only surface rather than counting as an undeclared writer.
-	if (
-		workspace.externalReadRoot === undefined &&
-		declaresNoWrites(args) &&
-		request.worktree !== true &&
-		request.storeTags === undefined &&
-		options.writesArtifact?.(agentId) !== true
-	)
-		request.readOnly = true;
 	// External and read-only Scouts run no verification; every other task from
 	// this turn carries the checks the operator named (deduplicated).
-	if (
-		workspace.externalReadRoot === undefined &&
-		options.isReadOnlyScout?.(agentId) !== true &&
-		request.readOnly !== true
-	) {
+	if (workspace.externalReadRoot === undefined && options.isReadOnlyScout?.(agentId) !== true) {
 		const named = options.operatorNamedChecks?.(cwd) ?? [];
 		if (named.length > 0) rawIntent = mergeOperatorNamedChecks(rawIntent, named);
 	}
@@ -452,7 +437,7 @@ export function dispatchRequestsFromArgs(
 	const isolateIntentFailures = (args.mode === undefined || args.mode === "parallel") && args.review === undefined;
 	for (let index = 0; index < tasks.length; index += 1) {
 		const item = tasks[index];
-		const itemArgs: Record<string, unknown> = isRecord(item) ? { ...shared, ...item } : { ...shared, task: item };
+		const itemArgs = dispatchTaskArgs(args, index) ?? { ...shared, task: item };
 		// A shared allowance over several members is inherited, not chosen for
 		// each of them; a one-task batch is the single-task form the tool
 		// normalizes every call into, so its shared value is that task's own.
@@ -464,7 +449,6 @@ export function dispatchRequestsFromArgs(
 				: "task";
 		const sharedIntent = isRecord(shared.intent) ? shared.intent : null;
 		const itemIntent = isRecord(item) && Object.hasOwn(item, "intent") && isRecord(item.intent) ? item.intent : null;
-		if (sharedIntent !== null && itemIntent !== null) itemArgs.intent = { ...sharedIntent, ...itemIntent };
 		const parsed = dispatchRequestFromArgs(itemArgs, options, resultSummaryScope);
 		if (!parsed.ok) {
 			if (isolateIntentFailures && parsed.reason !== undefined) {

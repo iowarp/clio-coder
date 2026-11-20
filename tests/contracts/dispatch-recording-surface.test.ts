@@ -230,6 +230,15 @@ it("admits an approved sibling-checkout Scout read once per run and records the 
 			equal(record.settled.outcome, "succeeded");
 			equal(bundle.contract.getRun(run.runId)?.cwd, root);
 		}
+		// detach: true asks the same per-run approval at the call and then starts detached (XR-60, M2).
+		const detach = tool.prepareAdmissionArguments?.({ ...scout, task: "Inspect the sibling checkout.", detach: true });
+		ok(detach);
+		const detached = await tool.run(detach);
+		equal(detached.kind, "ok", JSON.stringify(detached));
+		const text = detached.kind === "ok" ? detached.output : "";
+		match(text, /approved before the batch detaches/);
+		match(text, /dispatch \(detached\) batch=/);
+		deepStrictEqual(approvals, [root, root, root]);
 	} finally {
 		await bundle.extension.stop?.();
 	}

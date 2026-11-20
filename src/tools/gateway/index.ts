@@ -145,6 +145,9 @@ function mcpLaunchOptions(options: ToolInvokeOptions | undefined): McpLaunchOpti
  * stale catalog the model just read is fixed by what it reads next, not by
  * the data a chain or a display takes from the output (K9).
  */
+const GATEWAY_DISPATCH_FORWARD_NOTICE =
+	"[dispatch normalize] gateway op=call capability=dispatch was forwarded to the direct dispatch tool; call dispatch directly.";
+
 function withModelLine(result: ToolResult, line: string): ToolResult {
 	const note = `${line}\n`;
 	const text = result.modelContext ?? (result.kind === "ok" ? result.output : result.message);
@@ -931,7 +934,12 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				...(changed !== null && allowDirect ? { catalogChange: changed } : {}),
 			},
 		};
-		return nestedExecutedResult(changed !== null && !allowDirect ? withModelLine(executed, changed) : executed, verdict);
+		const lined = changed !== null && !allowDirect ? withModelLine(executed, changed) : executed;
+		// The forward is a normalization (fleet design 4.7): the result says so once, so the next call goes direct.
+		return nestedExecutedResult(
+			!allowDirect && spec.name === ToolNames.Dispatch ? withModelLine(lined, GATEWAY_DISPATCH_FORWARD_NOTICE) : lined,
+			verdict,
+		);
 	};
 
 	return {

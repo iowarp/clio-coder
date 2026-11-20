@@ -260,27 +260,42 @@ function withoutNonWorkspaceTokens(text: string): string {
 		.replace(HOME_PATH_RE, (path) => " ".repeat(path.length));
 }
 
+/** The words an absolute token naming the run's own working directory becomes. */
+export const WORKING_DIRECTORY_PHRASE = "the working directory";
+
 /**
  * Prose names the workspace by its absolute path ("/home/me/repo", "/home/me/repo/src/a.ts.")
  * or quotes a workspace path with a leading slash ("/paper/background"). Each names a path
- * the run already reads, so it is rewritten to its workspace-relative form (the root itself
- * to nothing) before the absolute-token refusal; only a token outside the workspace keeps it.
- * The leading-slash reading applies only when no such host path exists and the workspace
- * holds it, so "/etc/passwd" stays refused.
+ * the run already reads, so dispatch normalization rewrites it to its workspace-relative form,
+ * and the root itself to {@link WORKING_DIRECTORY_PHRASE}, keeping any sentence period. Only a
+ * token outside the workspace stays absolute, and legacy inference still refuses it. The
+ * leading-slash reading applies only when no such host path exists and the workspace holds it,
+ * so "/etc/passwd" stays as written.
  */
-function relativizeWorkspaceAbsoluteTokens(text: string, root: string): string {
+export function relativizeWorkspaceAbsoluteTokens(
+	text: string,
+	root: string,
+): { text: string; rewrites: Array<{ from: string; to: string }> } {
 	const base = resolve(root);
-	return text.replace(POSIX_ABSOLUTE_TOKEN_RE, (match: string, raw: string) => {
+	const rewrites: Array<{ from: string; to: string }> = [];
+	const rewritten = text.replace(POSIX_ABSOLUTE_TOKEN_RE, (match: string, raw: string) => {
 		const prefix = match.slice(0, match.length - raw.length);
 		const token = raw.replace(TRAILING_SENTENCE_DOTS_RE, "");
+		const trailing = raw.slice(token.length);
 		const local = relative(base, token);
-		if (local === "") return prefix;
-		if (local !== ".." && !local.startsWith("../") && !isAbsolute(local)) return `${prefix}${local}`;
-		const anchored = token.slice(1);
-		const walks = anchored.split("/").some((segment) => segment === ".." || segment === ".");
-		if (!walks && !existsSync(token) && existsSync(resolve(base, anchored))) return `${prefix}${anchored}`;
-		return match;
+		let to: string | null = null;
+		if (local === "") to = WORKING_DIRECTORY_PHRASE;
+		else if (local !== ".." && !local.startsWith("../") && !isAbsolute(local)) to = local;
+		else {
+			const anchored = token.slice(1);
+			const walks = anchored.split("/").some((segment) => segment === ".." || segment === ".");
+			if (!walks && !existsSync(token) && existsSync(resolve(base, anchored))) to = anchored;
+		}
+		if (to === null) return match;
+		rewrites.push({ from: token, to });
+		return `${prefix}${to}${trailing}`;
 	});
+	return { text: rewritten, rewrites };
 }
 
 function failMalformedText(text: string, source: "task" | "briefing"): void {
@@ -322,9 +337,8 @@ function strictInferredPaths(
 	paths: Array<{ path: string; evidence: DispatchPathProvenanceEvidence }>;
 	parentTokens: DispatchInferredParentToken[];
 } {
-	const local = relativizeWorkspaceAbsoluteTokens(text, root);
-	failMalformedText(local, source);
-	const withoutUrls = withoutNonWorkspaceTokens(local);
+	failMalformedText(text, source);
+	const withoutUrls = withoutNonWorkspaceTokens(text);
 	const evidence: DispatchPathProvenanceEvidence =
 		source === "task"
 			? { provenance: "inferred", source, confidence: "medium", reason: "task_path_token" }
