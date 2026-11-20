@@ -6,10 +6,13 @@
  */
 
 import { hostname } from "node:os";
+import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
+import { spendSumsOf, unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { SettledRunRecord } from "../telemetry/index.js";
-import { readSettledRun } from "../telemetry/index.js";
+import { readRunJournalRecords, readSettledRun } from "../telemetry/index.js";
 import { runStatusForOutcome } from "./outcome.js";
+import { runUsageFromJournal } from "./run-call-usage.js";
 import type { RunSettlement } from "./run-settlement.js";
 import { settleUnfinishedRun } from "./run-settlement.js";
 import type { Ledger } from "./state.js";
@@ -71,6 +74,21 @@ export function sealRowFromSettledRun(ledger: Ledger, runId: string, stateDir = 
 	return true;
 }
 
+/**
+ * The last instant the owner host saw the worker alive in the run's journal: its newest display row, stamped on the
+ * host's own clock like the row's heartbeat. The ledger keeps only a lifecycle-time heartbeat (FL-24), and a worker's
+ * own records carry the worker's clock, which on a fleet node is not the host's.
+ */
+function lastJournaledAt(records: readonly TelemetryRecord[]): number {
+	let last = Number.NaN;
+	for (const record of records) {
+		if (record.k !== "run.feed_appended") continue;
+		const at = Date.parse(record.t);
+		if (Number.isFinite(at) && !(at <= last)) last = at;
+	}
+	return last;
+}
+
 /** Row states that still claim a live run. */
 export function isOpenRunRow(row: RunEnvelope): boolean {
 	return row.endedAt === null && NON_TERMINAL_STATUSES.has(row.status);
@@ -92,8 +110,9 @@ export function isOpenRunRow(row: RunEnvelope): boolean {
  * recovery noticed it was gone. Stamping recovery time made every phase
  * duration derived from the row (`executionMs`, `totalEndToEndMs`) span the
  * whole orchestrator downtime, which is not a measurement of anything. The
- * last heartbeat is the honest bound; a row that never heartbeat has only its
- * own start, which reads as a zero-length run rather than an invented one.
+ * later of the row's heartbeat and the journal's last display row is the
+ * honest bound; a run with neither has only its own start, which reads as a
+ * zero-length run rather than an invented one.
  *
  * A restart has no shared monotonic origin with the process that owned the
  * worker, so recovery never estimates heartbeat age. It first adjudicates the
@@ -121,13 +140,30 @@ export function recoverAbandonedRuns(ledger: Ledger, options: RunRecoveryOptions
 			continue;
 		}
 		const detail = "abandoned: orchestrator exited before the run finalized";
-		const endedAt = row.heartbeatAt ?? row.startedAt;
+		let records: readonly TelemetryRecord[] = [];
+		try {
+			records = readRunJournalRecords(stateDir, row.id);
+		} catch {
+			// An unreadable journal leaves the run what the row knew: its heartbeat bound and unobserved spend.
+		}
+		// The row's spend was only ever written at lifecycle points, so it closes at the journal's fold, the value
+		// run.settled records and every other reader folds (FL-24).
+		const usage = runUsageFromJournal(records);
+		const spend = usage?.facts ?? unobservedRunUsageFacts();
+		const rowSeenAt = Date.parse(row.heartbeatAt ?? row.startedAt);
+		const journalSeenAt = lastJournaledAt(records);
+		const endedAt =
+			Number.isFinite(journalSeenAt) && !(journalSeenAt <= rowSeenAt)
+				? new Date(journalSeenAt).toISOString()
+				: (row.heartbeatAt ?? row.startedAt);
 		const closedRow = ledger.update(row.id, {
 			status: "dead",
 			outcome: "stalled",
 			outcomeDetail: detail,
 			endedAt,
 			exitCode: row.exitCode ?? 1,
+			spend,
+			spendSums: usage?.sums ?? spendSumsOf(spend),
 		});
 		abandoned += 1;
 		unsettled.push({
@@ -138,6 +174,7 @@ export function recoverAbandonedRuns(ledger: Ledger, options: RunRecoveryOptions
 				detail,
 				endedAt,
 				processExitCode: row.exitCode ?? null,
+				...(usage !== undefined ? { usage } : {}),
 			}),
 		});
 	}

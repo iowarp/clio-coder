@@ -188,6 +188,27 @@ export function runUsageFromCallRecords(input: Iterable<TelemetryRecord>, option
 	};
 }
 
+/** The records a run's spend folds; every other kind a worker sends leaves its meter unchanged. */
+function metersSpend(record: TelemetryRecord): boolean {
+	return (
+		record.k === "call.started" ||
+		record.k === "call.settled" ||
+		record.k === "run.usage_reported" ||
+		record.k === "journal.gap"
+	);
+}
+
+/**
+ * A run's spend as its journal last recorded it, folded over the kinds the live meter folds, so an abandoned run
+ * settles at what it was seen to spend and an attempt it started and never settled stays unknown coverage. A journal
+ * holding neither the worker's start nor a call says nothing, which stays unobserved (FL-24).
+ */
+export function runUsageFromJournal(records: readonly TelemetryRecord[]): RunCallUsage | undefined {
+	const spent = records.filter(metersSpend);
+	if (spent.length === 0 && !records.some((record) => record.k === "process.started")) return undefined;
+	return runUsageFromCallRecords(spent);
+}
+
 /** The receipt path drains this same stream before sealing; display replay never updates this projection (#434). */
 export function createRunCallUsage(context: WorkerTelemetryContext) {
 	const records: TelemetryRecord[] = [];
@@ -200,13 +221,7 @@ export function createRunCallUsage(context: WorkerTelemetryContext) {
 				snapshot ??= runUsageFromCallRecords(records);
 				return true;
 			}
-			if (
-				record.k !== "call.started" &&
-				record.k !== "call.settled" &&
-				record.k !== "run.usage_reported" &&
-				record.k !== "journal.gap"
-			)
-				return true;
+			if (!metersSpend(record)) return true;
 			records.push(record);
 			snapshot = runUsageFromCallRecords(records);
 			return true;

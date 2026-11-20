@@ -3,7 +3,10 @@ import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
 import { normalizeClioCoderEventTree, normalizeClioCoderEventType } from "../../src/core/naming-events.js";
+import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 
 import { recoverAbandonedRuns } from "../../src/domains/dispatch/orphan-recovery.js";
@@ -20,6 +23,7 @@ import {
 	reconcilePendingProtectedArtifacts,
 	stagePendingProtectedArtifact,
 } from "../../src/domains/session/protected-artifact-journal.js";
+import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { telemetryRunsDirectory } from "../../src/domains/telemetry/paths.js";
 import {
@@ -335,5 +339,83 @@ describe("session durability boundary", () => {
 		const settled = (await readCallJournal(directory)).records.filter(({ record }) => record.k === "run.settled");
 		strictEqual(settled.length, 1);
 		strictEqual((settled[0]?.record.data as { terminalReason?: string }).terminalReason, "stalled");
+	});
+
+	it("closes an abandoned run at its journal's call fold, a call it never settled unknown (FL-24)", async () => {
+		const ledger = openLedger({ maxRuns: 10 });
+		const run = ledger.create({
+			agentId: "coder",
+			executionRole: "builder",
+			task: "interrupted work",
+			targetId: "local",
+			wireModelId: "model",
+			runtimeId: "openai",
+			runtimeKind: "http",
+			sessionId: null,
+			cwd: scratch.dir,
+		});
+		ledger.update(run.id, { status: "running", pid: 999_999, heartbeatAt: run.startedAt });
+		await ledger.persist();
+		const directory = join(telemetryRunsDirectory(clioStateDir()), run.id);
+		const context = { sessionId: null, runId: run.id, agent: { role: "worker" as const, id: run.id } };
+		const journal = await openRunTelemetry(context, directory);
+		const frame = (kind: "call.started" | "call.settled", data: object, ids: object, mono: number) => ({
+			type: "clio_coder_telemetry",
+			record: {
+				...makeTelemetryRecord(kind, data as never, { ...context, ...ids }, { t: new Date().toISOString(), mono }),
+				origin: { host: "local-worker", pid: 42, birthToken: "fixture", monoEpochWallMs: 0 },
+			},
+		});
+		const call = (ids: { callId: string; attemptId: string }) => ({
+			...ids,
+			...{ attempt: 0, roundKind: "normal" as const, toolChoice: "auto" as const },
+			target: {
+				...{ targetId: "local", runtimeId: "openai", api: "openai", requestedModel: "model" },
+				reportedModel: { kind: "unknown" as const, reason: "not-observed" as const },
+			},
+		});
+		const message = {
+			role: "assistant",
+			stopReason: "toolUse",
+			content: [],
+			usage: { input: 1000, output: 100, totalTokens: 1100, cost: { total: 0.01 } },
+		};
+		const settledIds = { callId: newCallId(), attemptId: newAttemptId() };
+		const openIds = { callId: newCallId(), attemptId: newAttemptId() };
+		ok(journal.worker(frame("call.started", call(settledIds), settledIds, 1)));
+		const settledData = {
+			...call(settledIds),
+			stages: { settle: 1 },
+			...callSettlementFromMessage(message, "target-rates"),
+		};
+		ok(journal.worker(frame("call.settled", settledData, settledIds, 2)));
+		ok(journal.worker(frame("call.started", call(openIds), openIds, 3)));
+		// The host last saw the worker after the row's heartbeat, so that display row bounds the run's end.
+		while (Date.now() <= Date.parse(run.startedAt)) await sleep(1);
+		journal.feed({ kind: "open", runId: run.id, agentId: "coder" }, 1_000_000);
+		await journal.close();
+
+		const reopened = openLedger({ maxRuns: 10 });
+		const recovered = recoverAbandonedRuns(reopened);
+		strictEqual(recovered.abandoned, 1);
+		const row = reopened.get(run.id);
+		const [unsettled] = recovered.unsettled;
+		ok(row?.endedAt && unsettled);
+		ok(Date.parse(row.endedAt) > Date.parse(run.startedAt), "the end is the journal's last display row");
+		const { usage, totalTokens, apiCalls, pricing, callIds, endedAt } = unsettled.settlement.facts;
+		// The row closes at the spend run.settled records, and both name every call the journal saw.
+		deepStrictEqual(row.spend, { usage, totalTokens, apiCalls, pricing });
+		strictEqual(endedAt, row.endedAt);
+		deepStrictEqual(callIds, [settledIds.callId, openIds.callId].sort());
+		// The settled call's $0.01 stays counted; the one it never settled leaves the sum partial, never zero.
+		const usd = row.spendSums.usd;
+		ok(
+			Math.abs(usd.measured + usd.estimated - 0.01) < 1e-9,
+			`priced part ${usd.measured + usd.estimated} (abs tol 1e-9)`,
+		);
+		strictEqual(usd.unknownCount, 1);
+		await settleOrphanedRunJournal(directory, unsettled.settlement);
+		const journaled = (await readCallJournal(directory)).records.find(({ record }) => record.k === "run.settled");
+		deepStrictEqual((journaled?.record.data as { callIds?: unknown }).callIds, callIds);
 	});
 });

@@ -887,12 +887,6 @@ export interface DispatchBundleOptions {
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
-/**
- * The least time between two persists a live worker's spend alone asks for. Each one rewrites the whole ledger, so a
- * streaming worker paid that every heartbeat; lifecycle changes and settlement still persist at once, and budget
- * gates read the in-memory meters, so only another process's view of live spend lags.
- */
-const LIVE_USAGE_PERSIST_INTERVAL_MS = 10_000;
 const DEFAULT_RESILIENCE_COOLDOWN_MS = 15_000;
 /** The grant broker expires this long before the worker's own escalation timer. */
 const GRANT_DEADLINE_MARGIN_MS = 1_000;
@@ -5662,9 +5656,14 @@ export function createDispatchBundle(
 	 * consults admission gates: a budget ceiling breach cannot prevent the
 	 * reconciler from killing a dead worker.
 	 */
-	let liveLedgerWrite: Promise<void> | null = null;
-	let liveUsageDirty = false;
-	let liveUsagePersistedAt = Number.NEGATIVE_INFINITY;
+	/**
+	 * A live worker's spend never rewrites runs.json: at the 1000-row cap each rewrite is about 14 MiB fsynced and every
+	 * board re-parses it, while every reader in another process folds spend from the run's journal and this process
+	 * reads its meters. The tick still carries spend into the in-memory row, which any lifecycle write takes along. Only
+	 * a heartbeat transition writes here, so a sibling's `fleet status` sees a stale or dead row (FL-24).
+	 */
+	let heartbeatLedgerWrite: Promise<void> | null = null;
+	let heartbeatTransitionPending = false;
 
 	function checkActiveHeartbeats(): void {
 		if (!ledger) return;
@@ -5679,7 +5678,6 @@ export function createDispatchBundle(
 			const spendSums = meterSums(run.meter);
 			if (!isDeepStrictEqual(row.spend, spend) || !isDeepStrictEqual(row.spendSums, spendSums)) {
 				ledger.update(run.runId, { spend, spendSums });
-				liveUsageDirty = true;
 			}
 			if (run.awaitingOperator === true) {
 				// The orchestrator is the live party; keep the row fresh and unclassified.
@@ -5720,6 +5718,7 @@ export function createDispatchBundle(
 			}
 			if (status === run.heartbeatStatus) continue;
 			run.heartbeatStatus = status;
+			heartbeatTransitionPending = true;
 			emitHeartbeatStatus(run, status);
 			if (status !== "dead") continue;
 			run.stallKilled = true;
@@ -5729,23 +5728,14 @@ export function createDispatchBundle(
 				// child may have exited between classification and reap attempt
 			}
 		}
-		// Coalesce all changed runs into one write per interval, with no growing queue.
-		// Retry on a later tick after a write failure or an update during a write.
-		if (
-			liveUsageDirty &&
-			liveLedgerWrite === null &&
-			tickMonotonic - liveUsagePersistedAt >= LIVE_USAGE_PERSIST_INTERVAL_MS
-		) {
-			liveUsageDirty = false;
-			liveUsagePersistedAt = tickMonotonic;
-			liveLedgerWrite = ledger
-				.persist()
-				.catch((error: unknown) => {
-					liveUsageDirty = true;
-					reportDispatchDiagnostic("persist live run usage", error);
-				})
+		// One write covers every run that moved this tick; a transition during a write waits for the next tick. A failed
+		// write leaves its rows dirty for the next lifecycle persist rather than retrying every tick (#428).
+		if (heartbeatTransitionPending && heartbeatLedgerWrite === null) {
+			heartbeatTransitionPending = false;
+			heartbeatLedgerWrite = trackDurableWrite(ledger.persist())
+				.catch((error: unknown) => reportDispatchDiagnostic("persist heartbeat transition", error))
 				.finally(() => {
-					liveLedgerWrite = null;
+					heartbeatLedgerWrite = null;
 				});
 		}
 	}
@@ -9226,7 +9216,9 @@ export function createDispatchBundle(
 						// Replace only this process's own vouch: a row written after the start already names the
 						// worker, and one that settled meanwhile keeps what it recorded.
 						if (ledgerRef.get(runId)?.pid === process.pid) {
-							ledgerRef.update(runId, { pid: started.pid });
+							// The pid goes with the follower's own heartbeat: `fleet cancel` tells a recycled pid from
+							// this worker by a heartbeat later than its start, and no spend write refreshes it (FL-24).
+							ledgerRef.update(runId, { pid: started.pid, heartbeatAt: heartbeatIso(started.heartbeatAt) });
 							void persistLedgerInBackground(ledgerRef, runId);
 						}
 						subscribeHeldBoard?.();
@@ -11762,7 +11754,6 @@ export function createDispatchBundle(
 				ownedReservations.clear();
 				publishedPathScopeRoots.clear();
 				await flushDurableWrites();
-				await liveLedgerWrite;
 				// After drain(), so the last run's terminal line is written before the
 				// bridge stops listening.
 				journalBridge?.stop();
@@ -11937,7 +11928,6 @@ export function createDispatchBundle(
 				await Promise.allSettled([...memberWork.values()].flatMap((work) => [...work]));
 			}
 			await flushDurableWrites();
-			await liveLedgerWrite;
 			// Non-fatal so stop() still releases leases, flushes and closes the
 			// journal bridge; the rows stay dirty for any later persist (#428).
 			if (ledger) {

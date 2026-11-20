@@ -194,7 +194,7 @@ it("still marks an unfinished worker stale and terminates it when its heartbeat 
 	}
 });
 
-it("persists a live worker's spend to runs.json at most once per ten seconds (P3-2)", async (t) => {
+it("never rewrites runs.json for a live worker's spend; a heartbeat transition does (FL-24)", async (t) => {
 	t.mock.timers.enable({ apis: ["setInterval"] });
 	const stateDir = process.env.CLIO_CODER_STATE_DIR;
 	ok(stateDir);
@@ -262,15 +262,20 @@ it("persists a live worker's spend to runs.json at most once per ten seconds (P3
 			};
 		},
 		heartbeatIntervalMs: 10,
-		heartbeatSpec: { windowMs: 3_600_000, graceMs: 3_600_000 },
+		heartbeatSpec: { windowMs: 1_000, graceMs: 3_600_000 },
 		monotonicNow: () => monotonic,
 	});
 	await bundle.extension.start();
 	try {
 		const run = await bundle.contract.dispatch(request);
+		const ledgerFile = () => readFileSync(join(stateDir, "runs.json"), "utf8");
+		const rowOnDisk = () =>
+			(JSON.parse(ledgerFile()) as Array<{ id: string; status: string; spend: unknown }>).find(
+				(row) => row.id === run.runId,
+			);
 		const spendIn = (rows: ReadonlyArray<{ id: string; spend: unknown }>) =>
 			JSON.stringify(rows.find((row) => row.id === run.runId)?.spend ?? null);
-		const onDisk = () => spendIn(JSON.parse(readFileSync(join(stateDir, "runs.json"), "utf8")));
+		const onDisk = () => spendIn(JSON.parse(ledgerFile()));
 		const inMemory = () => spendIn(bundle.contract.listRuns());
 		const meterMoves = async (from: string) => {
 			await waitFor(() => {
@@ -278,24 +283,24 @@ it("persists a live worker's spend to runs.json at most once per ten seconds (P3
 				return inMemory() !== from;
 			});
 		};
-		await waitFor(() => onDisk() !== "null");
+		await waitFor(() => rowOnDisk()?.status === "running");
+		const running = ledgerFile();
 		const unspent = inMemory();
 		push("call");
 		await meterMoves(unspent);
-		await waitFor(() => onDisk() === inMemory());
-		const first = onDisk();
-		monotonic = 9_000;
+		const spent = inMemory();
 		push("call");
-		await meterMoves(first);
-		// Ticks inside the interval, long enough for any write still in flight to finish and a new one to land.
+		await meterMoves(spent);
+		// Long enough for any write a spend change started to land.
 		for (let tick = 0; tick < 20; tick += 1) {
 			t.mock.timers.tick(10);
 			await sleep(10);
 		}
-		strictEqual(onDisk(), first, "a second spend change inside the interval stays in memory");
-		monotonic = 10_000;
+		strictEqual(ledgerFile(), running, "spend changes stay in memory and the run's journal");
+		monotonic = 5_000;
 		t.mock.timers.tick(10);
-		await waitFor(() => onDisk() === inMemory());
+		await waitFor(() => rowOnDisk()?.status === "stale");
+		strictEqual(onDisk(), inMemory(), "the transition write carries the meter's spend along");
 		push("end");
 		strictEqual((await run.finalPromise).outcome, "succeeded");
 	} finally {

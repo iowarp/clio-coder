@@ -39,7 +39,8 @@ import type { RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { clioStateDir, resetXdgCache } from "../core/xdg.js";
 import type { ExecutionStepResult } from "../domains/dispatch/execution-scheduler.js";
 import { type RunFeedLine, readRunFeed, runFeedPath } from "../domains/dispatch/run-feed.js";
-import { openLedger, readFleetRun } from "../domains/dispatch/state.js";
+import type { LedgerSnapshot } from "../domains/dispatch/state.js";
+import { openLedger, readFleetRun, readLedgerSnapshot } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
 import { readRunGateIndex, readRunTrust } from "../domains/evidence/run-trust.js";
@@ -249,6 +250,8 @@ function transcriptLine(line: RunFeedLine): RunViewTranscriptLine | null {
 export interface LoadRunViewOptions {
 	now?: () => number;
 	scope?: ReturnType<typeof fleetInspectionScope>;
+	/** The ledger rows a poller keeps; absent, the run's row is read from runs.json. */
+	ledger?: () => ReadonlyArray<RunEnvelope>;
 }
 
 /**
@@ -283,7 +286,8 @@ function journalUnavailableReason(): string {
 }
 
 function loadRunViewModel(runId: string, options: LoadRunViewOptions = {}): RunViewModel | null {
-	const run = openLedger().get(runId);
+	const run =
+		options.ledger !== undefined ? (options.ledger().find((row) => row.id === runId) ?? null) : openLedger().get(runId);
 	if (run === null || (options.scope !== undefined && !options.scope.seesRun(run))) return null;
 	const now = options.now ?? (() => Date.now());
 	const journal = readRunFeed(runId, { maxLines: TRANSCRIPT_LIMIT });
@@ -812,7 +816,14 @@ async function followRun(runId: string, scope: ReturnType<typeof fleetInspection
 				.then(({ copyToSystemClipboard }) => copyToSystemClipboard(text, (sequence) => terminal.write(sequence)))
 				.catch(() => "Copy failed: clipboard module did not load"),
 	});
-	let model = loadRunViewModel(runId, { scope });
+	// A follow polls every POLL_MS; runs.json is parsed again only when it changed, so an idle follow stays off the CPU
+	// at the 1000-row cap (FL-24).
+	let ledger: LedgerSnapshot | null = null;
+	const rows = (): ReadonlyArray<RunEnvelope> => {
+		ledger = readLedgerSnapshot(ledger);
+		return ledger.runs;
+	};
+	let model = loadRunViewModel(runId, { scope, ledger: rows });
 	let following = true;
 
 	const view = {
@@ -830,7 +841,7 @@ async function followRun(runId: string, scope: ReturnType<typeof fleetInspection
 	return await new Promise<number>((resolve) => {
 		let settled = false;
 		const timer = setInterval(() => {
-			model = loadRunViewModel(runId, { scope });
+			model = loadRunViewModel(runId, { scope, ledger: rows });
 			if (model?.terminal === true) following = false;
 			tui.requestRender();
 		}, POLL_MS);

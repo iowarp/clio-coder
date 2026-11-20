@@ -959,12 +959,15 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 				...(env.sessionId ? { sessionId: env.sessionId } : {}),
 				searchText: [env.id, env.agentId, env.task, env.targetId, env.runtimeId, env.runtimeKind, env.cwd],
 				load: async () => {
-					let run: SettledRunView | null = null;
+					let record: RunTelemetryV1 | null = null;
 					try {
-						run = settledRunView(env.id, await readRunRecordAsync(this.deps.stateDir, env.id));
+						record = await readRunRecordAsync(this.deps.stateDir, env.id);
 					} catch {
 						// A run whose record cannot be read can still have session tool output to show.
 					}
+					const run = settledRunView(env.id, record);
+					// An open row's spend on disk is only as new as its last lifecycle write; its journal is live (FL-24).
+					const live = env.endedAt === null ? record : null;
 					const output = run?.result?.output;
 					const text = output?.text ?? dispatchResultForRun(entries, env.id);
 					const worded =
@@ -985,8 +988,8 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 						`runtime: ${env.runtimeKind}:${env.runtimeId}`,
 						`started: ${formatLocalTime(env.startedAt)}`,
 						`ended: ${env.endedAt ? formatLocalTime(env.endedAt) : "running"}`,
-						`tokens: ${renderCompactCount(env.spend.totalTokens)}`,
-						`cost: ${renderPricing(env.spend.pricing)}`,
+						`tokens: ${live ? live.row.tokens.display : renderCompactCount(env.spend.totalTokens)}`,
+						`cost: ${live ? live.row.usd.display : renderPricing(env.spend.pricing)}`,
 						`run journal: ${journalPath}`,
 						"",
 						"## What changed",

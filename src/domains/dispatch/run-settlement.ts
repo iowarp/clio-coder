@@ -30,7 +30,7 @@ import type { ResolvedTerminalReason } from "./outcome.js";
 import { deriveEnvelopePhaseDurations } from "./phase-timing.js";
 import { type RouteDecisionV1, routeConstraintValidity } from "./route-decision.js";
 import { defaultRoutingIntent, type RoutingIntent } from "./routing-intent.js";
-import type { RunUsageFacts } from "./run-call-usage.js";
+import type { RunCallUsage, RunUsageFacts } from "./run-call-usage.js";
 import { unobservedRunUsageFacts } from "./run-call-usage.js";
 import { labelledRunHashes, undeclaredRunHashes } from "./run-hashes.js";
 import { runGatewayRoutingLabel, runResponseModelIdObservationLabel } from "./run-upstream.js";
@@ -525,6 +525,8 @@ export function settleUnfinishedRun(
 		detail: string;
 		endedAt: string;
 		processExitCode: number | null;
+		/** What the run's journal recorded it spending; absent, its spend stays unobserved (FL-24). */
+		usage?: RunCallUsage;
 	},
 ): RunSettlement {
 	return redactedSettlement({
@@ -549,12 +551,12 @@ export function settleUnfinishedRun(
 			outcomeDetail: diagnostic(input.detail),
 			failureMessage: null,
 			terminalReason: input.terminal?.terminalReason ?? "worker_failed",
-			callIds: null,
+			callIds: input.usage ? [...input.usage.callIds] : null,
 			processExitCode: input.processExitCode,
 			...(input.terminal?.boundKind ? { boundKind: input.terminal.boundKind } : {}),
 			repairRounds: repairRounds(input.terminal),
 			frameType: null,
-			...unobservedRunUsageFacts(),
+			...(input.usage?.facts ?? unobservedRunUsageFacts()),
 			toolCalls: 0,
 			tools: [],
 			skills: [],

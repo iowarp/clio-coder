@@ -23,7 +23,6 @@ import { isStructuredAnswerText } from "../domains/telemetry/worker-progress.js"
  */
 
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
-import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { clioStateDir } from "../core/xdg.js";
 import { refusedCallsWords } from "../domains/dispatch/failure-headline.js";
@@ -34,7 +33,8 @@ import {
 	runFeedPath,
 } from "../domains/dispatch/run-feed.js";
 import { readRunResultFacts } from "../domains/dispatch/run-result-facts.js";
-import { openLedger, readFleetRun } from "../domains/dispatch/state.js";
+import type { LedgerSnapshot } from "../domains/dispatch/state.js";
+import { readFleetRun, readLedgerSnapshot } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { HOST_VERIFICATION_EVENT, type VerificationSlotState } from "../domains/dispatch/verification-slot.js";
 import { trustStateWord, trustVerdictWord, validationClause } from "../domains/evidence/trust-projection.js";
@@ -612,7 +612,7 @@ export interface BoardSource {
 	 * sealed, and a read in that gap kept `seal unchecked` on the dock while `evidence inspect` said verified (bt-11).
 	 */
 	unsealed: Map<string, number>;
-	ledger: { mtimeMs: number; size: number; runs: ReadonlyArray<RunEnvelope> } | null;
+	ledger: LedgerSnapshot | null;
 	/** A finished run's telemetry facts, kept while its journal's stamp is unchanged, so a sealed run folds once. */
 	telemetry: Map<string, { stamp: string; facts: CardTelemetry }>;
 }
@@ -630,25 +630,8 @@ export function createBoardSource(stateDir: string = clioStateDir()): BoardSourc
 
 /** The ledger rows, re-read only when `runs.json` changed. A torn or failed read keeps the last good copy. */
 export function ledgerRuns(source: BoardSource): ReadonlyArray<RunEnvelope> {
-	const path = join(source.stateDir, "runs.json");
-	let mtimeMs = 0;
-	let size = 0;
-	try {
-		const stat = statSync(path);
-		mtimeMs = stat.mtimeMs;
-		size = stat.size;
-	} catch {
-		source.ledger = { mtimeMs: 0, size: 0, runs: [] };
-		return [];
-	}
-	if (source.ledger !== null && source.ledger.mtimeMs === mtimeMs && source.ledger.size === size)
-		return source.ledger.runs;
-	try {
-		source.ledger = { mtimeMs, size, runs: openLedger().list() };
-	} catch {
-		// The writer replaces the file atomically; a failed parse is a race the next poll wins.
-	}
-	return source.ledger?.runs ?? [];
+	source.ledger = readLedgerSnapshot(source.ledger, source.stateDir);
+	return source.ledger.runs;
 }
 
 /**
