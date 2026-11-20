@@ -844,6 +844,9 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	for (const check of ["npx tsc --noEmit", "npx eslint ."])
 		deepStrictEqual(seal("npm test", `!${check}`), [["npm test"], "unverified", [check]], check);
 	deepStrictEqual(seal("!npm test", "npm test -- -t parses"), [["npm test -- -t parses"], "unverified", ["npm test"]]);
+	// A leading cd into the directory the call runs in moves nothing, so its green settles the plain spelling's red (XR-9).
+	for (const prefix of [`cd ${process.cwd()} && `, `cd "${process.cwd()}"; `])
+		deepStrictEqual(seal("!npm test", `${prefix}npm test`), green, prefix);
 	// A line continuation separates nothing, so the continued check's red stands under its single-line name (x7-4).
 	deepStrictEqual(seal("!npm test \\\n  -- --reporter=dot"), [[], "unverified", ["npm test -- --reporter=dot"]]);
 	// A here-document body is data no continuation joins, so its quoted terminator still ends it in the check's name (S2).

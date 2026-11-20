@@ -10,6 +10,7 @@ import {
 	combineLiveBashOutput,
 	runBashCommand,
 } from "../core/bash-exec.js";
+import { withoutLeadingCdTo } from "../core/leading-cd.js";
 import { neutralizeFraming, TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-framing.js";
 import { resolveSafeCwd } from "../core/safe-exec.js";
 import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
@@ -496,6 +497,8 @@ export const bashTool: ToolSpec = {
 			const { error, aborted, timedOut, outputCapped } = result;
 			const limit: BashTimeoutLimit = captured.timeoutLimit ?? { by: "timeout", ms: requested };
 			const rawOutput = combineBashOutput(result);
+			// The receipt speaks for the command after a leading `cd` into the directory it already ran in (XR-9).
+			const receiptCommand = withoutLeadingCdTo(args.command, cwd);
 			// Command output cannot speak in the host's voice: a `[middleware:` line or a reminder tag in it is made inert,
 			// so only the notes appended below read as host notes.
 			const shown = neutralizeFraming(rawOutput);
@@ -549,7 +552,7 @@ export const bashTool: ToolSpec = {
 					kind: "error",
 					message,
 					details: {
-						...bashResultDetails(result, rawOutput, "nonzero", elapsedMs, args.command),
+						...bashResultDetails(result, rawOutput, "nonzero", elapsedMs, receiptCommand),
 						...observedLinesDetail(args.command, rawOutput, outputPolicy, cwd),
 					},
 				};
@@ -559,7 +562,7 @@ export const bashTool: ToolSpec = {
 				kind: "ok",
 				output: `${body}${observeToolsNudge(args.command, options?.sessionId)}${clioIssueNudge(args.command)}`,
 				details: {
-					...bashResultDetails(result, rawOutput, "success", elapsedMs, args.command),
+					...bashResultDetails(result, rawOutput, "success", elapsedMs, receiptCommand),
 					...observedLinesDetail(args.command, rawOutput, outputPolicy, cwd),
 				},
 			};

@@ -862,6 +862,7 @@ test("evidence identity grounds and counts use only for the command that ran, se
 			[COMMAND, COMMAND],
 			[COMMAND, `node scripts/build.mjs && ${COMMAND}`],
 			[PNPM, `cd ${root} && corepack pnpm -s run check`],
+			[PNPM, `cd "${root}"; corepack pnpm -s run check`],
 		];
 		for (const [claimed, receipt] of positives) {
 			strictEqual(grounds(claimed, receipt), "command", receipt);
