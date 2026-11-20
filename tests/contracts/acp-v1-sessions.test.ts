@@ -349,7 +349,7 @@ test("ACP re-sends the thinking option once the live probe finds the reasoning a
 		})) as { configOptions: Array<Record<string, unknown>> };
 		strictEqual(thinkingOption(switched.configOptions)?.notice, "low was ignored because thinking is unsupported");
 		const probed = await nextConfigUpdate(seen + 1);
-		strictEqual(probed?._meta?.["clio-coder/session"] !== undefined, true);
+		deepStrictEqual(probed?._meta?.["clio-coder/session"], { target: "litellm-b", model: "fake/m" });
 		strictEqual(thinkingOption(probed?.update.configOptions)?.currentValue, "low");
 		strictEqual(thinkingOption(probed?.update.configOptions)?.notice, undefined);
 	} finally {

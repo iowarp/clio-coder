@@ -5433,7 +5433,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		options.transport.notify("session/update", {
 			sessionId: session.id,
 			update: { sessionUpdate: "config_option_update", configOptions: configOptions(session) },
-			_meta: { [ACP_SESSION_META_KEY]: { target: session.target } },
+			_meta: { [ACP_SESSION_META_KEY]: { target: session.target, model: session.model } },
 		});
 	};
 	/** Why a target's model choices are its configured ones and not the account's live listing. */
@@ -6231,6 +6231,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		request: Record<string, unknown>,
 		chooseTurn: "request" | "leaf",
 		replayToClient: boolean,
+		clientMcpServers?: ReadonlyArray<McpClientServerSpec>,
 	) => {
 		const { session, resetForSession, readEntries, buildMessages } = requireBranches();
 		const bound = getSession(request);
@@ -6243,12 +6244,20 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		// The fork closes the parent's ledger.
 		await checkpointBeforeClose(bound.id, "fork");
 		requireStillIdle(bound, "fork");
+		if (clientMcpServers !== undefined) {
+			// Standard fork names the child's client servers, so the parent's go first; a launch failure refuses the fork
+			// before the session changes, as on an opener.
+			await options.mcpCapabilities?.detachClientServers();
+			await attachClientMcpServers(clientMcpServers, ceiling);
+			requireStillIdle(bound, "fork");
+		}
 		let meta: SessionMeta;
 		try {
 			meta = session.fork(turnId);
 		} catch (error) {
 			// The session domain keeps the parent current when a fork throws.
 			options.diagnostics?.(`fork failed: ${acpErrorMessage(error)}`);
+			if (clientMcpServers !== undefined) await options.mcpCapabilities?.detachClientServers();
 			throw new AcpRequestError(-32603, "fork failed", { code: "internal_error" });
 		}
 		if (
@@ -6316,15 +6325,16 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		requireAuthenticated();
 		return forkBoundSession(assertParamKeys(params, new Set(["sessionId", "turnId"])), "request", true);
 	});
-	// Standard ACP fork: the whole active branch, at its leaf. Client MCP servers the parent attached stay attached.
+	// Standard ACP fork: the whole active branch, at its leaf, with the client MCP servers the request names in place of
+	// the parent's.
 	options.transport.onRequest("session/fork", (params) => {
 		requireInitialized();
 		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId", "cwd", "mcpServers", "additionalDirectories"]));
 		assertNoAdditionalDirectories(request.additionalDirectories);
 		canonicalSessionCwd(request.cwd);
-		parseClientMcpServers(request.mcpServers, false);
-		return forkBoundSession(request, "leaf", false);
+		const clientMcpServers = parseClientMcpServers(request.mcpServers, false);
+		return forkBoundSession(request, "leaf", false, clientMcpServers);
 	});
 
 	const handoffRefusal = (level: "warn" | "error", code: string, reason: string) => ({
