@@ -46,6 +46,7 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 - `clio-coder memory list --approved-by operator|guardian` lists approved memory by approver, and a plain listing notes how many records wait for review.
 - `clio-coder --help --all` lists every command path, and `clio-coder help run --topics` prints the long-form run notes.
 - `clio-coder --resume <id or prefix>` opens CLIO Coder on an earlier session, a bare `clio-coder --resume` opens the session picker, and `clio-coder --continue` opens the most recent session for the project; the exit summary and upgrade hints now name these flags.
+- `clio-coder dev flywheel --pull` keeps verified report bundles in a private intake store whose bundle bytes never enter git. `--sweep` deletes debug-only bundles 90 days after their issue closed or at 180 days and honours reporters' deletion requests, and `--forget <reportId>` deletes one bundle on request.
 
 **Tools and settings**
 
@@ -81,6 +82,8 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 - The welcome screen keeps one hints page instead of rotating every 15 seconds. The rows above the composer leave the transcript a third of the terminal and fold the workers row and context rail into the composer rail under 30 rows.
 - "Reply from <target> · <model>" appears only when the replying route changes, not above the first reply from the configured route.
 - The version banner, notice prefixes, upgrade messages, installer output, desktop app messages, TUI header, composer, slash command descriptions, prompt fragments, tool descriptions, worker commit text and pane profiles name the product CLIO Coder, and report consent text is version 3. The `clio-coder` command, package and paths are unchanged.
+- On the `openai-codex` runtime, fleet workers with the same model, tools and system prompt reuse one prompt-cache affinity when they run one after another, so a later worker's first request reads the prefix an earlier one wrote.
+- When a configured `high` thinking level runs as `xhigh` on a model that offers no `high`, the notice reads "high isn't offered by <model>; using xhigh".
 
 **Performance**
 
@@ -89,6 +92,8 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 - Each main request checks the history once at admission, and the post-tool guard checks fit on one history observation. Ledger reads skip copying entries with no legacy event id, which speeds start and resume on long sessions.
 - The bash tool masks output as it arrives, so a 16 MiB output no longer stalls the session for about half a second at the end.
 - Fullscreen: a scroll writes about 15x fewer bytes, keystroke frames with the scrollbar on are about 6x cheaper, and dragging the window edge re-wraps the transcript once, when the drag pauses. Live worker cards advance elapsed time without refolding the run journal, so a fleet board costs about a tenth as much per poll. `/export` converts to HTML in chunks so the prompt stays responsive.
+- A running worker's spend no longer rewrites `runs.json`: inspection reads it from the run journal, and the ledger is written only on lifecycle and heartbeat transitions. `fleet view --follow` re-reads `runs.json` only when it changed.
+- The terminal UI tracks which offscreen rows are still valid and repaints only rows that changed, which halves the row writes per frame.
 
 ### Removed
 
@@ -141,6 +146,11 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 - Dispatch verification admits family words such as `test` that resolve to one derived check, and citations ground on lines a `bash` `grep -n` printed.
 - A fork keeps reading and collecting its ancestors' runs through a deleted intermediate session, and `/view` lists them.
 - A sealed run whose telemetry was truncated and whose `bundle.json` was deleted reports failed integrity, not unsealed. Route history re-reads a sealed run whose journal changed in place.
+- Restart recovery settles an abandoned run at the spend its journal recorded, not as unobserved, and ends it at the last moment the host saw the worker.
+- On a shared state directory, the global dispatch concurrency cap counts per host, so another host's leases and reservations no longer consume this host's cap.
+- A worker permission ask left without its owning session is refused with "the session that owns this worker exited or disconnected; re-run the work from a live session".
+- A worker's checkout delta reports a same-size rewrite made within one filesystem timestamp tick of the baseline. Content checks per run are capped, and past the cap a file counts as changed.
+- A turn that collected detached workers' results, through the idle wake or `monitor` collect, no longer gets the "No dispatch ran this turn" honesty line.
 
 **Checks and safety classification**
 
@@ -156,12 +166,15 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 - A sandbox launched inside another no longer masks `/dev/null` read-only, so host verification compares a failed check against the task base again.
 - Paths under a folder whose name starts with `..` (such as `..notes/`) are treated as inside the workspace by share import, toolchain install, snapshot rewind, session artifacts, handoff, the store and path displays.
 - A project's claims log caps at 4096 claims by moving superseded claims nothing cites to an evicted file, and `clio-coder claims list` says how many and where.
+- Same-directory git reads with `-C`, `--git-dir` or `--work-tree` no longer clear observed checks as if they were changes.
+- A safety-judge refusal of a compound bash command names the sub-command the block is about and tells the agent to run it alone. Verdicts and policy are unchanged.
 
 **Providers**
 
 - Copilot names a served model only when it differs from the requested one, reports a reasoning count it sent (zero included) as measured, and keeps a zero sent while thinking as unknown.
 - A finish-gate continuation on copilot-sdk no longer re-sends the whole transcript in a new Copilot session. The Copilot route cancels the runtime's own background compaction and closes a run still waiting on calls CLIO Coder's transcript already answered.
 - A LiteLLM model whose output limit equals its window keeps its known output limit. Pre-warm runs on a route with an unknown window, and Anthropic cache keepalives stop after a zero-hit refresh.
+- Inception `mercury-3` is priced at list rates ($0.20 input, $0.70 output and $0.02 cache read per million tokens), so `run --require-priced` admits it and `--max-cost-usd` bounds it.
 
 **ACP and editors**
 
