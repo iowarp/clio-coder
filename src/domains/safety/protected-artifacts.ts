@@ -2437,6 +2437,41 @@ export function finalListAfterPlainSteps(
  * outside, so a sibling checkout's green never stands for this workspace.
  */
 export function checkRunsOutside(command: string, base: string, root: string): boolean {
+	return someCheckStep(
+		command,
+		base,
+		(argv, directory) =>
+			directory === null || !isSameOrDescendant(directory, root) || checkReachesOutside(argv, directory, root),
+	);
+}
+
+/**
+ * Whether a Python test step runs on a bare interpreter (`python3 -m pytest`, `pytest`, `python -m unittest`) rather
+ * than through `uv run`, in a directory `unprovisioned` names: there it judged whatever environment that interpreter
+ * carries, not the project's locked one, so its pass is not this project's (FL-2). An unknown directory answers false;
+ * {@link checkRunsOutside} already reads it.
+ */
+export function checkRunsBareInterpreter(
+	command: string,
+	base: string,
+	unprovisioned: (directory: string) => boolean,
+): boolean {
+	return someCheckStep(command, base, (argv, directory) => {
+		const label = validationMatch(basenameToken(argv[0]), argv.slice(1));
+		return (
+			directory !== null &&
+			(label === "pytest" || label === "python -m pytest" || label === "python -m unittest") &&
+			unprovisioned(directory)
+		);
+	});
+}
+
+/** Whether some check step of `command` passes `test`, given its argv and the directory it runs in (null when unknown). */
+function someCheckStep(
+	command: string,
+	base: string,
+	test: (argv: ReadonlyArray<string>, directory: string | null) => boolean,
+): boolean {
 	let directory: string | null = base;
 	let pushed: Array<string | null> = [];
 	const subshells: Array<{ directory: string | null; pushed: Array<string | null> }> = [];
@@ -2445,8 +2480,7 @@ export function checkRunsOutside(command: string, base: string, root: string): b
 		const executable = step.index === null ? "" : basenameToken(step.argv[step.index]);
 		const target = cdTarget(step.argv);
 		if (isCheckStep(step)) {
-			if (directory === null || !isSameOrDescendant(directory, root)) return true;
-			if (checkReachesOutside(step.argv.slice(step.index ?? 0), directory, root)) return true;
+			if (test(step.argv.slice(step.index ?? 0), directory)) return true;
 		} else if (executable === "popd")
 			directory = step.argv.length > (step.index ?? 0) + 1 ? null : (pushed.pop() ?? null);
 		else if (target !== null) {

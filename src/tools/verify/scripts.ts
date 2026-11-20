@@ -316,16 +316,26 @@ function withDeclaredEvidence(result: ToolResult, check: DeclaredCheck): ToolRes
 const UNAVAILABLE_RETRY_DIRECTIVE =
 	"Rerunning this entry with other arguments or cwd cannot help; report the limitation and stop.";
 
+/**
+ * A runner that needs provisioning still has the project's own locked command, which an agent with `bash` runs instead
+ * (FL-2); a bare interpreter beside a lock file tests another environment, so the directive names that too.
+ */
+function provisioningDirective(check: ToolchainCheck): string {
+	return `Rerunning this entry with other arguments or cwd cannot help. With bash, run the project's locked command instead: ${check.command.join(" ")}; never a bare python, python3 or pytest, which tests the system interpreter rather than the locked environment. Without bash, report the limitation and stop.`;
+}
+
 /** DF-10: no check may silently provision its runner before verification. */
 export function unavailableCheck(check: ToolchainCheck): ToolResult {
 	const availability = check.availability;
 	const operator = availability?.provisionCommand
 		? `; operator provisioning command: ${availability.provisionCommand.join(" ")}`
 		: "";
+	const directive =
+		availability?.state === "needs-provisioning" ? provisioningDirective(check) : UNAVAILABLE_RETRY_DIRECTIVE;
 	return withDeclaredEvidence(
 		{
 			kind: "error",
-			message: `verify: unavailable '${check.id}': ${availability?.reason ?? "runner is unavailable"}${operator}. ${UNAVAILABLE_RETRY_DIRECTIVE}`,
+			message: `verify: unavailable '${check.id}': ${availability?.reason ?? "runner is unavailable"}${operator}. ${directive}`,
 			details: {
 				availability,
 				judgement: judgement("unavailable", "not-run"),

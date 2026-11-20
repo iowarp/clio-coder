@@ -114,7 +114,10 @@ function trackCall(
 	const { root } = replay;
 	const reading = readCall(tool, args, replay, id);
 	const check =
-		reading.check !== null && reading.base === root && reading.shell?.outsideCwd !== true
+		reading.check !== null &&
+		reading.base === root &&
+		reading.shell?.outsideCwd !== true &&
+		reading.shell?.outsideLockedEnv !== true
 			? validationCheckId(reading.check)
 			: undefined;
 	return {

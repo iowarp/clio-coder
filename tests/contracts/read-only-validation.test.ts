@@ -1002,6 +1002,29 @@ it("a check sharing its bash call with a change judges the final tree only when 
 		});
 		strictEqual(claim.quality, "fail");
 	}
+	// FL-2: a bare interpreter beside uv.lock with no .venv tested the system Python, not the locked environment, so its
+	// pass seals nothing; the locked `uv run` command, and the bare one once the project is provisioned, still verify.
+	const uvProject = mkdtempSync(join(tmpdir(), "uv-unprovisioned-"));
+	try {
+		writeFileSync(join(uvProject, "uv.lock"), "version = 1\n");
+		const sealIn = (command: string) => {
+			const recorder = createRunEffectsRecorder(uvProject);
+			recorder.start("call-0", "bash", { command });
+			recorder.checkOutcome("call-0", "ok");
+			recorder.finish("call-0", false);
+			const typedValidations = typedValidationFactsFromObservedEffects(recorder.snapshot());
+			return deriveRunVerification({ toolStats: [], typedValidations }).state;
+		};
+		const bare = `cd ${uvProject} && python3 -B -m pytest tests/test_add.py -q 2>&1 | tail -30`;
+		deepStrictEqual(
+			[bare, "pytest -q", "python -m unittest", "uv run python -m pytest", "uv run pytest -q"].map(sealIn),
+			["unverified", "unverified", "unverified", "verified", "verified"],
+		);
+		mkdirSync(join(uvProject, ".venv"));
+		strictEqual(sealIn(bare), "verified");
+	} finally {
+		rmSync(uvProject, { recursive: true, force: true });
+	}
 });
 
 it("one classifier reads every call as a check, an inspection, a mutation or unknown (x5-1, x5-2, x1-3)", () => {
