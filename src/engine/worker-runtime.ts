@@ -1515,65 +1515,72 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					(!mutationResult || (resolvedContext.tools ?? []).some((tool) => tool.name !== INTERNAL_HELPER_RESULT_TOOL)));
 			const helperDeclaredFromStart =
 				helperToolAvailable && currentModel.api === "anthropic-messages" && !nativeToolChanges;
-			helperTerminalRequest = synthesisToolLock || helperTerminalPhase;
-			helperExposedThisRound =
-				helperToolAvailable &&
-				((!mutationResult && !codexToolChanges) || synthesisToolLock || helperTerminalPhase) &&
-				(!(synthesisToolLock || helperTerminalPhase) || helperForcedChoiceAvailable);
-			// Native additions hide the helper until handoff without rewriting the
-			// initial schemas. Older Anthropic models declare it early; the host
-			// still rejects premature submission during the work phase (#423).
-			const currentContext = {
-				...resolvedContext,
-				tools: (resolvedContext.tools ?? []).filter(
-					(tool) => tool.name !== INTERNAL_HELPER_RESULT_TOOL || helperExposedThisRound || helperDeclaredFromStart,
-				),
-			};
-			const helperOnRequest = helperExposedThisRound || helperDeclaredFromStart;
 			const helperProtocol = `Return the result by calling ${INTERNAL_HELPER_RESULT_TOOL} alone with the result object as arguments. Successful submission ends the run; no narrative report is needed.`;
-			const helperLockedNote =
-				!helperDeclaredFromStart && (synthesisToolLock || helperTerminalPhase)
-					? "Work tools are disabled. Earlier tool-use instructions apply only to the completed work phase; only the terminal handoff remains available. Do not invent missing evidence."
-					: "";
-			helperProtocolInPrefix ??= helperOnRequest;
 			const withProtocol = (note: string) =>
-				`${currentContext.systemPrompt ?? ""}\n\n# Internal helper protocol\n${helperProtocol}${note ? ` ${note}` : ""}`;
-			// Native routes slice the protocol back out of this prompt into a mid-conversation section below; every other
-			// route keeps the first round's prompt and carries a protocol or note that arrived later on the tail.
-			const systemPrompt = nativeToolChanges
-				? helperOnRequest
-					? withProtocol(helperLockedNote)
-					: currentContext.systemPrompt
-				: helperProtocolInPrefix
-					? withProtocol("")
-					: currentContext.systemPrompt;
-			const helperTail =
-				nativeToolChanges || !helperOnRequest
-					? ""
-					: [helperProtocolInPrefix ? "" : `Internal helper protocol: ${helperProtocol}`, helperLockedNote]
-							.filter((part) => part.length > 0)
-							.join(" ");
-			// A synthesis lock without the helper handoff carries its directive on the
-			// request tail, so the system prompt keeps the work phase's bytes and a
-			// prefix cache survives the lock.
-			const synthesisDirective =
-				synthesisToolLock && !helperOnRequest
-					? { requiredResult: input.resultContract ? resultContractShape(input.resultContract) : undefined }
-					: undefined;
+				`${resolvedContext.systemPrompt ?? ""}\n\n# Internal helper protocol\n${helperProtocol}${note ? ` ${note}` : ""}`;
+			// The lock decides the round's tool surface, prompt, tail and directive. A context handback flips the lock after
+			// the guard, so the round is shaped again then and the crossing request carries the handoff helper or the
+			// locked-synthesis directive like any locked round (M3).
+			const shapeRound = () => {
+				helperTerminalRequest = synthesisToolLock || helperTerminalPhase;
+				helperExposedThisRound =
+					helperToolAvailable &&
+					((!mutationResult && !codexToolChanges) || synthesisToolLock || helperTerminalPhase) &&
+					(!(synthesisToolLock || helperTerminalPhase) || helperForcedChoiceAvailable);
+				// Native additions hide the helper until handoff without rewriting the
+				// initial schemas. Older Anthropic models declare it early; the host
+				// still rejects premature submission during the work phase (#423).
+				const currentContext = {
+					...resolvedContext,
+					tools: (resolvedContext.tools ?? []).filter(
+						(tool) => tool.name !== INTERNAL_HELPER_RESULT_TOOL || helperExposedThisRound || helperDeclaredFromStart,
+					),
+				};
+				const helperOnRequest = helperExposedThisRound || helperDeclaredFromStart;
+				const helperLockedNote =
+					!helperDeclaredFromStart && (synthesisToolLock || helperTerminalPhase)
+						? "Work tools are disabled. Earlier tool-use instructions apply only to the completed work phase; only the terminal handoff remains available. Do not invent missing evidence."
+						: "";
+				helperProtocolInPrefix ??= helperOnRequest;
+				// Native routes slice the protocol back out of this prompt into a mid-conversation section below; every other
+				// route keeps the first round's prompt and carries a protocol or note that arrived later on the tail.
+				const systemPrompt = nativeToolChanges
+					? helperOnRequest
+						? withProtocol(helperLockedNote)
+						: currentContext.systemPrompt
+					: helperProtocolInPrefix
+						? withProtocol("")
+						: currentContext.systemPrompt;
+				const helperTail =
+					nativeToolChanges || !helperOnRequest
+						? ""
+						: [helperProtocolInPrefix ? "" : `Internal helper protocol: ${helperProtocol}`, helperLockedNote]
+								.filter((part) => part.length > 0)
+								.join(" ");
+				// A synthesis lock without the helper handoff carries its directive on the
+				// request tail, so the system prompt keeps the work phase's bytes and a
+				// prefix cache survives the lock.
+				const synthesisDirective =
+					synthesisToolLock && !helperOnRequest
+						? { requiredResult: input.resultContract ? resultContractShape(input.resultContract) : undefined }
+						: undefined;
+				// Priced with the tail directive the round will carry; only the estimate sees it here.
+				const pricedSystemPrompt =
+					synthesisDirective !== undefined
+						? `${systemPrompt ?? ""}\n\n${lockedSynthesisDirective(synthesisDirective.requiredResult)}`
+						: helperTail
+							? `${systemPrompt ?? ""}\n\n${helperTail}`
+							: (systemPrompt ?? "");
+				return { currentContext, systemPrompt, helperTail, synthesisDirective, pricedSystemPrompt };
+			};
+			let shape = shapeRound();
 			const window = input.runtimeResolution?.capabilities.contextWindow ?? currentModel.contextWindow;
 			const { reminders } = withResultContractReminder(
-				currentContext.messages,
+				resolvedContext.messages,
 				contractReminder,
 				inheritedMessages.length,
 			);
-			// Priced with the tail directive the round will carry; only the estimate sees it here.
-			const pricedSystemPrompt =
-				synthesisDirective !== undefined
-					? `${systemPrompt ?? ""}\n\n${lockedSynthesisDirective(synthesisDirective.requiredResult)}`
-					: helperTail
-						? `${systemPrompt ?? ""}\n\n${helperTail}`
-						: (systemPrompt ?? "");
-			const pressure = {
+			const pressureFor = ({ currentContext, pricedSystemPrompt }: ReturnType<typeof shapeRound>) => ({
 				messages: currentContext.messages,
 				overheadTokens: reminders.reduce((sum, reminder) => sum + estimateAgentMessageTokens(reminder as AgentMessage), 0),
 				systemPrompt: pricedSystemPrompt,
@@ -1600,7 +1607,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					// The same anchor rule `request` re-pins through: with one, Pi reads the guard's own count.
 					return anchorContextAtInputTokens(context, 1) === context ? estimateContextTokens(context).tokens : 0;
 				},
-			};
+			});
+			let pressure = pressureFor(shape);
 			let messages: AgentMessage[];
 			contextPressureWindow = window;
 			try {
@@ -1622,13 +1630,26 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			}
 			// A request admitted without a fold reports no decision, so the thrash share reads the admitted count too.
 			if (window > 0 && contextGuard.inputTokens >= window * THRASH_CONTEXT_FRACTION) contextPressureCrossed = true;
+			let handbackSurfaceTokens = 0;
 			// M3: a run with a role hands back at its role's share of the usable window instead of dying at the wall.
 			if (window > 0 && input.role !== undefined && !synthesisToolLock) {
 				const usable =
 					window - requestOutputReserve(currentModel, currentModel.maxTokens, window, contextGuard.inputTokens);
 				if (contextGuard.inputTokens >= usable * HANDBACK_NOTE_SHARE) contextPressureCrossed = true;
-				if (contextGuard.inputTokens >= usable * HANDBACK_CONTEXT_SHARE[input.role]) enterHandback("context");
+				if (contextGuard.inputTokens >= usable * HANDBACK_CONTEXT_SHARE[input.role]) {
+					enterHandback("context");
+					const surfaceTokens = ({ currentContext, pricedSystemPrompt }: ReturnType<typeof shapeRound>) =>
+						estimateContextTokens(
+							normalizeContext({ systemPrompt: pricedSystemPrompt, tools: currentContext.tools ?? [], messages: [] }),
+						).tokens;
+					const unlocked = shape;
+					shape = shapeRound();
+					pressure = pressureFor(shape);
+					// The guard admitted the history under the work phase's surface; the handoff's helper and directive add to it.
+					handbackSurfaceTokens = Math.max(0, surfaceTokens(shape) - surfaceTokens(unlocked));
+				}
 			}
+			const { currentContext, systemPrompt, helperTail, synthesisDirective } = shape;
 			// Stable sampling applies to every context-generation round, terminal
 			// repairs included. It merges over the caller's options so it beats quirk
 			// profiles and run overrides, which the adapters apply underneath.
@@ -1849,7 +1870,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// A token the server rejects as expired earns one locked refresh and one
 			// retry of the same request, as the main turn does; a failed refresh ends
 			// the round with the login remedy (#427).
-			const admitted = contextGuard.inputTokens;
+			const admitted = contextGuard.inputTokens + handbackSurfaceTokens;
 			const authRetried = retryStreamOnceOnAuthRejection(
 				request(messages, admitted),
 				(error) => isProviderAuthRejection(error.errorMessage, roundProviderHttpStatus ?? undefined),
