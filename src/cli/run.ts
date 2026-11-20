@@ -411,6 +411,7 @@ export async function runClioRun(
 		parsed.outputLastMessage !== undefined
 			? { path: parsed.outputLastMessage, ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}) }
 			: undefined,
+		parsed.exitCodeVerdict === true,
 	);
 }
 

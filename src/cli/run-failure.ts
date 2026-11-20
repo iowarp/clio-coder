@@ -124,9 +124,10 @@ export function startRunOutput(): void {
 export async function withRunFailureReporting(
 	run: () => Promise<number>,
 	output?: OutputLastMessageRequest,
+	exitCodeFlag = false,
 ): Promise<number> {
 	runCompletion = undefined;
-	return output === undefined ? run() : withOutputLastMessage(output, run);
+	return output === undefined ? run() : withOutputLastMessage(output, run, exitCodeFlag);
 }
 
 /** The answer text mode printed on stdout, the validated structured JSON when there is one; `-o` holds it (CLI-P22). */
@@ -141,21 +142,28 @@ export function noteTextAnswer(text: string): void {
  * SPEC 6.6 `-o` in text mode: the stale file goes at preflight, a missing directory is exit 2 before the run, and the
  * answer, what text mode printed, is written by temp file and rename only on exit 0; a failed write is exit 1.
  */
-async function withOutputLastMessage(output: OutputLastMessageRequest, run: () => Promise<number>): Promise<number> {
+async function withOutputLastMessage(
+	output: OutputLastMessageRequest,
+	run: () => Promise<number>,
+	exitCodeFlag: boolean,
+): Promise<number> {
 	const resolved = resolveOutputTarget(output);
 	if (!prepareOutputTarget(resolved)) return 2;
 	structuredNote = undefined;
 	textAnswer = undefined;
 	const answer = (): string => textAnswer ?? "";
 	// CLI-P22: a coordinated shutdown ends a successful run with process.exit before run() returns, as under v2; the
-	// file is still written then, synchronously, and a failed write still moves the exit code to 1.
+	// file is still written then, synchronously, and a failed write still moves the exit code to 1. `--exit-code` decides
+	// success on that path too: an unfinished completion leaves no file and exits 1.
 	let settled = false;
 	const settle = (code: number): boolean => {
 		if (settled || code !== 0) return true;
 		settled = true;
 		return writeOutputFile(resolved, `${answer()}\n`);
 	};
-	const onExit = (exitCode: number): void => {
+	const onExit = (rawExitCode: number): void => {
+		const exitCode = completionExitCode(rawExitCode, exitCodeFlag);
+		if (exitCode !== rawExitCode) process.exitCode = exitCode;
 		if (settle(exitCode)) return;
 		process.stderr.write(`clio-coder run: --output-last-message could not be written: ${resolved}\n`);
 		process.exitCode = 1;
@@ -664,11 +672,12 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			: [{ code: "output_write_failed", path: outputTarget }];
 	};
 	// A coordinated shutdown calls process.exit, which cannot await a flush or reach finish(): a successful run that
-	// ends that way still writes `-o` here, and a failed write still moves the exit code to the envelope's.
+	// ends that way still writes `-o` here. `--exit-code` decides success on this path too, and the process exits
+	// with the envelope's code whenever that differs (an unfinished completion, or a failed write).
 	const onExit = (exitCode: number): void => {
-		const extra = writeOutputTarget(exitCode);
+		const extra = writeOutputTarget(completionExitCode(exitCode, request.exitCode === true));
 		const out = envelopeLines(exitCode, extra);
-		if (extra.length > 0) process.exitCode = out.exitCode;
+		if (out.exitCode !== exitCode) process.exitCode = out.exitCode;
 		if (written || isStdoutDead()) return;
 		written = true;
 		writeSync(1, out.lines);
