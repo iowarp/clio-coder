@@ -204,18 +204,25 @@ function getProject(path: string, cwd: string): Reading {
 function setUser(path: string, text: string): string {
 	// A damaged settings.yaml is the file's problem, not the value's: report it before the writer does.
 	readSettings();
-	updateSettings((current) => {
-		applyValue(current, path, text);
-		return current;
-	});
+	updateSettings(
+		(current) => {
+			applyValue(current, path, text);
+			return current;
+		},
+		{ pin: path },
+	);
 	return settingsPath();
 }
 
 function setProject(path: string, text: string, cwd: string): string {
-	updateProjectLocalSettings(cwd, (current) => {
-		applyValue(current, path, text);
-		return current;
-	});
+	updateProjectLocalSettings(
+		cwd,
+		(current) => {
+			applyValue(current, path, text);
+			return current;
+		},
+		{ pin: path },
+	);
 	return join(clioProjectRoot(cwd, ...PROJECT_SETTINGS_FILES), ".clio-coder", "settings.local.yaml");
 }
 

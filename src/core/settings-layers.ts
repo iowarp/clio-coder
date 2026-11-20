@@ -33,6 +33,7 @@ import {
 import {
 	applySettingsDelta,
 	type ClioSettings,
+	pinSettingsLeaf,
 	reportSettingsWarnings,
 	type SettingsIssue,
 	type SettingsMutator,
@@ -948,9 +949,14 @@ export function updateLayeredSettings(cwd: string, mutate: SettingsMutator): Cli
  * layer. The existing settings surface must already be trusted, unless both
  * project files are absent. The exact bytes written are then approved so the
  * setting remains active on the next read and boot; a later manual edit still
- * invalidates that approval.
+ * invalidates that approval. `pin` names a leaf written even when it equals the
+ * inherited value, so an explicit `config set --scope project` takes effect in this layer.
  */
-export function updateProjectLocalSettings(cwd: string, mutate: SettingsMutator): ClioSettings {
+export function updateProjectLocalSettings(
+	cwd: string,
+	mutate: SettingsMutator,
+	options: { pin?: string } = {},
+): ClioSettings {
 	const root = clioProjectRoot(cwd, "settings.yaml", "settings.local.yaml");
 	const localFile = join(root, ".clio-coder", "settings.local.yaml");
 	const configDir = join(root, ".clio-coder");
@@ -984,7 +990,8 @@ export function updateProjectLocalSettings(cwd: string, mutate: SettingsMutator)
 		if (localIssues.length > 0 || (local.blob === undefined && beforeSurface.files[1]?.text !== null)) {
 			throw new Error("project local settings cannot be parsed for saving");
 		}
-		const saved = applySettingsDelta(local.blob ?? {}, current, validation.settings);
+		const delta = applySettingsDelta(local.blob ?? {}, current, validation.settings);
+		const saved = options.pin !== undefined ? pinSettingsLeaf(delta, validation.settings, options.pin) : delta;
 		const credentialIssues: SettingsLayerIssue[] = [];
 		stripCredentials(saved, "project.local", "", credentialIssues);
 		if (credentialIssues.length > 0) {
