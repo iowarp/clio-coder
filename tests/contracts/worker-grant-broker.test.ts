@@ -304,7 +304,9 @@ describe("safety judge worker grants (fleet.permissions.mode=judge)", () => {
 	it("never judges an operator-authority ask and shares the session's escalation count", async () => {
 		const { broker } = brokerWithLog();
 		const safety = createWorkerSafety();
-		const block = fakeJudge(() => judgeAnswer("block", "publish", "It publishes the build."));
+		// The streak counts blocks under distinct rules only (FX-36).
+		const rules = ["publish", "remote-code", "unclear"];
+		const block = fakeJudge(() => judgeAnswer("block", rules.shift() ?? "publish", "It publishes the build."));
 		const rail = opened(broker, { approvalAuthority: "operator" });
 		strictEqual(
 			(await evaluateJudgedGrant({ record: rail, autonomy: "default", safety, judge: block.judge })).kind,

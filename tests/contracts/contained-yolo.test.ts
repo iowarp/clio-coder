@@ -160,8 +160,10 @@ test("a judge streak halts yolo only once the crossing block is recorded, inside
 			seen.push(window.openDecisions(true));
 		},
 	});
+	// The streak counts blocks under distinct rules only (FX-36).
+	const rules = ["publish", "remote-code", "unclear"];
 	const { registry } = containedRegistry(
-		() => JSON.stringify({ verdict: "block", rule: "publish", reason: "uploads" }),
+		() => JSON.stringify({ verdict: "block", rule: rules.shift(), reason: "uploads" }),
 		{
 			onUnattendedRefusal: (call, decision, kind, rule) =>
 				window.openDecision(describeOpenDecision(call, decision, kind, rule)),

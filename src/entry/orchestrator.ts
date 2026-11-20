@@ -1743,7 +1743,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			autonomyWindow.haltFor(
 				"judge",
 				note.consecutiveBlocks >= SAFETY_JUDGE_CONSECUTIVE_BLOCKS
-					? `${note.consecutiveBlocks} blocks in a row`
+					? `blocks under ${note.consecutiveBlocks} different rules in a row`
 					: `${note.totalBlocks} blocks this session`,
 				note.workerRunId === undefined,
 			);

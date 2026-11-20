@@ -17,6 +17,7 @@ import {
 	resolveSafetyJudgeConfig,
 	type SafetyJudgeCompletion,
 	type SafetyJudgeNote,
+	type SafetyJudgeOperatorMessage,
 	type SafetyJudgeScreen,
 	type SafetyJudgeSeat,
 } from "../domains/safety/safety-judge.js";
@@ -27,6 +28,7 @@ import { activePath, extendsSnapshot, findLastEntry } from "../domains/session/t
 import type { EngineDestination, SystemOne } from "../domains/system-one/index.js";
 import type { JudgeScreenResult } from "../domains/system-one/points/index.js";
 import { JUDGE_SCREEN_POINT, judgeScreenResults } from "../domains/system-one/points/index.js";
+import { type AskUserQuestion, normalizeAskUserQuestions } from "../tools/ask-user.js";
 import { effectiveToolCall, expandChainMessages } from "../tools/surface.js";
 import { capturedJudgeCallId, withJudgeCallCapture, withSidePurpose } from "./side-request-admission.js";
 
@@ -41,7 +43,8 @@ export const SAFETY_JUDGE_NOTE_CUSTOM_TYPE = "clio-coder.safety-judge";
  * prompt, follow-up and observation, and a yolo continuation are skipped, and
  * injected reminders and expansions are stripped by `operatorTextOfUserPayload`.
  * And what the operator answered on an ask_user round, a gateway call or chain
- * step included (`operatorAnswersOfToolResult`). Assistant messages, thinking and
+ * step included, read as the agent's question and options with only what the
+ * operator typed as their words (`operatorAnswersOfToolResult`). Assistant messages, thinking and
  * every other tool result never reach the judge.
  *
  * `currentTurnId` is the turn the judged call serves, from the chat loop's
@@ -54,64 +57,144 @@ export function operatorMessagesForJudge(
 	entries: ReadonlyArray<SessionEntry>,
 	leafTurnId?: string,
 	currentTurnId?: string,
-): string[] {
+): SafetyJudgeOperatorMessage[] {
 	let path = activePath(entries, leafTurnId);
 	const holds = (rows: ReadonlyArray<SessionEntry>) =>
 		findLastEntry(rows, (entry) => entry.turnId === currentTurnId) !== undefined;
 	if (currentTurnId !== undefined && !holds(path) && holds(entries)) path = activePath(entries, currentTurnId);
-	if (!Object.isFrozen(entries)) return operatorTextsOf(path);
+	if (!Object.isFrozen(entries)) return operatorTextsOf(path, new Map()).texts;
 	const prior = judgeFold;
-	let texts: string[];
-	if (prior?.path === path) texts = prior.texts;
-	else if (prior !== null && extendsSnapshot(prior.path, path))
-		texts = prior.texts.concat(operatorTextsOf(path.slice(prior.path.length)));
-	else texts = operatorTextsOf(path);
-	judgeFold = { path, texts };
-	return [...texts];
+	let fold: JudgeFold;
+	if (prior?.path === path) fold = prior;
+	else if (prior !== null && extendsSnapshot(prior.path, path)) {
+		const more = operatorTextsOf(path.slice(prior.path.length), new Map(prior.asked));
+		fold = { path, texts: prior.texts.concat(more.texts), asked: more.asked };
+	} else fold = { path, ...operatorTextsOf(path, new Map()) };
+	judgeFold = fold;
+	return [...fold.texts];
+}
+
+/** The questions each ask_user call put, as ask_user normalized them, by call id, so its answer reads with the option text the operator chose. */
+type AskedQuestions = Map<string, ReadonlyArray<AskUserQuestion>>;
+
+interface JudgeFold {
+	path: ReadonlyArray<SessionEntry>;
+	texts: SafetyJudgeOperatorMessage[];
+	asked: AskedQuestions;
 }
 
 /**
  * The last fold, so a judged call on a path that only grew reads just the
- * appended entries. Each entry contributes on its own, so the fold of a path
- * is the fold of its prefix followed by the fold of the rest.
+ * appended entries. Each entry contributes on its own, given the questions
+ * asked before it, so the fold of a path is the fold of its prefix followed by
+ * the fold of the rest.
  */
-let judgeFold: { path: ReadonlyArray<SessionEntry>; texts: string[] } | null = null;
+let judgeFold: JudgeFold | null = null;
 
-function operatorTextsOf(path: ReadonlyArray<SessionEntry>): string[] {
-	const texts: string[] = [];
+function operatorTextsOf(
+	path: ReadonlyArray<SessionEntry>,
+	asked: AskedQuestions,
+): { texts: SafetyJudgeOperatorMessage[]; asked: AskedQuestions } {
+	const texts: SafetyJudgeOperatorMessage[] = [];
 	for (const entry of expandChainMessages(path)) {
 		if (entry.kind !== "message") continue;
+		if (entry.role === "tool_call") {
+			rememberAskedQuestions(entry.payload, asked);
+			continue;
+		}
 		if (entry.role === "tool_result") {
-			texts.push(...operatorAnswersOfToolResult(entry.payload));
+			texts.push(...operatorAnswersOfToolResult(entry.payload, asked));
 			continue;
 		}
 		if (entry.role !== "user" || !isOperatorTypedUserPayload(entry.payload)) continue;
 		const text = operatorTextOfUserPayload(entry.payload);
 		if (text !== null && text.trim().length > 0) texts.push(text);
 	}
-	return texts;
+	return { texts, asked };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function rememberAskedQuestions(payload: unknown, asked: AskedQuestions): void {
+	if (!isRecord(payload) || typeof payload.toolCallId !== "string" || typeof payload.name !== "string") return;
+	const call = effectiveToolCall(payload.name, payload.args);
+	if (call.toolName !== ToolNames.AskUser || call.args === undefined) return;
+	// The card the operator saw is what ask_user made of these arguments, trimmed by its own rules.
+	const { questions } = normalizeAskUserQuestions(call.args);
+	if (questions !== undefined) asked.set(payload.toolCallId, questions);
+}
+
+/** The one entry `matches` admits, or nothing when none or several do. */
+function onlyMatch<T>(entries: ReadonlyArray<T>, matches: (entry: T) => boolean): T | undefined {
+	const found = entries.filter(matches);
+	return found.length === 1 ? found[0] : undefined;
+}
+
+/**
+ * What the options the operator chose say, as the call that asked put them. The
+ * operator read these words on the card, so an approval carries the script, paths
+ * and purpose its option states, not only the label (FX-36). The answer binds to
+ * its own question: by position when every question was answered (ask_user keeps
+ * question order and drops only empty answers), else by a question text no other
+ * question on the card shares; an option binds by a label no other option on that
+ * question shares. Anything ambiguous adds nothing.
+ */
+function chosenOptionText(
+	questions: ReadonlyArray<AskUserQuestion> | undefined,
+	answered: { count: number; index: number },
+	question: string,
+	chosen: unknown,
+): string {
+	if (questions === undefined || !Array.isArray(chosen)) return "";
+	const text = question.trim();
+	const card =
+		answered.count === questions.length
+			? questions[answered.index]
+			: onlyMatch(questions, (entry) => entry.question === text);
+	if (card?.options === undefined || card.question !== text) return "";
+	const options = card.options;
+	const said = chosen.flatMap((label) => {
+		if (typeof label !== "string") return [];
+		const option = onlyMatch(options, (entry) => entry.label === label.trim());
+		return option?.description === undefined ? [] : [`The option "${option.label}" says: ${option.description}`];
+	});
+	return said.join("\n");
+}
+
 /**
  * What the operator answered in one recorded ask_user result. A round Clio
  * answered for an absent operator (#421), a cancelled round and an answer Clio
  * picked (`auto`) are no operator's word, as the registry's own reading holds.
+ * The question, the chosen labels and what those options say are the agent's
+ * text, so the judge reads them but only what the operator typed counts as their
+ * words; the escape backstop reads the question and labels as an approval only
+ * through `askApprovesSandboxEscape`.
  */
-function operatorAnswersOfToolResult(payload: unknown): string[] {
+function operatorAnswersOfToolResult(payload: unknown, asked: AskedQuestions): SafetyJudgeOperatorMessage[] {
 	if (!isRecord(payload) || typeof payload.toolName !== "string" || payload.isError === true) return [];
 	const details = isRecord(payload.result) && isRecord(payload.result.details) ? payload.result.details : undefined;
 	if (details === undefined || effectiveToolCall(payload.toolName, undefined, details).toolName !== ToolNames.AskUser)
 		return [];
 	if (details.unattended !== undefined || details.cancelled === true || !Array.isArray(details.answers)) return [];
-	return details.answers.flatMap((raw: unknown) => {
+	const questions = typeof payload.toolCallId === "string" ? asked.get(payload.toolCallId) : undefined;
+	const answers: unknown[] = details.answers;
+	return answers.flatMap((raw: unknown, index): SafetyJudgeOperatorMessage[] => {
 		if (!isRecord(raw) || raw.auto === true) return [];
 		const { question, answer } = raw;
 		if (typeof question !== "string" || typeof answer !== "string" || answer.trim().length === 0) return [];
-		return [`Asked "${question}", the operator answered: ${answer}`];
+		const chosen = Array.isArray(raw.options)
+			? raw.options.flatMap((label: unknown) => (typeof label === "string" ? [label.trim()] : []))
+			: [];
+		return [
+			{
+				text: `Asked "${question}", the operator answered: ${answer}`,
+				context: chosenOptionText(questions, { count: answers.length, index }, question, raw.options),
+				words: typeof raw.value === "string" ? raw.value : "",
+				asked: { question, chosen },
+			},
+		];
 	});
 }
 
