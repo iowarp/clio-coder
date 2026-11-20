@@ -464,6 +464,39 @@ describe("worker grant binding", () => {
 		ok(resolved.at(-1)?.startsWith("permission refusal limit reached"), resolved.at(-1));
 	});
 
+	it("names the lost owner when a parked ask is refused on control-channel close", { timeout: 30_000 }, async () => {
+		const mark = { name: "bash", arguments: JSON.stringify({ command: "./mark.sh" }) };
+		const run = await runGrantWorker([[mark], { text: "done" }], (_frame, handle) => {
+			handle.abort("owner_channel_closed");
+		});
+		strictEqual(run.count, "");
+		const resolved = resolutions(run.events);
+		strictEqual(resolved.length, 1);
+		strictEqual(resolved[0]?.decision, "denied");
+		strictEqual(resolved[0]?.mode, "escalate");
+		strictEqual(resolved[0]?.source, "operator");
+		strictEqual(
+			resolved[0]?.reason,
+			"permission request expired: the session that owns this worker exited or disconnected; re-run the work from a live session",
+		);
+	});
+
+	it("keeps the existing timeout refusal when the live owner expires the ask", { timeout: 30_000 }, async () => {
+		const mark = { name: "bash", arguments: JSON.stringify({ command: "./mark.sh" }) };
+		const run = await runGrantWorker([[mark], { text: "done" }], (frame, handle) => {
+			handle.resolvePermission?.(frame.requestId, "deny", undefined, "timeout");
+		});
+		strictEqual(run.count, "");
+		const resolved = resolutions(run.events);
+		strictEqual(resolved.length, 1);
+		strictEqual(resolved[0]?.decision, "denied");
+		strictEqual(resolved[0]?.source, "timeout");
+		strictEqual(
+			resolved[0]?.reason,
+			"permission denied by escalation timeout fallback: bash requires execute confirmation",
+		);
+	});
+
 	it("denies at once when a headless default run has no one to grant", { timeout: 30_000 }, async () => {
 		const mark = { name: "bash", arguments: JSON.stringify({ command: "./mark.sh" }) };
 		const run = await runGrantWorker([[mark], { text: "done" }], () => {}, {

@@ -360,8 +360,8 @@ export interface WorkerRunResult {
 
 export interface WorkerRunHandle {
 	promise: Promise<WorkerRunResult>;
-	/** Absent cause is the parent stopping the run; `internal` is the worker's own failure, such as a lost stdout lane. */
-	abort(cause?: "internal"): void;
+	/** A parent stop can name a closed owner channel for the refusal text; `internal` is the worker's own failure. */
+	abort(cause?: "internal" | "owner_channel_closed"): void;
 	/**
 	 * Queue operator guidance on a runtime that exposes a live input API. Absent
 	 * for single-shot subprocess runtimes. Returns true only after the runtime
@@ -2959,11 +2959,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// returning, so cancel it before aborting. cancelParkedCalls is a
 			// no-op when nothing is parked, so deny/fail abort stays unchanged.
 			if (escalationConfig) {
-				const reason = "run aborted while a permission escalation was pending";
+				const reason =
+					cause === "owner_channel_closed"
+						? "permission request expired: the session that owns this worker exited or disconnected; re-run the work from a live session"
+						: "run aborted while a permission escalation was pending";
 				denyActiveEscalationOnAbort(reason);
 				registry.cancelParkedCalls(reason);
 			}
-			workerStopCause ??= cause ?? "parent_cancel";
+			workerStopCause ??= cause === "internal" ? "internal" : "parent_cancel";
 			agent.abort();
 		},
 		steer: (text: string) => {

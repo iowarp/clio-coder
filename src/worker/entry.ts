@@ -45,6 +45,7 @@ import {
 	setResidencyNoticeSink,
 } from "../engine/apis/residency.js";
 import type { WorkerHookTransport } from "../engine/worker-extension-hooks.js";
+import type { WorkerRunHandle } from "../engine/worker-runtime.js";
 import { startWorkerRun, type WorkerRunInput, workerProviderSupportsTools } from "../engine/worker-runtime.js";
 import { attestedToolNames, attestedToolSchemaSignature } from "../engine/worker-tools.js";
 import { emitControlFrame } from "./control-lane.js";
@@ -385,7 +386,7 @@ async function main(): Promise<number> {
 	let abortStarted = false;
 	let runSettled = false;
 	let forceExit: ReturnType<typeof setTimeout> | null = null;
-	const abortOnce = (cause?: "internal"): void => {
+	const abortOnce: WorkerRunHandle["abort"] = (cause) => {
 		if (abortStarted || runSettled) return;
 		abortStarted = true;
 		emitControlFrame({ kind: "cancel_ack", at: Date.now() });
@@ -396,7 +397,7 @@ async function main(): Promise<number> {
 		pendingHooks.clear();
 		if (runSettled) return;
 		process.stderr.write("[worker] control channel closed; aborting run\n");
-		abortOnce();
+		abortOnce("owner_channel_closed");
 		if (forceExit !== null) return;
 		forceExit = setTimeout(() => process.exit(1), CHANNEL_CLOSE_EXIT_GRACE_MS);
 		forceExit.unref?.();
