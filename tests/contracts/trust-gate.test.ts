@@ -1,10 +1,11 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { settingsPath } from "../../src/core/config.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import {
 	approveOperatorProjectInstall,
@@ -425,6 +426,71 @@ test("S3-01: CLI review is read-only and approval refuses a stale digest", async
 		strictEqual(readLayeredSettings(workspace).settings.chat.retry.streamStallMs, 70000);
 		strictEqual(command(["settings", "--revoke"]).status, 0);
 		strictEqual(readLayeredSettings(workspace).settings.chat.retry.streamStallMs, 180000);
+	} finally {
+		home.restore();
+	}
+});
+
+test("config get, set and unset save one setting per scope, refuse bad input unwritten, and read flags around the verb", async () => {
+	const home = await isolateClioEnv("clio-coder-config-set-");
+	try {
+		const workspace = join(home.dir, "workspace");
+		mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
+		const argvFor = (args: string[]) => [
+			"--import",
+			new URL("../../node_modules/tsx/dist/loader.mjs", import.meta.url).href,
+			"--input-type=module",
+			"-e",
+			`import {runConfigCommand} from ${JSON.stringify(new URL("../../src/cli/config.ts", import.meta.url).href)}; process.exitCode = await runConfigCommand(JSON.parse(process.argv[1]));`,
+			JSON.stringify(args),
+		];
+		const config = (...args: string[]) =>
+			spawnSync(process.execPath, argvFor(args), { cwd: workspace, env: process.env, encoding: "utf8", timeout: 20_000 });
+		const background = (...args: string[]) =>
+			new Promise<number | null>((resolve) =>
+				spawn(process.execPath, argvFor(args), { cwd: workspace, env: process.env, stdio: "ignore" }).on("exit", resolve),
+			);
+		const before = config("trust", "safety", "--json");
+		strictEqual(before.status, 0, before.stderr);
+		strictEqual(config("--json", "trust", "safety").stdout, before.stdout);
+
+		strictEqual(config("set", "interface.exitSummary", "brief").status, 0);
+		const got = JSON.parse(config("get", "interface.exitSummary", "--json").stdout) as Record<string, unknown>;
+		deepStrictEqual([got.version, got.value, got.source, got.file], [1, "brief", "user", settingsPath()]);
+		const saved = readFileSync(settingsPath());
+		for (const refused of [
+			["interface.exitSummary", "bogus"],
+			["nope.thing", "1"],
+			["chat.target", "x"],
+		]) {
+			strictEqual(config("set", ...refused).status, 2, refused.join(" "));
+		}
+		ok(readFileSync(settingsPath()).equals(saved));
+
+		deepStrictEqual(
+			await Promise.all([background("set", "interface.demo", "false"), background("set", "interface.exitSummary", "off")]),
+			[0, 0],
+		);
+		const afterRace = readFileSync(settingsPath(), "utf8");
+		match(afterRace, /exitSummary: .?off/u);
+		match(afterRace, /demo: false/u);
+
+		strictEqual(config("unset", "interface.exitSummary").status, 0);
+		const fallback = JSON.parse(config("get", "interface.exitSummary", "--json").stdout) as Record<string, unknown>;
+		strictEqual(fallback.source, "default");
+
+		writeFileSync(join(workspace, ".clio-coder", "settings.yaml"), "interface:\n  demo: true\n");
+		const untrusted = config("set", "interface.exitSummary", "brief", "--scope", "project");
+		strictEqual(untrusted.status, 1);
+		match(untrusted.stderr, /config trust settings/u);
+		strictEqual(existsSync(join(workspace, ".clio-coder", "settings.local.yaml")), false);
+		approve(workspace, "settings");
+		strictEqual(config("set", "interface.exitSummary", "report", "--scope", "project").status, 0);
+		strictEqual(captureProjectSurface(workspace, "settings").verdict, "trusted");
+		strictEqual(readLayeredSettings(workspace).settings.interface.exitSummary, "report");
+		strictEqual(config("unset", "interface.exitSummary", "--scope", "project").status, 0);
+		strictEqual(captureProjectSurface(workspace, "settings").verdict, "trusted");
+		strictEqual(config("get", "interface.exitSummary", "--scope", "project").status, 1);
 	} finally {
 		home.restore();
 	}

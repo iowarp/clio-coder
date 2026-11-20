@@ -203,6 +203,15 @@ describe("contracts/auth logout listing", () => {
 			strictEqual(listed.join(","), "work-openai", listing.stdout);
 			const removed = await captureAuth(["logout", "work-openai"]);
 			strictEqual(removed.code, 0, removed.stderr);
+			const status = await captureAuth(["status", "--json"]);
+			strictEqual(status.code, 0, status.stderr);
+			const document = JSON.parse(status.stdout) as { version: number; credentials: Array<{ id: string }> };
+			strictEqual(document.version, 1);
+			strictEqual(
+				document.credentials.some((row) => row.id === RUNTIME),
+				true,
+				status.stdout,
+			);
 		} finally {
 			scratch.restore();
 		}

@@ -164,3 +164,25 @@ it("names the Copilot sign-in as the auth of a copilot-sdk target", async () => 
 	match(row ?? "", /copilot login/u);
 	strictEqual(/\bnone\b/u.test(row ?? ""), false, row);
 });
+
+it("keeps the deprecated targets worker spelling binding through profile, with one deprecation line", async () => {
+	const errors: string[] = [];
+	const originalErr = process.stderr.write.bind(process.stderr);
+	process.stderr.write = ((chunk: string | Uint8Array) => {
+		errors.push(String(chunk));
+		return true;
+	}) as typeof process.stderr.write;
+	let bound: { code: number; output: string };
+	try {
+		bound = await stdoutOf(["worker", "bind", "coder", "local-fast"]);
+	} finally {
+		process.stderr.write = originalErr;
+	}
+	strictEqual(bound.code, 0, errors.join(""));
+	strictEqual(errors.filter((line) => /deprecated/u.test(line)).length, 1, errors.join(""));
+	const rows = JSON.parse((await stdoutOf(["profile", "bindings", "--json"])).output) as Array<{
+		agentId: string;
+		profile: string;
+	}>;
+	strictEqual(rows.find((row) => row.agentId === "coder")?.profile, "local-fast");
+});

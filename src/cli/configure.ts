@@ -124,7 +124,7 @@ Usage:
                                          (older section names remain accepted)
                                          Without a terminal this prints the
                                          section's values and exits.
-  clio-coder configure --json            emit the effective settings as JSON
+  clio-coder configure --json            emit your user settings document as JSON (config inspect --json is the effective view)
   clio-coder configure --edit            edit all user settings in VISUAL/EDITOR;
                                          validate and review before saving
   clio-coder configure --interop         review detected coding agents as delegation peers
