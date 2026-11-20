@@ -8,7 +8,11 @@ import { COMMAND_CONSEQUENCE_MAX_SEVERE, fitConsequenceLine } from "../domains/s
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { decisionActionClass } from "../domains/safety/decision-presentation.js";
 import { UNATTENDED_DECIDED_BY, unattendedPermissionReason } from "../domains/safety/unattended.js";
-import { axisViewFromId, mainApprovalRequestView } from "../session-control/approval-request-facts.js";
+import {
+	approvalRequestTask,
+	axisViewFromId,
+	mainApprovalRequestView,
+} from "../session-control/approval-request-facts.js";
 import type { ToolApprovalStateEvent } from "../session-control/chat-loop.js";
 import { resolvePermission } from "../session-control/index.js";
 import type { NoticeSource } from "../session-control/notice-source.js";
@@ -602,7 +606,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 				meta,
 				autonomy,
 				deps.toolRegistry?.parkedCount(),
-				deps.getApprovalTask?.(meta.turnId),
+				approvalRequestTask(meta, (turnId) => deps.getApprovalTask?.(turnId)),
 			);
 			// The dialog states the tool, target, action class, asking axis, and
 			// decision keys. Another modal is interrupted so this prompt can take

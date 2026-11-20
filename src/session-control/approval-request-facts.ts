@@ -253,6 +253,24 @@ export function sessionApprovalTask(
 	}
 }
 
+/**
+ * The card's task row for one park: an external read-root ask raised by a dispatch call names the task
+ * that reads the root, sanitized and bounded like the operator's words; every other ask quotes the
+ * operator's newest message, which `operatorTask` reads only when needed (CLI-P35).
+ */
+export function approvalRequestTask(
+	meta: Pick<PermissionRequiredMeta, "turnId" | "dispatchTask">,
+	operatorTask: ((turnId: string | undefined) => ApprovalRequestView["task"]) | undefined,
+): ApprovalRequestView["task"] {
+	const dispatched = meta.dispatchTask;
+	if (dispatched === undefined) return operatorTask?.(meta.turnId);
+	const chars = Array.from(sanitizeCallTargetText(dispatched.text));
+	const text =
+		chars.length > APPROVAL_TASK_MAX_CHARS ? `${chars.slice(0, APPROVAL_TASK_MAX_CHARS - 1).join("")}…` : chars.join("");
+	if (text.trim().length === 0) return operatorTask?.(meta.turnId);
+	return { text, dispatch: { position: dispatched.position, count: dispatched.count } };
+}
+
 export function mainApprovalRequestView(
 	call: ClassifierCall,
 	decision: SafetyDecision,

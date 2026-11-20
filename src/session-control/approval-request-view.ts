@@ -64,9 +64,11 @@ export interface ApprovalRequestView {
 	 * The newest message the operator typed on the active path, sanitized and
 	 * bounded; `via` names the machine origin of the current turn when it has
 	 * one. Never model-authored text: a job's prompt or follow-up and a yolo
-	 * continuation are not the operator's (T-01).
+	 * continuation are not the operator's (T-01). The one exception is `dispatch`: an external read-root
+	 * ask raised for a dispatch call carries that call's own task, which the card attributes to the
+	 * dispatch (its position among the call's `count` tasks), never to the operator (CLI-P35).
 	 */
-	task?: { text: string; via?: string };
+	task?: { text: string; via?: string; dispatch?: { position: number; count: number } };
 	/**
 	 * The build that answered the System One gate, set only on the card the gate
 	 * raised. The card and the transcript rows name it so an operator can tell
