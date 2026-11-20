@@ -45,6 +45,7 @@ import {
 	runEnqueued,
 	runsReport,
 	runTelemetry,
+	runTelemetryAt,
 	sessionAccountQuotaWindow,
 	sessionRevision,
 	sessionTelemetry,
@@ -52,7 +53,7 @@ import {
 	turnsSum,
 	whyStopped,
 } from "./read-model.js";
-import type { SealVerdict, TelemetryScopeFiles } from "./seal.js";
+import type { TelemetryScopeFiles } from "./seal.js";
 
 /**
  * The live telemetry read model (#434 §11). It never reads a journal on a render path and never folds per token:
@@ -103,6 +104,8 @@ const runOwner = (runId: string) => `run:${runId}`;
 /** A view and whether its session references a run, without building the run's DTO or reading its scope. */
 type LocalView = TelemetryView & { references(runId: string): boolean };
 type VerifiedRun = { source: JournalSource; telemetry: RunTelemetryV1 };
+/** An open run's DTO as built from `source`, its scope read with it; only its clock moves until `source` changes. */
+type OpenRun = { source: JournalSource; telemetry: RunTelemetryV1 };
 
 /**
  * A run this session or a fork ancestor links. A fork keeps its parent's transcript, so a worker card the parent
@@ -120,14 +123,9 @@ export function telemetryView(
 	source: SessionSource,
 	scope: (runId: string) => TelemetryScopeFiles | null = () => null,
 	verifiedRuns: Map<string, VerifiedRun> = new Map(),
+	openRuns: Map<string, OpenRun> = new Map(),
 ): LocalView {
 	let session: SessionTelemetryV1 | undefined;
-	// A run still open has no seal or result to verify, so this view reads its scope once and every frame after reuses
-	// it; the DTO is still built per call so its elapsed time advances while the journal is quiet.
-	const openScopes = new Map<
-		string,
-		{ source: JournalSource; files: TelemetryScopeFiles | null; seal: SealVerdict | null }
-	>();
 	return {
 		sessionId: source.sessionId,
 		seeding: source.journal.seeding === true,
@@ -145,15 +143,19 @@ export function telemetryView(
 			if (!run) return null;
 			const verified = verifiedRuns.get(runId);
 			if (verified?.source === run) return verified.telemetry;
-			const open = openScopes.get(runId);
-			if (open?.source === run) return runTelemetry(runId, run, {}, open.files, open.seal);
+			// A run still open has no seal or result to verify yet, and its settlement, seal and assessment each land as a
+			// record in its own journal. Until the journal swaps its source, a frame reuses the DTO and its scope read and
+			// advances only the clock, so a fleet card no longer refolds its run on every poll.
+			const open = openRuns.get(runId);
+			if (open?.source === run) return runTelemetryAt(runId, run, open.telemetry);
 			const files = scope(runId);
 			const telemetry = runTelemetry(runId, run, {}, files);
 			if (telemetry.seal?.status === "verified") verifiedRuns.set(runId, { source: run, telemetry });
 			else verifiedRuns.delete(runId);
 			const tip = run.records.at(-1)?.k;
 			if (telemetry.settled === null && tip !== "run.sealed" && tip !== "share.sealed")
-				openScopes.set(runId, { source: run, files, seal: telemetry.seal });
+				openRuns.set(runId, { source: run, telemetry });
+			else openRuns.delete(runId);
 			return telemetry;
 		},
 		runEnqueued: (runId) => runEnqueued(source, runId),
@@ -362,6 +364,8 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 	// Scope files are read only once the cold loader is in; a run DTO before that names no seal rather than guessing.
 	const scope = (runId: string) => loaded?.loadRunScopeFiles?.(options.stateDir(), runId) ?? null;
 	const verifiedRuns = new Map<string, VerifiedRun>();
+	/** Open runs' DTOs across views: a batch on another owner rebuilds the view but leaves a quiet run's source as it was. */
+	const openRuns = new Map<string, OpenRun>();
 	/** The session `bind` named; nothing subscribes or reads until a reader first asks (`activate`). */
 	let bound: string | null = null;
 	let current: Binding | null = null;
@@ -410,13 +414,17 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		const binding = current;
 		current = null;
 		verifiedRuns.clear();
+		openRuns.clear();
 		for (const off of binding?.off ?? []) off();
 		binding?.seeded.resolve();
 	};
 
 	const onEvent = (binding: Binding) => (owner: string, event: PersistedTelemetry) => {
 		if (current !== binding) return;
-		if (owner.startsWith("run:")) verifiedRuns.delete(owner.slice(4));
+		if (owner.startsWith("run:")) {
+			verifiedRuns.delete(owner.slice(4));
+			openRuns.delete(owner.slice(4));
+		}
 		if (event.kind === "failed") {
 			markDirty(["health"]);
 			return;
@@ -746,7 +754,12 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		const binding = current;
 		if (!binding) return null;
 		if (binding.view?.version === binding.version) return binding.view.view;
-		const view = telemetryView(binding.root ? snapshot(binding, binding.root) : buffered(binding), scope, verifiedRuns);
+		const view = telemetryView(
+			binding.root ? snapshot(binding, binding.root) : buffered(binding),
+			scope,
+			verifiedRuns,
+			openRuns,
+		);
 		binding.view = { version: binding.version, view };
 		return view;
 	};
