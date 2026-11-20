@@ -129,6 +129,13 @@ const SYSTEM_WORD_CASES: ReadonlyArray<
 	["PATH=. grep sudo notes.md", "system_modify"],
 	["./grep sudo notes.md", "system_modify"],
 	["env -S 'grep sudo' notes.md", "system_modify"],
+	// LEAD-1: a file sed's `w` or awk's `>` writes is a write target like a redirect's.
+	["sed 's/a/b/w /etc/passwd' notes.md", "system_modify"],
+	["sed -n '/x/w /etc/cron.d/job' notes.md", "system_modify"],
+	[`awk '{print > "/etc/passwd"}' notes.md`, "system_modify"],
+	[`gawk -F: '{print >> "/etc/hosts"}' notes.md`, "system_modify"],
+	["sed 's/a/b/w out.txt' notes.md", "execute"],
+	[`awk '{print > "out.txt"}' notes.md`, "execute"],
 ];
 
 it("Astra r2-8: a system-modify word counts where the line can run it and not as text", () => {
