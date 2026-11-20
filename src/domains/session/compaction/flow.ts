@@ -20,7 +20,10 @@ import { prepareBackgroundModelMetadata } from "../../providers/background-model
 import type { ProvidersContract, ResolvedRuntimeTarget, RuntimeTier } from "../../providers/index.js";
 import {
 	applyModelCapabilityPatch,
+	endpointCapacityFor,
+	foregroundStreamUsage,
 	modelEndpointKey,
+	modelStreamUsage,
 	refineRuntimeTargetWithModelHints,
 	registerForegroundStream,
 	resolveRuntimeTarget,
@@ -100,6 +103,8 @@ export interface CompactionResolution extends SideCallAuth {
 	/** The summarizer route's tier, which sets its first-token stall window (CLI-P9). */
 	runtimeTier?: RuntimeTier;
 	endpointKey: string | null;
+	/** The route's concurrent request bound; null when nothing bounds it. */
+	endpointLimit: number | null;
 	wireModelId: string;
 	/** What the summarizer route resolves for the summary's request with thinking off; above off on an always-on model. */
 	effectiveThinkingLevel: ResolvedRuntimeTarget["effectiveThinkingLevel"];
@@ -183,6 +188,7 @@ async function resolveCompactionModel(
 		wireModelId: route.wireModelId,
 		effectiveThinkingLevel: refined.effectiveThinkingLevel,
 		endpointKey: modelEndpointKey(route.target, route.wireModelId),
+		endpointLimit: endpointCapacityFor({ target: route.target, runtime: route.runtime })?.limit ?? null,
 		...sideAuth,
 		...(route.target.auth?.headers ? { headers: route.target.auth.headers } : {}),
 	};
@@ -339,6 +345,14 @@ export async function runCompactionFlow(
 					);
 				},
 				continuityNote,
+				// MD10: a split fold's second summary runs beside the first only while the route has a slot free for it.
+				holdSecondSummarySlot: () => {
+					// No endpoint identity means no slot bound (endpointCapacityFor answers null too).
+					if (resolved.endpointKey === null) return () => {};
+					const busy = modelStreamUsage(foregroundStreamUsage(), resolved.endpointKey);
+					if (resolved.endpointLimit !== null && busy >= resolved.endpointLimit) return null;
+					return registerForegroundStream(resolved.endpointKey);
+				},
 				// The summary's output cap reserves reasoning room only when its request still thinks (CTX-3).
 				summaryThinkingLevel: resolved.effectiveThinkingLevel,
 				...compactionBudget,

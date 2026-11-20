@@ -211,6 +211,12 @@ export interface CompactInput extends SideCallAuth {
 	 * `hold.waitedOn` when a ceiling held the call (#434).
 	 */
 	beforeSummaryCall?: ((hold: AdmissionHold) => void | Promise<void>) | undefined;
+	/**
+	 * A split fold's second endpoint slot (MD10), asked once just before its history and split-turn summaries are sent.
+	 * A release means the route admits both now: they run concurrently and the release follows the later settle. Null,
+	 * or no hook, runs them in sequence, as on a capacity-one route.
+	 */
+	holdSecondSummarySlot?: () => (() => void) | null;
 	/** Price the proposed replay before persisting the operator-visible figures. */
 	checkpointTokenFigures?: (entry: Readonly<Omit<CompactionSummaryEntry, "timestamp">>) => {
 		tokensBefore: number;
@@ -1786,7 +1792,11 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			// Ignored: see above.
 		}
 	};
+	// Once per fold: both concurrent split summaries fail when one does.
+	let offersSettledFailed = false;
 	const offersFailed = (): void => {
+		if (offersSettledFailed) return;
+		offersSettledFailed = true;
 		for (const offer of issuedOffers) tellOffer(offer, { kind: "failed" });
 	};
 	// Recorded only once a portable request carrying the offer is sent, so a
@@ -2000,11 +2010,16 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	} else commitMemoryOffer?.();
 	// A reply the checkpoint validator refuses is asked for once more with the refusal in the request, on every pass
 	// (CLI-P5). The retry is an ordinary summary call; a failed call (provider, window, cap, stop) is never retried.
-	const checkedSummary = async (userText: string, history: boolean, check: (text: string) => string) => {
+	const checkedSummary = async (
+		userText: string,
+		history: boolean,
+		check: (text: string) => string,
+		call: CompactInput = input,
+	) => {
 		let request = userText;
 		for (let attempt = 0; ; attempt++) {
 			const reply = await runSummaryStream(
-				input,
+				call,
 				history ? "compaction.history" : "compaction.split",
 				request,
 				systemPrompt,
@@ -2021,36 +2036,75 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 					offersFailed();
 					throw error;
 				}
-				input.signal?.throwIfAborted();
+				call.signal?.throwIfAborted();
 				request = checkpointRetryText(userText, error, history);
 			}
 		}
 	};
-	if (!liveCovered && historyText !== undefined) {
-		summaryParts.push(
-			await checkedSummary(historyText, true, (text) => {
-				if (text.length === 0)
-					throw tagCompactionFailure(
-						new Error("compaction returned an empty history summary"),
-						"checkpoint_format",
-						"empty",
-					);
-				return checkedHistorySummary(text);
-			}),
-		);
-	}
-	if (!liveCovered && prefixText !== undefined) {
-		summaryParts.push(
-			await checkedSummary(prefixText, false, (text) => {
-				if (text.length === 0)
-					throw tagCompactionFailure(
-						new Error("compaction returned an empty split-turn summary"),
-						"checkpoint_format",
-						"empty",
-					);
-				return `**Turn Context (split turn):**\n\n${text}`;
-			}),
-		);
+	const checkHistory = (text: string): string => {
+		if (text.length === 0)
+			throw tagCompactionFailure(new Error("compaction returned an empty history summary"), "checkpoint_format", "empty");
+		return checkedHistorySummary(text);
+	};
+	const checkPrefix = (text: string): string => {
+		if (text.length === 0)
+			throw tagCompactionFailure(
+				new Error("compaction returned an empty split-turn summary"),
+				"checkpoint_format",
+				"empty",
+			);
+		return `**Turn Context (split turn):**\n\n${text}`;
+	};
+	// MD10: with a second slot free, a split fold's two portable summaries run together. The requests are the serial
+	// ones and the results install history first. A failure cancels the sibling and commits nothing; a sibling that
+	// already completed reported its own call, so it is still charged.
+	const releaseSecondSlot =
+		!liveCovered && historyText !== undefined && prefixText !== undefined
+			? (input.holdSecondSummarySlot?.() ?? null)
+			: null;
+	if (releaseSecondSlot !== null && historyText !== undefined && prefixText !== undefined) {
+		const sibling = new AbortController();
+		const signal = input.signal ? AbortSignal.any([input.signal, sibling.signal]) : sibling.signal;
+		// Progress is the two streams' sum, so the operator sees one count rather than two alternating.
+		const streamed: Array<{ tokens: number; limit?: number } | undefined> = [undefined, undefined];
+		const call = (index: 0 | 1): CompactInput => ({
+			...input,
+			signal,
+			...(input.onSummaryOutput
+				? {
+						onSummaryOutput: (written: { tokens: number; limit?: number }) => {
+							streamed[index] = written;
+							const limits = streamed.map((part) => part?.limit ?? maxTokens);
+							input.onSummaryOutput?.({
+								tokens: (streamed[0]?.tokens ?? 0) + (streamed[1]?.tokens ?? 0),
+								...(limits[0] !== undefined && limits[1] !== undefined ? { limit: limits[0] + limits[1] } : {}),
+							});
+						},
+					}
+				: {}),
+		});
+		let firstFailure: { error: unknown } | undefined;
+		const cancelSiblingOnFailure = (run: Promise<string>): Promise<string> =>
+			run.catch((error: unknown) => {
+				firstFailure ??= { error };
+				sibling.abort();
+				throw error;
+			});
+		try {
+			// Both settle before the slot is released: a cancelled request may still hold the server until it stops.
+			const parts = await Promise.allSettled([
+				cancelSiblingOnFailure(checkedSummary(historyText, true, checkHistory, call(0))),
+				cancelSiblingOnFailure(checkedSummary(prefixText, false, checkPrefix, call(1))),
+			]);
+			if (firstFailure !== undefined) throw firstFailure.error;
+			for (const part of parts) if (part.status === "fulfilled") summaryParts.push(part.value);
+		} finally {
+			releaseSecondSlot();
+		}
+	} else {
+		if (!liveCovered && historyText !== undefined)
+			summaryParts.push(await checkedSummary(historyText, true, checkHistory));
+		if (!liveCovered && prefixText !== undefined) summaryParts.push(await checkedSummary(prefixText, false, checkPrefix));
 	}
 
 	if (memoryOffer !== null && !(memoryOffer as MemoryCompactionOffer).isCurrent()) {
