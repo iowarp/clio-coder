@@ -9,6 +9,34 @@ export interface CredentialShape {
 	keepsHead?: true;
 }
 
+/** A pattern source whose lower-case letters match either case. */
+export function eitherCase(source: string): string {
+	return source.replace(/[a-z]/g, (letter) => `[${letter.toUpperCase()}${letter}]`);
+}
+
+/**
+ * The `pass` and `pwd` words of {@link SECRET_KEY_WORDS}. A bare `pass` or `pwd` is prose, the working directory or a word
+ * such as `compass`, so each needs a `_` or `-` ahead of it in any case (`DB_PASS`, `db-pass`, `MYSQL_PWD`), or a glued
+ * `PASS` written in capitals after a capital or digit (`DBPASS`, `PGPASS`, `MYSQLPASS`), or is `pgpass`. A counter such as
+ * `n_pass=3` still takes this name, so display redaction shows only a short number under these names and hides the rest.
+ */
+export const PASS_KEY_WORDS = [
+	`(?:[_-]|${eitherCase("pg")})${eitherCase("pass")}(?![A-Za-z])`,
+	"[A-Z0-9]PASS(?![A-Za-z])",
+	`[_-]${eitherCase("pwd")}(?![A-Za-z])`,
+].join("|");
+
+/**
+ * The secret words a key name holds, shared by evidence and display redaction so the two hide the same keys. Beyond
+ * {@link PASS_KEY_WORDS}, `passwd`, `password` and `passphrase` count anywhere; `PWD=/home/a`, `first pass: lint`,
+ * `tests_passed`, `compass=northwest` and `bypass` keep their values. Only the glued `PASS` is case-sensitive; every other
+ * word is spelled in either case, because Node 22 has no `(?i:)` group and the patterns compile without the `i` flag.
+ */
+export const SECRET_KEY_WORDS = [
+	eitherCase(String.raw`api[_-]?key|apikey|(?:account|access)[_-]?key|secret|token|pass(?:wd|word|phrase)|credential`),
+	PASS_KEY_WORDS,
+].join("|");
+
 /** Shapes that are a credential by their value alone, wherever they sit. */
 export const CREDENTIAL_VALUE_SHAPES: ReadonlyArray<CredentialShape> = [
 	{ kind: "aws-access-key", re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g },

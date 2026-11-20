@@ -7,7 +7,7 @@
  * every pattern here has to stay linear in its input.
  */
 
-import { CREDENTIAL_SHAPES } from "../../core/secret-shapes.js";
+import { CREDENTIAL_SHAPES, SECRET_KEY_WORDS } from "../../core/secret-shapes.js";
 import {
 	redactQuotedSecrets,
 	secretUrlParamValues,
@@ -35,28 +35,9 @@ interface SecretPattern {
  * each pattern targets a documented credential format, plus one generic
  * key/token/secret/password assignment shape. Audit rows already get
  * key-name-based redaction at write time; this pass catches values that
- * escaped into free text, command output, or tool arguments.
+ * escaped into free text, command output, or tool arguments. Key names come from {@link SECRET_KEY_WORDS}, which display
+ * redaction shares.
  */
-/**
- * The secret words a key name holds, shared by the assignment pattern and the JSON property-name pattern so the two
- * hide the same keys. A bare `pass` or `pwd` is prose, the working directory or a word such as `compass`, so each needs
- * a `_` or `-` ahead of it in any case (`DB_PASS`, `db-pass`, `MYSQL_PWD`), or a glued `PASS` written in capitals after
- * a capital or digit (`DBPASS`, `PGPASS`, `MYSQLPASS`), or is `pgpass`, `passwd`, `password` or `passphrase` anywhere; `PWD=/home/a`, `first pass: lint`, `tests_passed` and
- * `compass=northwest` and `bypass` keep their values. Only the glued `PASS` is case-sensitive; every other word is
- * spelled in either case, because Node 22 has no `(?i:)` group and the patterns compile without the `i` flag.
- */
-const SECRET_KEY_WORDS = [
-	eitherCase(String.raw`api[_-]?key|apikey|(?:account|access)[_-]?key|secret|token|pass(?:wd|word|phrase)|credential`),
-	`(?:[_-]|${eitherCase("pg")})${eitherCase("pass")}(?![A-Za-z])`,
-	"[A-Z0-9]PASS(?![A-Za-z])",
-	`[_-]${eitherCase("pwd")}(?![A-Za-z])`,
-].join("|");
-
-/** A pattern source whose lower-case letters match either case. */
-function eitherCase(source: string): string {
-	return source.replace(/[a-z]/g, (letter) => `[${letter.toUpperCase()}${letter}]`);
-}
-
 const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 	// Shares its patterns with display redaction so the two hide the same text (#446, #448). They run first because the
 	// assignment value below would swallow the `@` and host of `https://u:token=abcdefgh@h`.
