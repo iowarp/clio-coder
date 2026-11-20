@@ -1031,10 +1031,18 @@ export const RunSettledSchema = Type.Object(
 		apiCalls: factSchema(count),
 		pricing: PricingSchema,
 		toolCalls: count,
-		/** Calls per tool and how they ended, by tool name; a tool's arguments and results are never kept here. */
-		tools: Type.Array(Type.Object({ tool: ExistingId, calls: count, ok: count, errors: count, blocked: count }, closed), {
-			maxItems: 256,
-		}),
+		/**
+		 * Calls per tool and how they ended, by tool name; a tool's arguments and results are never kept here. `asked`
+		 * counts the permission asks that were refused without an answer, apart from `blocked`, so a row sums; absent when
+		 * there were none.
+		 */
+		tools: Type.Array(
+			Type.Object(
+				{ tool: ExistingId, calls: count, ok: count, errors: count, blocked: count, asked: Type.Optional(count) },
+				closed,
+			),
+			{ maxItems: 256 },
+		),
 		/** The skills the run loaded, in activation order, and who asked for each; never a skill's path or body. */
 		skills: Type.Array(
 			Type.Object({ name: ExistingId, requestSource: nullable(vocabulary(["recipe", "model", "operator"])) }, closed),

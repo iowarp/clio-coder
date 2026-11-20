@@ -135,10 +135,18 @@ describe("evidence integrity boundary", () => {
 				frameType: null,
 				usage: undefined,
 				...(askedByTool !== undefined ? { askedByTool } : {}),
-			}).facts.tools[0]?.blocked;
-		// The exact count the producer kept wins over the capped list; without it the list is all there is.
-		strictEqual(settle(new Map([["bash", 60]])), 1);
-		strictEqual(settle(), 11);
+			}).facts.tools[0];
+		// The exact count the producer kept wins over the capped list; without it the list is all there is. The refused asks
+		// stay on the row as `asked`, so calls = ok + errors + blocked + asked (FX-3).
+		deepStrictEqual(settle(new Map([["bash", 60]])), {
+			tool: "bash",
+			calls: 61,
+			ok: 0,
+			errors: 0,
+			blocked: 1,
+			asked: 60,
+		});
+		deepStrictEqual(settle(), { tool: "bash", calls: 61, ok: 0, errors: 0, blocked: 11, asked: 50 });
 	});
 
 	it("reads mutations:no when the only state change was refused and a shell call left the tree unmoved (FL-1)", () => {

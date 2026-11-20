@@ -292,7 +292,7 @@ export function settleFinishedRun(
 	const usage = input.usage ?? unobservedRunUsageFacts();
 	const host = receipt.hostVerification;
 	// An ask refused without an answer, as a --timeout abort denies one, is a permission request the way `decisions`
-	// counts it, not a blocked call. The tools row has no field for it, so it stays in `calls` only (bt-15 c14a).
+	// counts it, not a blocked call (bt-15 c14a). The tools row counts it as `asked`, so the row still sums (FX-3).
 	const asked = new Map<string, number>(input.askedByTool ?? []);
 	if (input.askedByTool === undefined)
 		for (const attempt of receipt.safety?.permissionRequestedAttempts ?? [])
@@ -326,13 +326,17 @@ export function settleFinishedRun(
 			frameType: input.frameType,
 			...usage,
 			toolCalls: receipt.toolCalls,
-			tools: receipt.toolStats.slice(0, 256).map((stat) => ({
-				tool: stat.tool,
-				calls: stat.count,
-				ok: stat.ok,
-				errors: stat.errors,
-				blocked: Math.max(0, stat.blocked - (asked.get(stat.tool) ?? 0)),
-			})),
+			tools: receipt.toolStats.slice(0, 256).map((stat) => {
+				const refusedAsks = Math.min(stat.blocked, asked.get(stat.tool) ?? 0);
+				return {
+					tool: stat.tool,
+					calls: stat.count,
+					ok: stat.ok,
+					errors: stat.errors,
+					blocked: stat.blocked - refusedAsks,
+					...(refusedAsks > 0 ? { asked: refusedAsks } : {}),
+				};
+			}),
 			skills: (receipt.skillActivations ?? [])
 				.slice(0, 256)
 				.map((skill) => ({ name: skill.name, requestSource: skill.requestSource ?? null })),
