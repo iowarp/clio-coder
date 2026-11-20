@@ -288,7 +288,16 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 		parkedMs += ms;
 		callerOnParked?.(ms);
 	};
-	const executedMs = (): number => Math.max(0, Math.round(performance.now() - startedAtClock) - parkedMs);
+	// Middleware hooks run inside the invocation too (a command hook blocks the event loop), so their time is
+	// reported apart and kept out of the tool's own.
+	let hookMs = 0;
+	const callerOnHookTime = invokeOpts.onHookTime;
+	invokeOpts.onHookTime = (ms) => {
+		hookMs += ms;
+		callerOnHookTime?.(ms);
+	};
+	const executedMs = (): number =>
+		Math.max(0, Math.round(performance.now() - startedAtClock) - parkedMs - Math.round(hookMs));
 	// The registry scopes its own work the same way, so the record joins its session, turn, tool call and the model
 	// call that asked for it (#434).
 	const telemetryCtx = withToolTelemetryContext(invokeOpts, telemetryContext);
@@ -300,6 +309,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 			outcome,
 			executedMs(),
 			parkedMs,
+			Math.round(hookMs),
 			extra,
 			result,
 			toolSettledFacets(spec.name, args, result, extra?.skillActivation),
@@ -464,6 +474,7 @@ function recordToolSettled(
 	outcome: ToolOutcome,
 	durationMs: number,
 	parkedMs: number,
+	hookMs: number,
 	extra: Parameters<typeof emitFinish>[4],
 	result: ToolResult | undefined,
 	facets: ToolSettledFacets,
@@ -477,6 +488,7 @@ function recordToolSettled(
 			outcome,
 			durationMs,
 			...(parkedMs > 0 ? { parkedMs } : {}),
+			...(hookMs > 0 ? { hookMs } : {}),
 			...(outcome !== "blocked" && result ? { resultBytes: Buffer.byteLength(toolResultContextText(result)) } : {}),
 			...(images > 0 ? { images } : {}),
 			...(extra?.terminate === true ? { terminate: true as const } : {}),

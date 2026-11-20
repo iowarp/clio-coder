@@ -1843,6 +1843,8 @@ export const ToolSettledSchema = Type.Object(
 		durationMs: duration,
 		/** Present only when the call parked for approval. */
 		parkedMs: Type.Optional(duration),
+		/** Middleware hook time inside the call (before_tool and after_tool), kept out of `durationMs`; absent when it rounds to 0. */
+		hookMs: Type.Optional(duration),
 		/** UTF-8 bytes of the result text the model receives; absent when nothing ran. */
 		resultBytes: Type.Optional(count),
 		images: Type.Optional(Type.Integer({ minimum: 1 })),
