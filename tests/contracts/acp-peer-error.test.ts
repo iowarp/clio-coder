@@ -8,6 +8,7 @@ import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { startAcpDelegationRun } from "../../src/engine/acp/adapter.js";
+import { prepareAntigravityLaunch } from "../../src/engine/acp/antigravity-launch.js";
 import { AcpEventMapper } from "../../src/engine/acp/event-mapper.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -222,6 +223,20 @@ test("ACP adapter launches agy with an allowlisted env and an owned, marked TMPD
 		strictEqual(existsSync(join(tempDir, "..")), false);
 		strictEqual(existsSync(orphan), namespace === null);
 		for (const kept of [unmarked, liveChild, foreign, noChild, notRun]) strictEqual(existsSync(kept), true, kept);
+		// The profile is <gemini-dir>/<app-data-dir>: a consumed value is never read as a flag, and an empty or missing
+		// value leaves agy's default.
+		const profileOf = (args: string[]): string => {
+			const prepared = prepareAntigravityLaunch({ ...agent, args }, { HOME: scratch }, scratch);
+			prepared.discard();
+			return prepared.profileDir;
+		};
+		const fallback = join(scratch, ".gemini", "antigravity-cli");
+		strictEqual(profileOf(agent.args), fallback);
+		strictEqual(profileOf(["acp", "--gemini-dir=", "--app-data-dir="]), fallback);
+		strictEqual(profileOf(["acp", "--app-data-dir", "x", "--app-data-dir"]), join(scratch, ".gemini", "x"));
+		strictEqual(profileOf(["acp", "--gemini-dir", "/g", "--app_data_dir", "--gemini-dir"]), "/g/--gemini-dir");
+		strictEqual(profileOf(["acp", "--gemini_dir=rel", "--app-data-dir", "/abs"]), "/abs");
+		strictEqual(profileOf(["acp", "--gemini-dir", "rel"]), join(scratch, "rel", "antigravity-cli"));
 		// spawn rejects a NUL byte synchronously; the launch dir made before it must not survive the throw.
 		const before = (await readdir(root)).sort();
 		throws(
@@ -257,13 +272,17 @@ interface AgyFrame {
 	result?: unknown;
 }
 
-test("ACP adapter applies the agy shims: version floor, explicit capabilities, prompt append, default mode, questions, tool shapes, steering, sign-in", {
+test("ACP adapter applies the agy shims: version floor, explicit capabilities, prompt append, default mode, questions, tool shapes, steering, sign-in, store sideband", {
 	skip: process.platform === "win32",
 }, async () => {
 	const scratch = await mkdtemp(join(tmpdir(), "clio-agy-shims-"));
 	const fixture = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
 	const cwd = process.cwd();
-	const launch = async (name: string, version: string, session: "ok" | "auth" | "abort" | "null") => {
+	const launch = async (
+		name: string,
+		version: string,
+		session: "ok" | "auth" | "abort" | "null" | "sideband" | "sideband-max" | "sideband-clean",
+	) => {
 		const dir = join(scratch, name);
 		await mkdir(dir);
 		const log = join(dir, "frames.jsonl");
@@ -441,6 +460,43 @@ test("ACP adapter applies the agy shims: version floor, explicit capabilities, p
 		const missing = await nulled.run.promise;
 		strictEqual(missing.stopReason, "error");
 		strictEqual(missing.failureMessage, "ACP prompt response missing stopReason");
+
+		// agy answers end_turn but recorded a quota error and a thinking-signature error in its store under the launch's
+		// profile (HOME/.gemini/antigravity-cli): the run fails with the typed usage limit and the session is marked spent.
+		const sideband = await (await launch("sideband", "1.5.13", "sideband")).run.promise;
+		const usageLimit = {
+			cause: "usage_limit_reached",
+			reason: "QUOTA_EXHAUSTED",
+			message: "Antigravity quota exhausted for gemini-x-high; resets at 2026-11-21T01:00:00.000Z",
+			model: "gemini-x-high",
+			resetAt: "2026-11-21T01:00:00.000Z",
+			resetDelayMs: 7_200_000,
+			retryAfterMs: 7_000,
+		};
+		deepStrictEqual(
+			{ stopReason: sideband.stopReason, exitCode: sideband.exitCode, failureMessage: sideband.failureMessage },
+			{ stopReason: "error", exitCode: 1, failureMessage: usageLimit.message },
+		);
+		deepStrictEqual(sideband.usageLimit, usageLimit);
+		deepStrictEqual(sideband.delegation.nonResumable, { reason: "INVALID_THINKING_SIGNATURE" });
+		// The same errors under a max_tokens end keep the peer's outcome; the session is still marked spent.
+		const maxed = await (await launch("sideband-max", "1.5.13", "sideband-max")).run.promise;
+		deepStrictEqual(
+			{ stopReason: maxed.stopReason, failureMessage: maxed.failureMessage, usageLimit: maxed.usageLimit },
+			{ stopReason: "max_tokens", failureMessage: "ACP stopReason=max_tokens", usageLimit: undefined },
+		);
+		deepStrictEqual(maxed.delegation.nonResumable, { reason: "INVALID_THINKING_SIGNATURE" });
+		// The store's earlier error steps predate this session's first prompt (baseline): a clean turn succeeds.
+		const clean = await (await launch("sideband-clean", "1.5.13", "sideband-clean")).run.promise;
+		deepStrictEqual(
+			{
+				stopReason: clean.stopReason,
+				exitCode: clean.exitCode,
+				usageLimit: clean.usageLimit,
+				nonResumable: clean.delegation.nonResumable,
+			},
+			{ stopReason: "end_turn", exitCode: 0, usageLimit: undefined, nonResumable: undefined },
+		);
 	} finally {
 		await rm(scratch, { recursive: true, force: true });
 	}

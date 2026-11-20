@@ -1,7 +1,8 @@
 import type { DelegationToolGovernance } from "../../core/defaults.js";
+import { type AntigravitySidebandSignal, readAntigravitySideband } from "./antigravity-sideband.js";
 import { AcpAuthRequiredError, AcpProtocolError } from "./errors.js";
 import { boundAcpSessionUpdate, routeNonJsonRpcStdout, type StdioTransportOptions } from "./transport.js";
-import type { AcpInitializeResponse, AcpPromptResponse, AcpRequestPermissionResponse } from "./types.js";
+import type { AcpInitializeResponse, AcpPromptResponse, AcpRequestPermissionResponse, AcpUsageLimit } from "./types.js";
 
 type Version = readonly [number, number, number];
 
@@ -39,6 +40,8 @@ const MAX_QUESTION_CHARS = 2_000;
 const MAX_CHOICES = 16;
 const MAX_CHOICE_CHARS = 200;
 const MAX_WARNING_CHARS = 1_000;
+/** Sideband pages read after one turn: 32 error rows each, far more than one turn records. */
+const MAX_SIDEBAND_PAGES = 4;
 /** ACP kinds whose targets AcpToolMediator reads from `locations` and `rawInput`, so a named agy tool of one passes on. */
 const MEDIATED_KINDS = new Set(["edit", "delete", "move", "fetch", "read", "search"]);
 
@@ -55,6 +58,14 @@ export interface AntigravityQuestion {
 	securityWarning?: string;
 	/** A delegation has no operator to choose, so the question is answered cancelled. */
 	answer: "cancelled";
+}
+
+/** What agy's own store says about the turn that just answered, beyond its ACP response. */
+export interface AntigravitySidebandOutcome {
+	/** The latest quota exhaustion recorded since the last read; the turn failed on it. */
+	usageLimit?: AcpUsageLimit;
+	/** Set once the session recorded an error that poisons it; it stays set for this session. */
+	nonResumable?: { reason: "INVALID_THINKING_SIGNATURE" };
 }
 
 export interface AntigravityShims {
@@ -89,6 +100,14 @@ export interface AntigravityShims {
 	question(params: unknown): AntigravityQuestion | null;
 	/** The answer to a question: no choice is made on the operator's behalf. */
 	questionResponse(): AcpRequestPermissionResponse;
+	/** Marks where the session's store stands before its first prompt, so earlier error steps are never reported. */
+	sidebandBaseline(sessionId: string): void;
+	/**
+	 * Error steps agy recorded in its own store since the baseline or the last read, which its ACP answer never
+	 * carried. Read once a prompt has answered; a session with no baseline, or a store that is absent, busy or
+	 * unreadable, reads as nothing new. Never throws.
+	 */
+	sideband(sessionId: string): AntigravitySidebandOutcome;
 	/**
 	 * A tool approval with agy's own tool shape rewritten into one AcpToolMediator judges (probed on 1.5.13):
 	 * `run_command` becomes the shell command it runs, `run_workflow` the inline script it runs, a named tool of a
@@ -257,17 +276,30 @@ function securityWarning(options: ReadonlyArray<unknown>): string | undefined {
 	return undefined;
 }
 
+/** A sideband quota signal as the typed usage limit a delegation result carries. */
+function usageLimitOf(signal: Extract<AntigravitySidebandSignal, { kind: "usage-limit" }>): AcpUsageLimit {
+	const { kind: _kind, idx: _idx, ...limit } = signal;
+	return limit;
+}
+
 /**
  * Antigravity CLI (`agy acp`) shims, applied only to that peer. `command` and `launchArgs` are the resolved launch
- * (profile `~` expanded), so the sign-in hint names the profile this run actually used.
+ * (profile `~` expanded), so the sign-in hint names the profile this run actually used; `profileDir` is that
+ * profile's directory, where agy keeps the per-session store the sideband reads.
  */
 export function createAntigravityShims(input: {
 	command: string;
 	launchArgs: ReadonlyArray<string>;
 	toolGovernance: DelegationToolGovernance;
+	profileDir?: string;
 }): AntigravityShims {
 	let appendsSystemPrompt = false;
 	let promptSteering = false;
+	// Per session: the last step read (null once its history is unknown, so nothing is reported) and the sticky marker.
+	const sidebandSessions = new Map<
+		string,
+		{ cursor: number | null; nonResumable?: { reason: "INVALID_THINKING_SIGNATURE" } }
+	>();
 	const profile = profileArgs(input.launchArgs);
 	const loginCommand = [input.command, "acp", ...profile, "--login"].map(shellWord).join(" ");
 	return {
@@ -375,6 +407,44 @@ export function createAntigravityShims(input: {
 			};
 		},
 		questionResponse: () => ({ outcome: { outcome: "cancelled" } }),
+		sidebandBaseline(sessionId) {
+			const profileDir = input.profileDir;
+			if (profileDir === undefined || sidebandSessions.has(sessionId)) return;
+			const read = readAntigravitySideband({ profileDir, sessionId, afterIdx: "latest" });
+			// A store agy has not written yet holds no history. Any other miss leaves the history unknown, and an old
+			// error must never fail a healthy turn, so the session then reports nothing.
+			const known = read.noSignal === undefined || read.noSignal === "no-database" || read.noSignal === "no-steps-table";
+			sidebandSessions.set(sessionId, { cursor: known ? read.cursor : null });
+		},
+		sideband(sessionId) {
+			const profileDir = input.profileDir;
+			const state = sidebandSessions.get(sessionId);
+			if (profileDir === undefined || state === undefined || state.cursor === null)
+				return state?.nonResumable !== undefined ? { nonResumable: state.nonResumable } : {};
+			let usageLimit: AcpUsageLimit | undefined;
+			let cursor = state.cursor;
+			let drained = false;
+			for (let page = 0; page < MAX_SIDEBAND_PAGES && !drained; page++) {
+				const read = readAntigravitySideband({ profileDir, sessionId, afterIdx: cursor });
+				for (const signal of read.signals) {
+					if (signal.kind === "usage-limit") usageLimit = usageLimitOf(signal);
+					else state.nonResumable = { reason: signal.reason };
+				}
+				// A cursor that did not move means nothing is left to read (or nothing could be).
+				drained = read.cursor === cursor;
+				cursor = read.cursor;
+			}
+			// Past the page bound the rest is skipped, never left to surface on a later turn.
+			if (!drained) {
+				const latest = readAntigravitySideband({ profileDir, sessionId, afterIdx: "latest" });
+				if (latest.noSignal === undefined) cursor = Math.max(cursor, latest.cursor);
+			}
+			state.cursor = cursor;
+			return {
+				...(usageLimit !== undefined ? { usageLimit } : {}),
+				...(state.nonResumable !== undefined ? { nonResumable: state.nonResumable } : {}),
+			};
+		},
 		toolRequest: agyToolRequest,
 	};
 }
