@@ -196,7 +196,10 @@ describe("release workflows", () => {
 		for (const key of ["ci", "runtime-compatibility"]) {
 			const steps: Step[] = workflow.jobs[key].steps;
 			// The userns sysctl step (row 106) needs sudo but installs nothing; package managers stay off the test path.
-			ok(!steps.some((step) => /apt-get|\bapt\s+install|sudo\s+(?!sysctl\b)/u.test(step.run ?? "")), `${key} installs nothing at test time`);
+			ok(
+				!steps.some((step) => /apt-get|\bapt\s+install|sudo\s+(?!sysctl\b)/u.test(step.run ?? "")),
+				`${key} installs nothing at test time`,
+			);
 			ok(
 				steps.some((step) => step.with?.name === "search-tools" && step.with.path === `\${{ runner.temp }}/search-tools`),
 			);
