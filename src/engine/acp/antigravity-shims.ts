@@ -98,9 +98,12 @@ export interface AntigravityShims {
 	question(params: unknown): AntigravityQuestion | null;
 	/** The answer to a question: no choice is made on the operator's behalf. */
 	questionResponse(): AcpRequestPermissionResponse;
+	/** Marks where the session's store stands before its first prompt, so earlier error steps are never reported. */
+	sidebandBaseline(sessionId: string): void;
 	/**
-	 * Error steps agy recorded in its own store since the last read, which its ACP answer never carried. Read once a
-	 * prompt has answered; a store that is absent, busy or unreadable reads as nothing new. Never throws.
+	 * Error steps agy recorded in its own store since the baseline or the last read, which its ACP answer never
+	 * carried. Read once a prompt has answered; a session with no baseline, or a store that is absent, busy or
+	 * unreadable, reads as nothing new. Never throws.
 	 */
 	sideband(sessionId: string): AntigravitySidebandOutcome;
 }
@@ -234,10 +237,11 @@ export function createAntigravityShims(input: {
 }): AntigravityShims {
 	let appendsSystemPrompt = false;
 	let promptSteering = false;
-	// One cursor per session: every step a fresh session records is new to Clio.
-	let sidebandSession: string | null = null;
-	let sidebandCursor = -1;
-	let nonResumable: AntigravitySidebandOutcome["nonResumable"];
+	// Per session: the last step read (null once its history is unknown, so nothing is reported) and the sticky marker.
+	const sidebandSessions = new Map<
+		string,
+		{ cursor: number | null; nonResumable?: { reason: "INVALID_THINKING_SIGNATURE" } }
+	>();
 	const profile = profileArgs(input.launchArgs);
 	const loginCommand = [input.command, "acp", ...profile, "--login"].map(shellWord).join(" ");
 	return {
@@ -345,27 +349,42 @@ export function createAntigravityShims(input: {
 			};
 		},
 		questionResponse: () => ({ outcome: { outcome: "cancelled" } }),
+		sidebandBaseline(sessionId) {
+			const profileDir = input.profileDir;
+			if (profileDir === undefined || sidebandSessions.has(sessionId)) return;
+			const read = readAntigravitySideband({ profileDir, sessionId, afterIdx: "latest" });
+			// A store agy has not written yet holds no history. Any other miss leaves the history unknown, and an old
+			// error must never fail a healthy turn, so the session then reports nothing.
+			const known = read.noSignal === undefined || read.noSignal === "no-database" || read.noSignal === "no-steps-table";
+			sidebandSessions.set(sessionId, { cursor: known ? read.cursor : null });
+		},
 		sideband(sessionId) {
-			if (input.profileDir === undefined) return {};
-			if (sessionId !== sidebandSession) {
-				sidebandSession = sessionId;
-				sidebandCursor = -1;
-				nonResumable = undefined;
-			}
+			const profileDir = input.profileDir;
+			const state = sidebandSessions.get(sessionId);
+			if (profileDir === undefined || state === undefined || state.cursor === null)
+				return state?.nonResumable !== undefined ? { nonResumable: state.nonResumable } : {};
 			let usageLimit: AcpUsageLimit | undefined;
-			for (let page = 0; page < MAX_SIDEBAND_PAGES; page++) {
-				const read = readAntigravitySideband({ profileDir: input.profileDir, sessionId, afterIdx: sidebandCursor });
+			let cursor = state.cursor;
+			let drained = false;
+			for (let page = 0; page < MAX_SIDEBAND_PAGES && !drained; page++) {
+				const read = readAntigravitySideband({ profileDir, sessionId, afterIdx: cursor });
 				for (const signal of read.signals) {
 					if (signal.kind === "usage-limit") usageLimit = usageLimitOf(signal);
-					else nonResumable = { reason: signal.reason };
+					else state.nonResumable = { reason: signal.reason };
 				}
 				// A cursor that did not move means nothing is left to read (or nothing could be).
-				if (read.cursor === sidebandCursor) break;
-				sidebandCursor = read.cursor;
+				drained = read.cursor === cursor;
+				cursor = read.cursor;
 			}
+			// Past the page bound the rest is skipped, never left to surface on a later turn.
+			if (!drained) {
+				const latest = readAntigravitySideband({ profileDir, sessionId, afterIdx: "latest" });
+				if (latest.noSignal === undefined) cursor = Math.max(cursor, latest.cursor);
+			}
+			state.cursor = cursor;
 			return {
 				...(usageLimit !== undefined ? { usageLimit } : {}),
-				...(nonResumable !== undefined ? { nonResumable } : {}),
+				...(state.nonResumable !== undefined ? { nonResumable: state.nonResumable } : {}),
 			};
 		},
 	};

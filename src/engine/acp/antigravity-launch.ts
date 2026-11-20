@@ -59,13 +59,15 @@ function expandHome(value: string, home: string | undefined): string {
 	return value === "~" ? home : value.startsWith("~/") ? path.join(home, value.slice(2)) : value;
 }
 
-/** The last value given for one of `flags`, as `--flag value` or `--flag=value`. */
+/** The last non-empty value given for one of `flags`, as `--flag value` or `--flag=value`; a consumed value is skipped. */
 function flagValue(args: ReadonlyArray<string>, flags: ReadonlySet<string>): string | undefined {
 	let value: string | undefined;
 	for (let index = 0; index < args.length; index++) {
 		const [flag, inline] = (args[index] ?? "").split(/=(.*)/su, 2);
 		if (flag === undefined || !flags.has(flag)) continue;
-		value = inline ?? args[index + 1];
+		const given = inline ?? args[++index];
+		// A trailing flag or an empty value names no directory; agy's default stands.
+		if (given !== undefined && given.trim().length > 0) value = given;
 	}
 	return value;
 }

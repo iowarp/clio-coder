@@ -649,6 +649,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				}
 			}
 			requireActive();
+			agy?.sidebandBaseline(sessionId);
 			promptInFlight = true;
 			const turnPrompt = transport.request<AcpPromptResponse>(
 				"session/prompt",
@@ -701,10 +702,13 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			} else {
 				recordUsage(promptResponse?.usage ?? promptResponse?.tokenUsage, "run", "complete");
 			}
+			const peerFailure = authFailure ?? mapper.reportedFailure();
+			// The quota fails only a turn agy closed as end_turn with no failure of its own; any other end stands.
+			const usageLimit =
+				peerFailure === null && promptResponse?.stopReason === "end_turn" ? sideband.usageLimit : undefined;
 			const reportedFailure =
-				authFailure ??
-				mapper.reportedFailure() ??
-				sideband.usageLimit?.message ??
+				peerFailure ??
+				usageLimit?.message ??
 				(typeof promptResponse?.stopReason === "string" && promptResponse.stopReason.length > 0
 					? null
 					: "ACP prompt response missing stopReason");
@@ -726,7 +730,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				...(reportedFailure !== null || (stopReason !== "end_turn" && stopReason !== "cancelled")
 					? { failureMessage: reportedFailure ?? `ACP stopReason=${stopReason}` }
 					: {}),
-				...(sideband.usageLimit !== undefined ? { usageLimit: sideband.usageLimit } : {}),
+				...(usageLimit !== undefined ? { usageLimit } : {}),
 				delegation: {
 					acpSessionId: sessionId,
 					...(sideband.nonResumable !== undefined ? { nonResumable: sideband.nonResumable } : {}),

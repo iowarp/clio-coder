@@ -223,11 +223,14 @@ describe("dispatch failure classification", () => {
 			strictEqual(decideRetry(classifyTail(tail(status)), 0, 2).retry, false, String(status));
 		}
 		strictEqual(classifyTail(tail(429)), "target-rate-limit");
-		// The ACP adapter's typed usage limit for an Antigravity quota failure moves off the target like a 429.
+		// The ACP adapter's typed usage limit for an Antigravity quota failure moves off the target like a 429; another
+		// runtime's quota or limit wording does not.
 		strictEqual(
 			classifyTail("Antigravity quota exhausted for gemini-x-high; resets at 2026-11-21T01:00:00.000Z"),
 			"target-rate-limit",
 		);
+		for (const tail of ["Error: disk quota exhausted", "inotify watch usage limit reached"])
+			strictEqual(classifyTail(tail), "worker-runtime", tail);
 		strictEqual(classifyTail(tail(408)), "target-transient");
 		strictEqual(decideRetry(classifyTail(tail(408)), 0, 2).retry, true);
 	});
