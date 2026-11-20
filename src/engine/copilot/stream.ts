@@ -1237,6 +1237,8 @@ async function runStep(
 	stream: AssistantMessageEventStream,
 ): Promise<void> {
 	const step = new Step(stream, model);
+	// options.maxTokens has no per-send counterpart in the SDK (only a BYOK provider config takes maxOutputTokens), so a
+	// caller's output cap is advisory here; a compaction summary is stopped only by its stream bound of twice the cap.
 	const signal = options?.signal;
 	// Cancellation is observed from the first moment: an abort during any await below ends the step, and every
 	// await is followed by a check, so nothing is sent to Copilot after it.
