@@ -544,7 +544,7 @@ const rows: Row[] = [
 			},
 			present: [
 				profile === "v2"
-					? "An undeclared `intent.verification` check id is refused with the declared ids named, so you need no `verify()`"
+					? "An undeclared `intent.verification` check id is refused naming the declared ids; no"
 					: "an undeclared id is refused with the declared ids named, so no verify()",
 			],
 		}),
