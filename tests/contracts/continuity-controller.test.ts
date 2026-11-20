@@ -11,6 +11,7 @@ import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import {
 	ContinuityController,
 	type ContinuityReductionHooks,
+	selfCompactSiblingRefusal,
 } from "../../src/session-control/continuity-controller.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
@@ -391,6 +392,86 @@ test("registered native tool completes three engine-driven handoffs through awai
 			strictEqual(f.fold()?.validated, true);
 		}
 		strictEqual(invocation, 6);
+	} finally {
+		await registration.close();
+	}
+});
+
+test("a self_compact beside a read is refused alone while the read runs, so the batch costs no round", async () => {
+	const f = fixture();
+	const registry = createRegistry({ safety: createWorkerSafety({ cwd: process.cwd() }) });
+	const registration = registerAllTools(registry, {
+		mcpCapabilities: false,
+		requestSelfCompact: (note, id, signal) => f.controller.request(note, id, signal),
+	});
+	const model: EngineModel = {
+		id: "fixture",
+		name: "fixture",
+		api: "openai-completions",
+		provider: "fixture",
+		baseUrl: "https://fixture.invalid",
+		reasoning: false,
+		input: ["text"],
+		contextWindow: 32768,
+		maxTokens: 2048,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	};
+	let invocation = 0;
+	const ended = new Map<string, { isError: boolean; text: string }>();
+	const handle = createEngineAgent({
+		initialState: {
+			model,
+			thinkingLevel: "off",
+			tools: resolveAgentTools({ registry, allowedTools: [ToolNames.SelfCompact, ToolNames.Read] }),
+		},
+		beforeToolCall: async ({ assistantMessage, toolCall }) => selfCompactSiblingRefusal(toolCall, assistantMessage),
+		transcriptStreamFn() {
+			const batch = invocation++ === 0;
+			const message: AssistantMessage = {
+				role: "assistant",
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				timestamp: Date.now(),
+				stopReason: batch ? "toolUse" : "stop",
+				content: batch
+					? [
+							{ type: "toolCall", id: "read-1", name: ToolNames.Read, arguments: { path: "package.json" } },
+							{
+								type: "toolCall",
+								id: "compact-1",
+								name: "gateway",
+								arguments: { op: "call", capability: "self_compact", args: { note_to_self: "Keep the slice." } },
+							},
+						]
+					: [{ type: "text", text: "Done." }],
+				usage: {
+					input: 100,
+					output: 10,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 110,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+			};
+			const stream = createAssistantMessageEventStream();
+			stream.push({ type: "done", reason: batch ? "toolUse" : "stop", message });
+			return stream;
+		},
+	});
+	handle.agent.subscribe((event) => {
+		if (event.type !== "tool_execution_end") return;
+		const content = (event.result as { content?: Array<{ type: string; text?: string }> }).content ?? [];
+		ended.set(event.toolCallId, { isError: event.isError, text: content.map((block) => block.text ?? "").join("") });
+	});
+	try {
+		await handle.agent.prompt("Read the manifest and compact.");
+		strictEqual(ended.get("read-1")?.isError, false, "the sibling read runs");
+		match(ended.get("read-1")?.text ?? "", /@iowarp\/clio-coder/);
+		strictEqual(ended.get("compact-1")?.isError, true);
+		match(ended.get("compact-1")?.text ?? "", /self_compact must be called alone: it did not run/);
+		deepStrictEqual(f.log, [], "no handoff was prepared");
+		strictEqual(invocation, 2);
 	} finally {
 		await registration.close();
 	}

@@ -31,7 +31,7 @@ import { MODEL_ADMISSION } from "../engine/model-admission.js";
 import { createRequestStructures } from "../engine/request-structure.js";
 import { type AttemptReceipt, carriedCheckpoints, type RequestCursor } from "./attempt-receipt.js";
 import { firstTokenStallLimitMs } from "./chat-loop-policy.js";
-import type { ContinuityController } from "./continuity-controller.js";
+import { type ContinuityController, selfCompactSiblingRefusal } from "./continuity-controller.js";
 import { resolveFitOutputReserve, turnAdmissionRemedy } from "./output-reserve.js";
 import { prefixBlocksOf } from "./prefix-blocks.js";
 /**
@@ -1295,16 +1295,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			steeringMode: "all",
 			followUpMode: "all",
 			...(gatewaySessionId ? { sessionId: gatewaySessionId } : {}),
-			beforeToolBatch: ({ assistantMessage }) => {
-				const calls = assistantMessage.content.filter((block) => block.type === "toolCall");
-				if (
-					calls.some((call) => effectiveToolCall(call.name, call.arguments).toolName === "self_compact") &&
-					calls.length !== 1
-				) {
-					return { reason: "self_compact must be the only call in its batch; no sibling was executed." };
-				}
-				return undefined;
-			},
+			beforeToolCall: async ({ assistantMessage, toolCall }) => selfCompactSiblingRefusal(toolCall, assistantMessage),
 			beforeStreamRequest: stageAdmission(async ({ model, context: request, options: streamOptions }, hold) => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
 				callTracking = null;
