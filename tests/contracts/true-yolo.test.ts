@@ -408,6 +408,12 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 	}
 	const staged = `export CLIO_CODER_HOME=${scratchHome}; mkdir -p $CLIO_CODER_HOME/state && echo x > "\${CLIO_CODER_HOME}/state/f"`;
 	strictEqual(engine.evaluate(bash(staged), "yolo", OPERATOR_YOLO).kind, "allow", staged);
+	// FX-7: `$TMPDIR` is the temp directory this process runs commands with, so a scratch file there deletes as one.
+	const scratchRm = bash('rm -f "$TMPDIR/probe.test.ts"');
+	const atDefault = { level: "default", scratchRoots: [], sandbox: true, snapshots: true } as const;
+	strictEqual(engine.evaluate(scratchRm, "default", atDefault).kind, "allow");
+	strictEqual(engine.evaluate(scratchRm, "yolo", OPERATOR_YOLO).reasonCode.startsWith("yolo-admitted"), false);
+	strictEqual(engine.evaluate(bash('rm -rf "$TMPDIR"'), "default", atDefault).kind, "ask");
 	// Reading Clio's own state, cleaning the workspace and writing /dev/null stay off the floor.
 	for (const command of [
 		`cat ${join(home.dir, "config", "settings.yaml")}`,

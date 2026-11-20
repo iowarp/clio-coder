@@ -87,6 +87,15 @@ test("a settings CLI call is blocked at default, unsandboxed or not, and on the 
 	strictEqual(engine.evaluate(bash("clio-coder config set nope.key 1")).reasonCode, "settings-authority");
 	for (const command of ["cat nope.key", "./clio-coder config get nope.key", "clio-coder config get ../nope.key"])
 		strictEqual(engine.evaluate(bash(command)).reasonCode, "secret_path_bash", command);
+	// FX-7: a glob entry holds only a word in a path position or naming a file; `event.key` in a script or text is a field.
+	for (const command of [
+		"sed -i 's/event.key/e.code/' src/x.ts",
+		"echo event.key",
+		"cat > y.ts <<'EOF'\nevent.key\nEOF",
+	])
+		strictEqual(engine.evaluate(bash(command)).kind, "allow", command);
+	for (const command of ["wc -c < nope.key", "if head nope.key; then :; fi", "od -c *.key"])
+		strictEqual(engine.evaluate(bash(command)).reasonCode, "secret_path_bash", command);
 });
 
 // The floor binds model tool calls only: the operator's own `!` line is theirs to run.

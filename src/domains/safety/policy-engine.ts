@@ -2273,9 +2273,24 @@ function evaluateBashZeroAccessRead(
 	const memo = createPathWalkMemo();
 	const judged = new Set<string>();
 	for (const token of roles.reads) {
+	// A glob entry such as `*.key` names a file by its suffix alone, so it holds a word only in a path position or one
+	// that names a file on disk: `event.key` in a sed script, a heredoc or an echo is a field, not a key file (FX-7).
+	let literalPolicy: CompiledPathPolicy | null = null;
 		if (judged.has(token)) continue;
 		judged.add(token);
-		const decision = evaluatePathPolicy(zeroAccessPolicy, "read", token, callCwd, memo);
+		let decision = evaluatePathPolicy(zeroAccessPolicy, "read", token, callCwd, memo);
+		if (
+			decision.kind === "block" &&
+			!roles.pathOperands.has(token) &&
+			!pathExistsAt(token, callCwd) &&
+			!(token.startsWith("@") && pathExistsAt(token.slice(1), callCwd))
+		) {
+			literalPolicy ??= {
+				...zeroAccessPolicy,
+				entries: zeroAccessPolicy.entries.filter((entry) => entry.pattern === undefined),
+			};
+			decision = evaluatePathPolicy(literalPolicy, "read", token, callCwd, memo);
+		}
 		if (decision.kind === "block") {
 			return { verb: "read", token, entrySource: `zeroAccessPaths entry ${decision.matchedPath}` };
 		}
@@ -2362,6 +2377,12 @@ interface BashOperandRoles {
 	/** Words judged as reads: everything that is not a write destination, a search pattern or an exclusion. */
 	reads: string[];
 	writes: BashWriteOperand[];
+	/**
+	 * The reads in a path position: an input redirect operand, a file operand of a known reader, a copy source or a
+	 * search operand, and any word the shell expands (`$`, a backtick, an unquoted glob). Only these, and words naming
+	 * a file that exists, meet glob entries such as `*.key`.
+	 */
+	pathOperands: Set<string>;
 	searches: RecursiveSearch[];
 }
 
@@ -2390,12 +2411,13 @@ const ROLE_PREFIX_WRAPPERS: ReadonlySet<string> = new Set([
  * with their roots so their walk can be judged.
  */
 function bashOperandRoles(command: string): BashOperandRoles {
-	const roles: BashOperandRoles = { reads: [], writes: [], searches: [] };
+	const roles: BashOperandRoles = { reads: [], pathOperands: new Set(), writes: [], searches: [] };
 	const inner = inlineShellScript(command);
 	if (inner !== null && inner !== command) {
 		const nested = bashOperandRoles(inner);
 		roles.reads.push(...nested.reads);
 		roles.writes.push(...nested.writes);
+		for (const operand of nested.pathOperands) roles.pathOperands.add(operand);
 		roles.searches.push(...nested.searches);
 	}
 	let segment: ShellToken[] = [];
@@ -2411,18 +2433,98 @@ function bashOperandRoles(command: string): BashOperandRoles {
 	return roles;
 }
 
-function pushReadCandidate(token: string, reads: string[]): void {
+function pushReadCandidate(token: string, reads: string[], pathOperands: Set<string> | null): void {
 	if (token.length === 0) return;
 	if (/\s/.test(token) && !token.includes("/")) return;
 	if (token.startsWith("-") && !token.includes("/") && !token.includes("=")) return;
 	reads.push(token);
 	const eq = token.indexOf("=");
-	if (eq > 0 && eq < token.length - 1) reads.push(token.slice(eq + 1));
+	pathOperands?.add(token);
+	if (eq > 0 && eq < token.length - 1) {
+		reads.push(token.slice(eq + 1));
+		pathOperands?.add(token.slice(eq + 1));
+	}
+}
+
+/**
+ * Commands whose operands are files they open and print or hash: a word after one of these names a file even when it
+ * does not exist yet (an earlier step may create it). Others reach a glob entry only through a word naming a file.
+ */
+const FILE_READERS: ReadonlySet<string> = new Set([
+	"cat",
+	"tac",
+	"nl",
+	"head",
+	"tail",
+	"less",
+	"more",
+	"bat",
+	"batcat",
+	"wc",
+	"sort",
+	"uniq",
+	"cut",
+	"paste",
+	"join",
+	"comm",
+	"diff",
+	"cmp",
+	"base64",
+	"base32",
+	"basenc",
+	"xxd",
+	"od",
+	"hexdump",
+	"hd",
+	"strings",
+	"file",
+	"stat",
+	"md5sum",
+	"sha1sum",
+	"sha256sum",
+	"sha512sum",
+	"shasum",
+	"b2sum",
+	"cksum",
+	"source",
+	".",
+	"openssl",
+	"ssh-keygen",
+	"ssh-add",
+	"gpg",
+	"scp",
+	"rsync",
+	"tar",
+	"zip",
+	"gzip",
+	"zcat",
+	"xz",
+	"bzip2",
+	"zstd",
+]);
+
+/** Reserved words that may stand before the command word of a segment (`if cat x.key; then`). */
+const READER_PREFIX_WORDS: ReadonlySet<string> = new Set([
+	"{",
+	"!",
+	"if",
+	"then",
+	"elif",
+	"else",
+	"while",
+	"until",
+	"do",
+]);
+
+/** A word the shell expands before the command sees it, so its literal text is no file name to test. */
+function shellExpandsWord(token: ShellToken): boolean {
+	return /[$`]/u.test(token.value) || (!token.quoted && /[*?[{]/u.test(token.value));
 }
 
 function segmentOperandRoles(tokens: ReadonlyArray<ShellToken>, roles: BashOperandRoles): void {
 	const skipped = new Set<ShellToken>();
 	const words: ShellToken[] = [];
+	const inputs: ShellToken[] = [];
 	for (let index = 0; index < tokens.length; index += 1) {
 		const token = tokens[index];
 		if (token === undefined) continue;
@@ -2442,7 +2544,9 @@ function segmentOperandRoles(tokens: ReadonlyArray<ShellToken>, roles: BashOpera
 				roles.writes.push({ target: next.value, sources: [], intoDirectory: false });
 			}
 		} else if (ROLE_OTHER_REDIRECTS.has(token.value)) {
-			// Input redirects stay reads; they are just not command arguments.
+			// Input redirects stay reads; they are just not command arguments. `< f` and `<> f` open a file, while a
+			// here-document delimiter and a here-string are text.
+			if (token.value === "<" || token.value === "<>") inputs.push(next);
 			index += 1;
 		}
 	}
@@ -2457,22 +2561,37 @@ function segmentOperandRoles(tokens: ReadonlyArray<ShellToken>, roles: BashOpera
 		} else break;
 	}
 	const head = words[at];
+	const positioned = new Set<ShellToken>(inputs);
 	if (head !== undefined) {
 		const name = path.basename(head.value);
 		const args = words.slice(at + 1);
-		if (name === "cp" || name === "mv" || name === "install" || name === "ln")
+		let reader = at;
+		while (READER_PREFIX_WORDS.has(words[reader]?.value ?? "")) reader += 1;
+		const readerWord = words[reader]?.value ?? "";
+		// A program named by path (`./tool`, `bin/run`) is the workspace's own code, so any operand may be a file it opens.
+		if (FILE_READERS.has(path.basename(readerWord)) || readerWord.includes("/")) {
+			for (const arg of words.slice(reader + 1)) positioned.add(arg);
+		}
+		if (name === "cp" || name === "mv" || name === "install" || name === "ln") {
+			for (const arg of args) positioned.add(arg);
 			copyOperandRoles(name, args, skipped, roles);
-		else if (name === "tee") {
+		} else if (name === "tee") {
 			for (const arg of args) {
 				if (arg.value.startsWith("-")) continue;
 				skipped.add(arg);
 				roles.writes.push({ target: arg.value, sources: [], intoDirectory: false });
 			}
 		} else if (name === "clio-coder" && head.value === name) settingsPathOperand(args, skipped);
-		else searchOperandRoles(name, args, skipped, roles);
+		else if (searchOperandRoles(name, args, skipped, roles)) {
+			// What the search leaves after its pattern and exclusions are the files and roots it opens.
+			for (const arg of args) positioned.add(arg);
+		}
 	}
 	for (const token of tokens) {
-		if (!token.operator && !skipped.has(token)) pushReadCandidate(token.value, roles.reads);
+		if (token.operator || skipped.has(token)) continue;
+		// An unquoted word spelled with a separator (`../x.key`) is a path wherever it stands; a quoted script is not.
+		const pathPosition = positioned.has(token) || shellExpandsWord(token) || (!token.quoted && token.value.includes("/"));
+		pushReadCandidate(token.value, roles.reads, pathPosition ? roles.pathOperands : null);
 	}
 }
 
@@ -2746,7 +2865,7 @@ function searchOperandRoles(
 	rawArgs: ReadonlyArray<ShellToken>,
 	skipped: Set<ShellToken>,
 	roles: BashOperandRoles,
-): void {
+): boolean {
 	let tool: RecursiveSearchTool;
 	let syntax: SearchSyntax;
 	let args = rawArgs;
@@ -2771,11 +2890,11 @@ function searchOperandRoles(
 			else if (value.startsWith("-")) index += 1;
 			else break;
 		}
-		if (rawArgs[index]?.value !== "grep") return;
+		if (rawArgs[index]?.value !== "grep") return false;
 		tool = "git grep";
 		syntax = GIT_GREP_SEARCH_SYNTAX;
 		args = rawArgs.slice(index + 1);
-	} else return;
+	} else return false;
 	const parsed = parseSearchArgs(args, syntax);
 	// The pattern (and an -e value) is a regular expression, never opened.
 	for (const entry of parsed.values) {
@@ -2801,7 +2920,7 @@ function searchOperandRoles(
 		if (pattern !== undefined) skipped.add(pattern);
 	}
 	const recursive = tool === "grep" ? recursesDirectories(args.map((arg) => arg.value)) : tool !== "rg" || !listsOnly;
-	if (!recursive) return;
+	if (!recursive) return true;
 	const excludes: string[] = [];
 	const excludeDirs: string[] = [];
 	for (const entry of parsed.values) {
@@ -2838,6 +2957,7 @@ function searchOperandRoles(
 		trackedOnly: tool === "git grep" && !parsed.flags.includes("--untracked") && !parsed.flags.includes("--no-index"),
 	});
 }
+	return true;
 
 function globExpression(glob: string): RegExp {
 	let source = "";

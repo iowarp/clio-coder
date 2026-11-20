@@ -445,6 +445,20 @@ function deleteTargetReason(
 	return inScratch ? null : `${DELETE_PATH_REASON_PREFIX}outside-workspace: ${abs}`;
 }
 
+/**
+ * `$TMPDIR` and `${TMPDIR}` spelled as this process's temp directory, which a command run from it inherits, so
+ * `rm "$TMPDIR/probe.ts"` lands where `rm /that/dir/probe.ts` does and meets the same scratch rule (FX-7). Only while
+ * the variable names the directory `tmpdir()` resolves to; any other variable stays named at run time.
+ */
+function expandTempDirVariable(word: string | null): string | null {
+	if (word === null || !word.includes("TMPDIR")) return word;
+	const value = process.env.TMPDIR?.trim().replace(/(.)\/+$/u, "$1");
+	if (value === undefined || value.length === 0 || !path.isAbsolute(value) || /[$`]/u.test(value)) return word;
+	const temp = canonicalizePath(tmpdir());
+	if (temp === null || canonicalizePath(value) !== temp) return word;
+	return word.replace(/\$\{TMPDIR\}|\$TMPDIR(?![A-Za-z0-9_])/gu, () => value);
+}
+
 function deleteEventReasons(
 	event: Extract<CommandPathEvent, { kind: "delete" }>,
 	bases: ShellBases,
@@ -453,7 +467,7 @@ function deleteEventReasons(
 	if (event.scope === "input") return [`${DELETE_PATH_REASON_PREFIX}unresolved: operands from input`];
 	if (event.scope === "remote") return [`${DELETE_PATH_REASON_PREFIX}remote: ${event.target}`];
 	const raw = event.target;
-	const expanded = expandShellHome(raw);
+	const expanded = expandTempDirVariable(expandShellHome(raw));
 	// A variable or substitution is named only at run time.
 	if (expanded === null || /[$`]/u.test(expanded)) return [`${DELETE_PATH_REASON_PREFIX}unresolved: ${raw}`];
 	let target = expanded;
