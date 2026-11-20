@@ -1,6 +1,7 @@
 /** Pure bounded agent admission, cold priors, and agent-role readiness views. */
 
 import type { ToolName } from "../../core/tool-names.js";
+import { type DispatchJob, dispatchJobRecipe } from "../agents/dispatch-jobs.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import {
 	AGENT_AUTOMATION_AUTHORITIES,
@@ -35,6 +36,7 @@ export type AgentTaskType =
 	| "config"
 	| "research"
 	| "world_knowledge"
+	| "run_records"
 	| "unknown";
 export type AgentTaskComplexity = "trivial" | "simple" | "moderate" | "complex";
 export type AgentTaskDomain = "frontend" | "backend" | "infra" | "data" | "security" | "general";
@@ -42,6 +44,8 @@ export type AgentTaskDomain = "frontend" | "backend" | "infra" | "data" | "secur
 /** Bounded task features. Raw task text never enters a decision or route history. */
 export interface AgentTaskFeatures {
 	taskType: AgentTaskType;
+	/** The job-table row this task resolves to (`dispatch-jobs.ts`). */
+	job: DispatchJob;
 	complexity: AgentTaskComplexity;
 	domain: AgentTaskDomain;
 	decomposable: boolean;
@@ -72,7 +76,68 @@ const TASK_TYPE_RULES: ReadonlyArray<readonly [AgentTaskType, RegExp]> = [
 // run tests. The ordered generic `test` rule below would otherwise consume it.
 const LEADING_READ_TASK =
 	/^(?:please\s+)?(?:read|inspect|explain|summarize|describe|map|locate|trace|look at|find where)\b/i;
-const MUTATION_REQUEST = /\b(?:write|implement|add|create|build|develop|fix|edit|change|modify|refactor|update)\b/i;
+/**
+ * The repair family: a fix asked for by any of these verbs is the same change.
+ * One list, so "resolve the parser crash" reads like "fix the parser crash".
+ * patch, address and correct are also nouns and adjectives ("labels: correct,
+ * incorrect"), so they ask for a change only with an object after them.
+ */
+const FIX_VERBS =
+	"fix|repair|resolve|(?:patch|address|correct)(?=\\s+(?:the|this|that|a|an|any|it|these|those|all)\\b)";
+const MUTATION_REQUEST = new RegExp(
+	`\\b(?:write|implement|add|create|build|develop|${FIX_VERBS}|edit|change|modify|refactor|update)\\b`,
+	"i",
+);
+/** A polite request ("could you fix ...", "can we add ...") is an instruction, not a question; it is read without its lead. */
+const POLITE_REQUEST_LEAD =
+	/^(?:please\s+)?(?:(?:can|could|would|will)\s+you|(?:can|could|should|shall)\s+(?:we|i))\s+(?:please\s+)?/i;
+/** Sentence breaks; a path's dot (`src/a.ts`) is not one. */
+const SENTENCE_BREAK = /(?<=[.!?])\s+/;
+/** A task about a dispatched run's record: it names a run (run id, run record, run receipt). */
+const RUN_RECORD_TASK = /\b(?:run[\s_-]?(?:records?|ids?|receipts?)|runIds?)\b/i;
+/**
+ * A mutation asked for rather than mentioned. The verb has to open a clause, so
+ * "do not edit files" and "verify the fix" stay reports while "run the tests
+ * and fix any failures" stays a change. Writing up the report itself is not a
+ * mutation unless it names somewhere on disk to put it.
+ */
+const IMPERATIVE_MUTATION = new RegExp(
+	`(?:^|[.;:!?,\\n]\\s*|\\b(?:and|then|also|please|must|should|need to|needs to)\\s+)(?:implement|add|create|build(?=\\s+(?:a|an|the\\s+(?:new|missing))\\b)|develop|${FIX_VERBS}|edit|change|modify|refactor|update|write(?!\\s+(?:up\\s+)?(?:(?:a|an|the|your)\\s+)?(?:\\w+\\s+)?(?:report|summary)\\b(?!\\s+(?:to|into|in|on)\\b)))\\b`,
+	"i",
+);
+
+/**
+ * A mutation verb whose object is nothing is a prohibition. "Change nothing."
+ * opens a clause with "change", so it is removed before the imperative check;
+ * "fix it and change nothing else" still mutates through "fix". A sentence that
+ * carries an exception ("change nothing in x.ts except the limit") is kept.
+ */
+const MUTATION_PROHIBITION =
+	/(?:\b(?:change|edit|modify|touch|write|alter|update)\s+(?:nothing|no\s+(?:files?|code|sources?)|none\s+of\s+(?:it|them|the\s+\w+))\b(?:\s+else\b)?|\bleave\s+(?:(?!\b(?:and|then|but|except|also|unchanged|untouched|as[\s-]is|alone|intact)\b)[^.;,\n]){0,60}?\b(?:unchanged|untouched|as[\s-]is|alone|intact)\b)(?=(?:(?!\b(?:except|but|other\s+than|besides|apart\s+from|aside\s+from|save\s+for|beyond|unless)\b|[.!?](?:\s|$))[^;\n])*(?:[.!?](?:\s|$)|[;\n]|$))/gi;
+
+/**
+ * Each sentence as the request it makes, polite lead removed, and whether it
+ * asks for an answer: a sentence ending in "?" does, unless a polite lead
+ * makes it a request.
+ */
+function taskSentences(task: string): Array<{ request: string; question: boolean }> {
+	return task
+		.trim()
+		.split(SENTENCE_BREAK)
+		.filter((sentence) => sentence.length > 0)
+		.map((sentence) => ({
+			request: sentence.replace(POLITE_REQUEST_LEAD, ""),
+			question: !POLITE_REQUEST_LEAD.test(sentence) && /\?\s*$/.test(sentence),
+		}));
+}
+
+/** Judged per sentence: a question ("which dependency do we need to patch?") asks for an answer, not a change. */
+export function asksForMutation(task: string): boolean {
+	return taskSentences(task.replace(MUTATION_PROHIBITION, " ")).some(
+		(sentence) => !sentence.question && IMPERATIVE_MUTATION.test(sentence.request),
+	);
+}
+
 const DOMAIN_RULES: ReadonlyArray<readonly [AgentTaskDomain, RegExp]> = [
 	["security", /\b(security|vulnerabilit|auth|credential|secret|cve)\b/i],
 	["frontend", /\b(ui|css|react|component|frontend|tui|overlay)\b/i],
@@ -81,12 +146,52 @@ const DOMAIN_RULES: ReadonlyArray<readonly [AgentTaskDomain, RegExp]> = [
 	["backend", /\b(api|server|endpoint|database|backend|service)\b/i],
 ];
 
+/**
+ * The job a task shape asks for. A shape is a change only when the task asks
+ * for one: "run the tests" is a check and "why does this crash" a diagnosis,
+ * while "add a test" and "resolve the crash" write. A task with a question in it
+ * or led by a read verb that asks for no change (`readOnly`) never gets a
+ * writing job, so "where is the configuration loaded?" is an inspection.
+ */
+function jobForTaskShape(taskType: AgentTaskType, mutates: boolean, readOnly: boolean): DispatchJob {
+	switch (taskType) {
+		case "code_read":
+		case "unknown":
+			return mutates ? "implement" : "inspect";
+		case "code_review":
+			return "review";
+		case "test":
+			return mutates ? "add-tests" : "check";
+		case "debug":
+			return mutates ? "implement" : "diagnose";
+		case "docs":
+			return readOnly ? "inspect" : "docs";
+		case "research":
+			return "research";
+		case "world_knowledge":
+			return "open-world";
+		case "run_records":
+			return "run-records";
+		case "code_write":
+		case "refactor":
+		case "config":
+			return readOnly ? "inspect" : "implement";
+	}
+}
+
 export function classifyAgentTask(task: string): AgentTaskFeatures {
 	const text = task.trim();
-	const taskType =
-		LEADING_READ_TASK.test(text) && !MUTATION_REQUEST.test(text)
-			? "code_read"
-			: (TASK_TYPE_RULES.find(([, pattern]) => pattern.test(text))?.[0] ?? "unknown");
+	const request = text.replace(POLITE_REQUEST_LEAD, "");
+	const mutates = asksForMutation(text);
+	const readOnly =
+		!mutates && (taskSentences(text).some((sentence) => sentence.question) || LEADING_READ_TASK.test(request));
+	const taskType: AgentTaskType =
+		!mutates && RUN_RECORD_TASK.test(request)
+			? "run_records"
+			: LEADING_READ_TASK.test(request) && !MUTATION_REQUEST.test(request)
+				? "code_read"
+				: (TASK_TYPE_RULES.find(([, pattern]) => pattern.test(request))?.[0] ?? "unknown");
+	const job = jobForTaskShape(taskType, mutates, readOnly);
 	const domain = DOMAIN_RULES.find(([, pattern]) => pattern.test(text))?.[0] ?? "general";
 	const words = text.split(/\s+/u).filter(Boolean).length;
 	const complexity: AgentTaskComplexity =
@@ -96,6 +201,7 @@ export function classifyAgentTask(task: string): AgentTaskFeatures {
 	const estimatedSubtasks = Math.max(1, Math.min(4, enumerated > 1 ? enumerated : conjunctions > 0 ? 2 : 1));
 	return {
 		taskType,
+		job,
 		complexity,
 		domain,
 		decomposable: estimatedSubtasks > 1,
@@ -236,25 +342,23 @@ export function agentRouteCandidates(input: {
 	};
 }
 
+/** Tag and contract signals per task shape; the recipe itself comes from the job table. */
 const TASK_SIGNALS: Readonly<
-	Partial<
-		Record<AgentTaskType, { ids: ReadonlyArray<string>; tags: ReadonlyArray<string>; contracts: ReadonlyArray<string> }>
-	>
+	Partial<Record<AgentTaskType, { tags: ReadonlyArray<string>; contracts: ReadonlyArray<string> }>>
 > = {
-	code_read: { ids: ["scout"], tags: ["reconnaissance", "symbols", "codewiki"], contracts: ["scout-report"] },
-	research: { ids: ["researcher"], tags: ["sources", "external-context", "papers"], contracts: ["research-report"] },
+	code_read: { tags: ["reconnaissance", "symbols", "codewiki"], contracts: ["scout-report"] },
+	research: { tags: ["sources", "external-context", "papers"], contracts: ["research-report"] },
 	world_knowledge: {
-		ids: ["world-knowledge"],
 		tags: ["open-world", "ecosystem", "current-context", "second-opinion"],
 		contracts: ["world-knowledge-report"],
 	},
-	code_review: { ids: ["verifier"], tags: ["review", "verification"], contracts: ["verifier-report"] },
-	debug: { ids: ["debugger"], tags: ["debugging", "root-cause"], contracts: ["debugger-report"] },
-	test: { ids: ["verifier", "tester"], tags: ["tests", "validation", "regression"], contracts: ["verifier-report"] },
-	docs: { ids: ["documenter"], tags: ["docs", "runbooks", "examples"], contracts: ["mutation-report"] },
-	code_write: { ids: ["coder"], tags: ["implementation", "repair"], contracts: ["mutation-report"] },
-	refactor: { ids: ["coder"], tags: ["refactor", "implementation"], contracts: ["mutation-report"] },
-	config: { ids: ["coder"], tags: ["implementation", "operations"], contracts: ["mutation-report"] },
+	code_review: { tags: ["review", "verification"], contracts: ["review-verdict", "verifier-report"] },
+	debug: { tags: ["debugging", "root-cause"], contracts: ["debugger-report"] },
+	test: { tags: ["tests", "validation", "regression"], contracts: ["verifier-report"] },
+	docs: { tags: ["docs", "runbooks", "examples"], contracts: ["mutation-report"] },
+	code_write: { tags: ["implementation", "repair"], contracts: ["mutation-report"] },
+	refactor: { tags: ["refactor", "implementation"], contracts: ["mutation-report"] },
+	config: { tags: ["implementation", "operations"], contracts: ["mutation-report"] },
 };
 
 function coldPrior(features: AgentTaskFeatures, spec: AgentSpec): { prior: RoutePrior; reasons: string[] } {
@@ -263,7 +367,7 @@ function coldPrior(features: AgentTaskFeatures, spec: AgentSpec): { prior: Route
 	const signal = TASK_SIGNALS[features.taskType];
 	if (signal === undefined) return { prior, reasons };
 	const matches =
-		signal.ids.includes(spec.id) ||
+		spec.id === dispatchJobRecipe(features.job) ||
 		spec.tags.some((tag) => signal.tags.includes(tag)) ||
 		signal.contracts.includes(spec.resultContract.kind);
 	if (!matches) return { prior, reasons };

@@ -37,6 +37,7 @@ import {
 	gateDeciderAgentId,
 	gateRouteCorrelation,
 	type RouteCorrelationFacts,
+	reviewDeciderAgentId,
 } from "../domains/dispatch/execution-role.js";
 import {
 	decideReviewGate,
@@ -1216,7 +1217,7 @@ async function runReviewGated(
 				};
 			}
 			const reviewerRequest: DispatchRequest = {
-				agentId: gateDeciderAgentId(review.reviewer),
+				agentId: reviewDeciderAgentId(review.reviewer, (id) => deps.getAgentSpecs().some((spec) => spec.id === id)),
 				...(base.budget === undefined ? {} : { budget: base.budget }),
 				...(base.record === undefined ? {} : { record: base.record }),
 				executionRole: "reviewer",
