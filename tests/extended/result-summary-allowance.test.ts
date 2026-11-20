@@ -283,6 +283,8 @@ it("seals a conforming report larger than the receipt floor without truncation, 
 function setup(outputs: readonly string[]) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;
+	// A run that answers nothing must not cool the target down for the rest of its batch.
+	settings.fleet.retry.breakerThreshold = 100;
 	settings.safety.autonomy = "yolo";
 	// Room for the twelve-run batch (M3).
 	const context = dispatchStubContext({ settings, scheduling: { maxWorkers: () => 12 } });
@@ -375,7 +377,7 @@ it("round-trips a 1200-word cited Coder explanation through dispatch, the receip
 });
 
 it("fixes one answer budget per run at dispatch: told to the worker, sealed, and the same at sync, collect and record (M3)", {
-	timeout: 20_000,
+	timeout: 30_000,
 }, async () => {
 	const body = (name: string, bytes: number) =>
 		report(`${`${name} note. `.repeat(Math.ceil(bytes / (name.length + 7))).slice(0, bytes)} ${name} closing.`);
@@ -476,6 +478,53 @@ it("fixes one answer budget per run at dispatch: told to the worker, sealed, and
 		ok(Buffer.byteLength(formatted, "utf8") <= 20_000, String(Buffer.byteLength(formatted, "utf8")));
 	} finally {
 		await batch.bundle.extension.stop?.();
+	}
+	// At max_output_bytes 1024 not even the twelve headings fit: no run vanishes, each shown run keeps its id, outcome and
+	// retrieval call, and one closing line names the rest. A run that sealed no answer points at its record instead.
+	const tight = setup(["", ...twelve.slice(1)]);
+	await tight.bundle.extension.start();
+	try {
+		const result = await tight.dispatch.run(
+			{
+				tasks: twelve.map((_, index) => ({ agent: "coder", task: `Explain part ${index + 1}.` })),
+				intent,
+				max_output_bytes: 1_024,
+			},
+			{},
+		);
+		// The silent run fails the batch, so the result is an error carrying the same formatted body.
+		const body = result.kind === "ok" ? result.output : result.message;
+		// The agent ledger board follows the runs outside their budget, as on every board dispatch.
+		const formatted = (body.split("\n\nagent ledger (")[0] ?? "")
+			.split("\n")
+			.filter((line) => !line.startsWith("[dispatch normalize]"))
+			.join("\n")
+			.trimStart();
+		ok(Buffer.byteLength(formatted, "utf8") <= 1_024, formatted);
+		const runIds = ((result.details as { terminalRunIds?: string[] } | undefined)?.terminalRunIds ?? []).slice();
+		strictEqual(runIds.length, 12);
+		const silent = runIds.find((runId) => {
+			const receipt = readVerifiedRun(clioStateDir(), runId);
+			return !twelve.includes((receipt ? resolvedRunResult(receipt).output?.text : undefined) ?? "");
+		});
+		ok(silent);
+		const answer = await tight.monitor.run({ mode: "answer", run_id: silent }, {});
+		ok(answer.kind === "error" || answer.output === "", "the silent run has no answer for mode=answer to return");
+		ok(formatted.includes(`monitor(mode="record", run_id=${JSON.stringify(silent)})`), formatted);
+		ok(!formatted.includes(`monitor(mode="answer", run_id=${JSON.stringify(silent)})`), formatted);
+		const omitted = /runs omitted by this result's 1024-byte cap; monitor\(mode="collect", run_ids=(\[[^\]]*\])\)/u.exec(
+			formatted,
+		);
+		const named = omitted?.[1] !== undefined ? (JSON.parse(omitted[1]) as string[]) : [];
+		ok(named.length > 0 && named.length < 12, formatted);
+		for (const runId of runIds) {
+			const shown = new RegExp(`^- ${runId} .*monitor\\(mode="(answer|record)", run_id="${runId}"\\)`, "mu").test(
+				formatted,
+			);
+			ok(shown !== named.includes(runId), `${runId} is shown with its retrieval call or named once as omitted`);
+		}
+	} finally {
+		await tight.bundle.extension.stop?.();
 	}
 });
 

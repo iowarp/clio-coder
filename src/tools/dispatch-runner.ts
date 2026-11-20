@@ -849,7 +849,8 @@ export function formatDispatchOutput(
 		// Compact shows the answer budget sealed at dispatch (M3); full is the caller's own max_output_bytes share.
 		const perRunOutputBytes = form === "compact" ? runAnswerBudgetBytes(view) : shareBytes;
 		const helperLines = compactHelperResultLines(view, PRODUCER_INTEGRITY, perRunOutputBytes);
-		if (helperLines !== null) return { runId: receipt.runId, lines: helperLines };
+		const outcome = receipt.outcome ?? (receipt.exitCode === 0 ? "succeeded" : "failed");
+		if (helperLines !== null) return { runId: receipt.runId, outcome, answered: true, lines: helperLines };
 		const note = successNote(receipt);
 		const noteSuffix = note !== null ? ` note=${note}` : "";
 		// A non-success outcome is load-bearing evidence (a timeout has no
@@ -908,6 +909,8 @@ export function formatDispatchOutput(
 					: truncateUtf8(answerText, perRunOutputBytes, TRUNCATION_MARKER);
 		return {
 			runId: receipt.runId,
+			outcome,
+			answered: answerText.length > 0,
 			lines: [
 				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${renderFactField(receipt.spend.totalTokens)}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}${placementSuffix}${uncommittedSuffix}${run.recording ? ` recording_manifest=${JSON.stringify(run.recording.manifestPath)}` : ""}`,
 				`  ${workerTextLabel(trustStatus, view)}`,
@@ -921,28 +924,36 @@ export function formatDispatchOutput(
 	return withAgentLedgerBoard(fitRunBlocks(lines.join("\n"), blocks, runBudget), board);
 }
 
+/** One run's part of a batch result: its rendered lines, heading first, and what its stub needs past the cap. */
+type RunBlock = { runId: string; outcome: string; answered: boolean; lines: ReadonlyArray<string> };
+
+const textBytes = (text: string) => Buffer.byteLength(text, "utf8");
+
+/** Where a cut run is read: its whole answer, or its run record when it sealed no answer `mode="answer"` returns. */
+function cutRunPointer(block: RunBlock): string {
+	return block.answered
+		? `the whole answer is in ${fullAnswerPointer(block.runId)}`
+		: `it sealed no answer; what it recorded is in monitor(mode="record", run_id=${JSON.stringify(block.runId)})`;
+}
+
 /**
  * A batch result within `budget` bytes, every run's block whole when they all fit. Past the cap each run keeps its
  * heading and where its answer is read, and a run fills only the room the later runs' headings and pointers leave, so
  * the cap never drops a run without a way back to its answer (M3).
  */
-function fitRunBlocks(
-	head: string,
-	blocks: ReadonlyArray<{ runId: string; lines: ReadonlyArray<string> }>,
-	budget: number,
-): string {
-	const bytes = (text: string) => Buffer.byteLength(text, "utf8");
+function fitRunBlocks(head: string, blocks: ReadonlyArray<RunBlock>, budget: number): string {
+	const bytes = textBytes;
 	const texts = blocks.map((block) => block.lines.join("\n"));
 	const whole = [head, ...texts].join("\n");
 	if (bytes(whole) <= budget) return whole;
 	const stubs = blocks.map((block) => ({
 		heading: block.lines[0] ?? "",
-		pointer: `  [cut by this result's ${budget}-byte cap; the whole answer is in ${fullAnswerPointer(block.runId)}]`,
+		pointer: `  [cut by this result's ${budget}-byte cap; ${cutRunPointer(block)}]`,
 	}));
 	const stubText = ({ heading, pointer }: { heading: string; pointer: string }) => `${heading}\n${pointer}`;
 	// Room left once the head and every run's stub, each after a newline, are set aside.
 	let room = budget - bytes(head) - stubs.reduce((sum, stub) => sum + bytes(stubText(stub)) + 1, 0);
-	if (room < 0) return truncateUtf8([head, ...stubs.map(stubText)].join("\n"), budget, TRUNCATION_MARKER);
+	if (room < 0) return fitMinimalRuns(head, blocks, stubs.map(stubText), budget);
 	const kept = blocks.map((block, index) => {
 		const stub = stubs[index] ?? { heading: "", pointer: "" };
 		const text = texts[index] ?? "";
@@ -958,6 +969,59 @@ function fitRunBlocks(
 		return [stub.heading, body, stub.pointer].join("\n");
 	});
 	return [head, ...kept].join("\n");
+}
+
+/**
+ * The batch when even every run's heading and pointer overrun `budget`: each run keeps one line with its id, outcome and
+ * where it is read, upgraded in order to its heading stub while room lasts. The head's notes give way first, by whole
+ * lines after its first. When the run lines overrun anyway, the runs that fit keep them and one closing line names the
+ * rest and the collect call that returns them.
+ */
+function fitMinimalRuns(head: string, blocks: ReadonlyArray<RunBlock>, stubs: ReadonlyArray<string>, budget: number) {
+	const bytes = textBytes;
+	const lineBytes = (lines: ReadonlyArray<string>) => lines.reduce((sum, line) => sum + bytes(line) + 1, 0);
+	// The head within `room` bytes (its join newline included), cut by whole lines and never below its first, or null.
+	const headWithin = (room: number): string | null => {
+		if (bytes(head) + 1 <= room) return head;
+		const marker = `[this batch's remaining notes cut by the ${budget}-byte cap]`;
+		const kept: string[] = [];
+		let used = bytes(marker) + 1;
+		for (const line of head.split("\n")) {
+			if (used + bytes(line) + 1 > room) break;
+			kept.push(line);
+			used += bytes(line) + 1;
+		}
+		return kept.length > 0 ? [...kept, marker].join("\n") : null;
+	};
+	const minimal = blocks.map((block) => `- ${block.runId} outcome=${block.outcome} [${cutRunPointer(block)}]`);
+	const notice = `[this result's ${budget}-byte cap left some runs only their id, outcome and where they are read]`;
+	const headRoom = budget - bytes(notice) - 1 - lineBytes(minimal) + 1;
+	const fitted = headWithin(headRoom);
+	if (fitted !== null) {
+		let room = headRoom - bytes(fitted) - 1;
+		const kept = minimal.map((line, index) => {
+			const stub = stubs[index] ?? line;
+			const extra = bytes(stub) - bytes(line);
+			if (extra > room) return line;
+			room -= extra;
+			return stub;
+		});
+		return [fitted, notice, ...kept].join("\n");
+	}
+	const closing = (omitted: ReadonlyArray<RunBlock>) => {
+		const ids = omitted.map((block) => block.runId);
+		const named = `[${ids.length} of ${blocks.length} runs omitted by this result's ${budget}-byte cap; monitor(mode="collect", run_ids=${JSON.stringify(ids)}) returns them]`;
+		return bytes(named) <= budget / 2
+			? named
+			: `[${ids.length} of ${blocks.length} runs omitted by this result's ${budget}-byte cap, from ${ids[0] ?? "?"} on the runs= line; monitor(mode="collect", run_ids=[...]) returns them]`;
+	};
+	for (let shown = blocks.length - 1; shown >= 0; shown -= 1) {
+		const last = closing(blocks.slice(shown));
+		const shownHead = headWithin(budget - lineBytes(minimal.slice(0, shown)) - bytes(last));
+		if (shownHead !== null) return [shownHead, ...minimal.slice(0, shown), last].join("\n");
+	}
+	// Not even the head's first line fits beside the closing line, which then stands alone.
+	return truncateUtf8(closing(blocks), Math.max(0, budget - bytes(TRUNCATION_MARKER)), TRUNCATION_MARKER);
 }
 
 /** The least spare room worth a partial block; below it a trimmed run shows only its heading and pointer. */
