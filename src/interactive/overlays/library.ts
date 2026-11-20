@@ -636,10 +636,11 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			{ key: "b", verb: "browse/installed", short: "view" },
 			{ key: "s", verb: "user/project", short: "scope" },
 			{ key: "n", verb: "notices" },
+			// `o` adopts from another local agent; a path is imported only by command, so a footer wide enough to spell
+			// every entry in full names that command too (FX-14). A narrowing footer spells every entry short, and there `o`
+			// takes no more room than the `[o] import` it replaced, so it drops where it always did.
+			{ key: "o", verb: "adopt · /library import <path>", short: "adopt" },
 			{ key: "r", verb: "refresh" },
-			// `o` adopts from another local agent and a path is imported only by command, so the footer names both (FX-14).
-			// Last of these, so a narrowing footer gives up its neighbours first.
-			{ key: "o", verb: "adopt · /library import <path>" },
 		],
 		globalActions: {
 			n: openNotices,
