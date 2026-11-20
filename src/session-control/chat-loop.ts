@@ -1535,15 +1535,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			options.correlationId = batch.id;
 			options.batchSize = batch.size;
 		}
+		const yolo = (deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) === "yolo";
 		options.turnBudgetContinues = budgetCrossingContinues({
-			yolo: (deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) === "yolo",
+			yolo,
 			machineTurn: machineTurnRunning !== null,
 			failure: state.continuation.stop,
 			locked: state.synthesisToolLock,
 			continuations: state.continuation.yoloContinuations,
 		});
 		if (options.turnBudgetContinues) options.observationBudgetRoll = () => requestBudgetRoll("observation");
-		else if (headlessObservation !== null) Object.assign(options, headlessObservation.invokeOptions(batch?.id));
+		// Yolo keeps XR-6 exactly, its stops included; the headless roll is never its fallback (CLI-P42).
+		else if (!yolo && headlessObservation !== null) Object.assign(options, headlessObservation.invokeOptions(batch?.id));
 		// The per-turn budgets follow this route's measured calls per round (CLI-P26).
 		const scale = turnBudgetWidthScale(
 			routeCallsPerRound(state.runtime?.agent.state.messages ?? [], state.runtime?.agent.state.model?.id),
