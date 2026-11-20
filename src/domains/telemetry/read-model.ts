@@ -3647,6 +3647,10 @@ function stepPipelineIncomplete(end: NonNullable<WhyStoppedV1["stepPipeline"]>):
 	switch (end.stoppedBy) {
 		case "cap":
 			return `The step pipeline of ${named} stopped at the continuation cap with a step still running, before ${end.stepTool} reported pipelineDone; the pipeline did not finish.`;
+		case "cancel":
+			return `The step pipeline of ${named} was cancelled before ${end.stepTool} reported pipelineDone; the pipeline did not finish.`;
+		case "failure":
+			return `The step pipeline of ${named} stopped on a failed turn before ${end.stepTool} reported pipelineDone; the pipeline did not finish.`;
 		case "unreported":
 			return `The step pipeline of ${named} ended on a turn that made no ${end.stepTool} call; ${end.stepTool} never reported pipelineDone, so whether every step ran is not known.`;
 		default:
@@ -3661,6 +3665,7 @@ const HARNESS_STOP_CAUSES: ReadonlySet<string> = new Set([
 	"route_moved",
 	"triage_stop",
 	"autonomy_stop",
+	"job_clock",
 	"repetition",
 	"generation_guard",
 	"turn_timeout",

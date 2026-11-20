@@ -1125,8 +1125,9 @@ function reloadProtectedArtifactsForSession(
 /**
  * How the last step pipeline ended, for a headless caller: `done` when its step
  * tool said `pipelineDone`; otherwise `stoppedBy` says whether the yolo
- * continuation cap (`cap`) or the end of a turn nothing continued (`turn`:
- * autonomy below yolo, a cancel, a failure) stopped it (bt-15). `unreported`
+ * continuation cap (`cap`), a cancel (`cancel`), a terminal failure
+ * (`failure`) or the end of a turn nothing continued (`turn`, such as
+ * autonomy below yolo) stopped it (bt-15, SC-3). `unreported`
  * is a pipeline whose last turn, at the cap, made no step call and ended on
  * its own summary: no step was cut off, but the step tool never said
  * `pipelineDone`, so whether every step ran is unknown (N1).
@@ -1135,20 +1136,25 @@ export interface StepPipelineEnd {
 	stepTool: string;
 	template?: string;
 	done: boolean;
-	stoppedBy?: "cap" | "turn" | "unreported";
+	stoppedBy?: "cap" | "turn" | "cancel" | "failure" | "unreported";
 }
 
-function stepPipelineEnd(
+export function stepPipelineEnd(
 	policy: { stepTool: string; template?: string },
 	run: StepRun,
 	capSpent: boolean,
 	settledCleanly: boolean,
+	ended: "cancel" | "failure" | null,
 ): StepPipelineEnd {
-	const stoppedBy = !capSpent
-		? ("turn" as const)
-		: run.carried === true && settledCleanly
-			? ("unreported" as const)
-			: ("cap" as const);
+	// A cancel or a failure is what ended the pipeline, at the cap or below it.
+	const stoppedBy =
+		ended !== null
+			? ended
+			: !capSpent
+				? ("turn" as const)
+				: run.carried === true && settledCleanly
+					? ("unreported" as const)
+					: ("cap" as const);
 	return {
 		stepTool: policy.stepTool,
 		...(policy.template === undefined ? {} : { template: policy.template }),
@@ -3098,7 +3104,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							...(continuedMessage ? { continues: continuedMessage } : {}),
 						});
 						// Silent like any queued message: the queue panel is the signal, and the settle names it as it starts.
-						if (entry !== null) return;
+						// Triage labels it like any queued message; its pinned constraints keep it from interrupting or re-kinding.
+						if (queuedForTriage(entry)) return;
 					}
 					if (constrained) {
 						emitAdmissionNotice(
@@ -3365,6 +3372,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.turnToolCalls = 0;
 				state.toolMarkupReprompt = rebaseToolMarkupReprompt(state.toolMarkupReprompt);
 				state.turnToolNames = [];
+				state.turnCallsDone = [];
 				state.turnSharedWorkerNote = isWorkerShareNote(text);
 				state.continuation.beginPrompt({
 					requestContinuation: options.requestContinuation === true,
@@ -4058,6 +4066,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					recovery.settleOpenForecast();
 					const canceled = state.activeInterruptReason !== null && state.activeInterruptByOperator;
 					const autonomyStopped = state.activeInterruptReason !== null && state.activeInterruptByAutonomy;
+					const jobClockStopped = state.activeInterruptReason !== null && state.activeInterruptByJobClock;
 					// Esc on an interview resolves it as cancelled and the tool ends the turn
 					// itself, so no interrupt is raised and `canceled` stays false. The turn
 					// still ended on the operator's say-so, which the outcome has to show.
@@ -4176,9 +4185,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 									? "operator_cancel"
 									: autonomyStopped
 										? "autonomy_stop"
-										: failure?.stage === "harness" && failure.errorClass === "oversized_tool_result"
-											? "oversized_tool_result"
-											: undefined,
+										: jobClockStopped
+											? "job_clock"
+											: failure?.stage === "harness" && failure.errorClass === "oversized_tool_result"
+												? "oversized_tool_result"
+												: undefined,
 								noAnswer: ending?.kind === "no_answer" ? ending.cause : undefined,
 								runIds: workerRunIds,
 								missing: missingReceipts,
@@ -4281,7 +4292,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							!state.synthesisToolLock &&
 							!state.toolBudgetLock;
 						lastStepPipeline =
-							stepPolicy && stepRun !== null ? stepPipelineEnd(stepPolicy, stepRun, capSpent, settledCleanly) : null;
+							stepPolicy && stepRun !== null
+								? stepPipelineEnd(
+										stepPolicy,
+										stepRun,
+										capSpent,
+										settledCleanly,
+										canceled ? "cancel" : detectTerminalFailureFromState(agentRuntime.agent) !== null ? "failure" : null,
+									)
+								: null;
 						const named = lastStepPipeline?.template ? `prompt template ${lastStepPipeline.template}` : "this template";
 						if (lastStepPipeline?.stoppedBy === "cap")
 							emitNotice(
@@ -4379,6 +4398,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.activeInterruptByOperator = (options?.source ?? "stream_cancel") === "stream_cancel";
 				state.activeInterruptByTriage = options?.source === "triage";
 				state.activeInterruptByAutonomy = options?.source === "autonomy";
+				state.activeInterruptByJobClock = options?.source === "job_clock";
 				// An Esc is reported once, by the turn's Cancelled outcome. The footer
 				// carries only an interruption the operator did not ask for.
 				if (!isOperatorCancelReason(state.activeInterruptReason))

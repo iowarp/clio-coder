@@ -465,6 +465,33 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 			strictEqual(unrun.kind === "engage" && unrun.message, FINISH_CONTRACT_ADVISORY_MESSAGE);
 	});
 
+	it("names a changed file a project runner executed: uv run, make and npm run (SC-3)", () => {
+		const ranAfter = (path: string, command: string) => {
+			const verdict = assessFinishContract({
+				sessionEntries: [
+					userMessage("user-1"),
+					toolCall("write-1", ToolNames.Write, { path, content: "x" }),
+					toolResult("write-1", ToolNames.Write, false),
+					toolCall("run-1", ToolNames.Bash, { command }),
+					toolResult("run-1", ToolNames.Bash, false),
+					assistantMessage("assistant-1", "Done."),
+				],
+				assistantTurnId: "assistant-1",
+			});
+			return verdict.kind === "engage" && verdict.message.endsWith(` Ran after the edit: ${path}.`);
+		};
+		strictEqual(ranAfter("src/clean.py", "uv run src/clean.py data/raw.csv"), true);
+		strictEqual(ranAfter("src/clean.py", "uv run --with pandas python -B src/clean.py"), true);
+		strictEqual(ranAfter("Makefile", "make all"), true);
+		strictEqual(ranAfter("sim/Makefile", "make -C sim run"), true);
+		strictEqual(ranAfter("build.mk", "make -f build.mk"), true);
+		strictEqual(ranAfter("package.json", "npm run clean"), true);
+		strictEqual(ranAfter("web/package.json", "cd web && pnpm run clean"), true);
+		// A runner never credits a file it does not read.
+		strictEqual(ranAfter("src/clean.py", "make all"), false);
+		strictEqual(ranAfter("package.json", "npm install"), false);
+	});
+
 	it("credits a declared check the model ran whole through the shell after its last edit, and nothing looser", (t) => {
 		const root = mkdtempSync(join(tmpdir(), "finish-declared-"));
 		t.after(() => rmSync(root, { recursive: true, force: true }));

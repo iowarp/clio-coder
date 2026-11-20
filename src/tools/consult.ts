@@ -983,12 +983,47 @@ async function runFilter(
 	return { kind: "ok", output: JSON.stringify(output), details: { consult: output } };
 }
 
+/** The arguments a model sends as JSON text where the schema wants an object or an array. */
+const JSON_TEXT_ARGUMENTS: ReadonlyArray<readonly [string, "object" | "array"]> = [
+	["filter", "object"],
+	["state", "object"],
+	["questions", "array"],
+];
+
+/**
+ * Parses an argument the model sent as JSON text into the object or array the
+ * schema expects. Models sent `"filter": "{\"source\": ...}"`, and the schema
+ * refused the call as `filter: expected object` (bt-s1). Text that is not JSON of
+ * the expected shape stays as sent, so the schema still names it.
+ */
+function prepareConsultArguments(args: Record<string, unknown>): Record<string, unknown> {
+	let prepared = args;
+	for (const [key, shape] of JSON_TEXT_ARGUMENTS) {
+		const value = args[key];
+		if (typeof value !== "string") continue;
+		const text = value.trim();
+		if (!text.startsWith(shape === "array" ? "[" : "{")) continue;
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(text);
+		} catch {
+			continue;
+		}
+		const fits = shape === "array" ? Array.isArray(parsed) : isRecord(parsed);
+		if (!fits) continue;
+		if (prepared === args) prepared = { ...args };
+		prepared[key] = parsed;
+	}
+	return prepared;
+}
+
 export function createConsultTool(deps: ConsultDeps): ToolSpec {
 	let turn: { id: string; calls: number } = { id: "", calls: 0 };
 	return {
 		name: ToolNames.Consult,
 		description: DESCRIPTION,
 		parameters: consultParameters,
+		prepareArguments: prepareConsultArguments,
 		baseActionClass: "read",
 		executionMode: "parallel",
 		async run(args, options): Promise<ToolResult> {

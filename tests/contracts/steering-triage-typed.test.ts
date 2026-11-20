@@ -290,6 +290,61 @@ test("a steer through the chat api, as the headless steer channel and ACP send i
 	}
 });
 
+test("a constrained turn queued while a run streams is triaged, and its pinned constraints keep it queued (SC-4)", async () => {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.prewarm = false;
+	settings.chat.steering.triage.enabled = true;
+	const context = dispatchStubContext({ settings });
+	const target = settings.targets[0];
+	ok(target);
+	settings.chat.target = target.id;
+	settings.chat.model = target.defaultModel ?? "gpt-4o";
+	let release!: () => void;
+	const turnHeld = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const typed = engine(MASS, "stop", 0.99);
+	const loop = createChatLoop({
+		getSettings: () => settings,
+		providers: context.getContract("providers") as ProvidersContract,
+		knownTargets: () => new Set([target.id]),
+		systemOne: over(typed),
+		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
+			agent: {
+				state: options?.initialState as { messages: AgentMessage[] },
+				subscribe: () => () => {},
+				abort() {},
+				steer() {},
+				followUp() {},
+				clearAllQueues() {},
+				async prompt() {
+					await turnHeld;
+				},
+			},
+		})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+	});
+	try {
+		const turn = loop.submit("fix the cache");
+		for (let i = 0; i < 1000 && !loop.isStreaming(); i++) await new Promise((resolve) => setImmediate(resolve));
+		strictEqual(loop.isStreaming(), true);
+		void loop.submit("review the diff", { constraints: { mode: "answer" }, queueConstrainedTurn: true });
+		for (let i = 0; i < 100 && loop.queueEntries()[0]?.labels === undefined; i++) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		strictEqual(typed.asked.length, 1);
+		strictEqual(loop.queueEntries()[0]?.labels?.producer, "triage");
+		// A stop reading never interrupts a pinned entry: it stays queued and the run keeps streaming.
+		strictEqual(loop.queueEntries().length, 1);
+		strictEqual(loop.isStreaming(), true);
+		release();
+		await turn;
+	} finally {
+		release();
+		loop.dispose();
+		await loop.whenSettled();
+	}
+});
+
 test("a steer triage reads as a stop redirects a headless run to answer it; only a real cancel ends it canceled (bt-41)", {
 	timeout: 20_000,
 }, async () => {

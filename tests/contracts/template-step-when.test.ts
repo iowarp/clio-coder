@@ -19,7 +19,7 @@ import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
-import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
+import { type CreateChatLoopDeps, createChatLoop, stepPipelineEnd } from "../../src/session-control/chat-loop.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { loopSafety } from "../harness/loop-guard.js";
@@ -484,6 +484,18 @@ describe("template turnPolicy when", () => {
 		} finally {
 			await unreported.close();
 		}
+	});
+
+	it("names a cancel or a failure that ended an unfinished pipeline, instead of a turn nothing continued (SC-3)", () => {
+		const policy = { stepTool: STEP, template: "wtfp:advance" };
+		const run = { pipelineDone: false, carried: true } as Parameters<typeof stepPipelineEnd>[1];
+		const by = (capSpent: boolean, ended: "cancel" | "failure" | null) =>
+			stepPipelineEnd(policy, run, capSpent, ended === null, ended).stoppedBy;
+		deepStrictEqual(
+			[by(false, null), by(false, "cancel"), by(false, "failure"), by(true, "cancel"), by(true, "failure")],
+			["turn", "cancel", "failure", "cancel", "failure"],
+		);
+		strictEqual(stepPipelineEnd(policy, { ...run, pipelineDone: true }, false, false, "cancel").stoppedBy, undefined);
 	});
 
 	it("a step call inside a gateway chain counts as the turn's step, so the pipeline continues to its end (bt-15)", async () => {

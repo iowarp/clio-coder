@@ -201,6 +201,7 @@ export const NEVER_OFFER_CAUSES: ReadonlySet<FailureCause> = new Set<FailureCaus
 	"route_moved",
 	"triage_stop",
 	"autonomy_stop",
+	"job_clock",
 	"repetition",
 	"turn_timeout",
 	"output_cap",

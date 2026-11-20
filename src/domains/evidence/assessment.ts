@@ -185,7 +185,7 @@ function runFindings(settled: RunSettled, trust: CanonicalTrustStatus): Finding[
 			"completion-evidence",
 			pipeline.stoppedBy === "unreported"
 				? `step pipeline ended without ${pipeline.stepTool} reporting pipelineDone; whether every step ran is not known`
-				: `step pipeline stopped ${pipeline.stoppedBy === "cap" ? "at the continuation cap" : "with its last turn"} before ${pipeline.stepTool} reported pipelineDone`,
+				: `step pipeline stopped ${pipeline.stoppedBy === "cap" ? "at the continuation cap" : pipeline.stoppedBy === "cancel" ? "on a cancel" : pipeline.stoppedBy === "failure" ? "on a failed turn" : "with its last turn"} before ${pipeline.stepTool} reported pipelineDone`,
 		);
 	if (settled.exitCode !== null && settled.exitCode !== 0)
 		add(

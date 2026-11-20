@@ -104,6 +104,7 @@ function failureCause(failure: Record<string, unknown>): FailureCause | undefine
 		case "route_moved":
 		case "triage_stop":
 		case "autonomy_stop":
+		case "job_clock":
 		case "repetition":
 		case "shutdown":
 		case "parent_cancel":

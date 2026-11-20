@@ -26,6 +26,7 @@ import type {
 } from "../../src/domains/system-one/index.js";
 import { engineCapabilities, PROFILES } from "../../src/domains/system-one/profiles.js";
 import { createRunner, type DecisionFlowCheck, type RunnerRoute } from "../../src/domains/system-one/runner.js";
+import { validateEngineToolArguments } from "../../src/engine/ai.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
@@ -333,6 +334,22 @@ describe("contracts/consult tool", () => {
 		deepStrictEqual(payload.filesRead, ["src/median.ts"]);
 		strictEqual(payload.remainingCalls, 2, "only the ask that was sent spent a call");
 		strictEqual(engine.asked.length, 1);
+	});
+
+	it("takes a filter sent as JSON text instead of failing the schema with filter: expected object (SC-4)", async () => {
+		const engine = typed();
+		const registry = bound([engine]);
+		const tool = resolveAgentTools({ registry }).find((candidate) => candidate.name === ToolNames.Consult);
+		ok(tool);
+		const filter = { criterion: "names the cache", source: "items", items: { a: "the cache", b: "a view" } };
+		const raw = { filter: JSON.stringify(filter) };
+		const prepared = (tool.prepareArguments?.(raw) ?? raw) as Record<string, unknown>;
+		deepStrictEqual(prepared, { filter });
+		validateEngineToolArguments(tool, { type: "toolCall", id: "c1", name: tool.name, arguments: prepared });
+		const result = await invoke(registry, ToolNames.Consult, raw, { turnId: "t1" });
+		strictEqual(result.kind, "ok", result.text);
+		// Text that is not a JSON object stays as sent, for the schema to name.
+		deepStrictEqual(tool.prepareArguments?.({ filter: "the cache" }), { filter: "the cache" });
 	});
 
 	it("filters items to ids and scores at the yes boundary, never echoing their text, three calls a turn", async () => {

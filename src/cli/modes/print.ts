@@ -288,6 +288,8 @@ interface HeadlessMainAgentRunStats {
 	guardBlockedAttempts: SafetyBlockedAttempt[];
 	/** The blocked calls `decisions.permissionRequested` counts, up to `BLOCKED_ATTEMPTS_LIMIT`. */
 	permissionRequestedAttempts: SafetyBlockedAttempt[];
+	/** Those refused asks per tool, exact past the list's limit, so the sealed tools row subtracts them all (SC-2). */
+	permissionRequestedByTool: Map<string, number>;
 	/** Paths a terminating result wrote: the turn's answer as a file, not a workspace change. */
 	reportPaths: Set<string>;
 	/** Dispatched runs whose task worktree merged into this workspace. */
@@ -628,9 +630,10 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 		if (guardBlock)
 			recordBlockedAttempt({ blockedAttempts: stats.guardBlockedAttempts, blockedAttemptsTruncated: 0 }, attempt);
 		// So does a refused ask, such as one a --timeout abort denied before anyone decided (bt-15 c13a).
-		else if (permissionAsk)
+		else if (permissionAsk) {
+			stats.permissionRequestedByTool.set(tool, (stats.permissionRequestedByTool.get(tool) ?? 0) + 1);
 			recordBlockedAttempt({ blockedAttempts: stats.permissionRequestedAttempts, blockedAttemptsTruncated: 0 }, attempt);
-		else recordBlockedAttempt(stats, attempt);
+		} else recordBlockedAttempt(stats, attempt);
 	}
 	// A terminating result (the artifact tool's plan, review, or report) is the
 	// turn's answer written to a file, not the workspace change the task asked
@@ -1042,6 +1045,8 @@ async function recordHeadlessMainAgentRun(input: {
 					frameType: null,
 					// The run's calls live in its session, so its usage facts are the read model's fold of them (#434).
 					usage: input.calls?.facts,
+					// Exact past the 50 the receipt lists, so the tools row stops counting the rest as blocked (SC-2).
+					askedByTool: input.stats.permissionRequestedByTool,
 					// A stalled step pipeline settles `completed` as its turns did; the record says the pipeline stopped (bt-20).
 					...(stepPipeline !== null ? { stepPipeline } : {}),
 				},
@@ -1135,6 +1140,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		blockedAttemptsTruncated: 0,
 		guardBlockedAttempts: [],
 		permissionRequestedAttempts: [],
+		permissionRequestedByTool: new Map<string, number>(),
 		reportPaths: new Set(),
 		mergedTaskWorktrees: 0,
 		unresolvedBlocks: new Set<string>(),
