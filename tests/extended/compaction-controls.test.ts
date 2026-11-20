@@ -2102,7 +2102,14 @@ describe("production compaction controls", () => {
 		ok(journalCalls.every((record) => record.ctx.agent.role === "compaction"));
 		deepStrictEqual(
 			(await f.journalOutcomes()).map((row) => row.data),
-			[{ callIds: journalCalls.map((row) => row.data.callId), outcome: "failed", checkpointTurnId: null }],
+			[
+				{
+					callIds: journalCalls.map((row) => row.data.callId),
+					outcome: "failed",
+					checkpointTurnId: null,
+					failureCause: "provider",
+				},
+			],
 		);
 		const calls = ledgerUsageCalls(f.entries(), await f.journal());
 		ok(calls.every((call) => call.providerId === "summary-target" && call.compactionOutcome === "failed"));
@@ -2139,21 +2146,46 @@ describe("production compaction controls", () => {
 		);
 		strictEqual(cost("model")?.groups[0]?.usd.display, "not measured");
 	});
-	for (const text of [
-		"## Goal\nRepair MPI exchange\n## Constraints & Preferences\nKeep rank order.",
-		syntheticCompactionSummary("Repair MPI exchange").replace("### Blocked", "### Risks"),
-		`\`\`\`markdown\n${syntheticCompactionSummary("Repair MPI exchange")}\n\`\`\``,
-	]) {
-		it("refuses normally stopped malformed history without publishing a checkpoint", async () => {
-			const f = fixture(true);
+	const malformed: Array<[string, string]> = [
+		["## Goal\nRepair MPI exchange\n## Constraints & Preferences\nKeep rank order.", "heading_set"],
+		[syntheticCompactionSummary("Repair MPI exchange").replace("### Blocked", "### Risks"), "heading_set"],
+		[`\`\`\`markdown\n${syntheticCompactionSummary("Repair MPI exchange")}\n\`\`\``, "heading_set"],
+		[`${syntheticCompactionSummary("Repair MPI exchange")}\n\`\`\`text\nopen`, "unclosed_fence"],
+	];
+	for (const [text, defect] of malformed) {
+		it("refuses normally stopped malformed history without publishing a checkpoint, journaling why", async () => {
+			const f = fixture(true, true, true);
 			f.response.text = text;
 			const before = f.entries();
 			await rejects(f.run(), /incomplete history checkpoint/);
 			deepStrictEqual(f.entries(), before);
 			strictEqual(f.calls.length, 1);
 			deepStrictEqual(foregroundStreamUsage(), {});
+			const [settled] = await f.journalOutcomes();
+			deepStrictEqual(
+				[settled?.data.outcome, settled?.data.failureCause, settled?.data.checkpointDefect],
+				["failed", "checkpoint_format", defect],
+			);
 		});
 	}
+
+	it("repairs a checkpoint whose required headings arrive out of order instead of discarding it (FX-6)", async () => {
+		const f = fixture(true, true, true);
+		const ordered = syntheticCompactionSummary("Repair MPI exchange");
+		const at = ordered.indexOf("## Key Decisions");
+		const nextAt = ordered.indexOf("## Next Steps");
+		ok(at > 0 && nextAt > at);
+		// Key Decisions written after Next Steps and Critical Context.
+		f.response.text = `${ordered.slice(0, at)}${ordered.slice(nextAt).trimEnd()}\n${ordered.slice(at, nextAt).trimEnd()}`;
+		await f.run();
+		strictEqual(f.calls.length, 1, "no second summary call");
+		const saved = f.entries().find((entry) => entry.kind === "compactionSummary");
+		ok(saved?.kind === "compactionSummary");
+		const headings = saved.summary.split("\n").filter((line) => /^##+ /.test(line));
+		ok(headings.indexOf("## Key Decisions") < headings.indexOf("## Next Steps"), headings.join(" | "));
+		ok(headings.indexOf("## Next Steps") < headings.indexOf("## Critical Context"), headings.join(" | "));
+		strictEqual((await f.journalOutcomes())[0]?.data.outcome, "committed");
+	});
 
 	it("refuses a truncated dedicated summary and preserves the failed call's spending", async () => {
 		const f = fixture(true);

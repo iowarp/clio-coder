@@ -50,7 +50,8 @@ describe("compaction checkpoint format and semantic replay", () => {
 		["headings hidden in backtick fence", `\`\`\`markdown\n${valid}\n\`\`\``],
 		["headings hidden in tilde fence", `~~~~markdown\n${valid}\n~~~~`],
 		["unfinished fence before last heading", valid.replace("## Critical Context", "```\n## Critical Context")],
-		["reordered sections", valid.replace("## Goal", "## Next Steps").replace("## Next Steps\n(none)", "## Goal\n(none)")],
+		// A reorder with every heading once is repaired (FX-6); one that repeats a heading and drops another is not.
+		["reordered sections with a repeated heading", valid.replace("## Goal", "## Next Steps")],
 	] as const) {
 		it(`rejects ${name} before producing a checkpoint`, async () => {
 			const provider = registerEngineFauxProvider({ api: "summary-format", models: [{ id: "fixture" }] });

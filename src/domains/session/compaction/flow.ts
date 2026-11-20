@@ -45,6 +45,8 @@ import {
 	type CompactResult,
 	checkpointContinuityCarry,
 	compact,
+	compactionFailureOf,
+	tagCompactionFailure,
 } from "./compact.js";
 import { readCompactionSystemPrompt } from "./system-prompt.js";
 
@@ -339,7 +341,8 @@ export async function runCompactionFlow(
 					: {}),
 				// Native rejection and its portable retry share one transaction admission (#423).
 				beforeSummaryCall: (hold) => {
-					if (flowViolation !== undefined && flowViolation !== null) throw new Error(`compaction refused: ${flowViolation}`);
+					if (flowViolation !== undefined && flowViolation !== null)
+						throw tagCompactionFailure(new Error(`compaction refused: ${flowViolation}`), "refused");
 					if (!nativeEnabled || !providerCompaction) return admitSummary(hold);
 					nativeAdmission ??= admitSummary(hold);
 					return nativeAdmission;
@@ -363,7 +366,10 @@ export async function runCompactionFlow(
 			budget.signal.throwIfAborted();
 		}
 		if (!isOriginCurrent()) {
-			throw new Error("compaction session or branch changed; summary discarded and originating usage retained");
+			throw tagCompactionFailure(
+				new Error("compaction session or branch changed; summary discarded and originating usage retained"),
+				"superseded",
+			);
 		}
 		if (result.messagesSummarized === 0 || result.summary.length === 0) {
 			closure.outcome = "discarded";
@@ -469,7 +475,7 @@ export async function runCompactionFlow(
 			budget.signal.throwIfAborted();
 		}
 		if (!isOriginCurrent()) {
-			throw new Error("compaction ownership changed before publication");
+			throw tagCompactionFailure(new Error("compaction ownership changed before publication"), "superseded");
 		}
 		try {
 			result.publishProviderCheckpoint?.();
@@ -508,7 +514,7 @@ export async function runCompactionFlow(
 			if (!written) {
 				closure.outcome = "failed";
 				if (result.providerCheckpoint) pruneProviderCheckpoints(result.providerCheckpoint);
-				throw error;
+				throw tagCompactionFailure(error, "persistence");
 			}
 			// The ledger holds this checkpoint by id, so the append committed and the
 			// caller publishes it like any other; only an absent checkpoint fails.
@@ -520,6 +526,14 @@ export async function runCompactionFlow(
 			closure.overTriggerTokens = Math.round(figures.overTriggerTokens);
 		if (figures?.fitReserveTokens !== undefined) closure.fitReserveTokens = Math.round(figures.fitReserveTokens);
 		return { ...result, checkpointId: entry.turnId };
+	} catch (error) {
+		// A failed compaction names why on its journal row, not only in the session ledger (FX-6).
+		if (closure.outcome === "failed") {
+			const failure = compactionFailureOf(error, budget?.signal?.aborted === true);
+			closure.failureCause = failure.cause;
+			if (failure.defect !== undefined) closure.checkpointDefect = failure.defect;
+		}
+		throw error;
 	} finally {
 		if (lease && callIds.size > 0)
 			telemetryHub().emit("compaction.settled", { ...closure, callIds: [...callIds] }, lease.context);
