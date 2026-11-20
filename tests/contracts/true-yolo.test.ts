@@ -680,7 +680,8 @@ test("yolo reads a shell script by the floor alone and runs what it cannot read 
 	const savedPath = process.env.PATH;
 	process.env.PATH = `${onPath}:${savedPath ?? ""}`;
 	try {
-		for (const command of ["source shadow.sh", ". shadow.sh"])
+		// Rewriting only the cwd copy leaves the PATH copy bash loads unchanged, so it is still read.
+		for (const command of ["source shadow.sh", ". shadow.sh", "echo ok > shadow.sh; source shadow.sh"])
 			strictEqual(judged(command).reasonCode, "yolo-floor:trust-authority", command);
 	} finally {
 		process.env.PATH = savedPath;

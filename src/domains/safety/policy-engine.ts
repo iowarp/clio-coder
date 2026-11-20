@@ -3871,19 +3871,9 @@ function scanCommandScript(
 	const operand = script.path;
 	if (/^[<>]\(/u.test(operand)) return null;
 	const candidates = scriptCandidates(operand, cwds, script.sourced);
-	const files = candidates.filter((candidate): candidate is string => candidate !== null);
-	if (files.length < candidates.length) return null;
-	for (const file of files) {
-		if (isWrittenFirst(file, written)) return null;
-		let regular: boolean | undefined;
-		try {
-			regular = statSync(file, { throwIfNoEntry: false })?.isFile();
-		} catch {
-			// A path the stat cannot reach is not one the scan can call a regular file.
-			regular = false;
-		}
-		if (regular !== true) return null;
-	}
+	if (candidates.includes(null)) return null;
+	// Each candidate is skipped on its own: rewriting one copy leaves another that bash may load (CLI-P31).
+	const files = (candidates as string[]).filter((file) => !isWrittenFirst(file, written) && regularFile(file));
 	// `bash x.sh` runs with `$0` as written; on standard input `$0` names the shell.
 	const name = operand === "~" || operand.startsWith("~/") ? expandPath(operand) : operand;
 	const names: ScriptNames = script.stdin ? { zero: null, source: null } : { zero: name, source: name };
