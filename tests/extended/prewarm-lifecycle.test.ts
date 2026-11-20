@@ -19,7 +19,12 @@ afterEach(() => scratch.restore());
 
 function fixture(
 	budget: { maxInputTokens?: number; contextWindow?: number } = {},
-	options: { unbound?: boolean } = {},
+	options: {
+		unbound?: boolean;
+		runtime?: string;
+		attended?: boolean;
+		authGate?: { entered: () => void; open: Promise<void> };
+	} = {},
 ) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = true;
@@ -27,7 +32,7 @@ function fixture(
 	settings.chat.model = "fixture";
 	const target = {
 		id: "local",
-		runtime: "llamacpp",
+		runtime: options.runtime ?? "llamacpp",
 		url: "https://fixture.invalid",
 		...(budget.maxInputTokens !== undefined ? { cache: { warm: { maxInputTokens: budget.maxInputTokens } } } : {}),
 	};
@@ -61,7 +66,13 @@ function fixture(
 		providers: {
 			getTarget: () => target,
 			getRuntime: () => llamacpp,
-			auth: { resolveForTarget: async () => ({ apiKey: "fixture" }) },
+			auth: {
+				resolveForTarget: async () => {
+					options.authGate?.entered();
+					await options.authGate?.open;
+					return { apiKey: "fixture" };
+				},
+			},
 		} as unknown as ProvidersContract,
 		context: {
 			ensureSessionPrompt: async () => {},
@@ -77,6 +88,7 @@ function fixture(
 		// An unbound target goes through the real observation, which sends nothing without a binding.
 		...(options.unbound ? {} : { observeDeployment }),
 		notice: (text) => notices.push(text),
+		isAttended: () => options.attended !== false,
 		registerEndpointSlot: () => {
 			reservations += 1;
 			return () => {
@@ -104,14 +116,44 @@ test("prewarm on a local target that binds no cache.deployment says so once inst
 	const f = fixture({}, { unbound: true });
 	try {
 		f.warm.schedule("session-start");
-		deepStrictEqual(await f.warm.settled(), { ran: false, reason: "deployment", detail: "deployment-unbound" });
+		deepStrictEqual(await f.warm.settled(), {
+			ran: false,
+			reason: "deployment",
+			detail: "deployment-unbound",
+			unbound: { targetId: "local", backend: "llamacpp" },
+		});
 		f.warm.schedule("resume");
 		await f.warm.settled();
 		strictEqual(f.rounds.length, 0);
 		strictEqual(f.notices.length, 1, "one notice per target, not one per skipped trigger");
 		match(f.notices[0] ?? "", /chat\.prewarm is on, but target local binds no cache\.deployment/u);
+		match(f.notices[0] ?? "", /backend llamacpp, controlUrl, model and build/u);
 	} finally {
 		f.warm.dispose();
+	}
+	// Silent off the terminal UI (ACP), on a local runtime no binding can warm, and from a round a submit let go of.
+	const acp = fixture({}, { unbound: true, attended: false });
+	const ollama = fixture({}, { unbound: true, runtime: "ollama" });
+	let entered!: () => void;
+	let releaseAuth!: () => void;
+	const authEntered = new Promise<void>((resolve) => (entered = resolve));
+	const open = new Promise<void>((resolve) => (releaseAuth = resolve));
+	const detached = fixture({}, { unbound: true, authGate: { entered: () => entered(), open } });
+	try {
+		acp.warm.schedule("resume");
+		await acp.warm.settled();
+		ollama.warm.schedule("resume");
+		deepStrictEqual(await ollama.warm.settled(), { ran: false, reason: "deployment", detail: "deployment-unbound" });
+		detached.warm.schedule("resume");
+		await authEntered;
+		detached.warm.cancel();
+		releaseAuth();
+		deepStrictEqual(await detached.warm.settled(), { ran: false, reason: "superseded" });
+		deepStrictEqual([acp.notices, ollama.notices, detached.notices], [[], [], []]);
+	} finally {
+		acp.warm.dispose();
+		ollama.warm.dispose();
+		detached.warm.dispose();
 	}
 });
 

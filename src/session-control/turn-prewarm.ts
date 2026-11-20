@@ -21,6 +21,8 @@ import {
 	type CacheDeploymentObservation,
 	observeCacheDeployment,
 	type ProvidersContract,
+	type WarmableBackend,
+	warmableBackend,
 } from "../domains/providers/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import { type PrewarmTrigger, prewarmPromptTokens, runPrewarmRound } from "./prewarm.js";
@@ -43,7 +45,13 @@ export type PrewarmSkipReason =
 
 export type PrewarmOutcome =
 	| { ran: true; trigger: PrewarmTrigger }
-	| { ran: false; reason: PrewarmSkipReason; detail?: string };
+	| {
+			ran: false;
+			reason: PrewarmSkipReason;
+			detail?: string;
+			/** Set with `deployment-unbound` on a runtime a binding could warm: the target this round observed. */
+			unbound?: { targetId: string; backend: WarmableBackend };
+	  };
 
 export interface TurnPrewarmDeps {
 	state: TurnPrewarmState;
@@ -106,6 +114,11 @@ export interface TurnPrewarmDeps {
 	 * `cache.deployment`, which no round can fix, so a skip that is otherwise diagnostics would read as a silent no-op.
 	 */
 	notice?: (text: string) => void;
+	/**
+	 * True only on the terminal UI. The unbound notice is for a person reading the transcript; on ACP a transcript
+	 * notice can reach the client inside a reply, so every other surface stays silent. Defaults to false.
+	 */
+	isAttended?: () => boolean;
 }
 
 export interface TurnPrewarm {
@@ -153,6 +166,15 @@ const ABORT_ROUND_ON_SUBMIT = false;
  */
 function defaultWarmInputTokens(contextWindow: number): number {
 	return contextWindow > 0 && Number.isFinite(contextWindow) ? Math.min(16_384, contextWindow) : 16_384;
+}
+
+/** What a target on this runtime must bind before a pre-warm can run against it. */
+function unboundNotice(targetId: string, backend: WarmableBackend): string {
+	const requirement =
+		backend === "lmstudio"
+			? "set cache.deployment on the target with backend lmstudio, controlUrl and model, and set cache.warm.startup to true"
+			: "set cache.deployment on the target with backend llamacpp, controlUrl, model and build (the server's build_info)";
+	return `[CLIO Coder] chat.prewarm is on, but target ${targetId} binds no cache.deployment, so CLIO Coder does not prewarm it. To prewarm it, ${requirement}; otherwise set chat.prewarm to false.`;
 }
 
 export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
@@ -254,8 +276,18 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 				deployment.reason === "model-not-loaded" &&
 				target.cache?.warm?.startup === true
 			)
-		)
-			return { ran: false, reason: "deployment", detail: deployment.reason };
+		) {
+			// A round a submit or a switch let go of no longer speaks for the selected target.
+			if (detached.has(controller) || controller.signal.aborted || !stillSelected())
+				return { ran: false, reason: "superseded" };
+			const backend = deployment.reason === "deployment-unbound" ? warmableBackend(target.runtime) : null;
+			return {
+				ran: false,
+				reason: "deployment",
+				detail: deployment.reason,
+				...(backend ? { unbound: { targetId: target.id, backend } } : {}),
+			};
+		}
 
 		if (admissionRefusal() || detached.has(controller) || controller.signal.aborted)
 			return { ran: false, reason: "superseded" };
@@ -504,12 +536,10 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 					});
 				}
 				if (!outcome.ran && deps.getSettings().chat.prewarm && outcome.reason !== "surface") {
-					const targetId = deps.getSettings().chat.target;
-					if (outcome.detail === "deployment-unbound" && targetId && !unboundNoticed.has(targetId)) {
-						unboundNoticed.add(targetId);
-						deps.notice?.(
-							`[CLIO Coder] chat.prewarm is on, but target ${targetId} binds no cache.deployment, so CLIO Coder does not prewarm it. Bind its deployment (backend, controlUrl, model, build) under the target's cache settings, or set chat.prewarm to false.`,
-						);
+					const unbound = outcome.unbound;
+					if (unbound && deps.isAttended?.() === true && !unboundNoticed.has(unbound.targetId)) {
+						unboundNoticed.add(unbound.targetId);
+						deps.notice?.(unboundNotice(unbound.targetId, unbound.backend));
 					}
 					const key = `${outcome.reason}:${outcome.detail ?? ""}`;
 					if (lastSkip !== key) {
