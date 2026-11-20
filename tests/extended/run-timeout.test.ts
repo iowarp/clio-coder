@@ -289,14 +289,15 @@ describe("clio-coder run --timeout", () => {
 		strictEqual(check?.reason, "deadline");
 	});
 
-	// v1 has no skipped row, so its verify frame lists the checks that finished; it still precedes run_end (CLI-P8).
+	// Under stream-json the verify frame lists the checks that finished; it still precedes run_end (CLI-P8).
 	for (const cut of [
 		{ by: "a deadline", code: 124, check: "touch started && sleep 30", flags: ["--timeout", "4"] },
 		{ by: "a SIGTERM", code: 143, check: "touch started && kill -TERM $PPID && sleep 30", flags: [] },
 	]) {
-		it(`v1 --json: ${cut.by} during a --verify check writes the verify frame before run_end, nothing after`, async () => {
+		it(`stream-json: ${cut.by} during a --verify check writes the verify frame before run_end, nothing after`, async () => {
 			const { turn, scratch } = await headlessTurn([], "default", [
-				"--json",
+				"--output-format",
+				"stream-json",
 				"--verify",
 				"true",
 				"--verify",

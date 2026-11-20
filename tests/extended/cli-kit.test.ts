@@ -254,65 +254,26 @@ test("a v2 run refuses a --steer-channel it cannot open with exit 2 before the r
 	}
 });
 
-test("-o beside v1 --json writes the answer on exit 0, removes a stale file otherwise, and leaves stdout as it was (CLI-P14)", async () => {
-	const env = await isolateClioEnv("cli-kit-v1-output-");
-	try {
-		const script = `
-			const { existsSync, readFileSync, writeFileSync } = await import("node:fs");
-			const { withRunFailureReporting } = await import(${JSON.stringify(resolve("src/cli/run-failure.ts"))});
-			const { writeFrame } = await import(${JSON.stringify(resolve("src/cli/modes/jsonl.ts"))});
-			const turn = { type: "turn_end", startedAt: "t0", endedAt: "t1", exitCode: 0, outcome: "succeeded", text: "The answer." };
-			const body = (code) => async () => { writeFrame(turn); return code; };
-			const output = { path: "out.txt", cwd: ${JSON.stringify(env.dir)} };
-			const file = ${JSON.stringify(join(env.dir, "out.txt"))};
-			await withRunFailureReporting(true, body(0), false);
-			process.stdout.write("--\\n");
-			const ok = await withRunFailureReporting(true, body(0), false, output);
-			const written = readFileSync(file, "utf8");
-			writeFileSync(file, "stale");
-			const failed = await withRunFailureReporting(true, body(1), false, output);
-			process.stderr.write(JSON.stringify({ ok, failed, written, left: existsSync(file) }) + "\\n");
-		`;
-		const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
-			env: { ...process.env, HOME: env.dir },
-			encoding: "utf8",
-		});
-		const result = JSON.parse(child.stderr.trim().split("\n").at(-1) ?? "{}") as Record<string, unknown>;
-		deepStrictEqual(result, { ok: 0, failed: 1, written: "The answer.\n", left: false }, child.stderr);
-		const [plain, withOutput] = child.stdout.split("--\n");
-		equal(withOutput?.startsWith(plain ?? ""), true, child.stdout);
-		equal(
-			plain,
-			`${JSON.stringify({ type: "turn_end", startedAt: "t0", endedAt: "t1", exitCode: 0, outcome: "succeeded", text: "The answer." })}\n`,
-		);
-	} finally {
-		env.restore();
-	}
-});
-
-test("-o is written when a v1 --json or text run exits 0 through process.exit before returning (CLI-P22)", async () => {
+test("-o is written when a text run exits 0 through process.exit before returning (CLI-P22)", async () => {
 	const env = await isolateClioEnv("cli-kit-exit-output-");
 	try {
 		// The coordinated shutdown ends a successful headless run with process.exit (src/core/termination.ts).
 		const script = `
 			const { noteTextAnswer, withRunFailureReporting } = await import(${JSON.stringify(resolve("src/cli/run-failure.ts"))});
-			const { writeFrame } = await import(${JSON.stringify(resolve("src/cli/modes/jsonl.ts"))});
-			const json = process.argv[1] === "json";
-			const output = { path: "out-" + process.argv[1] + ".txt", cwd: ${JSON.stringify(env.dir)} };
-			await withRunFailureReporting(json, async () => {
-				if (json) writeFrame({ type: "turn_end", startedAt: "t0", endedAt: "t1", exitCode: 0, outcome: "succeeded", text: "pong" });
-				else { noteTextAnswer("pong"); process.stdout.write("pong\\n"); }
+			const output = { path: "out-text.txt", cwd: ${JSON.stringify(env.dir)} };
+			await withRunFailureReporting(async () => {
+				noteTextAnswer("pong");
+				process.stdout.write("pong\\n");
 				process.exit(0);
-			}, false, output);
+			}, output);
 		`;
-		for (const mode of ["json", "text"]) {
-			const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script, mode], {
-				env: { ...process.env, HOME: env.dir },
-				encoding: "utf8",
-			});
-			equal(child.status, 0, child.stderr);
-			equal(readFileSync(join(env.dir, `out-${mode}.txt`), "utf8"), "pong\n", mode);
-		}
+		const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+			env: { ...process.env, HOME: env.dir },
+			encoding: "utf8",
+		});
+		equal(child.status, 0, child.stderr);
+		equal(child.stdout, "pong\n");
+		equal(readFileSync(join(env.dir, "out-text.txt"), "utf8"), "pong\n");
 	} finally {
 		env.restore();
 	}

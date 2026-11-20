@@ -93,16 +93,16 @@ test("a headless run reports an ask it could not put to anyone as a permission r
 	strictEqual(end.outcome, "failed");
 	// The v2 envelope carries no safety summary; the sealed receipt is the record a host reads it from.
 	const safety = receipt.settled as unknown as {
-		decisions: { permissionRequested: number };
 		blockedAttempts: Array<Record<string, unknown>>;
 		permissionRequestedAttempts?: Array<Record<string, unknown>>;
 	};
-	// bt-15 c13a: the refused ask is listed where decisions counts it, never as a safety refusal.
-	strictEqual(safety.decisions.permissionRequested, 1);
+	// bt-15 c13a: the refused ask is listed as a refused ask, never as a safety refusal.
+	strictEqual(safety.permissionRequestedAttempts?.length, 1);
 	deepStrictEqual(safety.blockedAttempts, []);
+	// The sealed record lists the ask under permissionRequestedAttempts; that list is what marks it as a refused ask.
 	deepStrictEqual(
-		safety.permissionRequestedAttempts?.map(({ tool, permissionRequired }) => ({ tool, permissionRequired })),
-		[{ tool: "bash", permissionRequired: true }],
+		safety.permissionRequestedAttempts?.map(({ tool }) => tool),
+		["bash"],
 	);
 	// The sealed record's tools row does not count the ask as a blocked call (bt-15 c14a).
 	strictEqual(receipt.settled.tools.find((row) => row.tool === "bash")?.blocked, 0);
