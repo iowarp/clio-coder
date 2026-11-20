@@ -162,6 +162,11 @@ export interface WorkerAttestation {
 	endpointIdentityHash: string;
 	wireModelId: string;
 	toolSignature: string;
+	/**
+	 * Digest of the parameter schemas behind `toolSignature`'s names, from this build. Optional on the wire: a peer from
+	 * before it announces names only and is admitted on the name check alone.
+	 */
+	toolSchemaSignature?: string;
 	resources: WorkerResourceFacts;
 }
 
@@ -793,6 +798,10 @@ function parseAttestation(value: unknown): FrameParseResult<WorkerAttestation> {
 	}
 	const resources = parseResourceFacts(record.resources);
 	if (resources === null) return { ok: false, reason: "announce resources are missing or malformed" };
+	const schemaSignature = record.toolSchemaSignature;
+	if (schemaSignature !== undefined && (typeof schemaSignature !== "string" || !HEX_64.test(schemaSignature))) {
+		return { ok: false, reason: "announce toolSchemaSignature must be a sha256 hex digest" };
+	}
 	return {
 		ok: true,
 		value: {
@@ -808,6 +817,7 @@ function parseAttestation(value: unknown): FrameParseResult<WorkerAttestation> {
 			endpointIdentityHash: record.endpointIdentityHash as string,
 			wireModelId: record.wireModelId as string,
 			toolSignature: record.toolSignature as string,
+			...(schemaSignature !== undefined ? { toolSchemaSignature: schemaSignature } : {}),
 			resources,
 		},
 	};

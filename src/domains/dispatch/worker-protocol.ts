@@ -12,7 +12,7 @@
 
 import { createHash } from "node:crypto";
 import type { ToolName } from "../../core/tool-names.js";
-import { attestedToolSignature } from "../../engine/worker-tools.js";
+import { attestedToolNames, attestedToolSchemaSignature } from "../../engine/worker-tools.js";
 import type { ToolProfileName } from "../../tools/profiles.js";
 import {
 	canonicalJson,
@@ -89,6 +89,8 @@ export interface ApprovedWorkerIdentity {
 	wireModelId: string;
 	/** Fingerprint of the exact tool names the admitted WorkerSpec permits. */
 	toolSignature: string;
+	/** Digest of those names' parameter schemas in this build; compared only when the worker announces one. */
+	toolSchemaSignature?: string;
 }
 
 export type AttestationVerdict = { ok: true } | { ok: false; reason: string };
@@ -121,6 +123,10 @@ export function verifyWorkerAttestation(
 		["wire model", approved.wireModelId, attestation.wireModelId],
 		["tool surface", approved.toolSignature, attestation.toolSignature],
 	];
+	// A worker from before the schema digest announces names only; one that announces it must match this build's.
+	if (attestation.toolSchemaSignature !== undefined && approved.toolSchemaSignature !== undefined) {
+		fields.push(["tool schemas", approved.toolSchemaSignature, attestation.toolSchemaSignature]);
+	}
 	for (const [label, expected, announced] of fields) {
 		if (!Object.is(expected, announced)) {
 			return {
@@ -147,6 +153,21 @@ export function approvedIdentityForSpec(spec: {
 	runtimeResolution?: { capabilities: { tools: boolean | null } };
 	runtime?: { kind: string; id: string };
 }): ApprovedWorkerIdentity {
+	// The spec carries the final runtime-narrowed admission surface. The
+	// worker fingerprints its independently resolved registry intersection,
+	// so a missing, added, or differently filtered tool fails admission.
+	const toolNames =
+		spec.helperResult === true
+			? attestedToolNames({
+					allowedTools: spec.allowedTools as ReadonlyArray<ToolName>,
+					toolsSupported: spec.runtimeResolution?.capabilities.tools === true,
+					helperResult: true,
+					...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
+					...(spec.agentId !== undefined ? { agentId: spec.agentId } : {}),
+					...(spec.task !== undefined ? { task: spec.task } : {}),
+					...(spec.runtime !== undefined ? { runtime: spec.runtime } : {}),
+				})
+			: [...spec.allowedTools];
 	return {
 		specVersion: spec.specVersion,
 		settingsFingerprint: spec.settingsFingerprint,
@@ -155,21 +176,8 @@ export function approvedIdentityForSpec(spec: {
 		targetId: spec.target.id,
 		endpointIdentityHash: endpointIdentityHash(spec.target.url),
 		wireModelId: spec.wireModelId,
-		// The spec carries the final runtime-narrowed admission surface. The
-		// worker fingerprints its independently resolved registry intersection,
-		// so a missing, added, or differently filtered tool fails admission.
-		toolSignature:
-			spec.helperResult === true
-				? attestedToolSignature({
-						allowedTools: spec.allowedTools as ReadonlyArray<ToolName>,
-						toolsSupported: spec.runtimeResolution?.capabilities.tools === true,
-						helperResult: true,
-						...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
-						...(spec.agentId !== undefined ? { agentId: spec.agentId } : {}),
-						...(spec.task !== undefined ? { task: spec.task } : {}),
-						...(spec.runtime !== undefined ? { runtime: spec.runtime } : {}),
-					})
-				: toolSignatureOf(spec.allowedTools),
+		toolSignature: toolSignatureOf(toolNames),
+		toolSchemaSignature: attestedToolSchemaSignature(toolNames),
 	};
 }
 
