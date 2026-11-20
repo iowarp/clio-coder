@@ -3526,7 +3526,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (options.requestContinuation !== true) {
 					state.turnCalledWork = false;
 					state.finishRoundSpent = false;
-					headlessObservation?.reset();
+					// Per operator prompt: a later submit of the same host run (an --output-schema repair) keeps the pool's fact.
+					if (options.yoloContinuation !== true && options.machineTurn === undefined)
+						headlessObservation?.reset(options.hostRun?.runId);
 				}
 				state.continuation.beginPrompt({
 					requestContinuation: options.requestContinuation === true,

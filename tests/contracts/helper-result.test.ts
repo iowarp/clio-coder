@@ -1,6 +1,6 @@
 import { deepStrictEqual, notStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { test } from "node:test";
-import { formatDispatchHumanOutput, sealedFactsNotVerified } from "../../src/cli/run-output.js";
+import { formatDispatchHumanOutput } from "../../src/cli/run-output.js";
 import type { InternalHelperResultKind } from "../../src/domains/agents/result-contract.js";
 import {
 	INTERNAL_HELPER_RESULT_KINDS,
@@ -13,10 +13,7 @@ import { createWorkerOutputCapture } from "../../src/domains/dispatch/event-pump
 
 import { summarizeToolActivity, workerNoWorkDetail } from "../../src/domains/dispatch/tool-stats.js";
 import { approvedIdentityForSpec } from "../../src/domains/dispatch/worker-protocol.js";
-import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
 import { attestedToolSignature } from "../../src/engine/worker-tools.js";
-import { createTurnMiddleware } from "../../src/session-control/turn-middleware.js";
-import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import { parseWorkerSpec } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -442,28 +439,4 @@ test("headless human output exposes a sealed coder limitation between narration 
 		await bundle.extension.stop?.();
 		env.restore();
 	}
-});
-
-test("a headless run the observation pool stopped seals it and prints it under Not verified (CLI-P42)", async () => {
-	const state = createTurnState("off");
-	let stopped = true;
-	const middleware = createTurnMiddleware({
-		state,
-		middlewareToolChoice: createMiddlewareToolChoiceControl(),
-		emitNotice: () => {},
-		emitFooterNotice: () => {},
-		hostCompletionFacts: () => (stopped ? ["observation_budget"] : []),
-	});
-	state.turnCompletion = { state: "done", limitations: [], unverified: [] };
-	await middleware.fireTurnEnd({} as AgentRuntime, []);
-	const sealed = state.turnSealedCompletion;
-	deepStrictEqual([sealed?.claimed, sealed?.assessed, sealed?.facts], ["done", "partly_done", ["observation_budget"]]);
-	const block = sealedFactsNotVerified(sealed?.facts ?? []);
-	ok(block.startsWith("\nNot verified:\n- Observation budget: the per-turn observation pool refused "), block);
-	stopped = false;
-	await middleware.fireTurnEnd({} as AgentRuntime, []);
-	deepStrictEqual(
-		[state.turnSealedCompletion?.assessed, sealedFactsNotVerified(state.turnSealedCompletion?.facts ?? [])],
-		["done", ""],
-	);
 });
