@@ -10,6 +10,11 @@ export type BudgetInspection =
 			outputReserveAt?: (inputTokens: number) => number;
 			/** A chars/4 token count priced at the route's measured chars per token, as the view prices its input (CTX-1). */
 			priceAt?: (charsOver4Tokens: number) => number;
+			/**
+			 * Whether the next fold's summary can ride the main route's cached prefix: the summary runs on the chat route
+			 * and the last request passes the live-prefix request checks. The fold still weighs price and fit (MD9).
+			 */
+			livePrefixSummary?: () => boolean;
 			/** The compiled system prompt's sections and their estimated sizes, in prompt order (S-87). */
 			promptSections?: Array<{ id: string; tokens: number }>;
 	  }

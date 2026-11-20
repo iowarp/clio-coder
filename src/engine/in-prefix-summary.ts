@@ -110,6 +110,36 @@ export interface InPrefixRoute {
 const PREFIX_APIS: ReadonlySet<string> = new Set(["anthropic-messages", "openai-responses", "openai-completions"]);
 
 /**
+ * The request-level half of `prepareInPrefixSummary`: whether the last request this route sent can carry an
+ * in-prefix summary at all, read without rebuilding the transcript. Null when it can. The transcript checks (pending
+ * tools, a moved prefix) and the planner's price and fit comparison still decide at the fold.
+ */
+export function inPrefixRequestRefusal(
+	model: Pick<Model<Api>, "api" | "id" | "provider">,
+	last: MainRequestRecord | undefined,
+	route: InPrefixRoute,
+	now = Date.now(),
+): InPrefixRefusal | null {
+	if (!PREFIX_APIS.has(model.api)) return "unsupported-api";
+	if (!last || last.request.model.id !== model.id || last.request.model.provider !== model.provider) return "no-request";
+	if (last.promptTokens === null || last.promptTokens <= 0) return "prompt-unknown";
+	const lifetime = cacheLifetimeSeconds(last.request.model, last.request.options);
+	if (lifetime !== undefined) {
+		if (now - last.sentAt > lifetime * 1000 - EXPIRY_MARGIN_MS) return "expired";
+	} else {
+		// Without a declared lifetime only a route known to bill nothing is read as a slot cache; any other route
+		// (priced, or an unpriced gateway in front of an unknown backend) may have dropped the entry and bill the miss.
+		if (!route.free) return "lifetime-unknown";
+		// A slot cache has no clock: the last request reading from it is the evidence that it holds this prefix.
+		if (!last.cachedTokens || last.cachedTokens <= 0) return "no-cache-reuse";
+	}
+	// A forced or suppressed tool choice keys a different message cache than the auto request sent here.
+	const choice = last.request.options?.toolChoice;
+	if (choice !== undefined && choice !== "auto") return "tool-choice";
+	return null;
+}
+
+/**
  * Rebuild the live request and check it can be served from the last request's cache entry. A refusal names why;
  * any refusal means the portable summary is the only honest route.
  */
@@ -121,25 +151,12 @@ export async function prepareInPrefixSummary(
 	now = Date.now(),
 ): Promise<InPrefixSummary | InPrefixRefusal> {
 	const model = agent.state.model;
-	if (!PREFIX_APIS.has(model.api)) return "unsupported-api";
-	if (!last || last.request.model.id !== model.id || last.request.model.provider !== model.provider) return "no-request";
-	if (last.promptTokens === null || last.promptTokens <= 0) return "prompt-unknown";
-	const lifetime = cacheLifetimeSeconds(last.request.model, last.request.options);
-	let pricing: PrefixPricing;
-	if (lifetime !== undefined) {
-		if (now - last.sentAt > lifetime * 1000 - EXPIRY_MARGIN_MS) return "expired";
-		pricing = hostedPricing(last.request.model);
-	} else {
-		// Without a declared lifetime only a route known to bill nothing is read as a slot cache; any other route
-		// (priced, or an unpriced gateway in front of an unknown backend) may have dropped the entry and bill the miss.
-		if (!route.free) return "lifetime-unknown";
-		// A slot cache has no clock: the last request reading from it is the evidence that it holds this prefix.
-		if (!last.cachedTokens || last.cachedTokens <= 0) return "no-cache-reuse";
-		pricing = { read: 0, write: 1, slack: Math.min(last.promptTokens, SLOT_RESTORE_SLACK_TOKENS) };
-	}
-	// A forced or suppressed tool choice keys a different message cache than the auto request sent here.
-	const choice = last.request.options?.toolChoice;
-	if (choice !== undefined && choice !== "auto") return "tool-choice";
+	const refusal = inPrefixRequestRefusal(model, last, route, now);
+	if (refusal !== null || !last || last.promptTokens === null) return refusal ?? "no-request";
+	const pricing: PrefixPricing =
+		cacheLifetimeSeconds(last.request.model, last.request.options) !== undefined
+			? hostedPricing(last.request.model)
+			: { read: 0, write: 1, slack: Math.min(last.promptTokens, SLOT_RESTORE_SLACK_TOKENS) };
 
 	let messages = structuredClone(agent.state.messages);
 	if (agent.transformContext) messages = await agent.transformContext(messages, signal);

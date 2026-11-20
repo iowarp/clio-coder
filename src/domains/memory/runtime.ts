@@ -1,7 +1,7 @@
 import { readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import type { FoldProjection } from "../context/fold/pressure.js";
+import { type FoldPlannerView, foldProjection } from "../context/fold/pressure.js";
 import type { MemoryCommitScope } from "./commit-state.js";
 import type { RetentionStatus } from "./completion-retention.js";
 import {
@@ -16,6 +16,7 @@ import type {
 	MemoryContract,
 	MemoryObservationCommands,
 	MemoryOfferInput,
+	MemoryOfferOutcome,
 	MemoryOfferUse,
 	MemoryPromptSelection,
 	ObservationSource,
@@ -81,14 +82,18 @@ export interface MemoryRuntimeInfrastructure {
 	source(): ObservationSource | null;
 	usableHistoryTokens(): number;
 	/**
-	 * The fold planner's projection of the next automatic fold, or null when the
-	 * live budget cannot say. Preparation runs only for a fold that sends history
-	 * to a portable summary request, and only once pressure is within
+	 * The fold planner the chat loop publishes and the compaction settings,
+	 * read lazily; memory projects the next automatic fold from them
+	 * (`foldProjection`). Preparation runs only for a fold that sends history to
+	 * a portable summary request, and only once pressure is within
 	 * `OBSERVATION_FOLD_MARGIN` of the trigger; most sessions end before it. A
-	 * port that answers null defers new preparation; leaving it unwired removes
-	 * the gate.
+	 * projection the live budget cannot make defers new preparation; leaving
+	 * the port unwired removes the gate.
 	 */
-	foldProjection?(): FoldProjection | null;
+	foldPlanner?(): {
+		live: FoldPlannerView;
+		compaction: { readonly provider?: string | undefined; readonly model?: string | null | undefined };
+	};
 	/** Preparation can use its own route before an actor exists; offers still require the actual compactor's fit. */
 	observerHistoryTokens?(): number;
 	client: {
@@ -190,10 +195,10 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	#usage: TaskMemoryStepUsage | null = null;
 	#durationMs: number | null = null;
 	#reflection = false;
-	/** The last two folds that saw an offer decision, oldest first; two declined in a row stop preparation. */
-	#folds: Array<{ key: string; declined: boolean; used: boolean }> = [];
-	/** The fold whose decline stopped preparation for this session, or null while it runs. */
-	#stoppedAt: string | null = null;
+	/** Offer declines of the fold in progress, keyed by the checkpoint it reads; it settles at its commit. */
+	#fold: { key: string; declines: Set<string> } | null = null;
+	/** Committed folds in a row that declined the offer for no gain; two stop preparation for the session. */
+	#declinedFolds = 0;
 	#disposed = false;
 	#enabled = false;
 	#retention: RetentionStatus = EMPTY_RETENTION;
@@ -368,6 +373,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				if (verdict !== "accepted" && verdict !== "duplicate") return;
 				if (input.memoryReceipt) this.consume(input.commitId, input.memoryReceipt);
 				if (verdict === "duplicate") return verdict;
+				if (input.kind === "summary") this.#foldCommitted(input.memoryReceipt !== undefined);
 				this.#invalidate("checkpoint-changed");
 				return verdict;
 			},
@@ -450,8 +456,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		this.#consumed.clear();
 		this.#commits.clear();
 		this.#attempts.clear();
-		this.#folds = [];
-		this.#stoppedAt = null;
+		this.#fold = null;
+		this.#declinedFolds = 0;
 		this.#lastCommit = null;
 		this.#lastReceipt = null;
 		this.#retention = EMPTY_RETENTION;
@@ -526,7 +532,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			return null;
 		}
 		// Two folds in a row that declined the offer for no gain end preparation for the session.
-		if (this.#stoppedAt !== null) {
+		if (this.#declinedFolds >= 2) {
 			this.#lastReason = "folds-declined";
 			return null;
 		}
@@ -536,7 +542,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		// nothing about how near the main route's compaction is. Reflection over
 		// batches already prepared still runs. An unwired port is a bare runtime
 		// with no live budget to consult, which prepares ungated.
-		const projection = infra.foldProjection === undefined ? undefined : infra.foldProjection();
+		const planner = infra.foldPlanner?.();
+		const projection = planner === undefined ? undefined : foldProjection(planner.live, planner.compaction);
 		if (projection !== undefined && projection !== null) {
 			// A fold in the live prefix, a native one, or none declines every offer: no call can pay off.
 			if (projection.path !== "portable") {
@@ -1213,7 +1220,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				incompleteUnits: input.source.units.filter((unit) => !unit.complete).length,
 			});
 			// A fold with nothing prepared declined nothing; one whose prepared notes could not gain did.
-			if (offerable > 0) this.#foldOutcome(fold, "declined");
+			if (offerable > 0) this.#foldDeclined(fold, "no-eligible-gain");
 			return null;
 		}
 		if (this.#issued.size >= 4) this.#issued.delete(this.#issued.keys().next().value ?? "");
@@ -1221,35 +1228,37 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		this.#issued.set(offer.receipt.offerId, offer.receipt);
 		return Object.freeze({
 			...offer,
-			onUse: (use: MemoryOfferUse) => {
-				this.#foldOutcome(fold, "used");
+			// Choosing the offer is not using it: use is credited when the checkpoint carrying its receipt commits.
+			onUse: (use: MemoryOfferUse) =>
 				this.#event("offer-used", {
 					receipt: offer.receipt,
 					originalInputTokens: use.originalInputTokens,
 					substitutedInputTokens: use.substitutedInputTokens,
-				});
+				}),
+			onOutcome: (outcome: MemoryOfferOutcome) => {
+				if (outcome.kind === "declined") this.#foldDeclined(fold, outcome.reason);
+				// A failed fold settles nothing; its retry reads the same checkpoint and decides again.
+				else if (this.#fold?.key === fold) this.#fold = null;
 			},
 		});
 	}
 
+	#foldDeclined(key: string, reason: string): void {
+		if (this.#fold?.key !== key) this.#fold = { key, declines: new Set() };
+		this.#fold.declines.add(reason);
+	}
+
 	/**
-	 * Record what a fold did with the offer. Preparation stops for the session once two folds in a row declined it
-	 * and neither used one; a later offer used by the same fold lifts the stop, since that fold did not decline.
+	 * A fold settles when its checkpoint commits. One that declined the offer for no gain, by memory's measure or the
+	 * compactor's, and used none extends the run; any other commit resets it. Two in a row stop preparation for the
+	 * session, and the stop stays until the scope resets.
 	 */
-	#foldOutcome(key: string, outcome: "declined" | "used"): void {
-		let fold = this.#folds.at(-1);
-		if (fold?.key !== key) {
-			fold = { key, declined: false, used: false };
-			this.#folds = [...this.#folds.slice(-1), fold];
-		}
-		if (outcome === "used") {
-			fold.used = true;
-			if (this.#stoppedAt === key) this.#stoppedAt = null;
-			return;
-		}
-		fold.declined = true;
-		if (this.#stoppedAt === null && this.#folds.length === 2 && this.#folds.every((each) => each.declined && !each.used))
-			this.#stoppedAt = key;
+	#foldCommitted(used: boolean): void {
+		const declines = this.#fold?.declines;
+		this.#fold = null;
+		if (this.#declinedFolds >= 2) return;
+		if (!used && (declines?.has("no-gain") || declines?.has("no-eligible-gain"))) this.#declinedFolds += 1;
+		else this.#declinedFolds = 0;
 	}
 
 	consume(commitId: string, receipt: MemoryConsumptionReceipt): void {

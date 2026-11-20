@@ -128,8 +128,8 @@ export function summaryOutputCap(input: {
 
 /**
  * Where the next automatic fold would send the history it reads. `live` asks the summary inside the main route's
- * cached prefix (the summary runs on the chat route), `portable` sends history to a separate summary request,
- * `native` is the provider's own compaction, `none` means no automatic fold fires.
+ * cached prefix, `portable` sends history to a separate summary request, `native` is the provider's own compaction,
+ * `none` means no automatic fold fires.
  */
 export type FoldPath = "live" | "portable" | "native" | "none";
 
@@ -142,40 +142,34 @@ export interface FoldProjection {
 	readonly trigger: number;
 }
 
+/** What the chat loop publishes that the projection reads: its live budget and its context ledger. */
+export interface FoldPlannerView {
+	inspectLiveBudget(): BudgetInspection;
+	contextLedger(): { readonly compactionAuto: boolean; readonly compactionThreshold: number | null };
+}
+
 /**
  * Project the next automatic fold from the chat loop's published live budget, its context ledger's trigger and the
- * compaction settings. Null while the live budget is unavailable or only a persisted capture exists: the projection is
- * unknown. The path mirrors the planner's own choices: native as the compaction flow enables it, the chat route as the
- * trigger's reserve reads it (an unresolvable compaction model counts as the chat route there too).
+ * compaction settings. Null while the live budget is unavailable or only a persisted capture exists: the projection
+ * is unknown. The path is the planner's own: native as the compaction flow enables it, live only when the live budget
+ * reports the live-prefix request available. A live request the fold later refuses on price or fit, which cannot be
+ * known ahead, takes the portable path then; this projection cannot see that and names it live.
  */
 export function foldProjection(
-	live: {
-		inspectLiveBudget(): BudgetInspection;
-		contextLedger(): { readonly compactionAuto: boolean; readonly compactionThreshold: number | null };
-	},
+	planner: FoldPlannerView,
 	compaction: { readonly provider?: string | undefined; readonly model?: string | null | undefined },
-	resolveRoute: (reference: string) => { target: string; model: string } | null,
 ): FoldProjection | null {
-	const budget = live.inspectLiveBudget();
+	const budget = planner.inspectLiveBudget();
 	if (budget.status !== "available" || budget.view.historical || budget.view.inputTokens === null) return null;
 	const view = budget.view;
 	const input = view.inputTokens;
 	const window = view.effectiveWindow ?? 0;
 	const pressure = window > 0 && input !== null ? input / window : 0;
-	const ledger = live.contextLedger();
+	const ledger = planner.contextLedger();
 	const trigger = ledger.compactionThreshold;
 	if (!ledger.compactionAuto || !(window > 0) || trigger === null)
 		return { path: "none", pressure, trigger: trigger ?? 1 };
 	if (compaction.provider === "native" && !compaction.model && view.runtimeId === "openai-codex")
 		return { path: "native", pressure, trigger };
-	let onChatRoute = true;
-	if (compaction.model) {
-		try {
-			const route = resolveRoute(compaction.model);
-			if (route) onChatRoute = route.target === view.targetId && route.model === view.modelId;
-		} catch {
-			// An invalid reference fails the summary itself; the trigger reads it as the chat route, and so does this.
-		}
-	}
-	return { path: onChatRoute ? "live" : "portable", pressure, trigger };
+	return { path: budget.livePrefixSummary?.() === true ? "live" : "portable", pressure, trigger };
 }

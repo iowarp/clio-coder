@@ -1,11 +1,11 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { type FoldProjection, foldProjection } from "../../src/domains/context/fold/pressure.js";
+import { foldProjection } from "../../src/domains/context/fold/pressure.js";
 import type { ObservationSource, ObservationSourceUnit } from "../../src/domains/memory/contract.js";
 import { prepareObservation } from "../../src/domains/memory/observations.js";
 import { MemoryRuntime } from "../../src/domains/memory/runtime.js";
@@ -203,28 +203,36 @@ test("the observer prepares only near a portable fold, stops after two declined 
 	strictEqual(memory({ observations: { enabled: true }, surfaces: { observe: "off" } }), "off", "the new key wins");
 	strictEqual(memory({ surfaces: { observe: "on" } }), "on");
 
-	// The projection: live on the chat route, portable on a separate compaction model, native, or no fold.
-	const live = (auto = true, runtimeId = "anthropic") => ({
+	// The projection names the planner's path: live only when its live-prefix request is available.
+	const fold = { pressure: 0.79, livePrefix: true as boolean | undefined, auto: true, runtimeId: "anthropic" };
+	const planner = {
 		inspectLiveBudget: () =>
 			({
 				status: "available",
 				capability: "native",
-				view: { historical: false, inputTokens: 70_000, effectiveWindow: 100_000, runtimeId, targetId: "t", modelId: "m" },
+				view: {
+					historical: false,
+					inputTokens: fold.pressure * 100_000,
+					effectiveWindow: 100_000,
+					runtimeId: fold.runtimeId,
+				},
+				...(fold.livePrefix === undefined ? {} : { livePrefixSummary: () => fold.livePrefix }),
 			}) as never,
-		contextLedger: () => ({ compactionAuto: auto, compactionThreshold: 0.8 }),
-	});
-	const elsewhere = () => ({ target: "summary", model: "small" });
-	strictEqual(foldProjection(live(), {}, elsewhere)?.path, "live");
-	strictEqual(foldProjection(live(), { model: "t/m" }, () => ({ target: "t", model: "m" }))?.path, "live");
-	deepStrictEqual(foldProjection(live(), { model: "small" }, elsewhere), {
-		path: "portable",
-		pressure: 0.7,
-		trigger: 0.8,
-	});
-	strictEqual(foldProjection(live(true, "openai-codex"), { provider: "native" }, elsewhere)?.path, "native");
-	strictEqual(foldProjection(live(false), { model: "small" }, elsewhere)?.path, "none");
+		contextLedger: () => ({ compactionAuto: fold.auto, compactionThreshold: 0.8 }),
+	};
+	strictEqual(foldProjection(planner, {})?.path, "live");
+	fold.livePrefix = false;
+	strictEqual(foldProjection(planner, {})?.path, "portable", "the chat route without a live-prefix request is portable");
+	fold.livePrefix = undefined;
+	strictEqual(foldProjection(planner, {})?.path, "portable");
+	fold.runtimeId = "openai-codex";
+	strictEqual(foldProjection(planner, { provider: "native" })?.path, "native");
+	fold.runtimeId = "anthropic";
+	fold.auto = false;
+	strictEqual(foldProjection(planner, {})?.path, "none");
+	fold.auto = true;
 	strictEqual(
-		foldProjection({ ...live(), inspectLiveBudget: () => ({ status: "unavailable", reason: "x" }) }, {}, elsewhere),
+		foldProjection({ ...planner, inspectLiveBudget: () => ({ status: "unavailable", reason: "x" }) }, {}),
 		null,
 	);
 
@@ -246,10 +254,10 @@ test("the observer prepares only near a portable fold, stops after two declined 
 			message(`a${n}`, "assistant", { text: `ok ${"detail ".repeat(1200)}`, stopReason: "stop" }),
 		);
 	turn(1);
-	let projection: FoldProjection = { path: "live", pressure: 0.79, trigger: 0.8 };
 	let calls = 0;
 	const runtime = new MemoryRuntime();
-	runtime.createIntervention({}).bindCommitScope(scope);
+	const registration = runtime.createIntervention({});
+	registration.bindCommitScope(scope);
 	const units = () => observationSourceUnits(entries);
 	runtime.configure({
 		stateDir: () => dir,
@@ -259,7 +267,7 @@ test("the observer prepares only near a portable fold, stops after two declined 
 		lessonSource: () => null,
 		source: () => ({ ...scope, checkpoint: null, units: units() }),
 		usableHistoryTokens: () => 100_000,
-		foldProjection: () => projection,
+		foldPlanner: () => ({ live: planner, compaction: {} }),
 		client: {
 			getModelClient: () => ({
 				complete: async (request: { userPrompt: string }) => {
@@ -280,30 +288,51 @@ test("the observer prepares only near a portable fold, stops after two declined 
 			backgroundEndpointBusy: () => false,
 		},
 	} as never);
-	const decline = (id: string) =>
-		runtime.offerCompaction({
-			source: { ...scope, checkpoint: { id, digest: id }, units: units() },
-			ordinary: "x",
-			serialize: () => "",
+	// One fold: offer decisions, then the checkpoint commit that settles it.
+	const offer = (ordinary: string) =>
+		runtime.offerCompaction({ source: { ...scope, checkpoint: null, units: units() }, ordinary, serialize: () => "" });
+	let commits = 0;
+	const commit = (receipt?: unknown) =>
+		registration.notifyContextCommitted({
+			...scope,
+			commitId: `c${++commits}`,
+			kind: "summary",
+			outcome: "summarized",
+			...(receipt ? { memoryReceipt: receipt as never } : {}),
 		});
 	try {
+		fold.livePrefix = true;
 		await runtime.runIdleStep();
 		strictEqual(calls, 0, "a live-prefix fold prepares nothing");
-		projection = { path: "portable", pressure: 0.6, trigger: 0.8 };
+		fold.livePrefix = false;
+		fold.pressure = 0.6;
 		await runtime.runIdleStep();
 		strictEqual(calls, 0, "no preparation below the margin");
-		projection = { path: "portable", pressure: 0.7, trigger: 0.8 };
+		fold.pressure = 0.7;
 		await runtime.runIdleStep();
 		strictEqual(calls, 1, "a portable fold within the margin prepares");
-		strictEqual(runtime.observationStatus().ready, 1);
-		strictEqual(decline("c1"), null);
+
+		strictEqual(offer("x"), null, "memory's no-eligible-gain");
+		commit();
+		commit(); // A fold that commits with no decline breaks the run.
+		const chosen = offer("word ".repeat(20_000));
+		ok(chosen);
+		chosen.onUse?.({ originalInputTokens: 2, substitutedInputTokens: 1 });
+		chosen.onOutcome?.({ kind: "failed" }); // Chosen early, then the summary failed: nothing commits or counts.
+		offer("word ".repeat(20_000))?.onOutcome?.({ kind: "declined", reason: "no-gain" }); // The compactor's own no-gain.
+		commit();
 		turn(2);
 		await runtime.runIdleStep();
 		strictEqual(calls, 2, "one declined fold does not stop preparation");
-		strictEqual(decline("c2"), null);
+		strictEqual(offer("x"), null);
+		commit();
 		turn(3);
 		await runtime.runIdleStep();
 		strictEqual(calls, 2, "two declined folds in a row stop preparation for the session");
+		commit(chosen.receipt);
+		turn(4);
+		await runtime.runIdleStep();
+		strictEqual(calls, 2, "the stop holds for the session");
 	} finally {
 		runtime.dispose();
 		rmSync(dir, { recursive: true, force: true });

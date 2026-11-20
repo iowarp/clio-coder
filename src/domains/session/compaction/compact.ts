@@ -1836,6 +1836,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		if (memoryOffer !== null || input.offerMemory === undefined) return raw;
 		const offer = input.offerMemory(rawSlice, ordinary, slice);
 		const declined = (reason: string, facts: Record<string, unknown> = {}) => {
+			offer?.onOutcome?.({ kind: "declined", reason });
 			observationEvent("offer-declined", { reason, split, entries: slice.length, ...facts });
 			if (observationTracing()) traceObservation("offer-declined", { reason, split, entries: slice.length, ...facts });
 			return raw;
@@ -1975,6 +1976,8 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	} else commitMemoryOffer?.();
 	// A reply the checkpoint validator refuses is asked for once more with the refusal in the request, on every pass
 	// (CLI-P5). The retry is an ordinary summary call; a failed call (provider, window, cap, stop) is never retried.
+	// A fold that fails after choosing an offer tells it; a fold that commits reports itself through the commit notice.
+	const offerFailed = () => (memoryOffer as MemoryCompactionOffer | null)?.onOutcome?.({ kind: "failed" });
 	const checkedSummary = async (userText: string, history: boolean, check: (text: string) => string) => {
 		let request = userText;
 		for (let attempt = 0; ; attempt++) {
@@ -1984,12 +1987,18 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 				request,
 				systemPrompt,
 				maxTokens,
-			);
+			).catch((error: unknown) => {
+				offerFailed();
+				throw error;
+			});
 			usage = addCompactionUsage(usage, reply.usage);
 			try {
 				return check(reply.text);
 			} catch (error) {
-				if (attempt > 0 || compactionFailureOf(error, false).cause !== "checkpoint_format") throw error;
+				if (attempt > 0 || compactionFailureOf(error, false).cause !== "checkpoint_format") {
+					offerFailed();
+					throw error;
+				}
 				input.signal?.throwIfAborted();
 				request = checkpointRetryText(userText, error, history);
 			}
@@ -2022,8 +2031,10 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		);
 	}
 
-	if (memoryOffer !== null && !(memoryOffer as MemoryCompactionOffer).isCurrent())
+	if (memoryOffer !== null && !(memoryOffer as MemoryCompactionOffer).isCurrent()) {
+		offerFailed();
 		throw new Error("memory offer became stale during compaction");
+	}
 
 	// A generated split summary is not a reliable copy of the active request.
 	// Keep it in the canonical checkpoint so live replay and resume agree.
