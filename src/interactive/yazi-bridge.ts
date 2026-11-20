@@ -253,7 +253,10 @@ function pathKind(path: string): "file" | "directory" | "other" {
 function formatYaziMentions(
 	paths: ReadonlyArray<string>,
 	options: {
+		/** Yazi's directory for the pick; it resolves a relative raw path and nothing else. */
 		cwd: string;
+		/** Clio's workspace, which mentions resolve against, so it is what a mention is relative to. */
+		workspace: string;
 		draft: string;
 		statPath?: (path: string) => "file" | "directory" | "other";
 		maxPaths?: number;
@@ -279,7 +282,7 @@ function formatYaziMentions(
 		}
 		seen.add(absolute);
 		const kind = inspect(absolute);
-		let display = relativeWhenInside(absolute, options.cwd);
+		let display = relativeWhenInside(absolute, options.workspace);
 		if (kind === "directory" && display !== "/" && !display.endsWith("/")) display = `${display}/`;
 		const mention = kind === "file" && !containsAsciiWhitespace(display);
 		const item = mention ? `@${display}` : `\`${display.replaceAll("`", "\\`")}\``;
@@ -343,7 +346,12 @@ export function createYaziBridge(deps: YaziBridgeDeps): YaziBridge {
 
 	const insert = (paths: ReadonlyArray<string>, cwd: string): void => {
 		const draft = deps.getDraft();
-		const batch = formatYaziMentions(paths, { cwd, draft, ...(deps.statPath ? { statPath: deps.statPath } : {}) });
+		const batch = formatYaziMentions(paths, {
+			cwd,
+			workspace: deps.getCwd(),
+			draft,
+			...(deps.statPath ? { statPath: deps.statPath } : {}),
+		});
 		if (batch.inserted === 0) {
 			if (batch.truncated > 0) {
 				deps.notice(
