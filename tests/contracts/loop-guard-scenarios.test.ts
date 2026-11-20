@@ -298,6 +298,8 @@ test("loop guard block reasons restate a prior failure and name where the turn's
 		tool: "gateway",
 		args: { op: "call", capability, args },
 	});
+	const read = (path: string): GuardCall => ({ tool: "read", args: { path } });
+	const continues = { turnBudgetContinues: true };
 	const rows: Row[] = [
 		{
 			name: "a blocked repeat of a failed call restates why the call failed",
@@ -342,6 +344,66 @@ test("loop guard block reasons restate a prior failure and name where the turn's
 				[0, /soft budget 3/u],
 				[0, /This turn's calls by tool: read 2, extension_desk__next_step 1, extension_desk__record 1\./u],
 			],
+		},
+		{
+			name:
+				"a parallel batch that would cross the soft budget runs none of its calls, and the refusal says a continuation follows (CLI-H1)",
+			guard: { turnToolCallBudget: () => ({ soft: 3, hard: 18 }) },
+			calls: rounds(
+				[read("a.md")],
+				[read("b.md")],
+				[
+					{ tool: "verify", args: { check: "typecheck" }, metadata: continues },
+					{ tool: "verify", args: { check: "lint" }, metadata: continues },
+					{ ...read("c.md"), metadata: continues },
+				],
+				[{ ...read("d.md"), metadata: continues }],
+			),
+			admitted: [true, true, false, false, false, false],
+			reasons: [
+				["every", /continuation turn follows automatically/u],
+				["every", /Do not claim the work is finished/u],
+				["every", /end your reply\./u, false],
+				[0, /this parallel batch of 3 tool calls would take the turn past its soft budget of 3 \(2 made\), so no call/u],
+				[2, /no call in the batch ran/u],
+				[3, /this turn has made its 3 tool calls/u],
+			],
+		},
+		{
+			name: "a refused batch counts as one refused attempt, so its siblings never bring a later call to the hard ceiling",
+			guard: { turnToolCallBudget: () => ({ soft: 3, hard: 5 }) },
+			calls: rounds(
+				[read("a.md")],
+				[read("b.md")],
+				times(3, (index) => read(`${index}.md`)),
+				[read("d.md")],
+				[read("e.md")],
+			),
+			admitted: [true, true, false, false, false, false, false],
+			reasons: [
+				[3, /this turn has made its 3 tool calls/u],
+				[3, /hard ceiling/u, false],
+				[4, /passed the hard ceiling \(5\); the turn is being stopped/u],
+			],
+		},
+		{
+			name:
+				"a parallel batch that exactly fills the soft budget runs whole, and without a continuation the refusal asks for a summary",
+			guard: { turnToolCallBudget: () => ({ soft: 3, hard: 18 }) },
+			calls: rounds([read("a.md")], [read("b.md"), read("c.md")], [read("d.md"), read("e.md")]),
+			admitted: [true, true, true, false, false],
+			reasons: [
+				["every", /continuation/u, false],
+				["every", /state the single next step you propose, and end your reply\./u],
+			],
+		},
+		{
+			name:
+				"a parallel batch wider than the whole soft budget keeps the per-call cut, so no continuation can refuse it again",
+			guard: { turnToolCallBudget: () => ({ soft: 3, hard: 18 }) },
+			calls: rounds(times(5, (index) => read(`${index}.md`))),
+			admitted: [true, true, true, false, false],
+			reasons: [["every", /this turn has made its 3 tool calls/u]],
 		},
 	];
 	for (const row of rows) check(row);

@@ -609,6 +609,10 @@ export interface ToolInvokeOptions {
 	callId?: string;
 	attemptId?: string;
 	correlationId?: string;
+	/** Calls in the model response named by `correlationId`; the loop guard judges the batch whole at the turn budget. */
+	batchSize?: number;
+	/** Whether a turn the per-turn tool budget ends now continues without the operator; the soft refusal says so. */
+	turnBudgetContinues?: boolean;
 	/** Session-effective ceiling for one tool result, read again before every invocation. */
 	toolResultMaxBytes?: number;
 	pendingSkillPolicy?: PendingSkillToolPolicy;
@@ -3491,6 +3495,8 @@ function buildToolHookInput(
 	// A prompt template's turn bounds, for the loop guard's per-turn budget and step policy.
 	const { budget, turnPolicy } = options?.turnConstraints ?? {};
 	if (budget?.toolCalls !== undefined) metadata.templateToolCalls = budget.toolCalls;
+	if (options?.batchSize !== undefined) metadata.batchSize = options.batchSize;
+	if (options?.turnBudgetContinues !== undefined) metadata.turnBudgetContinues = options.turnBudgetContinues;
 	if (turnPolicy !== undefined) metadata.templateStepTool = turnPolicy.stepTool;
 	const template = budget?.template ?? turnPolicy?.template;
 	if ((budget?.toolCalls !== undefined || turnPolicy !== undefined) && template) metadata.templateName = template;

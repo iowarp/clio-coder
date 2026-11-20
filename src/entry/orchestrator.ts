@@ -2722,6 +2722,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				if (caps === null) return null;
 				return {
 					usage: autonomyWindow.usage(),
+					turn: { toolCalls: autonomyWindow.turnToolCalls(), budget: readOrchTurnToolCallBudget().soft },
 					caps,
 					halted: autonomyWindow.halted(),
 					osSandbox: mainShellContained(getCurrentSettings().safety.sandbox, sandboxAvailability()),

@@ -96,6 +96,8 @@ export type AutonomyEmit = <K extends AutonomyEventName>(
 /** What the footer shows of the window at yolo. */
 export interface AutonomyStatus {
 	usage: AutonomyUsage;
+	/** Tool calls the running turn made against the per-turn soft budget, which the window's cap does not show. */
+	turn?: { toolCalls: number; budget: number };
 	caps: AutonomousCaps;
 	halted: AutonomyHalt | null;
 	/** Whether the main session's shell runs under an OS sandbox backend. */
@@ -105,6 +107,8 @@ export interface AutonomyStatus {
 export interface AutonomyWindow {
 	/** One settled main-session tool call. */
 	toolCall(): void;
+	/** Settled main-session tool calls since the turn started, counted at yolo only. */
+	turnToolCalls(): number;
 	/** Tokens one settled main-session model call spent. */
 	tokens(count: number): void;
 	turnStarted(): void;
@@ -149,6 +153,7 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 	const now = deps.now ?? (() => performance.now());
 	let session: string | null = deps.session?.() ?? null;
 	let toolCalls = 0;
+	let turnToolCalls = 0;
 	let tokens = 0;
 	let activeMs = 0;
 	let turnStart: number | null = null;
@@ -253,9 +258,11 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 			const caps = counting();
 			if (caps === null) return;
 			toolCalls += 1;
+			turnToolCalls += 1;
 			flushJudge();
 			check(caps);
 		},
+		turnToolCalls: () => turnToolCalls,
 		tokens(count) {
 			const caps = counting();
 			if (caps === null || !Number.isFinite(count) || count <= 0) return;
@@ -264,6 +271,7 @@ export function createAutonomyWindow(deps: AutonomyWindowDeps): AutonomyWindow {
 		},
 		turnStarted() {
 			counting();
+			turnToolCalls = 0;
 			if (turnStart === null) turnStart = now();
 		},
 		// Time accrues here but is checked at the next call event, so a pause
