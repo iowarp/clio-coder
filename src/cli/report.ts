@@ -49,6 +49,7 @@ import {
 	requestBundleDeletion,
 	routeFor,
 	runReportSend,
+	SHARE_RECIPIENT,
 	SHARE_RETENTION_DAYS,
 	saveBuiltBundle,
 	saveReportDraft,
@@ -59,6 +60,7 @@ import {
 	updateShareReceipt,
 	uploadShare,
 } from "../domains/report/index.js";
+import { SHARE_KEY_EXPIRED } from "../domains/report/share/seal.js";
 import { writeSealedReportBundle } from "../domains/report/transport.js";
 import { parseCommandFlags } from "./kit/flags.js";
 import { jsonDocument, writeCliFailure } from "./kit/json-out.js";
@@ -674,19 +676,29 @@ async function confirmAndSend(
 			: null;
 	if (shareId !== null && share === null && source !== null) {
 		// No gh to upload it: the same sealed envelope goes to a file only the maintainers can open.
-		const box = writeSealedReportBundle(io.stateDir, {
-			reportId: draft.id,
-			shareId,
-			clio: source.clio,
-			consent: source.scopes,
-			digest: reportBundleDigest(source.bytes),
-			archiveFormat: REPORT_BUNDLE_FORMAT,
-			archive: source.bytes,
-			...(io.deps.now !== undefined ? { now: io.deps.now() } : {}),
-		});
-		(options.json ? io.err : io.out)(
-			`Sealed the bundle for the maintainers at ${box}; only they can open it. Attach it to the issue by hand.\n`,
-		);
+		let box: string | null = null;
+		try {
+			box = writeSealedReportBundle(io.stateDir, {
+				reportId: draft.id,
+				shareId,
+				clio: source.clio,
+				consent: source.scopes,
+				digest: reportBundleDigest(source.bytes),
+				archiveFormat: REPORT_BUNDLE_FORMAT,
+				archive: source.bytes,
+				...(io.deps.now !== undefined ? { now: io.deps.now() } : {}),
+			});
+		} catch (error) {
+			// An old build's maintainer key has expired (SF-20): only the box is skipped, the report still goes.
+			if (!(error instanceof Error && error.message === SHARE_KEY_EXPIRED)) throw error;
+			io.err(
+				`No .box written: the maintainers' key this Clio Coder carries expired after ${SHARE_RECIPIENT.notAfter}; run clio-coder upgrade to seal bundles again. Sending the report without it.\n`,
+			);
+		}
+		if (box !== null)
+			(options.json ? io.err : io.out)(
+				`Sealed the bundle for the maintainers at ${box}; only they can open it. Attach it to the issue by hand.\n`,
+			);
 	}
 	const outcome = await runReportSend(draft, plan.rendered, {
 		...(share !== null ? { share } : {}),

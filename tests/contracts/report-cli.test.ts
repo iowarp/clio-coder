@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -248,4 +248,20 @@ test("without gh a --share report seals its bundle to a .box file and names its 
 	strictEqual(envelope.format, "clio-coder.share.sealed");
 	strictEqual(envelope.kind, "report-bundle");
 	ok(!text.includes(HAPPENED));
+});
+
+test("without gh, after the sealing key expires, the report is still written without a .box and stderr names the upgrade", async () => {
+	const { bodyFile, deps, output } = scratch();
+	await liveSession(deps.stateDir ?? "", "ses_share");
+	deps.findGh = () => null;
+	deps.now = () => new Date("2028-01-01T00:00:00.000Z");
+	strictEqual(await runReport([...compose(bodyFile), ...shareFlags], deps), 0);
+	const { out, err } = output();
+	ok(!out.includes("Sealed the bundle"), out);
+	ok(/^Wrote \S+\.md\. Post it at https:\/\/github\.com\//mu.test(out), out);
+	const skipped = err.split("\n").filter((line) => line.includes("clio-coder upgrade"));
+	strictEqual(skipped.length, 1, err);
+	ok(skipped[0]?.includes(".box"), err);
+	const files = readdirSync(deps.stateDir ?? "", { recursive: true }).map(String);
+	ok(!files.some((file) => file.endsWith(".box")), files.join("\n"));
 });
