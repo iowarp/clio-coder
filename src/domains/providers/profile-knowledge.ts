@@ -1,41 +1,61 @@
-import { loadModelProfiles, type ModelProfile, type ModelProfiles } from "./model-profiles.js";
-import type { KnowledgeBase, KnowledgeBaseEntry, KnowledgeBaseHit } from "./types/knowledge-base.js";
+import { ModelCatalogOverlays, resolveModelCatalogOverlayRoots, substringCatalogLookup } from "./catalog-overlays.js";
+import {
+	loadModelProfiles,
+	loadPackagedModelProfiles,
+	type ModelProfile,
+	type ModelProfiles,
+} from "./model-profiles.js";
+import type { KnowledgeBase, KnowledgeBaseEntry, KnowledgeBaseHit, KnowledgeBaseRoot } from "./types/knowledge-base.js";
 
 /**
- * Refactor step 4: `models/profiles.yaml` answers what the model is (windows, output cap,
- * capability flags, thinking mechanism and levels) through the `KnowledgeBase` shape every
- * resolver already consumes. Profiles also supply sampling recommendations, including user
- * overrides. The legacy catalog supplies a fallback sampler and family for parser selection, so it never
- * decides a switched field: its capability flags, window and output numbers, and thinking
- * block are dropped even for a model no profile matches. Step 5 deletes the legacy side.
+ * The model catalog every resolver reads, in two tiers.
+ *
+ * Profiles (`models/profiles.yaml` with the operator's `model-profiles.yaml` layered on) answer what the
+ * model is: windows, output cap, capability flags, thinking mechanism and levels, sampling.
+ *
+ * The fallback tier matches by substring and supplies a sampler and a family for parser selection: the
+ * packaged profiles in file order, then the operator's `model-catalog.d` overlays. It never decides a
+ * profile-owned field: its capability flags, window and output numbers and thinking block are dropped even
+ * for a model no profile matches. A fallback entry whose family is the matched profile's id lends that
+ * profile its sampler when the profile has none.
  */
 export class ProfileKnowledgeBase implements KnowledgeBase {
-	private current: ModelProfiles | null;
+	private current: ModelProfiles | null = null;
+	private packaged: readonly KnowledgeBaseEntry[] = [];
+	private fallback: readonly KnowledgeBaseEntry[] = [];
 
 	constructor(
-		private readonly loadProfiles: () => ModelProfiles | null,
-		private readonly legacy: KnowledgeBase,
+		private readonly loadProfiles: () => { profiles: ModelProfiles | null; packaged: readonly ModelProfile[] },
+		private readonly overlays: ModelCatalogOverlays | null,
 	) {
-		this.current = loadProfiles();
+		this.loadTiers();
 	}
 
 	profiles(): ModelProfiles | null {
 		return this.current;
 	}
 
-	/** Picks up an edited user profile file or catalog overlay without restarting. */
+	/** Picks up an edited user profile file or catalog overlay without restarting. A bad overlay throws. */
 	reload(): void {
-		this.current = this.loadProfiles();
-		const reload = (this.legacy as { reload?: unknown }).reload;
-		if (typeof reload === "function") reload.call(this.legacy);
+		try {
+			this.loadTiers();
+			this.overlays?.reload();
+		} finally {
+			this.fallback = [...this.packaged, ...(this.overlays?.entries() ?? [])];
+		}
 	}
 
 	entries(): ReadonlyArray<KnowledgeBaseEntry> {
 		return (this.current?.entries() ?? []).map((profile) => entryFromProfile(profile, null));
 	}
 
+	/** The raw fallback-tier hit, before profile-owned fields are dropped. */
+	fallbackLookup(modelId: string): KnowledgeBaseHit | null {
+		return substringCatalogLookup(this.fallback, modelId);
+	}
+
 	lookup(modelId: string, runtimeId?: string): KnowledgeBaseHit | null {
-		const old = this.legacy.lookup(modelId, runtimeId);
+		const old = this.fallbackLookup(modelId);
 		const hit = this.current?.lookup(modelId, runtimeId) ?? null;
 		if (hit) {
 			return {
@@ -45,25 +65,69 @@ export class ProfileKnowledgeBase implements KnowledgeBase {
 		}
 		return old ? { matchKind: old.matchKind, entry: withoutSwitchedFields(old.entry) } : null;
 	}
+
+	private loadTiers(): void {
+		const loaded = this.loadProfiles();
+		this.current = loaded.profiles;
+		this.packaged = loaded.packaged.map(fallbackEntryFromProfile);
+		this.fallback = [...this.packaged, ...(this.overlays?.entries() ?? [])];
+	}
+}
+
+export interface ProfileKnowledgeBaseOptions {
+	/** Reports a profile file or overlay that failed to load; the failure is never fatal. */
+	onError?: (message: string) => void;
+	/** `model-catalog.d` roots, lowest precedence first; defaults to the operator's config, project and env dirs. */
+	overlayRoots?: ReadonlyArray<string | KnowledgeBaseRoot>;
+	packagedPath?: string;
+	userPath?: string;
 }
 
 /**
- * The profile file that ships with the package, with the user's override layered on it. A
- * file that fails to load leaves every switched field to the live server, the operator's
- * limits and the Pi catalog, so the failure is reported and never fatal.
+ * The packaged profiles with the user's override layered on, plus the fallback tier. A profile file that
+ * fails to load leaves every switched field to the live server, the operator's limits and the Pi catalog,
+ * and an overlay that fails to load is dropped; both are reported and neither is fatal.
  */
-export function createProfileKnowledgeBase(
-	legacy: KnowledgeBase,
-	onError: (message: string) => void = () => undefined,
-): ProfileKnowledgeBase {
+export function createProfileKnowledgeBase(options: ProfileKnowledgeBaseOptions = {}): ProfileKnowledgeBase {
+	const onError = options.onError ?? (() => undefined);
+	let overlays: ModelCatalogOverlays | null = null;
+	try {
+		overlays = new ModelCatalogOverlays(options.overlayRoots ?? resolveModelCatalogOverlayRoots());
+	} catch (err) {
+		onError(`model catalog overlays disabled: ${err instanceof Error ? err.message : String(err)}`);
+	}
 	return new ProfileKnowledgeBase(() => {
+		let packaged: ModelProfile[] = [];
 		try {
-			return loadModelProfiles({ onWarning: onError });
+			packaged = loadPackagedModelProfiles(options.packagedPath);
+			const profiles = loadModelProfiles({
+				packaged,
+				onWarning: onError,
+				...(options.userPath !== undefined ? { userPath: options.userPath } : {}),
+			});
+			return { profiles, packaged };
 		} catch (err) {
 			onError(`model profiles disabled: ${err instanceof Error ? err.message : String(err)}`);
-			return null;
+			return { profiles: null, packaged };
 		}
-	}, legacy);
+	}, overlays);
+}
+
+/** Sampling and serving notes a packaged profile contributes to the substring fallback tier. */
+const FALLBACK_QUIRKS = ["sampling", "outputTokens", "runtimePreference"] as const;
+
+function fallbackEntryFromProfile(profile: ModelProfile): KnowledgeBaseEntry {
+	const quirks: Record<string, unknown> = {};
+	for (const key of FALLBACK_QUIRKS) {
+		const value = profile.recommendations?.[key];
+		if (value !== undefined) quirks[key] = value;
+	}
+	return {
+		family: profile.id,
+		matchPatterns: [...(profile.match.exactIds ?? []), ...(profile.match.familyPrefixes ?? [])],
+		capabilities: {},
+		...(Object.keys(quirks).length > 0 ? { quirks } : {}),
+	};
 }
 
 function entryFromProfile(profile: ModelProfile, old: KnowledgeBaseEntry | null): KnowledgeBaseEntry {
@@ -74,7 +138,7 @@ function entryFromProfile(profile: ModelProfile, old: KnowledgeBaseEntry | null)
 		capabilities.reasoning = thinking.mechanism !== "none";
 	}
 	const quirks: Record<string, unknown> = {};
-	// User profiles must keep their sampler when the packaged legacy family is retired.
+	// A user profile with no sampler keeps the one its `model-catalog.d` family declares.
 	const sampling = profile.recommendations?.sampling ?? old?.quirks?.sampling;
 	if (sampling !== undefined) quirks.sampling = sampling;
 	if (thinking !== undefined) quirks.thinking = thinking;
@@ -94,8 +158,8 @@ function entryFromProfile(profile: ModelProfile, old: KnowledgeBaseEntry | null)
 }
 
 function withoutSwitchedFields(entry: KnowledgeBaseEntry): KnowledgeBaseEntry {
-	const { quirks: legacyQuirks, ...rest } = entry;
-	const quirks = { ...legacyQuirks };
+	const { quirks: fallbackQuirks, ...rest } = entry;
+	const quirks = { ...fallbackQuirks };
 	delete quirks.thinking;
 	return { ...rest, capabilities: {}, ...(Object.keys(quirks).length > 0 ? { quirks } : {}) };
 }

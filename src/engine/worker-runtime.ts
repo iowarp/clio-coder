@@ -104,13 +104,8 @@ import type {
 	ThinkingLevel,
 } from "../domains/providers/index.js";
 import { applyModelCapabilityPatch, resolveModelRuntimeCapabilitiesForModel } from "../domains/providers/index.js";
-import { resolveProviderKnowledgeBaseRoots } from "../domains/providers/knowledge-base-path.js";
 import { createProfileKnowledgeBase } from "../domains/providers/profile-knowledge.js";
-import {
-	FileKnowledgeBase,
-	type KnowledgeBase,
-	type KnowledgeBaseHit,
-} from "../domains/providers/types/knowledge-base.js";
+import type { KnowledgeBase } from "../domains/providers/types/knowledge-base.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { ApprovalAuthority } from "../domains/safety/admission.js";
 import { describeCallTarget, WORKER_CALL_TARGET_MAX_CHARS } from "../domains/safety/call-target.js";
@@ -491,29 +486,13 @@ function terminalContractViolation(
 	return validation.conformance === "pass" ? null : (validation.reason ?? "invalid result");
 }
 
-class NullKnowledgeBase implements KnowledgeBase {
-	lookup(_modelId: string): KnowledgeBaseHit | null {
-		return null;
-	}
-	entries() {
-		return [];
-	}
-}
-
 let kbSingleton: KnowledgeBase | null = null;
 
 function getKnowledgeBase(): KnowledgeBase {
 	if (kbSingleton) return kbSingleton;
-	let legacy: KnowledgeBase;
-	try {
-		const roots = resolveProviderKnowledgeBaseRoots(import.meta.url);
-		legacy = roots.length > 0 ? new FileKnowledgeBase(roots) : new NullKnowledgeBase();
-	} catch {
-		legacy = new NullKnowledgeBase();
-	}
-	// Stdout is the NDJSON lane, so a profile file that fails to load is left silent here;
+	// Stdout is the NDJSON lane, so a profile file or overlay that fails to load is left silent here;
 	// the orchestrator reports it once and the worker resolves from the live server instead.
-	kbSingleton = createProfileKnowledgeBase(legacy);
+	kbSingleton = createProfileKnowledgeBase();
 	return kbSingleton;
 }
 

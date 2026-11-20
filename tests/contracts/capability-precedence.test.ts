@@ -1,13 +1,12 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
 import { hintCapabilities, ignoredCapabilityRaises } from "../../src/domains/providers/capabilities.js";
 import { EMPTY_CAPABILITIES, mergeCapabilities } from "../../src/domains/providers/index.js";
 import { capabilitiesFromLiteLLMModelInfo } from "../../src/domains/providers/runtimes/protocol/litellm.js";
-import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
+import { packagedModelCatalog } from "../harness/packaged-model-catalog.js";
 
 // Bundled catalog only, so an operator overlay on the test machine cannot change the answer.
-const kb = new FileKnowledgeBase(fileURLToPath(new URL("../../src/domains/providers/models/", import.meta.url)));
+const kb = packagedModelCatalog();
 
 describe("capability precedence", () => {
 	it("a deployment that reports no image input is not vision-capable, whatever the family says", () => {

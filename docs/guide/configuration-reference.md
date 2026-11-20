@@ -243,7 +243,7 @@ The schema, validation, migration paths, and user settings path are in [`src/cor
 | Agent definition frontmatter | [`src/domains/agents/recipe-schema.ts`](../../src/domains/agents/recipe-schema.ts) |
 | Prompt fragment metadata | [`src/domains/prompts/`](../../src/domains/prompts/compiler.ts) |
 | Model facts per model | [`models/profiles.yaml`](../../models/profiles.yaml) and [`src/domains/providers/model-profiles.ts`](../../src/domains/providers/model-profiles.ts) |
-| Sampling presets and family notes | [`src/domains/providers/models/local-models/`](../../src/domains/providers/models/local-models/clio-coder-local-coding-targets.yaml) |
+| Sampling presets and family notes | [`models/profiles.yaml`](../../models/profiles.yaml) |
 
 For an ACP peer, `integrations.externalAgents.entries[].env` may use an exact
 `"{env:NAME}"` value. CLIO Coder resolves that named host variable for the configured
