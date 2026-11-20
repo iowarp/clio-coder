@@ -6,6 +6,7 @@ import {
 	isReadOnlyExplorationCall,
 	workspaceRelativeTarget,
 } from "./dispatch-nudge.js";
+import { createReadStreakRegistration, type ReadStreakClassifiers } from "./read-streak.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 import { type MiddlewareEffect, type MiddlewareHookInput, metadataString } from "./types.js";
 
@@ -128,9 +129,17 @@ export function createScoutNudgeRegistration(deps: { workspaceRoot?: () => strin
 	};
 }
 
-/** The exploration advisories the main session registers together: the follow-up Scout advisory and the in-turn scout nudge. */
+/**
+ * The exploration advisories the main session registers together: the follow-up Scout advisory, the in-turn scout
+ * nudge and, when the composition supplies its classifiers, the no-progress read streak.
+ */
 export function createExplorationNudgeRegistrations(
-	deps: { workspaceRoot?: () => string } = {},
+	deps: { workspaceRoot?: () => string; readStreak?: ReadStreakClassifiers } = {},
 ): ReadonlyArray<MiddlewareHookRegistration> {
-	return [createReadOnlyExplorationNudgeRegistration(deps).registration, createScoutNudgeRegistration(deps)];
+	const { readStreak, ...shared } = deps;
+	return [
+		createReadOnlyExplorationNudgeRegistration(shared).registration,
+		createScoutNudgeRegistration(shared),
+		...(readStreak !== undefined ? [createReadStreakRegistration({ ...shared, classifiers: readStreak })] : []),
+	];
 }
