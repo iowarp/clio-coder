@@ -1,6 +1,16 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmdirSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -14,6 +24,7 @@ import type { ClassifierCall } from "../../src/domains/safety/action-classifier.
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { EMPTY_INFORMATION_FLOW_INPUT } from "../../src/domains/safety/information-flow.js";
+import { isSameOrDescendant } from "../../src/domains/safety/path-policy.js";
 import {
 	createSafetyPolicyEngine,
 	type OperatorDefaultScope,
@@ -403,7 +414,12 @@ test("a lone delete inside a scratch root runs as scratch-disposable and needs n
 test("the judge reads the session's workspace and scratch roots by path, and a delete escaping them by its real target", async (t) => {
 	const cwd = workspace("clio-judge-roots-ws-");
 	const temp = workspace("clio-judge-roots-tmp-");
-	const outside = workspace("clio-judge-roots-out-");
+	// Every temp tree is a scratch root, and the escape target must be in none of them, so it
+	// lives in the checkout's gitignored tmp/ rather than under tmpdir() (FX-8).
+	const parent = fileURLToPath(new URL("../../tmp/", import.meta.url));
+	const madeParent = !existsSync(parent);
+	mkdirSync(parent, { recursive: true });
+	const outside = realpathSync(mkdtempSync(join(parent, "clio-judge-roots-out-")));
 	symlinkSync(outside, join(temp, "link"));
 	const saved = { cwd: process.cwd(), tmp: process.env.TMPDIR };
 	process.env.TMPDIR = temp;
@@ -412,7 +428,15 @@ test("the judge reads the session's workspace and scratch roots by path, and a d
 		process.chdir(saved.cwd);
 		if (saved.tmp === undefined) delete process.env.TMPDIR;
 		else process.env.TMPDIR = saved.tmp;
+		rmSync(outside, { recursive: true, force: true });
+		if (madeParent) rmdirSync(parent);
 	});
+	const scratch = effectiveScratchRoots(DEFAULT_SETTINGS.safety.scratchRoots, cwd);
+	deepStrictEqual(
+		scratch.filter((root) => isSameOrDescendant(outside, root)),
+		[],
+		`${outside} must lie outside every scratch root`,
+	);
 	const prompts: Array<{ system: string; user: string }> = [];
 	const judge = createSafetyJudge({
 		config: () => ({ ...resolveSafetyJudgeConfig(DEFAULT_SETTINGS, cwd), target: "local" }),
