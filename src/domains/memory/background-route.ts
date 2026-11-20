@@ -439,7 +439,10 @@ function prepareBackgroundMemoryRoute(
 								startAttempt: () => observer?.startAttempt(),
 								withContext: <T>(work: () => T): T => (observer ? observer.withContext(work) : work()),
 								settle(message: unknown) {
-									const settled = callSettlementFromMessage(message, refined);
+									const settled = callSettlementFromMessage(
+										message,
+										resolveEffectivePricing(refined.target, refined.runtime, refined.wireModelId),
+									);
 									facts =
 										settled.usage === null
 											? noCallRunUsageFacts()
@@ -591,6 +594,7 @@ export function createBackgroundCallJournal(
 		const target = providers.getTarget(targetId);
 		const runtime = target ? providers.getRuntime(target.runtime) : null;
 		if (!acquire || !target || !runtime) return undefined;
+		const pricing = resolveEffectivePricing(target, runtime, modelId);
 		return {
 			origin: origin ?? null,
 			acquire,
@@ -598,7 +602,8 @@ export function createBackgroundCallJournal(
 			purpose,
 			targetId,
 			runtimeId: runtime.id,
-			...pricingBasisFields(resolveEffectivePricing(target, runtime, modelId)),
+			...pricingBasisFields(pricing),
+			rates: pricing.rates,
 		};
 	};
 }
