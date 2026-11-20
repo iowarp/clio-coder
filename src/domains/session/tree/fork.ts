@@ -1,13 +1,24 @@
 import { clioStateDir } from "../../../core/xdg.js";
-import { readSessionFileEntries, type SessionTreeNode, sessionPaths } from "../../../engine/session.js";
+import {
+	readSessionFileEntries,
+	readSessionMeta,
+	type SessionTreeNode,
+	sessionPaths,
+} from "../../../engine/session.js";
 import { inheritPinnedContext } from "../../extensions/session-state.js";
 import { seedForkCallJournal } from "../../telemetry/call-journal.js";
 import { collectSessionEntries } from "../compaction/session-entries.js";
 import { HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE } from "../continuity/operator-request.js";
 import type { SessionMeta } from "../contract.js";
-import { HOST_INSERT_CUSTOM_TYPE, isSessionHeader, type SessionEntry, STEP_CHAIN_CUSTOM_TYPE } from "../entries.js";
+import {
+	HOST_INSERT_CUSTOM_TYPE,
+	isSessionHeader,
+	type SessionEntry,
+	type SessionInfoEntry,
+	STEP_CHAIN_CUSTOM_TYPE,
+} from "../entries.js";
 import { enrichForkMeta } from "../history.js";
-import { type SessionManagerState, startSession } from "../manager.js";
+import { newTurnId, type SessionManagerState, startSession } from "../manager.js";
 import { entryBelongsToPath } from "./active-path.js";
 
 /**
@@ -229,16 +240,70 @@ export function forkFromState(input: ForkInput): ForkResult {
 	// instead of orphaning the caller (issue #93).
 	input.from.writer.flushAppends();
 	const branch = branchEntriesFromParent(parentMeta, input.parentTurnId);
+	const next = startForkChild(parentMeta, input.parentTurnId, branch, input.cwd);
+	// Only now is the child known good: created, seeded, and stamped with its
+	// parent pointers. Close (and stamp endedAt on) the parent last, after the
+	// caller's hook, which is the parent's final chance to append.
+	input.beforeClose?.();
+	void input.from.writer.close();
+	return { next, parentMeta, nodes: branch.tree };
+}
 
-	const cwd = input.cwd ?? parentMeta.cwd;
+/**
+ * Fork a session from its file alone (SPEC L3, 6.7): the parent may be open in another process, so it is read and
+ * never written. The fork point is `atTurnId`, else the parent's pinned leaf, else its last assistant message as
+ * committed to the file at read time. A `name` is part of the child's first write, so a named fork never exists
+ * unnamed. The caller owns `result.next.writer`.
+ */
+export function forkSessionAtRest(
+	parentSessionId: string,
+	input: { atTurnId?: string; name?: string; cwd?: string } = {},
+): ForkResult & { parentTurnId: string } {
+	const parentMeta = readSessionMeta(parentSessionId) as SessionMeta;
+	const parentTurnId = input.atTurnId ?? committedLeafTurnId(parentMeta);
+	if (parentTurnId === undefined) throw new Error(`session ${parentSessionId} has no committed turn to fork from`);
+	const branch = branchEntriesFromParent(parentMeta, parentTurnId);
+	const name = input.name?.trim();
+	if (name !== undefined && name.length > 0) {
+		const entry: SessionInfoEntry = {
+			kind: "sessionInfo",
+			turnId: newTurnId(),
+			parentTurnId: null,
+			timestamp: new Date().toISOString(),
+			name,
+		};
+		branch.entries.push(entry);
+	}
+	const next = startForkChild(parentMeta, parentTurnId, branch, input.cwd);
+	return { next, parentMeta, nodes: branch.tree, parentTurnId };
+}
+
+function committedLeafTurnId(parentMeta: SessionMeta): string | undefined {
+	if (parentMeta.pinnedLeafTurnId) return parentMeta.pinnedLeafTurnId;
+	const path = sessionPaths(parentMeta).current;
+	const parsed = collectSessionEntries(
+		readSessionFileEntries(path).filter((entry) => !isSessionHeader(entry)),
+		path,
+	);
+	const messages = parsed.filter((entry) => entry.kind === "message");
+	const assistant = [...messages].reverse().find((entry) => entry.role === "assistant");
+	return (assistant ?? messages.at(-1))?.turnId;
+}
+
+function startForkChild(
+	parentMeta: SessionMeta,
+	parentTurnId: string,
+	branch: { parentCurrentPath: string; entries: SessionEntry[]; tree: SessionTreeNode[] },
+	cwd: string | undefined,
+): SessionManagerState {
 	const next = startSession({
-		cwd,
+		cwd: cwd ?? parentMeta.cwd,
 		model: parentMeta.model,
 		target: parentMeta.target,
 		initialEntries: branch.entries,
 		initialTree: branch.tree,
 		parentSession: branch.parentCurrentPath,
-		parentTurnId: input.parentTurnId,
+		parentTurnId,
 	});
 	// The copied name ledger and the child's live metadata must agree (#443).
 	const inheritedName = branch.entries.reduce<string | undefined>(
@@ -246,20 +311,15 @@ export function forkFromState(input: ForkInput): ForkResult {
 		undefined,
 	);
 	if (inheritedName) next.meta.name = inheritedName;
-	enrichForkMeta(next.meta, parentMeta.id, input.parentTurnId);
-	const parentTurnAt = branch.entries.find((entry) => entry.turnId === input.parentTurnId)?.timestamp;
+	enrichForkMeta(next.meta, parentMeta.id, parentTurnId);
+	const parentTurnAt = branch.entries.find((entry) => entry.turnId === parentTurnId)?.timestamp;
 	if (!parentTurnAt) throw new Error("fork boundary timestamp unavailable");
 	seedForkCallJournal(clioStateDir(), next.meta.id, {
 		parentSessionId: parentMeta.id,
 		parentCwdHash: parentMeta.cwdHash,
-		parentTurnId: input.parentTurnId,
+		parentTurnId,
 		parentTurnAt,
 	});
 	inheritPinnedContext(clioStateDir(), parentMeta.id, next.meta.id);
-	// Only now is the child known good: created, seeded, and stamped with its
-	// parent pointers. Close (and stamp endedAt on) the parent last, after the
-	// caller's hook, which is the parent's final chance to append.
-	input.beforeClose?.();
-	void input.from.writer.close();
-	return { next, parentMeta, nodes: branch.tree };
+	return next;
 }

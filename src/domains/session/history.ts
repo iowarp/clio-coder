@@ -54,7 +54,7 @@ export function listSessionsForCwd(cwd: string): SessionMeta[] {
 /**
  * Resolves a session id, or a unique prefix of one, among the sessions recorded for `cwd`. It reads each meta.json and
  * never a ledger, so a named resume stays flat as other conversations grow (Astra r8-1). An exact id wins over any
- * prefix, and no match returns the input unchanged for the resume to refuse. Only an ambiguous prefix pays for
+ * prefix, and no match returns the input unchanged for the resume to refuse. Only an ambiguous prefix or a name pays for
  * {@link listSessionsForCwd}, which lists the candidates in the picker's last-activity order.
  */
 export function resolveSessionIdForCwd(cwd: string, idOrPrefix: string): string | { ambiguous: string[] } {
@@ -76,7 +76,12 @@ export function resolveSessionIdForCwd(cwd: string, idOrPrefix: string): string 
 		if (id === idOrPrefix) return id;
 		if (id.startsWith(idOrPrefix)) matches.push(id);
 	}
-	if (matches.length === 0) return idOrPrefix;
+	if (matches.length === 0) {
+		// No id or prefix: a session name, the way `/resume` resolves one (SPEC L3, C13).
+		const named = listSessionsForCwd(cwd).filter((meta) => meta.name === idOrPrefix);
+		if (named.length === 1 && named[0]) return named[0].id;
+		return named.length === 0 ? idOrPrefix : { ambiguous: named.map((meta) => meta.id) };
+	}
 	if (matches.length === 1) return matches[0] as string;
 	const candidates = new Set(matches);
 	return { ambiguous: listSessionsForCwd(cwd).flatMap((meta) => (candidates.has(meta.id) ? [meta.id] : [])) };

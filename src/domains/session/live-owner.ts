@@ -2,7 +2,7 @@ import { hostname } from "node:os";
 import { processAlive, processBirthToken } from "../../core/process-identity.js";
 import type { ClioSessionOwner } from "../../engine/session.js";
 import type { SessionMeta } from "./contract.js";
-import { formatAge, liveSessionView } from "./heartbeat.js";
+import { formatAge, liveSessionView, ownerOnThisHost } from "./heartbeat.js";
 
 /**
  * The process that holds this session's ledger open right now, or null. A ledger
@@ -18,6 +18,26 @@ export function liveSessionOwner(meta: Pick<SessionMeta, "endedAt" | "owner">): 
 	if (owner.birth === null) return owner;
 	const current = processBirthToken(owner.pid);
 	return current === null || current === owner.birth ? owner : null;
+}
+
+/**
+ * The owner the live registry names for this session when its heartbeat is fresh and it is another process
+ * (#439). A run that has not stamped meta.json yet is visible only here; a stale beat or a pid gone on this host
+ * owns nothing.
+ */
+export function registeredLiveOwner(sessionId: string, nowMs = Date.now()): ClioSessionOwner | null {
+	const view = liveSessionView(sessionId, nowMs);
+	if (view === null || view.stale || ownerOnThisHost(view) === "gone") return null;
+	const { host, pid, birth } = view.record;
+	if (host === hostname() && pid === process.pid) return null;
+	return { host, pid, birth };
+}
+
+/** Who holds the session open, from its meta.json owner or its live record; null when nobody but this process does. */
+export function sessionLiveOwner(meta: Pick<SessionMeta, "id" | "endedAt" | "owner">): ClioSessionOwner | null {
+	const owner = liveSessionOwner(meta);
+	if (owner && !(owner.host === hostname() && owner.pid === process.pid)) return owner;
+	return registeredLiveOwner(meta.id);
 }
 
 /**
