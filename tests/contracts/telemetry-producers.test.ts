@@ -148,7 +148,7 @@ test("middleware.fired names each emitting rule, its own effects and the evidenc
 		// Only the firing whose effects settle (a continuation) draws a firing id; a notification is counted, not settled.
 		strictEqual((fired[0]?.data as { firingId?: string }).firingId, undefined);
 		const firingId = (fired[1]?.data as { firingId?: string }).firingId;
-		ok(firingId !== undefined && /^fir_[1-9][0-9]*$/.test(firingId), String(firingId));
+		ok(firingId !== undefined && /^fir_[0-9a-f]{8}_[1-9][0-9]*$/.test(firingId), String(firingId));
 		deepStrictEqual(fired[1]?.data, {
 			firingId,
 			hook: "turn_end",

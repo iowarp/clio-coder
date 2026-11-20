@@ -2351,8 +2351,11 @@ export const MessageSteppedSchema = Type.Object(
 	closed,
 );
 export type MessageStepped = Static<typeof MessageSteppedSchema>;
-/** A firing's id, monotonic per session (or per run in a worker): `fir_` and its sequence number (memory design 4.1). */
-const FiringIdSchema = Type.String({ pattern: "^fir_[1-9][0-9]{0,15}$" });
+/**
+ * A firing's id: `fir_`, the drawing process's token and its sequence number, monotonic per session (or per run in a
+ * worker) within a process and unique across the processes a resumed session spans (memory design 4.1).
+ */
+const FiringIdSchema = Type.String({ pattern: "^fir_[0-9a-f]{8}_[1-9][0-9]{0,15}$" });
 /** One middleware rule that emitted effects at a hook; ctx names the session or run, turn and tool call (#431). */
 export const MiddlewareFiredSchema = Type.Object(
 	{

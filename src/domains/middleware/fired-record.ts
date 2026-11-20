@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { telemetryContext, withToolTelemetryContext } from "../../core/telemetry/context.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
 import {
@@ -13,11 +14,17 @@ const EVIDENCE_CLASS = /^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9_.-]{1,64}(?:@[a-z][a-z0
 /** Owners whose firing sequence is kept; the oldest is forgotten past this, as a process outlives many sessions. */
 const FIRING_OWNER_LIMIT = 256;
 const firingSequences = new Map<string, number>();
+/**
+ * This process's token in every id it draws. A resumed session runs in a new process whose sequence starts again at 1,
+ * so the token keeps its ids apart from the ones its journal already holds.
+ */
+const PROCESS_TOKEN = randomUUID().slice(0, 8);
 
 /**
- * The next firing id of a session (or of a run, in a worker): monotonic per owner for the life of the process, so two
- * firings of one rule in one turn never share one (memory design 4.1). A host surface that fires outside middleware,
- * such as steering triage, draws from the same sequence.
+ * The next firing id of a session (or of a run, in a worker): `fir_<process token>_<sequence>`, monotonic per owner
+ * for the life of the process and unique across the processes one owner's journal spans, so two firings never share
+ * one (memory design 4.1). A host surface that fires outside middleware, such as steering triage, draws from the same
+ * sequence.
  */
 export function nextFiringId(owner: string): string {
 	const next = (firingSequences.get(owner) ?? 0) + 1;
@@ -27,7 +34,7 @@ export function nextFiringId(owner: string): string {
 		const oldest = firingSequences.keys().next().value;
 		if (oldest !== undefined) firingSequences.delete(oldest);
 	}
-	return `fir_${next}`;
+	return `fir_${PROCESS_TOKEN}_${next}`;
 }
 
 /** The result with a firing id on every rule whose effects settle; ids need an owner to be monotonic within. */
