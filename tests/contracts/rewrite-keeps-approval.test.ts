@@ -226,12 +226,20 @@ describe("a rewrite that adds write roots to an intent that declared none", () =
 
 	for (const intent of [{ read_roots: ["paper/"] }, { read_roots: ["paper/"], write_roots: [] }] as Intent[]) {
 		const label = intent.write_roots === undefined ? "read_roots only" : "write_roots: []";
-		it(`admits an in-workspace write root added beside the shared intent and hands it to the worker (${label})`, async () => {
+		it(`${intent.write_roots === undefined ? "admits" : "refuses"} an in-workspace write root added beside the shared intent (${label})`, async () => {
 			// The desk's shape: the model's intent rides at the top level, the rewrite confines the task.
 			const { verdict, ran } = await approvedDispatch(
 				[{ task: "Edit the module.", intent: { write_roots: ["paper/x.md"] } }],
 				{ original: [{ task: "Edit the module." } as never], args: intentArgs(intent) },
 			);
+			if (intent.write_roots !== undefined) {
+				// M2 (DESIGN 4.7): an explicit write_roots: [] declares no writes, so it is a ceiling a member cannot widen.
+				const text =
+					verdict.kind === "ok" && verdict.result.kind === "error" ? verdict.result.message : JSON.stringify(verdict);
+				match(text, /intent_scope_widening: .*write_roots: \[\] \(no writes\)/);
+				deepStrictEqual(ran, []);
+				return;
+			}
 			strictEqual(verdict.kind, "ok");
 			deepStrictEqual(ran, [["paper/x.md"]]);
 		});

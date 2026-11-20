@@ -193,9 +193,11 @@ it("a dispatch result is compact by default and monitor(mode=record) returns the
 		match(compact, new RegExp(`- ${run.id} agent=coder exit=0`), "the run line keeps its key facts");
 		match(compact, /^ {2}worker (claims|output)/mu, "the trust line stays");
 		match(compact, new RegExp(`the whole answer is in monitor\\(mode="record", run_id="${run.id}"\\)`));
-		// The run line keeps what the run delivered and leaves setup diagnostics to the record.
-		match(compact, /trust="sealed; inferred/u);
-		match(compact, /validations=claimed:1 grounded:0/u);
+		// The run line keeps what the run delivered and leaves setup diagnostics to the record. Its task declares
+		// write_roots: [], so it ran read-only (XR-60) and its trust names no validation rather than an inferred one.
+		match(compact, /trust="sealed; no validation observed/u);
+		match(compact, /runs read-only: its intent\.write_roots: \[\] declares no writes/u);
+		match(compact, /findings=no-validation/u);
 		ok(!/budget_recipe_policy=|project_context=|trust_status=|route_decision=/u.test(compact), compact);
 
 		const record = ok_(await monitor.run({ mode: "record", run_id: run.id }, {}));

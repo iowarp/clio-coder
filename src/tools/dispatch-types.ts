@@ -67,6 +67,8 @@ export interface DispatchRunExecutionSnapshot {
 	readonly requests: ReadonlyArray<DispatchRequest>;
 	readonly positions?: ReadonlyArray<number>;
 	readonly rejectedTasks?: ReadonlyArray<DispatchRejectedTask>;
+	/** One line per shape the normalize stage rewrote; dispatch puts them in front of the result text. */
+	readonly notices?: ReadonlyArray<string>;
 	readonly mode: DispatchMode;
 	readonly writers: 1 | undefined;
 	readonly review: DispatchReviewSettings | undefined;

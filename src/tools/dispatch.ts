@@ -12,7 +12,7 @@ import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT } from "./dispatch-plan.js";
 import { createDispatchRunEventRegistry } from "./dispatch-run-events.js";
 import { buildDispatchParameters, FULL_DISPATCH_SCHEMA_COMPOSITION } from "./dispatch-schema.js";
 import type { DispatchExecutionSnapshot, DispatchToolDeps } from "./dispatch-types.js";
-import type { ToolSpec } from "./registry.js";
+import type { ToolResult, ToolSpec } from "./registry.js";
 
 export type {
 	DispatchBackgroundControl,
@@ -190,14 +190,21 @@ export function createDispatchTool(
 			}
 			const result = await runner.runDispatchTool(deps, admission.state, args, options);
 			const snapshot = admission.state.trustedExecutionSnapshots.get(args);
+			const notices = snapshot?.kind === "dispatch" ? (snapshot.notices ?? []) : [];
+			const noted: ToolResult =
+				notices.length === 0
+					? result
+					: result.kind === "ok"
+						? { ...result, output: `${notices.join("\n")}\n\n${result.output}` }
+						: { ...result, message: `${notices.join("\n")}\n\n${result.message}` };
 			const rejected = snapshot?.kind === "dispatch" ? snapshot.rejectedTasks : undefined;
-			if (rejected === undefined || rejected.length === 0) return result;
+			if (rejected === undefined || rejected.length === 0) return noted;
 			const failures = rejected.map((task) => `task ${task.position} rejected: ${task.message}`).join("\n");
 			return {
 				kind: "error",
-				message: `${failures}\n\n${result.kind === "ok" ? result.output : result.message}`,
+				message: `${failures}\n\n${noted.kind === "ok" ? noted.output : noted.message}`,
 				details: {
-					...result.details,
+					...noted.details,
 					rejectedTasks: [
 						...structuredClone(rejected),
 						...(Array.isArray(result.details?.rejectedTasks) ? result.details.rejectedTasks : []),
