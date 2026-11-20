@@ -24,6 +24,7 @@ import {
 	type InteractivePresentationDeps,
 } from "../../src/interactive/interactive-presentation.js";
 import { buildLayout } from "../../src/interactive/layout.js";
+import type { CompletionSourceRequest, SlashAutocompleteOptions } from "../../src/interactive/slash-autocomplete.js";
 import {
 	buildWelcomeDashboardLines,
 	createBootWelcome,
@@ -592,6 +593,7 @@ function presentation(
 	let rendered = 0;
 	const notices: string[] = [];
 	let footerDeps!: Parameters<typeof buildFooterDashboard>[0];
+	let autocomplete: SlashAutocompleteOptions | undefined;
 	const view = { render: () => [], invalidate: noop };
 	const deps = {
 		bus: { on: () => noop, emit: noop },
@@ -653,7 +655,10 @@ function presentation(
 				realEditor
 					? new ClioEditor(new TuiMainScreen({ columns: 120, rows: 24, write: noop } as unknown as Terminal), chrome)
 					: { ...view, render: () => ["COMPOSER"], focused: false, setAutocompleteProvider: noop },
-			createAutocomplete: () => ({}),
+			createAutocomplete: (options: SlashAutocompleteOptions) => {
+				autocomplete = options;
+				return {};
+			},
 			createDispatchBoardView: () => view,
 			createChatRenderer:
 				rendererFactory ?? (() => ({ mutate: (run: () => void) => run(), reset: (run: () => void) => run(), flush: noop })),
@@ -663,7 +668,7 @@ function presentation(
 		...over,
 	} as unknown as InteractivePresentationDeps;
 	const built = createInteractivePresentation(deps);
-	return { presentation: built, renders: () => rendered, footerDeps, notices };
+	return { presentation: built, renders: () => rendered, footerDeps, notices, autocomplete: () => autocomplete };
 }
 
 function headerRows(built: ReturnType<typeof presentation>["presentation"], width = 100): string[] {
@@ -1206,14 +1211,18 @@ test("source dev version identifies itself without bundle provenance", () => {
 	strictEqual(readClioVersionLabel(), isDevVersion(version) ? `${version} (unreleased · source)` : version);
 });
 
-test("an on/off route's thinking reads one word on the toast, the rail and the picker", () => {
+test("an on/off route's thinking reads one word on the toast, the rail and the picker", async () => {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat = { ...settings.chat, target: "dynamo", model: "qwen3.8-27b", thinkingLevel: "off" };
 	const onOff = status({
 		probeModelCapabilities: { "qwen3.8-27b": { reasoning: true, reasoningLevels: ["off", "low"] } },
 		probeModelId: "qwen3.8-27b",
 	});
-	const { presentation: built, notices } = presentation({
+	const {
+		presentation: built,
+		notices,
+		autocomplete,
+	} = presentation({
 		getSettings: () => settings,
 		providers: { list: () => [onOff], getTarget: () => null } as never,
 	});
@@ -1231,4 +1240,11 @@ test("an on/off route's thinking reads one word on the toast, the rail and the p
 		"low",
 	)?.thinking;
 	strictEqual(thinking && thinkingLevelChoiceLabel(thinking.mechanism, thinking.effectiveLevel), "on");
+	// `/thinking` completion marks the level the route runs: a stored medium runs as on here.
+	settings.chat.thinkingLevel = "medium";
+	const levels = await autocomplete()?.completionSources?.["thinking-levels"]?.({} as CompletionSourceRequest);
+	deepStrictEqual(
+		levels?.map((item) => `${item.value}:${item.description}`),
+		["low:on · current", "off:off"],
+	);
 });

@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { planEviction } from "../../src/domains/context/working-set/engine.js";
+import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import {
 	estimateAgentContextBreakdown,
@@ -126,6 +127,33 @@ describe("live measured context anchor", () => {
 		});
 		return { state, runtime, settings, context, summaries: () => summaries };
 	}
+
+	it("splits a capture that names no segments by the compiled prompt the agent carries (bt-48)", async () => {
+		const sections = [
+			{ id: "identity", tokenEstimate: 400 },
+			{ id: "tools-and-agents", tokenEstimate: 300 },
+			{ id: "project-context", tokenEstimate: 200 },
+		];
+		const f = fixture({
+			prompts: {
+				inputEpoch: () => 0,
+				compileSessionPrompt: async () => ({
+					systemPrompt: "p".repeat(3600),
+					systemPromptHash: "compiled",
+					tokenEstimate: 900,
+					sections,
+					fragmentManifest: [],
+				}),
+			} as unknown as PromptsContract,
+		});
+		ok(await f.context.ensureSessionPrompt(f.runtime));
+		// A checkpoint or eviction capture passes no segments; the rows must not fold into System prompt.
+		const snapshot = f.context.captureRuntimeContextSnapshot(f.runtime, "compaction", 0.85);
+		deepStrictEqual(
+			[snapshot.categories.system, snapshot.categories.agents, snapshot.categories.project],
+			[400, 300, 200],
+		);
+	});
 
 	it("refreshes tool-result decomposition each API call without inflating definitions or counting output twice", () => {
 		const f = fixture();

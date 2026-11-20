@@ -8,7 +8,7 @@ import type { OutputStyle } from "../../src/core/defaults.js";
 import { createMuxRuntime, type MuxPaneOpenFailure } from "../../src/domains/mux/contract.js";
 import { createMuxClient, type MuxClient } from "../../src/domains/mux/socket-client.js";
 import { MuxError } from "../../src/domains/mux/types.js";
-import { createWatchPaneController } from "../../src/interactive/watch-pane.js";
+import { createWatchPaneController, workersDockHiddenNotice } from "../../src/interactive/watch-pane.js";
 
 function fixture() {
 	const calls: string[] = [];
@@ -423,4 +423,10 @@ it("does not adopt a dock whose owning Clio is still running", async () => {
 	});
 	const adopted = await runtime.contract.adoptPane({ purpose: "watch", label: "watch" });
 	strictEqual(adopted?.paneId, "orphan");
+});
+
+it("a hidden workers dock names the workers still running and none once they finished (bt-48-14)", () => {
+	strictEqual(workersDockHiddenNotice(0), "workers dock hidden; the key shows it again, twice quickly closes it");
+	match(workersDockHiddenNotice(1), /^workers dock hidden, 1 worker still running;/u);
+	match(workersDockHiddenNotice(2), /^workers dock hidden, 2 workers still running;/u);
 });

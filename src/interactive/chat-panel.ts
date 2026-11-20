@@ -54,7 +54,7 @@ import {
 import { coldReasonList } from "../session-control/cold-reasons.js";
 import type { WorkerEntryState } from "../session-control/worker-stream.js";
 import { routeFirstOutput } from "./footer/silence-note.js";
-import { wallClockLocal } from "./format-time.js";
+import { dateLocal, wallClockLocal } from "./format-time.js";
 import { keepRows, keptPieceRows, keptRows, type RowPiece } from "./kept-rows.js";
 import { editPreviewDiff } from "./mutation-preview.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
@@ -3213,6 +3213,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	let cachedLines: string[] | null = [];
 	let cachedDetail: TranscriptDetailPolicy | undefined;
 	let cachedTick = 0;
+	let cachedDay = "";
 	let cachedTerminalRows = 0;
 	/**
 	 * Did the last executed render put a counting elapsed line on screen? It is
@@ -4000,6 +4001,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		// pinned to 0 whenever nothing is counting so a settled transcript
 		// re-renders no more often than it did before.
 		const tick = renderedRunningTool ? Math.floor(nowMs / 100) : 0;
+		// A receipt reads its end time bare on the day it ended and dated after, so a settled transcript
+		// renders again once the local day turns; a receipt cached across midnight kept reading as today.
+		const day = dateLocal(nowMs);
 		// A live block that settled since the last frame changed what it renders, which no mutation marked: a `!false`
 		// that exited inside one 100 ms tick kept reading `you are running` beside a rail reading `exited 1`.
 		for (const live of liveReplayBlocks) {
@@ -4012,7 +4016,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			cachedWidth === width &&
 			cachedTerminalRows === terminalRows &&
 			cachedDetail === detail &&
-			cachedTick === tick
+			cachedTick === tick &&
+			cachedDay === day
 		) {
 			options.onRenderMetrics?.({
 				durationMs: performance.now() - startedAt,
@@ -4023,7 +4028,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			return cachedRegions;
 		}
 		// Stable entries cache by width, height budget, and preset; a replay block and a prefix holding one by height too.
-		const baseKey = `${width}|${rowsBudget(detail, terminalRows)}|${detail.style}`;
+		const baseKey = `${width}|${rowsBudget(detail, terminalRows)}|${detail.style}|${day}`;
 		const heightKey = `${baseKey}|${terminalRows}`;
 		const capacity = entryCacheCapacity();
 		if (frozen !== null && frozen.key !== baseKey && frozen.key !== heightKey) frozen = null;
@@ -4183,6 +4188,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		cachedDetail = detail;
 		cachedTerminalRows = terminalRows;
 		cachedTick = tick;
+		cachedDay = day;
 		renderedRunningTool = sawRunningTool;
 		dirty = false;
 		options.onRenderMetrics?.({
@@ -4217,16 +4223,19 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				blocked = true;
 				break;
 			}
+			const aheadMs = now();
+			const day = dateLocal(aheadMs);
 			for (const style of OUTPUT_STYLE_CYCLE) {
 				if (style === job.style) continue;
 				const detail = transcriptDetail(style);
-				const key = `${job.width}|${rowsBudget(detail, job.terminalRows)}|${style}${entry.role === "replayBlock" ? `|${job.terminalRows}` : ""}`;
+				// The same key the frame renders by, local day included.
+				const key = `${job.width}|${rowsBudget(detail, job.terminalRows)}|${style}|${day}${entry.role === "replayBlock" ? `|${job.terminalRows}` : ""}`;
 				const renders = entryRenderCache.get(entry);
 				if (renders?.has(key)) continue;
 				const lines = renderEntryLines(
 					entry,
 					job.width,
-					now(),
+					aheadMs,
 					unboundedToolBodies,
 					bareFences,
 					copyMarks,

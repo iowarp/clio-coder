@@ -52,9 +52,12 @@ export type LoopCreateArgs = {
 	until_stopped?: boolean;
 };
 
-export const LOOP_CONTROL_ACTIONS = ["pause", "resume", "stop", "cancel"] as const;
+/** Job-tool control actions; `cancel` is what `stop <id> --now` sends and is never typed. */
+const LOOP_CONTROL_ACTIONS = ["pause", "resume", "stop", "cancel"] as const;
+/** Control words a typed `/loop` line accepts. */
+const LOOP_CONTROL_VERBS: ReadonlyArray<string> = ["pause", "resume", "stop"];
 /** First words that read or control existing jobs and never create one. */
-export const LOOP_OBSERVE_VERBS: ReadonlyArray<string> = ["list", "status", ...LOOP_CONTROL_ACTIONS];
+export const LOOP_OBSERVE_VERBS: ReadonlyArray<string> = ["status", ...LOOP_CONTROL_VERBS];
 export type LoopControlAction = (typeof LOOP_CONTROL_ACTIONS)[number];
 
 export type LoopCommand =
@@ -258,7 +261,7 @@ function parseCreate(tokens: ReadonlyArray<string>): LoopParseResult {
 			every = parseLoopDuration(token);
 			if (every === null) {
 				return fail(
-					`Unrecognized interval "${token}". Write one duration such as 30s, 5m or 2h, or one of ${["list", "status", ...LOOP_CONTROL_ACTIONS].join(", ")}`,
+					`Unrecognized interval "${token}". Write one duration such as 30s, 5m or 2h, or one of ${LOOP_OBSERVE_VERBS.join(", ")}`,
 				);
 			}
 			index++;
@@ -351,33 +354,26 @@ function parseId(verb: string, tokens: ReadonlyArray<string>): { id: string } | 
  */
 export function parseLoopArgv(argv: ReadonlyArray<string>): LoopParseResult {
 	let tokens = argv;
-	// Bare `/loop` lists the jobs; `list` stays accepted for one release.
+	// Bare `/loop` lists the jobs.
 	if (tokens.length === 0) return { ok: true, command: { kind: "list" } };
 	if (tokens.length > MAX_TOKENS) return fail(`Too many words (limit ${MAX_TOKENS})`);
 	if (tokens.some((token) => Buffer.byteLength(token, "utf8") > MAX_TOKEN_BYTES)) {
 		return fail(`A word is longer than ${MAX_TOKEN_BYTES} bytes`);
 	}
-	let verb = tokens[0] as string;
-	// `stop <id> --now` aborts the current run; it replaces `cancel <id>`, which stays accepted for one release.
-	if (verb === "stop" && tokens.includes("--now")) {
-		verb = "cancel";
-		tokens = ["cancel", ...tokens.slice(1).filter((token) => token !== "--now")];
-	}
-	if (verb === "list") {
-		return tokens.length === 1 ? { ok: true, command: { kind: "list" } } : fail("/loop list takes no arguments");
-	}
+	const verb = tokens[0] as string;
 	if (verb === "status") {
 		if (tokens.length === 1) return { ok: true, command: { kind: "status", id: undefined } };
 		const parsed = parseId("status", tokens);
 		return "error" in parsed ? fail(parsed.error) : { ok: true, command: { kind: "status", id: parsed.id } };
 	}
-	if ((LOOP_CONTROL_ACTIONS as ReadonlyArray<string>).includes(verb)) {
-		if (verb === "cancel" && tokens.length === 1)
-			return { ok: true, command: { kind: "control", action: "cancel", id: undefined } };
+	if (LOOP_CONTROL_VERBS.includes(verb)) {
+		// `stop <id> --now` aborts the current run, and bare `stop --now` picks the one active loop.
+		const now = verb === "stop" && tokens.includes("--now");
+		if (now) tokens = [verb, ...tokens.slice(1).filter((token) => token !== "--now")];
+		if (now && tokens.length === 1) return { ok: true, command: { kind: "control", action: "cancel", id: undefined } };
 		const parsed = parseId(verb, tokens);
-		return "error" in parsed
-			? fail(parsed.error)
-			: { ok: true, command: { kind: "control", action: verb as LoopControlAction, id: parsed.id } };
+		const action: LoopControlAction = now ? "cancel" : (verb as LoopControlAction);
+		return "error" in parsed ? fail(parsed.error) : { ok: true, command: { kind: "control", action, id: parsed.id } };
 	}
 	return parseCreate(tokens);
 }
@@ -523,7 +519,7 @@ function jobWarnings(job: JobRecord, now: number): string[] {
 	return warnings;
 }
 
-/** One row of `/loop list`: what the job is, how far it got, when it runs next, how the last run ended. */
+/** One row of the bare `/loop` listing: what the job is, how far it got, when it runs next, how the last run ended. */
 export function loopJobRow(job: JobRecord, now: number): string {
 	const parts = [
 		job.id,

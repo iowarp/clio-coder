@@ -2392,9 +2392,9 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		acp: {
 			injectsUserTurn: true,
 			injectsUserTurnExcept: LOOP_OBSERVE_VERBS,
-			reads: ["", "list", "status"],
+			reads: ["", "status"],
 			// Resume restarts jobs that fire turns, so a ceiling does not admit it.
-			sessionOnly: ["stop", "cancel", "pause"],
+			sessionOnly: ["stop", "pause"],
 		},
 		description: "Run a bounded recurring job: a main-context task or a typed command",
 		group: "Work",
@@ -2440,7 +2440,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			const output = (lines: ReadonlyArray<string>) => ctx.io.stdout(`${lines.join("\n")}\n`);
 			const run = () => runLoopCommand(command.command, { jobs: ctx.jobs, notice: ctx.notice, output, now: Date.now });
 			// The reply waits for acceptance where the host answers when the work ends (ACP); the
-			// terminal queues it behind earlier local operations so `/loop list` sees a just-made job.
+			// terminal queues it behind earlier local operations so `/loop` sees a just-made job.
 			if (ctx.holdReplyFor) {
 				ctx.holdReplyFor(run());
 				return;

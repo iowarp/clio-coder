@@ -128,7 +128,7 @@ the terminal and ACP clients show identical local times. Each function accepts a
 | `clockLocal(instant)` | `HH:MM:SS` through `en-GB` with a 24-hour cycle | Local time of day |
 | `dateLocal(instant)` | `YYYY-MM-DD` through `en-CA` | Local calendar date |
 | `stampLocal(instant, now)` | `HH:MM:SS` on today's local date, otherwise `YYYY-MM-DD HH:MM:SS` | Exact time on an operator surface |
-| `wallClockLocal(instant, now)` | `HH:MM` on today's local date, `Nov 16 HH:MM` on another day this year, `Nov 16 2025 HH:MM` in another year | Turn receipt end time |
+| `wallClockLocal(instant, now)` | Hour and minute in the time locale (`LC_ALL`, `LC_TIME`, then `LANG`; `18:42` or `6:42 PM`, and `HH:MM` when unset, `C` or `POSIX`) on today's local date, prefixed `Nov 16` on another day this year and `Nov 16 2025` in another year | Turn receipt end time |
 | `relative(instant, now)` | `just now` under 5 s, then `Ns ago`, `Nm ago`, `Nh ago`, `yesterday`, `Nd ago` under 7 days, `Nw ago` under 30 days, then `dateLocal` | Coarse recency |
 | `operatorCalendar(instant)` | Local date, weekday, `HH:MM`, and the zone with its UTC offset, such as `America/Chicago (UTC-06:00)` | The model's view of the operator's calendar |
 

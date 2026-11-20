@@ -931,6 +931,9 @@ describe("library browser behavior", () => {
 			["e", "u", "x", "Enter"],
 		);
 		equal(installedHints.at(-1)?.verb, "detail", "Enter opens the package's detail, named like every list");
+		const pane = plain(installed.rows("plugin")[0]?.detail?.(80).join("\n") ?? "");
+		match(pane, /\[Enter\] detail/, "the pane's key row uses the footer's word for Enter");
+		ok(!pane.includes("members"));
 	});
 
 	it("keeps a package name readable at a narrow width and compacts its metadata", () => {
