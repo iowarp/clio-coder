@@ -36,6 +36,7 @@ export type AgentTaskType =
 	| "config"
 	| "research"
 	| "world_knowledge"
+	| "run_records"
 	| "unknown";
 export type AgentTaskComplexity = "trivial" | "simple" | "moderate" | "complex";
 export type AgentTaskDomain = "frontend" | "backend" | "infra" | "data" | "security" | "general";
@@ -75,15 +76,33 @@ const TASK_TYPE_RULES: ReadonlyArray<readonly [AgentTaskType, RegExp]> = [
 // run tests. The ordered generic `test` rule below would otherwise consume it.
 const LEADING_READ_TASK =
 	/^(?:please\s+)?(?:read|inspect|explain|summarize|describe|map|locate|trace|look at|find where)\b/i;
-const MUTATION_REQUEST = /\b(?:write|implement|add|create|build|develop|fix|edit|change|modify|refactor|update)\b/i;
+/**
+ * The repair family: a fix asked for by any of these verbs is the same change.
+ * One list, so "resolve the parser crash" reads like "fix the parser crash".
+ */
+const FIX_VERBS = "fix|repair|resolve|patch|address|correct";
+const MUTATION_REQUEST = new RegExp(
+	`\\b(?:write|implement|add|create|build|develop|${FIX_VERBS}|edit|change|modify|refactor|update)\\b`,
+	"i",
+);
+/** A polite request ("could you fix ...") is an instruction, not a question; it is read without its lead. */
+const POLITE_REQUEST_LEAD = /^(?:please\s+)?(?:can|could|would|will)\s+you\s+(?:please\s+)?/i;
+/** An interrogative lead word: the task opens by asking for an answer. */
+const QUESTION_LEAD = /^(?:what|where|which|why|how|who|when|whether|is|are|was|were|does|do|did|has|have)\b/i;
+/** A sentence end followed by more text; a path's dot (`src/a.ts`) is not one. */
+const LATER_SENTENCE = /[.!?]\s+\S/;
+/** A task about a dispatched run's record: a run id, receipt or run record named in it. */
+const RUN_RECORD_TASK = /\b(?:run[\s_-]?records?|run[\s_-]?ids?|runId|receipts?)\b/i;
 /**
  * A mutation asked for rather than mentioned. The verb has to open a clause, so
  * "do not edit files" and "verify the fix" stay reports while "run the tests
  * and fix any failures" stays a change. Writing up the report itself is not a
  * mutation unless it names somewhere on disk to put it.
  */
-const IMPERATIVE_MUTATION =
-	/(?:^|[.;:!?,\n]\s*|\b(?:and|then|also|please|must|should|need to|needs to)\s+)(?:implement|add|create|build(?=\s+(?:a|an|the\s+(?:new|missing))\b)|develop|fix|edit|change|modify|refactor|update|write(?!\s+(?:up\s+)?(?:(?:a|an|the|your)\s+)?(?:\w+\s+)?(?:report|summary)\b(?!\s+(?:to|into|in|on)\b)))\b/i;
+const IMPERATIVE_MUTATION = new RegExp(
+	`(?:^|[.;:!?,\\n]\\s*|\\b(?:and|then|also|please|must|should|need to|needs to)\\s+)(?:implement|add|create|build(?=\\s+(?:a|an|the\\s+(?:new|missing))\\b)|develop|${FIX_VERBS}|edit|change|modify|refactor|update|write(?!\\s+(?:up\\s+)?(?:(?:a|an|the|your)\\s+)?(?:\\w+\\s+)?(?:report|summary)\\b(?!\\s+(?:to|into|in|on)\\b)))\\b`,
+	"i",
+);
 
 /**
  * A mutation verb whose object is nothing is a prohibition. "Change nothing."
@@ -107,15 +126,17 @@ const DOMAIN_RULES: ReadonlyArray<readonly [AgentTaskDomain, RegExp]> = [
 ];
 
 /**
- * The job a task shape asks for. A test or debug shape is a change only when
- * the task asks for one: "run the tests" is a check and "why does this crash"
- * a diagnosis, while "add a test" and "fix the crash" write.
+ * The job a task shape asks for. A shape is a change only when the task asks
+ * for one: "run the tests" is a check and "why does this crash" a diagnosis,
+ * while "add a test" and "resolve the crash" write. A task that opens as a
+ * question or with a read verb and asks for no change (`readOnly`) never gets a
+ * writing job, so "where is the configuration loaded?" is an inspection.
  */
-function jobForTaskShape(taskType: AgentTaskType, mutates: boolean): DispatchJob {
+function jobForTaskShape(taskType: AgentTaskType, mutates: boolean, readOnly: boolean): DispatchJob {
 	switch (taskType) {
 		case "code_read":
 		case "unknown":
-			return "inspect";
+			return mutates ? "implement" : "inspect";
 		case "code_review":
 			return "review";
 		case "test":
@@ -123,25 +144,36 @@ function jobForTaskShape(taskType: AgentTaskType, mutates: boolean): DispatchJob
 		case "debug":
 			return mutates ? "implement" : "diagnose";
 		case "docs":
-			return "docs";
+			return readOnly ? "inspect" : "docs";
 		case "research":
 			return "research";
 		case "world_knowledge":
 			return "open-world";
+		case "run_records":
+			return "run-records";
 		case "code_write":
 		case "refactor":
 		case "config":
-			return "implement";
+			return readOnly ? "inspect" : "implement";
 	}
 }
 
 export function classifyAgentTask(task: string): AgentTaskFeatures {
 	const text = task.trim();
-	const taskType =
-		LEADING_READ_TASK.test(text) && !MUTATION_REQUEST.test(text)
-			? "code_read"
-			: (TASK_TYPE_RULES.find(([, pattern]) => pattern.test(text))?.[0] ?? "unknown");
-	const job = jobForTaskShape(taskType, asksForMutation(text));
+	const polite = POLITE_REQUEST_LEAD.test(text);
+	const request = text.replace(POLITE_REQUEST_LEAD, "");
+	// A one-sentence question asks for an answer even when it names a change
+	// ("which files need to change?"); a later sentence can still ask for one.
+	const question = !polite && !LATER_SENTENCE.test(request) && (QUESTION_LEAD.test(request) || /\?\s*$/.test(request));
+	const mutates = !question && asksForMutation(request);
+	const readOnly = !mutates && (question || QUESTION_LEAD.test(request) || LEADING_READ_TASK.test(request));
+	const taskType: AgentTaskType =
+		!mutates && RUN_RECORD_TASK.test(request)
+			? "run_records"
+			: LEADING_READ_TASK.test(request) && !MUTATION_REQUEST.test(request)
+				? "code_read"
+				: (TASK_TYPE_RULES.find(([, pattern]) => pattern.test(request))?.[0] ?? "unknown");
+	const job = jobForTaskShape(taskType, mutates, readOnly);
 	const domain = DOMAIN_RULES.find(([, pattern]) => pattern.test(text))?.[0] ?? "general";
 	const words = text.split(/\s+/u).filter(Boolean).length;
 	const complexity: AgentTaskComplexity =

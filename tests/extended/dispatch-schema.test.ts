@@ -12,6 +12,7 @@ import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
 import { validateResultContract } from "../../src/domains/agents/result-contract.js";
 import { nodeResultContractFilesystem } from "../../src/domains/agents/result-contract-filesystem.js";
 import { agentSpecPolicyErrors, normalizeAgentSpec } from "../../src/domains/agents/spec.js";
+import { assessCapabilityMismatch } from "../../src/domains/dispatch/capability-match.js";
 import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
 import { mergeOperatorNamedChecks, operatorNamedChecks } from "../../src/domains/dispatch/operator-checks.js";
 import { scoutReadWorkspace } from "../../src/domains/dispatch/scout-workspace.js";
@@ -112,7 +113,7 @@ describe("dispatch schema composition", () => {
 		);
 	});
 
-	it("resolves an omitted agent from the job table, typed write scope outranking a read-shaped job (M4)", () => {
+	it("resolves an omitted agent from the job table, typed write scope outranking the prose classifier (M4)", () => {
 		const parsed = dispatchRequestsFromArgs(
 			{
 				tasks: [
@@ -122,6 +123,10 @@ describe("dispatch schema composition", () => {
 					"Fix the crash in src/parser.ts.",
 					"Add a regression test for the empty-input crash.",
 					{ task: "Map the modules that read fleet config.", intent: { write_roots: ["src"] } },
+					"Resolve the parser crash.",
+					"Where is the configuration loaded?",
+					{ task: "Implement the retry flag in src/config.ts.", intent: { write_roots: [], expected_outputs: [] } },
+					"Summarize the run record for run id 1yd79n91i9b0.",
 				],
 			},
 			{
@@ -135,8 +140,18 @@ describe("dispatch schema composition", () => {
 		assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
 		assert.deepEqual(
 			parsed.requests.map((request) => request.agentId),
-			["scout", "verifier", "debugger", "coder", "tester", "coder"],
+			["scout", "verifier", "debugger", "coder", "tester", "coder", "coder", "scout", "scout", "provenance"],
 		);
+		// The fix family writes, so a pinned read-only scout on a repair is refused, not seated.
+		const pinnedScout = assessCapabilityMismatch({
+			agentId: "scout",
+			capabilityClass: "read-only",
+			task: "Resolve the parser crash.",
+			autoSelected: false,
+			resultContractKind: "scout-report",
+			specs: [],
+		});
+		assert.equal(pinnedScout?.verdict, "refuse");
 		assert.ok(parsed.requests.every((request) => request.agentSelection === undefined));
 		const tool = createDispatchTool({ getAgentSpecs: () => [] } as unknown as DispatchToolDeps);
 		assert.ok(tool.description.startsWith(DISPATCH_JOB_TABLE_TEXT));

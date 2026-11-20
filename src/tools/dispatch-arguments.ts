@@ -45,17 +45,38 @@ function declaresWrites(args: Record<string, unknown>): boolean {
 }
 
 /**
+ * Typed intent that declares an empty write scope: `write_roots: []` and no
+ * expected outputs. The caller said in the schema that the run changes nothing,
+ * which outranks any verb the prose classifier reads as a change.
+ */
+function declaresNoWrites(args: Record<string, unknown>): boolean {
+	const intent = args.intent;
+	if (!isRecord(intent) || !Array.isArray(intent.write_roots) || intent.write_roots.length > 0) return false;
+	return (
+		intent.expected_outputs === undefined ||
+		(Array.isArray(intent.expected_outputs) && intent.expected_outputs.length === 0)
+	);
+}
+
+/**
  * The recipe an omitted or `agent:"auto"` agent resolves to: the job table's
  * recipe for the task's job. There is no default recipe. Arguments that say
  * the run writes (see `declaresWrites`) turn a job that writes nothing into
- * `implement`. Falls
+ * `implement`; an empty typed write scope (see `declaresNoWrites`) turns a
+ * writing job into `inspect` and keeps any other read job. Falls
  * back whenever the job's recipe is not present in this install, so a trimmed
  * recipe set can never produce a dispatch against an agent id that does not
  * resolve.
  */
 function jobBaselineAgentId(task: string, args: Record<string, unknown>, hasAgent?: (id: string) => boolean): string {
 	const classified = classifyAgentTask(task).job;
-	const job = declaresWrites(args) && !dispatchJobWrites(classified) ? "implement" : classified;
+	const job = declaresWrites(args)
+		? dispatchJobWrites(classified)
+			? classified
+			: "implement"
+		: declaresNoWrites(args) && dispatchJobWrites(classified)
+			? "inspect"
+			: classified;
 	const mapped = dispatchJobRecipe(job);
 	if (hasAgent === undefined) return mapped;
 	if (hasAgent(mapped)) return mapped;
