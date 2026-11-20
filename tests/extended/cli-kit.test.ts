@@ -251,6 +251,42 @@ test("a v2 run refuses a --steer-channel it cannot open with exit 2 before the r
 	}
 });
 
+test("-o beside v1 --json writes the answer on exit 0, removes a stale file otherwise, and leaves stdout as it was (CLI-P14)", async () => {
+	const env = await isolateClioEnv("cli-kit-v1-output-");
+	try {
+		const script = `
+			const { existsSync, readFileSync, writeFileSync } = await import("node:fs");
+			const { withRunFailureReporting } = await import(${JSON.stringify(resolve("src/cli/run-failure.ts"))});
+			const { writeFrame } = await import(${JSON.stringify(resolve("src/cli/modes/jsonl.ts"))});
+			const turn = { type: "turn_end", startedAt: "t0", endedAt: "t1", exitCode: 0, outcome: "succeeded", text: "The answer." };
+			const body = (code) => async () => { writeFrame(turn); return code; };
+			const output = { path: "out.txt", cwd: ${JSON.stringify(env.dir)} };
+			const file = ${JSON.stringify(join(env.dir, "out.txt"))};
+			await withRunFailureReporting(true, body(0), false);
+			process.stdout.write("--\\n");
+			const ok = await withRunFailureReporting(true, body(0), false, output);
+			const written = readFileSync(file, "utf8");
+			writeFileSync(file, "stale");
+			const failed = await withRunFailureReporting(true, body(1), false, output);
+			process.stderr.write(JSON.stringify({ ok, failed, written, left: existsSync(file) }) + "\\n");
+		`;
+		const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+			env: { ...process.env, HOME: env.dir },
+			encoding: "utf8",
+		});
+		const result = JSON.parse(child.stderr.trim().split("\n").at(-1) ?? "{}") as Record<string, unknown>;
+		deepStrictEqual(result, { ok: 0, failed: 1, written: "The answer.\n", left: false }, child.stderr);
+		const [plain, withOutput] = child.stdout.split("--\n");
+		equal(withOutput?.startsWith(plain ?? ""), true, child.stdout);
+		equal(
+			plain,
+			`${JSON.stringify({ type: "turn_end", startedAt: "t0", endedAt: "t1", exitCode: 0, outcome: "succeeded", text: "The answer." })}\n`,
+		);
+	} finally {
+		env.restore();
+	}
+});
+
 test("json-out writes the C6 failure document and the C3 diagnostic", () => {
 	const out: string[] = [];
 	const err: string[] = [];

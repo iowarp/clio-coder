@@ -408,11 +408,19 @@ export async function runClioRun(
 			execute,
 		);
 	}
-	if (parsed.outputLastMessage !== undefined) {
-		writeRunDiagnostic("clio-coder run: --output-last-message needs --output-format json or stream-json\n");
+	if (parsed.outputLastMessage !== undefined && !parsed.json) {
+		// Text mode has no seam that hands its stdout answer to the -o writer yet (CLI-P14, OPEN).
+		writeRunDiagnostic("clio-coder run: --output-last-message needs --output-format json or stream-json, or --json\n");
 		return 2;
 	}
-	return withRunFailureReporting(parsed.json, execute, fullMainStream);
+	return withRunFailureReporting(
+		parsed.json,
+		execute,
+		fullMainStream,
+		parsed.outputLastMessage !== undefined
+			? { path: parsed.outputLastMessage, ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}) }
+			: undefined,
+	);
 }
 
 async function executeRunCommand(

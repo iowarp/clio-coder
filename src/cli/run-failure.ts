@@ -121,8 +121,33 @@ export async function withRunFailureReporting(
 	json: boolean,
 	run: () => Promise<number>,
 	fullMainStream = false,
+	output?: OutputLastMessageRequest,
 ): Promise<number> {
 	if (!json) return run();
+	// CLI-P14: `-o` beside --json keeps v2's semantics (SPEC 6.6) and leaves every v1 frame as it was written.
+	const execute =
+		output === undefined
+			? run
+			: async (): Promise<number> => {
+					const resolved = resolveOutputTarget(output);
+					if (!prepareOutputTarget(resolved)) return 2;
+					let text = "";
+					structuredNote = undefined;
+					setFrameProjector((frame) => {
+						const answer = turnAnswer(frame);
+						if (answer !== null) text = answer;
+						return frame;
+					});
+					let code: number;
+					try {
+						code = await run();
+					} finally {
+						setFrameProjector(null);
+					}
+					if (code !== 0 || writeOutputFile(resolved, `${structuredAnswerJson() ?? text}\n`)) return code;
+					writeRunDiagnostic(`clio-coder run: --output-last-message could not be written: ${resolved}\n`);
+					return 1;
+				};
 	const state: RunFailureState = { pending: true };
 	const startedAt = new Date().toISOString();
 	runEndWritten = false;
@@ -160,7 +185,7 @@ export async function withRunFailureReporting(
 	process.once("exit", onExit);
 	return runFailureState.run(state, async () => {
 		try {
-			const code = await run();
+			const code = await execute();
 			let wrote = false;
 			if (state.pending && code !== 0) {
 				state.pending = false;
@@ -189,6 +214,47 @@ export async function withRunFailureReporting(
 	});
 }
 
+/** `-o` as the caller gave it; the path resolves against the run directory (SPEC 6.2). */
+interface OutputLastMessageRequest {
+	path: string;
+	cwd?: string;
+}
+
+function resolveOutputTarget(request: OutputLastMessageRequest): string {
+	const base = request.cwd !== undefined ? path.resolve(request.cwd) : process.cwd();
+	return path.resolve(base, request.path);
+}
+
+/** SPEC 6.6: a stale `-o` file is removed at preflight; false (refusal written) when its directory does not exist. */
+function prepareOutputTarget(resolved: string): boolean {
+	if (!existsSync(path.dirname(resolved))) {
+		writeRunDiagnostic(`clio-coder run: --output-last-message directory does not exist: ${path.dirname(resolved)}\n`);
+		return false;
+	}
+	rmSync(resolved, { force: true });
+	return true;
+}
+
+/** `-o` is written once, by temp file and rename; false when the write failed, which leaves no file. */
+function writeOutputFile(resolved: string, bytes: string): boolean {
+	const temporary = `${resolved}.${process.pid}.tmp`;
+	try {
+		writeFileSync(temporary, bytes);
+		renameSync(temporary, resolved);
+		return true;
+	} catch {
+		rmSync(temporary, { force: true });
+		return false;
+	}
+}
+
+/** The answer a v1 `turn_end` frame carries: what text mode prints on stdout. */
+function turnAnswer(frame: RunJsonFrame): string | null {
+	if (frame.type !== "turn_end") return null;
+	const carried = (frame as { text?: unknown }).text;
+	return answerText(frame) ?? (typeof carried === "string" ? carried : null);
+}
+
 /** What the headless main agent tells a v2 writer directly: facts no v1 frame carries. */
 interface MainRunNoteV2 {
 	runId?: string;
@@ -211,6 +277,11 @@ interface StructuredNoteV2 {
 }
 
 let structuredNote: StructuredNoteV2 | undefined;
+
+/** The validated `--output-schema` JSON the run noted, which `-o` holds instead of the answer text (SPEC 6.8). */
+function structuredAnswerJson(): string | undefined {
+	return structuredNote?.json;
+}
 
 /** Hand the v2 writer the structured-output verdict (main or `--agent`); a no-op shape for runs without the flag. */
 export function noteStructuredV2(note: StructuredNoteV2): void {
@@ -390,8 +461,7 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
 			return rewritten;
 		}
 		case "turn_end": {
-			const carried = (frame as { text?: unknown }).text;
-			const text = answerText(frame) ?? (typeof carried === "string" ? carried : null);
+			const text = turnAnswer(frame);
 			if (text !== null) seen.text = text;
 			break;
 		}
@@ -598,16 +668,10 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	const writeOutputTarget = (code: number): RunExitFact[] => {
 		if (outputTarget === undefined || outputSettled || code !== 0) return [];
 		outputSettled = true;
-		const temporary = `${outputTarget}.${process.pid}.tmp`;
-		try {
-			// With --output-schema the file holds the validated JSON, the same bytes text mode prints (SPEC 6.8).
-			writeFileSync(temporary, `${structuredNote?.json ?? seen.text}\n`);
-			renameSync(temporary, outputTarget);
-			return [];
-		} catch {
-			rmSync(temporary, { force: true });
-			return [{ code: "output_write_failed", path: outputTarget }];
-		}
+		// With --output-schema the file holds the validated JSON, the same bytes text mode prints (SPEC 6.8).
+		return writeOutputFile(outputTarget, `${structuredNote?.json ?? seen.text}\n`)
+			? []
+			: [{ code: "output_write_failed", path: outputTarget }];
 	};
 	// A coordinated shutdown calls process.exit, which cannot await a flush or reach finish(): a successful run that
 	// ends that way still writes `-o` here, and a failed write still moves the exit code to the envelope's.
@@ -631,13 +695,11 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	};
 	return runFailureState.run(state, async () => {
 		if (request.outputLastMessage !== undefined) {
-			const base = request.cwd !== undefined ? path.resolve(request.cwd) : process.cwd();
-			const resolved = path.resolve(base, request.outputLastMessage);
-			if (!existsSync(path.dirname(resolved))) {
-				writeRunDiagnostic(`clio-coder run: --output-last-message directory does not exist: ${path.dirname(resolved)}\n`);
-				return finish(2);
-			}
-			rmSync(resolved, { force: true });
+			const resolved = resolveOutputTarget({
+				path: request.outputLastMessage,
+				...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
+			});
+			if (!prepareOutputTarget(resolved)) return finish(2);
 			outputTarget = resolved;
 		}
 		if (request.steerChannel !== undefined) {
