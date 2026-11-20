@@ -142,6 +142,7 @@ import {
 	compactHelperResultLines,
 	finishedRun,
 	finishedRunTrustStatus,
+	fullAnswerPointer,
 	PRODUCER_INTEGRITY,
 	runAnswerBudgetBytes,
 	runEvidenceLabels,
@@ -841,81 +842,126 @@ export function formatDispatchOutput(
 		...hostActions,
 		...(needsSpotCheck ? [SPOT_CHECK_GUIDANCE] : []),
 		"",
-		...runs.flatMap((run, index) => {
-			const { receipt } = run;
-			const view = finishedRun(receipt);
-			// Compact shows the answer budget sealed at dispatch (M3); full is the caller's own max_output_bytes share.
-			const perRunOutputBytes = form === "compact" ? runAnswerBudgetBytes(view) : shareBytes;
-			const helperLines = compactHelperResultLines(view, PRODUCER_INTEGRITY, perRunOutputBytes);
-			if (helperLines !== null) return helperLines;
-			const note = successNote(receipt);
-			const noteSuffix = note !== null ? ` note=${note}` : "";
-			// A non-success outcome is load-bearing evidence (a timeout has no
-			// failureMessage at all); render it and its detail on the run line.
-			const outcomeSuffix =
-				receipt.outcome !== undefined && receipt.outcome !== "succeeded"
-					? ` outcome=${receipt.outcome}${receipt.outcomeDetail ? ` detail=${receipt.outcomeDetail}` : ""}`
-					: "";
-			// The detail usually already carries the failure message; render it once.
-			const failure =
-				receipt.failureMessage && !(outcomeSuffix && receipt.outcomeDetail?.includes(receipt.failureMessage))
-					? ` failure=${receipt.failureMessage}`
-					: "";
-			// Pipeline runs are an ordered chain, so each line names its step.
-			const stepLabel = mode === "pipeline" ? `step ${index + 1}/${runs.length} ` : "";
-			// Provenance suffix is empty when a run carries no
-			// pipeline/persona/escalation fields, so the line format is unchanged.
-			const provenance = provenanceCompactSuffix(extractRunProvenance(receipt));
-			// Evidence confidence comes from the run's settled facts, the same ones its run.settled records.
-			const trustStatus = finishedRunTrustStatus(view, PRODUCER_INTEGRITY);
-			const labels = runEvidenceLabels(view, PRODUCER_INTEGRITY);
-			const evidenceSuffix = ` ${(form === "compact" ? compactEvidenceLabels(labels) : labels).join(" ")}`;
-			const routingSuffix =
-				form === "full" && receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
-					? ` route_decision=${receipt.routeDecision.decisionHash} route_mode=${receipt.routeDecision.mode}`
-					: "";
-			const external = receipt.runtimeKind === "subprocess" || receipt.delegation !== undefined;
-			const changedPaths = receipt.worktree?.changedPaths ?? receipt.checkoutChanges?.changedPaths ?? [];
-			const changedSuffix =
-				receipt.worktree || receipt.checkoutChanges
-					? ` changed=${JSON.stringify(changedPaths.slice(0, 20))}${changedPaths.length > 20 ? `(+${changedPaths.length - 20} more)` : ""}`
-					: "";
-			// Byproducts the host commit kept out of the branch; the main agent decides whether any should ship.
-			const leftUncommitted = run.leftUncommitted ?? receipt.worktree?.leftUncommitted;
-			const uncommittedSuffix =
-				leftUncommitted === undefined
-					? ""
-					: ` left_uncommitted=${leftUncommitted.count}${JSON.stringify(leftUncommitted.paths)}${leftUncommitted.count > leftUncommitted.paths.length ? `(+${leftUncommitted.count - leftUncommitted.paths.length} more)` : ""}`;
-			const placementSuffix = !external
+	];
+	const blocks = runs.map((run, index) => {
+		const { receipt } = run;
+		const view = finishedRun(receipt);
+		// Compact shows the answer budget sealed at dispatch (M3); full is the caller's own max_output_bytes share.
+		const perRunOutputBytes = form === "compact" ? runAnswerBudgetBytes(view) : shareBytes;
+		const helperLines = compactHelperResultLines(view, PRODUCER_INTEGRITY, perRunOutputBytes);
+		if (helperLines !== null) return { runId: receipt.runId, lines: helperLines };
+		const note = successNote(receipt);
+		const noteSuffix = note !== null ? ` note=${note}` : "";
+		// A non-success outcome is load-bearing evidence (a timeout has no
+		// failureMessage at all); render it and its detail on the run line.
+		const outcomeSuffix =
+			receipt.outcome !== undefined && receipt.outcome !== "succeeded"
+				? ` outcome=${receipt.outcome}${receipt.outcomeDetail ? ` detail=${receipt.outcomeDetail}` : ""}`
+				: "";
+		// The detail usually already carries the failure message; render it once.
+		const failure =
+			receipt.failureMessage && !(outcomeSuffix && receipt.outcomeDetail?.includes(receipt.failureMessage))
+				? ` failure=${receipt.failureMessage}`
+				: "";
+		// Pipeline runs are an ordered chain, so each line names its step.
+		const stepLabel = mode === "pipeline" ? `step ${index + 1}/${runs.length} ` : "";
+		// Provenance suffix is empty when a run carries no
+		// pipeline/persona/escalation fields, so the line format is unchanged.
+		const provenance = provenanceCompactSuffix(extractRunProvenance(receipt));
+		// Evidence confidence comes from the run's settled facts, the same ones its run.settled records.
+		const trustStatus = finishedRunTrustStatus(view, PRODUCER_INTEGRITY);
+		const labels = runEvidenceLabels(view, PRODUCER_INTEGRITY);
+		const evidenceSuffix = ` ${(form === "compact" ? compactEvidenceLabels(labels) : labels).join(" ")}`;
+		const routingSuffix =
+			form === "full" && receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
+				? ` route_decision=${receipt.routeDecision.decisionHash} route_mode=${receipt.routeDecision.mode}`
+				: "";
+		const external = receipt.runtimeKind === "subprocess" || receipt.delegation !== undefined;
+		const changedPaths = receipt.worktree?.changedPaths ?? receipt.checkoutChanges?.changedPaths ?? [];
+		const changedSuffix =
+			receipt.worktree || receipt.checkoutChanges
+				? ` changed=${JSON.stringify(changedPaths.slice(0, 20))}${changedPaths.length > 20 ? `(+${changedPaths.length - 20} more)` : ""}`
+				: "";
+		// Byproducts the host commit kept out of the branch; the main agent decides whether any should ship.
+		const leftUncommitted = run.leftUncommitted ?? receipt.worktree?.leftUncommitted;
+		const uncommittedSuffix =
+			leftUncommitted === undefined
 				? ""
-				: receipt.worktree
-					? ` placement=worktree cwd=${JSON.stringify(receipt.worktree.path)} branch=${JSON.stringify(receipt.worktree.branch)} apply=${receipt.worktree.apply}${receipt.worktree.applied && receipt.worktree.detail ? ` merge=${JSON.stringify(receipt.worktree.detail)}` : ""} diff=${receipt.worktree.diffHash}${changedSuffix}`
-					: ` placement=current cwd=${JSON.stringify(receipt.reproducibility?.cwd ?? "unknown")}${changedSuffix}${receipt.checkoutChanges ? " change_attribution=observed-delta" : ""}`;
-			// The run's result is authoritative. Live summaries remain useful for
-			// monitoring but can contain transient tool-use prose and never override
-			// a missing or partial durable answer.
-			const answerText =
-				receipt.output?.state === "final" || (receipt.outcome !== undefined && receipt.outcome !== "succeeded")
-					? (receipt.output?.text ?? "")
-					: "";
-			const output =
-				answerText.length === 0
-					? "(no assistant text captured in the run result)"
-					: form === "compact"
-						? compactAnswer(answerText, receipt.runId, perRunOutputBytes)
-						: truncateUtf8(answerText, perRunOutputBytes, TRUNCATION_MARKER);
-			return [
+				: ` left_uncommitted=${leftUncommitted.count}${JSON.stringify(leftUncommitted.paths)}${leftUncommitted.count > leftUncommitted.paths.length ? `(+${leftUncommitted.count - leftUncommitted.paths.length} more)` : ""}`;
+		const placementSuffix = !external
+			? ""
+			: receipt.worktree
+				? ` placement=worktree cwd=${JSON.stringify(receipt.worktree.path)} branch=${JSON.stringify(receipt.worktree.branch)} apply=${receipt.worktree.apply}${receipt.worktree.applied && receipt.worktree.detail ? ` merge=${JSON.stringify(receipt.worktree.detail)}` : ""} diff=${receipt.worktree.diffHash}${changedSuffix}`
+				: ` placement=current cwd=${JSON.stringify(receipt.reproducibility?.cwd ?? "unknown")}${changedSuffix}${receipt.checkoutChanges ? " change_attribution=observed-delta" : ""}`;
+		// The run's result is authoritative. Live summaries remain useful for
+		// monitoring but can contain transient tool-use prose and never override
+		// a missing or partial durable answer.
+		const answerText =
+			receipt.output?.state === "final" || (receipt.outcome !== undefined && receipt.outcome !== "succeeded")
+				? (receipt.output?.text ?? "")
+				: "";
+		const output =
+			answerText.length === 0
+				? "(no assistant text captured in the run result)"
+				: form === "compact"
+					? compactAnswer(answerText, receipt.runId, perRunOutputBytes)
+					: truncateUtf8(answerText, perRunOutputBytes, TRUNCATION_MARKER);
+		return {
+			runId: receipt.runId,
+			lines: [
 				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${renderFactField(receipt.spend.totalTokens)}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}${placementSuffix}${uncommittedSuffix}${run.recording ? ` recording_manifest=${JSON.stringify(run.recording.manifestPath)}` : ""}`,
 				`  ${workerTextLabel(trustStatus, view)}`,
 				...output.split("\n").map((line) => `  ${line}`),
 				...workerTextNonEvidenceNotices(view, trustStatus, answerText).map((notice) => `  ${notice}`),
-			];
-		}),
-	];
-	if (board === null) return truncateUtf8(lines.join("\n"), maxOutputBytes, TRUNCATION_MARKER);
+			],
+		};
+	});
+	if (board === null) return fitRunBlocks(lines.join("\n"), blocks, maxOutputBytes);
 	const runBudget = Math.max(1024, maxOutputBytes - Buffer.byteLength(board, "utf8") - 2);
-	return withAgentLedgerBoard(truncateUtf8(lines.join("\n"), runBudget, TRUNCATION_MARKER), board);
+	return withAgentLedgerBoard(fitRunBlocks(lines.join("\n"), blocks, runBudget), board);
 }
+
+/**
+ * A batch result within `budget` bytes, every run's block whole when they all fit. Past the cap each run keeps its
+ * heading and where its answer is read, and a run fills only the room the later runs' headings and pointers leave, so
+ * the cap never drops a run without a way back to its answer (M3).
+ */
+function fitRunBlocks(
+	head: string,
+	blocks: ReadonlyArray<{ runId: string; lines: ReadonlyArray<string> }>,
+	budget: number,
+): string {
+	const bytes = (text: string) => Buffer.byteLength(text, "utf8");
+	const texts = blocks.map((block) => block.lines.join("\n"));
+	const whole = [head, ...texts].join("\n");
+	if (bytes(whole) <= budget) return whole;
+	const stubs = blocks.map((block) => ({
+		heading: block.lines[0] ?? "",
+		pointer: `  [cut by this result's ${budget}-byte cap; the whole answer is in ${fullAnswerPointer(block.runId)}]`,
+	}));
+	const stubText = ({ heading, pointer }: { heading: string; pointer: string }) => `${heading}\n${pointer}`;
+	// Room left once the head and every run's stub, each after a newline, are set aside.
+	let room = budget - bytes(head) - stubs.reduce((sum, stub) => sum + bytes(stubText(stub)) + 1, 0);
+	if (room < 0) return truncateUtf8([head, ...stubs.map(stubText)].join("\n"), budget, TRUNCATION_MARKER);
+	const kept = blocks.map((block, index) => {
+		const stub = stubs[index] ?? { heading: "", pointer: "" };
+		const text = texts[index] ?? "";
+		const extra = bytes(text) - bytes(stubText(stub));
+		if (extra <= room) {
+			room -= extra;
+			return text;
+		}
+		if (room < PARTIAL_RUN_MIN_BYTES) return stubText(stub);
+		// The pointer follows as much of the block's body as the room holds.
+		const body = truncateUtf8(block.lines.slice(1).join("\n"), room - 1, "");
+		room -= bytes(body) + 1;
+		return [stub.heading, body, stub.pointer].join("\n");
+	});
+	return [head, ...kept].join("\n");
+}
+
+/** The least spare room worth a partial block; below it a trimmed run shows only its heading and pointer. */
+const PARTIAL_RUN_MIN_BYTES = 256;
 
 /** The union of what the collected runs' contexts carried, for the parent ledger to absorb. */
 export function flowRestrictionsOfRuns(

@@ -135,7 +135,7 @@ export function runAnswerBudgetBytes(run: FinishedRun): number {
 }
 
 /** Where the rest of a cut answer is read. */
-function fullAnswerPointer(runId: string): string {
+export function fullAnswerPointer(runId: string): string {
 	return `monitor(mode="answer", run_id=${JSON.stringify(runId)})`;
 }
 

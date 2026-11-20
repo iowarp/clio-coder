@@ -284,7 +284,8 @@ function setup(outputs: readonly string[]) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;
 	settings.safety.autonomy = "yolo";
-	const context = dispatchStubContext({ settings });
+	// Room for the twelve-run batch (M3).
+	const context = dispatchStubContext({ settings, scheduling: { maxWorkers: () => 12 } });
 	const agents = context.getContract("agents");
 	ok(agents);
 	const specs: WorkerSpec[] = [];
@@ -431,6 +432,50 @@ it("fixes one answer budget per run at dispatch: told to the worker, sealed, and
 		ok(answer.kind === "ok" && answer.output === outputs[2], "mode=answer returns the sealed answer alone");
 	} finally {
 		await bundle.extension.stop?.();
+	}
+	// Twelve runs at the 2,000-byte floor, each answering within it, overrun the 20,000-byte sync cap together: every
+	// run still shows its heading, and each the cap cuts names the call that returns its whole answer.
+	const names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett", "Kilo"];
+	const twelve = [...names, "Lima"].map((name) => body(name, 1_750));
+	for (const output of twelve) ok(Buffer.byteLength(output, "utf8") <= 2_000);
+	const batch = setup(twelve);
+	await batch.bundle.extension.start();
+	try {
+		const result = await batch.dispatch.run(
+			{ tasks: twelve.map((_, index) => ({ agent: "coder", task: `Explain part ${index + 1}.` })), intent },
+			{},
+		);
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") return;
+		strictEqual(batch.specs.length, 12);
+		// The read-only normalization notices precede the formatted result outside its cap.
+		const formatted = result.output
+			.split("\n")
+			.filter((line) => !line.startsWith("[dispatch normalize]"))
+			.join("\n")
+			.trimStart();
+		const sealed = batch.bundle.contract.listRuns().flatMap((run) => {
+			const receipt = readVerifiedRun(clioStateDir(), run.id);
+			const text = receipt ? resolvedRunResult(receipt).output?.text : undefined;
+			return receipt && text !== undefined && twelve.includes(text) ? [{ runId: run.id, receipt, text }] : [];
+		});
+		strictEqual(sealed.length, 12);
+		let cut = 0;
+		for (const { runId, receipt, text } of sealed) {
+			strictEqual(receipt.settled.answerBudgetBytes, 2_000);
+			const closing = /"summary":"(\w+) note/u.exec(text)?.[1];
+			match(formatted, new RegExp(`^- ${runId} agent=coder`, "mu"), `${runId} keeps its heading`);
+			if (formatted.includes(`${closing} closing.`)) continue;
+			cut += 1;
+			ok(
+				formatted.includes(`monitor(mode="answer", run_id=${JSON.stringify(runId)})`),
+				`${runId} names where its whole answer is`,
+			);
+		}
+		ok(cut > 0, "the batch overran the cap");
+		ok(Buffer.byteLength(formatted, "utf8") <= 20_000, String(Buffer.byteLength(formatted, "utf8")));
+	} finally {
+		await batch.bundle.extension.stop?.();
 	}
 });
 
