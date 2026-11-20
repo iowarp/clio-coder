@@ -71,15 +71,60 @@ Notes:
 `;
 
 /**
+ * Leaves whose `--help` answers with their own usage instead of the group help. The other leaves either own their help
+ * in their module (view, events, nodes, land) or still answer with the group help.
+ */
+const FLEET_LEAF_HELP: Readonly<Record<string, string>> = {
+	admission: `clio-coder fleet admission [status|drain|open] [--json]
+
+Show the dispatch admission gate (status, the default), deny new execution starts
+for up to one hour (drain), or reopen it (open). drain preserves running work;
+repeat it to renew the one-hour expiry. fleet drain and fleet resume are aliases
+of admission drain and admission open.
+
+  --json    print the admission document
+`,
+	wait: `clio-coder fleet wait <fleetRootId> [--timeout <duration>] [--json]
+
+Wait for a fleet root to seal and print the fleet result its owner persisted.
+
+  --timeout <duration>  give up after this long (bare number: seconds)
+  --json                print the fleet result document
+
+Exit codes: the root's own exit code once it seals, 1 when its owner died
+unsealed, 2 usage, 75 when --timeout expires with the fleet still live.
+`,
+	cancel: `clio-coder fleet cancel <runId|fleetRootId> [--json] [--reason <text>]
+
+Cancel one running run from any terminal, or stop a fleet root: no further
+step starts and its running steps are canceled.
+
+  --json           print the cancel report
+  --reason <text>  record why the run was canceled
+
+A run's owning process aborts it and the command waits up to 15s for it to seal
+canceled; it exits 1 while the request is still pending. When the owner is gone
+it terminates the orphaned worker's process group and settles the run itself.
+A fleet root that already sealed exits 0 with its recorded outcome.
+`,
+};
+
+/**
  * Answer the fleet group's own help without loading src/cli/fleet.ts and its domain graph, the way run-help.ts
  * answers `run --help`. The checks mirror runFleetCommand's, in its order: `view` and `events` own their help, so
- * they return null; otherwise `help` or `--help`/`-h` anywhere prints the group help on stdout (exit 0), and no
- * verb prints it on stderr (exit 2). Returns null when the arguments ask for a fleet verb.
+ * they return null; `admission`, `wait` and `cancel` print their own usage on stdout (exit 0); otherwise `help` or
+ * `--help`/`-h` anywhere prints the group help on stdout (exit 0), and no verb prints it on stderr (exit 2). Returns
+ * null when the arguments ask for a fleet verb.
  */
 export function answerFleetHelp(args: ReadonlyArray<string>): number | null {
 	const sub = args[0];
 	const asksHelp = args.includes("--help") || args.includes("-h");
 	if ((sub === "view" || sub === "events") && asksHelp) return null;
+	const leafHelp = sub !== undefined && Object.hasOwn(FLEET_LEAF_HELP, sub) ? FLEET_LEAF_HELP[sub] : undefined;
+	if (leafHelp !== undefined && asksHelp) {
+		process.stdout.write(leafHelp);
+		return 0;
+	}
 	if (sub === "help" || asksHelp) {
 		process.stdout.write(FLEET_HELP);
 		return 0;

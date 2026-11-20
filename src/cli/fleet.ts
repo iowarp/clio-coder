@@ -89,7 +89,7 @@ import { SessionDomainModule } from "../domains/session/index.js";
 import { loadRunTelemetrySource } from "../domains/session/telemetry-source.js";
 import { TelemetryDomainModule } from "../domains/telemetry/index.js";
 import { fleetTotals, runTelemetry } from "../domains/telemetry/read-model.js";
-import { FLEET_HELP as HELP } from "./fleet-help.js";
+import { answerFleetHelp, FLEET_HELP as HELP } from "./fleet-help.js";
 import { runFleetWithShutdown } from "./fleet-lifecycle.js";
 import { fleetInspectionScope } from "./fleet-project-scope.js";
 import { createFleetReporter } from "./fleet-reporting.js";
@@ -1262,15 +1262,11 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 	// Asking for help is not a usage error, and it is not an argument either.
 	// `status|drain|resume --help` answered `unknown flag: --help` on stderr with
 	// status 2, and `run --help` answered its usage the same way. Anywhere on the
-	// line it is a question, answered here before any subcommand executes.
-	if (sub === "help" || args.includes("--help") || args.includes("-h")) {
-		process.stdout.write(HELP);
-		return 0;
-	}
-	if (sub === undefined) {
-		process.stderr.write(HELP);
-		return 2;
-	}
+	// line it is a question, answered here before any subcommand executes, by the
+	// same leaf src/cli/index.ts asks first.
+	const help = answerFleetHelp(args);
+	if (help !== null) return help;
+	if (sub === undefined) return 2;
 	switch (sub) {
 		case "run": {
 			const options = parseFleetRunArgs(args.slice(1));
