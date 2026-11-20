@@ -216,6 +216,9 @@ describe("working-set ledger boundary", () => {
 		ok(query.kind === "ok");
 		match(query.output, /r9 \(/);
 		doesNotMatch(query.output, /r1 \(/);
+		// CTX-5: any term matches, so a query naming two files lists both; a term matching nothing drops nothing.
+		const both = recallableRefListing(entries, foldWorkingSet(entries), { query: "file9.ts file3.ts FACT" });
+		deepStrictEqual([both.total, both.refs.map((row) => row.split(" ")[0])], [2, ["r3", "r9"]]);
 		strictEqual(recorded.length, 0, "discovery must not create churn records");
 		strictEqual(recallableRefListing(entries, foldWorkingSet(entries), { limit: 100 }).refs.length, 12);
 		const recalled = await tool.run({ scope: "recall", ref: "r9" });

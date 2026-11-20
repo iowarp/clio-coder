@@ -133,7 +133,7 @@ export function buildRecallFields(
 }
 
 export interface RecallDiscoveryOptions {
-	/** Case-insensitive terms matched against ref, tool name, and path. */
+	/** Case-insensitive terms matched against ref, tool name, and path; a row matching any term is listed. */
 	query?: string;
 	/** Default 8, maximum 12. */
 	limit?: number;
@@ -174,7 +174,7 @@ export function recallableRefs(
 	});
 }
 
-/** Stable ledger-order pages for the same active path and query. */
+/** Stable pages for the same active path and query: ledger order, or matched-term count then ledger order. */
 export function recallableRefListing(
 	entries: ReadonlyArray<SessionEntry>,
 	view: WorkingSetView,
@@ -187,10 +187,16 @@ export function recallableRefListing(
 			: 8;
 	const offset =
 		typeof options.offset === "number" && Number.isSafeInteger(options.offset) ? Math.max(0, options.offset) : 0;
-	const matches = recallableRefs(entries, view, options).filter((row) => {
-		const metadata = `${row.ref} ${row.entry.turnId} ${row.toolName} ${row.path ?? ""}`.toLowerCase();
-		return terms.every((term) => metadata.includes(term));
-	});
+	// Any term matches, so a query naming several files or facts lists each; rows matching more terms come first,
+	// ledger order within a count.
+	const matches = recallableRefs(entries, view, options)
+		.map((row) => {
+			const metadata = `${row.ref} ${row.entry.turnId} ${row.toolName} ${row.path ?? ""}`.toLowerCase();
+			return { row, hits: terms.filter((term) => metadata.includes(term)).length };
+		})
+		.filter(({ hits }) => terms.length === 0 || hits > 0)
+		.sort((a, b) => b.hits - a.hits)
+		.map(({ row }) => row);
 	// Keep each row bounded even for unusual tool/path metadata.
 	const refs = matches.slice(offset, offset + limit).map((row) => {
 		const label = `${row.toolName}${row.path === undefined ? "" : ` ${row.path}`}`.replace(/\s+/g, " ").slice(0, 240);
