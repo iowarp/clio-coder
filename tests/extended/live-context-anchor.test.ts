@@ -263,10 +263,40 @@ describe("live measured context anchor", () => {
 		resumed.runtime.agent.state.messages = [assistant(usage(replyMeasured - 61, 61)), tail];
 		resumed.context.resetForSession();
 		const reopened = resumed.context.liveContextEstimate(resumed.runtime);
-		ok(reopened.tokens > reopened.estimatedTokens * 1.25 && reopened.tokens < reopened.estimatedTokens * 1.35);
+		// The reply's usage is already a provider count: only the chars/4 projection takes the ratio (CLI-P37).
+		const atResume = structural(resumed);
+		const replyChars4 = atResume - estimateAgentMessageTokens(tail);
+		strictEqual(reopened.tokens, Math.ceil(atResume * (replyMeasured / replyChars4)));
 		// A measurement no tokenizer explains (here 0.02 of chars/4) leaves chars/4 in place.
 		resumed.context.reconcileUsage(usage(100, 20));
 		strictEqual(resumed.context.liveContextEstimate(resumed.runtime).tokens, structural(resumed));
+	});
+
+	it("reads the last measured input plus only the delta since that call when an ask_user round drops the live anchor (FX-31)", () => {
+		const f = fixture();
+		const model = f.runtime.agent.state.model;
+		ok(model);
+		Object.assign(model, { api: "openai-completions", provider: "fixture" });
+		const statics = estimateAgentContextBreakdown(f.runtime.agent.state);
+		const atCall = statics.systemPromptTokens + statics.messageTokens + statics.toolSchemaTokens;
+		// The route measures 1.3x chars/4 (the repro's copilot-long route measured 1.72x).
+		const measured = Math.round(atCall * 1.3);
+		f.runtime.agent.state.messages = [assistant(usage(measured - 61, 61))];
+		f.context.reconcileUsage(usage(measured - 61, 61));
+		const answer = {
+			...result("The operator chose the first option. ".repeat(40)),
+			toolName: "ask_user",
+		} as AgentMessage;
+		f.runtime.agent.state.messages.push(answer);
+		const anchored = f.context.liveContextEstimate(f.runtime);
+		ok(anchored.reconciledTokens !== null);
+		// A rewrite of the attested call's message drops the live anchor; its usage still rides on the message.
+		const [call] = f.runtime.agent.state.messages;
+		ok(call);
+		f.runtime.agent.state.messages = [{ ...call }, answer];
+		const dropped = f.context.liveContextEstimate(f.runtime);
+		strictEqual(dropped.reconciledTokens, null);
+		strictEqual(dropped.tokens, anchored.tokens, "the measured usage is not priced at the route ratio a second time");
 	});
 
 	for (const change of ["shorter", "replaced", "runtime", "target", "model", "endpoint", "reset"] as const) {

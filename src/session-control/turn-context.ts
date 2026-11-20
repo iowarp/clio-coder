@@ -152,6 +152,7 @@ import {
 	reconcileSnapshot,
 	rehydrationRecord,
 	snapshotInputTokens,
+	usageAnchoredTokens,
 } from "../domains/session/context-accounting.js";
 import {
 	buildContextLedger,
@@ -1469,12 +1470,21 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				? estimateAgentContextTokens(estimateInput) + pendingPolicyTokens
 				: breakdown.systemPromptTokens + breakdown.messageTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
 		const ratio = routeTokenRatio(agentRuntime, observed);
+		const priced = (tokens: number): number => (ratio === 1 ? tokens : Math.ceil(tokens * ratio));
+		// With no live anchor (a resume, or an anchor a rewrite dropped) the floor is the newest usable usage plus
+		// the delta since that call: already a provider count, so only the chars/4 projection takes the ratio (FX-31).
+		const usageFloor = reconciledTokens === null ? usageAnchoredTokens(estimateInput, breakdown) : null;
+		const projection =
+			breakdown.systemPromptTokens + breakdown.messageTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
 		return {
 			// The estimate is a floor, not a competing verdict: it prices material
 			// the attested call never saw, so a provider count below it would be
 			// answering about a smaller conversation. It is priced at the route's
 			// measured chars per token when the route has one, else at chars/4.
-			tokens: Math.max(ratio === 1 ? estimatedTokens : Math.ceil(estimatedTokens * ratio), reconciledTokens ?? 0),
+			tokens:
+				usageFloor === null
+					? Math.max(priced(estimatedTokens), reconciledTokens ?? 0)
+					: Math.max(priced(projection), usageFloor),
 			estimatedTokens,
 			reconciledTokens,
 			contextWindow,
