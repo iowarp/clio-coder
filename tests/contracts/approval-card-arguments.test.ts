@@ -145,6 +145,13 @@ describe("approval card arguments of an uncurated tool", () => {
 			["key=value", true],
 			["sort_key=name", true],
 			["max_tokens=128", true],
+			// FX-34: a pass/pwd name shares the evidence key words and hides only a credential-length value.
+			["MYSQL_PWD=hunter2hunter2", false],
+			["DBPASS=hunter2hunter2", false],
+			["pass=0", true],
+			["n_pass=3", true],
+			["compass=northwest", true],
+			["tests_passed=12", true],
 		] as const) {
 			const name = text.slice(0, text.indexOf("=") + 1);
 			strictEqual(redactSecretString(text), shown ? text : `${name}[redacted]`, text);
@@ -168,6 +175,7 @@ describe("approval card arguments of an uncurated tool", () => {
 			"Authorization: Basic opaque-session-12345",
 			"Authorization: Bearer opaque-session-12345",
 			"bearer opaque-session-12345",
+			"Authorization: ApiKey opaque-session-12345",
 			`export GH=${gitToken}`,
 		].map(redactSecretString);
 		for (const line of shown) ok(!line.includes("opaque-session") && !line.includes(gitToken), line);
