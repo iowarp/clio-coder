@@ -61,6 +61,9 @@ export function createTaskNudgeRegistration(options: CreateTaskNudgeRegistration
 			// mirroring the finish contract.
 			const stopReason = input.metadata?.stopReason;
 			if (stopReason !== undefined && stopReason !== "stop") return [];
+			// Row 162, fleet design 4.3: a turn that declared through `finish` ended on its own account, which names
+			// what remains; only an undeclared turn is carried onward.
+			if (input.metadata?.completionState !== undefined) return [];
 			const turnToolCalls = input.metadata?.turnToolCalls;
 			if (typeof turnToolCalls !== "number" || turnToolCalls <= 0) return [];
 			// A surface without access to tasks can never update the board, so

@@ -179,6 +179,10 @@ export function createFinishContractRegistration(
 			// An absent stopReason is treated as "stop".
 			const stopReason = input.metadata?.stopReason;
 			if (stopReason !== undefined && stopReason !== "stop") return [];
+			// XR-8, fleet design 4.3: a turn that declared itself partly_done or not_done through `finish` claims no
+			// completion; it is an honest progress note and the gate leaves it alone. Only the typed declaration counts.
+			const declared = input.metadata?.completionState;
+			if (declared === "partly_done" || declared === "not_done") return [];
 			// An empty final text is not a completion claim. The assessor reads
 			// only ledger receipts, so the text is otherwise unused here.
 			if ((input.text?.trim() ?? "").length === 0) return [];
