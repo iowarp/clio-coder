@@ -11,7 +11,7 @@ import { assessRun } from "../../src/domains/evidence/assessment.js";
 
 import { attributeEvidenceFailure, type EvidenceFailureFacts } from "../../src/domains/evidence/failure-attribution.js";
 import { admitRunProvenance } from "../../src/domains/evidence/provenance.js";
-import { createRedactionTally, redactSecretsDeep } from "../../src/domains/evidence/redact.js";
+import { createRedactionTally, redactSecretsDeep, secretRedactingReplacer } from "../../src/domains/evidence/redact.js";
 import { inspectRunEvidence } from "../../src/domains/evidence/run-evidence.js";
 import { readRunTrust } from "../../src/domains/evidence/run-trust.js";
 import { inspectRunTrustStatus } from "../../src/domains/evidence/trust-status.js";
@@ -266,6 +266,42 @@ describe("evidence integrity boundary", () => {
 		strictEqual(redacted.reference, 'curl -H "Authorization: Bearer $TOKEN"');
 		strictEqual(redacted.prose, "a bearer credential is required");
 		strictEqual(tally.count, 2);
+	});
+
+	it("redacts the password and account-key names display redaction hides, but not the working directory or prose", () => {
+		const value = "Zq8vLx2mNpQ7rT";
+		const hidden = [
+			`DB_PASS=${value}`,
+			`export PGPASS=${value}`,
+			`DB_PASSPHRASE=${value}`,
+			`MYSQL_PWD=${value}`,
+			`DefaultEndpointsProtocol=https;AccountName=acct;AccountKey=${value}==;EndpointSuffix=core.windows.net`,
+			`Authorization: ApiKey ${value}`,
+			`DBPASS=${value}`,
+		];
+		const kept = [
+			"PWD=/home/operator/project",
+			"OLDPWD=/home/operator/other",
+			"first pass: typecheck",
+			"tests_passed=12345678",
+			"compass=northwest",
+		];
+		const tally = createRedactionTally();
+		const redacted = redactSecretsDeep([...hidden, ...kept], tally);
+		for (const line of redacted.slice(0, hidden.length)) ok(!line.includes(value), line);
+		deepStrictEqual(redacted.slice(hidden.length), kept);
+		strictEqual(tally.count, hidden.length);
+		const properties = JSON.parse(
+			JSON.stringify(
+				{ DB_PASS: value, DBPASS: value, mysql_pwd: value, AccountKey: value, compass: "northwest" },
+				secretRedactingReplacer(tally),
+			),
+		) as Record<string, string>;
+		deepStrictEqual(
+			Object.values(properties).filter((item) => item === value),
+			[],
+		);
+		strictEqual(properties.compass, "northwest");
 	});
 
 	it("redacts secrets deeply and accounts for every replacement", () => {

@@ -108,6 +108,7 @@ export {
 	runMiddlewareRegistrations,
 	writeMiddlewareDiagnosticToStderr,
 } from "./runtime.js";
+export { createExplorationNudgeRegistrations, SCOUT_NUDGE_REGISTRATION_ID } from "./scout-nudge.js";
 export {
 	createSkillsReminderRegistration,
 	SKILL_SUGGESTION_ANCHOR,

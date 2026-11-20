@@ -17,8 +17,24 @@ main() {
 		esac
 	done
 	case "$version" in latest | beta | dev) channel=$version ;; esac
-	file=$(mktemp "${TMPDIR:-/tmp}/clio-coder-install.XXXXXXXX")
-	trap 'rm -f "$file" "$file.channel"' EXIT HUP INT TERM
+	# Both downloads live in a private directory: a name derived from a mktemp file sits in a shared directory where
+	# another local user can plant a link at it first. The script works inside it by relative names and runs the
+	# installer through a descriptor opened there, so renaming or swapping the directory's entry in a temp directory
+	# others may write cannot change what runs. The installer itself runs in the caller's directory, where relative
+	# --package, --node-tarball and --install-dir paths mean what the caller meant. Between mktemp and cd another user who
+	# can write the temp directory could swap the entry, so the directory reached must be this user's, closed to others
+	# and empty, as a fresh mktemp directory is (a link to one of this user's own private directories is not).
+	dir=$(mktemp -d "${TMPDIR:-/tmp}/clio-coder-install.XXXXXXXX")
+	trap 'rm -rf "$dir"' EXIT HUP INT TERM
+	cd -P "$dir"
+	private=no
+	case $(ls -ld .) in
+		drwx------[!+]*) if [ -O . ] && [ -z "$(ls -A .)" ]; then private=yes; fi ;;
+	esac
+	if [ "$private" != yes ]; then
+		echo "clio-coder install: $dir is not a private directory of this user; refusing to continue" >&2
+		exit 1
+	fi
 	get() {
 		if command -v curl >/dev/null 2>&1; then curl -fsSL "$1" -o "$2"; else wget -q "$1" -O "$2"; fi
 	}
@@ -27,19 +43,21 @@ main() {
 		beta | dev)
 			# Snapshots have no GitHub release. The beta installer resolves all three
 			# channels itself; a missing beta tag falls back to the stable asset.
-			if get https://registry.npmjs.org/@iowarp/clio-coder/beta "$file.channel"; then
-				rc=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file.channel" | head -n 1)
+			if get https://registry.npmjs.org/@iowarp/clio-coder/beta ./channel; then
+				rc=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' ./channel | head -n 1)
 				if printf '%s\n' "$rc" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'; then
 					url="https://github.com/iowarp/clio-coder/releases/download/v$rc/install.sh"
 				fi
 			fi
 			;;
 	esac
-	if ! get "$url" "$file"; then get https://github.com/iowarp/clio-coder/releases/latest/download/install.sh "$file"; fi
+	if ! get "$url" ./install.sh; then get https://github.com/iowarp/clio-coder/releases/latest/download/install.sh ./install.sh; fi
+	exec 3<./install.sh
+	cd - >/dev/null
 	# A rerun without an exact version follows the channel and clears a pin, so the
 	# default hosted upgrade names its channel. An exact version or --package pins.
 	if [ -z "$version" ]; then set -- "$@" --version "$channel"; fi
-	sh "$file" "$@"
+	sh /dev/fd/3 "$@"
 }
 # A group runs only once its closing brace arrived, so a truncated download runs nothing.
 { main "$@"; }

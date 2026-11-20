@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { serverProof } from "../server/launch-proof.js";
-import { localServerReady } from "../server/local-server.js";
+import { dropClientCredential, launchTicket, localServerReady } from "../server/local-server.js";
 import { harness } from "./harness/app.js";
 
 test("installable assets are public and credential-free only in background mode; APIs remain authenticated", async (t) => {
@@ -79,6 +79,7 @@ test("background readiness authenticates the exact loopback endpoint and rejects
 			return;
 		}
 		assert.equal(req.url, "/api/meta");
+		res.setHeader("X-Clio-Client", "launcher-1");
 		assert.equal(req.headers.authorization, `Bearer ${mode === "legacy" ? legacyToken : credential}`);
 		if (mode === "redirect") {
 			res.writeHead(302, { Location: "https://example.invalid" });
@@ -103,4 +104,67 @@ test("background readiness authenticates the exact loopback endpoint and rejects
 	// A listener that answers the exchange with 404 is not this app, and is never handed the token.
 	mode = "legacy";
 	assert.equal(await localServerReady(address.port, legacyToken), false);
+});
+
+test("a held credential's answer counts only from the app that issued it, so a listener that took the port after a restart is not ready", async (t) => {
+	const token = "s".repeat(43);
+	let named = true;
+	const app = createServer(async (req, res) => {
+		if (req.url === "/api/auth/challenge") return res.end(JSON.stringify({ challenge: "h".repeat(43), expiresIn: 60 }));
+		if (req.url === "/api/auth/clients") {
+			let text = "";
+			for await (const chunk of req) text += String(chunk);
+			const { challenge } = JSON.parse(text) as { challenge: string };
+			const port = (app.address() as { port: number }).port;
+			return res.end(
+				JSON.stringify({
+					clientId: "launcher-1",
+					credential: "c".repeat(43),
+					rotateIn: 450,
+					expiresIn: 900,
+					serverProof: serverProof(token, challenge, port),
+				}),
+			);
+		}
+		if (named) res.setHeader("X-Clio-Client", "launcher-1");
+		res.end(JSON.stringify({ apiVersion: 1, pwa: true, ticket: "k".repeat(43) }));
+	});
+	await new Promise<void>((resolve) => app.listen(0, "127.0.0.1", resolve));
+	// Closed here too, so a failing assertion never leaves the listener holding the test process open.
+	t.after(() => {
+		app.closeAllConnections();
+		app.close(() => {});
+	});
+	const port = (app.address() as { port: number }).port;
+	assert.equal(await localServerReady(port, token), true);
+	assert.equal(await launchTicket(port, token), "k".repeat(43));
+	// The proof answers for its own exchange only: a listener that hands the port over right after it, so the next
+	// answer names no client this process holds, is not the app, for readiness and for the ticket a browser opens.
+	dropClientCredential(port, port, token);
+	named = false;
+	assert.equal(await localServerReady(port, token), false);
+	assert.equal(await launchTicket(port, token), null);
+	// One more authenticated exchange with the app, so the launcher holds a credential when the replacement binds.
+	named = true;
+	assert.equal(await localServerReady(port, token), true);
+	app.closeAllConnections();
+	await new Promise((resolve) => app.close(resolve));
+	// Another program takes the port in the restart gap and answers 200 to anything; the held credential's answer names
+	// a client this process does not hold, and the squatter cannot prove the token.
+	const presented: string[] = [];
+	const squatter = createServer((req, res) => {
+		if (req.url === "/api/auth/challenge") return res.end(JSON.stringify({ challenge: "q".repeat(43), expiresIn: 60 }));
+		if (req.url === "/api/auth/clients")
+			return res.end(JSON.stringify({ clientId: "x", credential: "x".repeat(43), rotateIn: 450, serverProof: "nope" }));
+		presented.push(req.headers.authorization ?? "");
+		res.setHeader("X-Clio-Client", "squatter");
+		res.end(JSON.stringify({ apiVersion: 1, pwa: true }));
+	});
+	await new Promise<void>((resolve) => squatter.listen(port, "127.0.0.1", resolve));
+	t.after(() => {
+		squatter.closeAllConnections();
+		squatter.close();
+	});
+	assert.equal(await localServerReady(port, token), false);
+	assert.ok(presented[0]?.endsWith("c".repeat(43)), "the replacement was asked with the held credential");
 });

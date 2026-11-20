@@ -11,6 +11,7 @@
 import type { RunBoundKind, RunTerminalReason } from "../../core/telemetry/enums.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../worker/spec-contract.js";
 import type { AbortReason } from "./contract.js";
+import type { Obligation } from "./obligation.js";
 import type { RunOutcome, RunOutcomeCode, RunStatus } from "./types.js";
 
 export interface RunTerminationEvidence {
@@ -34,6 +35,8 @@ export interface RunTerminationEvidence {
 	policyDenied: string | null;
 	/** Coordinator quality/verification gate rejected an otherwise successful completion. */
 	qualityGateFailure?: boolean;
+	/** The obligation the run left unmet; retried once on another model (ruling 5). */
+	obligationUnmet?: Obligation;
 	/** ACP stopReason when the peer reported one. */
 	stopReason: string | null;
 	/** Cause recorded by `abort(runId, reason)`; absent for an operator cancel (#425). */
