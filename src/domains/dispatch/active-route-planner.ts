@@ -69,6 +69,9 @@ export function routeValidationProjection(
 		// Stamped by the dispatch tool from its own topology (Phase D); a model
 		// must not be able to claim its caller can yield for a live grant.
 		mainGrantRoute,
+		// Set by the argument parser from the caller's own pins; a model must
+		// not be able to free a sealed route.
+		routeFree,
 		...raw
 	} = request;
 	const awaitingEnvelope =
@@ -108,6 +111,7 @@ export function routeValidationProjection(
 			...(permitNarrowing !== undefined ? { permitNarrowing: { ...permitNarrowing } } : {}),
 			...(inheritedPermitAllowance !== undefined ? { inheritedPermitAllowance: { ...inheritedPermitAllowance } } : {}),
 			...(mainGrantRoute !== undefined ? { mainGrantRoute: { ...mainGrantRoute } } : {}),
+			...(routeFree !== undefined ? { routeFree } : {}),
 			...(awaitingEnvelope ? { failover: "approved" as const } : {}),
 		}),
 	};

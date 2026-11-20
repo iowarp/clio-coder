@@ -2940,6 +2940,9 @@ export async function runDispatchTool(
 	// judge, and synthesis requests copy it from their base explicitly.
 	const decisionRefs = activeDecisionRefs(deps.getDecisionBoard?.() ?? []);
 	if (decisionRefs.length > 0) requests = requests.map((request) => ({ ...request, decisionRefs }));
+	// An operator-approved or Scout-sealed plan fixes the route it shows, so the parser's route freedom ends here.
+	if (authenticatedApproval !== undefined || (resolvedPlan?.source ?? null) !== null)
+		requests = requests.map(({ routeFree: _free, ...request }) => request);
 	if (planView.planScale && deps.dispatch.preview !== undefined && resolvedPlan === null) {
 		return { kind: "error", message: "dispatch: resolved plan is missing after admission" };
 	}

@@ -475,7 +475,12 @@ import {
 	rollbackUnconsumedDispatchReservation,
 } from "./reservation-store.js";
 import { assertApprovedRecoveryCapability } from "./route-approval.js";
-import { firstAvailableRouteCandidate, ROUTE_CANDIDATE_LIMIT, type RouteAvailability } from "./route-candidates.js";
+import {
+	firstAvailableRouteCandidate,
+	ROUTE_CANDIDATE_LIMIT,
+	type RouteAvailability,
+	routeBoundaryRejections,
+} from "./route-candidates.js";
 import {
 	fixedRouteDecision,
 	type RouteDecisionV1,
@@ -1394,6 +1399,11 @@ async function awaitEventDrain(drained: Promise<void>, graceMs = DISPATCH_DRAIN_
  * these words rather than as a denial.
  */
 class RetryRoutesRefusedError extends Error {}
+
+/** The next route a refused retry moves to, given the routes refused so far, or null when none is left. */
+type NextRetryRoute = (
+	refused: ReadonlyArray<{ target: string; model: string }>,
+) => { target: string; model: string; agentId?: string; node?: string } | null;
 
 /** One refused alternate in words: a down target says so, anything else keeps admission's reason. */
 function routeRefusalWords(targetId: string, error: unknown): string {
@@ -4927,7 +4937,7 @@ export function createDispatchBundle(
 				run.lineage.attempt + 1,
 				reason,
 				{ retry: true, excludedRouteParts: [], qualityEscalation: null, reasonCode: "retry-write-roots-widened" },
-				null,
+				[],
 				reason,
 				continuation,
 			),
@@ -5161,14 +5171,17 @@ export function createDispatchBundle(
 		const maxRetries =
 			unmetObligation !== undefined ? Math.min(configuredRetries, OBLIGATION_RETRY_LIMIT) : configuredRetries;
 		const baseDecision = decideRetry(failureClass, memberRetryAttempt(run), maxRetries);
-		let plannedRoute: DispatchFailoverCandidate | null = null;
+		let plannedRoutes: DispatchFailoverCandidate[] = [];
+		/** An obligation retry may move past a refused route to the next other model. */
+		let otherModelFallThrough = false;
 		if (unmetObligation !== undefined && baseDecision.retry) {
 			const plan = planObligationRetry(run, unmetObligation, baseDecision);
 			if ("settlementDetail" in plan) {
 				retryBackoff.delete(controlRoot);
 				return { scheduled: false, settlementDetail: plan.settlementDetail };
 			}
-			plannedRoute = plan.route;
+			plannedRoutes = plan.routes;
+			otherModelFallThrough = true;
 		}
 		// An exact manual route may be retried, but no route component may drift.
 		let decision = recovery.retryDecisionWithinFailover(baseDecision, failoverModeFor(run.req));
@@ -5179,7 +5192,8 @@ export function createDispatchBundle(
 				retryBackoff.delete(controlRoot);
 				return { scheduled: false, settlementDetail: plan.settlementDetail };
 			}
-			plannedRoute = plan.route;
+			plannedRoutes = [plan.route];
+			otherModelFallThrough = false;
 			overflowReason = plan.reason;
 			decision = { retry: true, excludedRouteParts: [], qualityEscalation: null, reasonCode: "retry-context-overflow" };
 		}
@@ -5247,10 +5261,16 @@ export function createDispatchBundle(
 			retryQueue.delete(run.runId);
 			// Ownership starts at scheduling, covering admission before a handle
 			// exists and terminal receipt work after the handle arrives.
-			executeRetry(run, attempt, reason, decision, plannedRoute, failureClassWords(failureClass)).then(
-				settleCanceled,
-				rejectContinuation,
-			);
+			executeRetry(
+				run,
+				attempt,
+				reason,
+				decision,
+				plannedRoutes,
+				failureClassWords(failureClass),
+				{},
+				otherModelFallThrough,
+			).then(settleCanceled, rejectContinuation);
 		}, delayMs);
 		retryQueue.set(run.runId, {
 			runId: run.runId,
@@ -5358,10 +5378,12 @@ export function createDispatchBundle(
 		attempt: number,
 		reason = "retry",
 		decision: RetryDecision = decideRetry("internal", memberRetryAttempt(run), assignmentPolicyFor(run.req).maxRetries),
-		/** A route chosen at scheduling, by a context overflow or an unmet obligation. */
-		plannedRoute: DispatchFailoverCandidate | null = null,
+		/** Routes chosen at scheduling, by a context overflow or an unmet obligation, in the order to try them. */
+		plannedRoutes: ReadonlyArray<DispatchFailoverCandidate> = [],
 		moveReason = reason,
 		continuation: WriteRootContinuation = {},
+		/** An obligation retry: a refused route falls through to the next other-model route, never the failed model. */
+		otherModelFallThrough = false,
 	): Promise<void> {
 		if (draining || !retryChainIsLive(run)) return;
 		const excludesNode = decision.excludedRouteParts.includes("node");
@@ -5394,49 +5416,89 @@ export function createDispatchBundle(
 		// settlement share one run journal, independently of assignment lineage (#434).
 		retryReq.runIdHint = newRunId();
 		let terminal: Promise<RunResult> | undefined;
-		/** Set when the retry moved to an alternate target, so a refused admission can move on to the next one. */
-		let tryAlternates = false;
+		/** Set when a refused admission can move the retry on to the next route. */
+		let nextRoute: NextRetryRoute | null = null;
+		const notRefused =
+			(refused: ReadonlyArray<{ target: string; model: string }>) => (candidate: DispatchFailoverCandidate) =>
+				!refused.some((entry) => entry.target === candidate.target && entry.model === candidate.model);
 		const reasonKey = retryReasonKey(controlRootFor(run.runId), attempt);
 		retryReasons.set(reasonKey, reason);
 		try {
 			if (failoverModeFor(run.req) === "approved") {
-				const candidates = plannedRoute !== null ? [plannedRoute] : approvedRetryCandidates(run, decision);
+				const candidates =
+					plannedRoutes.length > 0
+						? plannedRoutes.map((candidate) => ({ ...candidate }))
+						: approvedRetryCandidates(run, decision);
 				if (run.req.routeApproval === undefined) {
 					const candidate = candidates[0] as DispatchFailoverCandidate;
 					retryReq.agentId = candidate.agentId;
 					retryReq.target = candidate.target;
 					retryReq.model = candidate.model;
 					retryReq.node = candidate.node;
-				} else {
-					const settings = getEffectiveSettings();
-					let selected: DispatchRequest | null = null;
-					let lastError: unknown;
-					for (const candidate of candidates) {
-						const bounded = {
-							...retryReq,
-							agentId: candidate.agentId,
-							target: candidate.target,
-							model: candidate.model,
-							node: candidate.node,
-							allowedCandidates: [candidate],
+					if (otherModelFallThrough) {
+						// The envelope's later other-model candidates, in order, once each.
+						let index = 0;
+						nextRoute = () => {
+							index += 1;
+							return candidates[index] ?? null;
 						};
-						try {
-							const active = resolveJointRoute(jointRouteInput(bounded, undefined, settings, "active").input).decision;
-							assertApprovedRecoveryCapability(run.req.routeApproval, active.selected);
-							selected = applyActiveRouteSelection(bounded, active);
-							retryReq.routeAttemptDecision = active;
-							break;
-						} catch (error) {
-							lastError = error;
-						}
 					}
-					if (selected === null) {
+				} else {
+					const approval = run.req.routeApproval;
+					const settings = getEffectiveSettings();
+					const approvedEnvelope = retryReq.allowedCandidates as DispatchFailoverCandidate[];
+					/** The retry before any selection, so a later candidate starts from the same request. */
+					const unselected: DispatchRequest = { ...retryReq };
+					let lastError: unknown;
+					/** Apply the first candidate from `start` the active resolver and the approval admit; its index, or null. */
+					const selectFrom = (start: number): number | null => {
+						for (let index = start; index < candidates.length; index += 1) {
+							const candidate = candidates[index] as DispatchFailoverCandidate;
+							const bounded = {
+								...unselected,
+								agentId: candidate.agentId,
+								target: candidate.target,
+								model: candidate.model,
+								node: candidate.node,
+								allowedCandidates: [candidate],
+							};
+							try {
+								const active = resolveJointRoute(jointRouteInput(bounded, undefined, settings, "active").input).decision;
+								assertApprovedRecoveryCapability(approval, active.selected);
+								const selected = applyActiveRouteSelection(bounded, active);
+								for (const key of Object.keys(retryReq)) {
+									if (!Object.hasOwn(unselected, key)) Reflect.deleteProperty(retryReq, key);
+								}
+								Object.assign(retryReq, unselected);
+								retryReq.routeAttemptDecision = active;
+								Object.assign(retryReq, selected);
+								retryReq.allowedCandidates = approvedEnvelope;
+								return index;
+							} catch (error) {
+								lastError = error;
+							}
+						}
+						return null;
+					};
+					let selectedIndex = selectFrom(0);
+					if (selectedIndex === null) {
 						const detail = lastError instanceof Error ? lastError.message : String(lastError);
 						throw new Error(`dispatch: approved recovery has no active-eligible route (${detail})`);
 					}
-					const approvedEnvelope = retryReq.allowedCandidates as DispatchFailoverCandidate[];
-					Object.assign(retryReq, selected);
-					retryReq.allowedCandidates = approvedEnvelope;
+					if (otherModelFallThrough) {
+						// Admission refused the selected candidate: the next other-model
+						// one in the envelope, with its own active decision, once each.
+						nextRoute = () => {
+							selectedIndex = selectedIndex === null ? null : selectFrom(selectedIndex + 1);
+							if (selectedIndex === null || retryReq.target === undefined || retryReq.model === undefined) return null;
+							return {
+								target: retryReq.target,
+								model: retryReq.model,
+								agentId: retryReq.agentId,
+								...(retryReq.node !== undefined ? { node: retryReq.node } : {}),
+							};
+						};
+					}
 				}
 				delete retryReq.plannedNode;
 			} else {
@@ -5447,9 +5509,16 @@ export function createDispatchBundle(
 					retryReq.model = run.wireModelId;
 					retryReq.node = run.node?.id ?? "local";
 				}
-				if (plannedRoute !== null) {
+				const plannedRoute = plannedRoutes[0];
+				if (plannedRoute !== undefined) {
 					retryReq.target = plannedRoute.target;
 					retryReq.model = plannedRoute.model;
+					if (otherModelFallThrough) {
+						nextRoute = (refused) => {
+							const next = eligibleAlternateRoute(run, retryReq, undefined, notRefused(refused), true);
+							return next === null ? null : { target: next.target, model: next.model };
+						};
+					}
 				}
 				// Automatic placement re-selects only the failed route component.
 				if (excludesNode) {
@@ -5461,7 +5530,10 @@ export function createDispatchBundle(
 					if (alternate !== null) {
 						retryReq.target = alternate.target;
 						retryReq.model = alternate.model;
-						tryAlternates = true;
+						nextRoute = (refused) => {
+							const next = eligibleAlternateRoute(run, retryReq, undefined, notRefused(refused));
+							return next === null ? null : { target: next.target, model: next.model };
+						};
 					} else {
 						// No other route can serve the request, so placement picks again.
 						// That is usually the failed route itself, which the chain may
@@ -5470,10 +5542,10 @@ export function createDispatchBundle(
 					}
 				}
 				// A planned route already moved off the failed model; placement would be free to pick it again.
-				if (plannedRoute === null && decision.excludedRouteParts.includes("model")) delete retryReq.model;
+				if (plannedRoute === undefined && decision.excludedRouteParts.includes("model")) delete retryReq.model;
 				if (decision.excludedRouteParts.includes("runtime")) delete retryReq.workerRuntime;
 			}
-			const handle = await dispatchRetryAcrossAlternates(run, retryReq, tryAlternates, moveReason);
+			const handle = await dispatchRetryAcrossAlternates(run, retryReq, nextRoute, moveReason);
 			// Cancellation can arrive while retry admission is awaiting a handle.
 			if (canceledControlRoots.has(controlRootsByAttempt.get(run.runId) ?? run.lineage.rootRunId)) {
 				contract.abort(handle.runId);
@@ -5538,17 +5610,17 @@ export function createDispatchBundle(
 	}
 
 	/**
-	 * Admit a retry, and when it moved to an alternate target that admission
-	 * refuses, move on to the next alternate. Health is often unknown until
-	 * admission probes a target, so the first alternate in configured order can
-	 * be down while a later one is healthy. Each alternate is tried once, the
-	 * list is the configured routes, and the retry stays one attempt. Every
-	 * refusal is journaled on the assignment and named in the move's reason.
+	 * Admit a retry, and when admission refuses its route and `nextRoute` names
+	 * another, move on to it. Health is often unknown until admission probes a
+	 * target, so the first alternate in configured order can be down while a
+	 * later one is healthy. Each route is tried once and the retry stays one
+	 * attempt. Every refusal is journaled on the assignment and named in the
+	 * move's reason.
 	 */
 	async function dispatchRetryAcrossAlternates(
 		run: ActiveRun,
 		retryReq: DispatchRequest,
-		tryAlternates: boolean,
+		nextRoute: NextRetryRoute | null,
 		moveReason: string,
 	): ReturnType<typeof dispatch> {
 		const refused: Array<{ target: string; model: string; words: string }> = [];
@@ -5558,9 +5630,10 @@ export function createDispatchBundle(
 			} catch (error) {
 				const target = retryReq.target;
 				const model = retryReq.model;
-				if (!tryAlternates || target === undefined || model === undefined || draining || !retryChainIsLive(run))
+				if (nextRoute === null || target === undefined || model === undefined || draining || !retryChainIsLive(run))
 					throw error;
-				const words = routeRefusalWords(target, error);
+				// A route on the failed target is another model, so the words name the model too.
+				const words = routeRefusalWords(target === run.targetId ? `${target}/${model}` : target, error);
 				refused.push({ target, model, words });
 				context.bus.emit("run.progressed", {
 					runId: run.lineage.rootRunId,
@@ -5579,21 +5652,18 @@ export function createDispatchBundle(
 						reason: error instanceof Error ? error.message : String(error),
 					},
 				});
-				const next = eligibleAlternateRoute(
-					run,
-					retryReq,
-					undefined,
-					(candidate) => !refused.some((entry) => entry.target === candidate.target && entry.model === candidate.model),
-				);
+				const next = nextRoute(refused);
 				const skipped = refused.map((entry) => entry.words).join("; ");
 				if (next === null) throw new RetryRoutesRefusedError(`no other route would take the retry: ${skipped}`);
 				retryReq.target = next.target;
 				retryReq.model = next.model;
+				if (next.agentId !== undefined) retryReq.agentId = next.agentId;
+				if (next.node !== undefined) retryReq.node = next.node;
 				retryReq.runIdHint = newRunId();
 				retryReq.routeMove = {
 					fromTargetId: run.targetId,
 					fromModelId: run.wireModelId,
-					reason: `${moveReason}; ${skipped}, so ${next.target} took the retry`,
+					reason: `${moveReason}; ${skipped}, so ${next.target === run.targetId ? `${next.target}/${next.model}` : next.target} took the retry`,
 				};
 			}
 		}
@@ -5997,21 +6067,27 @@ export function createDispatchBundle(
 
 	/**
 	 * Ruling 5 retries an unmet obligation once, and only on another model:
-	 * the route that retry runs on, or why there is none. A pinned route has
-	 * no other model, an approved plan moves only inside its envelope, and
-	 * automatic failover takes the first eligible route with a different wire
-	 * model on any target.
+	 * the routes that retry may run on, in order, or why there is none. A
+	 * route the caller pinned, or a plan or approval sealed, never moves.
+	 * Admission seals failover none on every request, so only `routeFree`,
+	 * recorded before admission stamped the tuple, lets that default move the
+	 * one retry to the first eligible route with a different wire model on any
+	 * target. An approved plan moves only inside its envelope, in envelope
+	 * order.
 	 */
 	function planObligationRetry(
 		run: ActiveRun,
 		obligation: Obligation,
 		decision: RetryDecision,
-	): { route: DispatchFailoverCandidate } | { settlementDetail: string } {
+	): { routes: DispatchFailoverCandidate[] } | { settlementDetail: string } {
 		const unmet = (because: string) => ({
 			settlementDetail: `obligation ${obligation} unmet, not retried because ${because}`,
 		});
+		const failedRoute = `${run.targetId}/${run.wireModelId}`;
 		const mode = failoverModeFor(run.req);
-		if (mode === "none") return unmet("failover is none, which pins the route to the model that left it unmet");
+		if (mode === "none" && run.req.routeFree !== true) {
+			return unmet(`the route is explicitly pinned to ${failedRoute}`);
+		}
 		const node = run.node?.id ?? "local";
 		if (mode === "approved") {
 			let candidates: DispatchFailoverCandidate[] = [];
@@ -6020,15 +6096,15 @@ export function createDispatchBundle(
 			} catch {
 				// An envelope with no next candidate has no other model either.
 			}
-			const route = candidates.find((candidate) => candidate.model !== run.wireModelId);
-			return route !== undefined
-				? { route }
+			const routes = candidates.filter((candidate) => candidate.model !== run.wireModelId);
+			return routes.length > 0
+				? { routes }
 				: unmet(`the approved failover envelope has no model other than ${run.wireModelId}, which left it unmet`);
 		}
 		const route = eligibleAlternateRoute(run, run.req, undefined, undefined, true);
 		return route !== null
-			? { route: { agentId: route.agentId, target: route.target, model: route.model, node } }
-			: unmet(`no other eligible model can take it, and ${run.targetId}/${run.wireModelId} left it unmet`);
+			? { routes: [{ agentId: route.agentId, target: route.target, model: route.model, node }] }
+			: unmet(`there is no other eligible model (${failedRoute} left it unmet)`);
 	}
 
 	/**
@@ -11291,7 +11367,18 @@ export function createDispatchBundle(
 			},
 			envelopeRejection: (candidate) => {
 				if (req.lineage === undefined || req.routeApproval === undefined) return null;
-				return recovery.approvedEnvelopeRejection(req.routeApproval, candidate);
+				// This verdict replaces the boundary one, so it keeps an attempt narrowed to part of the approval inside that part.
+				const narrowed = routeBoundaryRejections(
+					req,
+					{
+						agentId: candidate.agentId,
+						targetId: candidate.targetId,
+						modelId: candidate.modelId,
+						nodeId: candidate.nodeId,
+					},
+					false,
+				)["approved-envelope"];
+				return narrowed ?? recovery.approvedEnvelopeRejection(req.routeApproval, candidate);
 			},
 		});
 		return { input, resolution };
