@@ -5,7 +5,7 @@
  * with exit 2, or as "--help needs a value" from `telemetry share`, whose
  * parser asked any unknown flag for a value before naming it as unknown.
  */
-import { equal, match, ok } from "node:assert/strict";
+import { deepEqual, equal, match, ok } from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -84,7 +84,7 @@ describe("leaf commands answer --help", { concurrency: 4 }, () => {
 		equal(manifest.stdout.trimEnd().split("\n").length, 1, "help --json printed more than one line");
 		const doc = JSON.parse(manifest.stdout) as {
 			version: number;
-			leaves: Array<{ path: string[]; flags: Array<{ name: string; persistence?: string }> }>;
+			leaves: Array<{ path: string[]; flags: Array<{ name: string; value: unknown; persistence?: string }> }>;
 		};
 		equal(doc.version, 1);
 		const paths = new Set(doc.leaves.map((leaf) => leaf.path.join(" ")));
@@ -104,6 +104,11 @@ describe("leaf commands answer --help", { concurrency: 4 }, () => {
 			const row = doc.leaves.find((leaf) => leaf.path.join(" ") === path)?.flags.find((f) => f.name === flag);
 			equal(row?.persistence, "persisted", `help --json: ${path} ${flag}`);
 		}
+		// CLI-P21: a value set after a flag in a synopsis is published as its choices, not as a boolean.
+		const method = doc.leaves
+			.find((leaf) => leaf.path.join(" ") === "auth login")
+			?.flags.find((f) => f.name === "--method");
+		deepEqual(method?.value, ["browser", "device"], "help --json: auth login --method");
 		for (const name of ["run-result", "run-events", "task", "help", "fleet-result"]) {
 			const schema = await cli(["schema", name]);
 			equal(schema.status, 0, schema.stderr);

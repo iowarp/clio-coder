@@ -245,7 +245,15 @@ function exitFor(key: string): ManifestLeaf["exit"] {
 	}
 }
 
-const TOKEN = /\[|\]|\||--[a-z][a-z0-9-]*(?:=\S+)?|<[^>]+>(?:\.\.\.)?|\.\.\.|[^\s[\]|]+/gu;
+/**
+ * Synopsis tokens. A space-free `a|b` word run stays one token, so a value set after a flag (`--method browser|device`)
+ * reaches the flag as its choices; a `|` with spaces around it, or before a flag (`[--json|--text]`), stays its own
+ * token and separates alternatives as before. An inline `=value` stops at a closing bracket.
+ */
+const TOKEN =
+	/\[|\]|\||--[a-z][a-z0-9-]*(?:=[^\s\]]+)?|<[^>]+>(?:\.\.\.)?|\.\.\.|[^\s[\]|]+(?:\|[^\s[\]|-][^\s[\]|]*)*/gu;
+/** A value set word: `a|b|c`, each choice a plain word such as `user-managed`. */
+const VALUE_SET = /^[A-Za-z0-9][A-Za-z0-9-]*(?:\|[A-Za-z0-9][A-Za-z0-9-]*)+$/u;
 
 /** Positionals and flags read from a synopsis such as `store put <tag> <file> [--blob <name>] [--json]`. */
 function fromUsage(usage: string, pathLength: number): { positionals: ManifestPositional[]; flags: ManifestFlag[] } {
@@ -266,10 +274,7 @@ function fromUsage(usage: string, pathLength: number): { positionals: ManifestPo
 			const next = tokens[i + 1];
 			const valueText =
 				inline ??
-				(next !== undefined &&
-				(next.startsWith("<") || /^[A-Za-z0-9]+(?:\|[A-Za-z0-9-]+)+$/u.test(next) || /^[A-Z]+$/u.test(next))
-					? next
-					: undefined);
+				(next !== undefined && (next.startsWith("<") || VALUE_SET.test(next) || /^[A-Z]+$/u.test(next)) ? next : undefined);
 			if (valueText !== undefined) {
 				if (inline === undefined) i += 1;
 				const bare = valueText.replace(/^<|>(?:\.\.\.)?$/gu, "");
