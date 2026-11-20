@@ -94,6 +94,9 @@ const SESSION_STAGES: ReadonlyArray<readonly [name: string, roots: ReadonlyArray
  * `help` keeps `help --json` to the kit and the command specs: without it the
  * kit shared a file with the import() namespace stub of
  * src/domains/prompts/preload.ts, whose imports load the session stage.
+ * `fleetStatus` keeps `fleet status` off the providers stage: guards alone let
+ * src/core/telemetry/pricing.ts share a file with src/domains/providers/ on
+ * some builds and not others, since their allowance follows output bytes.
  */
 const EXACT_PATHS: ReadonlyArray<readonly [name: string, roots: ReadonlyArray<string>]> = [
 	// The workspace launcher: the launch stage plus what starts the pane host and the session inside it.
@@ -133,6 +136,7 @@ const EXACT_PATHS: ReadonlyArray<readonly [name: string, roots: ReadonlyArray<st
 	],
 	["runHelp", ["src/cli/index.ts", "src/cli/run-help.ts"]],
 	["help", ["src/cli/index.ts", "src/cli/help-command.ts"]],
+	["fleetStatus", ["src/cli/index.ts", "src/cli/fleet-status.ts"]],
 ];
 
 /**
