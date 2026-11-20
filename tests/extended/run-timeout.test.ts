@@ -277,4 +277,37 @@ describe("clio-coder run --timeout", () => {
 		strictEqual(check?.status, "skipped");
 		strictEqual(check?.reason, "deadline");
 	});
+
+	// v1 has no skipped row, so its verify frame lists the checks that finished; it still precedes run_end (CLI-P8).
+	for (const cut of [
+		{ by: "a deadline", code: 124, check: "touch started && sleep 30", flags: ["--timeout", "4"] },
+		{ by: "a SIGTERM", code: 143, check: "touch started && kill -TERM $PPID && sleep 30", flags: [] },
+	]) {
+		it(`v1 --json: ${cut.by} during a --verify check writes the verify frame before run_end, nothing after`, async () => {
+			const { turn, scratch } = await headlessTurn([], "default", [
+				"--json",
+				"--verify",
+				"true",
+				"--verify",
+				cut.check,
+				...cut.flags,
+			]);
+			strictEqual(turn.code, cut.code, turn.stderr);
+			ok(existsSync(join(scratch.root, "project", "started")), "the second check must have started");
+			const frames = turn.stdout
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as { type?: string; checks?: Array<{ command?: string; passed?: boolean }> });
+			const types = frames.map((frame) => frame.type);
+			strictEqual(types.at(-1), "run_end", turn.stdout);
+			strictEqual(types.filter((type) => type === "run_end").length, 1, turn.stdout);
+			const verify = frames.filter((frame) => frame.type === "verify");
+			strictEqual(verify.length, 1, turn.stdout);
+			ok(types.indexOf("verify") < types.indexOf("run_end"), turn.stdout);
+			strictEqual(
+				JSON.stringify(verify[0]?.checks?.map((check) => [check.command, check.passed])),
+				JSON.stringify([["true", true]]),
+			);
+		});
+	}
 });
