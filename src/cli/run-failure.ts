@@ -359,7 +359,12 @@ function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, reque
 			return [{ code: /judge/i.test(text ?? "") ? "judge_streak" : "permission_required", ...message }];
 		case 4: {
 			const limit = LIMIT_CODES.find((entry) => entry === detail);
-			if (limit !== undefined) return [{ code: limit, ...message }];
+			if (limit !== undefined) {
+				// A run cap's refusal names its numbers: "(limit N, observed M)".
+				const counts = /\(limit (\d+), observed (\d+)\)/.exec(text ?? "");
+				const payload = counts ? { limit: Number(counts[1]), observed: Number(counts[2]) } : {};
+				return [{ code: limit, ...payload, ...message }];
+			}
 			if (text?.startsWith("budget_ceiling:"))
 				return [{ code: /--max-cost-usd/.test(text) ? "max_cost_usd" : "session_cost_ceiling", ...message }];
 			return unnamed;

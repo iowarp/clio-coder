@@ -82,6 +82,10 @@ export interface RunCliArgs {
 	dryRun?: boolean;
 	/** Priced spend this run may add, in US dollars; with `--agent`, the bound on that one worker run. */
 	maxCostUsd?: number;
+	/** `--max-requests`: main-loop provider requests this run may send. */
+	maxRequests?: number;
+	/** `--max-tool-calls`: tool calls the main agent may make or have refused in this run. */
+	maxToolCalls?: number;
 	/** `--worktree` (`--agent` only): run the worker in a task worktree kept for review. */
 	worktree?: boolean;
 	/** Wall-clock limit for the whole run, in seconds. */
@@ -158,6 +162,8 @@ function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 		[parsed.failOnVerify === true, "--fail-on-verify"],
 		[parsed.onPermission !== undefined, "--on-permission"],
 		[parsed.dryRun === true, "--dry-run"],
+		[parsed.maxRequests !== undefined, "--max-requests"],
+		[parsed.maxToolCalls !== undefined, "--max-tool-calls"],
 		[parsed.verify.length > 0, "--verify"],
 		[parsed.answersFile !== undefined, "--answers"],
 		[parsed.systemOne !== undefined, "--systemone"],
@@ -480,6 +486,17 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--dry-run") {
 			parsed.dryRun = true;
+			continue;
+		}
+		if (arg === "--max-requests" || arg === "--max-tool-calls") {
+			const value = need(arg);
+			if (value !== null) {
+				const count = /^[0-9]+$/.test(value) ? Number(value) : Number.NaN;
+				if (!Number.isSafeInteger(count) || count < 1)
+					parsed.diagnostics.push({ type: "error", message: `${arg} must be a positive whole number, not ${value}` });
+				else if (arg === "--max-requests") parsed.maxRequests = count;
+				else parsed.maxToolCalls = count;
+			}
 			continue;
 		}
 		if (arg === "--max-cost-usd") {

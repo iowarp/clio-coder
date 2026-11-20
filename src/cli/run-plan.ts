@@ -22,6 +22,8 @@ export interface RunPlan {
 	limits: {
 		timeoutSeconds: number | null;
 		maxCostUsd: number | null;
+		maxRequests: number | null;
+		maxToolCalls: number | null;
 		maxContextTokens: number | null;
 		verifyTimeoutSeconds: number | null;
 	};
@@ -56,6 +58,8 @@ export function buildRunPlan(
 		limits: {
 			timeoutSeconds: parsed.timeoutSeconds ?? null,
 			maxCostUsd: parsed.maxCostUsd ?? null,
+			maxRequests: parsed.maxRequests ?? null,
+			maxToolCalls: parsed.maxToolCalls ?? null,
 			maxContextTokens: parsed.maxContextTokens ?? null,
 			verifyTimeoutSeconds: parsed.verify.length > 0 ? verifyTimeoutSeconds : null,
 		},

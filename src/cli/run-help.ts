@@ -1,7 +1,7 @@
 import { parseRunCliArgs } from "./args.js";
 
 export const RUN_USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--resume <id|prefix|name>|--continue] [--fork] [--name <text>] [--fail-on-noop] [--timeout <duration>] [--verify "<cmd>" [--verify-timeout <duration>]] [--max-cost-usd <N>] [--answers <file.yaml>] [--agent <recipe-id>] [--] "<task>"\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--resume <id|prefix|name>|--continue] [--fork] [--name <text>] [--fail-on-noop] [--timeout <duration>] [--verify "<cmd>" [--verify-timeout <duration>]] [--max-cost-usd <N>] [--max-requests <N>] [--max-tool-calls <N>] [--answers <file.yaml>] [--agent <recipe-id>] [--] "<task>"\n';
 
 export const RUN_HELP = `clio-coder run [flags] [--] "<task>"
 
@@ -67,6 +67,11 @@ Flags:
   --dry-run                 print what the run would do (route, tools, autonomy, sandbox, limits, --verify checks
                             with authority host) and exit 0: no session, no model call, no check runs; with
                             --output-format json it is the v2 envelope with outcome previewed and plan
+  --max-requests <N>        provider requests the main agent loop may send in this run, once per attempt (retries,
+                            compaction, side calls and workers do not count); exit 4, cause max_requests
+  --max-tool-calls <N>      tool calls the main agent may make in this run, refused ones and each call of a parallel
+                            batch included; a batch that would pass it does not run; exit 4, cause max_tool_calls.
+                            safety.limits.chatToolCallsPerTurn still applies per turn. Both are refused with --agent
   --max-cost-usd <N>        priced spend this run may add: main agent, compaction and dispatched workers are each
                             admitted only while under it, and running workers are stopped when it is reached; exit 4
                             when it stops the run. Spend can pass it by the model calls already in flight then: one per

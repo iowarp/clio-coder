@@ -463,6 +463,15 @@ async function executeRunCommand(
 			// Without --agent, --read-only is the main agent's enforced ceiling,
 			// carried in the task scope so every continuation keeps it.
 			if (parsed.readOnly && parsed.agentId === undefined) parsed.constraints = { ...parsed.constraints, readOnly: true };
+			// The per-run caps ride the task scope too, so a later turn of the run still counts.
+			if ((parsed.maxRequests !== undefined || parsed.maxToolCalls !== undefined) && parsed.agentId === undefined)
+				parsed.constraints = {
+					...parsed.constraints,
+					runCaps: {
+						...(parsed.maxRequests !== undefined ? { maxRequests: parsed.maxRequests } : {}),
+						...(parsed.maxToolCalls !== undefined ? { maxToolCalls: parsed.maxToolCalls } : {}),
+					},
+				};
 			if (parsed.constraints && parsed.agentId !== undefined) {
 				writeRunDiagnostic(
 					"clio-coder run: --turn-mode, --allow-tools, --delegate-tools, and --no-delegate apply to the main-agent task\n",

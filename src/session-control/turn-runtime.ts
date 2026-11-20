@@ -340,6 +340,14 @@ export interface TurnRuntimeDeps {
 	 * batch settled and before the next model request: true ends the run (F-C16).
 	 */
 	stopAtToolBoundary?: () => boolean;
+	/**
+	 * Per-run main-loop caps (`run --max-requests`, `--max-tool-calls`): a refusal
+	 * reason ends the request or refuses the batch, undefined admits it.
+	 */
+	runCaps?: {
+		admitRequest(): string | undefined;
+		admitToolCalls(count: number): string | undefined;
+	};
 	middleware: TurnMiddleware;
 	retrySettings: () => RetrySettings;
 	/** Stable Clio session id forwarded only to gateway runtimes that understand it. */
@@ -1297,6 +1305,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			...(gatewaySessionId ? { sessionId: gatewaySessionId } : {}),
 			beforeToolBatch: ({ assistantMessage }) => {
 				const calls = assistantMessage.content.filter((block) => block.type === "toolCall");
+				// Refused calls count toward the run's tool-call cap as executed ones do.
+				const capRefusal = deps.runCaps?.admitToolCalls(calls.length);
+				if (capRefusal !== undefined) return { reason: capRefusal };
 				if (
 					calls.some((call) => effectiveToolCall(call.name, call.arguments).toolName === "self_compact") &&
 					calls.length !== 1
@@ -1466,6 +1477,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					});
 				preInvocationStage = "admission";
 				const admission = deps.continuity?.admission() ?? { block: false };
+				// Counted only here, once nothing else blocks: the request is about to be sent.
+				const capRefusal = admission.block ? undefined : deps.runCaps?.admitRequest();
+				if (capRefusal !== undefined) return { block: true, reason: capRefusal };
 				admittedMessages = admission.block ? [] : resolved.messages;
 				admittedSystemPrompt = admission.block ? "" : (resolved.systemPrompt ?? "");
 				return admission;

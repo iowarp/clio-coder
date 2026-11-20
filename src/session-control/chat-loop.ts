@@ -89,6 +89,7 @@ import {
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { TurnAbortSource } from "../core/telemetry/live-events.js";
 import {
+	createRunCapCounter,
 	narrowTurnConstraints,
 	routeScopedTurnConstraints,
 	snapshotTurnConstraints,
@@ -2001,6 +2002,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	/** A stop waiting for the running round's tool batch to settle (F-C16); cleared when the submit settles. */
 	let boundaryStop: ChatCancelOptions | null = null;
+	/** `run --max-requests`/`--max-tool-calls`: one count for the life of this loop, which is one headless run. */
+	const runCapCounter = createRunCapCounter();
 	const turnRuntime = createTurnRuntime({
 		hostInserts,
 		onMemoryRequestSubmitted: deps.onMemoryRequestSubmitted,
@@ -2041,6 +2044,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			boundaryStop = null;
 			api.cancel(stop);
 			return true;
+		},
+		runCaps: {
+			admitRequest: () => runCapCounter.admitRequest(state.currentTurnConstraints?.runCaps),
+			admitToolCalls: (count) => runCapCounter.admitToolCalls(state.currentTurnConstraints?.runCaps, count),
 		},
 		queueHandOver: {
 			atFinishTurn: (final) => queues.handOverAtFinishTurn(final),

@@ -273,6 +273,51 @@ describe("headless no-op contract through the built binary", () => {
 		strictEqual(mainLoop.length, 1);
 	});
 
+	const readSentinel = (id: string): OpenAICompatToolCallScript => ({
+		id,
+		name: "read",
+		arguments: { path: "sentinel.txt" },
+	});
+	const lastJson = (stdout: string): Record<string, unknown> =>
+		JSON.parse(stdout.trim().split("\n").filter(Boolean).at(-1) ?? "{}") as Record<string, unknown>;
+
+	test("--max-requests stops the main loop before the request past the cap: exit 4, cause max_requests", async () => {
+		const { turn, envelope, fixture } = await headlessTurn({
+			autonomy: "default",
+			steps: [readSentinel("r1"), readSentinel("r2"), readSentinel("r3")],
+			failOnNoop: false,
+			flags: ["--max-requests", "2", "--output-format", "json"],
+		});
+		strictEqual(turn.code, 4, turn.stderr);
+		strictEqual(envelope.outcomeDetail, "max_requests");
+		const mainLoop = fixture.requests.filter((request) => Array.isArray(request.tools) && request.tools.length > 0);
+		strictEqual(mainLoop.length, 2);
+		const causes = lastJson(turn.stdout).causes as Array<Record<string, unknown>>;
+		deepStrictEqual(
+			{ code: causes[0]?.code, limit: causes[0]?.limit, observed: causes[0]?.observed },
+			{ code: "max_requests", limit: 2, observed: 2 },
+		);
+	});
+
+	test("--max-tool-calls refuses the batch past the cap and ends the run: exit 4, cause max_tool_calls", async () => {
+		const { turn, envelope, fixture } = await headlessTurn({
+			autonomy: "default",
+			steps: [readSentinel("t1"), readSentinel("t2"), readSentinel("t3")],
+			failOnNoop: false,
+			flags: ["--max-tool-calls", "1", "--output-format", "json"],
+		});
+		strictEqual(turn.code, 4, turn.stderr);
+		strictEqual(envelope.outcomeDetail, "max_tool_calls");
+		// Request 2 brought the refused call; no request follows it.
+		const mainLoop = fixture.requests.filter((request) => Array.isArray(request.tools) && request.tools.length > 0);
+		strictEqual(mainLoop.length, 2);
+		const causes = lastJson(turn.stdout).causes as Array<Record<string, unknown>>;
+		deepStrictEqual(
+			{ code: causes[0]?.code, limit: causes[0]?.limit, observed: causes[0]?.observed },
+			{ code: "max_tool_calls", limit: 1, observed: 2 },
+		);
+	});
+
 	for (const failOnNoop of [true, false]) {
 		test(`a run whose shell write was denied ${failOnNoop ? "fails under --fail-on-noop" : "also fails without the flag"}`, async () => {
 			// Hidden shell content asks in default mode, and a headless run has no

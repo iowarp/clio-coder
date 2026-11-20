@@ -15,7 +15,7 @@ import { isUnreportedUsageNotice } from "../../core/telemetry/pricing.js";
 import { renderCompactCount, renderUsdSum } from "../../core/telemetry/render.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
-import type { TurnConstraints } from "../../core/turn-constraints.js";
+import { runCapStopCode, type TurnConstraints } from "../../core/turn-constraints.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
 import { mainAgentTerminalReason, runStatusForOutcome } from "../../domains/dispatch/outcome.js";
@@ -832,7 +832,8 @@ export function prefixHeadlessFailure(
 	message: string,
 	notFromRoute = false,
 ): string {
-	if (notFromRoute || message.startsWith(`${SESSION_COST_CEILING_REASON}:`)) return message;
+	if (notFromRoute || message.startsWith(`${SESSION_COST_CEILING_REASON}:`) || runCapStopCode(message) !== undefined)
+		return message;
 	const snapshot = chat.lastRunSnapshot?.();
 	if (!snapshot) return message;
 	const route = [snapshot.runtimeId, snapshot.targetUrl].filter(Boolean).join(" ");
@@ -1575,12 +1576,15 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		stderrMessage = result.abortReason;
 	} else if (result.error) {
 		const budgetCeiling = result.error.startsWith(`${SESSION_COST_CEILING_REASON}:`);
+		// `--max-requests`/`--max-tool-calls` fired: a limit exit, as the cost ceiling is.
+		const runCap = runCapStopCode(result.error);
+		const limitDetail = budgetCeiling ? SESSION_COST_CEILING_REASON : runCap;
 		terminal = {
-			exitCode: budgetCeiling ? SESSION_COST_CEILING_EXIT_CODE : 1,
+			exitCode: limitDetail !== undefined ? SESSION_COST_CEILING_EXIT_CODE : 1,
 			outcome: "failed",
 			status: "failed",
 			failureMessage: result.error,
-			...(budgetCeiling ? { outcomeDetail: SESSION_COST_CEILING_REASON } : {}),
+			...(limitDetail !== undefined ? { outcomeDetail: limitDetail } : {}),
 		};
 		// Text mode printed the refusal's notice as it arrived; saying it twice
 		// reads as two failures.
