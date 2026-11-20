@@ -131,7 +131,7 @@ function advertisesClientCapability(capabilities) {
  * An `agy acp` 1.5 stand-in: argv is `agy <log> <version> <ok|auth|abort|null>`. Every frame it receives is appended
  * to the log. The first prompt asks a fixed-choice question; in `ok` mode it first sends `interaction_` requests:
  * tool-shaped ones (an execute command, a path or a URL under kind other or none) and questions whose locations are
- * null or empty. In `ok` mode the first steer prompt ends at max_tokens; the second makes the turn answer end_turn,
+ * null or empty, then agy's own tool shapes (probed on 1.5.13): `run_command`, `run_workflow` and a tool no shim maps. In `ok` mode the first steer prompt ends at max_tokens; the second makes the turn answer end_turn,
  * then a later update arrives, then the second steer fails. In `abort` mode a steer makes the turn answer end_turn and
  * is never answered itself. In `null` mode a steer is answered with a null result, then the turn with end_turn.
  */
@@ -222,6 +222,11 @@ function agy(request) {
 			ask("tool-3", { toolCallId: "interaction_4", title: "Fetch it", rawInput: { url: "https://example.com" } });
 			ask("question-2", { toolCallId: "interaction_5", title: "Null locations?", kind: "other", locations: null });
 			ask("question-3", { toolCallId: "interaction_6", title: "No locations?", locations: [] });
+			const agyTool = (id, name, kind, rawInput) =>
+				ask(id, { toolCallId: id, name, kind, title: name, rawInput, args: rawInput });
+			agyTool("call_1", "run_command", "execute", { CommandLine: "ls", WaitMsBeforeAsync: 5000, toolSummary: "list" });
+			agyTool("call_2", "run_workflow", "other", { Description: "list", Script: "print('hi')", WaitMsBeforeAsync: 5000 });
+			agyTool("call_3", "browser_click", "other", { path: "README.md" });
 		}
 		send({
 			jsonrpc: "2.0",
