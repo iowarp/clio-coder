@@ -106,6 +106,7 @@ import type { PinnedContextBlock } from "../domains/extensions/pinned-context.js
 import {
 	createMiddlewareToolChoiceControl,
 	type MiddlewareContract,
+	type MiddlewareEffect,
 	type MiddlewareRegistrar,
 	type MiddlewareToolChoiceControl,
 } from "../domains/middleware/index.js";
@@ -3312,6 +3313,28 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 					text = verdict.text;
 				}
+				const pendingSkillRequests =
+					state.currentTurnConstraints?.skills === "disabled" ? [] : (options.pendingSkillRequests ?? []);
+				// The user turn id is fixed before the turn_start gate and turn control run, so
+				// their records and the ledger row carry the id the user turn will be filed under.
+				// A run that returns before admission leaves the id unused, which costs nothing.
+				const reservedUserTurnId = randomUUID();
+				// The awaited turn_start phase is the turn's gate. Like the prompt gate it
+				// decides before the turn spends anything (an image sidecar call, turn
+				// control) or buffers a reminder, so a refused turn leaves nothing for the
+				// next prompt. Its effects apply after the synchronous turn_start phase.
+				let turnStartEffects: ReadonlyArray<MiddlewareEffect> = [];
+				if (options.requestContinuation !== true) {
+					markPreparationStep("turn-start");
+					const gate = await middleware.awaitTurnStart(agentRuntime, text, pendingSkillRequests.length, reservedUserTurnId);
+					if (!admissionCurrent()) return;
+					// A blocking turn_start hook that failed refuses the turn before its first model request.
+					if (gate.refusal !== null) {
+						emitAdmissionNotice(gate.refusal, "turn-blocked", "warning");
+						return;
+					}
+					turnStartEffects = gate.effects;
+				}
 				const operatorText = text;
 				let sidecarObservation: string | null = null;
 				const routeAcceptsImages = acceptsImageInput({
@@ -3391,8 +3414,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				});
 				middlewareToolChoice.reset();
 				const images = sidecarObservation === null && options.images?.length ? [...options.images] : undefined;
-				const pendingSkillRequests =
-					state.currentTurnConstraints?.skills === "disabled" ? [] : (options.pendingSkillRequests ?? []);
 				// Inlined @file content is part of this text, and the pre-turn decision or
 				// a preparation compaction can send it before the user turn is filed.
 				// A first turn has no session to hold the label yet, so it is recorded
@@ -3405,10 +3426,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					continuation: options.requestContinuation === true,
 					images,
 				});
-				// The user turn id is fixed before turn control runs, so its record and the
-				// ledger row carry the id the user turn will be filed under. A run that returns
-				// before admission leaves the id unused, which costs nothing.
-				const reservedUserTurnId = randomUUID();
 				if (options.requestContinuation !== true) {
 					operatorSpokeAt = Date.now();
 					try {
@@ -3491,22 +3508,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					pendingSkillRequests.length,
 					options.requestContinuation === true,
 					reservedUserTurnId,
+					turnStartEffects,
 				);
-				if (options.requestContinuation !== true) {
-					markPreparationStep("turn-start");
-					const refusal = await middleware.awaitTurnStart(
-						agentRuntime,
-						text,
-						pendingSkillRequests.length,
-						reservedUserTurnId,
-					);
-					if (!admissionCurrent()) return;
-					// A blocking turn_start hook that failed refuses the turn before its first model request.
-					if (refusal !== null) {
-						emitAdmissionNotice(refusal, "turn-blocked", "warning");
-						return;
-					}
-				}
 				// The turn's scope is host-framed text in its own user message, kept
 				// verbatim in history, never a recompile of the system prompt (#422).
 				// Continuations repeat it so a mid-turn compaction cannot drop it.

@@ -341,6 +341,9 @@ function landingFields(
 	return fields;
 }
 
+/** What `block` does at after_tool, where the call has already run. */
+const AFTER_TOOL_BLOCK_CONSEQUENCE = "the tool already ran, so its result carries this warning";
+
 /**
  * A gate that fails closed. A call or a turn not yet run is refused, and a
  * result that ran carries the warning. The turn middleware reads a hard
@@ -351,7 +354,15 @@ function closedGate(point: ToolOrTurnPoint, extensionId: string, reason: string)
 	const message = `extension ${extensionId} ${point} hook ${reason}; the gate fails closed`;
 	if (point === "before_tool" || point === "turn_start")
 		return [{ kind: "block_tool", reason: message, severity: "hard-block" }];
-	if (point === "after_tool") return [{ kind: "annotate_tool_result", message, severity: "warn" }];
+	// The call already ran, so a closed gate refuses nothing and only marks the result.
+	if (point === "after_tool")
+		return [
+			{
+				kind: "annotate_tool_result",
+				message: `extension ${extensionId} after_tool hook ${reason}; ${AFTER_TOOL_BLOCK_CONSEQUENCE}`,
+				severity: "warn",
+			},
+		];
 	return [];
 }
 
@@ -406,7 +417,13 @@ function createRuntimeHookRunner(
 		}
 	};
 	const failed = (reason: string, policy: "pass" | "block", outcome: HookReceipt["outcome"]): RunnerOutcome => {
-		notify(policy === "block" ? `${reason}; it fails closed` : `${reason}; skipped`);
+		notify(
+			policy === "pass"
+				? `${reason}; skipped`
+				: point === "after_tool"
+					? `${reason}; ${AFTER_TOOL_BLOCK_CONSEQUENCE}`
+					: `${reason}; it fails closed`,
+		);
 		return { kind: "failed", reason, policy, outcome };
 	};
 	const evaluate = async (
@@ -782,12 +799,17 @@ export async function evaluateWorkerHookRequest(
 	notify: (message: string) => void,
 ): Promise<WorkerHookEffect[]> {
 	const closed = (reason: string): WorkerHookEffect[] => {
-		const message = `${request.hookId} ${reason}; the gate fails closed`;
 		// The stricter of the two policies, as the worker decides a lost answer.
 		if (declared !== undefined && declared.onError !== "block" && declared.onTimeout !== "block") return [];
 		return request.point === "before_tool"
-			? [{ kind: "block_tool", reason: message }]
-			: [{ kind: "annotate_tool_result", message, severity: "warn" }];
+			? [{ kind: "block_tool", reason: `${request.hookId} ${reason}; the gate fails closed` }]
+			: [
+					{
+						kind: "annotate_tool_result",
+						message: `${request.hookId} ${reason}; ${AFTER_TOOL_BLOCK_CONSEQUENCE}`,
+						severity: "warn",
+					},
+				];
 	};
 	if (evaluator === undefined) return closed("is not installed in this session's current generation");
 	const input: MiddlewareHookInput = {

@@ -82,10 +82,16 @@ export function createWorkerExtensionHookRegistrations(
 				const reason = error instanceof Error ? error.message : String(error);
 				// A lost answer is neither the hook's error nor its timeout, so the stricter policy decides.
 				if (hook.onError !== "block" && hook.onTimeout !== "block") return [];
-				const message = `${hook.id}: the dispatching session did not answer (${reason}); the gate fails closed`;
+				const message = `${hook.id}: the dispatching session did not answer (${reason})`;
 				return hook.point === "before_tool"
-					? [{ kind: "block_tool", reason: message, severity: "hard-block" }]
-					: [{ kind: "annotate_tool_result", message, severity: "warn" }];
+					? [{ kind: "block_tool", reason: `${message}; the gate fails closed`, severity: "hard-block" }]
+					: [
+							{
+								kind: "annotate_tool_result",
+								message: `${message}; the tool already ran, so its result carries this warning`,
+								severity: "warn",
+							},
+						];
 			}
 			return effects.map(middlewareEffect);
 		},

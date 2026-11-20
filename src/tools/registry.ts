@@ -658,6 +658,13 @@ export interface ToolInvokeOptions {
 	 */
 	onParked?: (parkedMs: number) => void;
 	/**
+	 * Wall time each before_tool or after_tool middleware run took, reported as
+	 * it ends. A command hook blocks the event loop and an extension hook is
+	 * awaited, both inside this invocation, so a caller timing the tool
+	 * subtracts it: a 1.8 s hook on `read` is not a 1.8 s read.
+	 */
+	onHookTime?: (hookMs: number) => void;
+	/**
 	 * Display-only cumulative progress supplied by pi-agent-core's
 	 * `AgentToolUpdateCallback`. Tool bodies may report the result snapshot the
 	 * operator should see while the call runs. Admission, final result shaping,
@@ -1503,7 +1510,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	): ReadonlyArray<MiddlewareEffect> => {
 		if (!deps.middleware) return [];
 		const input = hookInput(hook, spec, call, decision, options, result, resultDigest);
+		const startedAt = performance.now();
 		const effects = noteGuardRule(deps.middleware.runHook(input));
+		options?.onHookTime?.(performance.now() - startedAt);
 		try {
 			deps.onMiddlewareEffects?.(effects, input);
 		} catch {
@@ -1638,11 +1647,14 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			...(landing === null ? {} : { toolLanding: landing }),
 		};
 		let effects: ReadonlyArray<MiddlewareEffect>;
+		const startedAt = performance.now();
 		try {
 			effects = noteGuardRule(await deps.middleware.runAwaitedHook(input, priorEffects));
 		} catch {
 			// Registrations isolate their own failures; anything escaping is a runtime bug and changes no call.
 			return [];
+		} finally {
+			options?.onHookTime?.(performance.now() - startedAt);
 		}
 		try {
 			deps.onMiddlewareEffects?.(effects, input);

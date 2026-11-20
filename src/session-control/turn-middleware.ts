@@ -67,12 +67,17 @@ export interface TurnMiddlewareDeps {
 	stepTurnEnd?: () => { continues: boolean; startTurnId?: string } | null;
 }
 
+/** The awaited turn_start phase's answer: the turn's refusal, or the effects an admitted turn applies. */
+export type TurnStartGate = { refusal: string } | { refusal: null; effects: ReadonlyArray<MiddlewareEffect> };
+
 export interface TurnMiddleware {
 	/** Async-only completed tool-batch observation and delivery of already-finished background reminders. */
 	prepareToolContinuation(agentRuntime: AgentRuntime, signal?: AbortSignal): Promise<boolean>;
 	/**
 	 * `userTurnId` is the id the turn's user row is filed under; without it the
 	 * turn already filed (an in-run continuation's) is the one that starts.
+	 * `awaitedEffects` are the admitted awaited phase's, applied after this
+	 * synchronous phase's own.
 	 */
 	fireTurnStart(
 		agentRuntime: AgentRuntime,
@@ -80,20 +85,23 @@ export interface TurnMiddleware {
 		pendingSkillRequestCount?: number,
 		requestContinuation?: boolean,
 		userTurnId?: string,
+		awaitedEffects?: ReadonlyArray<MiddlewareEffect>,
 	): void;
 	/**
-	 * The awaited turn_start phase for extension runtime hooks, run after
-	 * `fireTurnStart` and before the pending reminders are taken. It awaits
-	 * nothing unless an awaited registration matches turn_start. A hard
-	 * block_tool there is a closed gate refusing the turn: its reason comes
-	 * back and no other effect of the phase applies. Null lets the turn run.
+	 * The awaited turn_start phase for extension runtime hooks: the turn's gate,
+	 * run before anything else the turn spends or buffers (an image sidecar
+	 * call, turn control, the synchronous phase's reminders). It awaits nothing
+	 * unless an awaited registration matches turn_start. A hard block_tool there
+	 * is a closed gate refusing the turn: its reason comes back and no other
+	 * effect of the phase applies. An admitted turn gets the phase's effects,
+	 * which the caller hands to `fireTurnStart`.
 	 */
 	awaitTurnStart(
 		agentRuntime: AgentRuntime,
 		promptText: string,
 		pendingSkillRequestCount?: number,
 		userTurnId?: string,
-	): Promise<string | null>;
+	): Promise<TurnStartGate>;
 	fireTurnEnd(
 		agentRuntime: AgentRuntime,
 		messages: ReadonlyArray<AgentMessage>,
@@ -469,26 +477,34 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			return true;
 		},
 
-		fireTurnStart(agentRuntime, promptText, pendingSkillRequestCount = 0, requestContinuation = false, userTurnId): void {
+		fireTurnStart(
+			agentRuntime,
+			promptText,
+			pendingSkillRequestCount = 0,
+			requestContinuation = false,
+			userTurnId,
+			awaitedEffects = [],
+		): void {
 			const input = turnStartInput(agentRuntime, promptText, pendingSkillRequestCount, requestContinuation, userTurnId);
 			// The skills reminder and the marketplace offer each list installed
 			// skills on a session's first substantive turn. One discovery pass
 			// verifies every plugin tree once for all turn_start registrations.
 			applyTurnStartEffects(withPluginDiscoveryPass(() => runMiddlewareTurnHook(input)));
+			applyTurnStartEffects(awaitedEffects);
 		},
 
-		async awaitTurnStart(agentRuntime, promptText, pendingSkillRequestCount = 0, userTurnId): Promise<string | null> {
-			if (!deps.middleware?.hasAwaitedHook?.("turn_start") || !deps.middleware.runAwaitedHook) return null;
+		async awaitTurnStart(agentRuntime, promptText, pendingSkillRequestCount = 0, userTurnId): Promise<TurnStartGate> {
+			if (!deps.middleware?.hasAwaitedHook?.("turn_start") || !deps.middleware.runAwaitedHook)
+				return { refusal: null, effects: [] };
 			const input = turnStartInput(agentRuntime, promptText, pendingSkillRequestCount, false, userTurnId);
 			try {
 				const { effects } = await deps.middleware.runAwaitedHook(input);
 				const refusal = effects.find((effect) => effect.kind === "block_tool");
-				if (refusal !== undefined) return refusal.reason;
-				applyTurnStartEffects(effects);
+				return refusal !== undefined ? { refusal: refusal.reason } : { refusal: null, effects };
 			} catch (error) {
 				reportHookFailure(input.hook, error);
 			}
-			return null;
+			return { refusal: null, effects: [] };
 		},
 
 		async fireTurnEnd(agentRuntime, messages, terminalToolResult): Promise<void> {
