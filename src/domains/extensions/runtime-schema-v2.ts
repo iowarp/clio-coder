@@ -576,23 +576,37 @@ function compareReach(left: ExtensionHookDeclaration, right: ExtensionHookDeclar
 }
 
 /**
- * Every hook runs, so one approved declaration covers one candidate. The most
- * demanding candidate claims first and takes the narrowest approved hook that
- * covers it, which leaves broad ones for what only they cover; a reordered or
- * narrowed manifest therefore finds no growth.
+ * Every hook runs, so one approved declaration covers one candidate. This is a
+ * maximum matching of candidates to the approved hooks that cover them: a
+ * candidate whose cover is held by another candidate moves that one to a cover
+ * it can also use before it is counted as growth, so a manifest that fits
+ * inside the approved one never asks again. The most demanding candidate
+ * claims first and tries the narrowest cover first, which only decides which
+ * of several copies is named when some do not fit.
  */
 function uncoveredHooks(
 	approved: readonly ExtensionHookDeclaration[],
 	next: readonly ExtensionHookDeclaration[],
 ): ExtensionHookDeclaration[] {
-	const free = [...approved].sort(compareReach);
+	const covers = [...approved].sort(compareReach);
+	const holder: Array<number | undefined> = covers.map(() => undefined);
+	const claim = (index: number, visited: Set<number>): boolean => {
+		const hook = next[index];
+		if (hook === undefined) return false;
+		for (const [at, prior] of covers.entries()) {
+			if (visited.has(at) || !hookCovers(prior, hook)) continue;
+			visited.add(at);
+			const held = holder[at];
+			if (held === undefined || claim(held, visited)) {
+				holder[at] = index;
+				return true;
+			}
+		}
+		return false;
+	};
 	const unmatched = new Set<number>();
 	const order = next.map((hook, index) => ({ hook, index })).sort((left, right) => compareReach(right.hook, left.hook));
-	for (const { hook, index } of order) {
-		const at = free.findIndex((prior) => hookCovers(prior, hook));
-		if (at === -1) unmatched.add(index);
-		else free.splice(at, 1);
-	}
+	for (const { index } of order) if (!claim(index, new Set())) unmatched.add(index);
 	return next.filter((_, index) => unmatched.has(index));
 }
 
