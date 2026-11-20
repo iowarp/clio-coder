@@ -509,6 +509,7 @@ import {
 	verifyCallStart,
 } from "./run-findings.js";
 import { detectRunIdentity } from "./run-identity.js";
+import { planCardLimits } from "./run-limits.js";
 import { finishRunResult, settleUnfinishedRun } from "./run-settlement.js";
 import type { RunTelemetryJournal } from "./run-telemetry.js";
 import {
@@ -11238,7 +11239,7 @@ export function createDispatchBundle(
 			getProtectedArtifactState(),
 		);
 		assertWorkerHooksCarried(target.runtime, effectiveTools);
-		resolveEffectiveWorkerBudget({
+		const budget = resolveEffectiveWorkerBudget({
 			req,
 			recipeId: recipe.id,
 			declared: agentSpec.budget,
@@ -11251,6 +11252,9 @@ export function createDispatchBundle(
 				isHoareResultContract(dispatchResultContract(req, recipe)),
 		});
 		const endpoint = endpointCapacityForTarget(target.target.id);
+		const outputBoundTokens = admissionMaxOutputTokens(settings, target.modelCapabilities);
+		const costUpperBoundUsd = conservativeRouteAdmissionEstimateUsd(target.effectivePricing, outputBoundTokens, req);
+		const costUpperBoundKnown = target.effectivePricing.pricedBy !== "none";
 		const resolution: DispatchPlanTaskResolution = {
 			agentId: req.agentId,
 			specFingerprint: agentSpecFingerprint(agentSpec),
@@ -11263,13 +11267,17 @@ export function createDispatchBundle(
 			toolSignature: toolSignatureOf(effectiveTools),
 			endpointIdentityHash: endpointIdentityHash(target.target.url),
 			settingsFingerprint: computeSettingsFingerprint(settings ?? null),
-			costUpperBoundUsd: conservativeRouteAdmissionEstimateUsd(
-				target.effectivePricing,
-				admissionMaxOutputTokens(settings, target.modelCapabilities),
-				req,
-			),
-			costUpperBoundKnown: target.effectivePricing.pricedBy !== "none",
+			costUpperBoundUsd,
+			costUpperBoundKnown,
 			routeApproval: null,
+			limits: planCardLimits({
+				priced: costUpperBoundKnown,
+				costUpperBoundUsd,
+				outputBoundTokens,
+				budget,
+				nativeWorker: target.runtime.kind === "http",
+				responseSeconds: (settings ?? DEFAULT_SETTINGS).safety.limits.workerResponseSeconds,
+			}),
 		};
 		return {
 			resolution,

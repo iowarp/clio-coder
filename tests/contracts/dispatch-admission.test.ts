@@ -48,6 +48,8 @@ import {
 	type RuntimeDescriptor,
 } from "../../src/domains/providers/index.js";
 import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
+import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
+import copilotSdkRuntime from "../../src/domains/providers/runtimes/copilot/copilot-sdk.js";
 import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { dispatchRequestsFromArgs } from "../../src/tools/dispatch-arguments.js";
@@ -236,6 +238,50 @@ describe("dispatch admission boundary", () => {
 
 	beforeEach(async () => isolateDispatchState());
 	afterEach(() => restoreDispatchState());
+
+	it("states each run's bounds on the plan card: a priced estimate at the output bound, else wall clock and tool ceiling (M6)", async () => {
+		const planText = async (runtime: RuntimeDescriptor, model: string, maxOutputTokens = 0) => {
+			const settings = structuredClone(DEFAULT_SETTINGS);
+			settings.targets = [{ id: "api", runtime: runtime.id, defaultModel: model }];
+			settings.fleet.default = { ...settings.fleet.default, target: "api", model };
+			settings.chat.maxOutputTokens = maxOutputTokens;
+			const context = dispatchStubContext({ settings, runtime });
+			const bundle = makeDispatchBundle(context);
+			await bundle.extension.start();
+			try {
+				const tool = createDispatchTool({
+					dispatch: bundle.contract,
+					getAgentSpecs: () => context.getContract("agents")?.listSpecs() ?? [],
+					getAutonomy: () => "yolo",
+				});
+				const prepared = tool.prepareAdmissionArguments?.({
+					agent: "coder",
+					mode: "sequential",
+					budget: { toolCalls: 1000, readReserve: 0 },
+					tasks: [{ task: "Rename the helper." }, { task: "Update its callers." }],
+				});
+				ok(prepared);
+				strictEqual(prepared[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT], undefined);
+				const text = tool.describeDispatchPlan?.(prepared).text ?? "";
+				tool.disposeAdmissionArguments?.(prepared);
+				return text;
+			} finally {
+				await bundle.extension.stop?.();
+			}
+		};
+		// A Copilot subscription route has no rates: its card names the bounds that do stop it.
+		const unpriced = await planText(copilotSdkRuntime, "gpt-6-luna");
+		match(
+			unpriced,
+			/limits: unpriced route, bounded by wall clock and the tool ceiling: each response stops at 600 s and the run only at the call's timeout_ms; Clio stops it at 300 tool calls/u,
+		);
+		const priced = (maxOutputTokens: number) => planText(anthropic, "claude-haiku-5-5", maxOutputTokens);
+		const estimate = (text: string) => /limits: cost (~\S+ est) per model call at a (\d+)-token output bound/u.exec(text);
+		const [small, large] = [estimate(await priced(100)), estimate(await priced(4000))];
+		strictEqual(small?.[2], "100");
+		strictEqual(large?.[2], "4000");
+		ok(small?.[1] !== large?.[1], `${small?.[1]} moves with the output bound to ${large?.[1]}`);
+	});
 
 	it("preserves declared intent through admission when briefing quotes an absolute workspace", async () => {
 		const context = dispatchStubContext();

@@ -329,6 +329,8 @@ export interface DispatchPlanTaskResolution {
 	routeApproval: ApprovedAssignmentRoute | null;
 	/** Admission parts only the run can settle, named on the plan card instead of passing silently. */
 	checkedAtRun?: ReadonlyArray<string>;
+	/** The bounds that stop this run, as the plan card states them: cost estimate or, unpriced, wall clock and tool ceiling. */
+	limits?: string;
 }
 
 /**

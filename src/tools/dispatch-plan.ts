@@ -108,6 +108,8 @@ export interface DispatchPlanTaskView {
 	resolvedVerification?: NonNullable<DispatchRequest["resolvedVerification"]>;
 	/** Admission parts only the run can settle, shown on the card as checked at run. */
 	checkedAtRun?: ReadonlyArray<string>;
+	/** The bounds that stop this run (cost estimate, or wall clock and tool ceiling on an unpriced route). */
+	limits?: string;
 }
 
 export interface DispatchPlanView {
@@ -165,6 +167,7 @@ export interface ResolvedDispatchPlanArtifact {
 				| "intent"
 				| "resolvedVerification"
 				| "checkedAtRun"
+				| "limits"
 			> &
 			Required<
 				Pick<
@@ -485,6 +488,7 @@ function renderPlanText(
 			);
 		}
 		if (task.record === true) lines.push("    record=true (bounded redacted display asciicast)");
+		if (task.limits !== undefined) lines.push(`    limits: ${safeField(task.limits)}`);
 		for (const note of task.checkedAtRun ?? []) lines.push(`    checked at run: ${safeField(note)}`);
 		if (task.worktree === true)
 			lines.push(
@@ -592,6 +596,7 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 		"intent",
 		"resolvedVerification",
 		"checkedAtRun",
+		"limits",
 	]);
 	if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
 	for (const key of [
@@ -655,6 +660,7 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 			!value.checkedAtRun.every((note) => typeof note === "string" && note.length > 0))
 	)
 		return false;
+	if (value.limits !== undefined && (typeof value.limits !== "string" || value.limits.length === 0)) return false;
 	if (value.worktree !== undefined && value.worktree !== true) return false;
 	if (value.apply !== undefined && value.apply !== "merge" && value.apply !== "preserve") return false;
 	if (value.apply !== undefined && value.worktree !== true) return false;
@@ -928,6 +934,7 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 			...(task.briefing !== undefined ? { briefing: task.briefing.trim() } : {}),
 			...(task.record !== undefined ? { record: task.record } : {}),
 			...(task.checkedAtRun !== undefined ? { checkedAtRun: [...task.checkedAtRun] } : {}),
+			...(typeof task.limits === "string" ? { limits: task.limits } : {}),
 			...(task.context !== undefined ? { context: parseWorkerContextPolicy(task.context) } : {}),
 			...(task.workerContext !== undefined ? { workerContext: structuredClone(task.workerContext) } : {}),
 			...(task.worktree === true
