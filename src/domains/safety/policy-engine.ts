@@ -2064,9 +2064,13 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			...(leavesSandbox ? { leavesSandbox: true as const } : {}),
 		});
 		// The floor could not place the sourced file yet, or could not place or read a script the call runs: whatever the net
-		// would block stays blocked, and the rest asks, so the safety judge decides it rather than the launching PATH or an
-		// unread script. A contained call stays contained if it runs.
+		// would block stays blocked, an ask the net raises keeps its rule (leaving the sandbox, an operator-only change, a
+		// damage-control finding) with this reason added, and an allow asks, so the safety judge decides it rather than the
+		// launching PATH or an unread script. An operator's approval of this exact call already answered it. A contained
+		// call stays contained if it runs.
 		if (pending === null || normal.kind === "block") return normal;
+		if (normal.kind === "ask" || posture === CONFIRMED_POSTURE)
+			return { ...normal, reasons: [...normal.reasons, ...pending.reasons] };
 		const { rejection: _rejection, match: _match, ...rest } = normal;
 		return gateDecision("ask", rest, {
 			...pending,
