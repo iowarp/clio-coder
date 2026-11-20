@@ -1,6 +1,6 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { OutputStyle } from "../../src/core/defaults.js";
+import { DEFAULT_SETTINGS, type OutputStyle } from "../../src/core/defaults.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
@@ -13,9 +13,11 @@ import {
 	WORKER_TOOL_NAME_LIMIT,
 } from "../../src/domains/telemetry/worker-progress.js";
 import {
+	getKeybindings,
 	InstrumentedTuiAltScreen,
 	InstrumentedTuiMainScreen,
 	ScrollView,
+	setKeybindings,
 	stripTerminalSequences,
 	type Terminal,
 	Text,
@@ -44,7 +46,10 @@ import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
 } from "../../src/interactive/interactive-slash-runtime.js";
-import { createKeybindingManagerForTesting } from "../../src/interactive/keybinding-manager.js";
+import {
+	createKeybindingManager,
+	createKeybindingManagerForTesting,
+} from "../../src/interactive/keybinding-manager.js";
 import { buildLayout, releaseRegularDock, returnToLiveEdge } from "../../src/interactive/layout.js";
 import { showClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
 import { openAskUserOverlay } from "../../src/interactive/overlays/ask-user.js";
@@ -4144,6 +4149,33 @@ describe("agent invocations", () => {
 			.join("\n");
 		doesNotMatch(plain, /recognized no test|no check ran/u, plain);
 		match(plain, /python3 -c import calc passed on the worker's own report/u, plain);
+	});
+
+	it("a compact council round says which key shows the answers its one-line rows cut", () => {
+		const member = (text: string) =>
+			card({
+				assignmentId: "m1",
+				agentId: "scout",
+				origin: "user",
+				council: { group: "g1", label: "fast", round: 1 },
+				text,
+			});
+		const header = (text: string, style: "compact" | "standard") => {
+			const entry = member(text);
+			return stripTerminalSequences(
+				renderWorkerEntryLines(entry, 120, { detail: transcriptDetail(style), siblings: [entry] })[0] ?? "",
+			);
+		};
+		const long = "Keep the clock in retry().\nThe caller cannot see the backoff, and tests stub it there.";
+		const previous = getKeybindings();
+		createKeybindingManager(DEFAULT_SETTINGS, {});
+		try {
+			match(header(long, "compact"), /council · round 1 · Alt\+O shows the answers$/u);
+			strictEqual(header("Yes.", "compact"), `${GLYPH.workerHuman} council · round 1`, "a whole answer needs no hint");
+			strictEqual(header(long, "standard"), `${GLYPH.workerHuman} council · round 1`, "Standard previews the answer");
+		} finally {
+			setKeybindings(previous);
+		}
 	});
 
 	it("names a council's sealed report by its size, never by a member's route, whatever the synthesis", () => {
