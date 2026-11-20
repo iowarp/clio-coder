@@ -40,11 +40,22 @@ interface SecretPattern {
 /**
  * The secret words a key name holds, shared by the assignment pattern and the JSON property-name pattern so the two
  * hide the same keys. A bare `pass` or `pwd` is prose, the working directory or a word such as `compass`, so each needs
- * a `_` or `-` ahead of it (`DB_PASS`, `db-pass`, `MYSQL_PWD`) or is one of the named glued forms (`PGPASS`, and
- * `passwd`, `password` and `passphrase` anywhere); `PWD=/home/a`, `first pass: lint`, `tests_passed` and
- * `compass=northwest` keep their values.
+ * a `_` or `-` ahead of it in any case (`DB_PASS`, `db-pass`, `MYSQL_PWD`), or a glued `PASS` written in capitals after
+ * a capital or digit (`DBPASS`, `PGPASS`, `MYSQLPASS`), or is `pgpass`, `passwd`, `password` or `passphrase` anywhere; `PWD=/home/a`, `first pass: lint`, `tests_passed` and
+ * `compass=northwest` and `bypass` keep their values. Only the glued `PASS` is case-sensitive; every other word is
+ * spelled in either case, because Node 22 has no `(?i:)` group and the patterns compile without the `i` flag.
  */
-const SECRET_KEY_WORDS = String.raw`api[_-]?key|apikey|(?:account|access)[_-]?key|secret|token|pass(?:wd|word|phrase)|(?:[_-]|pg)pass(?![a-z])|[_-]pwd(?![a-z])|credential`;
+const SECRET_KEY_WORDS = [
+	eitherCase(String.raw`api[_-]?key|apikey|(?:account|access)[_-]?key|secret|token|pass(?:wd|word|phrase)|credential`),
+	`(?:[_-]|${eitherCase("pg")})${eitherCase("pass")}(?![A-Za-z])`,
+	"[A-Z0-9]PASS(?![A-Za-z])",
+	`[_-]${eitherCase("pwd")}(?![A-Za-z])`,
+].join("|");
+
+/** A pattern source whose lower-case letters match either case. */
+function eitherCase(source: string): string {
+	return source.replace(/[a-z]/g, (letter) => `[${letter.toUpperCase()}${letter}]`);
+}
 
 const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 	// Shares its patterns with display redaction so the two hide the same text (#446, #448). They run first because the
@@ -113,7 +124,7 @@ const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 		//
 		re: new RegExp(
 			String.raw`\b(?<=(?:^|[^A-Za-z0-9_-])-*)(?=[A-Za-z0-9_-]*?(?:${SECRET_KEY_WORDS}))([A-Za-z0-9_-]*\s*(?:["']\s*)?[:=]\s*["']?)(?![A-Za-z_][\w.]*\((?:[\s"'{[)]|$))([^\s"'\x60;,&|<>]{8,})`,
-			"gi",
+			"g",
 		),
 	},
 ];
@@ -151,7 +162,6 @@ function secretShapeHolds(kind: string, value: string): boolean {
 /** The assignment pattern's key half, for a key that arrives as a JSON property name. */
 const SECRET_PROPERTY_NAME = new RegExp(
 	String.raw`(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*$)[A-Za-z0-9_-]*?(?:${SECRET_KEY_WORDS})`,
-	"i",
 );
 
 /**

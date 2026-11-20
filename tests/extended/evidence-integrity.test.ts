@@ -277,6 +277,7 @@ describe("evidence integrity boundary", () => {
 			`MYSQL_PWD=${value}`,
 			`DefaultEndpointsProtocol=https;AccountName=acct;AccountKey=${value}==;EndpointSuffix=core.windows.net`,
 			`Authorization: ApiKey ${value}`,
+			`DBPASS=${value}`,
 		];
 		const kept = [
 			"PWD=/home/operator/project",
@@ -292,7 +293,7 @@ describe("evidence integrity boundary", () => {
 		strictEqual(tally.count, hidden.length);
 		const properties = JSON.parse(
 			JSON.stringify(
-				{ DB_PASS: value, mysql_pwd: value, AccountKey: value, compass: "northwest" },
+				{ DB_PASS: value, DBPASS: value, mysql_pwd: value, AccountKey: value, compass: "northwest" },
 				secretRedactingReplacer(tally),
 			),
 		) as Record<string, string>;
