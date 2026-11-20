@@ -11,6 +11,7 @@ import {
 	type CapacityLimits,
 	type CapacityStateFile,
 	capacityStateLockPath,
+	countsInGlobalCap,
 	countsOnThisEndpoint,
 	countsOnThisNode,
 	describeEndpointCapacityHolders,
@@ -235,7 +236,11 @@ function heldAllocation(record: DispatchReservationRecord): ReservationAllocatio
 			(task) => task.endpointKey !== undefined && countsOnThisEndpoint(record.host, task.nodeId, task.endpointKey),
 		),
 	);
-	return { ...onNodes, endpointSlots: onEndpoints.endpointSlots };
+	return {
+		...onNodes,
+		globalSlots: countsInGlobalCap(record.host) ? onNodes.globalSlots : 0,
+		endpointSlots: onEndpoints.endpointSlots,
+	};
 }
 
 function allocateReservation(

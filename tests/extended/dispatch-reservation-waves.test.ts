@@ -365,3 +365,103 @@ it("a running member's lease heartbeat keeps its plan current for hosts that can
 		await controller.stop();
 	}
 });
+
+it("another host's leases and reservations do not consume this host's global cap", () => {
+	const cap: CapacityLimits = { global: 1, nodes: { local: 2, gpu07: 2 }, endpoints: {} };
+	const foreignLocal = acquireCapacityLease({
+		assignmentId: "foreign-local",
+		nodeId: "local",
+		limits: { ...cap, global: 4 },
+	});
+	const foreignNamed = acquireCapacityLease({
+		assignmentId: "foreign-named",
+		nodeId: "gpu07",
+		limits: { ...cap, global: 4 },
+	});
+	const state = readCapacityStateUnsafe();
+	for (const lease of state.leases) lease.host = "other-host.example";
+	writeCapacityStateUnsafe(state);
+	strictEqual(capacityLeaseUsage().global, 0);
+	const here = acquireCapacityLease({ assignmentId: "here-local", nodeId: "local", limits: cap });
+	releaseCapacityLease(here.leaseId);
+
+	const foreignPlan = createDispatchReservation({
+		topology: "sequential",
+		tasks: [{ memberId: "remote-1", wave: 0, nodeId: "gpu07", costUpperBoundUsd: 1 }],
+		capacity: {
+			global: { active: 0, limit: 2 },
+			nodes: { gpu07: { active: 1, limit: 2 } },
+			endpoints: {},
+			budget: { currentUsd: 0, ceilingUsd: 100 },
+		},
+	});
+	const withForeignPlan = readCapacityStateUnsafe();
+	withForeignPlan.reservations = withForeignPlan.reservations.map((record) => ({
+		...(record as object),
+		host: "other-host.example",
+	}));
+	writeCapacityStateUnsafe(withForeignPlan);
+	const localPlan = createDispatchReservation({
+		topology: "sequential",
+		tasks: [{ memberId: "local-1", wave: 0, nodeId: "local", costUpperBoundUsd: 1 }],
+		capacity: {
+			global: { active: 0, limit: 1 },
+			nodes: { local: { active: 0, limit: 1 } },
+			endpoints: {},
+			budget: { currentUsd: 0, ceilingUsd: 100 },
+		},
+	});
+	releaseDispatchReservation(localPlan.ownerId);
+	const afterForeignPlan = acquireCapacityLease({ assignmentId: "here-after-plan", nodeId: "local", limits: cap });
+	releaseCapacityLease(afterForeignPlan.leaseId);
+	releaseDispatchReservation(foreignPlan.ownerId);
+	releaseCapacityLease(foreignNamed.leaseId);
+	releaseCapacityLease(foreignLocal.leaseId);
+});
+
+it("a named-node lease counts toward global capacity on its own host and not elsewhere", () => {
+	const cap: CapacityLimits = { global: 1, nodes: { local: 2, gpu07: 2 }, endpoints: {} };
+	const onNamed = acquireCapacityLease({ assignmentId: "named-own", nodeId: "gpu07", limits: cap });
+	strictEqual(capacityLeaseUsage().global, 1);
+	strictEqual(capacityLeaseUsage().nodes.gpu07, 1);
+	throws(
+		() => acquireCapacityLease({ assignmentId: "second-here", nodeId: "local", limits: cap }),
+		/global capacity reached \(1\/1\)/,
+	);
+	const state = readCapacityStateUnsafe();
+	for (const lease of state.leases) lease.host = "other-host.example";
+	writeCapacityStateUnsafe(state);
+	strictEqual(capacityLeaseUsage().global, 0);
+	strictEqual(capacityLeaseUsage().nodes.gpu07, 1);
+	const here = acquireCapacityLease({ assignmentId: "second-here", nodeId: "local", limits: cap });
+	releaseCapacityLease(here.leaseId);
+	throws(
+		() =>
+			acquireCapacityLease({
+				assignmentId: "contend-gpu07",
+				nodeId: "gpu07",
+				limits: { global: 2, nodes: { gpu07: 1 }, endpoints: {} },
+			}),
+		/node 'gpu07' capacity reached \(1\/1\) \(held by other-host\.example;/,
+	);
+	releaseCapacityLease(onNamed.leaseId);
+});
+
+it("this host's own leases still enforce the global cap alongside another host's leases", () => {
+	const cap: CapacityLimits = { global: 2, nodes: { local: 4, gpu07: 4 }, endpoints: {} };
+	const foreignNamed = acquireCapacityLease({ assignmentId: "foreign-gpu07", nodeId: "gpu07", limits: cap });
+	const state = readCapacityStateUnsafe();
+	for (const lease of state.leases) lease.host = "other-host.example";
+	writeCapacityStateUnsafe(state);
+	const first = acquireCapacityLease({ assignmentId: "own-local", nodeId: "local", limits: cap });
+	strictEqual(capacityLeaseUsage().global, 1);
+	const second = acquireCapacityLease({ assignmentId: "own-gpu07", nodeId: "gpu07", limits: cap });
+	strictEqual(capacityLeaseUsage().global, 2);
+	throws(
+		() => acquireCapacityLease({ assignmentId: "own-third", nodeId: "local", limits: cap }),
+		/global capacity reached \(2\/2\)\.(?!.*other-host\.example)/,
+	);
+	releaseCapacityLease(second.leaseId);
+	releaseCapacityLease(first.leaseId);
+	releaseCapacityLease(foreignNamed.leaseId);
+});
