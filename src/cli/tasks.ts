@@ -4,7 +4,8 @@ import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
 import { packageDeclaredCheck } from "../tools/verify/catalog.js";
 import { discoverDeclaredChecksAtRoot, discoverDeclaredProjectEntriesAtRoot } from "../tools/verify/scripts.js";
-import { printError } from "./argv.js";
+import { jsonDocument, writeCliFailure } from "./kit/json-out.js";
+import type { ErrorSlug } from "./kit/slugs.js";
 
 /** Operator flags use the same bounds and normalization as dispatch intent. */
 export function acceptanceFromTaskFlags(
@@ -39,23 +40,42 @@ export function acceptanceFromTaskFlags(
 }
 
 const USAGE = `Usage:
-  clio-coder tasks [list]
-  clio-coder tasks add [--expect <path>] [--verify <checkId>[:timeoutMs]] <text>
-  clio-coder tasks hand|done|drop <uN>
+  clio-coder tasks [list] [--json]
+  clio-coder tasks add [--expect <path>] [--verify <checkId>[:timeoutMs]] [--json] <text>
+  clio-coder tasks hand|done|drop <uN> [--json]
 `;
 
 const HELP = `${USAGE}
---expect and --verify are repeatable. Check ids must be declared in package.json or .clio-coder/verifiers.yaml.`;
+--expect and --verify are repeatable. Check ids must be declared in package.json or .clio-coder/verifiers.yaml.
+list, hand, done and drop always print JSON; --json is accepted on them for uniformity. add prints
+{"version":1,"task":{...}} with --json and one line without it.`;
 
-class TasksUsageError extends Error {}
+const VERBS = new Set(["add", "list", "hand", "done", "drop"]);
 
-function unexpected(arg: string): TasksUsageError {
-	return new TasksUsageError(arg.startsWith("-") ? `unknown flag: ${arg}` : `unexpected argument: ${arg}`);
+class TasksUsageError extends Error {
+	constructor(
+		message: string,
+		readonly slug: ErrorSlug = "usage",
+	) {
+		super(message);
+	}
 }
 
-export function runTasksCommand(args: string[]): number {
+function unexpected(arg: string): TasksUsageError {
+	return arg.startsWith("-")
+		? new TasksUsageError(`unknown flag: ${arg}`, "unknown_flag")
+		: new TasksUsageError(`unexpected argument: ${arg}`);
+}
+
+export function runTasksCommand(argv: string[]): number {
+	// `--json` is a flag of every leaf, not task text, unless it follows "--".
+	const end = argv.indexOf("--");
+	const options = end === -1 ? argv : argv.slice(0, end);
+	const json = options.includes("--json");
+	const args = json ? [...options.filter((arg) => arg !== "--json"), ...(end === -1 ? [] : argv.slice(end))] : argv;
+	const path = ["tasks", ...(VERBS.has(args[0] ?? "list") ? [args[0] ?? "list"] : [])];
 	try {
-		if (args.includes("--help") || args.includes("-h")) {
+		if (options.includes("--help") || options.includes("-h")) {
 			console.log(HELP);
 			return 0;
 		}
@@ -80,7 +100,8 @@ export function runTasksCommand(args: string[]): number {
 			}
 			if (title.join(" ").trim().length === 0) throw new TasksUsageError("tasks add requires the task text");
 			const task = store.add(title.join(" "), undefined, acceptanceFromTaskFlags(process.cwd(), expected, verify));
-			console.log(`logged operator task ${task.id}: ${task.title}`);
+			if (json) console.log(JSON.stringify(jsonDocument({ task })));
+			else console.log(`logged operator task ${task.id}: ${task.title}`);
 		} else if (action === "list") {
 			if (rest[0] !== undefined) throw unexpected(rest[0]);
 			console.log(JSON.stringify(store.snapshot(), null, 2));
@@ -89,7 +110,13 @@ export function runTasksCommand(args: string[]): number {
 			if (id === undefined) throw new TasksUsageError(`tasks ${action} requires a task id (uN)`);
 			if (id.startsWith("-")) throw unexpected(id);
 			if (extra !== undefined) throw unexpected(extra);
-			const task = store[action](id);
+			let task: ReturnType<(typeof store)[typeof action]>;
+			try {
+				task = store[action](id);
+			} catch (error) {
+				writeCliFailure({ path, slug: "not_found", message: error instanceof Error ? error.message : String(error), json });
+				return 1;
+			}
 			console.log(JSON.stringify(task, null, 2));
 			if (action === "hand") {
 				console.error(
@@ -99,14 +126,17 @@ export function runTasksCommand(args: string[]): number {
 				);
 			}
 		} else
-			throw new TasksUsageError(action.startsWith("-") ? `unknown flag: ${action}` : `unknown tasks command: ${action}`);
+			throw action.startsWith("-")
+				? new TasksUsageError(`unknown flag: ${action}`, "unknown_flag")
+				: new TasksUsageError(`unknown tasks command: ${action}`, "unknown_command");
 		return 0;
 	} catch (error) {
-		printError(error instanceof Error ? error.message : String(error));
+		const message = error instanceof Error ? error.message : String(error);
 		if (error instanceof TasksUsageError) {
-			process.stderr.write(USAGE);
+			writeCliFailure({ path, slug: error.slug, message, json });
 			return 2;
 		}
+		writeCliFailure({ path, slug: "io", message, json });
 		return 1;
 	}
 }
