@@ -241,7 +241,7 @@ function formatRewindConfirmRows(rawRecord: WorkspaceSnapshotRecord, rawPlan: Re
 			[
 				chip(theme, `snapshot #${record.n}`, "accent"),
 				chip(theme, `${dateLocal(record.at)} ${clockLocal(record.at)}`, "muted"),
-				chip(theme, `${record.reason}${record.tool !== undefined ? ` before ${record.tool}` : ""}`, "muted"),
+				chip(theme, snapshotWhat(record), "muted"),
 			],
 			contentWidth,
 		),
