@@ -136,7 +136,10 @@ test("spec stubs cover every command handler and the kit stays off the domain gr
 	for (const dir of ["src/cli/kit", "src/cli/specs"]) {
 		for (const file of readdirSync(join(root, dir)).filter((name) => name.endsWith(".ts"))) {
 			const source = readFileSync(join(root, dir, file), "utf8");
-			for (const [, specifier] of source.matchAll(/(?:from|import\()\s*"([^"]+)"/gu)) {
+			for (const [, fromSpecifier, bareSpecifier, dynamicSpecifier] of source.matchAll(
+				/^(?:import|export)\b[^;"]*?\bfrom\s*"([^"]+)"|^import\s*"([^"]+)"|import\(\s*"([^"]+)"/gmu,
+			)) {
+				const specifier = fromSpecifier ?? bareSpecifier ?? dynamicSpecifier;
 				ok(
 					specifier?.startsWith("node:") ||
 						specifier === "chalk" ||
