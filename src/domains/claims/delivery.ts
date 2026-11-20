@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { canonicalCheckout, checkoutHead } from "../../core/project-root.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { ToolNames } from "../../core/tool-names.js";
@@ -231,7 +232,7 @@ export function checksTouchingPath(
 ): string[] {
 	const absolute = isAbsolute(path) ? path : resolve(cwd, path);
 	const inside = relative(project, absolute);
-	const candidates = new Set([path, absolute, ...(inside.startsWith("..") || isAbsolute(inside) ? [] : [inside])]);
+	const candidates = new Set([path, absolute, ...(relativePathEscapes(inside) ? [] : [inside])]);
 	const touched = new Set<string>();
 	for (const claim of claims) {
 		const paths = checkPaths(claim).map((entry) =>
