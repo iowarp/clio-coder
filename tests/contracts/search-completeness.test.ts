@@ -418,9 +418,24 @@ test("ls selects a bounded alphabetic prefix in a wide directory without blockin
 	const timer = setInterval(() => ticks++, 1);
 	const start = performance.now();
 	try {
-		const result = ok(await lsTool.run({ path: root, limit: 3 }, { allowsObservationPath: () => true }));
+		let screened = 0;
+		const result = ok(
+			await lsTool.run(
+				{ path: root, limit: 3 },
+				{
+					allowsObservationPath: () => {
+						screened++;
+						return true;
+					},
+				},
+			),
+		);
 		assert.deepEqual(result.output.split("\n").slice(0, 3), expected);
-		assert.deepEqual(result.details?.selection, { scanned: 5003, retained: 3 });
+		// TL-2: only the shown names pay the path-policy check, and the total says it was not counted.
+		assert.deepEqual(result.details?.selection, { scanned: 5003, retained: 67, screened: 3 });
+		assert.equal(screened, 3);
+		assert.match(result.output, /5003 names in this directory; only the first 3 in order were checked/);
+		assert.match(result.output, /3\/3\+ entries shown/);
 		assert.equal(statCount, 3);
 		assert.ok(ticks >= Math.max(1, Math.floor((performance.now() - start) / 100)));
 	} finally {
