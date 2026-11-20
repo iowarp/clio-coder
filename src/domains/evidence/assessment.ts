@@ -12,6 +12,7 @@ import type { DecisionRecord } from "../session/entries.js";
 import { runSettledDigest } from "../telemetry/run-digest.js";
 import { attributeEvidenceFailure } from "./failure-attribution.js";
 import { compareGates, type GateReview, readGateReviews, reviewFinding } from "./run-trust.js";
+import { trustVerdict } from "./trust-projection.js";
 import {
 	adaptCompletionEvidence,
 	adaptGateDecisionReviewStatus,
@@ -117,10 +118,13 @@ export function assessRun(runId: string, input: AssessRunInput): RunAssessment |
 		data: {
 			version: 1,
 			attempt,
+			// The verdict every run surface reads its caveat from: a run whose validation failed reads failed on the
+			// dock and the card, so it is not a first-pass success here either (bt-48-9).
 			firstPassSuccess:
 				settled.outcome === "succeeded" &&
 				attempt === 0 &&
 				settled.stepPipeline?.done !== false &&
+				trustVerdict(trust) !== "compromised" &&
 				!findings.some((entry) => entry.tag === "no-validation"),
 			failureCause,
 			// Plain data for the journal: the canonical status hands out readonly artifact lists.

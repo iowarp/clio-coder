@@ -120,6 +120,54 @@ describe("evidence integrity boundary", () => {
 		match(labels, /refused_cause=approval_timeout:1 \(a call waited for approval and no one answered in time\)/u);
 	});
 
+	it("reads mutations:no when the only state change was refused and a shell call left the tree unmoved (FL-1)", () => {
+		const draft = fixtureReceiptDraft(fixtureEnvelope("refused-only-mutation"));
+		draft.toolStats = [
+			{ tool: "bash", count: 2, ok: 1, errors: 0, blocked: 1, totalDurationMs: 1 },
+			{ tool: "limitation", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 1 },
+		];
+		draft.toolActivity = { calls: 3, succeeded: 2, failed: 0, blocked: 1, mutatingSucceeded: true };
+		match(runEvidenceLabels(finishedRun(draft), PRODUCER_INTEGRITY).join(" "), /blocked:1 mutations:yes/u);
+		draft.checkoutChanges = { cwd: "/repo", changedPaths: [], attribution: "observed-delta" };
+		match(runEvidenceLabels(finishedRun(draft), PRODUCER_INTEGRITY).join(" "), /blocked:1 mutations:no/u);
+		draft.toolStats.push({ tool: "edit", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 1 });
+		match(runEvidenceLabels(finishedRun(draft), PRODUCER_INTEGRITY).join(" "), /mutations:yes/u);
+	});
+
+	it("does not call a run whose validation failed a first-pass success (FL-3, bt-48-9)", () => {
+		const draft = fixtureReceiptDraft(fixtureEnvelope("validation-failed-first-pass"));
+		draft.quality.resultContract = {
+			sourceId: `agent-result-contract:mutation-report:${"a".repeat(64)}`,
+			validatorDigest: "b".repeat(64),
+			conformance: "pass",
+			quality: "fail",
+		};
+		const settlement = settleFinishedRun(draft, {
+			terminal: { terminalReason: "completed" },
+			processExitCode: 0,
+			frameType: null,
+			usage: undefined,
+		});
+		const ctx = { sessionId: null, runId: draft.runId, agent: { role: "worker" as const, id: draft.runId } };
+		const assessed = assessRun(draft.runId, {
+			records: [
+				makeTelemetryRecord(
+					"run.settled",
+					{ ...settlement.facts, result: telemetryObjectRef("run-result", settlement.result) },
+					ctx,
+					{ t: draft.endedAt, mono: 1 },
+				),
+			],
+			context: { sessionId: null, cwd: "/repo", attempt: 0, decisionRefs: [], pipeline: null, personaOverride: null },
+			gateDecisions: [],
+			decisions: null,
+		});
+		ok(assessed);
+		strictEqual(settlement.facts.outcome, "succeeded");
+		strictEqual(assessed.data.trust.validationGrounding.state, "failed");
+		strictEqual(assessed.data.firstPassSuccess, false);
+	});
+
 	it("treats run ids as identities, never paths", async () => {
 		for (const id of ["../receipt", "nested/receipt", "/absolute"]) {
 			await rejects(inspectRunEvidence("/state", id), /invalid run id|path separators/);

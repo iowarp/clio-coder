@@ -168,7 +168,10 @@ export function blockedWriteAttempts(
 	return attempted > 0 && blocked === attempted ? attempted : null;
 }
 
-/** Calls of the execute or write class that policy refused before they ran. */
+/**
+ * Calls of the execute or write class that policy refused before they ran, when every such call was refused.
+ * Zero once one of them got past admission, ran or failed: the refusals then are not why the tree did not move.
+ */
 export function blockedStateChangingCalls(
 	stats: ReadonlyMap<string, ToolCallStat>,
 	classify: (tool: string) => ActionClass,
@@ -176,7 +179,9 @@ export function blockedStateChangingCalls(
 	let blocked = 0;
 	for (const stat of stats.values()) {
 		const actionClass = classify(stat.tool);
-		if (actionClass === "write" || actionClass === "execute") blocked += stat.blocked;
+		if (actionClass !== "write" && actionClass !== "execute") continue;
+		if (stat.count > stat.blocked) return 0;
+		blocked += stat.blocked;
 	}
 	return blocked;
 }
@@ -184,6 +189,9 @@ export function blockedStateChangingCalls(
 /** A report that opens by saying the worker could not do something. */
 const INABILITY_OPENING =
 	/^(?:i\s+)?(?:cannot|can't|could not|couldn't|was unable to|am unable to|unable to|blocked\b)/iu;
+/** A report that opens by saying the assignment needed no change, the finish an unrefused edit worker may give. */
+const NO_CHANGE_NEEDED_OPENING =
+	/^(?:no\s+(?:code\s+|source\s+)?(?:changes?|edits?|fix(?:es)?|modifications?)\s+(?:(?:is|are|was|were)\s+)?(?:needed|required|necessary)|nothing\s+(?:needed\s+to\s+(?:change|be\s+changed)|needs\s+(?:to\s+)?(?:change|changing|fixing)|to\s+(?:change|fix))|already\s+(?:implemented|done|fixed|correct|present|in\s+place|handled|satisfied))\b/iu;
 /** A report that opens by saying the work is only partly done. */
 const PARTIAL_OPENING =
 	/^(?:(?:only\s+)?partial(?:ly)?\b|incomplete\b|(?:i\s+)?(?:did not|didn't|have not|haven't)\s+(?:finish|complete)|not\s+(?:all|everything|finished|complete)\b)/iu;
@@ -278,8 +286,9 @@ export function workerNoWorkDetail(input: {
 	if (input.toolLaneObserved !== false && input.activity.calls === 0) {
 		return "worker executed no tools, so it did none of its assignment";
 	}
+	// A worker that found nothing to change says so; one incidental refusal on the way does not undo that finish.
 	const refused = input.blockedStateChanging ?? 0;
-	if (unchanged && refused > 0 && !input.activity.mutatingSucceeded) {
+	if (unchanged && refused > 0 && !input.activity.mutatingSucceeded && !NO_CHANGE_NEEDED_OPENING.test(opening)) {
 		return `the worker's ${refused === 1 ? "state-changing call was" : `${refused} state-changing calls were`} refused by policy and nothing changed, so the assignment was not done`;
 	}
 	return null;
