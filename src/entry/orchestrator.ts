@@ -144,13 +144,13 @@ import { createHistoryReviewActivity, projectTaskMemoryActivity } from "../domai
 import { type CapabilityMatch, createCapabilityGate } from "../domains/middleware/capability-gate.js";
 import {
 	createDetachedDispatchNudgeRegistration,
-	createReadOnlyExplorationNudgeRegistration,
 	createUnbackedWorkerClaimRegistration,
 	finishedDetachedBatchIds,
 	openDetachedBatchViews,
 } from "../domains/middleware/dispatch-nudge.js";
 import { createGuidanceRegistration } from "../domains/middleware/guidance.js";
 import {
+	createExplorationNudgeRegistrations,
 	createMarketplaceOfferRegistration,
 	createMiddlewareDomain,
 	createMiddlewareToolChoiceControl,
@@ -2572,9 +2572,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// precedes the finish-contract advisory in effect order.
 	middlewareRegistrar.registerHook(createToolProseRegistration());
 	middlewareRegistrar.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
-	middlewareRegistrar.registerHook(
-		createReadOnlyExplorationNudgeRegistration({ workspaceRoot: memoryWorkspaceRoot }).registration,
-	);
+	for (const registration of createExplorationNudgeRegistrations({ workspaceRoot: memoryWorkspaceRoot }))
+		middlewareRegistrar.registerHook(registration);
 	middlewareRegistrar.registerHook(createUnbackedWorkerClaimRegistration());
 	middlewareRegistrar.registerHook(
 		createDetachedDispatchNudgeRegistration({ getOpenBatches: () => openDetachedBatchViews(dispatch) }),
