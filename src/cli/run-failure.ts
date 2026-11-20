@@ -18,6 +18,7 @@ import type {
 import {
 	RUN_RESULT_SCHEMA_VERSION,
 	type RunCauseCode,
+	type RunCompletionV2,
 	type RunDispatchedRunV2,
 	type RunExitFact,
 	type RunLimitsV2,
@@ -123,8 +124,10 @@ export function startRunOutput(): void {
 export async function withRunFailureReporting(
 	run: () => Promise<number>,
 	output?: OutputLastMessageRequest,
+	exitCodeFlag = false,
 ): Promise<number> {
-	return output === undefined ? run() : withOutputLastMessage(output, run);
+	runCompletion = undefined;
+	return output === undefined ? run() : withOutputLastMessage(output, run, exitCodeFlag);
 }
 
 /** The answer text mode printed on stdout, the validated structured JSON when there is one; `-o` holds it (CLI-P22). */
@@ -139,21 +142,28 @@ export function noteTextAnswer(text: string): void {
  * SPEC 6.6 `-o` in text mode: the stale file goes at preflight, a missing directory is exit 2 before the run, and the
  * answer, what text mode printed, is written by temp file and rename only on exit 0; a failed write is exit 1.
  */
-async function withOutputLastMessage(output: OutputLastMessageRequest, run: () => Promise<number>): Promise<number> {
+async function withOutputLastMessage(
+	output: OutputLastMessageRequest,
+	run: () => Promise<number>,
+	exitCodeFlag: boolean,
+): Promise<number> {
 	const resolved = resolveOutputTarget(output);
 	if (!prepareOutputTarget(resolved)) return 2;
 	structuredNote = undefined;
 	textAnswer = undefined;
 	const answer = (): string => textAnswer ?? "";
 	// CLI-P22: a coordinated shutdown ends a successful run with process.exit before run() returns, as under v2; the
-	// file is still written then, synchronously, and a failed write still moves the exit code to 1.
+	// file is still written then, synchronously, and a failed write still moves the exit code to 1. `--exit-code` decides
+	// success on that path too: an unfinished completion leaves no file and exits 1.
 	let settled = false;
 	const settle = (code: number): boolean => {
 		if (settled || code !== 0) return true;
 		settled = true;
 		return writeOutputFile(resolved, `${answer()}\n`);
 	};
-	const onExit = (exitCode: number): void => {
+	const onExit = (rawExitCode: number): void => {
+		const exitCode = completionExitCode(rawExitCode, exitCodeFlag);
+		if (exitCode !== rawExitCode) process.exitCode = exitCode;
 		if (settle(exitCode)) return;
 		process.stderr.write(`clio-coder run: --output-last-message could not be written: ${resolved}\n`);
 		process.exitCode = 1;
@@ -275,6 +285,27 @@ export function noteRunPlan(plan: object): void {
 }
 
 /**
+ * The settled main run's completion (fleet design 4.3): the state the agent declared through `finish`, or `unknown`
+ * with `declared: false` when it declared none. Absent until a main run settles.
+ */
+let runCompletion: RunCompletionV2 | undefined;
+
+/** The settled main run hands over its completion; the envelope carries it and `--exit-code` reads it. */
+export function noteRunCompletion(completion: RunCompletionV2): void {
+	runCompletion = completion;
+}
+
+/**
+ * `run --exit-code` (SPEC C19, ruling 7): a run that ended 0 whose completion state (the host's assessment) is
+ * `partly_done` or `not_done` exits 1; `done` and an undeclared run keep 0. Every other exit is unchanged, and without
+ * the flag the exit is the run's own.
+ */
+export function completionExitCode(code: number, exitCodeFlag: boolean): number {
+	const unfinished = runCompletion?.state === "partly_done" || runCompletion?.state === "not_done";
+	return exitCodeFlag && code === 0 && unfinished ? 1 : code;
+}
+
+/**
  * SPEC 6.9 `limits`: what was requested and what is enforced. Every accepted limit is enforced, because one
  * this build cannot enforce is refused at preflight. Undefined when no limit was given.
  */
@@ -338,6 +369,8 @@ export interface RunResultV2Request {
 	timeoutSeconds?: number;
 	/** The limits the run was given (SPEC 6.9); the envelope carries them as `limits` when any is set. */
 	limits?: RunLimitsV2["requested"];
+	/** `--exit-code` (SPEC C19): a declared completion `partly_done` or `not_done` exits 1. */
+	exitCode?: true;
 }
 
 /** What the v1 frames told the v2 writer; the run itself still speaks v1 underneath. */
@@ -549,6 +582,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	supersededRuns = [];
 	structuredNote = undefined;
 	runPlan = undefined;
+	runCompletion = undefined;
 	let written = false;
 	let outputTarget: string | undefined;
 	const envelopeLines = (code: number, extra: RunExitFact[] = []): { lines: string; exitCode: number } => {
@@ -564,6 +598,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			...(seen.firstTokenMs !== undefined ? { firstTokenMs: seen.firstTokenMs } : {}),
 		};
 		const limits = runLimitsV2(request.limits, usage, mainRunNote.unpricedRoutes);
+		const exitCode = completionExitCode(resolution.exitCode, request.exitCode === true);
 		const envelope: RunResultEnvelopeV2 = {
 			type: "run_end",
 			schemaVersion: RUN_RESULT_SCHEMA_VERSION,
@@ -580,10 +615,11 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			startedAt,
 			endedAt: new Date().toISOString(),
 			durationMs: Date.now() - started,
-			exitCode: resolution.exitCode,
+			exitCode,
 			outcome: previewed ? "previewed" : resolution.outcome,
 			...(resolution.causes[0] !== undefined ? { outcomeDetail: resolution.causes[0].code } : {}),
 			causes: resolution.causes,
+			...(runCompletion !== undefined ? { completion: runCompletion } : {}),
 			result: {
 				text: seen.text,
 				artifacts: [],
@@ -623,7 +659,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 						cwd: process.cwd(),
 					})
 				: "";
-		return { lines: pending + (heldSteer ?? []).join("") + serializeJsonLine(envelope), exitCode: resolution.exitCode };
+		return { lines: pending + (heldSteer ?? []).join("") + serializeJsonLine(envelope), exitCode };
 	};
 	// `-o` is written once, by temp file and rename, only for a run that ends exit 0; any other end leaves no file.
 	let outputSettled = false;
@@ -636,17 +672,19 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			: [{ code: "output_write_failed", path: outputTarget }];
 	};
 	// A coordinated shutdown calls process.exit, which cannot await a flush or reach finish(): a successful run that
-	// ends that way still writes `-o` here, and a failed write still moves the exit code to the envelope's.
+	// ends that way still writes `-o` here. `--exit-code` decides success on this path too, and the process exits
+	// with the envelope's code whenever that differs (an unfinished completion, or a failed write).
 	const onExit = (exitCode: number): void => {
-		const extra = writeOutputTarget(exitCode);
+		const extra = writeOutputTarget(completionExitCode(exitCode, request.exitCode === true));
 		const out = envelopeLines(exitCode, extra);
-		if (extra.length > 0) process.exitCode = out.exitCode;
+		if (out.exitCode !== exitCode) process.exitCode = out.exitCode;
 		if (written || isStdoutDead()) return;
 		written = true;
 		writeSync(1, out.lines);
 	};
 	const finish = async (code: number): Promise<number> => {
-		const extra = writeOutputTarget(code);
+		// `-o` is written only on success, and `--exit-code` decides success, so the mapping comes first.
+		const extra = writeOutputTarget(completionExitCode(code, request.exitCode === true));
 		const out = envelopeLines(code, extra);
 		if (!written && !isStdoutDead()) {
 			written = true;

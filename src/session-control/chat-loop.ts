@@ -30,6 +30,7 @@ import type { TelemetrySessionLease } from "../domains/telemetry/session-journal
 import type { TurnControlRecord } from "../domains/turn-control/index.js";
 import type { TurnFailureRecord } from "../domains/turn-control/outcome.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
+import type { SealedCompletion } from "../tools/finish.js";
 import type {
 	MachineTurnProjectionAdmission,
 	MachineTurnProjectionHost,
@@ -748,6 +749,8 @@ export interface ChatLoop {
 	getSessionId(): string | null;
 	captureWorkerContext?(): WorkerContextSnapshot | null;
 	lastRunSnapshot?(): ChatLoopRunSnapshot | null;
+	/** How the last turn ended as the host sealed it (fleet design 4.3); null before a turn ends. */
+	lastTurnCompletion?(): SealedCompletion | null;
 	/** How the last step pipeline ended, or null when the last prompt ran none (bt-15). */
 	stepPipeline?(): StepPipelineEnd | null;
 	isStreaming(): boolean;
@@ -3496,6 +3499,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.turnCallsDone = [];
 				state.turnSharedWorkerNote = isWorkerShareNote(text);
 				state.turnCollectedDetachedBatch = false;
+				state.turnCompletion = null;
+				state.turnSealedCompletion = null;
+				if (options.requestContinuation !== true) {
+					state.turnCalledWork = false;
+					state.finishRoundSpent = false;
+				}
 				state.continuation.beginPrompt({
 					requestContinuation: options.requestContinuation === true,
 					yoloContinuation: options.yoloContinuation === true,
@@ -4599,6 +4608,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		lastRunSnapshot(): ChatLoopRunSnapshot | null {
 			return state.lastRunSnapshot ? structuredClone(state.lastRunSnapshot) : null;
+		},
+		lastTurnCompletion(): SealedCompletion | null {
+			return state.turnSealedCompletion ? structuredClone(state.turnSealedCompletion) : null;
 		},
 		stepPipeline(): StepPipelineEnd | null {
 			return lastStepPipeline === null ? null : { ...lastStepPipeline };

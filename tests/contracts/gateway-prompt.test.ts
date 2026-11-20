@@ -52,7 +52,15 @@ describe("gateway in the session prompt", () => {
 			strictEqual(registry.get(ToolNames.Ledger)?.metadata?.startupPrompt, false);
 			const tools = resolveAgentTools({ registry });
 			const names = tools.map((tool) => tool.name as ToolName).sort();
-			for (const present of [ToolNames.Gateway, ToolNames.Read, ToolNames.Write, ToolNames.Edit, ToolNames.Dispatch]) {
+			for (const present of [
+				ToolNames.Gateway,
+				ToolNames.Read,
+				ToolNames.Write,
+				ToolNames.Edit,
+				ToolNames.Grep,
+				ToolNames.CodeNav,
+				ToolNames.Dispatch,
+			]) {
 				ok(names.includes(present), `${present} is attached`);
 			}
 			for (const absent of [
@@ -123,7 +131,8 @@ describe("gateway in the session prompt", () => {
 			console.log(
 				`attached schema bytes: total ${total}\n${sizes.map((entry) => `  ${entry.name}: ${entry.bytes}`).join("\n")}`,
 			);
-			ok(total <= 9_829, `seven attached tools must stay within 9,829 bytes, down from ${ATTACHED_BUDGET_BYTES}`);
+			// 13,024 (fleet DESIGN open question 10): grep and code_nav (row 145) and dispatch's job table, plus the 648-byte finish declaration.
+			ok(total <= 13_024, `ten attached tools must stay within 13,024 bytes, down from ${ATTACHED_BUDGET_BYTES}`);
 			const gateway = sizes.find((entry) => entry.name === ToolNames.Gateway);
 			ok(gateway !== undefined && gateway.bytes < 2_048, `the gateway schema stays small: ${gateway?.bytes}`);
 			doesNotMatch(

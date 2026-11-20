@@ -458,9 +458,10 @@ function gitSummary(stats: WelcomeDashboardStats): string {
 function autonomySummary(stats: WelcomeDashboardStats): string {
 	if (stats.autonomy !== "yolo") {
 		// With no OS sandbox, shell calls keep their approval rails, so only edits are automatic (bt-11 #6).
-		return stats.shellContained === false
-			? `Default ${GLYPH.dot} auto edits ${GLYPH.dot} no OS sandbox`
-			: `Default ${GLYPH.dot} auto in workspace`;
+		if (stats.shellContained === false) return `Default ${GLYPH.dot} auto edits ${GLYPH.dot} no OS sandbox`;
+		// Before the cached probe answers, claim only the edits; the shell's containment is not known yet.
+		if (stats.shellContained !== true) return `Default ${GLYPH.dot} auto edits`;
+		return `Default ${GLYPH.dot} auto in workspace`;
 	}
 	return stats.yoloConfinement === "unconfined"
 		? `YOLO ${GLYPH.dot} UNCONFINED ${GLYPH.dot} never asks`

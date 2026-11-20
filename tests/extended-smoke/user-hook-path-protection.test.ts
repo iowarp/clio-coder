@@ -81,9 +81,10 @@ test("trusted user hooks protect paths before mutations and after observations i
 		);
 		match(result.stdout, /PROTECTION_CHECK_COMPLETE/u);
 		// A successful headless run then retains lessons through a tool-less request
-		// (b1385e91a), so the agent loop's turns are the requests that carry tools.
+		// (b1385e91a), so the agent loop's turns are the requests that carry tools. The last is the round an
+		// unattended run that ended undeclared spends pinned to finish (fleet design 4.3).
 		const turns = fixture.requests.filter((request) => request.stream !== false && Array.isArray(request.tools));
-		strictEqual(turns.length, 5);
+		strictEqual(turns.length, 6);
 		strictEqual(readFileSync("before.txt", "utf8"), "original before");
 		strictEqual(readFileSync("after.txt", "utf8"), "original after");
 		strictEqual(readFileSync("ordinary.txt", "utf8"), "allowed write");

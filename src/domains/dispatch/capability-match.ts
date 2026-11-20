@@ -31,23 +31,14 @@
  * and the dispatch summary line.
  */
 
+import { type DispatchJob, dispatchJobRecipe, dispatchJobWrites } from "../agents/dispatch-jobs.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import type { AgentCapabilityClass, AgentSpec } from "../agents/spec.js";
-import { type AgentTaskType, classifyAgentTask } from "./agent-candidates.js";
+import { type AgentTaskType, asksForMutation, classifyAgentTask } from "./agent-candidates.js";
 import type { DispatchIntent } from "./intent.js";
 
 /** Capability classes that cannot change the workspace, whatever the task says. */
 const READ_ONLY_CAPABILITY_CLASSES: ReadonlySet<AgentCapabilityClass> = new Set(["read-only", "verification"]);
-
-/** Task shapes whose completion requires writing something. */
-const MUTATING_TASK_TYPES: ReadonlySet<AgentTaskType> = new Set([
-	"code_write",
-	"debug",
-	"refactor",
-	"config",
-	"test",
-	"docs",
-]);
 
 /**
  * Read-shaped corroboration independent of the classifier's ordered scan.
@@ -68,28 +59,6 @@ const READ_SHAPED_PATTERNS: ReadonlyArray<RegExp> = [
 const VERIFICATION_REQUEST =
 	/\b(?:check|verify|validate|confirm|report|ensure|make sure|see (?:if|whether))\b|\b(?:re-?run|run|execute)\b[^.;\n]{0,60}\b(?:tests?|suites?|specs?|lint(?:er)?|type-?check|checks?|gates?|builds?|ci)\b|\btest (?:the|that|whether|if)\b|\btests? (?:pass|fail|succeed|still pass)/i;
 /**
- * A mutation asked for rather than mentioned. The verb has to open a clause, so
- * "do not edit files" and "verify the fix" stay reports while "run the tests
- * and fix any failures" stays a change. Writing up the report itself is not a
- * mutation unless it names somewhere on disk to put it.
- */
-const IMPERATIVE_MUTATION =
-	/(?:^|[.;:!?,\n]\s*|\b(?:and|then|also|please|must|should|need to|needs to)\s+)(?:implement|add|create|build(?=\s+(?:a|an|the\s+(?:new|missing))\b)|develop|fix|edit|change|modify|refactor|update|write(?!\s+(?:up\s+)?(?:(?:a|an|the|your)\s+)?(?:\w+\s+)?(?:report|summary)\b(?!\s+(?:to|into|in|on)\b)))\b/i;
-
-/**
- * A mutation verb whose object is nothing is a prohibition. "Change nothing."
- * opens a clause with "change", so it is removed before the imperative check;
- * "fix it and change nothing else" still mutates through "fix". A sentence that
- * carries an exception ("change nothing in x.ts except the limit") is kept.
- */
-const MUTATION_PROHIBITION =
-	/(?:\b(?:change|edit|modify|touch|write|alter|update)\s+(?:nothing|no\s+(?:files?|code|sources?)|none\s+of\s+(?:it|them|the\s+\w+))\b(?:\s+else\b)?|\bleave\s+(?:(?!\b(?:and|then|but|except|also|unchanged|untouched|as[\s-]is|alone|intact)\b)[^.;,\n]){0,60}?\b(?:unchanged|untouched|as[\s-]is|alone|intact)\b)(?=(?:(?!\b(?:except|but|other\s+than|besides|apart\s+from|aside\s+from|save\s+for|beyond|unless)\b|[.!?](?:\s|$))[^;\n])*(?:[.!?](?:\s|$)|[;\n]|$))/gi;
-
-function asksForMutation(task: string): boolean {
-	return IMPERATIVE_MUTATION.test(task.replace(MUTATION_PROHIBITION, " "));
-}
-
-/**
  * Contracts whose postcondition is a report. A recipe that declares one has
  * said in its own frontmatter that its terminal result is an account of the
  * workspace rather than a change to it, which is the corroboration a refusal
@@ -100,22 +69,13 @@ function asksForMutation(task: string): boolean {
 const REPORTING_CONTRACT_KINDS: ReadonlySet<ResultContract["kind"]> = new Set([
 	"scout-report",
 	"verifier-report",
+	"review-verdict",
 	"research-report",
 	"world-knowledge-report",
 	"provenance-report",
 	"debugger-report",
 	"oracle-report",
 ]);
-
-/** Preferred mutating specialist per task shape, best first. */
-const MUTATING_SPECIALISTS: Readonly<Partial<Record<AgentTaskType, ReadonlyArray<string>>>> = {
-	code_write: ["coder"],
-	debug: ["debugger", "coder"],
-	refactor: ["coder"],
-	config: ["coder"],
-	test: ["tester", "coder"],
-	docs: ["documenter", "coder"],
-};
 
 export interface CapabilityMismatch {
 	/** `refuse` fails admission; `flag` admits the run and rides the receipt. */
@@ -149,14 +109,15 @@ export interface CapabilityMismatchInput {
 	intent?: Pick<DispatchIntent, "writeRoots" | "expectedOutputs"> | null;
 }
 
-function suggestedSpecialist(taskType: AgentTaskType, specs: ReadonlyArray<AgentSpec>): string | null {
+/** The job table's recipe for a writing job, else its implement recipe, when installed and able to write. */
+function suggestedSpecialist(job: DispatchJob, specs: ReadonlyArray<AgentSpec>): string | null {
 	const canMutate = new Set(
 		specs.filter((spec) => !READ_ONLY_CAPABILITY_CLASSES.has(spec.capabilityClass)).map((spec) => spec.id),
 	);
-	for (const id of MUTATING_SPECIALISTS[taskType] ?? []) {
+	for (const id of [dispatchJobRecipe(job), dispatchJobRecipe("implement")]) {
 		if (canMutate.has(id)) return id;
 	}
-	return canMutate.has("coder") ? "coder" : null;
+	return null;
 }
 
 /**
@@ -174,11 +135,11 @@ export function assessCapabilityMismatch(input: CapabilityMismatchInput): Capabi
 	) {
 		return null;
 	}
-	if (!MUTATING_TASK_TYPES.has(features.taskType)) return null;
+	if (!dispatchJobWrites(features.job)) return null;
 	const readShaped = READ_SHAPED_PATTERNS.some((pattern) => pattern.test(input.task));
 	const reportingContract = input.resultContractKind !== null && REPORTING_CONTRACT_KINDS.has(input.resultContractKind);
 	const confident = !readShaped && !input.autoSelected && reportingContract;
-	const suggestedAgentId = suggestedSpecialist(features.taskType, input.specs);
+	const suggestedAgentId = suggestedSpecialist(features.job, input.specs);
 	const remedy =
 		suggestedAgentId === null
 			? "No installed recipe can change the workspace, so this task cannot be delegated as written."

@@ -7,7 +7,7 @@
  *   OBSERVE      evidence, read, grep, find, ls, count, code_nav, context, credential_present, clio_docs, clio_library, data, vision, memory_recall
  *   MUTATE       write, edit
  *   EXECUTE      bash, git, verify, run_script
- *   ORCHESTRATE  dispatch, monitor, steer, tasks, ledger, panes, music, limitation, decide, consult
+ *   ORCHESTRATE  dispatch, monitor, steer, tasks, ledger, panes, music, limitation, finish, decide, consult
  *   RETRIEVE     web_read, web_fetch
  *   INTERACT     ask_user, configure_clio, restart_session, report
  *   ARTIFACT     artifact
@@ -52,6 +52,7 @@ export const ToolNames = {
 	Panes: "panes",
 	Music: "music",
 	Limitation: "limitation",
+	Finish: "finish",
 	Decide: "decide",
 	Consult: "consult",
 	Vision: "vision",

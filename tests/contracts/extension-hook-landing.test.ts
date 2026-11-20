@@ -274,12 +274,12 @@ test("a review dispatch's landing names the reviewer the loop starts, not only t
 		landing.tasks.map((task) => [task.role, task.agent]),
 		[
 			["builder", "coder"],
-			["reviewer", "verifier"],
+			["reviewer", "reviewer"],
 		],
 	);
 	deepStrictEqual(landing.tasks[1], {
 		role: "reviewer",
-		agent: "verifier",
+		agent: "reviewer",
 		cwd: workspace,
 		writeRoots: [],
 		writeBoundaries: [],

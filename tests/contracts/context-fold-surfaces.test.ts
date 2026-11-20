@@ -154,7 +154,12 @@ describe("surface capture", () => {
 					.trim()
 					.split("\n")
 					.map((entry) => JSON.parse(entry) as Context);
-				strictEqual(server.requests.length, 3, "two read rounds and the answer reached the server");
+				// An unattended run that did work and ended undeclared spends one more request, pinned to finish (fleet design 4.3).
+				strictEqual(
+					server.requests.length,
+					surface === "headless run" ? 4 : 3,
+					"two read rounds, the answer and, headless, the pinned finish round reached the server",
+				);
 				const results = wireElements(server.requests.at(-1) as CapturedRequest).filter((element) =>
 					element.startsWith("result:"),
 				);

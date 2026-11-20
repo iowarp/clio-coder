@@ -20,6 +20,13 @@ export type ResultContract =
 	| { kind: "architect-plan"; path: string }
 	| { kind: "scout-report" }
 	| { kind: "verifier-report"; assurance?: HoareAssurance }
+	/**
+	 * A reviewer's verdict on one subject: the review gate's own shape,
+	 * `{verdict, checks}`, declared by the builtin `reviewer` so a direct review
+	 * run is validated against the answer the gate asks for. No assurance level:
+	 * a review judges a subject, it does not mechanize proofs.
+	 */
+	| { kind: "review-verdict" }
 	| { kind: "council-report" }
 	/**
 	 * One council member's ballot under `synthesis: "vote"`.
@@ -216,7 +223,8 @@ export function resultContractResponseSchema(contract: ResultContract): Record<s
 	});
 	switch (contract.kind) {
 		case "verifier-report":
-			if (contract.assurance !== undefined) return null;
+		case "review-verdict":
+			if (contract.kind === "verifier-report" && contract.assurance !== undefined) return null;
 			return object({
 				verdict: { type: "string", enum: ["pass", "fail"] },
 				checks: { type: "array", items: object({ name: text, passed: { type: "boolean" }, evidence: text }) },
@@ -1339,6 +1347,8 @@ function validateVerifier(
 			`Verifier result field${unknown.length === 1 ? "" : "s"} ${unknown.join(", ")} ${unknown.length === 1 ? "is" : "are"} not legal; legal top-level fields are verdict, checks and optional assurance`,
 		);
 	}
+	if (contract.kind === "review-verdict" && value.assurance !== undefined)
+		return failure(contract, "fail", "Review verdict fields are verdict and checks; assurance is not legal");
 	const requiredAssurance = contract.kind === "verifier-report" ? contract.assurance : undefined;
 	if (
 		(requiredAssurance !== undefined && value.assurance !== requiredAssurance) ||
@@ -2148,6 +2158,10 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 			if (input.outputTruncated)
 				return failure(input.contract, "fail", "Verifier report was truncated; shorten the report");
 			return validateVerifier(input.contract, input.output, true, input.observedRunEffects?.proofs);
+		case "review-verdict":
+			if (input.outputTruncated)
+				return failure(input.contract, "fail", "Review verdict was truncated; shorten the report");
+			return validateVerifier(input.contract, input.output);
 		case "council-report": {
 			const report = parseCouncilReport(input.output);
 			return report === null
@@ -2270,6 +2284,8 @@ export function resultContractShape(contract: ResultContract): string {
 			if (contract.assurance !== undefined)
 				return `{"verdict":"fail","assurance":"${contract.assurance}","checks":[{"name":"f.post","passed":false,"evidence":"specification source and argument, trace or missing proof evidence","obligation":{"target":"src/file.c:f","kind":"post","pre":"input contract","post":"output contract","formula":"verification condition","status":"unknown"}}]}. Every check requires an obligation; optional fields are invariant, hazard and check (an exact declared proof check ID). Statuses: mechanized, modeled, argued, assumed, refuted, unknown. Assurance is fixed at ${contract.assurance}. Assumed, refuted and unknown never pass. Machine claims require this run's matching native verify proof evidence on unchanged inputs; missing evidence must be unknown with passed=false, never an invented execution.`;
 			return 'one of {"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]} or {"verdict":"fail","checks":[{"name":"npm run typecheck","passed":false,"evidence":"exit 1"}]}; verdict legal values are pass | fail and checks[].passed legal values are true | false';
+		case "review-verdict":
+			return 'one of {"verdict":"pass","checks":[{"name":"...","passed":true,"evidence":"what you inspected and observed"}]} or {"verdict":"fail","checks":[{"name":"...","passed":false,"evidence":"what you inspected and observed"}]}; the verdict must agree with every check';
 		case "council-report":
 			return '{"members":[{"label":"alpha","runId":"run-1","round":1,"answer":"..."}],"synthesis":{"kind":"none"}}';
 		case "council-ballot":
@@ -2323,6 +2339,8 @@ function resultContractReminderForm(contract: ResultContract): string | null {
 			return contract.assurance === undefined
 				? '{"verdict":"pass|fail","checks":[{"name":"...","passed":true,"evidence":"..."}]}'
 				: `{"verdict":"pass|fail","assurance":"${contract.assurance}","checks":[{"name":"...","passed":false,"evidence":"...","obligation":{...}}]}`;
+		case "review-verdict":
+			return '{"verdict":"pass|fail","checks":[{"name":"...","passed":true,"evidence":"..."}]}';
 		case "debugger-report":
 			return '{"diagnosis":"...","reproduction":"reproduced|not-reproduced|unknown","evidence":["..."]}';
 		case "research-report":
@@ -2475,6 +2493,7 @@ export function resultContractRepairMessages(
 const RECIPE_DECLARABLE_KINDS = [
 	"scout-report",
 	"verifier-report",
+	"review-verdict",
 	"council-report",
 	"debugger-report",
 	"research-report",

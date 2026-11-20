@@ -207,6 +207,8 @@ function baseClassify(tool: string): ActionClass | null {
 		// limitation appends a typed receipt to the session ledger and touches
 		// nothing else, so it is never gated behind a confirmation.
 		case ToolNames.Limitation:
+		// finish declares how the turn ended; the ledger pair is its whole effect.
+		case ToolNames.Finish:
 		// decide appends the model's own design decision to the session
 		// decision board. One ledger append, no workspace effect, never gated.
 		case ToolNames.Decide:

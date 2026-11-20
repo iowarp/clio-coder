@@ -561,7 +561,7 @@ async function fallbackGrep(input: FallbackSearchInput): Promise<ToolResult> {
 
 export const grepTool: ToolSpec = {
 	name: ToolNames.Grep,
-	description: `Search file contents with ripgrep. mode=content (default) returns matching lines with paths and line numbers, files returns matching paths, count returns per-file counts. Respects .gitignore and skips generated dirs unless include_ignored=true. Without rg, the fallback skips generated dirs but does not apply .gitignore; unreadable, binary, over-20MB files and symlinks are reported as skipped. Capped at ${DEFAULT_LIMIT} matches by default; a truncated result says how to continue.`,
+	description: `Search file contents with ripgrep. mode=content (default): matching lines with path and line number; files: matching paths; count: per-file counts. Respects .gitignore and skips generated dirs unless include_ignored=true (the no-rg fallback skips generated dirs only). Unreadable, binary, over-20MB files and symlinks are reported skipped. ${DEFAULT_LIMIT} matches by default; a truncated result says how to continue.`,
 	parameters: Type.Object({
 		pattern: Type.String({ description: "Regex unless literal is true." }),
 		path: Type.Optional(Type.String({ description: "Directory or file." })),

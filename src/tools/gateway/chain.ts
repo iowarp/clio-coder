@@ -155,6 +155,8 @@ function parseSteps(value: unknown): Step[] {
 		if (entry.capability.trim() === ToolNames.Gateway) throw new Error("nested gateways are not chain steps");
 		if (entry.capability.trim() === ToolNames.SelfCompact)
 			throw new Error("self_compact must be called alone with gateway op=call");
+		if (entry.capability.trim() === ToolNames.Finish)
+			throw new Error("finish ends the turn; call it alone, not in a chain");
 		return {
 			id: entry.id as string | undefined,
 			capability: entry.capability.trim(),

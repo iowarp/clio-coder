@@ -4,6 +4,7 @@ import { delimiter, isAbsolute, relative, resolve, sep } from "node:path";
 import { scrubbedCommandEnv } from "../core/bash-exec.js";
 import type { JobCondition, JobPredicate, JobRunner } from "../core/job-types.js";
 import { runCommandVector } from "../core/safe-exec.js";
+import type { MainSandboxPolicy } from "../core/sandbox/main-session.js";
 import type { SandboxEnvPolicy } from "../core/sandbox/types.js";
 import { shellQuote } from "../core/shell-quote.js";
 import { ToolNames } from "../core/tool-names.js";
@@ -126,8 +127,9 @@ export function attestJobCommand(runner: Extract<JobRunner, { kind: "command" }>
 
 /**
  * Shell-shaped policy text only. Execution always uses the exact argv vector,
- * outside any sandbox, so the projection says `unsandboxed` and a
- * `safety.sandbox: required` yolo session refuses it (R1-safety-secrets-10).
+ * outside any sandbox unless admission ran it contained, so the projection
+ * says `unsandboxed` and a `safety.sandbox: required` yolo session refuses it
+ * uncontained (R1-safety-secrets-10).
  */
 export function jobCommandEffect(runner: JobRunner, cwd: string): readonly HostEffectCall[] {
 	if (runner.kind !== "command") return [];
@@ -173,6 +175,7 @@ async function pollCommand(
 	context: JobExecutionContext,
 	autonomy: AutonomyLevel | undefined,
 	envPolicy: SandboxEnvPolicy,
+	shellSandbox: MainSandboxPolicy | undefined,
 ): Promise<CommandPoll> {
 	const result = await runCommandVector(argv[0] as string, argv.slice(1), {
 		cwd: context.job.owner.cwd,
@@ -182,6 +185,8 @@ async function pollCommand(
 		env: jobCommandEnv(autonomy),
 		maxOutputBytes: JOB_COMMAND_CAPTURE_BYTES,
 		signal: context.signal,
+		// Admission ran the command contained when only its sandboxed bash form is admitted (XR-12).
+		...(shellSandbox === undefined ? {} : { shellSandbox }),
 	});
 	let json: unknown = null;
 	let jsonComplete = false;
@@ -231,6 +236,7 @@ export async function executeJobCommand(
 	context: JobExecutionContext,
 	autonomy?: AutonomyLevel,
 	envPolicy: SandboxEnvPolicy = { passEnv: [], secretNames: [] },
+	shellSandbox?: MainSandboxPolicy,
 ): Promise<JobRunResult> {
 	const runner = context.job.spec.runner;
 	if (runner.kind !== "command") throw new Error("Command job runner received a main occurrence.");
@@ -238,7 +244,7 @@ export async function executeJobCommand(
 	if (!context.start()) return { outcome: "deferred", summary: "Job execution is no longer admitted." };
 	const also = runner.also;
 	if (also === undefined) {
-		const poll = await pollCommand(runner.argv, context, autonomy, envPolicy);
+		const poll = await pollCommand(runner.argv, context, autonomy, envPolicy, shellSandbox);
 		return {
 			outcome: poll.failed ? "failed" : "succeeded",
 			summary: JSON.stringify(poll.report),
@@ -256,7 +262,10 @@ export async function executeJobCommand(
 	const polls: Array<{ condition: number; poll: CommandPoll }> = [];
 	for (const [index, condition] of conditions.entries()) {
 		if (context.signal.aborted) break;
-		polls.push({ condition: index + 1, poll: await pollCommand(condition.argv, context, autonomy, envPolicy) });
+		polls.push({
+			condition: index + 1,
+			poll: await pollCommand(condition.argv, context, autonomy, envPolicy, shellSandbox),
+		});
 		if (polls.at(-1)?.poll.cleanupUnresolved === true) break;
 	}
 	const failed = polls.length < conditions.length || polls.some(({ poll }) => poll.failed);

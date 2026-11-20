@@ -434,6 +434,7 @@ export const RUN_FLAGS: ReadonlyArray<ManifestFlag> = [
 	{ name: "--verify", value: "string", repeatable: true, appliesTo: main },
 	{ name: "--verify-timeout", value: "duration", appliesTo: main },
 	{ name: "--fail-on-verify", value: "boolean", appliesTo: main },
+	{ name: "--exit-code", value: "boolean", appliesTo: main },
 	{ name: "--fail-on-noop", value: "boolean", appliesTo: main },
 	{ name: "--answers", value: "path", appliesTo: main },
 	{ name: "--max-requests", value: "number", appliesTo: main },

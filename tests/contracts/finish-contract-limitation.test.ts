@@ -20,6 +20,7 @@ import { createFinishContractRegistration } from "../../src/domains/safety/finis
 import { runCheckFacts } from "../../src/domains/safety/observed-checks.js";
 import { checkOutputReader, createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { builtin } from "../../src/tools/builtin-tool-catalog.js";
+import { finishRoundDue, finishSiblingRefusal, finishTool, sealCompletion } from "../../src/tools/finish.js";
 import { limitationTool } from "../../src/tools/limitation.js";
 import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
@@ -1020,5 +1021,83 @@ describe("the limitation tool", () => {
 			error.includes(ToolNames.Limitation),
 		);
 		deepStrictEqual(errors, []);
+	});
+});
+
+describe("the finish declaration (fleet design 4.3)", () => {
+	it("ends the turn with a typed declaration, runs alone, skips the gate when unfinished, and is pinned only unattended", async () => {
+		const declared = await finishTool.run({ state: "partly_done", remaining: ["docs"], limitations: [] });
+		strictEqual(declared.kind, "ok");
+		ok(declared.kind === "ok" && declared.terminate === true);
+		deepStrictEqual(declared.kind === "ok" ? declared.details?.completion : null, {
+			state: "partly_done",
+			limitations: [],
+			unverified: [],
+			remaining: ["docs"],
+		});
+		strictEqual((await finishTool.run({ state: "finished" })).kind, "error");
+		const call = { name: ToolNames.Finish, arguments: { state: "done" } };
+		strictEqual(finishSiblingRefusal(call, { content: [{ type: "text" }, { type: "toolCall" }] }), undefined);
+		ok(finishSiblingRefusal(call, { content: [{ type: "toolCall" }, { type: "toolCall" }] })?.block);
+		// XR-8: a declared unfinished state is a progress note the gate skips; on a done the host seals the gate's fact.
+		const gate = (completionState?: string) =>
+			createFinishContractRegistration({
+				readSessionEntries: () => mutationWindow(),
+				resolveRigor: () => "high",
+			}).evaluate({
+				hook: "turn_end",
+				text: "Partly done: the edit is in, checks are not run.",
+				...(completionState ? { metadata: { completionState } } : {}),
+			});
+		ok(reprompted(gate()));
+		ok(reprompted(gate("done")));
+		deepStrictEqual(gate("partly_done"), []);
+		deepStrictEqual(gate("not_done"), []);
+		const turn = {
+			headless: true,
+			origin: "operator",
+			declared: false,
+			calledWork: true,
+			spent: false,
+			toolsLocked: false,
+			endedOnTerminalTool: false,
+			finishAttached: true,
+		};
+		strictEqual(finishRoundDue(turn), true);
+		strictEqual(finishRoundDue({ ...turn, headless: false }), false);
+		strictEqual(finishRoundDue({ ...turn, headless: false, origin: "job" }), true);
+		strictEqual(finishRoundDue({ ...turn, headless: false, origin: "continuation" }), true);
+		for (const change of [{ declared: true }, { calledWork: false }, { spent: true }, { toolsLocked: true }])
+			strictEqual(finishRoundDue({ ...turn, ...change }), false, JSON.stringify(change));
+	});
+
+	it("assesses a textless declared done over an unvalidated edit as partly_done (fleet design 4.3)", () => {
+		const facts = (rigor: "high" | "normal", completionState?: string) =>
+			createFinishContractRegistration({ readSessionEntries: () => mutationWindow(), resolveRigor: () => rigor })
+				.evaluate({ hook: "turn_end", text: "", ...(completionState ? { metadata: { completionState } } : {}) })
+				.flatMap((effect) => ("fact" in effect && effect.fact !== undefined ? [effect.fact] : []));
+		// An undeclared empty reply claims nothing; a declared done is assessed from the ledger whatever the prose.
+		deepStrictEqual(facts("high"), []);
+		ok(facts("high", "done").includes("unvalidated_mutation"));
+		deepStrictEqual(facts("normal", "done"), ["unvalidated_mutation"]);
+		const done = { state: "done" as const, limitations: [], unverified: ["the edit"] };
+		deepStrictEqual(sealCompletion(done, facts("normal", "done")), {
+			declared: true,
+			claimed: "done",
+			assessed: "partly_done",
+			facts: ["unvalidated_mutation"],
+			limitations: [],
+			unverified: ["the edit"],
+		});
+		strictEqual(sealCompletion(done, []).assessed, "done");
+		strictEqual(sealCompletion({ ...done, state: "not_done" }, ["open_task"]).assessed, "not_done");
+		deepStrictEqual(sealCompletion(null, ["open_task"]), {
+			declared: false,
+			claimed: null,
+			assessed: "unknown",
+			facts: ["open_task"],
+			limitations: [],
+			unverified: [],
+		});
 	});
 });
