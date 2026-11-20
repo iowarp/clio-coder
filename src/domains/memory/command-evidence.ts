@@ -20,7 +20,7 @@
 
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { commandName, wrappedCommand } from "../../core/command-words.js";
 import { shellLikeChain, shellLikeInvocation } from "../../core/shell-argv.js";
 
@@ -307,8 +307,27 @@ export function receiptVouches(
 
 function strictlyInside(path: string, root: string): boolean {
 	if (!isAbsolute(path) || !isAbsolute(root)) return false;
-	const inside = relative(resolve(root), resolve(path));
+	const inside = relative(canonicalPath(root), canonicalPath(path));
 	return inside.length > 0 && inside !== ".." && !inside.startsWith(`..${sep}`) && !isAbsolute(inside);
+}
+
+/**
+ * A path with symlinks resolved as far as it exists: the real path of its nearest existing ancestor and the rest
+ * unchanged, so `<root>/link/new` under a link out of the root is judged where it lands.
+ */
+function canonicalPath(path: string): string {
+	const absolute = resolve(path);
+	const rest: string[] = [];
+	for (let current = absolute; ; ) {
+		try {
+			return join(realpathSync(current), ...rest.reverse());
+		} catch {
+			const parent = dirname(current);
+			if (parent === current) return absolute;
+			rest.push(basename(current));
+			current = parent;
+		}
+	}
 }
 
 function sameDirectory(left: string, right: string): boolean {

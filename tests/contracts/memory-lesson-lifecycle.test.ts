@@ -1,6 +1,15 @@
 import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -910,6 +919,9 @@ test("evidence identity grounds and counts use only for the command that ran, se
 		ok(receiptVouches(parametric, receipt(`${scratch}/b/store`), [scratch]), "a declared scratch parameter matches");
 		ok(!receiptVouches(parametric, receipt(`${other}/store`), [scratch]), "a path outside the scratch root does not");
 		ok(!receiptVouches(claim, receipt(`${scratch}/b/store`), [scratch]), "an undeclared claim never generalizes");
+		mkdirSync(scratch);
+		symlinkSync(other, join(scratch, "link"));
+		ok(!receiptVouches(parametric, receipt(`${scratch}/link/store`), [scratch]), "a symlink out of the root does not");
 		const record = (id: string, text: string, refs: string[], patch: Partial<MemoryRecord> = {}): MemoryRecord => ({
 			id,
 			scope: "repo",
