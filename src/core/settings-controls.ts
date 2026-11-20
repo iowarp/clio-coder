@@ -487,6 +487,9 @@ const MENU_ROWS = new Set([
 	"chat.steering.triage.enabled",
 	"fleet.worktrees.root",
 	"context.memory.surfaces.observe",
+	"context.memory.surfaces.correct",
+	"context.memory.surfaces.bank",
+	"context.memory.sideShare",
 	"context.memory.thinkingLevel",
 	"context.semantic.enabled",
 	"context.semantic.target",
@@ -548,6 +551,8 @@ const CHOICES: Record<string, readonly string[]> = {
 	"chat.steering.triage.thinkingLevel": THINKING_LEVELS,
 	"context.memory.thinkingLevel": THINKING_LEVELS,
 	"context.memory.surfaces.observe": ["off", "on"],
+	"context.memory.surfaces.correct": ["rules", "model"],
+	"context.memory.surfaces.bank": ["rules", "model"],
 	"fleet.permissions.mode": ["judge", "deny", "escalate", "fail", "main"],
 	"fleet.permissions.escalation.fallback": ["deny", "fail"],
 	"interface.mode": ["regular", "fullscreen"],
@@ -645,6 +650,18 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"context.memory.surfaces.observe": [
 		"Continuity preparation",
 		"Let the memory model condense older turns in the background so compaction can reuse that record instead of summarizing them again. Starts only near a compaction that would send history to a separate summary request. Needs proactive memory on; off by default.",
+	],
+	"context.memory.surfaces.correct": [
+		"Correction tier",
+		"Rules, the default, warns after a repeated failure with no model call. Model also asks the memory model after two tool errors in a row or a loop-guard block. Rules by default as a policy choice: the model tier was measured costing calls without producing reminders.",
+	],
+	"context.memory.surfaces.bank": [
+		"Task bank tier",
+		"Rules, the default, records failures and operator statements in the task bank with no model call. Model also asks the memory model to maintain the bank every cadence of tool calls. Rules by default as a policy choice: the model tier's product was rarely read.",
+	],
+	"context.memory.sideShare": [
+		"Memory side share",
+		"After three automatic memory calls, a session skips more while its memory output tokens (and premium units, where the route reports them) exceed this share of its main output. Calls you ask for, such as remember, are never skipped. 0 turns the governor off.",
 	],
 	"context.memory.thinkingLevel": [
 		"Memory thinking",
