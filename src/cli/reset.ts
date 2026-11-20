@@ -4,12 +4,13 @@ import { join } from "node:path";
 import { initializeClioHome } from "../core/init.js";
 import { clioDirLayoutProblems, removableClioRootProblem, resetXdgCache, resolveClioDirs } from "../core/xdg.js";
 import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
+import { writeCliFailure } from "./kit/json-out.js";
+import { CliUsageError } from "./kit/usage-error.js";
 import { stopLegacyDocsBeforeRemoval } from "./legacy-docs-cleanup.js";
 import { createLifecyclePresenter, type LifecycleItem, measurePath } from "./lifecycle-presenter.js";
 import { type RemovalFailure, refuseForOpenSessions, removePath, reportRemovalFailures } from "./removal.js";
-import { printError } from "./shared.js";
 
-const HELP = `clio-coder reset --state|--data|--cache|--auth|--settings|--all [--dry-run] [--force] [--json]
+const HELP = `clio-coder reset --state|--data|--cache|--auth|--settings|--all [--dry-run] [--yes] [--json]
 
 Recover or wipe CLIO Coder state while keeping the clio-coder launcher installed.
 Each level clears exactly the root (or file) it names and nothing else, then the
@@ -29,9 +30,12 @@ Levels (name at least one; combinable except --all):
 
 Safety:
   --state, --data and --all stop while a session is still open.
-  --force, -f   required for destructive execution in non-interactive environments
+  --yes, -y     skip the confirmation; without a terminal, reset needs it
+                (exit 2, confirmation_required). --force and -f are deprecated
+                spellings of --yes.
   --dry-run     print what would be reset without changing anything
-  --json        emit machine-readable JSON output
+  --json        emit machine-readable JSON output; a terminal run still asks,
+                on stderr
   --help, -h    show this message
 `;
 
@@ -52,11 +56,15 @@ interface ParsedResetArgs {
 	auth: boolean;
 	settings: boolean;
 	all: boolean;
-	force: boolean;
+	yes: boolean;
+	/** `--force` or `-f` spelled the confirmation skip; it still works and says it is deprecated. */
+	forceSpelling: string | null;
 	dryRun: boolean;
 	json: boolean;
 	help: boolean;
 }
+
+const RESET_PATH = ["reset"] as const;
 
 function parseResetArgs(argv: ReadonlyArray<string>): ParsedResetArgs {
 	const parsed: ParsedResetArgs = {
@@ -66,7 +74,8 @@ function parseResetArgs(argv: ReadonlyArray<string>): ParsedResetArgs {
 		auth: false,
 		settings: false,
 		all: false,
-		force: false,
+		yes: false,
+		forceSpelling: null,
 		dryRun: false,
 		json: false,
 		help: false,
@@ -91,9 +100,14 @@ function parseResetArgs(argv: ReadonlyArray<string>): ParsedResetArgs {
 			case "--all":
 				parsed.all = true;
 				break;
+			case "--yes":
+			case "-y":
+				parsed.yes = true;
+				break;
 			case "--force":
 			case "-f":
-				parsed.force = true;
+				parsed.yes = true;
+				parsed.forceSpelling = arg;
 				break;
 			case "--dry-run":
 				parsed.dryRun = true;
@@ -106,16 +120,28 @@ function parseResetArgs(argv: ReadonlyArray<string>): ParsedResetArgs {
 				parsed.help = true;
 				break;
 			default:
-				throw new Error(`unknown flag: ${arg}`);
+				throw new CliUsageError(
+					RESET_PATH,
+					arg.startsWith("-") ? "unknown_flag" : "usage",
+					arg.startsWith("-") ? `unknown flag: ${arg}` : `unexpected argument: ${arg}`,
+				);
 		}
 	}
 	const levels = [parsed.state, parsed.data, parsed.cache, parsed.auth, parsed.settings];
 	if (!parsed.help && parsed.all && levels.some(Boolean)) {
-		throw new Error("--all cannot be combined with --state, --data, --cache, --auth, or --settings");
+		throw new CliUsageError(
+			RESET_PATH,
+			"flag_conflict",
+			"--all cannot be combined with --state, --data, --cache, --auth, or --settings",
+		);
 	}
 	// A bare reset used to mean --state, which deletes every transcript. Destruction is always named.
 	if (!parsed.help && !parsed.all && !levels.some(Boolean)) {
-		throw new Error("name what to reset: --state, --data, --cache, --auth, --settings, or --all");
+		throw new CliUsageError(
+			RESET_PATH,
+			"usage",
+			"name what to reset: --state, --data, --cache, --auth, --settings, or --all",
+		);
 	}
 	return parsed;
 }
@@ -153,7 +179,7 @@ function resetInvocation(args: ParsedResetArgs): string {
 	)
 		.filter(([, on]) => on)
 		.map(([name]) => `--${name}`);
-	return `clio-coder reset ${levels.join(" ")} --force`;
+	return `clio-coder reset ${levels.join(" ")} --yes`;
 }
 
 export async function runResetCommand(argv: ReadonlyArray<string>): Promise<number> {
@@ -161,30 +187,43 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 	try {
 		args = parseResetArgs(argv);
 	} catch (error) {
-		printError(error instanceof Error ? error.message : String(error));
-		process.stderr.write(HELP);
+		// One diagnostic and a pointer at the help (C3), never the help itself;
+		// under --json the failure document is the one thing on stdout (C6).
+		const usage = error instanceof CliUsageError ? error : new CliUsageError(RESET_PATH, "usage", String(error));
+		writeCliFailure({ path: RESET_PATH, slug: usage.slug, message: usage.message, json: argv.includes("--json") });
 		return 2;
 	}
 	if (args.help) {
 		process.stdout.write(HELP);
 		return 0;
 	}
+	if (args.forceSpelling !== null)
+		process.stderr.write(`clio-coder: deprecated: reset ${args.forceSpelling}; use --yes\n`);
 
-	// One sentence, and nothing on stdout: a caller that piped this run is
-	// parsing stdout, and a help dump there is indistinguishable from output.
+	// One sentence on stderr, and nothing on stdout but the --json failure
+	// document: a caller that piped this run is parsing stdout.
 	const isInteractive = Boolean(process.stdin.isTTY);
-	if (!args.dryRun && !args.force && !isInteractive) {
-		printError("`clio-coder reset` needs a terminal to confirm; pass --force to skip the prompt");
+	if (!args.dryRun && !args.yes && !isInteractive) {
+		writeCliFailure({
+			path: RESET_PATH,
+			slug: "confirmation_required",
+			message: "needs a terminal to confirm; pass --yes to skip the prompt",
+			json: args.json,
+		});
 		return 2;
 	}
 
 	const dirs = resolveClioDirs();
 	const layoutProblems = clioDirLayoutProblems(dirs);
 	if (layoutProblems.length > 0) {
-		printError(
-			`reset refused an unsafe directory layout: ${layoutProblems.join("; ")}. ` +
+		writeCliFailure({
+			path: RESET_PATH,
+			slug: "not_configured",
+			message:
+				`refused an unsafe directory layout: ${layoutProblems.join("; ")}. ` +
 				"Run `clio-coder doctor` after setting four absolute, distinct, non-nesting roots.",
-		);
+			json: args.json,
+		});
 		return 2;
 	}
 	const settingsPath = join(dirs.config, "settings.yaml");
@@ -361,9 +400,11 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 		return 0;
 	}
 
-	if (!args.force) {
+	if (!args.yes) {
 		const confirmed = await presenter.confirm("Are you sure you want to reset the selected state?", false);
 		if (!confirmed) {
+			// Exit 0 is the v1 contract for a declined prompt; convention C8's exit 1
+			// waits for a versioned opt-in because it changes an exit code.
 			presenter.warn("Reset cancelled");
 			presenter.done("Cancelled");
 			return 0;

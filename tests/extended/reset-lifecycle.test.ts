@@ -181,6 +181,11 @@ describe("contracts/reset-lifecycle", () => {
 			strictEqual(code, 2);
 			strictEqual(stdout, "", "a refusal must leave stdout clean for the caller parsing it");
 			ok(existsSync(join(temp.stateDir, "home.json")), "nothing is removed on the refusal path");
+			const json = await runInHome(temp, () => runResetCommand(["--state", "--json"]));
+			strictEqual(json.code, 2);
+			strictEqual(JSON.parse(json.stdout).error.code, "confirmation_required");
+			strictEqual(json.stdout.trim().split("\n").length, 1, "one failure document");
+			strictEqual((await runInHome(temp, () => runResetCommand(["--cache", "--yes"]))).code, 0);
 		} finally {
 			process.stdin.isTTY = savedIsTty;
 			temp.cleanup();

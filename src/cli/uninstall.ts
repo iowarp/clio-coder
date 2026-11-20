@@ -42,15 +42,16 @@ import {
 	installRootServiceFiles,
 } from "../domains/lifecycle/install-plan.js";
 import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
+import { writeCliFailure } from "./kit/json-out.js";
+import { CliUsageError } from "./kit/usage-error.js";
 import { stopLegacyDocsBeforeRemoval } from "./legacy-docs-cleanup.js";
 import type { LifecycleItem, LifecyclePresenter } from "./lifecycle-presenter.js";
 import { createLifecyclePresenter, measurePath, shortenPath } from "./lifecycle-presenter.js";
 import type { RemovalFailure } from "./removal.js";
 import { refuseForOpenSessions, removePath, reportRemovalFailures } from "./removal.js";
-import { printError } from "./shared.js";
 
-const HELP = `clio-coder uninstall [--keep-binary] [--keep-package] [--keep-config] [--keep-data] [--dry-run] [--force] [--json]
-clio-coder uninstall --inactive [--dry-run] [--force] [--json]
+const HELP = `clio-coder uninstall [--keep-binary] [--keep-package] [--keep-config] [--keep-data] [--dry-run] [--yes] [--json]
+clio-coder uninstall --inactive [--dry-run] [--yes] [--json]
 
 Remove CLIO Coder: the config, data, state, and cache roots, the launcher, and for
 an install.sh install its private Node and every installed version.
@@ -79,8 +80,11 @@ Flags:
                    after moving to a checkout or a package manager, and their own
                    launcher. Your config, data, sessions and this installation stay.
   --dry-run        print what would be removed without changing anything
-  --force, -f      skip confirmation prompt and proceed immediately
-  --json           emit machine-readable JSON output
+  --yes, -y        skip the confirmation; without a terminal, uninstall needs it
+                   (exit 2, confirmation_required). --force and -f are deprecated
+                   spellings of --yes.
+  --json           emit machine-readable JSON output; a terminal run still asks,
+                   on stderr
   --help, -h       show this message
 `;
 
@@ -90,11 +94,15 @@ interface ParsedUninstallArgs {
 	keepData: boolean;
 	inactive: boolean;
 	keepPackage: boolean;
-	force: boolean;
+	yes: boolean;
+	/** `--force` or `-f` spelled the confirmation skip; it still works and says it is deprecated. */
+	forceSpelling: string | null;
 	dryRun: boolean;
 	json: boolean;
 	help: boolean;
 }
+
+const UNINSTALL_PATH = ["uninstall"] as const;
 
 function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 	const parsed: ParsedUninstallArgs = {
@@ -103,7 +111,8 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 		keepData: false,
 		inactive: false,
 		keepPackage: false,
-		force: false,
+		yes: false,
+		forceSpelling: null,
 		dryRun: false,
 		json: false,
 		help: false,
@@ -125,9 +134,14 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 			case "--inactive":
 				parsed.inactive = true;
 				break;
+			case "--yes":
+			case "-y":
+				parsed.yes = true;
+				break;
 			case "--force":
 			case "-f":
-				parsed.force = true;
+				parsed.yes = true;
+				parsed.forceSpelling = arg;
 				break;
 			case "--dry-run":
 				parsed.dryRun = true;
@@ -140,11 +154,19 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 				parsed.help = true;
 				break;
 			default:
-				throw new Error(`unknown flag: ${arg}`);
+				throw new CliUsageError(
+					UNINSTALL_PATH,
+					arg.startsWith("-") ? "unknown_flag" : "usage",
+					arg.startsWith("-") ? `unknown flag: ${arg}` : `unexpected argument: ${arg}`,
+				);
 		}
 	}
 	if (parsed.inactive && (parsed.keepBinary || parsed.keepPackage || parsed.keepConfig || parsed.keepData))
-		throw new Error("--inactive already keeps the binary, config and data; drop the --keep-* flags");
+		throw new CliUsageError(
+			UNINSTALL_PATH,
+			"flag_conflict",
+			"--inactive already keeps the binary, config and data; drop the --keep-* flags",
+		);
 	return parsed;
 }
 
@@ -588,7 +610,7 @@ async function uninstallInactive(
 		presenter.done("Done");
 		return 0;
 	}
-	if (!args.force && !(await presenter.confirm("Remove these inactive installs?", false))) {
+	if (!args.yes && !(await presenter.confirm("Remove these inactive installs?", false))) {
 		presenter.warn("Cancelled");
 		presenter.done("Cancelled");
 		return 0;
@@ -635,7 +657,7 @@ async function uninstallInactive(
 	}
 	if (failures.length > 0) {
 		presenter.fail("uninstall --inactive did not remove everything");
-		reportRemovalFailures("clio-coder uninstall --inactive --force", failures);
+		reportRemovalFailures("clio-coder uninstall --inactive --yes", failures);
 		presenter.finish();
 		return 1;
 	}
@@ -648,30 +670,43 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	try {
 		args = parseUninstallArgs(argv);
 	} catch (error) {
-		printError(error instanceof Error ? error.message : String(error));
-		process.stderr.write(HELP);
+		// One diagnostic and a pointer at the help (C3), never the help itself;
+		// under --json the failure document is the one thing on stdout (C6).
+		const usage = error instanceof CliUsageError ? error : new CliUsageError(UNINSTALL_PATH, "usage", String(error));
+		writeCliFailure({ path: UNINSTALL_PATH, slug: usage.slug, message: usage.message, json: argv.includes("--json") });
 		return 2;
 	}
 	if (args.help) {
 		process.stdout.write(HELP);
 		return 0;
 	}
+	if (args.forceSpelling !== null)
+		process.stderr.write(`clio-coder: deprecated: uninstall ${args.forceSpelling}; use --yes\n`);
 
-	// One sentence, and nothing on stdout: a caller that piped this run is
-	// parsing stdout, and a help dump there is indistinguishable from output.
+	// One sentence on stderr, and nothing on stdout but the --json failure
+	// document: a caller that piped this run is parsing stdout.
 	const isInteractive = Boolean(process.stdin.isTTY);
-	if (!args.dryRun && !args.force && !isInteractive) {
-		printError("`clio-coder uninstall` needs a terminal to confirm; pass --force to skip the prompt");
+	if (!args.dryRun && !args.yes && !isInteractive) {
+		writeCliFailure({
+			path: UNINSTALL_PATH,
+			slug: "confirmation_required",
+			message: "needs a terminal to confirm; pass --yes to skip the prompt",
+			json: args.json,
+		});
 		return 2;
 	}
 
 	const dirs = resolveClioDirs();
 	const layoutProblems = clioDirLayoutProblems(dirs);
 	if (layoutProblems.length > 0) {
-		printError(
-			`uninstall refused an unsafe directory layout: ${layoutProblems.join("; ")}. ` +
+		writeCliFailure({
+			path: UNINSTALL_PATH,
+			slug: "not_configured",
+			message:
+				`refused an unsafe directory layout: ${layoutProblems.join("; ")}. ` +
 				"Run `clio-coder doctor` after setting four absolute, distinct, non-nesting roots.",
-		);
+			json: args.json,
+		});
 		return 2;
 	}
 	const installation = inspectInstallation();
@@ -886,7 +921,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		return 0;
 	}
 
-	if (!args.force) {
+	if (!args.yes) {
 		const confirmed = await presenter.confirm("Are you sure you want to uninstall?", false);
 		if (!confirmed) {
 			presenter.warn("Uninstall cancelled");
@@ -1125,7 +1160,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		if (failures.length > 0) {
 			presenter.fail("uninstall did not remove everything");
 			reportRemovalFailures(
-				`clio-coder uninstall${args.keepBinary ? " --keep-binary" : ""}${args.keepConfig ? " --keep-config" : ""}${args.keepData ? " --keep-data" : ""} --force`,
+				`clio-coder uninstall${args.keepBinary ? " --keep-binary" : ""}${args.keepConfig ? " --keep-config" : ""}${args.keepData ? " --keep-data" : ""} --yes`,
 				failures,
 			);
 			presenter.finish();
