@@ -19,6 +19,7 @@ export const webFetchToolSurface = {
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
+	steerInterruptible: true,
 } satisfies ToolSurface;
 
 /**
@@ -41,4 +42,5 @@ export const webReadToolSurface = {
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
+	steerInterruptible: true,
 } satisfies ToolSurface;

@@ -21,6 +21,7 @@ import { performance } from "node:perf_hooks";
 import type { TSchema } from "typebox";
 import { normalizeGatewayArguments } from "../core/gateway-envelope.js";
 import { runtimeModelField } from "../core/model-tier.js";
+import { STEER_ABORT_MARK } from "../core/reminder-framing.js";
 import { type SkillActivation, skillActivationFromToolDetails } from "../core/skill-activation.js";
 import type { TelemetryContext } from "../core/telemetry/context.js";
 import { telemetryContext, withToolTelemetryContext } from "../core/telemetry/context.js";
@@ -616,6 +617,32 @@ export function wireParameterSchema<T>(schema: T): T {
 	return out as T;
 }
 
+/** A gateway call takes the flag of the capability it calls; a chain or describe is never interrupted. */
+function steerInterruptible(spec: ToolSpec, params: unknown, registry: ToolRegistry): boolean {
+	if (spec.steerInterruptible === true) return true;
+	if (spec.name !== ToolNames.Gateway || !isRecord(params)) return false;
+	const envelope = normalizeGatewayArguments(params);
+	return (
+		envelope.op === "call" &&
+		typeof envelope.capability === "string" &&
+		registry.get(envelope.capability as ToolName)?.steerInterruptible === true
+	);
+}
+
+const STEER_ABORT_NOTE = `\n\n[CLIO Coder] ${STEER_ABORT_MARK}: the operator queued a steer while this call ran, so the host ended it; any output above is partial. The run goes on, and the steer follows as the next message.`;
+
+/** A tool that settled on its own after the steer's abort still says so, unless its own result already did. */
+function markSteerAborted(result: WorkerAgentToolResult): WorkerAgentToolResult {
+	const [first, ...rest] = result.content;
+	if (first?.type === "text" && first.text.includes(STEER_ABORT_MARK)) return result;
+	const text = first?.type === "text" ? `${first.text}${STEER_ABORT_NOTE}` : STEER_ABORT_NOTE.trimStart();
+	return {
+		...result,
+		content: [{ type: "text", text }, ...(first?.type === "text" ? rest : result.content)],
+		details: { ...result.details, abortedBy: "steer" } as unknown as WorkerAgentToolResult["details"],
+	};
+}
+
 function toAgentTool(
 	spec: ToolSpec,
 	registry: ToolRegistry,
@@ -638,6 +665,15 @@ function toAgentTool(
 			if (onUpdate !== undefined) {
 				options.onUpdate = (partialResult) => onUpdate(projectToolResult(partialResult));
 			}
+			const steerHost = options.steerInterrupt;
+			delete options.steerInterrupt;
+			const interrupt =
+				steerHost !== undefined && steerInterruptible(spec, params, registry) ? steerHost.begin(spec.name) : undefined;
+			const runSignal = signal;
+			if (interrupt !== undefined) {
+				options.steerInterrupted = interrupt.fired;
+				signal = runSignal === undefined ? interrupt.signal : AbortSignal.any([runSignal, interrupt.signal]);
+			}
 			const callInput: RunValidatedToolCallInput = {
 				spec,
 				args: spec.modelParameters
@@ -659,7 +695,19 @@ function toAgentTool(
 			if (signal) callInput.signal = signal;
 			if (telemetry) callInput.telemetry = telemetry;
 			if (Object.keys(options).length > 0) callInput.invokeOptions = options;
-			return runValidatedToolCall(callInput);
+			if (interrupt === undefined) return runValidatedToolCall(callInput);
+			// Only a steer that ended the call, not a run that ended too, marks the result.
+			const steered = (): boolean => interrupt.fired() && runSignal?.aborted !== true;
+			try {
+				const result = await runValidatedToolCall(callInput);
+				return steered() ? markSteerAborted(result) : result;
+			} catch (err) {
+				if (!steered()) throw err;
+				const message = errorMessage(err);
+				throw new Error(message.includes(STEER_ABORT_MARK) ? message : `${message}${STEER_ABORT_NOTE}`);
+			} finally {
+				interrupt.end();
+			}
 		},
 	};
 	if (spec.executionMode) tool.executionMode = spec.executionMode;

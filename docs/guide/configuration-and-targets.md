@@ -314,6 +314,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `safety.limits.autonomousToolCalls` | `600` | next turn; a project layer can only tighten it |
 | `safety.limits.autonomousMinutes` | `120` | next turn; a project layer can only tighten it |
 | `safety.limits.autonomousTokens` | `5000000` | next turn; a project layer can only tighten it |
+| `safety.limits.bashIdleSeconds` | `0` | immediately; the next foreground bash call reads it; `0` is off; a project layer can only tighten it |
 | `safety.review.enabled` | `false` | immediately; a project layer can only turn review on or lower the cadence |
 | `safety.review.target` | unset | immediately |
 | `safety.review.cadenceToolCalls` | unset | immediately; a project layer can only turn review on or lower the cadence |

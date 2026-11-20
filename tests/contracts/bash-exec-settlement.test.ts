@@ -246,6 +246,27 @@ describe("bash abort settlement (#445)", () => {
 			rmSync(dir, { recursive: true, force: true });
 		}
 	});
+
+	// FX-32: a hung command held a lane for minutes with no output; safety.limits.bashIdleSeconds (off by default) ends it.
+	it("stops a silent, CPU-idle command as a typed idle timeout and spares one that keeps the CPU busy", async () => {
+		const idle = await bashTool.run({ command: "echo started; sleep 30", timeout_ms: 3_600_000 }, { bashIdleMs: 400 });
+		strictEqual(idle.kind, "error");
+		if (idle.kind !== "error") return;
+		strictEqual(idle.details?.outcome, "timeout");
+		strictEqual(idle.details?.timedOut, true);
+		strictEqual(idle.details?.timedOutBy, "idle");
+		match(
+			idle.message,
+			/started[\s\S]*stopped as idle \(safety\.limits\.bashIdleSeconds\)[\s\S]*next call runs normally/u,
+		);
+		if (process.platform !== "linux") return;
+		// Silent for five idle windows, but busy: CPU in the process tree counts as activity.
+		const busy = await bashTool.run(
+			{ command: "end=$((SECONDS+2)); while [ $SECONDS -lt $end ]; do :; done; echo done" },
+			{ bashIdleMs: 400 },
+		);
+		strictEqual(busy.kind, "ok", busy.kind === "error" ? busy.message : "");
+	});
 });
 
 describe("worker cancel stops running commands", () => {
