@@ -3642,6 +3642,19 @@ describe("tool classes", () => {
 			true,
 		);
 		match(timedOut[0] ?? "", /^\$ ran `npm test` · timed out after 30s ✗/u);
+		// An idle stop states the idle figure, never the timeout budget it stopped short of (FX-40).
+		const idled = rows(
+			{ command: "npm test", timeout_ms: 650_000 },
+			{
+				content: [
+					{ type: "text", text: "bash: this command printed nothing and used no CPU for 20s and was stopped as idle" },
+				],
+				details: { timedOut: true, timedOutBy: "idle", idleMs: 20_000 },
+			},
+			true,
+		);
+		match(idled[0] ?? "", /^\$ ran `npm test` · stopped idle after 20s ✗/u);
+		doesNotMatch(idled[0] ?? "", /timed out/u);
 	});
 
 	it("keeps every character of a command the full body echoes, a lone & included", () => {

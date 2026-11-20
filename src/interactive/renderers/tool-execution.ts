@@ -813,7 +813,11 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
 		if (isTruncatedResult(finished) && !parts.includes("truncated")) parts.push("truncated");
 		const details = detailsOf(finished.result);
 		const status = row.spec.class === "execute" && finished.isError ? commandStatusLine(finished.result) : null;
-		if (details?.timedOut === true || status?.timedOut === true) {
+		if (details?.timedOutBy === "idle") {
+			// An idle stop is not the timeout budget running out; its figure is how long the command sat idle (FX-40).
+			const idle = typeof details.idleMs === "number" ? optionalCompactMs(details.idleMs) : null;
+			parts.push(idle === null ? "stopped idle" : `stopped idle after ${idle}`);
+		} else if (details?.timedOut === true || status?.timedOut === true) {
 			// The row does not state a timeout the command stayed under; one it hit is the fact.
 			let limit: string | null;
 			if (row.toolName === "verify") {
