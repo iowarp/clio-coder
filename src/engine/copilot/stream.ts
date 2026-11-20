@@ -1275,6 +1275,20 @@ async function runStep(
 
 	const framed = core.length > 0 && fingerprint(core[core.length - 1] as CoreMessage) === null;
 	let { conversation } = plan(key, systemHash, kept, prints, framed);
+	// A run still waiting on calls this transcript has already answered was passed over above (its history no longer
+	// matches), so it can never take those results; it is closed instead of staying parked until eviction (CTX-4).
+	const settledCalls = new Set(core.flatMap((message) => (message.role === "toolResult" ? [message.toolCallId] : [])));
+	for (const stale of conversations.filter(
+		(open) =>
+			open !== conversation &&
+			open.key === key &&
+			!open.busy &&
+			open.state === "awaiting-tools" &&
+			open.systemHash === systemHash &&
+			open.pendingToolCallIds.length > 0 &&
+			open.pendingToolCallIds.every((id) => settledCalls.has(id)),
+	))
+		remove(stale, "Clio's transcript moved past the calls this Copilot run waited on; its conversation was closed");
 	const reused = conversation !== null;
 	// No open conversation fits: one an earlier process left for this Clio session may (bt-10).
 	const stored = conversation ? null : storedConversation(key, systemHash, kept, prints);

@@ -1270,6 +1270,21 @@ test("a synced tool result the working set rewrote reseeds in full; an unchanged
 	disposeCopilotConversations(key);
 });
 
+test("a reseed past a call a Copilot run still waits on closes that run instead of leaving it parked (CTX-4)", async () => {
+	const key = "stale-tools-session";
+	disposeCopilotConversations(key);
+	const ask = user("please use tool");
+	const first = await step({ tools: [readTool], messages: [ask] }, key);
+	strictEqual(first.stopReason, "toolUse");
+	const parked = fake().sessions.at(-1) as FakeSession & { aborted?: boolean };
+	// History before the call was rewritten, so the waiting run can never take this result.
+	const moved = [user("summary of the earlier work"), ask, first, toolResult("call_1", "file body")];
+	const reseeded = await step({ tools: [readTool], messages: moved }, key);
+	strictEqual((reseeded as { copilotContinuation?: string }).copilotContinuation, "full");
+	ok(await eventually(() => parked.aborted === true, 5_000), "the run parked on call_1 is closed");
+	disposeCopilotConversations(key);
+});
+
 test("an in-run continuation that adds only a reminder stays a delta on the same session (FX-5)", async () => {
 	const key = "continuation-session";
 	disposeCopilotConversations(key);
