@@ -6,9 +6,12 @@ import { createReadOnlyExplorationNudgeRegistration } from "../../src/domains/mi
 import type { MiddlewareHookInput } from "../../src/domains/middleware/index.js";
 import { createMarketplaceOfferRegistration } from "../../src/domains/middleware/marketplace-offer.js";
 import { createPlanCloseRegistration } from "../../src/domains/middleware/plan-close.js";
+import { createReadStreakRegistration } from "../../src/domains/middleware/read-streak.js";
 import { createScoutNudgeRegistration } from "../../src/domains/middleware/scout-nudge.js";
 import { createTaskBoardReminderRegistration } from "../../src/domains/middleware/task-board-reminder.js";
 import { createCitationGroundingRegistration } from "../../src/domains/safety/citation-grounding.js";
+import { callChangesTree } from "../../src/domains/safety/index.js";
+import { callRepeatsAsRead } from "../../src/engine/loop-guard.js";
 
 // The host reports the turn's callable tools as activeCapabilityNames: the
 // attached and gateway-reachable tools the turn's constraints admit. A
@@ -172,6 +175,78 @@ describe("reminders gate on the turn's callable tools", () => {
 		deepStrictEqual(survey(SCOPED, threeAreas).flat(), []);
 		deepStrictEqual(survey(surface(ToolNames.Dispatch), ["src", "tests"]).flat(), []);
 		deepStrictEqual(survey(surface(ToolNames.Dispatch), threeAreas, true).flat(), []);
+	});
+
+	it("read streak asks for a decision at 25 and 40, names only callable tools, and resets only on progress", () => {
+		const rule = createReadStreakRegistration({
+			classifiers: { repeatsAsRead: callRepeatsAsRead, changesTree: callChangesTree },
+			workspaceRoot: () => process.cwd(),
+		});
+		const start = (metadata: NonNullable<MiddlewareHookInput["metadata"]>) =>
+			rule.evaluate({ hook: "turn_start", sessionId: "s1", metadata });
+		const call = (toolName: string, toolArgs: Record<string, unknown>, batchSize = 3) =>
+			rule.evaluate({
+				hook: "after_tool",
+				sessionId: "s1",
+				toolName,
+				toolArgs,
+				metadata: { resultKind: "ok", batchSize },
+			});
+		const reads = (count: number, batchSize = 3) =>
+			Array.from({ length: count }, (_, index) => call(ToolNames.Read, { path: `src/f-${index}.ts` }, batchSize));
+		const notes = (effects: ReadonlyArray<ReadonlyArray<{ kind: string; message?: string }>>) =>
+			effects.flatMap((each, index) => each.map((effect) => ({ at: index + 1, message: effect.message ?? "" })));
+		// Headless writer: edit and tasks are callable, ask_user is not.
+		start({ turnOrigin: "operator", activeCapabilityNames: surface(ToolNames.Read, ToolNames.Edit, ToolNames.Tasks) });
+		// Four single-read rounds draw the batching note once; a wider round and a bash mutation reset both counters.
+		const serial = notes([...reads(4, 1), ...reads(6)]);
+		deepStrictEqual(
+			serial.map((note) => note.at),
+			[4],
+		);
+		ok(serial[0]?.message.startsWith("[CLIO Coder] The last 4 rounds each made a single read."));
+		deepStrictEqual(call(ToolNames.Bash, { command: "sed -i 's/a/b/' src/f-0.ts" }), []);
+		// A cd-prefixed bash read counts as a read (X1) and crosses 25.
+		const first = notes([...reads(24), call(ToolNames.Bash, { command: "cd src && grep -n streak f-0.ts" })]);
+		deepStrictEqual(
+			first.map((note) => note.at),
+			[25],
+		);
+		const n1 = first[0]?.message ?? "";
+		ok(n1.startsWith("[CLIO Coder] 25 read-only calls in a row with no edit or plan update."));
+		ok(n1.includes("make the edit or record the plan with tasks."));
+		ok(!n1.includes("question") && !n1.includes("one round"));
+		// A plan recorded through gateway resets the streak and re-arms the ladder.
+		deepStrictEqual(call(ToolNames.Gateway, { op: "call", capability: "tasks", args: { action: "plan" } }), []);
+		const again = reads(21);
+		const crossing = notes([...again, ...reads(4, 1)]);
+		// Serial rounds at the 25th read ride on that note; no separate batching note.
+		deepStrictEqual(
+			crossing.map((note) => note.at),
+			[25],
+		);
+		ok(crossing[0]?.message.endsWith("Send the reads and searches you already know you need together in one round."));
+		// A continuation keeps the streak; the 40th read draws the firmer note.
+		start({
+			turnOrigin: "continuation",
+			activeCapabilityNames: surface(ToolNames.Read, ToolNames.Edit, ToolNames.Tasks),
+		});
+		const second = notes(reads(15, 2));
+		deepStrictEqual(
+			second.map((note) => note.at + 25),
+			[40],
+		);
+		const n2 = second[0]?.message ?? "";
+		ok(n2.startsWith("[CLIO Coder] 40 read-only calls in a row and still no edit or plan update."));
+		ok(n2.includes("The earlier reads are still in this conversation"));
+		// A turn that cannot write gets one answer-worded note, at 40 only.
+		start({ turnOrigin: "operator", turnMode: "answer", activeCapabilityNames: surface(ToolNames.Read) });
+		const answer = notes(reads(65));
+		deepStrictEqual(
+			answer.map((note) => note.at),
+			[40],
+		);
+		ok(answer[0]?.message.includes("Answer from what you have now"));
 	});
 
 	it("citation grounding asks for a numbered re-read only when read and grep are callable", () => {

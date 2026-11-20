@@ -198,6 +198,7 @@ import { projectDeclaresFlowRules } from "../domains/safety/flow-policy-snapshot
 import { createGitHookDriftGuard, type GitHookDriftGuard, gitHookDriftNotice } from "../domains/safety/hook-drift.js";
 import type { AutonomyLevel, FlowRestrictionSet } from "../domains/safety/index.js";
 import {
+	callChangesTree,
 	EMPTY_INFORMATION_FLOW_POLICY,
 	flowUnmediatedAgentRefusal,
 	isFlowRestrictionSet,
@@ -279,6 +280,7 @@ import {
 	setProtectedModelsProvider,
 } from "../engine/apis/residency.js";
 import {
+	callRepeatsAsRead,
 	createLoopGuardRegistration,
 	INTERACTIVE_LOOP_BLOCK_BUDGET,
 	INTERACTIVE_SAME_CALL_BLOCK_LIMIT,
@@ -2570,7 +2572,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// precedes the finish-contract advisory in effect order.
 	middlewareRegistrar.registerHook(createToolProseRegistration());
 	middlewareRegistrar.registerHook(createTaskNudgeRegistration({ getBoard: () => taskBoard.snapshot() }));
-	for (const registration of createExplorationNudgeRegistrations({ workspaceRoot: memoryWorkspaceRoot }))
+	for (const registration of createExplorationNudgeRegistrations({
+		workspaceRoot: memoryWorkspaceRoot,
+		readStreak: { repeatsAsRead: callRepeatsAsRead, changesTree: callChangesTree },
+	}))
 		middlewareRegistrar.registerHook(registration);
 	middlewareRegistrar.registerHook(createUnbackedWorkerClaimRegistration());
 	middlewareRegistrar.registerHook(
