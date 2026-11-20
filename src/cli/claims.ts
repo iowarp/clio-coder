@@ -24,6 +24,18 @@ import {
 } from "../domains/claims/index.js";
 import { exportClaims, importClaims, importOriginLabel } from "../domains/claims/transfer.js";
 import { printError } from "./argv.js";
+import { writeCliFailure } from "./kit/json-out.js";
+
+/** One diagnostic and a pointer to help, never the whole page (C3); `--json` adds the failure document. */
+function usageError(path: ReadonlyArray<string>, message: string, json: boolean, code = 2): number {
+	const flag = message.startsWith("unknown flag");
+	writeCliFailure({ path: ["claims", ...path], slug: flag ? "unknown_flag" : "usage", message, json });
+	return code;
+}
+
+function unexpected(operand: string): string {
+	return operand.startsWith("-") ? `unknown flag: ${operand}` : `unexpected argument '${operand}'`;
+}
 
 const HELP = `Usage:
   clio-coder claims [list] [--check <id>] [--json]
@@ -379,13 +391,15 @@ function takeOption(operands: string[], name: string): string | null | undefined
 	return value ?? null;
 }
 
-async function runExport(operands: string[]): Promise<number> {
+async function runExport(operands: string[], json: boolean): Promise<number> {
 	const check = takeOption(operands, "--check");
 	const out = takeOption(operands, "--out");
-	if (check === null || out === null || operands.length > 0) {
-		printError("claims export: usage: clio-coder claims export [--check <id>] [--out <file>]");
-		return 2;
-	}
+	if (check === null || out === null || operands.length > 0)
+		return usageError(
+			["export"],
+			operands[0] !== undefined ? unexpected(operands[0]) : "usage: clio-coder claims export [--check <id>] [--out <file>]",
+			json,
+		);
 	const bundle = exportClaims(claimsProjectRoot(process.cwd()), check !== undefined ? { check } : {});
 	const text = `${JSON.stringify(bundle, null, 2)}\n`;
 	if (out === undefined) process.stdout.write(text);
@@ -398,10 +412,9 @@ async function runExport(operands: string[]): Promise<number> {
 
 async function runImport(operands: string[], json: boolean): Promise<number> {
 	const [file] = operands;
-	if (file === undefined || operands.length > 1) {
-		printError("claims import: name one export file");
-		return 2;
-	}
+	// v1 read a flag here as a file name and failed with exit 1; the exit stays, the message names the flag.
+	if (file?.startsWith("-") === true) return usageError(["import"], unexpected(file), json, 1);
+	if (file === undefined || operands.length > 1) return usageError(["import"], "name one export file", json);
 	const checkout = canonicalCheckout(process.cwd());
 	if (!checkout.trusted) {
 		printError(
@@ -434,10 +447,14 @@ async function runCompact(operands: string[], json: boolean): Promise<number> {
 	const dryRun = operands.includes("--dry-run");
 	const rest = operands.filter((operand) => operand !== "--dry-run");
 	const before = takeOption(rest, "--prune-superseded-before");
-	if (before === null || rest.length > 0 || (before !== undefined && Number.isNaN(Date.parse(before)))) {
-		printError("claims compact: usage: clio-coder claims compact [--prune-superseded-before <iso-date>] [--dry-run]");
-		return 2;
-	}
+	if (before === null || rest.length > 0 || (before !== undefined && Number.isNaN(Date.parse(before))))
+		return usageError(
+			["compact"],
+			rest[0] !== undefined
+				? unexpected(rest[0])
+				: "usage: clio-coder claims compact [--prune-superseded-before <iso-date>] [--dry-run]",
+			json,
+		);
 	let cited: Set<string> | undefined;
 	if (before !== undefined) {
 		// A claim a memory record cites stays, whatever its age: pruning it would orphan the record's evidence.
@@ -470,7 +487,7 @@ export async function runClaimsCommand(args: string[]): Promise<number> {
 	const json = args.includes("--json");
 	const rest = args.filter((arg) => arg !== "--json");
 	const [action = "list", ...operands] = rest[0]?.startsWith("--") === true ? ["list", ...rest] : rest;
-	if (action === "export") return runExport(operands);
+	if (action === "export") return runExport(operands, json);
 	if (action === "import") return runImport(operands, json);
 	if (action === "compact") return runCompact(operands, json);
 	let read: ClaimsLogRead;
@@ -496,8 +513,7 @@ export async function runClaimsCommand(args: string[]): Promise<number> {
 				index += 1;
 				continue;
 			}
-			printError(`claims list: unexpected argument '${operand}'`, HELP.split("\n")[1]);
-			return 2;
+			return usageError(["list"], operand === "--check" ? "--check requires a value" : unexpected(operand ?? ""), json);
 		}
 		const claims =
 			check === undefined
@@ -562,10 +578,10 @@ export async function runClaimsCommand(args: string[]): Promise<number> {
 	}
 	if (action === "show") {
 		const prefix = operands[0];
-		if (prefix === undefined || operands.length > 1 || !/^[0-9a-f]{4,64}$/u.test(prefix)) {
-			printError("claims show: name one claim or hypothesis by an id prefix of at least 4 hex characters");
-			return 2;
-		}
+		const flag = operands.find((operand) => operand.startsWith("-"));
+		if (flag !== undefined) return usageError(["show"], unexpected(flag), json);
+		if (prefix === undefined || operands.length > 1 || !/^[0-9a-f]{4,64}$/u.test(prefix))
+			return usageError(["show"], "name one claim or hypothesis by an id prefix of at least 4 hex characters", json);
 		const matches = read.records.filter((claim) => claim.id.startsWith(prefix));
 		const hypothesisMatches = read.hypotheses.filter((hypothesis) => hypothesis.id.startsWith(prefix));
 		if (matches.length + hypothesisMatches.length !== 1) {
@@ -587,6 +603,6 @@ export async function runClaimsCommand(args: string[]): Promise<number> {
 		console.log(json ? JSON.stringify(relatedJson(claim, view), null, 2) : showLines(claim, view).join("\n"));
 		return 0;
 	}
-	printError(`claims: unknown subcommand '${action}'`, HELP.split("\n")[1]);
+	writeCliFailure({ path: ["claims"], slug: "unknown_command", message: `unknown subcommand '${action}'`, json });
 	return 2;
 }
