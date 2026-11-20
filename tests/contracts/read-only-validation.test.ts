@@ -1,6 +1,6 @@
 import { deepStrictEqual, doesNotMatch, match, notStrictEqual, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { it } from "node:test";
@@ -847,6 +847,17 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	// A leading cd into the directory the call runs in moves nothing, so its green settles the plain spelling's red (XR-9).
 	for (const prefix of [`cd ${process.cwd()} && `, `cd "${process.cwd()}"; `])
 		deepStrictEqual(seal("!npm test", `${prefix}npm test`), green, prefix);
+	// The shell keeps a backslash in `"\."`, expands an unquoted glob, and lets CDPATH redirect a bare relative operand,
+	// so none of those cds is read as staying put; `.` and a `./` path are.
+	const linked = mkdtempSync(join(tmpdir(), "xr9-cd-"));
+	symlinkSync(".", join(linked, "self"));
+	symlinkSync(".", join(linked, "s*"));
+	const named = (command: string) => classifyCall("bash", { command }, { cwd: linked }).name;
+	for (const command of ['cd "\\." && npm test', "cd ./s* && npm test", "cd self && npm test", "cd self; npm test"])
+		strictEqual(named(command), command, command);
+	for (const command of ["cd . && npm test", "cd ./self && npm test", "cd './s*' && npm test"])
+		strictEqual(named(command), "npm test", command);
+	rmSync(linked, { recursive: true, force: true });
 	// A line continuation separates nothing, so the continued check's red stands under its single-line name (x7-4).
 	deepStrictEqual(seal("!npm test \\\n  -- --reporter=dot"), [[], "unverified", ["npm test -- --reporter=dot"]]);
 	// A here-document body is data no continuation joins, so its quoted terminator still ends it in the check's name (S2).
