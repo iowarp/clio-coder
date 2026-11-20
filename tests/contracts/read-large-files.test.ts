@@ -4,6 +4,7 @@ import { appendFileSync, closeSync, openSync, statSync, truncateSync, writeFileS
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { configureGuardrails } from "../../src/core/guardrails.js";
+import { createConsultTool } from "../../src/tools/consult.js";
 import type { Observation } from "../../src/tools/observation.js";
 import { createHeadlessObservationPool } from "../../src/tools/observation.js";
 import {
@@ -533,6 +534,26 @@ describe("read windowed reader", () => {
 		const attended = await readTool.run({ path }, turn);
 		ok(attended.kind === "ok");
 		match(attended.output, /^\[observation budget exhausted for this turn before read reading /);
+
+		// Each case below drains a fresh run's pool with one read in batch-1, then probes the stop fact.
+		const drained = async (turnId: string) => {
+			const run = createHeadlessObservationPool();
+			const options = (batch: string) => ({ sessionId: "read-headless", turnId, ...run.invokeOptions(batch) });
+			const first = await readTool.run({ path }, options("batch-1"));
+			ok(first.kind === "ok" && first.output === "alpha\nbeta\n");
+			return { run, options };
+		};
+		// consult refunds its evidence reservation, yet a clean retry after a refusal still clears the stop.
+		const consult = createConsultTool({ systemOne: { ask: async () => null, routes: () => [] }, cwd: () => scratch.dir });
+		const question = { id: "q", kind: "yesNo", question: "Is it?", whenTrue: "it is", whenFalse: "it is not" };
+		const consulted = await drained(`${scratch.dir}#consult`);
+		const consultIn = (batch: string) =>
+			consult.run({ questions: [question], paths: ["headless.txt"] }, consulted.options(batch));
+		match(JSON.stringify(await consultIn("batch-1")), /did not run/);
+		strictEqual(consulted.run.stopped(), true);
+		const retried = await consultIn("batch-2");
+		ok(retried.kind === "ok" && retried.output.includes('"filesRead":["headless.txt"]'), JSON.stringify(retried));
+		strictEqual(consulted.run.stopped(), false);
 	});
 
 	it("charges parallel reads to the turn pool before any of them awaits", async () => {

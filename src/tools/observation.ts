@@ -610,9 +610,10 @@ function jsonStubBudgetNote(reservation: ObservationReservation): string {
 
 /**
  * A headless run's call that returned its result (CLI-P42): the run read something, and when what it returned left the
- * pool under one slice, the pool is spent and rolls at the next tool batch without waiting for a refusal.
+ * pool under one slice, the pool is spent and rolls at the next tool batch without waiting for a refusal. A call whose
+ * reservation is refunded rather than finalized (consult's evidence files) reports here itself, after the refund.
  */
-function reportPoolDelivery(reservation: ObservationReservation): void {
+export function reportPoolDelivery(reservation: ObservationReservation): void {
 	const poolEvent = reservation.poolEvent;
 	if (poolEvent === undefined || reservation.exhausted) return;
 	poolEvent("delivered");
