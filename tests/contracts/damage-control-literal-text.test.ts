@@ -69,7 +69,9 @@ it("BT-014: review round 2 execution probes retain parent outcomes", () => {
 		}
 });
 // Astra r2-8: a system-modify word is a system change where the line can run it, and text where it cannot.
-const SYSTEM_WORD_CASES: ReadonlyArray<[command: string, actionClass: "execute" | "system_modify"]> = [
+const SYSTEM_WORD_CASES: ReadonlyArray<
+	[command: string, actionClass: "execute" | "system_modify" | "git_destructive"]
+> = [
 	["rg sudo README.md", "execute"],
 	["grep -n doas docs/x.md", "execute"],
 	["git log --grep doas", "execute"],
@@ -109,6 +111,24 @@ const SYSTEM_WORD_CASES: ReadonlyArray<[command: string, actionClass: "execute" 
 	["rg $X sudo README.md", "system_modify"],
 	["git grep --open-files-in-pager=sudo x", "system_modify"],
 	["command sudo id", "system_modify"],
+	// SF-3: a script that only prints, an output-only assignment, a plain wrapper or a system path keeps the word text.
+	[`python -c "print('sudo')"`, "execute"],
+	["sed -n '/sudo/p' notes.md", "execute"],
+	["awk '/doas/ {print $1}' notes.md", "execute"],
+	["LC_ALL=C grep sudo notes.md", "execute"],
+	["/usr/bin/grep sudo notes.md", "execute"],
+	["timeout 5 stdbuf -oL rg sudo notes.md", "execute"],
+	['git log --grep "git reset --hard"', "execute"],
+	["git reset --hard", "git_destructive"],
+	["taskset -c 1 /usr/bin/git -C . reset --hard", "git_destructive"],
+	["sed 's/sudo/id/e' notes.md", "system_modify"],
+	["sed -n '/x/w out.sh' notes.md; sudo id", "system_modify"],
+	[`awk '{system("sudo id")}' notes.md`, "system_modify"],
+	[`python -c "exec('sudo')"`, "system_modify"],
+	[`python3 -c "print(open('x').read()); sudo"`, "system_modify"],
+	["PATH=. grep sudo notes.md", "system_modify"],
+	["./grep sudo notes.md", "system_modify"],
+	["env -S 'grep sudo' notes.md", "system_modify"],
 ];
 
 it("Astra r2-8: a system-modify word counts where the line can run it and not as text", () => {

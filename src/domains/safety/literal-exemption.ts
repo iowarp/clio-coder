@@ -1,3 +1,10 @@
+import {
+	awkOnlyPrints,
+	commandName,
+	pythonOnlyComputes,
+	sedOnlyPrints,
+	wrappedCommand,
+} from "../../core/command-words.js";
 import { isGitExecutable } from "./git-command-normalization.js";
 import type { ShellToken } from "./protected-artifacts.js";
 import {
@@ -42,6 +49,10 @@ export function inertQuotedMatch(command: string, pattern: RegExp, ruleId = ""):
 				(isGitExecutable(program ?? "") &&
 					["commit", "tag"].includes(words[1]?.value ?? "") &&
 					["-m", "--message"].includes(previous ?? "")) ||
+				// A history search pattern is matched against commits, never run (SF-3).
+				(isGitExecutable(program ?? "") &&
+					["log", "show", "shortlog"].includes(words[1]?.value ?? "") &&
+					["--grep", "--author", "--committer", "-S", "-G"].includes(previous ?? "")) ||
 				(["grep", "rg"].includes(program ?? "") && (i === 1 || previous === "-e" || previous === "--regexp"));
 			if (allowed) ranges.push([token.start + 1, token.end - 1]);
 		}
@@ -106,7 +117,66 @@ const GUARDED_TEXT_PROGRAMS: ReadonlyMap<string, (args: ReadonlyArray<string>) =
 	// `command -v` and `-V` describe a name; without them `command` runs it.
 	["command", (args: ReadonlyArray<string>) => args[0] === "-v" || args[0] === "-V"],
 	["git", (args: ReadonlyArray<string>) => gitTextSubcommand(args) !== null],
+	// A script that only prints: no `e`, `w` or in-place edit, no system(), pipe or redirection (SF-3).
+	["sed", sedOnlyPrints],
+	["awk", awkOnlyPrints],
+	["python", pythonOnlyComputes],
 ]);
+
+/** Spellings of one guarded program. */
+const PROGRAM_ALIASES: ReadonlyMap<string, string> = new Map([
+	["gawk", "awk"],
+	["mawk", "awk"],
+	["nawk", "awk"],
+	["python3", "python"],
+]);
+
+/**
+ * Wrappers that run the command after them unchanged, as the same user and
+ * with the same arguments (SF-3). sudo and doas change the user, and xargs
+ * adds arguments from its input, so a line holding one keeps its text.
+ */
+const TEXT_WRAPPERS: ReadonlySet<string> = new Set([
+	"env",
+	"nice",
+	"nohup",
+	"timeout",
+	"stdbuf",
+	"ionice",
+	"taskset",
+	"chrt",
+]);
+
+/** Assignments that only set the locale, time zone or terminal a program formats its output for. */
+const OUTPUT_ASSIGNMENT =
+	/^(?:LC_[A-Z]+|LANG|LANGUAGE|TZ|NO_COLOR|FORCE_COLOR|CLICOLOR(?:_FORCE)?|TERM|COLUMNS|LINES)=/u;
+
+/**
+ * The program a simple command's words run and the index of its word, past
+ * output-only assignments and the {@link TEXT_WRAPPERS}, or null when another
+ * assignment, an unreadable wrapper form or a program outside the system
+ * directories stands there: `PATH=. grep` and `./grep` may run anything.
+ */
+function textProgram(words: ReadonlyArray<string>): { name: string; index: number } | null {
+	let index = 0;
+	while (OUTPUT_ASSIGNMENT.test(words[index] ?? "")) index += 1;
+	for (let depth = 0; depth < 8; depth += 1) {
+		const word = words[index] ?? "";
+		if (word.includes("/") && !/^\/(?:usr\/)?bin\/[^/]+$/u.test(word)) return null;
+		const name = commandName(word);
+		if (!TEXT_WRAPPERS.has(name)) {
+			if (/^[A-Za-z_]\w*=/u.test(name)) return null;
+			return { name: PROGRAM_ALIASES.get(name) ?? (/^python3\.\d+$/u.test(name) ? "python" : name), index };
+		}
+		const inner = wrappedCommand(words.slice(index));
+		if (inner === undefined || inner === null || inner.length === 0) return null;
+		const next = words.length - inner.length;
+		if (words.slice(index + 1, next).some((arg) => /^[A-Za-z_]\w*=/u.test(arg) && !OUTPUT_ASSIGNMENT.test(arg)))
+			return null;
+		index = next;
+	}
+	return null;
+}
 
 /**
  * Every bash builtin and reserved word, with the zsh ones that define names.
@@ -180,12 +250,19 @@ function wordExpansion(raw: string): "literal" | "expanded" | "unsafe" {
  */
 function textCommand(segment: ReadonlyArray<ShellToken>, source: string, depth: number): "plain" | "git" | null {
 	const words = shellCommandWords(segment);
-	const head = words[0];
-	if (head === undefined) return null;
-	const guard = GUARDED_TEXT_PROGRAMS.get(head.value);
-	if (guard === undefined && !TEXT_PROGRAMS.has(head.value)) return null;
-	const args = words.slice(1).map((token) => token.value);
-	const messages = head.value === "git" && ["commit", "tag"].includes(gitTextSubcommand(args) ?? "");
+	const program = textProgram(words.map((token) => token.value));
+	if (program === null) return null;
+	const { name, index: programIndex } = program;
+	const head = words[programIndex];
+	const guard = GUARDED_TEXT_PROGRAMS.get(name);
+	if (head === undefined || (guard === undefined && !TEXT_PROGRAMS.has(name))) return null;
+	const args = words.slice(programIndex + 1).map((token) => token.value);
+	const messages = name === "git" && ["commit", "tag"].includes(gitTextSubcommand(args) ?? "");
+	// The program word and every word before it must be written out: an expansion could name another.
+	const leading = (token: ShellToken): boolean => {
+		const at = words.indexOf(token);
+		return at >= 0 && at <= programIndex;
+	};
 	for (const token of segment) {
 		if (token.operator) continue;
 		const raw = source.slice(token.start, token.end);
@@ -193,17 +270,17 @@ function textCommand(segment: ReadonlyArray<ShellToken>, source: string, depth: 
 		if (token.substitutions !== undefined) {
 			const script = token.substitutions[0] ?? "";
 			const previous = words[words.indexOf(token) - 1]?.value ?? "";
-			if (token.substitutions.length !== 1 || raw !== `"$(${script})"` || token === head) return null;
+			if (token.substitutions.length !== 1 || raw !== `"$(${script})"` || leading(token)) return null;
 			if (guard !== undefined && !(messages && /^(?:-[A-Za-z]*m|--message)$/u.test(previous))) return null;
 			if (depth >= TEXT_SCRIPT_MAX_DEPTH || !onlyTextCommands(script, depth + 1)) return null;
 			continue;
 		}
 		const expansion = wordExpansion(raw);
-		if (expansion === "unsafe" || (expansion === "expanded" && (guard !== undefined || token === head))) return null;
+		if (expansion === "unsafe" || (expansion === "expanded" && (guard !== undefined || leading(token)))) return null;
 	}
-	if (guard !== undefined) return guard(args) ? (head.value === "git" ? "git" : "plain") : null;
+	if (guard !== undefined) return guard(args) ? (name === "git" ? "git" : "plain") : null;
 	// `printf -v` assigns a shell variable.
-	return head.value === "printf" && args[0]?.startsWith("-v") === true ? null : "plain";
+	return name === "printf" && args[0]?.startsWith("-v") === true ? null : "plain";
 }
 
 interface TextLine {
@@ -265,11 +342,12 @@ function rebindsNames(segment: ReadonlyArray<ShellToken>, source: string): boole
  * Whether every match of a classifier pattern in a bash command is text given
  * to a program that only reads or prints it, so the word it names is never
  * run (Astra r2-8): `rg sudo README.md`, `git log --grep doas`,
- * `echo "pip install x" >> notes.md`. The pattern still reads the whole
- * command, and a match counts unless it lies inside a {@link textCommand}. A
- * wrapper, an interpreter, `sh -c`, `xargs`, `find -exec` and any program not
- * listed keep their text, so `env sudo x` and `python -c "...sudo..."` match
- * as before.
+ * `echo "pip install x" >> notes.md`, `LC_ALL=C /usr/bin/grep sudo f`,
+ * `python3 -c "print('sudo')"`. The pattern still reads the whole command,
+ * and a match counts unless it lies inside a {@link textCommand}. sudo, doas,
+ * xargs, `sh -c`, `find -exec`, interpreter code that reaches past printing
+ * and any program not listed keep their text, so `env sudo x` and
+ * `python -c "import os; os.system('sudo x')"` match as before.
  *
  * Text can still reach something that runs it. A line of nothing but text
  * commands is exempt. Beside any other command, a line that pipes or carries a
