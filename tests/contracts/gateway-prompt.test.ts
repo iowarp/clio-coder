@@ -124,7 +124,7 @@ describe("gateway in the session prompt", () => {
 				`attached schema bytes: total ${total}\n${sizes.map((entry) => `  ${entry.name}: ${entry.bytes}`).join("\n")}`,
 			);
 			// Fleet DESIGN open question 10: the always-attached finish declaration adds 648 bytes at its schema floor.
-			ok(total <= 10_532, `eight attached tools must stay within 10,532 bytes, down from ${ATTACHED_BUDGET_BYTES}`);
+			ok(total <= 10_476, `eight attached tools must stay within 10,476 bytes, down from ${ATTACHED_BUDGET_BYTES}`);
 			const gateway = sizes.find((entry) => entry.name === ToolNames.Gateway);
 			ok(gateway !== undefined && gateway.bytes < 2_048, `the gateway schema stays small: ${gateway?.bytes}`);
 			doesNotMatch(
