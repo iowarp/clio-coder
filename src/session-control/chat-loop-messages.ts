@@ -831,9 +831,9 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 
 export type { BackendCacheVerdict } from "../core/cache-telemetry.js";
 
-function classifyCacheUsage(input: number, cacheRead: number): BackendCacheVerdict {
-	if (cacheRead > 0) return input >= 2000 ? "partial" : "hot";
-	return input >= 2000 ? "cold" : "small";
+function classifyCacheUsage(uncachedPrefill: number, cacheRead: number): BackendCacheVerdict {
+	if (cacheRead > 0) return uncachedPrefill >= 2000 ? "partial" : "hot";
+	return uncachedPrefill >= 2000 ? "cold" : "small";
 }
 
 /**
@@ -841,16 +841,18 @@ function classifyCacheUsage(input: number, cacheRead: number): BackendCacheVerdi
  * usage reports no cache read but the serving backend supplies cache_n, use
  * that direct observation instead. This is the single definition of a cache
  * verdict; the ledger, the overlay, and any forensics reader all consume the
- * persisted value rather than reclassifying:
- *   hot      cacheRead > 0  and input < 2000   (prefix reused, prefill ≈ user text)
- *   partial  cacheRead > 0  and input >= 2000  (prefix reused up to a divergence point)
- *   cold     reported cacheRead == 0 and input >= 2000
+ * persisted value rather than reclassifying. Uncached prefill is normalized
+ * input plus cacheWrite, which already includes the 1h write bucket:
+ *   hot      cacheRead > 0  and prefill < 2000   (prefix reused, prefill ≈ user text)
+ *   partial  cacheRead > 0  and prefill >= 2000  (prefix reused up to a divergence point)
+ *   cold     reported cacheRead == 0 and prefill >= 2000
  *   unknown  no cache-read count was supplied on the wire
- *   small    cacheRead == 0 and input < 2000   (too small to judge)
+ *   small    cacheRead == 0 and prefill < 2000   (too small to judge)
  */
 export function backendCacheVerdict(
 	input: number,
 	cacheRead: number,
+	cacheWrite: number,
 	backend?: BackendCompletionTimings | null,
 	cacheReadField?: CacheReadField,
 ): BackendCacheVerdict {
@@ -859,7 +861,7 @@ export function backendCacheVerdict(
 		if (backendInput !== null) return classifyCacheUsage(backendInput, backend.cachedTokens);
 	}
 	if (cacheRead === 0 && cacheReadField === "omitted") return "unknown";
-	return classifyCacheUsage(input, cacheRead);
+	return classifyCacheUsage(input + cacheWrite, cacheRead);
 }
 
 /** Native stream-invocation latency, measured on one monotonic clock. */

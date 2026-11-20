@@ -932,6 +932,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					? backendCacheVerdict(
 							usage.input,
 							usage.cacheRead,
+							typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0,
 							backend,
 							usage.cacheReadField === "sent" || usage.cacheReadField === "omitted" ? usage.cacheReadField : undefined,
 						)
@@ -2270,8 +2271,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (isAssistant && usage && typeof usage === "object" && runFirstCallVerdict === null) {
 					const input = typeof usage.input === "number" ? usage.input : 0;
 					const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
+					const cacheWrite = typeof usage.cacheWrite === "number" ? usage.cacheWrite : 0;
 					const backendTimings = (enrichedEvent.message as { backendTimings?: BackendCompletionTimings }).backendTimings;
-					runFirstCallVerdict = backendCacheVerdict(input, cacheRead, backendTimings, usage.cacheReadField);
+					runFirstCallVerdict = backendCacheVerdict(input, cacheRead, cacheWrite, backendTimings, usage.cacheReadField);
 				}
 				// The background memory budget sizes a local step's deadline from the
 				// speed this endpoint measured on the operator's own turns.

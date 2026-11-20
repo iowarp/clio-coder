@@ -43,7 +43,7 @@ The read-model contract tests run the lie detectors of #434 over every DTO: L1 (
 | Term | Definition |
 | --- | --- |
 | Scope | The owner of a journal: a process, a session or a run. |
-| Uncached prefill | The prompt tokens a call prefilled rather than read from cache, `cache.uncachedPrefillTokens` on `call.settled`. It is the provider's `input` beside a measured cache read, or, for a llama.cpp server whose usage omits the read but whose timings report `cache_n`, the prompt the server evaluated (`prompt_n`) ([cache-physics.ts](../../src/domains/telemetry/cache-physics.ts)). Otherwise it is unknown, because `input` without a read is the whole prompt. |
+| Uncached prefill | The prompt tokens a call prefilled rather than read from cache, `cache.uncachedPrefillTokens` on `call.settled`. It is normalized `input` plus reported `cacheWrite` beside a measured cache read, or, for a llama.cpp server whose usage omits the read but whose timings report `cache_n`, the prompt the server evaluated (`prompt_n`) ([cache-physics.ts](../../src/domains/telemetry/cache-physics.ts)). Otherwise it is unknown, because `input` without a read is the whole prompt. |
 | Prompt tokens | `input + cacheRead + cacheWrite`. |
 | Context tokens | Prompt tokens at settle. |
 | Output | The provider's `output` count, which includes reasoning when the provider bundles it. `reasoning` is a sub-field and is never added twice. |

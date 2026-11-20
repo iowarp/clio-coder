@@ -34,6 +34,7 @@ import {
 	type ReceiptJournalRecord,
 	verifyAttemptReceipts,
 } from "../../src/session-control/attempt-receipt.js";
+import { backendCacheVerdict } from "../../src/session-control/chat-loop-messages.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
 import { type CaptureScript, chatHarness, startCaptureServer, wireElements } from "../harness/context-capture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -178,6 +179,26 @@ test("a server whose usage omits cache reads is judged by its own cache_n, and i
 	strictEqual(serverTimedUsage({ ...settlement, disposition: "sent_unsettled" }, backend), undefined);
 	const read = { ...settlement, usage: timed ?? null };
 	strictEqual(serverTimedUsage(read, backend), undefined, "a measured read is the provider's and stands");
+});
+
+test("cache writes count as uncached prefill (XR-42)", () => {
+	const cases = [
+		{ input: 4, cacheRead: 29_619, cacheWrite: 136_150 },
+		{ input: 4, cacheRead: 0, cacheWrite: 79_237 },
+		// The 1h bucket is already part of cacheWrite. Counting it twice here would make the hit partial.
+		{ input: 4, cacheRead: 29_619, cacheWrite: 1_000, cacheWrite1h: 1_000 },
+	];
+	const actual = cases.map((usage) => ({
+		verdict: backendCacheVerdict(usage.input, usage.cacheRead, usage.cacheWrite),
+		prefill: callSettlementFromMessage({ role: "assistant", stopReason: "stop", usage }, "free").cache
+			.uncachedPrefillTokens,
+	}));
+	const measured = (value: number) => ({ kind: "measured", value, source: "provider" });
+	deepStrictEqual(actual, [
+		{ verdict: "partial", prefill: measured(136_154) },
+		{ verdict: "cold", prefill: measured(79_241) },
+		{ verdict: "hot", prefill: measured(1_004) },
+	]);
 });
 
 test("an omitted cache read leaves the shortfall unknown and is never a break (#434)", () => {

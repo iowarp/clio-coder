@@ -4459,7 +4459,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				input,
 				cacheRead,
 				cacheWrite,
-				backendVerdict: backendCacheVerdict(input, cacheRead, backend, usage.cacheReadField),
+				backendVerdict: backendCacheVerdict(input, cacheRead, cacheWrite, backend, usage.cacheReadField),
 				observation,
 			};
 			if (backend !== undefined) promptCache.backend = { ...backend };
