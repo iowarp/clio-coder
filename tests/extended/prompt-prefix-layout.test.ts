@@ -234,10 +234,11 @@ describe("compiled main prompt: surface-gated sections", () => {
 });
 
 describe("typed prompt layers", () => {
-	it("keeps the exact constitutional UTF-8 prefix through scope, tool, memory and runtime changes", () => {
-		// Keep inline guidance selected across tool-support changes so this pins the same constitution (#249).
-		const coordinatorCapabilities = sessionInputs().coordinatorCapabilities.filter((name) => name !== "clio_docs");
-		const baseline = compile(table, compileInputs({ coordinatorCapabilities }));
+	it("keeps the exact constitutional UTF-8 prefix when its guidance is unchanged", () => {
+		// Keep inline guidance selected and both capability-gated rows absent across tool-support changes (#249).
+		const toolNames = FULL_TOOL_SURFACE.filter((name) => name !== "code_nav" && name !== "tasks");
+		const coordinatorCapabilities = [...toolNames, "clio_library", "git"];
+		const baseline = compile(table, compileInputs({ toolNames, coordinatorCapabilities }));
 		const prefix = baseline.stablePrefix;
 		ok(prefix);
 		const bytes = Buffer.from(baseline.systemPrompt).subarray(0, prefix.bytes);
@@ -249,7 +250,7 @@ describe("typed prompt layers", () => {
 			{ providerSupportsTools: false, toolNames: [] },
 			{ memorySection: "# Memory\n\n- newly approved fact", contextWindow: 65_536 },
 		] satisfies Partial<SessionPromptInputs>[]) {
-			const compiled = compile(table, compileInputs({ ...variant, coordinatorCapabilities }));
+			const compiled = compile(table, compileInputs({ toolNames, ...variant, coordinatorCapabilities }));
 			deepStrictEqual(compiled.stablePrefix, prefix);
 			deepStrictEqual(Buffer.from(compiled.systemPrompt).subarray(0, prefix.bytes), bytes);
 			ok(compiled.systemPromptHash !== baseline.systemPromptHash);

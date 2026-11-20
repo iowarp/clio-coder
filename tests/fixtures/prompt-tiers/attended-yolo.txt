@@ -152,6 +152,9 @@ Before a call you expect to need approval, say in one line why you are making it
 what you expect it to change. The approval card shows the operator the call and its
 effect, not your reason.
 
+- Three or more authorized steps: put them on the `tasks` board and close each when it is done.
+- Finding code, never through the shell: `code_nav` for a symbol, an outline or importers.
+
 
 
 # Reporting CLIO Coder's own problems

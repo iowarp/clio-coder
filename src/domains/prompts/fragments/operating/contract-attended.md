@@ -14,3 +14,6 @@ that task; session history alone is not a loop block.
 Before a call you expect to need approval, say in one line why you are making it and
 what you expect it to change. The approval card shows the operator the call and its
 effect, not your reason.
+
+- {tasks} Three or more authorized steps: put them on the `tasks` board and close each when it is done.
+- {code_nav} Finding code, never through the shell: `code_nav` for a symbol, an outline or importers.
