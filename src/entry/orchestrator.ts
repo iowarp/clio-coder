@@ -8,7 +8,7 @@ import { runHeadlessMainAgent } from "../cli/modes/print.js";
 import type { RunJsonMainSessionFrame } from "../cli/modes/run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "../cli/modes/run-json-schema.js";
 import { noteMainRunV2, startRunOutput, writeRunDiagnostic } from "../cli/run-failure.js";
-import { setToolEnvAutonomy } from "../core/bash-exec.js";
+import { setToolEnvAutonomy, startLoginEnvCapture } from "../core/bash-exec.js";
 import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
 import {
@@ -1564,6 +1564,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Every bash command this session runs carries its live level as an autonomy ceiling, and the contained pin while
 	// it runs contained yolo, so a clio-coder it starts cannot take more autonomy or less confinement than it has.
 	setToolEnvAutonomy(resolveEffectiveAutonomy, unattendedYolo);
+	void startLoginEnvCapture(); // the bash tool's login environment, shared by admission and every command
 	const skillDiscoveryEnabled = options.noSkills !== true && options.headless?.noSkills !== true;
 	let readySkillSnapshot: { key: string; count: number; skills: ReturnType<typeof modelVisibleSkills> } | undefined;
 	const getReadySkillCount = (): number => {

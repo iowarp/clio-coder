@@ -651,15 +651,21 @@ function quotedStep(step: string): string {
  * that file can add `--follow`, `--pre` and `-z`, which {@link parseRgArgs}
  * refuses on the command line. Admission judges from the command text alone,
  * so an rg that would run with a config is never recognized. The variable is
- * left in the tool environment so the operator's rg keeps working.
+ * left in the tool environment so the operator's rg keeps working. Until the
+ * login profile has been captured the tool environment is unknown, and rg is
+ * not recognized either, so admission judges it as it does any unrecognized command.
  */
 const RG_CONFIG_ENV = "RIPGREP_CONFIG_PATH";
 
-const RG_CONFIG_REASON = `ripgrep reads options from the file ${RG_CONFIG_ENV} names, which can add --follow, --pre or -z behind the command text; with it set rg is not recognized as read-only`;
+const RG_CONFIG_REASONS = {
+	set: `ripgrep reads options from the file ${RG_CONFIG_ENV} names, which can add --follow, --pre or -z behind the command text; with it set rg is not recognized as read-only`,
+	pending: `the login environment bash commands run with is still being captured, so whether ${RG_CONFIG_ENV} names a ripgrep config that can add --follow, --pre or -z is unknown; rg is not recognized as read-only until it is`,
+} as const;
 
 /** Why rg cannot be recognized under the tool environment it would run with, or null when it can. */
 function rgConfigRefusal(): string | null {
-	return probeToolEnv(RG_CONFIG_ENV) === "set" ? RG_CONFIG_REASON : null;
+	const probe = probeToolEnv(RG_CONFIG_ENV);
+	return probe === "unset" ? null : RG_CONFIG_REASONS[probe];
 }
 
 /** The reason a command with an `rg` step is not recognized because of the ripgrep config variable, or none. */
@@ -1277,20 +1283,24 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const line = floorLine(trees);
 		const scriptHit = (scan: ScriptHit | null) =>
 			scan === null ? null : held(scan, [`script ${scan.file} line ${scan.line}: ${scan.text.slice(0, 200)}`]);
+		const budgets: ScriptBudget[] = [];
+		const budgetFor = (): ScriptBudget => {
+			const budget = newScriptBudget();
+			budgets.push(budget);
+			return budget;
+		};
 		if (call.tool === ToolNames.RunScript && runsUnderShell(call.args)) {
 			const script = typeof call.args?.script === "string" ? call.args.script.trim() : "";
 			const file = script === "" ? null : scriptPath(script, cwd);
 			const hit = scriptHit(
-				file === null
-					? null
-					: scanNamedScript(file, line, callCwd, [callCwd], newScriptBudget(), { zero: file, source: file }),
+				file === null ? null : scanNamedScript(file, line, callCwd, [callCwd], budgetFor(), { zero: file, source: file }),
 			);
 			if (hit !== null) return hit;
 		}
 		if (call.tool === ToolNames.Bash && command !== null && hasUnparsedShellScript(command)) {
 			const cwds = commandMoveBases(command, callCwd);
 			const written = commandWrittenPaths(command, cwds ?? [callCwd], newWrittenPaths());
-			const budget = newScriptBudget();
+			const budget = budgetFor();
 			for (const script of shellScriptSources(command) ?? []) {
 				const hit = scriptHit(scanCommandScript(script, line, callCwd, cwds, written, budget));
 				if (hit !== null) return hit;
@@ -1302,12 +1312,21 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		if (command !== null && runs.length > 0) {
 			const cwds = commandMoveBases(command, callCwd);
 			const written = commandWrittenPaths(command, cwds ?? [callCwd], newWrittenPaths());
-			const budget = newScriptBudget();
+			const budget = budgetFor();
 			for (const run of runs) {
 				const source = { path: run.path, program: !run.sourced, sourced: run.sourced, stdin: false };
 				const hit = scriptHit(scanCommandScript(source, line, callCwd, cwds, written, budget, !run.sourced));
 				if (hit !== null) return hit;
 			}
+		}
+		// No copy the scan could read refuses, but a sourced name was looked up before the bash tool's PATH was known.
+		if (budgets.some((budget) => budget.pathPending)) {
+			return {
+				ruleId: LOGIN_PATH_PENDING_RULE_ID,
+				reasonCode: LOGIN_PATH_PENDING_RULE_ID,
+				reasons: [LOGIN_PATH_PENDING_REASON],
+				policySource: "builtin-classifier",
+			};
 		}
 		return null;
 	};
@@ -1958,6 +1977,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const { callCwd, judgedCommand } = commandUnderJudgment(call);
 		const base = baseDecision(call, classify(call), callCwd, posture, judgedCommand);
 		const floor = floorBlock(call, callCwd, judgedCommand);
+		// Unconfined yolo has no judge and admits every ask, so a call whose sourced file is unknown yet is held instead.
+		if (floor?.ruleId === LOGIN_PATH_PENDING_RULE_ID)
+			return gateDecision("block", base, { ...floor, reasons: [...floor.reasons, LOGIN_PATH_PENDING_YOLO_HOLD] });
 		if (floor !== null) return gateDecision("block", base, floor);
 		const held: string[] = [];
 		const required = yoloRequiredSandbox(rawCall, call, base.classification, judgedCommand, scope, () => ({
@@ -2016,15 +2038,24 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const classification = classify(call);
 		const { callCwd, judgedCommand } = commandUnderJudgment(call);
 		const floor = floorBlock(call, callCwd, judgedCommand);
-		if (floor !== null)
+		const pending = floor?.ruleId === LOGIN_PATH_PENDING_RULE_ID ? floor : null;
+		if (floor !== null && pending === null)
 			return gateDecision("block", baseDecision(call, classification, callCwd, posture, judgedCommand), floor);
 		const leavesSandbox = scope.sandbox && call.args?.unsandboxed === true && runsProjectCommand(call, judgedCommand);
-		return evaluateCall(rawCall, posture, {
+		const normal = evaluateCall(rawCall, posture, {
 			scratchRoots: effectiveScratchRoots(scope.scratchRoots, cwd),
 			contained: scope.sandbox && containedShellCall(call, classification, judgedCommand),
 			snapshots: scope.snapshots,
 			...(scope.readOnly === true ? { readOnly: true as const } : {}),
 			...(leavesSandbox ? { leavesSandbox: true as const } : {}),
+		});
+		// The floor could not place the sourced file yet: whatever the net would block stays blocked, and the rest asks, so
+		// the safety judge decides it rather than the launching PATH. A contained call stays contained if it runs.
+		if (pending === null || normal.kind === "block") return normal;
+		const { rejection: _rejection, match: _match, ...rest } = normal;
+		return gateDecision("ask", rest, {
+			...pending,
+			...(normal.shellSandbox !== undefined ? { shellSandbox: normal.shellSandbox } : {}),
 		});
 	};
 
@@ -3800,11 +3831,23 @@ const FLOOR_SCRIPT_NEST_DEPTH = 3;
 /** Bytes left for one command's scripts, shared by every file the scan follows. */
 interface ScriptBudget {
 	remaining: number;
+	/** Set when a sourced name with no slash was looked up while the bash tool's PATH was still being captured. */
+	pathPending: boolean;
 }
 
 function newScriptBudget(): ScriptBudget {
-	return { remaining: FLOOR_SCRIPT_SCAN_BYTES };
+	return { remaining: FLOOR_SCRIPT_SCAN_BYTES, pathPending: false };
 }
+
+/** Rule id of a call the floor could not place because a bare `source name` waits on the login capture. */
+const LOGIN_PATH_PENDING_RULE_ID = "login-path-pending";
+
+const LOGIN_PATH_PENDING_REASON =
+	"the login environment bash commands run with is still being captured, so which file a bare `source name` loads is unknown; the call is judged instead of resolved on the PATH Clio was launched with";
+
+/** What unconfined yolo, which has no judge, adds to that reason. */
+const LOGIN_PATH_PENDING_YOLO_HOLD =
+	"yolo holds it until the capture settles, which happens once per session; run it again in a moment";
 
 /** The floor a script line meets, judged from `callCwd` where the scan lost the line's own directory. */
 type FloorLine = (
@@ -3869,7 +3912,7 @@ function scanCommandScript(
 ): ScriptHit | null {
 	const operand = script.path;
 	if (/^[<>]\(/u.test(operand)) return null;
-	const candidates = scriptCandidates(operand, cwds, script.sourced);
+	const candidates = scriptCandidates(operand, cwds, budget, script.sourced);
 	if (candidates.includes(null)) return null;
 	// Each candidate is skipped on its own: rewriting one copy leaves another that bash may load (CLI-P31).
 	const files = (candidates as string[]).filter((file) => !isWrittenFirst(file, written) && regularFile(file));
@@ -3971,7 +4014,7 @@ function scanScript(
 			// Every candidate is scanned for a refusal from its own copy of the shell and of the writes so far; bash
 			// loads the first one not written first, so the script continues from that copy alone (CLI-P31).
 			let loaded: { shell: ScriptShell; written: WrittenPaths } | null = null;
-			for (const candidate of scriptCandidates(source.path, cwds, source.sourced)) {
+			for (const candidate of scriptCandidates(source.path, cwds, scan.budget, source.sourced)) {
 				if (candidate === null || isWrittenFirst(candidate, scan.written) || !regularFile(candidate)) continue;
 				const branch: ScriptScan = { ...scan, written: copyWrittenPaths(scan.written) };
 				// `source` runs in this shell; `bash`, `sh` and `exec` start a child that changes nothing here.
@@ -4003,16 +4046,23 @@ function scanScript(
  * a null candidate. A sourced name with no slash is looked up as bash does, on
  * every directory of the bash tool's PATH in its order and then the directory,
  * and every regular file found is a candidate, the one bash loads first (CLI-P31).
+ * While that PATH is still being captured only the directory is searched, and
+ * the budget records it.
  */
-function scriptCandidates(operand: string, cwds: ReadonlyArray<string> | null, sourced = false): Array<string | null> {
+function scriptCandidates(
+	operand: string,
+	cwds: ReadonlyArray<string> | null,
+	budget: ScriptBudget,
+	sourced = false,
+): Array<string | null> {
 	if (/[$`*?[{]/u.test(operand)) return [null];
 	if (operand === "~" || operand.startsWith("~/") || path.isAbsolute(operand)) return [scriptPath(operand, "/")];
 	const local = cwds === null ? [] : [...new Set(cwds.map((cwd) => path.resolve(cwd, operand)))];
 	const exists = (candidate: string) => statSync(candidate, { throwIfNoEntry: false }) !== undefined;
 	if (sourced && !operand.includes("/")) {
-		const found = [
-			...new Set([...sourceSearchDirs(cwds).map((dir) => path.join(dir, operand)), ...local].filter(regularFile)),
-		];
+		const dirs = sourceSearchDirs(cwds);
+		if (dirs === null) budget.pathPending = true;
+		const found = [...new Set([...(dirs ?? []).map((dir) => path.join(dir, operand)), ...local].filter(regularFile))];
 		if (found.length > 0) return found;
 	}
 	if (cwds === null) return [null];
@@ -4022,12 +4072,14 @@ function scriptCandidates(operand: string, cwds: ReadonlyArray<string> | null, s
 
 /**
  * The directories `source name` searches, in bash's order: the PATH bash commands run with, alone, so the first hit is
- * the file bash loads. Reading it settles the login capture, so a first call is judged on the PATH it will run with. A
+ * the file bash loads; null while the login capture that sets it is pending, never the PATH Clio was launched with. A
  * relative entry is placed from every directory the shell may be in.
  */
-function sourceSearchDirs(cwds: ReadonlyArray<string> | null): string[] {
+function sourceSearchDirs(cwds: ReadonlyArray<string> | null): string[] | null {
+	const searchPath = bashSearchPath();
+	if (searchPath === null) return null;
 	const dirs = new Set<string>();
-	for (const entry of bashSearchPath().split(path.delimiter)) {
+	for (const entry of searchPath.split(path.delimiter)) {
 		if (path.isAbsolute(entry)) dirs.add(entry);
 		else for (const cwd of cwds ?? []) dirs.add(path.resolve(cwd, entry));
 	}

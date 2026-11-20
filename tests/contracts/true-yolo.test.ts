@@ -723,17 +723,22 @@ test("a bare sourced name resolves on the PATH bash commands run with, from the 
 			`const cwd = ${JSON.stringify(cwd)};`,
 			"const engine = createSafetyPolicyEngine({ cwd, projectPolicy: loadProjectSafetyPolicy(cwd) });",
 			'const judge = (command) => engine.evaluate({ tool: "bash", args: { command } }, "yolo", { scratchRoots: [] });',
-			// The session's first bash call is judged while another one is already starting and an rg probe has run; the
-			// profile, which counts its runs, is sourced once, and that command runs on the PATH admission judged on.
+			'const atDefault = (command) => engine.evaluate({ tool: "bash", args: { command } }, undefined, { level: "default", scratchRoots: [], sandbox: false, snapshots: false });',
+			// The session's first bash call is judged while another one is already starting and an rg probe has run. The
+			// login PATH is not known yet, so the call goes to the safety judge (unconfined yolo, which has none, holds it)
+			// instead of being placed on this process's PATH. The profile, which counts its runs, is sourced once, and once
+			// it settled admission reads the PATH that command ran with.
 			"const running = runBashCommand('printf %s \"$PATH\"', { cwd });",
 			'judge("rg x shadow.sh");',
-			'const first = judge("source shadow.sh").reasonCode;',
-			"const judgedPath = bashSearchPath();",
+			'const asked = atDefault("source shadow.sh");',
+			'const held = judge("source shadow.sh");',
+			"const pending = [bashSearchPath(), asked.kind, asked.reasonCode, held.kind, held.reasonCode];",
 			"const ranPath = (await running).stdout;",
+			"const judgedPath = bashSearchPath();",
 			`process.env.PATH = ${JSON.stringify(`${other}:`)} + process.env.PATH;`,
-			`const codes = [first, ...${JSON.stringify(commands)}.map((command) => judge(command).reasonCode)];`,
+			`const codes = ${JSON.stringify(commands)}.map((command) => judge(command).reasonCode);`,
 			`const searchPath = (bashSearchPath() ?? "").split(":");`,
-			`process.stdout.write(JSON.stringify([ranPath === judgedPath, searchPath.includes(${JSON.stringify(bin)}), searchPath.includes(${JSON.stringify(other)}), ...codes]));`,
+			`process.stdout.write(JSON.stringify([...pending, ranPath === judgedPath, searchPath.includes(${JSON.stringify(bin)}), searchPath.includes(${JSON.stringify(other)}), ...codes]));`,
 		].join("\n"),
 	);
 	const out = execFileSync(process.execPath, ["--import", "tsx", probe], {
@@ -742,10 +747,15 @@ test("a bare sourced name resolves on the PATH bash commands run with, from the 
 		encoding: "utf8",
 	});
 	deepStrictEqual(JSON.parse(out), [
+		null,
+		"ask",
+		"login-path-pending",
+		"block",
+		"login-path-pending",
 		true,
 		true,
 		false,
-		...["first", ...commands].map(() => "yolo-floor:trust-authority"),
+		...commands.map(() => "yolo-floor:trust-authority"),
 	]);
 	strictEqual(readFileSync(join(home, "captures"), "utf8"), "x\n");
 });
