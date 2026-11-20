@@ -7,7 +7,7 @@ import { openLedger } from "../../src/domains/dispatch/state.js";
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-test("closed stdout quietly ends fleet journals, followers, and trace JSON with SIGPIPE status", async () => {
+test("closed stdout quietly ends fleet journals, followers, trace JSON, and root help with SIGPIPE status", async () => {
 	const env = await isolateClioEnv("cli-broken-pipe-");
 	try {
 		const rootId = "fleet-closed-pipe";
@@ -35,6 +35,13 @@ test("closed stdout quietly ends fleet journals, followers, and trace JSON with 
 			["fleet", "code-steps", rootId, "--json"],
 			["agents"],
 			["paths"],
+			// Root help and version answer before dispatch; they end as subcommand help does (FX-23).
+			["agents", "--help"],
+			["--help"],
+			["-h"],
+			["--help", "--all"],
+			["help"],
+			["--version"],
 		]) {
 			const child = spawn(process.execPath, [resolve("dist/cli/index.js"), ...args], {
 				cwd: process.cwd(),

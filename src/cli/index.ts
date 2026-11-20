@@ -273,11 +273,14 @@ async function main(argv: string[]): Promise<number> {
 	// Only flags before the subcommand are global: `run -- -v` is a prompt and
 	// `paths -v` is the command's own unknown flag, not a version request.
 	const root = new Set(rootFlags);
+	// The root answers write before `dispatch`, so they guard their own pipe; `help` reaches this path in a child.
 	if (root.has("--help") || root.has("-h")) {
+		installHumanStdoutHandler("help", []);
 		process.stdout.write(root.has("--all") ? await fullHelpText() : HELP);
 		return 0;
 	}
 	if (root.has("--version") || root.has("-v")) {
+		installHumanStdoutHandler("version", []);
 		const { runVersionCommand } = await import("./version.js");
 		return runVersionCommand();
 	}
