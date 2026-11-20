@@ -21,24 +21,27 @@ import { normalizeNumericTolerance } from "../tools/verify/numeric.js";
 import { type DeclaredReproduce, normalizeReproduce } from "../tools/verify/reproduce.js";
 import { discoverDeclaredChecksAtRoot, recordPerfBaseline } from "../tools/verify/scripts.js";
 import { printError, printOk } from "./argv.js";
+import { jsonDocument, writeCliFailure } from "./kit/json-out.js";
+import type { ErrorSlug } from "./kit/slugs.js";
 import { runVerifiersInspect } from "./verifiers-inspect.js";
 
 const HELP = `Project verifier authoring
 
 Usage:
-  clio-coder verifiers discover
+  clio-coder verifiers discover [--json]
   clio-coder verifiers inspect --json
   clio-coder verifiers author [--exclude <id>] [--rename <old>=<new>] [--dry-run <id>] [--yes]
-  clio-coder verifiers validate
-  clio-coder verifiers dry-run <id>
+  clio-coder verifiers validate [--json]
+  clio-coder verifiers dry-run <id> [--json]
   clio-coder verifiers add --id <id> --description <text> --command <json-argv> [fields] [--yes]
   clio-coder verifiers edit <id> [--description <text>] [--command <json-argv>] [fields] [--yes]
   clio-coder verifiers rename <old> <new> [--yes]
   clio-coder verifiers remove <id> [--yes]
-  clio-coder verifiers baseline <id>
+  clio-coder verifiers baseline <id> [--json]
 
 Fields:
-  --cwd <path>            repository-relative working directory (default .)
+  --check-cwd <path>      repository-relative directory the check runs in (default .);
+                          --cwd is its deprecated spelling
   --timeout-ms <number>   bounded timeout in milliseconds (default 120000)
   --tags <a,b>            comma-separated catalog tags
   --kind <kind>           command (default), numeric-compare, perf-budget, or reproduce
@@ -72,6 +75,7 @@ const VALUE_OPTIONS = new Set([
 	"--id",
 	"--description",
 	"--command",
+	"--check-cwd",
 	"--cwd",
 	"--timeout-ms",
 	"--tags",
@@ -95,9 +99,11 @@ const VALUE_OPTIONS = new Set([
 interface ParsedAuthoringArgs {
 	yes: boolean;
 	help: boolean;
+	json: boolean;
 	positional: string[];
 	values: Map<string, string[]>;
 	error?: string;
+	errorSlug?: ErrorSlug;
 }
 
 function parseAuthoringArgs(argv: ReadonlyArray<string>): ParsedAuthoringArgs {
@@ -105,8 +111,10 @@ function parseAuthoringArgs(argv: ReadonlyArray<string>): ParsedAuthoringArgs {
 	const values = new Map<string, string[]>();
 	let yes = false;
 	let help = false;
+	const json = argv.includes("--json");
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
+		if (arg === "--json") continue;
 		if (arg === "--yes") {
 			yes = true;
 			continue;
@@ -116,10 +124,11 @@ function parseAuthoringArgs(argv: ReadonlyArray<string>): ParsedAuthoringArgs {
 			continue;
 		}
 		if (arg?.startsWith("--") === true) {
-			if (!VALUE_OPTIONS.has(arg)) return { yes, help, positional, values, error: `unknown option: ${arg}` };
+			if (!VALUE_OPTIONS.has(arg))
+				return { yes, help, json, positional, values, error: `unknown flag: ${arg}`, errorSlug: "unknown_flag" };
 			const value = argv[index + 1];
 			if (value === undefined || value.startsWith("--")) {
-				return { yes, help, positional, values, error: `${arg} requires a value` };
+				return { yes, help, json, positional, values, error: `${arg} requires a value` };
 			}
 			const prior = values.get(arg) ?? [];
 			prior.push(value);
@@ -129,7 +138,22 @@ function parseAuthoringArgs(argv: ReadonlyArray<string>): ParsedAuthoringArgs {
 		}
 		if (arg !== undefined) positional.push(arg);
 	}
-	return { yes, help, positional, values };
+	return { yes, help, json, positional, values };
+}
+
+/**
+ * The check's directory, from `--check-cwd` (C10: `--cwd` means the process directory everywhere else) or its
+ * deprecated spelling `--cwd`, which still works through 0.8.x with one stderr note.
+ */
+function checkCwd(parsed: ParsedAuthoringArgs): string | undefined | Error {
+	const current = oneValue(parsed, "--check-cwd");
+	const deprecated = oneValue(parsed, "--cwd");
+	if (current !== undefined && deprecated !== undefined) return new Error("give --check-cwd or --cwd, not both");
+	if (deprecated !== undefined) {
+		process.stderr.write("clio-coder verifiers: --cwd is deprecated; use --check-cwd\n");
+		return deprecated;
+	}
+	return current;
 }
 
 function oneValue(parsed: ParsedAuthoringArgs, option: string): string | undefined {
@@ -375,13 +399,15 @@ function addRevision(parsed: ParsedAuthoringArgs): VerifierRevision | Error {
 	if (timeoutMs instanceof Error) return timeoutMs;
 	const kindFields = kindFieldsFromArgs(parsed);
 	if (kindFields instanceof Error) return kindFields;
+	const cwd = checkCwd(parsed);
+	if (cwd instanceof Error) return cwd;
 	return {
 		kind: "add",
 		check: {
 			id,
 			description,
 			command,
-			cwd: oneValue(parsed, "--cwd") ?? ".",
+			cwd: cwd ?? ".",
 			timeoutMs,
 			tags: tags(oneValue(parsed, "--tags")),
 			...kindFields,
@@ -401,7 +427,8 @@ function editRevision(parsed: ParsedAuthoringArgs): VerifierRevision | Error {
 		if (command instanceof Error) return command;
 		changes.command = command;
 	}
-	const cwd = oneValue(parsed, "--cwd");
+	const cwd = checkCwd(parsed);
+	if (cwd instanceof Error) return cwd;
 	if (cwd !== undefined) changes.cwd = cwd;
 	const timeoutValue = oneValue(parsed, "--timeout-ms");
 	if (timeoutValue !== undefined) {
@@ -450,7 +477,12 @@ function dryRunCheck(id: string): ReturnType<typeof verifyTool.run> {
 	return verifyTool.run({ check: id }, shellSandbox !== undefined ? { shellSandbox } : undefined);
 }
 
-function printDryRun(id: string, result: Awaited<ReturnType<typeof verifyTool.run>>): number {
+function printDryRun(id: string, result: Awaited<ReturnType<typeof verifyTool.run>>, json = false): number {
+	if (json) {
+		const outcome = result.kind === "error" ? { ok: false, error: result.message } : { ok: true, output: result.output };
+		process.stdout.write(`${JSON.stringify(jsonDocument({ check: id, ...outcome }))}\n`);
+		return result.kind === "error" ? 1 : 0;
+	}
 	if (result.kind === "error") {
 		printError(`dry-run '${id}' failed: ${result.message}`);
 		return 1;
@@ -503,43 +535,62 @@ async function executeWorkflow(
 	return code;
 }
 
-async function baselineCommand(id: string | undefined): Promise<number> {
-	if (id === undefined) {
-		printError("baseline requires a check ID");
-		return 2;
-	}
+async function baselineCommand(id: string | undefined, json: boolean): Promise<number> {
+	const fail = (slug: ErrorSlug, message: string, code: number): number => {
+		writeCliFailure({ path: ["verifiers", "baseline"], slug, message, json });
+		return code;
+	};
+	if (id === undefined) return fail("usage", "baseline requires a check ID", 2);
 	const loaded = loadProjectVerifierCatalog(process.cwd());
-	if (!loaded.ok) {
-		printError(`production catalog parser rejected ${loaded.reason}`);
-		return 1;
-	}
+	if (!loaded.ok) return fail("not_configured", `production catalog parser rejected ${loaded.reason}`, 1);
 	const check = loaded.source?.checks.find((candidate) => candidate.id === id);
-	if (check === undefined) {
-		printError(`no catalog check '${id}' in ${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH}`);
-		return 1;
-	}
+	if (check === undefined)
+		return fail("not_found", `no catalog check '${id}' in ${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH}`, 1);
 	const recorded = await recordPerfBaseline(check);
-	if (!recorded.ok) {
-		printError(`baseline '${id}' not recorded: ${recorded.message}`);
-		return 1;
+	if (!recorded.ok) return fail("io", `baseline '${id}' not recorded: ${recorded.message}`, 1);
+	if (json) {
+		process.stdout.write(
+			`${JSON.stringify(jsonDocument({ check: id, wallTimeMs: recorded.wallTimeMs, path: recorded.path }))}\n`,
+		);
+		return 0;
 	}
 	printOk(`recorded baseline for '${id}': ${Math.round(recorded.wallTimeMs)}ms at ${recorded.path}`);
 	return 0;
 }
 
-async function discoverCommand(): Promise<number> {
+async function discoverCommand(json: boolean): Promise<number> {
 	const discovery = discoverVerifierAuthoring();
 	if (!discovery.ok) {
-		printError(discovery.reason);
+		if (json)
+			writeCliFailure({ path: ["verifiers", "discover"], slug: "not_configured", message: discovery.reason, json });
+		else printError(discovery.reason);
 		process.stderr.write(`${discovery.manualEntry}\n`);
 		return 1;
+	}
+	if (json) {
+		process.stdout.write(`${JSON.stringify(jsonDocument({ ok: true, draft: createVerifierDraft(discovery) }))}\n`);
+		return 0;
 	}
 	process.stdout.write(`${previewVerifierDraft(createVerifierDraft(discovery))}\n`);
 	return 0;
 }
 
-function validateCommand(): number {
+function validateCommand(json: boolean): number {
 	const loaded = loadProjectVerifierCatalog(process.cwd());
+	if (json) {
+		// The verdict is the document (C19); the exit stays what the text form returns.
+		const path = PROJECT_VERIFIER_CATALOG_RELATIVE_PATH;
+		const discovery = loaded.ok && loaded.source !== null ? discoverDeclaredChecksAtRoot(process.cwd(), undefined) : null;
+		const document = !loaded.ok
+			? { ok: false, path, exists: true, reason: `production catalog parser rejected ${loaded.reason}` }
+			: loaded.source === null
+				? { ok: true, path, exists: false, checks: 0 }
+				: discovery !== null && !discovery.ok
+					? { ok: false, path, exists: true, reason: `check discovery is blocked: ${discovery.reason}` }
+					: { ok: true, path, exists: true, checks: loaded.source.checks.length };
+		process.stdout.write(`${JSON.stringify(jsonDocument(document))}\n`);
+		return document.ok ? 0 : 1;
+	}
 	if (!loaded.ok) {
 		printError(`production catalog parser rejected ${loaded.reason}`);
 		return 1;
@@ -569,44 +620,48 @@ export async function runVerifiersCommand(argv: string[]): Promise<number> {
 	// authoring flag can reach it, and no flag it does not name can be spent on it.
 	if (argv[0] === "inspect") return runVerifiersInspect(argv.slice(1));
 	const parsed = parseAuthoringArgs(argv);
-	if (parsed.error !== undefined) {
-		printError(parsed.error);
-		process.stderr.write(HELP);
+	const command = parsed.positional[0];
+	const known = ["discover", "validate", "baseline", "dry-run", "author", "add", "edit", "rename", "remove"];
+	const path = command !== undefined && known.includes(command) ? ["verifiers", command] : ["verifiers"];
+	const usage = (message: string, slug: ErrorSlug = "usage"): number => {
+		// One diagnostic and a pointer to help, never the whole page (C3).
+		writeCliFailure({ path, slug, message, json: parsed.json });
 		return 2;
-	}
-	if (parsed.help || parsed.positional.length === 0) {
+	};
+	if (parsed.error !== undefined) return usage(parsed.error, parsed.errorSlug);
+	if (parsed.help) {
 		process.stdout.write(HELP);
 		return 0;
 	}
-	const command = parsed.positional[0];
-	if (command === "discover") return discoverCommand();
-	if (command === "validate") return validateCommand();
-	if (command === "baseline") return baselineCommand(parsed.positional[1]);
+	if (command === undefined) {
+		if (parsed.json) return usage("name a subcommand");
+		process.stdout.write(HELP);
+		return 0;
+	}
+	// The authoring workflow prints a preview for review and has no document form, so --json there is refused
+	// rather than ignored (C5).
+	if (parsed.json && !["discover", "validate", "baseline", "dry-run"].includes(command))
+		return usage(
+			`--json is not supported by verifiers ${known.includes(command) ? command : "<command>"}`,
+			"unknown_flag",
+		);
+	if (command === "discover") return discoverCommand(parsed.json);
+	if (command === "validate") return validateCommand(parsed.json);
+	if (command === "baseline") return baselineCommand(parsed.positional[1], parsed.json);
 	if (command === "dry-run") {
 		const id = parsed.positional[1];
-		if (id === undefined) {
-			printError("dry-run requires a check ID");
-			return 2;
-		}
-		return printDryRun(id, await dryRunCheck(id));
+		if (id === undefined) return usage("dry-run requires a check ID");
+		return printDryRun(id, await dryRunCheck(id), parsed.json);
 	}
 	if (command === "author") {
 		const revisions = authorRevisions(parsed);
-		if (revisions instanceof Error) {
-			printError(revisions.message);
-			return 2;
-		}
+		if (revisions instanceof Error) return usage(revisions.message);
 		return executeWorkflow(parsed, { includeProposals: true, revisions });
 	}
-	if (["add", "edit", "rename", "remove"].includes(command ?? "")) {
+	if (["add", "edit", "rename", "remove"].includes(command)) {
 		const revision = mutationRevision(parsed);
-		if (revision instanceof Error) {
-			printError(revision.message);
-			return 2;
-		}
+		if (revision instanceof Error) return usage(revision.message);
 		return executeWorkflow(parsed, { includeProposals: false, revisions: [revision] });
 	}
-	printError(`unknown verifiers command: ${command}`);
-	process.stderr.write(HELP);
-	return 2;
+	return usage(`unknown verifiers command: ${command}`, "unknown_command");
 }
