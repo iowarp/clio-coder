@@ -6,7 +6,7 @@ import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { buildSafeToolEnv } from "../../core/safe-exec.js";
-import type { UnixSocketMode } from "../../core/sandbox/types.js";
+import type { SandboxMode, UnixSocketMode } from "../../core/sandbox/types.js";
 import type { EmbeddingResponse } from "../providers/embedding/types.js";
 import { resolveExtensionEntrypoint } from "./command-schema.js";
 import { parseExtensionManifest } from "./discovery.js";
@@ -63,6 +63,8 @@ export interface RuntimeProcessV2Options {
 	onState?: () => void;
 	/** The operator's `safety.sandboxUnixSockets` when this runtime starts; absent blocks them. */
 	unixSockets?: UnixSocketMode;
+	/** The operator's `safety.sandbox` when this runtime starts; `required` refuses an unconfined launch. */
+	sandboxMode?: SandboxMode;
 	/** The session is read-only: the runtime may write its store but no user path (readOnlyRuntimeDeclaration). */
 	readOnly?: boolean;
 }
@@ -220,22 +222,30 @@ export class ExtensionRuntimeProcessV2 {
 		// A rejected stage is reported through `failure`; a caller that never awaits it must not crash the host.
 		this.staged.catch(() => {});
 		const bootstrap = path.join(resolvePackageRoot(), "src/domains/extensions/runtime-child-v2.mjs");
-		const launch = planExtensionLaunch({
-			declaration: confined,
-			roots: { workspace: options.snapshot.workspace, packageCopy: copy, storeDir: options.storeDir, bootstrap },
-			argv: [
-				process.execPath,
-				...runtimePermissionArgs(confined, {
+		let launch: ReturnType<typeof planExtensionLaunch>;
+		try {
+			launch = planExtensionLaunch({
+				declaration: confined,
+				roots: { workspace: options.snapshot.workspace, packageCopy: copy, storeDir: options.storeDir, bootstrap },
+				argv: [
+					process.execPath,
+					...runtimePermissionArgs(confined, {
+						bootstrap,
+						packageCopy: copy,
+						workspace: options.snapshot.workspace,
+						storeDir: options.storeDir,
+						home: os.homedir(),
+					}),
 					bootstrap,
-					packageCopy: copy,
-					workspace: options.snapshot.workspace,
-					storeDir: options.storeDir,
-					home: os.homedir(),
-				}),
-				bootstrap,
-			],
-			...(options.unixSockets !== undefined ? { unixSockets: options.unixSockets } : {}),
-		});
+				],
+				...(options.unixSockets !== undefined ? { unixSockets: options.unixSockets } : {}),
+				...(options.sandboxMode !== undefined ? { sandboxMode: options.sandboxMode } : {}),
+			});
+		} catch (error) {
+			rmSync(temporary, { recursive: true, force: true });
+			releaseDeclaredWriteRoots(this.createdRoots);
+			throw error;
+		}
 		this.sandbox = launch.report;
 		// The parent never forwards child stdout/stderr to a terminal or protocol stream.
 		this.child = spawn(launch.file, launch.args, {
