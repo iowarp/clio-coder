@@ -6,7 +6,9 @@
  *
  * The ledger holds an in-memory mirror of runs.json. `create()` and `update()`
  * mutate memory only; `persist()` writes the settings-bounded ring (default
- * 1000) atomically via safeResourceWriteAsync.
+ * 1000) atomically via safeResourceWriteAsync. Dispatch persists on lifecycle
+ * and heartbeat transitions only, never for a live worker's spend: that lives
+ * in the run's journal, which every reader in another process folds (FL-24).
  *
  * This module owns persistence. The dispatch extension wires worker spawning,
  * cross-domain coordination, and event emission around this ledger. A finished

@@ -504,7 +504,11 @@ export interface RunEnvelope {
 	heartbeatAt: string | null;
 	sessionId: string | null;
 	cwd: string;
-	/** The run's spend so far, one fact per quantity; it becomes the run.settled spend when the run ends (#434). */
+	/**
+	 * The run's spend so far, one fact per quantity; it becomes the run.settled spend when the run ends (#434). The
+	 * owner's in-memory row tracks its meter, but runs.json takes it only at lifecycle writes, so a reader in another
+	 * process folds a live run's spend from the run's journal instead (FL-24).
+	 */
 	spend: RunUsageFacts;
 	/** The same spend as sums over the run's calls, what a total across runs adds (#434). */
 	spendSums: RunSpendSums;
