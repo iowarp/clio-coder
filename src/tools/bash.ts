@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import {
 	BASH_HARD_CAP_BYTES,
 	type BashCommandResult,
+	type BashTimeoutLimit,
 	bashSecretValues,
 	combineBashOutput,
 	combineLiveBashOutput,
@@ -351,15 +352,17 @@ const TEST_RUN_COMMAND =
  */
 function bashTimeoutStatus(
 	command: string,
-	timeoutMs: number,
+	limit: BashTimeoutLimit,
 	printedNothing: boolean,
 	lastActiveTest: string | null,
 	requestedMs: number,
 ): string {
 	let status =
-		requestedMs > timeoutMs
-			? `bash: this command reached the run's --timeout deadline (${timeoutWords(timeoutMs)} left of the ${timeoutWords(requestedMs)} requested) and was stopped.`
-			: `bash: this command ran past its own ${timeoutWords(timeoutMs)} timeout and was stopped.`;
+		limit.by === "timeout"
+			? `bash: this command ran past its own ${timeoutWords(limit.ms)} timeout and was stopped.`
+			: limit.ms === 0
+				? `bash: the run's --timeout deadline had passed before this command started, so it did not run (${timeoutWords(requestedMs)} requested).`
+				: `bash: this command reached the run's --timeout deadline (${timeoutWords(limit.ms)} left of the ${timeoutWords(requestedMs)} requested) and was stopped.`;
 	if (printedNothing)
 		status += " It printed nothing before it was stopped (its output went elsewhere, or it was waiting).";
 	status += " The bash tool still works; the next call runs normally.";
@@ -445,10 +448,8 @@ export const bashTool: ToolSpec = {
 		}
 		const requested = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : 300_000;
 		// A headless run's --timeout bounds every wait it starts: no shell wait outlives the run (XR-12).
-		// The executor arms its timer against the deadline itself, after spawn preparation.
+		// The executor arms its timer against the deadline itself, after spawn preparation, and reports which limit armed it.
 		const deadlineAt = runDeadlineAt();
-		const runLeft = deadlineAt === null ? null : deadlineAt - performance.now();
-		const timeout = runLeft === null ? requested : Math.min(requested, Math.max(1, Math.ceil(runLeft)));
 		try {
 			// Credentials are masked where output is shaped, by known value and by shape, so model context, the cap result
 			// and any offload all read the masked text. Each stream is masked once as it grows, and a progress frame holds
@@ -458,7 +459,7 @@ export const bashTool: ToolSpec = {
 			const stderrMask = new CumulativeOutputMask(secrets);
 			const runOptions: Parameters<typeof runBashCommand>[1] = {
 				cwd,
-				timeoutMs: timeout,
+				timeoutMs: requested,
 				...(deadlineAt === null ? {} : { deadlineAt }),
 				...(options?.signal === undefined ? {} : { signal: options.signal }),
 				...(options?.shellSandbox === undefined ? {} : { shellSandbox: options.shellSandbox }),
@@ -485,6 +486,7 @@ export const bashTool: ToolSpec = {
 				stderr: stderrMask.final(captured.stderr, ending),
 			};
 			const { error, aborted, timedOut, outputCapped } = result;
+			const limit: BashTimeoutLimit = captured.timeoutLimit ?? { by: "timeout", ms: requested };
 			const rawOutput = combineBashOutput(result);
 			// Command output cannot speak in the host's voice: a `[middleware:` line or a reminder tag in it is made inert,
 			// so only the notes appended below read as host notes.
@@ -492,7 +494,7 @@ export const bashTool: ToolSpec = {
 			const output = shown.trim();
 			if (aborted) {
 				const abortCause = options?.abortCause?.() ?? null;
-				const status = bashAbortStatus(elapsedMs, timeout, abortCause);
+				const status = bashAbortStatus(elapsedMs, limit.ms, abortCause);
 				return {
 					kind: "error",
 					message: output.length > 0 ? `${output}\n\n${status}` : status,
@@ -501,7 +503,7 @@ export const bashTool: ToolSpec = {
 			}
 			if (timedOut) {
 				const lastActiveTest = lastActivePytestTest(args.command, rawOutput);
-				const status = bashTimeoutStatus(args.command, timeout, output.length === 0, lastActiveTest, requested);
+				const status = bashTimeoutStatus(args.command, limit, output.length === 0, lastActiveTest, requested);
 				return {
 					kind: "error",
 					message: output.length > 0 ? `${output}\n\n${status}` : status,

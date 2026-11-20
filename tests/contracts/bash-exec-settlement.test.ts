@@ -1,6 +1,6 @@
 import { deepStrictEqual, doesNotThrow, match, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -162,11 +162,30 @@ describe("bash abort settlement (#445)", () => {
 			if (result.kind !== "error") return;
 			strictEqual(result.details?.outcome, "timeout");
 			match(result.message, /run's --timeout/u);
-			// The executor arms its timer against the deadline itself, after spawn preparation.
+			// The executor arms its timer against the deadline itself, after spawn preparation, and names the limit it armed.
 			const raw = await runBashCommand("sleep 3", { timeoutMs: 604_800_000, deadlineAt: performance.now() + 300 });
 			strictEqual(raw.timedOut, true);
+			strictEqual(raw.timeoutLimit?.by, "run-deadline");
+			const own = await runBashCommand("sleep 3", { timeoutMs: 200, deadlineAt: performance.now() + 600_000 });
+			strictEqual(own.timeoutLimit?.by, "timeout");
 		} finally {
 			setRunDeadline(null);
+		}
+		// A deadline already passed before spawn starts no command.
+		const dir = mkdtempSync(join(tmpdir(), "clio-coder-bash-expired-"));
+		const marker = join(dir, "ran");
+		try {
+			const raw = await runBashCommand(`touch '${marker}'`, { timeoutMs: 60_000, deadlineAt: performance.now() - 1 });
+			strictEqual(raw.timedOut, true);
+			deepStrictEqual(raw.timeoutLimit, { by: "run-deadline", ms: 0 });
+			setRunDeadline(performance.now() - 1);
+			const result = await bashTool.run({ command: `touch '${marker}'` }, {});
+			strictEqual(result.kind, "error");
+			if (result.kind === "error") match(result.message, /before this command started, so it did not run/u);
+			strictEqual(existsSync(marker), false);
+		} finally {
+			setRunDeadline(null);
+			rmSync(dir, { recursive: true, force: true });
 		}
 	});
 
