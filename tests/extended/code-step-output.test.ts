@@ -5,14 +5,18 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	type PathLike,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
+import fsPromises from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, it } from "node:test";
+import { afterEach, it, mock } from "node:test";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { mainSandboxPolicy } from "../../src/core/sandbox/main-session.js";
 import { parseCodeReport } from "../../src/domains/agents/result-contract.js";
@@ -25,14 +29,49 @@ import {
 	workspaceChangeSnapshot,
 	writeCommitBaseline,
 } from "../../src/domains/dispatch/code-step.js";
-import { changedCheckoutPaths, snapshotCheckoutSince, takeCheckoutBaseline } from "../../src/tools/checkout-changes.js";
+import {
+	changedCheckoutPaths,
+	RACY_DIGEST_MAX_FILES,
+	snapshotCheckoutSince,
+	takeCheckoutBaseline,
+} from "../../src/tools/checkout-changes.js";
 import { resolveTestFileChecks } from "../../src/tools/verify/test-files.js";
 
 const roots: string[] = [];
 
 afterEach(() => {
+	mock.restoreAll();
+	syncBuiltinESMExports();
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+
+function checkoutFixture(prefix: string): string {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+	roots.push(root);
+	execFileSync("git", ["-C", root, "init", "-q"]);
+	return root;
+}
+
+/**
+ * Reports `ctimeNs` for the named files as a filesystem whose change clock did not move between two writes, and
+ * records the names of files read whole from then on.
+ */
+function pinChangeTime(root: string, ctimeNs: bigint, names: readonly string[]): string[] {
+	const pinned = new Set(names.map((name) => join(root, name)));
+	const reads: string[] = [];
+	const { lstat, readFile } = fsPromises;
+	mock.method(fsPromises, "lstat", (async (path: PathLike, options?: { bigint?: boolean }) => {
+		const stat = await lstat(path, { bigint: options?.bigint === true });
+		if (pinned.has(String(path))) Object.assign(stat, { ctimeNs });
+		return stat;
+	}) as typeof lstat);
+	mock.method(fsPromises, "readFile", (async (path: PathLike) => {
+		reads.push(String(path).slice(root.length + 1));
+		return readFile(path);
+	}) as typeof readFile);
+	syncBuiltinESMExports();
+	return reads;
+}
 
 async function run(script: string) {
 	const root = mkdtempSync(join(tmpdir(), "clio-coder-code-step-output-"));
@@ -340,7 +379,7 @@ it("stages everything since the last commit point, including an ignored required
 	match(outcome.report.checks[0]?.evidence ?? "", /1 other change\(s\) left out of this commit: operator-scratch\.txt/);
 });
 
-it("a run's checkout delta reads only files whose stat moved, and concurrent spawns share one baseline", async () => {
+it("a run's checkout delta reads only files whose stat moved or that sat in the tick window, and concurrent spawns share one baseline", async () => {
 	const root = mkdtempSync(join(tmpdir(), "clio-coder-checkout-delta-"));
 	roots.push(root);
 	execFileSync("git", ["-C", root, "init", "-q"]);
@@ -363,4 +402,62 @@ it("a run's checkout delta reads only files whose stat moved, and concurrent spa
 	const after = await snapshotCheckoutSince(before, root);
 	if (!after) throw new Error("the fixture is a git workspace");
 	deepStrictEqual(changedCheckoutPaths(before, after), ["large-rewritten.bin", "same-size.txt"]);
+});
+
+it("a same-size rewrite inside one timestamp tick of the baseline is reported although its stat held", async () => {
+	const root = checkoutFixture("clio-coder-checkout-tick-");
+	const file = join(root, "same-tick.txt");
+	writeFileSync(file, "aaaa\n");
+	// A tick that has not ended when the baseline reads the file: a later write in it keeps every timestamp.
+	const tick = new Date(Math.floor(Date.now() / 1000) * 1000 + 60_000);
+	utimesSync(file, tick, tick);
+	pinChangeTime(root, BigInt(tick.getTime()) * 1_000_000n, ["same-tick.txt"]);
+	const before = await takeCheckoutBaseline(root);
+	if (!before) throw new Error("the fixture is a git workspace");
+	writeFileSync(file, "bbbb\n");
+	utimesSync(file, tick, tick);
+	const after = await snapshotCheckoutSince(before, root);
+	if (!after) throw new Error("the fixture is a git workspace");
+	deepStrictEqual(changedCheckoutPaths(before, after), ["same-tick.txt"]);
+});
+
+it("a dirty file whose timestamps predate the tick window keeps the cheap stat check and is not read again", async () => {
+	const root = checkoutFixture("clio-coder-checkout-settled-");
+	const settled = new Date(Math.floor(Date.now() / 1000) * 1000 - 3_600_000);
+	const tick = new Date(Math.floor(Date.now() / 1000) * 1000 + 60_000);
+	for (const [name, time] of [
+		["settled.txt", settled],
+		["in-tick.txt", tick],
+	] as const) {
+		writeFileSync(join(root, name), "aaaa\n");
+		utimesSync(join(root, name), time, time);
+	}
+	const reads = pinChangeTime(root, BigInt(settled.getTime()) * 1_000_000n, ["settled.txt"]);
+	const before = await takeCheckoutBaseline(root);
+	if (!before) throw new Error("the fixture is a git workspace");
+	reads.length = 0;
+	const after = await snapshotCheckoutSince(before, root);
+	if (!after) throw new Error("the fixture is a git workspace");
+	deepStrictEqual(reads, ["in-tick.txt"]);
+	deepStrictEqual(changedCheckoutPaths(before, after), []);
+});
+
+it("content checks of files inside the tick window stop at the cap and report the rest as possibly changed", async () => {
+	const root = checkoutFixture("clio-coder-checkout-cap-");
+	const tick = new Date(Math.floor(Date.now() / 1000) * 1000 + 60_000);
+	const names = Array.from({ length: RACY_DIGEST_MAX_FILES + 2 }, (_, index) => `in-tick-${index}.txt`);
+	for (const name of names) {
+		writeFileSync(join(root, name), "aaaa\n");
+		utimesSync(join(root, name), tick, tick);
+	}
+	const reads = pinChangeTime(root, BigInt(tick.getTime()) * 1_000_000n, names);
+	const before = await takeCheckoutBaseline(root);
+	if (!before) throw new Error("the fixture is a git workspace");
+	reads.length = 0;
+	const after = await snapshotCheckoutSince(before, root);
+	if (!after) throw new Error("the fixture is a git workspace");
+	strictEqual(reads.length, RACY_DIGEST_MAX_FILES);
+	const reported = changedCheckoutPaths(before, after);
+	strictEqual(reported.length, 2);
+	for (const name of reported) ok(!reads.includes(name), `${name} was read yet reported`);
 });
