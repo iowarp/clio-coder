@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { readApiKey, runAuthCommand } from "../../src/cli/auth.js";
 import { runTargetRemove } from "../../src/cli/configure.js";
 import { listLogoutChoices } from "../../src/cli/provider-target.js";
+import { credentialFileProtection } from "../../src/cli/shared.js";
 
 const LOGOUT_SETTINGS = [
 	"version: 2",
@@ -117,6 +118,12 @@ describe("contracts/auth login against an unwritable credentials store", () => {
 		strictEqual(code, 0);
 		ok(stdout.includes(`ok: authenticated ${RUNTIME}`), `got: ${stdout}`);
 		ok(stderr.includes("unencrypted"), `got: ${stderr}`);
+		ok(
+			stderr.includes(`(${credentialFileProtection()})`),
+			`the warning names this platform's protection; got: ${stderr}`,
+		);
+		strictEqual(credentialFileProtection("win32"), "owner-only ACL", "Windows copy never claims mode 0600 (FX-24)");
+		strictEqual(credentialFileProtection("linux"), "mode 0600");
 		ok(existsSync(credentials), "the credentials file exists");
 		ok(readFileSync(credentials, "utf8").includes("sk-not-a-real-key-new"), "the key reached disk");
 	});

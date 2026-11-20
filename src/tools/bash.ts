@@ -11,7 +11,12 @@ import {
 	runBashCommand,
 } from "../core/bash-exec.js";
 import { withoutLeadingCdTo } from "../core/leading-cd.js";
-import { neutralizeFraming, TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-framing.js";
+import {
+	neutralizeFraming,
+	STEER_ABORT_MARK,
+	TOOL_RESULT_NOTES_SEPARATOR,
+	toolResultNote,
+} from "../core/reminder-framing.js";
 import { resolveSafeCwd } from "../core/safe-exec.js";
 import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
 import { runDeadlineAt } from "../core/termination-phase.js";
@@ -366,13 +371,15 @@ function bashTimeoutStatus(
 	if (limit.by === "run-deadline" && limit.ms === 0)
 		return `bash: ${deadline} had passed before this command started, so it did not run (${timeoutWords(requestedMs)} requested). The run's time is spent, so no further command can run in it.`;
 	let status =
-		limit.by === "timeout"
-			? `bash: this command ran past its own ${timeoutWords(limit.ms)} timeout and was stopped.`
-			: `bash: this command was stopped at ${deadline}, before the ${timeoutWords(requestedMs)} requested ran out.`;
-	if (printedNothing)
+		limit.by === "idle"
+			? `bash: this command printed nothing and used no CPU for ${timeoutWords(limit.ms)} and was stopped as idle (safety.limits.bashIdleSeconds), before the ${timeoutWords(requestedMs)} timeout ran out.`
+			: limit.by === "timeout"
+				? `bash: this command ran past its own ${timeoutWords(limit.ms)} timeout and was stopped.`
+				: `bash: this command was stopped at ${deadline}, before the ${timeoutWords(requestedMs)} requested ran out.`;
+	if (printedNothing && limit.by !== "idle")
 		status += " It printed nothing before it was stopped (its output went elsewhere, or it was waiting).";
 	status +=
-		limit.by === "timeout"
+		limit.by !== "run-deadline"
 			? " The bash tool still works; the next call runs normally."
 			: " The run's time is spent, so no further command can run in it.";
 	if (lastActiveTest !== null || TEST_RUN_COMMAND.test(command)) {
@@ -390,6 +397,11 @@ function bashAbortStatus(elapsedMs: number, timeoutMs: number, cause: string | n
 	return cause === null
 		? `bash: command aborted ${span}. The host ended the run and recorded no cause.`
 		: `bash: command aborted ${span}. The host ended the run: ${cause}`;
+}
+
+/** A queued operator steer ended the call, not the run: the output is partial and the steer is the next message (FX-32). */
+function bashSteerAbortStatus(elapsedMs: number): string {
+	return `bash: ${STEER_ABORT_MARK} after ${Math.round(elapsedMs / 1000)}s. The operator queued a steer while this command ran, so the host stopped it; the output above is partial. The run goes on, and the steer follows as the next message.`;
 }
 
 export const bashTool: ToolSpec = {
@@ -419,6 +431,7 @@ export const bashTool: ToolSpec = {
 	}),
 	baseActionClass: "execute",
 	executionMode: "sequential",
+	steerInterruptible: true,
 	prepareArguments: normalizeBashArguments,
 	resolveResultDisposition: resolveBashResultDisposition,
 	async run(args, options): Promise<ToolResult> {
@@ -472,6 +485,7 @@ export const bashTool: ToolSpec = {
 				...(deadlineAt === null ? {} : { deadlineAt }),
 				...(options?.signal === undefined ? {} : { signal: options.signal }),
 				...(options?.shellSandbox === undefined ? {} : { shellSandbox: options.shellSandbox }),
+				...(options?.bashIdleMs !== undefined && options.bashIdleMs > 0 ? { idleMs: options.bashIdleMs } : {}),
 				// Each piece is masked as it arrives, so a large output is not masked in one stall when the command ends (SC-7).
 				onOutput: (target, text) => (target === "stdout" ? stdoutMask : stderrMask).append(text),
 			};
@@ -504,6 +518,14 @@ export const bashTool: ToolSpec = {
 			const shown = neutralizeFraming(rawOutput);
 			const output = shown.trim();
 			const abortCause = aborted ? (options?.abortCause?.() ?? null) : null;
+			if (aborted && options?.steerInterrupted?.() === true && options.signal?.aborted === true) {
+				const status = bashSteerAbortStatus(elapsedMs);
+				return {
+					kind: "error",
+					message: output.length > 0 ? `${output}\n\n${status}` : status,
+					details: { ...bashResultDetails(result, rawOutput, "abort", elapsedMs), abortedBy: "steer" },
+				};
+			}
 			// The run's --timeout shuts the run down at the same instant this command's deadline timer fires, so the run's
 			// abort and the timer race and a result can carry both flags. Whichever landed first, a stop on or past the
 			// deadline with no other recorded cause is the deadline's, judged on unrounded time (XR-12).
@@ -537,6 +559,7 @@ export const bashTool: ToolSpec = {
 					message: output.length > 0 ? `${output}\n\n${status}` : status,
 					details: {
 						...bashResultDetails(result, rawOutput, "timeout", elapsedMs),
+						...(stopLimit.by === "idle" ? { timedOutBy: "idle", idleMs: stopLimit.ms } : {}),
 						...(lastActiveTest === null ? {} : { lastActiveTest }),
 					},
 				};

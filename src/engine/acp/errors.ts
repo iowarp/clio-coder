@@ -38,6 +38,17 @@ export class AcpProcessError extends AcpError {
 	}
 }
 
+/** A peer that needs its own sign-in before it opens a session; `loginCommand` is what the operator runs once. */
+export class AcpAuthRequiredError extends AcpError {
+	constructor(
+		message: string,
+		readonly loginCommand: string,
+	) {
+		super("acp_auth_required", message, { loginCommand });
+		this.name = "AcpAuthRequiredError";
+	}
+}
+
 /**
  * Upper bound on any `error.message` this process puts on the wire. A JSON-RPC
  * message is operator-facing prose, not a payload: an unbounded one lets a

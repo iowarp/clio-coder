@@ -191,6 +191,7 @@ const openaiCodexRuntime: RuntimeDescriptor = {
 	tier: "cloud",
 	apiFamily: "openai-codex-responses",
 	auth: "oauth",
+	oauthSignIn: "device-code",
 	defaultModel: "gpt-6-luna",
 	defaultCapabilities,
 	probeServingWindows: createCodexServingWindowReader(),

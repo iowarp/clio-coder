@@ -198,11 +198,12 @@ const SCRIPT_SHELLS: ReadonlySet<string> = new Set(["sh", "bash", "dash", "zsh",
 
 /**
  * The scripts a command runs by path (`./x.sh`, `/opt/x`) or sources (`source x`, `. x`), in `sh -c` scripts and
- * substitutions too (CLI-P31). `bash x.sh` is not listed: the shell-script scan already reads it.
+ * substitutions too (CLI-P31). `bash x.sh` is not listed: the shell-script scan already reads it. `home` stands in for a
+ * leading `~`, `$HOME` or `${HOME}` the shell expands, so a quoted `'$HOME/x'` stays literal (row 215).
  */
-export function yoloFloorScriptRuns(command: string): YoloFloorScriptRun[] {
+export function yoloFloorScriptRuns(command: string, home?: string): YoloFloorScriptRun[] {
 	const runs: YoloFloorScriptRun[] = [];
-	for (const step of shellCommandSteps(command)) {
+	for (const step of shellCommandSteps(command, home)) {
 		if (step.executable === "source" || step.executable === ".") {
 			const target = step.args[0] === "--" ? step.args[1] : step.args[0];
 			if (target !== undefined && !target.startsWith("-")) runs.push({ path: target, sourced: true });

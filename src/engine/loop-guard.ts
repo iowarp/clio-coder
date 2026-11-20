@@ -27,6 +27,7 @@ import {
 import { markHostAuthored } from "../core/message-accounting.js";
 import { EXPLORATION_TOOL_NAMES, READ_ONLY_SHELL_COMMAND_PATTERN } from "../core/read-only-calls.js";
 import { systemReminderBlock, TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-framing.js";
+import { ownerTelemetryContext } from "../core/telemetry/context.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type {
 	LoopBlockedDisposition,
@@ -129,6 +130,8 @@ export const ORCH_TURN_TOOL_CALL_HARD_MARGIN = 15;
 
 /** Bounded turn-id memory, matching the registry's dispatch-guard policy. */
 const LOOP_GUARD_TURN_LIMIT = 32;
+/** Direct `finish` attempts a turn may make past its spent tool-call budget (CLI-P43). */
+const FINISH_ATTEMPTS_PAST_BUDGET = 2;
 
 /** Bounded per-fingerprint success memory for the block-reason evidence anchor. */
 const SUCCEEDED_FINGERPRINT_LIMIT = 128;
@@ -172,6 +175,16 @@ const CROSS_ARGUMENT_RESULT_MIN_BYTES = 64;
  * spellings of one inspection (an op alias, limit 20 or none) cannot dodge the
  * detector as ignored log fields once did (DF-4, DF-9).
  */
+/** The guard's events belong to the hook's own session or run, turn and tool call, whichever async context emits them. */
+function guardEventContext(input: MiddlewareHookInput) {
+	return ownerTelemetryContext({
+		sessionId: input.sessionId,
+		runId: input.runId,
+		turnId: input.turnId,
+		toolCallId: input.toolCallId,
+	});
+}
+
 function callIdentity(tool: string, args: Record<string, unknown> | undefined): string {
 	const git = tool === ToolNames.Git && args !== undefined ? gitCallIdentity(args) : null;
 	return hashToolCall(tool, git ?? args ?? {});
@@ -279,6 +292,14 @@ function gitConfigOnlyReads(words: ReadonlyArray<string>): boolean {
  * its options (Astra r2-4, SF-4).
  */
 function segmentOnlyReads(input: ReadonlyArray<string>): boolean {
+	// `cd <one path>` reads nothing and writes nothing, so a cd-prefixed read stays a read (X1). Only the
+	// builtin counts: a bare `cd`, or one through `builtin` or `command`, with no leading assignment, since
+	// `./cd`, `env cd` or `sudo cd` runs a program, and no `$`, since an expansion such as `${X@P}` can run code.
+	const cd = input[0] === "cd" ? 1 : (input[0] === "builtin" || input[0] === "command") && input[1] === "cd" ? 2 : 0;
+	if (cd > 0) {
+		const operand = input[cd] ?? "-";
+		return input.length === cd + 1 && !operand.startsWith("-") && !operand.includes("$");
+	}
 	let words = input;
 	while (/^[A-Za-z_]\w*=/.test(words[0] ?? "")) words = words.slice(1);
 	for (let depth = 0; depth < 8; depth++) {
@@ -981,6 +1002,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const identicalBlockStreakByTurn = new Map<string, { identity: string; count: number }>();
 	const unavailableChecks = new Map<string, string>();
 	const callsByTurn = new Map<string, number>();
+	/** Per turn: direct `finish` attempts admitted past a spent turn budget (CLI-P43). */
+	const finishesPastBudgetByTurn = new Map<string, number>();
 	/** Per turn: calls by effective tool (a gateway call counts as its capability), named in the budget refusal. */
 	const callsByToolByTurn = new Map<string, Map<string, number>>();
 	/**
@@ -1459,7 +1482,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			at,
 			...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
 		};
-		options.bus?.emit("safety.loop_blocked", payload);
+		options.bus?.emit("safety.loop_blocked", payload, guardEventContext(input));
 	};
 
 	const emitBudgetEvent = (
@@ -1482,7 +1505,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			...(bound?.stepTool !== undefined ? { stepTool: bound.stepTool } : {}),
 			...(bound?.rolled === true ? { rolled: true as const } : {}),
 		};
-		options.bus?.emit("safety.tool_budget_exceeded", payload);
+		options.bus?.emit("safety.tool_budget_exceeded", payload, guardEventContext(input));
 	};
 
 	/**
@@ -2158,6 +2181,24 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			const chainWrapper = isGatewayChain(hookInput.toolName ?? "", hookInput.toolArgs);
 			const turnBudgetEffects = (): ReadonlyArray<MiddlewareEffect> => {
 				if (rejudge) return [];
+				// A run that spent its turn's calls can still declare how it ended: a direct `finish` called alone past the soft
+				// budget or the hard ceiling runs and spends nothing, at most FINISH_ATTEMPTS_PAST_BUDGET times a turn, so an
+				// invalid or varying declaration cannot spin. A gateway-wrapped finish cannot run, and a finish in a wider
+				// batch would end the turn over its refused siblings, so both count as any call does; the repeat and
+				// stagnation detectors still see every attempt (CLI-P43).
+				const batched = typeof input.metadata?.batchSize === "number" && input.metadata.batchSize > 1;
+				if (hookInput.toolName === ToolNames.Finish && !batched) {
+					const soft = resolveTurnBudget(input)?.budget.soft;
+					const spent = callsByTurn.get(turnKey) ?? 0;
+					if (
+						soft !== undefined &&
+						spent >= soft &&
+						(finishesPastBudgetByTurn.get(turnKey) ?? 0) < FINISH_ATTEMPTS_PAST_BUDGET
+					) {
+						bumpBoundedCounter(finishesPastBudgetByTurn, turnKey);
+						return [];
+					}
+				}
 				if (chainWrapper) {
 					const soft = resolveTurnBudget(input)?.budget.soft;
 					if (

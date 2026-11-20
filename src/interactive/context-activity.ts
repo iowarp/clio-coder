@@ -246,11 +246,13 @@ export function createContextActivityStore(
 		!operation ||
 		(operation.cwd === process.cwd() && (getSessionId === undefined || operation.sessionId === getSessionId()));
 	const snapshot = (now = Date.now()): ContextActivitySnapshot | null => {
+		// A settled run whose transcript card shows is said once, by the card: a
+		// 9 ms `/context reset` read as a box, a check line, a bar and a finish line.
 		for (const [key, run] of runs) {
 			if (
 				!owned(run.operation) ||
 				(run.completedAtMs !== null &&
-					((run.kind === "compaction" && run.operation !== undefined && showsContextResult(run.operation)) ||
+					((run.operation !== undefined && showsContextResult(run.operation)) ||
 						now - run.completedAtMs > TERMINAL_RETENTION_MS))
 			)
 				runs.delete(key);

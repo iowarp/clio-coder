@@ -63,5 +63,6 @@ export const verifyToolSurface: ToolSurface = {
 	}),
 	baseActionClass: "execute",
 	executionMode: "sequential",
+	steerInterruptible: true,
 	prepareArguments: prepareVerifyArguments,
 };

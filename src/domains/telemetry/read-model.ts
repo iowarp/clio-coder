@@ -56,7 +56,13 @@ import {
 	renderUsdLimit,
 	renderUsdSum,
 } from "../../core/telemetry/render.js";
-import type { CallSettled, CallUsage, EvidenceAssessed, ObjectRef } from "../../core/telemetry/schemas.js";
+import type {
+	CallSettled,
+	CallUsage,
+	EvidenceAssessed,
+	ObjectRef,
+	SurfaceOutcome,
+} from "../../core/telemetry/schemas.js";
 import { EvidenceFindingsObjectSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ContextSnapshot } from "../session/context-accounting.js";
@@ -4158,6 +4164,75 @@ export interface SideSurfacesFold {
 	residual: Array<{ role: AgentRole; totals: CallTotals }>;
 	/** The `/memory` spend line: its steps from `memory.step_decided`, its tokens from every memory-role call. */
 	memory: TaskMemorySpendSummary;
+	/** Every surface that fired, with how its settling firings settled (memory design 4.1, 4.6). */
+	ledger: SurfaceLedgerRow[];
+}
+
+/**
+ * One surface's firings and their settlements: a middleware rule by its registration id, or a host surface such as
+ * `triage`. A rule that only reminds or notifies is count-only: it fires and never settles.
+ */
+export interface SurfaceLedgerRow {
+	surface: string;
+	/** Firing rows: each `middleware.fired` of the rule, or each settlement of a host surface that has no firing row. */
+	fired: number;
+	/** Firings that carry an id because one of their effects settles. */
+	settling: number;
+	/** Settled firings a request carried. */
+	admitted: number;
+	outcomes: Partial<Record<SurfaceOutcome, number>>;
+	/** Settling firings with no settlement in these records: still open, or a session that never closed. */
+	unsettled: number;
+	/** Settling firings a worker drew under its run: no outcome ledger runs in a worker, so they never settle. */
+	unledgered: number;
+	/** Settlements beyond the first for one firing; any is a ledger defect, since each firing settles once. */
+	duplicates: number;
+}
+
+/** Fold firing rows and settlements by surface; a firing id is unique within the session or run that drew it. */
+function foldSurfaceLedger(records: readonly TelemetryRecord[]): SurfaceLedgerRow[] {
+	const rows = new Map<string, SurfaceLedgerRow>();
+	const row = (surface: string): SurfaceLedgerRow => {
+		let found = rows.get(surface);
+		if (found === undefined) {
+			found = { surface, fired: 0, settling: 0, admitted: 0, outcomes: {}, unsettled: 0, unledgered: 0, duplicates: 0 };
+			rows.set(surface, found);
+		}
+		return found;
+	};
+	const firings = new Map<string, string>();
+	const settled = new Set<string>();
+	for (const record of records) {
+		if (record.k === "middleware.fired") {
+			const target = row(record.data.ruleId);
+			target.fired += 1;
+			if (record.data.firingId === undefined) continue;
+			target.settling += 1;
+			const owner = telemetryOwner(record.ctx);
+			// A worker's firing is labelled, never counted as a session firing left open.
+			if (owner.startsWith("run:")) target.unledgered += 1;
+			else firings.set(`${owner}/${record.data.firingId}`, record.data.ruleId);
+		}
+	}
+	for (const record of records) {
+		if (record.k !== "surface.settled") continue;
+		const key = `${telemetryOwner(record.ctx)}/${record.data.firingId}`;
+		const target = row(record.data.surface);
+		if (settled.has(key)) {
+			target.duplicates += 1;
+			continue;
+		}
+		settled.add(key);
+		if (!firings.has(key)) {
+			// A host surface fires and settles in one step; its settlement is its firing row.
+			target.fired += 1;
+			target.settling += 1;
+		}
+		if (record.data.admittedIn !== null) target.admitted += 1;
+		target.outcomes[record.data.outcome] = (target.outcomes[record.data.outcome] ?? 0) + 1;
+	}
+	for (const [key, surface] of firings) if (!settled.has(key)) row(surface).unsettled += 1;
+	return [...rows.values()].sort((a, b) => a.surface.localeCompare(b.surface));
 }
 
 const NOT_SIDE_ROLES: ReadonlySet<AgentRole> = new Set(["main", "coordinator", "worker"]);
@@ -4239,7 +4314,7 @@ export function foldSideSurfaces(records: readonly TelemetryRecord[], route?: Si
 	const residual = [...unpurposed]
 		.sort(([a], [b]) => a.localeCompare(b))
 		.map(([role, attempts]) => ({ role, totals: sideCallTotals(attempts).totals }));
-	return { surfaces, residual, memory: foldMemorySpend(records, folded) };
+	return { surfaces, residual, memory: foldMemorySpend(records, folded), ledger: foldSurfaceLedger(records) };
 }
 
 /** Memory decisions and their call facts; a memory-role call no decision links is still spent, so it is counted too. */

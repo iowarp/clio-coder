@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { Type } from "typebox";
+import { validPayload } from "../../src/core/telemetry/events.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
+import { newCallId } from "../../src/core/telemetry/ids.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
@@ -25,12 +28,18 @@ import {
 	runMiddlewareRegistrations,
 } from "../../src/domains/middleware/runtime.js";
 import { createMiddlewareHostFromSnapshot, createMiddlewareSnapshot } from "../../src/domains/middleware/snapshot.js";
+import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareRule } from "../../src/domains/middleware/types.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
+import type { SessionContract } from "../../src/domains/session/contract.js";
+import { foldSideSurfaces } from "../../src/domains/telemetry/read-model.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { capturedHookSourcesFor } from "../../src/entry/extension-hook-sources.js";
 import { middlewareHookFailedSessionNotice } from "../../src/interactive/bus-notices.js";
+import { runTriageRound, type TriageSystemOne } from "../../src/session-control/steering-triage.js";
+import { createTurnMiddleware } from "../../src/session-control/turn-middleware.js";
 import { createTurnOutcomeCollector } from "../../src/session-control/turn-outcome-collector.js";
+import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import type { ToolInvokeOptions } from "../../src/tools/registry.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { middlewareOwner } from "../harness/middleware-owner.js";
@@ -109,6 +118,324 @@ describe("middleware hook boundary", () => {
 		});
 		strictEqual(collector.take("user-2").duplicateDispatch, true);
 		deepStrictEqual(collector.take("user-2").toolNames, []);
+	});
+
+	it("settles each firing once against the request that carried it and the typed fact after it (memory design MD12)", async () => {
+		const sessionId = "md12-outcome-ledger";
+		const collector = createTurnOutcomeCollector();
+		/** What each turn_end nudge fixture emits at the next turn end. */
+		let fire: Record<string, "both" | "continue"> = {};
+		const nudge = (id: string, text = id): MiddlewareHookRegistration =>
+			registration(
+				id,
+				() => [
+					...(fire[id] === "both" ? [{ kind: "inject_reminder" as const, message: `${text} reminder` }] : []),
+					...(fire[id] !== undefined ? [{ kind: "request_continuation" as const, message: `${text} continue` }] : []),
+				],
+				{ hooks: ["turn_end"] },
+			);
+		const gate = (id: string, effects: MiddlewareEffect[]): MiddlewareHookRegistration =>
+			registration(id, () => [], { hooks: ["turn_start"], awaited: true, evaluateAsync: async () => effects });
+		const middleware = createMiddlewareBundle({
+			registrations: [
+				collector,
+				nudge("nudge.a"),
+				nudge("nudge.b"),
+				nudge("nudge.memory", "Memory: recheck"),
+				registration("reminder.only", () => [{ kind: "inject_reminder", message: "count only" }], {
+					hooks: ["turn_end"],
+				}),
+				registration("guard.fixture", (input) =>
+					input.toolCallId?.startsWith("t-loop") === true
+						? [{ kind: "block_tool", reason: "repeat", severity: "hard-block" }]
+						: [],
+				),
+				registration("compaction.fixture", () => [{ kind: "request_continuation", message: "fold" }], {
+					hooks: ["on_compaction"],
+				}),
+				gate("gate.lock", [{ kind: "lock_tools" }]),
+				gate("gate.continue", [{ kind: "request_continuation", message: "gate only continue" }]),
+			],
+		}).contract;
+		let memoryCurrent = true;
+		const state = createTurnState("off");
+		const turns = createTurnMiddleware({
+			state,
+			middleware,
+			middlewareToolChoice: createMiddlewareToolChoiceControl(),
+			emitNotice: () => {},
+			emitFooterNotice: () => {},
+			session: { current: () => ({ id: sessionId }) } as unknown as SessionContract,
+			memoryContentGuard: () => () => memoryCurrent,
+			suppressFirings: (firingIds) => collector.suppressFirings(firingIds),
+		});
+		const runtime = {
+			wireModelId: "faux",
+			runtimeResolution: {},
+			agent: { state: { tools: [], messages: [] } },
+		} as unknown as AgentRuntime;
+		const hub = telemetryHub();
+		const records: Array<{ k: string; data: object; ctx: object }> = [];
+		const fired: Array<{ ruleId: string; firingId?: string }> = [];
+		const settled = new Map<string, { surface: string; outcome: string; admittedIn: string | null; fact: string }>();
+		const stops = [
+			hub.subscribe("middleware.fired", (payload, ctx) => {
+				if (ctx?.sessionId !== sessionId) return;
+				fired.push(payload);
+				records.push({ k: "middleware.fired", data: payload, ctx });
+			}),
+			hub.subscribe("surface.settled", (payload, ctx) => {
+				if (ctx?.sessionId !== sessionId) return;
+				ok(validPayload("surface.settled", payload), JSON.stringify(payload));
+				ok(!settled.has(payload.firingId), `settled twice: ${payload.firingId}`);
+				settled.set(payload.firingId, {
+					surface: payload.surface,
+					outcome: payload.outcome,
+					admittedIn: payload.admittedIn,
+					fact: payload.fact.kind,
+				});
+				records.push({ k: "surface.settled", data: payload, ctx });
+			}),
+		];
+		const detach = collector.attachLedger(
+			hub,
+			() => sessionId,
+			() => turns.heldFirings(),
+		);
+		const hook = (input: MiddlewareHookInput) => middleware.runHook({ sessionId, ...input });
+		const ids = () => fired.flatMap((row) => (row.firingId === undefined ? [] : [row.firingId]));
+		let seen = 0;
+		const next = (count: number) => {
+			const drawn = ids().slice(seen, seen + count);
+			seen += count;
+			return drawn;
+		};
+		/** A main request goes out, journaled under `callId` or not: it admits what the middleware held for it. */
+		const send = (callId: string | null | undefined) => collector.requestSent(callId ?? null, turns.requestCarried());
+		/** An operator prompt is admitted and its turn starts; the returned projection is the request's composition. */
+		const start = (turnId: string, awaited?: Parameters<typeof turns.fireTurnStart>[5]) => {
+			state.activeUserTurnId = turnId;
+			state.continuation.beginPrompt({ requestContinuation: false, yoloContinuation: false });
+			turns.fireTurnStart(runtime, "go", 0, false, turnId, awaited);
+			return turns.takePendingReminderProjection();
+		};
+		/** An in-run continuation; a locked request leaves the buffer for the next unlocked one. */
+		const continueInRun = (locked: boolean) => {
+			turns.fireTurnStart(runtime, "", 0, true);
+			if (!locked) turns.flushPendingReminders();
+		};
+		const end = async (assistantTurnId: string, emits: typeof fire = {}) => {
+			fire = emits;
+			state.lastTurnId = assistantTurnId;
+			await turns.fireTurnEnd(runtime, [
+				{ role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+			] as unknown as Parameters<typeof turns.fireTurnEnd>[1]);
+			fire = {};
+		};
+		const call = (turnId: string, toolName: string, toolCallId: string, toolArgs: Record<string, unknown>) => {
+			hook({ hook: "before_tool", turnId, toolName, toolCallId, toolArgs });
+			hook({ hook: "after_tool", turnId, toolName, toolCallId, toolArgs, metadata: { resultKind: "ok" } });
+		};
+		const block = (turnId: string, toolCallId: string, toolArgs: Record<string, unknown> = { path: "loop" }) =>
+			hook({ hook: "before_tool", turnId, toolName: "bash", toolCallId, toolArgs });
+		const escalate = (disposition: "lockout" | "stop", turnId: string) =>
+			hub.emit(
+				"safety.loop_blocked",
+				{ tool: "bash", repeatCount: 3, blocksThisTurn: 3, budget: 3, interrupted: false, disposition, at: 1 },
+				{ sessionId, agent: { role: "main", id: sessionId }, turnId },
+			);
+		const [c1, c2, cLocked, c3, c4, c5, c6, c7, c8, c10] = Array.from({ length: 10 }, () => newCallId());
+		try {
+			// Turn 0, before any hook of the session reached the collector: a compaction point's firing is suppressed.
+			// A submit returns after the awaited gate and before the turn starts: the gate's firings entered nothing.
+			hook({ hook: "on_compaction", metadata: { stage: "superseded" } });
+			const [k0] = next(1);
+			let holds = turns.beginTurnHolds();
+			ok((await turns.awaitTurnStart(runtime, "start", 0, "u0")).refusal === null);
+			const [w0, w1] = next(2);
+			turns.releaseTurnHolds(holds);
+			// Another submit starts its turn with the gate's lock armed, then returns before sending: the lock and the
+			// continuation the turn start could not carry are both suppressed, never admitted by turn 1's request.
+			holds = turns.beginTurnHolds();
+			const gated = await turns.awaitTurnStart(runtime, "start", 0, "u0b");
+			const [w2, w3] = next(2);
+			start("u0b", gated.refusal === null ? gated : undefined);
+			turns.releaseTurnHolds(holds);
+			// Turn 1: two nudges ride one in-run continuation; one check credits the later firing and the other is moot.
+			// The same rule fires again in the same turn under a new id; a locked continuation does not carry it.
+			holds = turns.beginTurnHolds();
+			start("u1")();
+			send(c1);
+			await end("a1", { "nudge.a": "both", "nudge.b": "both" });
+			const [a1, b1] = next(2);
+			continueInRun(false);
+			send(c2);
+			call("u1", "verify", "t-check", { check: "test" });
+			await end("a2", { "nudge.a": "both" });
+			const [a2] = next(1);
+			continueInRun(true);
+			send(cLocked);
+			turns.releaseTurnHolds(holds);
+			ok(a1 && b1 && a2 && new Set([a1, b1, a2]).size === 3, `two firings of one rule stay distinct: ${ids()}`);
+			// Turn 2: the delayed nudge is carried by this turn's first request; a read states nothing, an edit acts.
+			// A block whose turn sees only reads and its own call's success is ignored, never recovered; the call is known
+			// by its canonical identity, so its arguments in another key order are still its own.
+			holds = turns.beginTurnHolds();
+			start("u2")();
+			send(c3);
+			call("u2", "read", "t-read", { path: "a.ts" });
+			call("u2", "edit", "t-edit", { path: "a.ts" });
+			block("u2", "t-loop", { path: "loop", reason: "x" });
+			const [g1] = next(1);
+			send(c4);
+			call("u2", "read", "t-read-2", { path: "b.ts" });
+			call("u2", "bash", "t-again", { reason: "x", path: "loop" });
+			await end("a3");
+			turns.releaseTurnHolds(holds);
+			// Turn 3: a lockout exhausts the block; a nudge whose continuation is spent and that buffered nothing else is
+			// suppressed at once.
+			holds = turns.beginTurnHolds();
+			start("u3")();
+			block("u3", "t-loop-2");
+			const [g2] = next(1);
+			escalate("lockout", "u3");
+			send(c5);
+			call("u3", "edit", "t-edit-2", { path: "c.ts" });
+			await end("a4", { "nudge.a": "both", "nudge.b": "continue" });
+			const [a3, b2] = next(2);
+			turns.releaseTurnHolds(holds);
+			// Turn 4: the carried nudge meets no receipt, so it is ignored, not moot. Its next firing is flushed into an
+			// in-run continuation the run abandons before sending: it entered no request.
+			holds = turns.beginTurnHolds();
+			start("u4")();
+			send(c6);
+			await end("a5", { "nudge.a": "both" });
+			const [a4] = next(1);
+			continueInRun(false);
+			turns.releaseTurnHolds(holds);
+			// Turn 5: a silently rolled budget crossing and a lockout of no session end nothing, so the block recovers.
+			holds = turns.beginTurnHolds();
+			start("u5")();
+			send(c7);
+			hub.emit(
+				"safety.tool_budget_exceeded",
+				{ tool: "bash", callsThisTurn: 9, softBudget: 8, hardCeiling: 16, interrupted: false, rolled: true, at: 1 },
+				{ sessionId, agent: { role: "main", id: sessionId }, turnId: "u5" },
+			);
+			hub.emit("safety.loop_blocked", {
+				tool: "bash",
+				repeatCount: 3,
+				blocksThisTurn: 3,
+				budget: 3,
+				interrupted: false,
+				disposition: "lockout",
+				at: 1,
+			});
+			block("u5", "t-loop-3");
+			const [g3] = next(1);
+			send(c8);
+			call("u5", "edit", "t-edit-3", { path: "d.ts" });
+			await end("a6", { "nudge.a": "both" });
+			const [a5] = next(1);
+			turns.releaseTurnHolds(holds);
+			// Turn 6: a request no journal lease records still carries the buffer, so its firing is admitted, under null.
+			// A stop ends the turn before any request carries its block, which settles exhausted there.
+			holds = turns.beginTurnHolds();
+			start("u6")();
+			send(null);
+			block("u6", "t-loop-4");
+			const [g4] = next(1);
+			escalate("stop", "u6");
+			await end("a7", { "nudge.memory": "continue" });
+			const [m1] = next(1);
+			turns.releaseTurnHolds(holds);
+			// Turn 7: the gate's lock rides the turn's request. The memory nudge went stale before the request was
+			// composed, so the request left it out and its firing is suppressed.
+			holds = turns.beginTurnHolds();
+			const admitted = await turns.awaitTurnStart(runtime, "start", 0, "u7");
+			const [w4, w5] = next(2);
+			const composed = start("u7", admitted.refusal === null ? admitted : undefined);
+			memoryCurrent = false;
+			ok(!composed().includes("Memory: recheck"));
+			send(c10);
+			await end("a8");
+			turns.releaseTurnHolds(holds);
+			// Steering triage settles on its typed route: acted when the verdict applied, expired when the queue moved on.
+			for (const current of [true, false])
+				await runTriageRound({
+					triage: { target: null, minQueued: 2, timeoutMs: 1000 },
+					systemOne: {
+						bound: () => true,
+						ask: async () => ({
+							value: { picks: [{ id: "q-1", relation: "continue", urgency: "next", mass: 1 }] },
+							probabilities: false,
+						}),
+					} as unknown as TriageSystemOne,
+					asked: [{ id: "q-1", text: "also check docs", kind: "steer" }],
+					task: () => "",
+					previous: () => "",
+					current: () => current,
+					apply: (verdicts) => collector.settleTriage(sessionId, verdicts, "q-1"),
+					expired: (verdicts) => collector.settleTriage(sessionId, verdicts, null),
+					side: async () => {},
+				});
+			const [t1, t2] = [...settled].flatMap(([id, row]) => (row.surface === "triage" ? [id] : []));
+			const countOnly = fired.filter((row) => row.ruleId === "reminder.only");
+			ok(countOnly.length > 0 && countOnly.every((row) => row.firingId === undefined));
+			const expected = [
+				[k0, "compaction.fixture", "suppressed", null, "none"],
+				[w0, "gate.lock", "suppressed", null, "none"],
+				[w1, "gate.continue", "suppressed", null, "none"],
+				[w2, "gate.lock", "suppressed", null, "none"],
+				[w3, "gate.continue", "suppressed", null, "none"],
+				[a1, "nudge.a", "moot", c2, "receipt"],
+				[b1, "nudge.b", "acted", c2, "receipt"],
+				[a2, "nudge.a", "acted", c3, "receipt"],
+				[g1, "guard.fixture", "ignored", c4, "none"],
+				[g2, "guard.fixture", "exhausted", c5, "scope-end"],
+				[a3, "nudge.a", "ignored", c6, "none"],
+				[b2, "nudge.b", "suppressed", null, "none"],
+				[a4, "nudge.a", "suppressed", null, "none"],
+				[g3, "guard.fixture", "recovered", c8, "receipt"],
+				[a5, "nudge.a", "ignored", null, "none"],
+				[g4, "guard.fixture", "exhausted", null, "scope-end"],
+				[m1, "nudge.memory", "suppressed", null, "none"],
+				[w4, "gate.lock", "ignored", c10, "none"],
+				[w5, "gate.continue", "suppressed", null, "none"],
+				[t1, "triage", "acted", null, "receipt"],
+				[t2, "triage", "expired", null, "none"],
+			];
+			deepStrictEqual(
+				Object.fromEntries([...settled].sort(([x], [y]) => x.localeCompare(y))),
+				Object.fromEntries(
+					expected
+						.map(([id, surface, outcome, admittedIn, fact]) => [id, { surface, outcome, admittedIn, fact }] as const)
+						.sort(([x], [y]) => String(x).localeCompare(String(y))),
+				),
+			);
+			strictEqual(ids().length + 2, settled.size);
+			// The fold reads each settlement once, and a firing a worker drew under its run is labelled, not left open.
+			records.push({
+				k: "middleware.fired",
+				data: { firingId: g1, hook: "before_tool", phase: "sync", ruleId: "guard.fixture", effects: ["block_tool"] },
+				ctx: { sessionId, runId: "run-worker" },
+			});
+			const ledger = foldSideSurfaces(records as unknown as Parameters<typeof foldSideSurfaces>[0]).ledger;
+			deepStrictEqual(
+				ledger.map((row) => [row.surface, row.unsettled, row.duplicates, row.unledgered]),
+				ledger.map((row) => [row.surface, 0, 0, row.surface === "guard.fixture" ? 1 : 0]),
+			);
+			strictEqual(ledger.find((row) => row.surface === "nudge.a")?.admitted, 3);
+			// A second process draws from its own sequence: a session resumed there never reuses an id of the first.
+			const other = (await import(
+				`../../src/domains/middleware/fired-record.js?process=${process.pid}`
+			)) as typeof import("../../src/domains/middleware/fired-record.js");
+			const resumed = other.nextFiringId();
+			ok(!ids().includes(resumed), `a resumed process reuses ${resumed}`);
+		} finally {
+			detach();
+			for (const stop of stops) stop();
+		}
 	});
 	afterEach(() => {
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });

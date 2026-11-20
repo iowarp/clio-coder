@@ -17,6 +17,17 @@ export interface CacheDeploymentObservation {
 	reason: string;
 }
 
+/**
+ * The runtimes a binding can ever warm directly: the backends `observeCacheDeployment` may answer `warm: "bounded"`
+ * for. vLLM binds but never warms (`vllm-scheduler-unverified`); every other runtime has no backend to bind.
+ */
+const WARMABLE_BACKENDS = ["llamacpp", "lmstudio"] as const;
+export type WarmableBackend = (typeof WARMABLE_BACKENDS)[number];
+
+export function warmableBackend(runtimeId: string): WarmableBackend | null {
+	return WARMABLE_BACKENDS.find((backend) => backend === runtimeId) ?? null;
+}
+
 function record(value: unknown): Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }

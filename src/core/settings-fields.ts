@@ -30,6 +30,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"backend",
 	"background",
 	"baseDelayMs",
+	"bashIdleSeconds",
 	"breakerThreshold",
 	"budget",
 	"build",

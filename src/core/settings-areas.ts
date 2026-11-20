@@ -265,6 +265,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "safety.limits.autonomousToolCalls":
 		case "safety.limits.autonomousMinutes":
 		case "safety.limits.autonomousTokens":
+		case "safety.limits.bashIdleSeconds":
 			return place("safety", "Spending & tool limits");
 		case "safety.sandbox":
 		case "safety.sandboxNetwork":

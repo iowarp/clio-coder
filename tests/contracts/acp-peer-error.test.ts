@@ -8,6 +8,7 @@ import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { startAcpDelegationRun } from "../../src/engine/acp/adapter.js";
+import { prepareAntigravityLaunch } from "../../src/engine/acp/antigravity-launch.js";
 import { AcpEventMapper } from "../../src/engine/acp/event-mapper.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -222,6 +223,20 @@ test("ACP adapter launches agy with an allowlisted env and an owned, marked TMPD
 		strictEqual(existsSync(join(tempDir, "..")), false);
 		strictEqual(existsSync(orphan), namespace === null);
 		for (const kept of [unmarked, liveChild, foreign, noChild, notRun]) strictEqual(existsSync(kept), true, kept);
+		// The profile is <gemini-dir>/<app-data-dir>: a consumed value is never read as a flag, and an empty or missing
+		// value leaves agy's default.
+		const profileOf = (args: string[]): string => {
+			const prepared = prepareAntigravityLaunch({ ...agent, args }, { HOME: scratch }, scratch);
+			prepared.discard();
+			return prepared.profileDir;
+		};
+		const fallback = join(scratch, ".gemini", "antigravity-cli");
+		strictEqual(profileOf(agent.args), fallback);
+		strictEqual(profileOf(["acp", "--gemini-dir=", "--app-data-dir="]), fallback);
+		strictEqual(profileOf(["acp", "--app-data-dir", "x", "--app-data-dir"]), join(scratch, ".gemini", "x"));
+		strictEqual(profileOf(["acp", "--gemini-dir", "/g", "--app_data_dir", "--gemini-dir"]), "/g/--gemini-dir");
+		strictEqual(profileOf(["acp", "--gemini_dir=rel", "--app-data-dir", "/abs"]), "/abs");
+		strictEqual(profileOf(["acp", "--gemini-dir", "rel"]), join(scratch, "rel", "antigravity-cli"));
 		// spawn rejects a NUL byte synchronously; the launch dir made before it must not survive the throw.
 		const before = (await readdir(root)).sort();
 		throws(
@@ -240,6 +255,250 @@ test("ACP adapter launches agy with an allowlisted env and an owned, marked TMPD
 		if (inherited.pin !== undefined) process.env.CLIO_CODER_YOLO_CONFINEMENT = inherited.pin;
 		await rm(scratch, { recursive: true, force: true });
 		for (const dir of seededDirs) await rm(dir, { recursive: true, force: true });
+	}
+});
+
+interface AgyFrame {
+	method?: string;
+	id?: unknown;
+	params?: {
+		clientCapabilities?: unknown;
+		clientInfo?: { name?: string };
+		_meta?: unknown;
+		prompt?: Array<{ text?: string }>;
+		configId?: string;
+		value?: string;
+	};
+	result?: unknown;
+}
+
+test("ACP adapter applies the agy shims: version floor, explicit capabilities, prompt append, default mode, questions, tool shapes, steering, sign-in, store sideband", {
+	skip: process.platform === "win32",
+}, async () => {
+	const scratch = await mkdtemp(join(tmpdir(), "clio-agy-shims-"));
+	const fixture = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
+	const cwd = process.cwd();
+	const launch = async (
+		name: string,
+		version: string,
+		session: "ok" | "auth" | "abort" | "null" | "sideband" | "sideband-max" | "sideband-clean",
+	) => {
+		const dir = join(scratch, name);
+		await mkdir(dir);
+		const log = join(dir, "frames.jsonl");
+		const agy = join(dir, "agy");
+		await writeFile(agy, `#!/bin/sh\nexec "${process.execPath}" "${fixture}" agy "${log}" ${version} ${session}\n`, {
+			mode: 0o755,
+		});
+		const run = startAcpDelegationRun({
+			agent: {
+				id: "antigravity",
+				command: agy,
+				args: ["acp", "--gemini-dir", "~/.gemini", "--app-data-dir", "antigravity-cli"],
+				env: { HOME: scratch },
+				connectTimeoutMs: 5_000,
+			},
+			// A pending steer must not hold an aborted run open until this grace forces termination.
+			cancelGraceMs: 600_000,
+			task: "pick a branch",
+			systemPrompt: "SYSTEM RULES",
+			cwd,
+			safety: createWorkerSafety({ cwd }),
+		});
+		const frames = async () =>
+			(await readFile(log, "utf8").catch(() => ""))
+				.trim()
+				.split("\n")
+				.filter((line) => line.length > 0)
+				.map((line) => JSON.parse(line) as AgyFrame);
+		return { run, frames, agy };
+	};
+	try {
+		const old = await launch("old", "1.5.0", "ok");
+		const refused = await old.run.promise;
+		strictEqual(refused.stopReason, "error");
+		ok(/CLI 1\.5\.0 is not supported.*agy 1\.5\.1 or later/u.test(refused.failureMessage ?? ""), refused.failureMessage);
+		deepStrictEqual(
+			(await old.frames()).map((frame) => frame.method),
+			["initialize"],
+		);
+
+		const signedOut = await launch("auth", "1.5.13", "auth");
+		const auth = await signedOut.run.promise;
+		const login = `${signedOut.agy} acp --gemini-dir ${join(scratch, ".gemini")} --app-data-dir antigravity-cli --login`;
+		deepStrictEqual(auth.authRequired, { loginCommand: login });
+		ok(auth.failureMessage?.includes(`Authentication required`), auth.failureMessage);
+		ok(auth.failureMessage?.endsWith(login), auth.failureMessage);
+
+		const live = await launch("live", "1.5.13", "ok");
+		const questions: unknown[] = [];
+		const steered: boolean[] = [];
+		const steerFailures: unknown[] = [];
+		let lateSteer: boolean | undefined;
+		for await (const event of live.run.events) {
+			const typed = event as { type: string; payload?: unknown; text?: string };
+			if (typed.type === "clio_coder_peer_steer_failed") steerFailures.push(typed.payload);
+			// The turn's own prompt has answered by now; a steer here would open a new turn, so it is refused.
+			if (typed.type === "text_delta" && typed.text === "initial-done") lateSteer = live.run.steer?.("too late");
+			if (typed.type !== "clio_coder_peer_question") continue;
+			questions.push(typed.payload);
+			if ((typed.payload as { questionId?: string }).questionId !== "interaction_1") continue;
+			steered.push(live.run.steer?.("use the topic branch") === true, live.run.steer?.("second steer") === true);
+		}
+		const result = await live.run.promise;
+		// The first steer settled first at max_tokens; the turn's later end_turn does not hide it, and the second
+		// steer's failure after the turn answered is recorded, not the run's failure.
+		strictEqual(result.stopReason, "max_tokens", result.failureMessage);
+		strictEqual(result.failureMessage, "ACP stopReason=max_tokens");
+		deepStrictEqual(steerFailures, [{ reason: "ACP session/prompt failed: steer lost" }]);
+		strictEqual(lateSteer, false);
+		strictEqual(live.run.steer?.("after the run"), false);
+		// interaction_2..4 carry an execute command, or a path or URL under kind other or none: tool calls for the
+		// mediator. interaction_5 and _6 have null or empty locations and no tool input: questions.
+		strictEqual(result.delegation.toolCallsRequested, 6);
+		// agy's own shapes are judged as what they run: run_command's command line, run_workflow's script as inline
+		// Python; a tool the shims cannot map is denied by name, never as an empty bash command.
+		deepStrictEqual(
+			live.run
+				.toolCallLog()
+				.filter((entry) => entry.callId.startsWith("call_"))
+				.map(({ callId, tool, arguments: args, decision, reason }) => ({ callId, tool, args, decision, reason })),
+			[
+				{
+					callId: "call_1",
+					tool: "bash",
+					args: { command: "ls", cwd },
+					decision: "approved",
+					reason: "bash-recognized-chain",
+				},
+				{
+					callId: "call_2",
+					tool: "bash",
+					args: { command: `python3 -c 'print('\\''hi'\\'')'`, cwd },
+					decision: "denied",
+					reason: "permission_required: denied by non-stall policy (no interactive operator in delegation context)",
+				},
+				{
+					callId: "call_3",
+					tool: "agy:browser_click",
+					args: { toolName: "agy:browser_click" },
+					decision: "denied",
+					reason: "unknown ACP tool: agy:browser_click",
+				},
+			],
+		);
+		deepStrictEqual(steered, [true, true]);
+		const question = (id: string, text: string, extra: Record<string, unknown> = {}) => ({
+			questionId: id,
+			question: text,
+			choices: ["Allow", "Reject"],
+			...extra,
+			answer: "cancelled",
+		});
+		deepStrictEqual(questions, [
+			question("interaction_5", "Null locations?"),
+			question("interaction_6", "No locations?"),
+			{
+				questionId: "interaction_1",
+				question: "Which branch?",
+				choices: ["main", "topic"],
+				securityWarning: "pushes to main",
+				answer: "cancelled",
+			},
+		]);
+		const frames = await live.frames();
+		const init = frames.find((frame) => frame.method === "initialize");
+		deepStrictEqual(init?.params?.clientCapabilities, {
+			fs: { readTextFile: false, writeTextFile: false },
+			terminal: false,
+		});
+		strictEqual(init?.params?.clientInfo?.name, "clio-coder");
+		const sessionNew = frames.find((frame) => frame.method === "session/new");
+		deepStrictEqual(sessionNew?.params?._meta, { antigravity: { systemPrompt: { append: "SYSTEM RULES" } } });
+		deepStrictEqual(frames.find((frame) => frame.method === "session/set_mode")?.params, {
+			sessionId: "agy-session",
+			modeId: "default",
+		});
+		const prompts = frames
+			.filter((frame) => frame.method === "session/prompt")
+			.map((frame) => frame.params?.prompt?.[0]?.text ?? "");
+		const [first = "", ...steers] = prompts;
+		ok(!first.includes("SYSTEM RULES") && first.includes("pick a branch"), first);
+		deepStrictEqual(steers, ["use the topic branch", "second steer"]);
+		ok(!frames.some((frame) => frame.method === "session/cancel"));
+		deepStrictEqual(frames.find((frame) => frame.id === "question-1" && frame.method === undefined)?.result, {
+			outcome: { outcome: "cancelled" },
+		});
+
+		// Abort while a steer is pending after the turn's own prompt answered end_turn: the run settles cancelled
+		// (agent_end included) without waiting on the steer. This session reports its mode only as a config option,
+		// which is reset to default the same way.
+		const aborting = await launch("abort", "1.5.13", "abort");
+		const ends: unknown[] = [];
+		for await (const event of aborting.run.events) {
+			const typed = event as { type: string; text?: string; messages?: Array<{ stopReason?: string }> };
+			if (typed.type === "agent_end") ends.push(typed.messages?.[0]?.stopReason);
+			if (typed.type === "clio_coder_peer_question") strictEqual(aborting.run.steer?.("never answered"), true);
+			if (typed.type === "text_delta" && typed.text === "turn-answered") aborting.run.abort();
+		}
+		const cancelled = await aborting.run.promise;
+		strictEqual(cancelled.stopReason, "cancelled");
+		strictEqual(cancelled.exitCode, 1);
+		strictEqual(cancelled.failureMessage, undefined);
+		deepStrictEqual(ends, ["aborted"]);
+		const abortFrames = await aborting.frames();
+		deepStrictEqual(
+			abortFrames.filter((frame) => frame.method === "session/set_config_option").map((frame) => frame.params?.value),
+			["default"],
+		);
+
+		// A steer answered with a null result is a response without a stop reason, not a crash in settlement.
+		const nulled = await launch("null", "1.5.13", "null");
+		for await (const event of nulled.run.events) {
+			if ((event as { type: string }).type === "clio_coder_peer_question") nulled.run.steer?.("null please");
+		}
+		const missing = await nulled.run.promise;
+		strictEqual(missing.stopReason, "error");
+		strictEqual(missing.failureMessage, "ACP prompt response missing stopReason");
+
+		// agy answers end_turn but recorded a quota error and a thinking-signature error in its store under the launch's
+		// profile (HOME/.gemini/antigravity-cli): the run fails with the typed usage limit and the session is marked spent.
+		const sideband = await (await launch("sideband", "1.5.13", "sideband")).run.promise;
+		const usageLimit = {
+			cause: "usage_limit_reached",
+			reason: "QUOTA_EXHAUSTED",
+			message: "Antigravity quota exhausted for gemini-x-high; resets at 2026-11-21T01:00:00.000Z",
+			model: "gemini-x-high",
+			resetAt: "2026-11-21T01:00:00.000Z",
+			resetDelayMs: 7_200_000,
+			retryAfterMs: 7_000,
+		};
+		deepStrictEqual(
+			{ stopReason: sideband.stopReason, exitCode: sideband.exitCode, failureMessage: sideband.failureMessage },
+			{ stopReason: "error", exitCode: 1, failureMessage: usageLimit.message },
+		);
+		deepStrictEqual(sideband.usageLimit, usageLimit);
+		deepStrictEqual(sideband.delegation.nonResumable, { reason: "INVALID_THINKING_SIGNATURE" });
+		// The same errors under a max_tokens end keep the peer's outcome; the session is still marked spent.
+		const maxed = await (await launch("sideband-max", "1.5.13", "sideband-max")).run.promise;
+		deepStrictEqual(
+			{ stopReason: maxed.stopReason, failureMessage: maxed.failureMessage, usageLimit: maxed.usageLimit },
+			{ stopReason: "max_tokens", failureMessage: "ACP stopReason=max_tokens", usageLimit: undefined },
+		);
+		deepStrictEqual(maxed.delegation.nonResumable, { reason: "INVALID_THINKING_SIGNATURE" });
+		// The store's earlier error steps predate this session's first prompt (baseline): a clean turn succeeds.
+		const clean = await (await launch("sideband-clean", "1.5.13", "sideband-clean")).run.promise;
+		deepStrictEqual(
+			{
+				stopReason: clean.stopReason,
+				exitCode: clean.exitCode,
+				usageLimit: clean.usageLimit,
+				nonResumable: clean.delegation.nonResumable,
+			},
+			{ stopReason: "end_turn", exitCode: 0, usageLimit: undefined, nonResumable: undefined },
+		);
+	} finally {
+		await rm(scratch, { recursive: true, force: true });
 	}
 });
 
@@ -357,6 +616,67 @@ test("ACP adapter fails before prompting when the peer keeps another thinking le
 	strictEqual(result.exitCode, 1);
 	strictEqual(result.stopReason, "error");
 	strictEqual(result.failureMessage?.includes("kept thinking level 'medium' after Clio selected 'high'"), true);
+});
+
+test("ACP adapter splits agy legacy <model>-<level> ids and names the offered choices when one is refused", {
+	skip: process.platform === "win32",
+}, async () => {
+	const scratch = await mkdtemp(join(tmpdir(), "clio-agy-levels-"));
+	const agy = join(scratch, "agy");
+	const fixture = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
+	await writeFile(agy, `#!/bin/sh\nexec "${process.execPath}" "${fixture}" agy-levels "$AGY_START" "$AGY_EXPECT"\n`, {
+		mode: 0o755,
+	});
+	const cwd = process.cwd();
+	// The fixture ends the turn only when it runs the expected model and level; a level-less model has no thought_level.
+	const run = (model: string, thinkingLevel?: string, start = "gemini-3.8-flash", expect = "") =>
+		startAcpDelegationRun({
+			agent: {
+				id: "antigravity",
+				command: agy,
+				args: ["acp"],
+				env: { HOME: scratch, AGY_START: start, AGY_EXPECT: expect },
+				connectTimeoutMs: 5_000,
+			},
+			task: "report version",
+			model,
+			...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
+			cwd,
+			safety: createWorkerSafety({ cwd }),
+		}).promise;
+	try {
+		for (const [model, thinkingLevel, start, expect] of [
+			// xhigh is offered only once the model is pro, so the level is checked against the switched model's list.
+			["gemini-3.8-pro-xhigh", undefined, undefined, "gemini-3.8-pro/xhigh"],
+			// The offered spelling is sent whatever case the request used.
+			["gemini-3.8-flash-high", "HIGH", undefined, "gemini-3.8-flash/high"],
+			// Starting on a model without levels: an offered id is never rewritten as gemini-3.8-flash[low], and a
+			// legacy id still splits; each level is checked once the switch returns flash's options.
+			["gemini-3.8-flash", "low", "claude-sonnet-4-6", "gemini-3.8-flash/low"],
+			["gemini-3.8-flash-medium", undefined, "claude-sonnet-4-6", "gemini-3.8-flash/medium"],
+		] as const) {
+			const selected = await run(model, thinkingLevel, start, expect);
+			strictEqual(selected.exitCode, 0, `${model}: ${selected.failureMessage}`);
+			strictEqual(selected.delegation.selectedModelId, expect.split("/")[0]);
+		}
+		for (const [model, thinkingLevel, failure] of [
+			["gemini-3.8-pro-medium", undefined, "thinking level 'medium'; offered: low, high, xhigh"],
+			[
+				"gemini-9-ultra",
+				undefined,
+				"model 'gemini-9-ultra'; offered: gemini-3.8-flash, gemini-3.8-pro, claude-sonnet-4-6",
+			],
+			["gemini-3.8-pro-high", "low", "model 'gemini-3.8-pro-high' with thinking level 'low'"],
+			// The switch's options drop thought_level, so the level is refused rather than ignored.
+			["claude-sonnet-4-6", "low", "thinking level 'low'; the peer offers none"],
+		] as const) {
+			const refused = await run(model, thinkingLevel);
+			strictEqual(refused.exitCode, 1);
+			ok(refused.failureMessage?.includes(`ACP peer does not offer requested ${failure}`), refused.failureMessage);
+		}
+	} finally {
+		await rm(scratch, { recursive: true, force: true });
+	}
 });
 
 test("ACP adapter selects models only through the stable config option, never session/set_model", async () => {

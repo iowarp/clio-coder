@@ -229,6 +229,14 @@ export interface RuntimeDescriptor {
 	 */
 	oauthProviderId?: string;
 	/**
+	 * How an OAuth sign-in finishes, so setup can say what Connect now does. `device-code` waits on a browser callback
+	 * and, with no local browser, shows a link and a code to enter on any device;
+	 * `paste-code` waits on the callback too but, with no local browser, asks for the code the sign-in page shows;
+	 * `paste-only` always asks for that code, opening the page in a browser where one can. Unset reads as `paste-code`,
+	 * which never promises a code Clio would show.
+	 */
+	oauthSignIn?: "device-code" | "paste-code" | "paste-only";
+	/**
 	 * Optional one-line notice printed before an interactive `clio-coder auth login` or
 	 * configure connect for this runtime. Used to surface subscription usage-terms
 	 * considerations so OAuth subscription paths are an explicit, informed opt-in.
