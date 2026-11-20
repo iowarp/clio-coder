@@ -10,6 +10,7 @@ import type { SegmentHeader } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { EventPayload } from "../../src/core/telemetry/events.js";
 import { newProcessId } from "../../src/core/telemetry/ids.js";
+import type { ContextFoldPayload } from "../../src/core/telemetry/live-events.js";
 import type { ObjectRef } from "../../src/core/telemetry/schemas.js";
 import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.js";
 import { encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
@@ -34,7 +35,12 @@ import {
 	verifyShareArchive,
 	writeShare,
 } from "../../src/domains/telemetry/share.js";
-import { BUILTIN_EVIDENCE } from "../../src/domains/telemetry/share-projection.js";
+import {
+	BUILTIN_EVIDENCE,
+	conformingAnonymous,
+	projectionFor,
+	projectSharedPayload,
+} from "../../src/domains/telemetry/share-projection.js";
 
 const SECRET = ["sk-proj", "0123456789abcdefghijklmnop"].join("-");
 const HOST = "operator-laptop.example";
@@ -735,4 +741,29 @@ test("every evidence literal a built-in rule records is one a share keeps verbat
 	}
 	ok(found.size > 10);
 	deepStrictEqual([...found].filter((text) => !BUILTIN_EVIDENCE.has(text)).sort(), []);
+});
+
+test("a context.fold record reads and shares with or without the retired legacy.priorState (CTX-11)", () => {
+	const fold = (legacy: ContextFoldPayload["legacy"]): ContextFoldPayload => ({
+		checkpoint: "submit",
+		route: { promptCaching: true },
+		stages: [{ stage: "superseded", outcome: "none", reason: "adopted" }],
+		tokensBefore: 10,
+		tokensAfter: 10,
+		...(legacy !== undefined ? { legacy } : {}),
+	});
+	const old = fold({ outcome: "legacy_aging_released", results: 1, priorState: "unknown" });
+	const current = fold({ outcome: "legacy_aging_released", results: 1 });
+	const context: TelemetryContext = { sessionId: "ses_fold", agent: { role: "main", id: "ses_fold" } };
+	const at = { t: new Date(0).toISOString(), mono: 0 };
+	for (const data of [old, current]) {
+		const bytes = encodeTelemetryLine(makeTelemetryRecord("context.fold", data, context, at));
+		const [row] = scanTelemetrySegment(bytes).rows;
+		strictEqual(row?.kind, "record", JSON.stringify(row));
+		deepStrictEqual(row.kind === "record" ? row.record.data : null, data);
+		for (const profile of SHARE_PROFILE_NAMES.filter((name) => name !== "research")) {
+			const shared = projectSharedPayload("context.fold", data, conformingAnonymous, projectionFor(profile));
+			strictEqual(canonicalJson(shared), canonicalJson(data), `${profile} keeps the record a fixed point`);
+		}
+	}
 });
