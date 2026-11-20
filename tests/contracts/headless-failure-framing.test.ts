@@ -1,7 +1,9 @@
 import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { prefixHeadlessFailure, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
-import { withRunResultV2 } from "../../src/cli/run-failure.js";
+import { withRunFailureReporting, withRunResultV2 } from "../../src/cli/run-failure.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { CITATION_CHECK_PREFIX } from "../../src/domains/safety/citation-grounding.js";
 import type { ChatLoopRunSnapshot } from "../../src/session-control/chat-loop.js";
@@ -266,6 +268,7 @@ test("a dispatch whose worker started and failed is not reported as never starte
 async function writtenCallRun(
 	format?: "json",
 	override?: Record<string, unknown>,
+	output?: { path: string; cwd: string },
 ): Promise<{ code: number; stdout: string; stderr: string }> {
 	let handler: (event: unknown) => void = () => {};
 	const reply = override ?? {
@@ -315,13 +318,42 @@ async function writtenCallRun(
 			} as never,
 		);
 	try {
-		const code = format === undefined ? await run() : await withRunResultV2({ format, mode: "main", verify: [] }, run);
+		const code =
+			format !== undefined
+				? await withRunResultV2({ format, mode: "main", verify: [] }, run)
+				: output !== undefined
+					? await withRunFailureReporting(false, run, false, output)
+					: await run();
 		return { code, stdout: stdout.join(""), stderr: stderr.join("") };
 	} finally {
 		process.stdout.write = write;
 		process.stderr.write = writeError;
 	}
 }
+
+test("text-mode -o holds the printed answer on exit 0 and leaves stdout and the exit code as they were (CLI-P22)", async (t) => {
+	const env = await isolateClioEnv("headless-text-output-");
+	t.after(() => env.restore());
+	const output = { path: "out.txt", cwd: env.dir };
+	const file = join(env.dir, "out.txt");
+	const pong = answerMessage("pong") as Record<string, unknown>;
+	const plain = await writtenCallRun(undefined, pong);
+	writeFileSync(file, "stale\n");
+	const written = await writtenCallRun(undefined, pong, output);
+	strictEqual(plain.code, 0, plain.stderr);
+	strictEqual(written.code, plain.code, written.stderr);
+	strictEqual(written.stdout, plain.stdout);
+	strictEqual(readFileSync(file, "utf8"), plain.stdout);
+	// A failed run leaves no file, not the stale one; a missing directory refuses before the run.
+	writeFileSync(file, "stale\n");
+	const failed = { ...answerMessage(""), content: [], stopReason: "error", errorMessage: "429 Too Many Requests" };
+	strictEqual((await writtenCallRun(undefined, failed, output)).code, 1);
+	strictEqual(existsSync(file), false);
+	const missing = await writtenCallRun(undefined, pong, { path: "nope/out.txt", cwd: env.dir });
+	strictEqual(missing.code, 2);
+	strictEqual(missing.stdout, "");
+	match(missing.stderr, /--output-last-message directory does not exist: /u);
+});
 
 // Last in the file: the v2 writer keeps its started mark for the rest of the process.
 test("an answer ending on a written call stays exit 0 in v1 and fails as no_answer under v2 (CLI-13)", async (t) => {

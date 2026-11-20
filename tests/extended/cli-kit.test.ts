@@ -243,7 +243,9 @@ test("a v2 run refuses a --steer-channel it cannot open with exit 2 before the r
 			.split("\n")
 			.map((line) => JSON.parse(line) as { exitCode?: number; causes?: Array<{ code: string; message?: string }> });
 		equal(missing?.exitCode, 2);
-		equal(missing?.causes?.[0]?.code, "not_started");
+		// CLI-P22: C17's `io`, not the not_started fallback.
+		equal(missing?.causes?.[0]?.code, "io");
+		equal(directory?.causes?.[0]?.code, "io");
 		ok(missing?.causes?.[0]?.message?.endsWith("no-such-channel: no such file or FIFO"), child.stdout);
 		ok(directory?.causes?.[0]?.message?.endsWith("not a FIFO or regular file"), child.stdout);
 	} finally {
@@ -282,6 +284,34 @@ test("-o beside v1 --json writes the answer on exit 0, removes a stale file othe
 			plain,
 			`${JSON.stringify({ type: "turn_end", startedAt: "t0", endedAt: "t1", exitCode: 0, outcome: "succeeded", text: "The answer." })}\n`,
 		);
+	} finally {
+		env.restore();
+	}
+});
+
+test("-o is written when a v1 --json or text run exits 0 through process.exit before returning (CLI-P22)", async () => {
+	const env = await isolateClioEnv("cli-kit-exit-output-");
+	try {
+		// The coordinated shutdown ends a successful headless run with process.exit (src/core/termination.ts).
+		const script = `
+			const { noteTextAnswer, withRunFailureReporting } = await import(${JSON.stringify(resolve("src/cli/run-failure.ts"))});
+			const { writeFrame } = await import(${JSON.stringify(resolve("src/cli/modes/jsonl.ts"))});
+			const json = process.argv[1] === "json";
+			const output = { path: "out-" + process.argv[1] + ".txt", cwd: ${JSON.stringify(env.dir)} };
+			await withRunFailureReporting(json, async () => {
+				if (json) writeFrame({ type: "turn_end", startedAt: "t0", endedAt: "t1", exitCode: 0, outcome: "succeeded", text: "pong" });
+				else { noteTextAnswer("pong"); process.stdout.write("pong\\n"); }
+				process.exit(0);
+			}, false, output);
+		`;
+		for (const mode of ["json", "text"]) {
+			const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script, mode], {
+				env: { ...process.env, HOME: env.dir },
+				encoding: "utf8",
+			});
+			equal(child.status, 0, child.stderr);
+			equal(readFileSync(join(env.dir, `out-${mode}.txt`), "utf8"), "pong\n", mode);
+		}
 	} finally {
 		env.restore();
 	}

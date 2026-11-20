@@ -102,6 +102,7 @@ import {
 	noteRunEndWritten,
 	noteSteerV2,
 	noteStructuredV2,
+	noteTextAnswer,
 	runResultV2Active,
 	runTextSummaryRequested,
 	writeRunRefusal,
@@ -1890,6 +1891,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		process.stderr.write(`${stderrMessage}\n`);
 	}
 	if (stdoutMessage !== null) {
+		// CLI-P22: text mode's `-o` holds exactly these bytes; a v1 or v2 JSON run reads its answer from its frames.
+		if (mode === "text") noteTextAnswer(stdoutMessage);
 		writeRawStdout(`${stdoutMessage}\n`);
 	}
 	// What the harness saw, beside the model's account; stdout stays the answer and the exit code is unchanged.
