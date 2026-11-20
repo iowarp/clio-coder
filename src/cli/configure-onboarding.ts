@@ -34,6 +34,7 @@ import {
 import type { ThinkingLevel } from "../core/defaults.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
+import { canOpenBrowser } from "../core/open-browser.js";
 import { isLoopbackUrl } from "../core/project-target-urls.js";
 import { clioStateDir } from "../core/xdg.js";
 import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
@@ -106,7 +107,7 @@ import { inferKeyProvider } from "./key-prefix.js";
 import type { LifecyclePresenter } from "./lifecycle-presenter.js";
 import { createLifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
 import { canSelect, promptSelect, promptText } from "./select.js";
-import { credentialWriteFailed } from "./shared.js";
+import { credentialFileProtection, credentialWriteFailed } from "./shared.js";
 import { truncate } from "./text-layout.js";
 
 export interface OnboardingStreams {
@@ -479,7 +480,9 @@ const KEY_STEP: Step = {
 			heading: [
 				"",
 				chalk.bold("Paste your API key"),
-				chalk.dim(`Saved to ${shortenPath(authStoragePath())} (mode 0600, not encrypted) when you save.`),
+				chalk.dim(
+					`Saved to ${shortenPath(authStoragePath())} (${credentialFileProtection()}, not encrypted) when you save.`,
+				),
 			],
 			initial: answers.apiKeyEnv !== undefined ? `$${answers.apiKeyEnv}` : "",
 			hint: "or type $NAME to read the key from that environment variable instead",
@@ -1040,6 +1043,22 @@ function keyWaitsForRefusal(answers: Answers, runtime: RuntimeDescriptor): boole
 	);
 }
 
+/**
+ * What Connect now does for this runtime's sign-in, as a phrase that follows the choice's name. A device-code flow
+ * shows its own code; every other flow asks for the code its sign-in page shows, so it never promises one.
+ */
+function connectHint(runtime: RuntimeDescriptor, browser: boolean): string {
+	const flow = runtime.oauthSignIn ?? "paste-code";
+	if (flow === "paste-only")
+		return browser
+			? "opens your browser, then asks for the code the sign-in page shows"
+			: "shows a sign-in link for any device, then asks for the code that page shows";
+	if (browser) return "opens your browser and waits for the sign-in";
+	return flow === "device-code"
+		? "shows a link and a code to enter on any device"
+		: "shows a sign-in link for any device, then asks for the code that page shows";
+}
+
 const CREDENTIAL_STEP: Step = {
 	id: "credential",
 	applies: (answers) =>
@@ -1059,7 +1078,12 @@ const CREDENTIAL_STEP: Step = {
 					"Sign-in stores credentials immediately; target settings wait for Save.",
 				],
 				choices: [
-					{ value: "oauth-connect", label: "Connect now", hint: "opens your browser and waits for the sign-in" },
+					{
+						value: "oauth-connect",
+						label: "Connect now",
+						// Worded per flow: only a device-code flow shows a code of its own; the others ask for the one the page shows.
+						hint: connectHint(runtime, canOpenBrowser()),
+					},
 					{
 						value: "oauth-skip",
 						label: "Later",
@@ -1111,7 +1135,7 @@ const CREDENTIAL_STEP: Step = {
 			{
 				value: "stored" as CredentialSource,
 				label: "Store the key",
-				hint: "written to credentials.yaml, mode 0600, not encrypted",
+				hint: `written to credentials.yaml, ${credentialFileProtection()}, not encrypted`,
 			},
 			...(hasStored ? [{ value: "keep" as CredentialSource, label: "Keep what is there", hint: stored }] : []),
 			{
@@ -1161,7 +1185,7 @@ const CREDENTIAL_VALUE_STEP: Step = {
 			initial: wantsEnv ? (answers.apiKeyEnv ?? runtime.credentialsEnvVar ?? "") : "",
 			hint: wantsEnv
 				? "Clio reads it every time it calls the provider, so the key never lands on disk"
-				: `stored at ${shortenPath(authStoragePath())}`,
+				: `stored at ${shortenPath(authStoragePath())} (${credentialFileProtection()}, not encrypted)`,
 			...(wantsEnv ? {} : { mask: true }),
 			validate: (value) =>
 				value.length === 0
@@ -1562,7 +1586,11 @@ const REVIEW_STEP: Step = {
 				[
 					"Credential handling",
 					...(answers.credential === "stored"
-						? ["Key written only when you save.", "Local storage: mode 0600.", "Storage is not encrypted."]
+						? [
+								"Key written only when you save.",
+								`Local storage: ${credentialFileProtection()}.`,
+								"Storage is not encrypted.",
+							]
 						: answers.credential === "env"
 							? [
 									`Read from $${answers.apiKeyEnv}`,
@@ -1687,7 +1715,7 @@ async function offerKeyForApp(wizard: Wizard, answers: Answers): Promise<StepOut
 		heading: [
 			"",
 			chalk.bold("The desktop app cannot see this shell's key. Store it for the app too?"),
-			`Clio would store ${variable} unencrypted in ${shortenPath(authStoragePath())} (mode 0600).`,
+			`Clio would store ${variable} unencrypted in ${shortenPath(authStoragePath())} (${credentialFileProtection()}).`,
 		],
 		choices: [
 			{ value: false, label: "No", hint: "the app asks for the key itself" },
@@ -2042,8 +2070,8 @@ async function finish(wizard: Wizard, answers: Answers): Promise<number> {
 			// Inside the TUI the flag is not something the operator can type; the credential step's choice is.
 			presenter.warn(
 				wizard.host
-					? "API key stored unencrypted (mode 0600). Any process running as you can read it. Edit the target and choose Environment variable to keep the key off disk."
-					: "API key stored unencrypted (mode 0600). Any process running as you can read it. Use --api-key-env <VAR> to keep the key off disk.",
+					? `API key stored unencrypted (${credentialFileProtection()}). Any process running as you can read it. Edit the target and choose Environment variable to keep the key off disk.`
+					: `API key stored unencrypted (${credentialFileProtection()}). Any process running as you can read it. Use --api-key-env <VAR> to keep the key off disk.`,
 			);
 		}
 
@@ -2066,7 +2094,7 @@ async function finish(wizard: Wizard, answers: Answers): Promise<number> {
 				return 1;
 			}
 			presenter.warn(
-				`${answers.apiKeyEnv} stored unencrypted (mode 0600) for the desktop app. Any process running as you can read it. ${targetId} still reads the variable first.`,
+				`${answers.apiKeyEnv} stored unencrypted (${credentialFileProtection()}) for the desktop app. Any process running as you can read it. ${targetId} still reads the variable first.`,
 			);
 		}
 

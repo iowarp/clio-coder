@@ -465,7 +465,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	"autonomy.resumed": keep("cleared"),
 	"autonomy.ended": keep("reason", "toolCalls", "activeMs", "tokens", "openDecisions"),
 	"job.clock_resumed": { ...keep("boundMs"), jobId: "id" },
-	"turn.continued": { ...keep("cause", "attempt", "cap"), jobId: "id" },
+	"turn.continued": { ...keep("cause", "attempt", "cap"), jobId: "id", continues: "id" },
 	"agent.status_changed": {
 		...keep("phase", "prevPhase", "elapsedFromStart", "watchdogTier", "attempt"),
 		toolName: "tool",
@@ -537,9 +537,25 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	},
 	"middleware.fired": {
 		...keep("hook", "phase", "effects", "severity"),
+		firingId: "id",
 		ruleId: "name",
 		evidence: "evidence",
 		tool: "tool",
+	},
+	// A settled surface is a side surface id or a rule's registration id, which an operator hook names.
+	"surface.settled": {
+		...keep("outcome"),
+		firingId: "id",
+		surface: "name",
+		admittedIn: "id",
+		fact: { kind: "keep", ref: "id" },
+	},
+	"safety.loop_blocked": { ...keep("repeatCount", "blocksThisTurn", "budget", "disposition"), tool: "tool" },
+	"safety.tool_budget_exceeded": {
+		...keep("callsThisTurn", "softBudget", "hardCeiling", "interrupted", "rolled"),
+		tool: "tool",
+		template: "name",
+		stepTool: "tool",
 	},
 	"system_one.decided": {
 		...keep("outcome", "latencyMs", "deadlineMs", "asked", "abstained", "callIds"),

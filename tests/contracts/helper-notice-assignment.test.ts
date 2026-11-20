@@ -1,4 +1,4 @@
-import { deepStrictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { createNotificationCenter } from "../../src/interactive/footer/notifications.js";
@@ -112,6 +112,7 @@ test("context reduction status uses the footer while errors retain transcript ev
 	const transcript: ChatLoopEvent[] = [];
 	const footer: string[] = [];
 	let helperDismissals = 0;
+	const dismissed: string[] = [];
 	const projection = createInteractiveEventProjection({
 		bus: createTelemetryHub(),
 		chat: {
@@ -137,7 +138,7 @@ test("context reduction status uses the footer while errors retain transcript ev
 		refreshFooter: noop,
 		requestRender: noop,
 		notify: (_level, text) => footer.push(text),
-		dismissNotification: noop,
+		dismissNotification: (key) => dismissed.push(key),
 		supersedeWorkNotifications: () => {
 			helperDismissals += 1;
 		},
@@ -158,5 +159,7 @@ test("context reduction status uses the footer while errors retain transcript ev
 	deepStrictEqual(transcript, [failure]);
 	ingress({ type: "agent_start" } as ChatLoopEvent);
 	deepStrictEqual(helperDismissals, 1);
+	// A finish footer describes the turn that raised it, the lowered-claim assessment included (FX-38).
+	ok(["finish.unverified", "finish.coverage-unverified", "finish.assessed"].every((key) => dismissed.includes(key)));
 	projection.dispose();
 });

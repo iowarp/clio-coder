@@ -320,6 +320,14 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			}
 			if (text.trim().length === 0) return;
 			const origin = deps.removeQueuedMirrorEntry(text);
+			// FX-40: the handed-over message starts its sender's turn, so a continuation or job run it lands in is attended
+			// from here when the operator sent it; a peer's message keeps its own origin.
+			const template = state.currentTurnOrigin?.template;
+			state.currentTurnOrigin = {
+				origin: origin === undefined ? "operator" : "peer",
+				...(template !== undefined ? { template } : {}),
+			};
+			state.finishReplyRefused = false;
 			if (!deps.session) return;
 			if (!deps.session.current()) {
 				const settings = deps.getSettings();
@@ -350,6 +358,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			}
 			state.synthesisToolLock = false;
 			state.toolBudgetLock = false;
+			// FX-38: a declaration belongs to the turn that made it; a message handed over inside the run starts an undeclared one.
+			state.turnCompletion = null;
 			deps.middlewareToolChoice.reset();
 			startTurnUsage(userTurn.id);
 		},

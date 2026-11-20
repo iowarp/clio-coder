@@ -148,6 +148,9 @@ const ESSENTIAL_DETAIL_KEYS = new Set([
 	"signal",
 	"terminate",
 	"timedOut",
+	// Which limit ended a timed-out call when it was not its own timeout, and that a queued steer ended an aborted one (FX-32).
+	"timedOutBy",
+	"abortedBy",
 	"retainedBytes",
 	"stderrBytes",
 	"stdoutBytes",

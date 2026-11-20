@@ -2558,10 +2558,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		}
 		let summaryLifecycleStarted = false;
 		let summaryReportedAt = 0;
+		// Summary calls between entering beforeSummaryCall and its end; a split fold's two summaries may overlap (MD10).
+		let summaryEntriesOpen = 0;
 		const startSummaryLifecycle = (): void => {
+			// Set first, so a concurrent entry never starts the lifecycle twice.
+			summaryLifecycleStarted = true;
 			middleware.fireCompactionHook("llm_summary", trigger);
 			emitCompactionActivity("started", "summarizing session history", "summarize");
-			summaryLifecycleStarted = true;
 		};
 		// Started lazily, in beforeSummaryCall, for forced runs too. Starting it here
 		// made a forced compaction with no older history fire the llm_summary hook
@@ -2781,11 +2784,19 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								fitReserveTokens: resolveFitOutputReserve(agentRuntime, tokensAfter),
 							};
 						},
-						beforeSummaryCall: async (hold) => {
-							await (handoff?.beforeSummaryCall ?? budget?.beforeSummaryCall)?.(hold);
+						beforeSummaryCall: async (hold, signal) => {
+							// An entry that overlaps another keeps that one's progress line and pacing.
+							const overlapping = summaryEntriesOpen > 0;
+							summaryEntriesOpen += 1;
+							try {
+								await (handoff?.beforeSummaryCall ?? budget?.beforeSummaryCall)?.(hold, signal);
+							} finally {
+								summaryEntriesOpen -= 1;
+							}
 							if (evictionSkipNotice) deps.emitNotice(evictionSkipNotice, "info", CONTEXT_STATUS_NOTICE_KEY);
 							evictionSkipNotice = null;
 							if (!summaryLifecycleStarted) startSummaryLifecycle();
+							if (overlapping) return;
 							// Nothing is measurable while the summarizer reads, so the rail
 							// stays indeterminate and says what it is waiting for.
 							summaryReportedAt = 0;

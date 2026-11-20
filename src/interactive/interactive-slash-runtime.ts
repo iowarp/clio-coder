@@ -20,6 +20,7 @@ import {
 	resolveModelRuntimeCapabilitiesForProviders,
 	type ThinkingLevel,
 	thinkingLevelChoiceLabel,
+	VALID_THINKING_LEVELS,
 } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
@@ -61,6 +62,7 @@ import type { ThinkingLevelChoice } from "./overlays/thinking-level.js";
 import type { SubmitPhase } from "./render-trace.js";
 import { renderDoctorReport } from "./renderers/doctor-report.js";
 import { renameCurrentSession } from "./session-rename.js";
+import { thinkingNoteWords } from "./thinking-note.js";
 
 const EXPORT_RENDER_WIDTH = 100;
 /** Two of pi-tui's 16 ms render intervals: long enough for the frame an export notice requests to commit first. */
@@ -698,8 +700,14 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			const labelFor = (candidate: ThinkingLevel): string =>
 				thinkingLevelChoiceLabel(thinking?.mechanism ?? null, candidate);
 			const requested = level.trim().toLowerCase();
-			const match = supported.find((candidate) => candidate === requested || labelFor(candidate) === requested);
-			if (!match) {
+			// Model labels (on, forced) match only this model's own levels; the fallback takes
+			// plain level names, which run through the same clamp a chat.thinkingLevel setting
+			// does (high on a model without high runs as xhigh, CLI-P29).
+			const listed = supported.find((candidate) => candidate === requested || labelFor(candidate) === requested);
+			const match = listed ?? VALID_THINKING_LEVELS.find((candidate) => candidate === requested);
+			// A model whose thinking cannot be switched (none, always-on) takes only its own level.
+			const fixed = !thinking || thinking.mechanism === "none" || thinking.mechanism === "always-on";
+			if (!match || (fixed && listed === undefined)) {
 				return { status: "unsupported", level, supported: supported.map(labelFor) };
 			}
 			// Session scope, like Alt+O: onSetThinkingLevel writes the level
@@ -713,7 +721,20 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				deps.onSetThinkingLevel(match, "session", "slash-command");
 			}
 			deps.refreshFooter();
-			return { status: "applied", level: match, display: labelFor(match) };
+			const resolved = resolveModelRuntimeCapabilitiesForProviders(
+				deps.providers,
+				settings.chat.target,
+				settings.chat.model,
+				match,
+			);
+			const applied = resolved?.thinking;
+			const note = applied ? thinkingNoteWords({ ...applied, model: resolved.modelId }) : null;
+			return {
+				status: "applied",
+				level: match,
+				display: applied ? applied.display : labelFor(match),
+				...(note !== null ? { note } : {}),
+			};
 		},
 		thinkingLevelChoices: () => {
 			const settings = deps.getSettings?.();

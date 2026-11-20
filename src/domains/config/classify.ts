@@ -29,6 +29,8 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	// The parked request re-reads the ceiling every 250 ms, and dispatch admission
 	// reads it per call, so a raise lifts a live wait (#424).
 	"safety.limits.sessionCostUsd",
+	// The main session reads it on every foreground bash call, so the next one observes a change (FX-32).
+	"safety.limits.bashIdleSeconds",
 	"chat.modelPicker",
 	// The keepalive reads it before every refresh, so a change applies to the next one (#423).
 	"chat.cacheKeepalive",

@@ -128,6 +128,46 @@ export function finishSiblingRefusal(
 	};
 }
 
+/** Nobody watches the turn: a headless run, a job, or a yolo continuation (fleet design 4.3, ruling 11). */
+function unattendedTurn(turn: { headless: boolean; origin: string | undefined }): boolean {
+	return turn.headless || turn.origin === "job" || turn.origin === "continuation";
+}
+
+/**
+ * On an attended turn `finish` closes the reply the operator reads, so a response that carries no assistant text is
+ * refused before it runs and declares nothing (FX-40). The refusal runs before the registry, where no loop guard or
+ * turn budget sees it, so it happens at most once per user turn: a later bare finish in that turn runs, and its
+ * declaration records the missing reply as a limitation. The check is typed: a non-empty text block in that response,
+ * never its wording. An unattended turn keeps a bare finish, which its pinned declaration round asks for.
+ */
+export function bareFinishVerdict(
+	toolCall: { name: string; arguments: unknown },
+	assistantMessage: { content: ReadonlyArray<{ type: string; text?: unknown }> },
+	turn: { headless: boolean; origin: string | undefined; refusedThisTurn: boolean },
+): "refuse" | "admit" | null {
+	if (unattendedTurn(turn)) return null;
+	if (effectiveToolCall(toolCall.name, toolCall.arguments).toolName !== ToolNames.Finish) return null;
+	const replied = assistantMessage.content.some(
+		(block) => block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0,
+	);
+	if (replied) return null;
+	return turn.refusedThisTurn ? "admit" : "refuse";
+}
+
+export const FINISH_WITHOUT_REPLY_REFUSAL =
+	"finish did not run: this response has no reply text. Write your reply to the operator, then call finish.";
+
+/** The declaration of a bare finish admitted after its turn's one refusal, with the missing reply on record (FX-40). */
+export function withoutReplyLimitation(completion: CompletionDeclaration): CompletionDeclaration {
+	return {
+		...completion,
+		limitations: [
+			...completion.limitations,
+			{ what: "the response that declared completion carried no reply text for the operator", why: "other" },
+		],
+	};
+}
+
 /** The host's note on the one round an unattended turn spends to declare; it rides the request tail, never the prefix. */
 export const FINISH_DECLARATION_REMINDER =
 	"<system-reminder>Nobody is watching this turn and it ended without a completion declaration. Call finish now with the state the work is in (done, partly_done or not_done), its limitations and anything left unverified. Do not repeat your reply.</system-reminder>";
@@ -147,9 +187,8 @@ export function finishRoundDue(turn: {
 	endedOnTerminalTool: boolean;
 	finishAttached: boolean;
 }): boolean {
-	const unattended = turn.headless || turn.origin === "job" || turn.origin === "continuation";
 	return (
-		unattended &&
+		unattendedTurn(turn) &&
 		turn.calledWork &&
 		!turn.declared &&
 		!turn.spent &&

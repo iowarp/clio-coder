@@ -91,10 +91,13 @@ import type { AgentEvent, AgentMessage, CodexConfiguration, EngineModel, Usage }
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
 import { closeAskUserInterviewOnAssistantTurn } from "../tools/ask-user.js";
 import {
+	bareFinishVerdict,
 	completionOfToolResult,
 	FINISH_DECLARATION_REMINDER,
+	FINISH_WITHOUT_REPLY_REFUSAL,
 	finishRoundDue,
 	finishSiblingRefusal,
+	withoutReplyLimitation,
 } from "../tools/finish.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 import type { ChatNoticeEvent } from "./chat-loop.js";
@@ -364,13 +367,18 @@ export interface TurnRuntimeDeps {
 	/** Stable Clio session id forwarded only to gateway runtimes that understand it. */
 	sessionId?: () => string | undefined;
 	sessionOrigin?: () => TelemetrySessionOrigin | null;
-	/** A main-agent request is leaving now, on this attempt: what the run's messages hold, this request carries. */
-	onModelRequestSent?: (call: {
-		callId: string;
-		attemptId: string;
-		attempt: number;
-		context: TelemetrySessionLease["context"];
-	}) => void;
+	/**
+	 * A main-agent request is leaving now, on this attempt: what the run's messages hold, this request carries. Every
+	 * main request reports, journaled or not; `call` is null when no journal lease records it.
+	 */
+	onModelRequestSent?: (
+		call: {
+			callId: string;
+			attemptId: string;
+			attempt: number;
+			context: TelemetrySessionLease["context"];
+		} | null,
+	) => void;
 	onModelCallSettled?: (facts: CallSettled) => void;
 	/** The ledger as admission prepares a request: the attempt's cursor, owner and the fold records it renders. */
 	requestCursor?: () => RequestCursor;
@@ -1017,16 +1025,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// still trips; an uncapped session prices nothing extra.
 				const capped = deps.getSettings().safety.limits.sessionCostUsd > 0;
 				let interrupted = capped || (message as { stopReason?: unknown }).stopReason === "aborted" ? unreported : null;
-				if (unreported && capped) {
-					const resolution = localRuntime.runtimeResolution;
-					const { rates } = resolveEffectivePricing(resolution.target, resolution.runtime, resolution.wireModelId);
-					if (rates) interrupted = { ...unreported, usd: calculatePricingCostUsd(rates, unreported) };
-				}
+				const resolution = localRuntime.runtimeResolution;
+				const { rates } = resolveEffectivePricing(resolution.target, resolution.runtime, resolution.wireModelId);
+				if (unreported && capped && rates) interrupted = { ...unreported, usd: calculatePricingCostUsd(rates, unreported) };
 				const quota = quotaReadingFromMessage(message, localRuntime.runtimeId, localRuntime.targetId);
 				const settlement = withCachePhysics(
 					callSettlementFromMessage(
 						message,
-						localRuntime.runtimeResolution,
+						{ ...resolution, rates },
 						message.role === "assistant" && message.stopReason === "aborted" ? harnessAbortCause() : undefined,
 						interrupted,
 					),
@@ -1153,6 +1159,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let admittedMessages: readonly AgentMessage[] = [];
 		let admittedSystemPrompt = "";
 		let requiredToolReminder: string | null = null;
+		// FX-40: bare finish calls admitted after their user turn's one refusal; each declaration records the missing reply.
+		const bareFinishCalls = new Set<string>();
 		clearCurrentWatchdog();
 		let runIdentity = deps.turnIdentity?.();
 		// The user turn the run started under, so a call a steer moved to its own entry settles with it (bt-26 N2h).
@@ -1209,13 +1217,16 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						const attempt = modelCall;
 						// The first attempt's send opened at onStreamInvocation; a #426 retry opens its own here.
 						attempt?.stage("send", "start");
-						if (attempt && journalLease)
-							deps.onModelRequestSent?.({
-								callId: attempt.callId,
-								attemptId: attempt.attemptId,
-								attempt: attempt.attempt,
-								context: journalLease.context,
-							});
+						deps.onModelRequestSent?.(
+							attempt && journalLease
+								? {
+										callId: attempt.callId,
+										attemptId: attempt.attemptId,
+										attempt: attempt.attempt,
+										context: journalLease.context,
+									}
+								: null,
+						);
 						const facts: ModelRequestFacts = {
 							sentAt: Date.now(),
 							modelId: currentModel.id,
@@ -1324,8 +1335,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						const failure = terminal
 							? tracking.failure(terminal.errorMessage, terminal.stopReason === "aborted", reported)
 							: undefined;
+						const resolution = localRuntime.runtimeResolution;
+						const { rates } = resolveEffectivePricing(resolution.target, resolution.runtime, resolution.wireModelId);
 						const settlement = withCachePhysics(
-							callSettlementFromMessage({ ...message, ...(failure ? { failure } : {}) }, localRuntime.runtimeResolution),
+							callSettlementFromMessage({ ...message, ...(failure ? { failure } : {}) }, { ...resolution, rates }),
 							message,
 							modelCall.attemptId,
 						);
@@ -1354,8 +1367,20 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const capRefusal = deps.runCaps?.admitToolCalls(calls.length);
 				return capRefusal !== undefined ? { reason: capRefusal } : undefined;
 			},
-			beforeToolCall: async ({ assistantMessage, toolCall }) =>
-				selfCompactSiblingRefusal(toolCall, assistantMessage) ?? finishSiblingRefusal(toolCall, assistantMessage),
+			beforeToolCall: async ({ assistantMessage, toolCall }) => {
+				const sibling =
+					selfCompactSiblingRefusal(toolCall, assistantMessage) ?? finishSiblingRefusal(toolCall, assistantMessage);
+				if (sibling !== undefined) return sibling;
+				const verdict = bareFinishVerdict(toolCall, assistantMessage, {
+					headless: deps.headless === true,
+					origin: state.currentTurnOrigin?.origin,
+					refusedThisTurn: state.finishReplyRefused,
+				});
+				if (verdict === "admit") bareFinishCalls.add(toolCall.id);
+				if (verdict !== "refuse") return undefined;
+				state.finishReplyRefused = true;
+				return { block: true, reason: FINISH_WITHOUT_REPLY_REFUSAL };
+			},
 			beforeStreamRequest: stageAdmission(async ({ model, context: request, options: streamOptions }, hold) => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
 				callTracking = null;
@@ -1788,7 +1813,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			) {
 				deps.queueHandOver?.atFinishTurn(final);
 			}
-			if (!final || localRuntime.agent.hasQueuedMessages?.() === true) return undefined;
+			// A declared turn still settles before a queued message carries the run on: its terminal row, turn_end and seal
+			// belong to it, and the returns after turn_end below hand the queue over (FX-38).
+			if (!final || (localRuntime.agent.hasQueuedMessages?.() === true && state.turnCompletion === null)) return undefined;
+			// `finish` is turn-terminal (fleet design 4.3, FX-38): a required tool still pending after a declared completion
+			// asks for nothing more.
+			if (state.turnCompletion !== null) requiredToolReminder = null;
 			if (requiredToolReminder !== null && currentRun() && state.activeInterruptReason === null) {
 				return { action: "continue" };
 			}
@@ -2394,7 +2424,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const completion = enrichedEvent.isError
 					? null
 					: completionOfToolResult(enrichedEvent.toolName, enrichedEvent.result);
-				if (completion !== null) state.turnCompletion = completion;
+				const bare = bareFinishCalls.delete(enrichedEvent.toolCallId);
+				if (completion !== null) state.turnCompletion = bare ? withoutReplyLimitation(completion) : completion;
 				pendingTerminalToolResult =
 					(enrichedEvent.result as { terminate?: boolean } | undefined)?.terminate === true
 						? { toolCallId: enrichedEvent.toolCallId, toolName: enrichedEvent.toolName }

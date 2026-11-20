@@ -15,15 +15,20 @@
  * made by hand from `/memory`.
  */
 
-import { commandClaimRef, commandEvidenceRef, simpleInvocation, sourceEvidenceRef } from "./command-evidence.js";
-import { applyMemoryGate } from "./guardian-gate.js";
-import { canonicalMemoryRepositoryIdentity, cloneMemoryRecord } from "./operations.js";
-import { memoryRecordFromPromotion } from "./promotion.js";
+import {
+	commandClaimRef,
+	commandEvidenceRef,
+	parseSourceEvidenceRef,
+	simpleInvocation,
+	sourceEvidenceRef,
+} from "./command-evidence.js";
+import { applyMemoryGate, observeMemoryRecord, operatorDecided, reviseMemoryLesson } from "./guardian-gate.js";
+import { canonicalMemoryRepositoryIdentity, checkoutPosition, cloneMemoryRecord } from "./operations.js";
+import { memoryClaimKey, memoryRecordFromPromotion } from "./promotion.js";
 import type { MemoryMutationOptions } from "./store.js";
 import { mutateMemoryRecords } from "./store.js";
 import type { TaskMemoryEntry } from "./task-bank.js";
 import type { MemoryRecord, MemoryRepositoryIdentity } from "./types.js";
-import { MEMORY_OBSERVATIONS_MAX } from "./types.js";
 
 export interface ProposeInjectedTaskMemoryInput {
 	/** Session the reminder was produced in. Without one there is no provenance to file under. */
@@ -35,6 +40,8 @@ export interface ProposeInjectedTaskMemoryInput {
 	writeOptions?: MemoryMutationOptions;
 	/** Only a caller that checked concrete source evidence may report a held lesson. */
 	observation?: "held";
+	/** The held lesson had been delivered to this session before its evidence. */
+	prompted?: boolean;
 	/** Entry ids whose evidence command the caller saw succeed (`lessonEvidence` returned "command"). */
 	commandVerified?: ReadonlySet<string>;
 }
@@ -80,6 +87,7 @@ export async function proposeInjectedTaskMemory(
 		}
 	}
 	if (!prepared.length) return result;
+	const position = input.observation === "held" ? checkoutPosition(input.cwd) : {};
 	return mutateMemoryRecords(
 		dataDir,
 		(records) => {
@@ -87,30 +95,56 @@ export async function proposeInjectedTaskMemory(
 			let changed = false;
 			const at = (input.now ?? new Date()).toISOString();
 			for (const item of prepared) {
-				// Claim identity is the record or its exact wording. Evidence identity
-				// rides separately in `command:`/`source:` refs: two lessons quoting
-				// the same command can state different prerequisites, so a shared
-				// command never makes one claim's evidence count for the other.
+				// Claim identity is the claim's repository, kind and body (`memoryClaimKey`):
+				// the same command under another wording is the same record, at a new
+				// revision. A record with no claim keeps the older identity, its id or
+				// its exact wording.
+				const identity = memoryClaimKey(item.record);
 				const existing =
 					updated.find((record) => record.id === item.record.id) ??
-					(item.entry.durable === true ? similarRepositoryLesson(updated, repository, item.entry.content) : null);
+					(identity === null ? undefined : updated.find((record) => memoryClaimKey(record) === identity)) ??
+					(identity === null && item.entry.durable === true
+						? similarRepositoryLesson(updated, repository, item.entry.content)
+						: null);
+				// The operator's decision stands as they left it; the proposal resolves to it.
+				if (existing && operatorDecided(existing)) {
+					result.records.push(existing);
+					result.recordByEntry.set(item.entry.id, existing);
+					continue;
+				}
 				const record = cloneMemoryRecord(existing ?? item.record);
-				const addedEvidence = existing
-					? item.record.evidenceRefs.filter((ref) => !record.evidenceRefs.includes(ref) && /^(?:command|source):/u.test(ref))
-					: [];
-				if (addedEvidence.length > 0) record.evidenceRefs = [...record.evidenceRefs, ...addedEvidence];
-				// One verdict per session: a repeat from the same session adds nothing the gate
-				// counts, and stacking it would push older contradictions out of the window.
-				const held =
-					input.observation === "held" &&
-					!(existing?.observations ?? []).some((seen) => seen.sessionId === sessionId && seen.kind === "held");
-				if (held) {
-					record.observations = [...(record.observations ?? []), { at, sessionId, kind: "held" as const }].slice(
-						-MEMORY_OBSERVATIONS_MAX,
+				// Only a grounded filing revises a note: a delivered, ungrounded or scope-end proposal brings words no
+				// session demonstrated, and a lesson keeps the words and evidence it was promoted on. A newer quote of a
+				// file replaces the older quote of that same file rather than sitting beside it.
+				if (existing && !record.approved && input.observation === "held") {
+					const incoming = item.record.evidenceRefs.filter((ref) => /^(?:command|source):/u.test(ref));
+					const requoted = new Set(incoming.flatMap((ref) => parseSourceEvidenceRef(ref)?.path ?? []));
+					const kept = record.evidenceRefs.filter((ref) => {
+						const source = parseSourceEvidenceRef(ref);
+						return source === null || !requoted.has(source.path) || incoming.includes(ref);
+					});
+					reviseMemoryLesson(
+						record,
+						item.record.lesson,
+						[...kept, ...incoming.filter((ref) => !kept.includes(ref))],
+						sessionId,
+						at,
+					);
+				}
+				if (input.observation === "held") {
+					observeMemoryRecord(
+						record,
+						{
+							sessionId,
+							kind: "held",
+							...position,
+							...(input.prompted !== undefined ? { prompted: input.prompted } : {}),
+						},
+						at,
 					);
 					applyMemoryGate(record, at, updated);
 				}
-				changed ||= !existing || held || addedEvidence.length > 0;
+				changed ||= !existing || JSON.stringify(record) !== JSON.stringify(existing);
 				if (existing) updated[updated.indexOf(existing)] = record;
 				else updated.push(record);
 				result.records.push(record);
@@ -123,12 +157,13 @@ export async function proposeInjectedTaskMemory(
 }
 
 /**
- * The repository lesson that already says exactly this, if any. Identity is the
- * text with whitespace collapsed and nothing else: term overlap matched "the
- * cache is safe across sessions" with "the cache is NOT safe across sessions",
- * and a changed number or path the same way, so a new and opposite fact would
- * have counted as a second session holding the old one. A rejected record
- * matches too, because the operator declined that lesson.
+ * The repository lesson that already says exactly this, if any, for a record
+ * that has no claim. Identity is the text with whitespace collapsed and nothing
+ * else: term overlap matched "the cache is safe across sessions" with "the
+ * cache is NOT safe across sessions", and a changed number or path the same
+ * way, so a new and opposite fact would have counted as a second session
+ * holding the old one. A rejected record matches too, because the operator
+ * declined that lesson.
  */
 function similarRepositoryLesson(
 	records: ReadonlyArray<MemoryRecord>,

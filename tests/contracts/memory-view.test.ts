@@ -210,7 +210,7 @@ test("detail names the subject, reach, track record and evidence without treatin
 	// Outcomes count once per session, and the source session's own hold is named apart.
 	match(
 		detail,
-		/Delivered in 1 sessions; held in 1 later sessions and in the session it came from; contradicted after delivery in 0 sessions/u,
+		/Delivered 2 times; held in 1 later sessions and in the session it came from; contradicted after delivery in 0 sessions/u,
 	);
 	match(detail, /Last verified 2026-10-14T03:00:00.000Z/u);
 	match(detail, /do not prove.*changed the result/u);

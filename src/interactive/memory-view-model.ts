@@ -77,19 +77,42 @@ function reachLine(
 		: `Eligible, but the prompt's ${item.reason === "token-budget" ? "token budget" : "item limit"} left it out.`;
 }
 
-/** Outcomes counted once per session: two observations from one session are one track-record entry. */
+/** Verdicts counted once per session: two from one session are one track-record entry. Deliveries are a count. */
 function trackRecord(record: MemoryRecord): string[] {
-	const sessions = (kind: "delivered" | "held" | "contradicted") =>
+	const sessions = (kind: "held" | "contradicted") =>
 		new Set((record.observations ?? []).filter((item) => item.kind === kind).map((item) => item.sessionId));
 	const held = sessions("held");
 	const source = record.provenance?.sourceSessionId;
 	const heldElsewhere = [...held].filter((sessionId) => sessionId !== source).length;
+	// A record written before the delivery counter still lists its deliveries as observations until it next changes.
+	const delivered =
+		(record.deliveredCount ?? 0) + (record.observations ?? []).filter((item) => item.kind === "delivered").length;
 	return [
-		`Delivered in ${sessions("delivered").size} sessions; held in ${heldElsewhere} later sessions${
+		`Delivered ${delivered} time${delivered === 1 ? "" : "s"}; held in ${heldElsewhere} later sessions${
 			source !== undefined && held.has(source) ? " and in the session it came from" : ""
 		}; contradicted after delivery in ${sessions("contradicted").size} sessions.`,
 		`Last verified ${record.lastVerifiedAt ?? "never"}; learned ${record.createdAt}.`,
+		...(record.revisions !== undefined
+			? [
+					`Reworded ${record.revisions.length - 1} time${record.revisions.length === 2 ? "" : "s"}; verdicts count per wording.`,
+				]
+			: []),
 	];
+}
+
+/** The claim a record stores, as an operator reads it; a record written before claims were stored shows none. */
+function claimLine(record: MemoryRecord): string[] {
+	const claim = record.claim;
+	if (claim === undefined) return [];
+	const words = (argv: readonly string[]) => `\`${argv.join(" ")}\``;
+	switch (claim.kind) {
+		case "command":
+			return [`Claim: command ${words(claim.command.argv)}`];
+		case "fix":
+			return [`Claim: ${words(claim.fixed.argv)} fixes a failed ${words(claim.failed.argv)}`];
+		case "source":
+			return [`Claim: a quoted span of ${claim.path}`];
+	}
 }
 
 export function memoryLessonDetail(
@@ -129,6 +152,7 @@ export function memoryLessonDetail(
 		"Delivery and recall do not prove that a lesson changed the result of a task.",
 		"",
 		"## Evidence",
+		...claimLine(record),
 		...(record.evidenceRefs.length ? record.evidenceRefs.map((ref) => `- ${ref}`) : ["No evidence reference recorded."]),
 		...(record.provenance?.evidenceId ? [`Evidence artifact: ${record.provenance.evidenceId}`] : []),
 		approval,
