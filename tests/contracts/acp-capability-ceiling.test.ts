@@ -331,7 +331,7 @@ test("a ceiling admits commands that only stop, pause or reshape the session's o
 		providers: {} as ProvidersContract,
 	});
 	const refusal = (command: string, argv: string[]) => control.ceilingRefusal?.(command, argv, { readOnly: true });
-	for (const verb of ["stop", "cancel", "pause"]) assert.equal(refusal("loop", [verb, "job-1"]), null, `/loop ${verb}`);
+	for (const verb of ["stop", "pause"]) assert.equal(refusal("loop", [verb, "job-1"]), null, `/loop ${verb}`);
 	assert.equal(refusal("context", ["compact"]), null);
 	assert.equal(refusal("context", ["recall", "ref-1"]), null);
 	assert.equal(refusal("eggs", ["off"]), null);

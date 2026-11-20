@@ -8,8 +8,8 @@ import type { LoopHost } from "../../src/session-control/loop-command.js";
 import { parseLoopLine, runLoopCommand } from "../../src/session-control/loop-command.js";
 
 for (const count of [0, 1, 2]) {
-	test(`bare /loop cancel resolves only one active loop (${count} active)`, async () => {
-		const parsed = parseLoopLine("cancel");
+	test(`bare /loop stop --now resolves only one active loop (${count} active)`, async () => {
+		const parsed = parseLoopLine("stop --now");
 		ok(parsed.ok);
 		const invoked: unknown[] = [];
 		const notices: string[] = [];
@@ -41,12 +41,17 @@ for (const count of [0, 1, 2]) {
 	});
 }
 
-test("other loop control verbs still require an id and explicit cancellation preserves its id", () => {
+test("other loop control verbs still require an id, stop --now preserves its id, and the retired spellings are refused", () => {
 	for (const verb of ["pause", "resume", "stop"]) strictEqual(parseLoopLine(verb).ok, false);
-	deepStrictEqual(parseLoopLine("cancel chosen"), {
+	deepStrictEqual(parseLoopLine("stop chosen --now"), {
 		ok: true,
 		command: { kind: "control", action: "cancel", id: "chosen" },
 	});
+	for (const line of ["list", "cancel", "cancel chosen"]) {
+		const parsed = parseLoopLine(line);
+		ok(!parsed.ok);
+		match(parsed.reason, /Unrecognized interval .*status, pause, resume, stop$/u);
+	}
 });
 
 test("/loop status words a job's spend from the read model over the turns its ledger origin names", async () => {
