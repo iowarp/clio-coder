@@ -281,8 +281,42 @@ it("asks once for a multi-task dispatch that needs the session's test-runner con
 	}
 });
 
-it("admits a compete whose operator turn names `npm test`, moving the check into each candidate's worktree (M10a)", async () => {
+it("admits a compete whose operator turn names `npm test`, moving the check and every checkout path it names into each candidate's worktree (M10a)", async () => {
 	const root = project([{ id: "test", command: [process.execPath, "-e", "process.exit(0)"] }]);
+	// Absolute argv words and numeric inputs under the checkout follow the candidate; a path outside the checkout,
+	// or one git ignores there, stays.
+	writeFileSync(join(root, ".gitignore"), "dist/\n");
+	writeFileSync(join(root, "ref.json"), '{"e":1}');
+	const argv = [
+		process.execPath,
+		join(root, "scripts", "check.mjs"),
+		join(root, "src"),
+		`--root=${root}`,
+		join(root, "dist", "x.js"),
+	];
+	writeFileSync(
+		join(root, ".clio-coder", "verifiers.yaml"),
+		JSON.stringify({
+			version: 2,
+			checks: [
+				{ id: "test", description: "Check test", command: argv, cwd: ".", timeoutMs: 5_000, tags: [] },
+				{
+					id: "num",
+					description: "Check num",
+					kind: "numeric-compare",
+					command: [process.execPath, "-e", "process.stdout.write('{\"e\":1}')"],
+					reference: "ref.json",
+					tolerance: { absolute: 0 },
+					inputs: ["input.txt"],
+					cwd: ".",
+					timeoutMs: 5_000,
+					tags: [],
+				},
+			],
+		}),
+	);
+	execFileSync("git", ["-C", root, "add", "-A"]);
+	execFileSync("git", ["-C", root, "commit", "-qm", "checks"]);
 	const head = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 	const previousCwd = process.cwd();
 	process.chdir(root);
@@ -306,18 +340,39 @@ it("admits a compete whose operator turn names `npm test`, moving the check into
 		);
 		const verdict = await registry.invoke({
 			tool: "dispatch",
-			args: { agent: "coder", task: "Edit input.txt.", mode: "compete", candidates: 2 },
+			args: {
+				agent: "coder",
+				task: "Edit input.txt.",
+				mode: "compete",
+				candidates: 2,
+				intent: { verification: [{ check: "num" }] },
+			},
 		});
 		ok(!JSON.stringify(verdict).includes("verification_unsupported_for_mode"), JSON.stringify(verdict));
 		ok(requests.length > 0, JSON.stringify(verdict));
 		for (const request of requests) {
 			const worktree = request.cwd as string;
 			ok(worktree !== root && worktree.startsWith(root), worktree);
-			const checks = request.resolvedVerification as Array<{ check: string; cwd: string }>;
-			deepStrictEqual(
-				checks.map((check) => [check.check, check.cwd]),
-				[["test", worktree]],
-			);
+			const checks = request.resolvedVerification as Array<{
+				check: string;
+				cwd: string;
+				argv: string[];
+				numeric?: { reference: string; inputs?: string[] };
+			}>;
+			deepStrictEqual(checks.map((check) => [check.check, check.cwd]).sort(), [
+				["num", worktree],
+				["test", worktree],
+			]);
+			deepStrictEqual(checks.find((check) => check.check === "test")?.argv, [
+				process.execPath,
+				join(worktree, "scripts", "check.mjs"),
+				join(worktree, "src"),
+				`--root=${worktree}`,
+				join(root, "dist", "x.js"),
+			]);
+			const numeric = checks.find((check) => check.check === "num")?.numeric;
+			deepStrictEqual(numeric?.inputs, [join(worktree, "input.txt")]);
+			strictEqual(numeric?.reference, join(root, "ref.json"), "the sealed reference stays where admission read it");
 			deepStrictEqual(request.candidateWorktree, { root, path: worktree, base: head });
 		}
 	} finally {

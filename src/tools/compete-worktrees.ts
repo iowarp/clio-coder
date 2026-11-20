@@ -32,7 +32,7 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { internalGitArgv, withoutRepositoryEnv } from "../core/internal-git.js";
 import { relativePathEscapes } from "../core/path-containment.js";
@@ -592,25 +592,80 @@ export function candidateDiffStat(root: string, branch: string): string {
 	return worktreeBranchDiffStat(root, branch);
 }
 
+/** The given absolute paths under `root` that git ignores there; exit 1 means none is. */
+function ignoredInCheckout(root: string, paths: ReadonlyArray<string>): Set<string> {
+	if (paths.length === 0) return new Set();
+	try {
+		const out = execFileSync("git", internalGitArgv(["-C", root, "check-ignore", "-z", "--stdin"]), {
+			encoding: "utf8",
+			input: `${paths.join("\0")}\0`,
+			stdio: ["pipe", "pipe", "pipe"],
+			timeout: 30_000,
+			env: withoutRepositoryEnv(),
+		});
+		return new Set(out.split("\0").filter((path) => path.length > 0));
+	} catch (error) {
+		if ((error as { status?: unknown }).status === 1) return new Set();
+		throw error;
+	}
+}
+
 /**
  * A candidate's host checks, moved from the checkout admission sealed them in to the candidate's own worktree, the
  * way a task worktree's checks move with its worker; a check left in the checkout would judge the operator's tree.
- * The commit the worktree starts at is the base a failing check is compared against (M10a). Sealed reference and
- * baseline files stay where admission read them. A check outside the checkout cannot follow the candidate and is
- * refused; compete builds every candidate's request before admitting any, so that refusal starts no run.
+ * Every path the check reads that lies under the checkout follows it: the cwd, absolute argv words (`--opt=/path`
+ * too), numeric inputs and provenance probes. A path outside the checkout, or one git ignores there (dependencies,
+ * build output a candidate's worktree never has), stays as it is. The sealed reference and
+ * baseline stay where admission read them: they are the operator's yardstick, digest-checked, not candidate output.
+ * The commit the worktree starts at is the base a failing check is compared against (M10a). A check whose cwd lies
+ * outside the checkout cannot follow the candidate and is refused; compete builds every candidate's request before
+ * admitting any, so that refusal starts no run.
  */
 export function candidateVerification(
 	root: string,
 	worktree: CandidateWorktree,
 	checks: ReadonlyArray<ResolvedVerificationCheck>,
 ): Required<Pick<DispatchRequest, "resolvedVerification" | "candidateWorktree">> {
+	const underRoot = (path: string): boolean => !relativePathEscapes(relative(root, path));
+	const pathValue = (arg: string): string => (isAbsolute(arg) ? arg : arg.slice(arg.indexOf("=") + 1));
+	const named = checks.flatMap((check) => [
+		...check.argv,
+		...(check.numeric?.inputs ?? []),
+		...(check.numeric?.provenance ?? []).flat(),
+	]);
+	const ignored = ignoredInCheckout(
+		root,
+		named.map(pathValue).filter((path) => isAbsolute(path) && path !== root && underRoot(path)),
+	);
+	// A path git ignores (installed dependencies, build output) never reaches a candidate's worktree, so it stays.
+	const moved = (path: string): string =>
+		underRoot(path) && !ignored.has(path) ? resolve(worktree.path, relative(root, path)) : path;
+	const word = (arg: string): string => {
+		if (isAbsolute(arg)) return moved(arg);
+		const value = pathValue(arg);
+		return arg.includes("=") && isAbsolute(value) ? `${arg.slice(0, arg.length - value.length)}${moved(value)}` : arg;
+	};
 	return {
 		resolvedVerification: checks.map((check) => {
 			const rel = relative(root, resolve(root, check.cwd));
 			if (relativePathEscapes(rel)) {
 				throw new Error(`dispatch: host verification check '${check.check}' runs outside the compete checkout`);
 			}
-			return { ...check, argv: [...check.argv], cwd: resolve(worktree.path, rel) };
+			const numeric = check.numeric;
+			return {
+				...check,
+				argv: check.argv.map(word),
+				cwd: resolve(worktree.path, rel),
+				...(numeric !== undefined
+					? {
+							numeric: {
+								...numeric,
+								...(numeric.inputs !== undefined ? { inputs: numeric.inputs.map(moved) } : {}),
+								...(numeric.provenance !== undefined ? { provenance: numeric.provenance.map((probe) => probe.map(word)) } : {}),
+							},
+						}
+					: {}),
+			};
 		}),
 		candidateWorktree: {
 			root,
