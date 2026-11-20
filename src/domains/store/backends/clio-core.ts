@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { type Dirent, constants as fsConstants } from "node:fs";
 import { access, chmod, lstat, mkdir, readdir, realpath, rename, rm, stat, utimes } from "node:fs/promises";
 import path from "node:path";
+import { relativePathEscapes } from "../../../core/path-containment.js";
 import {
 	decodeTagSegment,
 	encodeTagSegment,
@@ -201,7 +202,7 @@ export async function createClioCoreStoreBackend(
 				{ bytes: info.bytes, ...(signal !== undefined ? { signal } : {}) },
 			);
 			const relative = path.relative(destDir, got.path);
-			if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative))
+			if (relative === "" || relativePathEscapes(relative))
 				throw new StoreRefusal("io", `The clio-core host wrote ${got.path}, outside ${destDir}.`);
 			if ((await stat(got.path)).size !== info.bytes)
 				throw new StoreRefusal("io", `Blob ${blob} in tag ${tag} changed while it was being read; try again.`);
@@ -398,7 +399,7 @@ export async function createClioCoreStoreBackend(
 				const resolved = await realpath(root).catch(() => null);
 				if (resolved === null) return null;
 				const relative = path.relative(resolved, realPath);
-				if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) return null;
+				if (relative === "" || relativePathEscapes(relative)) return null;
 				return relative.split(path.sep);
 			};
 			const named = (tag: string, blob: string) =>
