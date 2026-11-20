@@ -21,6 +21,7 @@ import { type MemoryGateOutcome, recordMemoryObservations } from "./guardian-gat
 import type { MemoryDeliveryOutcome, MemoryKnowledgeReview } from "./intervention.js";
 import type { MemoryObservationEvent } from "./observation-events.js";
 import { observationDigest } from "./observations.js";
+import { checkoutPosition } from "./operations.js";
 import { takeMemoryStoreNotices } from "./store.js";
 import type { TaskMemoryEntry } from "./task-bank.js";
 import { TASK_MEMORY_CONTENT_MAX_CHARS } from "./task-bank.js";
@@ -62,6 +63,8 @@ interface ProposedEntry {
 	 * still owed its held observation when the command later succeeds.
 	 */
 	held: boolean;
+	/** Filed when a reminder carrying it was delivered, so a later held is a prompted one. */
+	delivered: boolean;
 }
 
 const HISTORY_CANDIDATE_VERSION = 1;
@@ -115,10 +118,14 @@ export class MemoryLessonFeedback {
 			const filed = this.#proposed.get(entry.id);
 			if (filed === undefined || filed.content !== entry.content || filed.held) return [];
 			filed.held = true;
-			return [filed.record];
+			return [filed];
 		});
 		if (fresh.length > 0) this.#propose(fresh, "held", undefined, review.commandVerified);
-		if (nowHeld.length > 0) this.#observeResolved(nowHeld, "held", "held lessons not recorded");
+		// A lesson the reminder carried before it held was prompted to.
+		for (const prompted of [true, false]) {
+			const records = nowHeld.filter((filed) => filed.delivered === prompted).map((filed) => filed.record);
+			if (records.length > 0) this.#observeResolved(records, "held", "held lessons not recorded", prompted);
+		}
 		const unfounded = review.ungrounded.filter((entry) => this.#proposed.get(entry.id)?.content !== entry.content);
 		if (unfounded.length > 0) this.#propose(unfounded, null);
 		const withdrawn = review.withdrawn.flatMap((entry) => {
@@ -145,7 +152,10 @@ export class MemoryLessonFeedback {
 					current.held = true;
 				}
 				const proposed = await current.record;
-				return proposed ? { ...proposed, kind: outcome.kind } : null;
+				// A held delivery followed the reminder that carried the lesson.
+				return proposed
+					? { ...proposed, kind: outcome.kind, ...(outcome.kind === "held" ? { prompted: true } : {}) }
+					: null;
 			}),
 		);
 		if (final) this.#proposed.clear();
@@ -155,7 +165,7 @@ export class MemoryLessonFeedback {
 				.then((resolved) =>
 					recordMemoryObservations(
 						this.#ports.dataDir(),
-						resolved.filter((item) => item !== null),
+						resolved.filter((item) => item !== null).map((item) => ({ ...this.#position(), ...item })),
 					),
 				)
 				.then((outcome) => this.#reportGate(outcome))
@@ -184,7 +194,8 @@ export class MemoryLessonFeedback {
 		this.#observe(
 			[
 				...input.delivered.map((memoryId) => ({ memoryId, sessionId, kind: "delivered" as const })),
-				...input.held.map((memoryId) => ({ memoryId, sessionId, kind: "held" as const })),
+				// The recommended command succeeded after the lesson was delivered: a prompted success.
+				...input.held.map((memoryId) => ({ memoryId, sessionId, kind: "held" as const, prompted: true })),
 			],
 			"durable lesson outcomes not recorded",
 		);
@@ -416,7 +427,7 @@ export class MemoryLessonFeedback {
 					this.#reportGate(
 						await recordMemoryObservations(
 							this.#ports.dataDir(),
-							ids.map((memoryId) => ({ memoryId, sessionId, kind })),
+							ids.map((memoryId) => ({ ...this.#position(), memoryId, sessionId, kind })),
 						),
 					);
 				}
@@ -431,6 +442,7 @@ export class MemoryLessonFeedback {
 			this.#proposed.set(entry.id, {
 				content: entry.content,
 				held: kind === "held" && entry.durable === true,
+				delivered: kind === "delivered",
 				record: proposal.then((records) => {
 					const record = entry.durable === true ? records.get(entry.id) : undefined;
 					return record === undefined || sessionId === null ? null : { memoryId: record.id, sessionId };
@@ -443,13 +455,16 @@ export class MemoryLessonFeedback {
 		records: ReadonlyArray<Promise<{ memoryId: string; sessionId: string } | null>>,
 		kind: MemoryObservationKind,
 		failure: string,
+		prompted?: boolean,
 	): void {
 		this.#track(
 			Promise.all(records)
 				.then((resolved) =>
 					recordMemoryObservations(
 						this.#ports.dataDir(),
-						resolved.filter((item) => item !== null).map((item) => ({ ...item, kind })),
+						resolved
+							.filter((item) => item !== null)
+							.map((item) => ({ ...this.#position(), ...item, kind, ...(prompted ? { prompted } : {}) })),
 					),
 				)
 				.then((outcome) => this.#reportGate(outcome))
@@ -461,10 +476,21 @@ export class MemoryLessonFeedback {
 		if (inputs.length === 0) return;
 		this.#track(
 			Promise.resolve()
-				.then(() => recordMemoryObservations(this.#ports.dataDir(), inputs))
+				.then(() =>
+					recordMemoryObservations(
+						this.#ports.dataDir(),
+						inputs.map((item) => ({ ...this.#position(), ...item })),
+					),
+				)
 				.then((outcome) => this.#reportGate(outcome))
 				.catch(this.#storeFailure(failure)),
 		);
+	}
+
+	/** The current checkout's branch and head, which scope a verdict; nothing when no session or repository is known. */
+	#position(): { branch?: string; head?: string } {
+		const cwd = this.#ports.session()?.cwd;
+		return cwd ? checkoutPosition(cwd) : {};
 	}
 
 	/** Nobody reviews these by hand any more, so a gate change is told to the operator. */

@@ -37,6 +37,7 @@ import {
 import { MemoryLessonFeedback } from "../../src/domains/memory/lesson-feedback.js";
 import { projectKeptLesson } from "../../src/domains/memory/lesson-projection.js";
 import { rejectMemoryRecord } from "../../src/domains/memory/operations.js";
+import { memoryRevision } from "../../src/domains/memory/promotion.js";
 import {
 	demotedMemoryIds,
 	detectMemoryUse,
@@ -635,7 +636,7 @@ test("a task with no command receipt or read excerpt settles its retention witho
 	}
 });
 
-test("a recipe the task's receipts prove is retained though the model keeps nothing", async () => {
+test("a recipe the task's receipts prove is filed though the model keeps nothing, and waits for later sessions", async () => {
 	const closed = await closedSessionRuntime(
 		{
 			revision: "rev-b",
@@ -649,10 +650,10 @@ test("a recipe the task's receipts prove is retained though the model keeps noth
 	);
 	try {
 		strictEqual(await closed.runtime.runIdleStep(true), "ran");
-		strictEqual(closed.marker()?.phase, "retained");
+		strictEqual(closed.marker()?.phase, "gated");
 		const records = closed.records();
 		strictEqual(records.length, 1);
-		strictEqual(records[0]?.approved, true);
+		strictEqual(records[0]?.approved, false, "its own session's evidence never promotes it");
 		ok(records[0]?.lesson.includes(`\`${COMMAND}\``));
 	} finally {
 		closed.cleanup();
@@ -682,7 +683,7 @@ test("an operation list missing only its closing bracket is repaired, and nothin
 	strictEqual(broken.decision, "malformed");
 });
 
-test("lessons quoting the same command stay separate claims, and one session holds each once", async () => {
+test("lessons quoting the same command are one claim, each wording a revision one session holds once", async () => {
 	const root = mkdtempSync(join(tmpdir(), "memory-same-command-"));
 	const dataDir = join(root, "data");
 	const cwd = join(root, "project");
@@ -712,15 +713,24 @@ test("lessons quoting the same command stay separate claims, and one session hol
 		const id = first.records[0]?.id;
 		ok(id);
 		strictEqual(repeat.records[0]?.id, id, "the same claim from the same session is the same record");
-		notStrictEqual(mock.records[0]?.id, id, "a shared command never merges different prerequisites");
+		strictEqual(mock.records[0]?.id, id, "the same command under another wording is the same claim");
 		const stored = JSON.parse(readFileSync(join(dataDir, "memory", "records.json"), "utf8")).records;
-		strictEqual(stored.length, 2);
-		const nativeRecord = stored.find((record: { id: string }) => record.id === id);
-		strictEqual(nativeRecord.observations.length, 1, "a repeat from the same session adds no second verdict");
-		strictEqual(nativeRecord.observations[0].sessionId, "s1", "the mock session's evidence stays with its own claim");
-		ok(
-			stored.every((record: { evidenceRefs: string[] }) => record.evidenceRefs.some((ref) => ref.startsWith("command:"))),
+		strictEqual(stored.length, 1);
+		const [claim] = stored;
+		deepStrictEqual(
+			claim.revisions.map((item: { sessionId: string }) => item.sessionId),
+			["s1", "s2", "s1"],
+			"each wording is kept as a revision",
 		);
+		deepStrictEqual(
+			claim.observations.map((item: { sessionId: string; revision: string }) => [item.sessionId, item.revision]),
+			[
+				["s1", claim.revisions[0].revision],
+				["s2", claim.revisions[1].revision],
+			],
+			"a verdict judges its own wording, and a repeat from the same session adds no second verdict",
+		);
+		ok(claim.evidenceRefs.some((ref: string) => ref.startsWith("command:")));
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -942,12 +952,17 @@ test("evidence identity grounds and counts use only for the command that ran, se
 			`command:${legacyCommandHash(PNPM)}`,
 		]);
 		rejected.rejectedAt = "2026-11-02T00:00:00.000Z";
-		const reworded = record(
-			"mem-00000000000000d3",
-			"Always run `corepack pnpm -s run check` before releasing.",
-			[commandEvidenceRef("corepack pnpm -s run check")],
-			{ observations: [{ at: "2026-11-03T00:00:00.000Z", sessionId: "s2", kind: "held" }] },
-		);
+		const rewording = "Always run `corepack pnpm -s run check` before releasing.";
+		const rewordingRefs = [commandEvidenceRef("corepack pnpm -s run check")];
+		const revision = memoryRevision({ lesson: rewording, evidenceRefs: rewordingRefs });
+		const reworded = record("mem-00000000000000d3", rewording, rewordingRefs, {
+			observations: ["s2", "s3"].map((sessionId) => ({
+				at: "2026-11-03T00:00:00.000Z",
+				sessionId,
+				kind: "held" as const,
+				revision,
+			})),
+		});
 		strictEqual(evaluateMemoryGate(reworded, []), "approve");
 		strictEqual(evaluateMemoryGate(reworded, [rejected]), "hold", "a pre-slice rejection holds a rewording");
 	} finally {
