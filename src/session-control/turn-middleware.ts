@@ -365,10 +365,13 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		);
 	};
 
-	/** FX-38: a declared turn's sealed facts, in one footer line, in place of the reminders that carried them. */
+	/**
+	 * FX-38: a declared done the seal lowered, in one footer line, in place of the reminders that carried its facts. An
+	 * honest partly_done or not_done claimed no more than the facts allow, so it gets no line.
+	 */
 	const announceAssessment = (effects: ReadonlyArray<MiddlewareEffect>): void => {
 		const sealed = state.turnSealedCompletion;
-		if (!sealed?.declared || sealed.claimed === null || sealed.facts.length === 0) return;
+		if (!sealed?.declared || sealed.claimed !== "done" || sealed.assessed === "done") return;
 		const noteOf = (fact: CompletionFact): string => {
 			for (const effect of effects)
 				if (effect.kind === "request_continuation" && effect.fact === fact && effect.note) return effect.note;
@@ -377,9 +380,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		const open = [...new Set(sealed.facts.map(noteOf))].join("; ");
 		deps.emitFooterNotice(
 			"warning",
-			sealed.claimed === "done"
-				? `declared done, assessed ${sealed.assessed.replace("_", " ")}: ${open}`
-				: `declared ${sealed.claimed.replace("_", " ")}, still open: ${open}`,
+			`declared done, assessed ${sealed.assessed.replace("_", " ")}: ${open}`,
 			"finish.assessed",
 		);
 	};

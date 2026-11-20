@@ -536,10 +536,17 @@ test("contained yolo's finish gate keeps its own nudge and records an exhausted 
 	// High rigor with no recovery in reach (no verification tool, no limitation) carries the fact on an advisory.
 	const unrecoverable = await declare(finishGateTurn(true, { tools: [] }), "done");
 	deepStrictEqual([unrecoverable.footer, unrecoverable.footerText], [["finish.assessed"], [unvalidated]]);
-	// FX-38: a declared partly_done or not_done claims no completion, so nothing follows it, footer included.
+	// FX-38: an honest partly_done or not_done is not lowered, so no line follows it, even with a fact still open.
+	const openTask: MiddlewareEffect = {
+		kind: "inject_reminder",
+		message: "tasks open",
+		severity: "warn",
+		fact: "open_task",
+	};
 	for (const claim of ["partly_done", "not_done"] as const) {
-		const turn = await declare(finishGateTurn(true), claim);
+		const turn = await declare(finishGateTurn(true, { extra: [openTask] }), claim);
 		strictEqual(turn.state.turnSealedCompletion?.assessed, claim);
+		deepStrictEqual(turn.state.turnSealedCompletion?.facts, ["open_task"]);
 		deepStrictEqual(turn.footer, []);
 	}
 	const cwd = process.cwd();
