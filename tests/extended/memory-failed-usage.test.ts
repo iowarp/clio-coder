@@ -731,3 +731,39 @@ test("the history guardian retains an explicit missing-usage observation in its 
 	assert.equal(spend.llmSteps, 1);
 	assert.equal(spend.totalTokens.unknownCount, 1);
 });
+
+test("an ACP host's guardian starts no history review before the first turn, at boot or on a reopen (ACP-6)", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	let steps = 0;
+	const guardian = createMemoryGuardian({
+		enabled: () => true,
+		isForegroundActive: () => {
+			steps += 1;
+			return false;
+		},
+		live: { pendingWork: () => false, stepInFlight: () => false, runIdleStep: async () => "none" },
+		historySource: () => null,
+		client: {} as never,
+		settings: () => ({ maxTokens: 2_000, timeoutMs: 1_000 }),
+		workspaceRoot: () => process.cwd(),
+		getKeptLessons: () => [],
+		onHistoryLessons() {},
+		onStateChange() {},
+		scopeKey: () => "acp-session",
+		awaitFirstTurn: true,
+	});
+	t.after(() => guardian.dispose());
+	const settle = async () => {
+		t.mock.timers.runAll();
+		await new Promise((resolve) => setImmediate(resolve));
+	};
+	// Boot, then the client's session/load binding the reopened session.
+	guardian.wake("ready");
+	guardian.reset();
+	guardian.wake("settings");
+	await settle();
+	assert.equal(steps, 0);
+	guardian.wake("turn-start");
+	await settle();
+	assert.ok(steps > 0, "the first turn arms the guardian");
+});
