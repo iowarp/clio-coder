@@ -3,8 +3,8 @@
 CLIO Coder keeps the model-facing envelope stable and moves enforcement into the runtime registry and safety policy.
 
 Main sessions attach a small coordinator surface (read, bash, edit, write,
-verify, ask_user, gateway and dispatch, plus consult when a decision route is
-bound) and discover other tools, agents, and
+grep, code_nav, verify, ask_user, finish, gateway and dispatch, plus consult
+when a decision route is bound) and discover other tools, agents, and
 playbooks progressively through the gateway. Workers keep their recipe execution surfaces. The compiler receives registered
 builtin presence separately from attached schemas so it can teach reachable
 gateway capabilities without claiming those tools are attached. Lazy MCP tool
@@ -152,9 +152,9 @@ The worker compiler runs after target capability and tool-profile admission. Can
 
 Project context, memory, bounded dispatch briefing, pipeline input, the assigned task, and the per-run safety-posture reminder remain dynamic user messages. A briefing is a separately delimited message labeled as untrusted task context/data; it is never concatenated into the task or stable system prompt. Dynamic ordering is project, safety, memory, briefing, the agent board, then predecessor handoffs and pipeline input, with pipeline input last. The board follows everything a batch's members share because its roster lists the members admitted so far, so it differs per member; the shared-prefix stagger groups members by their prompt without the board. These messages do not affect the stable composition hash. Persona, effective autonomy, target tool capability, or final toolkit changes do affect it.
 
-## Eight planes, forty-one builtin tools
+## Eight planes, forty-two builtin tools
 
-The canonical builtin catalog contains 41 tools organized in eight planes. A
+The canonical builtin catalog contains 42 tools organized in eight planes. A
 particular session or worker receives the subset whose dependencies and policy
 allow it to register. The policy table records each tool's plane, action class, size posture, and concurrency rule; tools within a plane can differ.
 [policy.ts](../../src/tools/policy.ts) asserts these invariants at bootstrap, so drift between
@@ -179,7 +179,7 @@ so a tool whose declared action class disagrees with its plane or with the safet
 | ORCHESTRATE | `panes` | read | sequential |
 | ORCHESTRATE | `music` | read | sequential |
 | ORCHESTRATE | `limitation`, `consult` | read | parallel |
-| ORCHESTRATE | `decide` | read | sequential |
+| ORCHESTRATE | `decide`, `finish` | read | sequential |
 | ORCHESTRATE | `self_compact` | read | sequential |
 | RETRIEVE | `web_read`, `web_fetch` | read | parallel |
 | INTERACT | `ask_user`, `report` | read | sequential |
@@ -202,6 +202,7 @@ Several tools sit in a plane for containment rather than class:
 | `report` | INTERACT plane, read class, sequential | It drafts or offers a report about CLIO Coder and never sends one; it writes only CLIO Coder's own report store. Only the main session's registry registers it. |
 | `restart_session` | INTERACT plane, write class, sequential | It only records a restart request. The operator approves it on a card and the interactive host runs it when the turn ends. It is refused at `yolo`. |
 | `limitation` | ORCHESTRATE plane, read class, parallel | It appends one typed receipt to the session ledger and touches nothing else. The call is pure. |
+| `finish` | ORCHESTRATE plane, read class, sequential, direct on the main registry only | It declares how the turn ended; the call and its result are its whole effect, and the result ends the turn. A `finish` beside other calls is refused, so the declaration always comes after their results. |
 | `decide` | ORCHESTRATE plane, read class, sequential | It appends one decision-board entry and touches nothing else. Sequential so two decisions in one batch cannot race the supersede lookup. |
 | `consult` | ORCHESTRATE plane, read class, parallel, direct when bound | It filters up to 256 items the agent does not hold, returning only ids and scores, or sends up to four typed questions over a small state and up to eight workspace files (read under the read tool's containment and redacted) to the routes `systemOne.use` names. It returns a hint, never a chosen option, and changes nothing. Only the session registers it, and only when a route is named at startup, so an unbound session's registry, gateway listing and prompt are unchanged, and dispatch never admits it for a worker. |
 | `self_compact` | ORCHESTRATE plane, read class, sequential | It saves the agent's handoff note and asks the host to compact the agent's own context, touching no workspace. Only the native interactive host supplies the continuity port it needs, so bootstrap never requires it and an external agent loop never receives it. |
@@ -291,9 +292,9 @@ Tool descriptions are tiered by how much a wrong call costs. The hot tools the m
 
 [surface.ts](../../src/tools/surface.ts) owns placement independently of policy planes. A registered spec's explicit `placement` declaration wins. Otherwise a surface rule applies: `find`, `ls` and `count` are gateway-placed on any surface that admits `bash` (`SHELL_COVERED_TOOLS`), because bash already runs `find`, `ls` and `wc` as recognized commands on workspace paths and their schemas would cost every request; a surface without `bash` keeps them attached. Otherwise `TOOL_PLACEMENT` decides.
 
-`TOOL_PLACEMENT` makes these builtins direct: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `count`, `context`, `code_nav`, `self_compact`, `verify`, `run_script`, `gateway`, `dispatch`, `monitor`, `steer`, `tasks`, `ledger`, `panes`, `music`, `limitation`, `decide`, `consult` and `ask_user`, each when its dependencies are bound. Gateway capabilities are `artifact`, `web_read`, `web_fetch`, `git`, `evidence`, `credential_present`, `clio_docs`, `clio_library`, `data`, `store`, `memory_recall`, `job`, `vision`, `configure_clio`, `restart_session`, `report`, extension commands (`extension_<id>__<name>`), and trusted local MCP tools (`mcp_<id>__<tool>`).
+`TOOL_PLACEMENT` makes these builtins direct: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `count`, `context`, `code_nav`, `self_compact`, `verify`, `run_script`, `gateway`, `dispatch`, `monitor`, `steer`, `tasks`, `ledger`, `panes`, `music`, `limitation`, `finish`, `decide`, `consult` and `ask_user`, each when its dependencies are bound. Gateway capabilities are `artifact`, `web_read`, `web_fetch`, `git`, `evidence`, `credential_present`, `clio_docs`, `clio_library`, `data`, `store`, `memory_recall`, `job`, `vision`, `configure_clio`, `restart_session`, `report`, extension commands (`extension_<id>__<name>`), and trusted local MCP tools (`mcp_<id>__<tool>`).
 
-The main session registry overrides that table: `registerAllTools` in [bootstrap.ts](../../src/tools/bootstrap.ts) applies `coordinatorToolPlacement` to every spec, so only `COORDINATOR_DIRECT_TOOLS` carry an attached schema: `read`, `bash`, `edit`, `write`, `gateway`, `dispatch`, `verify`, `ask_user`, and `consult` when a route is named at startup. Everything else, `grep`, `find`, `ls` and `count` included, is reached through the gateway. A promoted extension tool is the one addition: it is attached beside these. Workers keep the table placement plus the shell rule on their admitted surface. The permanent context schema retains workspace, settings, skills, recall and budget.
+The main session registry overrides that table: `registerAllTools` in [bootstrap.ts](../../src/tools/bootstrap.ts) applies `coordinatorToolPlacement` to every spec, so only `COORDINATOR_DIRECT_TOOLS` carry an attached schema: `read`, `bash`, `edit`, `write`, `grep`, `code_nav`, `gateway`, `dispatch`, `verify`, `ask_user`, `finish`, and `consult` when a route is named at startup. `grep` and `code_nav` are attached so that finding code never goes through the shell, and `finish` registers only on this main registry. Everything else, `find`, `ls` and `count` included, is reached through the gateway. A promoted extension tool is the one addition: it is attached beside these. Workers keep the table placement plus the shell rule on their admitted surface. The permanent context schema retains workspace, settings, skills, recall and budget.
 
 `gateway(op="find"|"describe"|"call", capability?, query?, args?)` is read class and sequential. Its inner call runs through canonical registry admission with the capability's own class, skill restrictions, approvals, and cancellation. Nested accounting counts the model call once. `effectiveToolCall` restores capability identity for artifact folding, mutation observers, path indexing, exported evidence, and transcripts. Terminal artifact results, images, and details survive routing. Gateway placement changes schema attachment, not authority or evidence.
 

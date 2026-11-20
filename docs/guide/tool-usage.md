@@ -7,10 +7,10 @@ Operational reference for agents and operators. Sections summarize each tool's a
 You never call these tools yourself. Ask in plain words, and the agent picks
 the tool:
 
-- A main session starts with `read`, `bash`, `edit`, `write`, `verify`,
-  `ask_user` and `gateway` attached, plus `dispatch` when workers are
-  available and `consult` when a decision route is bound. Everything else is
-  one `gateway` call away.
+- A main session starts with `read`, `bash`, `edit`, `write`, `grep`,
+  `code_nav`, `verify`, `ask_user`, `finish` and `gateway` attached, plus
+  `dispatch` when workers are available and `consult` when a decision route is
+  bound. Everything else is one `gateway` call away.
 - To limit what the agent may use, start it with
   `clio-coder --allow-tools read,grep,find,ls`; `--delegate-tools` limits its
   workers. See
@@ -28,7 +28,7 @@ the tool:
 | --- | --- |
 | Read and search the workspace | [`read`](#read-page-through-a-file-with-offset-limit-and-tail), [`grep`](#grep-search-file-contents-with-ripgrep), [`find`](#find-locate-files-and-directories-by-glob-pattern), [`ls`](#ls-list-one-directory), [`count`](#count-words-lines-and-bytes-of-one-file), [`code_nav`](#codenav-navigate-the-codemap) |
 | Change the workspace | [`edit`](#edit-exact-text-replacements-in-one-file), [`write`](#write-create-or-overwrite-a-whole-file), [`bash`](#bash-run-a-shell-command), [`run_script`](#runscript-stream-a-scientific-processing-step-to-disk), [`store`](#store-keep-results-and-datasets-outside-the-working-tree) |
-| Prove something works | [`verify`](#verify-run-declared-verification-checks), [`evidence`](#evidence-inspect-canonical-evidence-and-trust-status), [`limitation`](#limitation-record-what-a-turn-could-not-verify) |
+| Prove something works | [`verify`](#verify-run-declared-verification-checks), [`evidence`](#evidence-inspect-canonical-evidence-and-trust-status), [`limitation`](#limitation-record-what-a-turn-could-not-verify), [`finish`](#finish-declare-how-the-turn-ended) |
 | Delegate and supervise work | [`dispatch`](#dispatch-run-bounded-tasks-on-fleet-agents), [`monitor`](#monitor-inspect-dispatched-runs), [`steer`](#steer-guide-cancel-or-approve-a-running-worker), [`ledger`](#ledger-coordinate-peer-workers-through-typed-entries) |
 | Track and record decisions | [`tasks`](#tasks-the-session-task-board), [`decide`](#decide-record-a-design-decision), [`artifact`](#artifact-plans-reviews-and-reports) |
 | Look things up | [`gateway`](#gateway-discover-and-call-secondary-capabilities), [`clio_docs`](#cliodocs-retrieve-bundled-documentation-through-the-gateway), [`clio_library`](#cliolibrary-inspect-the-component-catalog-through-the-gateway), [`context`](#context-workspace-skill-activation-and-recall), [`git`](#git-typed-inspection-staging-and-commits), [`data`](#data-inspect-structured-files-through-the-gateway) |
@@ -46,8 +46,8 @@ Tool registration and argument normalization are owned by [agent-tools.ts](../..
 ## gateway: discover and call secondary capabilities
 
 Main CLIO Coder sessions attach a small basic surface: `read`, `bash`, `edit`,
-`write`, `verify`, `ask_user` and `gateway`, plus `dispatch` when delegation is
-wired and `consult` when a decision route is bound. The gateway supplies every other capability on demand. Workers keep their admitted recipe surfaces, including direct
+`write`, `grep`, `code_nav`, `verify`, `ask_user`, `finish` and `gateway`, plus
+`dispatch` when delegation is wired and `consult` when a decision route is bound. The gateway supplies every other capability on demand. Workers keep their admitted recipe surfaces, including direct
 execution and observation tools. Ordinary dispatch has a compact attached
 schema; `gateway(op="describe", capability="dispatch")` returns that schema plus
 an `advanced` block with the canonical fields it omits, such as `candidates`,
@@ -81,8 +81,8 @@ steps in a chain. Describing `gateway` returns composition syntax; describing
 
 | Placement | Tools |
 | --- | --- |
-| Direct in main sessions | read, bash, edit, write, verify, ask_user, gateway; dispatch and consult when wired |
-| Gateway in main sessions | Every other wired builtin, including grep, find, ls, code_nav, context, run_script, tasks, monitor, steer, ledger, panes, music, limitation, decide and self_compact |
+| Direct in main sessions | read, bash, edit, write, grep, code_nav, verify, ask_user, finish, gateway; dispatch and consult when wired |
+| Gateway in main sessions | Every other wired builtin, including find, ls, count, context, run_script, tasks, monitor, steer, ledger, panes, music, limitation, decide and self_compact |
 | Direct in workers | The builtins that `TOOL_PLACEMENT` marks direct and the recipe admits. `find`, `ls` and `count` move behind the gateway when the worker's surface admits `bash`. See its discovered tools rather than assuming the main surface |
 | Gateway when trusted/installed | `extension_<id>__<name>`, `mcp_<id>__<tool>`. An extension tool its manifest lists in `runtime.promote` is attached directly instead, and the gateway refuses that name |
 
@@ -175,11 +175,11 @@ Every name in `ToolNames` ([tool-names.ts](../../src/core/tool-names.ts)) has on
 | --- | --- | --- | --- | --- | --- |
 | `read` | direct | direct | observe | read | parallel |
 | `evidence` | gateway | gateway | observe | read | sequential |
-| `grep` | direct | gateway | observe | read | parallel |
+| `grep` | direct | direct | observe | read | parallel |
 | `find` | direct, or gateway with `bash` | gateway | observe | read | parallel |
 | `ls` | direct, or gateway with `bash` | gateway | observe | read | parallel |
 | `count` | direct, or gateway with `bash` | gateway | observe | read | parallel |
-| `code_nav` | direct | gateway | observe | read | parallel |
+| `code_nav` | direct | direct | observe | read | parallel |
 | `self_compact` | direct | gateway | orchestrate | read | sequential |
 | `context` | direct | gateway | observe | read | parallel |
 | `credential_present` | gateway | gateway | observe | read | parallel |
@@ -203,6 +203,7 @@ Every name in `ToolNames` ([tool-names.ts](../../src/core/tool-names.ts)) has on
 | `panes` | direct | gateway | orchestrate | read | sequential |
 | `music` | direct | gateway | orchestrate | read | sequential |
 | `limitation` | direct | gateway | orchestrate | read | parallel |
+| `finish` | direct | direct | orchestrate | read | sequential |
 | `decide` | direct | gateway | orchestrate | read | sequential |
 | `consult` | direct | direct | orchestrate | read | parallel |
 | `vision` | gateway | gateway | observe | read | parallel |
@@ -215,7 +216,7 @@ Every name in `ToolNames` ([tool-names.ts](../../src/core/tool-names.ts)) has on
 | `artifact` | gateway | gateway | artifact | write | sequential |
 | `gateway` | direct | direct | gateway | read; the inner call keeps its class | sequential |
 
-There are 41 tools in eight planes. The action class is the tool's base class; admission still judges the effect of a particular call, so `bash`, `run_script`, `verify` and `git` mutations are classified by the command they would run. Where this page says a call runs at `yolo`, it means unconfined yolo (`safety.yoloConfinement: unconfined`). Contained yolo, the default, admits calls as `default` does and refuses a call that would wait for the operator. See [the safety model](../architecture/safety-model.md) for autonomy, and [Prompt Envelope and Tools](../architecture/prompt-envelope-and-tools.md) for why a tool sits in its plane.
+There are 42 tools in eight planes. The action class is the tool's base class; admission still judges the effect of a particular call, so `bash`, `run_script`, `verify` and `git` mutations are classified by the command they would run. Where this page says a call runs at `yolo`, it means unconfined yolo (`safety.yoloConfinement: unconfined`). Contained yolo, the default, admits calls as `default` does and refuses a call that would wait for the operator. See [the safety model](../architecture/safety-model.md) for autonomy, and [Prompt Envelope and Tools](../architecture/prompt-envelope-and-tools.md) for why a tool sits in its plane.
 
 ## Observation envelope: truncation notices, offload, next hints, and the turn budget
 
@@ -587,7 +588,7 @@ Runs one task or a batch on configured fleet agents. Source: [`src/tools/dispatc
 
 | Argument | Contract |
 | --- | --- |
-| `list` | Return the agent catalog instead of dispatching. |
+| `list` | Return the agent catalog instead of dispatching. Its text, like the tool's description, opens with the job table. |
 | `from_scout` | `{run_id, run_digest}` only; compiles a terminal Scout run's split result into an approval-gated dependency plan. `run_digest` is the sha256 run digest the Scout result names. |
 | `task` / `tasks` | Supply exactly one. `task` is one assignment; `tasks` is an array of strings or task objects. A task object may set `context`, `briefing`, `agent`, `target`, `model`, `node`, `intent`, `gate`, `budget`, `worktree`, or `result_summary_max_bytes`; each overrides the batch default. |
 | `mode` | `parallel` (default), `sequential`, `pipeline` (each task receives prior output), `compete` (candidates run in scratch worktrees for a judge), or `council` (members answer the same task). A singular ordinary task uses the sequential path. |
@@ -596,8 +597,8 @@ Runs one task or a batch on configured fleet agents. Source: [`src/tools/dispatc
 | `candidates`, `apply_winner` | Compete only; candidates 2–4 (default 2). `judge` is a read-only ranker; `apply_winner` merges `{branch,cwd?}` from a preserved winner after approval. |
 | `writers`, `worktree`, `apply` | `writers:1` serializes writers while reads run concurrently. `worktree:true` isolates a singular writer; `apply` is `merge` (default) or `preserve` and requires a worktree. |
 | `detach` | Parallel fan-out only; returns durable `batch_id` and `assignmentIds` while workers continue. Use `monitor`/`steer`, then `collect` before final synthesis. |
-| `review` | One task only; optional bool or `{reviewer?,max_cycles?,node?,model?,target?}`; read-only pass/fail/revise review by `review.reviewer`, which defaults to `verifier` and never to the builder's agent, cycles default 2 (max 4). |
-| `agent`, `persona`, `tool_profile`, `thinking_level` | Batch defaults. Agent defaults to `coder` (`researcher` for council); `auto` selects by task shape. Persona max 8000 chars; profiles are `minimal-local`, `science-local`, `full-agent`; thinking is `off|minimal|low|medium|high|xhigh|max`. |
+| `review` | One task only; optional bool or `{reviewer?,max_cycles?,node?,model?,target?}`; read-only pass/fail/revise review by `review.reviewer`, which defaults to the builtin `reviewer` (to `verifier` when this install has no `reviewer`) and never to the builder's agent, cycles default 2 (max 4). |
+| `agent`, `persona`, `tool_profile`, `thinking_level` | Batch defaults. There is no default recipe: an omitted agent, or `auto`, takes the recipe of the task's row in the [job table](fleet-dispatch.md#job-table-and-the-reviewer-recipe). Declared `write_roots` or `expected_outputs`, `review` or compete turn a read job into `implement` (`coder`), and `write_roots: []` with `expected_outputs` absent or empty turns a writing job into `inspect` (`scout`). A council's members default to `scout`. Persona max 8000 chars; profiles are `minimal-local`, `science-local`, `full-agent`; thinking is `off|minimal|low|medium|high|xhigh|max`. |
 | `context` | Parent history: `isolated` (default), `fork` (full native transcript), or `splice` (selected text). Fork/splice `max_tokens` 256–262144; splice takes 1–64 `paths` or `refs`, each 1–4096 chars (`tool:<id>` or `message:<index>`). Per-task override supported. |
 | `target`, `model`, `node`, `cwd` | Top-level route and working-directory defaults. `target` and `model` pin the route for this call, and a task object may override them. This is how a one-off request for a named target or model runs: the coordinator pins it here and never edits routing settings. |
 | `routing` | Hard bounds: positive `maxCostUsd`, positive `deadlineMs`, `requiredCapabilities`. Configured adaptive routing adds `posture` (`manual`, `quality`, `balanced`, `latency`, `economy`), `minimumQuality` (0–1), `locality` (`local-only`, `prefer-local`, `any`), and `failover` (`none`, `approved`). Exact pins require manual posture and do not fail over; model-authored candidate lists are rejected. |
@@ -605,11 +606,13 @@ Runs one task or a batch on configured fleet agents. Source: [`src/tools/dispatc
 | `briefing` | Optional parent context, not a task or worker instruction; trimmed, max 12,000 UTF-8 bytes, and recorded as byte/hash provenance. A task-level briefing overrides the batch value. |
 | `intent` | Top-level or task-level `{read_roots, write_roots, relevant_paths, expected_outputs, verification}` scope. Path arrays allow up to 32 entries. `verification` is an array of up to 8 `{check,timeout_ms?}` entries using only check IDs `verify` can run: package scripts, project catalog entries and available [derived checks](#derived-checks). An unknown ID is refused with the available IDs named, and a single object, shell command, or invented label such as `test suite` is refused. Paths normalize repository-relative, and `expected_outputs` are file paths, never `.` or an action such as commit; task intent can narrow, not widen, the top-level ceiling. Parallel write roots must be disjoint; expected outputs do not confine access. A read-only `scout` task may name one absolute directory in `read_roots` to inspect a checkout outside the workspace, after the operator approves that root for the run; headless runs refuse it with `external_read_approval_required`. Any other task that works in its own workspace may list absolute directories outside it in `read_roots` as a read-only grant: its worker may read them and never write them, and a system tree, the home directory, a credential store or an ancestor of the workspace is refused. See [typed dispatch intent](../architecture/dispatch-typed-intent.md#67-external-scout-read) and [granted read roots](../architecture/dispatch-typed-intent.md#68-granted-read-roots). |
 | `gate` | Shorthand for `intent.verification=[{check: gate}]`; refused when both forms are supplied. |
-| `budget`, `max_output_bytes`, `result_summary_max_bytes` | Budget is `{toolCalls>=1,readReserve>=0,retryRevision?}`; `retryRevision` uses the same two fields. They are estimates, but a native worker stops at a hard tool-call ceiling, which in the default advisory mode is never below `toolCalls` or `retryRevision.toolCalls`. `readReserve` applies only to native scout, provenance and context-bootstrap runs. Requests are not range-checked, so a larger `toolCalls` raises the advisory ceiling ([budget admission](fleet-dispatch.md#worker-prompt-and-budget-admission)). Without `max_output_bytes` each run returns a compact form: its key facts, trust or verdict line, evidence notices, and its answer up to the run's answer budget (12,000 bytes shared equally across the batch, at least 2,000 each, told to the worker), a cut one naming `monitor(mode="answer", run_id=...)` for the whole answer. Setting `max_output_bytes` returns each run's full answer within that many bytes in total (20000 when the value is not a positive number). Inline summary defaults to 16384 bytes; mutation-report workers accept 1–32768, with per-task override. Explicit mutation summary limits on other steps are refused. |
+| `budget`, `max_output_bytes`, `result_summary_max_bytes` | Budget is `{toolCalls>=1,readReserve>=0,retryRevision?}`; `retryRevision` uses the same two fields. They are estimates, but a native worker stops at a hard tool-call ceiling, which in the default advisory mode is never below `toolCalls` or `retryRevision.toolCalls`. `readReserve` applies only to native scout, provenance and context-bootstrap runs. Requests are not range-checked, but an estimate above `fleet.limits.toolCallsPerRun` is held at that cap with a `global-cap-clamp` reason, so a larger `toolCalls` can raise the ceiling above a recipe's maximum and never above the cap ([budget admission](fleet-dispatch.md#worker-prompt-and-budget-admission)). Without `max_output_bytes` each run returns a compact form: its key facts, trust or verdict line, evidence notices, and its answer up to the run's answer budget (12,000 bytes shared equally across the batch, at least 2,000 each, told to the worker), a cut one naming `monitor(mode="answer", run_id=...)` for the whole answer. Setting `max_output_bytes` returns each run's full answer within that many bytes in total (20000 when the value is not a positive number). Inline summary defaults to 16384 bytes; mutation-report workers accept 1–32768, with per-task override. Explicit mutation summary limits on other steps are refused. |
 
 `tasks` accepts a JSON-string array, single object, or bare string. The result is batch-shaped even for one task: `details` carries `assignmentIds`, counts, and `runs[]`; each run distinguishes `assignmentId` from terminal `runId`, and includes verification and run-integrity status. There is no `runIds` alias. Any nonzero terminal attempt makes the call fail with the same summary.
 
 Run integrity, worker evidence, orchestrator verification, parent briefing, and rendered project context are separate facts. A zero exit alone is not a deliverable: native and ACP workers need nonempty final output. A `verifier-report` run whose own verdict is fail, with no executed check behind the failure, is labeled `review verdict: fail (N findings)` rather than as a failed validation. Treat worker prose as advisory until you inspect its settled run record or verify the stated result. For detached batches, `wait` observes; `collect` closes the batch and resolves each assignment to its terminal attempt. See [Fleet dispatch](fleet-dispatch.md) for run record and verification workflows.
+
+Before admission, a normalize stage rewrites a few admissible shapes into their canonical form instead of refusing them, and each rewrite puts one `[dispatch normalize]` line at the top of the result ([The normalize stage](fleet-dispatch.md#the-normalize-stage)).
 
 ### Compact schema in the main session
 
@@ -1225,6 +1228,37 @@ A `reason` written as prose is filed under the closest category (`blocked` when 
 
 ```text
 limitation(scope="CUDA kernels changed but no GPU is available here", reason="environment", paths=["src/kernels/solve.cu"])
+```
+
+## finish: declare how the turn ended
+
+The main agent's completion declaration. Source: [finish.ts](../../src/tools/finish.ts). Orchestrate plane, read class, sequential. It registers only on the main session's registry and is always attached there; a dispatched worker never has it and declares its outcome in its report. The tool is pure: the call and its result in the session ledger are its whole effect.
+
+Arguments:
+
+- `state` (required). `done`, `partly_done` or `not_done`.
+- `limitations` (optional). `{what, why}` entries, `why` one of `blocked_by_policy`, `missing_access`, `needs_decision`, `out_of_scope`, `out_of_budget`, `not_reproducible`, `tool_unavailable` or `other`. A `why` written as prose is filed as `other`, and its text joins `what`.
+- `unverified`, `remaining` (optional). String arrays: what the turn left unchecked, and what is left to do.
+
+The model writes its final reply and calls `finish` alone in the same response. A `finish` beside other calls is refused while its siblings run, and the model declares once it has their results. The result reads `completion declared: <state>`, or `completion declared: <state> (<N> limitation(s))` when limitations are given, and ends the turn: no further model round runs. The declaration comes only from the call's arguments; CLIO Coder never reads a completion state from the reply text.
+
+An attended turn may leave `finish` out. An unattended turn (a headless `run`, a job, or a yolo continuation the host started, not a turn a middleware continuation request carries onward) that called a tool and ended without declaring gets one more round whose reminder asks for the declaration. That round runs at most once per operator prompt, and never when tools are locked or the turn ended on a turn-ending tool.
+
+### Completion states
+
+The host seals every ended turn as the claim beside its assessment. An undeclared turn is `declared: false`, assessed `unknown`. A declared turn is assessed as claimed, except that a `done` claim over an open obligation of the coordinator is assessed `partly_done`, and the sealed `facts` name each one:
+
+| Fact | What is still open |
+| --- | --- |
+| `unvalidated_mutation` | The finish contract found a change with no validation or limitation after it. |
+| `failed_check` | A check failed since the last change. |
+| `uncollected_run` | A detached dispatch batch is ready to collect, or on a declared turn still running. |
+| `open_task` | The task board still has pending or active items, or on a declared turn blocked ones. |
+
+A declared turn takes no continuation. The high-rigor finish gate does not re-prompt a turn that declared `partly_done` or `not_done`, and on a declared `done` what the gate would have asked for becomes a sealed fact, while the gate's reminder is still injected as a warning. An undeclared work turn keeps the existing continuations: the open-tasks nudge carries it onward once per operator prompt while board items stay open. A headless run carries the sealed completion in its `run_end` envelope, and `run --exit-code` maps an unfinished state to exit 1 ([Completion and `--exit-code`](exit-codes-and-output.md#completion-and---exit-code)).
+
+```text
+finish(state="partly_done", limitations=[{what: "GPU kernels untested", why: "tool_unavailable"}], remaining=["port the solver tests"])
 ```
 
 ## memory_recall: search task and approved durable memory
