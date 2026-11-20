@@ -12,24 +12,25 @@ import { printError } from "./shared.js";
 
 export const TOKENS_HELP = `clio-coder telemetry tokens --session <id> [--by-source] [--json]
 
-tokens lists each turn of a session with its input tokens, cached and fresh, and
-its output tokens. --by-source splits each turn's input by where it came from:
-system prompt, skills, tool schemas, template body, extension effects (reminders
-and tool-result annotations), tool results per tool, and history. Providers
-report one input total per call, so the totals are measured and the split is
-estimated from the session ledger and the journal's context snapshot; the
-output header says so. The calls column counts every invoked call and names
-those the provider sent no token counts for; their tokens are in no sum, and a
-turn with no measured call prints its tokens as unknown. A measured call that
-sent no cache-read count has no cached/fresh split: its tokens are in the input
-total only, cached and fresh sum the calls that have one, and the calls column
-names the rest as without split. Fresh is uncached input plus cache write;
-copilot-sdk reports the whole prompt as cache read plus cache write, so on its
-calls fresh is cache write and the output says so. Calls a
+tokens lists each turn of a session with its prompt tokens, split into cache read
+and fresh, and its output tokens. --by-source splits each turn's prompt by where
+it came from: system prompt, skills, tool schemas, template body, extension
+effects (reminders and tool-result annotations), tool results per tool, and
+history. Providers report one input total per call, so the totals are measured
+and the split is estimated from the session ledger and the journal's context
+snapshot; the output header says so. The calls column counts every invoked call
+and names those the provider sent no token counts for; their tokens are in no
+sum, and a turn with no measured call prints its tokens as unknown. A measured
+call that sent no cache-read count has no cache read/fresh split: its tokens are
+in the prompt total only, cache read and fresh sum the calls that have one, and
+the calls column names the rest as without split. Fresh is uncached input plus
+cache write; copilot-sdk reports the whole prompt as cache read plus cache
+write, so on its calls fresh is cache write and the output says so. Calls a
 side agent made for the session (compaction, memory and the like) are charged to
-the turn they ran in and counted in its totals; the calls column names them by
-role, and --by-source gives each role its own row. --json emits the report
-verbatim.
+the turn they ran in, and calls of the workers the session dispatched to the
+turn open when each started; both are counted in its totals. The calls column
+names them by role, and --by-source gives each role its own row. --json emits
+the report verbatim.
 `;
 
 const count = (value: number | null) => (value === null ? "unknown" : String(value));
@@ -103,7 +104,7 @@ export function renderTokenSources(report: TokenSourcesReportV1, bySource: boole
 	if (report.turns.length === 0) return `${header.join("\n")}\nno turns\n`;
 	if (!bySource) {
 		const table = formatColumns([
-			["turn", "at", "calls", "cached", "fresh", "input", "output"],
+			["turn", "at", "calls", "cache read", "fresh", "prompt", "output"],
 			...[...report.turns, { ...report.totals, index: "all", at: "" }].map((span) => [
 				String(span.index),
 				span.at,
@@ -119,14 +120,14 @@ export function renderTokenSources(report: TokenSourcesReportV1, bySource: boole
 	const sections = report.turns.map(
 		(turn) =>
 			`${turnHeading(turn)}\n${formatColumns([
-				["  source", "cached", "fresh", "total"],
+				["  source", "cache read", "fresh", "total"],
 				...turn.rows.map(rowCells),
 				inputCells("  turn input", turn, turn.input),
 			]).trimEnd()}`,
 	);
 	const { totals } = report;
 	const session = `session · ${callsCell(totals)} call(s) · output ${outputCell(totals)}\n${formatColumns([
-		["  source", "cached", "fresh", "total"],
+		["  source", "cache read", "fresh", "total"],
 		...totals.rows.map(rowCells),
 		inputCells("  session input", totals, totals.input),
 	]).trimEnd()}`;
