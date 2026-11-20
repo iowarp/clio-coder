@@ -114,6 +114,24 @@ test("the observed line omits a run with no tool calls and names a write with no
 		formatHeadlessObservedLine(after) ?? "",
 		/ · check failed: pytest · 1 unclassified command ran after a standing check$/,
 	);
+	// A red unclassified command is named on the line even with no check standing (x8-2).
+	const red = observeHeadlessRun({
+		entries: [],
+		start: 0,
+		effects: {
+			validationOutcomes: new Map(),
+			checkOutcomes: new Map(),
+			unclassifiedAfterLastCheck: ["node e2e.mjs"],
+			unclassifiedFailed: ["node e2e.mjs"],
+		},
+		toolCalls: 1,
+		refused: 0,
+		writes: 0,
+	});
+	strictEqual(
+		formatHeadlessObservedLine(red),
+		"clio-coder run: observed: 1 tool call, 0 refused · unclassified command failed: node e2e.mjs",
+	);
 });
 
 test("a run whose verify call found no check in the workspace is observed as no checks declared", () => {

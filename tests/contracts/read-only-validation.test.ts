@@ -1259,6 +1259,20 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 	recorder.checkOutcome("fix", "ok");
 	recorder.finish("fix", false);
 	deepStrictEqual(recorder.snapshot().unclassifiedAfterLastCheck, []);
+	// A red unknown is disclosed with no outcome standing and stays named past a later pass; a green one is not (x8-2).
+	const unknowns = createRunEffectsRecorder(cwd);
+	for (const [id, command, outcome] of [
+		["gen", "node gen.mjs", "ok"],
+		["e2e", "node e2e.mjs", "error"],
+		["test", "npm test", "ok"],
+	] as const) {
+		unknowns.start(id, "bash", { command });
+		unknowns.checkOutcome(id, outcome);
+		unknowns.finish(id, outcome === "error");
+		if (id === "gen") deepStrictEqual(unknowns.snapshot().unclassifiedAfterLastCheck, []);
+	}
+	deepStrictEqual(unknowns.snapshot().unclassifiedAfterLastCheck, ["node e2e.mjs"]);
+	deepStrictEqual(unknowns.snapshot().unclassifiedFailed, ["node e2e.mjs"]);
 	// The recorder reads the repository's config: a core.fsmonitor hook makes a later git status a mutation.
 	const repo = mkdtempSync(join(tmpdir(), "fsmonitor-"));
 	const env: NodeJS.ProcessEnv = {

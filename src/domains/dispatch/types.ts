@@ -1193,7 +1193,8 @@ export interface RunResult {
 	validationGrounding?: RunValidationGrounding;
 	/**
 	 * Calls the check classifier could not read (neither check, inspection nor mutation) that ran after the run's
-	 * oldest check outcome still standing. They neither settled nor cleared it, so `verification` stands as observed;
+	 * oldest check outcome still standing, and any that ran and failed with or without one (x8-2). They neither settled
+	 * nor cleared it, so `verification` stands as observed;
 	 * this only discloses them. Absent when none ran, and on receipts written before the field existed.
 	 */
 	unclassifiedAfterLastCheck?: RunResultUnclassifiedCommands;

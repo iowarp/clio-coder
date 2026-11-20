@@ -126,9 +126,12 @@ export interface RunEffects {
 	 * Calls the check classifier could not read (`check-classifier.ts`, verdict `unknown`) that ran after the oldest
 	 * check outcome still standing, in run order: a bash call's command, any other call's tool name. They neither
 	 * settled nor cleared an outcome, so a receipt discloses them beside its verdict without changing it. A later
-	 * outcome leaves them listed while an earlier one stands (x6-3). Empty while no outcome stands.
+	 * outcome leaves them listed while an earlier one stands (x6-3). Empty while no outcome stands, except that a call
+	 * that ran and failed is listed whether or not an outcome stands, until a change retires it (x8-2).
 	 */
 	unclassifiedAfterLastCheck?: ReadonlyArray<string>;
+	/** The calls in `unclassifiedAfterLastCheck` that ran and failed, in run order, so a finish line can name them. */
+	unclassifiedFailed?: ReadonlyArray<string>;
 }
 
 export interface WriteRecordDowngrade {
@@ -387,7 +390,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	const outcomeSequence = new Map<string, number>();
 	// The check each standing outcome ran, so a later run of it under another spelling replaces it (SF-2).
 	const outcomeIdentity = new Map<string, string>();
-	const unclassifiedCalls: Array<{ sequence: number; label: string }> = [];
+	const unclassifiedCalls: Array<{ sequence: number; label: string; failed: boolean }> = [];
 	const proofs = new Map<string, ObservedProof>();
 	const latestProofCalls = new Map<string, string>();
 	return {
@@ -509,14 +512,15 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 					...(reading.shellCommand !== null ? [observedValidationCommand(reading.shellCommand)] : []),
 				]);
 			// An unknown call that ran neither settles nor clears, so a receipt can only say a standing outcome predates it.
+			// One that ran and failed is red on this tree with or without an outcome, so it is always recorded (x8-2).
 			if (
 				reading.verdict === "unknown" &&
-				outcomeSequence.size > 0 &&
-				(failed ? effects.outcome === "error" : effects.outcome !== "blocked")
+				(failed ? effects.outcome === "error" : outcomeSequence.size > 0 && effects.outcome !== "blocked")
 			)
 				unclassifiedCalls.push({
 					sequence,
 					label: reading.shell === null ? effects.tool : (reading.shellCommand ?? effects.tool),
+					failed,
 				});
 			if (failed) {
 				for (const target of reading.paths) failedMutationPaths.add(target);
@@ -600,8 +604,9 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				writeRecordDowngrades: [...writeRecordDowngrades.values()].map((entry) => ({ ...entry })),
 				executedShellCommands: [...executedShellCommands],
 				unclassifiedAfterLastCheck: unclassifiedCalls
-					.filter((call) => call.sequence > oldestStanding)
+					.filter((call) => call.failed || call.sequence > oldestStanding)
 					.map((call) => call.label),
+				unclassifiedFailed: unclassifiedCalls.filter((call) => call.failed).map((call) => call.label),
 			};
 		},
 		checkFreshness() {

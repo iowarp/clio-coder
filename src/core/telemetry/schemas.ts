@@ -1193,8 +1193,9 @@ export const RunSettledSchema = Type.Object(
 			),
 		),
 		/**
-		 * Calls the check classifier could not read that ran after the run's oldest standing check outcome, as the
-		 * receipt discloses them: the count and up to 5 redacted commands. Absent when none ran and in older journals.
+		 * Calls the check classifier could not read that ran after the run's oldest standing check outcome, or ran and
+		 * failed (x8-2), as the receipt discloses them: the count and up to 5 redacted commands. Absent when none ran and
+		 * in older journals.
 		 */
 		unclassifiedAfterLastCheck: Type.Optional(
 			Type.Object({ count, commands: Type.Array(diagnostic, { maxItems: 5 }) }, closed),
