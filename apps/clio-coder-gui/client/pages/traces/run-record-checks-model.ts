@@ -179,6 +179,7 @@ const NOT_RUN_REASONS: Record<string, string> = {
 	unconfigured: "the check is not configured",
 	"spawn-failed": "its process could not start",
 	"nothing-changed": "nothing changed under it",
+	shutdown: "a shutdown stopped it before it finished",
 };
 
 function hostChecks(value: Sealed["hostVerification"]): CheckRow {

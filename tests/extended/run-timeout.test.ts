@@ -320,6 +320,21 @@ describe("clio-coder run --timeout", () => {
 				JSON.stringify(verify[0]?.checks?.map((check) => [check.command, check.passed])),
 				JSON.stringify([["true", true]]),
 			);
+			// The seal keeps the check that finished and marks only the cut-off one as stopped by the shutdown.
+			const record = readRunJournal(scratch.stateDir)?.runs[0];
+			const summary = record?.settled.hostVerification;
+			strictEqual(
+				JSON.stringify([summary?.status, summary?.executed, summary?.skipped]),
+				JSON.stringify(["skipped", 1, 1]),
+			);
+			const host = record?.result?.state === "resolved" ? record.result.value.hostVerification : undefined;
+			strictEqual(
+				JSON.stringify(host?.checks.map((check) => [check.check, check.exitCode, check.notRun ?? null])),
+				JSON.stringify([
+					["run-acceptance", 0, null],
+					["run-acceptance-2", 1, "shutdown"],
+				]),
+			);
 		});
 	}
 });
