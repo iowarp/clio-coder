@@ -357,6 +357,11 @@ function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, reque
 			return unnamed;
 		}
 		case 1: {
+			// `--fail-on-verify` (SPEC 6.10) ranks above a sealed verdict: the failed checks are what that verdict judged.
+			if (detail === "verify_failed") {
+				const checks = (seen.verify ?? []).filter((check) => !check.passed).map((check) => check.command);
+				return [{ code: "verify_failed", checks, ...message }];
+			}
 			if (seen.verdict === "failed" || (seen.failedChecks?.length ?? 0) > 0)
 				return [{ code: "verdict_failed", failedChecks: seen.failedChecks ?? [], ...message }];
 			const work = WORK_CODES.find((entry) => entry === detail);

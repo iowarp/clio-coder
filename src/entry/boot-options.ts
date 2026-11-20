@@ -107,6 +107,8 @@ export interface BootOptions {
 		sessionName?: string;
 		/** `clio-coder run --fail-on-noop`: a no-op run exits 1 with outcome failed. */
 		failOnNoop?: boolean;
+		/** `clio-coder run --fail-on-verify`: a failed or timed-out `--verify` check exits 1 (`verify_failed`). */
+		failOnVerify?: boolean;
 		/** `clio-coder run --max-cost-usd`: priced spend the run may add on top of what its session already spent. */
 		maxCostUsd?: number;
 		/** `clio-coder run --timeout`: the armed wall-clock limit for the whole run. */

@@ -618,6 +618,7 @@ async function executeRunCommand(
 								...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
 								...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
 								...(parsed.failOnNoop ? { failOnNoop: true } : {}),
+								...(parsed.failOnVerify === true ? { failOnVerify: true } : {}),
 								...(parsed.maxCostUsd !== undefined ? { maxCostUsd: parsed.maxCostUsd } : {}),
 								...(parsed.verify.length > 0
 									? {

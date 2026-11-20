@@ -74,6 +74,8 @@ export interface RunCliArgs {
 	cwd?: string;
 	/** Fail a main-agent run whose receipt records a no-op. */
 	failOnNoop: boolean;
+	/** `--fail-on-verify`: a failed or timed-out `--verify` check fails the run. */
+	failOnVerify?: boolean;
 	/** Priced spend this run may add, in US dollars; with `--agent`, the bound on that one worker run. */
 	maxCostUsd?: number;
 	/** `--worktree` (`--agent` only): run the worker in a task worktree kept for review. */
@@ -149,6 +151,7 @@ function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 	}
 	const mainOnly: Array<[boolean, string]> = [
 		[parsed.failOnNoop, "--fail-on-noop"],
+		[parsed.failOnVerify === true, "--fail-on-verify"],
 		[parsed.verify.length > 0, "--verify"],
 		[parsed.answersFile !== undefined, "--answers"],
 		[parsed.systemOne !== undefined, "--systemone"],
@@ -458,6 +461,10 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			parsed.failOnNoop = true;
 			continue;
 		}
+		if (arg === "--fail-on-verify") {
+			parsed.failOnVerify = true;
+			continue;
+		}
 		if (arg === "--max-cost-usd") {
 			const value = need(arg);
 			if (value !== null) {
@@ -498,6 +505,9 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 	}
 	if (parsed.verifyTimeoutSeconds !== undefined && parsed.verify.length === 0) {
 		parsed.diagnostics.push({ type: "error", message: "--verify-timeout applies only with --verify" });
+	}
+	if (parsed.failOnVerify === true && parsed.verify.length === 0) {
+		parsed.diagnostics.push({ type: "error", message: "--fail-on-verify applies only with --verify" });
 	}
 	// Only the main-agent stream reads the mode (cli/modes/print.ts); a dispatch
 	// took the flag and printed its usual stream.

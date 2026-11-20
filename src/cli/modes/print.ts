@@ -163,6 +163,8 @@ export interface HeadlessMainAgentOptions {
 	 * without recovery or a successful write, and explicit limitations, fail unconditionally.
 	 */
 	failOnNoop?: boolean;
+	/** `--fail-on-verify`: a `--verify` check that failed or timed out fails the run (`verify_failed`). */
+	failOnVerify?: boolean;
 	/**
 	 * `clio-coder run --timeout`. When it expired, the shutdown it started seals
 	 * outcome `timed_out` instead of `canceled`, so a driver can tell its own
@@ -1627,6 +1629,12 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				failureMessage,
 				outcomeDetail: "dispatched_worker_failed",
 			};
+			stderrMessage = failureMessage;
+		}
+		if (terminal.exitCode === 0 && options.failOnVerify === true && verify?.some((check) => !check.passed)) {
+			const failed = verify.filter((check) => !check.passed).map((check) => check.command);
+			const failureMessage = `clio-coder run: --fail-on-verify: ${failed.length} check(s) did not pass: ${failed.join("; ")}`;
+			terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage, outcomeDetail: "verify_failed" };
 			stderrMessage = failureMessage;
 		}
 		if (mode === "text") {

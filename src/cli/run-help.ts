@@ -60,6 +60,8 @@ Flags:
                             the turn, and the finish gate counts the agent's own run of it (see below)
   --verify-timeout <dur>    limit for each --verify check (default 300s), a duration as --timeout; a check that
                             runs over fails
+  --fail-on-verify          exit 1 (cause verify_failed) when a --verify check failed or timed out; a check a
+                            cancellation or the deadline skipped never counts
   --max-cost-usd <N>        priced spend this run may add: main agent, compaction and dispatched workers are each
                             admitted only while under it, and running workers are stopped when it is reached; exit 4
                             when it stops the run. Spend can pass it by the model calls already in flight then: one per
