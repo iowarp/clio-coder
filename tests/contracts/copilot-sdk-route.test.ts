@@ -239,6 +239,8 @@ class FakeSession {
 		}
 		if (prompt.includes("zero usage")) {
 			this.usage({ model: "fake-model", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 });
+		} else if (prompt.includes("reasoned usage")) {
+			this.usage({ model: "fake-model", inputTokens: 10, outputTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 3 });
 		} else if (prompt.includes("partial credits")) {
 			this.metricsFail = true;
 			this.usage({ model: "fake-model", inputTokens: 10, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 1, copilotUsage: { totalNanoAiu: 700 } });
@@ -1212,9 +1214,27 @@ test("usage facts keep per-field presence and billing coverage", async () => {
 	for (const field of ["input", "cacheRead", "cacheWrite"] as const)
 		strictEqual(omitted.usage?.[field].kind, "unknown", `${field} was omitted, so it is not a measured zero`);
 	const zeros = callSettlementFromMessage(await step({ messages: [user("zero usage")] }, "facts-session"), "none");
+	// The fake model does not reason (thinking off), so its reasoning 0 is a true zero.
 	for (const field of ["input", "output", "cacheRead", "cacheWrite", "reasoning"] as const)
 		deepStrictEqual(zeros.usage?.[field], { kind: "measured", value: 0, source: "provider" });
 	strictEqual(omitted.usage?.reasoning.kind, "unknown", "an absent reasoning count is not a measured zero");
+	// PV-4: with thinking on, Copilot's reasoningTokens 0 is a placeholder; only a nonzero count is measured.
+	const thinking = async (prompt: string) =>
+		callSettlementFromMessage(
+			await engineStreamSimple(
+				{ ...model, reasoning: true } as Model<Api>,
+				normalizeContext({ messages: [user(prompt)] }),
+				{
+					sessionId: "facts-thinking",
+					reasoning: "high",
+				},
+			).result(),
+			"none",
+		).usage?.reasoning;
+	strictEqual((await thinking("zero usage"))?.kind, "unknown", "a zero sent while thinking is not a measured zero");
+	disposeCopilotConversations("facts-thinking");
+	deepStrictEqual(await thinking("reasoned usage"), { kind: "measured", value: 3, source: "provider" });
+	disposeCopilotConversations("facts-thinking");
 	const partial = callSettlementFromMessage(
 		await step({ messages: [user("partial credits")] }, "facts-session"),
 		"none",
