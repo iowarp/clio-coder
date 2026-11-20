@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
 	appendFileSync,
@@ -193,7 +193,7 @@ for (const connect of ["before startup", "after startup", "never", "with read-on
 	});
 }
 
-it("FIFO writer EOF delivers the final unterminated line and closes the read side", {
+it("FIFO writer EOF delivers the final unterminated line and reopens for the next writer", {
 	skip: process.platform === "win32",
 	timeout: 10_000,
 }, async () => {
@@ -212,15 +212,20 @@ it("FIFO writer EOF delivers the final unterminated line and closes the read sid
 		writer = undefined;
 		await reader.linesReceived(1);
 		deepStrictEqual(reader.lines(), ["last line at EOF"]);
-		await delay(100);
-		throws(
-			() => {
-				const fd = openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK);
-				closeSync(fd);
-			},
-			{ code: "ENXIO" },
-			"the original EOF behavior closes the channel until a new run starts",
-		);
+		// A second writer finds a reader again (bt-b S5): before the fix its open failed with ENXIO.
+		for (let attempt = 0; writer === undefined; attempt++) {
+			try {
+				writer = openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ENXIO" || attempt >= 40) throw error;
+				await delay(25);
+			}
+		}
+		writeSync(writer, "second writer\n");
+		closeSync(writer);
+		writer = undefined;
+		await reader.linesReceived(2);
+		deepStrictEqual(reader.lines(), ["last line at EOF", "second writer"]);
 		await reader.cleanup();
 	} finally {
 		await reader?.dispose();

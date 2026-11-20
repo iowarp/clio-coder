@@ -3,6 +3,9 @@ import { Socket } from "node:net";
 import * as readline from "node:readline";
 import { StringDecoder } from "node:string_decoder";
 
+/** How long a FIFO read side that ended without a byte waits before it opens again. */
+const EMPTY_FIFO_REOPEN_MS = 50;
+
 /** `lineNumber` is the 1-based index of the line in the channel, blank lines included, so one writer can correlate. */
 export function setupSteerChannel(filePath: string, onLine: (line: string, lineNumber: number) => void): () => void {
 	let closed = false;
@@ -11,9 +14,14 @@ export function setupSteerChannel(filePath: string, onLine: (line: string, lineN
 	let stream: Socket | null = null;
 	let rl: readline.Interface | null = null;
 	let finishFile: (() => void) | undefined;
+	let reopenTimer: ReturnType<typeof setTimeout> | null = null;
+	/** A FIFO read side that saw its writer's EOF, held open until the next one is: the pipe keeps its buffer only while a reader has it open. */
+	let ended: Socket | null = null;
 	const cleanup = () => {
 		if (closed) return;
 		closed = true;
+		if (reopenTimer !== null) clearTimeout(reopenTimer);
+		ended?.destroy();
 		watcher?.close();
 		finishFile?.();
 		rl?.close();
@@ -32,26 +40,59 @@ export function setupSteerChannel(filePath: string, onLine: (line: string, lineN
 		if (stats.isFIFO()) {
 			// A blocking fs read cannot be cancelled while a FIFO writer stays
 			// open. Socket uses readiness-driven pipe reads that destroy() closes.
-			// Keep read-only access and the existing first-writer-EOF behavior.
-			const fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
-			try {
-				stream = new Socket({ fd, readable: true, writable: false });
-			} catch (err) {
-				// Ownership transfers to Socket only after successful construction.
-				fs.closeSync(fd);
-				throw err;
-			}
-			stream.on("error", reportError);
-			rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-			rl.on("error", reportError);
-			rl.on("line", (line) => {
-				if (closed) return;
-				lineNumber += 1;
-				const trimmed = line.trim();
-				if (trimmed.length > 0) {
-					onLine(trimmed, lineNumber);
+			// Each writer's close ends one read side; the channel then opens a new
+			// one, so a later writer is read too and line numbers keep counting (bt-b S5).
+			const openFifo = (): void => {
+				const fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+				let input: Socket;
+				try {
+					input = new Socket({ fd, readable: true, writable: false });
+				} catch (err) {
+					// Ownership transfers to Socket only after successful construction.
+					fs.closeSync(fd);
+					throw err;
 				}
-			});
+				stream = input;
+				let received = false;
+				input.on("data", () => {
+					received = true;
+				});
+				input.on("error", reportError);
+				const lines = readline.createInterface({ input, crlfDelay: Infinity });
+				rl = lines;
+				lines.on("error", reportError);
+				lines.on("line", (line) => {
+					if (closed) return;
+					lineNumber += 1;
+					const trimmed = line.trim();
+					if (trimmed.length > 0) {
+						onLine(trimmed, lineNumber);
+					}
+				});
+				lines.on("close", () => {
+					if (closed) return;
+					// A writer that connected after this EOF has its bytes in the pipe; closing this side before the
+					// next opens would drop them, so the next opens first.
+					ended = input;
+					// An end with no bytes waits a moment first: where a FIFO with no writer reads as EOF at once, an
+					// immediate reopen would spin.
+					if (received) reopen();
+					else reopenTimer = setTimeout(reopen, EMPTY_FIFO_REOPEN_MS).unref();
+				});
+			};
+			const reopen = (): void => {
+				reopenTimer = null;
+				if (closed) return;
+				try {
+					openFifo();
+				} catch (err) {
+					reportError(err);
+				} finally {
+					ended?.destroy();
+					ended = null;
+				}
+			};
+			openFifo();
 		} else {
 			// Regular file: read current contents, and watch for appends
 			let bytesRead = 0;
