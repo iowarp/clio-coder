@@ -31,7 +31,6 @@ export function runPlaybookValidate(args: ReadonlyArray<string>): number {
 		];
 		if (json) process.stdout.write(`${JSON.stringify({ valid: false, playbook: name, diagnostics }, null, 2)}\n`);
 		else process.stderr.write(`clio-coder playbook: ${diagnostics.join("\n  ")}\n`);
-		// An invalid playbook cannot run as stated: exit 2, the code `fleet run <name>` refuses it with (SPEC 6.5).
-		return 2;
+		return 1;
 	}
 }

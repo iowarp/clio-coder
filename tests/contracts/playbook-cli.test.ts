@@ -97,7 +97,7 @@ describe("playbook CLI variables", () => {
 
 	it("validates and graphs a code step's variable argument from --var", () => {
 		const bare = captured(() => runPlaybookValidate(["stage"]));
-		strictEqual(bare.code, 2, bare.stdout + bare.stderr);
+		strictEqual(bare.code, 1, bare.stdout + bare.stderr);
 		match(bare.stderr, /missing variable fixture/);
 		const valid = captured(() => runPlaybookValidate(["stage", "--var", "fixture=r7", "--json"]));
 		strictEqual(valid.code, 0, valid.stdout + valid.stderr);
@@ -119,11 +119,11 @@ describe("playbook CLI variables", () => {
 		writeFileSync(join(root, "stage.md"), readFileSync(inside, "utf8"));
 		for (const spelling of ["./stage.md", join(root, "stage.md"), ".clio-coder/playbooks/../../stage.md"]) {
 			const refused = captured(() => runPlaybookValidate([spelling, "--var", "fixture=r7"]));
-			strictEqual(refused.code, 2, `${spelling}: ${refused.stdout}${refused.stderr}`);
+			strictEqual(refused.code, 1, `${spelling}: ${refused.stdout}${refused.stderr}`);
 			match(refused.stderr, /playbook path refused: .* pass a playbook name \(hello for .*hello\.md\) or a builtin name/);
 		}
 		const missing = captured(() => runPlaybookValidate(["absent.md"]));
-		strictEqual(missing.code, 2);
+		strictEqual(missing.code, 1);
 		match(missing.stderr, /playbook not found: .*absent\.md \(and no builtin named 'absent'\); pass a playbook name/);
 	});
 
@@ -157,8 +157,7 @@ describe("playbook CLI variables", () => {
 		// Version 5 enforces write boundaries, which compare a git checkout.
 		execFileSync("git", ["init", "-q"], { cwd: root });
 		const untrusted = captured(() => runPlaybookValidate(["routed"]));
-		// SPEC L7a row 7: exit 2, as `fleet run routed` refuses it.
-		strictEqual(untrusted.code, 2);
+		strictEqual(untrusted.code, 1);
 		// The preflight fleet run shares, so the diagnostic reads the same from both commands.
 		match(untrusted.stderr, /preflight failed: unknown target 'project-route' at step 'build'/);
 		recordProjectSurfaceTrust(root, "settings", captureProjectSurface(root, "settings").contentHash as string);
@@ -177,7 +176,7 @@ describe("playbook CLI variables", () => {
 				),
 			);
 			const result = captured(() => runPlaybookValidate(["stage", "--var", "fixture=r7", "--json"]));
-			strictEqual(result.code, 2, result.stdout + result.stderr);
+			strictEqual(result.code, 1, result.stdout + result.stderr);
 			match(result.stdout, /reserved for Clio internal orchestration/);
 		}
 	});
