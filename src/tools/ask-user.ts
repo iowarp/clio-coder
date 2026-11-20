@@ -21,6 +21,7 @@ import type {
 	ToolResult,
 	ToolSpec,
 } from "./registry.js";
+import { effectiveToolCall } from "./surface.js";
 
 const MAX_DECISIONS = 24;
 const DEFAULT_MAX_ROUNDS = 6;
@@ -792,7 +793,7 @@ function compactInterview(
 		...(policy.summary ? { summary: policy.summary } : {}),
 		next:
 			policy.status === "active"
-				? "ask a new necessary follow-up round or call ask_user with action=complete before final prose"
+				? "act on the recorded decisions or ask a new necessary follow-up round"
 				: policy.status === "cancelled"
 					? "the turn has ended; wait for the operator's next message and do not act on a guessed answer"
 					: "continue the task using the decisions/defaults; do not call ask_user again for this interview",
@@ -863,7 +864,7 @@ function renderAskUserState(
 		event === "standalone_answered"
 			? "The operator answered this standalone question. Act on the answer within the requested scope. The earlier completed interview and its decisions are unchanged."
 			: policy.status === "active"
-				? "The interview modal remains open. Ask only new necessary follow-up rounds. When enough information is collected, call ask_user with action=complete before final prose."
+				? "Act on the answers now: approval means do the work, and if the operator declines or says the work is enough, end in one sentence without restating earlier output. Ask another round only if a new necessary question remains; otherwise continue directly and the interview closes automatically with the recorded decisions below."
 				: event === "unscripted"
 					? "No entry in this run's --answers file matches this question, so nobody answered it and the run ends here. Make no edits, run no commands and dispatch no workers on a guessed answer."
 					: policy.status === "cancelled"
@@ -928,6 +929,51 @@ async function completeInterview(
 	policy.updatedAt = now;
 	await persistAskUserTranscript(policy, options);
 	return okInterviewResult(policy, event);
+}
+
+/** Whether an assistant message contains any ask_user tool call (direct, gateway call, or gateway chain). */
+function assistantMessageCallsAskUser(message: { role?: unknown; content?: unknown }): boolean {
+	if (message.role !== "assistant" || !Array.isArray(message.content)) return false;
+	for (const block of message.content) {
+		if (!isRecord(block) || block.type !== "toolCall" || typeof block.name !== "string") continue;
+		if (effectiveToolCall(block.name, block.arguments).toolName === ToolNames.AskUser) return true;
+		if (
+			block.name === ToolNames.Gateway &&
+			isRecord(block.arguments) &&
+			block.arguments.op === "chain" &&
+			Array.isArray(block.arguments.steps) &&
+			block.arguments.steps.some((step) => isRecord(step) && step.capability === ToolNames.AskUser)
+		) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * Close an active interview implicitly when the model's next settled assistant
+ * message after a `round_answered` result contains no `ask_user` call. Writes
+ * the same complete state and derived decisions that an explicit `complete`
+ * call writes today without requiring a dedicated bookkeeping round (XR-5).
+ */
+export async function closeAskUserInterviewOnAssistantTurn(
+	policy: AskUserToolPolicy,
+	message: { role?: unknown; content?: unknown; stopReason?: unknown },
+	options?: ToolInvokeOptions,
+): Promise<boolean> {
+	if (policy.status !== "active" || policy.inFlight === true || policy.rounds.length === 0) return false;
+	if (message.role !== "assistant") return false;
+	if (message.stopReason === "error" || message.stopReason === "aborted" || message.stopReason === "length") {
+		return false;
+	}
+	if (assistantMessageCallsAskUser(message)) return false;
+	const now = new Date().toISOString();
+	policy.status = "complete";
+	policy.cancelled = false;
+	policy.endedAt = policy.endedAt ?? now;
+	policy.updatedAt = now;
+	await persistAskUserTranscript(policy, options);
+	return true;
 }
 
 /** Why the host closed an interview the model left open, as the decisions summary words it. */
