@@ -91,13 +91,14 @@ function advertisesClientCapability(capabilities) {
 }
 
 /**
- * An `agy acp` 1.5 stand-in: argv is `agy <log> <version> <ok|auth|abort>`. Every frame it receives is appended to
- * the log. The first prompt asks a fixed-choice question; in `ok` mode it first asks to run a command under an
- * `interaction_` id. In `ok` mode the first steer prompt ends at max_tokens; the second makes the turn answer
- * end_turn, then a later update arrives, then the second steer fails. In `abort` mode a steer is never answered and
- * session/cancel ends the turn as cancelled.
+ * An `agy acp` 1.5 stand-in: argv is `agy <log> <version> <ok|auth|abort|null>`. Every frame it receives is appended
+ * to the log. The first prompt asks a fixed-choice question; in `ok` mode it first sends `interaction_` requests:
+ * tool-shaped ones (an execute command, a path or a URL under kind other or none) and questions whose locations are
+ * null or empty. In `ok` mode the first steer prompt ends at max_tokens; the second makes the turn answer end_turn,
+ * then a later update arrives, then the second steer fails. In `abort` mode a steer makes the turn answer end_turn and
+ * is never answered itself. In `null` mode a steer is answered with a null result, then the turn with end_turn.
  */
-const agyState = { firstPrompt: undefined, steers: 0 };
+const agyState = { firstPrompt: undefined, steers: 0, answered: false };
 function agyUpdate(text) {
 	send({
 		jsonrpc: "2.0",
@@ -161,23 +162,30 @@ function agy(request) {
 	} else if (request.method === "session/set_mode" || request.method === "session/set_config_option") {
 		send({ jsonrpc: "2.0", id: request.id, result: {} });
 	} else if (request.method === "session/cancel") {
-		send({ jsonrpc: "2.0", id: agyState.firstPrompt, result: { stopReason: "cancelled" } });
+		if (!agyState.answered) send({ jsonrpc: "2.0", id: agyState.firstPrompt, result: { stopReason: "cancelled" } });
 	} else if (request.method === "session/prompt" && agyState.firstPrompt === undefined) {
 		agyState.firstPrompt = request.id;
-		if (scenario === "ok")
+		const ask = (id, toolCall) =>
 			send({
 				jsonrpc: "2.0",
-				id: "tool-1",
+				id,
 				method: "session/request_permission",
 				params: {
 					sessionId: "agy-session",
-					toolCall: { toolCallId: "interaction_2", title: "Run it", kind: "execute", rawInput: { command: "echo hi" } },
+					toolCall,
 					options: [
 						{ optionId: "allow", name: "Allow", kind: "allow_once" },
 						{ optionId: "reject", name: "Reject", kind: "reject_once" },
 					],
 				},
 			});
+		if (scenario === "ok") {
+			ask("tool-1", { toolCallId: "interaction_2", title: "Run it", kind: "execute", rawInput: { command: "echo hi" } });
+			ask("tool-2", { toolCallId: "interaction_3", title: "Read it", kind: "other", rawInput: { path: "README.md" } });
+			ask("tool-3", { toolCallId: "interaction_4", title: "Fetch it", rawInput: { url: "https://example.com" } });
+			ask("question-2", { toolCallId: "interaction_5", title: "Null locations?", kind: "other", locations: null });
+			ask("question-3", { toolCallId: "interaction_6", title: "No locations?", locations: [] });
+		}
 		send({
 			jsonrpc: "2.0",
 			id: "question-1",
@@ -201,6 +209,14 @@ function agy(request) {
 		send({ jsonrpc: "2.0", id: agyState.firstPrompt, result: { stopReason: "end_turn", usage: { inputTokens: 7 } } });
 		setTimeout(50).then(() => agyUpdate("initial-done"));
 		setTimeout(150).then(() => send({ jsonrpc: "2.0", id: request.id, error: { code: -32603, message: "steer lost" } }));
+	} else if (request.method === "session/prompt" && scenario === "abort") {
+		// The turn answers while this steer stays pending; the test aborts on the update that follows.
+		agyState.answered = true;
+		send({ jsonrpc: "2.0", id: agyState.firstPrompt, result: { stopReason: "end_turn" } });
+		agyUpdate("turn-answered");
+	} else if (request.method === "session/prompt" && scenario === "null") {
+		send({ jsonrpc: "2.0", id: request.id, result: null });
+		send({ jsonrpc: "2.0", id: agyState.firstPrompt, result: { stopReason: "end_turn" } });
 	}
 }
 

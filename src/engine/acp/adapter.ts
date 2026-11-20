@@ -702,6 +702,9 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				(typeof promptResponse?.stopReason === "string" && promptResponse.stopReason.length > 0
 					? null
 					: "ACP prompt response missing stopReason");
+			// An abort that lands after the turn answered (a steer still pending, say) is the run's outcome: report it
+			// as cancelled, as the peer would, rather than an end_turn with a failing exit code.
+			if (aborted && reportedFailure === null) promptResponse = { ...promptResponse, stopReason: "cancelled" };
 			for (const event of mapper.finalEvents(promptResponse ?? null, reportedFailure)) emit(event);
 			const stopReason =
 				reportedFailure !== null

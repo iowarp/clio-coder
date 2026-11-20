@@ -15,6 +15,22 @@ const QUESTION_ID_PREFIX = "interaction_";
 const SECURITY_WARNING_KEY = "agy.security.warning";
 /** ACP tool kinds: an `interaction_*` request of one of these kinds is a tool call, mediated like any other. */
 const TOOL_KINDS = new Set(["execute", "edit", "delete", "move", "fetch", "read", "search"]);
+/** `rawInput` keys AcpToolMediator maps to a tool whatever the kind: a tool name, command, path, URL or pattern. */
+const RAW_TOOL_KEYS = [
+	"command",
+	"cmd",
+	"shell",
+	"tool",
+	"toolName",
+	"tool_name",
+	"name",
+	"path",
+	"file_path",
+	"filePath",
+	"notebook_path",
+	"url",
+	"pattern",
+];
 const PROFILE_FLAGS = new Set(["--gemini-dir", "--gemini_dir", "--app-data-dir", "--app_data_dir"]);
 /** agy's own JSON-RPC code and text for a session request made before sign-in (probed on 1.5.13). */
 const AUTH_REQUIRED_CODE = -32000;
@@ -136,13 +152,17 @@ function summedUsage(records: ReadonlyArray<unknown>): Record<string, unknown> |
 	return any ? sum : undefined;
 }
 
-/** A permission request shaped like a tool call: a tool kind, a command, or file locations. */
+/**
+ * A permission request shaped like a tool call: a tool kind, file locations, or a `rawInput` key the mediator maps
+ * to a tool. Ambiguous requests count as tools, so they are mediated rather than answered as questions.
+ */
 function hasToolShape(toolCall: Record<string, unknown>): boolean {
 	const kind = typeof toolCall.kind === "string" ? toolCall.kind.toLowerCase() : "";
 	if (TOOL_KINDS.has(kind)) return true;
-	if (toolCall.locations !== undefined) return true;
+	const locations = toolCall.locations;
+	if (locations !== undefined && locations !== null && (!Array.isArray(locations) || locations.length > 0)) return true;
 	const raw = toolCall.rawInput;
-	return isRecord(raw) && ["command", "cmd", "shell"].some((key) => Object.hasOwn(raw, key));
+	return isRecord(raw) && RAW_TOOL_KEYS.some((key) => Object.hasOwn(raw, key));
 }
 
 function bounded(text: string, chars: number): string {
@@ -251,7 +271,9 @@ export function createAntigravityShims(input: {
 					`Antigravity kept mode '${bounded(option.current, 64)}' after CLIO Coder selected '${DEFAULT_MODE}', so CLIO Coder cannot mediate its tool calls`,
 				);
 		},
-		settleTurn(settled) {
+		settleTurn(responses) {
+			// A null or otherwise non-object JSON-RPC result is an answer without a stop reason, not a crash.
+			const settled = responses.map((response): AcpPromptResponse => (isRecord(response) ? response : {}));
 			const last = settled.at(-1) ?? {};
 			const unfinished = settled.filter((response) => response.stopReason !== "end_turn").at(-1);
 			const usage = summedUsage(settled.map((response) => response.usage ?? response.tokenUsage));

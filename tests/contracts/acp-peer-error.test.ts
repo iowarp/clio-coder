@@ -263,7 +263,7 @@ test("ACP adapter applies the agy shims: version floor, explicit capabilities, p
 	const scratch = await mkdtemp(join(tmpdir(), "clio-agy-shims-"));
 	const fixture = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
 	const cwd = process.cwd();
-	const launch = async (name: string, version: string, session: "ok" | "auth" | "abort") => {
+	const launch = async (name: string, version: string, session: "ok" | "auth" | "abort" | "null") => {
 		const dir = join(scratch, name);
 		await mkdir(dir);
 		const log = join(dir, "frames.jsonl");
@@ -323,6 +323,7 @@ test("ACP adapter applies the agy shims: version floor, explicit capabilities, p
 			if (typed.type === "text_delta" && typed.text === "initial-done") lateSteer = live.run.steer?.("too late");
 			if (typed.type !== "clio_coder_peer_question") continue;
 			questions.push(typed.payload);
+			if ((typed.payload as { questionId?: string }).questionId !== "interaction_1") continue;
 			steered.push(live.run.steer?.("use the topic branch") === true, live.run.steer?.("second steer") === true);
 		}
 		const result = await live.run.promise;
@@ -333,10 +334,20 @@ test("ACP adapter applies the agy shims: version floor, explicit capabilities, p
 		deepStrictEqual(steerFailures, [{ reason: "ACP session/prompt failed: steer lost" }]);
 		strictEqual(lateSteer, false);
 		strictEqual(live.run.steer?.("after the run"), false);
-		// interaction_2 has an execute kind and a command: a tool call for the mediator, not a question.
-		strictEqual(result.delegation.toolCallsRequested, 1);
+		// interaction_2..4 carry an execute command, or a path or URL under kind other or none: tool calls for the
+		// mediator. interaction_5 and _6 have null or empty locations and no tool input: questions.
+		strictEqual(result.delegation.toolCallsRequested, 3);
 		deepStrictEqual(steered, [true, true]);
+		const question = (id: string, text: string, extra: Record<string, unknown> = {}) => ({
+			questionId: id,
+			question: text,
+			choices: ["Allow", "Reject"],
+			...extra,
+			answer: "cancelled",
+		});
 		deepStrictEqual(questions, [
+			question("interaction_5", "Null locations?"),
+			question("interaction_6", "No locations?"),
 			{
 				questionId: "interaction_1",
 				question: "Which branch?",
@@ -369,20 +380,36 @@ test("ACP adapter applies the agy shims: version floor, explicit capabilities, p
 			outcome: { outcome: "cancelled" },
 		});
 
-		// Abort with a steer the peer never answers: the run settles cancelled without waiting on it. This session
-		// reports its mode only as a config option, which is reset to default the same way.
+		// Abort while a steer is pending after the turn's own prompt answered end_turn: the run settles cancelled
+		// (agent_end included) without waiting on the steer. This session reports its mode only as a config option,
+		// which is reset to default the same way.
 		const aborting = await launch("abort", "1.5.13", "abort");
+		const ends: unknown[] = [];
 		for await (const event of aborting.run.events) {
-			if ((event as { type: string }).type !== "clio_coder_peer_question") continue;
-			strictEqual(aborting.run.steer?.("never answered"), true);
-			aborting.run.abort();
+			const typed = event as { type: string; text?: string; messages?: Array<{ stopReason?: string }> };
+			if (typed.type === "agent_end") ends.push(typed.messages?.[0]?.stopReason);
+			if (typed.type === "clio_coder_peer_question") strictEqual(aborting.run.steer?.("never answered"), true);
+			if (typed.type === "text_delta" && typed.text === "turn-answered") aborting.run.abort();
 		}
-		strictEqual((await aborting.run.promise).stopReason, "cancelled");
+		const cancelled = await aborting.run.promise;
+		strictEqual(cancelled.stopReason, "cancelled");
+		strictEqual(cancelled.exitCode, 1);
+		strictEqual(cancelled.failureMessage, undefined);
+		deepStrictEqual(ends, ["aborted"]);
 		const abortFrames = await aborting.frames();
 		deepStrictEqual(
 			abortFrames.filter((frame) => frame.method === "session/set_config_option").map((frame) => frame.params?.value),
 			["default"],
 		);
+
+		// A steer answered with a null result is a response without a stop reason, not a crash in settlement.
+		const nulled = await launch("null", "1.5.13", "null");
+		for await (const event of nulled.run.events) {
+			if ((event as { type: string }).type === "clio_coder_peer_question") nulled.run.steer?.("null please");
+		}
+		const missing = await nulled.run.promise;
+		strictEqual(missing.stopReason, "error");
+		strictEqual(missing.failureMessage, "ACP prompt response missing stopReason");
 	} finally {
 		await rm(scratch, { recursive: true, force: true });
 	}
