@@ -605,6 +605,8 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	"context.fold": {
 		...keep("checkpoint", "route", "tokensBefore", "tokensAfter", "cause"),
 		stages: { ...keep("stage", "outcome", "reason"), recordId: "id" },
+		// `priorState` is no longer written but stays `keep`: a share made before 0.8.5 carries it, and a verifier
+		// rejects a record that is not a fixed point of this table.
 		legacy: { ...keep("outcome", "results", "priorState"), earliest: "id" },
 	},
 	// An endpoint key is the provider URL, which can name a private host.

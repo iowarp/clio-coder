@@ -642,8 +642,11 @@ export const ContextFoldSchema = Type.Object(
 					results: count,
 					/** The earliest adopted result's row id. */
 					earliest: Type.Optional(ExistingId),
-					/** What the provider's cache held of the stubbed request is not on the ledger. */
-					priorState: vocabulary(["unknown"]),
+					/**
+					 * A constant `unknown` records before 0.8.5 carried: what the provider's cache held of the stubbed request
+					 * is not on the ledger. No longer written; kept optional so those records still read.
+					 */
+					priorState: Type.Optional(vocabulary(["unknown"])),
 				},
 				closed,
 			),

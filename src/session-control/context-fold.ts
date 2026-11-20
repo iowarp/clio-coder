@@ -287,7 +287,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 				stages.push(entry);
 			},
 			legacy: (outcome) => {
-				legacy = { ...outcome, priorState: "unknown" };
+				legacy = { ...outcome };
 			},
 			measure: (tokens) => {
 				tokensBefore ??= figure(tokens);

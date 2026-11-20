@@ -309,7 +309,7 @@ it("a v6 session on an uncached route adopts its aging stubs once, as one record
 		);
 		const adopted = folds.find((fold) => fold.legacy !== undefined);
 		ok(adopted);
-		deepStrictEqual(adopted.legacy, { outcome: "adopted", results: 1, earliest: "r1", priorState: "unknown" });
+		deepStrictEqual(adopted.legacy, { outcome: "adopted", results: 1, earliest: "r1" });
 		deepStrictEqual(adopted.stages[0], {
 			stage: "superseded",
 			outcome: "committed",
@@ -353,7 +353,7 @@ it("a v6 session on a cached route releases its aging stubs and writes no record
 		deepStrictEqual(results(wireElements(server.requests.at(-1) as never)), [`result:${RECORD}`, `result:${RECORD}`]);
 		const released = folds.find((fold) => fold.legacy !== undefined);
 		ok(released, JSON.stringify(folds));
-		deepStrictEqual(released.legacy, { outcome: "legacy_aging_released", results: 1, priorState: "unknown" });
+		deepStrictEqual(released.legacy, { outcome: "legacy_aging_released", results: 1 });
 	} finally {
 		await harness.close();
 	}
