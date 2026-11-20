@@ -59,6 +59,11 @@ const CASES: ReadonlyArray<{ args: string[]; usage: RegExp }> = [
 	{ args: ["research", "start", "--help"], usage: /clio-coder research start / },
 	{ args: ["help", "--help"], usage: /clio-coder help --json / },
 	{ args: ["schema", "--help"], usage: /clio-coder schema <name>/ },
+	// The fleet leaves answer from src/cli/fleet-help.ts with their own usage, not the whole fleet help.
+	...["admission", "wait", "cancel"].map((leaf) => ({
+		args: ["fleet", leaf, "--help"],
+		usage: new RegExp(`^clio-coder fleet ${leaf} [^\\n]*\\n\\n(?![\\s\\S]*Subcommands:)`, "u"),
+	})),
 ];
 
 describe("leaf commands answer --help", { concurrency: 4 }, () => {

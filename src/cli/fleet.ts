@@ -89,7 +89,7 @@ import { SessionDomainModule } from "../domains/session/index.js";
 import { loadRunTelemetrySource } from "../domains/session/telemetry-source.js";
 import { TelemetryDomainModule } from "../domains/telemetry/index.js";
 import { fleetTotals, runTelemetry } from "../domains/telemetry/read-model.js";
-import { FLEET_HELP as HELP } from "./fleet-help.js";
+import { answerFleetHelp, FLEET_HELP as HELP } from "./fleet-help.js";
 import { runFleetWithShutdown } from "./fleet-lifecycle.js";
 import { fleetInspectionScope } from "./fleet-project-scope.js";
 import { createFleetReporter } from "./fleet-reporting.js";
@@ -294,6 +294,10 @@ interface FleetRunTrack {
 	playbook: string | null;
 	planHash: string | null;
 	started: boolean;
+	/** A step was dispatched (not replayed): from here a failure is the run's, not a refusal. */
+	stepDispatched: boolean;
+	/** The run threw before it dispatched any step (a drained admission gate, a denied reservation), so nothing ran. */
+	refusedBeforeStep: boolean;
 	documentWritten: boolean;
 	steps: Array<{ stepId: string; runId: string | null; outcome: FleetStepOutcome }>;
 	stopCause: FleetStopCause | null;
@@ -322,11 +326,12 @@ function fleetEndDocument(
 	exitCode: number,
 	causes: ReadonlyArray<RunCause>,
 ): Record<string, unknown> {
-	const completionState = !track.started
-		? "refused"
-		: track.stopCause !== null || causes.some((cause) => cause.code === "interrupted")
-			? "stopped"
-			: "completed";
+	const completionState =
+		!track.started || track.refusedBeforeStep
+			? "refused"
+			: track.stopCause !== null || causes.some((cause) => cause.code === "interrupted")
+				? "stopped"
+				: "completed";
 	const stopReason =
 		completionState !== "stopped"
 			? null
@@ -365,6 +370,8 @@ async function runFleet(options: FleetRunOptions, reporter: ReturnType<typeof cr
 		playbook: null,
 		planHash: null,
 		started: false,
+		stepDispatched: false,
+		refusedBeforeStep: false,
 		documentWritten: false,
 		steps: [],
 		stopCause: null,
@@ -383,20 +390,17 @@ async function runFleet(options: FleetRunOptions, reporter: ReturnType<typeof cr
 	};
 	lastFleetDiagnostic = null;
 	const code = await runFleetTracked(options, reporter, track);
+	// An exit that never reached the end of the run: not_started when no step ran (6.5 exit 2), else run_failed.
+	const fallbackCause: RunCause = {
+		code: track.started && !track.refusedBeforeStep ? "run_failed" : "not_started",
+		...(lastFleetDiagnostic !== null ? { message: lastFleetDiagnostic } : {}),
+	};
 	if (options.format !== "text" && !track.documentWritten) {
 		// Every exit that never reached the end of the run still answers with the one result document (6.6).
-		const cause: RunCause = {
-			code: track.started ? "run_failed" : "not_started",
-			...(lastFleetDiagnostic !== null ? { message: lastFleetDiagnostic } : {}),
-		};
-		reporter.stdout(`${JSON.stringify(fleetEndDocument(options, track, code, [cause]))}\n`);
+		reporter.stdout(`${JSON.stringify(fleetEndDocument(options, track, code, [fallbackCause]))}\n`);
 	}
 	if (track.rootRecorded && track.rootId !== null) {
-		const document =
-			track.resultDocument ??
-			fleetEndDocument(options, track, code, [
-				{ code: "run_failed", ...(lastFleetDiagnostic !== null ? { message: lastFleetDiagnostic } : {}) },
-			]);
+		const document = track.resultDocument ?? fleetEndDocument(options, track, code, [fallbackCause]);
 		try {
 			// The result before the sealed mark, so `fleet wait` never sees a sealed root without its document.
 			writeFleetResult(track.rootId, document);
@@ -732,6 +736,7 @@ async function runFleetTracked(
 						}
 					},
 					onStepDispatched(event) {
+						if (event.replayed !== true) track.stepDispatched = true;
 						if (stream) reporter.stdout(`${JSON.stringify({ type: "step_dispatched", ...event })}\n`);
 					},
 					onStepSettled(step) {
@@ -848,6 +853,8 @@ async function runFleetTracked(
 			return finishFleetRun(options, reporter, track, settledExitCode(false), shutdownSignal?.aborted === true);
 		}
 		const message = err instanceof Error ? err.message : String(err);
+		// Thrown before any step was dispatched (`dispatch: reservation denied: capacity is draining`): nothing ran.
+		if (!track.stepDispatched) track.refusedBeforeStep = true;
 		return fleetFailureExitCode(err) === 1 ? refuse(message) : fail(message);
 	}
 	clearTimeout(deadline);
@@ -1255,15 +1262,11 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 	// Asking for help is not a usage error, and it is not an argument either.
 	// `status|drain|resume --help` answered `unknown flag: --help` on stderr with
 	// status 2, and `run --help` answered its usage the same way. Anywhere on the
-	// line it is a question, answered here before any subcommand executes.
-	if (sub === "help" || args.includes("--help") || args.includes("-h")) {
-		process.stdout.write(HELP);
-		return 0;
-	}
-	if (sub === undefined) {
-		process.stderr.write(HELP);
-		return 2;
-	}
+	// line it is a question, answered here before any subcommand executes, by the
+	// same leaf src/cli/index.ts asks first.
+	const help = answerFleetHelp(args);
+	if (help !== null) return help;
+	if (sub === undefined) return 2;
 	switch (sub) {
 		case "run": {
 			const options = parseFleetRunArgs(args.slice(1));
