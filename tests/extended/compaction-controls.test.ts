@@ -2926,9 +2926,8 @@ describe("compaction trigger output reservation", () => {
 
 	it("bounds a reasoning route's summary reserve at half a known window, reserves none for a capped thinking-off summary (CTX-3), S1 follows the trigger and fit sits above it under 52,428 (bt-47 cf1j-b, D6, bt3 m2a, bt-18, ContextFold A1, A3, A5)", async () => {
 		const { effectiveCompactionThreshold } = await import("../../src/domains/session/compaction/auto.js");
-		const { evictionPressure, fitOutputReserve, foldTriggerReserve, summaryOutputCap } = await import(
-			"../../src/domains/context/fold/pressure.js"
-		);
+		const { evictionPressure, fitOutputReserve, foldTriggerReserve, overflowEvictionInputLimit, summaryOutputCap } =
+			await import("../../src/domains/context/fold/pressure.js");
 		const { ADMISSIBLE_OUTPUT_RESERVE, requestOutputReserve, setGlobalDefaultMaxOutputTokens } = await import(
 			"../../src/engine/apis/output-budget.js"
 		);
@@ -3049,6 +3048,15 @@ describe("compaction trigger output reservation", () => {
 			if (window < 52_428 && configured === undefined) ok(window - fit > trigger, `${window}: fit above the trigger`);
 			else strictEqual(fit, turnReserve, `${window}: fit counts the turn reserve, as today`);
 		}
+		// XR-40: at equality the saved tokens on seven calls merely repay the retained prefix, so Copilot declines.
+		const overflow = { window: 200_000, reserve: 32_768, tokens: 168_000 };
+		strictEqual(overflowEvictionInputLimit({ ...overflow, fullReseed: false }), 147_232, "ten percent below fit");
+		strictEqual(overflowEvictionInputLimit({ ...overflow, fullReseed: true }), 146_999, "147K would only break even");
+		strictEqual(
+			overflowEvictionInputLimit({ ...overflow, tokens: 175_000, fullReseed: true }),
+			147_232,
+			"paying for the reseed is not enough without the fit margin",
+		);
 		deepStrictEqual(
 			evictionPressure({ automatic: true, window: 0, threshold: 0.8, target: 0.6, triggerFraction: () => 0.5 }),
 			{ threshold: 0.8, target: 0.6 },

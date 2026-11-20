@@ -10,7 +10,7 @@ import type { ClioSettings } from "../core/config.js";
 import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import type { ContextActivityStatus, ContextFoldPayload, ContextPrunedPayload } from "../core/telemetry/live-events.js";
 import type { FoldCheckpoint } from "../domains/context/fold/contract.js";
-import { evictionPressure } from "../domains/context/fold/pressure.js";
+import { evictionPressure, overflowEvictionInputLimit } from "../domains/context/fold/pressure.js";
 import type { EvictionPlan, PolicyInput } from "../domains/context/working-set/contract.js";
 import { buildEvictionFields } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
@@ -169,6 +169,8 @@ export interface LegacyAdoptionInput {
 export interface EvictionStageInput extends LegacyAdoptionInput {
 	/** Overflow on a known window: the stage plans to fit the request, not to the trigger. */
 	requiredFit: boolean;
+	/** The summary already failed: recover on fit alone rather than declining in favor of a stage that cannot run. */
+	summaryFailed?: boolean;
 	compactionWindow: number;
 	workingSetTarget: number;
 	shouldCompact(tokens: number): ContextCompactionVerdict;
@@ -479,6 +481,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 				? port.overflowFitTokens(agentRuntime, pendingUserText)
 				: port.liveContextEstimate(agentRuntime, pendingUserText).tokens;
 		let folded: FoldPlan;
+		let yieldLimit: number | undefined;
 		let visibleEntries: ReadonlyArray<SessionEntry> = [];
 		let policyId = workingSet.policy;
 		try {
@@ -486,8 +489,16 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			const policy = structural ? resolveWorkingSetPolicy(workingSet.policy) : null;
 			if (policy !== null) policyId = policy.id;
 			const tokens = fitTokens();
-			const fitShare = () =>
-				Math.max(0, 1 - resolveFitOutputReserve(agentRuntime, Math.max(tokens, estimate.tokens)) / estimate.contextWindow);
+			const reserve = requiredFit ? resolveFitOutputReserve(agentRuntime, Math.max(tokens, estimate.tokens)) : 0;
+			const fitShare = requiredFit ? Math.max(0, 1 - reserve / estimate.contextWindow) : 0;
+			if (requiredFit && !input.summaryFailed) {
+				yieldLimit = overflowEvictionInputLimit({
+					window: estimate.contextWindow,
+					reserve,
+					tokens,
+					fullReseed: agentRuntime.agent.state.model?.api === "copilot-sdk",
+				});
+			}
 			// S1's figures (ContextFold A3); S0's selection reads neither, so its floor and gate are unchanged.
 			const pressure = evictionPressure({
 				automatic: trigger === "auto" && !requiredFit,
@@ -500,8 +511,10 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			const policyInput = selectionInput(entries, session, settings, {
 				tokens,
 				contextWindow: compactionWindow,
-				threshold: requiredFit ? Math.min(compactionThreshold, fitShare()) : pressure.threshold,
-				target: requiredFit ? Math.min(workingSetTarget, fitShare()) : pressure.target,
+				threshold: requiredFit ? Math.min(compactionThreshold, fitShare) : pressure.threshold,
+				target: requiredFit
+					? Math.min(workingSetTarget, fitShare, yieldLimit === undefined ? 1 : Math.max(0, yieldLimit / compactionWindow))
+					: pressure.target,
 				...(requiredFit ? { forced: true } : {}),
 			});
 			visibleEntries = policyInput.entries;
@@ -531,6 +544,21 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			if (!structural) return { acted: false, committed: false, fit: false, skipNotice };
 			decision.stage({ stage: "working_set", outcome: "none", reason: "no_candidates" });
 			return { acted: false, committed: false, fit: false, skipNotice: structuralSkip() };
+		}
+		if (yieldLimit !== undefined && planned.tokensAfter > yieldLimit) {
+			if (superseded.outcome === "planned") decision.stage({ stage: "superseded", outcome: "held", reason: "no_gain" });
+			if (structural)
+				decision.stage({
+					stage: "working_set",
+					outcome: folded.structural ? "held" : "none",
+					reason: folded.structural ? "no_gain" : "no_candidates",
+				});
+			return {
+				acted: false,
+				committed: false,
+				fit: false,
+				skipNotice: `[context engine] working set: saving ~${planned.tokensBefore - planned.tokensAfter} tokens would not yield enough overflow relief; llm_summary runs instead`,
+			};
 		}
 		const alone = !folded.structural;
 		if (alone) deps.middleware.fireCompactionHook("superseded", "superseded", estimate.tokens);
