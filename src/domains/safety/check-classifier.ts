@@ -358,12 +358,28 @@ export function classifyCall(
 	const verdict = declaredSteps.size > 0 ? "check" : callVerdict(toolName, args, gitHelpers);
 	// A bash command has a shape exactly when it runs a check, so only a check reads where its output lands.
 	const isOutput =
-		command !== null && verdict === "check" ? outputTarget(base, checkLogTargets(command, declaredSteps)) : () => false;
+		command !== null && verdict === "check"
+			? outputTarget(base, checkLogTargets(command, declaredSteps, base))
+			: () => false;
 	const shape =
 		command !== null
 			? verdict === "check"
-				? checkCommandShape(command, gitHelpers, isOutput, declaredSteps, (step) =>
-						writesTree(toolName, step, mutationTargets(toolName, { command: step }), base, gitHelpers, outputTarget, command),
+				? checkCommandShape(
+						command,
+						gitHelpers,
+						isOutput,
+						declaredSteps,
+						(step) =>
+							writesTree(
+								toolName,
+								step,
+								mutationTargets(toolName, { command: step }),
+								base,
+								gitHelpers,
+								outputTarget,
+								command,
+							),
+						base,
 					)
 				: null
 			: // A verify check whose argv rewrites the tree (`npm run format`) is a change, as in bash (x3-3).

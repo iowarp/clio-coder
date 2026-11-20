@@ -2081,8 +2081,8 @@ function makeCheckMatch(args: ReadonlyArray<string>): boolean {
 }
 
 /**
- * Read-only checks of other ecosystems by their subcommand (x8-2): cargo check, clippy and build, go vet and build
- * (without `-o`), `gofmt -l`, mypy, pyright, pylint, flake8, ruff check, `prettier --check`, the format checks
+ * Read-only checks of other ecosystems by their subcommand (x8-2): cargo check, clippy, build and `insta test`, go vet
+ * and build (whose binary the output reader judges, {@link checkReportTargets}), `gofmt -l`, mypy, pyright, pylint, flake8, ruff check, `prettier --check`, the format checks
  * `black --check`, `isort --check-only`, `ruff format --check`, `cargo fmt --check` and `rustfmt --check` (x10-2),
  * `golangci-lint run`, staticcheck (x10-3), biome check and lint,
  * dotnet test, rspec, phpunit, composer test, deno test, check and lint, playwright test, cypress run, tox, nox, hatch
@@ -2100,10 +2100,12 @@ function ecosystemCheckMatch(executable: string, args: ReadonlyArray<string>): b
 				subcommand === "check" ||
 				subcommand === "clippy" ||
 				subcommand === "build" ||
+				// `cargo insta test` writes only pending `.snap.new` files beside a red; its accept forms are writers (SF-2).
+				(subcommand === "insta" && args[1] === "test") ||
 				(subcommand === "fmt" && args.includes("--check"));
 			break;
 		case "go":
-			matched = subcommand === "vet" || (subcommand === "build" && !has(/^-o(?:=|$)/u));
+			matched = subcommand === "vet" || subcommand === "build";
 			break;
 		case "gofmt":
 			matched = has(/^-[ld]$/u);
@@ -2158,7 +2160,8 @@ function ecosystemCheckMatch(executable: string, args: ReadonlyArray<string>): b
 			break;
 		case "tox":
 		case "nox":
-			matched = !args.flatMap((arg) => arg.split(/[=,]/u)).some(isWriteCapableScriptName);
+			// An environment or session named as a writer (`-e format`, `-s lint_fix`) is excluded by checkWritesTree below.
+			matched = true;
 			break;
 		case "rake":
 			matched = subcommand === "test";
@@ -2264,6 +2267,8 @@ export function checkCommandShape(
 	isOutput: (target: string) => boolean = () => false,
 	declaredSteps: ReadonlySet<number> = new Set(),
 	stepWritesTree: (step: string) => boolean = () => true,
+	/** The directory the check runs in ({@link checkLogTargets}). */
+	directory = "",
 ): CheckCommandShape | null {
 	const tokens = scanShellLike(command, true);
 	const parsed = shellSteps(tokens);
@@ -2274,9 +2279,11 @@ export function checkCommandShape(
 		collectRedirectTargets(step.tokens, writes);
 		const check = isCheck(step, index);
 		const argv = step.index === null ? [] : step.argv.slice(step.index);
+		// A report, coverage directory or binary the check writes by its own options is judged as its logs are (SF-2).
+		if (check) writes.push(...checkReportTargets(argv, directory));
 		const readOnly =
 			step.index === null ||
-			(check && !checkWritesTree(argv)) ||
+			(check && !checkWritesTree(argv) && !updatesGoldensByEnv(step.argv.slice(0, step.index))) ||
 			SHELL_SETUP_STEPS.has(argv[0] ?? "") ||
 			(basenameToken(argv[0]) === "tee" && pathArgs(argv, 0).every(isOutput)) ||
 			readOnlyInspectionStep(argv, gitHelpersConfigured);
@@ -2306,12 +2313,19 @@ export function checkCommandShape(
  * target is output and not a change is the caller's call. `declaredSteps` count as check steps, as in
  * {@link checkCommandShape}.
  */
-export function checkLogTargets(command: string, declaredSteps: ReadonlySet<number> = new Set()): ReadonlySet<string> {
+export function checkLogTargets(
+	command: string,
+	declaredSteps: ReadonlySet<number> = new Set(),
+	/** The directory the check runs in, which names the binary `go build` leaves there ({@link checkReportTargets}). */
+	directory = "",
+): ReadonlySet<string> {
 	const logs = new Set<string>();
 	let checked = false;
 	for (const [index, step] of shellSteps(scanShellLike(command, true)).entries()) {
-		checked ||= isCheckStep(step) || declaredSteps.has(index);
+		const check = isCheckStep(step) || declaredSteps.has(index);
+		checked ||= check;
 		const argv = step.index === null ? [] : step.argv.slice(step.index);
+		if (check) for (const target of checkReportTargets(argv, directory)) logs.add(target);
 		if (checked && basenameToken(argv[0]) === "tee") for (const target of pathArgs(argv, 0)) logs.add(target);
 		if (step.joinedBy === "|") continue;
 		if (checked) {
@@ -2322,6 +2336,131 @@ export function checkLogTargets(command: string, declaredSteps: ReadonlySet<numb
 		checked = false;
 	}
 	return logs;
+}
+
+/** Default files pytest-cov writes for a `--cov-report` kind named without a destination. */
+const COV_REPORT_DEFAULTS: ReadonlyMap<string, string> = new Map([
+	["html", "htmlcov"],
+	["xml", "coverage.xml"],
+	["json", "coverage.json"],
+	["lcov", "coverage.lcov"],
+]);
+
+/** `go build` options that take the next word as their value. */
+const GO_BUILD_VALUE_OPTIONS: ReadonlySet<string> = new Set([
+	"-o",
+	"-p",
+	"-C",
+	"-tags",
+	"-ldflags",
+	"-gcflags",
+	"-asmflags",
+	"-mod",
+	"-modfile",
+	"-overlay",
+	"-pkgdir",
+	"-buildmode",
+	"-compiler",
+	"-installsuffix",
+	"-toolexec",
+	"-pgo",
+	"-coverpkg",
+	"-covermode",
+]);
+
+/**
+ * The files a check step writes through its own options (SF-2), for the caller's output reader to judge as it judges a
+ * log: a gitignored or newly made untracked target stays output, a tracked or older one is a change. They are an ESLint
+ * report (`-o`, `--output-file`), a coverage directory (`--coverage` in any spelling, jest's `--coverageDirectory`,
+ * vitest's `--coverage.reportsDirectory`), pytest-cov's `.coverage` and `--cov-report` files, `go test -coverprofile`
+ * and `-o`, and the binary `go build` leaves unless it builds several packages: its `-o`, its one package's or `.go`
+ * file's name, or for the package in `directory` that directory's name. Without a `directory` that last binary is `.`,
+ * the tree itself, so it is a change.
+ */
+function checkReportTargets(argv: ReadonlyArray<string>, directory: string): string[] {
+	const targets: string[] = [];
+	const valueAt = (index: number, name: string): string | undefined => {
+		const arg = argv[index];
+		return arg === name ? argv[index + 1] : arg?.startsWith(`${name}=`) === true ? arg.slice(name.length + 1) : undefined;
+	};
+	const eslint = argv.findIndex((word) => basenameToken(word) === "eslint");
+	let coverage = false;
+	let coverageDirectory: string | undefined;
+	for (const [index, arg] of argv.entries()) {
+		if (/^--(?:coverage(?:\.enabled)?|collectCoverage)(?:=true)?$/u.test(arg)) coverage = true;
+		coverageDirectory =
+			valueAt(index, "--coverageDirectory") ?? valueAt(index, "--coverage.reportsDirectory") ?? coverageDirectory;
+		const report = eslint >= 0 && index > eslint ? (valueAt(index, "-o") ?? valueAt(index, "--output-file")) : undefined;
+		if (report !== undefined) targets.push(report);
+		if (arg === "--cov" || arg.startsWith("--cov=")) targets.push(".coverage");
+		const covReport = valueAt(index, "--cov-report");
+		if (covReport !== undefined) {
+			const [kind = "", destination] = covReport.split(":");
+			const target = destination || COV_REPORT_DEFAULTS.get(kind);
+			if (target !== undefined) targets.push(target);
+		}
+	}
+	if (coverage) targets.push(coverageDirectory ?? "coverage");
+	const go = argv.findIndex((word) => basenameToken(word) === "go");
+	const subcommand = go >= 0 ? argv[go + 1] : undefined;
+	if (subcommand === "test")
+		for (let index = go + 2; index < argv.length; index += 1) {
+			const target = valueAt(index, "-coverprofile") ?? valueAt(index, "-o");
+			if (target !== undefined) targets.push(target);
+		}
+	if (subcommand === "build") {
+		const operands: string[] = [];
+		let output: string | undefined;
+		for (let index = go + 2; index < argv.length; index += 1) {
+			const arg = argv[index] ?? "";
+			if (!arg.startsWith("-")) {
+				operands.push(arg);
+				continue;
+			}
+			const name = arg.replace(/^--/u, "-").split("=")[0] ?? "";
+			if (name === "-o") output = arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : argv[index + 1];
+			if (!arg.includes("=") && GO_BUILD_VALUE_OPTIONS.has(name)) index += 1;
+		}
+		const [first] = operands;
+		const files = operands.length > 0 && operands.every((operand) => operand.endsWith(".go"));
+		if (output !== undefined) targets.push(output);
+		else if (first !== undefined && files) targets.push(path.basename(first, ".go"));
+		else if (first === undefined || first === "." || first === "./")
+			targets.push(operands.length > 1 || directory === "" ? "." : path.basename(directory));
+		else if (operands.length === 1 && !first.includes("...")) targets.push(path.basename(first));
+	}
+	return targets;
+}
+
+/**
+ * Environment settings that make a test run rewrite its snapshots or goldens instead of comparing against them
+ * (`UPDATE_GOLDEN=1 go test`, `INSTA_UPDATE=always cargo test`, `UPDATE_SNAPSHOTS=1 npm test`, SF-2): a name with an
+ * update word and a snapshot word set to anything but an off value, insta's `always`/`unseen` and its force-pass, and
+ * trybuild's `overwrite`. `NO_UPDATE_NOTIFIER` and the like name no snapshot, so they stay setup.
+ */
+function updatesGoldensByEnv(prefix: ReadonlyArray<string>): boolean {
+	return prefix.some((word) => {
+		const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/su.exec(word);
+		if (match === null) return false;
+		const name = (match[1] ?? "").toUpperCase();
+		const value = (match[2] ?? "").replace(/^["']|["']$/gu, "");
+		if (/^(?:|0|false|no|off)$/iu.test(value)) return false;
+		if (name === "INSTA_UPDATE") return value === "always" || value === "unseen";
+		if (name === "INSTA_FORCE_PASS") return true;
+		if (name === "TRYBUILD") return value === "overwrite";
+		const parts = name.split("_");
+		return (
+			parts.some((part) => /^(?:UPDATE|REGEN|REGENERATE|BLESS|ACCEPT|OVERWRITE|RECORD)$/u.test(part)) &&
+			parts.some((part) =>
+				/^(?:SNAPSHOTS?|SNAPS?|GOLDENS?|GOLD|EXPECT|EXPECTED|EXPECTATIONS?|FIXTURES?|BASELINES?)$/u.test(part),
+			)
+		);
+	});
+}
+
+/** {@link isWriteCapableScriptName} with `_` read as a separator too, so `nox -s lint_fix` names a writer (SF-2). */
+function isWriterName(name: string): boolean {
+	return isWriteCapableScriptName(name.replace(/_/gu, "-"));
 }
 
 /** Flags that turn a linter or formatter into a writer of the files it checks. */
@@ -2349,7 +2488,17 @@ export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
 	// `go test -update`, `pytest --snapshot-update` and `bun test -u` rewrite the goldens they compare against (x7-2).
 	if (testRunnerArgs(executable, args)?.some(writesSnapshots) === true) return true;
 	if (executable === "cargo" && args[0] === "insta")
-		return args[1] === "accept" || args[1] === "review" || args.some((arg) => arg === "--accept" || writesSnapshots(arg));
+		return (
+			args[1] === "accept" ||
+			args[1] === "review" ||
+			args.some(
+				(arg, index) =>
+					/^--(?:accept|review|force-update-snapshots)/u.test(arg) ||
+					/^--unreferenced=(?:delete|auto)$/u.test(arg) ||
+					(arg === "--unreferenced" && /^(?:delete|auto)$/u.test(args[index + 1] ?? "")) ||
+					writesSnapshots(arg),
+			)
+		);
 	if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
 		const run = packageScriptRun(executable, args);
 		const script = run?.script ?? (args[0] === "run" ? args[1] : args[0]);
@@ -2357,10 +2506,12 @@ export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
 		// `npm test -- -u` is a check that rewrites its snapshots (x5-2); pnpm and yarn hand `pnpm test -u` the flag too.
 		if (separator >= 0 && args.slice(separator + 1).some(writesSnapshots)) return true;
 		if ((executable === "pnpm" || executable === "yarn") && run?.forwarded.some(writesSnapshots) === true) return true;
-		return script !== undefined && isWriteCapableScriptName(script);
+		return script !== undefined && isWriterName(script);
 	}
 	if (executable === "make" || executable === "just")
-		return args.some((arg) => !arg.startsWith("-") && !arg.includes("=") && isWriteCapableScriptName(arg));
+		return args.some((arg) => !arg.startsWith("-") && !arg.includes("=") && isWriterName(arg));
+	// A tox environment or nox session named as a writer rewrites the tree (`nox -s lint_fix`, `tox -e format`, SF-2).
+	if (executable === "tox" || executable === "nox") return args.flatMap((arg) => arg.split(/[=,]/u)).some(isWriterName);
 	return false;
 }
 

@@ -2,7 +2,7 @@ import { deepStrictEqual, doesNotMatch, match, notStrictEqual, strictEqual } fro
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { it } from "node:test";
 import { mapExitCode } from "../../src/cli/run.js";
 import {
@@ -934,6 +934,35 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	} finally {
 		rmSync(repo, { recursive: true, force: true });
 	}
+	// A check's own report, coverage directory or binary is a write judged as its logs are, and a golden update by
+	// environment rewrites the tree (SF-2): a gitignored or new target is output, a tracked or older one is a change.
+	const reports = mkdtempSync(join(tmpdir(), "check-reports-"));
+	try {
+		execFileSync("git", ["init", "-q"], { cwd: reports });
+		writeFileSync(join(reports, ".gitignore"), "coverage/\n");
+		for (const older of ["report.json", "tool", basename(reports)]) writeFileSync(join(reports, older), "older");
+		const outputTarget = checkOutputReader(reports, process.env, [], new Map(), Date.now() + 1);
+		const changes = (command: string) => classifyCall("bash", { command }, { cwd: reports, outputTarget }).changesTree;
+		for (const [command, expected] of [
+			["npx eslint . -o report.json", true],
+			["npx eslint . --output-file=lint.json", false],
+			["npx vitest run --coverage", false],
+			["npx jest --coverage --coverageDirectory=report.json", true],
+			["pytest --cov=src", false],
+			["UPDATE_GOLDEN=1 go test ./...", true],
+			["INSTA_UPDATE=always cargo test", true],
+			["UPDATE_SNAPSHOTS=1 npm test", true],
+			["NO_UPDATE_NOTIFIER=1 npm test", false],
+			["go build", true],
+			["go build ./cmd/tool", true],
+			["go build ./cmd/fresh", false],
+			["go build ./...", false],
+			["go build -o report.json ./cmd/x", true],
+		] as const)
+			strictEqual(changes(command), expected, command);
+	} finally {
+		rmSync(reports, { recursive: true, force: true });
+	}
 	// Shell setup changes no tree, so a standing red stands beside a narrower green (x3-1).
 	for (const setup of ["source .venv/bin/activate", "export CI=1"])
 		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [
@@ -1136,6 +1165,13 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 		["isort .", "mutation"],
 		["ruff format .", "mutation"],
 		["cargo fmt", "mutation"],
+		// Writer-named nox sessions and tox environments write; `cargo insta test` checks while its accept forms write (SF-2).
+		["nox -s lint_fix", "mutation"],
+		["tox -e format", "mutation"],
+		["nox -s lint", "check"],
+		["cargo insta test", "check"],
+		["cargo insta test --accept", "mutation"],
+		["cargo insta test --unreferenced=delete", "mutation"],
 		// Go and Rust's routine third-party runner and linters (x10-3).
 		["cargo nextest run --workspace", "check"],
 		["golangci-lint run ./...", "check"],
