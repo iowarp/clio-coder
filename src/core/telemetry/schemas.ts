@@ -2021,6 +2021,8 @@ export const TurnContinuedSchema = Type.Object(
 		attempt: count,
 		cap: count,
 		jobId: Type.Optional(ExistingId),
+		/** The user turn this continuation continues, as its records name it in `ctx.turnId` (memory design 4.6). */
+		continues: Type.Optional(ExistingId),
 	},
 	closed,
 );
@@ -2349,9 +2351,13 @@ export const MessageSteppedSchema = Type.Object(
 	closed,
 );
 export type MessageStepped = Static<typeof MessageSteppedSchema>;
+/** A firing's id, monotonic per session (or per run in a worker): `fir_` and its sequence number (memory design 4.1). */
+const FiringIdSchema = Type.String({ pattern: "^fir_[1-9][0-9]{0,15}$" });
 /** One middleware rule that emitted effects at a hook; ctx names the session or run, turn and tool call (#431). */
 export const MiddlewareFiredSchema = Type.Object(
 	{
+		/** Present when an effect is one that settles (`request_continuation`, `block_tool`, `lock_tools`). */
+		firingId: Type.Optional(FiringIdSchema),
 		hook: vocabulary(["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"]),
 		phase: vocabulary(["sync", "async", "awaited"]),
 		ruleId: ExistingId,
@@ -2363,6 +2369,64 @@ export const MiddlewareFiredSchema = Type.Object(
 			Type.String({ pattern: "^[a-z][a-z0-9-]{0,31}:[A-Za-z0-9_.-]{1,64}(?:@[a-z][a-z0-9-]{0,31})?$" }),
 		),
 		tool: Type.Optional(ExistingId),
+	},
+	closed,
+);
+/** The closed vocabulary a firing settles with (memory design 4.1). */
+export const SURFACE_OUTCOMES = [
+	"used",
+	"acted",
+	"recovered",
+	"held",
+	"contradicted",
+	"declined",
+	"ignored",
+	"moot",
+	"expired",
+	"exhausted",
+	"suppressed",
+] as const;
+export type SurfaceOutcome = (typeof SURFACE_OUTCOMES)[number];
+/** The typed fact a settlement rests on; `none` when nothing followed. */
+export const SETTLEMENT_FACT_KINDS = ["receipt", "declaration", "fold", "retry", "scope-end", "none"] as const;
+/**
+ * A firing's one settlement: the request that carried its text or effect (null when none did), its outcome, and the
+ * terminal fact it rests on, `ref` naming that fact's tool call, check or event. `surface` is a `SIDE_SURFACES` id or
+ * a middleware rule's registration id (memory design 4.1, 4.6).
+ */
+export const SurfaceSettledSchema = Type.Object(
+	{
+		firingId: FiringIdSchema,
+		surface: ExistingId,
+		admittedIn: Type.Union([CallIdSchema, Type.Null()]),
+		outcome: vocabulary(SURFACE_OUTCOMES),
+		fact: Type.Object({ kind: vocabulary(SETTLEMENT_FACT_KINDS), ref: Type.Optional(ExistingId) }, closed),
+	},
+	closed,
+);
+export type SurfaceSettled = Static<typeof SurfaceSettledSchema>;
+/** The loop guard blocked a verbatim-repeated call; `disposition` is how far it escalated (memory design 4.6). */
+export const LoopBlockedSchema = Type.Object(
+	{
+		tool: ExistingId,
+		repeatCount: count,
+		blocksThisTurn: count,
+		budget: count,
+		disposition: vocabulary(["block", "lockout", "stop"]),
+	},
+	closed,
+);
+/** The loop guard counted a turn's calls past its soft budget, or its hard ceiling when `interrupted`. */
+export const ToolBudgetExceededSchema = Type.Object(
+	{
+		tool: ExistingId,
+		callsThisTurn: count,
+		softBudget: count,
+		hardCeiling: count,
+		interrupted: Type.Boolean(),
+		template: Type.Optional(ExistingId),
+		stepTool: Type.Optional(ExistingId),
+		rolled: Type.Optional(Type.Literal(true)),
 	},
 	closed,
 );

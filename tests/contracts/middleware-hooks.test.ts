@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { Type } from "typebox";
+import { validPayload } from "../../src/core/telemetry/events.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
+import { newCallId } from "../../src/core/telemetry/ids.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
@@ -109,6 +112,130 @@ describe("middleware hook boundary", () => {
 		});
 		strictEqual(collector.take("user-2").duplicateDispatch, true);
 		deepStrictEqual(collector.take("user-2").toolNames, []);
+	});
+
+	it("settles each firing once against the request that carried it and the typed fact after it (memory design MD12)", () => {
+		const sessionId = "md12-outcome-ledger";
+		const collector = createTurnOutcomeCollector();
+		const nudge = (id: string, flag: string): MiddlewareHookRegistration =>
+			registration(
+				id,
+				(input) =>
+					input.metadata?.[flag] === true
+						? [
+								{ kind: "inject_reminder", message: `${id} reminder` },
+								{ kind: "request_continuation", message: `${id} continue` },
+							]
+						: [],
+				{ hooks: ["turn_end"] },
+			);
+		const middleware = createMiddlewareBundle({
+			registrations: [
+				collector,
+				nudge("nudge.a", "fireA"),
+				nudge("nudge.b", "fireB"),
+				registration("reminder.only", () => [{ kind: "inject_reminder", message: "count only" }], {
+					hooks: ["turn_end"],
+				}),
+				registration("guard.fixture", (input) =>
+					input.toolArgs?.path === "loop" ? [{ kind: "block_tool", reason: "repeat", severity: "hard-block" }] : [],
+				),
+			],
+		}).contract;
+		const hub = telemetryHub();
+		const fired: Array<{ ruleId: string; firingId?: string }> = [];
+		const settled = new Map<string, { surface: string; outcome: string; admittedIn: string | null; fact: string }>();
+		const stops = [
+			hub.subscribe("middleware.fired", (payload, ctx) => {
+				if (ctx?.sessionId === sessionId) fired.push(payload);
+			}),
+			hub.subscribe("surface.settled", (payload, ctx) => {
+				if (ctx?.sessionId !== sessionId) return;
+				ok(validPayload("surface.settled", payload), JSON.stringify(payload));
+				ok(!settled.has(payload.firingId), `settled twice: ${payload.firingId}`);
+				settled.set(payload.firingId, {
+					surface: payload.surface,
+					outcome: payload.outcome,
+					admittedIn: payload.admittedIn,
+					fact: payload.fact.kind,
+				});
+			}),
+		];
+		const detach = collector.attachLedger(hub);
+		const hook = (input: MiddlewareHookInput) => middleware.runHook({ sessionId, ...input });
+		const ids = () => fired.flatMap((row) => (row.firingId === undefined ? [] : [row.firingId]));
+		const call = (turnId: string, toolName: string, toolCallId: string, toolArgs: Record<string, unknown>) => {
+			hook({ hook: "before_tool", turnId, toolName, toolCallId, toolArgs });
+			hook({ hook: "after_tool", turnId, toolName, toolCallId, toolArgs, metadata: { resultKind: "ok" } });
+		};
+		const [c1, c2, c3, c4, c5, c6] = [newCallId(), newCallId(), newCallId(), newCallId(), newCallId(), newCallId()];
+		try {
+			// Turn 1: two nudges ride one request; one check credits the later firing and the other is moot. The same
+			// rule fires again in the same turn under a new id, and waits for the next turn's request.
+			hook({ hook: "turn_start", turnId: "u1" });
+			collector.requestSent(c1);
+			hook({ hook: "turn_end", turnId: "a1", metadata: { userTurnId: "u1", fireA: true, fireB: true } });
+			const [a1, b1] = ids();
+			collector.requestSent(c2);
+			call("u1", "verify", "t-check", { check: "test" });
+			hook({ hook: "turn_end", turnId: "a2", metadata: { userTurnId: "u1", fireA: true } });
+			const a2 = ids()[2];
+			ok(a1 && b1 && a2 && new Set([a1, b1, a2]).size === 3, `two firings of one rule stay distinct: ${ids()}`);
+			deepStrictEqual(
+				fired.filter((row) => row.ruleId === "reminder.only").map((row) => row.firingId),
+				[undefined, undefined],
+			);
+			// Turn 2: the delayed nudge is carried by this turn's first request; a read states nothing, an edit acts.
+			// A block whose turn sees only reads and its own call's success is ignored, never recovered.
+			hook({ hook: "turn_start", turnId: "u2" });
+			collector.requestSent(c3);
+			call("u2", "read", "t-read", { path: "a.ts" });
+			call("u2", "edit", "t-edit", { path: "a.ts" });
+			hook({ hook: "before_tool", turnId: "u2", toolName: "bash", toolCallId: "t-loop", toolArgs: { path: "loop" } });
+			const g1 = ids()[3];
+			collector.requestSent(c4);
+			call("u2", "read", "t-read-2", { path: "b.ts" });
+			hook({ hook: "turn_end", turnId: "a3", metadata: { userTurnId: "u2" } });
+			// Turn 3: a lockout exhausts the block; a nudge that is spent before any request carries it is suppressed.
+			hook({ hook: "turn_start", turnId: "u3" });
+			hook({ hook: "before_tool", turnId: "u3", toolName: "bash", toolCallId: "t-loop-2", toolArgs: { path: "loop" } });
+			const g2 = ids()[4];
+			hub.emit(
+				"safety.loop_blocked",
+				{ tool: "bash", repeatCount: 3, blocksThisTurn: 3, budget: 3, interrupted: false, disposition: "lockout", at: 1 },
+				{ sessionId, agent: { role: "main", id: sessionId }, turnId: "u3" },
+			);
+			collector.requestSent(c5);
+			call("u3", "edit", "t-edit-2", { path: "c.ts" });
+			hook({ hook: "turn_end", turnId: "a4", metadata: { userTurnId: "u3", fireA: true, fireB: true } });
+			const [a3, b2] = ids().slice(5);
+			collector.suppressFirings([b2 as string]);
+			// Turn 4: the carried nudge meets no receipt, so it is ignored, not moot.
+			hook({ hook: "turn_start", turnId: "u4" });
+			collector.requestSent(c6);
+			hook({ hook: "turn_end", turnId: "a5", metadata: { userTurnId: "u4" } });
+			const expected = [
+				[a1, "nudge.a", "moot", c2, "receipt"],
+				[b1, "nudge.b", "acted", c2, "receipt"],
+				[a2, "nudge.a", "acted", c3, "receipt"],
+				[g1, "guard.fixture", "ignored", c4, "none"],
+				[g2, "guard.fixture", "exhausted", c5, "scope-end"],
+				[a3, "nudge.a", "ignored", c6, "none"],
+				[b2, "nudge.b", "suppressed", null, "none"],
+			];
+			deepStrictEqual(
+				Object.fromEntries([...settled].sort(([x], [y]) => x.localeCompare(y))),
+				Object.fromEntries(
+					expected
+						.map(([id, surface, outcome, admittedIn, fact]) => [id, { surface, outcome, admittedIn, fact }] as const)
+						.sort(([x], [y]) => String(x).localeCompare(String(y))),
+				),
+			);
+			strictEqual(ids().length, settled.size);
+		} finally {
+			detach();
+			for (const stop of stops) stop();
+		}
 	});
 	afterEach(() => {
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });

@@ -1615,6 +1615,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitFooterNotice,
 		bus: deps.bus,
 		stepTurnEnd: () => stepTurnEnd(),
+		suppressFirings: (firingIds) => outcomeCollector.suppressFirings(firingIds),
 	});
 
 	try {
@@ -1849,6 +1850,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	});
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
 	if (deps.turnOutcomeCollector === undefined) deps.middlewareRegistrar?.registerHook(outcomeCollector);
+	/** Settles every firing that costs a round, against the requests and typed facts that follow it (memory design 4.1). */
+	const detachOutcomeLedger = deps.bus ? outcomeCollector.attachLedger(deps.bus) : null;
 
 	/**
 	 * A recovery exchange is a durable insert (F13): the record holds the exact pair, stands for the stopped reply
@@ -2097,7 +2100,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		retrySettings,
 		sessionId: () => deps.session?.current()?.id,
 		sessionOrigin: () => deps.session?.current() ?? null,
-		onModelRequestSent: (call) => messagePath.requestSent(call),
+		onModelRequestSent: (call) => {
+			messagePath.requestSent(call);
+			outcomeCollector.requestSent(call.callId);
+		},
 		onModelCallSettled: (facts) => messagePath.callSettled(facts),
 		requestCursor: () =>
 			requestCursorOf(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? null, {
@@ -2336,13 +2342,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		generation: number,
 		constraints: ChatSubmitOptions["constraints"],
 		lastToolCall: TurnToolCall | null,
+		stoppedTurnId: string | null,
 	): Promise<void> => {
 		const counted = countsAgainstCap(stop);
 		const attempt = counted ? state.continuation.countYoloContinuation() : state.continuation.yoloContinuations;
 		const context = deps.session?.current()?.id;
 		deps.bus?.emit(
 			"turn.continued",
-			{ cause: stop.cause, attempt, cap: TURN_CONTINUATION_CAP, at: Date.now() },
+			{
+				cause: stop.cause,
+				attempt,
+				cap: TURN_CONTINUATION_CAP,
+				at: Date.now(),
+				// The turn it continues, so a continuation joins the stopped turn's own records (memory design 4.6).
+				...(stoppedTurnId !== null ? { continues: stoppedTurnId } : {}),
+			},
 			...(context === undefined ? [] : [ownerTelemetryContext({ sessionId: context })]),
 		);
 		if (stop.rolled !== true)
@@ -3034,16 +3048,31 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				result.text,
 				asked.map((entry) => entry.id),
 			);
+			// A verdict is the triage firing: `acted` when its relabel or interrupt applied, `expired` when the queue moved
+			// on before it could (memory design 4.5). A round with no verdict fired nothing.
+			const settleTriage = (applied: string | null): void => {
+				const sessionId = origin?.id;
+				if (verdicts.length === 0 || sessionId === undefined) return;
+				outcomeCollector.settleHostFiring(
+					sessionId,
+					"triage",
+					applied === null ? "expired" : "acted",
+					applied === null ? { kind: "none" } : { kind: "receipt", ref: applied },
+				);
+			};
 			if (!triageSnapshotMatches(asked, queues.entries())) {
+				settleTriage(null);
 				return;
 			}
-			applyTriage(verdicts, triage.autoInterrupt);
+			settleTriage(applyTriage(verdicts, triage.autoInterrupt));
 		} finally {
 			clearTimeout(deadline);
 		}
 	};
 
-	const applyTriage = (verdicts: ReadonlyArray<TriageVerdict>, autoInterrupt: boolean): void => {
+	/** Applies each verdict once; returns the first queued message it applied to, or null when none was left. */
+	const applyTriage = (verdicts: ReadonlyArray<TriageVerdict>, autoInterrupt: boolean): string | null => {
+		let applied: string | null = null;
 		for (const verdict of verdicts) {
 			const entry = queues.entries().find((candidate) => candidate.id === verdict.id);
 			if (entry === undefined) continue;
@@ -3069,10 +3098,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// The interrupt path reports its own refusals; nothing else to do here.
 				});
 				// One interrupt per round: the rest of the queue is held for the new run.
-				return;
+				return applied ?? taken.id;
 			}
 			queues.relabel(entry.id, triageLabelsFor(verdict), triageKindFor(verdict));
+			applied ??= entry.id;
 		}
+		return applied;
 	};
 
 	const api: ChatLoop = {
@@ -4482,7 +4513,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						else if (continuation !== null) {
 							// Read before the resubmit appends anything: the stopped turn's own last call.
 							const lastToolCall = lastToolCallOf(evidence.messages());
-							await continueStoppedTurn(continuation, generation, options.constraints, lastToolCall);
+							await continueStoppedTurn(continuation, generation, options.constraints, lastToolCall, userTurnId);
 						}
 					}
 				}
@@ -4859,6 +4890,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			unsubscribePluginsReload?.();
 			unsubscribeSynthesisLock?.();
 			unsubscribeToolBudgetLock?.();
+			detachOutcomeLedger?.();
 			unsubscribePrewarmCompaction();
 			prewarm.dispose();
 			keepalive.dispose();

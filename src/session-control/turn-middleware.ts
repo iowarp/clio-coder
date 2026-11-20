@@ -18,6 +18,7 @@ import {
 	type MiddlewareContract,
 	type MiddlewareEffect,
 	type MiddlewareHookInput,
+	type MiddlewareHookResult,
 	type MiddlewareMetadataValue,
 	type MiddlewareReminderSeverity,
 	type MiddlewareToolChoiceControl,
@@ -66,6 +67,12 @@ export interface TurnMiddlewareDeps {
 	 * of the earlier turn that opened the step pipeline it continues (bt-12 #4). Null off a step-policy turn.
 	 */
 	stepTurnEnd?: () => { continues: boolean; startTurnId?: string } | null;
+	/**
+	 * The settling firings whose effect never entered a request: a spent or declared-away continuation, a turn that
+	 * errored or was aborted, a refused turn start, a released reminder buffer. The outcome ledger settles them
+	 * `suppressed` (memory design 4.1).
+	 */
+	suppressFirings?: (firingIds: ReadonlyArray<string>) => void;
 }
 
 /** The awaited turn_start phase's answer: the turn's refusal, or the effects an admitted turn applies. */
@@ -150,6 +157,20 @@ function reminderNoticeLevel(severity: MiddlewareReminderSeverity): "info" | "wa
 	return severity === "warn" || severity === "hard-block" ? "warning" : "info";
 }
 
+/** Each effect of a settling firing, mapped to that firing's id, by the order the runtime records them in. */
+function firingsOf(result: MiddlewareHookResult): Map<MiddlewareEffect, string> {
+	const owners = new Map<MiddlewareEffect, string>();
+	let offset = 0;
+	for (const rule of result.fired ?? []) {
+		if (rule.firingId !== undefined)
+			for (const effect of result.effects.slice(offset, offset + rule.effects.length)) owners.set(effect, rule.firingId);
+		offset += rule.effects.length;
+	}
+	return owners;
+}
+
+const NO_HOOK_RESULT = { effects: [] as ReadonlyArray<MiddlewareEffect>, firings: new Map<MiddlewareEffect, string>() };
+
 export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 	const { state, middlewareToolChoice } = deps;
 	// Internal availability includes admitted gateway capabilities. Keep the
@@ -174,25 +195,49 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		severity: MiddlewareReminderSeverity;
 		deferred: boolean;
 		isCurrent?: (() => boolean) | undefined;
+		/** The settling firings this text carries; a firing no remaining entry carries never entered a request. */
+		firingIds?: string[];
 	}> = [];
+	const releaseFirings = (removed: ReadonlyArray<{ firingIds?: string[] }>): void => {
+		const ids = removed.flatMap((entry) => entry.firingIds ?? []);
+		if (ids.length === 0) return;
+		const carried = new Set(pendingReminders.flatMap((entry) => entry.firingIds ?? []));
+		const released = ids.filter((id) => !carried.has(id));
+		if (released.length > 0) deps.suppressFirings?.(released);
+	};
 	const dropStale = () => {
+		const removed: Array<{ firingIds?: string[] }> = [];
 		for (let index = pendingReminders.length - 1; index >= 0; index--) {
-			if (pendingReminders[index]?.isCurrent?.() === false) pendingReminders.splice(index, 1);
+			if (pendingReminders[index]?.isCurrent?.() === false) removed.push(...pendingReminders.splice(index, 1));
 		}
+		releaseFirings(removed);
 	};
 
+	/** True when the message is in the buffer afterwards, its own entry or an identical one already there. */
 	const bufferReminder = (
 		message: string,
 		severity: MiddlewareReminderSeverity,
 		deferred = false,
 		isCurrent?: () => boolean,
-	): void => {
+		firingId?: string,
+	): boolean => {
 		dropStale();
 		// Memory text revalidates its own offer (cited facts, open failures) until the request carries it.
 		isCurrent ??= message.startsWith("Memory:") ? deps.memoryContentGuard?.(message) : undefined;
-		if (isCurrent?.() === false) return;
-		if (pendingReminders.some((entry) => entry.message === message && entry.severity === severity)) return;
-		pendingReminders.push({ message, severity, deferred, isCurrent });
+		if (isCurrent?.() === false) return false;
+		const existing = pendingReminders.find((entry) => entry.message === message && entry.severity === severity);
+		if (existing !== undefined) {
+			if (firingId !== undefined) existing.firingIds = [...(existing.firingIds ?? []), firingId];
+			return true;
+		}
+		pendingReminders.push({
+			message,
+			severity,
+			deferred,
+			isCurrent,
+			...(firingId !== undefined ? { firingIds: [firingId] } : {}),
+		});
+		return true;
 	};
 
 	// Per-registration throws are already isolated inside the runtime; anything escaping it is a runtime bug that
@@ -214,26 +259,28 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		);
 	};
 
-	const runMiddlewareTurnHook = (input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> => {
-		if (!deps.middleware) return [];
+	const runMiddlewareTurnHook = (input: MiddlewareHookInput): typeof NO_HOOK_RESULT => {
+		if (!deps.middleware) return NO_HOOK_RESULT;
 		try {
-			return deps.middleware.runHook(input).effects;
+			const result = deps.middleware.runHook(input);
+			return { effects: result.effects, firings: firingsOf(result) };
 		} catch (error) {
 			reportHookFailure(input.hook, error);
-			return [];
+			return NO_HOOK_RESULT;
 		}
 	};
 
 	const runMiddlewareTurnHookAsync = async (
 		input: MiddlewareHookInput,
 		priorEffects: ReadonlyArray<MiddlewareEffect>,
-	): Promise<ReadonlyArray<MiddlewareEffect>> => {
-		if (!deps.middleware?.runAsyncHook) return [];
+	): Promise<typeof NO_HOOK_RESULT> => {
+		if (!deps.middleware?.runAsyncHook) return NO_HOOK_RESULT;
 		try {
-			return (await deps.middleware.runAsyncHook(input, priorEffects)).effects;
+			const result = await deps.middleware.runAsyncHook(input, priorEffects);
+			return { effects: result.effects, firings: firingsOf(result) };
 		} catch (error) {
 			reportHookFailure(input.hook, error);
-			return [];
+			return NO_HOOK_RESULT;
 		}
 	};
 
@@ -242,6 +289,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		severity: MiddlewareReminderSeverity,
 		source: NoticeSource,
 		display = true,
+		firingId?: string,
 	): void => {
 		if (!deps.session?.current()) return;
 		try {
@@ -250,8 +298,9 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				parentTurnId: state.lastTurnId,
 				customType: "middlewareReminder",
 				display,
-				// The source rides with the entry so a resumed transcript titles the callout the live one did.
-				data: { message, severity, source },
+				// The source rides with the entry so a resumed transcript titles the callout the live one did. The firing id
+				// joins the entry to its firing row and its settlement (memory design 4.1).
+				data: { message, severity, source, ...(firingId !== undefined ? { firingId } : {}) },
 			});
 		} catch {
 			// Reminder persistence is best-effort; the live notice still
@@ -265,14 +314,15 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		severity: MiddlewareReminderSeverity,
 		source: NoticeSource = "reminder",
 		modelOnly = false,
-	): void => {
+		firingId?: string,
+	): boolean => {
 		if (modelOnly && severity !== "hard-block") {
 			// Advice for the model rides the next request and stays in the ledger
 			// for inspection. As a callout it reached the operator after the
 			// answer they asked for, addressed to someone else.
-			bufferReminder(message, severity);
-			appendMiddlewareReminderEntry(message, severity, source, false);
-			return;
+			const buffered = bufferReminder(message, severity, false, undefined, firingId);
+			appendMiddlewareReminderEntry(message, severity, source, false, firingId);
+			return buffered;
 		}
 		if (message.startsWith(FINISH_CONTRACT_ADVISORY_MESSAGE) && severity === "warn") {
 			// The finish decision is already in the evidence ledger. Surface the
@@ -304,7 +354,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					: `Clio changed files but ran no check on them afterwards${hint}`,
 				"finish.unverified",
 			);
-			return;
+			return false;
 		}
 		if (
 			severity === "warn" &&
@@ -324,9 +374,9 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 						: "validation evidence recorded; coverage of the change not measured",
 				"finish.coverage-unverified",
 			);
-			return;
+			return false;
 		}
-		bufferReminder(message, severity);
+		const buffered = bufferReminder(message, severity, false, undefined, firingId);
 		if (severity === "hard-block") {
 			// Interrupt the turn unless the streaming tool-prose cutoff already
 			// aborted it mid-delta; the buffered reminder carries the recovery
@@ -336,10 +386,11 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				agentRuntime.agent.abort();
 				deps.emitNotice(message, "warning", source);
 			}
-			return;
+			return buffered;
 		}
-		appendMiddlewareReminderEntry(message, severity, source);
+		appendMiddlewareReminderEntry(message, severity, source, true, firingId);
 		deps.emitNotice(message, reminderNoticeLevel(severity), source);
+		return buffered;
 	};
 
 	/** Whether {@link applyTurnEndReminder} writes this reminder to the ledger; mirrors its branches. */
@@ -369,7 +420,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		note?: string,
 		reserved?: "verification",
 		persisted = false,
-	): void => {
+		firingId?: string,
+	): boolean => {
 		if (!state.continuation.request(reserved)) {
 			if (reserved === "verification") {
 				deps.emitFooterNotice(
@@ -377,28 +429,29 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					"the change has no validation evidence and this prompt's verification nudge is spent; it is recorded unverified",
 					"nudge.verification.spent",
 				);
-				return;
+				return false;
 			}
 			// One continuation per user prompt, and that cap is all this branch
 			// knows. It cannot tell whether the model stalled, answered, or was
 			// carried here by a second producer entirely, so it reports the cap and
 			// leaves any claim about a stall to the watchdog that measures one.
 			deps.emitFooterNotice("warning", "turn still has open work; this turn's nudge is spent", "nudge.continuation.spent");
-			return;
+			return false;
 		}
-		bufferReminder(message, "info");
+		const buffered = bufferReminder(message, "info", false, undefined, firingId);
 		// The nudge reaches the model as context inside the run, never as a
 		// persisted operator turn, so the ledger keeps it for inspection only. A
 		// paired reminder with the same text already keeps it there, once (XR-8).
-		if (!persisted) appendMiddlewareReminderEntry(message, "info", "reminder", false);
+		if (!persisted) appendMiddlewareReminderEntry(message, "info", "reminder", false, firingId);
 		// The producer's own note says what was nudged. An empty note is the plan
 		// close, whose "Carry out this plan?" card is already the announcement.
-		if (note === "") return;
+		if (note === "") return buffered;
 		deps.emitFooterNotice(
 			"info",
 			note === undefined ? "nudged the model to continue" : `nudged the model to continue: ${note}`,
 			"nudge.continuation.sent",
 		);
+		return buffered;
 	};
 
 	const lastAssistantMessage = (messages: ReadonlyArray<AgentMessage>): AgentMessage | null => {
@@ -467,15 +520,29 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		};
 	};
 
-	const applyTurnStartEffects = (effects: ReadonlyArray<MiddlewareEffect>): void => {
+	/** Settle `suppressed` every firing of `firings` none of whose effects entered a request. */
+	const suppressUnentered = (firings: ReadonlyMap<MiddlewareEffect, string>, entered: ReadonlySet<string>): void => {
+		const ids = [...new Set(firings.values())].filter((id) => !entered.has(id));
+		if (ids.length > 0) deps.suppressFirings?.(ids);
+	};
+
+	const applyTurnStartEffects = (
+		effects: ReadonlyArray<MiddlewareEffect>,
+		firings: ReadonlyMap<MiddlewareEffect, string> = new Map(),
+	): void => {
 		middlewareToolChoice.apply(effects);
+		// A tool-choice effect shapes this turn's request; a reminder enters it when buffered. Nothing else applies here.
+		const entered = new Set<string>();
 		for (const effect of effects) {
+			const firingId = firings.get(effect);
 			if (effect.kind === "inject_reminder") {
-				bufferReminder(effect.message, effect.severity ?? "info");
+				if (bufferReminder(effect.message, effect.severity ?? "info", false, undefined, firingId) && firingId)
+					entered.add(firingId);
 			} else if (effect.kind === "notify_operator") {
 				notifyOperator(effect.message, effect.key);
-			}
+			} else if ((effect.kind === "lock_tools" || effect.kind === "require_tool") && firingId) entered.add(firingId);
 		}
+		suppressUnentered(firings, entered);
 	};
 
 	return {
@@ -490,7 +557,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			if (!current()) return false;
 			// This is not a user-turn finish: run only the async observation phase,
 			// never completion assessors or foreground continuation effects.
-			await runMiddlewareTurnHookAsync(
+			const observed = await runMiddlewareTurnHookAsync(
 				{
 					hook: "after_tool",
 					...(sessionId ? { sessionId } : {}),
@@ -499,6 +566,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				},
 				[],
 			);
+			// Its effects are observation only and never applied.
+			suppressUnentered(observed.firings, new Set());
 			if (!current()) return false;
 			dropStale();
 			const ready = pendingReminders.filter((entry) => entry.deferred);
@@ -528,7 +597,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			// The skills reminder and the marketplace offer each list installed
 			// skills on a session's first substantive turn. One discovery pass
 			// verifies every plugin tree once for all turn_start registrations.
-			applyTurnStartEffects(withPluginDiscoveryPass(() => runMiddlewareTurnHook(input)));
+			const started = withPluginDiscoveryPass(() => runMiddlewareTurnHook(input));
+			applyTurnStartEffects(started.effects, started.firings);
 			applyTurnStartEffects(awaitedEffects);
 		},
 
@@ -537,8 +607,11 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				return { refusal: null, effects: [] };
 			const input = turnStartInput(agentRuntime, promptText, pendingSkillRequestCount, false, userTurnId);
 			try {
-				const { effects } = await deps.middleware.runAwaitedHook(input);
+				const result = await deps.middleware.runAwaitedHook(input);
+				const { effects } = result;
 				const refusal = effects.find((effect) => effect.kind === "block_tool");
+				// A refused turn sends no request, so nothing its gate fired can enter one.
+				if (refusal !== undefined) suppressUnentered(firingsOf(result), new Set());
 				return refusal !== undefined ? { refusal: refusal.reason } : { refusal: null, effects };
 			} catch (error) {
 				reportHookFailure(input.hook, error);
@@ -605,8 +678,16 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				text: text.slice(0, MIDDLEWARE_HOOK_TEXT_MAX_CHARS),
 				metadata,
 			};
-			const syncEffects = runMiddlewareTurnHook(input);
-			const effects = [...syncEffects, ...(await runMiddlewareTurnHookAsync(input, syncEffects))];
+			const sync = runMiddlewareTurnHook(input);
+			const later = await runMiddlewareTurnHookAsync(input, sync.effects);
+			const effects = [...sync.effects, ...later.effects];
+			const firings = new Map([...sync.firings, ...later.firings]);
+			/** The settling firings an effect of which entered the reminder buffer, so the next request carries it. */
+			const entered = new Set<string>();
+			const enter = (effect: MiddlewareEffect, carried: boolean): void => {
+				const firingId = firings.get(effect);
+				if (carried && firingId !== undefined) entered.add(firingId);
+			};
 			// The four coordinator obligations come from the producers that already watch them, as typed tags.
 			const facts = effects.flatMap((effect) =>
 				(effect.kind === "inject_reminder" || effect.kind === "request_continuation") && effect.fact !== undefined
@@ -620,11 +701,16 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			// Observation is not recovery authority. No reminder or continuation
 			// may restart a failed or operator-canceled foreground turn.
 			if (stopReason === "aborted") {
+				const removed: Array<{ firingIds?: string[] }> = [];
 				for (let index = pendingReminders.length - 1; index >= 0; index--) {
-					if (pendingReminders[index]?.deferred) pendingReminders.splice(index, 1);
+					if (pendingReminders[index]?.deferred) removed.push(...pendingReminders.splice(index, 1));
 				}
+				releaseFirings(removed);
 			}
-			if (stopReason === "error" || stopReason === "aborted") return;
+			if (stopReason === "error" || stopReason === "aborted") {
+				suppressUnentered(firings, entered);
+				return;
+			}
 			// A continuation paired with a reminder of the same text is written to the ledger by the reminder alone.
 			const paired = new Set(
 				effects.flatMap((effect) =>
@@ -633,13 +719,15 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			);
 			for (const effect of effects) {
 				if (effect.kind === "inject_reminder") {
-					applyTurnEndReminder(
+					const carried = applyTurnEndReminder(
 						agentRuntime,
 						effect.message,
 						effect.severity ?? "info",
 						effect.source === "memory" ? "memory" : "reminder",
 						effect.audience === "model",
+						firings.get(effect),
 					);
+					enter(effect, carried);
 					continue;
 				}
 				if (effect.kind === "request_continuation" && declaredTurn) continue;
@@ -647,11 +735,22 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					// A locked request cannot call the tool a nudge asks for: a plan close
 					// here reasoned over that conflict for 131k tokens until max_tokens.
 					if (effect.toolFree === true || !(state.synthesisToolLock || state.toolBudgetLock))
-						applyRequestContinuation(effect.message, effect.note, effect.reserved, paired.has(effect.message));
+						enter(
+							effect,
+							applyRequestContinuation(
+								effect.message,
+								effect.note,
+								effect.reserved,
+								paired.has(effect.message),
+								firings.get(effect),
+							),
+						);
 					continue;
 				}
 				if (effect.kind === "notify_operator") notifyOperator(effect.message, effect.key);
 			}
+			// A declared turn, a locked request or a spent nudge left these firings nothing to carry.
+			suppressUnentered(firings, entered);
 		},
 
 		/**
@@ -664,6 +763,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			const sessionId = deps.session?.current()?.id;
 			const metadata: Record<string, MiddlewareMetadataValue> = { stage, trigger };
 			if (tokensBefore !== undefined) metadata.tokensBefore = tokensBefore;
+			// The ledger settles a firing here `suppressed` itself: this hook's effects are discarded by design.
 			runMiddlewareTurnHook({
 				hook: "on_compaction",
 				...(sessionId ? { sessionId } : {}),
@@ -695,7 +795,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		},
 
 		clearPendingReminders(): void {
-			pendingReminders.length = 0;
+			releaseFirings(pendingReminders.splice(0));
 		},
 
 		injectDeferredReminder(message, severity = "advisory", isCurrent, source = "reminder"): void {
