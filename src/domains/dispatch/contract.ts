@@ -319,6 +319,8 @@ export interface DispatchPlanTaskResolution {
 	costUpperBoundKnown: boolean;
 	/** Required plan projection: null means this task remains shadow/fixed. */
 	routeApproval: ApprovedAssignmentRoute | null;
+	/** Admission parts only the run can settle, named on the plan card instead of passing silently. */
+	checkedAtRun?: ReadonlyArray<string>;
 }
 
 /**

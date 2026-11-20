@@ -106,6 +106,8 @@ export interface DispatchPlanTaskView {
 	wave: number | null;
 	intent?: DispatchIntent;
 	resolvedVerification?: NonNullable<DispatchRequest["resolvedVerification"]>;
+	/** Admission parts only the run can settle, shown on the card as checked at run. */
+	checkedAtRun?: ReadonlyArray<string>;
 }
 
 export interface DispatchPlanView {
@@ -162,6 +164,7 @@ export interface ResolvedDispatchPlanArtifact {
 				| "allowedCandidates"
 				| "intent"
 				| "resolvedVerification"
+				| "checkedAtRun"
 			> &
 			Required<
 				Pick<
@@ -482,6 +485,7 @@ function renderPlanText(
 			);
 		}
 		if (task.record === true) lines.push("    record=true (bounded redacted display asciicast)");
+		for (const note of task.checkedAtRun ?? []) lines.push(`    checked at run: ${safeField(note)}`);
 		if (task.worktree === true)
 			lines.push(
 				`    worktree=true apply=${task.apply ?? "merge"} destination=${safeField(task.worktreeDestination ?? "unresolved")}`,
@@ -587,6 +591,7 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 		"wave",
 		"intent",
 		"resolvedVerification",
+		"checkedAtRun",
 	]);
 	if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
 	for (const key of [
@@ -643,6 +648,13 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 	if (value.briefing !== undefined && (typeof value.briefing !== "string" || value.briefing.trim().length === 0))
 		return false;
 	if (value.record !== undefined && typeof value.record !== "boolean") return false;
+	if (
+		value.checkedAtRun !== undefined &&
+		(!Array.isArray(value.checkedAtRun) ||
+			value.checkedAtRun.length === 0 ||
+			!value.checkedAtRun.every((note) => typeof note === "string" && note.length > 0))
+	)
+		return false;
 	if (value.worktree !== undefined && value.worktree !== true) return false;
 	if (value.apply !== undefined && value.apply !== "merge" && value.apply !== "preserve") return false;
 	if (value.apply !== undefined && value.worktree !== true) return false;
@@ -914,6 +926,7 @@ export function resolvedDispatchPlanFromArgs(args: Record<string, unknown>): Res
 			task: task.task.trim(),
 			...(task.briefing !== undefined ? { briefing: task.briefing.trim() } : {}),
 			...(task.record !== undefined ? { record: task.record } : {}),
+			...(task.checkedAtRun !== undefined ? { checkedAtRun: [...task.checkedAtRun] } : {}),
 			...(task.context !== undefined ? { context: parseWorkerContextPolicy(task.context) } : {}),
 			...(task.workerContext !== undefined ? { workerContext: structuredClone(task.workerContext) } : {}),
 			...(task.worktree === true

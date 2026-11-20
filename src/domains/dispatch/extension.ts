@@ -36,7 +36,7 @@ import {
 	flowUnmediatedAgentRefusal,
 	resolveModelDestination,
 } from "../safety/information-flow.js";
-import { openStoreBackend } from "../store/index.js";
+import { listedStoreTags, openStoreBackend } from "../store/index.js";
 import { callSettlementFromMessage } from "../telemetry/call-facts.js";
 import { assertTurnConstraintCompatibility } from "./tool-constraints.js";
 import { readToolRounds } from "./types.js";
@@ -1568,23 +1568,51 @@ function withStoreGrantBoundaries(req: DispatchRequest, pathScope: DispatchPathS
 	return { ...pathScope, writeBoundaries: [...new Set([...pathScope.writeBoundaries, ...granted])] };
 }
 
+/** A store grant a read-only run cannot use; checked at preview and at run. */
+function storeGrantScopeRefusal(req: DispatchRequest, readOnly: boolean): string | null {
+	const tags = req.storeTags ?? [];
+	if (tags.length === 0 || !readOnly) return null;
+	return `dispatch: admission denied: agent '${req.agentId}' runs read-only, so a store grant (tags: ${JSON.stringify(tags)}) contradicts its scope; dispatch a writing recipe or drop tags`;
+}
+
+function missingStoreTagRefusal(tag: string): string {
+	return `dispatch: admission denied: store tag '${tag}' does not exist; create it with store create before granting it`;
+}
+
 /** Refuse a tag grant a run cannot use: a read-only run, or a tag that does not exist. */
 async function assertStoreGrantAdmissible(req: DispatchRequest, readOnly: boolean): Promise<void> {
 	const tags = req.storeTags ?? [];
 	if (tags.length === 0) return;
-	if (readOnly) {
-		throw new Error(
-			`dispatch: admission denied: agent '${req.agentId}' runs read-only, so a store grant (tags: ${JSON.stringify(tags)}) contradicts its scope; dispatch a writing recipe or drop tags`,
-		);
-	}
+	const scope = storeGrantScopeRefusal(req, readOnly);
+	if (scope !== null) throw new Error(scope);
 	const backend = await openStoreBackend(req.cwd ?? process.cwd());
 	for (const tag of tags) {
-		if (!(await backend.tagExists(tag))) {
-			throw new Error(
-				`dispatch: admission denied: store tag '${tag}' does not exist; create it with store create before granting it`,
-			);
-		}
+		if (!(await backend.tagExists(tag))) throw new Error(missingStoreTagRefusal(tag));
 	}
+}
+
+/**
+ * The grant's write boundaries are this host's store directories, and the worker on a remote node opens its own
+ * home's store; neither the backend selection nor the project key travels with the assignment, so on any backend
+ * its puts cannot reach this store.
+ */
+function remoteStoreGrantRefusal(req: DispatchRequest, node: RunNodeIdentity | null): string | null {
+	if (node?.kind !== "ssh" || req.storeTags === undefined || req.storeTags.length === 0) return null;
+	return `dispatch: admission denied: node '${node.id}' is remote and a worker there cannot reach this host's store, so it cannot be granted tags ${JSON.stringify(req.storeTags)}; run this task on the local node or drop tags`;
+}
+
+const EXTERNAL_READ_APPROVAL_REQUIRED =
+	"external_read_approval_required: Outside Scout reads require approval bound to this run and canonical root.";
+
+/**
+ * An outside read root admits only a read-only Scout whose cwd is that canonical root. The approval itself is
+ * bound to a run id minted after the plan, so preview checks the shape and run checks the binding as well.
+ */
+function externalReadShapeAdmissible(req: DispatchRequest): boolean {
+	return (
+		req.externalReadRoot === undefined ||
+		(req.agentId === "scout" && req.readOnly === true && canonicalizeExistingPath(req.cwd ?? "") === req.externalReadRoot)
+	);
 }
 
 function pickWorkerScope(
@@ -4605,20 +4633,47 @@ export function createDispatchBundle(
 	 * run row exists, so without this denied `tool.decided` record the journal
 	 * would carry no trace that the admission gate refused the dispatch.
 	 */
-	function denyDispatchForBudget(
-		preflight: { currentUsd: number; ceilingUsd: number; pricing?: BudgetSpendPricing },
-		routeEstimateUsd = 0,
-	): never {
-		const estimateSuffix =
-			routeEstimateUsd > 0 ? ` (includes ${renderUsdEstimate(routeEstimateUsd)} route estimate)` : "";
-		const reason = `budget ceiling crossed: ${budgetSpendText(preflight.currentUsd, preflight.pricing)} / ${renderUsdLimit(preflight.ceilingUsd)}${estimateSuffix}`;
+	function refuseForBudget(message: string): never {
 		safety.decisions.recordToolCall?.({
 			tool: "dispatch",
 			classification: { actionClass: "dispatch" },
 			decision: "denied",
 			reasonCode: "budget-ceiling",
 		});
-		throw new Error(`dispatch: admission denied: ${reason}`);
+		throw new Error(message);
+	}
+
+	function budgetDenialMessage(
+		preflight: { currentUsd: number; ceilingUsd: number; pricing?: BudgetSpendPricing },
+		routeEstimateUsd: number,
+	): string {
+		const estimateSuffix =
+			routeEstimateUsd > 0 ? ` (includes ${renderUsdEstimate(routeEstimateUsd)} route estimate)` : "";
+		return `dispatch: admission denied: budget ceiling crossed: ${budgetSpendText(preflight.currentUsd, preflight.pricing)} / ${renderUsdLimit(preflight.ceilingUsd)}${estimateSuffix}`;
+	}
+
+	/** The route's conservative estimate against the request's own cost bound; named as an estimate (#434 §6.3). */
+	function intentCeilingRefusal(req: DispatchRequest, estimateUsd: number): string | null {
+		const ceilingUsd = req.routingIntent?.maxCostUsd;
+		if (ceilingUsd === null || ceilingUsd === undefined || estimateUsd <= ceilingUsd) return null;
+		return budgetDenialMessage(
+			{ currentUsd: estimateUsd, ceilingUsd, pricing: { estimated: true, unpriced: false } },
+			estimateUsd,
+		);
+	}
+
+	/** The session ceiling against the spend the read model holds now, plus what running workers have metered. */
+	function sessionCeilingRefusal(): SessionCostCeilingError | null {
+		const preflight = scheduling.preflight();
+		const currentUsd = preflight.currentUsd + inFlightSpendUsd();
+		if (!sessionCeilingReached(currentUsd, preflight.ceilingUsd)) return null;
+		return new SessionCostCeilingError(
+			currentUsd,
+			preflight.ceilingUsd,
+			undefined,
+			undefined,
+			combineBudgetPricing(preflight.pricing, inFlightPricing()),
+		);
 	}
 
 	/**
@@ -4678,13 +4733,8 @@ export function createDispatchBundle(
 		signal?: AbortSignal,
 	): Promise<void> {
 		const estimateUsd = conservativeRouteAdmissionEstimateUsd(pricing, admissionMaxOutputTokens(settings), req, prompt);
-		const intentCeiling = req.routingIntent?.maxCostUsd;
-		if (intentCeiling !== null && intentCeiling !== undefined && estimateUsd > intentCeiling)
-			// The amount compared is the route's conservative estimate, so it is named as one (#434 §6.3).
-			denyDispatchForBudget(
-				{ currentUsd: estimateUsd, ceilingUsd: intentCeiling, pricing: { estimated: true, unpriced: false } },
-				estimateUsd,
-			);
+		const intentRefusal = intentCeilingRefusal(req, estimateUsd);
+		if (intentRefusal !== null) refuseForBudget(intentRefusal);
 		if (budgetExemptRoute(pricing)) return;
 		try {
 			if (scheduling.admitPaidRequest) {
@@ -4696,16 +4746,8 @@ export function createDispatchBundle(
 					...(signal ? { signal } : {}),
 				});
 			} else {
-				const preflight = scheduling.preflight();
-				const currentUsd = preflight.currentUsd + inFlightSpendUsd();
-				if (sessionCeilingReached(currentUsd, preflight.ceilingUsd))
-					throw new SessionCostCeilingError(
-						currentUsd,
-						preflight.ceilingUsd,
-						undefined,
-						undefined,
-						combineBudgetPricing(preflight.pricing, inFlightPricing()),
-					);
+				const refusal = sessionCeilingRefusal();
+				if (refusal !== null) throw refusal;
 			}
 		} catch (error) {
 			if (error instanceof SessionCostCeilingError) {
@@ -7705,16 +7747,12 @@ export function createDispatchBundle(
 		if (req.externalReadRoot !== undefined) {
 			const approval = req.externalReadApproval;
 			if (
-				req.agentId !== "scout" ||
-				req.readOnly !== true ||
+				!externalReadShapeAdmissible(req) ||
 				approval === undefined ||
 				approval.root !== req.externalReadRoot ||
-				approval.runId !== req.runIdHint ||
-				canonicalizeExistingPath(req.cwd ?? "") !== approval.root
+				approval.runId !== req.runIdHint
 			)
-				throw new Error(
-					"external_read_approval_required: Outside Scout reads require approval bound to this run and canonical root.",
-				);
+				throw new Error(EXTERNAL_READ_APPROVAL_REQUIRED);
 		}
 		// Admission never awaits a decision model. Routing classifies the task
 		// with the rules, always: a dispatch is the main agent's call, and a
@@ -7820,14 +7858,8 @@ export function createDispatchBundle(
 		await assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings, lifecycle, preparation?.signal);
 
 		const placement = resolveNode(req) ?? null;
-		if (placement?.node.kind === "ssh" && req.storeTags !== undefined && req.storeTags.length > 0) {
-			// The grant's write boundaries are this host's store directories, and the worker on the
-			// node opens its own home's store; neither the backend selection nor the project key
-			// travels with the assignment, so on any backend its puts cannot reach this store.
-			throw new Error(
-				`dispatch: admission denied: node '${placement.node.id}' is remote and a worker there cannot reach this host's store, so it cannot be granted tags ${JSON.stringify(req.storeTags)}; run this task on the local node or drop tags`,
-			);
-		}
+		const remoteStoreGrant = remoteStoreGrantRefusal(req, placement?.node ?? null);
+		if (remoteStoreGrant !== null) throw new Error(remoteStoreGrant);
 		let remoteReturn: FleetChangeReturn | undefined;
 		let remoteImport: FleetChangeImport | undefined;
 		if (placement?.node.kind === "ssh") {
@@ -10814,7 +10846,12 @@ export function createDispatchBundle(
 	function previewFixedStages(
 		req: DispatchRequest,
 		settings: EffectiveSettings,
-	): { resolution: DispatchPlanTaskResolution; grants: DispatchDerivedGrants | null } {
+	): {
+		resolution: DispatchPlanTaskResolution;
+		grants: DispatchDerivedGrants | null;
+		/** Null for an ACP delegation, whose budget admission prices nothing. */
+		pricing: EffectivePricing | null;
+	} {
 		const isAcpAgent = settings?.integrations.externalAgents?.entries?.some((entry) => entry.id === req.agentId) ?? false;
 		if (isAcpAgent && !req.delegationAgentId) req = { ...req, delegationAgentId: req.agentId };
 		const validation = routeValidationProjection(req, true);
@@ -10848,7 +10885,7 @@ export function createDispatchBundle(
 				costUpperBoundKnown: false,
 				routeApproval: null,
 			};
-			return { resolution, grants: null };
+			return { resolution, grants: null, pricing: null };
 		}
 
 		const recipe = agents.get(req.agentId);
@@ -10961,6 +10998,7 @@ export function createDispatchBundle(
 				mcp: admission.mcp ?? null,
 				permit: previewPermit,
 			},
+			pricing: target.effectivePricing,
 		};
 	}
 
@@ -11094,13 +11132,71 @@ export function createDispatchBundle(
 		});
 	}
 
-	const planAgentSelection: DispatchContract["planAgentSelection"] = (input) =>
-		materializeAgentPlanSelection(input, {
+	/**
+	 * The plan-card preview (FL-13): the planned route, then the run's admission checks that can run synchronously,
+	 * through the same cores the run uses. Nothing is consumed or recorded. A part only the run can settle (an outside
+	 * read approval, a clio-core tag lookup, a budget hold) is named on the card as checked at run.
+	 */
+	function previewAdmission(
+		req: DispatchRequest,
+		settings: EffectiveSettings = getEffectiveSettings(),
+	): DispatchPlanTaskResolution {
+		return withPreviewAdmission(req, preview(req, settings), settings);
+	}
+
+	function withPreviewAdmission(
+		req: DispatchRequest,
+		resolution: DispatchPlanTaskResolution,
+		settings: EffectiveSettings,
+	): DispatchPlanTaskResolution {
+		const routed: DispatchRequest = { ...req, agentId: resolution.agentId };
+		const checkedAtRun: string[] = [];
+		if (!externalReadShapeAdmissible(routed)) throw new Error(EXTERNAL_READ_APPROVAL_REQUIRED);
+		if (routed.externalReadRoot !== undefined)
+			checkedAtRun.push(`outside read root ${routed.externalReadRoot}: approval is asked at run`);
+		const tags = routed.storeTags ?? [];
+		if (tags.length > 0) {
+			const recipe = agents.get(routed.agentId);
+			const readOnly =
+				routed.readOnly === true ||
+				(recipe !== null &&
+					(normalizeAgentSpec(recipe).capabilityClass === "read-only" ||
+						isHoareResultContract(dispatchResultContract(routed, recipe))));
+			const scope = storeGrantScopeRefusal(routed, readOnly);
+			if (scope !== null) throw new Error(scope);
+			const remote = remoteStoreGrantRefusal(routed, resolution.node);
+			if (remote !== null) throw new Error(remote);
+			const listed = listedStoreTags(routed.cwd ?? process.cwd());
+			if (listed === null) checkedAtRun.push(`store tags ${JSON.stringify(tags)}: existence checked at run`);
+			const missing = listed === null ? undefined : tags.find((tag) => !listed.includes(tag));
+			if (missing !== undefined) throw new Error(missingStoreTagRefusal(missing));
+		}
+		const intent = intentCeilingRefusal(routed, resolution.costUpperBoundUsd);
+		if (intent !== null) throw new Error(intent);
+		const ceiling = sessionCeilingRefusal();
+		if (ceiling !== null && resolution.runtimeId !== "acp") {
+			const pinned = previewFixedStages(
+				{ ...routed, target: resolution.targetId, model: resolution.wireModelId, node: resolution.node.id },
+				settings,
+			);
+			if (pinned.pricing !== null && !budgetExemptRoute(pinned.pricing)) {
+				if (scheduling.admitPaidRequest === undefined || options?.budgetWaitForRaise !== true) throw ceiling;
+				checkedAtRun.push("session cost ceiling reached: the run waits for a raise");
+			}
+		}
+		return checkedAtRun.length === 0 ? resolution : { ...resolution, checkedAtRun };
+	}
+
+	const planAgentSelection: DispatchContract["planAgentSelection"] = (input) => {
+		const settings = getEffectiveSettings();
+		const selection = materializeAgentPlanSelection(input, {
 			resolve: (request, mode, intent) =>
-				resolveJointRoute(jointRouteInput(request, undefined, getEffectiveSettings(), mode, intent).input).decision,
-			preview: (request) => previewFixed(request),
+				resolveJointRoute(jointRouteInput(request, undefined, settings, mode, intent).input).decision,
+			preview: (request) => previewFixed(request, settings),
 			getAgentSpec: (agentId) => agents.getSpec(agentId),
 		});
+		return { ...selection, resolution: withPreviewAdmission(input.request, selection.resolution, settings) };
+	};
 
 	function routeCandidates(req: DispatchRequest): ReadonlyArray<DispatchFailoverCandidate> {
 		const settings = getEffectiveSettings();
@@ -12115,7 +12211,7 @@ export function createDispatchBundle(
 			) + DISPATCH_DRAIN_GRACE_MS,
 		publishesProgress: true,
 		ownsProgressBus: (bus) => bus === context.bus,
-		preview,
+		preview: previewAdmission,
 		derivedGrants: (req) => previewFixedStages(req, getEffectiveSettings()).grants,
 		planAgentSelection,
 		routeCandidates,

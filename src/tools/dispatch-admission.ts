@@ -584,6 +584,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			routingIntent: request.routingIntent ?? defaultRoutingIntent(request),
 			failover,
 			routeApproval: resolution.routeApproval,
+			...(resolution.checkedAtRun !== undefined ? { checkedAtRun: [...resolution.checkedAtRun] } : {}),
 			agentSelection: request.agentSelection === undefined ? null : structuredClone(request.agentSelection),
 			stepId: null,
 			dependencies: [],
