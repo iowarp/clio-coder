@@ -465,10 +465,12 @@ const TEMP_DIR_ASSIGNERS =
  * reference, and no dynamic assigner may appear), when a quoted here-document or ANSI-C string could hold the
  * reference as text, or when TMPDIR is not the directory `tmpdir()` resolves to or is `/`, the home or above it.
  * Single-quoted and escaped references are text to the outer shell and stay as they are. A TMPDIR that is not an
- * existing directory is no temp root at all: a cd into it fails and the shell stays where it was.
+ * existing directory is no temp root at all: a cd into it fails and the shell stays where it was. The value is never
+ * trimmed: the shell keeps leading and trailing whitespace and word-splits an unquoted reference on it, so a padded
+ * TMPDIR fails the character check and stays named.
  */
 function stableTempDir(): string | null {
-	const value = process.env.TMPDIR?.trim().replace(/(.)\/+$/u, "$1");
+	const value = process.env.TMPDIR?.replace(/(.)\/+$/u, "$1");
 	if (value === undefined || !path.isAbsolute(value) || !/^[\w./+@%,:-]+$/u.test(value)) return null;
 	if (statSync(value, { throwIfNoEntry: false })?.isDirectory() !== true) return null;
 	const temp = canonicalizePath(tmpdir());

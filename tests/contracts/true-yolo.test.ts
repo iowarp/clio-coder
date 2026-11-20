@@ -537,6 +537,17 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
 		strictEqual(verdict(command, "yolo"), "allow/yolo-admitted:damage-control:delete-outside-workspace", command);
 	}
+	// The shell keeps the whitespace in a TMPDIR value and word-splits it, so a padded TMPDIR is no stable temp root,
+	// even when the padded name links to the directory itself.
+	const paddedTemp = join(linkDir, "padded");
+	mkdirSync(paddedTemp);
+	symlinkSync(paddedTemp, `${paddedTemp} `);
+	process.env.TMPDIR = `${paddedTemp} `;
+	try {
+		strictEqual(verdict("rm -rf $TMPDIR/etc"), "block/damage-control:delete-outside-workspace");
+	} finally {
+		process.env.TMPDIR = temp;
+	}
 	// Reading Clio's own state, cleaning the workspace and writing /dev/null stay off the floor.
 	for (const command of [
 		`cat ${join(home.dir, "config", "settings.yaml")}`,
