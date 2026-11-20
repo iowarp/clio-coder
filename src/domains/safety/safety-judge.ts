@@ -12,6 +12,7 @@ import {
 	projectScriptConsequences,
 	storeReplaceConsequences,
 } from "./call-consequence.js";
+import { type RefusedCompound, refusedCompound } from "./compound-refusal.js";
 import type { SafetyDecision } from "./contract.js";
 import type { SafetyJudgementInput } from "./decision-events.js";
 import { GIT_HOOKS_CHANGED_RULE_ID } from "./hook-drift.js";
@@ -590,7 +591,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 					reason: parsed.reason,
 					build,
 					latencyMs,
-					refusal: safetyJudgeRefusal(subject.tool, parsed, after.escalated),
+					refusal: safetyJudgeRefusal(subject.tool, parsed, after.escalated, refusedBashCompound(subject, parsed.reason)),
 					allowedBy:
 						"an operator message must name this action, so ask the operator for it in your reply; the judge hands a call to the operator itself only after repeated blocks.",
 				};
@@ -652,12 +653,68 @@ function screenedReason(source: string): string {
 	return `Clio's safety judge would allow this call, but System One reads a result from ${named} as directing an AI agent, so this call needs your decision.`;
 }
 
+/** A refused bash call's compound shape, or null for any other call and a simple command. */
+function refusedBashCompound(subject: SafetyJudgeSubject, reason: string): RefusedCompound | null {
+	if (subject.tool !== ToolNames.Bash) return null;
+	const command = subject.args?.command;
+	const cwd = subject.args?.cwd;
+	if (typeof command !== "string") return null;
+	try {
+		return refusedCompound(command, reason, typeof cwd === "string" && cwd.length > 0 ? cwd : undefined);
+	} catch {
+		// The split only words the refusal; the block stands without it.
+		return null;
+	}
+}
+
+/** How long one sub-command reads in a refusal, and how many a refusal lists. */
+const PART_MAX_CHARS = 200;
+const PARTS_LISTED = 6;
+
+function quotedPart(part: string): string {
+	const text = boundedLine(redactSecretString(part), PART_MAX_CHARS);
+	return text.includes("`") ? `\`\` ${text} \`\`` : `\`${text}\``;
+}
+
+function listedParts(parts: ReadonlyArray<string>): string {
+	const shown = parts.slice(0, PARTS_LISTED).map(quotedPart);
+	const more = parts.length - shown.length;
+	return [...shown, ...(more > 0 ? [`${more} more`] : [])].join("; ");
+}
+
+/** What a refused compound tells the agent to run instead: the named part alone, then the rest. */
+function compoundRoute(compound: RefusedCompound): string {
+	const count = compound.parts.length;
+	const rest =
+		"A sub-command the judge refuses again is not run either: take a route that stays inside the workspace and scratch roots, or record it as an open decision for your final reply and continue with the rest of the task.";
+	if (compound.offending.length === 0) {
+		return [
+			`This is a compound command of ${count} sub-commands: ${listedParts(compound.parts)}. The judge's reason does not single one out.`,
+			"Do not retry the compound command or a reworded form of it. Run each sub-command as its own call, so the judge reviews the one it objects to alone.",
+			rest,
+		].join("\n");
+	}
+	const one = compound.offending.length === 1;
+	return [
+		`This is a compound command of ${count} sub-commands, and the block is about ${one ? "the sub-command" : "the sub-commands"} ${listedParts(compound.offending)}.`,
+		`Do not retry the compound command or a reworded form of it. Run ${one ? "that sub-command" : "each of those sub-commands"} as its own call, apart from the rest, so the judge reviews it alone, and run the other sub-commands as their own calls.`,
+		rest,
+	].join("\n");
+}
+
 /** The refused tool result the model reads for a block. */
-function safetyJudgeRefusal(tool: string, verdict: { rule: string; reason: string }, escalated: boolean): string {
+function safetyJudgeRefusal(
+	tool: string,
+	verdict: { rule: string; reason: string },
+	escalated: boolean,
+	compound: RefusedCompound | null,
+): string {
 	return [
 		`Clio's safety judge blocked this ${tool} call (rule ${verdict.rule}): ${verdict.reason}`,
 		"The judge reviewed this call against the operator's own messages and did not find this action authorized.",
-		"Do not retry this call or a reworded form of it. Take a route that stays inside the workspace and scratch roots, or record this open decision for your final reply and continue with the rest of the task.",
+		compound === null
+			? "Do not retry this call or a reworded form of it. Take a route that stays inside the workspace and scratch roots, or record this open decision for your final reply and continue with the rest of the task."
+			: compoundRoute(compound),
 		...(escalated
 			? ["The judge has blocked repeatedly, so the next call that needs approval goes to the operator."]
 			: []),
