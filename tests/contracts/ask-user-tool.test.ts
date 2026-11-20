@@ -1,7 +1,6 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { skillInstallOfferTag } from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
@@ -14,22 +13,23 @@ import {
 } from "../../src/domains/safety/unattended.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { validateEngineToolArguments } from "../../src/engine/ai.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { createAskUserToolPolicy } from "../../src/session-control/chat-loop-messages.js";
+import { resolveAgentTools } from "../../src/tools/agent-tools.js";
 import {
 	type AskUserQuestion,
 	type AskUserResult,
-	askUserParameters,
 	closeAskUserInterviewOnAssistantTurn,
-	createAskUserTool,
 	UNATTENDED_ESCAPE_ANSWER,
 	UNATTENDED_FREE_TEXT_ANSWER,
 	UNATTENDED_OUTWARD_ANSWER,
 } from "../../src/tools/ask-user.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
-import { type AskUserToolPolicy, createRegistry, prepareToolArgs, type ToolResult } from "../../src/tools/registry.js";
+import { resolveToolRow } from "../../src/tools/presentation.js";
+import { type AskUserToolPolicy, createRegistry, type ToolResult } from "../../src/tools/registry.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -63,6 +63,7 @@ function fixture(replies: Reply[], autonomy: AutonomyLevel = "default", live = f
 	const policy = createAskUserToolPolicy([{ name: ToolNames.AskUser }]);
 	if (!policy) throw new Error("the chat loop creates no interview policy for ask_user");
 	return {
+		registry,
 		shown,
 		presentations,
 		fallbacks,
@@ -321,12 +322,27 @@ describe("ask_user tool", () => {
 	// CLI-P39: a bare-string question cost a round on "questions.0: expected object, got string".
 	it("asks a bare-string question as { question } before schema validation, with the schema unchanged", async () => {
 		const raw = { questions: ["Which cache key?", { question: "Anything else?" }] };
-		ok(!Value.Check(askUserParameters, raw), "the attached schema still refuses the raw shape");
-		const prepared = prepareToolArgs(createAskUserTool(), raw);
-		ok(Value.Check(askUserParameters, prepared), JSON.stringify(prepared));
 		const f = fixture([{ answers: [{ question: "Which cache key?", answer: "Node id" }] }]);
+		const tool = resolveAgentTools({ registry: f.registry }).find((candidate) => candidate.name === ToolNames.AskUser);
+		ok(tool);
+		const toolCall = (args: Record<string, unknown>) => ({
+			type: "toolCall" as const,
+			id: "c1",
+			name: tool.name,
+			arguments: args,
+		});
+		throws(
+			() => validateEngineToolArguments(tool, toolCall(raw)),
+			/questions/,
+			"the attached schema still refuses the raw shape",
+		);
+		const prepared = (tool.prepareArguments?.(raw) ?? raw) as Record<string, unknown>;
+		validateEngineToolArguments(tool, toolCall(prepared));
 		strictEqual((await f.call(raw)).kind, "ok");
 		deepStrictEqual(f.shown, [[{ question: "Which cache key?" }, { question: "Anything else?" }]]);
+		// The TUI row reads the raw args, so a lone bare string is its object and a settled row can inline the answer.
+		const row = resolveToolRow(ToolNames.AskUser, { questions: ["Which cache key?"] });
+		deepStrictEqual(row.spec.object?.(row.args, {}), { text: "Which cache key?" });
 	});
 
 	it("answers a round nobody answered with its recommended options, closes the interview, and says so", async () => {
