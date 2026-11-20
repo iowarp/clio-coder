@@ -32,6 +32,10 @@ on:
         description: Caller's unique run name, so the caller finds this run without comparing clocks
         required: false
         type: string
+      credits:
+        description: Reporter credits JSON from scripts/report-credits.mjs for the release notes (empty leaves them unchanged)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -85,7 +89,15 @@ jobs:
           retention-days: 30
       - run: pnpm install --frozen-lockfile
       - name: Check, build, pack once, and prepare the website
-        run: node scripts/release-candidate.mjs prepare --directory "$RUNNER_TEMP/candidate"
+        env:
+          CREDITS: ${{ inputs.credits }}
+        run: |
+          if test -n "$CREDITS"; then
+            printf '%s' "$CREDITS" > "$RUNNER_TEMP/credits.json"
+            node scripts/release-candidate.mjs prepare --directory "$RUNNER_TEMP/candidate" --credits "$RUNNER_TEMP/credits.json"
+          else
+            node scripts/release-candidate.mjs prepare --directory "$RUNNER_TEMP/candidate"
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: candidate-${{ inputs.sha }}
