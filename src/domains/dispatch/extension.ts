@@ -435,7 +435,7 @@ import {
 	taskRequestsTestRemoval,
 	taskWorktreeCommitMessage,
 } from "./merge-gate.js";
-import { OBLIGATION_RETRY_LIMIT, resolveObligation, resolveRunRole } from "./obligation.js";
+import { OBLIGATION_RETRY_LIMIT, type Obligation, resolveObligation, resolveRunRole } from "./obligation.js";
 import { recoverAbandonedRuns } from "./orphan-recovery.js";
 import {
 	type ResolvedTerminalReason,
@@ -5134,7 +5134,7 @@ export function createDispatchBundle(
 		failureClass: FailureClass,
 		contextOverflow = false,
 		currentRetryReason: string | null = null,
-		obligationUnmet = false,
+		unmetObligation?: Obligation,
 	): RetryScheduleResult {
 		if (draining) return { scheduled: false };
 		const rootRunId = run.lineage.rootRunId;
@@ -5158,8 +5158,17 @@ export function createDispatchBundle(
 			assignments.get(controlRoot)?.policy.maxRetries ??
 			controlAttempts.get(controlRoot)?.maxRetries ??
 			assignmentPolicyFor(run.req).maxRetries;
-		const maxRetries = obligationUnmet ? Math.min(configuredRetries, OBLIGATION_RETRY_LIMIT) : configuredRetries;
+		const maxRetries =
+			unmetObligation !== undefined ? Math.min(configuredRetries, OBLIGATION_RETRY_LIMIT) : configuredRetries;
 		const baseDecision = decideRetry(failureClass, memberRetryAttempt(run), maxRetries);
+		// Ruling 5 retries an unmet obligation only on another model, and a pinned route has no other.
+		if (unmetObligation !== undefined && baseDecision.retry && failoverModeFor(run.req) === "none") {
+			retryBackoff.delete(controlRoot);
+			return {
+				scheduled: false,
+				settlementDetail: `obligation ${unmetObligation} unmet, not retried because failover is none, which pins the route to the model that left it unmet`,
+			};
+		}
 		// An exact manual route may be retried, but no route component may drift.
 		let decision = recovery.retryDecisionWithinFailover(baseDecision, failoverModeFor(run.req));
 		let overflowRoute: DispatchFailoverCandidate | null = null;
@@ -5284,7 +5293,7 @@ export function createDispatchBundle(
 		detail: string | null,
 		failureClass: FailureClass,
 		contextOverflow = false,
-		obligationUnmet = false,
+		unmetObligation?: Obligation,
 	): void {
 		const controlAttempt = controlAttempts.get(run.runId);
 		if (controlAttempt !== undefined && run.lineage.depth > 0) controlAttempt.receipt = receipt;
@@ -5311,7 +5320,7 @@ export function createDispatchBundle(
 			failureClass,
 			contextOverflow,
 			retryReason,
-			obligationUnmet,
+			unmetObligation,
 		);
 		if (retry.scheduled) return;
 		const currentStatus = assignments.get(assignment.id)?.status;
@@ -10560,7 +10569,7 @@ export function createDispatchBundle(
 					receipt.outcomeDetail ?? finalDetail,
 					failureClass,
 					contextOverflow,
-					evidence.obligationUnmet !== undefined,
+					evidence.obligationUnmet,
 				);
 				return receipt;
 			} catch (error) {

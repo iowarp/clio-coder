@@ -1,7 +1,8 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
+import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -127,6 +128,27 @@ describe("retry target selection", () => {
 			const first = await fleet.bundle.contract.dispatch({ ...REQUEST, cwd: scratch.dir });
 			await fleet.bundle.contract.assignments?.get(first.runId)?.terminal;
 			deepStrictEqual(fleet.spawned, ["default", "second", "third"]);
+		} finally {
+			await fleet.bundle.extension.stop?.();
+		}
+	});
+
+	it("does not rerun a pinned model that left its obligation unmet (ruling 5)", async () => {
+		const fleet = await retryFleet(["default", "other"], new Set(), new Set());
+		try {
+			const scope = declaredScopeIntent({ readRoots: ["src/"] });
+			ok(scope.ok);
+			const first = await fleet.bundle.contract.dispatch({
+				...REQUEST,
+				cwd: scratch.dir,
+				intent: scope.intent,
+				target: "default",
+			});
+			await fleet.bundle.contract.assignments?.get(first.runId)?.terminal;
+			const assignment = fleet.bundle.contract.assignments?.get(first.runId);
+			deepStrictEqual(fleet.spawned, ["default"]);
+			strictEqual(assignment?.status, "failed");
+			match(assignment?.outcomeDetail ?? "", /^obligation observed-evidence unmet, not retried because failover is none/u);
 		} finally {
 			await fleet.bundle.extension.stop?.();
 		}
