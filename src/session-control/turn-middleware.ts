@@ -341,6 +341,20 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		deps.emitNotice(message, reminderNoticeLevel(severity), source);
 	};
 
+	/** Whether {@link applyTurnEndReminder} writes this reminder to the ledger; mirrors its branches. */
+	const pairedReminderPersists = (effect: Extract<MiddlewareEffect, { kind: "inject_reminder" }>): boolean => {
+		const severity = effect.severity ?? "info";
+		if (severity === "hard-block") return false;
+		if (effect.audience === "model") return true;
+		if (severity !== "warn") return true;
+		return !(
+			effect.message.startsWith(FINISH_CONTRACT_ADVISORY_MESSAGE) ||
+			effect.message === FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE ||
+			effect.message === FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE ||
+			effect.message === FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE
+		);
+	};
+
 	const notifyOperator = (message: string, key: string): void => {
 		if (deps.emitOperatorTip) deps.emitOperatorTip(message, key);
 		// `notify_operator` is the operator-only advisory channel. A tip is not part
@@ -349,7 +363,12 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		else deps.emitFooterNotice("info", message.replace(/^\[tip\]\s*/u, "tip: "), key);
 	};
 
-	const applyRequestContinuation = (message: string, note?: string, reserved?: "verification"): void => {
+	const applyRequestContinuation = (
+		message: string,
+		note?: string,
+		reserved?: "verification",
+		persisted = false,
+	): void => {
 		if (!state.continuation.request(reserved)) {
 			if (reserved === "verification") {
 				deps.emitFooterNotice(
@@ -368,8 +387,9 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		}
 		bufferReminder(message, "info");
 		// The nudge reaches the model as context inside the run, never as a
-		// persisted operator turn, so the ledger keeps it for inspection only.
-		appendMiddlewareReminderEntry(message, "info", "reminder", false);
+		// persisted operator turn, so the ledger keeps it for inspection only. A
+		// paired reminder with the same text already keeps it there, once (XR-8).
+		if (!persisted) appendMiddlewareReminderEntry(message, "info", "reminder", false);
 		// The producer's own note says what was nudged. An empty note is the plan
 		// close, whose "Carry out this plan?" card is already the announcement.
 		if (note === "") return;
@@ -570,6 +590,12 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				}
 			}
 			if (stopReason === "error" || stopReason === "aborted") return;
+			// A continuation paired with a reminder of the same text is written to the ledger by the reminder alone.
+			const paired = new Set(
+				effects.flatMap((effect) =>
+					effect.kind === "inject_reminder" && pairedReminderPersists(effect) ? [effect.message] : [],
+				),
+			);
 			for (const effect of effects) {
 				if (effect.kind === "inject_reminder") {
 					applyTurnEndReminder(
@@ -585,7 +611,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					// A locked request cannot call the tool a nudge asks for: a plan close
 					// here reasoned over that conflict for 131k tokens until max_tokens.
 					if (effect.toolFree === true || !(state.synthesisToolLock || state.toolBudgetLock))
-						applyRequestContinuation(effect.message, effect.note, effect.reserved);
+						applyRequestContinuation(effect.message, effect.note, effect.reserved, paired.has(effect.message));
 					continue;
 				}
 				if (effect.kind === "notify_operator") notifyOperator(effect.message, effect.key);

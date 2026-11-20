@@ -16,6 +16,7 @@ import {
 	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE,
 } from "../../src/domains/safety/finish-contract.js";
+import { HIGH_RIGOR_REVALIDATION_MESSAGE } from "../../src/domains/safety/finish-contract-registration.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { TaskBoardSnapshot } from "../../src/domains/session/task-board.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
@@ -272,6 +273,46 @@ test("paired task continuation and warning deliver one model reminder while pres
 	deepStrictEqual(notices, [message]);
 	deepStrictEqual(footer, ["nudge.continuation.sent"]);
 	strictEqual(board.tasks[0]?.status, "pending");
+});
+
+test("a finish-gate firing writes one ledger entry for its paired continuation and reminder (XR-8)", async () => {
+	const message = HIGH_RIGOR_REVALIDATION_MESSAGE;
+	const state = createTurnState("off");
+	state.turnToolCalls = 1;
+	const receipts: Array<{ customType?: string; data?: { message?: string } }> = [];
+	const runtime = {
+		wireModelId: "fixture",
+		runtimeId: "fixture",
+		runtimeResolution: {},
+		agent: { state: { tools: [{ name: "verify" }], messages: [] } },
+	} as unknown as AgentRuntime;
+	const gate = {
+		id: "fixture.finish-gate",
+		description: "the high-rigor finish gate's paired effects",
+		hooks: ["turn_end" as const],
+		evaluate: (): MiddlewareEffect[] => [
+			{ kind: "request_continuation", message, note: "the change has no validation evidence yet" },
+			{ kind: "inject_reminder", message, severity: "warn" },
+		],
+	};
+	const middleware = createTurnMiddleware({
+		state,
+		middleware: { runHook: (input) => runMiddlewareRegistrations(input, [gate]) } as MiddlewareContract,
+		middlewareToolChoice: createMiddlewareToolChoiceControl(),
+		session: {
+			current: () => ({ id: "session" }),
+			appendEntry: (entry: unknown) => receipts.push(entry as (typeof receipts)[number]),
+		} as unknown as SessionContract,
+		emitNotice: () => {},
+		emitFooterNotice: () => {},
+	});
+	await middleware.fireTurnEnd(runtime, [], { toolCallId: "fixture", toolName: "verify" });
+	const written = receipts.filter(
+		(entry) => entry.customType === "middlewareReminder" && entry.data?.message === message,
+	);
+	strictEqual(written.length, 1, "one ledger entry per firing");
+	strictEqual(state.continuation.requested, true, "the re-prompt still runs");
+	strictEqual(middleware.flushPendingReminders(), `<system-reminder>\n${message}\n</system-reminder>`);
 });
 
 test("deduplicating model text preserves hard-block effects and distinct reminder order", async () => {

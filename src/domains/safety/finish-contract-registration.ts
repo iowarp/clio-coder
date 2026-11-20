@@ -7,7 +7,8 @@
  * `limitation` receipt, or when validation's behavior coverage is unknown.
  * Unknown coverage only advises; it never requests continuation, even at high rigor.
  * The trigger is the observed mutation, not the wording
- * of the assistant's text, and the text never enters the assessment. The chat-loop's generic effect application renders the
+ * of the assistant's text, and the text never enters the assessment; a reply that opens by saying the work is
+ * unfinished is a progress note, not a claim, and is not assessed. The chat-loop's generic effect application renders the
  * notice, persists the session entry, and flushes the reminder into the next
  * model request. Every decision is also written to the audit ledger.
  */
@@ -182,6 +183,9 @@ export function createFinishContractRegistration(
 			// An empty final text is not a completion claim. The assessor reads
 			// only ledger receipts, so the text is otherwise unused here.
 			if ((input.text?.trim() ?? "").length === 0) return [];
+			// Neither is a progress note that opens by saying the work is unfinished (XR-8): the next turn that claims
+			// the work is assessed as usual.
+			if (replySaysWorkUnfinished(input.text ?? "")) return [];
 			// A step turn runs one pipeline step by contract; while a step continuation follows it, its change waits
 			// for the turn that ends the pipeline, which assesses every step's changes and checks together (bt-12 #4).
 			if (input.metadata?.stepContinues === true) return [];
@@ -263,6 +267,27 @@ export function createFinishContractRegistration(
 
 function isHardBlockEffect(effect: MiddlewareEffect): boolean {
 	return effect.kind === "block_tool" || (effect.kind === "inject_reminder" && effect.severity === "hard-block");
+}
+
+/** Openings that say the work is unfinished: "Not done yet: ...", "Partly done.", "FL-4 is not finished." */
+const UNFINISHED_OPENINGS: ReadonlyArray<RegExp> = [
+	/^(?:not\s+(?:yet\s+)?(?:done|finished|complete)|part(?:ly|ially)\s+done)\b/iu,
+	/\b(?:is|are|was|were|has|have)\s+not\s+(?:yet\s+)?(?:been\s+)?(?:done|finished|complete)\b/iu,
+	/\bnot\s+(?:done|finished|complete)\s+yet\b/iu,
+	/^neither\b.*\byet\b/iu,
+];
+
+/**
+ * True when the reply's opening sentence says the work is not done (XR-8). Such a note is a progress report, not a
+ * completion claim, so the finish gate leaves it alone. Only the opening counts: a final answer that mentions an
+ * unfinished side issue later still makes its claim.
+ */
+function replySaysWorkUnfinished(text: string): boolean {
+	const opening = text
+		.trim()
+		.replace(/^[#>*_\s]+/u, "")
+		.split(/(?<=[.!?])\s|\n/u)[0];
+	return opening !== undefined && UNFINISHED_OPENINGS.some((pattern) => pattern.test(opening));
 }
 
 function recordDecision(

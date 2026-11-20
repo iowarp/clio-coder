@@ -379,6 +379,19 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		}
 	});
 
+	it("leaves a progress note that says the work is unfinished alone (XR-8)", async () => {
+		for (const note of [
+			"Not done yet: the fix is written, but the tests have not run.",
+			"Partly done. One of three items is committed.",
+			"FL-4 is not finished.",
+			"Neither item is committed yet; this turn hit its tool-call budget.",
+		]) {
+			deepStrictEqual(await highRigorGate(mutationWindow(), note), [], note);
+		}
+		// A claim that mentions unfinished side work later still makes its claim.
+		strictEqual(reprompted(await highRigorGate(mutationWindow(), "Done. The docs follow-up is not done yet.")), true);
+	});
+
 	it("still fires when the check did not run, failed, ran before the edit, or was only named (CLI-P24)", async () => {
 		const before = [
 			userMessage("user-1"),
