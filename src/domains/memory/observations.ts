@@ -182,13 +182,23 @@ export function prepareObservation(input: {
 	// Only the operator's own words are a constraint or decision. A note first
 	// prepared from source that claims either without assertion status or an
 	// operator message among its refs keeps its text as context. A reflection
-	// inherits its inputs' categories and a stored artifact keeps its notes as
-	// written, so neither is reclassified here.
-	const operator = input.stored || input.inputs ? null : new Set(input.units.flatMap((unit) => unit.operatorRefs ?? []));
-	const authored = (note: { category: ObservationNote["category"]; status: string; refs: readonly string[] }) =>
+	// is held to the same rule, except that a note keeping or superseding an
+	// input note of its category inherits it (MEM-2); a stored artifact keeps
+	// its notes as written.
+	const operator = input.stored ? null : new Set(input.units.flatMap((unit) => unit.operatorRefs ?? []));
+	const inherited = (category: string, ids: readonly string[]) =>
+		input.inputs?.some((batch) => batch.notes.some((prior) => prior.category === category && ids.includes(prior.id))) ===
+		true;
+	const authored = (note: {
+		category: ObservationNote["category"];
+		status: string;
+		refs: readonly string[];
+		ids: readonly string[];
+	}) =>
 		operator === null ||
 		(note.category !== "constraint" && note.category !== "decision") ||
-		(note.status === "assertion" && note.refs.some((ref) => operator.has(ref)));
+		(note.status === "assertion" && note.refs.some((ref) => operator.has(ref))) ||
+		inherited(note.category, note.ids);
 	const ids = new Set<string>();
 	const previousIds = new Set([
 		...(input.inputs?.flatMap((batch) => batch.notes.map((note) => note.id)) ?? []),
@@ -228,6 +238,7 @@ export function prepareObservation(input: {
 			category: raw.category as ObservationNote["category"],
 			status: raw.status as ObservationNote["status"],
 			refs: [...new Set(raw.refs as string[])],
+			ids: [stableId(raw.id), ...((raw.supersedes as string[] | undefined) ?? []).map(stableId)],
 		};
 		accepted.push({
 			id: stableId(raw.id),
