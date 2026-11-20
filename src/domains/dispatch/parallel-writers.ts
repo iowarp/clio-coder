@@ -102,7 +102,7 @@ export function parallelWriterConflict(
 			const left = roots[i] ?? [],
 				right = roots[j] ?? [];
 			if (!left.length || !right.length || writeRootsOverlap(left, right)) {
-				return `parallel_writer_conflict: ${writers[i]?.agentId} and ${writers[j]?.agentId} have overlapping or undeclared write roots. ${inspection} For authorized writes, use worktree: true, declare disjoint intent.write_roots, or serialize writers with writers: 1.`;
+				return `parallel_writer_conflict: ${writers[i]?.agentId} and ${writers[j]?.agentId} have overlapping or undeclared write roots. ${inspection} For authorized writes, use worktree: true, declare disjoint intent.write_roots, or serialize writers with writers: 1. Declared write roots withhold bash and verify from a writer unless a bwrap sandbox confines its writes; worktree: true keeps both.`;
 			}
 		}
 	return null;

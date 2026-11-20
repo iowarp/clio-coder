@@ -121,6 +121,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * True when the task explicitly declares it writes nothing: intent.write_roots
+ * is an empty array, with no legacy writeRoots, verification or gate beside it.
+ */
+function declaresNoWrites(args: Record<string, unknown>): boolean {
+	if (!isRecord(args.intent)) return false;
+	const roots = args.intent.write_roots;
+	if (!Array.isArray(roots) || roots.length > 0) return false;
+	if (Array.isArray(args.writeRoots) && args.writeRoots.length > 0) return false;
+	return !Object.hasOwn(args.intent, "verification") && !Object.hasOwn(args, "gate");
+}
+
 export function stringArg(args: Record<string, unknown>, ...names: string[]): string | undefined {
 	for (const name of names) {
 		const value = args[name];
@@ -295,7 +307,8 @@ function dispatchRequestFromArgs(
 			return {
 				ok: false,
 				reason: "external_read_mode_unsupported",
-				message: "external_read_mode_unsupported: External Scout approval requires an attached parallel dispatch.",
+				message:
+					'external_read_mode_unsupported: an External Scout\'s approval is raised while the call is attached, so detach: true cannot carry an external read root. Send every such scout in one call without detach: dispatch({mode: "parallel", tasks: [{agent: "scout", task: "...", intent: {read_roots: ["..."]}}, ...]}); its tasks run in parallel.',
 			};
 		request.externalReadRoot = workspace.externalReadRoot;
 		request.readOnly = true;
@@ -316,9 +329,23 @@ function dispatchRequestFromArgs(
 		}
 		rawIntent = { ...(isRecord(rawIntent) ? rawIntent : {}), verification: [{ check: args.gate.trim() }] };
 	}
+	// An explicit intent.write_roots: [] declares a task that writes nothing, so it
+	// runs on the read-only surface rather than counting as an undeclared writer.
+	if (
+		workspace.externalReadRoot === undefined &&
+		declaresNoWrites(args) &&
+		request.worktree !== true &&
+		request.storeTags === undefined &&
+		options.writesArtifact?.(agentId) !== true
+	)
+		request.readOnly = true;
 	// External and read-only Scouts run no verification; every other task from
 	// this turn carries the checks the operator named (deduplicated).
-	if (workspace.externalReadRoot === undefined && options.isReadOnlyScout?.(agentId) !== true) {
+	if (
+		workspace.externalReadRoot === undefined &&
+		options.isReadOnlyScout?.(agentId) !== true &&
+		request.readOnly !== true
+	) {
 		const named = options.operatorNamedChecks?.(cwd) ?? [];
 		if (named.length > 0) rawIntent = mergeOperatorNamedChecks(rawIntent, named);
 	}

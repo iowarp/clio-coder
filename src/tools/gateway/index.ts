@@ -836,7 +836,9 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				message: unknownCapabilityMessage(name, options),
 				details: { refusal: { kind: "unknown_capability" } },
 			};
-		const resolved = await resolveCapability(name, options, allowDirect);
+		// dispatch is the direct tool models most often reach through the gateway;
+		// the call forwards to it instead of costing a round on a refusal.
+		const resolved = await resolveCapability(name, options, allowDirect || name === ToolNames.Dispatch);
 		if (resolved.spec === null) {
 			// A recorded tool the upgraded server dropped fails here, before any run (K9).
 			const changed = isMcpToolName(name) ? (deps.mcp?.takeCatalogChange(name) ?? null) : null;

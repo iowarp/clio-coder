@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { isAbsolute, relative } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import {
 	asDirectoryPathBoundary,
 	normalizePathBoundaryEntry,
@@ -21,6 +21,8 @@ const SCHEME_URI_RE = /\b(?!file:)[A-Za-z][A-Za-z0-9+.-]+:\/\/\S+/giu;
 const HOME_PATH_RE = /(?<![\w.~/-])~\/[^\s"'`)]*/gu;
 const POSIX_ABSOLUTE_TOKEN_RE = /(?:^|[\s("'])((?:\/[\w.~+-]+)+)/gu;
 const WINDOWS_ABSOLUTE_TOKEN_RE = /(?:^|[\s("'])([A-Za-z]:[\\/][^\s"']+)/gu;
+// A sentence that ends on a path ("... in /repo/src.") puts its period on the token.
+const TRAILING_SENTENCE_DOTS_RE = /(?<=[^/.])\.+$/u;
 const BACKSLASH_PATH_RE = /\b[A-Za-z_.-][\w.-]*\\(?:(?:[\w.-]+\\)+[\w.-]+|[\w-]+\.[A-Za-z0-9]{1,8})\b/gu;
 const DOUBLE_SEPARATOR_PATH_RE = /\b[\w.-]+\/\/[\w./-]+/gu;
 const PARENT_PREFIX_RE = /^(?:\.\.\/)+/u;
@@ -258,6 +260,29 @@ function withoutNonWorkspaceTokens(text: string): string {
 		.replace(HOME_PATH_RE, (path) => " ".repeat(path.length));
 }
 
+/**
+ * Prose names the workspace by its absolute path ("/home/me/repo", "/home/me/repo/src/a.ts.")
+ * or quotes a workspace path with a leading slash ("/paper/background"). Each names a path
+ * the run already reads, so it is rewritten to its workspace-relative form (the root itself
+ * to nothing) before the absolute-token refusal; only a token outside the workspace keeps it.
+ * The leading-slash reading applies only when no such host path exists and the workspace
+ * holds it, so "/etc/passwd" stays refused.
+ */
+function relativizeWorkspaceAbsoluteTokens(text: string, root: string): string {
+	const base = resolve(root);
+	return text.replace(POSIX_ABSOLUTE_TOKEN_RE, (match: string, raw: string) => {
+		const prefix = match.slice(0, match.length - raw.length);
+		const token = raw.replace(TRAILING_SENTENCE_DOTS_RE, "");
+		const local = relative(base, token);
+		if (local === "") return prefix;
+		if (local !== ".." && !local.startsWith("../") && !isAbsolute(local)) return `${prefix}${local}`;
+		const anchored = token.slice(1);
+		const walks = anchored.split("/").some((segment) => segment === ".." || segment === ".");
+		if (!walks && !existsSync(token) && existsSync(resolve(base, anchored))) return `${prefix}${anchored}`;
+		return match;
+	});
+}
+
 function failMalformedText(text: string, source: "task" | "briefing"): void {
 	const withoutUrls = withoutNonWorkspaceTokens(text);
 	const absolute = POSIX_ABSOLUTE_TOKEN_RE.exec(withoutUrls)?.[1];
@@ -297,8 +322,9 @@ function strictInferredPaths(
 	paths: Array<{ path: string; evidence: DispatchPathProvenanceEvidence }>;
 	parentTokens: DispatchInferredParentToken[];
 } {
-	failMalformedText(text, source);
-	const withoutUrls = withoutNonWorkspaceTokens(text);
+	const local = relativizeWorkspaceAbsoluteTokens(text, root);
+	failMalformedText(local, source);
+	const withoutUrls = withoutNonWorkspaceTokens(local);
 	const evidence: DispatchPathProvenanceEvidence =
 		source === "task"
 			? { provenance: "inferred", source, confidence: "medium", reason: "task_path_token" }

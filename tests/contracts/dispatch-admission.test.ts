@@ -29,6 +29,7 @@ import { admissionWriteBoundaries } from "../../src/domains/dispatch/extension.j
 import { isBoundedGateRolePrompt, REVIEWER_GATE_PROMPT } from "../../src/domains/dispatch/gate-role-prompts.js";
 import { normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
 import { classifyDispatchIntentCompatibility } from "../../src/domains/dispatch/intent-compatibility.js";
+import { parallelWriterConflict } from "../../src/domains/dispatch/parallel-writers.js";
 import {
 	declaredScopeReplacementNotice,
 	inferredScopeParentTokenNotice,
@@ -729,6 +730,57 @@ describe("dispatch admission boundary", () => {
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
+	});
+
+	it("reads an absolute token naming the workspace as its relative path and refuses only one outside it (XR-60)", () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-path-scope-"));
+		try {
+			mkdirSync(join(root, "paper", "background"), { recursive: true });
+			const scope = (task: string) =>
+				resolveDispatchPathScope({ cwd: root, task } as Parameters<typeof resolveDispatchPathScope>[0]);
+			for (const [task, paths] of [
+				[`audit ${root} for leaks`, []],
+				[`audit the tree at ${root}.`, []],
+				[`read ${root}/paper/method.md and report`, ["paper/method.md"]],
+				["summarize /paper/background now", ["paper/background"]],
+			] as const) {
+				deepStrictEqual(scope(task).workingContextPaths, paths, task);
+				deepStrictEqual(scope(task).writeBoundaries, [], task);
+			}
+			throws(() => scope("read /etc/passwd now"), /legacy_scope_path_absolute/u);
+			throws(() => scope(`read ${dirname(root)}/elsewhere/a.md now`), /legacy_scope_path_absolute/u);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("runs a task declaring intent.write_roots: [] read-only instead of refusing it as an undeclared writer (XR-60)", () => {
+		const auto = { approvedAuthorities: ["read-only" as const], authorityBasis: "yolo-policy" as const };
+		const resolveIntent = () => ({
+			ok: true as const,
+			intent: { writeRoots: [], readRoots: [], expectedOutputs: [], verification: [] } as unknown as NonNullable<
+				Parameters<typeof resolveDispatchPathScope>[0]["intent"]
+			>,
+			resolvedVerification: [],
+		});
+		const task = { agent: "coder", task: "Map the cache split", intent: { write_roots: [] } };
+		const parsed = dispatchRequestsFromArgs(
+			{ mode: "parallel", tasks: [task, task, task] },
+			{ auto, resolveIntent, workspaceRoot: process.cwd() },
+		);
+		ok(parsed.ok, JSON.stringify(parsed));
+		deepStrictEqual(
+			parsed.requests.map((request) => request.readOnly),
+			[true, true, true],
+		);
+		const specs = [{ id: "coder", capabilityClass: "workspace-write" }] as unknown as AgentSpec[];
+		strictEqual(parallelWriterConflict(parsed.requests, specs), null);
+		const writers = dispatchRequestsFromArgs(
+			{ mode: "parallel", tasks: ["Fix a", "Fix b"].map((text) => ({ agent: "coder", task: text })) },
+			{ auto, resolveIntent },
+		);
+		ok(writers.ok);
+		match(String(parallelWriterConflict(writers.requests, specs)), /withhold bash and verify .* worktree: true/u);
 	});
 
 	it("resolves the plan artifact's legacy scope against the dispatch cwd, not the process cwd", () => {
