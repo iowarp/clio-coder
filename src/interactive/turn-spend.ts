@@ -1,5 +1,5 @@
 import { formatFooterTokens } from "../core/display-units.js";
-import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
+import type { FactMetric, FactScope, Quantity } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import { factKnownValue } from "../core/telemetry/known.js";
 import { COST_NOT_MEASURED, renderCompactCount } from "../core/telemetry/render.js";
@@ -13,7 +13,10 @@ import { type ReasoningUsageView, reasoningFromQuantity } from "./status/reasoni
  * (#434 §11.3). An unknown count reads `?` and a partial one `≥`, never a zero nothing measured.
  */
 export interface TurnSpend {
-	/** API calls the turn made, its workers' included except those still running when it ended; null when the count is unknown. */
+	/**
+	 * API calls the turn made, its workers' included except those still running when it ended; null when the count is
+	 * unknown. With `workers` set, every figure here is the turn's own and the workers' spend is there instead.
+	 */
 	calls: number | null;
 	/** How many of those calls Clio prepared but never sent. */
 	neverSent?: number;
@@ -37,6 +40,20 @@ export interface TurnSpend {
 	cached: string | null;
 	/** One call's own amounts, for a turn whose sum mixes a call that was moved away from with the one that answered. */
 	answer?: { tokens: string | null; cached: string | null };
+	/** The worker runs of a turn that ended with some still running, stated apart from its own spend and read live. */
+	workers?: TurnWorkerSpend;
+}
+
+/** What the worker runs of a turn that left some running spent so far, as the read model folds them. */
+export interface TurnWorkerSpend {
+	/** Every worker run the turn started. */
+	runs: number;
+	/** How many of those have not settled. */
+	running: number;
+	/** Their priced spend, or null when nothing of theirs was priced. */
+	cost: string | null;
+	/** Their API calls; null when the count is unknown. */
+	calls: number | null;
 }
 
 /** The known part of a quantity: a measured or estimated value, or a sum's measured and estimated parts. */
@@ -128,9 +145,55 @@ function detachedCalls(
 }
 
 /**
+ * The turn's worker runs, read apart from its own calls, when it left one of `detachedRunIds` running and the view holds
+ * that run. Null otherwise, and for a turn whose own calls this session's journal does not hold (a fork's copied turn
+ * journaled them under its parent), which keeps the turn's figures whole (f-m-turn-row ruling).
+ */
+function turnWorkers(
+	view: TelemetryView,
+	turnId: string,
+	detachedRunIds: ReadonlyArray<string>,
+): TurnWorkerSpend | null {
+	if (detachedRunIds.length === 0) return null;
+	const detached = new Set(detachedRunIds);
+	const runs = view.runs().filter((run) => run.turnId === turnId);
+	if (!runs.some((run) => detached.has(run.runId))) return null;
+	const read = (scope: FactScope, metric: FactMetric) =>
+		view.quantity(factRef({ scope, owner: view.sessionId, metric, group: { by: "turn", key: turnId } }));
+	const ownCalls = read("own", "calls");
+	const calls = read("runs", "calls");
+	const usd = read("runs", "usd");
+	if (!ownCalls || !contributed(ownCalls) || !calls || !usd) return null;
+	return {
+		runs: runs.length,
+		running: runs.filter((run) => run.terminalReason === null).length,
+		cost: contributed(usd) && usd.display !== COST_NOT_MEASURED ? usd.display : null,
+		calls: "kind" in calls.fact || calls.fact.unknownCount === 0 ? known(calls) : null,
+	};
+}
+
+/**
+ * The receipt's worker fact: how many runs, how many still run, then what they spent, `workers 1 running $0.05`. It
+ * settles as they do, to `workers 1 done $0.12`; a run's own card says how it ended.
+ */
+export function turnWorkersFact(workers: TurnWorkerSpend): string {
+	const state =
+		workers.running === 0
+			? `workers ${workers.runs} done`
+			: workers.running === workers.runs
+				? `workers ${workers.runs} running`
+				: `workers ${workers.runs}, ${workers.running} running`;
+	if (workers.cost !== null) return `${state} ${workers.cost}`;
+	return workers.calls !== null && workers.calls > 0
+		? `${state}, ${workers.calls} ${workers.calls === 1 ? "call" : "calls"}`
+		: state;
+}
+
+/**
  * Null when the view cannot resolve the turn's references. `answeringCallId` also reads that one call's own amounts.
  * A replayed turn reads the `lineage` scope: a forked session's copied turns journaled their calls under its parent.
- * `detachedRunIds` names the worker runs still going when the turn ended, whose calls the turn's count leaves out.
+ * `detachedRunIds` names the worker runs still going when the turn ended. Their turn reads its own calls, tokens and cost
+ * with every worker run's spend in `workers`; without the runs in view, the count alone leaves their calls out.
  */
 export function turnSpend(
 	view: TelemetryView,
@@ -139,8 +202,16 @@ export function turnSpend(
 	scope: "session" | "lineage" = "session",
 	detachedRunIds: ReadonlyArray<string> = [],
 ): TurnSpend | null {
+	const workers = turnWorkers(view, turnId, detachedRunIds);
 	const read = (metric: FactMetric) =>
-		view.quantity(factRef({ scope, owner: view.sessionId, metric, group: { by: "turn", key: turnId } }));
+		view.quantity(
+			factRef({
+				scope: workers === null ? scope : "own",
+				owner: view.sessionId,
+				metric,
+				group: { by: "turn", key: turnId },
+			}),
+		);
 	const calls = read("calls");
 	// `in` is the uncached input on every surface, with the cache read beside it: the receipt's whole prompt read
 	// `in 150k` beside /usage's `input 27k · cache read 123k` for the same calls (bt-11).
@@ -157,7 +228,7 @@ export function turnSpend(
 	const skipped = known(neverSent);
 	const tokens = measuredTokens(input, output);
 	const neverSentNote = skipped > 0 ? `${skipped} ${skipped === 1 ? "call" : "calls"} never sent` : null;
-	const detached = detachedCalls(view, turnId, detachedRunIds);
+	const detached = workers === null ? detachedCalls(view, turnId, detachedRunIds) : { known: 0, unknown: 0 };
 	return {
 		calls:
 			"kind" in calls.fact || calls.fact.unknownCount - detached.unknown <= 0
@@ -180,6 +251,7 @@ export function turnSpend(
 		tokens,
 		cached: measuredCached(cacheRead),
 		...(answeringCallId === undefined ? {} : { answer: answerSpend(view, turnId, answeringCallId) }),
+		...(workers === null ? {} : { workers }),
 	};
 }
 

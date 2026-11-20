@@ -2784,14 +2784,16 @@ describe("transcript block grammar", () => {
 		match(plain, /Turn ended · 2 workers running/u, plain);
 	});
 
-	it("keeps the ended turn's call count when its detached worker keeps calling (ns:49-50)", () => {
-		const main = [1, 2].flatMap(() => telemetryCall("frozen", { turnId: "fanout", usage: { input: 10, output: 5 } }));
+	it("states the ended turn's own calls, tokens and cost apart from its detached worker's, which settle live (ns:49-50)", () => {
+		const main = [1, 2].flatMap(() =>
+			telemetryCall("frozen", { turnId: "fanout", usage: { input: 10, output: 5 }, usd: 0.02 }),
+		);
 		const first = main[0];
 		if (!first) throw new Error("fixture call missing");
 		const linked = makeTelemetryRecord("run.linked", { runId: "run-a1" }, first.ctx, { t: first.t, mono: 0 });
 		const workerCalls = (count: number) =>
 			Array.from({ length: count }, () =>
-				telemetryCall("frozen", { role: "worker", usage: { input: 3, output: 1 } }).map(
+				telemetryCall("frozen", { role: "worker", usage: { input: 3, output: 1 }, usd: 0.01 }).map(
 					(record) =>
 						({
 							...record,
@@ -2825,11 +2827,11 @@ describe("transcript block grammar", () => {
 		const row = () =>
 			plainRender(panel, 160)
 				.split("\n")
-				.find((line) => line.includes("Turn ended · 1 worker running")) ?? "";
-		match(row(), / · 2 calls\b/u, row());
-		// The worker goes on calling after the turn ended; the turn's row still counts only the turn's own two.
+				.find((line) => line.includes("Turn ended")) ?? "";
+		match(row(), / · 2 calls · in 20 · out 10 · \$0\.04 · workers 1 running \$0\.01\b/u, row());
+		// The worker goes on calling after the turn ended; the turn's own figures hold and the worker's spend grows.
 		view = viewWith(31);
-		match(row(), / · 2 calls\b/u, row());
+		match(row(), / · 2 calls · in 20 · out 10 · \$0\.04 · workers 1 running \$0\.31\b/u, row());
 	});
 
 	it("puts a card that arrives after its dispatch settled under that call, and one from an earlier turn at the tail", () => {
