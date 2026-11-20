@@ -221,6 +221,17 @@ describe("dispatch admission boundary", () => {
 		);
 	});
 
+	it("queues behind a worker lease sharing a full endpoint with a foreground stream, and refuses only when foreground streams fill it", () => {
+		const check = (holders: { leases: number; reservations: number; foregroundStreams: number }) =>
+			foregroundEndpointBlock({
+				endpointKey: "endpoint",
+				limits: { global: 4, nodes: {}, endpoints: { endpoint: 2 } },
+				usage: { endpoints: { endpoint: 2 }, endpointHolders: { endpoint: holders } },
+			});
+		strictEqual(check({ leases: 1, reservations: 0, foregroundStreams: 1 }), null);
+		match(check({ leases: 0, reservations: 0, foregroundStreams: 2 }) ?? "", /cannot release its slot.*deadlock/u);
+	});
+
 	beforeEach(async () => isolateDispatchState());
 	afterEach(() => restoreDispatchState());
 

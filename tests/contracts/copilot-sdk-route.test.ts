@@ -1869,20 +1869,33 @@ test("a default copilot-sdk target admits workers beside the foreground turn, an
 	const controller = createCapacityAdmissionController({
 		limits: () => ({ global: 8, nodes: { local: 8 }, endpoints: { [capacity.key]: capacity.limit } }),
 	});
-	const releaseForeground = registerForegroundStream(capacity.key);
+	const foreground = [registerForegroundStream(capacity.key)];
 	try {
 		const admit = (assignmentId: string) =>
 			controller.admit({ assignmentId, nodeId: "local", endpointKey: capacity.key });
 		const workers = [];
 		for (let index = 1; index < capacity.limit; index += 1) workers.push(await admit(`worker-${index}`));
 		ok(workers.length >= 2);
-		await rejects(admit("one-too-many"), (error: unknown) => {
+		// A full endpoint that a worker lease shares frees on its own, so the next worker queues behind it.
+		let settled = false;
+		const queued = admit("one-too-many").finally(() => {
+			settled = true;
+		});
+		for (let turn = 0; turn < 4; turn += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+		strictEqual(settled, false);
+		const first = workers.shift();
+		if (first !== undefined) controller.release(first.lease.leaseId);
+		workers.push(await queued);
+		for (const worker of workers) controller.release(worker.lease.leaseId);
+		// Foreground streams alone fill it: nothing frees before the tool call returns, so admission refuses.
+		while (foreground.length < capacity.limit) foreground.push(registerForegroundStream(capacity.key));
+		await rejects(admit("behind-foreground"), (error: unknown) => {
 			ok(error instanceof Error);
 			match(error.message, /set maxConcurrentRequests on target 'copilot' above its default of \d+/u);
 			return true;
 		});
 	} finally {
-		releaseForeground();
+		for (const release of foreground) release();
 		await controller.stop();
 	}
 });

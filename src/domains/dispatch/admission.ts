@@ -141,7 +141,10 @@ export function foregroundEndpointBlock(input: {
 	const limit = input.limits.endpoints[input.endpointKey];
 	const active = input.usage.endpoints[input.endpointKey] ?? 0;
 	const holders = input.usage.endpointHolders?.[input.endpointKey];
-	if (limit === undefined || active < limit || !holders || holders.foregroundStreams < 1) return null;
+	// Only foreground streams cannot release before this tool call returns. A full
+	// endpoint that also holds a worker lease or reservation frees on its own, so
+	// the request queues like ordinary worker saturation.
+	if (limit === undefined || active < limit || !holders || holders.foregroundStreams < limit) return null;
 	if (input.operatorStarted === true) {
 		return [
 			`dispatch: admission denied: the main turn is using ${limit === 1 ? "the only slot" : `all ${limit} slots`} on endpoint '${endpointLabel(input.endpointKey)}'.`,
