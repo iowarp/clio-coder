@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, normalize } from "node:path";
+import { basename, dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { type ArchiveEntry, readTarGzEntries, readZipEntries } from "./archive.js";
 import { ensureToolchainRoot } from "./paths.js";
@@ -168,7 +169,7 @@ export async function installPinnedTool(
 		// The registry is trusted input, but a relative path is written under the
 		// version directory verbatim, so one that climbs out is refused here.
 		const clean = normalize(memberPath);
-		if (isAbsolute(clean) || clean.startsWith("..")) {
+		if (relativePathEscapes(clean)) {
 			return failure(entry.id, entry.version, dir, `runtime member ${memberPath} escapes the install directory`);
 		}
 	}

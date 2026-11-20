@@ -1,6 +1,7 @@
 import { equal, match, ok, rejects } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { updateSettings } from "../../src/core/config.js";
@@ -57,6 +58,37 @@ it("writes the separate-program notice during an atomic checksum-verified instal
 	equal(result.ok, true);
 	equal(readFileSync(join(result.dir, "NOTICE"), "utf8"), `${entry.notice}\n`);
 	ok(result.documents.includes(join(result.dir, "NOTICE")));
+});
+
+it("installs a runtime member under a directory whose name starts with ..", async () => {
+	const tree = join(env.dir, "asset");
+	mkdirSync(join(tree, "..data"), { recursive: true });
+	writeFileSync(join(tree, "tool"), "fixture program");
+	writeFileSync(join(tree, "..data", "lib.so"), "runtime");
+	const archive = join(env.dir, "asset.tar.gz");
+	execFileSync("tar", ["-czf", archive, "-C", tree, "tool", "..data/lib.so"]);
+	const bytes = readFileSync(archive);
+	const entry = findPinnedTool("asciinema");
+	ok(entry);
+	const result = await installPinnedTool(
+		{
+			...entry,
+			documents: [],
+			downloads: {
+				"linux-x64": {
+					url: "https://fixture.invalid/asciinema.tar.gz",
+					sha256: createHash("sha256").update(bytes).digest("hex"),
+					archive: "tar.gz",
+					binaryMembers: { asciinema: "tool" },
+					documentMembers: [],
+					runtimeMembers: ["..data/lib.so"],
+				},
+			},
+		},
+		{ root: join(env.dir, "tools"), platform: "linux-x64", fetch: async () => bytes },
+	);
+	equal(result.ok, true, result.message);
+	equal(readFileSync(join(result.dir, "..data", "lib.so"), "utf8"), "runtime");
 });
 
 it("previews explicit user-level SSH provisioning and rejects changed connections before remote execution", async () => {
