@@ -130,6 +130,8 @@ import {
 	advanceScriptShell,
 	childScriptShell,
 	commandMoveBases,
+	forkScriptShell,
+	joinScriptShells,
 	newScriptReader,
 	newScriptShell,
 	readScriptLine,
@@ -3969,7 +3971,12 @@ function scanScript(
 		commandWrittenPaths(read.expanded, cwds ?? [scan.callCwd], scan.written);
 		if (depth >= FLOOR_SCRIPT_NEST_DEPTH) continue;
 		for (const source of sources) {
+			// Candidates are alternatives: each sourced one runs from its own copy of the shell, and the script
+			// continues from all of them (CLI-P31).
+			const outcomes: ScriptShell[] = [];
 			for (const candidate of scriptCandidates(source.path, cwds, source.sourced)) {
+				const branch = forkScriptShell(shell);
+				outcomes.push(branch);
 				if (candidate !== null && isWrittenFirst(candidate, scan.written)) continue;
 				// `source` runs in this shell; `bash`, `sh` and `exec` start a child that changes nothing here.
 				// A sourced file keeps the script's `$0`; a child shell gets the name it was run by.
@@ -3979,10 +3986,11 @@ function scanScript(
 						? { zero: reader.names.zero, source: source.path }
 						: { zero: source.path, source: source.path };
 				const inner = source.sourced
-					? scanScript(candidate, scan, shell, newScriptReader(read.context, names), depth + 1)
+					? scanScript(candidate, scan, branch, newScriptReader(read.context, names), depth + 1)
 					: scanScript(candidate, scan, childScriptShell(shell, read.context), newScriptReader("plain", names), depth + 1);
 				if (inner !== null) return inner;
 			}
+			if (source.sourced) joinScriptShells(shell, outcomes);
 		}
 	}
 	return null;
