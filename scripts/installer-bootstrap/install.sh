@@ -18,10 +18,13 @@ main() {
 	done
 	case "$version" in latest | beta | dev) channel=$version ;; esac
 	# Both downloads live in a private directory: a name derived from a mktemp file sits in a shared directory where
-	# another local user can plant a link at it first.
+	# another local user can plant a link at it first. The script works inside it by relative names and runs the
+	# installer through a descriptor opened there, so renaming or swapping the directory's entry in a temp directory
+	# others may write cannot change what runs. The installer itself runs in the caller's directory, where relative
+	# --package, --node-tarball and --install-dir paths mean what the caller meant.
 	dir=$(mktemp -d "${TMPDIR:-/tmp}/clio-coder-install.XXXXXXXX")
-	file=$dir/install.sh
 	trap 'rm -rf "$dir"' EXIT HUP INT TERM
+	cd "$dir"
 	get() {
 		if command -v curl >/dev/null 2>&1; then curl -fsSL "$1" -o "$2"; else wget -q "$1" -O "$2"; fi
 	}
@@ -30,19 +33,21 @@ main() {
 		beta | dev)
 			# Snapshots have no GitHub release. The beta installer resolves all three
 			# channels itself; a missing beta tag falls back to the stable asset.
-			if get https://registry.npmjs.org/@iowarp/clio-coder/beta "$dir/channel"; then
-				rc=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$dir/channel" | head -n 1)
+			if get https://registry.npmjs.org/@iowarp/clio-coder/beta ./channel; then
+				rc=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' ./channel | head -n 1)
 				if printf '%s\n' "$rc" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'; then
 					url="https://github.com/iowarp/clio-coder/releases/download/v$rc/install.sh"
 				fi
 			fi
 			;;
 	esac
-	if ! get "$url" "$file"; then get https://github.com/iowarp/clio-coder/releases/latest/download/install.sh "$file"; fi
+	if ! get "$url" ./install.sh; then get https://github.com/iowarp/clio-coder/releases/latest/download/install.sh ./install.sh; fi
+	exec 3<./install.sh
+	cd - >/dev/null
 	# A rerun without an exact version follows the channel and clears a pin, so the
 	# default hosted upgrade names its channel. An exact version or --package pins.
 	if [ -z "$version" ]; then set -- "$@" --version "$channel"; fi
-	sh "$file" "$@"
+	sh /dev/fd/3 "$@"
 }
 # A group runs only once its closing brace arrived, so a truncated download runs nothing.
 { main "$@"; }
