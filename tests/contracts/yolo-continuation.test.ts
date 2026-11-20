@@ -7,7 +7,7 @@ import type { SessionContract, TurnInput } from "../../src/domains/session/contr
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import type { CreateChatLoopDeps } from "../../src/session-control/chat-loop.js";
-import { createChatLoop } from "../../src/session-control/chat-loop.js";
+import { budgetCrossingContinues, createChatLoop } from "../../src/session-control/chat-loop.js";
 import type { MachineTurnResult } from "../../src/session-control/job-turn-types.js";
 import { subscribeLoopGuardStop } from "../../src/session-control/loop-guard-interrupt.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -415,5 +415,29 @@ describe("yolo continuation of a stopped turn (#445)", () => {
 		strictEqual(turnContinuationDelayMs(1, 600_000), 600_000);
 		strictEqual(turnContinuationDelayMs(1, 10 * 3_600_000), 10 * 3_600_000);
 		strictEqual(turnContinuationDelayMs(3, 1000), 900_000);
+	});
+
+	it("tells the budget refusal a continuation follows only when the settle path will continue the turn (CLI-H1)", () => {
+		const base = { yolo: true, machineTurn: false, failure: null, locked: false, continuations: 0 };
+		const spent = { ...base, continuations: TURN_CONTINUATION_CAP };
+		const rows: Array<[string, Parameters<typeof budgetCrossingContinues>[0], boolean]> = [
+			["a plain crossing at yolo", base, true],
+			["a plain crossing once the cap is spent, since a crossing never counts against it", spent, true],
+			["a locked turn with the cap left", { ...base, locked: true }, true],
+			["a locked turn once the cap is spent", { ...spent, locked: true }, false],
+			[
+				"a failed turn once the cap is spent",
+				{ ...spent, failure: { cause: "retries_exhausted", reason: "retries spent" } },
+				false,
+			],
+			[
+				"a provider wait past the budget",
+				{ ...base, failure: { cause: "wait_past_budget", reason: "429", retryAfterMs: 7_200_000 } },
+				false,
+			],
+			["below yolo", { ...base, yolo: false }, false],
+			["a machine turn, whose job decides", { ...base, machineTurn: true }, false],
+		];
+		for (const [name, input, expected] of rows) strictEqual(budgetCrossingContinues(input), expected, name);
 	});
 });

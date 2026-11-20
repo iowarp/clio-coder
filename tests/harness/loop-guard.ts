@@ -30,6 +30,8 @@ export interface GuardCall {
 	args: Record<string, unknown>;
 	traits?: { readOnly: boolean; idempotent: boolean };
 	batch?: string;
+	/** Extra before_tool metadata, as the registry carries it from the chat loop's invoke options. */
+	metadata?: Record<string, string | number | boolean>;
 	result?: GuardResult;
 }
 
@@ -84,6 +86,7 @@ export function runGuardScenario(
 						...traitsOf(call),
 						callFingerprint: hashToolCall(call.tool, call.args),
 						...(batch === undefined ? {} : { batchSize: round.length }),
+						...call.metadata,
 					},
 				} as MiddlewareHookInput)
 				.find((effect) => effect.kind === "block_tool");

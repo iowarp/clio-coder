@@ -276,6 +276,7 @@ import {
 	createTurnState,
 	type TurnPreparationPhase,
 	type TurnPreparationStep,
+	type TurnStop,
 	takeInterruptedCall,
 } from "./turn-state.js";
 import { createWorkerReceipts, noOutcomeUsage } from "./worker-receipts.js";
@@ -1170,6 +1171,25 @@ interface YoloContinuation {
 const countsAgainstCap = (stop: YoloContinuation): boolean =>
 	stop.step === true || continuationCountsAgainstCap(stop.cause);
 
+/**
+ * Whether a turn the per-turn tool budget ends now is continued without the operator, as `yoloContinuationDue`
+ * decides when it settles: yolo, not a machine turn (its job decides), and the stop it settles on not capped. A plain
+ * budget crossing never counts against the cap, so it continues past it; a turn whose tools the loop guard already
+ * locked, or that failed, settles on a counted stop and does not once the cap is spent (CLI-H1).
+ */
+export function budgetCrossingContinues(input: {
+	yolo: boolean;
+	machineTurn: boolean;
+	failure: TurnStop | null;
+	locked: boolean;
+	continuations: number;
+}): boolean {
+	const failure = input.failure;
+	if (!input.yolo || input.machineTurn || failure?.cause === "wait_past_budget") return false;
+	const cause = failure !== null ? failure.cause : input.locked ? "loop_guard" : "tool_budget";
+	return !(continuationCountsAgainstCap(cause) && input.continuations >= TURN_CONTINUATION_CAP);
+}
+
 /** The latest assistant text in a transcript, or empty: what a mid-run steer is reacting to. */
 function lastAssistantText(messages: ReadonlyArray<AgentMessage>): string {
 	for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -1486,6 +1506,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			options.correlationId = batch.id;
 			options.batchSize = batch.size;
 		}
+		options.turnBudgetContinues = budgetCrossingContinues({
+			yolo: (deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) === "yolo",
+			machineTurn: machineTurnRunning !== null,
+			failure: state.continuation.stop,
+			locked: state.synthesisToolLock,
+			continuations: state.continuation.yoloContinuations,
+		});
 		const hostRun = hostRunContext.getStore();
 		if (hostRun !== undefined) options.hostRun = hostRun;
 		const sessionId = deps.session?.current()?.id ?? null;

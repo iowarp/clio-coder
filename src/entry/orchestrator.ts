@@ -1141,7 +1141,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		turnBlockBudget: INTERACTIVE_LOOP_BLOCK_BUDGET,
 		sameCallBlockLimit: INTERACTIVE_SAME_CALL_BLOCK_LIMIT,
 		turnToolCallBudget: () => readOrchTurnToolCallBudget(),
-		turnBudgetContinues: () => resolveEffectiveAutonomy() === "yolo",
 		// Interactive/headless/ACP all share this orchestrator guard: at the
 		// block budget, lock tools for the rest of the turn so the model
 		// answers from what it gathered instead of hard-cancelling a turn that
@@ -2721,6 +2720,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				if (caps === null) return null;
 				return {
 					usage: autonomyWindow.usage(),
+					turn: { toolCalls: autonomyWindow.turnToolCalls(), budget: readOrchTurnToolCallBudget().soft },
 					caps,
 					halted: autonomyWindow.halted(),
 					osSandbox: mainShellContained(getCurrentSettings().safety.sandbox, sandboxAvailability()),

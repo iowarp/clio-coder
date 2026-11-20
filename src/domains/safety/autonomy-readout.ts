@@ -38,8 +38,9 @@ export function autonomyModeReadout(input: {
 }
 
 /**
- * The autonomous window: `412/600 calls · 38/120 min · 1.9M/5M tok`, the nearest cap alone when narrow, and the way
- * back once it has paused. Null when no cap applies.
+ * The autonomous window: `turn 12/73 · 412/600 calls · 38/120 min · 1.9M/5M tok`, the running turn against its
+ * per-turn tool budget first, the nearest alone when narrow, and the way back once it has paused. Null when no cap
+ * applies.
  */
 export function autonomyWindowReadout(
 	status: AutonomyStatus,
@@ -51,7 +52,7 @@ export function autonomyWindowReadout(
 	}
 	const { caps, usage } = status;
 	const minutes = Math.floor(usage.activeMs / 60_000);
-	const meters = [
+	const windowMeters = [
 		{ used: usage.toolCalls, cap: caps.toolCalls, text: `${usage.toolCalls}/${caps.toolCalls} calls` },
 		{ used: minutes, cap: caps.minutes, text: `${minutes}/${caps.minutes} min` },
 		{
@@ -60,7 +61,13 @@ export function autonomyWindowReadout(
 			text: `${formatFooterTokens(usage.tokens)}/${formatFooterTokens(caps.tokens)} tok`,
 		},
 	].filter((meter) => meter.cap > 0);
-	if (meters.length === 0) return null;
+	if (windowMeters.length === 0) return null;
+	// The per-turn budget rides beside an active window only: a turn crossing it ends early even with calls to spare.
+	const turn = status.turn;
+	const meters =
+		turn !== undefined && turn.budget > 0
+			? [{ used: turn.toolCalls, cap: turn.budget, text: `turn ${turn.toolCalls}/${turn.budget}` }, ...windowMeters]
+			: windowMeters;
 	const nearest = meters.reduce((best, meter) => (meter.used / meter.cap > best.used / best.cap ? meter : best));
 	const shown = narrow ? [nearest] : meters;
 	return {

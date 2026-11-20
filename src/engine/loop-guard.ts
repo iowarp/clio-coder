@@ -862,13 +862,6 @@ export interface CreateLoopGuardRegistrationOptions {
 	 */
 	turnToolCallBudget?: OrchTurnToolCallBudget | (() => OrchTurnToolCallBudget);
 	/**
-	 * Orchestrator only: whether a turn the soft budget ends is continued in a
-	 * new turn without the operator (yolo). The soft refusal then says a
-	 * continuation follows, so the model writes a progress note instead of a
-	 * closing summary (CLI-H1).
-	 */
-	turnBudgetContinues?: () => boolean;
-	/**
 	 * When the per-turn loop-block budget is exhausted, lock tool use for the
 	 * rest of the turn instead of cancelling it outright. Every further call is
 	 * denied with a synthesize-now directive so the model produces a final
@@ -983,7 +976,10 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	 * would cross the budget runs none of its calls, so the model never gets a
 	 * partial batch it mistakes for finished work (CLI-H1).
 	 */
-	const budgetBatchByTurn = new Map<string, { batch: string; size: number; spent: number; refused: boolean }>();
+	const budgetBatchByTurn = new Map<
+		string,
+		{ batch: string; size: number; spent: number; refused: boolean; announced: boolean }
+	>();
 	/** Per turn under a step policy: its step tool succeeded ("done"), then a second call locked the turn ("locked"). */
 	const stepByTurn = new Map<string, "done" | "locked">();
 	/**
@@ -1520,7 +1516,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		input: MiddlewareHookInput,
 		turnKey: string,
 		soft: number,
-	): { size: number; spent: number } | null => {
+	): { size: number; spent: number; announced: boolean } | null => {
 		const batch = input.correlationId;
 		const size = input.metadata?.batchSize;
 		if (batch === undefined || typeof size !== "number" || !(size > 1)) return null;
@@ -1532,7 +1528,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				if (typeof oldest !== "string") break;
 				budgetBatchByTurn.delete(oldest);
 			}
-			judged = { batch, size, spent, refused: spent < soft && spent + size > soft && size <= soft };
+			judged = { batch, size, spent, refused: spent < soft && spent + size > soft && size <= soft, announced: false };
 			budgetBatchByTurn.set(turnKey, judged);
 		}
 		return judged.refused ? judged : null;
@@ -1566,13 +1562,19 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		// attempts, then attempt hard + 1 ends the turn.
 		const firstRefusal = turnBudget.soft + 1;
 		const stopAttempt = turnBudget.hard + 1;
-		const continues = options.turnBudgetContinues?.() === true;
+		// The chat loop says whether a turn this refusal ends continues without
+		// the operator, as its settle path will decide (CLI-H1).
+		const continues = input.metadata?.turnBudgetContinues === true;
 		if (refusedBatch !== null) {
-			// The whole batch is refused, its siblings included: they were emitted
-			// before the model saw any refusal, so none of them escalates to the
-			// hard ceiling. The first refusal raises the turn's tool-budget lock.
-			if (callsThisTurn === refusedBatch.spent + 1)
+			// The whole batch is refused, its siblings included. It counts as the
+			// turn's first refusal attempt and its siblings as nothing more: they
+			// were emitted before the model saw any refusal, so they never bring a
+			// later call nearer the hard ceiling than one refused call would.
+			callsByTurn.set(turnKey, firstRefusal);
+			if (!refusedBatch.announced) {
+				refusedBatch.announced = true;
 				emitBudgetEvent(input, turnBudget, refusedBatch.spent + refusedBatch.size, false, now, bound);
+			}
 			return [
 				{
 					kind: "block_tool",

@@ -566,6 +566,28 @@ test("the footer shows the window's caps, the nearest alone when narrow, and a p
 		160,
 	);
 	match(paused, /yolo paused · Enter continues/u);
+
+	// The per-turn tool budget leads beside an active window, and is the nearest meter when narrow (CLI-H1).
+	const turn = { ...status, turn: { toolCalls: 70, budget: 73 } };
+	match(footerAt(turn, 160), /turn 70\/73 · 412\/600 calls · 38\/120 min/u);
+	match(footerAt(turn, 50), /turn 70\/73/u);
+	ok(!footerAt(turn, 50).includes("412/600"));
+	const off = footerAt({ ...turn, caps: { toolCalls: 0, minutes: 0, tokens: 0 } }, 160);
+	ok(!off.includes("turn 70/73"));
+});
+
+test("the autonomous window counts the running turn's tool calls from its start", () => {
+	const fx = windowFixture({ toolCalls: 100, minutes: 0, tokens: 0 });
+	fx.window.turnStarted();
+	fx.window.toolCall();
+	fx.window.toolCall();
+	strictEqual(fx.window.turnToolCalls(), 2);
+	fx.window.turnSettled();
+	fx.window.turnStarted();
+	strictEqual(fx.window.turnToolCalls(), 0);
+	fx.window.toolCall();
+	strictEqual(fx.window.turnToolCalls(), 1);
+	strictEqual(fx.window.usage().toolCalls, 3);
 });
 
 function gatedLoop(halt: { current: AutonomyHalt | null }) {
