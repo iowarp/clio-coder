@@ -2211,6 +2211,69 @@ describe("production compaction controls", () => {
 		strictEqual(settled?.data.callIds.length, 2, "the retry is a journaled compaction call");
 	});
 
+	// A route that accepts the summary request and then sends nothing, or stops after its first delta (CLI-P9).
+	const stallingSummary = (f: ReturnType<typeof fixture>, deltas: string[], honorAbort: boolean) => {
+		const stream: Parameters<typeof registerEngineApiProvider>[0]["stream"] = (model, context, options) => {
+			const events = createAssistantMessageEventStream();
+			void Promise.resolve(f.respond(context, options, faux.state, model)).then((message) => {
+				const partial = { ...message, content: [] };
+				events.push({ type: "start", partial });
+				for (const delta of deltas) events.push({ type: "text_delta", contentIndex: 0, delta, partial });
+				const abort = () => {
+					const aborted = { ...partial, stopReason: "aborted" as const, errorMessage: "Request was aborted" };
+					events.push({ type: "error", reason: "aborted", error: aborted });
+					events.end(aborted);
+				};
+				if (!honorAbort) return;
+				if (options?.signal?.aborted) abort();
+				else options?.signal?.addEventListener("abort", abort, { once: true });
+			});
+			return events;
+		};
+		registerEngineApiProvider({ api: faux.api, stream, streamSimple: stream });
+	};
+	for (const [label, deltas, honorAbort, failure] of [
+		["sends nothing and ignores the abort", [], false, "stall_first_token"],
+		["stops after its first delta", ["## Goal\n"], true, "stall_mid_stream"],
+	] as const) {
+		it(`fails a summary stream that ${label} at the stall window, without a retry or checkpoint (CLI-P9)`, async () => {
+			const f = fixture(true, true, true);
+			f.settings.chat.retry.streamStallMs = 40;
+			f.settings.chat.retry.firstTokenStallMs = 40;
+			stallingSummary(f, [...deltas], honorAbort);
+			const before = f.entries();
+			await rejects(f.run(), /compaction summary stream stalled/);
+			strictEqual(f.calls.length, 1, "a stalled call is not repeated as a checkpoint retry");
+			deepStrictEqual(f.entries(), before);
+			deepStrictEqual(foregroundStreamUsage(), {});
+			const [settled] = await f.journalOutcomes();
+			deepStrictEqual([settled?.data.outcome, settled?.data.failureCause], ["failed", "provider"]);
+			const [call] = await f.journalCalls();
+			strictEqual(call?.data.stop.failure, failure);
+		});
+	}
+	it("reports a caller abort as aborted while the stall watchdog is armed, and 0 leaves the stream unbounded (CLI-P9)", async () => {
+		for (const streamStallMs of [60_000, 0]) {
+			const f = fixture(true, true, true);
+			f.settings.chat.retry.streamStallMs = streamStallMs;
+			f.settings.chat.retry.firstTokenStallMs = 40;
+			stallingSummary(f, [], true);
+			const controller = new AbortController();
+			let settled = false;
+			const run = f.run(undefined, undefined, { signal: controller.signal }).finally(() => {
+				settled = true;
+			});
+			// Several 40 ms first-token windows pass; with the stall watchdog off nothing ends the call.
+			await new Promise((resolve) => setTimeout(resolve, 200));
+			strictEqual(settled, false, `streamStallMs ${streamStallMs} keeps waiting on a silent summary`);
+			strictEqual(f.calls.length, 1);
+			controller.abort();
+			await rejects(run);
+			const [outcome] = await f.journalOutcomes();
+			deepStrictEqual([outcome?.data.outcome, outcome?.data.failureCause], ["failed", "aborted"]);
+		}
+	});
+
 	it("closes a trailing unclosed fence without a second call (CLI-P5)", async () => {
 		const f = fixture(true, true, true);
 		f.response.text = `${syntheticCompactionSummary("Repair MPI exchange")}\n\`\`\`text\nopen`;

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import type { CallFailureRecord } from "../../../core/call-failure.js";
 import { trackCallFetch } from "../../../core/call-failure.js";
 import type { SideCallAuth } from "../../../core/oauth-retry.js";
@@ -42,7 +43,7 @@ import { type ContinuityProjectionInput, resolveContinuityProjection } from "../
  * boundary; this module does not import pi-ai directly.
  */
 
-import { streamSimple } from "../../../engine/ai.js";
+import { hasAssistantGenerationDelta, streamSimple } from "../../../engine/ai.js";
 import type { EngineModel, ProviderCheckpointHandle, ProviderCompactionResult, Usage } from "../../../engine/types.js";
 import { effectiveToolCall, expandChainMessages } from "../../../tools/surface.js";
 import { foldWorkingSet } from "../../context/working-set/fold.js";
@@ -260,6 +261,8 @@ export interface CompactInput extends SideCallAuth {
 	keepRecentTokens?: number;
 	/** A bound on the summary request's output cap: a chat-route summary on a small window (bt-18). */
 	summaryOutputCap?: number;
+	/** The silence each summary stream may keep before it is stopped (CLI-P9); absent, a stream waits unbounded. */
+	summaryStall?: SummaryStallWindow;
 	/**
 	 * History the cut aims to leave: the checkpoint plus the retained suffix. The summary request states the room
 	 * this leaves the checkpoint when that room is below the summary's own output room.
@@ -1143,6 +1146,91 @@ function retainReportedUsage(previous: Record<string, unknown>, raw: unknown): R
 	return known;
 }
 
+/**
+ * The silence a summary stream may keep, by the main turn's `chat.retry` rule for the compaction route (CLI-P9):
+ * `streamMs` once output has started, `firstTokenMs` before it (null: no limit before the first token). A `streamMs`
+ * of 0 never stops a stream.
+ */
+export interface SummaryStallWindow {
+	streamMs: number;
+	firstTokenMs: number | null;
+}
+
+/** The watchdog stopped a silent summary stream; the call journals it as a harness stall, the compaction as `provider`. */
+class SummaryStallError extends Error {
+	constructor(
+		readonly awaitingFirstToken: boolean,
+		idleMs: number,
+	) {
+		super(
+			`compaction summary stream stalled: no ${awaitingFirstToken ? "first token" : "output"} for ${Math.round(idleMs / 1000)}s, aborting (stream timeout); incomplete checkpoint was not saved`,
+		);
+	}
+}
+
+/**
+ * Yield `events` until they go silent past the stall window, then stop the request through `bound` and throw a
+ * `provider` failure, which the checkpoint retry never repeats (CLI-P9). Every event is progress; the first generated
+ * delta ends the first-token window, as on the main turn. The caller's own stop is left to its signal, so it still
+ * reads as aborted. `next()` is raced, so a transport that ignores the abort cannot hold the summary open.
+ */
+async function* stallWatched<T>(
+	events: AsyncIterable<T>,
+	window: SummaryStallWindow | undefined,
+	bound: AbortController,
+	callerSignal: AbortSignal | undefined,
+): AsyncGenerator<T> {
+	if (window === undefined || window.streamMs <= 0) {
+		yield* events;
+		return;
+	}
+	const iterator = events[Symbol.asyncIterator]();
+	let lastActivityAt = performance.now();
+	let started = false;
+	let stall: SummaryStallError | undefined;
+	let onStall: ((error: SummaryStallError) => void) | undefined;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const arm = (delayMs: number): void => {
+		timer = setTimeout(
+			() => {
+				timer = undefined;
+				if (callerSignal?.aborted) return;
+				const limitMs = started ? window.streamMs : window.firstTokenMs;
+				if (limitMs === null) return arm(window.streamMs);
+				const idleMs = performance.now() - lastActivityAt;
+				if (idleMs < limitMs) return arm(limitMs - idleMs);
+				stall = tagCompactionFailure(new SummaryStallError(!started, idleMs), "provider");
+				bound.abort();
+				onStall?.(stall);
+			},
+			Math.max(1, delayMs),
+		);
+	};
+	arm(window.firstTokenMs ?? window.streamMs);
+	let done = false;
+	try {
+		while (true) {
+			if (stall) throw stall;
+			const next = await new Promise<IteratorResult<T>>((resolve, reject) => {
+				onStall = reject;
+				iterator.next().then(resolve, reject);
+			});
+			onStall = undefined;
+			if (next.done) {
+				done = true;
+				return;
+			}
+			lastActivityAt = performance.now();
+			if (hasAssistantGenerationDelta(next.value)) started = true;
+			yield next.value;
+		}
+	} finally {
+		if (timer !== undefined) clearTimeout(timer);
+		// A stalled transport may never answer `return()`; `bound` already ended its request.
+		if (!done && stall === undefined) await iterator.return?.();
+	}
+}
+
 async function runSummaryStream(
 	input: CompactInput,
 	userText: string,
@@ -1284,7 +1372,7 @@ async function runSummaryRequest(
 					options as unknown as Parameters<typeof streamSimple>[2],
 				);
 		let writtenChars = 0;
-		for await (const event of events) {
+		for await (const event of stallWatched(events, input.summaryStall, bound, input.signal)) {
 			if (event.type === "text_delta" || event.type === "thinking_delta") {
 				writtenChars += event.delta.length;
 				input.onSummaryOutput?.({
@@ -1342,6 +1430,13 @@ async function runSummaryRequest(
 		// Whatever the request did not mark itself failed on the provider's side: the stream, its end, or the summarizer.
 		tagCompactionFailure(error, "provider");
 		failure = tracking.failure(error, input.signal?.aborted || outcome === "aborted", Object.keys(reported).length > 0);
+		// The watchdog's stop is Clio's own, named by where the stream went silent (CLI-P9).
+		if (error instanceof SummaryStallError)
+			failure = {
+				...failure,
+				stage: "harness",
+				errorClass: error.awaitingFirstToken ? "stall_first_token" : "stall_mid_stream",
+			};
 		scope.settle({ stopReason: input.signal?.aborted || outcome === "aborted" ? "aborted" : "error", failure });
 		rememberOAuthCallFailure(error, failure);
 		throw error;

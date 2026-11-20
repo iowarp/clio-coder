@@ -17,7 +17,7 @@ import { sessionPaths } from "../../../engine/session.js";
 import type { AgentMessage, EngineModel } from "../../../engine/types.js";
 import type { MemoryRuntime } from "../../memory/runtime.js";
 import { prepareBackgroundModelMetadata } from "../../providers/background-model-metadata.js";
-import type { ProvidersContract, ResolvedRuntimeTarget } from "../../providers/index.js";
+import type { ProvidersContract, ResolvedRuntimeTarget, RuntimeTier } from "../../providers/index.js";
 import {
 	applyModelCapabilityPatch,
 	modelEndpointKey,
@@ -37,6 +37,7 @@ import type { SessionContract } from "../contract.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../entries.js";
 import { withProviderCheckpointMeasurements } from "../entries.js";
 import { observationCheckpoint, observationSourceUnits } from "../memory-source.js";
+import { firstTokenStallLimitMs } from "../retry.js";
 import { filterEntriesToActivePath } from "../tree/active-path.js";
 import { serializeConversation } from "./branch-summary.js";
 import {
@@ -96,6 +97,8 @@ export interface CompactionResolution extends SideCallAuth {
 	freeRule?: ResolvedRuntimeTarget["freeRule"];
 	targetId: string;
 	runtimeId: string;
+	/** The summarizer route's tier, which sets its first-token stall window (CLI-P9). */
+	runtimeTier?: RuntimeTier;
 	endpointKey: string | null;
 	wireModelId: string;
 	headers?: Record<string, string>;
@@ -174,6 +177,7 @@ async function resolveCompactionModel(
 		...pricingBasisFields(route),
 		targetId: route.targetId,
 		runtimeId: route.runtime.id,
+		...(route.runtime.tier !== undefined ? { runtimeTier: route.runtime.tier } : {}),
 		wireModelId: route.wireModelId,
 		endpointKey: modelEndpointKey(route.target, route.wireModelId),
 		...sideAuth,
@@ -349,6 +353,11 @@ export async function runCompactionFlow(
 				},
 				...(summarize ? { summarize } : {}),
 				onCall: (call) => calls.push(call),
+				// The main turn's stall rule, on the summarizer's own route (CLI-P9).
+				summaryStall: {
+					streamMs: settings.chat.retry.streamStallMs,
+					firstTokenMs: firstTokenStallLimitMs(settings.chat.retry, resolved.runtimeTier),
+				},
 				model: resolved.model,
 				...(systemPrompt !== undefined ? { systemPrompt } : {}),
 				...(resolved.headers !== undefined ? { headers: resolved.headers } : {}),

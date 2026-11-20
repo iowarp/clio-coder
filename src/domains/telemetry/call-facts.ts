@@ -110,6 +110,9 @@ function failureCause(failure: Record<string, unknown>): FailureCause | undefine
 		case "parent_cancel":
 		case "loop_guard":
 		case "oversized_tool_result":
+		// A compaction summary's stall watchdog (CLI-P9).
+		case "stall_first_token":
+		case "stall_mid_stream":
 			return failure.stage === "harness" ? failure.errorClass : undefined;
 	}
 	const status = amount(failure.httpStatus);

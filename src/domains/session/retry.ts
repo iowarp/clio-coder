@@ -37,6 +37,7 @@ import {
 	isEngineRetryableAssistantError,
 	isHarmonyTerminalFailure,
 } from "../../engine/ai.js";
+import type { RuntimeTier } from "../providers/index.js";
 import { SESSION_COST_CEILING_REASON } from "../scheduling/budget.js";
 
 export type { RetrySettings } from "../../core/defaults.js";
@@ -53,6 +54,21 @@ export const DEFAULT_RETRY_SETTINGS: RetrySettings = {
 	streamStallMs: 180000,
 	firstTokenStallMs: 600000,
 };
+
+/**
+ * The silence a call may keep before its first token, or null for no limit. The long first-token window exists for a
+ * self-hosted server that slept and must reload and prefill cold; a hosted service has no model to load, so its first
+ * token is held to the mid-stream window and a call that never starts is reported long before a run's own timeout.
+ * The main turn's watchdog and the compaction summary's (CLI-P9) share this rule.
+ */
+export function firstTokenStallLimitMs(
+	retry: Pick<RetrySettings, "streamStallMs" | "firstTokenStallMs">,
+	tier: RuntimeTier | undefined,
+): number | null {
+	if (retry.streamStallMs <= 0 || retry.firstTokenStallMs <= 0) return null;
+	if (tier === "cloud" || tier === "subscription") return retry.streamStallMs;
+	return Math.max(retry.firstTokenStallMs, retry.streamStallMs);
+}
 
 /**
  * A self-hosted server refusing a request because the model is not resident.
