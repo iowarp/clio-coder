@@ -7,7 +7,7 @@ import { segmentUsageFromView } from "../cli/modes/json-stream.js";
 import { runHeadlessMainAgent } from "../cli/modes/print.js";
 import type { RunJsonMainSessionFrame } from "../cli/modes/run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "../cli/modes/run-json-schema.js";
-import { startRunOutput, writeRunDiagnostic } from "../cli/run-failure.js";
+import { noteMainRunV2, startRunOutput, writeRunDiagnostic } from "../cli/run-failure.js";
 import { setToolEnvAutonomy } from "../core/bash-exec.js";
 import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
@@ -1038,7 +1038,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let resumedSessionAtBoot = false;
 	if (resumeId && session && headlessResumeFailure === null) {
 		try {
-			if (requestedResume?.kind !== "picker" && requestedResume?.fork === true) session.forkFrom(resumeId);
+			// A v2 envelope names the session a fork branched from; a no-op unless --output-format json|stream-json.
+			if (requestedResume?.kind !== "picker" && requestedResume?.fork === true)
+				noteMainRunV2({ parentSessionId: session.forkFrom(resumeId).parentSessionId ?? resumeId });
 			else session.resume(resumeId);
 			resumedSessionAtBoot = true;
 		} catch (err) {

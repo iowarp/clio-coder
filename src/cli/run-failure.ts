@@ -59,6 +59,8 @@ export function writeRunDiagnostic(text: string): void {
 const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
 	[/--output-format cannot be combined with --json or --json-events/u, "flag_conflict"],
 	[/^clio-coder run: not configured: /u, "not_configured"],
+	// The orchestrator's resume refusal when another process holds the session (SPEC L3, 6.7; liveSessionRefusal).
+	[/^clio-coder run: failed to resume session \S+: session \S+ is open in another process /u, "session_live"],
 ];
 
 /** The cause of an exit-2 refusal before any work, from the diagnostics it wrote: the first that names one wins. */
@@ -150,6 +152,7 @@ export async function withRunFailureReporting(
 /** What the headless main agent tells a v2 writer directly: facts no v1 frame carries. */
 interface MainRunNoteV2 {
 	runId?: string;
+	parentSessionId?: string;
 	usage?: RunUsageV2;
 	sessionReadyMs?: number;
 }
@@ -176,9 +179,15 @@ export function runResultV2Active(): boolean {
 }
 
 /** Hand the v2 writer the run id, the folded usage or the moment the session was ready; a no-op for v1 runs. */
-export function noteMainRunV2(note: { runId?: string; usage?: RunUsageV2; sessionReady?: true }): void {
+export function noteMainRunV2(note: {
+	runId?: string;
+	usage?: RunUsageV2;
+	sessionReady?: true;
+	parentSessionId?: string;
+}): void {
 	if (v2Started === null) return;
 	if (note.runId !== undefined) mainRunNote.runId = note.runId;
+	if (note.parentSessionId !== undefined) mainRunNote.parentSessionId = note.parentSessionId;
 	if (note.usage !== undefined) mainRunNote.usage = note.usage;
 	if (note.sessionReady === true && mainRunNote.sessionReadyMs === undefined)
 		mainRunNote.sessionReadyMs = Math.round(performance.now() - v2Started);
@@ -393,6 +402,9 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			mode: request.mode,
 			...(runId !== undefined ? { runId } : {}),
 			...(session?.id !== undefined ? { sessionId: session.id } : {}),
+			...(mainRunNote.parentSessionId !== undefined && mainRunNote.parentSessionId !== session?.id
+				? { parentSessionId: mainRunNote.parentSessionId }
+				: {}),
 			...(request.agentId !== undefined ? { agentId: request.agentId } : {}),
 			pid: process.pid,
 			cwd: process.cwd(),
