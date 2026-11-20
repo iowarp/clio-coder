@@ -18,6 +18,7 @@ import type {
 import {
 	RUN_RESULT_SCHEMA_VERSION,
 	type RunCauseCode,
+	type RunDispatchedRunV2,
 	type RunExitFact,
 	type RunLimitsV2,
 	type RunResultEnvelopeV2,
@@ -214,6 +215,20 @@ export function runTextSummaryRequested(): boolean {
 	return textSummary;
 }
 let mainRunNote: MainRunNoteV2 = {};
+/** CLI-5: dispatched failures a later dispatch of the same task delivered, for the envelope's `dispatch.superseded`. */
+let supersededRuns: RunDispatchedRunV2[] = [];
+
+/** Hand the v2 writer the superseded dispatched failures; a no-op for v1 runs. */
+export function noteDispatchSupersededV2(runs: ReadonlyArray<RunJsonDispatchedRunOutcome>): void {
+	if (v2Started === null) return;
+	supersededRuns = runs.map((run) => ({
+		runId: run.runId,
+		agentId: run.agentId,
+		...(run.outcome !== null ? { outcome: run.outcome } : {}),
+		...(run.outcomeCode !== null ? { outcomeCode: run.outcomeCode } : {}),
+		...(run.outcomeDetail !== null ? { outcomeDetail: run.outcomeDetail } : {}),
+	}));
+}
 /** `--dry-run`: the plan the v2 envelope carries with outcome `previewed` (CLI-L4). */
 let runPlan: Readonly<Record<string, unknown>> | undefined;
 
@@ -469,6 +484,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	v2StreamJson = request.format === "stream-json";
 	heldSteer = [];
 	mainRunNote = {};
+	supersededRuns = [];
 	structuredNote = undefined;
 	runPlan = undefined;
 	let written = false;
@@ -524,7 +540,12 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 				: {}),
 			...(usage !== undefined ? { usage } : {}),
 			verify: { requested: request.verify.length, checks: verifyChecksV2(request.verify, seen.verify, skipReason) },
-			dispatch: { runs: seen.receipt !== undefined ? [seen.receipt] : [], live: seen.live, undelivered: seen.undelivered },
+			dispatch: {
+				runs: seen.receipt !== undefined ? [seen.receipt] : [],
+				live: seen.live,
+				undelivered: seen.undelivered,
+				...(supersededRuns.length > 0 ? { superseded: supersededRuns } : {}),
+			},
 			timings,
 			...(limits !== undefined ? { limits } : {}),
 			...(previewed && runPlan !== undefined ? { plan: runPlan } : {}),

@@ -62,6 +62,31 @@ describe("headless dispatched runs", () => {
 			["live"],
 		);
 	});
+	it("keeps a failure a later dispatch of the same task delivered undelivered in v1 and superseded under v2 (CLI-5)", async () => {
+		const at = (id: string, outcome: RunOutcome, startedAt: string, task = "fix the parser") =>
+			({ ...run(id, outcome), task, startedAt }) as RunEnvelope;
+		const runs = [
+			at("first", "failed", "2026-09-30T00:00:01.000Z"),
+			at("reworded", "failed", "2026-09-30T00:00:02.000Z", "fix the parser, again"),
+			at("replacement", "succeeded", "2026-09-30T00:00:03.000Z"),
+			at("after", "failed", "2026-09-30T00:00:04.000Z"),
+		];
+		const v1 = await settleDispatchedRuns({ listRuns: () => runs }, ROOT, () => false);
+		deepStrictEqual(
+			v1.undelivered.map((entry) => entry.id),
+			["first", "reworded", "after"],
+		);
+		deepStrictEqual(v1.superseded, []);
+		const v2 = await settleDispatchedRuns({ listRuns: () => runs }, ROOT, () => false, { supersede: true });
+		deepStrictEqual(
+			v2.undelivered.map((entry) => entry.id),
+			["reworded", "after"],
+		);
+		deepStrictEqual(
+			v2.superseded.map((entry) => entry.id),
+			["first"],
+		);
+	});
 });
 
 it("reports the no-work reason on the headless failure line", () => {

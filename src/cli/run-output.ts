@@ -66,10 +66,15 @@ export function verifierVerdict(receipt: RunResult): { verdict: string; failedCh
 	return { verdict: report.data.verdict, failedChecks: failedChecks(report.data.checks) };
 }
 
-/** Code-step checks that ran and failed, which print under Failed checks rather than as unverified. */
+/**
+ * Checks that ran and failed, which print under Failed checks rather than as unverified: a code step's checks that
+ * ran, and a mutation report's failed validations, since its contract lists only executed checks there and names the
+ * ones it did not run under declaredChecks (CLI-6).
+ */
 function executedCodeFailures(receipt: RunResult): string[] {
 	const report = sealedReport(receipt);
-	return report?.kind === "code-report" ? failedChecks(report.data.checks, true) : [];
+	if (report?.kind === "code-report") return failedChecks(report.data.checks, true);
+	return report?.kind === "mutation-report" ? failedChecks(report.data.validations) : [];
 }
 
 /** DF-6: project only contract fields from the sealed result, never infer limits from narration. */
@@ -79,7 +84,7 @@ function sealedResultLimitations(receipt: RunResult): string[] {
 	const { kind, data } = report;
 	switch (kind) {
 		case "mutation-report":
-			return [...strings(data.declaredChecks), ...failedChecks(data.validations)];
+			return strings(data.declaredChecks);
 		case "code-report":
 			// A check that ran and failed is a failure, not a gap; a report sealed before `ran` keeps every failure here.
 			return failedChecks(data.checks, false);

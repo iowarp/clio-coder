@@ -1,6 +1,7 @@
 import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { prefixHeadlessFailure, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
+import { withRunResultV2 } from "../../src/cli/run-failure.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { CITATION_CHECK_PREFIX } from "../../src/domains/safety/citation-grounding.js";
 import type { ChatLoopRunSnapshot } from "../../src/session-control/chat-loop.js";
@@ -259,4 +260,84 @@ test("a dispatch whose worker started and failed is not reported as never starte
 	} finally {
 		env.restore();
 	}
+});
+
+/** A headless run whose answer ends on a call it only wrote out, as the turn runtime stamps it; v2 when `format` is set. */
+async function writtenCallRun(format?: "json"): Promise<{ code: number; stdout: string; stderr: string }> {
+	let handler: (event: unknown) => void = () => {};
+	const reply = {
+		...answerMessage(
+			'The file holds 50 data rows.\n<tool_call>{"name":"read","arguments":{"path":"data.csv"}}</tool_call>',
+		),
+		clioCoderWrittenCalls: ["read"],
+	};
+	const stub: Record<string, unknown> = {
+		onEvent: (next: (event: unknown) => void) => {
+			handler = next;
+			return () => {};
+		},
+		getSessionId: () => null,
+		submit: async () => {
+			handler({ type: "agent_start" });
+			handler({ type: "message_end", message: reply });
+			handler({ type: "turn_end", message: reply, toolResults: [] });
+			handler({ type: "agent_end", messages: [reply] });
+		},
+		whenSettled: async () => {},
+		lastRunSnapshot: () => null,
+		isStreaming: () => false,
+	};
+	const chat = new Proxy(stub, { get: (target, key) => (key in target ? target[key as string] : undefined) });
+	const stdout: string[] = [];
+	const stderr: string[] = [];
+	const write = process.stdout.write;
+	const writeError = process.stderr.write;
+	process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+		stdout.push(String(chunk));
+		for (const argument of rest) if (typeof argument === "function") argument();
+		return true;
+	}) as typeof process.stdout.write;
+	process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+		stderr.push(String(chunk));
+		return true;
+	}) as typeof process.stderr.write;
+	const run = () =>
+		runHeadlessMainAgent(
+			chat as never,
+			{
+				prompt: "How many rows?",
+				mode: format === undefined ? "text" : "json",
+				...(format !== undefined ? { jsonEvents: "full" as const } : {}),
+				shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
+			} as never,
+		);
+	try {
+		const code = format === undefined ? await run() : await withRunResultV2({ format, mode: "main", verify: [] }, run);
+		return { code, stdout: stdout.join(""), stderr: stderr.join("") };
+	} finally {
+		process.stdout.write = write;
+		process.stderr.write = writeError;
+	}
+}
+
+// Last in the file: the v2 writer keeps its started mark for the rest of the process.
+test("an answer ending on a written call stays exit 0 in v1 and fails as no_answer under v2 (CLI-13)", async (t) => {
+	const env = await isolateClioEnv("headless-written-call-");
+	t.after(() => env.restore());
+	const v1 = await writtenCallRun();
+	strictEqual(v1.code, 0, v1.stderr);
+	strictEqual(v1.stdout, "The file holds 50 data rows.\n");
+	match(v1.stderr, /The answer ends on a written read call/u);
+	const v2 = await writtenCallRun("json");
+	strictEqual(v2.code, 1, v2.stderr);
+	const envelope = JSON.parse(v2.stdout.trim().split("\n").at(-1) ?? "{}") as {
+		outcome?: string;
+		exitCode?: number;
+		causes?: Array<{ code: string; message?: string }>;
+	};
+	strictEqual(envelope.outcome, "failed");
+	strictEqual(envelope.exitCode, 1);
+	strictEqual(envelope.causes?.[0]?.code, "no_answer");
+	match(envelope.causes?.[0]?.message ?? "", /written read call/u);
+	strictEqual(v2.stderr.split("written read call").length - 1, 1, v2.stderr);
 });

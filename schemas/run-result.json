@@ -106,7 +106,8 @@
 			"properties": {
 				"runs": { "type": "array", "items": { "type": "object" } },
 				"live": { "type": "array", "items": { "type": "object" } },
-				"undelivered": { "type": "array", "items": { "type": "object" } }
+				"undelivered": { "type": "array", "items": { "type": "object" } },
+				"superseded": { "type": "array", "items": { "type": "object" } }
 			}
 		},
 		"timings": {

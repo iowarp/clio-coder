@@ -362,6 +362,37 @@ test("headless human output lists a code check that ran and failed as failed, no
 		human,
 	);
 	ok(human.includes(" failed_checks=1 verification=unverified not_verified=2 "), human);
+	// CLI-6: a mutation report lists only executed checks in validations, so a failed one is a failure, not a gap.
+	const report = {
+		mutatedPaths: ["a.js"],
+		validations: [
+			{ name: "npm test", passed: false, evidence: "exit 1" },
+			{ name: "red first", passed: false, evidence: "exit 1", baseline: true },
+		],
+		declaredChecks: ["lint: no execution authority"],
+	};
+	const mutation = formatDispatchHumanOutput("", {
+		runId: "r",
+		agentId: "coder",
+		exitCode: 0,
+		targetId: "t",
+		wireModelId: "m",
+		startedAt: "2026-01-01T00:00:00Z",
+		endedAt: "2026-01-01T00:00:01Z",
+		spend: { totalTokens: unknown, usage: { reasoning: unknown } },
+		quality: {},
+		output: {
+			state: "final",
+			truncated: false,
+			text: JSON.stringify(report),
+			structured: { kind: "mutation-report", data: report },
+		},
+	} as never);
+	ok(
+		mutation.includes("Failed checks:\n- npm test: exit 1\n\nNot verified:\n- lint: no execution authority\n"),
+		mutation,
+	);
+	ok(mutation.includes(" failed_checks=1 verification=unverified not_verified=1 "), mutation);
 });
 
 test("headless human output exposes a sealed coder limitation between narration and receipt", async (t) => {

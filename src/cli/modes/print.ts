@@ -97,6 +97,7 @@ import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from
 const PERMISSION_REQUIRED_EXIT_CODE = 3;
 
 import {
+	noteDispatchSupersededV2,
 	noteMainRunV2,
 	noteRunEndWritten,
 	noteSteerV2,
@@ -1598,8 +1599,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// Detached workers outlive the turn but not the process, so wait for them
 	// while a deadline can still fire.
 	const settlement: DispatchedRunsSettlement = options.dispatch
-		? await settleDispatchedRuns(options.dispatch, runId, () => termination.isShuttingDown())
-		: { live: [], undelivered: [] };
+		? await settleDispatchedRuns(options.dispatch, runId, () => termination.isShuttingDown(), {
+				supersede: runResultV2Active(),
+			})
+		: { live: [], undelivered: [], superseded: [] };
+	if (settlement.superseded.length > 0) noteDispatchSupersededV2(settlement.superseded.map(projectDispatchedRunOutcome));
 	if (mode === "json" && (settlement.live.length > 0 || settlement.undelivered.length > 0)) {
 		writeJsonHeader(true);
 		writeMainFrame({
@@ -1751,6 +1755,14 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			};
 			stderrMessage = failureMessage;
 		}
+		// CLI-13, schema v2 only: an answer that ends on calls it only wrote out did not finish (the turn-ending reading
+		// `call_not_run`), so it fails as `no_answer`, which outranks noop and limitation (SPEC 6.5). v1 keeps exit 0.
+		const callsNotRunFail = result.callsNotRun !== null && !result.sawTerminatingToolResult && runResultV2Active();
+		if (callsNotRunFail) {
+			const failureMessage = `clio-coder run: ${result.callsNotRun}`;
+			terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage, outcomeDetail: "no_answer" };
+			stderrMessage = failureMessage;
+		}
 		if (terminal.exitCode === 0 && settlement.undelivered.length > 0) {
 			const failureMessage = `clio-coder run: ${settlement.undelivered.length} dispatched worker(s) did not deliver: ${describeRuns(settlement.undelivered)}`;
 			terminal = {
@@ -1794,7 +1806,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			if (notice !== null) stderrMessage = [stderrMessage, notice].filter(Boolean).join("\n");
 		}
 		// The answer stands, so the run still succeeds; the caller still learns that its last calls never ran.
-		if (result.callsNotRun !== null && !result.sawTerminatingToolResult) {
+		if (result.callsNotRun !== null && !result.sawTerminatingToolResult && !callsNotRunFail) {
 			stderrMessage = [stderrMessage, `clio-coder run: ${result.callsNotRun}`].filter(Boolean).join("\n");
 		}
 	}
