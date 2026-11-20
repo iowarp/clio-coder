@@ -181,7 +181,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	},
 	[ToolNames.Data]: {
 		objective:
-			"Inspect, select, validate, or summarize tabular and scientific data (CSV/TSV, JSON Lines, SQLite, HDF5, NetCDF, Parquet) with bounded memory and honest counts.",
+			"Inspect, select, validate, or summarize tabular and scientific data (CSV/TSV, JSON Lines, SQLite, HDF5, NetCDF, Parquet, Zarr, ADIOS2 BP) with bounded memory and honest counts.",
 		uiLabel: "Data",
 		resultSizePolicy: observePolicy(
 			DATA_OBSERVATION_SELF_CAP_BYTES,
