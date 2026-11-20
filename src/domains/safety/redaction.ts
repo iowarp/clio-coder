@@ -134,15 +134,16 @@ function redactUnlessEnvReference(match: string, prefix: string, secret: string)
 // The name match stays broad, since a missed secret leaks and a false positive only hides a value (SF-6). A name holding a
 // password, passphrase, secret, credential, auth or singular token word, glued or not, redacts every value that is not a
 // variable reference, whatever its shape; so does one holding access, api or private. A name whose only secret word is a
-// `pass` or `pwd` of PASS_KEY_WORDS, as `DB_PASS` and `MYSQL_PWD` are, also names counters such as `n_pass=0` and paths, so
-// it shows only a value that is plainly not a credential: up to six digits, or a path opening with `/` or `~`. Every other
-// value hides whatever its length, so `DB_PASS=hunter2` stays hidden. A name whose secret word is key
+// `pass` or `pwd` of PASS_KEY_WORDS, as `DB_PASS` and `MYSQL_PWD` are, also names counters such as `n_pass=0`, so it shows
+// only up to six digits. Every other value hides whatever its length or shape, paths included, so `DB_PASS=hunter2` and
+// `MYSQL_PWD=/randomPW42` stay hidden, and a shown value never holds a nested `name=value`. Bare `PWD` and `OLDPWD` are not
+// such names, since the `pwd` word needs a `_` or `-` ahead of it. A name whose secret word is key
 // or a plural count such as tokens shows a value no credential takes: up to six digits, or a short lowercase word or
 // identifier without digits, as in `key=value`, `sort_key=name` or `max_tokens=128`.
 const STRICT_ASSIGNMENT_NAME_RE =
 	/PASS(?:WD|WORD|PHRASE)|SECRET|CREDENTIAL|AUTH|ACCESS|API|PRIVATE|TOKEN(?!S(?![A-Z]))/iu;
 const PASS_ASSIGNMENT_NAME_RE = new RegExp(PASS_KEY_WORDS, "u");
-const PLAIN_PASS_VALUE_RE = /^(?:\d{1,6}|[/~].*)$/u;
+const PLAIN_PASS_VALUE_RE = /^\d{1,6}$/u;
 const SHAPED_ASSIGNMENT_NAME_RE = /KEY|TOKENS/iu;
 const PLAIN_ASSIGNMENT_VALUE_RE = /^(?:\d{1,6}|[a-z][a-z_]{0,15})$/u;
 

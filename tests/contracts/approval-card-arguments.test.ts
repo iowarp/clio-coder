@@ -145,11 +145,14 @@ describe("approval card arguments of an uncurated tool", () => {
 			["key=value", true],
 			["sort_key=name", true],
 			["max_tokens=128", true],
-			// FX-34: a pass/pwd name shares the evidence key words and shows only a short number or a path.
+			// FX-34: a pass/pwd name shares the evidence key words and shows only a short number; bare PWD and OLDPWD are not such names.
 			["MYSQL_PWD=hunter2hunter2", false],
 			["DBPASS=hunter2hunter2", false],
 			["DB_PASS=hunter2", false],
 			["db-pass=example-fixture-42", false],
+			["DB_PASS=/tmp/token=hunter2", false],
+			["MYSQL_PWD=/randomPW42", false],
+			["OLDPWD=/home/b", true],
 			["PWD=/home/a", true],
 			["pass=0", true],
 			["n_pass=3", true],
