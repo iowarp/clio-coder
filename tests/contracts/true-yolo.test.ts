@@ -765,11 +765,21 @@ test("a bare sourced name resolves on the PATH bash commands run with, from the 
 });
 
 // Fix queue row 215: a scanned script's child the floor cannot place or read goes to the safety judge, never refused.
-test("a script child the floor cannot place or read is judged at contained yolo and runs at unconfined yolo", () => {
+test("a script child the floor cannot place or read is judged at contained yolo and runs at unconfined yolo", (t) => {
 	const cwd = workspace("clio-yolo-script-unplaced-");
 	writeFileSync(join(cwd, "env.sh"), 'source "$NVM_DIR/nvm.sh"\nnvm use 22\n');
 	writeFileSync(join(cwd, "lib.sh"), "echo ok\n");
 	writeFileSync(join(cwd, "plain.sh"), "source ./lib.sh\n");
+	writeFileSync(join(cwd, "procsub.sh"), "source <(cat lib.sh)\n");
+	writeFileSync(join(cwd, "loopcd.sh"), 'for d in sub; do cd "$d"; done\nsource ./child.sh\n');
+	mkdirSync(join(cwd, "sub"));
+	writeFileSync(join(cwd, "sub", "child.sh"), "echo ok\n");
+	writeFileSync(join(cwd, "run.sh"), `exec "$JAVA_HOME/bin/java" "$@"\nexec ${process.execPath} app.js\n`);
+	writeFileSync(join(cwd, "version.sh"), "bash --version\nbash -euo pipefail ./lib.sh\n");
+	mkdirSync(join(cwd, "locked"));
+	writeFileSync(join(cwd, "locked", "secret.sh"), "echo ok\n");
+	chmodSync(join(cwd, "locked"), 0o000);
+	t.after(() => chmodSync(join(cwd, "locked"), 0o700));
 	const engine = engineFor(cwd);
 	// Contained yolo, the default confinement, admits at default with the operator's scope; its asks go to the judge.
 	const level = admissionAutonomy("yolo", "contained");
@@ -779,6 +789,12 @@ test("a script child the floor cannot place or read is judged at contained yolo 
 	for (const [command, unplaced] of [
 		["bash env.sh", /\$NVM_DIR\/nvm\.sh.*env\.sh line 1/u],
 		['cd "$WORK" && bash plain.sh', /plain\.sh/u],
+		["bash procsub.sh", /<\(cat lib\.sh\)/u],
+		["cat lib.sh | bash", /without naming it/u],
+		["bash -euo pipefail env.sh", /\$NVM_DIR\/nvm\.sh/u],
+		["bash loopcd.sh", /child\.sh/u],
+		["bash locked/secret.sh", /secret\.sh/u],
+		["source ~-/evil.sh", /~-\/evil\.sh/u],
 	] as const) {
 		const judged = engine.evaluate(bash(command), level, contained);
 		deepStrictEqual([judged.kind, judged.reasonCode], ["ask", "script-unplaceable"], command);
@@ -786,10 +802,32 @@ test("a script child the floor cannot place or read is judged at contained yolo 
 		// Unconfined yolo has no judge, and the ruling allows no outright refusal, so the call runs as before.
 		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).kind, "allow", command);
 	}
-	strictEqual(engine.evaluate(bash("bash plain.sh"), level, contained).kind, "allow");
+	// A program a script execs (by a dynamic path, or a binary past the byte budget) and a placed `$HOME` file are not judged.
+	for (const command of [
+		"bash plain.sh",
+		"bash run.sh",
+		"bash version.sh",
+		'source "$HOME/.venv/bin/activate" && true',
+	]) {
+		strictEqual(engine.evaluate(bash(command), level, contained).kind, "allow", command);
+	}
 	// A program run by a path the scan cannot place may be any binary, so it keeps today's rails rather than the judge.
 	const java = engine.evaluate(bash("$JAVA_HOME/bin/java -version"), level, contained);
 	notStrictEqual(java.reasonCode, "script-unplaceable");
+	// The judge route never replaces an ask the net already raised: leaving the sandbox and operator-only asks keep theirs.
+	const leaving = engine.evaluate(
+		{ tool: ToolNames.Bash, args: { command: "bash env.sh", unsandboxed: true } },
+		level,
+		contained,
+	);
+	deepStrictEqual([leaving.kind, leaving.ruleId], ["ask", "sandbox-escape"]);
+	match(leaving.reasons.join("\n"), /\$NVM_DIR\/nvm\.sh/u);
+	const library = engine.evaluate(bash('source "$X"; clio-coder library install foo'), level, contained);
+	deepStrictEqual([library.kind, library.ruleId], ["ask", "library-confirm"]);
+	// Each named child is bounded so the reason fits the judge's finding.
+	const long = engine.evaluate(bash(`source "$A${"y".repeat(600)}"; source "$B${"z".repeat(600)}"`), level, contained);
+	strictEqual(long.reasonCode, "script-unplaceable");
+	strictEqual((long.reasons[0]?.length ?? 0) <= 400, true);
 });
 
 // #421: Python lines are not shell; #407: a shell script at yolo meets only the floor.

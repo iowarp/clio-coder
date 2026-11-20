@@ -478,9 +478,18 @@ function segmentShellInvocation(segment: ReadonlyArray<string>): ShellInvocation
 			continue;
 		}
 		if (["--norc", "--noprofile", "--posix", "--login", "--restricted", "--verbose"].includes(token)) continue;
+		// `bash --version` prints and exits without running a script.
+		if (token === "--version" || token === "--help") return { kind: "none" };
 		if (token === "--rcfile" || token === "--init-file") return { kind: "opaque" };
 		if (/^[-+][a-zA-Z]+$/u.test(token)) {
-			if (!/^[-+][abCefhiklmnprstuvxBDEHILPTXc]+$/u.test(token)) return { kind: "opaque" };
+			if (!/^[-+][abCefhiklmnoprstuvxBDEHILOPTXc]+$/u.test(token)) return { kind: "opaque" };
+			// Each `o` or `O` in a cluster (`-euo pipefail`) takes the next word as its option name.
+			const named = token.slice(1).replace(/[^oO]/gu, "").length;
+			if (named > 0 && token.slice(1).includes("c")) return { kind: "opaque" };
+			for (let taken = 0; taken < named; taken += 1) {
+				const option = segment[++index];
+				if (option === undefined || option.startsWith("-") || option.startsWith("+")) return { kind: "opaque" };
+			}
 			if (token.startsWith("-") && token.slice(1).includes("c")) return { kind: "inline", script: segment[index + 1] };
 			// `-s` reads the script from standard input even with operands.
 			if (token.startsWith("-") && token.slice(1).includes("s")) return { kind: "stdin" };
@@ -527,14 +536,30 @@ export function scriptLineSources(line: string): ScriptSource[] | null {
 	return collectScriptSources(line, 0, true, sources) ? sources : null;
 }
 
+/**
+ * True when a command hands a shell a script it does not name and whose text
+ * it does not hold (row 215): one piped in, read through `-s`, a startup file
+ * or a nesting past the parse. A here-document or here-string is the
+ * command's own text, which the floor reads, so it is not one.
+ */
+export function runsUnnamedShellScript(command: string): boolean {
+	return !collectScriptSources(command, 0, false, [], true);
+}
+
 /** Options of `exec` that take the next word: `-a name`. */
 const EXEC_VALUE_OPTIONS: ReadonlySet<string> = new Set(["-a"]);
 
-function collectScriptSources(command: string, depth: number, sourced: boolean, sources: ScriptSource[]): boolean {
+function collectScriptSources(
+	command: string,
+	depth: number,
+	sourced: boolean,
+	sources: ScriptSource[],
+	inlineText = false,
+): boolean {
 	for (const segment of splitSegments(scanShellLike(command))) {
 		for (const token of segment) {
 			for (const substitution of token.substitutions ?? []) {
-				if (depth >= INNER_SHELL_MAX_DEPTH || !collectScriptSources(substitution, depth + 1, sourced, sources))
+				if (depth >= INNER_SHELL_MAX_DEPTH || !collectScriptSources(substitution, depth + 1, sourced, sources, inlineText))
 					return false;
 			}
 		}
@@ -570,10 +595,12 @@ function collectScriptSources(command: string, depth: number, sourced: boolean, 
 			if (
 				invocation.script === undefined ||
 				depth >= INNER_SHELL_MAX_DEPTH ||
-				!collectScriptSources(invocation.script, depth + 1, sourced, sources)
+				!collectScriptSources(invocation.script, depth + 1, sourced, sources, inlineText)
 			)
 				return false;
 		} else {
+			if (inlineText && segment.some((token) => token.operator && (token.value === "<<" || token.value === "<<<")))
+				continue;
 			const redirect = segment.findIndex((token) => token.operator && token.value === "<");
 			const target = redirect < 0 ? undefined : segment[redirect + 1];
 			if (target === undefined || target.operator) return false;
