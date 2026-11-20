@@ -34,6 +34,7 @@ import {
 import type { ThinkingLevel } from "../core/defaults.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
+import { canOpenBrowser } from "../core/open-browser.js";
 import { isLoopbackUrl } from "../core/project-target-urls.js";
 import { clioStateDir } from "../core/xdg.js";
 import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
@@ -1061,7 +1062,14 @@ const CREDENTIAL_STEP: Step = {
 					"Sign-in stores credentials immediately; target settings wait for Save.",
 				],
 				choices: [
-					{ value: "oauth-connect", label: "Connect now", hint: "opens your browser and waits for the sign-in" },
+					{
+						value: "oauth-connect",
+						label: "Connect now",
+						// The sign-in opens a browser only where loginOAuthRuntime can; elsewhere it prints a link and a code.
+						hint: canOpenBrowser()
+							? "opens your browser and waits for the sign-in"
+							: "no browser here; shows a link and a code to sign in on any device",
+					},
 					{
 						value: "oauth-skip",
 						label: "Later",
