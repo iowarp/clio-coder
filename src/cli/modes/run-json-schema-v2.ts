@@ -17,12 +17,15 @@ export const RUN_RESULT_SCHEMA_VERSION = 2;
 /**
  * Every cause code, in precedence order. The first fact present sets the exit code; `causes[]` lists every fact,
  * winner first. `not_started` covers a request refused before any work (usage, configuration, admission), and
- * `run_failed` a failure no narrower code names.
+ * `run_failed` a failure no narrower code names. `flag_conflict` and `not_configured` are the two pre-work refusals
+ * with a narrower name of their own.
  */
 const CAUSE_ORDER = [
 	"interrupted",
 	"deadline",
 	"reader_closed",
+	"flag_conflict",
+	"not_configured",
 	"not_started",
 	"unscripted",
 	"permission_required",
@@ -90,6 +93,8 @@ function exitCodeFor(cause: RunCause): number {
 			return EXIT_CODES.deadline;
 		case "reader_closed":
 			return EXIT_CODES.readerClosed;
+		case "flag_conflict":
+		case "not_configured":
 		case "not_started":
 			return EXIT_CODES.notStarted;
 		case "unscripted":

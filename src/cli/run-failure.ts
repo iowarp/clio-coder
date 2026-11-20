@@ -31,6 +31,8 @@ import { flushRawStdout, isStdoutDead, writeRawStdout } from "./output-guard.js"
 interface RunFailureState {
 	pending: boolean;
 	diagnostic?: string;
+	/** Every diagnostic written before output started, in order; the last one is `diagnostic`. */
+	diagnostics?: string[];
 }
 
 const runFailureState = new AsyncLocalStorage<RunFailureState>();
@@ -46,8 +48,26 @@ export function writeRunDiagnostic(text: string): void {
 	// A diagnostic can quote a failure's message, and it reaches stderr and a turn_end frame's error alike (#446).
 	const shown = redactUrlCredentials(text);
 	const state = runFailureState.getStore();
-	if (state?.pending) state.diagnostic = shown.trim();
+	if (state?.pending) {
+		state.diagnostic = shown.trim();
+		state.diagnostics = [...(state.diagnostics ?? []), state.diagnostic];
+	}
 	process.stderr.write(shown);
+}
+
+/** Pre-work refusals that carry a narrower cause than `not_started`, known by the diagnostic each one writes. */
+const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
+	[/--output-format cannot be combined with --json or --json-events/u, "flag_conflict"],
+	[/^clio-coder run: not configured: /u, "not_configured"],
+];
+
+/** The cause of an exit-2 refusal before any work, from the diagnostics it wrote: the first that names one wins. */
+export function startRefusalCause(diagnostics: ReadonlyArray<string>): { code: RunCauseCode; message?: string } {
+	for (const diagnostic of diagnostics) {
+		const row = START_REFUSALS.find(([pattern]) => pattern.test(diagnostic));
+		if (row !== undefined) return { code: row[1], message: diagnostic };
+	}
+	return { code: "not_started" };
 }
 
 export function startRunOutput(): void {
@@ -284,12 +304,8 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
  * The facts behind a run's exit, read from the exit code the run returned and the frames it wrote. Under v2 a
  * `--agent` worker that started (a receipt exists) and exited 2 is a failed run, not a refused one.
  */
-function exitFacts(
-	code: number,
-	seen: SeenFrames,
-	diagnostic: string | undefined,
-	request: RunResultV2Request,
-): RunExitFact[] {
+function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, request: RunResultV2Request): RunExitFact[] {
+	const diagnostic = state.diagnostic;
 	const text = seen.runEnd?.error ?? diagnostic;
 	const message = text !== undefined && text.length > 0 ? { message: text } : {};
 	const detail = seen.runEnd?.outcomeDetail ?? seen.receipt?.outcomeDetail ?? undefined;
@@ -313,10 +329,12 @@ function exitFacts(
 			];
 		case 141:
 			return [{ code: "reader_closed" }];
-		case 2:
+		case 2: {
 			if (request.mode === "agent" && seen.receipt !== undefined)
 				return [{ code: "worker_failed", exitCode: 2, ...message }];
-			return [{ code: "not_started", ...message }];
+			const refusal = startRefusalCause(state.diagnostics ?? []);
+			return [{ code: refusal.code, ...(refusal.message !== undefined ? { message: refusal.message } : message) }];
+		}
 		case 5:
 			return [{ code: "unscripted", ...message }];
 		case 3:
@@ -360,7 +378,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	let outputTarget: string | undefined;
 	const envelopeLines = (code: number, extra: RunExitFact[] = []): { lines: string; exitCode: number } => {
 		const skipReason = code === 124 ? "deadline" : signalForExitCode(code) !== null ? "interrupted" : "turn_failed";
-		const resolution = resolveRunExit([...exitFacts(code, seen, state.diagnostic, request), ...extra]);
+		const resolution = resolveRunExit([...exitFacts(code, seen, state, request), ...extra]);
 		const session = seen.session;
 		const runId = session?.runId ?? mainRunNote.runId ?? seen.receipt?.runId;
 		const usage = mainRunNote.usage;
