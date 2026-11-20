@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { stagedClient } from "./scripts/staged-client.js";
 
 // The bundle carries the Clio Coder version it was built from, which /api/meta's `clio` reads from the same file, so
 // an open window can tell when the server it talks to has moved on.
@@ -13,8 +14,9 @@ export default defineConfig({
 	define: { __CLIO_CODER_BUNDLE_VERSION__: JSON.stringify(version) },
 	logLevel: process.env.CLIO_CODER_BUILD_VERBOSE === "1" ? "info" : "warn",
 	root: fileURLToPath(new URL("./client", import.meta.url)),
-	plugins: [react()],
+	plugins: [react(), stagedClient(fileURLToPath(new URL("./dist/client", import.meta.url)))],
 	build: {
+		// stagedClient builds this into dist/client.next and renames it into place, so a served GUI never sees it empty.
 		outDir: "../dist/client",
 		emptyOutDir: true,
 		license: { fileName: "THIRD_PARTY_LICENSES.md" },
