@@ -730,6 +730,12 @@ export function planMainSandboxSpawn(
 		...workerSandboxMasks(),
 		...mainSandboxAgentMasks(),
 		...mainSandboxKerberosMasks(process.env, ["/tmp", "/var/tmp", tmpdir(), ...policy.secretRoots.scratchRoots]),
+		...(availability.backend === "bwrap"
+			? mainSandboxModuleCacheMasks(
+					["/tmp", "/var/tmp", tmpdir(), ...policy.secretRoots.scratchRoots],
+					policy.writableRoots,
+				)
+			: []),
 		...hookMasks,
 		...(configMask === null && policy.env.maskSettings === true ? settingsFileMasks() : []),
 	];
@@ -872,6 +878,52 @@ function mainSandboxKerberosMasks(
 				// Gone: nothing to mask.
 			}
 			add(real);
+		}
+	}
+	return masks;
+}
+
+/**
+ * Code caches host tools keep in a temp root and run later: tsx's `tsx-<euid>`, jiti's `jiti` and Node's default
+ * `node-compile-cache`. A contained command shares the host's temp roots, so an entry it rewrote would run outside
+ * the sandbox the next time the operator used that tool. Under bubblewrap each one in a temp root the command can
+ * write is an empty tmpfs, present or not: the command gets a private cache and the host's stays as it was. An
+ * absent one leaves an empty directory behind as the mount point, which is never swept, since removing it from the
+ * host would detach the mount in a command still running.
+ */
+function mainSandboxModuleCacheMasks(
+	tempRoots: ReadonlyArray<string>,
+	writableRoots: ReadonlyArray<string>,
+	euid: number | undefined = process.geteuid?.(),
+): SandboxMaskedPath[] {
+	const real = (entry: string): string | null => {
+		try {
+			return realpathSync(entry);
+		} catch {
+			return null;
+		}
+	};
+	const writable = writableRoots.map(real).filter((root): root is string => root !== null);
+	const roots = new Set<string>();
+	for (const root of tempRoots) {
+		const resolved = real(root);
+		if (resolved !== null && writable.some((parent) => isInside(parent, resolved))) roots.add(resolved);
+	}
+	const names = [`tsx-${euid ?? ""}`, "jiti", "node-compile-cache"].filter((name) => name !== "tsx-");
+	const masks: SandboxMaskedPath[] = [];
+	for (const root of roots) {
+		for (const name of names) {
+			const entry = path.join(root, name);
+			let stat: ReturnType<typeof lstatSync> | undefined;
+			try {
+				stat = lstatSync(entry);
+			} catch {
+				stat = undefined;
+			}
+			// A link leads the host tool to its target, so that is the directory to cover.
+			const target = stat?.isSymbolicLink() === true ? real(entry) : entry;
+			if (target === null || (stat !== undefined && !isDirectory(target))) continue;
+			if (!masks.some((mask) => mask.path === target)) masks.push({ path: target, kind: "directory" });
 		}
 	}
 	return masks;
