@@ -164,6 +164,8 @@ export function compactHelperResultLines(run: FinishedRun, integrity: RunIntegri
 				]
 			: []),
 		`  ${truncateUtf8(JSON.stringify(result.data), maxBytes, "\n[helper result preview truncated; inspect the run record for the full result]")}`,
+		// The run's own work counters: without them a helper result hides `mutations:no` on an edit task (FX-4).
+		...activityLabels(run, finishedRunTrustStatus(run, integrity)).map((label) => `  ${label}`),
 		...taskWorktreeLines(run),
 		`  Run record available on demand: ${fullRecordPointer(run.runId)}.`,
 		...skillLoadLabels(run).map((label) => `  ${label}`),
