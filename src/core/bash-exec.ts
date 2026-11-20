@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import type { Socket } from "node:net";
 import { StringDecoder } from "node:string_decoder";
 import { holdUnresolvedUserinfo, isSecretArgKey } from "../domains/safety/redaction.js";
 import { AI_AGENT_NAME } from "./agent-environment.js";
@@ -324,23 +325,45 @@ const LOGIN_ENV_ARGS = ["-lc", "env -0"];
  */
 const loginEnvCaptureRuns = (): boolean => process.platform !== "win32";
 
-/** A login bash prints its environment; null when it failed or timed out. */
+/** Keeps the pending capture's child, pipe and timer alive in the event loop; null once nothing is pending. */
+let holdLoginEnvCapture: (() => void) | null = null;
+
+/**
+ * A login bash prints its environment; null when it failed or timed out. Until a command waits on it the capture holds
+ * no event-loop handle, so a run that ends first is not kept open by it, and a still-running child dies with the process.
+ */
 function captureLoginEnv(): Promise<NodeJS.ProcessEnv | null> {
 	return new Promise<NodeJS.ProcessEnv | null>((resolve) => {
 		let stdout = "";
 		let settled = false;
+		const child = spawn(LOGIN_ENV_SHELL, LOGIN_ENV_ARGS, { env: buildToolEnv(), stdio: ["ignore", "pipe", "ignore"] });
+		// A piped stdio stream is a socket, which can be unref'd like the child.
+		const pipe = child.stdout as Socket | null;
+		const killOnExit = (): void => {
+			child.kill("SIGKILL");
+		};
 		const finish = (value: NodeJS.ProcessEnv | null): void => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
+			process.off("exit", killOnExit);
+			holdLoginEnvCapture = null;
 			resolve(value);
 		};
-		const child = spawn(LOGIN_ENV_SHELL, LOGIN_ENV_ARGS, { env: buildToolEnv(), stdio: ["ignore", "pipe", "ignore"] });
 		const timer = setTimeout(() => {
 			child.kill("SIGKILL");
 			finish(null);
 		}, LOGIN_ENV_CAPTURE_TIMEOUT_MS);
-		child.stdout?.on("data", (chunk: Buffer) => {
+		timer.unref();
+		child.unref();
+		pipe?.unref();
+		process.once("exit", killOnExit);
+		holdLoginEnvCapture = () => {
+			timer.ref();
+			child.ref();
+			pipe?.ref();
+		};
+		pipe?.on("data", (chunk: Buffer) => {
 			stdout += chunk.toString("utf8");
 		});
 		child.on("error", () => finish(null));
@@ -378,7 +401,10 @@ export function startLoginEnvCapture(): Promise<NodeJS.ProcessEnv | null> {
 }
 
 async function bashSpawnPlan(): Promise<BashSpawnPlan> {
-	const captured = await startLoginEnvCapture();
+	const capture = startLoginEnvCapture();
+	// A command waits on it now, so the capture must keep the process alive until it settles.
+	holdLoginEnvCapture?.();
+	const captured = await capture;
 	if (captured === null) return { mode: "-c", env: buildToolEnv(), source: baseToolEnv(process.env) };
 	// Captured (login-transformed) values win; keys added to process.env after
 	// the capture still flow through; the CLIO control keys are re-stripped

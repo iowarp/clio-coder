@@ -1564,7 +1564,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Every bash command this session runs carries its live level as an autonomy ceiling, and the contained pin while
 	// it runs contained yolo, so a clio-coder it starts cannot take more autonomy or less confinement than it has.
 	setToolEnvAutonomy(resolveEffectiveAutonomy, unattendedYolo);
-	void startLoginEnvCapture(); // the bash tool's login environment, shared by admission and every command
 	const skillDiscoveryEnabled = options.noSkills !== true && options.headless?.noSkills !== true;
 	let readySkillSnapshot: { key: string; count: number; skills: ReturnType<typeof modelVisibleSkills> } | undefined;
 	const getReadySkillCount = (): number => {
@@ -2156,6 +2155,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		clampThinkingLevel,
 	});
 	effectiveSettingsForDispatch = getCurrentSettings;
+	void startLoginEnvCapture(); // after getCurrentSettings: building the capture's env reads unattendedYolo
 	startSessionSettings((hook) => termination.onDrain(hook));
 	// System One: one instance for the process, fixed at startup in what it binds.
 	const currentSessionId = (): string | null => session?.current()?.id ?? null;
