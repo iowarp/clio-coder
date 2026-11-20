@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
@@ -962,6 +962,8 @@ test("/export reports a workspace file by its relative path, after a notice that
 		assert.match(shown(), /\[\/export\] exporting session session/u);
 		await pending;
 		assert.equal(existsSync(target), true);
+		// A transcript is as private as the session file it copies.
+		if (process.platform !== "win32") assert.equal(statSync(target).mode & 0o077, 0);
 		const notice = shown();
 		assert.match(notice, /\[\/export\] wrote \d+ lines to \.clio-coder\/exports\/session\.html/u);
 		assert.doesNotMatch(notice, new RegExp(workspace));

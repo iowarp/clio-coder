@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
@@ -96,6 +96,8 @@ test("export writes the branch the session is on as escaped HTML with no script,
 		const expected = join(root, ".clio-coder", "exports", `${sessionId}-2026-09-26.html`);
 		assert.match(result.lines.join("\n"), /wrote 2 requests to \.clio-coder\/exports\//);
 		assert.ok(existsSync(expected));
+		// A transcript is as private as the session file it copies.
+		if (process.platform !== "win32") assert.equal(statSync(expected).mode & 0o077, 0);
 		const html = readFileSync(expected, "utf8");
 		assert.match(html, /Compare &lt;b&gt;A&lt;\/b&gt; &amp; B/);
 		assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
