@@ -8192,10 +8192,16 @@ export function createDispatchBundle(
 				.catch((error: unknown): ReadonlyArray<WorkerHookEffect> => {
 					const hook = spec.extensionHooks?.find((entry) => entry.id === request.hookId);
 					if (hook !== undefined && hook.onError !== "block" && hook.onTimeout !== "block") return [];
-					const message = `${request.hookId} could not be evaluated (${error instanceof Error ? error.message : String(error)}); the gate fails closed`;
+					const reason = `${request.hookId} could not be evaluated (${error instanceof Error ? error.message : String(error)})`;
 					return request.point === "before_tool"
-						? [{ kind: "block_tool", reason: message }]
-						: [{ kind: "annotate_tool_result", message, severity: "warn" }];
+						? [{ kind: "block_tool", reason: `${reason}; the gate fails closed` }]
+						: [
+								{
+									kind: "annotate_tool_result",
+									message: `${reason}; the tool already ran, so its result carries this warning`,
+									severity: "warn",
+								},
+							];
 				})
 				.then((effects) => answerHook?.({ type: "hook_result", requestId: request.requestId, effects }))
 				.catch(() => {

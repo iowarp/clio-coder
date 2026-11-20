@@ -203,6 +203,7 @@ test("a turn_start hook that fails under a block policy refuses the turn, and tu
 			hooks: [
 				{ on: "turn_start", timeoutMs: 1000, onError: "block" },
 				{ on: "turn_end", timeoutMs: 1000 },
+				{ on: "after_tool", timeoutMs: 1000, onError: "block" },
 			],
 		},
 	};
@@ -249,6 +250,14 @@ test("a turn_start hook that fails under a block policy refuses the turn, and tu
 	deepStrictEqual((await turns.awaitTurnStart(runtime, "write the intro")).refusal, reason);
 	deepStrictEqual(notices, ["extension desk: turn_start hook failed: boom; it fails closed"]);
 	deepStrictEqual(outcomes, ["desk:turn_start:runtime-failed:block_turn"]);
+	// At after_tool the call already ran, so block only marks the result, and the notice says so.
+	const afterTool = registrations.find((registration) => registration.hooks.includes("after_tool"));
+	const ran = "after_tool hook failed: boom; the tool already ran, so its result carries this warning";
+	deepStrictEqual(
+		await afterTool?.evaluateAsync?.({ hook: "after_tool", toolName: "read", metadata: { resultKind: "ok" } }),
+		[{ kind: "annotate_tool_result", message: `extension desk ${ran}`, severity: "warn" }],
+	);
+	deepStrictEqual(notices.at(-1), `extension desk: ${ran}`);
 	// The runtime gone is the same failure under onError.
 	bridge.bind(null);
 	deepStrictEqual(
