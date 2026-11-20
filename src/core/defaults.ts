@@ -615,7 +615,16 @@ export interface MemorySurfaceSettings {
 	 * benefit is not. `context.memory.observations.enabled: true` still turns it on when this key is unset.
 	 */
 	observe: "off" | "on";
+	/**
+	 * Which channels deliver kept lessons. `section` is the `# Memory` section alone; `decision`, the default, adds
+	 * reminders at decision points (a failed call, a verification gap, a touched file, the turn's task); `broadcast`
+	 * adds the first-change broadcast to `decision`, off by default as a policy choice; `off` delivers nothing from the
+	 * store, and `memory_recall` still reaches every layer.
+	 */
+	delivery: MemoryDeliveryMode;
 }
+
+export type MemoryDeliveryMode = "off" | "section" | "decision" | "broadcast";
 
 export interface MemorySettings {
 	enabled: boolean;
@@ -883,7 +892,7 @@ export const DEFAULT_SETTINGS = {
 		} as DurableCompactionSettings,
 		memory: {
 			enabled: true,
-			surfaces: { observe: "off" },
+			surfaces: { observe: "off", delivery: "decision" },
 			target: null as string | null,
 			model: null as string | null,
 			thinkingLevel: "off" as ThinkingLevel,
@@ -1115,6 +1124,7 @@ context:
     enabled: true
     surfaces:
       observe: off
+      delivery: decision
     target: null
     model: null
     thinkingLevel: off

@@ -2277,13 +2277,22 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						if (!isPlainObject(memory.surfaces))
 							issues.add("context.memory.surfaces", `expected a map, got ${describe(memory.surfaces)}`);
 						else {
-							issues.unknownKeys("context.memory.surfaces", memory.surfaces, ["observe"]);
+							issues.unknownKeys("context.memory.surfaces", memory.surfaces, ["observe", "delivery"]);
 							if ("observe" in memory.surfaces) {
 								const parsed = expectEnum(issues, "context.memory.surfaces.observe", memory.surfaces.observe, [
 									"off",
 									"on",
 								] as const);
 								if (parsed !== undefined) settings.context.memory.surfaces.observe = parsed;
+							}
+							if ("delivery" in memory.surfaces) {
+								const parsed = expectEnum(issues, "context.memory.surfaces.delivery", memory.surfaces.delivery, [
+									"off",
+									"section",
+									"decision",
+									"broadcast",
+								] as const);
+								if (parsed !== undefined) settings.context.memory.surfaces.delivery = parsed;
 							}
 						}
 					}
