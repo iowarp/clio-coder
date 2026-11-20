@@ -28,7 +28,7 @@ import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js"
 import { openSession, sessionPaths } from "../../src/engine/session.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
-import { renderSessionHtml } from "../../src/interactive/export-html/index.js";
+import { renderSessionHtml, renderSessionHtmlAsync } from "../../src/interactive/export-html/index.js";
 import {
 	buildModelReplayAgentMessagesFromTurns,
 	continuityContextFromSession,
@@ -574,7 +574,7 @@ describe("continuity through real forks, replay and export", () => {
 		strictEqual(reconstruction.entry.continuity.accepted.note, NOTE_A.note);
 	});
 
-	it("labels the note in the transcript and escapes it in the HTML export", () => {
+	it("labels the note in the transcript and escapes it in the HTML export", async () => {
 		const meta = contract.create({ cwd: scratch.dir });
 		contract.append({ id: "m1", parentId: null, at: AT, kind: "user", payload: { text: "first" } });
 		contract.append({ id: "m2", parentId: "m1", at: AT, kind: "assistant", payload: { text: "second" } });
@@ -603,5 +603,16 @@ describe("continuity through real forks, replay and export", () => {
 		ok(!html.includes("<script>alert"));
 		ok(html.includes("&lt;script&gt;"));
 		ok(html.includes("&amp;"));
+		// /export converts a long session in chunks, handing the loop back between them, into the same document (TUI-10).
+		const long = Array.from({ length: 40 }, () => lines).flat();
+		let turns = 0;
+		const tick = () => {
+			turns += 1;
+			if (turns < 1000) setImmediate(tick);
+		};
+		setImmediate(tick);
+		const chunked = await renderSessionHtmlAsync({ sessionId: meta.id, exportedAt: AT, ansiLines: long });
+		ok(long.length > 512 && turns > 1);
+		ok(chunked === renderSessionHtml({ sessionId: meta.id, exportedAt: AT, ansiLines: long }));
 	});
 });
