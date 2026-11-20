@@ -12,6 +12,7 @@ import {
 import { neutralizeFraming, TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-framing.js";
 import { resolveSafeCwd } from "../core/safe-exec.js";
 import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
+import { runDeadlineRemainingMs } from "../core/termination-phase.js";
 import { ToolNames } from "../core/tool-names.js";
 import { CumulativeOutputMask } from "../domains/evidence/output-mask.js";
 import { bashObservedLines } from "./bash-observed-lines.js";
@@ -353,8 +354,12 @@ function bashTimeoutStatus(
 	timeoutMs: number,
 	printedNothing: boolean,
 	lastActiveTest: string | null,
+	requestedMs: number,
 ): string {
-	let status = `bash: this command ran past its own ${timeoutWords(timeoutMs)} timeout and was stopped.`;
+	let status =
+		requestedMs > timeoutMs
+			? `bash: this command reached the run's --timeout deadline (${timeoutWords(timeoutMs)} left of the ${timeoutWords(requestedMs)} requested) and was stopped.`
+			: `bash: this command ran past its own ${timeoutWords(timeoutMs)} timeout and was stopped.`;
 	if (printedNothing)
 		status += " It printed nothing before it was stopped (its output went elsewhere, or it was waiting).";
 	status += " The bash tool still works; the next call runs normally.";
@@ -438,7 +443,10 @@ export const bashTool: ToolSpec = {
 				message: `bash: cwd '${cwdArg}' escapes workspace root '${process.cwd()}'; use a typed tool or a project policy entry with explicit cwd`,
 			};
 		}
-		const timeout = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : 300_000;
+		const requested = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : 300_000;
+		// A headless run's --timeout bounds every wait it starts: no shell wait outlives the run (XR-12).
+		const runLeft = runDeadlineRemainingMs();
+		const timeout = runLeft === null ? requested : Math.min(requested, Math.max(1, Math.ceil(runLeft)));
 		try {
 			// Credentials are masked where output is shaped, by known value and by shape, so model context, the cap result
 			// and any offload all read the masked text. Each stream is masked once as it grows, and a progress frame holds
@@ -490,7 +498,7 @@ export const bashTool: ToolSpec = {
 			}
 			if (timedOut) {
 				const lastActiveTest = lastActivePytestTest(args.command, rawOutput);
-				const status = bashTimeoutStatus(args.command, timeout, output.length === 0, lastActiveTest);
+				const status = bashTimeoutStatus(args.command, timeout, output.length === 0, lastActiveTest, requested);
 				return {
 					kind: "error",
 					message: output.length > 0 ? `${output}\n\n${status}` : status,

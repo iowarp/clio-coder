@@ -10,3 +10,19 @@ export function terminationPhase(): TerminationPhase {
 export function setTerminationPhase(next: TerminationPhase): void {
 	phase = next;
 }
+
+let runDeadline: (() => number) | null = null;
+
+/**
+ * Milliseconds left before the headless run's `--timeout` shuts this process
+ * down, or null when no run deadline is armed. A tool clamps its own wait to it,
+ * so no wait it starts outlives the run (XR-12).
+ */
+export function runDeadlineRemainingMs(): number | null {
+	return runDeadline === null ? null : Math.max(0, runDeadline());
+}
+
+/** Armed by `clio-coder run --timeout` with its remaining-time reader; null disarms it once the run settles. */
+export function setRunDeadline(remainingMs: (() => number) | null): void {
+	runDeadline = remainingMs;
+}

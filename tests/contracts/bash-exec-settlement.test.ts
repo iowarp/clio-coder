@@ -12,6 +12,7 @@ import {
 	runBashCommand,
 } from "../../src/core/bash-exec.js";
 import { bashShellEnvironment, POSIX_BASH, resolveBashShell } from "../../src/core/bash-shell.js";
+import { setRunDeadline } from "../../src/core/termination-phase.js";
 import { bashTool } from "../../src/tools/bash.js";
 
 class DeterministicScheduler implements BashProgressScheduler {
@@ -151,6 +152,19 @@ describe("bash abort settlement (#445)", () => {
 		if (result.kind !== "error") return;
 		match(result.message, /The host ended the run and recorded no cause\./u);
 		strictEqual(result.details?.abortCause, null);
+	});
+
+	it("clamps timeout_ms to the run's remaining --timeout (XR-12)", async () => {
+		setRunDeadline(() => 300);
+		try {
+			const result = await bashTool.run({ command: "sleep 3", timeout_ms: 604_800_000 }, {});
+			strictEqual(result.kind, "error");
+			if (result.kind !== "error") return;
+			strictEqual(result.details?.outcome, "timeout");
+			match(result.message, /run's --timeout/u);
+		} finally {
+			setRunDeadline(null);
+		}
 	});
 
 	const hasSetsid = process.platform !== "win32" && spawnSync("setsid", ["--version"]).status === 0;

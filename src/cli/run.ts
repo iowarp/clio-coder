@@ -10,6 +10,7 @@ import { requirePricedRefusal, withRunOverrides } from "../core/run-overrides.js
 import { readStrictLayeredSettings, settingsSourceFor } from "../core/settings-layers.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { getTerminationCoordinator } from "../core/termination.js";
+import { setRunDeadline } from "../core/termination-phase.js";
 import { clioDataDir } from "../core/xdg.js";
 import { autonomyCeilingRefusal, yoloRootRefusal } from "../core/yolo-host.js";
 import type { isUserOriginAudienceRefusal } from "../domains/agents/spec.js";
@@ -89,11 +90,17 @@ function armRunTimeout(seconds: number): HeadlessRunDeadline {
 		Math.max(0, Math.ceil(endsAt - performance.now())),
 	);
 	timer.unref();
+	const remainingMs = () => Math.max(0, endsAt - performance.now());
+	// Tools clamp their own waits to it, so no shell wait outlives the run (XR-12).
+	setRunDeadline(remainingMs);
 	return {
 		seconds,
 		expired: () => expired,
-		settle: () => clearTimeout(timer),
-		remainingMs: () => Math.max(0, endsAt - performance.now()),
+		settle: () => {
+			clearTimeout(timer);
+			setRunDeadline(null);
+		},
+		remainingMs,
 	};
 }
 
