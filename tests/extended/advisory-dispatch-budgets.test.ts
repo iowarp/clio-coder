@@ -34,11 +34,12 @@ const base = {
 it("main overrides recipe recommendations and baseline, with truthful immutable round trips", () => {
 	const envelope = resolveToolBudgetEnvelope({
 		...base,
+		hardCap: 300,
 		request: { toolCalls: 100, readReserve: 10, retryRevision: { toolCalls: 200, readReserve: 20 } },
 	});
 	equal(envelope.effective.mode, "advisory");
 	equal(envelope.effective.toolCalls, 100);
-	equal(envelope.effective.hardCap, 3);
+	equal(envelope.effective.hardCap, 300);
 	equal(envelope.enforcement.perTool, "advisory");
 	deepStrictEqual(cloneRunToolBudgetEnvelope(JSON.parse(JSON.stringify(envelope))), envelope);
 	ok(Object.isFrozen(envelope.effective));
@@ -359,7 +360,12 @@ describe("dispatch advisory admission and explicit authority", () => {
 		equal(workerBudgetFromEnvelope(admitted).ceiling, 50);
 		const noMaximum = { ...base, policy: { toolCalls: 50, readReserve: 5, synthesis: false }, hardCap: 400 };
 		equal(workerBudgetFromEnvelope(resolveToolBudgetEnvelope(noMaximum)).ceiling, 400);
-		equal(workerBudgetFromEnvelope(resolveToolBudgetEnvelope({ ...noMaximum, hardCap: 30 })).ceiling, 50);
+		// The operator's cap holds against the recipe's own estimate and a request alike (M6).
+		equal(workerBudgetFromEnvelope(resolveToolBudgetEnvelope({ ...noMaximum, hardCap: 30 })).ceiling, 30);
+		const raised = resolveToolBudgetEnvelope({ ...advisory, request: { toolCalls: 1000, readReserve: 2 } });
+		equal(workerBudgetFromEnvelope(raised).ceiling, 150);
+		ok(raised.reasons.some((reason) => reason.code === "global-cap-clamp"));
+		deepStrictEqual(cloneRunToolBudgetEnvelope(JSON.parse(JSON.stringify(raised))), raised);
 
 		let observed: unknown;
 		const bundle = makeDispatchBundle(dispatchStubContext(), {
@@ -376,6 +382,7 @@ describe("dispatch advisory admission and explicit authority", () => {
 					task: "Edit fixture.",
 					executionRole: "builder",
 					requestOrigin: "internal",
+					budget: { toolCalls: 1000, readReserve: 0 },
 				}),
 				/fixture launch/u,
 			);
@@ -384,7 +391,7 @@ describe("dispatch advisory admission and explicit authority", () => {
 		}
 		const spec = observed as { budget: Record<string, unknown> };
 		equal(spec.budget.mode, "advisory");
-		equal(typeof parseWorkerSpec(spec).budget.ceiling, "number");
+		equal(parseWorkerSpec(spec).budget.ceiling, DEFAULT_SETTINGS.fleet.limits.toolCallsPerRun);
 		throws(
 			() => parseWorkerSpec({ ...spec, budget: { ...spec.budget, mode: "enforced" } }),
 			/ceiling applies only to advisory budgets/u,
