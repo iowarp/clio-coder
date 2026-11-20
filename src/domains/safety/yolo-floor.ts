@@ -3,7 +3,7 @@ import path from "node:path";
 import { canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import type { DamageControlRule } from "./damage-control.js";
 import { isSameOrDescendant } from "./path-policy.js";
-import { extractCommandPathWalks, shellCommandSteps } from "./protected-artifacts.js";
+import { extractCommandPathWalks, shellCommandSteps, withoutDataHeredocBodies } from "./protected-artifacts.js";
 
 /**
  * The yolo floor (#407, #419, #421). Yolo is the operator's
@@ -95,6 +95,15 @@ const FLOOR_EXECUTABLES: ReadonlyArray<{ id: string; description: string; matche
 export interface YoloFloorHit {
 	ruleId: string;
 	reason: string;
+}
+
+/**
+ * FX-25: a quoted heredoc copied to a file is write content, not shell text. Keep its redirects and surrounding
+ * commands. If the path walk also reads the original body because it may run in this call, so does the floor.
+ */
+export function yoloFloorCommandText(command: string): string {
+	const text = withoutDataHeredocBodies(command);
+	return text !== command && extractCommandPathWalks(command).length === 1 ? text : command;
 }
 
 /** The floor rule a command's steps run, by executable name: mkfs and wipefs. */
@@ -193,9 +202,6 @@ function holdsSubstitution(command: string): boolean {
 /** A cd operand the floor's walk cannot place, standing for a cd whose directory the raw text does not say. */
 const RAW_TEXT_UNPLACED_CD = "$UNPLACED_CD";
 
-/** Most directories the byte budget charges a raw-text candidate for; the floor's walk keeps no more. */
-const RAW_TEXT_MAX_FANOUT = 32;
-
 /** Most directories a line's cds may place a raw-text candidate in before its relative cds count as unplaced. */
 const RAW_TEXT_RELATIVE_FANOUT = 8;
 
@@ -232,8 +238,9 @@ function rawCdOperand(words: ReadonlyArray<string>, at: number): string | null {
  * here-document delimiter bash reads as the end), and the piece from every floor command word on, for the floor's
  * judgments to read like commands. Every cd on the line is put in front of each candidate, so a relative delete is
  * placed where such a cd can leave the shell; a cd whose directory the text does not say adds a variant judged from
- * an unknown directory. Each candidate counts once per directory its cds can place it in. Fail-closed: a floor command quoted as data in such a line blocks
- * too. Null when the line has no such shape; `overflow` when its candidates hold more text than the floor reads.
+ * an unknown directory. Placement does not charge the budget again for text already read (XR-41). Fail-closed:
+ * a floor command quoted as data in such a line blocks too. Null when the line has no such shape; `overflow` when
+ * its candidates hold more text than the floor reads.
  */
 export function yoloFloorRawCandidates(command: string): { candidates: string[]; overflow: boolean } | null {
 	const substitution = /\$\(/u.test(command);
@@ -272,10 +279,10 @@ export function yoloFloorRawCandidates(command: string): { candidates: string[];
 		placed = placed.filter((cd) => /^cd [/~$]/u.test(cd));
 		unplacedCd = true;
 	}
-	const fanout = Math.min(fanoutOf(placed), RAW_TEXT_MAX_FANOUT);
 	const literal = placed.length === 0 ? "" : `${placed.join(" && ")} && `;
 	const prefixes = unplacedCd ? [literal, `${literal}cd ${RAW_TEXT_UNPLACED_CD} && `] : [literal];
 	const candidates = new Set<string>([stripped]);
+	const charged = new Set<string>([stripped]);
 	let bytes = stripped.length;
 	for (const words of pieces) {
 		if (words.length === 0) continue;
@@ -283,13 +290,13 @@ export function yoloFloorRawCandidates(command: string): { candidates: string[];
 		if (starts.length === 0 && !words.some((word) => /[/~$>]/u.test(word))) continue;
 		for (const start of new Set([0, 1, ...starts])) {
 			if (start >= words.length) continue;
-			for (const prefix of prefixes) {
-				const candidate = `${prefix}${words.slice(start).join(" ")}`;
-				if (candidates.has(candidate)) continue;
-				candidates.add(candidate);
-				bytes += (candidate.length + RAW_TEXT_CANDIDATE_BYTES) * fanout;
+			const text = words.slice(start).join(" ");
+			if (!charged.has(text)) {
+				charged.add(text);
+				bytes += text.length + RAW_TEXT_CANDIDATE_BYTES;
 				if (bytes > MAX_RAW_TEXT_BYTES) return { candidates: [], overflow: true };
 			}
+			for (const prefix of prefixes) candidates.add(`${prefix}${text}`);
 		}
 	}
 	return { candidates: [...candidates], overflow: false };
