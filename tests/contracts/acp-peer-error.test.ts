@@ -257,7 +257,7 @@ interface AgyFrame {
 	result?: unknown;
 }
 
-test("ACP adapter applies the agy shims: version floor, explicit capabilities, prompt append, default mode, questions, steering, sign-in", {
+test("ACP adapter applies the agy shims: version floor, explicit capabilities, prompt append, default mode, questions, tool shapes, steering, sign-in", {
 	skip: process.platform === "win32",
 }, async () => {
 	const scratch = await mkdtemp(join(tmpdir(), "clio-agy-shims-"));
@@ -336,7 +336,38 @@ test("ACP adapter applies the agy shims: version floor, explicit capabilities, p
 		strictEqual(live.run.steer?.("after the run"), false);
 		// interaction_2..4 carry an execute command, or a path or URL under kind other or none: tool calls for the
 		// mediator. interaction_5 and _6 have null or empty locations and no tool input: questions.
-		strictEqual(result.delegation.toolCallsRequested, 3);
+		strictEqual(result.delegation.toolCallsRequested, 6);
+		// agy's own shapes are judged as what they run: run_command's command line, run_workflow's script as inline
+		// Python; a tool the shims cannot map is denied by name, never as an empty bash command.
+		deepStrictEqual(
+			live.run
+				.toolCallLog()
+				.filter((entry) => entry.callId.startsWith("call_"))
+				.map(({ callId, tool, arguments: args, decision, reason }) => ({ callId, tool, args, decision, reason })),
+			[
+				{
+					callId: "call_1",
+					tool: "bash",
+					args: { command: "ls", cwd },
+					decision: "approved",
+					reason: "bash-recognized-chain",
+				},
+				{
+					callId: "call_2",
+					tool: "bash",
+					args: { command: `python3 -c 'print('\\''hi'\\'')'`, cwd },
+					decision: "denied",
+					reason: "permission_required: denied by non-stall policy (no interactive operator in delegation context)",
+				},
+				{
+					callId: "call_3",
+					tool: "agy:browser_click",
+					args: { toolName: "agy:browser_click" },
+					decision: "denied",
+					reason: "unknown ACP tool: agy:browser_click",
+				},
+			],
+		);
 		deepStrictEqual(steered, [true, true]);
 		const question = (id: string, text: string, extra: Record<string, unknown> = {}) => ({
 			questionId: id,

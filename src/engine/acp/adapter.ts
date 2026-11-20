@@ -405,14 +405,16 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				emit({ type: "clio_coder_peer_question", payload: { ...asked, answer } });
 				return agy.questionResponse();
 			}
-			if (!telemetry) return mediator.handle(params);
+			// agy's own tool shapes reach the mediator as the command or script they run.
+			const request = agy?.toolRequest(params) ?? params;
+			if (!telemetry) return mediator.handle(request);
 			const toolCall = isRecord(params) && isRecord(params.toolCall) ? params.toolCall : undefined;
 			return withTelemetryContext(
 				{
 					...telemetry.context,
 					...(typeof toolCall?.toolCallId === "string" ? { toolCallId: toolCall.toolCallId } : {}),
 				},
-				() => mediator.handle(params),
+				() => mediator.handle(request),
 			);
 		}),
 		transport.onStderr((chunk) => {

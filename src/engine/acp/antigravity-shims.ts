@@ -39,6 +39,8 @@ const MAX_QUESTION_CHARS = 2_000;
 const MAX_CHOICES = 16;
 const MAX_CHOICE_CHARS = 200;
 const MAX_WARNING_CHARS = 1_000;
+/** ACP kinds whose targets AcpToolMediator reads from `locations` and `rawInput`, so a named agy tool of one passes on. */
+const MEDIATED_KINDS = new Set(["edit", "delete", "move", "fetch", "read", "search"]);
 
 /** The request that returns agy to `default`: the stable session mode, or a `mode` session config option. */
 export type AntigravityModeReset =
@@ -87,6 +89,13 @@ export interface AntigravityShims {
 	question(params: unknown): AntigravityQuestion | null;
 	/** The answer to a question: no choice is made on the operator's behalf. */
 	questionResponse(): AcpRequestPermissionResponse;
+	/**
+	 * A tool approval with agy's own tool shape rewritten into one AcpToolMediator judges (probed on 1.5.13):
+	 * `run_command` becomes the shell command it runs, `run_workflow` the inline script it runs, a named tool of a
+	 * mediated kind passes on, and any other named tool becomes an unknown tool named `agy:<name>`, which the
+	 * mediator denies. A request without a tool name is returned unchanged.
+	 */
+	toolRequest(params: unknown): unknown;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -172,6 +181,55 @@ function bounded(text: string, chars: number): string {
 
 function shellWord(word: string): string {
 	return /^[\w@%+=:,./~-]+$/u.test(word) ? word : `'${word.replace(/'/gu, `'\\''`)}'`;
+}
+
+function rawText(raw: Record<string, unknown>, ...keys: string[]): string | undefined {
+	for (const key of keys) {
+		const value = raw[key];
+		if (typeof value === "string" && value.trim().length > 0) return value;
+	}
+	return undefined;
+}
+
+/**
+ * The shell command an agy tool call runs, or undefined when it cannot say: `run_command`'s command line, entered from
+ * its own working directory when it names one, and `run_workflow`'s script as inline Python, which the policy never
+ * reads as a plain read (always single-quoted, so the script stays one word).
+ */
+function agyCommand(name: string, raw: Record<string, unknown>): string | undefined {
+	if (name === "run_command") {
+		const command = rawText(raw, "CommandLine", "commandLine", "command");
+		if (command === undefined) return undefined;
+		const dir = rawText(raw, "Cwd", "cwd");
+		return dir === undefined ? command : `cd ${shellWord(dir)} && ${command}`;
+	}
+	if (name === "run_workflow") {
+		const script = rawText(raw, "Script", "script");
+		return script === undefined ? undefined : `python3 -c '${script.replace(/'/gu, `'\\''`)}'`;
+	}
+	return undefined;
+}
+
+/** See {@link AntigravityShims.toolRequest}. */
+function agyToolRequest(params: unknown): unknown {
+	if (!isRecord(params) || !isRecord(params.toolCall)) return params;
+	const toolCall = params.toolCall;
+	const name = typeof toolCall.name === "string" ? toolCall.name.trim() : "";
+	if (name.length === 0) return params;
+	const kind = typeof toolCall.kind === "string" ? toolCall.kind.toLowerCase() : "";
+	const raw = isRecord(toolCall.rawInput) ? toolCall.rawInput : isRecord(toolCall.args) ? toolCall.args : {};
+	const command = agyCommand(name, raw);
+	if (command === undefined && MEDIATED_KINDS.has(kind) && name !== "run_command" && name !== "run_workflow")
+		return params;
+	const base = {
+		...(toolCall.toolCallId !== undefined ? { toolCallId: toolCall.toolCallId } : {}),
+		...(typeof toolCall.title === "string" ? { title: toolCall.title } : {}),
+	};
+	const normalized =
+		command !== undefined
+			? { ...base, kind: "execute", rawInput: { command } }
+			: { ...base, kind: "other", rawInput: { toolName: `agy:${bounded(name, 64)}` } };
+	return { ...params, toolCall: normalized };
 }
 
 /** The profile flags of the launch, as given or in `--flag=value` form, with `~` already expanded by the launcher. */
@@ -317,5 +375,6 @@ export function createAntigravityShims(input: {
 			};
 		},
 		questionResponse: () => ({ outcome: { outcome: "cancelled" } }),
+		toolRequest: agyToolRequest,
 	};
 }
