@@ -1,7 +1,6 @@
+import { DISPATCH_JOB_TABLE_TEXT } from "./dispatch-jobs.js";
 import type { AgentSpec } from "./spec.js";
 import { isUserVisibleAgent, SHADOW_AGENT_OPERATOR_STAND_IN } from "./spec.js";
-
-const DEFAULT_DISPATCH_AGENT_ID = "coder";
 
 /** Shared by the fleet catalog and dispatch results so evidence guidance stays consistent. */
 export const FLEET_EVIDENCE_GUIDANCE =
@@ -38,15 +37,8 @@ export const FLEET_ANTI_CHURN_RULE =
 	"Fleet anti-churn guard: do not repeat the same target files and goal while an identical run is pending or after an unresolved identical failure; collect its result, address the failure, or change approach. Once earlier runs have settled and the operator merged, discarded, or kept their work, a new operator request may dispatch the same task again. Past session runs alone do not block a new request. If a tool guard blocks a call, report its guard name and the action it requires.";
 
 /**
- * `agent:"auto"` baselines from task text alone and cannot see the shape of a
- * probe, so the jobs it most often misroutes are named against the roster ids
- * directly below this line.
- */
-export const FLEET_SPECIALIST_ROUTING =
-	"Pick by job: supplied URLs, standards, or papers -> researcher; current ecosystems or an open-world second opinion -> world-knowledge; repository recon -> scout; run records -> provenance; tests -> tester; gates -> verifier.";
-
-/**
- * Spec-based roster used when the caller already holds normalized specs.
+ * Spec-based roster used when the caller already holds normalized specs. It
+ * leads with the job table, the one source for which recipe does which job.
  * `AgentsContract.listSpecs()` includes ACP delegation agents synthesized from
  * settings.integrations.externalAgents.entries[], which never exist as recipe files; rendering
  * from specs keeps those dispatchable targets discoverable in the fleet block.
@@ -60,9 +52,9 @@ export function renderAgentCatalogSectionsFromSpecs(input: ReadonlyArray<AgentSp
 	const shadowSpecs = specs.filter((spec) => spec.audience === "shadow");
 
 	const lines: string[] = [
+		DISPATCH_JOB_TABLE_TEXT,
 		"Clio manages a small fleet of coding agents. Recipes are Markdown files; normalized specs carry audience, category, capability, tools, skills, latency, and worker-budget hints.",
 		"Use the `dispatch` tool to invoke one by `agent_id` when delegation helps.",
-		`Default dispatch agent: ${DEFAULT_DISPATCH_AGENT_ID}.`,
 		`User-facing agents are base/custom. Shadow agents are internal helpers that run only through \`dispatch\`; \`/run\` and \`clio-coder run --agent\` refuse them, so offer an operator \`${SHADOW_AGENT_OPERATOR_STAND_IN}\` with \`--read-only\` instead.`,
 		"Prefer fast read-only agents for orientation, verification agents for gates, and workspace-edit agents only for bounded coding tasks.",
 		"When a task matches a skill named on an agent line (skills=...), prefer the recipe that binds it; its worker is told to load bound skills for the run.",

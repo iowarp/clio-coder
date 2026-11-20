@@ -4,9 +4,10 @@ import { parseWorkerContextPolicy } from "../domains/context/worker/contract.js"
 
 import { validateTagName } from "../core/store-paths.js";
 import { forbidsFileWrites } from "../core/write-prohibition.js";
+import { dispatchJobRecipe, dispatchJobWrites } from "../domains/agents/dispatch-jobs.js";
 import { parseResultSummaryMaxBytes } from "../domains/agents/result-contract.js";
 import type { AgentAutomationAuthority } from "../domains/agents/spec.js";
-import { type AgentTaskType, classifyAgentTask } from "../domains/dispatch/agent-candidates.js";
+import { classifyAgentTask } from "../domains/dispatch/agent-candidates.js";
 import { cloneDispatchBudgetRequest } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchRequest } from "../domains/dispatch/contract.js";
 import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
@@ -21,7 +22,6 @@ import { repositorySpanRefusal, scoutReadWorkspace } from "../domains/dispatch/s
 import { DISPATCH_BRIEFING_MAX_BYTES, type JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { isToolProfileName, TOOL_PROFILE_NAMES } from "./profiles.js";
 
-const DEFAULT_AGENT_ID = "coder";
 /**
  * The agent a council seats when the caller names none. Council admission pins
  * every member to the `council-read-only` tool profile, and `coder` requires a
@@ -32,50 +32,34 @@ const DEFAULT_AGENT_ID = "coder";
  */
 export const COUNCIL_DEFAULT_AGENT_ID = "scout";
 
-/**
- * Baseline recipe per task shape for `agent:"auto"`.
- *
- * The active router is supposed to upgrade this baseline, but it only engages
- * with an approved failover, an active posture, and enough quality labels to
- * score a candidate; a default install has none of those, so the baseline IS
- * the executed route. A single hard-coded baseline therefore has to be right
- * for every task shape, and `scout` (read-only reconnaissance) was wrong for
- * every mutation: "fix the bug in cache.ts" came back as findings, twice,
- * because no worker on that route may edit a file.
- *
- * The mapping keeps capability class ahead of specialization: anything that
- * has to change the tree baselines to a workspace-edit recipe, read-shaped
- * work to the read-only specialist that exists for it.
- */
-const AUTO_BASELINE_BY_TASK_TYPE: Readonly<Record<AgentTaskType, string>> = {
-	// Mutating shapes: capability class first, specialization second.
-	code_write: "coder",
-	debug: "coder",
-	refactor: "coder",
-	config: "coder",
-	test: "tester",
-	docs: "documenter",
-	// Read-only shapes.
-	code_review: "verifier",
-	research: "researcher",
-	world_knowledge: "world-knowledge",
-	code_read: "scout",
-	unknown: "scout",
-};
+/** Last-resort baseline when the job's recipe is not installed. */
+const JOB_BASELINE_FALLBACK_AGENT_ID = "scout";
 
-/** Last-resort baseline when the mapped recipe is not installed. */
-const AUTO_BASELINE_FALLBACK_AGENT_ID = "scout";
+/** The typed arguments that say a run writes: declared write scope, or the builder seat of a review or compete. */
+function declaresWrites(args: Record<string, unknown>): boolean {
+	if (args.review !== undefined || args.mode === "compete") return true;
+	const intent = args.intent;
+	if (!isRecord(intent)) return false;
+	const nonEmpty = (value: unknown) => Array.isArray(value) && value.length > 0;
+	return nonEmpty(intent.write_roots) || nonEmpty(intent.expected_outputs);
+}
 
 /**
- * Resolve the `agent:"auto"` baseline from the task text. Falls back whenever
- * the mapped recipe is not present in this install, so a trimmed recipe set
- * can never produce a dispatch against an agent id that does not resolve.
+ * The recipe an omitted or `agent:"auto"` agent resolves to: the job table's
+ * recipe for the task's job. There is no default recipe. Arguments that say
+ * the run writes (see `declaresWrites`) turn a job that writes nothing into
+ * `implement`. Falls
+ * back whenever the job's recipe is not present in this install, so a trimmed
+ * recipe set can never produce a dispatch against an agent id that does not
+ * resolve.
  */
-function autoBaselineAgentId(task: string, hasAgent?: (id: string) => boolean): string {
-	const mapped = AUTO_BASELINE_BY_TASK_TYPE[classifyAgentTask(task).taskType] ?? AUTO_BASELINE_FALLBACK_AGENT_ID;
+function jobBaselineAgentId(task: string, args: Record<string, unknown>, hasAgent?: (id: string) => boolean): string {
+	const classified = classifyAgentTask(task).job;
+	const job = declaresWrites(args) && !dispatchJobWrites(classified) ? "implement" : classified;
+	const mapped = dispatchJobRecipe(job);
 	if (hasAgent === undefined) return mapped;
 	if (hasAgent(mapped)) return mapped;
-	if (hasAgent(AUTO_BASELINE_FALLBACK_AGENT_ID)) return AUTO_BASELINE_FALLBACK_AGENT_ID;
+	if (hasAgent(JOB_BASELINE_FALLBACK_AGENT_ID)) return JOB_BASELINE_FALLBACK_AGENT_ID;
 	return mapped;
 }
 const DEFAULT_MAX_OUTPUT_BYTES = 20_000;
@@ -188,10 +172,10 @@ function dispatchRequestFromArgs(
 	const task = stringArg(args, "task");
 	if (!task) return { ok: false, message: "missing task (pass list:true to see available agents)" };
 	if (Object.hasOwn(args, "agent_id")) return { ok: false, message: "agent_id is unsupported; use agent" };
-	const requestedAgent =
-		stringArg(args, "agent") ?? (args.mode === "council" ? COUNCIL_DEFAULT_AGENT_ID : DEFAULT_AGENT_ID);
+	const requestedAgent = stringArg(args, "agent") ?? (args.mode === "council" ? COUNCIL_DEFAULT_AGENT_ID : undefined);
 	const auto = requestedAgent === "auto";
-	const agentId = auto ? autoBaselineAgentId(task, options.hasAgent) : requestedAgent;
+	const agentId =
+		auto || requestedAgent === undefined ? jobBaselineAgentId(task, args, options.hasAgent) : requestedAgent;
 	const request: DispatchRequest = {
 		agentId,
 		executionRole: requestExecutionRole({

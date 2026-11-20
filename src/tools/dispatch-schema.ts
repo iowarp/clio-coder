@@ -402,7 +402,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 						agent: Type.Optional(
 							Type.String({
 								description:
-									"Recipe id for this task: set scout/documenter explicitly in a mixed pipeline; names in task text do not select recipes, and omission inherits the batch/default recipe.",
+									"Recipe id for this task: set scout/documenter explicitly in a mixed pipeline; names in task text do not select recipes, and omission inherits the batch recipe, else the job's.",
 							}),
 						),
 						budget: Type.Optional(DispatchBudgetSchema),
@@ -464,7 +464,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 				[
 					Type.Boolean(),
 					Type.Object({
-						reviewer: Type.Optional(Type.String({ description: "Reviewer recipe id (default: verifier, read-only)." })),
+						reviewer: Type.Optional(Type.String({ description: "Reviewer recipe id (default: reviewer)." })),
 						max_cycles: Type.Optional(
 							Type.Number({ description: "Review/revise cycles before an operator decision (default 2, max 4)." }),
 						),
@@ -499,8 +499,8 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 		agent: Type.Optional(
 			Type.String({
 				description: composition.council
-					? "Recipe or configured ACP peer ID; default researcher for council."
-					: "Recipe or configured ACP peer ID; default coder.",
+					? "Recipe or configured ACP peer ID; omitted, resolved from the job (scout for council)."
+					: "Recipe or configured ACP peer ID; omitted, resolved from the job.",
 			}),
 		),
 		context: Type.Optional(WorkerContextSchema),

@@ -1,6 +1,7 @@
 /** Pure bounded agent admission, cold priors, and agent-role readiness views. */
 
 import type { ToolName } from "../../core/tool-names.js";
+import { type DispatchJob, dispatchJobRecipe } from "../agents/dispatch-jobs.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import {
 	AGENT_AUTOMATION_AUTHORITIES,
@@ -42,6 +43,8 @@ export type AgentTaskDomain = "frontend" | "backend" | "infra" | "data" | "secur
 /** Bounded task features. Raw task text never enters a decision or route history. */
 export interface AgentTaskFeatures {
 	taskType: AgentTaskType;
+	/** The job-table row this task resolves to (`dispatch-jobs.ts`). */
+	job: DispatchJob;
 	complexity: AgentTaskComplexity;
 	domain: AgentTaskDomain;
 	decomposable: boolean;
@@ -73,6 +76,28 @@ const TASK_TYPE_RULES: ReadonlyArray<readonly [AgentTaskType, RegExp]> = [
 const LEADING_READ_TASK =
 	/^(?:please\s+)?(?:read|inspect|explain|summarize|describe|map|locate|trace|look at|find where)\b/i;
 const MUTATION_REQUEST = /\b(?:write|implement|add|create|build|develop|fix|edit|change|modify|refactor|update)\b/i;
+/**
+ * A mutation asked for rather than mentioned. The verb has to open a clause, so
+ * "do not edit files" and "verify the fix" stay reports while "run the tests
+ * and fix any failures" stays a change. Writing up the report itself is not a
+ * mutation unless it names somewhere on disk to put it.
+ */
+const IMPERATIVE_MUTATION =
+	/(?:^|[.;:!?,\n]\s*|\b(?:and|then|also|please|must|should|need to|needs to)\s+)(?:implement|add|create|build(?=\s+(?:a|an|the\s+(?:new|missing))\b)|develop|fix|edit|change|modify|refactor|update|write(?!\s+(?:up\s+)?(?:(?:a|an|the|your)\s+)?(?:\w+\s+)?(?:report|summary)\b(?!\s+(?:to|into|in|on)\b)))\b/i;
+
+/**
+ * A mutation verb whose object is nothing is a prohibition. "Change nothing."
+ * opens a clause with "change", so it is removed before the imperative check;
+ * "fix it and change nothing else" still mutates through "fix". A sentence that
+ * carries an exception ("change nothing in x.ts except the limit") is kept.
+ */
+const MUTATION_PROHIBITION =
+	/(?:\b(?:change|edit|modify|touch|write|alter|update)\s+(?:nothing|no\s+(?:files?|code|sources?)|none\s+of\s+(?:it|them|the\s+\w+))\b(?:\s+else\b)?|\bleave\s+(?:(?!\b(?:and|then|but|except|also|unchanged|untouched|as[\s-]is|alone|intact)\b)[^.;,\n]){0,60}?\b(?:unchanged|untouched|as[\s-]is|alone|intact)\b)(?=(?:(?!\b(?:except|but|other\s+than|besides|apart\s+from|aside\s+from|save\s+for|beyond|unless)\b|[.!?](?:\s|$))[^;\n])*(?:[.!?](?:\s|$)|[;\n]|$))/gi;
+
+export function asksForMutation(task: string): boolean {
+	return IMPERATIVE_MUTATION.test(task.replace(MUTATION_PROHIBITION, " "));
+}
+
 const DOMAIN_RULES: ReadonlyArray<readonly [AgentTaskDomain, RegExp]> = [
 	["security", /\b(security|vulnerabilit|auth|credential|secret|cve)\b/i],
 	["frontend", /\b(ui|css|react|component|frontend|tui|overlay)\b/i],
@@ -81,12 +106,42 @@ const DOMAIN_RULES: ReadonlyArray<readonly [AgentTaskDomain, RegExp]> = [
 	["backend", /\b(api|server|endpoint|database|backend|service)\b/i],
 ];
 
+/**
+ * The job a task shape asks for. A test or debug shape is a change only when
+ * the task asks for one: "run the tests" is a check and "why does this crash"
+ * a diagnosis, while "add a test" and "fix the crash" write.
+ */
+function jobForTaskShape(taskType: AgentTaskType, mutates: boolean): DispatchJob {
+	switch (taskType) {
+		case "code_read":
+		case "unknown":
+			return "inspect";
+		case "code_review":
+			return "review";
+		case "test":
+			return mutates ? "add-tests" : "check";
+		case "debug":
+			return mutates ? "implement" : "diagnose";
+		case "docs":
+			return "docs";
+		case "research":
+			return "research";
+		case "world_knowledge":
+			return "open-world";
+		case "code_write":
+		case "refactor":
+		case "config":
+			return "implement";
+	}
+}
+
 export function classifyAgentTask(task: string): AgentTaskFeatures {
 	const text = task.trim();
 	const taskType =
 		LEADING_READ_TASK.test(text) && !MUTATION_REQUEST.test(text)
 			? "code_read"
 			: (TASK_TYPE_RULES.find(([, pattern]) => pattern.test(text))?.[0] ?? "unknown");
+	const job = jobForTaskShape(taskType, asksForMutation(text));
 	const domain = DOMAIN_RULES.find(([, pattern]) => pattern.test(text))?.[0] ?? "general";
 	const words = text.split(/\s+/u).filter(Boolean).length;
 	const complexity: AgentTaskComplexity =
@@ -96,6 +151,7 @@ export function classifyAgentTask(task: string): AgentTaskFeatures {
 	const estimatedSubtasks = Math.max(1, Math.min(4, enumerated > 1 ? enumerated : conjunctions > 0 ? 2 : 1));
 	return {
 		taskType,
+		job,
 		complexity,
 		domain,
 		decomposable: estimatedSubtasks > 1,
@@ -236,25 +292,23 @@ export function agentRouteCandidates(input: {
 	};
 }
 
+/** Tag and contract signals per task shape; the recipe itself comes from the job table. */
 const TASK_SIGNALS: Readonly<
-	Partial<
-		Record<AgentTaskType, { ids: ReadonlyArray<string>; tags: ReadonlyArray<string>; contracts: ReadonlyArray<string> }>
-	>
+	Partial<Record<AgentTaskType, { tags: ReadonlyArray<string>; contracts: ReadonlyArray<string> }>>
 > = {
-	code_read: { ids: ["scout"], tags: ["reconnaissance", "symbols", "codewiki"], contracts: ["scout-report"] },
-	research: { ids: ["researcher"], tags: ["sources", "external-context", "papers"], contracts: ["research-report"] },
+	code_read: { tags: ["reconnaissance", "symbols", "codewiki"], contracts: ["scout-report"] },
+	research: { tags: ["sources", "external-context", "papers"], contracts: ["research-report"] },
 	world_knowledge: {
-		ids: ["world-knowledge"],
 		tags: ["open-world", "ecosystem", "current-context", "second-opinion"],
 		contracts: ["world-knowledge-report"],
 	},
-	code_review: { ids: ["verifier"], tags: ["review", "verification"], contracts: ["verifier-report"] },
-	debug: { ids: ["debugger"], tags: ["debugging", "root-cause"], contracts: ["debugger-report"] },
-	test: { ids: ["verifier", "tester"], tags: ["tests", "validation", "regression"], contracts: ["verifier-report"] },
-	docs: { ids: ["documenter"], tags: ["docs", "runbooks", "examples"], contracts: ["mutation-report"] },
-	code_write: { ids: ["coder"], tags: ["implementation", "repair"], contracts: ["mutation-report"] },
-	refactor: { ids: ["coder"], tags: ["refactor", "implementation"], contracts: ["mutation-report"] },
-	config: { ids: ["coder"], tags: ["implementation", "operations"], contracts: ["mutation-report"] },
+	code_review: { tags: ["review", "verification"], contracts: ["review-verdict", "verifier-report"] },
+	debug: { tags: ["debugging", "root-cause"], contracts: ["debugger-report"] },
+	test: { tags: ["tests", "validation", "regression"], contracts: ["verifier-report"] },
+	docs: { tags: ["docs", "runbooks", "examples"], contracts: ["mutation-report"] },
+	code_write: { tags: ["implementation", "repair"], contracts: ["mutation-report"] },
+	refactor: { tags: ["refactor", "implementation"], contracts: ["mutation-report"] },
+	config: { tags: ["implementation", "operations"], contracts: ["mutation-report"] },
 };
 
 function coldPrior(features: AgentTaskFeatures, spec: AgentSpec): { prior: RoutePrior; reasons: string[] } {
@@ -263,7 +317,7 @@ function coldPrior(features: AgentTaskFeatures, spec: AgentSpec): { prior: Route
 	const signal = TASK_SIGNALS[features.taskType];
 	if (signal === undefined) return { prior, reasons };
 	const matches =
-		signal.ids.includes(spec.id) ||
+		spec.id === dispatchJobRecipe(features.job) ||
 		spec.tags.some((tag) => signal.tags.includes(tag)) ||
 		signal.contracts.includes(spec.resultContract.kind);
 	if (!matches) return { prior, reasons };
