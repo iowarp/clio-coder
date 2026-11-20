@@ -161,6 +161,8 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 			"fitReserveTokens",
 			"summaryOutputCap",
 			"summaryRoomTokens",
+			"failureCause",
+			"checkpointDefect",
 		),
 		callIds: "id",
 		checkpointTurnId: "id",

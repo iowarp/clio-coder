@@ -617,7 +617,11 @@ export function validPayload<K extends JournalEventName>(kind: K, data: unknown)
 	}
 	if (kind === "compaction.settled") {
 		const outcome = data as EventPayload<"compaction.settled">;
-		return outcome.outcome !== "committed" || outcome.checkpointTurnId !== null;
+		return (
+			(outcome.outcome !== "committed" || outcome.checkpointTurnId !== null) &&
+			(outcome.failureCause === undefined || outcome.outcome === "failed") &&
+			(outcome.checkpointDefect === undefined || outcome.failureCause === "checkpoint_format")
+		);
 	}
 	if (kind === "tool.settled") {
 		const tool = data as EventPayload<"tool.settled">;

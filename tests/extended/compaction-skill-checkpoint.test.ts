@@ -28,7 +28,7 @@ import { createEngineAgent, setEngineSystemPrompt } from "../../src/engine/agent
 import type { EngineModel } from "../../src/engine/types.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
-import { createTurnContext } from "../../src/session-control/turn-context.js";
+import { createTurnContext, OVERSIZED_RESULT_STOP } from "../../src/session-control/turn-context.js";
 import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
 import type { TurnPersistence } from "../../src/session-control/turn-persistence.js";
 import { createTurnRecovery } from "../../src/session-control/turn-recovery.js";
@@ -1387,7 +1387,14 @@ describe("typed historical skill checkpoints (pure source)", () => {
 			},
 		});
 		context.refreshAgentMessagesFromSession(runtime);
-		await rejects(context.postToolContinuationGuard(runtime), /post-tool context guard stopped continuation/);
+		// No single result is oversized, yet the compacted request still overflows: the guard's own stop, named so the turn
+		// runtime journals the harness cause oversized_tool_result at stage harness, not a stream failure (CLI-3).
+		await rejects(
+			context.postToolContinuationGuard(runtime),
+			(error: Error) =>
+				error.name === OVERSIZED_RESULT_STOP &&
+				/post-tool context guard stopped continuation before provider call/.test(error.message),
+		);
 		ok(context.liveContextEstimate(runtime).tokens > 32768);
 	});
 });

@@ -6,6 +6,7 @@ import { rememberOAuthCallFailure, withOAuthRefresh } from "../../../core/oauth-
 import { prepareProviderCheckpoint } from "../../../core/provider-checkpoint.js";
 import { ProviderCompactionError } from "../../../core/provider-checkpoint-handle.js";
 import type { CallMessageObserver } from "../../../core/telemetry/producer.js";
+import type { CheckpointDefect, CompactionFailureCause } from "../../../core/telemetry/schemas.js";
 // Direct modules, not the memory barrel: entries and compaction sit in the
 // interactive Stage 0 graph, and the barrel would pull in the whole runtime.
 import {
@@ -75,22 +76,48 @@ import { noteSummaryUsage } from "./reasoning-share.js";
 import { summaryOutputBudget, summaryOutputForRoom, summaryRoomTokens } from "./summary-output.js";
 import { type ContinuityNoteCost, calculateContextTokens, estimateTokens, getLastAssistantUsage } from "./tokens.js";
 
-/** Validate the history checkpoint, never the intentionally different split-turn prompt. */
-function validateHistorySummary(text: string): void {
-	const required = [
-		"## Goal",
-		"## Constraints & Preferences",
-		"## Progress",
-		"### Done",
-		"### In Progress",
-		"### Blocked",
-		"## Key Decisions",
-		"## Next Steps",
-		"## Critical Context",
-	];
-	const headings: string[] = [];
+/** Why a compaction failed and, for a refused checkpoint, what the validator refused (FX-6). */
+type CompactionFailure = { cause: CompactionFailureCause; defect?: CheckpointDefect };
+const compactionFailures = new WeakMap<object, CompactionFailure>();
+
+/** Mark an error with its compaction failure cause; the first mark stands. Returns the error for `throw`. */
+export function tagCompactionFailure<T>(error: T, cause: CompactionFailureCause, defect?: CheckpointDefect): T {
+	if (typeof error === "object" && error !== null && !compactionFailures.has(error))
+		compactionFailures.set(error, defect === undefined ? { cause } : { cause, defect });
+	return error;
+}
+
+/** The cause a failed `compaction.settled` journals; a stop wins, and an unmarked error is `internal`. */
+export function compactionFailureOf(error: unknown, aborted: boolean): CompactionFailure {
+	if (aborted || (error instanceof Error && error.name === "AbortError")) return { cause: "aborted" };
+	return (
+		(typeof error === "object" && error !== null ? compactionFailures.get(error) : undefined) ?? { cause: "internal" }
+	);
+}
+
+const HISTORY_HEADINGS = [
+	"## Goal",
+	"## Constraints & Preferences",
+	"## Progress",
+	"### Done",
+	"### In Progress",
+	"### Blocked",
+	"## Key Decisions",
+	"## Next Steps",
+	"## Critical Context",
+];
+
+/**
+ * Validate the history checkpoint, never the intentionally different split-turn prompt. A checkpoint with every
+ * required heading once, outside code fences, but out of order is repaired: each heading's section, through the line
+ * before the next required heading, moves into the required order, so a paid summary is not discarded for its order
+ * alone (FX-6). A missing or repeated heading or an open fence is refused.
+ */
+function checkedHistorySummary(text: string): string {
+	const lines = text.split(/\r?\n/);
+	const found: Array<{ heading: string; line: number }> = [];
 	let fence: { character: string; length: number } | undefined;
-	for (const line of text.split(/\r?\n/)) {
+	for (const [index, line] of lines.entries()) {
 		const fenceMatch = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
 		if (fenceMatch) {
 			const marker = fenceMatch[1] ?? "";
@@ -102,14 +129,29 @@ function validateHistorySummary(text: string): void {
 		const heading = /^ {0,3}(#{2,3})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
 		if (heading) {
 			const normalized = `${heading[1]} ${heading[2]}`;
-			if (required.includes(normalized)) headings.push(normalized);
+			if (HISTORY_HEADINGS.includes(normalized)) found.push({ heading: normalized, line: index });
 		}
 	}
-	if (fence || headings.length !== required.length || headings.some((heading, index) => heading !== required[index])) {
-		throw new Error(
-			"compaction returned an incomplete history checkpoint: required headings must appear in order outside code fences; checkpoint was not saved",
+	const refuse = (defect: CheckpointDefect): never => {
+		throw tagCompactionFailure(
+			new Error(
+				"compaction returned an incomplete history checkpoint: required headings must appear in order outside code fences; checkpoint was not saved",
+			),
+			"checkpoint_format",
+			defect,
 		);
-	}
+	};
+	if (fence) refuse("unclosed_fence");
+	if (found.length !== HISTORY_HEADINGS.length || new Set(found.map((entry) => entry.heading)).size !== found.length)
+		refuse("heading_set");
+	if (found.every((entry, index) => entry.heading === HISTORY_HEADINGS[index])) return text;
+	const sections = new Map(
+		found.map((entry, index) => [entry.heading, lines.slice(entry.line, found[index + 1]?.line ?? lines.length)]),
+	);
+	return [
+		...lines.slice(0, found[0]?.line ?? 0),
+		...HISTORY_HEADINGS.flatMap((heading) => sections.get(heading) ?? []),
+	].join("\n");
 }
 
 /** One invoked summary stream, including failed calls that produce no checkpoint. */
@@ -1158,8 +1200,11 @@ async function runSummaryRequest(
 		// needs more stops at the length check below and is never saved.
 		const minOutput = Math.min(maxTokens ?? 1024, 1024);
 		if (estimatedInput + minOutput > contextWindow) {
-			throw new Error(
-				`compaction estimated input ${estimatedInput} tokens plus output ${minOutput} tokens exceeds model context window ${contextWindow}; use a larger compaction model or reduce the working set`,
+			throw tagCompactionFailure(
+				new Error(
+					`compaction estimated input ${estimatedInput} tokens plus output ${minOutput} tokens exceeds model context window ${contextWindow}; use a larger compaction model or reduce the working set`,
+				),
+				"window",
 			);
 		}
 		if (maxTokens !== undefined) maxTokens = Math.min(maxTokens, contextWindow - estimatedInput);
@@ -1232,8 +1277,11 @@ async function runSummaryRequest(
 				});
 				if (ceilChars(writtenChars) > outputBound) {
 					bound.abort();
-					throw new Error(
-						`compaction summary passed its output bound of ${outputBound} tokens; incomplete checkpoint was not saved`,
+					throw tagCompactionFailure(
+						new Error(
+							`compaction summary passed its output bound of ${outputBound} tokens; incomplete checkpoint was not saved`,
+						),
+						"output_cap",
 					);
 				}
 			}
@@ -1249,11 +1297,18 @@ async function runSummaryRequest(
 				reported = retainReportedUsage(reported, usage);
 				input.signal?.throwIfAborted();
 				if (event.reason === "length" || event.message.stopReason === "length") {
-					throw new Error("compaction summary reached the model output limit; incomplete checkpoint was not saved");
+					throw tagCompactionFailure(
+						new Error("compaction summary reached the model output limit; incomplete checkpoint was not saved"),
+						"output_cap",
+					);
 				}
 				// The live prefix keeps the turn's tools declared; a model that calls one wrote no checkpoint.
 				if (prefix && event.message.content.some((block) => block.type === "toolCall")) {
-					throw new Error("compaction summarizer called a tool instead of writing the checkpoint");
+					throw tagCompactionFailure(
+						new Error("compaction summarizer called a tool instead of writing the checkpoint"),
+						"checkpoint_format",
+						"tool_call",
+					);
 				}
 				outcome = "success";
 				return { text: textFromAssistant(event.message).trim(), usage };
@@ -1268,6 +1323,8 @@ async function runSummaryRequest(
 		}
 		throw new Error("compaction stream ended without a terminal response");
 	} catch (error) {
+		// Whatever the request did not mark itself failed on the provider's side: the stream, its end, or the summarizer.
+		tagCompactionFailure(error, "provider");
 		failure = tracking.failure(error, input.signal?.aborted || outcome === "aborted", Object.keys(reported).length > 0);
 		scope.settle({ stopReason: input.signal?.aborted || outcome === "aborted" ? "aborted" : "error", failure });
 		rememberOAuthCallFailure(error, failure);
@@ -1752,9 +1809,9 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		try {
 			const liveSummary = await runSummaryStream(input, live.tail, systemPrompt, maxTokens, live.port);
 			usage = addCompactionUsage(usage, liveSummary.usage);
-			if (liveSummary.text.length === 0) throw new Error("compaction returned an empty history summary");
-			validateHistorySummary(liveSummary.text);
-			summaryParts.push(liveSummary.text);
+			if (liveSummary.text.length === 0)
+				throw tagCompactionFailure(new Error("compaction returned an empty history summary"), "checkpoint_format", "empty");
+			summaryParts.push(checkedHistorySummary(liveSummary.text));
 			liveCovered = true;
 		} catch (error) {
 			input.signal?.throwIfAborted();
@@ -1772,14 +1829,19 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	if (!liveCovered && historyText !== undefined) {
 		const historySummary = await runSummaryStream(input, historyText, systemPrompt, maxTokens);
 		usage = addCompactionUsage(usage, historySummary.usage);
-		if (historySummary.text.length === 0) throw new Error("compaction returned an empty history summary");
-		validateHistorySummary(historySummary.text);
-		summaryParts.push(historySummary.text);
+		if (historySummary.text.length === 0)
+			throw tagCompactionFailure(new Error("compaction returned an empty history summary"), "checkpoint_format", "empty");
+		summaryParts.push(checkedHistorySummary(historySummary.text));
 	}
 	if (!liveCovered && prefixText !== undefined) {
 		const prefixSummary = await runSummaryStream(input, prefixText, systemPrompt, maxTokens);
 		usage = addCompactionUsage(usage, prefixSummary.usage);
-		if (prefixSummary.text.length === 0) throw new Error("compaction returned an empty split-turn summary");
+		if (prefixSummary.text.length === 0)
+			throw tagCompactionFailure(
+				new Error("compaction returned an empty split-turn summary"),
+				"checkpoint_format",
+				"empty",
+			);
 		summaryParts.push(`**Turn Context (split turn):**\n\n${prefixSummary.text}`);
 	}
 

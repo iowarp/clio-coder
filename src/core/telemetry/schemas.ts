@@ -777,6 +777,26 @@ export const ShutdownRequestedSchema = Type.Object(
 );
 
 export const CallLinkedSchema = Type.Object({ runId: ExistingId, callId: CallIdSchema }, closed);
+/**
+ * Why a compaction settled `failed` (FX-6): stopped, its summary call failed or hit the output cap, its request did not
+ * fit the summarizer's window, the validator refused the checkpoint, admission refused it, the session moved under it,
+ * or the checkpoint could not be written.
+ */
+export const CompactionFailureCause = vocabulary([
+	"aborted",
+	"provider",
+	"output_cap",
+	"window",
+	"checkpoint_format",
+	"refused",
+	"superseded",
+	"persistence",
+	"internal",
+]);
+export type CompactionFailureCause = Static<typeof CompactionFailureCause>;
+/** What the checkpoint validator refused: no text, a tool call, a required heading missing or repeated, an open fence. */
+export const CheckpointDefect = vocabulary(["empty", "tool_call", "heading_set", "unclosed_fence"]);
+export type CheckpointDefect = Static<typeof CheckpointDefect>;
 export const CompactionSettledSchema = Type.Object(
 	{
 		callIds: Type.Array(CallIdSchema, { minItems: 1, uniqueItems: true }),
@@ -792,6 +812,10 @@ export const CompactionSettledSchema = Type.Object(
 		summaryOutputCap: Type.Optional(count),
 		/** The checkpoint room the summary request stated, when it stated one. */
 		summaryRoomTokens: Type.Optional(count),
+		/** Why a `failed` compaction failed; absent on every other outcome. */
+		failureCause: Type.Optional(CompactionFailureCause),
+		/** What the validator refused, when `failureCause` is `checkpoint_format`. */
+		checkpointDefect: Type.Optional(CheckpointDefect),
 	},
 	closed,
 );
