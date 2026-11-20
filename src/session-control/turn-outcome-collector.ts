@@ -1,6 +1,11 @@
 import { isReadOnlyCall } from "../core/read-only-calls.js";
+import { ownerTelemetryContext, type TelemetryContext } from "../core/telemetry/context.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type { SurfaceOutcome, SurfaceSettled } from "../core/telemetry/schemas.js";
 import { ToolNames } from "../core/tool-names.js";
+import { nextFiringId } from "../domains/middleware/fired-record.js";
 import type { MiddlewareHookInput, MiddlewareHookRegistration } from "../domains/middleware/index.js";
+import { hashToolCall } from "../domains/safety/loop-detector.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import { dispatchKeysFromArgs } from "../domains/turn-control/index.js";
 import { effectiveToolCall } from "../tools/surface.js";
@@ -28,6 +33,73 @@ export interface TurnOutcomeCollector extends MiddlewareHookRegistration {
 	seedClarificationStreak(value: number): void;
 	clarificationStreak(): number;
 	recordControl(record: TurnControlRecord): void;
+	/**
+	 * Start the outcome ledger on `hub`: it reads the settling firings of the session `currentSession` names off their
+	 * `middleware.fired` rows, and the loop guard's escalations, and writes one `surface.settled` per firing. A firing
+	 * joins the ledger under that session even before any hook of its turn ran (memory design 4.1, 4.6). `held` names
+	 * the firings whose effect still waits for a later request (a buffered reminder, an armed tool choice); at a turn's
+	 * end every other firing no request carried settles `suppressed`. The returned stop settles every firing still
+	 * open, as the session it belonged to is over.
+	 */
+	attachLedger(hub: TelemetryHub, currentSession: () => string | undefined, held: () => ReadonlySet<string>): () => void;
+	/**
+	 * A main request went out, journaled under `callId` or unjournaled (null). It admits the firings named in `carried`,
+	 * whose effects its composition holds, and the turn's own tool-hook firings, whose blocked result or tool choice
+	 * rides the next request of their run. Nothing else waiting is admitted.
+	 */
+	requestSent(callId: string | null, carried: ReadonlyArray<string>): void;
+	/** These firings' effects never entered a request (a spent nudge, a released buffer, an ended turn). */
+	suppressFirings(firingIds: ReadonlyArray<string>): void;
+	/**
+	 * Settle one steering triage round of either route (memory design 4.5), which acts on the queue rather than through
+	 * a request: `acted` when a verdict's relabel or interrupt applied to the queued message `applied`, `expired` when
+	 * the queue moved on before it could. A round with no verdict, or no session, fired nothing.
+	 */
+	settleTriage(sessionId: string | undefined, verdicts: ReadonlyArray<unknown>, applied: string | null): void;
+}
+
+type SettlementFact = SurfaceSettled["fact"];
+
+/** A settling firing the ledger has not settled yet (memory design 4.1). */
+interface OpenFiring {
+	firingId: string;
+	surface: string;
+	/** A block settles `recovered` or `exhausted`; anything else that settles is a nudge, `acted` or `ignored`. */
+	kind: "nudge" | "block";
+	/** Fired by a tool hook: its effect rides the next request of its own run, or none. */
+	inRun: boolean;
+	sessionId: string;
+	turnId?: string;
+	/** The blocked call's identity: its own later success is not a recovery. */
+	identity?: string;
+	admittedIn: string | null;
+	/** Admission order, so a fact credits the most recently admitted claimant; null until a request carries it. */
+	admitted: number | null;
+	/** A block's credited fact, held to the turn's end so a lockout of the same turn can still exhaust it. */
+	credit?: SettlementFact;
+	/** The loop guard escalation that ended the turn's tool use, when one did. */
+	exhausted?: string;
+}
+
+const IDENTITY_LIMIT = 64;
+
+/** A call's identity for recovery: the call it runs (a gateway call's capability) hashed as the loop guard hashes it. */
+function callIdentity(input: MiddlewareHookInput): string {
+	const call = effectiveToolCall(input.toolName ?? "", input.toolArgs, input.toolResultDetails);
+	return hashToolCall(call.toolName, call.args ?? {});
+}
+
+/**
+ * The typed fact a succeeded call states for settlement: a `finish` declaration, a check's receipt, or a non-read
+ * call's receipt. A read, a failed call and reply text state none (memory design 4.1).
+ */
+function callFact(
+	toolName: string,
+	args: Readonly<Record<string, unknown>> | undefined,
+): SettlementFact["kind"] | null {
+	if (toolName === ToolNames.Finish) return "declaration";
+	if (toolName === ToolNames.Verify) return "receipt";
+	return isReadOnlyCall(toolName, args) ? null : "receipt";
 }
 
 function emptyTurn(previousClarificationStreak: number): CollectedTurn {
@@ -73,12 +145,190 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 	let dispatched = false;
 	const succeededKeys = new Set<string>();
 	const harnessReads = new Map<string, number>();
+	// --- outcome ledger (memory design 4.1, 4.6) ---
+	let hub: TelemetryHub | null = null;
+	let currentSession: () => string | undefined = () => undefined;
+	let held: () => ReadonlySet<string> = () => new Set();
+	const open = new Map<string, OpenFiring>();
+	const identities = new Map<string, string>();
+	let admissions = 0;
+	/** The loop guard escalation that ended this turn's tool use, if one did. */
+	let turnExhausted: string | null = null;
+	const settle = (firing: OpenFiring, outcome: SurfaceOutcome, fact: SettlementFact): void => {
+		if (!open.delete(firing.firingId)) return;
+		const ctx: TelemetryContext | undefined = ownerTelemetryContext({
+			sessionId: firing.sessionId,
+			...(firing.turnId !== undefined ? { turnId: firing.turnId } : {}),
+		});
+		hub?.emit(
+			"surface.settled",
+			{ firingId: firing.firingId, surface: firing.surface, admittedIn: firing.admittedIn, outcome, fact },
+			ctx,
+		);
+	};
+	/** A firing whose turn is over: a block by how its turn ended, a nudge `ignored` for want of a typed fact. */
+	const settleEnded = (firing: OpenFiring): void => {
+		if (firing.kind === "block" && firing.exhausted !== undefined)
+			settle(firing, "exhausted", { kind: "scope-end", ref: firing.exhausted });
+		else if (firing.kind === "block" && firing.credit !== undefined) settle(firing, "recovered", firing.credit);
+		else settle(firing, "ignored", { kind: "none" });
+	};
+	/**
+	 * The admitted firings settle with the turn that carried them. A firing no request carried before its turn ended
+	 * never enters one unless its effect still waits in the buffer for the next request (a delayed nudge): a block is
+	 * exhausted when the turn's tool use ended, and every other one is suppressed. A later turn's request carries none.
+	 */
+	const endTurn = (): void => {
+		const waiting = held();
+		for (const firing of [...open.values()]) {
+			if (firing.admitted !== null) settleEnded(firing);
+			else if (firing.kind === "block" && firing.exhausted !== undefined)
+				settle(firing, "exhausted", { kind: "scope-end", ref: firing.exhausted });
+			else if (!waiting.has(firing.firingId)) settle(firing, "suppressed", { kind: "none" });
+		}
+		turnExhausted = null;
+	};
+	/** A session is over: nothing it left waiting can enter a request now. */
+	const closeSession = (): void => {
+		for (const firing of [...open.values()]) {
+			if (firing.admitted !== null) settleEnded(firing);
+			else if (firing.kind === "block" && firing.exhausted !== undefined)
+				settle(firing, "exhausted", { kind: "scope-end", ref: firing.exhausted });
+			else settle(firing, "suppressed", { kind: "none" });
+		}
+		identities.clear();
+		turnExhausted = null;
+	};
+	/** The collector now follows `id`: what the earlier session left open settles with it. */
+	const enterSession = (id: string): void => {
+		if (id === sessionId) return;
+		closeSession();
+		succeededKeys.clear();
+		harnessReads.clear();
+		sessionId = id;
+	};
+	/**
+	 * Whether a ledger event belongs to this loop's session: the one it runs now, known from the loop rather than from a
+	 * later hook, so a firing before the first turn's hooks (an awaited turn_start, a compaction) still joins it. A
+	 * worker's forwarded event belongs to its run, and an event with no session to none of this loop's requests.
+	 */
+	const ownSession = (ctx: TelemetryContext | undefined): ctx is TelemetryContext & { sessionId: string } => {
+		if (ctx?.runId !== undefined || !ctx?.sessionId) return false;
+		const current = currentSession() ?? sessionId;
+		if (current === undefined || ctx.sessionId !== current) return false;
+		enterSession(current);
+		return true;
+	};
+	/**
+	 * One terminal fact credits one firing: the most recently admitted claimant. Every other claimant of the same fact
+	 * settles `moot`. A block never claims its own call's later success.
+	 */
+	const credit = (fact: SettlementFact, identity: string): void => {
+		const claimants = [...open.values()].filter(
+			(firing) =>
+				firing.admitted !== null &&
+				(firing.kind === "nudge" ||
+					(firing.credit === undefined && firing.exhausted === undefined && firing.identity !== identity)),
+		);
+		let winner: OpenFiring | undefined;
+		for (const firing of claimants)
+			if (winner === undefined || (firing.admitted ?? 0) >= (winner.admitted ?? 0)) winner = firing;
+		for (const firing of claimants) {
+			if (firing !== winner) settle(firing, "moot", fact);
+			else if (firing.kind === "nudge") settle(firing, "acted", fact);
+			else firing.credit = fact;
+		}
+	};
+	const onFired = (
+		payload: { firingId?: string; hook: string; ruleId: string; effects: ReadonlyArray<string> },
+		ctx: TelemetryContext | undefined,
+	): void => {
+		if (payload.firingId === undefined || !ownSession(ctx)) return;
+		const block = payload.effects.includes("block_tool");
+		const identity = block && ctx.toolCallId !== undefined ? identities.get(ctx.toolCallId) : undefined;
+		const firing: OpenFiring = {
+			firingId: payload.firingId,
+			surface: payload.ruleId,
+			kind: block ? "block" : "nudge",
+			inRun: payload.hook === "before_tool" || payload.hook === "after_tool",
+			sessionId: ctx.sessionId,
+			...(ctx.turnId !== undefined ? { turnId: ctx.turnId } : {}),
+			...(identity !== undefined ? { identity } : {}),
+			admittedIn: null,
+			admitted: null,
+			...(block && turnExhausted !== null ? { exhausted: turnExhausted } : {}),
+		};
+		// A further block of the same call takes back a recovery an earlier block was credited with.
+		if (identity !== undefined)
+			for (const earlier of open.values()) if (earlier.identity === identity) delete earlier.credit;
+		open.set(firing.firingId, firing);
+		// An observe-only compaction point discards every effect, so none can enter a request.
+		if (payload.hook === "on_compaction") settle(firing, "suppressed", { kind: "none" });
+	};
+	/** A lockout, a stop or a crossed tool budget of this session ends the turn's tool use: its blocks cannot recover now. */
+	const onExhausted = (event: string, ctx: TelemetryContext | undefined): void => {
+		if (!ownSession(ctx)) return;
+		turnExhausted ??= event;
+		for (const firing of open.values()) if (firing.kind === "block") firing.exhausted ??= event;
+	};
 	return {
 		id: "observer.turn-outcome",
 		description: "collect host facts for the operator turn without steering it",
 		hooks: ["turn_start", "before_tool", "after_tool", "turn_end"],
 		evidence: "observer:turn-outcome@turn",
 		clarificationStreak: () => previousClarificationStreak,
+		attachLedger(target, session, waiting) {
+			hub = target;
+			currentSession = session;
+			held = waiting;
+			const stops = [
+				target.subscribe("middleware.fired", (payload, ctx) => onFired(payload, ctx)),
+				target.subscribe("safety.loop_blocked", (payload, ctx) => {
+					if (payload.disposition !== "block") onExhausted(`safety.loop_blocked:${payload.disposition}`, ctx);
+				}),
+				// A rolled crossing is a silent roll: its batch still runs, so the turn's tool use did not end.
+				target.subscribe("safety.tool_budget_exceeded", (payload, ctx) => {
+					if (payload.rolled !== true) onExhausted("safety.tool_budget_exceeded", ctx);
+				}),
+			];
+			return () => {
+				for (const stop of stops) stop();
+				closeSession();
+				if (hub === target) hub = null;
+			};
+		},
+		requestSent(callId, carried) {
+			const named = new Set(carried);
+			let any = false;
+			for (const firing of open.values()) {
+				if (firing.admitted !== null || !(firing.inRun || named.has(firing.firingId))) continue;
+				if (!any) admissions += 1;
+				any = true;
+				firing.admitted = admissions;
+				firing.admittedIn = callId;
+			}
+		},
+		suppressFirings(firingIds) {
+			for (const id of firingIds) {
+				const firing = open.get(id);
+				if (firing !== undefined && firing.admitted === null) settle(firing, "suppressed", { kind: "none" });
+			}
+		},
+		settleTriage(owner, verdicts, applied) {
+			if (hub === null || owner === undefined || verdicts.length === 0) return;
+			const firing: OpenFiring = {
+				firingId: nextFiringId(),
+				surface: "triage",
+				kind: "nudge",
+				inRun: false,
+				sessionId: owner,
+				admittedIn: null,
+				admitted: null,
+			};
+			open.set(firing.firingId, firing);
+			if (applied === null) settle(firing, "expired", { kind: "none" });
+			else settle(firing, "acted", { kind: "receipt", ref: applied });
+		},
 		recordControl(record) {
 			userTurnId = record.turnId;
 			// A refused act may still have started workers; those runs belong to the turn.
@@ -123,12 +373,10 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 			}
 		},
 		evaluate(input) {
-			if (input.sessionId !== undefined && input.sessionId !== sessionId) {
-				succeededKeys.clear();
-				harnessReads.clear();
-				sessionId = input.sessionId;
-			}
+			if (input.sessionId !== undefined) enterSession(input.sessionId);
 			if (input.hook === "turn_start") {
+				// A turn that ended without a turn_end hook still ended; what it carried settles before this one starts.
+				endTurn();
 				active = emptyTurn(previousClarificationStreak);
 				userTurnId = input.turnId ?? null;
 				assistantTurnId = null;
@@ -138,6 +386,7 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 			if (input.hook === "turn_end") {
 				if (typeof input.metadata?.userTurnId === "string") userTurnId = input.metadata.userTurnId;
 				assistantTurnId = input.turnId ?? null;
+				endTurn();
 				return [];
 			}
 			if (input.metadata?.nested === true) return [];
@@ -165,12 +414,24 @@ export function createTurnOutcomeCollector(): TurnOutcomeCollector {
 				return [];
 			}
 			if (input.hook === "before_tool") {
+				if (input.toolCallId !== undefined) {
+					if (identities.size >= IDENTITY_LIMIT) {
+						const oldest = identities.keys().next().value;
+						if (oldest !== undefined) identities.delete(oldest);
+					}
+					identities.set(input.toolCallId, callIdentity(input));
+				}
 				active = { ...active, toolNames: [...active.toolNames, toolName] };
 				if (toolName === ToolNames.Dispatch) dispatched ||= !isDispatchListing(args);
 				else if (!dispatched && isReadOnlyCall(toolName, args)) {
 					active = { ...active, readOnlyCallsBeforeFirstDispatch: active.readOnlyCallsBeforeFirstDispatch + 1 };
 				}
-			} else if (input.hook === "after_tool" && toolName === ToolNames.Dispatch && !isDispatchListing(args)) {
+			} else if (input.hook === "after_tool" && input.metadata?.resultKind === "ok" && input.toolName !== undefined) {
+				const kind = callFact(toolName, args);
+				if (kind !== null)
+					credit({ kind, ...(input.toolCallId !== undefined ? { ref: input.toolCallId } : {}) }, callIdentity(input));
+			}
+			if (input.hook === "after_tool" && toolName === ToolNames.Dispatch && !isDispatchListing(args)) {
 				// A dispatch whose worker failed or was aborted still launched a run
 				// and spent worker tokens; tokens.workers is built from these run ids.
 				// Only a successful dispatch can make a later identical one a duplicate.
