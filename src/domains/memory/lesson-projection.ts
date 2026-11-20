@@ -224,6 +224,27 @@ function memoryDeliveryCheck(record: MemoryRecord, input: DeliveryCheckInput): s
 	return null;
 }
 
+/**
+ * The delivery check for a pass over the store outside a session, `clio-coder memory consolidate`: the same check
+ * against one checkout, each of its files read once for the pass. Null when nothing is certainly dead, otherwise why.
+ */
+export function checkoutDeliveryCheck(root: string): (record: MemoryRecord) => string | null {
+	const files = new Map<string, SourceFile | null | undefined>();
+	const file = (path: string): SourceFile | null | undefined => {
+		const key = resolve(root, path);
+		if (!files.has(key)) files.set(key, readSourceFile(root, path));
+		return files.get(key);
+	};
+	return (record) => memoryDeliveryCheck(record, { root, file });
+}
+
+/** A checkout file as the check reads it: `null` when it is gone, `undefined` when it exists but is not read. */
+function readSourceFile(root: string, path: string): SourceFile | null | undefined {
+	if (!existsSync(resolve(root, path))) return null;
+	const content = readInsideRoot(root, path);
+	return content === null ? undefined : { content };
+}
+
 /** Lines a pinned span may cover when it is looked for in its file rather than in the lesson's words. */
 const SPAN_WINDOW_LINES = 6;
 /** Words a span recovered from the lesson's own text may run to. */
@@ -481,15 +502,7 @@ export class MemoryDeliveryGate {
 	/** A checkout file, read once per session: `null` when it is gone, `undefined` when it exists but is not read. */
 	#file(root: string, path: string): SourceFile | null | undefined {
 		const key = resolve(root, path);
-		if (!this.#files.has(key)) {
-			let file: SourceFile | null | undefined;
-			if (!existsSync(key)) file = null;
-			else {
-				const content = readInsideRoot(root, path);
-				file = content === null ? undefined : { content };
-			}
-			this.#files.set(key, file);
-		}
+		if (!this.#files.has(key)) this.#files.set(key, readSourceFile(root, path));
 		return this.#files.get(key);
 	}
 

@@ -6,7 +6,9 @@ import {
 	approveMemoryRecord,
 	type ClearedMemoryRegressions,
 	canonicalMemoryRepositoryIdentity,
+	consolidateMemory,
 	loadMemoryRecords,
+	type MemoryConsolidation,
 	type MemoryRecord,
 	type MemoryScopeSelection,
 	memoryAgentIdentity,
@@ -35,6 +37,7 @@ clio-coder memory promote --from-handoff <path> [--entry <id>...] --scope <scope
 clio-coder memory approve <memoryId>
 clio-coder memory reject <memoryId>
 clio-coder memory prune --stale
+clio-coder memory consolidate [--json]
 
 Manage scoped, approved, evidence-linked local memory records.
 
@@ -57,9 +60,16 @@ guardian for lessons the memory gate approved automatically on execution
 evidence, operator for the ones a person approved (a record approved before
 approvals were stamped counts as the operator's, as the prompt reads it).
 The text listing notes on stderr how many records wait for review.
+
+consolidate tidies the store by rule, with no model call: records of one claim
+merge (other wordings kept as revisions), lessons of this repository whose
+command no longer resolves or whose quoted span left its file here are demoted
+to notes (an operator-approved one is only reported as withheld), and notes
+the automatic tier wrote with no evidence, verdict or delivery are dropped.
+Operator decisions are never changed. It runs only when you run it.
 `;
 
-type MemoryCommand = "list" | "propose" | "promote" | "approve" | "reject" | "prune";
+type MemoryCommand = "list" | "propose" | "promote" | "approve" | "reject" | "prune" | "consolidate";
 type MemoryApprover = "operator" | "guardian";
 
 interface ParsedMemoryArgs {
@@ -96,7 +106,8 @@ function parseMemoryArgs(args: ReadonlyArray<string>): ParsedMemoryArgs {
 				arg === "promote" ||
 				arg === "approve" ||
 				arg === "reject" ||
-				arg === "prune"
+				arg === "prune" ||
+				arg === "consolidate"
 			) {
 				parsed.command = arg;
 				continue;
@@ -168,7 +179,7 @@ function parseMemoryArgs(args: ReadonlyArray<string>): ParsedMemoryArgs {
 			}
 			throw new Error(`unexpected memory ${parsed.command} argument: ${arg}`);
 		}
-		if (parsed.command === "list" && arg === "--json") {
+		if ((parsed.command === "list" || parsed.command === "consolidate") && arg === "--json") {
 			parsed.json = true;
 			continue;
 		}
@@ -189,7 +200,8 @@ function parseMemoryArgs(args: ReadonlyArray<string>): ParsedMemoryArgs {
 		throw new Error(`unexpected memory argument: ${arg}`);
 	}
 	if (parsed.help) return parsed;
-	if (parsed.command === undefined) throw new Error("memory requires list, propose, promote, approve, reject, or prune");
+	if (parsed.command === undefined)
+		throw new Error("memory requires list, propose, promote, approve, reject, prune, or consolidate");
 	if (parsed.command === "propose" && (parsed.evidenceId === undefined) === (parsed.claimId === undefined)) {
 		throw new Error("propose requires one of --from-evidence <runId> or --from-claim <claim-id-prefix>");
 	}
@@ -395,11 +407,34 @@ export async function runMemoryCommand(args: ReadonlyArray<string>): Promise<num
 			printOk(`pruned ${pruned.length} stale memory record${pruned.length === 1 ? "" : "s"}`);
 			return 0;
 		}
-		printError("memory requires list, propose, promote, approve, reject, or prune");
+		if (parsed.command === "consolidate") {
+			const result = await consolidateMemory(dataDir, { cwd: process.cwd() });
+			if (parsed.json) process.stdout.write(`${JSON.stringify(result)}\n`);
+			else renderConsolidation(result);
+			return 0;
+		}
+		printError("memory requires list, propose, promote, approve, reject, prune, or consolidate");
 		return 2;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
 		return 1;
+	}
+}
+
+function renderConsolidation(result: MemoryConsolidation): void {
+	process.stdout.write(
+		`memory consolidate: scanned ${result.scanned}, merged ${result.merged}, demoted ${result.demoted}, withheld ${result.withheld}, dropped ${result.dropped}${result.changed ? "" : "; nothing changed"}\n`,
+	);
+	for (const item of result.items) {
+		const detail =
+			item.action === "merged"
+				? ` into ${item.into ?? "?"}`
+				: item.action === "withheld"
+					? `: ${item.reason ?? ""}; its operator approval stands`
+					: item.reason === undefined
+						? ""
+						: `: ${item.reason}`;
+		process.stdout.write(`  ${item.action} ${item.id}${detail}\n`);
 	}
 }
 
