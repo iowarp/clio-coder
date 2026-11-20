@@ -37,6 +37,8 @@ function identity(port: number, token: string) {
 interface JsonAnswer {
 	status: number;
 	value: Record<string, unknown> | null;
+	/** The client an authenticated answer names (`X-Clio-Client`); only the app that issued the credential knows it. */
+	client: string | null;
 }
 
 /** One small JSON exchange with an app listener: fixed loopback, no redirects, a bounded body. */
@@ -82,9 +84,11 @@ function exchange(
 					} catch {
 						// A body that is not JSON answers with its status alone.
 					}
+					const client = response.headers["x-clio-client"];
 					resolve({
 						status: response.statusCode ?? 0,
 						value: value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null,
+						client: typeof client === "string" ? client : null,
 					});
 				});
 			},
@@ -120,15 +124,27 @@ export async function clientCredential(
 	label: string,
 	caller = "",
 ): Promise<string | null> {
+	return (await openCredential(port, listenerPort, token, label, caller))?.held.credential ?? null;
+}
+/** `proven` when this call proved the launch token to the listener; a held credential proves nothing about who answers now. */
+async function openCredential(
+	port: number,
+	listenerPort: number,
+	token: string,
+	label: string,
+	caller: string,
+): Promise<{ held: Held; proven: boolean } | null> {
 	identity(port, token);
 	identity(listenerPort, token);
 	const key = `${port}:${listenerPort}:${token}:${caller}`;
 	const current = held.get(key);
-	if (current && performance.now() < current.refreshAt) return current.credential;
+	if (current && performance.now() < current.refreshAt) return { held: current, proven: false };
 	if (current) {
 		const rotated = await exchange(port, listenerPort, "POST", "/api/auth/rotate", current.credential, {});
-		const next = rotated?.status === 200 ? adopt(key, rotated.value) : null;
-		if (next) return next;
+		// A rotation keeps the client id; an answer naming another came from a listener this credential never opened.
+		const next =
+			rotated?.status === 200 && rotated.value?.clientId === current.clientId ? adopt(key, rotated.value) : null;
+		if (next) return { held: next, proven: false };
 	}
 	const issued = await exchange(port, listenerPort, "POST", "/api/auth/challenge", null, {});
 	const challenge = issued?.status === 200 ? issued.value?.challenge : undefined;
@@ -144,17 +160,20 @@ export async function clientCredential(
 	});
 	held.delete(key);
 	const answer = opened?.status === 200 ? opened.value?.serverProof : undefined;
-	return typeof answer === "string" && sameSecret(serverProof(token, challenge, listenerPort), answer)
-		? adopt(key, opened?.value ?? null)
-		: null;
+	const proven =
+		typeof answer === "string" && sameSecret(serverProof(token, challenge, listenerPort), answer)
+			? adopt(key, opened?.value ?? null)
+			: null;
+	return proven ? { held: proven, proven: true } : null;
 }
-function adopt(key: string, value: Record<string, unknown> | null) {
+function adopt(key: string, value: Record<string, unknown> | null): Held | null {
 	const { clientId, credential, rotateIn } = value ?? {};
 	if (typeof clientId !== "string" || typeof credential !== "string" || typeof rotateIn !== "number") return null;
 	held.delete(key);
 	if (held.size >= HELD_MAX) held.delete(held.keys().next().value as string);
-	held.set(key, { clientId, credential, refreshAt: performance.now() + rotateIn * 1000 });
-	return credential;
+	const next = { clientId, credential, refreshAt: performance.now() + rotateIn * 1000 };
+	held.set(key, next);
+	return next;
 }
 /** Forget a credential the app refused, so the next call exchanges the launch token again. */
 export function dropClientCredential(port: number, listenerPort: number, token: string, caller = "") {
@@ -167,11 +186,12 @@ export function dropClientCredential(port: number, listenerPort: number, token: 
  */
 async function readMeta(port: number, token: string, listenerPort = port, label = "Launcher") {
 	for (let attempt = 0; attempt < 2; attempt += 1) {
-		const credential = await clientCredential(port, listenerPort, token, label);
-		if (credential === null) return null;
-		const answer = await exchange(port, listenerPort, "GET", "/api/meta", credential);
-		// A restarted app forgot the held credential; exchange the launch token once more.
-		if (answer?.status === 401) {
+		const opened = await openCredential(port, listenerPort, token, label, "");
+		if (opened === null) return null;
+		const answer = await exchange(port, listenerPort, "GET", "/api/meta", opened.held.credential);
+		// A restarted app forgot the held credential, and a program that took its port since answers whatever it likes:
+		// only the app that issued the credential names its client. Either way, exchange the launch token once more.
+		if (answer?.status === 401 || (answer?.status === 200 && !opened.proven && answer.client !== opened.held.clientId)) {
 			dropClientCredential(port, listenerPort, token);
 			continue;
 		}

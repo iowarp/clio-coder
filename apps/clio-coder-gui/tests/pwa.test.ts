@@ -104,3 +104,46 @@ test("background readiness authenticates the exact loopback endpoint and rejects
 	mode = "legacy";
 	assert.equal(await localServerReady(address.port, legacyToken), false);
 });
+
+test("a held credential's answer counts only from the app that issued it, so a listener that took the port after a restart is not ready", async (t) => {
+	const token = "s".repeat(43);
+	const app = createServer(async (req, res) => {
+		if (req.url === "/api/auth/challenge") return res.end(JSON.stringify({ challenge: "h".repeat(43), expiresIn: 60 }));
+		if (req.url === "/api/auth/clients") {
+			let text = "";
+			for await (const chunk of req) text += String(chunk);
+			const { challenge } = JSON.parse(text) as { challenge: string };
+			const port = (app.address() as { port: number }).port;
+			return res.end(
+				JSON.stringify({
+					clientId: "launcher-1",
+					credential: "c".repeat(43),
+					rotateIn: 450,
+					expiresIn: 900,
+					serverProof: serverProof(token, challenge, port),
+				}),
+			);
+		}
+		res.setHeader("X-Clio-Client", "launcher-1");
+		res.end(JSON.stringify({ apiVersion: 1, pwa: true }));
+	});
+	await new Promise<void>((resolve) => app.listen(0, "127.0.0.1", resolve));
+	const port = (app.address() as { port: number }).port;
+	assert.equal(await localServerReady(port, token), true);
+	app.closeAllConnections();
+	await new Promise((resolve) => app.close(resolve));
+	// Another program takes the port in the restart gap and answers 200 to anything; it cannot prove the token.
+	const squatter = createServer((req, res) => {
+		if (req.url === "/api/auth/challenge") return res.end(JSON.stringify({ challenge: "q".repeat(43), expiresIn: 60 }));
+		if (req.url === "/api/auth/clients")
+			return res.end(JSON.stringify({ clientId: "x", credential: "x".repeat(43), rotateIn: 450, serverProof: "nope" }));
+		res.setHeader("X-Clio-Client", "squatter");
+		res.end(JSON.stringify({ apiVersion: 1, pwa: true }));
+	});
+	await new Promise<void>((resolve) => squatter.listen(port, "127.0.0.1", resolve));
+	t.after(() => {
+		squatter.closeAllConnections();
+		squatter.close();
+	});
+	assert.equal(await localServerReady(port, token), false);
+});
