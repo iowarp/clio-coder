@@ -7,7 +7,9 @@ import { fileURLToPath } from "node:url";
 import { renderCard, verdictText } from "../../src/cli/fleet-board.js";
 import { createBoardSource, loadBoard, loadTakeover, type WorkerCard } from "../../src/cli/fleet-board-model.js";
 import { fleetInspectionScope } from "../../src/cli/fleet-project-scope.js";
+import { answerFleetStatus } from "../../src/cli/fleet-status.js";
 import { clioStateDir } from "../../src/core/xdg.js";
+import { setCapacityDraining } from "../../src/domains/dispatch/capacity-lease.js";
 import { gateDecisionsDirectory, stagePendingGateDecision } from "../../src/domains/dispatch/gate-decisions.js";
 import { runFeedPath } from "../../src/domains/dispatch/run-feed.js";
 import { openLedger, writeFleetRun } from "../../src/domains/dispatch/state.js";
@@ -143,6 +145,71 @@ test("fleet inspection defaults to this project and --all deliberately shows eve
 		strictEqual(hiddenRoot.status, 2);
 		const globalRoot = run("view", "fleet-foreign-root", "--all");
 		strictEqual(globalRoot.status, 0, globalRoot.stderr);
+	} finally {
+		home.restore();
+	}
+});
+
+test("fleet status with no ledger rows answers from its leaf with fleet.ts's bytes and exit codes (CLI-P11)", async (t) => {
+	const home = await isolateClioEnv("clio-fleet-status-leaf-");
+	try {
+		t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-11-20T12:00:00.000Z") });
+		const { runFleetCommand } = await import("../../src/cli/fleet.js");
+		// fleet.ts's status writes before its first await, so the capture is restored before the promise settles.
+		const full = (args: string[]) => {
+			const out = process.stdout.write.bind(process.stdout);
+			const err = process.stderr.write.bind(process.stderr);
+			let stdout = "";
+			let stderr = "";
+			process.stdout.write = ((chunk: string) => {
+				stdout += chunk;
+				return true;
+			}) as typeof process.stdout.write;
+			process.stderr.write = ((chunk: string) => {
+				stderr += chunk;
+				return true;
+			}) as typeof process.stderr.write;
+			let pending: Promise<number>;
+			try {
+				pending = runFleetCommand(args);
+			} finally {
+				process.stdout.write = out;
+				process.stderr.write = err;
+			}
+			return pending.then((code) => ({ code, stdout, stderr }));
+		};
+		const leaf = async (args: string[]) => {
+			let stdout = "";
+			let stderr = "";
+			const code = await answerFleetStatus(
+				args,
+				{ write: (chunk: string) => (stdout += chunk) },
+				{ write: (chunk: string) => (stderr += chunk) },
+			);
+			return { code, stdout, stderr };
+		};
+		const forms = [["status", "--json"], ["status"], ["status", "--json", "--all"], ["status", "--bogus"]];
+		for (const args of forms) deepStrictEqual(await leaf(args), await full(args), args.join(" "));
+		setCapacityDraining(true);
+		const drained = await leaf(["status"]);
+		ok(drained.stdout.includes("admission: draining until "), drained.stdout);
+		for (const args of forms.slice(0, 2))
+			deepStrictEqual(await leaf(args), await full(args), `drained ${args.join(" ")}`);
+		// A ledger row needs its telemetry, which only fleet.ts loads.
+		const ledger = openLedger();
+		ledger.create({
+			agentId: "agent",
+			executionRole: "builder",
+			task: "task",
+			targetId: "local",
+			wireModelId: "model",
+			runtimeId: "openai",
+			runtimeKind: "http",
+			sessionId: null,
+			cwd: home.dir,
+		});
+		await ledger.persist();
+		strictEqual(await answerFleetStatus(["status", "--json"]), null);
 	} finally {
 		home.restore();
 	}
