@@ -226,7 +226,8 @@ export class CommandOutputMask {
 
 /**
  * Masked frames of a stream a producer reports as its whole text so far, as bash progress does. Only what is new since the
- * last frame is masked.
+ * last call is masked. A producer that also reports each new piece hands it to {@link append}, so a large output is masked
+ * while it arrives instead of all at once when it ends.
  */
 export class CumulativeOutputMask {
 	private readonly mask: CommandOutputMask;
@@ -245,6 +246,12 @@ export class CumulativeOutputMask {
 	final(text: string, ending: Exclude<OutputEnding, "open"> = "complete"): string {
 		this.advance(text);
 		return this.committed + this.mask.end(ending);
+	}
+
+	/** Take the next piece of the stream; the whole text a later call reports must start with every piece taken. */
+	append(piece: string): void {
+		this.committed += this.mask.push(piece);
+		this.seen += piece.length;
 	}
 
 	private advance(text: string): void {
