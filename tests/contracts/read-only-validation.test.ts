@@ -708,13 +708,15 @@ it("a green claim against a red latest verify on the final tree seals fail, as t
 		const recorder = createRunEffectsRecorder(process.cwd());
 		for (const [index, step] of steps.split(" ").entries()) {
 			const id = `call-${index}`;
+			// `sh` and `shred` run the same check through bash as `npm test`, green and red.
+			const bash = step === "sh" || step === "shred";
 			recorder.start(
 				id,
-				step === "edit" ? "edit" : "verify",
-				step === "edit" ? { path: "src/calc.c" } : { check: "test" },
+				step === "edit" ? "edit" : bash ? "bash" : "verify",
+				step === "edit" ? { path: "src/calc.c" } : bash ? { command: "npm test" } : { check: "test" },
 			);
-			recorder.checkOutcome(id, step === "red" ? "error" : "ok");
-			recorder.finish(id, step === "red");
+			recorder.checkOutcome(id, step === "red" || step === "shred" ? "error" : "ok");
+			recorder.finish(id, step === "red" || step === "shred");
 		}
 		return validateResultContract({
 			contract: { kind: "mutation-report" },
@@ -731,6 +733,9 @@ it("a green claim against a red latest verify on the final tree seals fail, as t
 	strictEqual(seal("pass edit red"), "fail");
 	strictEqual(seal("red edit pass"), "pass");
 	strictEqual(seal("edit red pass"), "pass");
+	// A later run of the same check through bash settles a red verify, and a red one settles a green verify (SF-2).
+	strictEqual(seal("edit red sh"), "pass");
+	strictEqual(seal("edit pass shred"), "fail");
 });
 
 it("a check judges only the tree it ran on, sealed per verify call or from a tool's aggregate (bt-27c)", () => {
@@ -1303,6 +1308,15 @@ it("a probe importing the workspace's module, `exit 0; npm test` and `cd pkg; np
 		`python3 -c "from textutil import slugify; open('out.txt', 'w').write(slugify('x'))"`,
 		`python3 -c "import textutil, pathlib; pathlib.Path('o').write_text('x')"`,
 		`python3 -c "import textutil, shutil; shutil.rmtree('build')"`,
+	])
+		deepStrictEqual(after(command), [], command);
+	// A program the step reader cannot place ends before the list that runs the check, so the check judges what it left
+	// and earns the pass again (SF-2); a function, a compound or a builtin that sets shell state still hides its status.
+	deepStrictEqual(after("./gen.sh; npm test"), ["./gen.sh; npm test"]);
+	for (const command of [
+		"gen() { :; }; gen; npm test",
+		"if true; then ./gen.sh; fi; npm test",
+		"declare -x A=1; npm test",
 	])
 		deepStrictEqual(after(command), [], command);
 });

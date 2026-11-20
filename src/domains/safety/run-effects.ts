@@ -385,6 +385,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	// Each finished call's place in run order, so an unknown call is disclosed while any outcome older than it stands (x6-3).
 	let sequence = 0;
 	const outcomeSequence = new Map<string, number>();
+	// The check each standing outcome ran, so a later run of it under another spelling replaces it (SF-2).
+	const outcomeIdentity = new Map<string, string>();
 	const unclassifiedCalls: Array<{ sequence: number; label: string }> = [];
 	const proofs = new Map<string, ObservedProof>();
 	const latestProofCalls = new Map<string, string>();
@@ -477,25 +479,35 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				validationOutcomes.clear();
 				checkOutcomes.clear();
 				outcomeSequence.clear();
+				outcomeIdentity.clear();
 				// The calls were disclosed against outcomes the change just retired, so none is left to disclose (x6-6).
 				unclassifiedCalls.length = 0;
 				validationCommands.clear();
 			}
 			settleRan(checkedAfterOwnMutation);
 			sequence += 1;
-			const settleOutcome = (key: string) => {
-				checkOutcomes.set(key, !failed);
-				outcomeSequence.set(key, sequence);
+			// One run of a check settles every name it stands under: the outcomes earlier spellings of it left are re-filed, so a
+			// green `npm test` settles a red `verify test` and a red `npm test` replaces `npm run test`'s green.
+			const settleOutcomes = (keys: ReadonlyArray<string>) => {
+				const identity = reading.identity ?? keys[0];
+				const names = [...keys, ...[...outcomeIdentity].flatMap(([key, ran]) => (ran === identity ? [key] : []))];
+				for (const key of names) {
+					checkOutcomes.set(key, !failed);
+					outcomeSequence.set(key, sequence);
+					if (validationOutcomes.has(key)) validationOutcomes.set(key, !failed);
+					if (identity !== undefined) outcomeIdentity.set(key, identity);
+				}
 			};
 			// `pytest; echo done` ran the check, but its status is echo's, so the outcome stays unknown either way.
 			if (effects.validationName !== null && settled && statusAttributable()) {
+				settleOutcomes([effects.validationName]);
 				validationOutcomes.set(effects.validationName, !failed);
-				settleOutcome(effects.validationName);
 			}
-			if (effects.proofCheck !== null && effects.proofCheck.length > 0 && settled) {
-				settleOutcome(effects.proofCheck);
-				if (reading.shellCommand !== null) settleOutcome(observedValidationCommand(reading.shellCommand));
-			}
+			if (effects.proofCheck !== null && effects.proofCheck.length > 0 && settled)
+				settleOutcomes([
+					effects.proofCheck,
+					...(reading.shellCommand !== null ? [observedValidationCommand(reading.shellCommand)] : []),
+				]);
 			// An unknown call that ran neither settles nor clears, so a receipt can only say a standing outcome predates it.
 			if (
 				reading.verdict === "unknown" &&

@@ -296,6 +296,35 @@ export function observedValidationCommand(command: string): string {
 	}
 }
 
+/** npm's own abbreviations of `test` and `run`. */
+const NPM_COMMAND_ALIASES: ReadonlyMap<string, string> = new Map([
+	["t", "test"],
+	["tst", "test"],
+	["run-script", "run"],
+	["rum", "run"],
+	["urn", "run"],
+]);
+
+/**
+ * The check an observed name ({@link observedValidationCommand}) runs, so respellings of one check settle each other
+ * while each outcome keeps the name it was filed under (SF-2). One literal step is read past `time` and the transparent
+ * wrappers (`timeout 300 npm test` is `npm test`), and an npm, pnpm or yarn script run as `<pm> [selectors] run
+ * <script> [args]`, so `npm test`, `npm t` and `npm run test` are one check. Anything else is its own text: arguments,
+ * environment prefixes and tools stay distinct, so `pytest` never settles `pytest -q` (bt-27).
+ */
+export function checkIdentity(name: string): string {
+	const steps = commandSteps(name);
+	const [step] = steps;
+	if (steps.length !== 1 || step === undefined || !step.literal || step.grouped) return `text:${name}`;
+	const [executable = "", first, ...rest] = step.argv.slice(step.command);
+	const args = first === undefined ? [] : [(executable === "npm" && NPM_COMMAND_ALIASES.get(first)) || first, ...rest];
+	const run =
+		executable === "npm" || executable === "pnpm" || executable === "yarn" ? packageScriptRun(executable, args) : null;
+	const argv =
+		run === null ? [executable, ...args] : [executable, ...run.selectors, "run", run.script, ...run.forwarded];
+	return `argv:${JSON.stringify(argv)}`;
+}
+
 /**
  * Returns every path the command would write to: shell redirect targets
  * (`>`, `>>`), all path arguments to `tee`, `mkdir`, and `touch`, the
@@ -2401,11 +2430,58 @@ const LIST_BENDING_BUILTINS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Builtins that set what a later list runs or waits on (variables, functions, jobs) without changing the tree; an
+ * unknown step spelled as one is not plain ({@link finalListAfterPlainSteps}).
+ */
+const SHELL_STATE_BUILTINS: ReadonlySet<string> = new Set([
+	"declare",
+	"typeset",
+	"readonly",
+	"local",
+	"unset",
+	"let",
+	"read",
+	"readarray",
+	"mapfile",
+	"printf",
+	"getopts",
+	"fg",
+	"bg",
+	"disown",
+	"coproc",
+	"function",
+	"ulimit",
+	"umask",
+]);
+
+/** Words that open or close a compound command or a function body; a list holding one is not plain. */
+const COMPOUND_COMMAND_WORDS: ReadonlySet<string> = new Set([
+	"{",
+	"}",
+	"function",
+	"if",
+	"then",
+	"elif",
+	"else",
+	"fi",
+	"while",
+	"until",
+	"for",
+	"select",
+	"do",
+	"done",
+	"case",
+	"esac",
+	"[[",
+]);
+
+/**
  * The text of a command's last `;` or newline list when the steps before it cannot touch its exit status (bt-46 S2):
- * none runs a check (`declaredSteps` count as checks), none is grouped or backgrounded, and each is a plain command the
- * step reader knows, so a write by redirect, heredoc or a known writer may come first. An `exit`, a `trap`, a `set`,
- * a function or alias definition, a nested shell or any step the reader cannot place returns null, as does a command
- * with no such list.
+ * none runs a check (`declaredSteps` count as checks), none is grouped or backgrounded, and each is a plain command, so
+ * a write by redirect, heredoc, a known writer or a program the step reader cannot place (`./gen.sh; npm test`, SF-2)
+ * may come first: a child process cannot end the shell or change what the next list runs. An `exit`, a `trap`, a
+ * `set`, a function or alias definition, a builtin that sets variables or jobs, a nested shell or a hidden word returns
+ * null, as does a command with no such list.
  */
 export function finalListAfterPlainSteps(
 	command: string,
@@ -2424,8 +2500,12 @@ export function finalListAfterPlainSteps(
 		if (isCheckStep(step) || declaredSteps.has(position)) return false;
 		if (step.tokens.some((token) => token.hiddenContent === true || token.unterminated === true)) return false;
 		const argv = step.argv.slice(step.index);
+		if (step.argv.slice(0, step.index + 1).some((word) => COMPOUND_COMMAND_WORDS.has(word))) return false;
 		if (LIST_BENDING_BUILTINS.has(argv[0] ?? "") || segmentShellScript(step.argv) !== null) return false;
-		return (inlinePythonVerdict(command, step) ?? stepVerdict(argv, false)) !== "unknown";
+		return (
+			(inlinePythonVerdict(command, step) ?? stepVerdict(argv, false)) !== "unknown" ||
+			!SHELL_STATE_BUILTINS.has(argv[0] ?? "")
+		);
 	};
 	return steps.every(plain) ? command.slice(tail.start) : null;
 }

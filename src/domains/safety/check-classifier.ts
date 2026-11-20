@@ -12,6 +12,7 @@ import {
 	type CommandVerdict,
 	checkCommandShape,
 	checkFailureAttributable,
+	checkIdentity,
 	checkLogTargets,
 	checkRunsBareInterpreter,
 	checkRunsOutside,
@@ -120,6 +121,13 @@ export interface CallClassification {
 	 * else {@link check}. The recorder and the task board both key on it, so neither drops a check the other keeps (x6-1).
 	 */
 	name: string | null;
+	/**
+	 * What check the call ran, shared by its respellings ({@link checkIdentity}): a bash check's observed command, a verify
+	 * call's resolved argv, under the same directory prefix as {@link name}. A later run of one identity re-files the
+	 * outcomes earlier spellings left with its own, so a green `npm test` settles a red `verify test` (SF-2). Null for
+	 * anything but a check.
+	 */
+	identity: string | null;
 	/** The ids of the declared checks a bash call runs whole ({@link ClassifierContext.declaredChecks}). */
 	declared: string[];
 }
@@ -127,6 +135,11 @@ export interface CallClassification {
 /** The name a bash check's outcome is filed under: its full observed command, prefixed with its directory off `cwd`. */
 function observedCheckName(command: string, base: string, cwd: string): string {
 	return `${base === cwd ? "" : `cwd=${base}: `}${observedValidationCommand(command)}`;
+}
+
+/** The check a command runs, under the same directory prefix as its name ({@link CallClassification.identity}). */
+function observedCheckIdentity(command: string, base: string, cwd: string): string {
+	return `${base === cwd ? "" : `cwd=${base}: `}${checkIdentity(observedValidationCommand(command))}`;
 }
 
 /**
@@ -381,6 +394,14 @@ export function classifyCall(
 		shape,
 		check,
 		name: verdict === "check" && command !== null ? observedCheckName(command, base, cwd) : check,
+		identity:
+			verdict !== "check"
+				? null
+				: shellCommand !== null
+					? observedCheckIdentity(shellCommand, base, cwd)
+					: check === null
+						? null
+						: `check:${check}`,
 		declared: [...new Set(declaredRuns.map((run) => run.check.id))],
 	};
 }
