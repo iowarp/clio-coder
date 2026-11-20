@@ -60,6 +60,7 @@ import {
 	renderEvictionSkipLine,
 } from "../../src/interactive/renderers/compaction-summary.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
+import { CONTEXT_STATUS_NOTICE_KEY } from "../../src/session-control/compaction-lines.js";
 import { createHostInserts } from "../../src/session-control/host-inserts.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
 import { createTurnContext, type TurnContextDeps } from "../../src/session-control/turn-context.js";
@@ -303,6 +304,7 @@ describe("production compaction controls", () => {
 		f.settings.chat.prewarm = false;
 		f.providers.getDetectedReasoning = () => false;
 		const notices: string[] = [];
+		const noticeKeys = new Map<string, string | undefined>();
 		const bus = createTelemetryHub();
 		const compactionEnds: CompactionPayload[] = [];
 		let compactionBegins = 0;
@@ -322,13 +324,18 @@ describe("production compaction controls", () => {
 			autoCompact: f.run,
 		});
 		loop.onEvent((event) => {
-			if (event.type === "notice") notices.push(event.text);
+			if (event.type === "notice") {
+				notices.push(event.text);
+				noticeKeys.set(event.text, event.key);
+			}
 		});
 		try {
 			loop.resetForSession(before.at(-1)?.turnId ?? null, buildModelReplayAgentMessagesFromTurns(before));
 			await loop.compact();
 			const message = "compaction would not reduce context; checkpoint discarded (usage recorded)";
 			strictEqual(notices.filter((notice) => notice === message).length, 1);
+			// ACP routes the line off the reply by this tag, not by its wording (ACP-3).
+			strictEqual(noticeKeys.get(message), CONTEXT_STATUS_NOTICE_KEY);
 			doesNotMatch(notices.join("\n"), /too short to compact/u);
 			strictEqual(f.calls.length, 2);
 			await loop.compact();

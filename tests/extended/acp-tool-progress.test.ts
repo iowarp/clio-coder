@@ -6,7 +6,8 @@ import {
 	ACP_MAX_TOOL_PROGRESS_FRAMES_PER_CALL,
 	ACP_MIN_TOOL_PROGRESS_INTERVAL_MS,
 } from "../../src/engine/acp/types.js";
-import { fakeTransport } from "../harness/acp-fake-transport.js";
+import { CONTEXT_STATUS_NOTICE_KEY } from "../../src/session-control/compaction-lines.js";
+import { fakeTransport, stdioPeer } from "../harness/acp-fake-transport.js";
 
 interface TurnScript {
 	emit(event: unknown): void;
@@ -302,7 +303,13 @@ it("keeps compaction failure lines in the reply, where context status does not g
 		optIn: false,
 		script: ({ emit }) => {
 			for (const notice of failures) emit({ type: "notice", surface: "transcript", ...notice });
-			emit({ type: "notice", surface: "transcript", level: "info", text: "Clio compacted 36.2K → 28.6K tokens" });
+			emit({
+				type: "notice",
+				surface: "transcript",
+				level: "info",
+				text: "Clio compacted 36.2K → 28.6K tokens",
+				key: CONTEXT_STATUS_NOTICE_KEY,
+			});
 		},
 	});
 	deepStrictEqual(
@@ -319,22 +326,42 @@ it("projects transcript notices for plain ACP clients while keeping footer state
 		"[context engine] working set: nothing evictable, the 1 turn is inside the protected window; llm_summary runs instead",
 		"compaction would not reduce context; checkpoint discarded (usage recorded)",
 		"Clio compacted 36.2K → 28.6K tokens: 42 earlier messages now read as one summary",
+		// ACP-3: the producer's tag routes the line, so a reworded one still stays off the reply.
+		"Context trimmed: 3 tool results now read by ref",
 	];
-	const turn = await runTurn({
-		optIn: false,
-		script: ({ emit }) => {
-			emit({ type: "notice", surface: "footer", level: "info", text: "cold cache" });
-			emit({ type: "notice", surface: "transcript", level: "info", text: "project instructions: all 42 lines loaded" });
-			for (const text of status) emit({ type: "notice", surface: "transcript", level: "info", text });
-			emit({ type: "text_delta", delta: "Done." });
-		},
+	// The same lead without the tag is ordinary transcript text; wording no longer decides the route.
+	const untagged = "Clio compacted nothing; this line came from an extension";
+	const peer = stdioPeer();
+	const served = serveClioAcpAgent({
+		transport: peer.transport,
+		chat: scriptedChat(
+			({ emit }) => {
+				emit({ type: "notice", surface: "footer", level: "info", text: "cold cache" });
+				emit({ type: "notice", surface: "transcript", level: "info", text: "project instructions: all 42 lines loaded" });
+				for (const text of status)
+					emit({ type: "notice", surface: "transcript", level: "info", text, key: CONTEXT_STATUS_NOTICE_KEY });
+				emit({ type: "notice", surface: "transcript", level: "info", text: untagged });
+				emit({ type: "text_delta", delta: "Done." });
+			},
+			() => {},
+		),
+		cwd: process.cwd(),
 	});
-	const texts = turn.updates
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const session = (await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
+		await peer.call("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text: "build" }] });
+	} finally {
+		peer.close();
+	}
+	strictEqual(await served, 0);
+	const updates = peer.updates().map((frame) => frame.update);
+	const texts = updates
 		.filter((update) => update.sessionUpdate === "agent_message_chunk")
 		.map((update) => (update.content as { text: string }).text);
-	deepStrictEqual(texts, ["project instructions: all 42 lines loaded\n", "Done."]);
+	deepStrictEqual(texts, ["project instructions: all 42 lines loaded\n", `${untagged}\n`, "Done."]);
 	// bt-47: context engine status crosses as session metadata, the startup notices' channel.
-	const notices = turn.updates
+	const notices = updates
 		.filter((update) => update.sessionUpdate === "session_info_update")
 		.map((update) => (update._meta as Record<string, unknown>)["clio-coder/notice"]);
 	deepStrictEqual(
