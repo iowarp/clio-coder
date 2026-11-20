@@ -10,8 +10,8 @@ import type { ImageContent } from "../../engine/types.js";
 import { escapeRegExp } from "../ignore-policy.js";
 import { resolveReadPath } from "../path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails } from "../registry.js";
-import { maxOutputArg, timeoutArg } from "../safe-exec.js";
-import { truncateHeadTailUtf8, truncateUtf8 } from "../truncate-utf8.js";
+import { maxOutputArg, timeoutArg, trimOutputHeadTail } from "../safe-exec.js";
+import { truncateUtf8 } from "../truncate-utf8.js";
 import { BROWSER_MODES } from "./surface.js";
 
 export { BROWSER_MODES } from "./surface.js";
@@ -139,7 +139,7 @@ export async function runFrontendCheck(
 
 	const failed = checks.filter((check) => check.status === "fail");
 	const details = resultDetails(artifactPath, browserMode, checks);
-	const output = truncateHeadTailUtf8(renderChecks(artifactPath, checks), maxOutputArg(args));
+	const output = trimOutputHeadTail(renderChecks(artifactPath, checks), maxOutputArg(args));
 	if (failed.length > 0) {
 		return {
 			kind: "error",

@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import {
 	combineSafeOutput,
+	createRetainedStreamWindow,
 	resolveSafeCwd,
 	runCommandVector,
 	SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES,
@@ -23,7 +24,7 @@ import {
 import { checkGitFields, GIT_OPS, gitInspectArgv, isGitInspectOp } from "./git-inspect.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { COMMIT_IDENTITY } from "./task-worktree.js";
-import { truncateHeadTailUtf8, truncateUtf8 } from "./truncate-utf8.js";
+import { truncateUtf8 } from "./truncate-utf8.js";
 
 const TRUNCATION_MARKER = "\n[output truncated]\n";
 
@@ -33,6 +34,19 @@ export function timeoutArg(args: Record<string, unknown>, fallback = SAFE_EXEC_D
 
 function cwdArg(args: Record<string, unknown>): string | undefined {
 	return typeof args.cwd === "string" && args.cwd.length > 0 ? args.cwd : undefined;
+}
+
+export function trimOutputHeadTail(text: string, maxBytes: number): string {
+	const buf = Buffer.from(text, "utf8");
+	if (buf.byteLength <= maxBytes) return text;
+	if (maxBytes <= 0) return "";
+	const markerAllowance = Buffer.byteLength(`\n[... ${buf.byteLength} bytes omitted ...]\n`, "utf8");
+	const bodyBudget = Math.max(0, maxBytes - markerAllowance);
+	const headCap = Math.floor(bodyBudget / 3);
+	const tailCap = bodyBudget - headCap;
+	const window = createRetainedStreamWindow(headCap, tailCap);
+	window.append(buf);
+	return window.render().text;
 }
 
 function formatTimeoutSeconds(timeoutMs: number): string {
@@ -101,7 +115,7 @@ export async function runVectorTool(
 		const result = await runCommandVector(file, vectorArgs, runOptions);
 		const combined = combineSafeOutput(result);
 		const output = truncateOnly
-			? truncateHeadTailUtf8(combined, requestedMaxOutputBytes)
+			? trimOutputHeadTail(combined, requestedMaxOutputBytes)
 			: truncateUtf8(combined, requestedMaxOutputBytes, TRUNCATION_MARKER);
 		const details = resultDetails(result);
 		if (result.aborted) return { kind: "error", message: `${action}: aborted`, details };
