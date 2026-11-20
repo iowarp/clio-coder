@@ -1112,6 +1112,18 @@ async function defaultAskUserHandler(): Promise<AskUserResult> {
 	return cancelledAskUserResult();
 }
 
+/**
+ * A bare string in questions[] is an unambiguous one-question intent that the
+ * schema refuses as "expected object", costing the model a round. Pi runs this
+ * before schema validation, so the string becomes `{ question }` there and the
+ * attached schema stays as it is.
+ */
+function prepareAskUserArguments(args: Record<string, unknown>): Record<string, unknown> {
+	const { questions } = args;
+	if (!Array.isArray(questions) || !questions.some((entry) => typeof entry === "string")) return args;
+	return { ...args, questions: questions.map((entry) => (typeof entry === "string" ? { question: entry } : entry)) };
+}
+
 export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 	return {
 		name: ToolNames.AskUser,
@@ -1120,6 +1132,7 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 		parameters: askUserParameters,
 		baseActionClass: "read",
 		executionMode: "sequential",
+		prepareArguments: prepareAskUserArguments,
 		async run(args, options): Promise<ToolResult> {
 			const normalized = normalizeAskUserCall(args);
 			if (!normalized.call) return { kind: "error", message: `ask_user: ${normalized.error ?? "invalid input"}` };

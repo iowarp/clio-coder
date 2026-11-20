@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { skillInstallOfferTag } from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
@@ -20,13 +21,15 @@ import { createAskUserToolPolicy } from "../../src/session-control/chat-loop-mes
 import {
 	type AskUserQuestion,
 	type AskUserResult,
+	askUserParameters,
 	closeAskUserInterviewOnAssistantTurn,
+	createAskUserTool,
 	UNATTENDED_ESCAPE_ANSWER,
 	UNATTENDED_FREE_TEXT_ANSWER,
 	UNATTENDED_OUTWARD_ANSWER,
 } from "../../src/tools/ask-user.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
-import { type AskUserToolPolicy, createRegistry, type ToolResult } from "../../src/tools/registry.js";
+import { type AskUserToolPolicy, createRegistry, prepareToolArgs, type ToolResult } from "../../src/tools/registry.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -313,6 +316,17 @@ describe("ask_user tool", () => {
 		}
 		deepStrictEqual(f.shown, []);
 		strictEqual(f.policy.status, "idle");
+	});
+
+	// CLI-P39: a bare-string question cost a round on "questions.0: expected object, got string".
+	it("asks a bare-string question as { question } before schema validation, with the schema unchanged", async () => {
+		const raw = { questions: ["Which cache key?", { question: "Anything else?" }] };
+		ok(!Value.Check(askUserParameters, raw), "the attached schema still refuses the raw shape");
+		const prepared = prepareToolArgs(createAskUserTool(), raw);
+		ok(Value.Check(askUserParameters, prepared), JSON.stringify(prepared));
+		const f = fixture([{ answers: [{ question: "Which cache key?", answer: "Node id" }] }]);
+		strictEqual((await f.call(raw)).kind, "ok");
+		deepStrictEqual(f.shown, [[{ question: "Which cache key?" }, { question: "Anything else?" }]]);
 	});
 
 	it("answers a round nobody answered with its recommended options, closes the interview, and says so", async () => {
