@@ -309,6 +309,26 @@ describe("dispatch advisory admission and explicit authority", () => {
 			await priced.extension.stop?.();
 		}
 	});
+	it("prices a route's admission estimate at its output bound, never at one token (M6)", async () => {
+		const estimate = async (maxOutputTokens: number) => {
+			const settings = structuredClone(DEFAULT_SETTINGS);
+			settings.targets = [{ id: "api", runtime: "anthropic", defaultModel: "claude-haiku-5-5" }];
+			settings.fleet.default = { ...settings.fleet.default, target: "api", model: "claude-haiku-5-5" };
+			settings.chat.maxOutputTokens = maxOutputTokens;
+			const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: anthropic }));
+			await bundle.extension.start();
+			try {
+				const preview = bundle.contract.preview?.({ ...request, agentId: "coder", executionRole: "builder" });
+				ok(preview?.costUpperBoundKnown);
+				return preview.costUpperBoundUsd;
+			} finally {
+				await bundle.extension.stop?.();
+			}
+		};
+		const [unset, small, larger] = [await estimate(0), await estimate(100), await estimate(200)];
+		ok(larger > small, `${larger} > ${small}`);
+		ok(unset > larger, `an unset budget prices the model's own output cap: ${unset} > ${larger}`);
+	});
 	it("previews the run's store-grant, budget, remote-node and outside-read admission (FL-13)", async () => {
 		const cwd = realpathSync(mkdtempSync(join(tmpdir(), "fl13-preview-")));
 		let node: RunNodeIdentity = { id: "local", kind: "local" };

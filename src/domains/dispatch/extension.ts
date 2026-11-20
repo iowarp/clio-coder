@@ -2,6 +2,7 @@ import { readCallFailure } from "../../core/call-failure.js";
 import { claudeAuthEnvironment, withClaudeCredential } from "../../core/claude-environment.js";
 import { writeDiagnostic, writeHeadlessDiagnostic } from "../../core/diagnostics.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
+import { routeOutputBound } from "../../core/output-bound.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
 import {
 	noCallRunUsageFacts,
@@ -955,13 +956,15 @@ function sealRouteDecision(draft: RunResultDraft, decision: RouteDecisionV1): Ru
 export const UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD = 1;
 
 /**
- * Output-token figure the admission estimate prices a route against. Settings
- * always carry `defaults.maxTokens`; the fallback covers the callers that
- * admit a route before settings are resolved, and it defers to the one place
- * that owns the default rather than restating the number here.
+ * Output-token figure the admission estimate prices a route against: the
+ * route's own output bound (routeOutputBound), so an unset chat.maxOutputTokens
+ * prices the model's cap and not one token (M6).
  */
-function admissionMaxOutputTokens(settings: EffectiveSettings): number {
-	return settings?.chat.maxOutputTokens ?? DEFAULT_SETTINGS.chat.maxOutputTokens;
+function admissionMaxOutputTokens(settings: EffectiveSettings, capabilities: CapabilityFlags | null): number {
+	return routeOutputBound(
+		{ contextWindow: capabilities?.contextWindow ?? 0, maxTokens: capabilities?.maxTokens ?? 0 },
+		settings?.chat.maxOutputTokens ?? DEFAULT_SETTINGS.chat.maxOutputTokens,
+	);
 }
 
 /** Unpriced and zero-rate routes pass the session cost ceiling at admission, and the ceiling stop spares them. */
@@ -4764,10 +4767,17 @@ export function createDispatchBundle(
 		req: DispatchRequest,
 		pricing: EffectivePricing,
 		settings: EffectiveSettings,
-		prompt: Pick<DispatchLifecycleStage, "systemPrompt" | "dynamicPromptMessages">,
+		prompt: Pick<DispatchLifecycleStage, "systemPrompt" | "dynamicPromptMessages"> & {
+			target?: Pick<ResolvedTarget, "modelCapabilities">;
+		},
 		signal?: AbortSignal,
 	): Promise<void> {
-		const estimateUsd = conservativeRouteAdmissionEstimateUsd(pricing, admissionMaxOutputTokens(settings), req, prompt);
+		const estimateUsd = conservativeRouteAdmissionEstimateUsd(
+			pricing,
+			admissionMaxOutputTokens(settings, prompt.target?.modelCapabilities ?? null),
+			req,
+			prompt,
+		);
 		const intentRefusal = intentCeilingRefusal(req, estimateUsd);
 		if (intentRefusal !== null) refuseForBudget(intentRefusal);
 		if (budgetExemptRoute(pricing)) return;
@@ -8057,7 +8067,7 @@ export function createDispatchBundle(
 			endpoint,
 			conservativeRouteAdmissionEstimateUsd(
 				lifecycle.target.effectivePricing,
-				admissionMaxOutputTokens(settings),
+				admissionMaxOutputTokens(settings, lifecycle.target.modelCapabilities),
 				req,
 				lifecycle,
 			),
@@ -11255,7 +11265,7 @@ export function createDispatchBundle(
 			settingsFingerprint: computeSettingsFingerprint(settings ?? null),
 			costUpperBoundUsd: conservativeRouteAdmissionEstimateUsd(
 				target.effectivePricing,
-				admissionMaxOutputTokens(settings),
+				admissionMaxOutputTokens(settings, target.modelCapabilities),
 				req,
 			),
 			costUpperBoundKnown: target.effectivePricing.pricedBy !== "none",
