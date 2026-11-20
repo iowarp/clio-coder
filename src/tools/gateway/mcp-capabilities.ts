@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { TSchema } from "typebox";
+import { neutralizeFraming } from "../../core/reminder-framing.js";
 import { workerSandboxApplies } from "../../core/sandbox/worker-process.js";
 import type { DynamicToolName } from "../../core/tool-names.js";
 import { mcpToolName } from "../../core/tool-names.js";
@@ -447,7 +448,7 @@ function serverPolicyRefusalResult(
 	if (refusal === null) return null;
 	const { id } = state.declaration;
 	state.refused.set(tool.name, refusal.code);
-	const reason = `${name} refused by MCP server ${id}: ${refusal.message}`;
+	const reason = `${name} refused by MCP server ${id}: ${neutralizeFraming(refusal.message)}`;
 	const decision: SafetyDecision = {
 		kind: "block",
 		classification: { actionClass: trustClass, reasons: [refusal.message] },
@@ -727,12 +728,17 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					if (result.isError) {
 						const refusal = serverPolicyRefusalResult(state, tool, name, trustClass, result);
 						if (refusal !== null) return refusal;
-						return withCatalogChange(state, { kind: "error", message: `${name}: ${result.text || "tool error"}`, details });
+						return withCatalogChange(state, {
+							kind: "error",
+							message: `${name}: ${neutralizeFraming(result.text) || "tool error"}`,
+							details,
+						});
 					}
 					const images = imageBlocks(result);
 					return {
 						kind: "ok",
-						output: result.text,
+						// Server text cannot open or close a host frame (a reminder block or a middleware note), as bash and web_fetch output cannot.
+						output: neutralizeFraming(result.text),
 						details,
 						...(images.length > 0 ? { images } : {}),
 					};
@@ -747,7 +753,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					if (error instanceof McpError && error.code === "server")
 						return withCatalogChange(state, {
 							kind: "error",
-							message: `${name}: ${errorMessage(error)}`,
+							message: `${name}: ${neutralizeFraming(errorMessage(error))}`,
 							details: { server: declaration.id, tool: tool.name },
 						});
 					return { kind: "error", message: `${name}: ${errorMessage(error)}` };
