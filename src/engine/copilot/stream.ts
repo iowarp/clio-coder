@@ -257,6 +257,15 @@ class Conversation {
 				return;
 			}
 		}
+		if (event.type === "session.compaction_start") {
+			// Clio owns this transcript's compaction (infiniteSessions is off), yet the runtime still compacts in the
+			// background at its own threshold. Its summary never reaches Clio's transcript and the shrunken live usage
+			// hides the pressure from Clio's meter, so Clio never compacts and a later reseed renders the whole transcript,
+			// about twice what the live session held (FX-5). The runtime's blocking compaction near the window stays.
+			void Promise.resolve()
+				.then(() => this.session.rpc.history.cancelBackgroundCompaction())
+				.catch(() => undefined);
+		}
 		this.activeStep?.handle(event);
 	}
 

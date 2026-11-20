@@ -99,6 +99,9 @@ class FakeSession {
 				await new Promise((resolve) => setTimeout(resolve, delay));
 			}
 			return { ...snapshot, totalUserRequests: 0, totalApiDurationMs: 0, sessionStartTime: "", lastCallInputTokens: 0, lastCallOutputTokens: 0, modelMetrics: {}, codeChanges: {} };
+		} }, history: { cancelBackgroundCompaction: async () => {
+			this.compactionsCancelled = (this.compactionsCancelled ?? 0) + 1;
+			return { cancelled: true };
 		} } };
 	}
 	usage(data) {
@@ -1282,6 +1285,19 @@ test("a reseed past a call a Copilot run still waits on closes that run instead 
 	const reseeded = await step({ tools: [readTool], messages: moved }, key);
 	strictEqual((reseeded as { copilotContinuation?: string }).copilotContinuation, "full");
 	ok(await eventually(() => parked.aborted === true, 5_000), "the run parked on call_1 is closed");
+	disposeCopilotConversations(key);
+});
+
+test("the runtime's own background compaction is cancelled so the live session keeps Clio's transcript (FX-5)", async () => {
+	const key = "compaction-session";
+	disposeCopilotConversations(key);
+	await step({ messages: [user("hello")] }, key);
+	const live = fake().sessions.at(-1) as FakeSession & {
+		compactionsCancelled?: number;
+		emit(type: string, data: unknown): void;
+	};
+	live.emit("session.compaction_start", { conversationTokens: 160_000 });
+	ok(await eventually(() => live.compactionsCancelled === 1), "the background compaction is cancelled");
 	disposeCopilotConversations(key);
 });
 
