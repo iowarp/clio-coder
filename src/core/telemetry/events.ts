@@ -398,6 +398,7 @@ export const EVENTS = {
 	"prompt.prefix_captured": journal(S.PromptPrefixCapturedSchema, { tier: "research", cc: "structural" }),
 	"auth.refreshed": journal(S.AuthRefreshedSchema, { tier: "operational", cc: "content-free" }),
 	"middleware.fired": journal(S.MiddlewareFiredSchema, { tier: "operational", cc: "content-free" }),
+	"surface.settled": journal(S.SurfaceSettledSchema, { tier: "operational", cc: "content-free" }),
 	"system_one.decided": journal(S.SystemOneDecidedSchema, { tier: "operational", cc: "content-free", version: 2 }),
 	"worker.channel_failed": journal(S.WorkerChannelFailedSchema, { tier: "operational", cc: "content-free" }),
 	"request.captured": journal(S.RequestCapturedSchema, { tier: "research", cc: "content-bearing", capture: "content" }),
@@ -435,7 +436,9 @@ export const EVENTS = {
 		tier: "accountability",
 		cc: "content-free",
 		scope: "session",
-		project: (p: TurnContinuedPayload) => pick(p, ["cause", "attempt", "cap", "jobId"]),
+		// `continues` rides only this event's payload, so it is declared here rather than on the shared live type.
+		project: (p: TurnContinuedPayload & { continues?: string }) =>
+			pick(p, ["cause", "attempt", "cap", "jobId", "continues"]),
 	}),
 	"autonomy.entered": journal(S.AutonomyEnteredSchema, { tier: "accountability", cc: "content-free", scope: "session" }),
 	"autonomy.open_decision": journal(S.AutonomyOpenDecisionSchema, {
@@ -482,8 +485,18 @@ export const EVENTS = {
 	}),
 	"config.session_changed": live<ConfigSessionChangePayload>(),
 	"safety.blocked": live<SafetyBlockedPayload>(),
-	"safety.loop_blocked": live<LoopBlockedPayload>(),
-	"safety.tool_budget_exceeded": live<ToolBudgetExceededPayload>(),
+	// Journaled so a loop guard settlement has its facts on disk; the live payload keeps its text fields (memory design 4.6).
+	"safety.loop_blocked": journal(S.LoopBlockedSchema, {
+		tier: "operational",
+		cc: "content-free",
+		project: (p: LoopBlockedPayload) => pick(p, ["tool", "repeatCount", "blocksThisTurn", "budget", "disposition"]),
+	}),
+	"safety.tool_budget_exceeded": journal(S.ToolBudgetExceededSchema, {
+		tier: "operational",
+		cc: "content-free",
+		project: (p: ToolBudgetExceededPayload) =>
+			pick(p, ["tool", "callsThisTurn", "softBudget", "hardCeiling", "interrupted", "template", "stepTool", "rolled"]),
+	}),
 	"safety.git_hooks_changed": live<GitHooksChangedPayload>(),
 	"safety.internal_git_drifted": live<InternalGitDriftPayload>(),
 	"provider.health_changed": live<ProviderHealthPayload>(),

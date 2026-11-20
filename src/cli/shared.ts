@@ -19,8 +19,17 @@ export {
 } from "./argv.js";
 
 /**
+ * How the credentials file is protected on this platform, for copy that names
+ * it: POSIX gets mode 0600, Windows gets an owner-only ACL (backend-file.ts
+ * applies it after every write), so "mode 0600" would be false there.
+ */
+export function credentialFileProtection(platform: NodeJS.Platform = process.platform): string {
+	return platform === "win32" ? "owner-only ACL" : "mode 0600";
+}
+
+/**
  * Warn that an API key was just written to the credentials file in plaintext.
- * Clio protects the file with mode 0600 but does not encrypt it, so a key on
+ * Clio protects the file (credentialFileProtection) but does not encrypt it, so a key on
  * disk is readable by any process running as the user. Callers invoke this
  * right after persisting a literal key; the env-var path stores nothing and
  * stays silent. This is the one helper that needs the auth graph, so it stays
@@ -28,7 +37,7 @@ export {
  */
 export function printPlaintextCredentialWarning(): void {
 	process.stderr.write(
-		`${chalk.yellow("warning:")} API key stored unencrypted at ${authStoragePath()} (${process.platform === "win32" ? "owner-only ACL" : "mode 0600"}).\n` +
+		`${chalk.yellow("warning:")} API key stored unencrypted at ${authStoragePath()} (${credentialFileProtection()}).\n` +
 			"  It is readable by any process running as you. To keep the key off disk, configure the\n" +
 			"  target with an environment variable instead: clio-coder configure ... --api-key-env <VAR>.\n",
 	);

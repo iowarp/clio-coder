@@ -442,6 +442,44 @@ it("uses package and entry footer units with singular/plural forms across compon
 		() => {},
 	);
 	match(plain(legacy.getHint()), /tab · 1 agents/);
+	// `o` opens the adoption view, not a path import, which only `/library import <path>` does (FX-14). Its short
+	// spelling keeps every global key on a narrowing footer beside an installed package row's own actions.
+	const data = inventory();
+	data.copies = [
+		{
+			ref: "plugin:materio",
+			kind: "plugin",
+			name: "materio",
+			scope: "user",
+			root: "/fixture/materio",
+			version: "1.0.0",
+			state: "loadable",
+			enabled: true,
+			valid: true,
+			compatible: true,
+			effective: true,
+			loadable: true,
+			trust: "trusted",
+			origin: { kind: "bundled", catalog: "/library/registry.yaml" },
+			diagnostics: [],
+		},
+	];
+	const library = browser("plugin", data);
+	library.view.handleInput("b");
+	const footer = (columns: number) => plain(library.view.getHint(columns - 2));
+	const rowKeys = "[e] disable · [u] update · [x] remove · [Esc] close";
+	deepStrictEqual(
+		[80, 100, 120].map(footer),
+		[
+			"[/] filter · [Enter] detail · [u] update · [x] remove · [Esc] close",
+			`[/] filter · [Enter] detail · [Tab] list · ${rowKeys}`,
+			`[/] filter · [Enter] detail · [r] refresh · [Tab] list · ${rowKeys}`,
+		],
+		"the global keys drop right to left, as they did beside `[o] import`",
+	);
+	match(footer(220), /\[b\] view · \[s\] scope · \[n\] notices · \[o\] adopt · \[r\] refresh/);
+	match(footer(320), /\[o\] adopt · \/library import <path> · \[r\] refresh/);
+	ok(![80, 100, 120, 220, 320].some((columns) => /\[o\] import/.test(footer(columns))));
 });
 
 it("a confirmGlobal key asks once: the rail says so, another key keeps it, the same key twice runs it", () => {

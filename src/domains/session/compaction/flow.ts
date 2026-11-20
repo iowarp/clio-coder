@@ -17,9 +17,14 @@ import { sessionPaths } from "../../../engine/session.js";
 import type { AgentMessage, EngineModel } from "../../../engine/types.js";
 import type { MemoryRuntime } from "../../memory/runtime.js";
 import { prepareBackgroundModelMetadata } from "../../providers/background-model-metadata.js";
+import type { EffectivePricing } from "../../providers/catalog.js";
+import { resolveEffectivePricing } from "../../providers/catalog.js";
 import type { ProvidersContract, ResolvedRuntimeTarget, RuntimeTier } from "../../providers/index.js";
 import {
 	applyModelCapabilityPatch,
+	endpointCapacitiesForStatuses,
+	endpointCapacityFor,
+	gatewayEndpointKey,
 	modelEndpointKey,
 	refineRuntimeTargetWithModelHints,
 	registerForegroundStream,
@@ -95,11 +100,18 @@ export interface CompactionResolution extends SideCallAuth {
 	model: EngineModel;
 	pricedBy: ResolvedRuntimeTarget["pricedBy"];
 	freeRule?: ResolvedRuntimeTarget["freeRule"];
+	/** The summarizer route's rates, so its target-rates calls are priced from their settled counts (#434). */
+	rates?: EffectivePricing["rates"];
 	targetId: string;
 	runtimeId: string;
 	/** The summarizer route's tier, which sets its first-token stall window (CLI-P9). */
 	runtimeTier?: RuntimeTier;
 	endpointKey: string | null;
+	/**
+	 * The route's concurrent request bound, null only when nothing bounds its endpoint: no declared, live-discovered,
+	 * persisted or runtime-default limit on this target, and none on another target sharing the endpoint.
+	 */
+	endpointLimit: number | null;
 	wireModelId: string;
 	/** What the summarizer route resolves for the summary's request with thinking off; above off on an always-on model. */
 	effectiveThinkingLevel: ResolvedRuntimeTarget["effectiveThinkingLevel"];
@@ -174,15 +186,27 @@ async function resolveCompactionModel(
 			"context.compaction.model authentication is unavailable; authenticate the selected target with clio-coder auth",
 		);
 	}
+	const endpointKey = modelEndpointKey(route.target, route.wireModelId);
+	// Discovered slots from this process's probe outrank a persisted prior, and a bound any target sets on the same
+	// gateway binds every model behind it (MD10).
+	const endpointBound =
+		endpointCapacityFor({
+			target: route.target,
+			runtime: route.runtime,
+			discoveredSlots: status.probeCapabilities?.parallelSlots,
+		}) ??
+		(endpointKey === null ? undefined : endpointCapacitiesForStatuses(providers.list())[gatewayEndpointKey(endpointKey)]);
 	return {
 		model,
 		...pricingBasisFields(route),
+		rates: resolveEffectivePricing(route.target, route.runtime, route.wireModelId).rates,
 		targetId: route.targetId,
 		runtimeId: route.runtime.id,
 		...(route.runtime.tier !== undefined ? { runtimeTier: route.runtime.tier } : {}),
 		wireModelId: route.wireModelId,
 		effectiveThinkingLevel: refined.effectiveThinkingLevel,
-		endpointKey: modelEndpointKey(route.target, route.wireModelId),
+		endpointKey,
+		endpointLimit: endpointBound?.limit ?? null,
 		...sideAuth,
 		...(route.target.auth?.headers ? { headers: route.target.auth.headers } : {}),
 	};
@@ -297,10 +321,19 @@ export async function runCompactionFlow(
 			!settings.context.compaction.model &&
 			resolved.runtimeId === "openai-codex";
 		let nativeAdmission: Promise<void> | undefined;
-		const admitSummary = async (hold: AdmissionHold): Promise<void> => {
+		let nativeAdmissionShared = false;
+		// A call's own signal wakes it when parked in admission, a split fold's sibling failure included (MD10).
+		const admitSummary = async (hold: AdmissionHold, signal?: AbortSignal): Promise<void> => {
 			if (admission?.summaryAdmitted) return;
-			await budget?.beforeSummaryCall?.(hold);
-			await admitCompactionSummaryCall(admission, hold, budget?.signal);
+			await budget?.beforeSummaryCall?.(hold, signal);
+			await admitCompactionSummaryCall(admission, hold, signal ?? budget?.signal);
+		};
+		// Two summaries admitted together both read the same settled spend, so under a cost ceiling a split fold's pair
+		// runs in sequence and the second is admitted against what the first spent (MD2, MD10).
+		const costCeilingActive = (): boolean => {
+			const scheduling = admission?.scheduling;
+			if (!admission || admission.summaryAdmitted || !scheduling?.admitPaidRequest) return false;
+			return (admission.getCeilingUsd?.() ?? scheduling.ceilingUsd()) > 0 || (scheduling.runCostCap?.() ?? null) !== null;
 		};
 
 		let result: CompactResult;
@@ -316,6 +349,7 @@ export async function runCompactionFlow(
 								targetId: resolved.targetId,
 								runtimeId: resolved.runtimeId,
 								...pricingBasisFields(resolved),
+								...(resolved.rates !== undefined ? { rates: resolved.rates } : {}),
 								onSettled: (facts) => {
 									callIds.add(facts.callId);
 								},
@@ -339,6 +373,13 @@ export async function runCompactionFlow(
 					);
 				},
 				continuityNote,
+				// MD10: a split fold's second summary runs beside the first only on a route nothing bounds and with no cost
+				// ceiling. A bounded route stays serial: the turn's own slot, background holds, other models on the gateway
+				// and other processes' worker leases all compete for it, and this hook cannot count them exactly.
+				holdSecondSummarySlot: () => {
+					if (resolved.endpointLimit !== null || costCeilingActive()) return null;
+					return resolved.endpointKey === null ? () => {} : registerForegroundStream(resolved.endpointKey);
+				},
 				// The summary's output cap reserves reasoning room only when its request still thinks (CTX-3).
 				summaryThinkingLevel: resolved.effectiveThinkingLevel,
 				...compactionBudget,
@@ -348,12 +389,18 @@ export async function runCompactionFlow(
 				...(settings.context.compaction.provider === "native" && !nativeEnabled
 					? { providerFallbackReason: "non-codex-or-compaction-override" }
 					: {}),
-				// Native rejection and its portable retry share one transaction admission (#423).
-				beforeSummaryCall: (hold) => {
+				// Native rejection and its first portable retry share one transaction admission (#423); a split fold's second
+				// portable summary is a new request and is admitted on its own.
+				beforeSummaryCall: (hold, signal) => {
 					if (flowViolation !== undefined && flowViolation !== null)
 						throw tagCompactionFailure(new Error(`compaction refused: ${flowViolation}`), "refused");
-					if (!nativeEnabled || !providerCompaction) return admitSummary(hold);
-					nativeAdmission ??= admitSummary(hold);
+					if (!nativeEnabled || !providerCompaction) return admitSummary(hold, signal);
+					if (nativeAdmission === undefined) {
+						nativeAdmission = admitSummary(hold, signal);
+						return nativeAdmission;
+					}
+					if (nativeAdmissionShared) return admitSummary(hold, signal);
+					nativeAdmissionShared = true;
 					return nativeAdmission;
 				},
 				...(summarize ? { summarize } : {}),

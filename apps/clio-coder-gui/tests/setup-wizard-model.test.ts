@@ -64,6 +64,41 @@ test("the routes Clio found and the test-request failure are steps of their own,
 	);
 	assert.equal(review.kind === "review" && review.tests, true);
 	assert.deepEqual(review.kind === "review" ? review.notes : null, []);
+
+	// The sign-in lede is the backend's own Connect now hint: only a device-code flow shows a code, and a host with no
+	// browser opens none.
+	const signIn = (hint: string) => {
+		const view = stepFor({
+			...select(["Sign in to ALCF Inference (Globus)", "credential: none"], ["Connect now", "Later"]),
+			choices: [
+				{ id: 0, label: "Connect now", hint },
+				{ id: 1, label: "Later", hint: "" },
+			],
+		});
+		return view.kind === "signin" ? view.lede : null;
+	};
+	assert.equal(
+		signIn("shows a sign-in link for any device, then asks for the code that page shows"),
+		"CLIO Coder shows a sign-in link for any device, then asks for the code that page shows.",
+	);
+	assert.equal(
+		signIn("opens your browser and waits for the sign-in"),
+		"CLIO Coder opens your browser and waits for the sign-in.",
+	);
+
+	// The key step names the protection the backend's platform applies, as its hint reports it.
+	const key = (hint: string) => {
+		const view = stepFor({ id: 8, kind: "text", heading: ["Paste the API key"], initial: "", hint, mask: true });
+		return view.kind === "credential-key" ? view.protection : undefined;
+	};
+	assert.equal(
+		key("stored at ~/.config/clio-coder/credentials.yaml (owner-only ACL, not encrypted)"),
+		"an owner-only ACL",
+	);
+	assert.equal(key("stored at ~/.config/clio-coder/credentials.yaml (mode 0600, not encrypted)"), "file mode 0600");
+	assert.equal(key("stored at ~/.config/clio-coder/credentials.yaml"), null);
+	const stored = "API key stored unencrypted (owner-only ACL). Any process running as you can read it.";
+	assert.deepEqual(readMessages([stored]).warnings, [stored]);
 });
 
 test("the test request is read from the CLI's lines: waiting on it, its answer, and a save without it", () => {

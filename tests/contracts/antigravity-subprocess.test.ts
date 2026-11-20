@@ -38,6 +38,7 @@ import antigravityCodeRuntime, {
 import deepseekRuntime from "../../src/domains/providers/runtimes/cloud/deepseek.js";
 import openaiCodexRuntime from "../../src/domains/providers/runtimes/cloud/openai-codex.js";
 import type { ProbeResult } from "../../src/domains/providers/types/runtime-descriptor.js";
+import { createAntigravityShims } from "../../src/engine/acp/antigravity-shims.js";
 import { ANTIGRAVITY_SIDEBAND_MAX_ROWS, readAntigravitySideband } from "../../src/engine/acp/antigravity-sideband.js";
 import {
 	ANTIGRAVITY_MAX_STREAM_BYTES,
@@ -863,5 +864,33 @@ describe("Antigravity ACP sideband reader", () => {
 			symlinkSync(join(root, "outside.db"), join(conversations, "escape.db"));
 			equal(none("escape"), "outside-profile");
 		}
+
+		// The adapter's shims report only steps after the session's baseline, and skip past a history longer than the
+		// pages one turn reads instead of surfacing it on a later turn.
+		const shimmed = "shims-session";
+		const store = new DatabaseSync(join(conversations, `${shimmed}.db`));
+		store.exec("CREATE TABLE steps (idx integer PRIMARY KEY, step_type integer, status integer, step_payload blob)");
+		const step = store.prepare("INSERT INTO steps (step_type, status, step_payload) VALUES (17, 3, ?)");
+		const shims = createAntigravityShims({
+			command: "agy",
+			launchArgs: [],
+			toolGovernance: "clio-coder-policy",
+			profileDir,
+		});
+		step.run(Buffer.from(quota));
+		deepStrictEqual(shims.sideband(shimmed), {}, "no baseline, no report");
+		shims.sidebandBaseline(shimmed);
+		deepStrictEqual(shims.sideband(shimmed), {}, "an error before the baseline");
+		for (let n = 0; n <= 4 * limit; n++) step.run(Buffer.from("The stream was interrupted."));
+		step.run(Buffer.from(quota));
+		deepStrictEqual(shims.sideband(shimmed), {}, "past the page bound");
+		deepStrictEqual(shims.sideband(shimmed), {}, "skipped, not deferred");
+		step.run(Buffer.from(quota));
+		step.run(Buffer.from("API error (attempt 1): INVALID_ARGUMENT (code 400): INVALID_THINKING_SIGNATURE"));
+		const { kind: _kind, idx: _idx, ...usageLimit } = quotaSignal;
+		const marker = { nonResumable: { reason: "INVALID_THINKING_SIGNATURE" } };
+		deepStrictEqual(shims.sideband(shimmed), { usageLimit, ...marker });
+		deepStrictEqual(shims.sideband(shimmed), marker, "the marker stays for the session");
+		store.close();
 	});
 });

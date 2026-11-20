@@ -21,7 +21,15 @@ import { hashToolCall } from "../safety/loop-detector.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { BackgroundSkipReason } from "./background-budget.js";
 import { BACKGROUND_SKIP_REASONS } from "./background-budget.js";
-import { sameCommand, simpleInvocation, succeededCommandForms, successfulShellReceipt } from "./command-evidence.js";
+import {
+	atWorkspaceRoot,
+	type CommandSegment,
+	commandSegment,
+	commandSegments,
+	receiptVouches,
+	sameCommandIdentity,
+	successfulShellReceipt,
+} from "./command-evidence.js";
 import {
 	type MemoryCommitScope,
 	MemoryCommitState,
@@ -521,6 +529,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	 * else.
 	 */
 	const succeededCommands = new Set<string>();
+	/** The evidence identity of every segment those receipts vouch for, by key; nothing else satisfies a command claim. */
+	const succeededSegments = new Map<string, CommandSegment>();
 	/**
 	 * Excerpts of successful read results, by repository-relative path, exactly
 	 * as the turn log showed them to the lesson pass. A source-cited lesson is
@@ -1222,6 +1232,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		pending.clear();
 		turnLog.length = 0;
 		succeededCommands.clear();
+		succeededSegments.clear();
 		observedReads.clear();
 		trajectory.length = 0;
 		failures.clear();
@@ -1702,17 +1713,15 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		}
 	}
 
-	/** A successful simple shell receipt satisfies a delivered lesson whose evidence is that exact command. */
-	function noteCommandEvidence(command: string): void {
-		if (simpleInvocation(command) === null) return;
+	/** A successful receipt segment satisfies a delivered lesson whose evidence command has that identity. */
+	function noteCommandEvidence(segment: CommandSegment): void {
+		const root = workspaceRoot();
 		for (const watch of deliveries)
-			for (const delivered of watch.entries)
-				if (
-					delivered.entry.durable === true &&
-					delivered.entry.evidenceCommand !== undefined &&
-					sameCommand(delivered.entry.evidenceCommand, command)
-				)
-					watch.supported.add(delivered.id);
+			for (const delivered of watch.entries) {
+				if (delivered.entry.durable !== true || delivered.entry.evidenceCommand === undefined) continue;
+				const claim = commandSegment(delivered.entry.evidenceCommand, root);
+				if (claim !== null && receiptVouches(claim, segment)) watch.supported.add(delivered.id);
+			}
 	}
 
 	/** A successful read that showed a delivered lesson's quoted source, which the checkout still holds. */
@@ -1828,19 +1837,32 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	}
 
 	/**
-	 * The complete command, and each simple command of a pure `&&` chain run
-	 * from the workspace root: exit 0 proves every segment finished with exit
-	 * 0. Nothing else is derived; `echo 'a && npm test'` and `true # && npm
-	 * test` both succeed without running `npm test`.
+	 * The complete command, and the evidence identity of each segment it vouches
+	 * for: one simple command, or each of a pure `&&` chain run from the
+	 * workspace root, since exit 0 proves every segment finished with exit 0.
+	 * Nothing else is derived; `echo 'a && npm test'` and `true # && npm test`
+	 * both succeed without running `npm test`, and a call whose own cwd is not
+	 * the root vouches for nothing.
 	 */
 	function rememberSucceededCommand(command: string, cwd: unknown): void {
-		for (const form of succeededCommandForms(command, workspaceRoot(), typeof cwd === "string" ? cwd : undefined)) {
+		const root = workspaceRoot();
+		const at = typeof cwd === "string" ? cwd : undefined;
+		if (!atWorkspaceRoot(root, at)) return;
+		const segments = commandSegments(command, root, at);
+		for (const form of new Set([command, ...segments.map((segment) => segment.text)])) {
 			succeededCommands.add(form);
 			if (succeededCommands.size > VERIFIED_COMMAND_LIMIT) {
 				succeededCommands.delete(succeededCommands.values().next().value ?? form);
 			}
-			noteCommandEvidence(form);
-			settleDurableLessons(form);
+		}
+		for (const segment of segments) {
+			succeededSegments.delete(segment.key);
+			succeededSegments.set(segment.key, segment);
+			if (succeededSegments.size > VERIFIED_COMMAND_LIMIT) {
+				succeededSegments.delete(succeededSegments.keys().next().value ?? segment.key);
+			}
+			noteCommandEvidence(segment);
+			settleDurableLessons(segment);
 		}
 	}
 
@@ -1928,10 +1950,10 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			keptLessons().filter(
 				(lesson) =>
 					lesson.commands.recommended.some(
-						(quoted) => !sameCommand(quoted, command) && sharesInvocationTarget(command, quoted, root),
+						(quoted) => !sameCommandIdentity(quoted, command, root) && sharesInvocationTarget(command, quoted, root),
 					) ||
 					(lesson.commands.recommended.length > 0 &&
-						lesson.commands.examples.some((quoted) => sameCommand(quoted, command))),
+						lesson.commands.examples.some((quoted) => sameCommandIdentity(quoted, command, root))),
 			),
 		);
 	}
@@ -2008,23 +2030,32 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	}
 
 	/**
-	 * A submitted lesson holds in this session once its recommended command
-	 * succeeds exactly, as one simple invocation. Failures, other commands that
-	 * merely mention it, and its quoted failed examples prove nothing about it.
+	 * A submitted lesson holds in this session once a receipt segment with the
+	 * evidence identity of its recommended command succeeds. Failures, other
+	 * commands that merely mention it, and its quoted failed examples prove
+	 * nothing about it.
 	 */
-	function settleDurableLessons(command: string): void {
-		if (durableWatch.size === 0 || simpleInvocation(command) === null) return;
+	function settleDurableLessons(segment: CommandSegment): void {
+		if (durableWatch.size === 0) return;
+		const root = workspaceRoot();
 		const held = [...durableWatch]
-			.filter(([, commands]) => commands.some((quoted) => sameCommand(quoted, command)))
+			.filter(([, commands]) =>
+				commands.some((quoted) => {
+					const claim = commandSegment(quoted, root);
+					return claim !== null && receiptVouches(claim, segment);
+				}),
+			)
 			.map(([id]) => id);
 		if (held.length === 0) return;
 		for (const id of held) durableWatch.delete(id);
 		reportDurableLessons([], held);
 	}
 
-	/** This session already ran exactly that command successfully. */
+	/** This session already ran a command with that evidence identity successfully. */
 	function commandSucceeded(quoted: string): boolean {
-		for (const command of succeededCommands) if (sameCommand(command, quoted)) return true;
+		const claim = commandSegment(quoted, workspaceRoot());
+		if (claim === null) return false;
+		for (const segment of succeededSegments.values()) if (receiptVouches(claim, segment)) return true;
 		return false;
 	}
 

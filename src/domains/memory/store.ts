@@ -4,7 +4,13 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
-import { MEMORY_VERSION, type MemoryRecord, type MemoryStatus, type MemoryStoreFile } from "./types.js";
+import {
+	MEMORY_LEGACY_VERSION,
+	MEMORY_VERSION,
+	type MemoryRecord,
+	type MemoryStatus,
+	type MemoryStoreFile,
+} from "./types.js";
 import { validateMemoryRecord } from "./validate.js";
 
 export const MEMORY_STORE_MAX_RECORDS = 500;
@@ -123,7 +129,11 @@ function readParsedStoreSync(dataDir: string): ParsedMemoryStore {
 /**
  * The envelope must be valid; a record that is not is set aside rather than
  * failing every read, and moves to `records.invalid.json` on the next write.
- * A store a newer build wrote is never touched.
+ * A store a newer build wrote is never touched. A store written before claim
+ * identity (`MEMORY_LEGACY_VERSION`) is the legacy reader's: its records are
+ * read as they are, with no claim, no revision on their verdicts and their
+ * deliveries still as `delivered` observations, and nothing is rewritten on
+ * load. A record changes shape only when a mutation touches it.
  */
 function parseAndValidate(raw: string, source: string): ParsedMemoryStore {
 	const parsed = parseJson(raw, source);
@@ -135,7 +145,8 @@ function parseAndValidate(raw: string, source: string): ParsedMemoryStore {
 	if (typeof envelope.version === "number" && envelope.version > MEMORY_VERSION) {
 		throw new Error(`memory store version ${envelope.version} is newer than this build supports (${MEMORY_VERSION})`);
 	}
-	if (envelope.version !== MEMORY_VERSION) throw new Error("memory store invalid: $.version: expected 1");
+	if (envelope.version !== MEMORY_VERSION && envelope.version !== MEMORY_LEGACY_VERSION)
+		throw new Error(`memory store invalid: $.version: expected ${MEMORY_LEGACY_VERSION} or ${MEMORY_VERSION}`);
 	if (extra.length > 0) throw new Error(`memory store invalid: $.${extra[0]}: unexpected field`);
 	if (!Array.isArray(envelope.records)) throw new Error("memory store invalid: $.records: expected array");
 	const records: MemoryRecord[] = [];
@@ -176,17 +187,39 @@ function writeMemoryRecordsUnlocked(
 	storedIds: ReadonlySet<string>,
 ): string {
 	const sorted = sortMemoryRecords(evictForRoom(records, storedIds));
-	const store: MemoryStoreFile = { version: MEMORY_VERSION, records: sorted };
+	const store: MemoryStoreFile = {
+		version: sorted.some(needsCurrentVersion) ? MEMORY_VERSION : MEMORY_LEGACY_VERSION,
+		records: sorted,
+	};
 	const path = memoryStorePath(dataDir);
 	safeResourceWrite(path, `${JSON.stringify(store, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 	return path;
 }
 
 /**
- * At the cap, make room from proposals nobody decided on: those without a
- * command or source evidence ref first, then evidence-backed ones, oldest
- * first. Approved records, operator rejections and records this write adds
- * are never evicted, so a write never reports a record it already dropped.
+ * Whether a record carries a field a build before claim identity rejects. Such a build would set the record aside
+ * as invalid and move it out of the store on its next write; the newer envelope version makes it refuse the store
+ * instead of touching it.
+ */
+function needsCurrentVersion(record: MemoryRecord): boolean {
+	return (
+		record.claim !== undefined ||
+		record.revisions !== undefined ||
+		record.deliveredCount !== undefined ||
+		record.lastDeliveredAt !== undefined ||
+		(record.observations ?? []).some((item) => Object.keys(item).some((key) => !LEGACY_OBSERVATION_FIELDS.has(key)))
+	);
+}
+
+const LEGACY_OBSERVATION_FIELDS: ReadonlySet<string> = new Set(["at", "sessionId", "kind"]);
+
+/**
+ * At the cap, make room from notes nobody decided on: first those with no
+ * command or source evidence ref (no agent authors one yet, so none is spared
+ * as an agent's), then the other unpromoted notes, the one observed longest
+ * ago first. A lesson, an operator approval or rejection, and a record this
+ * write adds are never evicted, so a write never reports a record it already
+ * dropped.
  */
 function evictForRoom(
 	records: ReadonlyArray<MemoryRecord>,
@@ -199,7 +232,7 @@ function evictForRoom(
 		.sort(
 			(left, right) =>
 				Number(hasEvidenceRef(left)) - Number(hasEvidenceRef(right)) ||
-				left.createdAt.localeCompare(right.createdAt) ||
+				lastObservedAt(left).localeCompare(lastObservedAt(right)) ||
 				left.id.localeCompare(right.id),
 		);
 	if (evictable.length < excess) {
@@ -207,6 +240,13 @@ function evictForRoom(
 	}
 	const evicted = new Set(evictable.slice(0, excess));
 	return records.filter((record) => !evicted.has(record));
+}
+
+/** The newest thing the store saw of a record: a verdict, a delivery, or its creation. */
+function lastObservedAt(record: MemoryRecord): string {
+	let latest = record.lastDeliveredAt ?? record.createdAt;
+	for (const item of record.observations ?? []) if (item.at > latest) latest = item.at;
+	return latest;
 }
 
 function hasEvidenceRef(record: MemoryRecord): boolean {

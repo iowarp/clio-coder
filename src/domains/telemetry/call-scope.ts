@@ -25,6 +25,8 @@ export interface CallJournalOptions {
 	runtimeId: string;
 	pricedBy: EffectivePricing["pricedBy"];
 	freeRule?: EffectivePricing["freeRule"];
+	/** The route's rates, so a target-rates call is priced from its settled counts (#434). */
+	rates?: EffectivePricing["rates"];
 	onSettled?: (facts: CallSettled) => void;
 }
 
@@ -88,7 +90,11 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 			if (!call || !options) return undefined;
 			return settled(
 				call.settle(
-					callSettlementFromMessage(message, pricingBasisFields(options), sideCallShutdownCause(message)),
+					callSettlementFromMessage(
+						message,
+						{ ...pricingBasisFields(options), ...(options.rates !== undefined ? { rates: options.rates } : {}) },
+						sideCallShutdownCause(message),
+					),
 					reportedModelFromMessage(message),
 				),
 			);

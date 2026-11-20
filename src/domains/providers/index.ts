@@ -32,7 +32,12 @@ export {
 	resolveRuntimeAuthTarget,
 	targetRequiresAuth,
 } from "./auth/index.js";
-export { type CacheDeploymentObservation, observeCacheDeployment } from "./cache-deployment.js";
+export {
+	type CacheDeploymentObservation,
+	observeCacheDeployment,
+	type WarmableBackend,
+	warmableBackend,
+} from "./cache-deployment.js";
 export { AGENT_ROLE_TOOLS_REQUIRED_REASON, mergeCapabilities, supportsAgentRoleTools } from "./capabilities.js";
 export type { ProvidersContract, TargetHealth, TargetStatus } from "./contract.js";
 export { credentialsPresent } from "./credentials.js";

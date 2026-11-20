@@ -121,7 +121,7 @@ continue to apply alongside the project policy.
 
 ## Rigor and the validation contract
 
-Rigor decides what evidence a completed turn needs. At `normal` the finish-contract advisory stays a soft reminder. At `high` an unvalidated completion claim, or an outstanding quality requirement, carries the turn onward once to run validation or record a limitation before it settles. Rigor resolves in this order ([rigor.ts](../../src/domains/safety/rigor.ts)):
+Rigor decides what evidence a completed turn needs. At `normal` the finish-contract advisory stays a soft reminder. At `high` an unvalidated completion claim, or an outstanding quality requirement, carries the turn onward once to run validation or record a limitation before it settles. A turn that declared through `finish` is never carried onward: a declared `partly_done` or `not_done` settles as declared, and a declared `done` with the requirement still open is assessed `partly_done` ([Completion states](tool-usage.md#completion-states)). Rigor resolves in this order ([rigor.ts](../../src/domains/safety/rigor.ts)):
 
 1. `CLIO_CODER_RIGOR` (`high` or `normal`, case-insensitive) overrides everything.
 2. A valid `.clio-coder/quality.yaml` selects `high`.

@@ -367,13 +367,18 @@ export interface TurnRuntimeDeps {
 	/** Stable Clio session id forwarded only to gateway runtimes that understand it. */
 	sessionId?: () => string | undefined;
 	sessionOrigin?: () => TelemetrySessionOrigin | null;
-	/** A main-agent request is leaving now, on this attempt: what the run's messages hold, this request carries. */
-	onModelRequestSent?: (call: {
-		callId: string;
-		attemptId: string;
-		attempt: number;
-		context: TelemetrySessionLease["context"];
-	}) => void;
+	/**
+	 * A main-agent request is leaving now, on this attempt: what the run's messages hold, this request carries. Every
+	 * main request reports, journaled or not; `call` is null when no journal lease records it.
+	 */
+	onModelRequestSent?: (
+		call: {
+			callId: string;
+			attemptId: string;
+			attempt: number;
+			context: TelemetrySessionLease["context"];
+		} | null,
+	) => void;
 	onModelCallSettled?: (facts: CallSettled) => void;
 	/** The ledger as admission prepares a request: the attempt's cursor, owner and the fold records it renders. */
 	requestCursor?: () => RequestCursor;
@@ -1020,16 +1025,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				// still trips; an uncapped session prices nothing extra.
 				const capped = deps.getSettings().safety.limits.sessionCostUsd > 0;
 				let interrupted = capped || (message as { stopReason?: unknown }).stopReason === "aborted" ? unreported : null;
-				if (unreported && capped) {
-					const resolution = localRuntime.runtimeResolution;
-					const { rates } = resolveEffectivePricing(resolution.target, resolution.runtime, resolution.wireModelId);
-					if (rates) interrupted = { ...unreported, usd: calculatePricingCostUsd(rates, unreported) };
-				}
+				const resolution = localRuntime.runtimeResolution;
+				const { rates } = resolveEffectivePricing(resolution.target, resolution.runtime, resolution.wireModelId);
+				if (unreported && capped && rates) interrupted = { ...unreported, usd: calculatePricingCostUsd(rates, unreported) };
 				const quota = quotaReadingFromMessage(message, localRuntime.runtimeId, localRuntime.targetId);
 				const settlement = withCachePhysics(
 					callSettlementFromMessage(
 						message,
-						localRuntime.runtimeResolution,
+						{ ...resolution, rates },
 						message.role === "assistant" && message.stopReason === "aborted" ? harnessAbortCause() : undefined,
 						interrupted,
 					),
@@ -1214,13 +1217,16 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						const attempt = modelCall;
 						// The first attempt's send opened at onStreamInvocation; a #426 retry opens its own here.
 						attempt?.stage("send", "start");
-						if (attempt && journalLease)
-							deps.onModelRequestSent?.({
-								callId: attempt.callId,
-								attemptId: attempt.attemptId,
-								attempt: attempt.attempt,
-								context: journalLease.context,
-							});
+						deps.onModelRequestSent?.(
+							attempt && journalLease
+								? {
+										callId: attempt.callId,
+										attemptId: attempt.attemptId,
+										attempt: attempt.attempt,
+										context: journalLease.context,
+									}
+								: null,
+						);
 						const facts: ModelRequestFacts = {
 							sentAt: Date.now(),
 							modelId: currentModel.id,
@@ -1329,8 +1335,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						const failure = terminal
 							? tracking.failure(terminal.errorMessage, terminal.stopReason === "aborted", reported)
 							: undefined;
+						const resolution = localRuntime.runtimeResolution;
+						const { rates } = resolveEffectivePricing(resolution.target, resolution.runtime, resolution.wireModelId);
 						const settlement = withCachePhysics(
-							callSettlementFromMessage({ ...message, ...(failure ? { failure } : {}) }, localRuntime.runtimeResolution),
+							callSettlementFromMessage({ ...message, ...(failure ? { failure } : {}) }, { ...resolution, rates }),
 							message,
 							modelCall.attemptId,
 						);

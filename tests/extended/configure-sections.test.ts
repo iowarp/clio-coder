@@ -926,12 +926,21 @@ describe("contracts/configure-onboarding", () => {
 		try {
 			const alcf = getRuntimeRegistry().get("alcf");
 			ok(alcf);
-			const result = await runWizard(testEnv.env, [{ waitFor: "Sign in to", keys: [DOWN, ENTER] }], {
-				mode: "first",
-				runtime: alcf,
-			});
+			const result = await runWizard(
+				// An SSH session opens no browser, so the sign-in step must not promise one (FX-14 item 11).
+				{ ...testEnv.env, SSH_CONNECTION: "10.0.0.1 50000 10.0.0.2 22" },
+				[{ waitFor: "Sign in to", keys: [DOWN, ENTER] }],
+				{
+					mode: "first",
+					runtime: alcf,
+				},
+			);
 			// S-78: "Later" ends setup with nothing saved and names the sign-in command.
 			const screen = plainText(result.transcript());
+			// ALCF never shows a code of its own: Globus shows one after sign-in and the operator pastes it back.
+			ok(screen.includes("shows a sign-in link for any device, then asks for the code that page shows"), screen);
+			ok(!screen.includes("a link and a code"), screen);
+			ok(!screen.includes("opens your browser"), screen);
 			strictEqual(result.code, 130, screen);
 			ok(screen.includes("clio-coder auth login alcf, then clio-coder"), screen);
 			ok(!screen.includes("127.0.0.1"), `the ALCF prompt must offer no localhost default:\n${screen}`);

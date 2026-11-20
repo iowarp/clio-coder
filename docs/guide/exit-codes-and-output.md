@@ -28,6 +28,8 @@ Interactive sessions, headless main-agent `run`, and `run --agent` exit `128 + s
 | `worker_removed_tests` | Edit directly on checkout (no task worktree) removed existing tests; edits remain on checkout for review ([extension.ts](../../src/domains/dispatch/extension.ts)). |
 | `information_flow_blocked` | Policy blocked restricted context from reaching the requested destination; change rule/destination and start a new session ([backoff.ts](../../src/domains/dispatch/backoff.ts)). |
 
+A run that left its evidence obligation unmet is the one exception to "no automatic retry": a builder that ends `worker_no_work` with no tool call over an unchanged tree is retried once on another model, and its idle task worktree is kept for that attempt ([Evidence obligations and the one retry](fleet-dispatch.md#evidence-obligations-and-the-one-retry)).
+
 ### Subcommand-specific exit codes
 
 | Subcommand | Codes |
@@ -88,6 +90,18 @@ Every `clio-coder run --output-format stream-json` stream ends with one `run_end
 ```
 
 `outcome` is `succeeded`, `failed`, `canceled`, `timed_out`, `previewed` (`--dry-run`) or `displayed`; `causes` lists every fact that ended the run, winner first, and `outcomeDetail` names the winner. After a step template's turns, the sealed run record (not the envelope) keeps `stepPipeline`, which names the step tool and says whether it signalled `done`; a pipeline left unfinished keeps the outcome and carries `stoppedBy` (`cap` for the yolo continuation cap with a step still running, `unreported` when the last turn at the cap made no step call and ended on its own summary, so the step tool simply never signalled `done`, `cancel` or `failure` when a cancel or a failed turn ended it, `turn` for a turn nothing continued). Always judge overall success/failure from `run_end`, not from model-level `agent_end` ([run-json-schema.ts](../../src/cli/modes/run-json-schema.ts)).
+
+### Completion and `--exit-code`
+
+Once a main run settles, its `run_end` envelope carries `completion`: how the agent declared the run ended through its [`finish`](tool-usage.md#finish-declare-how-the-turn-ended) tool, never read from the answer text ([run-json-schema-v2.ts](../../src/cli/modes/run-json-schema-v2.ts)).
+
+```json
+"completion":{"declared":true,"claimed":"done","assessed":"partly_done","state":"partly_done","facts":["unvalidated_mutation"],"limitations":[],"unverified":[]}
+```
+
+`claimed` is the declared `done`, `partly_done` or `not_done`, and `assessed` is the host's reading of it: a `done` over an open obligation (`unvalidated_mutation`, `failed_check`, `uncollected_run` or `open_task`, listed in `facts`) is `partly_done`. `state` is the assessment. A run that declared nothing has `declared: false`, `claimed: null` and state `unknown`. `limitations`, `unverified` and the optional `remaining` repeat the declaration.
+
+Without `--exit-code` the completion changes no exit code. With it, a run that would exit 0 exits 1 when `state` is `partly_done` or `not_done`; `done` and an undeclared run keep 0, and every other exit is unchanged ([run-failure.ts](../../src/cli/run-failure.ts)).
 
 ### Dispatched agent output (`clio-coder run --agent`)
 

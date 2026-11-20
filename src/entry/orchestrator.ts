@@ -1328,6 +1328,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			stateDir: clioStateDir,
 			enabled: () => memoryEnabledNow(),
 			takeRecalled: () => memoryOwner.takeTurnRecalledMemory(),
+			workspaceRoot: memoryWorkspaceRoot,
 		}),
 	);
 	const memoryRouteAvailable = (): boolean =>

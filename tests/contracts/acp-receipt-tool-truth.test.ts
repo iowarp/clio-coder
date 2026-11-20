@@ -1,8 +1,10 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
-import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { fileURLToPath } from "node:url";
+import { DEFAULT_SETTINGS, type WorkerPermissionMode } from "../../src/core/defaults.js";
+import type { DispatchBundleOptions } from "../../src/domains/dispatch/extension.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -238,4 +240,140 @@ it("seals native and ACP runs, and their failed finalizations, byte for byte as 
 	const text = JSON.stringify(actual, null, "\t");
 	if (process.env.CLIO_DISPATCH_GOLDEN === "update") writeFileSync(GOLDEN, `${text}\n`);
 	strictEqual(text, JSON.stringify(JSON.parse(readFileSync(GOLDEN, "utf8")), null, "\t"));
+});
+
+/**
+ * One dispatched run of the row-224 `agy acp` stand-in: its first prompt asks "Which branch?" (main, topic) and stays
+ * open until a steer prompt arrives, so every run steers once it has seen the question. The profile and HOME live in
+ * the scratch home, never the operator's ~/.gemini.
+ */
+async function agyDispatch(
+	name: string,
+	options: Pick<DispatchBundleOptions, "operatorAsk"> = {},
+	mode?: WorkerPermissionMode,
+	scenario: "steer" | "null" | "labels" = "steer",
+) {
+	const dir = join(process.env.CLIO_CODER_HOME ?? "", name);
+	mkdirSync(dir, { recursive: true });
+	const log = join(dir, "frames.jsonl");
+	const agy = join(dir, "agy");
+	const fixture = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
+	writeFileSync(agy, `#!/bin/sh\nexec "${process.execPath}" "${fixture}" agy "${log}" 1.5.13 ${scenario}\n`, {
+		mode: 0o755,
+	});
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.fleet.retry.maxRetries = 0;
+	if (mode !== undefined) settings.fleet.permissions.mode = mode;
+	settings.integrations.externalAgents.entries = [
+		{
+			id: "agy-fixture",
+			command: agy,
+			args: ["acp", "--gemini-dir", "~/.gemini", "--app-data-dir", "antigravity-cli"],
+			env: { HOME: dir },
+			toolGovernance: "clio-coder-policy",
+		},
+	];
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), options);
+	await bundle.extension.start();
+	try {
+		const run = await bundle.contract.dispatch({
+			agentId: "agy-fixture",
+			task: "pick a branch",
+			executionRole: "researcher",
+			requestOrigin: "internal",
+		});
+		const questions: unknown[] = [];
+		for await (const event of run.events) {
+			const typed = event as { type?: string; payload?: unknown };
+			if (typed.type !== "clio_coder_peer_question") continue;
+			questions.push(typed.payload);
+			bundle.contract.steer(run.runId, "use the topic branch");
+		}
+		const receipt = await run.finalPromise;
+		const frames = readFileSync(log, "utf8")
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { id?: unknown; method?: string; result?: unknown });
+		return { receipt, questions, frames };
+	} finally {
+		await bundle.extension.stop?.();
+	}
+}
+
+it("steers an agy delegation through its own session/prompt and seals the steer's provenance (row 228)", {
+	skip: process.platform === "win32",
+}, async () => {
+	const { receipt, frames } = await agyDispatch("steer");
+	const steering = receipt.steering ?? [];
+	strictEqual(steering.length, 1, JSON.stringify(receipt.outcomeDetail));
+	strictEqual(steering[0]?.sequence, 1);
+	strictEqual(steering[0]?.bytes, Buffer.byteLength("use the topic branch"));
+	strictEqual(steering[0]?.acknowledged, true);
+	deepStrictEqual(
+		frames.filter((frame) => frame.method === "session/prompt").length,
+		2,
+		"the steer goes out as a second session/prompt",
+	);
+	ok(!frames.some((frame) => frame.method === "session/cancel"));
+
+	// A steer the peer answers with a null result (no stop reason) is sent and recorded, but never acknowledged.
+	const nulled = await agyDispatch("steer-null", {}, undefined, "null");
+	strictEqual(nulled.receipt.steering?.length, 1);
+	strictEqual(nulled.receipt.steering?.[0]?.acknowledged, false);
+});
+
+it("parks an agy question on the operator's ask surface and answers the picked optionId, else cancelled (row 228)", {
+	skip: process.platform === "win32",
+}, async () => {
+	const asked: Array<{ question: string; options?: Array<{ label: string }>; fixedChoices?: boolean }> = [];
+	const askedAs: Array<{ origin?: string; signal: boolean }> = [];
+	let pick = "topic";
+	const operatorAsk: NonNullable<DispatchBundleOptions["operatorAsk"]> = {
+		available: () => true,
+		ask: async (questions, invokeOptions) => {
+			asked.push(...questions);
+			askedAs.push({
+				...(invokeOptions?.origin !== undefined ? { origin: invokeOptions.origin } : {}),
+				signal: invokeOptions?.signal !== undefined,
+			});
+			return { answers: [{ question: questions[0]?.question ?? "", answer: pick, options: [pick] }] };
+		},
+	};
+	const answered = await agyDispatch("answered", { operatorAsk });
+	strictEqual(asked.length, 1);
+	ok(asked[0]?.question.includes("Which branch?") && asked[0].question.includes("pushes to main"), asked[0]?.question);
+	deepStrictEqual(asked[0]?.options, [{ label: "main" }, { label: "topic" }]);
+	strictEqual(asked[0]?.fixedChoices, true);
+	// A harness card: the run's signal dismisses it and its answer stays out of the main transcript.
+	deepStrictEqual(askedAs, [{ origin: "harness", signal: true }]);
+	deepStrictEqual(answered.frames.find((frame) => frame.id === "question-1" && frame.method === undefined)?.result, {
+		outcome: { outcome: "selected", optionId: "topic" },
+	});
+	deepStrictEqual(answered.questions, [
+		{
+			questionId: "interaction_1",
+			question: "Which branch?",
+			choices: ["main", "topic"],
+			securityWarning: "pushes to main",
+			answer: "selected",
+			selected: "topic",
+		},
+	]);
+
+	// fleet.permissions.mode deny keeps the cancelled answer and never asks the operator.
+	const denied = await agyDispatch("denied", { operatorAsk }, "deny");
+	strictEqual(asked.length, 1);
+	deepStrictEqual(denied.frames.find((frame) => frame.id === "question-1" && frame.method === undefined)?.result, {
+		outcome: { outcome: "cancelled" },
+	});
+	strictEqual((denied.questions[0] as { answer?: string } | undefined)?.answer, "cancelled");
+
+	// A repeated label gets its optionId, and a counter when that collides with a real label; a blank name shows the
+	// optionId. Every option stays on the card and the pick maps back to its own optionId.
+	pick = "x (b 2)";
+	const labelled = await agyDispatch("labels", { operatorAsk }, undefined, "labels");
+	deepStrictEqual(asked.at(-1)?.options, [{ label: "x" }, { label: "x (b)" }, { label: "x (b 2)" }, { label: "d" }]);
+	deepStrictEqual(labelled.frames.find((frame) => frame.id === "question-1" && frame.method === undefined)?.result, {
+		outcome: { outcome: "selected", optionId: "b" },
+	});
 });
