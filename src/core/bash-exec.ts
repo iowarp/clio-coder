@@ -45,6 +45,16 @@ export interface BashCommandResult extends Partial<BashStreamByteCounts> {
 	outputCapped: boolean;
 	/** Exact bytes retained from stdout and stderr, never above the hard cap. */
 	outputBytes: number;
+	/**
+	 * The limit that armed the timeout timer: the run's deadline or the call's `timeoutMs`, with its delay. `ms` is 0
+	 * when the deadline had already passed before spawn, and then the command never started.
+	 */
+	timeoutLimit?: BashTimeoutLimit;
+}
+
+export interface BashTimeoutLimit {
+	by: "run-deadline" | "timeout";
+	ms: number;
 }
 
 export interface BashCommandProgress {
@@ -59,6 +69,12 @@ export interface BashCommandProgress {
 export interface RunBashCommandOptions {
 	cwd?: string;
 	timeoutMs?: number;
+	/**
+	 * A `performance.now()` instant the command may not outlive: the timeout timer,
+	 * armed after spawn preparation, fires at whichever of it and `timeoutMs` comes first.
+	 * A deadline that has passed by then times the command out without spawning it.
+	 */
+	deadlineAt?: number;
 	signal?: AbortSignal;
 	/** Cumulative snapshots, throttled to keep terminal rendering responsive. */
 	onUpdate?: (progress: BashCommandProgress) => void;
@@ -402,6 +418,33 @@ function notSpawnedResult(message: string): BashCommandResult {
 	};
 }
 
+/** The run's deadline passed during spawn preparation: the command times out without starting (XR-12). */
+function deadlinePassedResult(): BashCommandResult {
+	return {
+		error: {
+			name: "Error",
+			message: "the run's deadline passed before the command started",
+			code: "ETIMEDOUT",
+		} as NodeJS.ErrnoException,
+		stdout: "",
+		stderr: "",
+		exitCode: null,
+		signal: null,
+		aborted: false,
+		timedOut: true,
+		outputCapped: false,
+		outputBytes: 0,
+		timeoutLimit: { by: "run-deadline", ms: 0 },
+	};
+}
+
+/** The timer's delay and which limit sets it, measured now; null when no limit applies. */
+function armedTimeoutLimit(timeout: number, deadlineAt: number | undefined): BashTimeoutLimit | null {
+	if (deadlineAt === undefined) return timeout > 0 ? { by: "timeout", ms: timeout } : null;
+	const left = Math.max(0, Math.ceil(deadlineAt - performance.now()));
+	return timeout > 0 && timeout <= left ? { by: "timeout", ms: timeout } : { by: "run-deadline", ms: left };
+}
+
 /** Process groups of commands this process started that may still hold members, keyed by leader pid. */
 const liveCommandGroups = new Set<number>();
 
@@ -466,6 +509,11 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		let drainTimer: ReturnType<typeof setTimeout> | null = null;
 		let killSent = false;
 		let pendingClose: (() => void) | null = null;
+		// Checked immediately before spawn: a run deadline spent by preparation starts no command (XR-12).
+		if (armedTimeoutLimit(timeout, options.deadlineAt)?.ms === 0) {
+			resolve(deadlinePassedResult());
+			return;
+		}
 		const output = createBashOutputProgressController(options.onUpdate, undefined, options.onOutput);
 
 		const child = spawn(spawnFile, spawnArgs, {
@@ -565,12 +613,16 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			killChild();
 		}
 
-		if (timeout > 0) {
+		// Measured now, after spawn preparation, so preparation cannot carry the wait past the deadline (XR-12).
+		const armed = armedTimeoutLimit(timeout, options.deadlineAt);
+		const limit = armed === null ? null : { ...armed, ms: Math.max(1, armed.ms) };
+		if (limit !== null) {
 			timeoutId = setTimeout(() => {
 				timedOut = true;
 				killChild();
-			}, timeout);
+			}, limit.ms);
 		}
+		const limitField = limit === null ? {} : { timeoutLimit: limit };
 
 		if (options.signal?.aborted) {
 			onAbort();
@@ -599,6 +651,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 				signal: null,
 				aborted,
 				timedOut,
+				...limitField,
 			});
 		});
 		child.on("close", (code, signalName) => {
@@ -626,6 +679,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 				signal: signalName,
 				aborted,
 				timedOut,
+				...limitField,
 			});
 		});
 	});

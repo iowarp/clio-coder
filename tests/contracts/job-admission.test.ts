@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
+import type { MiddlewareEffect } from "../../src/domains/middleware/index.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { jobCommandEffect } from "../../src/tools/job-command.js";
@@ -30,4 +32,74 @@ test("a scheduled command the session admits directly is admitted for a job", as
 	strictEqual(direct.kind, "ok", direct.kind === "blocked" ? direct.reason : "");
 	const job = await registry.invoke({ tool: ToolNames.Job, args: {} });
 	strictEqual(job.kind, "ok", job.kind === "blocked" ? job.reason : "");
+});
+
+test("a scheduled probe bash would run contained is admitted and runs in the same sandbox (XR-12)", async () => {
+	const cwd = realpathSync(mkdtempSync(join(tmpdir(), "clio-job-admission-")));
+	const probe = {
+		kind: "command" as const,
+		argv: ["python3", "-c", "import os; print(os.path.exists('out/done.flag'))"],
+		executableSha256: "x",
+	};
+	const count = { kind: "command" as const, argv: ["git", "rev-list", "--count", "HEAD"], executableSha256: "x" };
+	// The stub job schedules the probe for command "probe" and the plain git count otherwise.
+	const runnerOf = (args: Record<string, unknown>) => (args.command === "probe" ? probe : count);
+	const build = (rewriteTo?: Record<string, unknown>) => {
+		const seen: { bash?: boolean; job?: boolean } = {};
+		const middleware =
+			rewriteTo === undefined
+				? undefined
+				: createMiddlewareBundle({
+						registrations: [
+							{
+								id: "extension:desk:before_tool:0",
+								description: "rewrites the scheduled command",
+								hooks: ["before_tool"],
+								awaited: true,
+								evaluate: () => [],
+								async evaluateAsync(): Promise<ReadonlyArray<MiddlewareEffect>> {
+									return [{ kind: "rewrite_tool_input", args: rewriteTo, reason: "probe instead", source: "desk" }];
+								},
+							},
+						],
+					}).contract;
+		const registry = createRegistry({
+			safety: createWorkerSafety({ cwd }),
+			autonomy: () => "default",
+			scratchRoots: () => [],
+			containment: () => ({ sandbox: true, snapshots: false }),
+			...(middleware !== undefined ? { middleware } : {}),
+		});
+		registry.register({
+			...bashTool,
+			run: async (_args, options) => {
+				seen.bash = options?.shellSandbox !== undefined;
+				return { kind: "ok", output: "" };
+			},
+		});
+		registry.register({
+			...bashTool,
+			name: ToolNames.Job,
+			hostEffectCalls: (args) => jobCommandEffect(runnerOf(args), cwd),
+			run: async (_args, options) => {
+				seen.job = options?.shellSandbox !== undefined;
+				return { kind: "ok", output: "scheduled" };
+			},
+		});
+		return { registry, seen };
+	};
+	const { registry, seen } = build();
+	const effect = jobCommandEffect(probe, cwd)[0]?.call;
+	const direct = await registry.invoke({ tool: ToolNames.Bash, args: { command: String(effect?.args?.command) } });
+	strictEqual(direct.kind, "ok", direct.kind === "blocked" ? direct.reason : "");
+	strictEqual(seen.bash, true);
+	const job = await registry.invoke({ tool: ToolNames.Job, args: { command: "probe" } });
+	strictEqual(job.kind, "ok", job.kind === "blocked" ? job.reason : "");
+	strictEqual(seen.job, true);
+	// A before_tool rewrite from a command admitted uncontained to one admitted only
+	// contained runs in the sandbox the rewritten call was admitted with.
+	const rewritten = build({ command: "probe" });
+	const viaRewrite = await rewritten.registry.invoke({ tool: ToolNames.Job, args: { command: "count" } });
+	strictEqual(viaRewrite.kind, "ok", viaRewrite.kind === "blocked" ? viaRewrite.reason : "");
+	strictEqual(rewritten.seen.job, true);
 });

@@ -1074,9 +1074,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 	};
 	/**
 	 * A host effect that declares `unsandboxed: true` (a scheduled job's argv)
-	 * always runs outside the sandbox: it is not a model's request to escape
-	 * one. It is judged as the uncontained call it is, as on a host without a
-	 * sandbox, so it earns no containment relief and raises no escape ask.
+	 * runs outside the sandbox: it is not a model's request to escape one. It is
+	 * judged as the uncontained call it is, as on a host without a sandbox, so it
+	 * earns no containment relief and raises no escape ask. A job whose
+	 * uncontained command would ask is judged again contained, below.
 	 */
 	const hostEffectScope = (
 		effectCall: ClassifierCall,
@@ -1085,6 +1086,65 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const scope = withOperatorScope(level);
 		if (effectCall.args?.unsandboxed !== true || scope.operatorDefault === undefined) return scope;
 		return { operatorDefault: { ...scope.operatorDefault, sandbox: false } };
+	};
+	/**
+	 * Each host effect is admitted exactly as its direct call would be, by the
+	 * same evaluator, and never under a one-shot grant for the calling tool.
+	 */
+	const admitHostEffect = (
+		effectCall: ClassifierCall,
+		level: AutonomyLevel,
+		scope: { operatorYolo?: OperatorYoloScope; operatorDefault?: OperatorDefaultScope },
+	): AdmissionDisposition => {
+		const effectSpec = tools.get(effectCall.tool as ToolName);
+		return evaluateAdmission({
+			principal: deps.principal ?? "main",
+			effects: [effectCall],
+			safety: deps.safety,
+			autonomy: level,
+			...scope,
+			...(deps.workerExecuteAutonomy !== undefined ? { workerExecuteAutonomy: deps.workerExecuteAutonomy } : {}),
+			...(effectSpec !== undefined
+				? { normalize: (raw: SafetyDecision) => applyRegisteredToolClassification(raw, effectSpec) }
+				: {}),
+			// A host check that runs a test runner owes the same session consent
+			// its direct verify call would ask for.
+			...(deps.sessionCodeConsent?.pending() === true ? { sessionCodeConsentPending: true } : {}),
+		});
+	};
+	type ContainedRoots = NonNullable<NonNullable<SafetyDecision["policy"]>["shellSandbox"]>;
+	/**
+	 * The sandbox every effect runs in when each, as the contained bash call it
+	 * would be, is admitted unasked and contained; otherwise null.
+	 */
+	const containedEffectsSandbox = (
+		effects: ReadonlyArray<HostEffectCall>,
+		level: AutonomyLevel,
+	): ContainedRoots | null => {
+		let roots: ContainedRoots | null = null;
+		for (const effect of effects) {
+			const { unsandboxed: _uncontained, ...args } = effect.call.args ?? {};
+			const admission = admitHostEffect({ ...effect.call, args }, level, withOperatorScope(level));
+			const sandbox = admission.kind === "allow" ? admission.decision.policy?.shellSandbox : undefined;
+			if (sandbox === undefined) return null;
+			roots = sandbox;
+		}
+		return roots;
+	};
+	/**
+	 * Whether a job's commands, as the exact arguments that execute, would be
+	 * refused uncontained, so they may run only in the sandbox admission put on
+	 * the decision. A session-consent ask is not counted: approving it admits the
+	 * uncontained command.
+	 */
+	const jobNeedsContainment = (spec: ToolSpec, call: ClassifierCall): boolean => {
+		if (call.tool !== ToolNames.Job) return false;
+		const level = deps.autonomy?.() ?? DEFAULT_AUTONOMY_LEVEL;
+		for (const effect of spec.hostEffectCalls?.(call.args ?? {}) ?? []) {
+			const admission = admitHostEffect(effect.call, level, hostEffectScope(effect.call, level));
+			if (admission.kind === "deny" || (admission.kind === "ask" && admission.source !== "session-consent")) return true;
+		}
+		return false;
 	};
 	const shellSandboxPolicy = (
 		roots: { workspace: string; scratchRoots: ReadonlyArray<string>; readOnly?: true },
@@ -1425,6 +1485,16 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 						? { flowAdmitsUrl: (url: string) => outboundFlowViolation(spec, { tool: spec.name, args: { url } }) }
 						: {}),
 				};
+				// Fail closed: a job command admitted only contained never runs without its sandbox (XR-12).
+				if (executionOptions.shellSandbox === undefined && jobNeedsContainment(spec, call)) {
+					const reason = `${spec.name} did not run: its command is admitted only in the sandbox, and the call reached execution without the sandbox policy.`;
+					const verdict = blockedVerdict(decision, `${call.tool} blocked: contained command without its sandbox`, reason, {
+						kind: "block",
+						reasonCode: "host_effect_not_admitted",
+					});
+					recordRegistryDisposition(call, verdict.decision, "blocked", { reasonCode: "host_effect_not_admitted" });
+					return verdict;
+				}
 				bodyStartedAt = performance.now();
 				execution = { executionStarted: true };
 				const result = await spec.run(preparedArgs, executionOptions);
@@ -1803,13 +1873,20 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				),
 			};
 		}
-		const effectOutcome = admitHostEffects(call, spec, admission, level);
+		const hostEffects = admitHostEffects(call, spec, admission, level);
+		const effectOutcome = hostEffects.obstacle;
 		if (effectOutcome?.kind === "terminal") return effectOutcome;
+		// Commands admitted only contained carry their sandbox on the decision of the call that runs them (XR-12).
+		const contained = hostEffects.contained;
+		const contain = (decision: SafetyDecision): SafetyDecision =>
+			contained === null || decision.policy === undefined
+				? decision
+				: { ...decision, policy: { ...decision.policy, shellSandbox: contained } };
 		if (admission.kind === "deny")
 			return { kind: "terminal", verdict: deniedVerdict(call, admission, options?.turnConstraints) };
 		if (admission.kind === "allow") {
 			if (effectOutcome !== null) {
-				const decision = sessionConsentParkDecision(call, admission.decision, effectOutcome, dispatchPlan);
+				const decision = contain(sessionConsentParkDecision(call, admission.decision, effectOutcome, dispatchPlan));
 				return {
 					kind: "park",
 					decision,
@@ -1818,18 +1895,20 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					source: "session-consent",
 				};
 			}
-			recordRegistryDisposition(call, admission.decision, "allowed");
-			return { kind: "execute", spec, decision: admission.decision };
+			const allowed = contain(admission.decision);
+			recordRegistryDisposition(call, allowed, "allowed");
+			return { kind: "execute", spec, decision: allowed };
 		}
-		const askDecision =
+		const askDecision = contain(
 			admission.source === "autonomy" && planScale && dispatchPlan !== null
 				? toDispatchPlanAskDecision(admission.netDecision, level, dispatchPlan)
-				: admission.decision;
+				: admission.decision,
+		);
 		if (effectOutcome !== null) {
 			// One combined ask: approving the call's own autonomy ask also gives the
 			// consent its checks need, so the operator is never asked twice (#377
 			// follow-up).
-			const decision = sessionConsentParkDecision(call, askDecision, effectOutcome, dispatchPlan);
+			const decision = contain(sessionConsentParkDecision(call, askDecision, effectOutcome, dispatchPlan));
 			return {
 				kind: "park",
 				decision,
@@ -2025,31 +2104,19 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		spec: ToolSpec,
 		callAdmission: AdmissionDisposition,
 		level: AutonomyLevel,
-	): Extract<AdmitOutcome, { kind: "terminal" }> | SessionConsentObstacle | null => {
+	): {
+		obstacle: Extract<AdmitOutcome, { kind: "terminal" }> | SessionConsentObstacle | null;
+		/** The sandbox the call's commands must run in, when they are admitted only contained. */
+		contained: ContainedRoots | null;
+	} => {
 		const decision = callAdmission.decision;
 		const effects = spec.hostEffectCalls?.(call.args ?? {}) ?? [];
-		if (effects.length === 0) return null;
+		if (effects.length === 0) return { obstacle: null, contained: null };
 		let hard: { label: string; cause: string } | null = null;
 		let soft: { label: string; cause: string } | null = null;
 		let consent: { label: string; cause: string; decision: SafetyDecision } | null = null;
 		for (const effect of effects) {
-			const effectSpec = tools.get(effect.call.tool as ToolName);
-			// Each check is admitted exactly as its direct call would be, by the
-			// same evaluator, and never under a one-shot grant for this call.
-			const admission = evaluateAdmission({
-				principal: deps.principal ?? "main",
-				effects: [effect.call],
-				safety: deps.safety,
-				autonomy: level,
-				...hostEffectScope(effect.call, level),
-				...(deps.workerExecuteAutonomy !== undefined ? { workerExecuteAutonomy: deps.workerExecuteAutonomy } : {}),
-				...(effectSpec !== undefined
-					? { normalize: (raw: SafetyDecision) => applyRegisteredToolClassification(raw, effectSpec) }
-					: {}),
-				// A host check that runs a test runner owes the same session consent
-				// its direct verify call would ask for.
-				...(deps.sessionCodeConsent?.pending() === true ? { sessionCodeConsentPending: true } : {}),
-			});
+			const admission = admitHostEffect(effect.call, level, hostEffectScope(effect.call, level));
 			if (
 				admission.kind === "deny" ||
 				(admission.kind === "ask" && admission.decision.classification.actionClass === "git_destructive")
@@ -2062,16 +2129,26 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				if (consent === null) consent = { label: effect.label, cause: admission.reason, decision: admission.decision };
 			} else if (soft === null) soft = { label: effect.label, cause: admission.reason };
 		}
+		// A scheduled command whose uncontained call would ask runs contained when
+		// bash would run that same command contained unasked: the job meets the
+		// sandbox rule its equivalent bash call meets, so a refused job never
+		// pushes the model into a shell wait loop (XR-12). The sandbox rides on
+		// the decision, so a decision without a policy to carry it keeps the refusal.
+		let contained: ContainedRoots | null = null;
+		if (call.tool === ToolNames.Job && decision.policy !== undefined && hard === null && soft !== null) {
+			contained = containedEffectsSandbox(effects, level);
+			if (contained !== null) soft = null;
+		}
 		const consentParks =
 			callAdmission.kind === "allow" ||
 			(callAdmission.kind === "ask" &&
 				callAdmission.source === "autonomy" &&
 				callAdmission.approvalAuthority === "operator");
 		if (hard === null && soft === null && consentParks && consent !== null && consent.decision.kind === "ask") {
-			return { kind: "session-consent", label: consent.label, decision: consent.decision };
+			return { obstacle: { kind: "session-consent", label: consent.label, decision: consent.decision }, contained };
 		}
 		const refused = hard ?? soft ?? consent;
-		if (refused === null) return null;
+		if (refused === null) return { obstacle: null, contained };
 		const reason = `${call.tool} refused: ${refused.label} would not be admitted as a direct call (${refused.cause})`;
 		const scheduled = call.tool === ToolNames.Job;
 		const reasonCode = hard !== null ? "host_effect_blocked" : "host_effect_not_admitted";
@@ -2095,7 +2172,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			{ reasonCode },
 		);
 		recordRegistryDisposition(call, blocked, "blocked", { reasonCode });
-		return { kind: "terminal", verdict: { kind: "blocked", reason, decision: blocked } };
+		return { obstacle: { kind: "terminal", verdict: { kind: "blocked", reason, decision: blocked } }, contained: null };
 	};
 
 	const recordRegistryDisposition = (

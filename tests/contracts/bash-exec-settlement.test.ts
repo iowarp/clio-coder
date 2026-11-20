@@ -1,6 +1,6 @@
 import { deepStrictEqual, doesNotThrow, match, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -12,6 +12,7 @@ import {
 	runBashCommand,
 } from "../../src/core/bash-exec.js";
 import { bashShellEnvironment, POSIX_BASH, resolveBashShell } from "../../src/core/bash-shell.js";
+import { setRunDeadline } from "../../src/core/termination-phase.js";
 import { bashTool } from "../../src/tools/bash.js";
 
 class DeterministicScheduler implements BashProgressScheduler {
@@ -151,6 +152,41 @@ describe("bash abort settlement (#445)", () => {
 		if (result.kind !== "error") return;
 		match(result.message, /The host ended the run and recorded no cause\./u);
 		strictEqual(result.details?.abortCause, null);
+	});
+
+	it("clamps timeout_ms to the run's remaining --timeout (XR-12)", async () => {
+		setRunDeadline(performance.now() + 300);
+		try {
+			const result = await bashTool.run({ command: "sleep 3", timeout_ms: 604_800_000 }, {});
+			strictEqual(result.kind, "error");
+			if (result.kind !== "error") return;
+			strictEqual(result.details?.outcome, "timeout");
+			match(result.message, /run's --timeout/u);
+			// The executor arms its timer against the deadline itself, after spawn preparation, and names the limit it armed.
+			const raw = await runBashCommand("sleep 3", { timeoutMs: 604_800_000, deadlineAt: performance.now() + 300 });
+			strictEqual(raw.timedOut, true);
+			strictEqual(raw.timeoutLimit?.by, "run-deadline");
+			const own = await runBashCommand("sleep 3", { timeoutMs: 200, deadlineAt: performance.now() + 600_000 });
+			strictEqual(own.timeoutLimit?.by, "timeout");
+		} finally {
+			setRunDeadline(null);
+		}
+		// A deadline already passed before spawn starts no command.
+		const dir = mkdtempSync(join(tmpdir(), "clio-coder-bash-expired-"));
+		const marker = join(dir, "ran");
+		try {
+			const raw = await runBashCommand(`touch '${marker}'`, { timeoutMs: 60_000, deadlineAt: performance.now() - 1 });
+			strictEqual(raw.timedOut, true);
+			deepStrictEqual(raw.timeoutLimit, { by: "run-deadline", ms: 0 });
+			setRunDeadline(performance.now() - 1);
+			const result = await bashTool.run({ command: `touch '${marker}'` }, {});
+			strictEqual(result.kind, "error");
+			if (result.kind === "error") match(result.message, /before this command started, so it did not run/u);
+			strictEqual(existsSync(marker), false);
+		} finally {
+			setRunDeadline(null);
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	const hasSetsid = process.platform !== "win32" && spawnSync("setsid", ["--version"]).status === 0;
