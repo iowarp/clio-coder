@@ -304,8 +304,8 @@ function contenderArgs(input: ArenaRunInput, spec: ArenaContenderSpec, cwd: stri
 		...(input.maxCostUsd != null ? ["--max-cost-usd", String(input.maxCostUsd)] : []),
 		...(readOnly ? ["--read-only"] : []),
 		...(input.autonomy === "yolo" ? ["--autonomy", "yolo"] : []),
-		"--json-events",
-		"full",
+		"--output-format",
+		"stream-json",
 		"--",
 		input.prompt,
 	];
