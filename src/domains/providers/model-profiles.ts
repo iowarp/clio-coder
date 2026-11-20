@@ -44,7 +44,8 @@ export interface ProfileComparison {
 	runtimeId: string;
 	modelId: string | null;
 	profileId: string | null;
-	legacyFamily: string | null;
+	/** The family the substring fallback tier (packaged profiles, then `model-catalog.d` overlays) names. */
+	fallbackFamily: string | null;
 	differentFields: string[];
 }
 
@@ -324,21 +325,39 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+/** The profiles the package ships, validated, in file order. The file is ours, so any fault in it throws. */
+export function loadPackagedModelProfiles(
+	packagedPath = join(resolvePackageRoot(), "models", "profiles.yaml"),
+): ModelProfile[] {
+	const out: ModelProfile[] = [];
+	const ids = new Set<string>();
+	for (const [index, item] of parseManifest(packagedPath, true).entries()) {
+		const profile = validateProfile(item, `${packagedPath}.models[${index}]`);
+		if (ids.has(profile.id.toLowerCase())) throw new Error(`${packagedPath}: duplicate id '${profile.id}'`);
+		ids.add(profile.id.toLowerCase());
+		out.push(profile);
+	}
+	return out;
+}
+
 /**
  * Packaged profiles first, then the operator's file layered on them field by field. The packaged
  * file is ours, so any fault in it throws. The operator's file is theirs: a bad field or entry is
- * dropped with a warning naming the file and entry, and the rest still loads.
+ * dropped with a warning naming the file and entry, and the rest still loads. `packaged` takes an
+ * already loaded packaged list instead of reading `packagedPath` again.
  */
 export function loadModelProfiles(
-	options: { packagedPath?: string; userPath?: string; onWarning?: (message: string) => void } = {},
+	options: {
+		packagedPath?: string;
+		packaged?: readonly ModelProfile[];
+		userPath?: string;
+		onWarning?: (message: string) => void;
+	} = {},
 ): ModelProfiles {
-	const packagedPath = options.packagedPath ?? join(resolvePackageRoot(), "models", "profiles.yaml");
 	const userPath = options.userPath ?? join(resolveClioDirs().config, "model-profiles.yaml");
 	const warn = options.onWarning ?? (() => undefined);
 	const byId = new Map<string, unknown>();
-	for (const [index, item] of parseManifest(packagedPath, true).entries()) {
-		const profile = validateProfile(item, `${packagedPath}.models[${index}]`);
-		if (byId.has(profile.id.toLowerCase())) throw new Error(`${packagedPath}: duplicate id '${profile.id}'`);
+	for (const profile of options.packaged ?? loadPackagedModelProfiles(options.packagedPath)) {
 		byId.set(profile.id.toLowerCase(), profile);
 	}
 	if (existsSync(userPath)) {
@@ -375,14 +394,15 @@ export function loadModelProfiles(
 }
 
 /**
- * Comparison mode for the fields step 4 has not switched. Capability flags, windows, output
- * caps and the thinking block are read from the profile now, so the legacy catalog no longer
- * has a vote on them; sampling and the free-form serving notes still come from it.
+ * Comparison mode (`CLIO_CODER_PROFILE_COMPARE=1`): each configured route's profile against the
+ * entry the substring fallback tier names for it. Capability flags, windows, output caps and the
+ * thinking block come only from the profile, so only the fallback's other quirks are compared;
+ * a difference means a `model-catalog.d` overlay disagrees with the profile.
  */
 export function compareConfiguredModelProfiles(
 	settings: Pick<ClioSettings, "targets" | "chat" | "fleet" | "context">,
 	profiles: ModelProfiles,
-	legacy: KnowledgeBase,
+	fallback: Pick<KnowledgeBase, "lookup">,
 ): ProfileComparison[] {
 	const rows: ProfileComparison[] = [];
 	for (const target of settings.targets) {
@@ -394,7 +414,7 @@ export function compareConfiguredModelProfiles(
 		}
 		for (const modelId of models.size ? models : [null]) {
 			const profile = modelId ? (profiles.lookup(modelId, target.runtime)?.profile ?? null) : null;
-			const old = modelId ? (legacy.lookup(modelId)?.entry ?? null) : null;
+			const old = modelId ? (fallback.lookup(modelId)?.entry ?? null) : null;
 			const differentFields: string[] = [];
 			if (profile && old) {
 				for (const [key, value] of Object.entries(old.quirks ?? {})) {
@@ -408,7 +428,7 @@ export function compareConfiguredModelProfiles(
 				runtimeId: target.runtime,
 				modelId,
 				profileId: profile?.id ?? null,
-				legacyFamily: old?.family ?? null,
+				fallbackFamily: old?.family ?? null,
 				differentFields,
 			});
 		}

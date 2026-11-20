@@ -1,14 +1,13 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
 import type { Model } from "@earendil-works/pi-ai";
 
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import { synthLocalModel } from "../../src/domains/providers/runtimes/common/local-synth.js";
-import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import { createGemmaChannelFilter, type GemmaChannelSegment } from "../../src/engine/gemma-channel-filter.js";
 import { closeServer, type OpenAICompatFixture, startOpenAICompatFixture } from "../harness/openai-compat-fixture.js";
+import { packagedModelCatalog } from "../harness/packaged-model-catalog.js";
 
 const fixtures: OpenAICompatFixture[] = [];
 
@@ -126,7 +125,7 @@ describe("contracts/gemma-4 channel filtering", () => {
 	});
 });
 
-const catalog = new FileKnowledgeBase(fileURLToPath(new URL("../../src/domains/providers/models/", import.meta.url)));
+const catalog = packagedModelCatalog();
 
 for (const [id, family] of [
 	["google/gemma-4-26B-A4B-it", "gemma4-26b-a4b"],

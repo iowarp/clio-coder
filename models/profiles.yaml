@@ -1,8 +1,33 @@
 # Packaged upstream local model facts and recommendations.
 # Model context maxima are catalog claims, never loaded serving limits.
 # Tool parsing, structured output and sampling extensions depend on the runtime.
+# Packaged entries also back the substring fallback for ids no profile matches (profile-knowledge.ts), in this
+# order and ahead of model-catalog.d overlays, so keep the first two entries first.
 version: 1
 models:
+  - id: meta-llama-4-maverick
+    match:
+      exactIds:
+        - meta-llama/llama-4-maverick
+      familyPrefixes:
+        - llama-4-maverick
+    claims: {}
+    provenance:
+      source: clio-coder-compatibility-catalog
+      notes: Ported from the retired ALCF compatibility catalog (cloud-models/alcf.yaml), which named this family for
+        the ALCF inference gateway. Its capability and limit fields were never served once profiles took over, so
+        the entry only names the family; the gateway's live report decides capabilities.
+  - id: meta-llama-4-scout
+    match:
+      exactIds:
+        - meta-llama/llama-4-scout
+      familyPrefixes:
+        - llama-4-scout
+    claims: {}
+    provenance:
+      source: clio-coder-compatibility-catalog
+      notes: Ported from the retired ALCF compatibility catalog (cloud-models/alcf.yaml); family name only, as for
+        meta-llama-4-maverick.
   - id: openai-gpt-oss
     match:
       exactIds:

@@ -1,5 +1,4 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -12,11 +11,11 @@ import {
 	runtimeResolutionWarnings,
 } from "../../src/domains/providers/index.js";
 import lmstudio from "../../src/domains/providers/runtimes/local-native/lmstudio.js";
-import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
 import { createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { type ChatNoticeEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
+import { packagedModelCatalog } from "../harness/packaged-model-catalog.js";
 
 /**
  * Issue #268: a family's chat-template kwargs that LM Studio cannot carry are
@@ -50,7 +49,7 @@ function providersFor(runtimeId: "lmstudio" | "llamacpp"): ProvidersContract {
 	const stub = dispatchStubContext({ settings, runtime });
 	const base = stub.getContract("providers");
 	if (!base) throw new Error("stub has no providers contract");
-	return { ...base, knowledgeBase: new FileKnowledgeBase(join(process.cwd(), "src/domains/providers/models")) };
+	return { ...base, knowledgeBase: packagedModelCatalog() };
 }
 
 describe("contracts/chat-template kwargs the runtime cannot carry", () => {

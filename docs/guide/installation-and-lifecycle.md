@@ -502,7 +502,7 @@ user configuration directory, not in any repository.
 None of `.clio-coder/` is published by CLIO Coder's own package. The directories the package ships
 (`src/domains/agents/builtins/`, the builtin playbooks, the whole `library/` catalog
 with its registry, packages and skill provenance records, `src/domains/prompts/fragments/`,
-`src/domains/providers/models/`) are read from the installed package root; the `.clio-coder/`
+`models/`) are read from the installed package root; the `.clio-coder/`
 entries above compose with them and never replace them on disk. Builtin agent recipes bind
 skills straight out of the package catalog; the operator's own session reaches the same
 catalog only as a marketplace, through `clio-coder library install skill:<name>` or `/skill <name>`.

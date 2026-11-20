@@ -1,12 +1,10 @@
 import { ok, strictEqual } from "node:assert/strict";
-import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { Model } from "@earendil-works/pi-ai";
-
-import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
 import { extractLocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import { closeServer, type OpenAICompatFixture, startOpenAICompatFixture } from "../harness/openai-compat-fixture.js";
+import { packagedModelCatalog } from "../harness/packaged-model-catalog.js";
 
 /**
  * The 2026-09-01 naming migration moved synthesized model metadata from
@@ -142,7 +140,7 @@ describe("contracts/engine reads model.clioCoder", () => {
 
 	it("a family sends its recommended chat template kwarg on vLLM", async () => {
 		const id = "nvidia-nemotron-3.5-lightning-30b-a3b";
-		const hit = new FileKnowledgeBase(join(process.cwd(), "src/domains/providers/models")).lookup(id);
+		const hit = packagedModelCatalog().lookup(id);
 		ok(hit, "the Nemotron Lightning family must exist in the catalog");
 		const server = await fixture(id);
 		const request = await lastRequest(

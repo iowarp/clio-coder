@@ -1,6 +1,5 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
 import { synthesizeCatalogBackedModel } from "../../src/domains/providers/catalog.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import { acceptsImageInput } from "../../src/domains/providers/image-input.js";
@@ -11,7 +10,7 @@ import {
 } from "../../src/domains/providers/runtime-resolution.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
-import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
+import { packagedModelCatalog } from "../harness/packaged-model-catalog.js";
 
 describe("image input capability gate", () => {
 	it("an explicit deployment false wins over a stale model input list", () => {
@@ -57,7 +56,7 @@ describe("image input capability gate", () => {
 // A gateway route whose probe reports image input, resolved the way a turn builds its runtime:
 // resolve, synthesize the model without the probe, then refine with the model's hints.
 describe("probed image input survives model-hint refinement", () => {
-	const kb = new FileKnowledgeBase(fileURLToPath(new URL("../../src/domains/providers/models/", import.meta.url)));
+	const kb = packagedModelCatalog();
 	function resolveThroughHints(route: string, probedVision: boolean) {
 		const target = { id: "blade", runtime: "litellm", url: "http://127.0.0.1:1", defaultModel: route };
 		const status = {

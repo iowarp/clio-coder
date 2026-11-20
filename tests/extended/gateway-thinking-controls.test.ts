@@ -1,6 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { applyModelCapabilityPatch } from "../../src/domains/providers/model-capabilities.js";
 import {
 	resolveModelRuntimeCapabilities,
@@ -11,12 +10,12 @@ import litellm, {
 	capabilitiesFromLiteLLMModelInfo,
 } from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
-import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import type { Model } from "../../src/engine/types.js";
 import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
+import { packagedModelCatalog } from "../harness/packaged-model-catalog.js";
 
-const kb = new FileKnowledgeBase(fileURLToPath(new URL("../../src/domains/providers/models/", import.meta.url)));
+const kb = packagedModelCatalog();
 
 test("gateway control runtime requires unanimous explicit deployment metadata", () => {
 	const lm = capabilitiesFromLiteLLMModelInfo({ runtime: "lm-studio" });

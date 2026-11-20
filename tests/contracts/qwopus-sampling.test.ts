@@ -1,17 +1,16 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
 import { applyModelCapabilityPatch } from "../../src/domains/providers/model-capabilities.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
-import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
 import type { LocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import { pickSamplingProfile, samplingParamsFromProfile } from "../../src/engine/apis/sampling-overrides.js";
 import type { Model } from "../../src/engine/types.js";
 import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
+import { packagedModelCatalog } from "../harness/packaged-model-catalog.js";
 
 // Bundled catalog only, so an operator overlay on the test machine cannot change the answer.
-const kb = new FileKnowledgeBase(fileURLToPath(new URL("../../src/domains/providers/models/", import.meta.url)));
+const kb = packagedModelCatalog();
 
 // The quirks the openai-completions API reads at request time, as the LiteLLM runtime attaches them.
 function quirksOf(id: string): LocalModelQuirks | undefined {

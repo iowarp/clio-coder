@@ -7,7 +7,7 @@ CLIO Coder combines inventory and metadata from these sources; their roles and p
 1. **Configured targets** in `settings.yaml` (`targets[]`, `defaultModel`, and optional `wireModels`).
 2. **Live runtime probes** (`probe()` / `probeModels()`), which discover models that appeared after CLIO Coder started.
 3. **Model profiles** from [`models/profiles.yaml`](../../models/profiles.yaml) and the operator's `<configDir>/model-profiles.yaml`. A profile supplies a model's capability flags, declared context and output maxima, thinking mechanism and recommended output budget. Loading and validation are in [`model-profiles.ts`](../../src/domains/providers/model-profiles.ts), and the match and precedence rules are in [model profiles](../guide/configuration-and-targets.md#model-profiles).
-4. **The sampling catalog**, CLIO Coder's bundled YAML under `src/domains/providers/models/**` plus user and project overlays. It supplies per-mode sampling presets and the family id, nothing else.
+4. **The sampling fallback**, a substring match over the packaged profiles and then the operator's `model-catalog.d` overlays ([`profile-knowledge.ts`](../../src/domains/providers/profile-knowledge.ts), [`catalog-overlays.ts`](../../src/domains/providers/catalog-overlays.ts)). It supplies per-mode sampling presets, serving notes and the family id, nothing else.
 5. **The Pi model catalog**, which supplies cloud model rows, their context windows (as labeled estimates) and their rate estimates.
 
 A target's cost is not a catalog fact. Pricing is declared per target and is never per model; see [pricing and cost provenance](../guide/configuration-and-targets.md#pricing-and-cost-provenance) for the resolution order that falls back to a catalog estimate. CLIO Coder's own rows for `inception/mercury-3` and `inception/mercury-decide` in [catalog.ts](../../src/domains/providers/catalog.ts) are read before the Pi catalog.
@@ -70,7 +70,7 @@ Engine-visible sampling lives in the catalog under `quirks.sampling`, with think
 
 CLIO Coder sends `quirks.sampling.thinking` on every request whose turn reasons and `quirks.sampling.instruct` on every other one, on OpenAI-compatible, LiteLLM and native Ollama runtimes. A family with only `instruct` sends it in both modes. A server's sampler preset applies only to a request that carries no sampler, so it is the fallback for other clients and never the setting for a CLIO Coder turn. The sampler travels as `temperature` plus top-level body fields: `top_p`, `top_k`, `min_p`, `presence_penalty`, `frequency_penalty` and `repeat_penalty`, which is spelled `repetition_penalty` for `vllm` and `sglang`. A request-level `samplingParams` key wins per key. The one-run flags (`--temperature`, `--top-p`, `--top-k`, `--min-p`) override both profiles. The packaged Qwen3.8-27B and Qwen3.5-4B entries carry separate thinking and instruct presets from their upstream cards. Finetune-specific presets belong in a local catalog overlay; CLIO Coder does not infer a base model's sampler for an unrecognized finetune.
 
-Bundled entries under `src/domains/providers/models/**/*.yaml` describe curated model families. LM Studio (`lmstudio`) routing and capability reporting use the HTTP adapter.
+Packaged entries in [`models/profiles.yaml`](../../models/profiles.yaml) describe curated model families. LM Studio (`lmstudio`) routing and capability reporting use the HTTP adapter.
 
 ## Local catalog overlays
 
@@ -78,7 +78,7 @@ Use a catalog overlay when a local endpoint needs a sampling preset for a model 
 
 Overlay roots are loaded in this order, with later roots winning equally specific `matchPatterns`:
 
-1. Bundled CLIO Coder catalog: `src/domains/providers/models/**`, which the npm package ships under the same path.
+1. Packaged profiles: [`models/profiles.yaml`](../../models/profiles.yaml) in file order, each matched by its `exactIds` and `familyPrefixes`.
 2. User overlay: `$CLIO_CODER_CONFIG_DIR/model-catalog.d` or the platform config equivalent.
 3. Project overlay: `.clio-coder/model-catalog.d` under the current working directory.
 4. Extra overlay roots from `CLIO_CODER_MODEL_CATALOG_DIRS`, separated by the platform path delimiter.

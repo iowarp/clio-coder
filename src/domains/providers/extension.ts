@@ -21,7 +21,6 @@ import {
 } from "./contract.js";
 import { credentialsPresent } from "./credentials.js";
 import { recordEndpointSlotsFromStatus } from "./endpoint-capacity.js";
-import { resolveProviderKnowledgeBaseRoots } from "./knowledge-base-path.js";
 import { probeCapabilitiesForModel, withholdUnreportedServingWindow } from "./model-capabilities.js";
 import { compareConfiguredModelProfiles } from "./model-profiles.js";
 import { loadPluginRuntimes } from "./plugins.js";
@@ -35,12 +34,7 @@ import { readTargetCheck } from "./target-check-record.js";
 import { readTargetModelSnapshot, recordTargetModelSnapshot } from "./target-model-cache.js";
 import type { CapabilityFlags } from "./types/capability-flags.js";
 import { EMPTY_CAPABILITIES } from "./types/capability-flags.js";
-import {
-	FileKnowledgeBase,
-	type KnowledgeBase,
-	type KnowledgeBaseEntry,
-	type KnowledgeBaseHit,
-} from "./types/knowledge-base.js";
+import type { KnowledgeBase } from "./types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "./types/runtime-descriptor.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
@@ -48,26 +42,6 @@ import type { TargetDescriptor } from "./types/target-descriptor.js";
 const DEFAULT_TOOL_PROBE_TIMEOUT_MS = 120_000;
 /** The key a turn sends to a target that needs none, matched so the probe request is the turn's. */
 const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
-
-class NullKnowledgeBase implements KnowledgeBase {
-	lookup(_modelId: string): KnowledgeBaseHit | null {
-		return null;
-	}
-	entries(): ReadonlyArray<KnowledgeBaseEntry> {
-		return [];
-	}
-}
-
-function loadKnowledgeBase(): KnowledgeBase {
-	try {
-		const roots = resolveProviderKnowledgeBaseRoots(import.meta.url);
-		if (roots.length === 0) return new NullKnowledgeBase();
-		return new FileKnowledgeBase(roots);
-	} catch (err) {
-		writeDiagnostic(`[providers] knowledge base disabled: ${err instanceof Error ? err.message : String(err)}\n`);
-		return new NullKnowledgeBase();
-	}
-}
 
 /** Only some runtimes flag a refused credential; the rest report the bare status of the shared HTTP probe. */
 const REFUSED_CREDENTIAL = /\bHTTP (?:401|403)\b/u;
@@ -370,10 +344,9 @@ export function createProvidersBundle(
 ): DomainBundle<ProvidersContract> {
 	const registry = getRuntimeRegistry();
 	const authStore = openAuthStorage();
-	const legacyKb = loadKnowledgeBase();
-	const profileKb = createProfileKnowledgeBase(legacyKb, (message) =>
-		writeDiagnostic(`[providers:profiles] ${message}`),
-	);
+	const profileKb = createProfileKnowledgeBase({
+		onError: (message) => writeDiagnostic(`[providers:profiles] ${message}`),
+	});
 	const kb: KnowledgeBase = profileKb;
 	let lastProfileComparison: string | null = null;
 	const statuses = new Map<string, TargetStatus>();
@@ -820,18 +793,19 @@ export function createProvidersBundle(
 	async function probeAll(): Promise<void> {
 		const settings = readConfig();
 		const profiles = profileKb.profiles();
-		// The step 3 comparison is a migration aid. Unmatched cloud routes are expected,
-		// so it prints only on request instead of warning on every probe.
+		// Prints only on request: unmatched cloud routes are expected, so it never warns on every probe.
 		if (profiles && process.env.CLIO_CODER_PROFILE_COMPARE === "1") {
 			try {
-				const comparison = compareConfiguredModelProfiles(options.getSettings?.() ?? settings, profiles, legacyKb);
+				const comparison = compareConfiguredModelProfiles(options.getSettings?.() ?? settings, profiles, {
+					lookup: (modelId) => profileKb.fallbackLookup(modelId),
+				});
 				const signature = JSON.stringify(comparison);
 				if (signature !== lastProfileComparison) {
 					lastProfileComparison = signature;
 					for (const row of comparison) {
 						if (!row.profileId) {
 							writeDiagnostic(
-								`[providers:profiles:compare] unmatched target=${row.targetId} runtime=${row.runtimeId} model=${row.modelId ?? "(unset)"} legacy=${row.legacyFamily ?? "none"}`,
+								`[providers:profiles:compare] unmatched target=${row.targetId} runtime=${row.runtimeId} model=${row.modelId ?? "(unset)"} fallback=${row.fallbackFamily ?? "none"}`,
 							);
 						} else if (row.differentFields.length > 0) {
 							writeDiagnostic(

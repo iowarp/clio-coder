@@ -544,7 +544,7 @@ Profile claims merge under live reports and target settings ([`capabilities.ts`]
 | Serving window and output cap | A live limit is the ceiling. `targets[].capabilities.contextWindow` and `maxTokens` can lower it, or stand alone when the server reports none. `claims.modelMaxContext` is never a serving window, and `claims.modelMaxOutput` ranks below server and target limits. |
 | Other flags, such as `toolCallFormat`, `thinkingFormat` and `structuredOutputs` | The profile outranks the server's flag list, and a target's `capabilities` outranks the profile. A live report of no audio input still wins. |
 
-When `chat.maxOutputTokens` is `0` and the request sets no limit, the profile's `recommendations.outputTokens` becomes the output budget, clamped to the model's output cap and the remaining window ([`output-budget.ts`](../../src/engine/apis/output-budget.ts)). Sampling presets still come from the [local model catalog](../../src/domains/providers/models/local-models/clio-coder-local-coding-targets.yaml), so a profile's `recommendations.sampling` is not applied.
+When `chat.maxOutputTokens` is `0` and the request sets no limit, the profile's `recommendations.outputTokens` becomes the output budget, clamped to the model's output cap and the remaining window ([`output-budget.ts`](../../src/engine/apis/output-budget.ts)). Sampling presets come from the profile's `recommendations.sampling`; a profile without one takes the preset of the [`model-catalog.d` overlay](../architecture/model-catalog.md#local-catalog-overlays) entry whose `family` is the profile id.
 
 Each request also holds back an output reserve from the window, and the automatic compaction trigger counts at least the reserve admission checks, so it fires before admission would refuse the next request. A configured `chat.maxOutputTokens` is reserved in full, up to the model's output cap; when the window cannot hold it, the refusal names `chat.maxOutputTokens` instead of shrinking it, and a refusal caused by a `--max-context-tokens` cap names that flag. Without one, the profile recommendation or the 32,768-token product default claims at most half the window, so a small `--max-context-tokens` cap still leaves room for input. On a window under 52,428 tokens with no `chat.maxOutputTokens`, the fit check and the worker guard reserve 8,192 output tokens instead of half the window. On a window of 52,428 tokens or more, transports that do not clamp output at the wire, such as Copilot, Anthropic and OpenAI Responses (every transport except OpenAI-compatible chat completions and native Ollama), reserve at most a quarter of the window and never under 16,384, so a 64K window triggers compaction at 49,152 tokens ([`output-budget.ts`](../../src/engine/apis/output-budget.ts), [`pressure.ts`](../../src/domains/context/fold/pressure.ts)).
 
@@ -676,7 +676,7 @@ CLIO Coder remembers the LM Studio instances it loads in one state file per serv
 
 Sampling is per request and follows the model catalog; see [model-catalog.md](../architecture/model-catalog.md).
 
-Model-family quirks belong to the local model catalog, not the target descriptor. See [`src/domains/providers/models/local-models/`](../../src/domains/providers/models/local-models/clio-coder-local-coding-targets.yaml) for current entries.
+Model-family quirks belong to the model profiles, not the target descriptor. See [`models/profiles.yaml`](../../models/profiles.yaml) for current entries.
 
 ## Model listing and refresh
 

@@ -1,21 +1,18 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
 import { EMPTY_CAPABILITIES, mergeCapabilities } from "../../src/domains/providers/index.js";
 import { resolveModelRuntimeCapabilities } from "../../src/domains/providers/model-runtime-capabilities.js";
-import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
 import { extractLocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
+import { packagedModelCatalog } from "../harness/packaged-model-catalog.js";
 
 /**
- * The bundled catalog only. `resolveProviderKnowledgeBaseRoots` also appends
- * `<config>/model-catalog.d`, `<cwd>/.clio-coder/model-catalog.d` and
- * `CLIO_CODER_MODEL_CATALOG_DIRS`, all three at higher precedence than the
- * bundled file, and an operator overlay on the machine running the suite would
- * silently change every answer below. The config-dir overlay is the one most
- * likely to exist on a maintainer's machine.
+ * The packaged catalog only. The runtime catalog also reads `<config>/model-catalog.d`,
+ * `<cwd>/.clio-coder/model-catalog.d` and `CLIO_CODER_MODEL_CATALOG_DIRS`, all three at higher
+ * precedence than the packaged tier, and an operator overlay on the machine running the suite would
+ * silently change every answer below. The config-dir overlay is the one most likely to exist on a
+ * maintainer's machine.
  */
-const catalogRoot = fileURLToPath(new URL("../../src/domains/providers/models/", import.meta.url));
-const kb = new FileKnowledgeBase(catalogRoot);
+const kb = packagedModelCatalog();
 
 // Public checkpoint names and quant suffixes from the five packaged families.
 const routerIds = [

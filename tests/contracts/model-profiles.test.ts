@@ -1,14 +1,21 @@
 import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { stringify as stringifyYaml } from "yaml";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { explicitToolCapability, targetToolCapability } from "../../src/domains/dispatch/extension.js";
+import {
+	MODEL_CATALOG_DIRS_ENV,
+	resolveModelCatalogOverlayRoots,
+} from "../../src/domains/providers/catalog-overlays.js";
 import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
-import { compareConfiguredModelProfiles, loadModelProfiles } from "../../src/domains/providers/model-profiles.js";
+import {
+	compareConfiguredModelProfiles,
+	loadModelProfiles,
+	type ModelProfile,
+} from "../../src/domains/providers/model-profiles.js";
 import { createProfileKnowledgeBase } from "../../src/domains/providers/profile-knowledge.js";
 import { resolveRuntimeTarget } from "../../src/domains/providers/runtime-resolution.js";
 import {
@@ -16,42 +23,34 @@ import {
 	lmStudioReasoningEffort,
 } from "../../src/domains/providers/runtimes/common/lmstudio-http.js";
 import litellmRuntime from "../../src/domains/providers/runtimes/protocol/litellm.js";
-import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
 import { extractLocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 import {
 	remainingContextMaxTokens,
 	resolveReservedOutputTokens,
 	setGlobalDefaultMaxOutputTokens,
 } from "../../src/engine/apis/output-budget.js";
+import { packagedModelCatalog } from "../harness/packaged-model-catalog.js";
 
-it("the packaged profiles and compatibility catalog agree on upstream local models", () => {
+it("the packaged profiles and their substring fallback tier agree on upstream local models", () => {
 	const root = mkdtempSync(join(tmpdir(), "clio-model-profiles-"));
 	try {
 		const profiles = loadModelProfiles({ userPath: join(root, "absent.yaml") });
-		const legacy = new FileKnowledgeBase(
-			join(resolvePackageRoot(), "src", "domains", "providers", "models", "local-models"),
-		);
-		// Both packaged catalogs describe the same supported upstream checkpoints.
-		deepStrictEqual(
-			profiles
-				.entries()
-				.map((entry) => entry.id)
-				.filter((id) => !legacy.entries().some((entry) => entry.family === id)),
-			[],
-		);
-		for (const entry of legacy.entries()) {
-			for (const alias of entry.matchPatterns) {
+		const catalog = packagedModelCatalog();
+		const legacy = { lookup: (modelId: string) => catalog.fallbackLookup(modelId) };
+		const patterns = (entry: ModelProfile) => [...(entry.match.exactIds ?? []), ...(entry.match.familyPrefixes ?? [])];
+		for (const entry of profiles.entries()) {
+			for (const alias of patterns(entry)) {
 				strictEqual(profiles.lookup(alias, "llamacpp")?.profile.id, legacy.lookup(alias)?.entry.family, alias);
 			}
 		}
 		const allCurated = structuredClone(DEFAULT_SETTINGS);
-		allCurated.targets = legacy.entries().map((entry, index) => ({
+		allCurated.targets = profiles.entries().map((entry, index) => ({
 			id: `curated-${index}`,
 			runtime: "llamacpp",
-			defaultModel: entry.matchPatterns[0] ?? entry.family,
+			defaultModel: patterns(entry)[0] ?? entry.id,
 		}));
 		for (const row of compareConfiguredModelProfiles(allCurated, profiles, legacy)) {
-			strictEqual(row.profileId, row.legacyFamily, row.modelId ?? "(unset)");
+			strictEqual(row.profileId, row.fallbackFamily, row.modelId ?? "(unset)");
 			deepStrictEqual(row.differentFields, [], row.modelId ?? "(unset)");
 		}
 		const settings = structuredClone(DEFAULT_SETTINGS);
@@ -122,9 +121,6 @@ const NEMOTRON = "dynamo/nvidia-nemotron-3.5-lightning-30b-a3b";
 
 function nemotronProviders(live?: Partial<TargetStatus>): ProvidersContract {
 	const target = { id: "blade", runtime: "litellm", url: "http://blade.invalid:4000", defaultModel: NEMOTRON };
-	const legacy = new FileKnowledgeBase(
-		join(resolvePackageRoot(), "src", "domains", "providers", "models", "local-models"),
-	);
 	const status: TargetStatus = {
 		target,
 		runtime: litellmRuntime,
@@ -143,7 +139,7 @@ function nemotronProviders(live?: Partial<TargetStatus>): ProvidersContract {
 		getRuntime: () => litellmRuntime,
 		getDetectedReasoning: () => null,
 		list: () => (live ? [status] : []),
-		knowledgeBase: createProfileKnowledgeBase(legacy),
+		knowledgeBase: packagedModelCatalog(),
 	} as unknown as ProvidersContract;
 }
 
@@ -152,9 +148,7 @@ it("a profile's recommended output tokens fill an unset budget and yield to expl
 	const profile = profiles.entries().find((entry) => typeof entry.recommendations?.outputTokens === "number");
 	if (!profile) throw new Error("no packaged profile recommends output tokens");
 	const recommended = profile.recommendations?.outputTokens as number;
-	const kb = createProfileKnowledgeBase(
-		new FileKnowledgeBase(join(resolvePackageRoot(), "src", "domains", "providers", "models", "local-models")),
-	);
+	const kb = packagedModelCatalog();
 	const alias = profile.match.exactIds?.[0];
 	if (!alias) throw new Error("profile has no exact id");
 	const quirks = extractLocalModelQuirks(kb.lookup(alias, "llamacpp")?.entry.quirks);
@@ -245,9 +239,7 @@ it("sends the resolved effort a template accepts, never a rounded-down one", () 
 });
 
 it("drives the upstream Qwen3.8 template with the three efforts it accepts", () => {
-	const kb = createProfileKnowledgeBase(
-		new FileKnowledgeBase(join(resolvePackageRoot(), "src", "domains", "providers", "models", "local-models")),
-	);
+	const kb = packagedModelCatalog();
 	for (const [model, profile] of [
 		["local/qwen3.8-27b-q4_k_m", "qwen3.8-27b"],
 		["local/qwen3.8-27b-q6_k", "qwen3.8-27b"],
@@ -256,6 +248,53 @@ it("drives the upstream Qwen3.8 template with the three efforts it accepts", () 
 		const thinking = extractLocalModelQuirks(kb.lookup(model, "litellm")?.entry.quirks)?.thinking;
 		strictEqual(thinking?.mechanism, "effort-levels", model);
 		deepStrictEqual(thinking?.effortByLevel, { low: "low", medium: "medium", xhigh: "xhigh" }, model);
+	}
+});
+
+it("loads model-catalog.d overlays from the config, project and env dirs in that order, after the packaged tier", () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-model-catalog-d-"));
+	const config = join(root, "config");
+	const project = join(root, "project");
+	const envDir = join(root, "env");
+	const userDir = join(config, "model-catalog.d");
+	const projectDir = join(project, ".clio-coder", "model-catalog.d");
+	const saved = { config: process.env.CLIO_CODER_CONFIG_DIR, dirs: process.env[MODEL_CATALOG_DIRS_ENV] };
+	const entry = (family: string, pattern: string, temperature: number) =>
+		`- family: ${family}\n  matchPatterns: [${pattern}]\n  capabilities: { tools: false }\n  quirks: { thinking: { mechanism: none }, sampling: { instruct: { temperature: ${temperature} } } }\n`;
+	try {
+		for (const dir of [join(userDir, "nested"), projectDir, envDir]) mkdirSync(dir, { recursive: true });
+		writeFileSync(join(userDir, "a.yaml"), entry("acme-coder", "acme-coder", 0.2));
+		writeFileSync(join(userDir, "nested", "b.yml"), entry("zeta-lm", "zeta-lm", 0.9));
+		// Ties on pattern length go to the later root: project beats packaged, env beats user.
+		writeFileSync(join(projectDir, "p.yaml"), entry("gpt-oss-house", "gpt-oss-20b", 0.42));
+		writeFileSync(join(envDir, "e.yaml"), entry("acme-coder", "acme-coder", 0.77));
+		writeFileSync(
+			join(config, "model-profiles.yaml"),
+			stringifyYaml({ version: 1, models: [{ id: "acme-coder", match: { familyPrefixes: ["acme-coder"] }, claims: {} }] }),
+		);
+		process.env.CLIO_CODER_CONFIG_DIR = config;
+		process.env[MODEL_CATALOG_DIRS_ENV] = envDir;
+		const overlayRoots = resolveModelCatalogOverlayRoots({ cwd: project });
+		deepStrictEqual(
+			overlayRoots.map((overlay) => overlay.dir),
+			[userDir, projectDir, envDir],
+		);
+		const kb = createProfileKnowledgeBase({ overlayRoots, userPath: join(config, "model-profiles.yaml") });
+		const at = (id: string) => {
+			const hit = kb.lookup(id, "llamacpp");
+			return hit && [hit.matchKind, hit.entry.family, hit.entry.capabilities, hit.entry.quirks];
+		};
+		const sampler = (temperature: number) => ({ sampling: { instruct: { temperature } } });
+		deepStrictEqual(at("acme-coder-7b"), ["family", "acme-coder", {}, sampler(0.77)], "user profile, env sampler");
+		deepStrictEqual(at("vendor/zeta-lm-1b"), ["family", "zeta-lm", {}, sampler(0.9)], "nested user overlay file");
+		deepStrictEqual(at("unsloth/my-gpt-oss-20b-q4"), ["alias", "gpt-oss-house", {}, sampler(0.42)], "project overlay");
+		deepStrictEqual(at("vendor/my-llama-4-scout"), ["alias", "meta-llama-4-scout", {}, undefined], "packaged tier");
+	} finally {
+		if (saved.config === undefined) delete process.env.CLIO_CODER_CONFIG_DIR;
+		else process.env.CLIO_CODER_CONFIG_DIR = saved.config;
+		if (saved.dirs === undefined) delete process.env[MODEL_CATALOG_DIRS_ENV];
+		else process.env[MODEL_CATALOG_DIRS_ENV] = saved.dirs;
+		rmSync(root, { recursive: true, force: true });
 	}
 });
 

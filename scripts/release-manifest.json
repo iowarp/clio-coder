@@ -7,6 +7,7 @@
 		"scripts/install.cmd",
 		"scripts/native-install.cjs",
 		"assets/windows-launcher/pins.json",
+		"models/profiles.yaml",
 		"assets/windows-launcher/win32-x64/launcher.exe",
 		"assets/windows-launcher/win32-arm64/launcher.exe",
 		"dist/build.json",
@@ -61,7 +62,6 @@
 		"src/domains/prompts/fragments/",
 		"src/domains/agents/builtins/",
 		"library/skills/",
-		"src/domains/providers/models/",
 		"library/plugins/",
 		"library/",
 		"examples/extensions/"

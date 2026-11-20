@@ -1,11 +1,10 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
-import { join } from "node:path";
 import { describe, it, mock } from "node:test";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import { resolveModelRuntimeCapabilities } from "../../src/domains/providers/model-runtime-capabilities.js";
-import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
 import { extractLocalModelQuirks } from "../../src/domains/providers/types/local-model-quirks.js";
 import { createHttpChannel } from "../../src/domains/system-one/engines/llm-wire.js";
+import { packagedModelCatalog } from "../harness/packaged-model-catalog.js";
 
 const effortLevelsQuirks = {
 	thinking: {
@@ -161,7 +160,7 @@ describe("thinking off reaches the wire", () => {
 	});
 
 	it("resolves the shipped Gemma 4 and Nemotron 3.5 entries to reasoning_effort none on LM Studio", () => {
-		const kb = new FileKnowledgeBase(join(process.cwd(), "src/domains/providers/models"));
+		const kb = packagedModelCatalog();
 		const gemma = kb.lookup("gemma-4-26b-a4b-it");
 		strictEqual(gemma?.entry.family, "gemma4-26b-a4b");
 		const gemmaResolved = resolveModelRuntimeCapabilities({
@@ -264,7 +263,7 @@ describe("thinking off reaches the wire", () => {
 	});
 
 	it("resolves kwargs from local coding target knowledge base entries", () => {
-		const kb = new FileKnowledgeBase(join(process.cwd(), "src/domains/providers/models"));
+		const kb = packagedModelCatalog();
 		const nemotronLightning = kb.lookup("nvidia-nemotron-3.5-lightning-30b-a3b");
 
 		strictEqual(nemotronLightning?.entry.family, "nemotron-3.5-lightning-30b-a3b");

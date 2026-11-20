@@ -65,7 +65,7 @@ Live model availability depends on which gateway jobs are running. When the clus
 
 ## Model facts and cost
 
-Capability flags come from the live probe, the target's `capabilities`, and a [model profile](../guide/configuration-and-targets.md#model-profiles) when one matches. The gpt-oss ids match the packaged `openai-gpt-oss` profile. The runtime descriptor declares chat, tools and reasoning, no vision, and a 32,768 token window placeholder that resolution never promotes to a serving window; set `capabilities.contextWindow` on the target or rely on a discovered limit. The Llama 4 entries in [`cloud-models/alcf.yaml`](../../src/domains/providers/models/cloud-models/alcf.yaml) have no matching profile, so their capability fields are not read.
+Capability flags come from the live probe, the target's `capabilities`, and a [model profile](../guide/configuration-and-targets.md#model-profiles) when one matches. The gpt-oss ids match the packaged `openai-gpt-oss` profile. The runtime descriptor declares chat, tools and reasoning, no vision, and a 32,768 token window placeholder that resolution never promotes to a serving window; set `capabilities.contextWindow` on the target or rely on a discovered limit. The Llama 4 ids match the packaged `meta-llama-4-maverick` and `meta-llama-4-scout` profiles, which name the family only and claim no capabilities.
 
 ALCF reports no per-token price. A target's cost provenance is `unknown` until it declares `pricing`, as [pricing and cost provenance](../guide/configuration-and-targets.md#pricing-and-cost-provenance) describes.
 
