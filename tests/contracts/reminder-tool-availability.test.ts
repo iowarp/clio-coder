@@ -184,13 +184,20 @@ describe("reminders gate on the turn's callable tools", () => {
 		});
 		const start = (metadata: NonNullable<MiddlewareHookInput["metadata"]>) =>
 			rule.evaluate({ hook: "turn_start", sessionId: "s1", metadata });
-		const call = (toolName: string, toolArgs: Record<string, unknown>, batchSize = 3) =>
+		const call = (
+			toolName: string,
+			toolArgs: Record<string, unknown>,
+			batchSize = 3,
+			declared: NonNullable<MiddlewareHookInput["metadata"]> = {},
+			toolCallId?: string,
+		) =>
 			rule.evaluate({
 				hook: "after_tool",
 				sessionId: "s1",
 				toolName,
 				toolArgs,
-				metadata: { resultKind: "ok", batchSize },
+				...(toolCallId !== undefined ? { toolCallId } : {}),
+				metadata: { resultKind: "ok", batchSize, ...declared },
 			});
 		const reads = (count: number, batchSize = 3) =>
 			Array.from({ length: count }, (_, index) => call(ToolNames.Read, { path: `src/f-${index}.ts` }, batchSize));
@@ -239,14 +246,61 @@ describe("reminders gate on the turn's callable tools", () => {
 		const n2 = second[0]?.message ?? "";
 		ok(n2.startsWith("[CLIO Coder] 40 read-only calls in a row and still no edit or plan update."));
 		ok(n2.includes("The earlier reads are still in this conversation"));
-		// A turn that cannot write gets one answer-worded note, at 40 only.
+		// A turn that cannot write gets one answer-worded note, at 40 only, with no batching sentence.
 		start({ turnOrigin: "operator", turnMode: "answer", activeCapabilityNames: surface(ToolNames.Read) });
-		const answer = notes(reads(65));
+		const answer = notes(reads(65, 1));
 		deepStrictEqual(
 			answer.map((note) => note.at),
 			[40],
 		);
 		ok(answer[0]?.message.includes("Answer from what you have now"));
+		ok(!answer[0]?.message.includes("one round"));
+		// The batching sentence goes out once per streak: after the standalone note the 25th read's note has none.
+		const writer = surface(ToolNames.Read, ToolNames.Edit, ToolNames.Tasks);
+		start({ turnOrigin: "operator", activeCapabilityNames: writer });
+		const once = notes(reads(25, 1));
+		deepStrictEqual(
+			once.map((note) => note.at),
+			[4, 25],
+		);
+		ok(!once[1]?.message.includes("one round"));
+		// Typed git add and commit, decide, artifact and run_script are progress.
+		const progress = [
+			() => call(ToolNames.Git, { op: "commit", message: "wip" }),
+			() => call(ToolNames.Gateway, { op: "call", capability: "git", args: { op: "add", paths: ["src/f-0.ts"] } }),
+			() => call(ToolNames.Gateway, { op: "call", capability: "decide", args: { key: "k", value: "v" } }),
+			() => call(ToolNames.Artifact, { kind: "report", content: "done" }),
+			() => call(ToolNames.RunScript, { interpreter: "python3", script: "sweep.py" }),
+		];
+		deepStrictEqual(notes(progress.flatMap((step) => [step(), ...reads(24)])), []);
+		// An extension tool declared only idempotent is not a read; one declared read-only is the 25th.
+		deepStrictEqual(call("extension_demo__lookup", {}, 3, { toolIdempotent: true, toolReadOnly: false }), []);
+		strictEqual(notes([call("extension_demo__lookup", {}, 3, { toolReadOnly: true })]).length, 1);
+		// One chain of read steps is one round as wide as the chain; four one-step chains are four single-read rounds.
+		const chain = (id: string, count: number) => {
+			const steps = Array.from({ length: count }, (_, index) => ({
+				id: `s${index}`,
+				capability: ToolNames.Read,
+				args: { path: `src/c-${id}-${index}.ts` },
+			}));
+			const args = { op: "chain", steps };
+			rule.evaluate({
+				hook: "before_tool",
+				sessionId: "s1",
+				toolName: ToolNames.Gateway,
+				toolArgs: args,
+				toolCallId: id,
+				metadata: { batchSize: 1 },
+			});
+			const ran = steps.map((step) => call(ToolNames.Read, step.args, 1, {}, `${id}:${step.id}`));
+			return [...ran, call(ToolNames.Gateway, args, 1, {}, id)];
+		};
+		deepStrictEqual(call(ToolNames.Tasks, { action: "plan" }), []);
+		deepStrictEqual(notes([...reads(3, 1), ...chain("c1", 4)]), []);
+		deepStrictEqual(
+			notes(["c2", "c3", "c4", "c5"].flatMap((id) => chain(id, 1))).map((note) => note.at),
+			[7],
+		);
 	});
 
 	it("citation grounding asks for a numbered re-read only when read and grep are callable", () => {

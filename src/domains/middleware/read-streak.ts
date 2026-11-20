@@ -22,8 +22,9 @@ import { type MiddlewareEffect, type MiddlewareHookInput, metadataNumber, turnCa
  * the batching sentence rides on it instead.
  *
  * Typed signals only: tool names, the read classifier the loop guard uses,
- * the finish gate's tree-change reading for bash and typed git, result kind,
- * batch size, turn origin and the turn's tools and mode. The streak is kept
+ * the finish gate's tree-change reading for bash, result kind, batch size,
+ * turn origin and the turn's tools and mode. The steps of one gateway chain
+ * are one round as wide as the chain. The streak is kept
  * per session, so a continuation or a budget roll neither resets nor double
  * counts it; an operator's own turn and a session change reset it. Both
  * classifiers are passed in, so this domain imports no engine module.
@@ -40,12 +41,18 @@ const SERIAL_EVIDENCE = "count:single-read-rounds@no-progress-streak";
 const BATCH_SENTENCE = "Send the reads and searches you already know you need together in one round.";
 /** Compaction stages that may remove tool results from the request; a recall restores them instead. */
 const NON_FOLD_STAGES: ReadonlySet<string> = new Set(["working_set_recall"]);
-/** Tools whose successful call is a plan, a question or a declaration, judged as the capability a gateway call runs. */
-const DECISION_TOOLS: ReadonlySet<string> = new Set([
+/**
+ * Tools whose successful call is progress, judged as the capability a gateway call runs: a plan, a question, a
+ * declaration or a recorded decision, a delivered artifact, or a script run.
+ */
+const PROGRESS_TOOLS: ReadonlySet<string> = new Set([
 	ToolNames.Tasks,
 	ToolNames.AskUser,
 	ToolNames.Finish,
 	ToolNames.Limitation,
+	ToolNames.Decide,
+	ToolNames.Artifact,
+	ToolNames.RunScript,
 ]);
 const NONE: ReadonlyArray<MiddlewareEffect> = [];
 
@@ -57,7 +64,7 @@ export interface ReadStreakClassifiers {
 		args: unknown,
 		declared: (tool: string) => { readOnly?: boolean; idempotent?: boolean } | undefined,
 	): boolean;
-	/** The finish gate's reading of whether a bash or typed git call changed the workspace (`callChangesTree`). */
+	/** The finish gate's reading of whether a bash call changed the workspace (`callChangesTree`). */
 	changesTree(toolName: string, args: Record<string, unknown> | undefined, cwd: string): boolean;
 }
 
@@ -74,6 +81,8 @@ interface StreakState {
 	serialNoted: boolean;
 	folded: boolean;
 	surface: TurnSurface;
+	/** The gateway chain running now: its steps reach after_tool one by one, each with the outer call's batch size. */
+	chain: { id: string | undefined; steps: number } | null;
 }
 
 const WRITER: TurnSurface = { canWrite: true, canPlan: true, canAsk: true };
@@ -145,6 +154,16 @@ function operatorTurnStart(input: MiddlewareHookInput): boolean {
 	return origin === undefined || origin === "operator";
 }
 
+/** The model's own gateway chain call, not one a gateway call nests or the harness makes. */
+function outerChain(input: MiddlewareHookInput): boolean {
+	return (
+		input.toolName === ToolNames.Gateway &&
+		input.toolArgs?.op === "chain" &&
+		input.metadata?.nested !== true &&
+		input.metadata?.origin !== "harness"
+	);
+}
+
 type CallEffect = "read" | "progress" | "other";
 
 export function createReadStreakRegistration(deps: {
@@ -158,6 +177,7 @@ export function createReadStreakRegistration(deps: {
 		serialNoted: false,
 		folded: false,
 		surface: WRITER,
+		chain: null,
 	};
 	const reset = (): void => {
 		state.reads = 0;
@@ -174,21 +194,20 @@ export function createReadStreakRegistration(deps: {
 	const classify = (input: MiddlewareHookInput): CallEffect => {
 		const name = input.toolName ?? "";
 		const call = effectiveToolCall(name, input.toolArgs);
-		if (DECISION_TOOLS.has(call.toolName)) {
+		if (PROGRESS_TOOLS.has(call.toolName)) {
 			// Listing the board reads it; any other action records the plan.
 			return call.toolName === ToolNames.Tasks && call.args?.action === "list" ? "other" : "progress";
 		}
 		if (call.toolName === ToolNames.Dispatch) return call.args?.list === true ? "other" : "progress";
 		if (call.toolName === ToolNames.Edit || call.toolName === ToolNames.Write)
 			return input.toolResultDetails?.unchanged === true ? "other" : "progress";
+		// Only a declared read-only extension tool is a read here; an idempotent one may still write.
 		const readOnly = input.metadata?.toolReadOnly;
-		const idempotent = input.metadata?.toolIdempotent;
-		const declared = {
-			...(typeof readOnly === "boolean" ? { readOnly } : {}),
-			...(typeof idempotent === "boolean" ? { idempotent } : {}),
-		};
+		const declared = typeof readOnly === "boolean" ? { readOnly } : {};
 		if (deps.classifiers.repeatsAsRead(name, input.toolArgs, () => declared)) return "read";
-		if (call.toolName === ToolNames.Bash || call.toolName === ToolNames.Git) {
+		// Typed git reads as a read only for its inspection ops, so any other op that succeeded (add, commit) is progress.
+		if (call.toolName === ToolNames.Git) return "progress";
+		if (call.toolName === ToolNames.Bash) {
 			const root = deps.workspaceRoot?.() ?? process.cwd();
 			if (deps.classifiers.changesTree(call.toolName, call.args, root)) return "progress";
 		}
@@ -200,7 +219,9 @@ export function createReadStreakRegistration(deps: {
 		context?: MiddlewareHookEvaluationContext,
 	): ReadonlyArray<MiddlewareEffect> => {
 		state.reads += 1;
-		const batch = metadataNumber(input, "batchSize");
+		// A chain step carries the outer call's batch size; the chain is one round as wide as its steps.
+		const reported = metadataNumber(input, "batchSize");
+		const batch = state.chain === null ? reported : Math.max(reported ?? 0, state.chain.steps);
 		if (batch === 1) state.serial += 1;
 		else if (batch !== null && batch > 1) state.serial = 0;
 		const surface = state.surface;
@@ -212,7 +233,8 @@ export function createReadStreakRegistration(deps: {
 				message = secondNote(state.reads, surface, state.folded);
 		} else if (state.reads === SECOND_NOTE) message = answerNote(state.reads);
 		if (message !== null) {
-			if (serialRun) {
+			// The batching sentence rides once per streak, on a writer's note, in place of the standalone serial note.
+			if (surface.canWrite && serialRun && !state.serialNoted) {
 				message = `${message} ${BATCH_SENTENCE}`;
 				state.serialNoted = true;
 			}
@@ -230,11 +252,12 @@ export function createReadStreakRegistration(deps: {
 	return {
 		id: READ_STREAK_REGISTRATION_ID,
 		description: "ask for a decision after a long run of read-only calls with no edit, plan or question",
-		hooks: ["turn_start", "after_tool", "on_compaction"],
+		hooks: ["turn_start", "before_tool", "after_tool", "on_compaction"],
 		evidence: STREAK_EVIDENCE,
 		evaluate(input, context): ReadonlyArray<MiddlewareEffect> {
 			followSession(input.sessionId);
 			if (input.hook === "turn_start") {
+				state.chain = null;
 				if (operatorTurnStart(input)) reset();
 				state.surface = turnSurface(input);
 				return NONE;
@@ -244,7 +267,19 @@ export function createReadStreakRegistration(deps: {
 				if (typeof stage !== "string" || !NON_FOLD_STAGES.has(stage)) state.folded = true;
 				return NONE;
 			}
+			if (input.hook === "before_tool") {
+				if (outerChain(input)) {
+					const steps = input.toolArgs?.steps;
+					state.chain = { id: input.toolCallId, steps: Array.isArray(steps) ? Math.max(steps.length, 1) : 1 };
+				}
+				return NONE;
+			}
 			if (input.hook !== "after_tool" || input.toolName === undefined) return NONE;
+			// The chain's own result closes its round; its steps were already judged one by one.
+			if (outerChain(input) && (state.chain === null || state.chain.id === input.toolCallId)) {
+				state.chain = null;
+				return NONE;
+			}
 			// A gateway call is judged once, as the capability it runs; harness calls are not the model's.
 			if (input.metadata?.nested === true || input.metadata?.origin === "harness") return NONE;
 			if (input.metadata?.resultKind !== "ok") return NONE;
