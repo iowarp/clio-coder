@@ -2297,7 +2297,7 @@ A takeover follows work forward. When the run it shows finishes and a retry of i
 
 ## Inspect fleet runs from the CLI
 
-Every inspection command reads durable state only, so it works from a second terminal or over SSH. Inspection defaults to the current project, and `--all` widens it to machine-wide state ([fleet-project-scope.ts](../../src/cli/fleet-project-scope.ts)). An unknown flag exits 2. The owning process writes a running worker's spend to the run ledger at most every 10 seconds, while lifecycle changes and settlement are written at once, so live spend read from another process can be up to 10 seconds old. The owner's budget gates read its in-memory meters and do not lag.
+Every inspection command reads durable state only, so it works from a second terminal or over SSH. Inspection defaults to the current project, and `--all` widens it to machine-wide state ([fleet-project-scope.ts](../../src/cli/fleet-project-scope.ts)). An unknown flag exits 2. Inspection commands read a running worker's spend from its run journal, which the owning process appends and syncs as each model call is recorded; the run ledger takes spend only at lifecycle changes and settlement. The owner's budget gates read its in-memory meters and do not lag.
 
 | Command | What it reports |
 | --- | --- |
