@@ -4028,12 +4028,12 @@ function scriptCandidates(operand: string, cwds: ReadonlyArray<string> | null, s
 
 /**
  * The directories `source name` searches, in bash's order: the PATH bash commands run with, alone, so the first hit is
- * the file bash loads; this process's PATH only while the bash tool has none yet. A relative entry is placed from every
- * directory the shell may be in.
+ * the file bash loads. Reading it settles the login capture, so a first call is judged on the PATH it will run with. A
+ * relative entry is placed from every directory the shell may be in.
  */
 function sourceSearchDirs(cwds: ReadonlyArray<string> | null): string[] {
 	const dirs = new Set<string>();
-	for (const entry of (bashSearchPath() ?? process.env.PATH ?? "").split(path.delimiter)) {
+	for (const entry of bashSearchPath().split(path.delimiter)) {
 		if (path.isAbsolute(entry)) dirs.add(entry);
 		else for (const cwd of cwds ?? []) dirs.add(path.resolve(cwd, entry));
 	}

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { holdUnresolvedUserinfo, isSecretArgKey } from "../domains/safety/redaction.js";
 import { AI_AGENT_NAME } from "./agent-environment.js";
@@ -262,6 +262,8 @@ function buildToolEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEn
 // capture fails (profile error, timeout, no PATH), every call falls back to
 // the filtered non-login environment; failed capture must not source secrets again.
 const LOGIN_ENV_CAPTURE_TIMEOUT_MS = 10_000;
+/** The async capture reads stdout unbounded; the synchronous one needs a bound, far above any real environment. */
+const LOGIN_ENV_SYNC_MAX_BYTES = 64 * 1024 * 1024;
 
 let loginEnvCapture: Promise<NodeJS.ProcessEnv | null> | null = null;
 /** The settled login capture. Null when the capture failed, and meaningful only once {@link loginEnvSettled}. */
@@ -298,10 +300,18 @@ function parseNullDelimitedEnv(raw: string): NodeJS.ProcessEnv | null {
 	return typeof env.PATH === "string" && env.PATH.length > 0 ? env : null;
 }
 
+/** The one login capture: a login bash prints its environment. */
+const LOGIN_ENV_SHELL = "/bin/bash";
+const LOGIN_ENV_ARGS = ["-lc", "env -0"];
+
+/**
+ * Git Bash's login environment spells PATH and the other path lists the MSYS way, which the Windows-side env Clio
+ * hands every child cannot take, so there the capture does not run and reads as failed.
+ */
+const loginEnvCaptureRuns = (): boolean => process.platform !== "win32";
+
 function captureLoginEnv(): Promise<NodeJS.ProcessEnv | null> {
-	// Git Bash's login environment spells PATH and the other path lists the
-	// MSYS way, which the Windows-side env Clio hands every child cannot take.
-	if (process.platform === "win32") return Promise.resolve(null);
+	if (!loginEnvCaptureRuns()) return Promise.resolve(null);
 	return new Promise<NodeJS.ProcessEnv | null>((resolve) => {
 		let stdout = "";
 		let settled = false;
@@ -311,7 +321,7 @@ function captureLoginEnv(): Promise<NodeJS.ProcessEnv | null> {
 			clearTimeout(timer);
 			resolve(value);
 		};
-		const child = spawn("/bin/bash", ["-lc", "env -0"], {
+		const child = spawn(LOGIN_ENV_SHELL, LOGIN_ENV_ARGS, {
 			env: buildToolEnv(),
 			stdio: ["ignore", "pipe", "ignore"],
 		});
@@ -334,15 +344,41 @@ interface BashSpawnPlan {
 	source: NodeJS.ProcessEnv;
 }
 
+/** Settles the login snapshot once: the first capture to finish is the one admission and execution both read. */
+function settleLoginEnv(env: NodeJS.ProcessEnv | null): NodeJS.ProcessEnv | null {
+	if (loginEnvSettled) return loginEnvSnapshot;
+	// The capture ran with this moment's generated keys; the snapshot outlives that moment.
+	if (env !== null) for (const key of GENERATED_TOOL_ENV_KEYS) Reflect.deleteProperty(env, key);
+	loginEnvSnapshot = env;
+	loginEnvSettled = true;
+	return env;
+}
+
 function captureLoginEnvOnce(): Promise<NodeJS.ProcessEnv | null> {
-	loginEnvCapture ??= captureLoginEnv().then((env) => {
-		// The capture ran with this moment's generated keys; the snapshot outlives that moment.
-		if (env !== null) for (const key of GENERATED_TOOL_ENV_KEYS) Reflect.deleteProperty(env, key);
-		loginEnvSnapshot = env;
-		loginEnvSettled = true;
-		return env;
-	});
+	loginEnvCapture ??= loginEnvSettled ? Promise.resolve(loginEnvSnapshot) : captureLoginEnv().then(settleLoginEnv);
 	return loginEnvCapture;
+}
+
+/**
+ * Runs the login capture to completion now, for a synchronous reader that must not judge on an environment bash will
+ * not run with. A capture already in flight is not awaited; whichever finishes first settles the snapshot.
+ */
+function settleLoginEnvNow(): void {
+	if (loginEnvSettled) return;
+	if (!loginEnvCaptureRuns()) {
+		settleLoginEnv(null);
+		return;
+	}
+	const run = spawnSync(LOGIN_ENV_SHELL, LOGIN_ENV_ARGS, {
+		env: buildToolEnv(),
+		stdio: ["ignore", "pipe", "ignore"],
+		timeout: LOGIN_ENV_CAPTURE_TIMEOUT_MS,
+		killSignal: "SIGKILL",
+		maxBuffer: LOGIN_ENV_SYNC_MAX_BYTES,
+	});
+	settleLoginEnv(
+		run.status === 0 && run.error === undefined ? parseNullDelimitedEnv(run.stdout.toString("utf8")) : null,
+	);
 }
 
 async function bashSpawnPlan(): Promise<BashSpawnPlan> {
@@ -356,14 +392,11 @@ async function bashSpawnPlan(): Promise<BashSpawnPlan> {
 }
 
 /**
- * The PATH a bash command runs with, read at once: the login profile's once its capture has settled, the
- * process's when that capture failed, and null while it is pending, which a read starts.
+ * The PATH a bash command runs with: the login profile's, or the process's when the capture failed or does not run.
+ * A read while the capture is pending settles it first, so admission never judges on a PATH execution will not use.
  */
-export function bashSearchPath(): string | null {
-	if (!loginEnvSettled) {
-		void captureLoginEnvOnce();
-		return null;
-	}
+export function bashSearchPath(): string {
+	settleLoginEnvNow();
 	return buildToolEnv({ ...process.env, ...loginEnvSnapshot }).PATH ?? "";
 }
 

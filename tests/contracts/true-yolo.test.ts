@@ -673,6 +673,13 @@ test("yolo reads a shell script by the floor alone and runs what it cannot read 
 	])
 		strictEqual(judged(command).reasonCode, "yolo-floor:trust-authority", command);
 	strictEqual(judged(join(outside, "grant.py")).kind, "allow");
+});
+
+// The bash tool's PATH comes from the login-profile capture, which never runs on Windows Git Bash.
+test("a bare sourced name resolves on the PATH bash commands run with, from the first call", {
+	skip: process.platform === "win32" ? "captureLoginEnv does not run on win32" : false,
+}, () => {
+	const cwd = workspace("clio-yolo-script-path-cwd-");
 	// `source name` loads the first hit on the bash tool's PATH, else the cwd one. A fresh process whose login profile puts
 	// `bin` on that PATH while its own PATH alone leads with `other`, so the two differ as they can in a session.
 	const bin = workspace("clio-yolo-script-path-");
@@ -713,12 +720,14 @@ test("yolo reads a shell script by the floor alone and runs what it cannot read 
 			`import { bashSearchPath, bashSecretValues } from ${source("src/core/bash-exec.ts")};`,
 			`import { createSafetyPolicyEngine } from ${source("src/domains/safety/policy-engine.ts")};`,
 			`import { loadProjectSafetyPolicy } from ${source("src/domains/safety/project-policy.ts")};`,
-			"await bashSecretValues();",
-			`process.env.PATH = ${JSON.stringify(`${other}:`)} + process.env.PATH;`,
 			`const cwd = ${JSON.stringify(cwd)};`,
 			"const engine = createSafetyPolicyEngine({ cwd, projectPolicy: loadProjectSafetyPolicy(cwd) });",
-			`const codes = ${JSON.stringify(commands)}.map((command) =>`,
-			'\tengine.evaluate({ tool: "bash", args: { command } }, "yolo", { scratchRoots: [] }).reasonCode);',
+			'const judge = (command) => engine.evaluate({ tool: "bash", args: { command } }, "yolo", { scratchRoots: [] });',
+			// The session's first bash call is judged while the login capture has not run; bash will run it on that PATH.
+			'const first = judge("source shadow.sh").reasonCode;',
+			"await bashSecretValues();",
+			`process.env.PATH = ${JSON.stringify(`${other}:`)} + process.env.PATH;`,
+			`const codes = [first, ...${JSON.stringify(commands)}.map((command) => judge(command).reasonCode)];`,
 			`const searchPath = (bashSearchPath() ?? "").split(":");`,
 			`process.stdout.write(JSON.stringify([searchPath.includes(${JSON.stringify(bin)}), searchPath.includes(${JSON.stringify(other)}), ...codes]));`,
 		].join("\n"),
@@ -728,7 +737,7 @@ test("yolo reads a shell script by the floor alone and runs what it cannot read 
 		env: { ...process.env, HOME: home },
 		encoding: "utf8",
 	});
-	deepStrictEqual(JSON.parse(out), [true, false, ...commands.map(() => "yolo-floor:trust-authority")]);
+	deepStrictEqual(JSON.parse(out), [true, false, ...["first", ...commands].map(() => "yolo-floor:trust-authority")]);
 });
 
 // #421: Python lines are not shell; #407: a shell script at yolo meets only the floor.
