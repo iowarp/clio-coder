@@ -3953,15 +3953,15 @@ function scanCommandScript(
 ): ScriptHit | null {
 	const operand = script.path;
 	const where = script.sourced ? "sourced by the command" : "run by the command";
-	if (/^[<>]\(/u.test(operand)) {
-		recordUnplaced(budget, unplacedOperand(operand, where));
+	// A program run by its own path may be any binary, so a name the scan cannot place keeps today's rails; a sourced
+	// name or one handed to a shell is a script, and the judge decides it (row 215).
+	const unplaced = () => {
+		if (!shellOnly) recordUnplaced(budget, unplacedOperand(operand, where));
 		return null;
-	}
+	};
+	if (/^[<>]\(/u.test(operand)) return unplaced();
 	const candidates = scriptCandidates(operand, cwds, budget, script.sourced);
-	if (candidates.includes(null)) {
-		recordUnplaced(budget, unplacedOperand(operand, where));
-		return null;
-	}
+	if (candidates.includes(null)) return unplaced();
 	// Each candidate is skipped on its own: rewriting one copy leaves another that bash may load (CLI-P31).
 	const files = (candidates as string[]).filter((file) => !isWrittenFirst(file, written) && regularFile(file));
 	// `bash x.sh` runs with `$0` as written; on standard input `$0` names the shell.

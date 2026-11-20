@@ -1,4 +1,4 @@
-import { deepStrictEqual, doesNotMatch, match, rejects, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, notStrictEqual, rejects, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -787,6 +787,9 @@ test("a script child the floor cannot place or read is judged at contained yolo 
 		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).kind, "allow", command);
 	}
 	strictEqual(engine.evaluate(bash("bash plain.sh"), level, contained).kind, "allow");
+	// A program run by a path the scan cannot place may be any binary, so it keeps today's rails rather than the judge.
+	const java = engine.evaluate(bash("$JAVA_HOME/bin/java -version"), level, contained);
+	notStrictEqual(java.reasonCode, "script-unplaceable");
 });
 
 // #421: Python lines are not shell; #407: a shell script at yolo meets only the floor.
