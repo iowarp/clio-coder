@@ -31,6 +31,8 @@ function controlledWorker() {
 		heartbeatAt: { current: Date.now(), monotonic: 0 },
 		events: (async function* () {
 			await promise;
+			// A read-scoped worker that executed no tool seals failed (FX-19).
+			yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok" } };
 			yield {
 				type: "message_end",
 				message: {

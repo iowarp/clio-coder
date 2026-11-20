@@ -77,6 +77,7 @@ it("binds recording into approval plans and returns the manifest reference from 
 			abort() {},
 			promise: Promise.resolve({ exitCode: 0, signal: null }),
 			events: (async function* () {
+				yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok" } };
 				yield { type: "text_delta", delta: "warning: preliminary\ncorrection: inspected original\n" };
 				yield {
 					type: "message_end",
@@ -183,6 +184,7 @@ it("admits an approved sibling-checkout Scout read once per run and records the 
 					needsSplit: false,
 					proposedSubtasks: [],
 				});
+				yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok" } };
 				yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content } };
 				yield { type: "agent_end" };
 			})(),

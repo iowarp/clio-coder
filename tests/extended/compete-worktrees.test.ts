@@ -147,8 +147,13 @@ for (const agent of ["scout", "coder"] as const) {
 								strictEqual(mapAutonomy("default", policy.classify(call).actionClass), "allow");
 								const read = await readTool.run(call.args);
 								strictEqual(read.kind, "ok");
+								yield { type: "clio_coder_tool_finish", payload: { tool: ToolNames.Read, outcome: "ok", durationMs: 1 } };
 								if (read.kind === "ok") strictEqual(JSON.parse(read.output).output.text, evidence.output.text);
 							}
+						}
+						// A read-scoped scout that executed no tool seals failed (FX-19).
+						if (!writer && !judge) {
+							yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok", durationMs: 1 } };
 						}
 						if (writer && !judge) {
 							// Model-free worker events carry the same ordinary tool facts as
@@ -449,6 +454,7 @@ for (const phase of ["candidates", "judge"] as const) {
 								await stopped;
 								return;
 							}
+							yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok" } };
 							yield {
 								type: "message_end",
 								message: {
