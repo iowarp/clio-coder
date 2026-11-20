@@ -7,6 +7,7 @@ import { loadSessionTelemetrySourceAsync } from "../domains/session/telemetry-so
 import { workspaceTelemetryCapture } from "../domains/telemetry/consent.js";
 import {
 	TELEMETRY_BUNDLE_FILE,
+	TELEMETRY_SEAL_MARKER_FILE,
 	telemetryJournalFiles,
 	telemetryProcessesDirectory,
 	telemetryRunsDirectory,
@@ -58,20 +59,20 @@ async function newestJournalMs(directory: string): Promise<number | null> {
 }
 
 /**
- * Only a scope holding a bundle is verified; one without is live or was never sealed, which `seal` reports without
- * hashing its segments, so the doctor stays cheap on a large telemetry root (#434).
+ * Only a scope holding a bundle or a seal marker is verified; one with neither is live or was never sealed, which
+ * `seal` reports without hashing its segments, so the doctor stays cheap on a large telemetry root (#434, RL-7).
  */
 async function scopeSeal(kind: ScopeKind, id: string, path: string): Promise<ScopeSeal> {
 	try {
 		const names = await readdir(path);
-		if (!names.includes(TELEMETRY_BUNDLE_FILE)) {
+		if (!names.includes(TELEMETRY_BUNDLE_FILE) && !names.includes(TELEMETRY_SEAL_MARKER_FILE)) {
 			const reason = telemetryJournalFiles(names).length === 0 ? "no journal" : "live or never sealed";
 			return { kind, id, path, status: "unsealed", detail: reason };
 		}
 		const verdict = seal(await readTelemetryScopeFiles(path));
 		if (verdict.status === "failed")
 			return { kind, id, path, status: "failed", detail: describeSealMismatch(verdict.mismatch) };
-		return { kind, id, path, status: verdict.status, detail: null };
+		return { kind, id, path, status: verdict.status, detail: verdict.status === "unsealed" ? "live after a seal" : null };
 	} catch (error) {
 		return { kind, id, path, status: "failed", detail: error instanceof Error ? error.message : String(error) };
 	}

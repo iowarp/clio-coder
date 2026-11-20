@@ -1,10 +1,11 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { TelemetryContext } from "../../src/core/telemetry/context.js";
+import { inspectRunTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import { openCallJournal, readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { storeTelemetryObject } from "../../src/domains/telemetry/objects.js";
 import {
@@ -13,6 +14,7 @@ import {
 	telemetrySessionDirectory,
 } from "../../src/domains/telemetry/paths.js";
 import { journalSourceFromRead, seal } from "../../src/domains/telemetry/read-model.js";
+import { readRunRecord } from "../../src/domains/telemetry/run-record.js";
 import { readTelemetryScopeFiles } from "../../src/domains/telemetry/seal.js";
 import { telemetryView } from "../../src/domains/telemetry/telemetry-live.js";
 import { scratchClioEnvVars } from "../harness/scratch-env.js";
@@ -189,6 +191,29 @@ test("a verified run cache follows a reopened and resealed journal", async () =>
 	} finally {
 		await reopened.close();
 	}
+});
+
+test("a sealed run whose journal was truncated and whose bundle.json was deleted fails integrity, not unsealed (RL-7)", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-seal-marker-"));
+	const runId = "run_marker";
+	const directory = telemetryRunDirectory(stateDir, runId);
+	const context: TelemetryContext = { sessionId: "ses_marker", runId, agent: { role: "worker", id: runId } };
+	const options = { directory, context, writer: { clioCoderVersion: "test", piVersion: "test" } };
+	const first = await openCallJournal(options);
+	ok(await first.sealAndClose());
+	const journalPath = join(directory, "journal.jsonl");
+	const sealed = await readFile(journalPath);
+	// A reopen that never resealed keeps the sealed prefix, so it reads live, torn tail or not.
+	await rm(join(directory, "bundle.json"));
+	await writeFile(journalPath, Buffer.concat([sealed, Buffer.from('{"torn')]));
+	strictEqual(seal(await readTelemetryScopeFiles(directory)).status, "unsealed");
+	// Truncation through the seal line leaves no seal in the scope; the marker still says one landed.
+	await writeFile(journalPath, sealed.subarray(0, sealed.lastIndexOf(0x0a, sealed.length - 2) + 1));
+	strictEqual(seal(await readTelemetryScopeFiles(directory)).status, "failed");
+	const inspection = inspectRunTrustStatus(readRunRecord(stateDir, runId));
+	strictEqual(inspection.integrity.state, "failed");
+	strictEqual(inspection.status.artifactIntegrity.state, "failed");
+	await rejects(openCallJournal(options), /sealed telemetry scope does not verify/);
 });
 
 test("telemetry inspect shows a session seal that fails verification as failed", async () => {

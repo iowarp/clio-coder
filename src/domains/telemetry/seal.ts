@@ -26,6 +26,7 @@ import {
 import {
 	TELEMETRY_BUNDLE_FILE,
 	TELEMETRY_JOURNAL_FILE,
+	TELEMETRY_SEAL_MARKER_FILE,
 	telemetryJournalFiles,
 	telemetryObjectsDirectory,
 } from "./paths.js";
@@ -69,6 +70,35 @@ export const ScopeBundleManifestSchema = Type.Object(
 	closed,
 );
 export type ScopeBundleManifest = Static<typeof ScopeBundleManifestSchema>;
+
+const SEAL_MARKER_FORMAT = "clio-coder.telemetry.seal-marker";
+/**
+ * The scope's last seal as `sealed.json` records it: the seal record and the chain head and line count just after its
+ * line. An append keeps it, since the sealed prefix it names stays in the chain; only a reseal replaces it (RL-7).
+ */
+const SealMarkerSchema = Type.Object(
+	{
+		format: Type.Literal(SEAL_MARKER_FORMAT),
+		version: Type.Literal(1),
+		scope: ScopeBundleManifestSchema.properties.scope,
+		sealedAt: Type.String(),
+		seal: Type.Object({ recordId: Type.String(), head: sha256Hex, lines: Type.Integer({ minimum: 1 }) }, closed),
+	},
+	closed,
+);
+type SealMarker = Static<typeof SealMarkerSchema>;
+
+/** The `sealed.json` bytes for a seal that just landed. */
+export function sealMarkerBytes(manifest: ScopeBundleManifest, lines: number): string {
+	const marker: SealMarker = {
+		format: SEAL_MARKER_FORMAT,
+		version: 1,
+		scope: manifest.scope,
+		sealedAt: manifest.sealedAt,
+		seal: { ...manifest.seal, lines },
+	};
+	return `${JSON.stringify(marker, null, "\t")}\n`;
+}
 export type ScopeFileEntry = ScopeSealed["segments"][number];
 export type ScopeObjectEntry = ScopeSealed["objects"][number];
 
@@ -164,6 +194,8 @@ export function scopeBundleManifest(input: {
 export interface TelemetryScopeFiles {
 	/** `bundle.json`, or null when the scope has none. */
 	manifest: Buffer | null;
+	/** `sealed.json`, the scope's last seal; absent or null when the scope was never sealed here (RL-7). */
+	marker?: Buffer | null;
 	/** Journal segments, oldest first, the live segment last. */
 	segments: Array<{ name: string; bytes: Buffer }>;
 	/** Every file under `objects/`, by file name. */
@@ -178,13 +210,16 @@ export async function readTelemetryScopeFiles(scopeDirectory: string): Promise<T
 	let manifest: Buffer | null = null;
 	if (names.includes(TELEMETRY_BUNDLE_FILE))
 		manifest = await readRegularFile(join(scopeDirectory, TELEMETRY_BUNDLE_FILE));
+	const marker = names.includes(TELEMETRY_SEAL_MARKER_FILE)
+		? await readRegularFile(join(scopeDirectory, TELEMETRY_SEAL_MARKER_FILE))
+		: null;
 	const segments = [];
 	for (const name of telemetryJournalFiles(names))
 		segments.push({ name, bytes: await readRegularFile(join(scopeDirectory, name)) });
 	const objects = [];
 	for (const name of await objectFileNames(scopeDirectory))
 		objects.push({ name, bytes: await readRegularFile(join(telemetryObjectsDirectory(scopeDirectory), name)) });
-	return { manifest, segments, objects };
+	return { manifest, marker, segments, objects };
 }
 
 /** The synchronous {@link readTelemetryScopeFiles}, for the CLI and the synchronous run DTO readers (#434). */
@@ -194,6 +229,9 @@ export function readTelemetryScopeFilesSync(scopeDirectory: string): TelemetrySc
 	const manifest = names.includes(TELEMETRY_BUNDLE_FILE)
 		? readRegularFileSync(join(scopeDirectory, TELEMETRY_BUNDLE_FILE))
 		: null;
+	const marker = names.includes(TELEMETRY_SEAL_MARKER_FILE)
+		? readRegularFileSync(join(scopeDirectory, TELEMETRY_SEAL_MARKER_FILE))
+		: null;
 	const segments = telemetryJournalFiles(names).map((name) => ({
 		name,
 		bytes: readRegularFileSync(join(scopeDirectory, name)),
@@ -202,7 +240,7 @@ export function readTelemetryScopeFilesSync(scopeDirectory: string): TelemetrySc
 		name,
 		bytes: readRegularFileSync(join(telemetryObjectsDirectory(scopeDirectory), name)),
 	}));
-	return { manifest, segments, objects };
+	return { manifest, marker, segments, objects };
 }
 
 export type SealMismatch = Static<typeof SealMismatchSchema>;
@@ -388,15 +426,53 @@ function fileMismatch(
 }
 
 /**
+ * A scope with no `bundle.json` but a `sealed.json` was sealed and is live again only while its journal still holds
+ * the history that seal covered: the chain through the seal's line count reaches the head the marker recorded. Lines
+ * after that prefix, a torn tail or damage included, belong to the live scope and are not judged here. Anything else
+ * means the sealed history was cut or rewritten after its bundle went, which fails integrity, not unsealed (RL-7).
+ */
+function verifyAgainstSealMarker(marker: Buffer, segments: TelemetryScopeFiles["segments"]): SealVerdict {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(marker.toString("utf8"));
+	} catch {
+		return failed({ kind: "manifest", detail: "sealed.json is not JSON and bundle.json is missing" });
+	}
+	if (!Value.Check(SealMarkerSchema, parsed))
+		return failed({ kind: "manifest", detail: "sealed.json is not a version 1 seal marker and bundle.json is missing" });
+	const { seal } = parsed;
+	let chain: TelemetryChain = EMPTY_TELEMETRY_CHAIN;
+	for (const segment of segments) {
+		let offset = 0;
+		while (chain.lines < seal.lines) {
+			const newline = segment.bytes.indexOf(0x0a, offset);
+			if (newline < 0) break;
+			chain = chainTelemetryLine(chain, segment.bytes.subarray(offset, newline));
+			offset = newline + 1;
+		}
+		if (chain.lines === seal.lines) break;
+	}
+	if (chain.lines === seal.lines && telemetryChainHead(chain) === seal.head)
+		return { status: "unsealed", reason: "no-bundle" };
+	return failed({
+		kind: "seal",
+		detail: `bundle.json is missing and the journal no longer holds seal ${seal.recordId} of ${parsed.sealedAt}`,
+	});
+}
+
+/**
  * The seal verdict for a scope's files (#434). Pure: it checks every listed segment and object against its size and
  * sha256 and every object against its content-addressed id, replays the chain checking every seal against its prefix,
  * and binds the manifest to the last seal: its record, head, file lists, timestamp, host and writer version. The first
- * mismatch fails the scope; a scope without `bundle.json` is unsealed. `scans`, when given, are
- * `scanTelemetrySegment` of each of `files.segments` by index, made by a caller that folds the same bytes.
+ * mismatch fails the scope; a scope without `bundle.json` is unsealed unless its `sealed.json` names a seal its journal
+ * no longer holds (RL-7). `scans`, when given, are `scanTelemetrySegment` of each of `files.segments` by index, made by
+ * a caller that folds the same bytes.
  */
 export function verifyTelemetryScope(files: TelemetryScopeFiles, scans?: readonly SegmentScan[]): SealVerdict {
-	if (files.manifest === null)
+	if (files.manifest === null) {
+		if (files.marker !== undefined && files.marker !== null) return verifyAgainstSealMarker(files.marker, files.segments);
 		return { status: "unsealed", reason: files.segments.length === 0 ? "no-journal" : "no-bundle" };
+	}
 	let manifest: ScopeBundleManifest;
 	try {
 		const parsed: unknown = JSON.parse(files.manifest.toString("utf8"));
