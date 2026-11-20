@@ -10,7 +10,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { EXIT_CODES } from "./kit/exit-codes.js";
-import { helpRequested } from "./kit/help.js";
+import { type FlagSpec, helpRequested, type LeafFlagsSpec } from "./kit/help.js";
 import { jsonDocument, writeCliFailure, writeJson } from "./kit/json-out.js";
 import { ERROR_SLUGS } from "./kit/slugs.js";
 import { type ManifestFlag, type ManifestValue, NESTED_LEAVES, RUN_FLAGS, TOP_LEVEL_USAGE } from "./specs/manifest.js";
@@ -45,6 +45,9 @@ interface ManifestPositional {
 	variadic: boolean;
 }
 
+/** A leaf's flag row; `persistence` comes only from a spec's curated `leafFlags` (SPEC 6.4, review R08). */
+type LeafFlag = ManifestFlag & { readonly persistence?: FlagSpec["persistence"] };
+
 interface ManifestOutput {
 	format: "text" | "json" | "stream-json";
 	schema?: string;
@@ -63,7 +66,7 @@ interface ManifestLeaf {
 	usage?: string;
 	positionals: ManifestPositional[];
 	stdin: StdinUse;
-	flags: ManifestFlag[];
+	flags: LeafFlag[];
 	effects: Effect[];
 	outputs: ManifestOutput[];
 	exit: { codes: number[]; exitCodeMap?: Record<string, number> };
@@ -321,6 +324,15 @@ function leafEntry(
 	};
 }
 
+/** A spec's curated rows over the flags read from the synopsis: a named flag is refined, a new one goes before `--help`. */
+function withCuratedFlags(derived: ReadonlyArray<LeafFlag>, curated: ReadonlyArray<FlagSpec>): LeafFlag[] {
+	const flags = new Map(derived.map((flag) => [flag.name, flag]));
+	const help = flags.get("--help");
+	flags.delete("--help");
+	for (const flag of curated) flags.set(flag.name, { ...flags.get(flag.name), ...flag });
+	return help !== undefined ? [...flags.values(), help] : [...flags.values()];
+}
+
 const ALIAS_SUMMARY = /^alias for clio-coder (.+)$/u;
 
 /** Every canonical leaf, top-level commands first in table order, then nested leaves by path. */
@@ -329,8 +341,11 @@ async function buildManifest(): Promise<ManifestLeaf[]> {
 	for (const row of NESTED_LEAVES) nested.set(row[0], row);
 	const tops: Array<{ name: string; summary: string; hidden: boolean }> = [];
 	const aliases: Array<[string, string]> = [];
+	const curated = new Map<string, ReadonlyArray<FlagSpec>>();
 	for (const [name, load] of Object.entries(COMMAND_SPECS)) {
 		const module: { spec: { summary: string; hidden: boolean } } & Record<string, unknown> = await load();
+		if (Array.isArray(module.leafFlags))
+			for (const item of module.leafFlags as ReadonlyArray<LeafFlagsSpec>) curated.set(item.path.join(" "), item.flags);
 		const alias = ALIAS_SUMMARY.exec(module.spec.summary);
 		if (alias?.[1] !== undefined) {
 			aliases.push([name, alias[1]]);
@@ -371,6 +386,10 @@ async function buildManifest(): Promise<ManifestLeaf[]> {
 	}
 	const byKey = new Map(entries.map((entry) => [entry.path.join(" "), entry]));
 	for (const [alias, target] of aliases) byKey.get(target)?.aliases.push([alias]);
+	for (const [key, flags] of curated) {
+		const entry = byKey.get(key);
+		if (entry !== undefined) entry.flags = withCuratedFlags(entry.flags, flags);
+	}
 	return entries;
 }
 

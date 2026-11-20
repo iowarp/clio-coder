@@ -82,7 +82,10 @@ describe("leaf commands answer --help", { concurrency: 4 }, () => {
 		const manifest = await cli(["help", "--json"]);
 		equal(manifest.status, 0, manifest.stderr);
 		equal(manifest.stdout.trimEnd().split("\n").length, 1, "help --json printed more than one line");
-		const doc = JSON.parse(manifest.stdout) as { version: number; leaves: Array<{ path: string[] }> };
+		const doc = JSON.parse(manifest.stdout) as {
+			version: number;
+			leaves: Array<{ path: string[]; flags: Array<{ name: string; persistence?: string }> }>;
+		};
 		equal(doc.version, 1);
 		const paths = new Set(doc.leaves.map((leaf) => leaf.path.join(" ")));
 		for (const sentinel of [
@@ -92,6 +95,15 @@ describe("leaf commands answer --help", { concurrency: 4 }, () => {
 			"telemetry share forget",
 		])
 			ok(paths.has(sentinel), `help --json omits ${sentinel}`);
+		// SPEC 6.4 (R08): the credential flags that write to disk say so per flag.
+		for (const [path, flag] of [
+			["configure", "--api-key"],
+			["configure", "--api-key-env"],
+			["auth login", "--api-key"],
+		] as const) {
+			const row = doc.leaves.find((leaf) => leaf.path.join(" ") === path)?.flags.find((f) => f.name === flag);
+			equal(row?.persistence, "persisted", `help --json: ${path} ${flag}`);
+		}
 		for (const name of ["run-result", "run-events", "task", "help", "fleet-result"]) {
 			const schema = await cli(["schema", name]);
 			equal(schema.status, 0, schema.stderr);
