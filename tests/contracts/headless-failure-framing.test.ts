@@ -393,4 +393,20 @@ test("a provider error that ends the run is provider_error under v2 and unchange
 	strictEqual(envelope.causes?.[0]?.code, "provider_error", v2.stdout);
 	strictEqual(envelope.outcomeDetail, "provider_error");
 	match(envelope.causes?.[0]?.message ?? "", /429 Too Many Requests/u);
+	// The post-compaction context guard's stop is the harness's, not the provider's (FX-22): run_failed with its words.
+	const stop = "[CLIO Coder] This turn stopped: after compaction about 61943 input tokens plus 12288 reserved";
+	const guard = {
+		...failed,
+		errorMessage: stop,
+		failure: { invoked: true, stage: "harness", httpStatus: null, errorClass: "oversized_tool_result", retryAttempts: 0 },
+	};
+	const guardV1 = await writtenCallRun(undefined, guard);
+	strictEqual(guardV1.code, 1, guardV1.stderr);
+	match(guardV1.stderr, /This turn stopped: after compaction/u);
+	const guardV2 = await writtenCallRun("json", guard);
+	strictEqual(guardV2.code, 1, guardV2.stderr);
+	const guardEnvelope = JSON.parse(guardV2.stdout.trim().split("\n").at(-1) ?? "{}") as typeof envelope;
+	strictEqual(guardEnvelope.causes?.[0]?.code, "run_failed", guardV2.stdout);
+	strictEqual(guardEnvelope.outcomeDetail, "run_failed");
+	strictEqual(guardEnvelope.causes?.[0]?.message, stop);
 });

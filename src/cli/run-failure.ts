@@ -515,9 +515,15 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
 			seen.runEnd = frame as RunJsonRunEndFrame;
 			return null;
 		case "message_end": {
-			const message = (frame as { message?: { role?: string; stopReason?: unknown; harnessStopped?: unknown } }).message;
+			const message = (
+				frame as {
+					message?: { role?: string; stopReason?: unknown; harnessStopped?: unknown; failure?: { stage?: unknown } };
+				}
+			).message;
+			// A harness stop (a repetition guard, or the context guard's `failure.stage` "harness") is not the provider's (FX-22).
 			if (message?.role === "assistant")
-				seen.providerError = message.stopReason === "error" && message.harnessStopped !== true;
+				seen.providerError =
+					message.stopReason === "error" && message.harnessStopped !== true && message.failure?.stage !== "harness";
 			break;
 		}
 		case "result": {
