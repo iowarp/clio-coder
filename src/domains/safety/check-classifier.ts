@@ -258,10 +258,11 @@ export function callVerdict(
 	toolName: string,
 	args: Record<string, unknown> | undefined,
 	gitHelpers = false,
+	recorderCwd?: string,
 ): CallVerdict {
 	if (toolName !== ToolNames.Bash) return toolVerdict(toolName, args, toolMutationPaths(toolName, args).length);
 	const command = commandOf(args);
-	return command === null ? "unknown" : shellCommandVerdict(command, gitHelpers);
+	return command === null ? "unknown" : shellCommandVerdict(command, gitHelpers, recorderCwd);
 }
 
 /**
@@ -329,8 +330,10 @@ function writesTree(
 	gitHelpers: boolean,
 	outputTarget: CheckOutputReader,
 	whole = command,
+	recorderCwd?: string,
 ): boolean {
-	const named = command !== null ? shellWritesOnlyNamedTargets(command, gitHelpers) : !toolWritesOpaquely(toolName);
+	const named =
+		command !== null ? shellWritesOnlyNamedTargets(command, gitHelpers, recorderCwd) : !toolWritesOpaquely(toolName);
 	if (!named) return true;
 	const rebased = whole !== null && extractCommandCdTargets(whole).length > 0;
 	const outside = outputTarget.outside(base);
@@ -348,6 +351,8 @@ export function classifyCall(
 ): CallClassification {
 	const { cwd, gitHelpers = false, outputTarget = NO_OUTPUT_TARGET, declaredChecks = [] } = context;
 	const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
+	// The helper probe only describes the recorder's repository, not a rebased bash call's.
+	const gitCwd = path.relative(cwd, base) === "" ? cwd : undefined;
 	const command = toolName === ToolNames.Bash ? commandOf(args) : null;
 	const shellCommand = command ?? verifyCommandOf(toolName, args, base);
 	const targets = mutationTargets(toolName, args);
@@ -355,7 +360,7 @@ export function classifyCall(
 	// The steps that run a declared check are check steps, so the call is a check whose shape places them (x7-5).
 	const declaredRuns = command === null ? [] : declaredCheckRuns(command, base, declaredChecks);
 	const declaredSteps = new Set(declaredRuns.flatMap((run) => run.steps));
-	const verdict = declaredSteps.size > 0 ? "check" : callVerdict(toolName, args, gitHelpers);
+	const verdict = declaredSteps.size > 0 ? "check" : callVerdict(toolName, args, gitHelpers, gitCwd);
 	// A bash command has a shape exactly when it runs a check, so only a check reads where its output lands.
 	const isOutput =
 		command !== null && verdict === "check"
@@ -380,6 +385,7 @@ export function classifyCall(
 								command,
 							),
 						base,
+						gitCwd,
 					)
 				: null
 			: // A verify check whose argv rewrites the tree (`npm run format`) is a change, as in bash (x3-3).
@@ -399,7 +405,8 @@ export function classifyCall(
 	return {
 		verdict,
 		changesTree:
-			(verdict === "mutation" && writesTree(toolName, command, targets, base, gitHelpers, outputTarget)) ||
+			(verdict === "mutation" &&
+				writesTree(toolName, command, targets, base, gitHelpers, outputTarget, command, gitCwd)) ||
 			(verdict === "check" && (changedPaths.length > 0 || shape === "after-change" || shape === "mixed")),
 		base,
 		paths,

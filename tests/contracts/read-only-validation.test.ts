@@ -1085,6 +1085,12 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 		["git status", "inspection"],
 		["git diff", "inspection"],
 		["git log -p", "inspection"],
+		// Repository selectors preserve reads only at the recorder's cwd (x6).
+		["git -C . status", "inspection"],
+		[`git -C "${cwd}" log`, "inspection"],
+		[`git --git-dir="${join(cwd, ".git")}" diff`, "inspection"],
+		["git --work-tree=. status", "inspection"],
+		["git -C . --git-dir=.git --work-tree=. --no-pager diff", "inspection"],
 		// Value-free globals and read-only plumbing read (x6-2).
 		["git --no-pager diff", "inspection"],
 		["git -P --no-optional-locks log -1", "inspection"],
@@ -1110,7 +1116,14 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 		["git diff --ext-diff", "mutation"],
 		["git show --textconv", "mutation"],
 		// A global that relocates the repository or a config key that may name a program (x6-2).
-		["git -C . status", "mutation"],
+		["git -C .. status", "mutation"],
+		["git --git-dir=../.git diff", "mutation"],
+		["git --work-tree=.. status", "mutation"],
+		["cd .. && git -C . status", "mutation"],
+		["git -C . commit", "mutation"],
+		["git -C . push", "mutation"],
+		["git --git-dir=.git reset", "mutation"],
+		["git --work-tree=. checkout main", "mutation"],
 		["git --paginate diff", "mutation"],
 		["git -c core.pager=./x.sh diff", "mutation"],
 		["git -c alias.st=!./x.sh st", "mutation"],
@@ -1197,6 +1210,8 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 		["pnpm dev", "unknown"],
 	];
 	for (const [command, expected] of table) strictEqual(bash(command), expected, command);
+	strictEqual(verdict("bash", { command: "git -C . status", cwd: ".." }), "mutation");
+	strictEqual(classifyCall("bash", { command: "npm test && git -C . status" }, { cwd }).shape, "pure");
 	// A check-named script that fixes or updates snapshots still rewrites the tree it checks (x6-4).
 	for (const command of ["pnpm lint --fix", "pnpm --filter web lint:fix", "pnpm test -u", "yarn workspace web format"])
 		strictEqual(classifyCall("bash", { command }, { cwd }).shape, "mixed", command);
@@ -1217,6 +1232,7 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 	// Where git config names a helper program, only log and show with both helpers switched off still read.
 	for (const command of [
 		"git status",
+		"git -C . status",
 		"git diff --no-ext-diff --no-textconv",
 		"git log -p",
 		"git blame a.ts",
@@ -1230,7 +1246,7 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 	for (const [id, tool, args] of [
 		["early", "bash", { command: "node before.mjs" }],
 		["test", "bash", { command: "npm test" }],
-		["look", "bash", { command: "git status" }],
+		["look", "bash", { command: `git -C "${cwd}" status` }],
 		["codemod", "bash", { command: "node codemod.mjs" }],
 		["mcp", "mcp__server__tool", {}],
 	] as const) {
