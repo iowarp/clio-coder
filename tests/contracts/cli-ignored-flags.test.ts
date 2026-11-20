@@ -310,3 +310,24 @@ describe("run --agent sampling flags", () => {
 		}
 	});
 });
+
+describe("fleet detach and wait flags (SPEC L7b)", () => {
+	for (const [args, needle] of [
+		[["fleet", "run", "demo", "--detach", "--json"], "--detach"],
+		[["fleet", "run", "demo", "--detached-root", "not a root"], "--detached-root"],
+		[["fleet", "wait", "fleet-abc", "--bogus"], "--bogus"],
+		[["fleet", "wait"], "fleet wait"],
+	] as const) {
+		it(`refuses ${args.join(" ")} with exit 2`, () => {
+			const result = cli(args);
+			equal(result.status, 2, result.stderr);
+			ok(result.stderr.includes(needle), result.stderr);
+		});
+	}
+
+	it("fleet wait on an unknown root exits 1 not_found", () => {
+		const result = cli(["fleet", "wait", "fleet-nosuchroot", "--json"]);
+		equal(result.status, 1, result.stderr);
+		match(result.stderr, /no fleet root matches/u);
+	});
+});
