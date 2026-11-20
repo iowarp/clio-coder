@@ -691,7 +691,16 @@ function emptyUsage(): AssistantMessage["usage"] {
 		cacheRead: 0,
 		cacheWrite: 0,
 		totalTokens: 0,
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		// The runtime computes no cost: the zero total is a placeholder, and totalUncomputed tells settlement to price the
+		// counts at the route's declared rates instead (#434).
+		cost: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			total: 0,
+			totalUncomputed: true,
+		} as AssistantMessage["usage"]["cost"],
 	};
 }
 

@@ -3,8 +3,10 @@ import { existsSync, renameSync, rmSync, writeFileSync, writeSync } from "node:f
 import path from "node:path";
 import { readClioVersion } from "../core/package-root.js";
 import type { RunResult } from "../domains/dispatch/types.js";
+import { CITATION_CHECK_PREFIX } from "../domains/safety/citation-grounding.js";
 import { redactUrlCredentials } from "../domains/safety/redaction.js";
 import type { ErrorSlug } from "./kit/slugs.js";
+import { type TurnAnswerEntry, turnAnswer } from "./modes/answer-segments.js";
 import { serializeJsonLine, setFrameProjector } from "./modes/jsonl.js";
 import type {
 	RunJsonDispatchedRunOutcome,
@@ -215,9 +217,15 @@ function writeOutputFile(resolved: string, bytes: string): boolean {
 	}
 }
 
-/** The answer a streamed `turn_end` frame carries in its assistant message: what text mode prints on stdout. */
-function turnAnswer(frame: RunJsonFrame): string | null {
-	return frame.type === "turn_end" ? answerText(frame) : null;
+/**
+ * The run's answer (CLI-P43): the headless main agent's printed answer, else, for a `--agent` worker, the replies of
+ * the `turn_end` frames it streamed. A `--agent` turn with no reply keeps its last text, which its text mode prints.
+ */
+function settledAnswer(seen: SeenFrames): string {
+	const main = mainRunNote.answer?.();
+	if (main !== undefined) return main;
+	const answer = turnAnswer(seen.answerEntries);
+	return answer.text.length > 0 ? answer.text : answer.narration;
 }
 
 /** What the headless main agent tells a v2 writer directly: facts no v1 frame carries. */
@@ -228,6 +236,8 @@ interface MainRunNoteV2 {
 	sessionReadyMs?: number;
 	/** Routes the run can reach whose cost `--max-cost-usd` cannot bound. */
 	unpricedRoutes?: string[];
+	/** The answer text mode prints, from the headless main agent's own turn entries (CLI-P43). */
+	answer?: () => string;
 }
 
 /** SPEC 6.6/6.8: what `--output-schema` settled; absent for a run without the flag. */
@@ -353,8 +363,10 @@ export function noteMainRunV2(note: {
 	sessionReady?: true;
 	parentSessionId?: string;
 	unpricedRoutes?: string[];
+	answer?: () => string;
 }): void {
 	if (v2Started === null) return;
+	if (note.answer !== undefined) mainRunNote.answer = note.answer;
 	if (note.unpricedRoutes !== undefined) mainRunNote.unpricedRoutes = [...note.unpricedRoutes];
 	if (note.runId !== undefined) mainRunNote.runId = note.runId;
 	if (note.parentSessionId !== undefined) mainRunNote.parentSessionId = note.parentSessionId;
@@ -392,7 +404,8 @@ export interface RunResultV2Request {
 /** What the v1 frames told the v2 writer; the run itself still speaks v1 underneath. */
 interface SeenFrames {
 	session?: { id?: string; target?: string; model?: string; runId?: string };
-	text: string;
+	/** The final user turn's settled assistant messages and citation checks, which give the answer (CLI-P43). */
+	answerEntries: TurnAnswerEntry[];
 	runEnd?: RunJsonRunEndFrame;
 	verify?: RunJsonVerifyResult[];
 	live: RunJsonDispatchedRunOutcome[];
@@ -422,17 +435,6 @@ const WORK_CODES: ReadonlyArray<RunCauseCode> = [
 	"noop",
 	"limitation",
 ];
-
-function answerText(frame: RunJsonFrame): string | null {
-	const message = (frame as { message?: { role?: string; content?: unknown } }).message;
-	if (message?.role !== "assistant" || !Array.isArray(message.content)) return null;
-	const parts: string[] = [];
-	for (const block of message.content as unknown[]) {
-		const entry = block as { type?: unknown; text?: unknown } | null;
-		if (entry?.type === "text" && typeof entry.text === "string") parts.push(entry.text);
-	}
-	return parts.length > 0 ? parts.join("") : null;
-}
 
 /** Read one v1 frame into `seen` and return what a v2 stream writes in its place; null withholds it. */
 function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResultV2Request["format"]): object | null {
@@ -466,8 +468,14 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
 			return rewritten;
 		}
 		case "turn_end": {
-			const text = turnAnswer(frame);
-			if (text !== null) seen.text = text;
+			const message = (frame as { message?: { role?: unknown } }).message;
+			if (message?.role === "assistant") seen.answerEntries.push({ kind: "message", message });
+			break;
+		}
+		case "notice": {
+			const text = (frame as { text?: unknown }).text;
+			if (typeof text === "string" && text.startsWith(CITATION_CHECK_PREFIX))
+				seen.answerEntries.push({ kind: "citation_check" });
 			break;
 		}
 		case "verify":
@@ -492,6 +500,8 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
 			if (message?.role === "assistant")
 				seen.providerError =
 					message.stopReason === "error" && message.harnessStopped !== true && message.failure?.stage !== "harness";
+			// A user message starts the turn whose replies are the answer, unless it delivers a citation check (CLI-P43).
+			if (message?.role === "user" && seen.answerEntries.at(-1)?.kind !== "citation_check") seen.answerEntries = [];
 			break;
 		}
 		case "result": {
@@ -590,7 +600,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	const state: RunFailureState = { pending: true };
 	const started = Date.now();
 	const startedAt = new Date(started).toISOString();
-	const seen: SeenFrames = { text: "", live: [], undelivered: [] };
+	const seen: SeenFrames = { answerEntries: [], live: [], undelivered: [] };
 	v2Started = performance.now();
 	v2StreamJson = request.format === "stream-json";
 	toolCallIds = v2StreamJson ? createToolCallIdMinter() : null;
@@ -639,7 +649,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			causes: resolution.causes,
 			...(runCompletion !== undefined ? { completion: runCompletion } : {}),
 			result: {
-				text: seen.text,
+				text: settledAnswer(seen),
 				artifacts: [],
 				...(structuredNote?.structured !== undefined && resolution.exitCode === 0
 					? { structured: structuredNote.structured }
@@ -685,7 +695,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 		if (outputTarget === undefined || outputSettled || code !== 0) return [];
 		outputSettled = true;
 		// With --output-schema the file holds the validated JSON, the same bytes text mode prints (SPEC 6.8).
-		return writeOutputFile(outputTarget, `${structuredNote?.json ?? seen.text}\n`)
+		return writeOutputFile(outputTarget, `${structuredNote?.json ?? settledAnswer(seen)}\n`)
 			? []
 			: [{ code: "output_write_failed", path: outputTarget }];
 	};

@@ -2,15 +2,19 @@ import { isAbsolute, resolve } from "node:path";
 import {
 	MEMORY_OBSERVATION_KINDS,
 	MEMORY_OBSERVATIONS_MAX,
+	MEMORY_REVISIONS_MAX,
 	MEMORY_SCOPES,
 	type MemoryAgentIdentity,
 	type MemoryApproval,
+	type MemoryClaim,
+	type MemoryClaimCommand,
 	type MemoryObservation,
 	type MemoryPromotionRedaction,
 	type MemoryRecord,
 	type MemoryRecordProvenance,
 	type MemoryRecordValidationResult,
 	type MemoryRepositoryIdentity,
+	type MemoryRevision,
 	type MemoryRuntimeIdentity,
 	type MemoryScope,
 	type MemoryValidationIssue,
@@ -80,6 +84,10 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 			"provenance",
 			"approval",
 			"observations",
+			"claim",
+			"revisions",
+			"deliveredCount",
+			"lastDeliveredAt",
 		],
 		issues,
 	);
@@ -113,6 +121,10 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 	const provenance = readOptionalMemoryProvenance(value, `${path}.provenance`, issues);
 	const approval = readOptionalApproval(value, `${path}.approval`, issues);
 	const observations = readOptionalObservations(value, `${path}.observations`, issues);
+	const claim = readOptionalClaim(value, `${path}.claim`, issues);
+	const revisions = readOptionalRevisions(value, `${path}.revisions`, issues);
+	const deliveredCount = readOptionalCount(value, `${path}.deliveredCount`, issues);
+	const lastDeliveredAt = readOptionalIsoString(value, `${path}.lastDeliveredAt`, issues);
 	if (approved === true && rejectedAt !== undefined) {
 		issues.push({ path: `${path}.rejectedAt`, message: "approved records must not be rejected" });
 	}
@@ -169,7 +181,133 @@ function readMemoryRecord(value: unknown, path: string, issues: MemoryValidation
 	if (provenance !== undefined) record.provenance = provenance;
 	if (approval !== undefined) record.approval = approval;
 	if (observations !== undefined) record.observations = observations;
+	if (claim !== undefined) record.claim = claim;
+	if (revisions !== undefined) record.revisions = revisions;
+	if (deliveredCount !== undefined) record.deliveredCount = deliveredCount;
+	if (lastDeliveredAt !== undefined) record.lastDeliveredAt = lastDeliveredAt;
 	return record;
+}
+
+const REVISION_PATTERN = /^[0-9a-f]{16}$/u;
+const SEGMENT_KEY_PATTERN = /^[0-9a-f]{64}$/u;
+
+function readOptionalCount(
+	record: Record<string, unknown>,
+	path: string,
+	issues: MemoryValidationIssue[],
+): number | undefined {
+	const field = fieldName(path);
+	if (!Object.hasOwn(record, field)) return undefined;
+	const value = record[field];
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+		issues.push({ path, message: "expected non-negative integer" });
+		return undefined;
+	}
+	return value;
+}
+
+function readClaimCommand(
+	value: unknown,
+	path: string,
+	issues: MemoryValidationIssue[],
+): MemoryClaimCommand | undefined {
+	if (!isRecord(value)) {
+		issues.push({ path, message: "expected object" });
+		return undefined;
+	}
+	rejectUnexpectedFields(value, path, ["assignments", "argv", "key", "scratchParameter"], issues);
+	const assignments = readStringArray(value, `${path}.assignments`, issues);
+	const argv = readStringArray(value, `${path}.argv`, issues);
+	if (argv !== null && argv.length === 0) issues.push({ path: `${path}.argv`, message: "expected at least one word" });
+	const key = readString(value, `${path}.key`, issues);
+	if (key !== null && !SEGMENT_KEY_PATTERN.test(key)) {
+		issues.push({ path: `${path}.key`, message: "expected 64 lowercase hex characters" });
+	}
+	const scratchParameter = readOptionalCount(value, `${path}.scratchParameter`, issues);
+	if (scratchParameter !== undefined && argv !== null && (scratchParameter === 0 || scratchParameter >= argv.length)) {
+		issues.push({ path: `${path}.scratchParameter`, message: "expected an argument index after the program" });
+	}
+	if (assignments === null || argv === null || argv.length === 0 || key === null || !SEGMENT_KEY_PATTERN.test(key)) {
+		return undefined;
+	}
+	return { assignments, argv, key, ...(scratchParameter !== undefined ? { scratchParameter } : {}) };
+}
+
+function readOptionalClaim(
+	record: Record<string, unknown>,
+	path: string,
+	issues: MemoryValidationIssue[],
+): MemoryClaim | undefined {
+	const field = fieldName(path);
+	if (!Object.hasOwn(record, field)) return undefined;
+	const value = record[field];
+	if (!isRecord(value)) {
+		issues.push({ path, message: "expected object" });
+		return undefined;
+	}
+	const kind = readString(value, `${path}.kind`, issues);
+	if (kind === "command") {
+		rejectUnexpectedFields(value, path, ["kind", "command"], issues);
+		const command = readClaimCommand(value.command, `${path}.command`, issues);
+		return command === undefined ? undefined : { kind, command };
+	}
+	if (kind === "fix") {
+		rejectUnexpectedFields(value, path, ["kind", "failed", "fixed"], issues);
+		const failed = readClaimCommand(value.failed, `${path}.failed`, issues);
+		const fixed = readClaimCommand(value.fixed, `${path}.fixed`, issues);
+		if (failed !== undefined && fixed !== undefined && failed.key === fixed.key) {
+			issues.push({ path, message: "a fix claim's failed and fixed patterns must differ" });
+			return undefined;
+		}
+		return failed === undefined || fixed === undefined ? undefined : { kind, failed, fixed };
+	}
+	if (kind === "source") {
+		rejectUnexpectedFields(value, path, ["kind", "path", "spanHash"], issues);
+		const sourcePath = readString(value, `${path}.path`, issues);
+		const spanHash = readString(value, `${path}.spanHash`, issues);
+		if (spanHash !== null && !SEGMENT_KEY_PATTERN.test(spanHash)) {
+			issues.push({ path: `${path}.spanHash`, message: "expected 64 lowercase hex characters" });
+		}
+		return sourcePath === null || spanHash === null || !SEGMENT_KEY_PATTERN.test(spanHash)
+			? undefined
+			: { kind, path: sourcePath, spanHash };
+	}
+	if (kind !== null) issues.push({ path: `${path}.kind`, message: "expected command, fix, or source" });
+	return undefined;
+}
+
+function readOptionalRevisions(
+	record: Record<string, unknown>,
+	path: string,
+	issues: MemoryValidationIssue[],
+): MemoryRevision[] | undefined {
+	const field = fieldName(path);
+	if (!Object.hasOwn(record, field)) return undefined;
+	const value = record[field];
+	if (!Array.isArray(value) || value.length === 0 || value.length > MEMORY_REVISIONS_MAX) {
+		issues.push({ path, message: `expected array of 1 to ${MEMORY_REVISIONS_MAX} revisions` });
+		return undefined;
+	}
+	const revisions: MemoryRevision[] = [];
+	for (let index = 0; index < value.length; index += 1) {
+		const item: unknown = value[index];
+		const itemPath = `${path}[${index}]`;
+		if (!isRecord(item)) {
+			issues.push({ path: itemPath, message: "expected object" });
+			continue;
+		}
+		rejectUnexpectedFields(item, itemPath, ["revision", "lesson", "at", "sessionId"], issues);
+		const revision = readString(item, `${itemPath}.revision`, issues);
+		if (revision !== null && !REVISION_PATTERN.test(revision)) {
+			issues.push({ path: `${itemPath}.revision`, message: "expected 16 lowercase hex characters" });
+		}
+		const lesson = readString(item, `${itemPath}.lesson`, issues);
+		const at = readIsoString(item, `${itemPath}.at`, issues);
+		const sessionId = readString(item, `${itemPath}.sessionId`, issues);
+		if (revision !== null && REVISION_PATTERN.test(revision) && lesson !== null && at !== null && sessionId !== null)
+			revisions.push({ revision, lesson, at, sessionId });
+	}
+	return revisions;
 }
 
 function readOptionalApproval(
@@ -214,7 +352,7 @@ function readOptionalObservations(
 			issues.push({ path: itemPath, message: "expected object" });
 			continue;
 		}
-		rejectUnexpectedFields(item, itemPath, ["at", "sessionId", "kind"], issues);
+		rejectUnexpectedFields(item, itemPath, ["at", "sessionId", "kind", "revision", "branch", "head", "prompted"], issues);
 		const at = readIsoString(item, `${itemPath}.at`, issues);
 		const sessionId = readString(item, `${itemPath}.sessionId`, issues);
 		const kind = readString(item, `${itemPath}.kind`, issues);
@@ -222,7 +360,30 @@ function readOptionalObservations(
 		if (kind !== null && known === undefined) {
 			issues.push({ path: `${itemPath}.kind`, message: "expected delivered, held, or contradicted" });
 		}
-		if (at !== null && sessionId !== null && known !== undefined) observations.push({ at, sessionId, kind: known });
+		const revision = readOptionalSourceString(item, `${itemPath}.revision`, issues);
+		if (revision !== undefined && !REVISION_PATTERN.test(revision)) {
+			issues.push({ path: `${itemPath}.revision`, message: "expected 16 lowercase hex characters" });
+		}
+		const branch = readOptionalSourceString(item, `${itemPath}.branch`, issues);
+		const head = readOptionalSourceString(item, `${itemPath}.head`, issues);
+		if (head !== undefined && !/^[0-9a-f]{40,64}$/u.test(head)) {
+			issues.push({ path: `${itemPath}.head`, message: "expected commit id" });
+		}
+		let prompted: boolean | undefined;
+		if (Object.hasOwn(item, "prompted")) {
+			if (typeof item.prompted === "boolean") prompted = item.prompted;
+			else issues.push({ path: `${itemPath}.prompted`, message: "expected boolean" });
+		}
+		if (at !== null && sessionId !== null && known !== undefined)
+			observations.push({
+				at,
+				sessionId,
+				kind: known,
+				...(revision !== undefined ? { revision } : {}),
+				...(branch !== undefined ? { branch } : {}),
+				...(head !== undefined ? { head } : {}),
+				...(prompted !== undefined ? { prompted } : {}),
+			});
 	}
 	return observations;
 }

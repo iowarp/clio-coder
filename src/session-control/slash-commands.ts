@@ -343,7 +343,7 @@ export interface RunIo {
 }
 
 export type SetThinkingLevelResult =
-	| { status: "applied"; level: string; display: string }
+	| { status: "applied"; level: string; display: string; note?: string }
 	| { status: "unsupported"; level: string; supported: ReadonlyArray<string> }
 	| { status: "unavailable" };
 
@@ -3288,7 +3288,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (command.kind !== "thinking-set") return;
 			const result = ctx.setThinkingLevel?.(command.level) ?? { status: "unavailable" as const };
 			if (result.status === "applied") {
-				ctx.notice("success", `thinking: ${result.display}`);
+				ctx.notice("success", `thinking: ${result.display}${result.note ? ` (${result.note})` : ""}`);
 			} else if (result.status === "unsupported") {
 				ctx.notice("error", `thinking level "${result.level}" is not available here; try ${result.supported.join(", ")}`);
 			} else {

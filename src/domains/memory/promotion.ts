@@ -1,11 +1,26 @@
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { repositoryRoot as enclosingRepository } from "../../core/project-root.js";
 import { createRedactionTally, redactSecretsPreservingMarkers } from "../evidence/redact.js";
-import { canonicalMemoryRepositoryIdentity } from "./operations.js";
+import {
+	COMMAND_CLAIM_REF_PREFIX,
+	COMMAND_EVIDENCE_REF_PREFIX,
+	type CommandSegment,
+	commandSegment,
+	legacyCommandHash,
+	parseSourceEvidenceRef,
+	segmentKeyRef,
+} from "./command-evidence.js";
+import { canonicalMemoryRepositoryIdentity, relatedRepositoryRoots } from "./operations.js";
 import type { MemoryMutationOptions } from "./store.js";
 import { insertMemoryRecordIfAbsent } from "./store.js";
 import type { TaskMemoryEntry, TaskMemoryRenderableClass } from "./task-bank.js";
 import type {
 	MemoryAgentIdentity,
+	MemoryClaim,
+	MemoryClaimCommand,
 	MemoryProposalResult,
 	MemoryRecord,
 	MemoryRepositoryIdentity,
@@ -156,7 +171,266 @@ export function memoryRecordFromPromotion(
 		},
 	};
 	applyScopeIdentity(record, validatedScope);
+	const claim = claimFromEvidence(
+		record.lesson,
+		record.evidenceRefs,
+		validatedScope.scope === "repo" ? validatedScope.repository.key : undefined,
+	);
+	if (claim !== null) {
+		if (validatedScope.scope === "repo") {
+			const refusal = claimPathRefusal(claim, validatedScope.repository.key);
+			if (refusal !== null) throw new Error(refusal);
+		}
+		record.claim = claim;
+	}
 	return assertValidMemoryRecord(record, "promoted");
+}
+
+/**
+ * What a record's evidence refs claim, read from the refs and the lesson text alone. A verified `command:` ref is a
+ * command claim on the quoted span whose evidence identity it names; without one, a single `source:` ref is a
+ * source claim. A `command-claimed:` ref grants nothing and claims nothing. More than one candidate, or a command
+ * whose words the store could not hold, is no claim. A quoted span is read against the repository root, as
+ * evidence identity reads a receipt, so `cd <root> && pnpm test` claims `pnpm test`; a ref written before segment
+ * keys names its span by the text hash.
+ *
+ * New records store the claim they were built with. A record written before claim identity has none stored and is
+ * read through this function on every use (`recordClaim`); its derived claim is never written back.
+ */
+function claimFromEvidence(lesson: string, evidenceRefs: ReadonlyArray<string>, root?: string): MemoryClaim | null {
+	const hashes = new Set(
+		evidenceRefs
+			.filter((ref) => ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX))
+			.map((ref) => ref.slice(COMMAND_EVIDENCE_REF_PREFIX.length)),
+	);
+	if (hashes.size > 1) return null;
+	const [hash] = [...hashes];
+	if (hash !== undefined) {
+		for (const match of lesson.matchAll(/`([^`\n]+)`/gu)) {
+			const span = (match[1] ?? "").trim();
+			const segment = commandSegment(span, root);
+			if (segment === null) continue;
+			const named = segmentKeyRef(hash)
+				? segment.key === hash || commandSegment(span)?.key === hash
+				: legacyCommandHash(span) === hash;
+			if (named) return commandClaimOf(segment);
+		}
+		return null;
+	}
+	const sources = evidenceRefs.flatMap((ref) => parseSourceEvidenceRef(ref) ?? []);
+	const source = sources.length === 1 ? sources[0] : undefined;
+	return source === undefined ? null : { kind: "source", path: source.path, spanHash: source.spanHash };
+}
+
+/** A segment as a claim binds it, or null when a word is empty and the store could not hold it. */
+export function claimCommand(segment: CommandSegment, scratchParameter?: number): MemoryClaimCommand | null {
+	if (segment.argv.some((word) => word.length === 0)) return null;
+	if (scratchParameter !== undefined && (scratchParameter <= 0 || scratchParameter >= segment.argv.length)) return null;
+	return {
+		assignments: [...segment.assignments],
+		argv: [...segment.argv],
+		key: segment.key,
+		...(scratchParameter !== undefined ? { scratchParameter } : {}),
+	};
+}
+
+function commandClaimOf(segment: CommandSegment): MemoryClaim | null {
+	const command = claimCommand(segment);
+	return command === null ? null : { kind: "command", command };
+}
+
+/** The claim a record makes: the one it stores, or, for a record written before claim identity, its refs' claim. */
+export function recordClaim(record: MemoryRecord): MemoryClaim | null {
+	return record.claim ?? claimFromEvidence(record.lesson, record.evidenceRefs, record.repository?.key);
+}
+
+/**
+ * Claim identity: repository, kind and body, plus any condition the record states beyond its repository, so
+ * opposing facts that hold under different conditions stay two claims. Wording is not part of it. Only a
+ * repository record with a claim has one.
+ */
+export function memoryClaimKey(record: MemoryRecord): string | null {
+	if (record.scope !== "repo" || record.repository === undefined) return null;
+	const claim = recordClaim(record);
+	if (claim === null) return null;
+	const conditions = record.appliesWhen.filter((condition) => !condition.startsWith("repository:")).sort();
+	return createHash("sha256")
+		.update(JSON.stringify([record.repository.key, claim.kind, claimBody(claim), conditions]))
+		.digest("hex");
+}
+
+function claimBody(claim: MemoryClaim): unknown {
+	// A declared scratch parameter is a parameter: its value is masked, keeping any `--flag=` prefix, so every
+	// session's concrete scratch path names the one claim. An undeclared argv is its evidence key.
+	const command = (item: MemoryClaimCommand) => {
+		const at = item.scratchParameter;
+		if (at === undefined) return [item.key, null];
+		const argv = item.argv.map((word, index) =>
+			index === at ? `${word.startsWith("-") ? word.slice(0, word.indexOf("=") + 1) : ""}\u0000scratch` : word,
+		);
+		return [item.assignments, argv, at];
+	};
+	switch (claim.kind) {
+		case "command":
+			return command(claim.command);
+		case "fix":
+			return [command(claim.failed), command(claim.fixed)];
+		case "source":
+			return [claim.path, claim.spanHash];
+	}
+}
+
+/** Refs that carry evidence identity; a `session:` ref names provenance and changes per session. */
+function gatingRef(ref: string): boolean {
+	return (
+		ref.startsWith(COMMAND_EVIDENCE_REF_PREFIX) || ref.startsWith(COMMAND_CLAIM_REF_PREFIX) || ref.startsWith("source:")
+	);
+}
+
+/**
+ * The revision a verdict judges: the lesson's words and its evidence. A rewording or a changed ref is a new
+ * revision, and demonstrations of an earlier one do not count toward it.
+ */
+export function memoryRevision(record: Pick<MemoryRecord, "lesson" | "evidenceRefs">): string {
+	const refs = [...new Set(record.evidenceRefs.filter(gatingRef))].sort();
+	return createHash("sha256")
+		.update(JSON.stringify([record.lesson.replace(/\s+/gu, " ").trim(), refs]))
+		.digest("hex")
+		.slice(0, 16);
+}
+
+/** The session that wrote a record's current wording: the reviser of its last revision, else the record's author. */
+export function revisionAuthor(record: MemoryRecord): string | undefined {
+	const last = record.revisions?.at(-1);
+	if (last !== undefined && last.revision === memoryRevision(record)) return last.sessionId;
+	return record.provenance?.sourceSessionId;
+}
+
+/**
+ * Why a claim may not be written, or null. A note binds only paths of the repository it is filed under, judged where
+ * they land with symlinks resolved: a path outside the canonical root, inside a linked worktree, or under a scratch
+ * root is a fact about one checkout or one run, and is refused at write. A relative source path is read against the
+ * root. A repository that itself sits under a scratch root still owns its own paths. The program word may name an
+ * installed tool outside the repository (`/usr/bin/python3`), never a file of another checkout or a scratch root. A
+ * declared scratch parameter is the one exception, and only when it holds a path under a scratch root.
+ */
+export function claimPathRefusal(
+	claim: MemoryClaim,
+	repositoryRoot: string,
+	scratchRoots: ReadonlyArray<string> = [],
+): string | null {
+	const root = landedPath(repositoryRoot);
+	const worktrees = (relatedRepositoryRoots(root)?.roots ?? []).map(landedPath).filter((other) => other !== root);
+	const scratch = [...new Set([tmpdir(), "/tmp", "/var/tmp", ...scratchRoots].filter((dir) => isAbsolute(dir)))].map(
+		landedPath,
+	);
+	const within = (path: string, dir: string) => path === dir || strictlyInside(path, dir);
+	const inWorktree = (target: string) => worktrees.some((other) => within(target, other));
+	const inRepository = (target: string) =>
+		within(target, root) &&
+		!inWorktree(target) &&
+		!scratch.some((dir) => strictlyInside(dir, root) && within(target, dir));
+	const underScratch = (target: string) => scratch.some((dir) => within(target, dir));
+	const refused = ({ path, use }: { path: string; use: "word" | "program" | "scratch" }): boolean => {
+		const target = landedPath(resolve(root, path));
+		if (use === "scratch") return !underScratch(target) || within(target, root) || inWorktree(target);
+		if (inRepository(target)) return false;
+		if (use === "word") return true;
+		return underScratch(target) || inWorktree(target) || enclosingRepository(target) !== null;
+	};
+	const paths: Array<{ path: string; use: "word" | "program" | "scratch" }> = [];
+	const command = (item: MemoryClaimCommand) => {
+		for (const [index, word] of [...item.assignments, ...item.argv].entries()) {
+			const at = index - item.assignments.length;
+			const value = word.includes("=") ? word.slice(word.indexOf("=") + 1) : word;
+			if (at === item.scratchParameter) {
+				paths.push({ path: isAbsolute(value) ? value : "\u0000", use: "scratch" });
+				continue;
+			}
+			for (const candidate of new Set([word, value]))
+				if (isAbsolute(candidate)) paths.push({ path: candidate, use: at === 0 ? "program" : "word" });
+		}
+	};
+	if (claim.kind === "command") command(claim.command);
+	if (claim.kind === "fix") {
+		command(claim.failed);
+		command(claim.fixed);
+	}
+	if (claim.kind === "source") paths.push({ path: claim.path, use: "word" });
+	const bad = paths.find(refused);
+	if (bad === undefined) return null;
+	return bad.use === "scratch"
+		? "memory note declares a scratch parameter that holds no path under a scratch root"
+		: `memory note binds a path outside its repository checkout: ${bad.path}`;
+}
+
+function strictlyInside(path: string, root: string): boolean {
+	const inside = relative(root, path);
+	return inside.length > 0 && inside !== ".." && !inside.startsWith(`..${sep}`) && !isAbsolute(inside);
+}
+
+/** Where a path lands: the real path of its nearest existing ancestor, with the rest unchanged. */
+function landedPath(path: string): string {
+	const rest: string[] = [];
+	for (let current = resolve(path); ; ) {
+		try {
+			return join(realpathSync(current), ...rest.reverse());
+		} catch {
+			const parent = dirname(current);
+			if (parent === current) return resolve(path);
+			rest.push(basename(current));
+			current = parent;
+		}
+	}
+}
+
+/**
+ * A note composed from a session's receipts: unapproved, at repository scope, authored by that session, its id
+ * derived from its claim identity so every session filing the claim names the same record. Its evidence ref is the
+ * command its claim recommends (a fix claim's fixed pattern) or its quoted source. A claim whose words would carry
+ * a secret is refused rather than redacted, since a redacted argv names a different command.
+ */
+export function claimNote(input: {
+	sessionId: string;
+	lesson: string;
+	claim: MemoryClaim;
+	repository: MemoryRepositoryIdentity;
+	at: string;
+	/** Conditions the claim holds under beyond its repository; they are part of its identity. */
+	appliesWhen?: ReadonlyArray<string>;
+}): MemoryRecord {
+	const lesson = redactSecretsPreservingMarkers(input.lesson, createRedactionTally()).replace(/\s+/gu, " ").trim();
+	const claimText = JSON.stringify(input.claim);
+	if (redactSecretsPreservingMarkers(claimText, createRedactionTally()) !== claimText)
+		throw new Error("a memory note cannot bind a secret");
+	const claim = input.claim;
+	const evidence =
+		claim.kind === "source"
+			? `source:${claim.path}#${claim.spanHash}`
+			: `${COMMAND_EVIDENCE_REF_PREFIX}${claim.kind === "fix" ? claim.fixed.key : claim.command.key}`;
+	const record: MemoryRecord = {
+		id: "mem-0000000000000000",
+		scope: "repo",
+		key: `claim:${claim.kind}`,
+		lesson,
+		evidenceRefs: [`session:${input.sessionId}`, evidence],
+		appliesWhen: [
+			`repository:${input.repository.kind}:${input.repository.key}`,
+			...new Set((input.appliesWhen ?? []).map((item) => item.trim()).filter((item) => item.length > 0)),
+		],
+		avoidWhen: [],
+		confidence: 0.6,
+		createdAt: input.at,
+		approved: false,
+		repository: { ...input.repository },
+		provenance: { sourceKind: "evidence", evidenceId: `session:${input.sessionId}`, sourceSessionId: input.sessionId },
+		claim,
+	};
+	const identity = memoryClaimKey(record);
+	if (identity === null) throw new Error("a memory note requires a claim");
+	record.id = `mem-${identity.slice(0, 16)}`;
+	record.key = `claim:${claim.kind}:${identity.slice(0, 16)}`;
+	return assertValidMemoryRecord(record, "claim note");
 }
 
 export function applyScopeIdentity(record: MemoryRecord, selection: MemoryScopeSelection): void {

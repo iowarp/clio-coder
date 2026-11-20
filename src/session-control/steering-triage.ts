@@ -244,6 +244,8 @@ export async function runTriageRound(input: {
 	/** Whether the run is still going and the queue still holds what was asked. */
 	readonly current: () => boolean;
 	readonly apply: (verdicts: ReadonlyArray<TriageVerdict>) => void;
+	/** The typed route's verdicts arrived after the queue moved on, so they were never applied. */
+	readonly expired?: (verdicts: ReadonlyArray<TriageVerdict>) => void;
 	readonly side: () => Promise<void>;
 }): Promise<void> {
 	const { triage, asked } = input;
@@ -254,9 +256,13 @@ export async function runTriageRound(input: {
 			previous: input.previous(),
 			entries: asked,
 		});
-		if (!input.current()) return;
-		if (verdict !== null) {
-			input.apply(typedTriageVerdicts(verdict.value.picks, verdict.probabilities));
+		const verdicts = verdict === null ? null : typedTriageVerdicts(verdict.value.picks, verdict.probabilities);
+		if (!input.current()) {
+			if (verdicts !== null) input.expired?.(verdicts);
+			return;
+		}
+		if (verdicts !== null) {
+			input.apply(verdicts);
 			return;
 		}
 	}

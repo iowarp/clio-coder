@@ -77,6 +77,12 @@ export interface SideQuestionUsage {
 	reasoning: number;
 	totalTokens: number;
 	costUsd: number;
+	/** The provider billed costUsd itself (Pi's totalFromProvider). */
+	costFromProvider?: true;
+	/** The runtime computed no cost, so costUsd is a placeholder (copilot-sdk's totalUncomputed). */
+	costUncomputed?: true;
+	/** The counts the provider sent, when the runtime lists them (copilot-sdk); an unlisted count is unknown. */
+	reportedFields?: string[];
 }
 
 export interface SideQuestionInput extends SideCallAuth {
@@ -214,6 +220,8 @@ export function sideQuestionUsage(raw: unknown): SideQuestionUsage | null {
 		raw as Record<string, unknown>,
 	);
 	if (!observed) return null;
+	const cost = usage.cost as (Usage["cost"] & { totalUncomputed?: unknown }) | undefined;
+	const reportedFields = (raw as { reportedFields?: unknown }).reportedFields;
 	return {
 		input,
 		output,
@@ -222,7 +230,13 @@ export function sideQuestionUsage(raw: unknown): SideQuestionUsage | null {
 		...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: positive(usage.cacheWrite1h) }),
 		reasoning,
 		totalTokens,
-		costUsd: positive(usage.cost?.total),
+		costUsd: positive(cost?.total),
+		// Carried so the settlement never promotes a placeholder to measured and a billed cost outranks rates (#434).
+		...(cost?.totalFromProvider === true ? { costFromProvider: true as const } : {}),
+		...(cost?.totalUncomputed === true ? { costUncomputed: true as const } : {}),
+		...(Array.isArray(reportedFields)
+			? { reportedFields: reportedFields.filter((field): field is string => typeof field === "string") }
+			: {}),
 	};
 }
 
@@ -291,6 +305,15 @@ function sumSideQuestionUsage(a: SideQuestionUsage | null, b: SideQuestionUsage 
 		reasoning: a.reasoning + b.reasoning,
 		totalTokens: a.totalTokens + b.totalTokens,
 		costUsd: a.costUsd + b.costUsd,
+		...(a.costFromProvider && b.costFromProvider ? { costFromProvider: true as const } : {}),
+		...(a.costUncomputed || b.costUncomputed ? { costUncomputed: true as const } : {}),
+		...(a.reportedFields !== undefined || b.reportedFields !== undefined
+			? {
+					reportedFields: (a.reportedFields ?? b.reportedFields ?? []).filter((field) =>
+						(b.reportedFields ?? a.reportedFields ?? []).includes(field),
+					),
+				}
+			: {}),
 	};
 }
 

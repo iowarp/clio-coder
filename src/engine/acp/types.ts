@@ -436,15 +436,34 @@ export interface AcpPromptResponse {
 	_meta?: unknown;
 }
 
+/** A provider quota or usage limit a peer hit, read from a source its ACP answer did not carry (agy's own store). */
+export interface AcpUsageLimit {
+	cause: "usage_limit_reached";
+	reason: string;
+	/** Bounded text CLIO Coder wrote; never the provider's prose. */
+	message: string;
+	model?: string;
+	/** ISO time the provider said the limit resets. */
+	resetAt?: string;
+	resetDelayMs?: number;
+	retryAfterMs?: number;
+}
+
 export interface AcpDelegationResult {
 	messages: AgentMessage[];
 	exitCode: number;
 	stopReason: string;
 	/** True when the turn request hit its configured timeout. */
 	timedOut?: boolean;
+	/** The peer needs its own sign-in before it opens a session; the operator runs `loginCommand` once. */
+	authRequired?: { loginCommand: string };
+	/** The peer's provider refused on quota; the run failed with `usageLimit.message`. */
+	usageLimit?: AcpUsageLimit;
 	failureMessage?: string;
 	delegation: {
 		acpSessionId: string | null;
+		/** The peer session cannot take another turn; a later turn starts a fresh session. */
+		nonResumable?: { reason: string };
 		selectedModelId?: string;
 		initialize: AcpInitializeResponse | null;
 		toolCallsRequested: number;

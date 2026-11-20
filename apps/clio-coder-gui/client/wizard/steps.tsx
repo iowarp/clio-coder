@@ -285,12 +285,7 @@ export function SignInStep({ view, busy, send }: StepProps<Of<"signin">>) {
 	return (
 		<Step
 			title={`Sign in to ${view.provider}`}
-			lede={
-				<p>
-					CLIO Coder opens your browser so you can sign in there. The command-line tool stores the result, and this page
-					never sees it.
-				</p>
-			}
+			lede={<p>{view.lede} The command-line tool stores the result, and this page never sees it.</p>}
 			actions={
 				<>
 					{view.connect ? (
@@ -392,8 +387,8 @@ export function CredentialKeyStep({ view, busy, problem, send }: StepProps<Of<"c
 			title="Paste the API key"
 			lede={
 				<p>
-					The CLIO Coder command-line tool stores the key in <code>credentials.yaml</code> with file mode 0600. It is not
-					encrypted, and this page never keeps it.
+					The CLIO Coder command-line tool stores the key in <code>credentials.yaml</code>
+					{view.protection ? ` with ${view.protection}` : ""}. It is not encrypted, and this page never keeps it.
 				</p>
 			}
 			actions={

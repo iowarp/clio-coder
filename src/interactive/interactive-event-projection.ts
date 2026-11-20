@@ -261,6 +261,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 				deps.dismissNotification("turn.interrupted");
 				deps.dismissNotification("finish.unverified");
 				deps.dismissNotification("finish.coverage-unverified");
+				deps.dismissNotification("finish.assessed");
 				deps.dismissNotification("safety:blocked");
 				deps.dismissNotification("nudge.continuation.spent");
 				deps.supersedeWorkNotifications?.();

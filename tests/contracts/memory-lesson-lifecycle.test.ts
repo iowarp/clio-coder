@@ -1,25 +1,56 @@
 import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { runMemoryCommand } from "../../src/cli/memory.js";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
+import {
+	commandEvidenceRef,
+	commandSegment,
+	commandSegments,
+	legacyCommandHash,
+	receiptVouches,
+	sourceEvidenceRef,
+} from "../../src/domains/memory/command-evidence.js";
 import { readRetention, retentionPath } from "../../src/domains/memory/completion-retention.js";
+import { evaluateMemoryGate } from "../../src/domains/memory/guardian-gate.js";
 import type { CompletedLessonSource } from "../../src/domains/memory/history-review.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
-import { lessonEvidence, readInsideRoot, repositoryRelativePath } from "../../src/domains/memory/lesson-evidence.js";
+import {
+	lessonCommands,
+	lessonEvidence,
+	readInsideRoot,
+	repositoryRelativePath,
+} from "../../src/domains/memory/lesson-evidence.js";
 import { MemoryLessonFeedback } from "../../src/domains/memory/lesson-feedback.js";
 import { projectKeptLesson } from "../../src/domains/memory/lesson-projection.js";
 import { rejectMemoryRecord } from "../../src/domains/memory/operations.js";
+import { memoryRevision } from "../../src/domains/memory/promotion.js";
+import {
+	demotedMemoryIds,
+	detectMemoryUse,
+	foldRecallUse,
+	type RecallUseLedger,
+} from "../../src/domains/memory/recall-use.js";
 import { MemoryRuntime } from "../../src/domains/memory/runtime.js";
 import { loadMemoryRecordsSync, memoryStorePath } from "../../src/domains/memory/store.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import { proposeInjectedTaskMemory } from "../../src/domains/memory/task-bank-promotion.js";
 import { renderTaskMemoryHandoffSource } from "../../src/domains/memory/task-memory-handoff.js";
 import { runTaskMemoryPolicy, TaskMemoryEndpointPreemptedError } from "../../src/domains/memory/task-memory-policy.js";
+import type { MemoryRecord } from "../../src/domains/memory/types.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import { cwdHash } from "../../src/engine/session.js";
 import { closedSessionLessonSource } from "../../src/entry/flow-ledger.js";
@@ -605,7 +636,7 @@ test("a task with no command receipt or read excerpt settles its retention witho
 	}
 });
 
-test("a recipe the task's receipts prove is retained though the model keeps nothing", async () => {
+test("a recipe the task's receipts prove is filed though the model keeps nothing, and waits for later sessions", async () => {
 	const closed = await closedSessionRuntime(
 		{
 			revision: "rev-b",
@@ -619,10 +650,10 @@ test("a recipe the task's receipts prove is retained though the model keeps noth
 	);
 	try {
 		strictEqual(await closed.runtime.runIdleStep(true), "ran");
-		strictEqual(closed.marker()?.phase, "retained");
+		strictEqual(closed.marker()?.phase, "gated");
 		const records = closed.records();
 		strictEqual(records.length, 1);
-		strictEqual(records[0]?.approved, true);
+		strictEqual(records[0]?.approved, false, "its own session's evidence never promotes it");
 		ok(records[0]?.lesson.includes(`\`${COMMAND}\``));
 	} finally {
 		closed.cleanup();
@@ -652,7 +683,7 @@ test("an operation list missing only its closing bracket is repaired, and nothin
 	strictEqual(broken.decision, "malformed");
 });
 
-test("lessons quoting the same command stay separate claims, and one session holds each once", async () => {
+test("lessons quoting the same command are one claim, each wording a revision one session holds once", async () => {
 	const root = mkdtempSync(join(tmpdir(), "memory-same-command-"));
 	const dataDir = join(root, "data");
 	const cwd = join(root, "project");
@@ -682,15 +713,24 @@ test("lessons quoting the same command stay separate claims, and one session hol
 		const id = first.records[0]?.id;
 		ok(id);
 		strictEqual(repeat.records[0]?.id, id, "the same claim from the same session is the same record");
-		notStrictEqual(mock.records[0]?.id, id, "a shared command never merges different prerequisites");
+		strictEqual(mock.records[0]?.id, id, "the same command under another wording is the same claim");
 		const stored = JSON.parse(readFileSync(join(dataDir, "memory", "records.json"), "utf8")).records;
-		strictEqual(stored.length, 2);
-		const nativeRecord = stored.find((record: { id: string }) => record.id === id);
-		strictEqual(nativeRecord.observations.length, 1, "a repeat from the same session adds no second verdict");
-		strictEqual(nativeRecord.observations[0].sessionId, "s1", "the mock session's evidence stays with its own claim");
-		ok(
-			stored.every((record: { evidenceRefs: string[] }) => record.evidenceRefs.some((ref) => ref.startsWith("command:"))),
+		strictEqual(stored.length, 1);
+		const [claim] = stored;
+		deepStrictEqual(
+			claim.revisions.map((item: { sessionId: string }) => item.sessionId),
+			["s1", "s2", "s1"],
+			"each wording is kept as a revision",
 		);
+		deepStrictEqual(
+			claim.observations.map((item: { sessionId: string; revision: string }) => [item.sessionId, item.revision]),
+			[
+				["s1", claim.revisions[0].revision],
+				["s2", claim.revisions[1].revision],
+			],
+			"a verdict judges its own wording, and a repeat from the same session adds no second verdict",
+		);
+		ok(claim.evidenceRefs.some((ref: string) => ref.startsWith("command:")));
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -793,3 +833,144 @@ test("a child named ..x is inside the repository, and a sibling of the root is n
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test("evidence identity grounds and counts use only for the command that ran, segment by segment", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "memory-identity-")));
+	const other = realpathSync(mkdtempSync(join(tmpdir(), "memory-identity-other-")));
+	try {
+		const grounds = (lessonCommand: string, receipt: string) =>
+			lessonEvidence(
+				new TaskMemoryBank().saveKnowledge(`Validate with \`${lessonCommand}\`.`, {
+					durable: true,
+					evidenceCommand: lessonCommand,
+				}),
+				{ succeededCommands: new Set([receipt]), observedReads: new Map(), workspaceRoot: root },
+			);
+		const lesson = (command: string): Pick<MemoryRecord, "id" | "lesson" | "evidenceRefs"> => ({
+			id: "mem-00000000000000d1",
+			lesson: `Validate scripts/check.mjs with \`${command}\`.`,
+			evidenceRefs: [commandEvidenceRef(command)],
+		});
+		const used = (command: string, receipt: string, touched: string[] = []) =>
+			detectMemoryUse(
+				lesson(command),
+				{ text: "", segments: commandSegments(receipt, root), touched: new Set(touched) },
+				root,
+			);
+		const PNPM = "pnpm run check";
+		const positives: Array<[string, string]> = [
+			[COMMAND, COMMAND],
+			[COMMAND, `node scripts/build.mjs && ${COMMAND}`],
+			[PNPM, `cd ${root} && corepack pnpm -s run check`],
+		];
+		for (const [claimed, receipt] of positives) {
+			strictEqual(grounds(claimed, receipt), "command", receipt);
+			strictEqual(used(claimed, receipt), "command", receipt);
+		}
+		const BOUNDED = 'node scripts/check.mjs --name "fast mode"';
+		const negatives: Array<[string, string]> = [
+			[COMMAND, "node scripts/check.mjs --mode"],
+			[BOUNDED, "node scripts/check.mjs --name fast mode"],
+			[COMMAND, `${COMMAND} | cat`],
+			[COMMAND, `printf '%s\\n' '${COMMAND}'`],
+			[COMMAND, `cd ${other} && ${COMMAND}`],
+			[PNPM, "pnpm run check --fix"],
+		];
+		for (const [claimed, receipt] of negatives) {
+			strictEqual(grounds(claimed, receipt), null, receipt);
+			notStrictEqual(used(claimed, receipt), "command", receipt);
+		}
+		deepStrictEqual(commandSegments(COMMAND, root, other), [], "a call whose cwd is another checkout vouches nothing");
+		strictEqual(used(COMMAND, "git status", ["scripts/check.mjs"]), "exposed", "touching a named file is not use");
+		for (const refused of [
+			`! ${PNPM}`,
+			`eval "${PNPM}"`,
+			`exec ${PNPM}`,
+			"source scripts/env.sh",
+			"export CI=1",
+			"cd scripts",
+			`command eval "${PNPM}"`,
+		])
+			deepStrictEqual(commandSegments(refused, root), [], `${refused} vouches nothing`);
+		const cited = { id: "mem-00000000000000d4", lesson: "Read scripts/check.mjs before editing it.", evidenceRefs: [] };
+		const turn = (text: string, touched: string[]) =>
+			detectMemoryUse(cited, { text, segments: [], touched: new Set(touched) }, root);
+		strictEqual(turn(`per ${cited.id}`, []), "cited", "a cited id is use");
+		strictEqual(turn("", []), "unscored", "a lesson with no command cannot be scored");
+		let ledger: RecallUseLedger = { version: 1, records: {} };
+		for (let index = 0; index < 6; index++) {
+			const signal = turn("", index % 2 === 0 ? ["scripts/check.mjs"] : []);
+			ledger = foldRecallUse(ledger, {
+				recalled: [cited.id],
+				used: [],
+				exposed: signal === "exposed" ? [cited.id] : [],
+				unscored: signal === "unscored" ? [cited.id] : [],
+				at: `2026-11-0${index + 1}T00:00:00.000Z`,
+			});
+		}
+		strictEqual(ledger.records[cited.id]?.consecutiveUnused, 0, "exposed and unscored turns are no verdict");
+		strictEqual(ledger.records[cited.id]?.exposed, 3);
+		deepStrictEqual([...demotedMemoryIds(ledger)], []);
+		deepStrictEqual(
+			lessonCommands("Set `const mode = 'native'` before running `node scripts/check.mjs`.", [], root).recommended,
+			["node scripts/check.mjs"],
+			"a backticked JavaScript span is not a command",
+		);
+		notStrictEqual(
+			sourceEvidenceRef("scripts/check.mjs", "process.exit(2);"),
+			sourceEvidenceRef("scripts/check.mjs", "process.exit(0);"),
+			"two quotes in one file are two sources",
+		);
+		const scratch = join(root, "scratch");
+		const claim = commandSegment(`pnpm install --store-dir ${scratch}/a/store`, root);
+		ok(claim);
+		const parametric = { ...claim, scratchParameter: 3 };
+		const receipt = (path: string) => commandSegment(`pnpm install --store-dir ${path}`, root) ?? assertSegment();
+		ok(receiptVouches(parametric, receipt(`${scratch}/b/store`), [scratch]), "a declared scratch parameter matches");
+		ok(!receiptVouches(parametric, receipt(`${other}/store`), [scratch]), "a path outside the scratch root does not");
+		ok(!receiptVouches(claim, receipt(`${scratch}/b/store`), [scratch]), "an undeclared claim never generalizes");
+		mkdirSync(scratch);
+		symlinkSync(other, join(scratch, "link"));
+		ok(!receiptVouches(parametric, receipt(`${scratch}/link/store`), [scratch]), "a symlink out of the root does not");
+		const record = (id: string, text: string, refs: string[], patch: Partial<MemoryRecord> = {}): MemoryRecord => ({
+			id,
+			scope: "repo",
+			key: id,
+			lesson: text,
+			evidenceRefs: refs,
+			appliesWhen: [],
+			avoidWhen: [],
+			confidence: 1,
+			createdAt: "2026-11-01T00:00:00.000Z",
+			approved: false,
+			repository: { kind: "canonical-path", key: root },
+			provenance: { sourceKind: "task-bank-entry", sourceEntryKind: "knowledge" },
+			...patch,
+		});
+		// A rejection recorded before evidence identity carries the old text hash of `pnpm run check`.
+		const rejected = record("mem-00000000000000d2", `Run \`${PNPM}\` before a release.`, [
+			`command:${legacyCommandHash(PNPM)}`,
+		]);
+		rejected.rejectedAt = "2026-11-02T00:00:00.000Z";
+		const rewording = "Always run `corepack pnpm -s run check` before releasing.";
+		const rewordingRefs = [commandEvidenceRef("corepack pnpm -s run check")];
+		const revision = memoryRevision({ lesson: rewording, evidenceRefs: rewordingRefs });
+		const reworded = record("mem-00000000000000d3", rewording, rewordingRefs, {
+			observations: ["s2", "s3"].map((sessionId) => ({
+				at: "2026-11-03T00:00:00.000Z",
+				sessionId,
+				kind: "held" as const,
+				revision,
+			})),
+		});
+		strictEqual(evaluateMemoryGate(reworded, []), "approve");
+		strictEqual(evaluateMemoryGate(reworded, [rejected]), "hold", "a pre-slice rejection holds a rewording");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+		rmSync(other, { recursive: true, force: true });
+	}
+});
+
+function assertSegment(): never {
+	throw new Error("expected one command segment");
+}

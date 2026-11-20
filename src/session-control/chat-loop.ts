@@ -22,6 +22,8 @@ import type { FailureCause, TurnNoAnswerCause } from "../core/telemetry/enums.js
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { pricesCalls, pricingBasisFields } from "../core/telemetry/pricing.js";
 import { routeCallsPerRound, turnBudgetWidthScale } from "../core/turn-budget-width.js";
+import type { EffectivePricing } from "../domains/providers/catalog.js";
+import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import { turnSettlementFromCalls } from "../domains/telemetry/call-facts.js";
@@ -110,7 +112,6 @@ import type { PinnedContextBlock } from "../domains/extensions/pinned-context.js
 import {
 	createMiddlewareToolChoiceControl,
 	type MiddlewareContract,
-	type MiddlewareEffect,
 	type MiddlewareRegistrar,
 	type MiddlewareToolChoiceControl,
 } from "../domains/middleware/index.js";
@@ -162,6 +163,7 @@ import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
 import { ensureDetailLedgerForSession } from "../tools/extension-runtime-tools.js";
 import { scopedCapabilityShapes, scopeShapesDelta } from "../tools/gateway/scope-shapes.js";
 import { isGatewayChain } from "../tools/gateway-display.js";
+import { createHeadlessObservationPool } from "../tools/observation.js";
 import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { effectiveToolCall } from "../tools/surface.js";
 import type { ApprovalRequestView } from "./approval-request-view.js";
@@ -255,7 +257,7 @@ import {
 import type { LiveContextUsage, TurnContextDeps } from "./turn-context.js";
 import { createTurnContext } from "./turn-context.js";
 import { createTurnKeepalive } from "./turn-keepalive.js";
-import { createTurnMiddleware } from "./turn-middleware.js";
+import { type AwaitedTurnStart, createTurnMiddleware } from "./turn-middleware.js";
 import type { TurnOutcomeCollector } from "./turn-outcome-collector.js";
 import { createTurnOutcomeCollector } from "./turn-outcome-collector.js";
 import { createTurnPersistence } from "./turn-persistence.js";
@@ -1524,6 +1526,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const retrySettings = (): RetrySettings => normalizeRetrySettings(deps.getSettings().chat.retry);
 
 	const hostRunContext = new AsyncLocalStorage<ToolInvokeOptions["hostRun"]>();
+	// A headless run's observation pool rolls once spent instead of capping the run (CLI-P42); attended turns keep theirs.
+	const headlessObservation = deps.headless === true ? createHeadlessObservationPool() : null;
 	const currentToolInvokeOptions = (toolCallId?: string): Partial<ToolInvokeOptions> => {
 		const options: Partial<ToolInvokeOptions> = {
 			toolResultMaxBytes: deps.getSettings().context.toolResultMaxBytes,
@@ -1539,14 +1543,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			options.correlationId = batch.id;
 			options.batchSize = batch.size;
 		}
+		const yolo = (deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) === "yolo";
 		options.turnBudgetContinues = budgetCrossingContinues({
-			yolo: (deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) === "yolo",
+			yolo,
 			machineTurn: machineTurnRunning !== null,
 			failure: state.continuation.stop,
 			locked: state.synthesisToolLock,
 			continuations: state.continuation.yoloContinuations,
 		});
 		if (options.turnBudgetContinues) options.observationBudgetRoll = () => requestBudgetRoll("observation");
+		// Yolo keeps XR-6 exactly, its stops included; the headless roll is never its fallback (CLI-P42).
+		else if (!yolo && headlessObservation !== null) Object.assign(options, headlessObservation.invokeOptions(batch?.id));
 		// The per-turn budgets follow this route's measured calls per round (CLI-P26).
 		const scale = turnBudgetWidthScale(
 			routeCallsPerRound(state.runtime?.agent.state.messages ?? [], state.runtime?.agent.state.model?.id),
@@ -1637,6 +1644,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitFooterNotice,
 		bus: deps.bus,
 		stepTurnEnd: () => stepTurnEnd(),
+		hostCompletionFacts: () => (headlessObservation?.stopped() === true ? ["observation_budget"] : []),
+		suppressFirings: (firingIds) => outcomeCollector.suppressFirings(firingIds),
 	});
 
 	try {
@@ -1871,6 +1880,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	});
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
 	if (deps.turnOutcomeCollector === undefined) deps.middlewareRegistrar?.registerHook(outcomeCollector);
+	/** Settles every firing that costs a round, against the requests and typed facts that follow it (memory design 4.1). */
+	const detachOutcomeLedger = deps.bus
+		? outcomeCollector.attachLedger(
+				deps.bus,
+				() => deps.session?.current()?.id,
+				() => middleware.heldFirings(),
+			)
+		: null;
 
 	/**
 	 * A recovery exchange is a durable insert (F13): the record holds the exact pair, stands for the stopped reply
@@ -2119,7 +2136,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		retrySettings,
 		sessionId: () => deps.session?.current()?.id,
 		sessionOrigin: () => deps.session?.current() ?? null,
-		onModelRequestSent: (call) => messagePath.requestSent(call),
+		onModelRequestSent: (call) => {
+			if (call !== null) messagePath.requestSent(call);
+			// Journaled or not, this request carried exactly what the middleware held for it, and admits only that.
+			outcomeCollector.requestSent(call?.callId ?? null, middleware.requestCarried());
+		},
 		onModelCallSettled: (facts) => messagePath.callSettled(facts),
 		requestCursor: () =>
 			requestCursorOf(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? null, {
@@ -2256,6 +2277,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		stepRun: StepRun | null = null,
 	): YoloContinuation | null => {
 		if ((deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) !== "yolo") return null;
+		// `finish` is turn-terminal (fleet design 4.3, FX-38): the host never continues a declared turn, whatever stopped it.
+		if (state.turnCompletion !== null) return null;
 		const failed = state.continuation.stop;
 		// Continuing would send this provider a request before the time it named.
 		if (failed?.cause === "wait_past_budget") return null;
@@ -2358,13 +2381,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		generation: number,
 		constraints: ChatSubmitOptions["constraints"],
 		lastToolCall: TurnToolCall | null,
+		stoppedTurnId: string | null,
 	): Promise<void> => {
 		const counted = countsAgainstCap(stop);
 		const attempt = counted ? state.continuation.countYoloContinuation() : state.continuation.yoloContinuations;
 		const context = deps.session?.current()?.id;
 		deps.bus?.emit(
 			"turn.continued",
-			{ cause: stop.cause, attempt, cap: TURN_CONTINUATION_CAP, at: Date.now() },
+			{
+				cause: stop.cause,
+				attempt,
+				cap: TURN_CONTINUATION_CAP,
+				at: Date.now(),
+				// The turn it continues, so a continuation joins the stopped turn's own records (memory design 4.6).
+				...(stoppedTurnId !== null ? { continues: stoppedTurnId } : {}),
+			},
 			...(context === undefined ? [] : [ownerTelemetryContext({ sessionId: context })]),
 		);
 		if (stop.rolled !== true)
@@ -2591,11 +2622,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					runtimeId: string;
 					pricedBy: AgentRuntime["runtimeResolution"]["pricedBy"];
 					freeRule?: AgentRuntime["runtimeResolution"]["freeRule"];
+					rates?: EffectivePricing["rates"];
 			  },
 		role: CallJournalOptions["role"],
 		origin: ReturnType<SessionContract["current"]>,
 	): { telemetry?: CallJournalOptions } => {
 		const acquire = deps.telemetry?.acquireTelemetrySession;
+		// The route's rates price a target-rates side call from its settled counts (#434).
+		const rates =
+			"runtimeResolution" in runtime
+				? resolveEffectivePricing(
+						runtime.runtimeResolution.target,
+						runtime.runtimeResolution.runtime,
+						runtime.runtimeResolution.wireModelId,
+					).rates
+				: runtime.rates;
 		return acquire
 			? {
 					telemetry: {
@@ -2605,6 +2646,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						targetId: runtime.targetId,
 						runtimeId: runtime.runtimeId,
 						...pricingBasisFields("runtimeResolution" in runtime ? runtime.runtimeResolution : runtime),
+						...(rates !== undefined ? { rates } : {}),
 					},
 				}
 			: {};
@@ -2771,6 +2813,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const prewarm = createTurnPrewarm({
 		callJournal: (runtime, origin) => sideCallJournal(runtime, "prewarm", origin),
+		notice: (text) => emitNotice(text),
+		// Prompt guidance is interactive exactly on the terminal UI: neither headless nor ACP.
+		isAttended: () => deps.interactiveGuidance === true,
 		state,
 		getSettings: deps.getSettings,
 		providers: deps.providers,
@@ -2888,6 +2933,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		wireModelId: string;
 		pricedBy: AgentRuntime["runtimeResolution"]["pricedBy"];
 		freeRule?: AgentRuntime["runtimeResolution"]["freeRule"];
+		rates: EffectivePricing["rates"];
 		apiKey: string | undefined;
 		thinkingLevel: ThinkingLevel;
 	};
@@ -2937,6 +2983,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				runtimeId: resolution.runtime.id,
 				wireModelId: runtime.wireModelId,
 				...pricingBasisFields(resolution),
+				rates: resolveEffectivePricing(resolution.target, resolution.runtime, resolution.wireModelId).rates,
 				apiKey: sideAuth.apiKey,
 				...sideAuth,
 				thinkingLevel: triageThinkingLevel(
@@ -2973,6 +3020,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			runtimeId: route.runtimeId,
 			wireModelId: route.wireModelId,
 			...pricingBasisFields(route),
+			rates: resolveEffectivePricing(route.target, route.runtime, route.wireModelId).rates,
 			apiKey: sideAuth.apiKey,
 			...sideAuth,
 			thinkingLevel: triageThinkingLevel(triage.thinkingLevel, route.targetId, route.wireModelId, model),
@@ -2985,6 +3033,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const asked: TriageEntry[] = queues.entries().map((entry) => ({ id: entry.id, text: entry.text, kind: entry.kind }));
 		if (asked.length < triageFloor(triage, deps.systemOne)) return;
 		triageInFlight = true;
+		const sessionId = deps.session?.current()?.id;
 		try {
 			await runTriageRound({
 				triage,
@@ -2993,7 +3042,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				task: () => deps.currentOperatorTask?.() ?? "",
 				previous: () => (state.runtime ? lastAssistantText(state.runtime.agent.state.messages) : ""),
 				current: () => state.streaming && triageSnapshotMatches(asked, queues.entries()),
-				apply: (verdicts) => applyTriage(verdicts, triage.autoInterrupt),
+				apply: (verdicts) =>
+					outcomeCollector.settleTriage(sessionId, verdicts, applyTriage(verdicts, triage.autoInterrupt)),
+				expired: (verdicts) => outcomeCollector.settleTriage(sessionId, verdicts, null),
 				side: () => runSideTriage(asked),
 			});
 		} catch {
@@ -3057,15 +3108,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				asked.map((entry) => entry.id),
 			);
 			if (!triageSnapshotMatches(asked, queues.entries())) {
+				outcomeCollector.settleTriage(origin?.id, verdicts, null);
 				return;
 			}
-			applyTriage(verdicts, triage.autoInterrupt);
+			outcomeCollector.settleTriage(origin?.id, verdicts, applyTriage(verdicts, triage.autoInterrupt));
 		} finally {
 			clearTimeout(deadline);
 		}
 	};
 
-	const applyTriage = (verdicts: ReadonlyArray<TriageVerdict>, autoInterrupt: boolean): void => {
+	/** Applies each verdict once; returns the first queued message it applied to, or null when none was left. */
+	const applyTriage = (verdicts: ReadonlyArray<TriageVerdict>, autoInterrupt: boolean): string | null => {
+		let applied: string | null = null;
 		for (const verdict of verdicts) {
 			const entry = queues.entries().find((candidate) => candidate.id === verdict.id);
 			if (entry === undefined) continue;
@@ -3091,10 +3145,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// The interrupt path reports its own refusals; nothing else to do here.
 				});
 				// One interrupt per round: the rest of the queue is held for the new run.
-				return;
+				return applied ?? taken.id;
 			}
 			queues.relabel(entry.id, triageLabelsFor(verdict), triageKindFor(verdict));
+			applied ??= entry.id;
 		}
+		return applied;
 	};
 
 	const api: ChatLoop = {
@@ -3330,6 +3386,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					mono: submittedAt,
 				});
 			let turnLease: TelemetrySessionLease | undefined;
+			/**
+			 * What this submit holds for its requests (the taken buffer, an armed tool choice, a flushed continuation, the
+			 * awaited gate's effects); a return before a request carries them suppresses their firings.
+			 */
+			const turnHolds = middleware.beginTurnHolds();
 			try {
 				await sessionResetSettlement;
 				if (!admissionCurrent()) return;
@@ -3450,7 +3511,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// decides before the turn spends anything (an image sidecar call, turn
 				// control) or buffers a reminder, so a refused turn leaves nothing for the
 				// next prompt. Its effects apply after the synchronous turn_start phase.
-				let turnStartEffects: ReadonlyArray<MiddlewareEffect> = [];
+				let awaitedTurnStart: AwaitedTurnStart | undefined;
 				if (options.requestContinuation !== true) {
 					markPreparationStep("turn-start");
 					const gate = await middleware.awaitTurnStart(agentRuntime, text, pendingSkillRequests.length, reservedUserTurnId);
@@ -3460,7 +3521,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						emitAdmissionNotice(gate.refusal, "turn-blocked", "warning");
 						return;
 					}
-					turnStartEffects = gate.effects;
+					awaitedTurnStart = gate;
 				}
 				const operatorText = text;
 				let sidecarObservation: string | null = null;
@@ -3541,6 +3602,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (options.requestContinuation !== true) {
 					state.turnCalledWork = false;
 					state.finishRoundSpent = false;
+					state.finishReplyRefused = false;
+					// Per operator prompt: a later submit of the same host run (an --output-schema repair) keeps the pool's fact.
+					if (options.yoloContinuation !== true && options.machineTurn === undefined)
+						headlessObservation?.reset(options.hostRun?.runId);
 				}
 				state.continuation.beginPrompt({
 					requestContinuation: options.requestContinuation === true,
@@ -3643,7 +3708,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					pendingSkillRequests.length,
 					options.requestContinuation === true,
 					reservedUserTurnId,
-					turnStartEffects,
+					awaitedTurnStart,
 				);
 				// The turn's scope is host-framed text in its own user message, kept
 				// verbatim in history, never a recompile of the system prompt (#422).
@@ -4504,12 +4569,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						else if (continuation !== null) {
 							// Read before the resubmit appends anything: the stopped turn's own last call.
 							const lastToolCall = lastToolCallOf(evidence.messages());
-							await continueStoppedTurn(continuation, generation, options.constraints, lastToolCall);
+							await continueStoppedTurn(continuation, generation, options.constraints, lastToolCall, userTurnId);
 						}
 					}
 				}
 			} finally {
 				await turnLease?.release();
+				middleware.releaseTurnHolds(turnHolds);
 				returnUnstarted();
 				if (pathMessage && !promptStarted && options.queued === undefined) messagePath.neverStarted(pathMessage);
 				if (submitOwner === owner) {
@@ -4882,6 +4948,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			unsubscribePluginsReload?.();
 			unsubscribeSynthesisLock?.();
 			unsubscribeToolBudgetLock?.();
+			detachOutcomeLedger?.();
 			unsubscribePrewarmCompaction();
 			prewarm.dispose();
 			keepalive.dispose();
