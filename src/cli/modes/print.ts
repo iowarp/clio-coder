@@ -2,7 +2,7 @@ import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { headlessRouteFailureText } from "../../core/gateway-routing.js";
 import { readClioVersion } from "../../core/package-root.js";
 import { reminderGist } from "../../core/reminder-gist.js";
-import { withRunOverrides } from "../../core/run-overrides.js";
+import { runOverrides, withRunOverrides } from "../../core/run-overrides.js";
 import {
 	type PendingSkillRequest,
 	type SkillActivation,
@@ -97,6 +97,7 @@ import {
 	noteSteerV2,
 	runResultV2Active,
 	runTextSummaryRequested,
+	writeRunRefusal,
 } from "../run-failure.js";
 import { createSteerIntake, setupSteerChannel } from "../steer-channel.js";
 import {
@@ -169,6 +170,11 @@ export interface HeadlessMainAgentOptions {
 	failOnNoop?: boolean;
 	/** `--fail-on-verify`: a `--verify` check that failed or timed out fails the run (`verify_failed`). */
 	failOnVerify?: boolean;
+	/**
+	 * Unpriced routes the run can reach: `main` is chat and compaction, `delegating` adds the fleet's. Read only under
+	 * `run --require-priced`, which refuses before the turn when any is listed (SPEC 6.9).
+	 */
+	unpricedRoutes?: (reach: "main" | "delegating") => string[];
 	/** `--on-permission`: `fail` ends the run with exit 3 at the first ask a headless run refuses; `deny` is today's. */
 	onPermission?: "deny" | "fail";
 	/**
@@ -1108,6 +1114,16 @@ async function noteRunUsageV2(options: HeadlessMainAgentOptions, from: string, m
 }
 
 export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMainAgentOptions): Promise<number> {
+	if (runOverrides().requirePriced === true) {
+		const delegating = options.constraints?.delegation !== "forbidden";
+		const unpriced = options.unpricedRoutes?.(delegating ? "delegating" : "main") ?? [];
+		if (unpriced.length > 0) {
+			writeRunRefusal(
+				`clio-coder run: --require-priced: routes this run can reach have no known pricing: ${unpriced.join(", ")}; declare targets[].pricing for them${delegating ? " or add --no-delegate if only worker routes are listed" : ""}\n`,
+			);
+			return 2;
+		}
+	}
 	// Children need the authoritative parent before submit can invoke dispatch.
 	// The terminal writer reuses this identity whichever settlement path wins.
 	const runId = newRunId();

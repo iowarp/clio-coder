@@ -6,9 +6,9 @@ import {
 	sandboxRequiredRefusal,
 	taskFileAuthorityRefusal,
 } from "../../src/cli/args.js";
-import { runLimitsV2 } from "../../src/cli/run-failure.js";
+import { runLimitsV2, startRefusalCause } from "../../src/cli/run-failure.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { pinRunSettings, RUN_OVERRIDES_ENV } from "../../src/core/run-overrides.js";
+import { pinRunSettings, RUN_OVERRIDES_ENV, requirePricedRefusal } from "../../src/core/run-overrides.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { factKnownValue } from "../../src/core/telemetry/known.js";
@@ -180,5 +180,23 @@ test("--sandbox required: only required parses, it pins safety.sandbox, and a ho
 	match(
 		sandboxRequiredRefusal({ available: false, reason: "bubblewrap (bwrap) is not installed" }) ?? "",
 		/--sandbox required, but no OS sandbox .*bwrap/,
+	);
+});
+
+test("--require-priced: parsed into limits, carried to admission, and refuses only an unpriced route", () => {
+	const parsed = parseRunCliArgs(["--require-priced", "--no-delegate", "x"]);
+	strictEqual(parsed.requirePriced, true);
+	deepStrictEqual(runLimitsV2(requestedRunLimits(parsed))?.enforced, ["requirePriced"]);
+	const required = { [RUN_OVERRIDES_ENV]: JSON.stringify({ requirePriced: true }) };
+	match(
+		requirePricedRefusal("none", "proxy/gpt-x", required) ?? "",
+		/^--require-priced: proxy\/gpt-x has no known pricing; declare targets\[\]\.pricing/,
+	);
+	for (const pricedBy of ["catalog", "target-rates", "free"])
+		strictEqual(requirePricedRefusal(pricedBy, "t/m", required), undefined);
+	strictEqual(requirePricedRefusal("none", "proxy/gpt-x", {}), undefined);
+	deepStrictEqual(
+		startRefusalCause(["clio-coder run: --require-priced: routes this run can reach have no known pricing: a/b"]).code,
+		"not_configured",
 	);
 });

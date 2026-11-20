@@ -56,12 +56,24 @@ export function writeRunDiagnostic(text: string): void {
 	process.stderr.write(shown);
 }
 
+/**
+ * A refusal the main run makes after boot but before its turn (`--require-priced`): written like any diagnostic and
+ * kept for the exit-2 cause even though run output has started.
+ */
+export function writeRunRefusal(text: string): void {
+	writeRunDiagnostic(text);
+	const state = runFailureState.getStore();
+	if (state && !state.pending) state.diagnostics = [...(state.diagnostics ?? []), redactUrlCredentials(text).trim()];
+}
+
 /** Pre-work refusals that carry a narrower cause than `not_started`, known by the diagnostic each one writes. */
 const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
 	[/--output-format cannot be combined with --json or --json-events/u, "flag_conflict"],
 	[/--deny-tools removes every tool --allow-tools names /u, "flag_conflict"],
 	[/--dry-run prints its plan as JSON with --output-format json/u, "flag_conflict"],
 	[/^clio-coder run: not configured: /u, "not_configured"],
+	// SPEC 6.9: the preflight's refusal names the unpriced route; declaring its pricing is the fix.
+	[/^clio-coder run: --require-priced: /u, "not_configured"],
 	// The orchestrator's resume refusal when another process holds the session (SPEC L3, 6.7; liveSessionRefusal).
 	[/^clio-coder run: failed to resume session \S+: session \S+ is open in another process /u, "session_live"],
 ];

@@ -7,7 +7,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import { FileReferenceError, readFileArgsAsync } from "../core/file-references.js";
 import { setAutonomousCommitProcess } from "../core/git-commit-attribution.js";
 import { readClioVersion } from "../core/package-root.js";
-import { withRunOverrides } from "../core/run-overrides.js";
+import { requirePricedRefusal, withRunOverrides } from "../core/run-overrides.js";
 import { readStrictLayeredSettings, settingsSourceFor } from "../core/settings-layers.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { getTerminationCoordinator } from "../core/termination.js";
@@ -29,6 +29,7 @@ import { ensureClioState } from "../domains/lifecycle/index.js";
 import { buildDispatchMemorySection } from "../domains/memory/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { prepareListedModelCapabilities } from "../domains/providers/background-model-metadata.js";
+import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
 import { runtimeNotRegistered } from "../domains/providers/retired-runtimes.js";
 import { loadSkills, ResourcesDomainModule } from "../domains/resources/index.js";
@@ -445,6 +446,7 @@ async function executeRunCommand(
 			...(parsed.agentId !== undefined && parsed.sampling !== undefined ? { sampling: { ...parsed.sampling } } : {}),
 			// Tighten-only; workers inherit it with the rest of the transport.
 			...(parsed.sandboxRequired === true ? { sandbox: "required" as const } : {}),
+			...(parsed.requirePriced === true ? { requirePriced: true as const } : {}),
 		},
 		async () => {
 			if (parsed.help) {
@@ -892,7 +894,22 @@ async function runDispatch(
 	if (runProviders) {
 		let workerTargetId = dispatchReq.target;
 		try {
-			workerTargetId = dispatch.preview?.(dispatchReq).targetId ?? workerTargetId;
+			const preview = dispatch.preview?.(dispatchReq);
+			workerTargetId = preview?.targetId ?? workerTargetId;
+			// --require-priced (SPEC 6.9): the one previewed route; admission rechecks the route it resolves.
+			const target = preview !== undefined ? runProviders.getTarget(preview.targetId) : null;
+			const runtime = target ? runProviders.getRuntime(target.runtime) : null;
+			const refusal =
+				preview !== undefined && target && runtime
+					? requirePricedRefusal(
+							resolveEffectivePricing(target, runtime, preview.wireModelId).pricedBy,
+							`${preview.targetId}/${preview.wireModelId}`,
+						)
+					: undefined;
+			if (refusal !== undefined) {
+				writeRunDiagnostic(`clio-coder run: ${refusal}\n`);
+				return stopDomains(2);
+			}
 		} catch {
 			// Admission reports the refusal itself when the run starts.
 		}

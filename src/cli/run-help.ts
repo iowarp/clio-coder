@@ -1,7 +1,7 @@
 import { parseRunCliArgs } from "./args.js";
 
 export const RUN_USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--resume <id|prefix|name>|--continue] [--fork] [--name <text>] [--fail-on-noop] [--timeout <duration>] [--verify "<cmd>" [--verify-timeout <duration>]] [--max-cost-usd <N>] [--max-requests <N>] [--max-tool-calls <N>] [--sandbox required] [--answers <file.yaml>] [--agent <recipe-id>] [--] "<task>"\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--resume <id|prefix|name>|--continue] [--fork] [--name <text>] [--fail-on-noop] [--timeout <duration>] [--verify "<cmd>" [--verify-timeout <duration>]] [--max-cost-usd <N>] [--max-requests <N>] [--max-tool-calls <N>] [--sandbox required] [--require-priced] [--answers <file.yaml>] [--agent <recipe-id>] [--] "<task>"\n';
 
 export const RUN_HELP = `clio-coder run [flags] [--] "<task>"
 
@@ -69,6 +69,9 @@ Flags:
                             --output-format json it is the v2 envelope with outcome previewed and plan
   --sandbox required        tighten-only, this run: safety.sandbox required for the main agent and its workers; a
                             host without an OS sandbox exits 2 before boot
+  --require-priced          refuse unpriced routes this run can reach (exit 2 naming them): chat and compaction
+                            with --no-delegate, the fleet routes too otherwise, the previewed route with --agent;
+                            each dispatch is also refused at admission when its resolved route is unpriced
   --max-requests <N>        provider requests the main agent loop may send in this run, once per attempt (retries,
                             compaction, side calls and workers do not count); exit 4, cause max_requests
   --max-tool-calls <N>      tool calls the main agent may make in this run, refused ones and each call of a parallel

@@ -31,6 +31,11 @@ export interface RunOverrides {
 	 * `required` exists, the strictest mode, so the override never loosens.
 	 */
 	sandbox?: "required";
+	/**
+	 * `run --require-priced`: every dispatch this run admits, nested ones included, is refused when its
+	 * resolved route has no known pricing (SPEC 6.9's admission recheck).
+	 */
+	requirePriced?: true;
 }
 
 /** Parse the current overrides. Malformed JSON or fields are dropped, never thrown. */
@@ -59,7 +64,21 @@ export function runOverrides(env: NodeJS.ProcessEnv = process.env): RunOverrides
 		if (Object.keys(numeric).length > 0) out.sampling = numeric;
 	}
 	if (record.sandbox === "required") out.sandbox = "required";
+	if (record.requirePriced === true) out.requirePriced = true;
 	return out;
+}
+
+/**
+ * Why `--require-priced` refuses `route` (`<target>/<model>`), or undefined when the run does not require pricing or
+ * the route is priced. `pricedBy` is the route's effective pricing source; only `none` is unpriced.
+ */
+export function requirePricedRefusal(
+	pricedBy: string,
+	route: string,
+	env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+	if (pricedBy !== "none" || runOverrides(env).requirePriced !== true) return undefined;
+	return `--require-priced: ${route} has no known pricing; declare targets[].pricing for it or choose a priced route`;
 }
 
 /**

@@ -87,6 +87,8 @@ export interface RunCliArgs {
 	maxRequests?: number;
 	/** `--sandbox required`: tighten-only one-run `safety.sandbox` (main and `--agent`). */
 	sandboxRequired?: true;
+	/** `--require-priced`: refuse unpriced routes the run can reach, at preflight and at each dispatch admission. */
+	requirePriced?: true;
 	/** `--max-tool-calls`: tool calls the main agent may make or have refused in this run. */
 	maxToolCalls?: number;
 	/** `--worktree` (`--agent` only): run the worker in a task worktree kept for review. */
@@ -224,6 +226,7 @@ export function requestedRunLimits(parsed: RunCliArgs): RunLimitsV2["requested"]
 		...(parsed.maxRequests !== undefined ? { maxRequests: parsed.maxRequests } : {}),
 		...(parsed.maxToolCalls !== undefined ? { maxToolCalls: parsed.maxToolCalls } : {}),
 		...(parsed.timeoutSeconds !== undefined ? { timeoutSeconds: parsed.timeoutSeconds } : {}),
+		...(parsed.requirePriced === true ? { requirePriced: true as const } : {}),
 	};
 }
 
@@ -534,6 +537,10 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--dry-run") {
 			parsed.dryRun = true;
+			continue;
+		}
+		if (arg === "--require-priced") {
+			parsed.requirePriced = true;
 			continue;
 		}
 		if (arg === "--sandbox") {

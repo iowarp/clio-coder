@@ -222,6 +222,7 @@ describe("headless no-op contract through the built binary", () => {
 		turnMode?: "answer" | "proposal" | "change";
 		prompt?: string;
 		flags?: ReadonlyArray<string>;
+		settingsPatch?: (yaml: string) => string;
 	}) {
 		const scratch = headlessScratch("clio-coder-noop-");
 		scratches.push(scratch);
@@ -230,6 +231,10 @@ describe("headless no-op contract through the built binary", () => {
 		});
 		fixtures.push(fixture);
 		seedOpenAICompatToolOrchestrator(scratch.configDir, fixture.url, input.autonomy);
+		if (input.settingsPatch) {
+			const settingsPath = join(scratch.configDir, "settings.yaml");
+			writeFileSync(settingsPath, input.settingsPatch(readFileSync(settingsPath, "utf8")));
+		}
 		const project = join(scratch.root, "project");
 		mkdirSync(project);
 		writeFileSync(join(project, "sentinel.txt"), "blocked is harmless fixture text\n");
@@ -478,6 +483,43 @@ describe("headless no-op contract through the built binary", () => {
 		strictEqual(envelope.outcome, "failed");
 		strictEqual(envelope.outcomeDetail, "noop");
 		match(turn.stderr, /no-op: the delegated task never started \([^)]*unknown fleet node 'no-such-node'/u);
+	});
+
+	test("--require-priced passes a priced main route and refuses an unpriced dispatch at admission, back to the model", async () => {
+		const { turn, fixture } = await headlessTurn({
+			autonomy: "default",
+			steps: [
+				{
+					id: "call-dispatch",
+					name: "dispatch",
+					arguments: { agent: "coder", task: "Apply the change.", target: "unpriced", model: "mock-model" },
+				},
+			],
+			failOnNoop: false,
+			reply: "The worker route was refused.",
+			flags: ["--require-priced"],
+			// mock-chat gains rates; a copy without them is a route no fleet setting names, so only admission sees it.
+			settingsPatch: (yaml) => {
+				const block = /^ {2}- id: mock-chat\n[\s\S]*?^ {6}- mock-model\n/m.exec(yaml)?.[0];
+				ok(block, "seeded mock-chat target block");
+				const priced = block.replace(
+					"    defaultModel: mock-model\n",
+					"    defaultModel: mock-model\n    pricing:\n      input: 1\n      output: 1\n",
+				);
+				return yaml.replace(block, priced + block.replace("id: mock-chat", "id: unpriced"));
+			},
+		});
+		doesNotMatch(turn.stderr, /routes this run can reach have no known pricing/);
+		const toolMessages = fixture.requests.flatMap((request) =>
+			(Array.isArray(request.messages) ? request.messages : []).filter(
+				(message) => (message as { role?: unknown }).role === "tool",
+			),
+		);
+		match(
+			JSON.stringify(toolMessages),
+			/admission denied: --require-priced: unpriced\/mock-model has no known pricing/,
+			turn.stderr,
+		);
 	});
 
 	test("--fail-on-noop is refused on the --agent path", async () => {

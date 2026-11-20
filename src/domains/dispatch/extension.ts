@@ -73,6 +73,7 @@ import {
 	runtimeSpeaksResponseSchemaDialect,
 	UnsupportedResponseSchemaError,
 } from "../../core/response-schema.js";
+import { requirePricedRefusal } from "../../core/run-overrides.js";
 import { sandboxAvailability } from "../../core/sandbox/availability.js";
 import { sandboxEnvPolicy } from "../../core/sandbox/env-scrub.js";
 import { gitHookDirectories } from "../../core/sandbox/git-hooks-fingerprint.js";
@@ -6853,6 +6854,9 @@ export function createDispatchBundle(
 		assertTargetNotCoolingDown(req, targetId, runtimeId, wireModelId, probeClaims);
 
 		if (req.contextSeed) persistWorkerContextSeed(req.contextSeed);
+		// ACP delegation has no pricing, so `run --require-priced` refuses it here and the model hears why.
+		const delegationUnpriced = requirePricedRefusal("none", `${targetId}/${wireModelId}`);
+		if (delegationUnpriced !== undefined) throw new Error(`dispatch: admission denied: ${delegationUnpriced}`);
 		await assertBudgetAdmitsRoute(req, { rates: null, pricedBy: "none" }, settings, lifecycle);
 
 		const queuedIdentity =
@@ -7806,6 +7810,12 @@ export function createDispatchBundle(
 			probeClaims,
 		);
 
+		// `run --require-priced` (SPEC 6.9): the resolved route, including a model named for this dispatch only.
+		const routeUnpriced = requirePricedRefusal(
+			lifecycle.target.effectivePricing.pricedBy,
+			`${lifecycle.target.target.id}/${lifecycle.target.wireModelId}`,
+		);
+		if (routeUnpriced !== undefined) throw new Error(`dispatch: admission denied: ${routeUnpriced}`);
 		await assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings, lifecycle, preparation?.signal);
 
 		const placement = resolveNode(req) ?? null;
