@@ -36,7 +36,10 @@ a rewrite by someone who can write the file.
   --json    write the stored NDJSON lines verbatim
   --all     read a fleet root from any project
 
-The root id may be a unique prefix, as with fleet view.
+The root id may be a unique prefix, as with fleet view. To read the same step
+events from the process that runs the fleet, start it with
+\`clio-coder fleet run <playbook> --output-format stream-json\`; list roots with
+\`clio-coder fleet list\`.
 
 Exit codes: 0 sealed and intact, 1 integrity break or read error, 2 usage,
 3 the journal read so far is intact but not sealed (the fleet may still be
