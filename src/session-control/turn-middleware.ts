@@ -14,6 +14,7 @@ import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsContinuation, turnAllowsTool } from "../core/turn-constraints.js";
 import { turnOriginMetadata } from "../core/turn-origin.js";
 import {
+	type CompletionFact,
 	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
 	type MiddlewareContract,
 	type MiddlewareEffect,
@@ -67,6 +68,14 @@ export interface TurnMiddlewareDeps {
 	 */
 	stepTurnEnd?: () => { continues: boolean; startTurnId?: string } | null;
 }
+
+/** What a sealed fact still leaves open, in plain words, when no continuation note names it. */
+const COMPLETION_FACT_NOTES: Record<CompletionFact, string> = {
+	unvalidated_mutation: "the change has no validation evidence yet",
+	failed_check: "a check failed after the last change",
+	uncollected_run: "detached runs are still uncollected",
+	open_task: "tasks are still open",
+};
 
 /** The awaited turn_start phase's answer: the turn's refusal, or the effects an admitted turn applies. */
 export type TurnStartGate = { refusal: string } | { refusal: null; effects: ReadonlyArray<MiddlewareEffect> };
@@ -356,6 +365,25 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		);
 	};
 
+	/** FX-38: a declared turn's sealed facts, in one footer line, in place of the reminders that carried them. */
+	const announceAssessment = (effects: ReadonlyArray<MiddlewareEffect>): void => {
+		const sealed = state.turnSealedCompletion;
+		if (!sealed?.declared || sealed.claimed === null || sealed.facts.length === 0) return;
+		const noteOf = (fact: CompletionFact): string => {
+			for (const effect of effects)
+				if (effect.kind === "request_continuation" && effect.fact === fact && effect.note) return effect.note;
+			return COMPLETION_FACT_NOTES[fact];
+		};
+		const open = [...new Set(sealed.facts.map(noteOf))].join("; ");
+		deps.emitFooterNotice(
+			"warning",
+			sealed.claimed === "done"
+				? `declared done, assessed ${sealed.assessed.replace("_", " ")}: ${open}`
+				: `declared ${sealed.claimed.replace("_", " ")}, still open: ${open}`,
+			"finish.assessed",
+		);
+	};
+
 	const notifyOperator = (message: string, key: string): void => {
 		if (deps.emitOperatorTip) deps.emitOperatorTip(message, key);
 		// `notify_operator` is the operator-only advisory channel. A tip is not part
@@ -631,17 +659,22 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					effect.kind === "inject_reminder" && pairedReminderPersists(effect) ? [effect.message] : [],
 				),
 			);
-			// FX-38: a reminder voicing a continuation a declared turn drops would ask for another round after the end. The
-			// seal holds its fact; the operator reads the assessment in the footer, and the model is not reminded.
-			const dropped = declaredTurn
-				? effects.flatMap((effect) => (effect.kind === "request_continuation" ? [effect] : []))
-				: [];
-			const voiced = new Set(dropped.map((effect) => effect.message));
-			const notes = [...new Set(dropped.flatMap((effect) => (effect.fact && effect.note ? [effect.note] : [])))];
-			if (state.turnCompletion?.state === "done" && notes.length > 0)
-				deps.emitFooterNotice("warning", `declared done, assessed partly done: ${notes.join("; ")}`, "finish.assessed");
+			// FX-38: a declared turn is over, so a finish-gate reminder from any producer (one that tags a completion fact
+			// or voices a continuation the turn drops) is sealed, not delivered: the operator reads the assessment in one
+			// footer line and the model is not reminded. A model-only fact is context for the next turn and still rides its
+			// request; an advisory the footer already carries stays there.
+			const voiced = new Set(
+				declaredTurn ? effects.flatMap((effect) => (effect.kind === "request_continuation" ? [effect.message] : [])) : [],
+			);
+			const sealedOnly = (effect: MiddlewareEffect): boolean =>
+				declaredTurn &&
+				effect.kind === "inject_reminder" &&
+				effect.audience !== "model" &&
+				pairedReminderPersists(effect) &&
+				(effect.fact !== undefined || voiced.has(effect.message));
+			if (declaredTurn) announceAssessment(effects);
 			for (const effect of effects) {
-				if (effect.kind === "inject_reminder" && voiced.has(effect.message)) continue;
+				if (sealedOnly(effect)) continue;
 				if (effect.kind === "inject_reminder") {
 					applyTurnEndReminder(
 						agentRuntime,

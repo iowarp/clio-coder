@@ -452,6 +452,7 @@ function finishGateTurn(contained: boolean) {
 	const footer: string[] = [];
 	const nudges: string[] = [];
 	const notices: string[] = [];
+	const footerText: string[] = [];
 	const middleware = createTurnMiddleware({
 		state,
 		middleware: {
@@ -463,7 +464,10 @@ function finishGateTurn(contained: boolean) {
 		} as MiddlewareContract,
 		middlewareToolChoice: createMiddlewareToolChoiceControl(),
 		emitNotice: (text) => notices.push(text),
-		emitFooterNotice: (_level, _text, key) => footer.push(key),
+		emitFooterNotice: (_level, text, key) => {
+			footer.push(key);
+			footerText.push(text);
+		},
 	});
 	const runtime = {
 		wireModelId: "fixture",
@@ -475,7 +479,7 @@ function finishGateTurn(contained: boolean) {
 		middleware.fireTurnEnd(runtime, [
 			{ role: "assistant", content: [{ type: "text", text: "Done." }], stopReason: "stop" },
 		] as never);
-	return { state, footer, audits, nudges, notices, middleware, finish };
+	return { state, footer, footerText, audits, nudges, notices, middleware, finish };
 }
 
 test("contained yolo's finish gate keeps its own nudge and records an exhausted check as unverified", async () => {
@@ -513,4 +517,44 @@ test("contained yolo's finish gate keeps its own nudge and records an exhausted 
 	deepStrictEqual(declared.notices, []);
 	strictEqual(declared.middleware.flushPendingReminders(), "");
 	strictEqual(declared.footer.at(-1), "finish.assessed");
+	strictEqual(
+		declared.footerText.at(-1),
+		"declared done, assessed partly done: the change has no validation evidence yet",
+	);
+	// FX-38: a declared partly_done or not_done claims no completion, so nothing follows it, footer included.
+	for (const claim of ["partly_done", "not_done"] as const) {
+		const turn = finishGateTurn(true);
+		turn.state.turnCompletion = { state: claim, limitations: [], unverified: [] };
+		await turn.finish();
+		strictEqual(turn.state.continuation.requested, false);
+		strictEqual(turn.state.turnSealedCompletion?.assessed, claim);
+		deepStrictEqual([turn.notices, turn.footer], [[], []]);
+		strictEqual(turn.middleware.flushPendingReminders(), "");
+	}
+	// FX-38: an unpaired finish-gate reminder (a project quality policy at normal rigor) follows no declaration either.
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-finish-quality-")));
+	mkdirSync(join(root, ".clio-coder"));
+	writeFileSync(
+		join(root, ".clio-coder", "quality.yaml"),
+		'version: 1\nrules:\n  - id: src\n    paths: ["src/**"]\n    checks: [test]\n',
+	);
+	const cwd = process.cwd();
+	process.chdir(root);
+	try {
+		const undeclared = finishGateTurn(false);
+		await undeclared.finish();
+		match(undeclared.notices.join("\n"), /project quality policy has outstanding checks/);
+		const quality = finishGateTurn(false);
+		quality.state.turnCompletion = { state: "done", limitations: [], unverified: [] };
+		await quality.finish();
+		deepStrictEqual(quality.notices, []);
+		strictEqual(quality.middleware.flushPendingReminders(), "");
+		strictEqual(quality.state.turnSealedCompletion?.assessed, "partly_done");
+		strictEqual(
+			quality.footerText.at(-1),
+			"declared done, assessed partly done: the change has no validation evidence yet",
+		);
+	} finally {
+		process.chdir(cwd);
+	}
 });
