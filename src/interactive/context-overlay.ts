@@ -3,6 +3,7 @@ import { relative } from "node:path";
 import { uncachedPrefillTokens } from "../core/cache-telemetry.js";
 import { relativePathEscapes } from "../core/path-containment.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
+import { renderUpperBound } from "../core/telemetry/render.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import type { WorkingSetView } from "../domains/context/working-set/contract.js";
 import { formatContextWindowSlots } from "../domains/providers/index.js";
@@ -313,7 +314,9 @@ function renderContextLedgerLines(
 							: "backend small";
 			// A partial or cold call charged again some of the prefix the previous request had; the journal counts it.
 			const rePrefilled =
-				verdict === "partial" || verdict === "cold" ? ["·", `re-prefilled ${call.cache.rePrefilled.display}`] : [];
+				verdict === "partial" || verdict === "cold"
+					? ["·", `re-prefilled ${renderUpperBound(call.cache.rePrefilled.fact, call.cache.rePrefilled.display)}`]
+					: [];
 			const line = backendCacheReadsUnknown
 				? ["prompt cache:", shell, "·", backend].join(" ")
 				: [

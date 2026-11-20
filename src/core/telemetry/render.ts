@@ -248,6 +248,21 @@ export function renderCalls(display: string, noun = "tool call"): string {
 	return `${display} ${display.replace(/^\D+/u, "") === "1" ? noun : `${noun}s`}`;
 }
 
+/**
+ * A re-prefill or its cache-break bill as the upper bound it is: the journal records the lesser of a call's uncached
+ * prefill and the prefix the previous request sent, so the true figure is at most this (CTX-16). A zero, an unknown,
+ * an absent figure and a sum with unknown parts read as before.
+ */
+export function renderUpperBound(value: Fact<number> | FactSum | number, display: string): string {
+	const bounded =
+		typeof value === "number"
+			? value > 0
+			: "kind" in value
+				? (value.kind === "measured" || value.kind === "estimated") && value.value > 0
+				: value.unknownCount === 0 && value.measured + value.estimated > 0;
+	return bounded ? `up to ${display}` : display;
+}
+
 export function renderFact(fact: Fact<number>, as: Scalar = "count"): string {
 	switch (fact.kind) {
 		case "measured":

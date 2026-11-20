@@ -49,6 +49,7 @@ import {
 	renderPricingSum,
 	renderShareSum,
 	renderTextFact,
+	renderUpperBound,
 	renderUsdFact,
 	renderUsdLimit,
 	renderUsdSum,
@@ -1373,9 +1374,10 @@ const RULES: Record<FactMetric, string> = {
 	requestBytes: "transport.requestBytes",
 	websocketFailures: "transport.websocketFailures, where the call's connection counters were attributable",
 	sseFallbacks: "transport.sseFallbacks, where the call's connection counters were attributable",
-	rePrefilled: "cache.rePrefilledTokens",
+	rePrefilled: "cache.rePrefilledTokens (each an upper bound on what the call prefilled again)",
 	uncachedPrefill: "cache.uncachedPrefillTokens",
-	breakUsd: "rePrefilledTokens × (input rate − cache-read rate), as each call records it",
+	breakUsd:
+		"rePrefilledTokens × (input rate − cache-read rate), as each call records it (an upper bound, like rePrefilledTokens)",
 	repairRounds: "run.settled.repairRounds",
 	runs: "count(referenced runs)",
 	harnessTime:
@@ -3904,7 +3906,9 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 			`${HARNESS_STOP_CAUSES.has(row.cause) ? "Stopped" : "Failed"} on ${row.cause}: ${row.calls.display} attempt(s), the last at ${row.lastAt}.`,
 		);
 	findings.push(`Spend: ${spend.usd.display} over ${spend.tokens.display} tokens.`);
-	findings.push(`Re-prefilled tokens: ${cache.rePrefilled.display}; cache-break bill: ${cache.breakUsd.display}.`);
+	findings.push(
+		`Re-prefilled tokens: ${renderUpperBound(cache.rePrefilled.fact, cache.rePrefilled.display)}; cache-break bill: ${renderUpperBound(cache.breakUsd.fact, cache.breakUsd.display)}.`,
+	);
 	const rounds = roundTrips.rounds.fact;
 	if ("kind" in rounds ? rounds.kind !== "measured" || rounds.value > 0 : rounds.measured > 0 || rounds.unknownCount > 0)
 		findings.push(

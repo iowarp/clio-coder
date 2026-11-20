@@ -11,7 +11,7 @@ import { readLayeredSettings } from "../../core/settings-layers.js";
 import { repairSettingsCoercions, type SettingsRepairResult } from "../../core/settings-repair.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import type { CacheReportV1 } from "../../core/telemetry/dto.js";
-import { unreportedCacheReadWords } from "../../core/telemetry/render.js";
+import { renderUpperBound, unreportedCacheReadWords } from "../../core/telemetry/render.js";
 import { clioDirLayoutProblems, removableClioRootProblem, resolveClioDirs } from "../../core/xdg.js";
 import { readSessionFileEntries, type SessionJsonlWarning } from "../../engine/session.js";
 import {
@@ -344,7 +344,7 @@ function latestSessionCacheFinding(stateDir: string): DoctorFinding | null {
 	return {
 		ok: true,
 		name: "cache telemetry",
-		detail: `last session ${latest.sessionId}: cached share ${report.share?.display ?? "unknown"}; hot ${counts.hot} · partial ${counts.partial} · cold ${counts.cold} · small ${counts.small} · unknown ${counts.unknown}; cache read ${report.cacheRead.display} · re-prefilled ${report.rePrefilled.display} in ${report.breaks.length} breaks (${report.breakUsd.display}); top cause ${top ? `${top.cause} (${top.breaks}${low ? `, ${top.rePrefilled.display} re-prefilled` : ""})` : "none"}${unreported === null ? "" : `; ${unreported}`}`,
+		detail: `last session ${latest.sessionId}: cached share ${report.share?.display ?? "unknown"}; hot ${counts.hot} · partial ${counts.partial} · cold ${counts.cold} · small ${counts.small} · unknown ${counts.unknown}; cache read ${report.cacheRead.display} · re-prefilled ${renderUpperBound(report.rePrefilled.fact, report.rePrefilled.display)} in ${report.breaks.length} breaks (${renderUpperBound(report.breakUsd.fact, report.breakUsd.display)}); top cause ${top ? `${top.cause} (${top.breaks}${low ? `, ${renderUpperBound(top.rePrefilled.fact, top.rePrefilled.display)} re-prefilled` : ""})` : "none"}${unreported === null ? "" : `; ${unreported}`}`,
 	};
 }
 
