@@ -98,6 +98,13 @@ export interface ExitSummarySnapshot {
 	 * its model calls are that session's only.
 	 */
 	visitSessions?: number;
+	/** When the visit switched sessions: the named session's own turns, beside the visit's `turns` (TUI-6). */
+	sessionTurns?: number;
+	/**
+	 * When the visit switched sessions: tool calls the other sessions made this visit, their workers' included, so a
+	 * Tools row that counts only the named session's says what it left out rather than vanishing (TUI-6).
+	 */
+	otherSessionToolCalls?: number;
 }
 
 /** A path inside the workspace by its workspace path, any other as given. */
@@ -339,6 +346,8 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 	const visitFrom = new Date().toISOString();
 	let baseTurns = deps.getTurns() ?? 0;
 	let priorTurns = 0;
+	/** Turns each parked session ran this visit, so the card can name the current session's own beside the visit's. */
+	const parkedTurns = new Map<string, number>();
 	let hasModelTurn = deps.session?.current()?.hasModelTurn === true;
 	/**
 	 * The session this visit reopened rather than started. A live session's meta
@@ -386,6 +395,11 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 	/** The run each assignment's latest attempt is, so a failover counts one worker. */
 	const assignmentRuns = new Map<string, string>();
 	const workerTools = new Map<string, ReadonlyArray<{ tool: string; count: number }>>();
+	/**
+	 * The session that dispatched each run, so its tool calls count on that session's Tools row, as its own calls do. A
+	 * fork's card listed the `read 4` of a worker its parent dispatched before the fork (TUI-9).
+	 */
+	const runSessions = new Map<string, string>();
 	const workerCapabilities = new Map<string, string>();
 	const noteModel = (target: string, model: string): void => {
 		if (target && model) models.set(`${target}\0${model}`, { target, model });
@@ -477,7 +491,9 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		deps.bus.subscribe("session.parked", ({ sessionId }) => {
 			visitSessions.add(sessionId);
 			reopenedSessionId = null;
-			priorTurns += Math.max(0, (deps.getTurns() ?? 0) - baseTurns);
+			const ran = Math.max(0, (deps.getTurns() ?? 0) - baseTurns);
+			priorTurns += ran;
+			parkedTurns.set(sessionId, (parkedTurns.get(sessionId) ?? 0) + ran);
 			baseTurns = deps.getTurns() ?? 0;
 			// The footer's tally restarts with the next session, so the visit keeps the parked one's here.
 			const parked = parkedTools.get(sessionId) ?? new Map<string, number>();
@@ -512,6 +528,9 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				record: "not available",
 			});
 			workerPaths.set(run.runId, new Set());
+			const owner = (run as { sessionId?: unknown }).sessionId;
+			const dispatcher = typeof owner === "string" && owner ? owner : deps.session?.current()?.id;
+			if (dispatcher) runSessions.set(run.runId, dispatcher);
 			highlight(`${run.agentId} started on ${run.targetId}`);
 			noteModel(run.targetId, run.wireModelId);
 		}),
@@ -649,8 +668,17 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			}
 			const tools = new Map(parkedTools.get(session.id));
 			for (const [tool, count] of deps.getToolCounts()) tools.set(tool, (tools.get(tool) ?? 0) + count);
-			for (const stats of workerTools.values()) {
-				for (const { tool, count } of stats) tools.set(tool, (tools.get(tool) ?? 0) + count);
+			let otherSessionToolCalls = 0;
+			for (const [sessionId, parked] of parkedTools) {
+				if (sessionId === session.id) continue;
+				for (const count of parked.values()) otherSessionToolCalls += count;
+			}
+			for (const [runId, stats] of workerTools) {
+				const own = (runSessions.get(runId) ?? session.id) === session.id;
+				for (const { tool, count } of stats) {
+					if (own) tools.set(tool, (tools.get(tool) ?? 0) + count);
+					else otherSessionToolCalls += count;
+				}
 			}
 			let entries: ReadonlyArray<unknown> = [];
 			try {
@@ -661,11 +689,12 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			const spend = exitSpend(deps.telemetry.read?.live(), visitFrom, entries);
 			const autonomy = deps.autonomy?.() ?? null;
 			const sessions = new Set([...visitSessions, session.id]).size;
+			const liveTurns = Math.max(0, (deps.getTurns() ?? 0) - baseTurns);
 			return {
 				sessionId: session.id,
 				sessionName: session.name ?? null,
 				wallMs: Math.max(0, now() - startedAt),
-				turns: priorTurns + Math.max(0, (deps.getTurns() ?? 0) - baseTurns),
+				turns: priorTurns + liveTurns,
 				models: [...models.values()],
 				spend,
 				// A tool no call ran (a worker's refused calls settle as zero) is not a row.
@@ -689,7 +718,13 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				compactions: compactions.get(session.id) ?? 0,
 				...(gitHooks.length > 0 ? { gitHooks } : {}),
 				...(autonomy !== null ? { autonomy } : {}),
-				...(sessions > 1 ? { visitSessions: sessions } : {}),
+				...(sessions > 1
+					? {
+							visitSessions: sessions,
+							sessionTurns: (parkedTurns.get(session.id) ?? 0) + liveTurns,
+							otherSessionToolCalls,
+						}
+					: {}),
 				...(internalGit.size > 0
 					? {
 							internalGit: [...internalGit.values()].map((entry) => ({

@@ -41,14 +41,16 @@ function blocksFromLines(lines: ReadonlyArray<string>): TranscriptBlock[] {
 	return blocks;
 }
 
+/** Each block's HTML in order, one at a time, so a long export can hand the event loop back between blocks. */
+export function* transcriptHtmlBlocks(lines: ReadonlyArray<string>): Generator<string, void, undefined> {
+	for (const block of blocksFromLines(lines)) {
+		const body = ansiLinesToHtml(block.lines);
+		yield block.kind === "tool"
+			? `<section class="tool-row" data-tool="${escapeHtml(block.toolName ?? "unknown")}">${body}</section>`
+			: `<div class="transcript-row">${body}</div>`;
+	}
+}
+
 export function renderTranscriptHtml(lines: ReadonlyArray<string>): string {
-	return blocksFromLines(lines)
-		.map((block) => {
-			const body = ansiLinesToHtml(block.lines);
-			if (block.kind === "tool") {
-				return `<section class="tool-row" data-tool="${escapeHtml(block.toolName ?? "unknown")}">${body}</section>`;
-			}
-			return `<div class="transcript-row">${body}</div>`;
-		})
-		.join("\n");
+	return [...transcriptHtmlBlocks(lines)].join("\n");
 }

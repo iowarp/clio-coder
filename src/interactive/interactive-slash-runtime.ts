@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
+import { setTimeout as delay, setImmediate as nextTurn } from "node:timers/promises";
 import type { ClioSettings } from "../core/config.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
 import { sessionTelemetryContext } from "../core/telemetry/context.js";
@@ -54,7 +54,7 @@ import { type ChatPanel, createChatPanel } from "./chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { runCompactWithNotice } from "./command-fallbacks.js";
 import { appendNotice, appendOperatorAside, appendOperatorCommand, appendReferenceCard } from "./command-output.js";
-import { renderSessionHtml } from "./export-html/index.js";
+import { renderSessionHtmlAsync } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
 import type { PendingModelScope } from "./overlays/model-scope.js";
 import type { ThinkingLevelChoice } from "./overlays/thinking-level.js";
@@ -896,7 +896,10 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 						deps.session ? { current: () => sessionMeta } : undefined,
 					),
 				);
+				// Each phase below hands the loop back before it starts, so keys typed meanwhile are read between them (TUI-10).
+				await nextTurn();
 				const ansiLines = exportPanel.render(EXPORT_RENDER_WIDTH);
+				await nextTurn();
 				let body: string;
 				if (markdown) {
 					const lines = ansiLines.map(stripTerminalSequences);
@@ -909,7 +912,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					const header = [`# Clio session ${sessionId}`, "", `Exported ${exportedAt.toISOString()}`, "", `${fence}text`];
 					body = `${[...header, ...lines, fence, ""].join("\n")}`;
 				} else {
-					body = renderSessionHtml({ sessionId, exportedAt: exportedAt.toISOString(), ansiLines });
+					body = await renderSessionHtmlAsync({ sessionId, exportedAt: exportedAt.toISOString(), ansiLines });
 				}
 				await mkdir(resolve(target, ".."), { recursive: true });
 				await writeFile(target, body, "utf8");
