@@ -142,11 +142,12 @@ const ABORT_ROUND_ON_SUBMIT = false;
 /**
  * Input budget when the target sets no `cache.warm.maxInputTokens`. The attended
  * surface's system prompt and tool schemas alone estimate near 11,000 tokens, so
- * the old 8,192 refused the ordinary first warm. The cap never exceeds the
- * serving window, and an unknown window keeps the old budget.
+ * the old 8,192 refused the ordinary first warm. The cap never exceeds a known
+ * serving window; an unknown one gets the same budget and the server judges the
+ * request, since the old budget refused the ordinary warm there too (PV-8).
  */
 function defaultWarmInputTokens(contextWindow: number): number {
-	return contextWindow > 0 && Number.isFinite(contextWindow) ? Math.min(16_384, contextWindow) : 8192;
+	return contextWindow > 0 && Number.isFinite(contextWindow) ? Math.min(16_384, contextWindow) : 16_384;
 }
 
 export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {

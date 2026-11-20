@@ -6,6 +6,7 @@ import {
 	registerSessionResourceCleanup,
 } from "@earendil-works/pi-ai";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
+import type { CacheReadField } from "../../core/token-split.js";
 import type { AnthropicResponseObservation } from "../types.js";
 import { withProxyConnectionNote } from "./proxy-connection-error.js";
 
@@ -66,6 +67,8 @@ export function observeAnthropicResponse<T extends StreamOptions>(
 	const restarts = new Map<string, boolean>();
 	let restarted = false;
 	let restartSkipped = false;
+	// Whether the reply carried a cache read count, so a read of zero is a miss and not an omission (PV-8).
+	let cacheReadField: CacheReadField = "omitted";
 	const onProviderStreamEvent = options?.onProviderStreamEvent;
 	const source = invoke({
 		...options,
@@ -149,6 +152,9 @@ export function observeAnthropicResponse<T extends StreamOptions>(
 				const { content: _content, ...message } = data.message;
 				observation.messageStart = structuredClone(message);
 			}
+			const usage = isRecord(data) ? (isRecord(data.message) ? data.message.usage : data.usage) : undefined;
+			const read = isRecord(usage) ? usage.cache_read_input_tokens : undefined;
+			if (typeof read === "number" && Number.isFinite(read) && read >= 0) cacheReadField = "sent";
 			await onProviderStreamEvent?.(data, eventModel);
 		},
 	} as T);
@@ -167,6 +173,7 @@ export function observeAnthropicResponse<T extends StreamOptions>(
 			});
 		(terminal as AssistantMessage & { anthropicResponse?: AnthropicResponseObservation }).anthropicResponse = observation;
 		if (observation.messageStart === null) return;
+		(terminal.usage as AssistantMessage["usage"] & { cacheReadField?: CacheReadField }).cacheReadField = cacheReadField;
 		const reported = observation.messageStart.model;
 		const reportedModelId = typeof reported === "string" ? reported.trim() : "";
 		const modelIdObservation: ResponseModelIdObservation = reportedModelId

@@ -149,6 +149,8 @@ test("an unset warm budget fits the attended prompt within the serving window; a
 	for (const [budget, expected] of [
 		[{ contextWindow: 131_072 }, 16_384],
 		[{ contextWindow: 12_000 }, 12_000],
+		// PV-8: an unknown window (0) no longer keeps the 8,192 cap that refused the ordinary 11K warm.
+		[{ contextWindow: 0 }, 16_384],
 		[{ contextWindow: 131_072, maxInputTokens: 4096 }, 4096],
 	] as const) {
 		const f = fixture(budget);
