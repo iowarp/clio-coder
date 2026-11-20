@@ -11,10 +11,11 @@ import { mainAgent, sessionTelemetryContext } from "../core/telemetry/context.js
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { factKnownValue } from "../core/telemetry/known.js";
 import type { CallMessageObserver } from "../core/telemetry/producer.js";
+import { clioStateDir } from "../core/xdg.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
 import type { MemoryInterventionRegistration } from "../domains/memory/intervention.js";
 import { compactionBudget, getCatalogModelForRuntime } from "../domains/providers/catalog.js";
-import { getLatestContextSnapshot } from "../domains/session/context-history.js";
+import { readSessionContextSnapshots } from "../domains/telemetry/index.js";
 import {
 	appendEnginePolicyMessage,
 	compactEngineCodex,
@@ -146,7 +147,6 @@ import {
 	contextUsageSnapshot,
 	endpointDigest,
 	estimateAgentContextBreakdown,
-	estimateAgentContextTokens,
 	estimateAgentMessageTokens,
 	latestUsableAssistantUsage,
 	reconcileSnapshot,
@@ -1472,17 +1472,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					Math.max(0, breakdown.systemPromptTokens - anchor.systemPromptTokens) +
 					Math.max(0, breakdown.toolSchemaTokens - anchor.toolSchemaTokens)
 				: null;
-		const estimatedTokens =
-			reconciledTokens === null
-				? estimateAgentContextTokens(estimateInput) + pendingPolicyTokens
-				: breakdown.systemPromptTokens + breakdown.messageTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
-		const ratio = routeTokenRatio(agentRuntime, observed);
-		const priced = (tokens: number): number => (ratio === 1 ? tokens : Math.ceil(tokens * ratio));
-		// With no live anchor (a resume, or an anchor a rewrite dropped) the floor is the newest usable usage plus
-		// the delta since that call: already a provider count, so only the chars/4 projection takes the ratio (FX-31).
-		const usageFloor = reconciledTokens === null ? usageAnchoredTokens(estimateInput, breakdown) : null;
+		// The structural projection (pending policy included) and, with no live anchor (a resume, or an anchor a
+		// rewrite dropped), the newest usable usage plus the delta since that call, each walked once.
 		const projection =
 			breakdown.systemPromptTokens + breakdown.messageTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
+		const usageFloor = reconciledTokens === null ? usageAnchoredTokens(estimateInput, breakdown) : null;
+		const estimatedTokens = usageFloor === null ? projection : Math.max(projection, usageFloor);
+		const ratio = routeTokenRatio(agentRuntime, observed);
+		const priced = (tokens: number): number => (ratio === 1 ? tokens : Math.ceil(tokens * ratio));
+		// The usage floor is already a provider count, so only the chars/4 projection takes the ratio (FX-31).
 		return {
 			// The estimate is a floor, not a competing verdict: it prices material
 			// the attested call never saw, so a provider count below it would be
@@ -4589,15 +4587,20 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			bindMemoryScope();
 			budgetProducer.reset();
 			const session = deps.session?.current();
-			const persisted = session ? getLatestContextSnapshot(session) : null;
-			// The figure the session was last measured at, so the journal can set the resumed projection beside it.
+			const snapshots = session ? readSessionContextSnapshots(clioStateDir(), session.id) : [];
+			const persisted = snapshots.at(-1) ?? null;
+			// The figure the session was last measured at, so the journal can set the resumed projection beside it: the
+			// newest reconciled snapshot, since a submit cancelled before usage leaves an estimated one after it.
+			let measured: (typeof snapshots)[number] | undefined;
+			for (let index = snapshots.length - 1; index >= 0 && measured === undefined; index -= 1) {
+				const snapshot = snapshots[index];
+				if (snapshot?.sources.total === "reconciled" && snapshot.reconciledTokens !== undefined) measured = snapshot;
+			}
 			resumedBudget = session
 				? {
 						sessionId: session.id,
 						priorTokens:
-							persisted?.sources.total === "reconciled" && persisted.reconciledTokens !== undefined
-								? persisted.reconciledTokens + persisted.categories.streaming
-								: null,
+							measured?.reconciledTokens !== undefined ? measured.reconciledTokens + measured.categories.streaming : null,
 					}
 				: null;
 			// The session's latest capture may describe the branch just left; a runtime captures the history now in place.

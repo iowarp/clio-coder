@@ -767,6 +767,10 @@ describe("live budget adapter", () => {
 		f.context.flushReconciledSnapshot();
 		const beforeQuit = f.context.liveBudget();
 		strictEqual(beforeQuit.inputSource, "anchored-plus-estimated-tail");
+		// A submit cancelled before usage leaves an estimated snapshot newest; priorTokens still reads the measurement.
+		const cancelled = f.context.captureRuntimeContextSnapshot(f.runtime, "t2", 0.85);
+		strictEqual(cancelled.sources.total, "estimated");
+		f.context.persistContextSnapshot(cancelled);
 		await journals.flush();
 		// The resume replays the same history with no live anchor; the next request is published as on reopen.
 		f.context.resetForSession("leaf-from-resume");
