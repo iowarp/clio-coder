@@ -28,7 +28,12 @@ import {
 import { MemoryLessonFeedback } from "../../src/domains/memory/lesson-feedback.js";
 import { projectKeptLesson } from "../../src/domains/memory/lesson-projection.js";
 import { rejectMemoryRecord } from "../../src/domains/memory/operations.js";
-import { detectMemoryUse } from "../../src/domains/memory/recall-use.js";
+import {
+	demotedMemoryIds,
+	detectMemoryUse,
+	foldRecallUse,
+	type RecallUseLedger,
+} from "../../src/domains/memory/recall-use.js";
 import { MemoryRuntime } from "../../src/domains/memory/runtime.js";
 import { loadMemoryRecordsSync, memoryStorePath } from "../../src/domains/memory/store.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
@@ -858,6 +863,35 @@ test("evidence identity grounds and counts use only for the command that ran, se
 		}
 		deepStrictEqual(commandSegments(COMMAND, root, other), [], "a call whose cwd is another checkout vouches nothing");
 		strictEqual(used(COMMAND, "git status", ["scripts/check.mjs"]), "exposed", "touching a named file is not use");
+		for (const refused of [
+			`! ${PNPM}`,
+			`eval "${PNPM}"`,
+			`exec ${PNPM}`,
+			"source scripts/env.sh",
+			"export CI=1",
+			"cd scripts",
+			`command eval "${PNPM}"`,
+		])
+			deepStrictEqual(commandSegments(refused, root), [], `${refused} vouches nothing`);
+		const cited = { id: "mem-00000000000000d4", lesson: "Read scripts/check.mjs before editing it.", evidenceRefs: [] };
+		const turn = (text: string, touched: string[]) =>
+			detectMemoryUse(cited, { text, segments: [], touched: new Set(touched) }, root);
+		strictEqual(turn(`per ${cited.id}`, []), "cited", "a cited id is use");
+		strictEqual(turn("", []), "unscored", "a lesson with no command cannot be scored");
+		let ledger: RecallUseLedger = { version: 1, records: {} };
+		for (let index = 0; index < 6; index++) {
+			const signal = turn("", index % 2 === 0 ? ["scripts/check.mjs"] : []);
+			ledger = foldRecallUse(ledger, {
+				recalled: [cited.id],
+				used: [],
+				exposed: signal === "exposed" ? [cited.id] : [],
+				unscored: signal === "unscored" ? [cited.id] : [],
+				at: `2026-11-0${index + 1}T00:00:00.000Z`,
+			});
+		}
+		strictEqual(ledger.records[cited.id]?.consecutiveUnused, 0, "exposed and unscored turns are no verdict");
+		strictEqual(ledger.records[cited.id]?.exposed, 3);
+		deepStrictEqual([...demotedMemoryIds(ledger)], []);
 		deepStrictEqual(
 			lessonCommands("Set `const mode = 'native'` before running `node scripts/check.mjs`.", [], root).recommended,
 			["node scripts/check.mjs"],

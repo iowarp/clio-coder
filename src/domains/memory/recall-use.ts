@@ -24,11 +24,12 @@ import type { MemoryRecord } from "./types.js";
  * succeeded in the turn. Words the turn shares with the lesson are not use;
  * on generic coding vocabulary that rule marked one stale lesson used 202
  * times in 318 recalls (XR-26). Reading or changing a file the lesson names is
- * `exposed`: recorded, and neither use nor a verdict. A lesson that recommends
- * no command cannot be scored for use, so an uncited recall of one leaves its
- * unused run unchanged. Records recalled `MEMORY_DEMOTE_AFTER_UNUSED` scored
- * turns running without use are demoted: the relevance gate then asks more of
- * them. Nothing is deleted or unapproved; one use clears the demotion.
+ * `exposed`: recorded, and neither use nor a verdict, so it leaves the unused
+ * run unchanged. A lesson that recommends no command cannot be scored for use,
+ * so an uncited recall of one leaves its unused run unchanged too. Records
+ * recalled `MEMORY_DEMOTE_AFTER_UNUSED` scored turns running without use are
+ * demoted: the relevance gate then asks more of them. Nothing is deleted or
+ * unapproved; one use clears the demotion.
  */
 
 export const MEMORY_DEMOTE_AFTER_UNUSED = 5;
@@ -90,7 +91,10 @@ export function detectMemoryUse(
 	return claims.length === 0 ? "unscored" : null;
 }
 
-/** One turn: every recalled id, those used, those exposed, and those the turn could not score. */
+/**
+ * One turn: every recalled id, those used, those exposed, and those the turn could not score. Exposed and unscored
+ * ids leave the unused run as it was.
+ */
 export interface RecallUseTurn {
 	recalled: ReadonlyArray<string>;
 	used: ReadonlyArray<string>;
@@ -113,7 +117,8 @@ export function foldRecallUse(ledger: RecallUseLedger, turn: RecallUseTurn): Rec
 		records[id] = {
 			recalled: (prior?.recalled ?? 0) + 1,
 			used: (prior?.used ?? 0) + (hit ? 1 : 0),
-			consecutiveUnused: hit ? 0 : unscored.has(id) ? unused : unused + 1,
+			// Exposed and unscored turns are no verdict, so only a scored turn without use extends the unused run.
+			consecutiveUnused: hit ? 0 : unscored.has(id) || exposed.has(id) ? unused : unused + 1,
 			lastRecalledAt: turn.at,
 			...(hit ? { lastUsedAt: turn.at } : prior?.lastUsedAt !== undefined ? { lastUsedAt: prior.lastUsedAt } : {}),
 			...(seen > 0 ? { exposed: seen } : {}),
