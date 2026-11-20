@@ -1,6 +1,16 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -22,6 +32,8 @@ import {
 } from "../../src/domains/mux/operations.js";
 import type { MuxPaneRecord } from "../../src/domains/mux/types.js";
 import { renderPosixShellShim } from "../../src/domains/mux/workspace/platform-posix.js";
+import { createYaziEventStream } from "../../src/domains/mux/yazi/event-stream.js";
+import { renderYaziKeymap } from "../../src/domains/mux/yazi/profile.js";
 import {
 	createYaziSession,
 	sweepStaleTransportFiles,
@@ -582,6 +594,88 @@ describe("contracts/files pane session transport", () => {
 			strictEqual(existsSync(stream), false);
 		} finally {
 			rmSync(cacheDir, { recursive: true, force: true });
+		}
+	});
+
+	it("binds Enter to enter a directory or send the selection as Ctrl+Y does, never Yazi's open", () => {
+		const doc = parseTomlDocument(renderYaziKeymap("/opt/Jo's yazi/ya", "linux")) as {
+			mgr: { prepend_keymap: { on: string; run: string }[] };
+		};
+		const run = (on: string): string => doc.mgr.prepend_keymap.find((chord) => chord.on === on)?.run ?? "";
+		const enter = run("<Enter>");
+		ok(enter.startsWith("plugin clio-enter -- '") && enter.endsWith("'"), enter);
+		const pick = enter.slice("plugin clio-enter -- '".length, -1).replaceAll(`'\\''`, "'");
+		strictEqual(`shell -- ${pick}`, run("<C-y>"));
+	});
+
+	it("keeps Yazi's open on Enter in the one-shot chooser, which carries no pick token, so a file reaches the chooser file", async () => {
+		const cacheDir = mkdtempSync(join(tmpdir(), "clio-coder-files-chooser-enter-"));
+		try {
+			const env: Record<string, Readonly<Record<string, string>> | undefined> = {};
+			for (const mode of ["companion", "chooser"] as const) {
+				const host = fakeMux();
+				const result = await createYaziSession({
+					mux: host.mux,
+					mode,
+					profileMode: "managed",
+					cwd: "/w",
+					cacheDir,
+					onEvent: () => undefined,
+					onChooser: () => undefined,
+					resolveBinaries: () => ({ yaziPath: "/bin/yazi", yaPath: "/bin/ya", missingYaziDetail: "" }),
+					ensureProfile: () => ({ dir: "/profile", stamp: {} as never }),
+				});
+				strictEqual(result.status, "opened");
+				if (result.status === "opened") await result.session.close();
+				env[mode] = host.requests[0]?.env;
+				strictEqual(host.requests[0]?.argv.includes("--chooser-file"), mode === "chooser");
+			}
+			strictEqual(env.chooser?.YAZI_CONFIG_HOME, "/profile");
+			strictEqual(env.chooser?.CLIO_CODER_YAZI_PICK_TOKEN, undefined);
+			ok(env.companion?.CLIO_CODER_YAZI_PICK_TOKEN);
+			const plugin = readFileSync(
+				new URL("../../src/domains/mux/yazi/assets/plugins/clio-enter.yazi/main.lua", import.meta.url),
+				"utf8",
+			);
+			match(
+				plugin,
+				/elseif job\.args\[1\] and \(os\.getenv\("CLIO_CODER_YAZI_PICK_TOKEN"\) or ""\) ~= "" then\s+ya\.emit\("shell", \{ job\.args\[1\] \}\)\s+else\s+ya\.emit\("open", \{\}\)/,
+			);
+		} finally {
+			rmSync(cacheDir, { recursive: true, force: true });
+		}
+	});
+
+	it("reads only event lines from the stream, past screen output a child process wrote there", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-coder-files-stream-"));
+		try {
+			const path = join(dir, "s.stream");
+			writeFileSync(
+				path,
+				[
+					'cd,1,1,{"tab":1,"url":"/w"}',
+					"\u001b[?1049h\u001b[22;0;0t\u001b[H\u001b[2J",
+					'" Netrw Directory Listing, sorted by name, then size, then time\r',
+					"Vim: Warning: Output is not to a terminal",
+					'clio-coder-pick,1,1,["tok","/w/a.txt"]',
+					"",
+				].join("\n"),
+			);
+			const events: string[] = [];
+			const stream = createYaziEventStream({
+				path,
+				autoStart: false,
+				isAlive: () => true,
+				onEvent: (event) =>
+					events.push(event.kind === "cd" ? `cd ${event.cwd}` : `${event.kind} ${event.values.join(" ")}`),
+			});
+			await stream.poll();
+			deepStrictEqual(events, ["cd /w", "clio-coder-pick tok /w/a.txt"]);
+			strictEqual(stream.stats().malformedLines, 0);
+			strictEqual(stream.stats().stopReason, null);
+			stream.stop();
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
 		}
 	});
 });

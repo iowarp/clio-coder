@@ -121,9 +121,11 @@ function shellQuote(value: string): string {
 }
 
 /**
- * Render Clio's two key chords, with an absolute `ya` path for vendored
- * installs: Ctrl+Y sends the selection, and Alt+E is the files key pressed
- * where Clio's own key handler cannot hear it.
+ * Render Clio's key chords, with an absolute `ya` path for vendored installs:
+ * Ctrl+Y sends the selection, Enter enters a directory or sends the selection
+ * as Ctrl+Y does, and Alt+E is the files key pressed where Clio's own key
+ * handler cannot hear it. Yazi's default Enter opens $EDITOR, which would write
+ * into the event stream on Yazi's stdout.
  *
  * Yazi runs `shell` through `sh -c` on POSIX and `cmd.exe /S /C` on Windows,
  * so each gets its own quoting and variable syntax. On Windows `%%` is Yazi's
@@ -135,7 +137,8 @@ export function renderYaziKeymap(yaPath: string, platform: NodeJS.Platform = pro
 	const ya = windows ? `"${yaPath.replaceAll("%", "%%")}"` : shellQuote(yaPath);
 	const id = windows ? "%%YAZI_ID%%" : '"$YAZI_ID"';
 	const token = windows ? "%%CLIO_CODER_YAZI_PICK_TOKEN%%" : '"$CLIO_CODER_YAZI_PICK_TOKEN"';
-	const command = `shell -- ${ya} pub-to ${id} clio-coder-pick --list ${token} %s`;
+	const pick = `${ya} pub-to ${id} clio-coder-pick --list ${token} %s`;
+	const command = `shell -- ${pick}`;
 	// The same token authenticates the tap, so a line another process writes
 	// into the stream file cannot hide or close the pane.
 	const dockTap = `shell -- ${ya} pub-to ${id} clio-coder-dock --list ${token}`;
@@ -145,6 +148,11 @@ export function renderYaziKeymap(yaPath: string, platform: NodeJS.Platform = pro
 on   = "<C-y>"
 run  = ${JSON.stringify(command)}
 desc = "Send the selection to Clio"
+
+[[mgr.prepend_keymap]]
+on   = "<Enter>"
+run  = ${JSON.stringify(`plugin clio-enter -- ${shellQuote(pick)}`)}
+desc = "Enter the directory, or send the selection to Clio"
 
 [[mgr.prepend_keymap]]
 on   = "<A-e>"

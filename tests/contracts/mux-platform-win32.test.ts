@@ -218,13 +218,14 @@ describe("win32 detach", () => {
 });
 
 describe("win32 files pane keymap", () => {
-	it("hands cmd.exe a quoted ya.exe and %-escaped variables, so Ctrl+Y and Alt+E reach Clio", () => {
+	it("hands cmd.exe a quoted ya.exe and %-escaped variables, so Ctrl+Y, Enter and Alt+E reach Clio", () => {
 		const ya = "C:\\Users\\Jo Doe\\AppData\\Local\\clio-coder\\tools\\yazi\\ya.exe";
 		const doc = parseTomlDocument(renderYaziKeymap(ya, "win32")) as { mgr: { prepend_keymap: { run: string }[] } };
 		deepStrictEqual(
 			doc.mgr.prepend_keymap.map((chord) => chord.run),
 			[
 				`shell -- "${ya}" pub-to %%YAZI_ID%% clio-coder-pick --list %%CLIO_CODER_YAZI_PICK_TOKEN%% %s`,
+				`plugin clio-enter -- '"${ya}" pub-to %%YAZI_ID%% clio-coder-pick --list %%CLIO_CODER_YAZI_PICK_TOKEN%% %s'`,
 				`shell -- "${ya}" pub-to %%YAZI_ID%% clio-coder-dock --list %%CLIO_CODER_YAZI_PICK_TOKEN%%`,
 			],
 		);
