@@ -79,20 +79,22 @@ const LEADING_READ_TASK =
 /**
  * The repair family: a fix asked for by any of these verbs is the same change.
  * One list, so "resolve the parser crash" reads like "fix the parser crash".
+ * patch, address and correct are also nouns and adjectives ("labels: correct,
+ * incorrect"), so they ask for a change only with an object after them.
  */
-const FIX_VERBS = "fix|repair|resolve|patch|address|correct";
+const FIX_VERBS =
+	"fix|repair|resolve|(?:patch|address|correct)(?=\\s+(?:the|this|that|a|an|any|it|these|those|all)\\b)";
 const MUTATION_REQUEST = new RegExp(
 	`\\b(?:write|implement|add|create|build|develop|${FIX_VERBS}|edit|change|modify|refactor|update)\\b`,
 	"i",
 );
-/** A polite request ("could you fix ...") is an instruction, not a question; it is read without its lead. */
-const POLITE_REQUEST_LEAD = /^(?:please\s+)?(?:can|could|would|will)\s+you\s+(?:please\s+)?/i;
-/** An interrogative lead word: the task opens by asking for an answer. */
-const QUESTION_LEAD = /^(?:what|where|which|why|how|who|when|whether|is|are|was|were|does|do|did|has|have)\b/i;
-/** A sentence end followed by more text; a path's dot (`src/a.ts`) is not one. */
-const LATER_SENTENCE = /[.!?]\s+\S/;
-/** A task about a dispatched run's record: a run id, receipt or run record named in it. */
-const RUN_RECORD_TASK = /\b(?:run[\s_-]?records?|run[\s_-]?ids?|runId|receipts?)\b/i;
+/** A polite request ("could you fix ...", "can we add ...") is an instruction, not a question; it is read without its lead. */
+const POLITE_REQUEST_LEAD =
+	/^(?:please\s+)?(?:(?:can|could|would|will)\s+you|(?:can|could|should|shall)\s+(?:we|i))\s+(?:please\s+)?/i;
+/** Sentence breaks; a path's dot (`src/a.ts`) is not one. */
+const SENTENCE_BREAK = /(?<=[.!?])\s+/;
+/** A task about a dispatched run's record: it names a run (run id, run record, run receipt). */
+const RUN_RECORD_TASK = /\b(?:run[\s_-]?(?:records?|ids?|receipts?)|runIds?)\b/i;
 /**
  * A mutation asked for rather than mentioned. The verb has to open a clause, so
  * "do not edit files" and "verify the fix" stay reports while "run the tests
@@ -113,8 +115,27 @@ const IMPERATIVE_MUTATION = new RegExp(
 const MUTATION_PROHIBITION =
 	/(?:\b(?:change|edit|modify|touch|write|alter|update)\s+(?:nothing|no\s+(?:files?|code|sources?)|none\s+of\s+(?:it|them|the\s+\w+))\b(?:\s+else\b)?|\bleave\s+(?:(?!\b(?:and|then|but|except|also|unchanged|untouched|as[\s-]is|alone|intact)\b)[^.;,\n]){0,60}?\b(?:unchanged|untouched|as[\s-]is|alone|intact)\b)(?=(?:(?!\b(?:except|but|other\s+than|besides|apart\s+from|aside\s+from|save\s+for|beyond|unless)\b|[.!?](?:\s|$))[^;\n])*(?:[.!?](?:\s|$)|[;\n]|$))/gi;
 
+/**
+ * Each sentence as the request it makes, polite lead removed, and whether it
+ * asks for an answer: a sentence ending in "?" does, unless a polite lead
+ * makes it a request.
+ */
+function taskSentences(task: string): Array<{ request: string; question: boolean }> {
+	return task
+		.trim()
+		.split(SENTENCE_BREAK)
+		.filter((sentence) => sentence.length > 0)
+		.map((sentence) => ({
+			request: sentence.replace(POLITE_REQUEST_LEAD, ""),
+			question: !POLITE_REQUEST_LEAD.test(sentence) && /\?\s*$/.test(sentence),
+		}));
+}
+
+/** Judged per sentence: a question ("which dependency do we need to patch?") asks for an answer, not a change. */
 export function asksForMutation(task: string): boolean {
-	return IMPERATIVE_MUTATION.test(task.replace(MUTATION_PROHIBITION, " "));
+	return taskSentences(task.replace(MUTATION_PROHIBITION, " ")).some(
+		(sentence) => !sentence.question && IMPERATIVE_MUTATION.test(sentence.request),
+	);
 }
 
 const DOMAIN_RULES: ReadonlyArray<readonly [AgentTaskDomain, RegExp]> = [
@@ -128,8 +149,8 @@ const DOMAIN_RULES: ReadonlyArray<readonly [AgentTaskDomain, RegExp]> = [
 /**
  * The job a task shape asks for. A shape is a change only when the task asks
  * for one: "run the tests" is a check and "why does this crash" a diagnosis,
- * while "add a test" and "resolve the crash" write. A task that opens as a
- * question or with a read verb and asks for no change (`readOnly`) never gets a
+ * while "add a test" and "resolve the crash" write. A task with a question in it
+ * or led by a read verb that asks for no change (`readOnly`) never gets a
  * writing job, so "where is the configuration loaded?" is an inspection.
  */
 function jobForTaskShape(taskType: AgentTaskType, mutates: boolean, readOnly: boolean): DispatchJob {
@@ -160,13 +181,10 @@ function jobForTaskShape(taskType: AgentTaskType, mutates: boolean, readOnly: bo
 
 export function classifyAgentTask(task: string): AgentTaskFeatures {
 	const text = task.trim();
-	const polite = POLITE_REQUEST_LEAD.test(text);
 	const request = text.replace(POLITE_REQUEST_LEAD, "");
-	// A one-sentence question asks for an answer even when it names a change
-	// ("which files need to change?"); a later sentence can still ask for one.
-	const question = !polite && !LATER_SENTENCE.test(request) && (QUESTION_LEAD.test(request) || /\?\s*$/.test(request));
-	const mutates = !question && asksForMutation(request);
-	const readOnly = !mutates && (question || QUESTION_LEAD.test(request) || LEADING_READ_TASK.test(request));
+	const mutates = asksForMutation(text);
+	const readOnly =
+		!mutates && (taskSentences(text).some((sentence) => sentence.question) || LEADING_READ_TASK.test(request));
 	const taskType: AgentTaskType =
 		!mutates && RUN_RECORD_TASK.test(request)
 			? "run_records"

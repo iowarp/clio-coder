@@ -127,6 +127,12 @@ describe("dispatch schema composition", () => {
 					"Where is the configuration loaded?",
 					{ task: "Implement the retry flag in src/config.ts.", intent: { write_roots: [], expected_outputs: [] } },
 					"Summarize the run record for run id 1yd79n91i9b0.",
+					"Do this now: fix the parser crash.",
+					"Can we add a retry flag to the configuration?",
+					"List the fields: address, postal code, and country.",
+					"List the result labels: correct, incorrect, and unknown.",
+					"Why does the parser crash? Which dependency do we need to patch?",
+					"Explain how the checkout service generates customer receipts.",
 				],
 			},
 			{
@@ -140,18 +146,37 @@ describe("dispatch schema composition", () => {
 		assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
 		assert.deepEqual(
 			parsed.requests.map((request) => request.agentId),
-			["scout", "verifier", "debugger", "coder", "tester", "coder", "coder", "scout", "scout", "provenance"],
+			[
+				"scout",
+				"verifier",
+				"debugger",
+				"coder",
+				"tester",
+				"coder",
+				"coder",
+				"scout",
+				"scout",
+				"provenance",
+				"coder",
+				"coder",
+				"scout",
+				"scout",
+				"debugger",
+				"scout",
+			],
 		);
 		// The fix family writes, so a pinned read-only scout on a repair is refused, not seated.
-		const pinnedScout = assessCapabilityMismatch({
-			agentId: "scout",
-			capabilityClass: "read-only",
-			task: "Resolve the parser crash.",
-			autoSelected: false,
-			resultContractKind: "scout-report",
-			specs: [],
-		});
-		assert.equal(pinnedScout?.verdict, "refuse");
+		for (const task of ["Resolve the parser crash.", "Do this now: fix the parser crash."]) {
+			const pinnedScout = assessCapabilityMismatch({
+				agentId: "scout",
+				capabilityClass: "read-only",
+				task,
+				autoSelected: false,
+				resultContractKind: "scout-report",
+				specs: [],
+			});
+			assert.equal(pinnedScout?.verdict, "refuse", task);
+		}
 		assert.ok(parsed.requests.every((request) => request.agentSelection === undefined));
 		const tool = createDispatchTool({ getAgentSpecs: () => [] } as unknown as DispatchToolDeps);
 		assert.ok(tool.description.startsWith(DISPATCH_JOB_TABLE_TEXT));
