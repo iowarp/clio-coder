@@ -32,8 +32,7 @@ function assistant(
 				totalTokens: stopReason === "length" ? 55973 : 5,
 				cacheRead: 0,
 				cacheWrite: 0,
-				// The fixture provider bills its own cost; a declared-rate route is priced only from rates it is handed (#434).
-				cost: { input: 0.125, output: 0.125, cacheRead: 0, cacheWrite: 0, total: 0.25, totalFromProvider: true },
+				cost: { input: 0.125, output: 0.125, cacheRead: 0, cacheWrite: 0, total: 0.25 },
 			},
 		} as AgentMessage,
 	};
@@ -362,7 +361,7 @@ for (const scenario of [
 						runtimeKind: "http",
 						wireModelId: "fixture-model",
 						autonomy: "yolo",
-						// The fixture provider bills its own cost, so it is measured beside a declared-rate route (#434).
+						// Declared rates price the fixture calls, so their cost is measured (#434).
 						pricedBy: "target-rates",
 						compiledPromptHash: null,
 						staticCompositionHash: null,

@@ -386,10 +386,7 @@ describe("session durability boundary", () => {
 		const settledData = {
 			...call(settledIds),
 			stages: { settle: 1 },
-			...callSettlementFromMessage(message, {
-				pricedBy: "target-rates",
-				rates: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0 },
-			}),
+			...callSettlementFromMessage(message, "target-rates"),
 		};
 		ok(journal.worker(frame("call.settled", settledData, settledIds, 2)));
 		ok(journal.worker(frame("call.started", call(openIds), openIds, 3)));

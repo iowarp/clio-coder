@@ -17,6 +17,12 @@ export interface LlmRequestUsage {
 	readonly reasoning?: number;
 	readonly totalTokens?: number;
 	readonly costUsd?: number;
+	/** The provider billed costUsd itself, so it outranks declared rates (#434). */
+	readonly costFromProvider?: boolean;
+	/** The runtime computed no cost (copilot-sdk), so costUsd is a placeholder and the counts are priced instead (#434). */
+	readonly costUncomputed?: boolean;
+	/** The counts the provider sent, when the runtime lists them; an unlisted count is unknown (#434). */
+	readonly reportedFields?: readonly string[];
 }
 
 /**

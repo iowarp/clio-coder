@@ -162,21 +162,16 @@ export function sideCallShutdownCause(message: unknown): "shutdown" | undefined 
 }
 
 /**
- * Declared per-million target rates priced against a call's settled counts, so no runtime's placeholder cost decides
- * the amount. A count with a non-zero rate that is not measured cannot be priced, so the amount is unknown, never a
- * zero (#434). A provider that omits its cache-read field reports the whole prompt as input, so its cache reads are
- * priced as none. A declared cache-write rate bills 1h writes at twice the input rate, as Pi's calculateCost does; an
- * omitted one is the documented $0 for every write.
+ * Declared per-million target rates priced against the settled counts of a call whose runtime computed no cost of its
+ * own. A count with a non-zero rate that is not measured cannot be priced, so the amount is unknown, never a zero
+ * (#434). A declared cache-write rate bills 1h writes at twice the input rate, as Pi's calculateCost does; an omitted
+ * one is the documented $0 for every write.
  */
-function targetRatesUsd(
-	counts: CallUsage,
-	rates: NonNullable<EffectivePricing["rates"]>,
-	cacheReadOmitted: boolean,
-): number | null {
+function targetRatesUsd(counts: CallUsage, rates: NonNullable<EffectivePricing["rates"]>): number | null {
 	let perMillion = 0;
 	for (const key of ["input", "output", "cacheRead", "cacheWrite"] as const) {
 		const rate = rates[key] ?? 0;
-		if (rate === 0 || (key === "cacheRead" && cacheReadOmitted)) continue;
+		if (rate === 0) continue;
 		const fact = counts[key];
 		if (fact.kind !== "measured") return null;
 		perMillion += fact.value * rate;
@@ -268,10 +263,11 @@ export function callSettlementFromMessage(
 	let pricing: CallSettled["pricing"] = { usd: unknown, pricedBy: "none" };
 	if (neverSent) pricing = { usd: { kind: "absent", reason: "not-applicable" }, pricedBy: "none" };
 	else if (pricedBy === "free") pricing = pricedUsd("free", 0, freeRule);
-	else if (observed && pricedBy === "target-rates" && !providerCost) {
-		// Declared rates price the settled counts, never a runtime's placeholder total (copilot-sdk seeds a zero one), so a
-		// settlement handed no rates leaves the amount unknown (#434).
-		const ratedUsd = rates === null ? null : targetRatesUsd(counts, rates, usage.cacheReadField === "omitted");
+	else if (observed && pricedBy === "target-rates" && !providerCost && (usd === null || cost.totalUncomputed === true)) {
+		// A runtime that computed no cost (copilot-sdk marks its seeded zero totalUncomputed) is priced from its settled
+		// counts at the declared rates, so a settlement handed no rates leaves the amount unknown (#434). A runtime that
+		// computed its total from those rates keeps it below.
+		const ratedUsd = rates === null ? null : targetRatesUsd(counts, rates);
 		if (ratedUsd !== null) pricing = pricedUsd("target-rates", ratedUsd);
 	} else if (usd !== null && observed) {
 		// Declared target rates price measured tokens as measured, ranked only below a provider's own cost. The Pi
