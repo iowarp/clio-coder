@@ -294,6 +294,16 @@ describe("agent plugin engine", () => {
 		}
 	});
 
+	it("reads a workspace removed under the session as empty instead of throwing", () => {
+		const gone = scratch();
+		reloadPluginResources(gone);
+		rmSync(gone, { recursive: true });
+		const loader = createResourcesLoader({ cwd: gone });
+		deepStrictEqual(loader.promptsForDisplay(gone).items, []);
+		clearPluginSnapshots();
+		deepStrictEqual(enabledPluginResourceRoots("prompts", gone), [], "a cold snapshot of the removed path builds too");
+	});
+
 	it("revokes drifted resources even while an earlier snapshot remains committed", () => {
 		const root = fixture();
 		mkdirSync(join(root, "prompts"));
