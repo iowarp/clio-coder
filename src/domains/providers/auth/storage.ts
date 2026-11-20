@@ -843,6 +843,7 @@ export class AuthStorage {
 			targetEnvVar?: string;
 			includeFallback?: boolean;
 			signal?: AbortSignal;
+			refresh?: false;
 		},
 	): Promise<AuthResolution> {
 		return remembered(await this.resolveApiKeyUnremembered(providerId, opts));
@@ -856,6 +857,7 @@ export class AuthStorage {
 			targetEnvVar?: string;
 			includeFallback?: boolean;
 			signal?: AbortSignal;
+			refresh?: false;
 		},
 	): Promise<AuthResolution> {
 		if (providerId === RETIRED_GITHUB_COPILOT_PROVIDER_ID) return retiredCopilotStatus(providerId);
@@ -934,6 +936,16 @@ export class AuthStorage {
 					detail: providerId,
 					apiKey: await getOAuthApiKey(providerId, stored),
 					refreshed: false,
+				};
+			}
+			// A diagnostic reads credentials without writing them; an expired login stays expired until a real call.
+			if (opts?.refresh === false) {
+				return {
+					providerId,
+					available: false,
+					credentialType: "oauth",
+					source: "stored-oauth",
+					detail: `${providerId} login has expired; the next model call refreshes it`,
 				};
 			}
 			let refreshError: unknown;
@@ -1019,7 +1031,7 @@ export class AuthStorage {
 
 	async resolveForTarget(
 		target: AuthTarget,
-		opts?: { includeFallback?: boolean; signal?: AbortSignal; rejectedApiKey?: string },
+		opts?: { includeFallback?: boolean; signal?: AbortSignal; rejectedApiKey?: string; refresh?: false },
 	): Promise<AuthResolution> {
 		const refused = this.refusedFor(target);
 		if (refused) return refused;
@@ -1035,9 +1047,11 @@ export class AuthStorage {
 			targetEnvVar?: string;
 			includeFallback?: boolean;
 			signal?: AbortSignal;
+			refresh?: false;
 		} = {};
 		if (opts?.includeFallback !== undefined) args.includeFallback = opts.includeFallback;
 		if (opts?.signal !== undefined) args.signal = opts.signal;
+		if (opts?.refresh === false) args.refresh = false;
 		if (target.explicitEnvVar) args.explicitEnvVar = target.explicitEnvVar;
 		if (target.targetEnvVar) args.targetEnvVar = target.targetEnvVar;
 		if (target.targetId) args.targetId = target.targetId;

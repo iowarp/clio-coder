@@ -62,11 +62,15 @@ export interface RunBashCommandOptions {
 	signal?: AbortSignal;
 	/** Cumulative snapshots, throttled to keep terminal rendering responsive. */
 	onUpdate?: (progress: BashCommandProgress) => void;
+	/** Each decoded piece of accepted output, unthrottled, before any snapshot that includes it. */
+	onOutput?: BashOutputListener;
 	/** Set by the bash tool for a contained main-session call: it runs in the main-session sandbox with this policy. */
 	shellSandbox?: MainSandboxPolicy;
 	/** Called with the shell's pid once it is spawned; off Windows the pid is also its process group id. */
 	onSpawn?: (pid: number) => void;
 }
+
+type BashOutputListener = (target: "stdout" | "stderr", text: string) => void;
 
 const BASH_UPDATE_THROTTLE_MS = 100;
 
@@ -102,6 +106,7 @@ const SYSTEM_PROGRESS_SCHEDULER: BashProgressScheduler = {
 export function createBashOutputProgressController(
 	onUpdate?: (progress: BashCommandProgress) => void,
 	scheduler: BashProgressScheduler = SYSTEM_PROGRESS_SCHEDULER,
+	onOutput?: BashOutputListener,
 ): BashOutputProgressController {
 	let phase: "active" | "settling" | "settled" = "active";
 	let stdout = "";
@@ -129,8 +134,13 @@ export function createBashOutputProgressController(
 		// A hard byte cap may bisect a multibyte code point. Discard the
 		// decoder's incomplete suffix instead of manufacturing U+FFFD.
 		if (outputCapped) return;
-		stdout += stdoutDecoder.end();
-		stderr += stderrDecoder.end();
+		for (const target of ["stdout", "stderr"] as const) {
+			const rest = target === "stdout" ? stdoutDecoder.end() : stderrDecoder.end();
+			if (rest.length === 0) continue;
+			if (target === "stdout") stdout += rest;
+			else stderr += rest;
+			onOutput?.(target, rest);
+		}
 	};
 
 	const emitUpdate = (final = false): void => {
@@ -189,6 +199,7 @@ export function createBashOutputProgressController(
 				const decoded = target === "stdout" ? stdoutDecoder.write(accepted) : stderrDecoder.write(accepted);
 				if (target === "stdout") stdout += decoded;
 				else stderr += decoded;
+				if (decoded.length > 0) onOutput?.(target, decoded);
 			}
 			if (accepted.byteLength < chunk.byteLength) outputCapped = true;
 			scheduleUpdate();
@@ -455,7 +466,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		let drainTimer: ReturnType<typeof setTimeout> | null = null;
 		let killSent = false;
 		let pendingClose: (() => void) | null = null;
-		const output = createBashOutputProgressController(options.onUpdate);
+		const output = createBashOutputProgressController(options.onUpdate, undefined, options.onOutput);
 
 		const child = spawn(spawnFile, spawnArgs, {
 			...(options.cwd === undefined ? {} : { cwd: options.cwd }),

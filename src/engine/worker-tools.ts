@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { WorkerRecall } from "../domains/context/worker/recall.js";
 /**
  * Worker-subprocess tool construction.
@@ -35,14 +36,14 @@ import {
 } from "../domains/safety/protected-artifacts.js";
 import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../domains/safety/scope.js";
 import { probeWorkspace } from "../domains/session/workspace/index.js";
-import { effectiveToolNames } from "../tools/agent-tools.js";
+import { effectiveToolNames, wireParameterSchema } from "../tools/agent-tools.js";
 import { assertRegisteredBuiltinTools, registerCoreTools } from "../tools/core-bootstrap.js";
 import type { McpCapabilitySource } from "../tools/gateway/index.js";
 import { registerHarnessExtensionTools } from "../tools/harness-extensions.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import { createRegistry, type RegistryDeps, type ToolRegistry } from "../tools/registry.js";
 import { runtimeAttachesGateway } from "../tools/surface.js";
-import { type AgentLedgerPort, toolSignatureOf } from "../worker/protocol.js";
+import { type AgentLedgerPort, canonicalJson, toolSignatureOf } from "../worker/protocol.js";
 
 export { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "./worker-runtime-capabilities.js";
 
@@ -251,8 +252,13 @@ export interface AttestedToolIdentityInput {
  * whose registry resolved a different tool set is refused rather than run.
  */
 export function attestedToolSignature(input: AttestedToolIdentityInput): string {
+	return toolSignatureOf(attestedToolNames(input));
+}
+
+/** The names `attestedToolSignature` signs, in the order the projection produced them. */
+export function attestedToolNames(input: AttestedToolIdentityInput): string[] {
 	if (!input.toolsSupported || input.allowedTools.length === 0) {
-		return toolSignatureOf(input.helperResult === true && input.toolsSupported ? [INTERNAL_HELPER_RESULT_TOOL] : []);
+		return input.helperResult === true && input.toolsSupported ? [INTERNAL_HELPER_RESULT_TOOL] : [];
 	}
 	// This private registry only projects names. Preserve canonical registration
 	// and extension verification without compiling an unused policy; executable
@@ -291,8 +297,32 @@ export function attestedToolSignature(input: AttestedToolIdentityInput): string 
 		input.runtime === undefined ||
 		runtimeAttachesGateway(input.runtime) ||
 		input.allowedTools.includes(ToolNames.Gateway);
-	return toolSignatureOf([
+	return [
 		...(attachesGateway ? names : names.filter((name) => name !== ToolNames.Gateway)),
 		...(input.helperResult === true && input.toolsSupported ? [INTERNAL_HELPER_RESULT_TOOL] : []),
-	]);
+	];
+}
+
+let schemaRegistry: ToolRegistry | undefined;
+
+/**
+ * Digest of the model-facing parameter schemas behind a signed name list. The name signature cannot see a tool whose
+ * name stayed while its parameters changed (another build on a fleet node), so the worker announces this beside it and
+ * the orchestrator computes it from its own build for the names it approved. Only built-in specs from a bare worker
+ * registry are read: they are fixed per build, unlike node-local extension and MCP capabilities, which sit behind
+ * `gateway`. A name without a registered spec, such as the helper result tool, hashes as null.
+ */
+export function attestedToolSchemaSignature(names: ReadonlyArray<string>): string {
+	if (names.length === 0) return sha256Hex("clio-coder.toolSchemas:[]");
+	schemaRegistry ??= createWorkerToolRegistry();
+	const registry = schemaRegistry;
+	const entries = [...new Set(names)].sort().map((name) => {
+		const spec = registry.get(name as ToolName);
+		return { name, parameters: spec ? wireParameterSchema(spec.modelParameters ?? spec.parameters) : null };
+	});
+	return sha256Hex(`clio-coder.toolSchemas:${canonicalJson(entries)}`);
+}
+
+function sha256Hex(text: string): string {
+	return createHash("sha256").update(text, "utf8").digest("hex");
 }

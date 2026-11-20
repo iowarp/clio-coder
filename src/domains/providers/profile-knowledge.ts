@@ -23,10 +23,6 @@ export class ProfileKnowledgeBase implements KnowledgeBase {
 		return this.current;
 	}
 
-	legacyCatalog(): KnowledgeBase {
-		return this.legacy;
-	}
-
 	/** Picks up an edited user profile file or catalog overlay without restarting. */
 	reload(): void {
 		this.current = this.loadProfiles();

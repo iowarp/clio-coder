@@ -1,8 +1,7 @@
 import { resolve } from "node:path";
 import { readSettings, updateSettings } from "../../core/config.js";
 import type { FleetNodeSettings } from "../../core/defaults.js";
-import { resolveEnvironmentApiKey, resolveStoredApiKey } from "../providers/auth/api-key.js";
-import { openAuthStorage, resolveAuthTarget } from "../providers/auth/index.js";
+import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../providers/auth/index.js";
 import { getRuntimeRegistry } from "../providers/registry.js";
 import { registerBuiltinRuntimes } from "../providers/runtimes/builtins.js";
 import {
@@ -84,11 +83,12 @@ export function removeFleetNode(id: string): void {
 }
 
 /**
- * Read stored API keys without refreshing OAuth or writing credential state during diagnostics.
- * Only targets this node is pinned to carry credentials; a dispatch sends one target's key, and
- * a check must not send every key the operator holds. Other targets get an anonymous probe.
+ * Resolve each pinned target's credential the way a dispatch does (same order, same project-URL refusal, no stored
+ * fallback), but never refresh an OAuth login or write credential state during diagnostics. Only targets this node is
+ * pinned to carry credentials; a dispatch sends one target's key, and a check must not send every key the operator
+ * holds. Other targets, and targets that need no credential, get an anonymous probe.
  */
-function fleetPreflightTargets(nodeId: string): FleetPreflightTarget[] {
+async function fleetPreflightTargets(nodeId: string): Promise<FleetPreflightTarget[]> {
 	const registry = getRuntimeRegistry();
 	registerBuiltinRuntimes(registry);
 	const auth = openAuthStorage();
@@ -99,17 +99,17 @@ function fleetPreflightTargets(nodeId: string): FleetPreflightTarget[] {
 			.map((profile) => profile.target),
 	);
 	if (settings.fleet.defaultNode === nodeId) pinned.add(settings.fleet.default.target);
-	return settings.targets.map((target) => {
+	const targets: FleetPreflightTarget[] = [];
+	for (const target of settings.targets) {
 		const runtime = registry.get(target.runtime);
 		const credentialed = pinned.has(target.id);
 		const headers: Record<string, string> = credentialed ? { ...target.auth?.headers } : {};
-		if (runtime && credentialed) {
-			const binding = resolveAuthTarget(target, runtime);
-			const stored = auth.get(binding.providerId);
-			const token =
-				stored?.type === "api_key"
-					? resolveStoredApiKey(stored.key, binding.providerId)
-					: resolveEnvironmentApiKey(binding.providerId, binding.explicitEnvVar).apiKey;
+		if (runtime && credentialed && targetRequiresAuth(target, runtime)) {
+			const resolution = await auth.resolveForTarget(resolveAuthTarget(target, runtime), {
+				includeFallback: false,
+				refresh: false,
+			});
+			const token = resolution.available ? resolution.apiKey : undefined;
 			if (token && !headers.authorization) headers.authorization = `Bearer ${token}`;
 		}
 		const family = runtime?.apiFamily;
@@ -119,15 +119,16 @@ function fleetPreflightTargets(nodeId: string): FleetPreflightTarget[] {
 				: family === "openai-completions" || family === "openai-responses"
 					? "openai"
 					: undefined;
-		return {
+		targets.push({
 			id: target.id,
 			runtimeId: target.runtime,
 			headers,
 			...(target.url !== undefined ? { url: target.url } : {}),
 			...(target.defaultModel !== undefined ? { wireModelId: target.defaultModel } : {}),
 			...(listing !== undefined ? { listing } : {}),
-		};
-	});
+		});
+	}
+	return targets;
 }
 
 export async function testFleetNode(
@@ -138,7 +139,7 @@ export async function testFleetNode(
 	const node = fleetNode(id);
 	const result = await runFleetNodePreflight(node, resolve(projectRoot), {
 		...options,
-		targets: options.targets ?? fleetPreflightTargets(id),
+		targets: options.targets ?? (await fleetPreflightTargets(id)),
 	});
 	if (result.ok && options.verifyProject !== false) {
 		result.project = await verifyFleetProject(

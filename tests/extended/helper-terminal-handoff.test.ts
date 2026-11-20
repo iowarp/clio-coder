@@ -225,6 +225,13 @@ for (const scenario of scenarios) {
 					ok(JSON.stringify(rejected[0]).includes("this run never wrote"));
 				}
 			}
+			// FL-16: on this non-native route the handoff never rewrites the system prompt mid-run; phase notes ride the tail.
+			const systemOf = (request: (typeof requests)[number]) =>
+				JSON.stringify(request.messages.filter((message) => message.role === "system"));
+			for (const request of requests.slice(1)) strictEqual(systemOf(request), systemOf(requests[0] ?? request));
+			const handoffRequest = scenario.mutation ? requests[scenario.terminalRound ?? requests.length] : undefined;
+			if (handoffRequest?.tools?.some((tool) => tool.function.name === "clio_submit_result"))
+				ok(JSON.stringify(handoffRequest.messages.at(-1)).includes("Internal helper protocol"));
 			strictEqual(existsSync(join(env.dir, "forbidden.txt")), false);
 			if (
 				!scenario.mutation &&

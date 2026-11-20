@@ -451,6 +451,8 @@ export const bashTool: ToolSpec = {
 				timeoutMs: timeout,
 				...(options?.signal === undefined ? {} : { signal: options.signal }),
 				...(options?.shellSandbox === undefined ? {} : { shellSandbox: options.shellSandbox }),
+				// Each piece is masked as it arrives, so a large output is not masked in one stall when the command ends (SC-7).
+				onOutput: (target, text) => (target === "stdout" ? stdoutMask : stderrMask).append(text),
 			};
 			if (options?.onUpdate !== undefined) {
 				runOptions.onUpdate = (progress) => {

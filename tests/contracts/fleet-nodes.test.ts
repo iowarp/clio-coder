@@ -16,6 +16,7 @@ import {
 } from "../../src/domains/dispatch/fleet-nodes.js";
 import { sameFleetBuild } from "../../src/domains/dispatch/fleet-preflight.js";
 import { verifyFleetProject } from "../../src/domains/dispatch/fleet-project-verification.js";
+import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
 describe("fleet node management", () => {
@@ -176,6 +177,37 @@ describe("fleet node management", () => {
 			false,
 		);
 		match(lines.join("\n"), /Use node 'builder' for this machine/);
+	});
+
+	it("preflight probes a pinned target with the credential dispatch sends", {
+		skip: process.platform === "win32",
+	}, async () => {
+		addFleetNode({ id: "builder", host: "builder.invalid", maxWorkers: 1 });
+		updateSettings((settings) => {
+			settings.targets.push({
+				id: "named",
+				runtime: "openai",
+				url: "http://127.0.0.1:9/v1",
+				auth: { apiKeyEnvVar: "CLIO_FLEET_NAMED_TEST_KEY" },
+			});
+			settings.fleet.profiles.pinned = { node: "builder", target: "named", model: null, thinkingLevel: "off" };
+		});
+		openAuthStorage().setApiKey("openai", "stored-runtime-key");
+		const observed = join(scratch, "targets.json");
+		const ssh = join(scratch, "ssh");
+		writeFileSync(
+			ssh,
+			`#!/bin/sh\ncase "$*" in *clio-coder-targets*) cat > ${shellQuote(observed)}; exit 0;; esac\nprintf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=${readClioVersion()}' 'workerSpecs=8 9' 'state=ok'\n`,
+		);
+		chmodSync(ssh, 0o755);
+		process.env.CLIO_FLEET_NAMED_TEST_KEY = "named-variable-key";
+		try {
+			await testFleetNode("builder", process.cwd(), { sshBinary: ssh, verifyProject: false });
+		} finally {
+			delete process.env.CLIO_FLEET_NAMED_TEST_KEY;
+		}
+		const sent = JSON.parse(readFileSync(observed, "utf8")) as Array<{ id: string; headers?: Record<string, string> }>;
+		strictEqual(sent.find((target) => target.id === "named")?.headers?.authorization, "Bearer named-variable-key");
 	});
 
 	it("tells builds of one -dev version apart by clean commit or build id", () => {
