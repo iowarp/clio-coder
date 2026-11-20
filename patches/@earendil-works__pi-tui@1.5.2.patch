@@ -25,6 +25,36 @@ index 29318b3224bb8346991569caa0fc6277fda4117b..b11f8b3bb5cd369907c625170c89df71
      handleInput(data) {
          const previous = this.input.getValue();
          this.input.handleInput(data);
+diff --git a/dist/components/alt-screen-flash.js b/dist/components/alt-screen-flash.js
+index 129d94a2223d6957b2eb79962f65b3adbdd4e9fc..05357b515c3b23a1e3f75953eeeee09fa5a95714 100644
+--- a/dist/components/alt-screen-flash.js
++++ b/dist/components/alt-screen-flash.js
+@@ -9,7 +9,12 @@ export class AltScreenFlashContainer {
+         this.requestRender = requestRender;
+     }
+     flash(message, durationMs = DEFAULT_DURATION_MS) {
+-        const id = this.nextId++;
++        // A message identical to one still showing restarts that row's timer instead of stacking another row,
++        // so a repeated copy keeps one row that shows for the repeat's whole duration.
++        const showing = this.entries.find((entry) => entry.message === message);
++        if (showing)
++            clearTimeout(showing.timer);
++        const id = showing ? showing.id : this.nextId++;
+         const timer = setTimeout(() => {
+             const index = this.entries.findIndex((entry) => entry.id === id);
+             if (index === -1)
+@@ -18,7 +23,10 @@ export class AltScreenFlashContainer {
+             this.requestRender();
+         }, Math.max(0, durationMs));
+         timer.unref();
+-        this.entries.push({ id, message, timer });
++        if (showing)
++            showing.timer = timer;
++        else
++            this.entries.push({ id, message, timer });
+         this.requestRender();
+     }
+     dispose() {
 diff --git a/dist/components/editor.d.ts b/dist/components/editor.d.ts
 index 7e6a8bc120ec687d4a647afff50d81fde6d5f23a..b98b2c14ac97c8e43ca0820bd78af2c288ec4e32 100644
 --- a/dist/components/editor.d.ts
@@ -103,6 +133,71 @@ index a27023e070788d2f143b77743eef1c8a5ad0de58..1c8341115ccc621b5a916bf2bb96da1a
      handleInput(data) {
          // Handle bracketed paste mode
          // Start of paste: \x1b[200~
+diff --git a/dist/layout.js b/dist/layout.js
+index 0a50deb61a365783f324434ac51e069043a3e933..d9023143d3946b2f1a0be7c13a54f6c78d3a262c 100644
+--- a/dist/layout.js
++++ b/dist/layout.js
+@@ -4,6 +4,9 @@ import { cropKittyImageLine, getKittyImageMetadata, getMaxKittyImageRows, isImag
+ import { CURSOR_MARKER, compositeTuiLine } from "./tui.js";
+ import { extractAnsiCode, getActiveBackgroundAnsi, getGraphemeCellRange, sliceByColumn, visibleWidth, } from "./utils.js";
+ const OSC133_ZONE_PREFIX = /^(?:\x1b\]133;[ABC](?:\x07|\x1b\\))+/;
++const SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
++/** Each scroll view's painted scrollbar rows from the last frame, by track offset. */
++const scrollbarRows = new WeakMap();
+ function intersect(a, b) {
+     const x = Math.max(a.x, b.x);
+     const y = Math.max(a.y, b.y);
+@@ -209,6 +212,15 @@ function paintScrollbar(box, screen, totalWidth) {
+     const geometry = getScrollbarGeometry(box);
+     if (!geometry || !box.scrollView)
+         return;
++    const preserveTargetBackground = box.scrollView.scrollbar !== "always";
++    // A row whose string, glyph and placement match the last frame's reuses that frame's result instead of
++    // slicing the row three times again.
++    let cache = scrollbarRows.get(box.scrollView);
++    if (!cache) {
++        cache = [];
++        scrollbarRows.set(box.scrollView, cache);
++    }
++    cache.length = Math.min(cache.length, geometry.trackHeight);
+     for (let offset = 0; offset < geometry.trackHeight; offset++) {
+         const row = geometry.trackTop + offset;
+         if (row < box.clip.y || row >= box.clip.y + box.clip.height || row < 0 || row >= screen.length)
+@@ -217,7 +229,20 @@ function paintScrollbar(box, screen, totalWidth) {
+         const replacement = isThumb
+             ? box.scrollView.scrollbarThumbStyle(box.scrollView.isScrollbarActive ? "█" : "┃")
+             : box.scrollView.scrollbarTrackStyle("│");
+-        screen[row] = replaceScrollbarCell(screen[row] ?? "", geometry.column, totalWidth, replacement, box.scrollView.scrollbar !== "always");
++        const line = screen[row] ?? "";
++        const cached = cache[offset];
++        if (cached &&
++            cached.line === line &&
++            cached.replacement === replacement &&
++            cached.column === geometry.column &&
++            cached.totalWidth === totalWidth &&
++            cached.preserveTargetBackground === preserveTargetBackground) {
++            screen[row] = cached.output;
++            continue;
++        }
++        const output = replaceScrollbarCell(line, geometry.column, totalWidth, replacement, preserveTargetBackground);
++        cache[offset] = { line, replacement, column: geometry.column, totalWidth, preserveTargetBackground, output };
++        screen[row] = output;
+     }
+ }
+ function paintBox(box, screen, totalWidth) {
+@@ -245,6 +270,12 @@ function paintBox(box, screen, totalWidth) {
+             if (box.rect.x === 0 && box.rect.width >= totalWidth && (isImageLine(line) || !screen[row])) {
+                 screen[row] = line;
+             }
++            // A box at column 0 narrower than the screen, such as a transcript beside its scrollbar column, takes
++            // the same path on an untouched row when the line already fits it. The reset keeps the line's style
++            // from reaching cells painted after it, as compositing's own reset does.
++            else if (box.rect.x === 0 && !screen[row] && !isImageLine(line) && visibleWidth(line) <= box.rect.width) {
++                screen[row] = `${line}${SEGMENT_RESET}`;
++            }
+             else {
+                 screen[row] = compositeTuiLine(screen[row] ?? "", line, box.rect.x, box.rect.width, totalWidth);
+             }
 diff --git a/dist/tui-alt-screen.d.ts b/dist/tui-alt-screen.d.ts
 index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..afb8bdc52e3ca93cbd00033837c910cd0e38e9ef 100644
 --- a/dist/tui-alt-screen.d.ts
@@ -165,10 +260,20 @@ index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..afb8bdc52e3ca93cbd00033837c910cd
      private copyTextToClipboard;
      private applySearchTextHighlight;
 diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
-index 3567a4350ab0da56276289d422b58d46e4882949..f60a8e43fe4e88e14dc38782ff9c24a294bfea75 100644
+index 3567a4350ab0da56276289d422b58d46e4882949..f9af5ef03c061dc1be5290c171a700c1179a2d20 100644
 --- a/dist/tui-alt-screen.js
 +++ b/dist/tui-alt-screen.js
-@@ -325,6 +325,13 @@ export class TuiAltScreen extends TuiBase {
+@@ -32,7 +32,8 @@ const COPY_ERROR_FLASH_DURATION_MS = 5000;
+ // Regular mode delegates double-click selection to the terminal emulator. Fullscreen owns mouse selection,
+ // so it uses iTerm2's default "characters considered part of a word" set:
+ // https://github.com/gnachman/iTerm2/blob/7f4ff739721f95d0b93003d8701c4523a7edf261/sources/Settings/iTermPreferences.m#L743
+-const TERMINAL_WORD_SELECTION_JOINERS = new Set(["/", "-", "+", "\\", "~", "_", "."]);
++// Clio adds the colon, so a double-clicked URL keeps its scheme and `path/file.ts:120` selects whole.
++const TERMINAL_WORD_SELECTION_JOINERS = new Set(["/", "-", "+", "\\", "~", "_", ".", ":"]);
+ const wordSegmenter = getWordSegmenter();
+ /** Alternate-screen TUI with a scrollable, application-owned viewport. */
+ export class TuiAltScreen extends TuiBase {
+@@ -325,6 +326,13 @@ export class TuiAltScreen extends TuiBase {
              return;
          }
      }
@@ -182,7 +287,20 @@ index 3567a4350ab0da56276289d422b58d46e4882949..f60a8e43fe4e88e14dc38782ff9c24a2
      toggleSearch() {
          if (this.activeSearch) {
              this.closeSearch();
-@@ -1163,7 +1170,13 @@ export class TuiAltScreen extends TuiBase {
+@@ -1063,7 +1071,11 @@ export class TuiAltScreen extends TuiBase {
+         const visibleTop = Math.max(0, box.rect.y, box.clip.y);
+         const visibleBottom = Math.min(this.terminal.rows - 1, box.rect.y + box.rect.height - 1, box.clip.y + box.clip.height - 1);
+         this.selectionDragPointer = { x: event.x, y: event.y };
+-        this.selectionAutoScrollDirection = event.y <= visibleTop ? -1 : event.y >= visibleBottom ? 1 : 0;
++        // Scroll only once the pointer leaves the view, so a selection can end on its edge rows. On the terminal's
++        // first or last row the pointer cannot go further, so that edge row itself still scrolls.
++        const scrollUp = event.y < visibleTop || (event.y === visibleTop && visibleTop === 0);
++        const scrollDown = event.y > visibleBottom || (event.y === visibleBottom && visibleBottom === this.terminal.rows - 1);
++        this.selectionAutoScrollDirection = scrollUp ? -1 : scrollDown ? 1 : 0;
+         if (this.selectionAutoScrollDirection === 0) {
+             this.stopSelectionAutoScroll();
+             return;
+@@ -1163,7 +1175,13 @@ export class TuiAltScreen extends TuiBase {
          }
          this.stopSelectionAutoScroll();
          this.selectionPressActive = true;
@@ -197,7 +315,7 @@ index 3567a4350ab0da56276289d422b58d46e4882949..f60a8e43fe4e88e14dc38782ff9c24a2
              ? getScrollViewsAt(this.currentLayout, event.x, event.y)[0]
              : undefined;
          const anchor = this.getSelectionPoint(event, scrollView);
-@@ -1222,15 +1235,18 @@ export class TuiAltScreen extends TuiBase {
+@@ -1222,15 +1240,18 @@ export class TuiAltScreen extends TuiBase {
                  return undefined;
              sourceLines = box.scrollContentLines;
          }
@@ -219,6 +337,17 @@ index 3567a4350ab0da56276289d422b58d46e4882949..f60a8e43fe4e88e14dc38782ff9c24a2
      async copySelectionToClipboard() {
          const text = this.getActiveSelectionText();
          if (!text)
+@@ -1373,6 +1394,10 @@ export class TuiAltScreen extends TuiBase {
+             maxRow = Math.min(screen.length - 1, box.rect.y + box.rect.height - 1, box.clip.y + box.clip.height - 1);
+             minColumn = Math.max(0, box.rect.x, box.clip.x);
+             maxColumn = Math.min(this.terminal.columns, box.rect.x + box.rect.width, box.clip.x + box.clip.width);
++            // The scrollbar column is not content: stop the highlight before it, as applySearchHighlights does.
++            const scrollbarColumn = getScrollbarGeometry(box)?.column;
++            if (scrollbarColumn !== undefined)
++                maxColumn = Math.min(maxColumn, scrollbarColumn);
+             screenSelection = {
+                 start: {
+                     ...selection.start,
 diff --git a/dist/tui-main-screen.d.ts b/dist/tui-main-screen.d.ts
 index 6ab7f63586dfa034ec6c30a40d475909d2d950e2..e7141bd93604bab7db31fcd7dfd0a4603ef9f34d 100644
 --- a/dist/tui-main-screen.d.ts

@@ -1584,6 +1584,94 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("keeps a URL's scheme when a double-click selects it", async () => {
+		const copies: string[] = [];
+		const terminal = new RenderingTerminal();
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer, undefined, undefined, {
+			copySelection: async (text) => {
+				copies.push(text);
+				return true;
+			},
+		});
+		tui.setLayoutRoot(new ScrollView(new Text("see https://example.com/path now", 0, 0), { primary: true }));
+		tui.start();
+		try {
+			tui.renderNow(true);
+			const screen = tui.getScreenLines().map(stripTerminalSequences);
+			const row = screen.findIndex((line) => line.includes("example")) + 1;
+			const column = (screen[row - 1] ?? "").indexOf("example") + 1;
+			for (let click = 0; click < 2; click++) {
+				terminal.input(`\x1b[<0;${column};${row}M`);
+				terminal.input(`\x1b[<0;${column};${row}m`);
+			}
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			strictEqual(copies.at(-1), "https://example.com/path");
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("stops a fullscreen selection highlight before the scrollbar column", () => {
+		const terminal = new RenderingTerminal();
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer);
+		const text = Array.from({ length: 60 }, (_, row) => `row ${row} ${"x".repeat(60)}`).join("\n");
+		tui.setLayoutRoot(new ScrollView(new Text(text, 0, 0), { primary: true, follow: "end", scrollbar: "always" }));
+		tui.start();
+		try {
+			tui.renderNow(true);
+			terminal.input("\x1b[<0;1;3M");
+			terminal.input(`\x1b[<32;${terminal.columns};8M`);
+			tui.renderNow();
+			for (const row of tui.getScreenLines().slice(3, 7)) {
+				const bar = Math.max(row.lastIndexOf("│"), row.lastIndexOf("┃"), row.lastIndexOf("█"));
+				ok(row.includes("\x1b[7m"), "the row is selected");
+				ok(bar > row.lastIndexOf("\x1b[27m"), `the bar is outside the highlight: ${JSON.stringify(row)}`);
+			}
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("lets a drag end on the last transcript row without scrolling, and scrolls once it leaves", (t) => {
+		t.mock.timers.enable({ apis: ["setInterval"] });
+		const terminal = new RenderingTerminal();
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer);
+		const chat = new Text(Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n"), 0, 0);
+		const chrome = {
+			banner: new Text("banner", 0, 0),
+			editor: new Text("editor", 0, 0),
+			footer: new Text("footer", 0, 0),
+		};
+		const root = buildLayout({ ...chrome, chat }, { mode: "fullscreen" });
+		ok(root instanceof VStack);
+		const scroll = root.children[0];
+		ok(scroll instanceof ScrollView);
+		tui.setLayoutRoot(root);
+		tui.start();
+		try {
+			tui.renderNow(true);
+			scroll.scrollTo(scroll.scrollTop - 30, { disableFollow: true });
+			tui.renderNow();
+			const screen = tui.getScreenLines().map(stripTerminalSequences);
+			let last = screen.length;
+			while (last > 0 && !/line \d/u.test(screen[last - 1] ?? "")) last--;
+			ok(last < terminal.rows, "the composer sits below the transcript");
+			const top = scroll.scrollTop;
+			terminal.input(`\x1b[<0;1;${last - 3}M`);
+			terminal.input(`\x1b[<32;4;${last}M`);
+			t.mock.timers.tick(500);
+			strictEqual(scroll.scrollTop, top, "held on the last transcript row");
+			terminal.input(`\x1b[<32;4;${last + 1}M`);
+			t.mock.timers.tick(500);
+			ok(scroll.scrollTop > top, "past the edge it scrolls");
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("keeps one neutral copy flash over SSH however many selections land", async () => {
 		const saved = { SSH_CONNECTION: process.env.SSH_CONNECTION, DISPLAY: process.env.DISPLAY };
 		process.env.SSH_CONNECTION = "client 0 server 0";
@@ -1875,6 +1963,50 @@ describe("Pi TUI compatibility", () => {
 			terminal.columns -= 30;
 			tui.renderNow(true);
 			strictEqual(tui.hasActiveSelection(), false, "a re-wrap would move the highlight onto other text");
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("re-wraps a window-edge drag once it pauses and paints a height-only change at once", async (t) => {
+		t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+		const terminal = new RenderingTerminal();
+		const painted: number[] = [];
+		const observer = {
+			beginFrame: (fields: { columns: number }) => fields.columns,
+			endFrame: (columns: unknown) => void painted.push(columns as number),
+			beginPhase() {},
+			endPhase() {},
+		};
+		const tui = new InstrumentedTuiAltScreen(terminal, observer);
+		tui.setLayoutRoot(new ScrollView(new Text("word ".repeat(200), 0, 0), { primary: true }));
+		const frame = async (change: () => void) => {
+			change();
+			tui.requestRender();
+			await new Promise<void>((resolve) => process.nextTick(resolve));
+			t.mock.timers.tick(20);
+		};
+		tui.start();
+		try {
+			tui.renderNow(true);
+			await frame(() => {
+				terminal.columns = 70;
+			});
+			deepStrictEqual(painted, [80, 70], "the first width change after a quiet spell paints at once");
+			await frame(() => {
+				terminal.columns = 60;
+			});
+			await frame(() => {
+				terminal.columns = 50;
+			});
+			deepStrictEqual(painted, [80, 70], "a drag skips the re-wraps between its steps");
+			t.mock.timers.tick(100);
+			await frame(() => {});
+			deepStrictEqual(painted, [80, 70, 50], "the drag re-wraps once at its last width");
+			await frame(() => {
+				terminal.rows -= 4;
+			});
+			deepStrictEqual(painted, [80, 70, 50, 50]);
 		} finally {
 			tui.stop();
 		}
