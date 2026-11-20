@@ -4545,8 +4545,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 				}
 			} finally {
-				await turnLease?.release();
+				// Settlements land before the lease release flushes, and possibly seals, the session's journal.
 				middleware.releaseTurnHolds(turnHolds);
+				await turnLease?.release();
 				returnUnstarted();
 				if (pathMessage && !promptStarted && options.queued === undefined) messagePath.neverStarted(pathMessage);
 				if (submitOwner === owner) {

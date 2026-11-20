@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { Type } from "typebox";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { validPayload } from "../../src/core/telemetry/events.js";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { newCallId } from "../../src/core/telemetry/ids.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
 import { createHookBudgetTracker } from "../../src/domains/middleware/budget.js";
@@ -30,20 +32,28 @@ import {
 import { createMiddlewareHostFromSnapshot, createMiddlewareSnapshot } from "../../src/domains/middleware/snapshot.js";
 import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareRule } from "../../src/domains/middleware/types.js";
+import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
-import type { SessionContract } from "../../src/domains/session/contract.js";
+import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
 import { foldSideSurfaces } from "../../src/domains/telemetry/read-model.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
+import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { capturedHookSourcesFor } from "../../src/entry/extension-hook-sources.js";
 import { middlewareHookFailedSessionNotice } from "../../src/interactive/bus-notices.js";
+import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { runTriageRound, type TriageSystemOne } from "../../src/session-control/steering-triage.js";
 import { createTurnMiddleware } from "../../src/session-control/turn-middleware.js";
 import { createTurnOutcomeCollector } from "../../src/session-control/turn-outcome-collector.js";
 import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
 import type { ToolInvokeOptions } from "../../src/tools/registry.js";
 import { createRegistry } from "../../src/tools/registry.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { middlewareOwner } from "../harness/middleware-owner.js";
 import { trustProjectPackages } from "../harness/project-trust.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function registration(
 	id: string,
@@ -446,6 +456,130 @@ describe("middleware hook boundary", () => {
 			)) as typeof import("../../src/domains/middleware/fired-record.js");
 			const resumed = other.nextFiringId();
 			ok(!ids().includes(resumed), `a resumed process reuses ${resumed}`);
+			// The chat loop settles what a submit held before its turn lease flushes the journal.
+			const loopSession = "md12-chat-loop";
+			const scratchEnv = await isolateClioEnv("clio-coder-md12-loop-");
+			const loopCollector = createTurnOutcomeCollector();
+			let lockAtStart = false;
+			const loopMiddleware = createMiddlewareBundle({
+				registrations: [
+					loopCollector,
+					registration("gate.lock", () => (lockAtStart ? [{ kind: "lock_tools" }] : []), { hooks: ["turn_start"] }),
+				],
+			}).contract;
+			const order: string[] = [];
+			const loopFired: string[] = [];
+			const loopSettled = new Map<string, { outcome: string; admittedIn: string | null }>();
+			stops.push(
+				hub.subscribe("middleware.fired", (payload, ctx) => {
+					if (ctx?.sessionId === loopSession && payload.firingId !== undefined) loopFired.push(payload.firingId);
+				}),
+				hub.subscribe("surface.settled", (payload, ctx) => {
+					if (ctx?.sessionId !== loopSession) return;
+					ok(!loopSettled.has(payload.firingId), `settled twice: ${payload.firingId}`);
+					loopSettled.set(payload.firingId, { outcome: payload.outcome, admittedIn: payload.admittedIn });
+					order.push(`settled ${payload.firingId}`);
+				}),
+			);
+			const settings = structuredClone(DEFAULT_SETTINGS);
+			settings.chat.prewarm = false;
+			const stubContext = dispatchStubContext({ settings });
+			const target = settings.targets[0];
+			ok(target);
+			settings.chat.target = target.id;
+			settings.chat.model = target.defaultModel ?? "gpt-4o";
+			const entries: SessionEntry[] = [];
+			let leaf: string | null = null;
+			const journals = createSessionJournals(clioStateDir(), () => {
+				throw new Error("fixture journal unavailable");
+			});
+			const loop: ReturnType<typeof createChatLoop> = createChatLoop({
+				getSettings: () => settings,
+				providers: stubContext.getContract("providers") as ProvidersContract,
+				knownTargets: () => new Set([target.id]),
+				session: {
+					current: () => ({ id: loopSession, cwd: scratchEnv.dir, cwdHash: "md12-repo" }),
+					tree: () => ({ leafId: leaf }),
+					leafId: () => leaf,
+					append(turn: TurnInput) {
+						const turnId = `turn-${entries.length + 1}`;
+						leaf = turnId;
+						entries.push({
+							kind: "message",
+							turnId,
+							parentTurnId: turn.parentId,
+							timestamp: new Date().toISOString(),
+							role: turn.kind,
+							payload: turn.payload,
+						} as SessionEntry);
+						return { id: turnId };
+					},
+					appendEntry(entry: Parameters<SessionContract["appendEntry"]>[0]) {
+						const row = { ...entry, turnId: `entry-${entries.length + 1}`, timestamp: new Date().toISOString() };
+						entries.push(row as SessionEntry);
+						return row as SessionEntry;
+					},
+				} as unknown as SessionContract,
+				readSessionEntries: () => entries,
+				middleware: loopMiddleware,
+				turnOutcomeCollector: loopCollector,
+				bus: hub,
+				telemetry: {
+					async acquireTelemetrySession(...args: Parameters<typeof journals.acquire>) {
+						const lease = await journals.acquire(...args);
+						const release = lease.release.bind(lease);
+						lease.release = async () => {
+							order.push("release");
+							await release();
+						};
+						return lease;
+					},
+				} as unknown as TelemetryContract,
+				createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
+					Object.assign(options?.initialState?.model ?? {}, { api: "openai-responses" });
+					let listener: (event: AgentEvent) => unknown = () => {};
+					const agentState = { ...options?.initialState, messages: [] as AgentMessage[] };
+					return {
+						requestCorrelationId: () => undefined,
+						agent: {
+							state: agentState,
+							subscribe: (next: typeof listener) => {
+								listener = next;
+								return () => {};
+							},
+							abort() {},
+							async prompt() {
+								await listener({ type: "agent_start" });
+								await listener({ type: "turn_start" });
+								const message = {
+									role: "assistant",
+									content: [{ type: "text", text: "done" }],
+									stopReason: "stop",
+									timestamp: Date.now(),
+								} as AgentMessage;
+								agentState.messages.push(message);
+								await listener({ type: "message_end", message });
+								await listener({ type: "agent_end", messages: [message] });
+							},
+						},
+					};
+				}) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+			});
+			try {
+				// A turn whose start armed a tool lock that no request carried: the lock settles before the lease releases.
+				lockAtStart = true;
+				await loop.submit("lock the tools");
+				lockAtStart = false;
+				const [l1] = loopFired;
+				ok(l1 !== undefined);
+				deepStrictEqual(loopSettled.get(l1), { outcome: "suppressed", admittedIn: null });
+				ok(order.indexOf(`settled ${l1}`) < order.lastIndexOf("release"), order.join(", "));
+			} finally {
+				loop.dispose();
+				await loop.whenSettled();
+				await journals.closeAll();
+				scratchEnv.restore();
+			}
 		} finally {
 			detach();
 			for (const stop of stops) stop();
