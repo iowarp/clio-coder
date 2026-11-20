@@ -3468,8 +3468,8 @@ function workerSandboxFor(input: {
 
 /**
  * True when the local OS sandbox confines every command this worker runs to
- * its write roots: a native worker, no fleet node that could host it
- * elsewhere, the sandbox not turned off, and bubblewrap usable here. Write-root
+ * its write roots: a native worker placed on this host, the sandbox not turned
+ * off, and bubblewrap usable here. Write-root
  * confinement then need not refuse shell, verify and run_script by name, so a
  * writer given file write roots can still run the project's tests. The worker
  * derives the same answer from its WorkerSpec (engine/worker-runtime.ts).
@@ -3477,11 +3477,18 @@ function workerSandboxFor(input: {
 function osSandboxConfinesWrites(
 	runtimeKind: RuntimeDescriptor["kind"],
 	settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined,
+	placement: () => RunNodeIdentity,
 ): boolean {
-	if (runtimeKind !== "http" || (settings?.fleet.nodes?.length ?? 0) > 0) return false;
+	if (runtimeKind !== "http") return false;
 	if ((settings?.safety.sandbox ?? "auto") === "off") return false;
 	const availability = sandboxAvailability();
-	return availability.available && availability.backend === "bwrap";
+	if (!availability.available || availability.backend !== "bwrap") return false;
+	// This probe answers only for a worker this host runs; a placement the preview cannot settle confines nothing (M6).
+	try {
+		return placement().kind === "local";
+	} catch {
+		return false;
+	}
 }
 
 /** The sandbox sentence for the worker's safety line, probed on this host. */
@@ -6413,7 +6420,9 @@ export function createDispatchBundle(
 			isHoareResultContract(dispatchResultContract(req, recipe));
 		await assertStoreGrantAdmissible(req, readOnly);
 		assertDenyToolsEnforceable(target.runtime, req.denyTools);
-		const writeConfined = pathScope.writeBoundaries.length > 0 && !osSandboxConfinesWrites(target.runtime.kind, settings);
+		const writeConfined =
+			pathScope.writeBoundaries.length > 0 &&
+			!osSandboxConfinesWrites(target.runtime.kind, settings, () => previewNode(req).node);
 		const effectiveTools = withLedgerToolNarrowing(
 			effectiveToolNames(
 				admission.allowedTools,
@@ -11167,7 +11176,9 @@ export function createDispatchBundle(
 		const mcpRuntimeRefusal = workerMcpRuntimeRefusal(req.agentId, admission.allowedTools, target.runtime);
 		if (mcpRuntimeRefusal !== null) throw new Error(mcpRuntimeRefusal);
 		assertDenyToolsEnforceable(target.runtime, req.denyTools);
-		const writeConfined = pathScope.writeBoundaries.length > 0 && !osSandboxConfinesWrites(target.runtime.kind, settings);
+		const writeConfined =
+			pathScope.writeBoundaries.length > 0 &&
+			!osSandboxConfinesWrites(target.runtime.kind, settings, () => previewNode(req).node);
 		const effectiveTools = withLedgerToolNarrowing(
 			effectiveToolNames(
 				admission.allowedTools,
