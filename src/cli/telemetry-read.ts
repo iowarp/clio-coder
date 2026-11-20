@@ -45,7 +45,7 @@ import type { SealVerdict } from "../domains/telemetry/seal.js";
 import { describeSealMismatch, readTelemetryScopeFilesSync, verifyTelemetryScope } from "../domains/telemetry/seal.js";
 import { explainRepoRef, isRepoRef, usageWindow } from "../domains/telemetry/usage-window.js";
 import { formatColumns, printError } from "./shared.js";
-import { resolveTelemetryTarget } from "./telemetry-target.js";
+import { resolveSessionSelector, resolveTelemetryTarget } from "./telemetry-target.js";
 
 /**
  * `clio-coder telemetry inspect|calls|cost|cache|timeline|why-stopped|explain` (#434 §11.3). Each command reads the
@@ -475,7 +475,17 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 		);
 		return 2;
 	}
-	const target = sessionFlag ?? args.positional[0];
+	const selector = sessionFlag ?? args.positional[0];
+	// A session selector is an id, a unique prefix or a name (C13); an imported install's scopes take exact ids only.
+	const selected =
+		selector === undefined || args.command === "explain" || imported !== undefined
+			? undefined
+			: resolveSessionSelector(stateDir, selector);
+	if (selected !== undefined && "miss" in selected) {
+		printError(selected.miss);
+		return 1;
+	}
+	const target = selected?.id ?? selector;
 	try {
 		if (args.command === "explain") {
 			const ref = target === undefined ? null : parseFactRef(target);
@@ -635,7 +645,7 @@ function callFilter(args: Args): CallFilter | string {
 		...(roles ? { roles } : {}),
 		...(dispositions ? { dispositions } : {}),
 		...(turns ? { turnIds: turns } : {}),
-		...(args.values.get("run") !== undefined && args.positional[0] !== undefined
+		...(args.values.get("run") !== undefined && (args.positional[0] ?? args.values.get("session")) !== undefined
 			? { runId: args.values.get("run") as string }
 			: {}),
 		...(from ? { from } : {}),

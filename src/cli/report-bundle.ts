@@ -9,10 +9,35 @@ import {
 	previewBundle,
 	type ReportDraft,
 	readReportBundle,
+	readShareReceipts,
 	renderBundlePreview,
+	sweepShareGists,
 	TRANSCRIPT_TURNS_DEFAULT,
 	TRANSCRIPT_TURNS_MAX,
 } from "../domains/report/index.js";
+
+/** A shared gist the expiry sweep deleted. */
+export interface SweptShare {
+	shareId: string;
+	gistId: string;
+}
+
+/**
+ * The explicit expiry sweep of `report sweep` and `telemetry share sweep`: it runs `sweepShareGists` and names each
+ * share whose gist it deleted, read from the receipts before and after, since the sweep itself only counts them. A
+ * damaged receipts file throws here, where the background sweep of a send stays quiet.
+ */
+export async function sweepExpiredShares(
+	stateDir: string,
+	deps: Parameters<typeof sweepShareGists>[1],
+): Promise<SweptShare[]> {
+	const live = Object.entries(readShareReceipts(stateDir)).filter(([, receipt]) => receipt.deletedAt === null);
+	await sweepShareGists(stateDir, deps);
+	const after = readShareReceipts(stateDir);
+	return live
+		.filter(([shareId]) => (after[shareId]?.deletedAt ?? null) !== null)
+		.map(([shareId, receipt]) => ({ shareId, gistId: receipt.gistId }));
+}
 
 /** What `report` needs to build and show a bundle; the TUI and tests supply their own. */
 export interface ReportBundleIo {

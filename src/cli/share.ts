@@ -10,6 +10,7 @@ import {
 	type ShareScope,
 	writeShareArchive,
 } from "../domains/share/index.js";
+import { writeCliFailure } from "./kit/json-out.js";
 import { printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder share <command>
@@ -232,9 +233,20 @@ function printExportPlan(files: ReadonlyArray<ShareArchiveManifestFile>, outPath
 
 export function runShareCommand(argv: ReadonlyArray<string>): number {
 	const parsed = parse(argv);
-	if (!parsed || parsed.help || !parsed.command) {
+	if (!parsed) {
+		// A usage error is one diagnostic and a pointer to help, never the full help on stdout (C3).
+		const command = argv.find((arg) => !arg.startsWith("-"));
+		writeCliFailure({
+			path: ["share", ...(command !== undefined ? [command] : [])],
+			slug: "usage",
+			message: "unknown flag, or a flag without its value",
+			json: argv.includes("--json"),
+		});
+		return 2;
+	}
+	if (parsed.help || !parsed.command) {
 		process.stdout.write(HELP);
-		return parsed ? 0 : 2;
+		return 0;
 	}
 	const ignored = ignoredFlag(parsed);
 	if (ignored !== null) {
@@ -299,8 +311,12 @@ export function runShareCommand(argv: ReadonlyArray<string>): number {
 			return plan.diagnostics.some((diag) => diag.type === "error") ? 1 : 0;
 		}
 		default:
-			printError(`unknown share command: ${parsed.command}`);
-			process.stdout.write(HELP);
+			writeCliFailure({
+				path: ["share"],
+				slug: "unknown_command",
+				message: `unknown share command: ${parsed.command}`,
+				json: parsed.json,
+			});
 			return 2;
 	}
 }

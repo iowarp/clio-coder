@@ -35,6 +35,8 @@ import {
 	type SkillCatalogInvalidReason,
 	skillCatalogValidity,
 } from "../domains/resources/index.js";
+import { helpRequested } from "./kit/help.js";
+import { writeCliFailure } from "./kit/json-out.js";
 
 /** Wire bound on the emitted skill list. */
 const MAX_SKILLS_INVENTORY_SKILLS = 64;
@@ -179,9 +181,25 @@ function skillsInventorySnapshot(now: () => number = Date.now, cwd: string = pro
 	};
 }
 
+const INVENTORY_HELP = `clio-coder library inventory --json
+
+Print the model-visible skill inventory as one JSON document (version 1):
+every installed skill, whether the model sees it, and loader diagnostics.
+`;
+
 export function runSkillsInventory(args: ReadonlyArray<string>): number {
+	if (helpRequested(args)) {
+		process.stdout.write(INVENTORY_HELP);
+		return 0;
+	}
 	if (args.length !== 1 || args[0] !== "--json") {
-		process.stderr.write("clio-coder library inventory: usage: clio-coder library inventory --json\n");
+		const unknown = args.find((arg) => arg.startsWith("-") && arg !== "--json");
+		writeCliFailure({
+			path: ["library", "inventory"],
+			slug: unknown !== undefined ? "unknown_flag" : "usage",
+			message: unknown !== undefined ? `unknown flag: ${unknown}` : "requires --json",
+			json: args.includes("--json"),
+		});
 		return 2;
 	}
 	process.stdout.write(`${JSON.stringify(skillsInventorySnapshot(), null, 2)}\n`);

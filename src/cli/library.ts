@@ -47,6 +47,8 @@ import { validateLibraryPackage } from "../domains/resources/library-validation.
 import { bareSkillRemedy, isBareSkillDirectory, packageBareSkill } from "../domains/resources/skills/bare-skill.js";
 import { knownSkillNames } from "../domains/resources/skills/marketplace.js";
 import { createProcessJournal } from "../domains/telemetry/process-journal.js";
+import { helpRequested } from "./kit/help.js";
+import { jsonDocument } from "./kit/json-out.js";
 import { printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder library <command>
@@ -72,8 +74,8 @@ Commands:
   clio-coder library inventory --json
   clio-coder library validate <package-path|skill-dir|SKILL.md> [--json]
   clio-coder library package <skill-dir> [--force] [--dry-run] [--json]
-  clio-coder library sync
-  clio-coder library push
+  clio-coder library sync [--json]
+  clio-coder library push [--json]
   clio-coder library remote confirm <url>
 
 Install and register default to user scope. Other mutations select the project
@@ -82,7 +84,8 @@ both scopes and all installed states. --from <index.yaml> selects an index.
 Every mutation builds one reviewed plan, rechecks it inside the package lock,
 refuses to break enabled dependents, and reports per-package outcomes with disk,
 component-admission and host-refresh facts separately; --dry-run prints the plan
-and writes nothing. A CLI never refreshes a running session.
+and writes nothing. A CLI never refreshes a running session: library reload
+refreshes only its own process and says so on stderr; use /reload library.
 Import reviews a portable, Claude Code or Codex plugin or a bare skill directory
 from a path or GitHub tree URL, normalizes supported components into a
 foreign-trust package, and never activates hooks, MCP, LSP or scripts.
@@ -392,6 +395,13 @@ export async function runLibraryCommand(
 	args: ReadonlyArray<string>,
 	discoveryOptions: { catalog?: string } = {},
 ): Promise<number> {
+	// Help reads nothing, so it opens no process journal (C15).
+	if (args.length > 0 && (args[0] === "--help" || args[0] === "-h")) {
+		process.stdout.write(HELP);
+		return 0;
+	}
+	if (args[0] === "inventory" && helpRequested(args.slice(1)))
+		return (await import("./skills-inventory.js")).runSkillsInventory(args.slice(1));
 	const journal = createProcessJournal(clioStateDir(), () =>
 		writeDiagnostic("[clio-coder:telemetry] process journal unavailable; coverage is incomplete\n"),
 	);
@@ -418,9 +428,14 @@ async function executeLibraryCommand(
 		printError(error instanceof Error ? error.message : String(error));
 		return 2;
 	}
-	if (parsed.help || !parsed.command) {
+	if (parsed.help) {
 		process.stdout.write(HELP);
-		return parsed.help ? 0 : 2;
+		return 0;
+	}
+	// A bare group is a usage error (C2): its help goes to stderr with the exit.
+	if (!parsed.command) {
+		process.stderr.write(HELP);
+		return 2;
 	}
 	const options = {
 		cwd: process.cwd(),
@@ -560,6 +575,10 @@ async function executeLibraryCommand(
 		if (parsed.command === "reload") {
 			if (parsed.positional.length) throw new Error("library reload takes no arguments");
 			const snapshot = reloadPluginResources(options.cwd);
+			// A CLI process refreshes only itself and then exits; the exit stays 0 (NIGHT-DECISIONS 2), the notice says so.
+			process.stderr.write(
+				"clio-coder library reload: refreshes only this exiting process; use /reload library in a running session\n",
+			);
 			if (parsed.json) emit(snapshot);
 			else printOk("library refreshed for this process; use /reload library in an active session");
 			return 0;
@@ -567,7 +586,8 @@ async function executeLibraryCommand(
 		if (parsed.command === "sync" || parsed.command === "push") {
 			if (parsed.positional.length) throw new Error(`library ${parsed.command} takes no arguments`);
 			await syncLibrary(parsed.command);
-			printOk(`library ${parsed.command} complete`);
+			if (parsed.json) process.stdout.write(`${JSON.stringify(jsonDocument({ ok: true, direction: parsed.command }))}\n`);
+			else printOk(`library ${parsed.command} complete`);
 			return 0;
 		}
 		if (parsed.command === "remote") {

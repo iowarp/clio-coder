@@ -15,6 +15,9 @@ clio-coder telemetry prune [--apply] [--days N] [--max-gib N] [--research-days N
 clio-coder telemetry verify <session | scope-dir | archive> [--imported <install-id>] [--json]
 clio-coder telemetry verify --run <run-id> [--imported <install-id>] [--json]
 clio-coder telemetry doctor [--json]
+clio-coder telemetry quota [--provider <id>] [--json]
+clio-coder telemetry health [--json]
+clio-coder telemetry runs <session> | --session <session> [--json]
 
 consent records, for this operator, that research content capture may run in a
 workspace (default: the current directory) and everything under it. Capture also
@@ -50,6 +53,10 @@ lines, gaps, duplicates), and the seal state of every session, run and process
 scope: a scope with bundle.json is verified as verify does, any other counts as
 unsealed. It exits 1 when a seal fails, the consent store is unreadable or the
 newest journal has damaged lines.
+
+quota, health and runs print the DTO ACP's telemetry methods return, read from
+the state directory: quota from the readings this host journaled (no provider is
+polled), health for this process, runs for the worker runs a session referenced.
 `;
 
 async function runPrune(argv: ReadonlyArray<string>): Promise<number> {
@@ -188,6 +195,9 @@ function runConsent(argv: ReadonlyArray<string>): number {
 /** The read model's commands; its module, the folds and the session loader load only for them. */
 const READ_COMMANDS = new Set(["inspect", "calls", "cost", "cache", "timeline", "why-stopped", "explain"]);
 
+/** The read model's request/reply snapshots, the CLI routes for ACP's quota, health and runs methods. */
+const SNAPSHOT_COMMANDS = new Set(["quota", "health", "runs"]);
+
 /**
  * The help a leaf prints for `--help`. Each leaf parser refuses flags it does not
  * know, so without this `telemetry share --help` answered "--help needs a value"
@@ -197,7 +207,8 @@ async function leafHelp(command: string): Promise<string | null> {
 	if (READ_COMMANDS.has(command)) return (await import("./telemetry-read.js")).READ_HELP;
 	if (command === "share" || command === "import") return (await import("./telemetry-share.js")).SHARE_HELP;
 	if (command === "insights") return (await import("./telemetry-insights.js")).INSIGHTS_HELP;
-	if (command === "consent" || command === "prune" || command === "doctor") return HELP;
+	if (command === "consent" || command === "prune" || command === "doctor" || SNAPSHOT_COMMANDS.has(command))
+		return HELP;
 	if (command === "tokens") return (await import("./telemetry-tokens.js")).TOKENS_HELP;
 	return null;
 }
@@ -224,6 +235,8 @@ export async function runTelemetryCommand(argv: ReadonlyArray<string>): Promise<
 	if (argv[0] === "doctor") return (await import("./telemetry-doctor.js")).runTelemetryDoctor(argv.slice(1));
 	if (argv[0] === "insights") return (await import("./telemetry-insights.js")).runTelemetryInsights(argv.slice(1));
 	if (argv[0] === "tokens") return (await import("./telemetry-tokens.js")).runTelemetryTokens(argv.slice(1));
+	if (argv[0] !== undefined && SNAPSHOT_COMMANDS.has(argv[0]))
+		return (await import("./telemetry-snapshot.js")).runTelemetrySnapshot(argv);
 	if (argv[0] !== undefined) printError(`unknown telemetry command: ${argv[0]}`);
 	process.stderr.write(await fullHelp());
 	return 2;

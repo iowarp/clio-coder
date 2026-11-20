@@ -223,6 +223,8 @@ export function mcpCommandOutput(
 				2,
 				"usage: clio-coder mcp list | test <id> [--call <tool> [--args <json>]]... | trust <id> [--action-class <class>] [--network] | untrust <id>",
 			);
+		// A flag where the id belongs is named as a flag, never looked up as a server id (C5); exit 1 stays (NIGHT-DECISIONS 2).
+		if (id.startsWith("-")) return fail(1, `unknown flag: ${id}`);
 		let actionClass: McpTrustActionClass | undefined;
 		let network = false;
 		const flags = [...rest];
@@ -508,7 +510,8 @@ export async function runMcpCommand(argv: ReadonlyArray<string>): Promise<number
 		(result.data as { trustDiagnostics: string[] }).trustDiagnostics.push(refreshFailure);
 	}
 	if (json) process.stdout.write(`${JSON.stringify(result.data, null, 2)}\n`);
-	else if (result.code && argv[0] !== "list") printError(result.text);
+	// List prints its own failing rows on stdout; a usage error goes to stderr like every other verb's (C3).
+	else if (result.code && (argv[0] !== "list" || result.code === 2)) printError(result.text);
 	else process.stdout.write(`${result.text}\n`);
 	return result.code;
 }

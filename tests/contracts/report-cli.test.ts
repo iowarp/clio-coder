@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { type ReportCliDeps, runReport } from "../../src/cli/report.js";
 import type { TelemetryContext } from "../../src/core/telemetry/context.js";
-import type { ReportCommandRunner } from "../../src/domains/report/index.js";
+import { type ReportCommandRunner, readShareReceipts, updateShareReceipt } from "../../src/domains/report/index.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/index.js";
 
@@ -120,6 +120,48 @@ test("--yes with a signed-in gh files the issue once and status lists it", async
 			output().out,
 		),
 	);
+});
+
+test("report status and show ask gh nothing; status --refresh and report sweep are the verbs that do", async () => {
+	const { bodyFile, calls, deps, output } = scratch();
+	const base = deps.run as ReportCommandRunner;
+	deps.run = async (file, args, options) => {
+		const reply = await base(file, args, options);
+		return args.includes("DELETE") ? { exitCode: 0, stdout: "", stderr: "", timedOut: false } : reply;
+	};
+	strictEqual(await runReport([...compose(bodyFile), "--yes"], deps), 0);
+	const stateDir = deps.stateDir ?? "";
+	const shareId = "shr_00112233445566aa";
+	const gistId = "abcdefabcdefabcdefab";
+	updateShareReceipt(stateDir, shareId, { kind: "report-bundle", gistId, sentAt: "2020-01-01T00:00:00.000Z" });
+	const gh = () => calls.filter((call) => call.file !== "git");
+	calls.length = 0;
+
+	const before = output().out.length;
+	strictEqual(await runReport(["status", "--json"], deps), 0);
+	const rows = JSON.parse(output().out.slice(before)) as { reports: Array<{ id: string }> };
+	const id = rows.reports[0]?.id ?? "";
+	strictEqual(await runReport(["status"], deps), 0);
+	ok(output().out.includes("clio-coder report status --refresh asks GitHub through gh"), output().out);
+	strictEqual(await runReport(["show", id], deps), 0);
+	deepStrictEqual(gh(), []);
+	strictEqual(readShareReceipts(stateDir)[shareId]?.deletedAt, null);
+
+	strictEqual(await runReport(["status", "--refresh"], deps), 0);
+	ok(
+		gh().some((call) => call.args[0] === "issue" && call.args[1] === "view" && call.args[2] === "452"),
+		JSON.stringify(gh()),
+	);
+	calls.length = 0;
+
+	const swept = output().out.length;
+	strictEqual(await runReport(["sweep", "--json"], deps), 0);
+	deepStrictEqual(JSON.parse(output().out.slice(swept)), { version: 1, bundles: [], shares: [{ shareId, gistId }] });
+	ok(gh().some((call) => call.args.includes("DELETE") && call.args.includes(`gists/${gistId}`)));
+	ok(readShareReceipts(stateDir)[shareId]?.deletedAt !== null);
+
+	strictEqual(await runReport(["sweep", "--bogus"], deps), 2);
+	ok(output().err.includes("clio-coder report sweep: unknown flag: --bogus\nsee: clio-coder report sweep --help\n"));
 });
 
 test("the editor opens the draft inside the reports drafts directory, never the shared temp dir", async () => {

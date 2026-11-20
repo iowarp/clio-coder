@@ -38,7 +38,10 @@ import {
 	telemetryShareSource,
 	writeShare,
 } from "../domains/telemetry/share.js";
+import { parseCommandFlags } from "./kit/flags.js";
+import { jsonDocument, writeCliFailure } from "./kit/json-out.js";
 import { formatBytes } from "./lifecycle-presenter.js";
+import { sweepExpiredShares } from "./report-bundle.js";
 import { canSelect, promptMultiSelect, promptSelect } from "./select.js";
 import { printError } from "./shared.js";
 
@@ -47,6 +50,7 @@ export const SHARE_HELP = `clio-coder telemetry share [--session <id>]... [--run
                            [--profile content-free|report|structural|research] [--out <file>] [--dry-run]
                            [--send --consent debug|dataset [--yes]]
 clio-coder telemetry share list
+clio-coder telemetry share sweep [--json]
 clio-coder telemetry share forget <shareId>
 clio-coder telemetry import <archive>
 
@@ -82,8 +86,9 @@ dataset also lets them publish an anonymized dataset from it. It takes the
 content-free, structural or research profile, asks before sending in a terminal
 and needs --yes outside one, and is refused in a command a CLIO Coder session
 started. list shows what this machine
-shared; forget <shareId> or github.com deletes the gist any time; once it is ${SHARE_RETENTION_DAYS} days
-old, the next report or telemetry share run deletes it.
+shared and asks GitHub nothing; forget <shareId> or github.com deletes the gist any time; once it is ${SHARE_RETENTION_DAYS} days
+old, the next report send or telemetry share run other than list deletes it, and sweep deletes every
+expired one now and names them (--json: one object).
 
 import verifies every bundle in an archive as telemetry verify does, then places
 the scopes under the state directory's telemetry/imported/<install-id>/,
@@ -313,12 +318,50 @@ function ghDeps(io: ShareIo, gh: string) {
 }
 
 async function sweep(io: ShareIo): Promise<void> {
-	await sweepShareGists(io.stateDir, {
-		findGh: await findGhFor(io.deps),
+	await sweepShareGists(io.stateDir, sweepDeps(io, await findGhFor(io.deps)));
+}
+
+function sweepDeps(io: ShareIo, findGh: () => string | null) {
+	return {
+		findGh,
 		env: io.env,
 		...(io.deps.run !== undefined ? { run: io.deps.run } : {}),
 		...(io.deps.now !== undefined ? { now: io.deps.now() } : {}),
-	});
+	};
+}
+
+/** `telemetry share sweep [--json]`: delete the expired share gists now and name them. Exit 2 on a usage error. */
+async function sweepShares(io: ShareIo, argv: ReadonlyArray<string>): Promise<number> {
+	const stderr = io.deps.stderr ?? ((text: string) => void process.stderr.write(text));
+	const parsed = parseCommandFlags(argv, { json: { kind: "boolean" }, help: { kind: "boolean", short: "h" } });
+	const failure = parsed.ok
+		? parsed.positional.length > 0
+			? { slug: "usage" as const, message: `unexpected argument: ${parsed.positional[0]}` }
+			: null
+		: { slug: parsed.slug, message: parsed.message };
+	if (failure !== null) {
+		writeCliFailure(
+			{ path: ["telemetry", "share", "sweep"], ...failure, json: argv.includes("--json") },
+			{ stdout: { write: io.out }, stderr: { write: stderr } },
+		);
+		return 2;
+	}
+	if (!parsed.ok) return 2;
+	if (parsed.flags.help === true) {
+		io.out(SHARE_HELP);
+		return 0;
+	}
+	const shares = await sweepExpiredShares(io.stateDir, sweepDeps(io, await findGhFor(io.deps)));
+	if (parsed.flags.json === true) {
+		io.out(`${JSON.stringify(jsonDocument({ shares }))}\n`);
+		return 0;
+	}
+	if (shares.length === 0) {
+		io.out("nothing deleted: no shared gist has expired\n");
+		return 0;
+	}
+	for (const share of shares) io.out(`deleted the encrypted share ${share.shareId} (gist ${share.gistId})\n`);
+	return 0;
 }
 
 const DISCUSSION_CATEGORY = "Telemetry shares";
@@ -473,15 +516,18 @@ async function sendShare(
 /** `telemetry share`: exit 0 written, sent or previewed, 1 nothing to share or a failure, 2 on usage errors (#434). */
 export async function runTelemetryShare(argv: ReadonlyArray<string>, deps: TelemetryShareDeps = {}): Promise<number> {
 	const io = shareIo(deps);
+	// list and sweep are read and sweep verbs of their own: list asks GitHub nothing and deletes nothing (C15).
+	const ownVerb = argv[0] === "list" || argv[0] === "sweep";
 	try {
-		// Every telemetry share run deletes this machine's expired share gists, as the consent text says.
-		await sweep(io);
+		// Every other telemetry share run deletes this machine's expired share gists, as the consent text says.
+		if (!ownVerb) await sweep(io);
 	} catch (error) {
 		io.fail(`cannot read the share receipts: ${error instanceof Error ? error.message : String(error)}`);
 		return 1;
 	}
 	try {
 		if (argv[0] === "list" && argv.length === 1) return await listShares(io);
+		if (argv[0] === "sweep") return await sweepShares(io, argv.slice(1));
 		if (argv[0] === "forget" && argv.length <= 2) return await forgetShare(io, argv[1]);
 	} catch (error) {
 		io.fail(`cannot ${argv[0]} shares: ${error instanceof Error ? error.message : String(error)}`);

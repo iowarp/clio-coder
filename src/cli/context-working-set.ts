@@ -26,6 +26,7 @@ import { parseSessionEntries } from "../domains/session/archive-readers.js";
 import { DEFAULT_KEEP_RECENT_TOKENS } from "../domains/session/compaction/defaults.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import { resolveSessionSelector } from "./telemetry-target.js";
 
 const REPLAY_HELP = `Usage:
   clio-coder context replay (--sessions <path>... | --synthetic <corpus>...) [options]
@@ -410,15 +411,18 @@ export async function runContextReplayCommand(args: string[]): Promise<number> {
 	}
 }
 
-async function sessionPath(value: string): Promise<string> {
-	const candidate = resolve(value);
+async function sessionPath(selector: string): Promise<string> {
+	const candidate = resolve(selector);
 	try {
 		const facts = await stat(candidate);
 		if (facts.isDirectory()) return join(candidate, "current.jsonl");
 		if (facts.isFile()) return candidate;
 	} catch {
-		// A non-path value is resolved as a validated session id below.
+		// A non-path value is resolved as a session selector below: an id, a unique prefix or a name (C13).
 	}
+	const selected = resolveSessionSelector(clioStatePath(), selector);
+	if ("miss" in selected) throw new Error(selected.miss);
+	const value = selected.id;
 	try {
 		assertSafeId(value, "session");
 	} catch (error) {
