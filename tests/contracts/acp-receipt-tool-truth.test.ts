@@ -257,7 +257,7 @@ async function agyDispatch(
 	const log = join(dir, "frames.jsonl");
 	const agy = join(dir, "agy");
 	const fixture = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
-	writeFileSync(agy, `#!/bin/sh\nexec "${process.execPath}" "${fixture}" agy "${log}" 1.5.13 ok\n`, { mode: 0o755 });
+	writeFileSync(agy, `#!/bin/sh\nexec "${process.execPath}" "${fixture}" agy "${log}" 1.5.13 steer\n`, { mode: 0o755 });
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;
 	if (mode !== undefined) settings.fleet.permissions.mode = mode;
