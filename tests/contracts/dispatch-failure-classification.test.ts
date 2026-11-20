@@ -12,6 +12,7 @@ import type { RunTerminationEvidence } from "../../src/domains/dispatch/outcome.
 import {
 	blockedStateChangingCalls,
 	blockedWriteAttempts,
+	readScopedNoToolsReason,
 	recordToolFinish,
 	summarizeToolActivity,
 	workerNoWorkDetail,
@@ -90,6 +91,31 @@ describe("dispatch failure classification", () => {
 		} finally {
 			env.restore();
 		}
+	});
+
+	it("grades a read-scoped worker that executed no tool, its result report aside, as a retryable quality failure", () => {
+		// FX-19: scout 339cwh27ifkd's only call was its result report; it sealed succeeded, quality=unmeasured, failed=0.
+		const stats = new Map<string, ToolCallStat>();
+		recordToolFinish(stats, { tool: "clio_submit_result", outcome: "ok", actionClass: "read" });
+		const scout = {
+			activity: summarizeToolActivity(stats, () => "read"),
+			readOnly: true,
+			capabilityClass: "read-only",
+			contractKind: "scout-report",
+			readRoots: [] as string[],
+			toolLaneObserved: true,
+		};
+		match(readScopedNoToolsReason(scout) ?? "", /no tools executed/);
+		match(readScopedNoToolsReason({ ...scout, contractKind: "research-report", readRoots: ["src"] }) ?? "", /no tools/);
+		strictEqual(readScopedNoToolsReason({ ...scout, contractKind: "research-report" }), null);
+		strictEqual(readScopedNoToolsReason({ ...scout, capabilityClass: "workspace-edit" }), null);
+		strictEqual(readScopedNoToolsReason({ ...scout, readOnly: false }), null);
+		strictEqual(readScopedNoToolsReason({ ...scout, toolLaneObserved: false }), null);
+		recordToolFinish(stats, { tool: "read", outcome: "ok", actionClass: "read" });
+		strictEqual(readScopedNoToolsReason({ ...scout, activity: summarizeToolActivity(stats, () => "read") }), null);
+		const failureClass = classifyFailure({ ...evidence, exitCode: 0, qualityGateFailure: true }, null, "failed", null);
+		strictEqual(failureClass, "model-quality");
+		strictEqual(decideRetry(failureClass, 0, 1).retry, true);
 	});
 
 	it("names an edit worker that ran no tool, or recorded a limitation and changed nothing, as having done no work", () => {

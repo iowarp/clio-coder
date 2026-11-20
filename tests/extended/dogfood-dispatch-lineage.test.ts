@@ -114,8 +114,9 @@ async function fixture(
 									needsSplit: false,
 									proposedSubtasks: [],
 								};
-					// A review gate only counts a pass from a reviewer that inspected something.
-					if (spec.agentId === "verifier") {
+					// A review gate only counts a pass from a reviewer that inspected something, and a
+					// read-scoped scout that executed no tool seals failed (FX-19).
+					if (spec.agentId === "verifier" || spec.agentId === "scout") {
 						yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok" } };
 					}
 					yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content: JSON.stringify(answer) } };
@@ -585,6 +586,7 @@ function controlledWorker() {
 		},
 		events: (async function* () {
 			const result = await promise;
+			if (result.exitCode === 0) yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok" } };
 			if (result.exitCode === 0)
 				yield {
 					type: "message_end",

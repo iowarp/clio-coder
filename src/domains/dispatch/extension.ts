@@ -519,6 +519,7 @@ import {
 	blockedWriteDetail,
 	countToolCalls,
 	hasPotentiallyMutatingAttempt,
+	readScopedNoToolsReason,
 	recordToolCompletion,
 	recordToolFinish,
 	recordToolStart,
@@ -9837,7 +9838,7 @@ export function createDispatchBundle(
 					// The worker derived the same gates from the same task text.
 					...(appliedResultContract?.kind === "verifier-report" ? { taskGates: extractTaskGates(req.task).gates } : {}),
 				});
-				const sealedResultContractFact: RunResultContractFact | null =
+				let sealedResultContractFact: RunResultContractFact | null =
 					resultContract === null
 						? null
 						: validationGrounding !== null &&
@@ -9845,6 +9846,25 @@ export function createDispatchBundle(
 								resultContract.fact.quality === "pass"
 							? { ...resultContract.fact, quality: "unmeasured" }
 							: resultContract.fact;
+				// FX-19: a read-scoped worker that read nothing grades fail and seals failed, so retry and summaries count it.
+				const noToolsReason =
+					finalOutcome === "succeeded"
+						? readScopedNoToolsReason({
+								activity: summarizeToolActivity(toolStats, (tool) => safety.classify({ tool }).actionClass),
+								readOnly: lifecycle.readOnly,
+								capabilityClass: lifecycle.capabilityClass,
+								contractKind: appliedResultContract?.kind ?? null,
+								readRoots: req.intent?.readRoots ?? [],
+								toolLaneObserved: lifecycle.runtimeKind !== "subprocess",
+							})
+						: null;
+				if (noToolsReason !== null) {
+					if (sealedResultContractFact !== null) sealedResultContractFact = { ...sealedResultContractFact, quality: "fail" };
+					evidence.qualityGateFailure = true;
+					finalOutcome = "failed";
+					finalDetail = noToolsReason;
+					failureMessage = noToolsReason;
+				}
 				if (validationGrounding !== null && validationGrounding.ungrounded.length > 0) {
 					finalDetail = [finalDetail, describeUngroundedValidations(validationGrounding)].filter(Boolean).join("; ");
 				}
