@@ -20,6 +20,7 @@ import { loadSkills, type Skill } from "./loader.js";
 
 export type MarketplaceSkillOrigin = "catalog" | "index";
 
+import { relativePathEscapes } from "../../../core/path-containment.js";
 import type { LibraryEntryKind, LibraryRequirementRef } from "../library-types.js";
 
 export type { LibraryEntryKind, LibraryRequirementRef } from "../library-types.js";
@@ -238,7 +239,7 @@ function resolveCatalogDir(options: DiscoverMarketplaceOptions): string | null {
 function catalogCategory(catalogDir: string, baseDir: string): string | undefined {
 	const rel = path.relative(catalogDir, baseDir);
 	const category = path.dirname(rel);
-	if (rel.length === 0 || rel.startsWith("..") || category === "." || category.startsWith("..")) return undefined;
+	if (rel.length === 0 || relativePathEscapes(rel) || category === ".") return undefined;
 	return category;
 }
 
