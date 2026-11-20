@@ -291,6 +291,14 @@ test("a CLI fork names its child at creation, never writes the parent, and block
 	);
 	assert.equal(sessionRemovalRefusal(parent.id)?.kind, "live");
 	assert.equal(renameSessionAtRest(parent.id, "gamma")?.pid, process.ppid);
+	// session compact refuses the held session before it boots anything (SPEC L3c).
+	const compactScript = `process.chdir(${JSON.stringify(env.dir)}); process.argv = [process.execPath, "clio-coder", "session", "compact", ${JSON.stringify(parent.id)}, "--json"]; await import(${JSON.stringify(join(process.cwd(), "src/cli/index.ts"))});`;
+	const refused = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", compactScript], {
+		env: process.env,
+		encoding: "utf8",
+	});
+	assert.equal(refused.status, 1, refused.stderr);
+	assert.equal(JSON.parse(refused.stdout).error.code, "session_live");
 	assert.throws(() => session.resume(parent.id), new RegExp(`${process.ppid}`));
 	assert.equal(session.forkFrom(parent.id).parentSessionId, parent.id, "a live parent can still be forked");
 	await session.close();
