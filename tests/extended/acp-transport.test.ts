@@ -5,7 +5,14 @@ import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import { promisify } from "node:util";
 import { AcpProcessError } from "../../src/engine/acp/errors.js";
-import { ACP_MAX_INPUT_LINE_BYTES, createStdioServerTransport } from "../../src/engine/acp/transport.js";
+import {
+	ACP_MAX_INPUT_LINE_BYTES,
+	boundAcpSessionUpdate,
+	createStdioServerTransport,
+	createStdioTransport,
+	routeNonJsonRpcStdout,
+	type StdioTransportOptions,
+} from "../../src/engine/acp/transport.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 for (const scenario of ["drain", "overflow", "initial", "initial-ascii", "write-error", "fast"] as const) {
@@ -145,5 +152,94 @@ test("ACP rejects the first oversized frame that stalls an ordinary sink", async
 		transport.close();
 		input.destroy();
 		output.destroy();
+	}
+});
+
+test("ACP stdio hooks route stray stdout and bound tool updates, and leave every frame as sent when unset", async () => {
+	const update = {
+		sessionUpdate: "tool_call_update",
+		toolCallId: "call-1",
+		status: "completed",
+		content: [
+			{ type: "content", content: { type: "image", mimeType: "image/png", data: "A".repeat(5_000) } },
+			{ type: "content", content: { type: "text", text: "x".repeat(100) } },
+		],
+		rawOutput: { output: "done", formatted_output: "done", items: [1, 2, 3, 4, 5] },
+	};
+	const sent = { sessionId: "s-1", update };
+	// The peer answers each request after an OAuth line on stdout and one heavy tool update.
+	const peer = `
+		const payload = JSON.parse(process.argv[1]);
+		let buffer = "";
+		process.stdin.setEncoding("utf8");
+		process.stdin.on("data", (chunk) => {
+			buffer += chunk;
+			for (let at = buffer.indexOf("\\n"); at >= 0; at = buffer.indexOf("\\n")) {
+				const message = JSON.parse(buffer.slice(0, at));
+				buffer = buffer.slice(at + 1);
+				process.stdout.write("Open https://auth.example/device?code=XYZ to sign in\\n");
+				process.stdout.write(JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: payload }) + "\\n");
+				process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { ok: true } }) + "\\n");
+			}
+		});
+	`;
+	const home = makeScratchHome("clio-coder-acp-hooks-");
+	const env = Object.fromEntries(
+		Object.entries(home.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+	);
+	const exchange = async (options: StdioTransportOptions) => {
+		const transport = createStdioTransport(process.execPath, ["-e", peer, JSON.stringify(sent)], { ...options, env });
+		const updates: unknown[] = [];
+		const stderr: string[] = [];
+		transport.onNotification("session/update", (params) => updates.push(params));
+		transport.onStderr((chunk) => stderr.push(chunk));
+		try {
+			const result = await transport.request("initialize", {}, 5_000);
+			return { result, updates, stderr: stderr.join("") };
+		} finally {
+			await transport.forceTerminate();
+		}
+	};
+	try {
+		const plain = await exchange({});
+		assert.deepEqual(plain.result, { ok: true });
+		assert.deepEqual(plain.updates, [sent]);
+		assert.equal(plain.stderr, "");
+
+		const hooked = await exchange({
+			transformStdout: routeNonJsonRpcStdout,
+			transformSessionUpdate: (params) => boundAcpSessionUpdate(params, { maxNodes: 12, maxChars: 40 }),
+		});
+		assert.deepEqual(hooked.result, { ok: true });
+		assert.equal(hooked.stderr, "Open https://auth.example/device?code=XYZ to sign in\n");
+		assert.deepEqual(hooked.updates, [
+			{
+				sessionId: "s-1",
+				update: {
+					sessionUpdate: "tool_call_update",
+					toolCallId: "call-1",
+					status: "completed",
+					content: [
+						{
+							type: "content",
+							content: {
+								type: "text",
+								text: "[image omitted: image/png, 5000 base64 chars]",
+								_meta: { "clio-coder/omitted": { kind: "image", mimeType: "image/png", chars: 5_000 } },
+							},
+						},
+						{ type: "content", content: { type: "text", text: `${"x".repeat(22)}[78 chars omitted]` } },
+					],
+					rawOutput: { output: "[4 chars omitted]", items: ["[5 items omitted]"] },
+				},
+			},
+		]);
+		// Nothing to cut, or not a tool update: the same object comes back.
+		const small = { sessionId: "s-1", update: { sessionUpdate: "tool_call", toolCallId: "c", rawInput: { a: 1 } } };
+		assert.equal(boundAcpSessionUpdate(small), small);
+		const chunk = { sessionId: "s-1", update: { sessionUpdate: "agent_message_chunk", content: update.content[0] } };
+		assert.equal(boundAcpSessionUpdate(chunk), chunk);
+	} finally {
+		home.cleanup();
 	}
 });

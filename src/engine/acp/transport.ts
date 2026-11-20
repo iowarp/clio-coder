@@ -109,6 +109,13 @@ export interface AcpBootablePeerTransport extends AcpJsonRpcPeerTransport {
 	invokeRegistered(method: string, params: unknown): Promise<unknown>;
 }
 
+/**
+ * What a `transformStdout` hook decides for one stdout line: the line to parse
+ * as JSON-RPC, `null` to drop it, or `{ diagnostic }` to hand its text to the
+ * stderr handlers instead of the parser.
+ */
+export type AcpStdoutLineDisposition = string | null | { diagnostic: string };
+
 export interface StdioTransportOptions {
 	cwd?: string;
 	env?: Record<string, string>;
@@ -116,6 +123,164 @@ export interface StdioTransportOptions {
 	terminationGraceMs?: number;
 	/** Maximum post-SIGKILL wait for process/handle closure. Defaults to 2s. */
 	terminationWaitMs?: number;
+	/**
+	 * Sees each nonblank stdout line before JSON-RPC parsing. A peer that prints
+	 * plain text on stdout, such as an OAuth URL, routes it away here: the parser
+	 * fails every pending request on a `{`-prefixed line that is not JSON. Unset
+	 * means identity; a hook that throws leaves the line as it was.
+	 */
+	transformStdout?: (line: string) => AcpStdoutLineDisposition;
+	/**
+	 * Rewrites `session/update` notification params before any handler sees
+	 * them, so events and run records carry the rewritten form. Unset means
+	 * identity; a hook that throws leaves the params as they were.
+	 */
+	transformSessionUpdate?: (params: unknown) => unknown;
+}
+
+/**
+ * A `transformStdout` for a peer that prints text on stdout: a line that does
+ * not open a JSON object goes to the stderr handlers as a diagnostic instead of
+ * being dropped unseen, and every other line is parsed as before.
+ */
+export function routeNonJsonRpcStdout(line: string): AcpStdoutLineDisposition {
+	return line.trimStart().startsWith("{") ? line : { diagnostic: line };
+}
+
+/** One shared bound on a tool update's `content`, `rawInput` and `rawOutput`. */
+export interface AcpToolPayloadBudget {
+	/** JSON values visited, containers and leaves alike. */
+	maxNodes: number;
+	/** UTF-16 code units across every string kept. */
+	maxChars: number;
+}
+
+export const ACP_TOOL_PAYLOAD_BUDGET: AcpToolPayloadBudget = { maxNodes: 2_000, maxChars: 64 * 1024 };
+
+const TOOL_PAYLOAD_FIELDS = ["content", "rawInput", "rawOutput"] as const;
+const FORMATTED_OUTPUT_KEYS = new Set(["formatted_output", "formattedOutput"]);
+const OMITTED_KEY = "[omitted]";
+const OMITTED_META_KEY = "clio-coder/omitted";
+
+interface PayloadWalk {
+	nodes: number;
+	chars: number;
+	changed: boolean;
+	readonly budget: AcpToolPayloadBudget;
+}
+
+/** An ACP image content block with inline data becomes a text block naming what was removed. */
+function inlineImagePlaceholder(value: Record<string, unknown>): Record<string, unknown> | null {
+	if (value.type !== "image" || typeof value.data !== "string") return null;
+	const mimeType = typeof value.mimeType === "string" ? value.mimeType.slice(0, 64) : "image";
+	return {
+		type: "text",
+		text: `[image omitted: ${mimeType}, ${value.data.length} base64 chars]`,
+		_meta: { [OMITTED_META_KEY]: { kind: "image", mimeType, chars: value.data.length } },
+	};
+}
+
+/** A `formatted_output` string that repeats a sibling string field of the same record. */
+function duplicateFormattedOutput(record: Record<string, unknown>, key: string, value: unknown): boolean {
+	if (!FORMATTED_OUTPUT_KEYS.has(key) || typeof value !== "string") return false;
+	const text = value.trim();
+	return Object.entries(record).some(
+		([other, sibling]) => other !== key && typeof sibling === "string" && sibling.trim() === text,
+	);
+}
+
+function boundPayloadString(value: string, walk: PayloadWalk): string {
+	const left = walk.budget.maxChars - walk.chars;
+	if (value.length <= left) {
+		walk.chars += value.length;
+		return value;
+	}
+	walk.changed = true;
+	walk.chars = walk.budget.maxChars;
+	let head = value.slice(0, Math.max(0, left));
+	// Never end on the first half of a surrogate pair.
+	const last = head.charCodeAt(head.length - 1);
+	if (last >= 0xd800 && last <= 0xdbff) head = head.slice(0, -1);
+	return `${head}[${value.length - head.length} chars omitted]`;
+}
+
+/**
+ * Children are visited only while the node budget has room, so a call never
+ * starts over budget and recursion depth is bounded by the budget itself.
+ * Records are rebuilt with `Object.fromEntries`, which defines a peer's
+ * `__proto__` key as data rather than assigning a prototype.
+ */
+function boundPayloadNode(value: unknown, walk: PayloadWalk): unknown {
+	walk.nodes += 1;
+	if (typeof value === "string") return boundPayloadString(value, walk);
+	if (Array.isArray(value)) {
+		const out: unknown[] = [];
+		for (let index = 0; index < value.length; index++) {
+			if (walk.nodes >= walk.budget.maxNodes) {
+				walk.changed = true;
+				out.push(`[${value.length - index} items omitted]`);
+				break;
+			}
+			out.push(boundPayloadNode(value[index], walk));
+		}
+		return out;
+	}
+	if (!isRecord(value)) return value;
+	const image = inlineImagePlaceholder(value);
+	if (image !== null) {
+		walk.changed = true;
+		return image;
+	}
+	const entries = Object.entries(value).filter(([key, child]) => !duplicateFormattedOutput(value, key, child));
+	if (entries.length !== Object.keys(value).length) walk.changed = true;
+	const out: Array<[string, unknown]> = [];
+	for (const [index, [key, child]] of entries.entries()) {
+		if (walk.nodes >= walk.budget.maxNodes) {
+			walk.changed = true;
+			out.push([OMITTED_KEY, `${entries.length - index} fields`]);
+			break;
+		}
+		out.push([key, boundPayloadNode(child, walk)]);
+	}
+	return Object.fromEntries(out);
+}
+
+/** A field reached after the node budget is spent keeps its JSON kind, so a record stays a record. */
+function omittedPayloadField(value: unknown): unknown {
+	if (Array.isArray(value)) return [`[${value.length} items omitted]`];
+	if (isRecord(value)) return { [OMITTED_KEY]: `${Object.keys(value).length} fields` };
+	if (typeof value === "string") return `[${value.length} chars omitted]`;
+	return null;
+}
+
+/**
+ * A `transformSessionUpdate` for a peer whose tool updates carry bulk. On a
+ * `tool_call` or `tool_call_update` it replaces inline base64 images in
+ * `content`, `rawInput` and `rawOutput` with a text placeholder (typed under
+ * `_meta["clio-coder/omitted"]`), removes a `formatted_output` string that
+ * repeats a sibling field, and holds what remains to one node count and one
+ * character budget; whatever is cut is replaced by a marker that says how much.
+ * Other updates, and a payload with nothing to cut, return the same object.
+ */
+export function boundAcpSessionUpdate(
+	params: unknown,
+	budget: AcpToolPayloadBudget = ACP_TOOL_PAYLOAD_BUDGET,
+): unknown {
+	if (!isRecord(params) || !isRecord(params.update)) return params;
+	const update = params.update;
+	if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") return params;
+	const walk: PayloadWalk = { nodes: 0, chars: 0, changed: false, budget };
+	const bounded: Record<string, unknown> = { ...update };
+	for (const field of TOOL_PAYLOAD_FIELDS) {
+		if (!Object.hasOwn(update, field)) continue;
+		if (walk.nodes >= budget.maxNodes) {
+			walk.changed = true;
+			bounded[field] = omittedPayloadField(update[field]);
+			continue;
+		}
+		bounded[field] = boundPayloadNode(update[field], walk);
+	}
+	return walk.changed ? { ...params, update: bounded } : params;
 }
 
 export interface StdioServerTransportOptions {
@@ -222,10 +387,14 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 	private readonly notificationHandlers = new Map<string, Set<NotificationHandler>>();
 	private readonly requestHandlers = new Map<string, RequestHandler>();
 	private readonly stderrHandlers = new Set<StderrHandler>();
+	private readonly transformStdout: ((line: string) => AcpStdoutLineDisposition) | undefined;
+	private readonly transformSessionUpdate: ((params: unknown) => unknown) | undefined;
 
 	constructor(command: string, args: string[], options: StdioTransportOptions = {}) {
 		this.terminationGraceMs = boundedMilliseconds(options.terminationGraceMs, DEFAULT_TERMINATION_GRACE_MS);
 		this.terminationWaitMs = boundedMilliseconds(options.terminationWaitMs, DEFAULT_TERMINATION_WAIT_MS);
+		this.transformStdout = options.transformStdout;
+		this.transformSessionUpdate = options.transformSessionUpdate;
 		this.childClosePromise = new Promise((resolve) => {
 			this.resolveChildClose = resolve;
 		});
@@ -252,9 +421,7 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 		this.child.stdout.setEncoding("utf8");
 		this.child.stderr.setEncoding("utf8");
 		this.child.stdout.on("data", (chunk: string) => this.consumeStdout(chunk));
-		this.child.stderr.on("data", (chunk: string) => {
-			for (const handler of this.stderrHandlers) handler(chunk);
-		});
+		this.child.stderr.on("data", (chunk: string) => this.emitStderr(chunk));
 		this.child.on("error", (err) => {
 			this.closeChannel(new AcpProcessError(`ACP process error: ${errorMessage(err)}`));
 		});
@@ -381,7 +548,26 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 		}
 	}
 
-	private handleLine(line: string): void {
+	private emitStderr(chunk: string): void {
+		for (const handler of this.stderrHandlers) handler(chunk);
+	}
+
+	private handleLine(rawLine: string): void {
+		let line = rawLine;
+		if (this.transformStdout !== undefined) {
+			let disposition: AcpStdoutLineDisposition = rawLine;
+			try {
+				disposition = this.transformStdout(rawLine);
+			} catch {
+				// A failing hook must not cost a frame: the line parses as it came.
+			}
+			if (disposition === null) return;
+			if (typeof disposition !== "string") {
+				this.emitStderr(`${disposition.diagnostic}\n`);
+				return;
+			}
+			line = disposition;
+		}
 		const trimmed = line.trimStart();
 		if (!trimmed.startsWith("{")) {
 			return;
@@ -411,7 +597,18 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 		}
 		const handlers = this.notificationHandlers.get(method);
 		if (!handlers) return;
-		for (const handler of handlers) handler(parsed.params);
+		const params = method === "session/update" ? this.sessionUpdateParams(parsed.params) : parsed.params;
+		for (const handler of handlers) handler(params);
+	}
+
+	private sessionUpdateParams(params: unknown): unknown {
+		if (this.transformSessionUpdate === undefined) return params;
+		try {
+			return this.transformSessionUpdate(params);
+		} catch {
+			// A failing hook must not cost an update: handlers see it as it came.
+			return params;
+		}
 	}
 
 	private handleResponse(message: AcpJsonRpcSuccess | AcpJsonRpcFailure): void {
