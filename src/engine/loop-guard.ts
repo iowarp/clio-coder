@@ -1921,12 +1921,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		if (streak < RESULT_STAGNATION_THRESHOLD || lockoutByTurn.has(turnKey)) return [];
 		// The read already ran and remains successful. The threshold is an
 		// annotation (DESIGN 3.5): it spends no loop block budget and cannot
-		// lock the turn, and the count starts over once it fires.
+		// lock the turn, and the count starts over once it fires. The text is
+		// advice: wording a model can read as a block makes it report one (ACP-H5).
 		redundantReadsByTurn.delete(turnKey);
 		return [
 			{
 				kind: "annotate_tool_result",
-				message: `loop detected: the last ${streak} read calls returned only source lines already observed from unchanged files. Reuse the evidence above and return the required result format; do not page through it again.`,
+				message: "These lines were already shown in this turn; reuse them unless the file changed.",
 				severity: "warn",
 			},
 		];

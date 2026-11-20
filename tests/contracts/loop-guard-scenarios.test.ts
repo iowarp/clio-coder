@@ -741,10 +741,13 @@ test("loop guard read coverage: a grep between rereads keeps the count, a fold f
 		});
 		const effects = row.steps.flatMap((step) => guard.evaluate(step));
 		const detail = `${row.name}: ${JSON.stringify(effects)}`;
-		strictEqual(
-			effects.filter((effect) => effect.kind === "annotate_tool_result" && effect.message.includes("already observed"))
-				.length,
-			row.annotations,
+		const shown = effects.filter(
+			(effect) => effect.kind === "annotate_tool_result" && effect.message.includes("already shown"),
+		);
+		strictEqual(shown.length, row.annotations, detail);
+		// Advice, not a block: a model reads "loop detected" or "blocked" as a refusal (ACP-H5).
+		ok(
+			shown.every((effect) => effect.kind === "annotate_tool_result" && !/loop detected|blocked/i.test(effect.message)),
 			detail,
 		);
 		ok(!effects.some((effect) => effect.kind === "block_tool" || effect.kind === "lock_tools"), detail);

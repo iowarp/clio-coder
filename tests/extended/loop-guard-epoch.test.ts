@@ -377,7 +377,7 @@ describe("read coverage stagnation", () => {
 		f.guard.evaluate(afterOk("coverage", ToolNames.Grep));
 		for (const offset of [560, 640]) deepStrictEqual(f.guard.evaluate(observedRead(offset, 20)), []);
 		const warning = f.guard.evaluate(observedRead(628, 15));
-		ok(JSON.stringify(warning).includes("already observed"));
+		ok(JSON.stringify(warning).includes("already shown"));
 		ok(warning.every((effect) => effect.kind === "annotate_tool_result"));
 		// The count starts over once the annotation fires; no lockout follows.
 		deepStrictEqual(f.guard.evaluate(observedRead(598, 12)), []);
@@ -393,7 +393,7 @@ describe("read coverage stagnation", () => {
 		// A subset spanning two formerly separate windows is now redundant.
 		const effects = [5, 15, 25, 35].map((offset) => f.guard.evaluate(observedRead(offset, 10)));
 		deepStrictEqual(
-			effects.map((row) => JSON.stringify(row).includes("already observed")),
+			effects.map((row) => JSON.stringify(row).includes("already shown")),
 			[false, false, true, false],
 		);
 		strictEqual(f.locks(), 0);
@@ -510,7 +510,7 @@ describe("read coverage stagnation", () => {
 			// Captured calls 29–32 from j1n6i2odzmuh; limit=1 reports truncated=true.
 			deepStrictEqual(await read({ offset: 16, limit: 30, line_numbers: true }), []);
 			deepStrictEqual(await read({ offset: 9, limit: 2, line_numbers: true }), []);
-			ok(JSON.stringify(await read({ offset: 30, limit: 1, line_numbers: true })).includes("already observed"));
+			ok(JSON.stringify(await read({ offset: 30, limit: 1, line_numbers: true })).includes("already shown"));
 			deepStrictEqual(await read({ offset: 20, limit: 1, line_numbers: true }), []);
 			strictEqual(f.locks(), 0);
 		} finally {
@@ -553,7 +553,7 @@ describe("read coverage stagnation", () => {
 					metadata: { resultKind: result.kind, resultBytes: result.kind === "ok" ? Buffer.byteLength(result.output) : 0 },
 					toolResultDetails: result.details ?? {},
 				});
-				annotated.push(JSON.stringify(effects).includes("already observed"));
+				annotated.push(JSON.stringify(effects).includes("already shown"));
 			}
 			deepStrictEqual(annotated, [false, false, false, true, false]);
 			strictEqual(f.locks(), 0);
