@@ -80,7 +80,10 @@ export type {
 } from "./result-contract.js";
 export {
 	COUNCIL_BALLOT_VERDICT_MAX_BYTES,
+	COUNCIL_SEAT_NOT_RUN_ID,
+	COUNCIL_SEAT_NOT_RUN_WORDS,
 	isCouncilBallotOption,
+	isCouncilSeatNotRun,
 	parseCouncilReport,
 	parseDelegationPlanResult,
 	parseOracleResult,

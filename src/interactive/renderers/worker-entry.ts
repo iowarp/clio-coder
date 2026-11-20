@@ -1,6 +1,6 @@
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import { renderCalls } from "../../core/telemetry/render.js";
-import { parseCouncilReport } from "../../domains/agents/index.js";
+import { isCouncilSeatNotRun, parseCouncilReport } from "../../domains/agents/index.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { COUNCIL_SEALED_REPORT_AGENT_ID, COUNCIL_SYNTHESIS_LABEL } from "../../session-control/council.js";
@@ -196,8 +196,8 @@ function identityUnits(entry: WorkerEntryState, withRunId = true): string[] {
 			? councilLabelText(
 					theme,
 					isSynthesis(entry)
-						? report !== null && report.members.length > 0
-							? `council of ${report.members.length}`
+						? report !== null && councilSeatsRan(report) > 0
+							? `council of ${councilSeatsRan(report)}`
 							: "council"
 						: entry.council.label,
 					entry.council.color,
@@ -259,10 +259,24 @@ function answersByDesign(entry: WorkerEntryState): boolean {
 	return entry.council !== undefined;
 }
 
-/** A council synthesis that settled with some members unanswered: its own run succeeded, the council did not in full. */
+/**
+ * A council synthesis that settled with some members unanswered: its own run succeeded, the council did not in full.
+ * A seat whose target was down never ran; the card names it in its body but does not read partial for it (FX-20).
+ */
 function councilShortfall(entry: WorkerEntryState): boolean {
 	if (!isSynthesis(entry) || entry.result?.outcome !== "succeeded") return false;
-	return parseCouncilReport(entry.text)?.members.some((member) => member.failed !== undefined) === true;
+	return (
+		parseCouncilReport(entry.text)?.members.some(
+			(member) => member.failed !== undefined && !isCouncilSeatNotRun(member),
+		) === true
+	);
+}
+
+/** How many seats sat on the council: distinct roster labels that ran, as the approval card counted them. */
+function councilSeatsRan(report: {
+	members: ReadonlyArray<{ label: string; runId: string; failed?: unknown }>;
+}): number {
+	return new Set(report.members.filter((member) => !isCouncilSeatNotRun(member)).map((member) => member.label)).size;
 }
 
 function settledMark(result: WorkerRunResultSummary, synthesizes: boolean): string {

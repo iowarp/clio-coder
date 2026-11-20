@@ -640,6 +640,21 @@ export interface CouncilReportMember {
 	failed?: { reason: string };
 }
 
+/** The run id a council report gives a seat that never ran because admission found its target down (FL-4). */
+export const COUNCIL_SEAT_NOT_RUN_ID = "not-run";
+/** What every council surface says for such a seat, in place of a failed answer. */
+export const COUNCIL_SEAT_NOT_RUN_WORDS = "seat not run (target unavailable)";
+
+/**
+ * A seat that never ran because its target was down: it is skipped, not a failed answer, so a council counts only the
+ * seats that ran. Takes an unparsed member too, since `/council` reads tool details before any parse.
+ */
+export function isCouncilSeatNotRun(member: { readonly runId?: unknown; readonly failed?: unknown }): boolean {
+	if (member.failed === null || typeof member.failed !== "object") return false;
+	const reason = (member.failed as { reason?: unknown }).reason;
+	return member.runId === COUNCIL_SEAT_NOT_RUN_ID || (typeof reason === "string" && reason.startsWith("seat not run"));
+}
+
 export interface CouncilReport {
 	members: CouncilReportMember[];
 	synthesis: {

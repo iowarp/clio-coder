@@ -12,7 +12,13 @@ import { renderFactField, renderPricingSum } from "../core/telemetry/render.js";
 import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsTool } from "../core/turn-constraints.js";
 import { clioStateDir } from "../core/xdg.js";
-import type { CouncilReport, CouncilReportMember } from "../domains/agents/result-contract.js";
+import {
+	COUNCIL_SEAT_NOT_RUN_ID,
+	COUNCIL_SEAT_NOT_RUN_WORDS,
+	type CouncilReport,
+	type CouncilReportMember,
+	isCouncilSeatNotRun,
+} from "../domains/agents/result-contract.js";
 import type { BriefingNotice, BriefingPart, BuiltBriefing } from "../domains/context/index.js";
 import { buildBriefing } from "../domains/context/index.js";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
@@ -2414,9 +2420,6 @@ function boundedCouncilBriefing(parts: ReadonlyArray<BriefingPart>): BuiltBriefi
 const COUNCIL_MEMBER_FRAMING =
 	"[council] You are advising a council read-only: read and search the code, then answer the question. Do not edit files, run builds or commit; no write tool is available in this seat.";
 
-/** The run id a council report gives a seat that never ran because its target was down; no run carries it. */
-const COUNCIL_SEAT_NOT_RUN = "not-run";
-
 async function runCouncil(
 	deps: RegisteredDispatchToolDeps,
 	base: DispatchRequest,
@@ -2616,7 +2619,7 @@ async function runCouncil(
 		if (run === null)
 			return {
 				label,
-				runId: COUNCIL_SEAT_NOT_RUN,
+				runId: COUNCIL_SEAT_NOT_RUN_ID,
 				round,
 				answer: "",
 				failed: { reason: down.get(label) ?? "seat not run" },
@@ -2752,6 +2755,9 @@ function councilResult(deps: DispatchToolDeps, outcome: Awaited<ReturnType<typeo
 		.filter((member) => member.round === Math.max(...outcome.report.members.map((entry) => entry.round)))
 		.map((member) => {
 			const run = outcome.runs.find((entry) => entry.receipt.runId === member.runId);
+			// A skipped seat names itself in the words every council surface uses, with admission's reason after them.
+			if (isCouncilSeatNotRun(member))
+				return `[${member.label}] ${COUNCIL_SEAT_NOT_RUN_WORDS}: ${(member.failed?.reason ?? "").replace(/^seat not run:?\s*/u, "")}`;
 			if (run === undefined && member.failed !== undefined) return `[${member.label}] ${member.failed.reason}`;
 			return `[${member.label}] ${run?.receipt.targetId ?? "unknown"}/${run?.receipt.wireModelId ?? "unknown"}\n${member.answer}`;
 		});
@@ -2764,7 +2770,8 @@ function councilResult(deps: DispatchToolDeps, outcome: Awaited<ReturnType<typeo
 	};
 	const finalRound = Math.max(...outcome.report.members.map((member) => member.round));
 	const timedOut = new Set(outcome.report.partial?.timedOut ?? []);
-	const finals = outcome.report.members.filter((member) => member.round === finalRound);
+	// A seat whose target was down never ran: it is named above but counts neither as an answer nor as a failure (FX-20).
+	const finals = outcome.report.members.filter((member) => member.round === finalRound && !isCouncilSeatNotRun(member));
 	if (timedOut.size > 0) {
 		sections.unshift(
 			`[partial] council returned without ${[...timedOut].join(", ")}: member deadline passed; ${finals.filter((member) => member.failed === undefined).length} of ${finals.length} members answered`,

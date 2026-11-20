@@ -1,5 +1,5 @@
 import { AssistantProseProjection, sanitizeAssistantProse } from "../../core/assistant-prose.js";
-import type { CouncilReport } from "../../domains/agents/index.js";
+import { COUNCIL_SEAT_NOT_RUN_WORDS, type CouncilReport, isCouncilSeatNotRun } from "../../domains/agents/index.js";
 import { sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { RedactedStringProjection, redactStreamingSecretString } from "../../domains/safety/redaction.js";
 import { GLYPH } from "../theme/index.js";
@@ -381,9 +381,11 @@ export function presentCouncilReport(report: CouncilReport): PresentedContractAn
 	const lines: string[] = councilSynthesisLines(report);
 	for (const member of report.members) {
 		lines.push(
-			member.failed !== undefined
-				? `${member.label}: no answer (${member.failed.reason})`
-				: `${member.label}: ${councilAnswerGist(member.answer)}`,
+			isCouncilSeatNotRun(member)
+				? `${member.label}: ${COUNCIL_SEAT_NOT_RUN_WORDS}`
+				: member.failed !== undefined
+					? `${member.label}: no answer (${member.failed.reason})`
+					: `${member.label}: ${councilAnswerGist(member.answer)}`,
 		);
 	}
 	const footer = synthesis.kind === "none" ? councilCollectedWords(report) : `synthesis by ${synthesis.kind}`;

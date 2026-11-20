@@ -13,7 +13,9 @@ import type { RunResultDraft } from "../../src/domains/dispatch/types.js";
 import { createWorkerProgressFold } from "../../src/domains/telemetry/worker-progress.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { dispatchCouncilThroughRegistry } from "../../src/interactive/council-dispatch.js";
+import { presentCouncilReport } from "../../src/interactive/renderers/worker-answer.js";
 import { parseCouncilDeadline } from "../../src/session-control/council.js";
+import { councilShortfall } from "../../src/session-control/poll.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { COUNCIL_DEFAULT_AGENT_ID } from "../../src/tools/dispatch-arguments.js";
 import { applyToolProfile } from "../../src/tools/profiles.js";
@@ -340,6 +342,27 @@ test("a seat whose target is down sits as a failed seat while the live seats del
 			["b", null],
 			["dead", "seat not run: target 'deadend' unavailable: health down: ECONNREFUSED"],
 		],
+	);
+	// FX-20: the skipped seat is named but not counted; both seats that ran answered, so the council is whole as admitted.
+	strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
+	match(result.kind === "ok" ? result.output : "", /\[dead\] seat not run \(target unavailable\): target 'deadend'/u);
+	const outcome = await dispatchCouncilThroughRegistry({ invoke: async () => ({ kind: "ok", result }) } as never, {
+		mode: "council",
+	});
+	deepStrictEqual(outcome, { status: "ok", skipped: { answered: 2, ran: 2, labels: ["dead"] } });
+	strictEqual(presentCouncilReport(report as CouncilReport).lines.at(-1), "dead: seat not run (target unavailable)");
+	// With a ran seat failing too, partial counts only the seats that ran.
+	deepStrictEqual(
+		councilShortfall({
+			council: {
+				members: [
+					{ label: "a", runId: "r1", round: 1, answer: "yes" },
+					{ label: "b", runId: "r2", round: 1, answer: "", failed: { reason: "ECONNREFUSED" } },
+					{ label: "dead", runId: "not-run", round: 1, answer: "", failed: { reason: "seat not run: x" } },
+				],
+			},
+		}),
+		{ answered: 1, total: 2, failed: ["b"] },
 	);
 	seated.length = 0;
 	const refused = await tool.run({ mode: "council", members: members(["a", "dead"]), task: "t" }, {} as never);

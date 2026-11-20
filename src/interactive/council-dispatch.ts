@@ -11,7 +11,7 @@
 
 import { ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
-import { councilShortfall, voteTally } from "../session-control/poll.js";
+import { councilShortfall, councilSkippedSeats, voteTally } from "../session-control/poll.js";
 import type { CouncilDispatchOutcome } from "../session-control/slash-commands.js";
 import type { ToolRegistry } from "../tools/registry.js";
 
@@ -33,7 +33,9 @@ export async function dispatchCouncilThroughRegistry(
 	if (verdict.kind === "blocked") return { status: "blocked", reason: verdict.reason };
 	if (verdict.kind === "not_visible") return { status: "error", message: verdict.reason };
 	const tally = voteTally(verdict.result.details);
-	const extra = tally !== undefined ? { tally } : {};
+	// A seat skipped because its target was down is named beside the outcome, never counted as a failed answer (FX-20).
+	const skipped = councilSkippedSeats(verdict.result.details);
+	const extra = { ...(tally !== undefined ? { tally } : {}), ...(skipped !== undefined ? { skipped } : {}) };
 	const partial = councilShortfall(verdict.result.details);
 	return verdict.result.kind === "error"
 		? { status: "error", message: verdict.result.message, ...extra, ...(partial !== undefined ? { partial } : {}) }
