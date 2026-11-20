@@ -1788,7 +1788,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			) {
 				deps.queueHandOver?.atFinishTurn(final);
 			}
-			if (!final || localRuntime.agent.hasQueuedMessages?.() === true) return undefined;
+			// A declared turn still settles before a queued message carries the run on: its terminal row, turn_end and seal
+			// belong to it, and the returns after turn_end below hand the queue over (FX-38).
+			if (!final || (localRuntime.agent.hasQueuedMessages?.() === true && state.turnCompletion === null)) return undefined;
+			// `finish` is turn-terminal (fleet design 4.3, FX-38): a required tool still pending after a declared completion
+			// asks for nothing more.
+			if (state.turnCompletion !== null) requiredToolReminder = null;
 			if (requiredToolReminder !== null && currentRun() && state.activeInterruptReason === null) {
 				return { action: "continue" };
 			}
