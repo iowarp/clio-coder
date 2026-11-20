@@ -12,8 +12,9 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import { internalGitArgv } from "../../../core/internal-git.js";
+import { relativePathEscapes } from "../../../core/path-containment.js";
 import { loadFragments } from "../../prompts/fragment-loader.js";
 import { type DecisionLedgerEntry, decisionRef } from "../../session/entries.js";
 import { renderCodewikiDigest } from "../codewiki/digest.js";
@@ -63,7 +64,7 @@ const REPOSITORY_GUIDANCE_CANDIDATES = [
 
 function isWithin(root: string, candidate: string): boolean {
 	const rel = relative(root, candidate);
-	return rel.length === 0 || (!rel.startsWith("..") && !isAbsolute(rel));
+	return rel.length === 0 || !relativePathEscapes(rel);
 }
 
 /**

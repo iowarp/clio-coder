@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
 import { interopUserHome } from "../../core/xdg.js";
 import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
@@ -218,7 +219,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isSubpath(parent: string, child: string): boolean {
 	const rel = relative(parent, child);
-	return rel === "" || (!rel.startsWith("..") && !rel.includes(`..${sep}`));
+	return rel === "" || !relativePathEscapes(rel);
 }
 
 function displayPath(filePath: string, cwd: string, home: string): string {

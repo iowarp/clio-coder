@@ -18,6 +18,7 @@
  */
 import { createHash } from "node:crypto";
 import { isAbsolute, relative } from "node:path";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import type { AgentCapabilityClass } from "../agents/spec.js";
 import { demoteHandbookHeadings } from "./clio-md.js";
 import { type ProjectRule, selectActiveRules } from "./project-rules.js";
@@ -287,7 +288,7 @@ function relativeWorkingPaths(cwd: string, paths: ReadonlyArray<string>): string
 	const normalized = new Set<string>();
 	for (const path of paths) {
 		const rel = isAbsolute(path) ? relative(cwd, path) : path;
-		if (!rel || rel.startsWith("..") || isAbsolute(rel)) continue;
+		if (!rel || relativePathEscapes(rel)) continue;
 		normalized.add(rel.replace(/\\/g, "/"));
 	}
 	return [...normalized];

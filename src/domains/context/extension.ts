@@ -3,6 +3,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../../core/context-operation.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import type { ContextActivityPayload } from "../../core/telemetry/live-events.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import { loadMemoryRecordsSync } from "../memory/index.js";
@@ -265,7 +266,7 @@ export function createContextBundle(
 				if (paths.length === 0) return;
 				const rel = paths
 					.map((p) => (isAbsolute(p) ? relative(workspace, p) : p))
-					.filter((p) => p.length > 0 && !p.startsWith(".."));
+					.filter((p) => p.length > 0 && !relativePathEscapes(p));
 				// Fires after every write the agent makes, mid-turn, with the TUI
 				// mounted; an edge rebuild here is the same cost as one at start.
 				await coordinateCodewikiWrite(
