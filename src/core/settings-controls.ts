@@ -295,7 +295,7 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"attribution.gitCommits":
 		"Role trailers are added only when Clio has trusted evidence for that role. Disabling leaves subsequent commit messages entirely unchanged.",
 	"attribution.commitAuthor":
-		"Automatic makes Clio Coder the author of autonomous commits, with you as committer and a Co-authored-by trailer naming you. Interactive sessions always keep you as the author. Needs commit credit on and a configured user.name and user.email; an author you or the command chose always wins.",
+		"Automatic makes CLIO Coder the author of autonomous commits, with you as committer and a Co-authored-by trailer naming you. Interactive sessions always keep you as the author. Needs commit credit on and a configured user.name and user.email; an author you or the command chose always wins.",
 	"workers.onPermission":
 		"Safety judge reviews the call against your own messages while Clio runs at default; it runs on an allow and is denied on a block or when the judge gives no verdict. Deny the tool lets the worker continue without it. Stop the worker ends the run. Ask me waits for your answer, then uses the fallback choice if time runs out.",
 	"workers.escalation.timeoutMs":

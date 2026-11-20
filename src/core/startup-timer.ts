@@ -31,7 +31,7 @@ export class StartupTimer {
 
 	report(): string {
 		const snap = this.snapshot();
-		const lines = [`Clio Coder boot total ${snap.totalMs.toFixed(1)}ms`];
+		const lines = [`CLIO Coder boot total ${snap.totalMs.toFixed(1)}ms`];
 		for (const m of snap.marks) lines.push(`  ${m.at.toFixed(1)}ms  ${m.name}`);
 		return lines.join("\n");
 	}

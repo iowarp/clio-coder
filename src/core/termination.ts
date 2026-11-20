@@ -284,7 +284,7 @@ class TerminationCoordinator {
 				}
 				process.exit(SIGNAL_EXIT_CODES[signal] ?? 143);
 			}
-			this.notice(`Clio Coder: received ${signal}, shutting down...`);
+			this.notice(`CLIO Coder: received ${signal}, shutting down...`);
 			void this.shutdown(SIGNAL_EXIT_CODES[signal] ?? 143);
 		};
 		this.signalHandler = handler;
