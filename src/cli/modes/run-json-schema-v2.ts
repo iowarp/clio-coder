@@ -10,7 +10,7 @@
 import type { RunCallUsage } from "../../domains/dispatch/run-call-usage.js";
 import type { RunResult } from "../../domains/dispatch/types.js";
 import { EXIT_CODES } from "../kit/exit-codes.js";
-import type { RunJsonDispatchedRunOutcome } from "./run-json-schema.js";
+import type { RunJsonDispatchedRunOutcome, RunJsonVerifyResult } from "./run-json-schema.js";
 
 export const RUN_RESULT_SCHEMA_VERSION = 2;
 
@@ -74,6 +74,14 @@ const SIGNAL_EXIT: Readonly<Record<string, number>> = {
 	SIGTERM: EXIT_CODES.sigterm,
 };
 
+/** The signal name a coordinated shutdown's exit code stands for; null for any other code. */
+export function signalForExitCode(code: number): "SIGHUP" | "SIGINT" | "SIGTERM" | null {
+	if (code === EXIT_CODES.sighup) return "SIGHUP";
+	if (code === EXIT_CODES.sigint) return "SIGINT";
+	if (code === EXIT_CODES.sigterm) return "SIGTERM";
+	return null;
+}
+
 function exitCodeFor(cause: RunCause): number {
 	switch (cause.code) {
 		case "interrupted":
@@ -136,13 +144,36 @@ export type RunVerifyStatus = "passed" | "failed" | "timed_out" | "skipped";
 export type RunVerifySkipReason = "interrupted" | "deadline" | "turn_failed";
 
 export interface RunVerifyCheckV2 {
-	id: string;
+	id?: string;
 	command: string;
 	status: RunVerifyStatus;
 	reason?: RunVerifySkipReason;
 	exitCode?: number;
 	durationMs?: number;
 	ranAfterLastEdit?: boolean;
+}
+
+/**
+ * One entry per requested check, in flag order. Checks run in that order and stop at a shutdown, so the results are a
+ * prefix of the requested list; a check past it never ran and is `skipped` with the reason it did not.
+ */
+export function verifyChecksV2(
+	requested: ReadonlyArray<string>,
+	ran: ReadonlyArray<RunJsonVerifyResult> | undefined,
+	skipReason: RunVerifySkipReason,
+): RunVerifyCheckV2[] {
+	return requested.map((command, index) => {
+		const result = ran?.[index];
+		if (result === undefined) return { command, status: "skipped", reason: skipReason };
+		return {
+			id: result.id,
+			command: result.command,
+			status: result.passed ? "passed" : result.timedOut ? "timed_out" : "failed",
+			...(result.exitCode !== null ? { exitCode: result.exitCode } : {}),
+			durationMs: result.durationMs,
+			ranAfterLastEdit: result.ranAfterLastEdit,
+		};
+	});
 }
 
 /** `stream-json` only: one frame per steer-channel line read before the turn settled. */

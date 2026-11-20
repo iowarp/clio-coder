@@ -1,9 +1,30 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { writeSync } from "node:fs";
+import { existsSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import path from "node:path";
+import { readClioVersion } from "../core/package-root.js";
+import type { RunResult } from "../domains/dispatch/types.js";
 import { redactUrlCredentials } from "../domains/safety/redaction.js";
-import { writeFrame } from "./modes/jsonl.js";
-import type { RunJsonRunEndFrame, RunJsonTerminalTurnEndFrame } from "./modes/run-json-schema.js";
-import { flushRawStdout, isStdoutDead } from "./output-guard.js";
+import { serializeJsonLine, setFrameProjector, writeFrame } from "./modes/jsonl.js";
+import type {
+	RunJsonDispatchedRunOutcome,
+	RunJsonDispatchSettlementFrame,
+	RunJsonFrame,
+	RunJsonResultFrame,
+	RunJsonRunEndFrame,
+	RunJsonTerminalTurnEndFrame,
+	RunJsonVerifyFrame,
+	RunJsonVerifyResult,
+} from "./modes/run-json-schema.js";
+import {
+	RUN_RESULT_SCHEMA_VERSION,
+	type RunCauseCode,
+	type RunExitFact,
+	type RunResultEnvelopeV2,
+	resolveRunExit,
+	signalForExitCode,
+	verifyChecksV2,
+} from "./modes/run-json-schema-v2.js";
+import { flushRawStdout, isStdoutDead, writeRawStdout } from "./output-guard.js";
 
 interface RunFailureState {
 	pending: boolean;
@@ -100,6 +121,270 @@ export async function withRunFailureReporting(
 			throw error;
 		} finally {
 			process.off("exit", onExit);
+		}
+	});
+}
+
+/** A `run --output-format json|stream-json` request, as far as the v2 writer needs it. */
+export interface RunResultV2Request {
+	format: "json" | "stream-json";
+	mode: "main" | "agent";
+	agentId?: string;
+	verify: ReadonlyArray<string>;
+	outputLastMessage?: string;
+	cwd?: string;
+	timeoutSeconds?: number;
+}
+
+/** What the v1 frames told the v2 writer; the run itself still speaks v1 underneath. */
+interface SeenFrames {
+	session?: { id?: string; target?: string; model?: string; runId?: string };
+	text: string;
+	runEnd?: RunJsonRunEndFrame;
+	verify?: RunJsonVerifyResult[];
+	live: RunJsonDispatchedRunOutcome[];
+	undelivered: RunJsonDispatchedRunOutcome[];
+	receipt?: RunResult;
+	failedChecks?: string[];
+	verdict?: string;
+}
+
+const LIMIT_CODES: ReadonlyArray<RunCauseCode> = [
+	"session_cost_ceiling",
+	"max_cost_usd",
+	"autonomous_cap",
+	"max_requests",
+	"max_tool_calls",
+];
+const WORK_CODES: ReadonlyArray<RunCauseCode> = ["provider_error", "no_answer", "output_limit", "noop", "limitation"];
+
+function answerText(frame: RunJsonFrame): string | null {
+	const message = (frame as { message?: { role?: string; content?: unknown } }).message;
+	if (message?.role !== "assistant" || !Array.isArray(message.content)) return null;
+	const parts: string[] = [];
+	for (const block of message.content as unknown[]) {
+		const entry = block as { type?: unknown; text?: unknown } | null;
+		if (entry?.type === "text" && typeof entry.text === "string") parts.push(entry.text);
+	}
+	return parts.length > 0 ? parts.join("") : null;
+}
+
+/** Read one v1 frame into `seen` and return what a v2 stream writes in its place; null withholds it. */
+function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResultV2Request["format"]): object | null {
+	switch (frame.type) {
+		case "session": {
+			const header = frame as { id?: string | null; target?: string | null; model?: string | null; runId?: string };
+			seen.session = {
+				...(typeof header.id === "string" ? { id: header.id } : {}),
+				...(typeof header.target === "string" ? { target: header.target } : {}),
+				...(typeof header.model === "string" ? { model: header.model } : {}),
+				...(header.runId !== undefined ? { runId: header.runId } : {}),
+			};
+			if (format === "json") return null;
+			// v2 never sends null: a pending session has no `id` key at all.
+			const rewritten: Record<string, unknown> = { ...frame, schemaVersion: RUN_RESULT_SCHEMA_VERSION };
+			for (const [key, value] of Object.entries(rewritten)) if (value === null) delete rewritten[key];
+			return rewritten;
+		}
+		case "turn_end": {
+			const carried = (frame as { text?: unknown }).text;
+			const text = answerText(frame) ?? (typeof carried === "string" ? carried : null);
+			if (text !== null) seen.text = text;
+			break;
+		}
+		case "verify":
+			seen.verify = (frame as RunJsonVerifyFrame).checks;
+			break;
+		case "dispatch_settlement": {
+			const settlement = frame as RunJsonDispatchSettlementFrame;
+			seen.live = settlement.live;
+			seen.undelivered = settlement.undelivered;
+			break;
+		}
+		case "run_end":
+			seen.runEnd = frame as RunJsonRunEndFrame;
+			return null;
+		case "result": {
+			const result = frame as RunJsonResultFrame;
+			seen.receipt = result.result;
+			if (result.verdict !== undefined) seen.verdict = result.verdict;
+			if (result.failedChecks !== undefined) seen.failedChecks = result.failedChecks;
+			return null;
+		}
+	}
+	return format === "json" ? null : frame;
+}
+
+/**
+ * The facts behind a run's exit, read from the exit code the run returned and the frames it wrote. Under v2 a
+ * `--agent` worker that started (a receipt exists) and exited 2 is a failed run, not a refused one.
+ */
+function exitFacts(
+	code: number,
+	seen: SeenFrames,
+	diagnostic: string | undefined,
+	request: RunResultV2Request,
+): RunExitFact[] {
+	const text = seen.runEnd?.error ?? diagnostic;
+	const message = text !== undefined && text.length > 0 ? { message: text } : {};
+	const detail = seen.runEnd?.outcomeDetail ?? seen.receipt?.outcomeDetail ?? undefined;
+	const signal = signalForExitCode(code);
+	if (signal !== null) return [{ code: "interrupted", signal, ...message }];
+	// An exit no row names keeps its code; run_failed carries what was said about it.
+	const unnamed: RunExitFact[] = [
+		{ code: "forced_exit", exitCode: code },
+		{ code: "run_failed", ...message },
+	];
+	switch (code) {
+		case 0:
+			return [];
+		case 124:
+			return [
+				{
+					code: "deadline",
+					...(request.timeoutSeconds !== undefined ? { seconds: request.timeoutSeconds } : {}),
+					...message,
+				},
+			];
+		case 141:
+			return [{ code: "reader_closed" }];
+		case 2:
+			if (request.mode === "agent" && seen.receipt !== undefined)
+				return [{ code: "worker_failed", exitCode: 2, ...message }];
+			return [{ code: "not_started", ...message }];
+		case 5:
+			return [{ code: "unscripted", ...message }];
+		case 3:
+			return [{ code: /judge/i.test(text ?? "") ? "judge_streak" : "permission_required", ...message }];
+		case 4: {
+			const limit = LIMIT_CODES.find((entry) => entry === detail);
+			if (limit !== undefined) return [{ code: limit, ...message }];
+			if (text?.startsWith("budget_ceiling:"))
+				return [{ code: /--max-cost-usd/.test(text) ? "max_cost_usd" : "session_cost_ceiling", ...message }];
+			return unnamed;
+		}
+		case 1: {
+			if (seen.verdict === "failed" || (seen.failedChecks?.length ?? 0) > 0)
+				return [{ code: "verdict_failed", failedChecks: seen.failedChecks ?? [], ...message }];
+			const work = WORK_CODES.find((entry) => entry === detail);
+			if (work !== undefined) return [{ code: work, ...message }];
+			if (request.mode === "agent" && seen.receipt !== undefined)
+				return [{ code: "worker_failed", exitCode: 1, ...message }];
+			return [{ code: "run_failed", ...message }];
+		}
+		default:
+			return unnamed;
+	}
+}
+
+/**
+ * `run --output-format json|stream-json`: the run speaks v1 underneath; its frames cross a projector that keeps the
+ * stream-json event frames, rewrites the session header to schema v2 and withholds v1's closing frames, and the run
+ * ends with one v2 envelope whose exit code comes from `resolveRunExit`. `json` writes only the envelope.
+ */
+export async function withRunResultV2(request: RunResultV2Request, run: () => Promise<number>): Promise<number> {
+	const state: RunFailureState = { pending: true };
+	const started = Date.now();
+	const startedAt = new Date(started).toISOString();
+	const seen: SeenFrames = { text: "", live: [], undelivered: [] };
+	let written = false;
+	let outputTarget: string | undefined;
+	const envelopeLines = (code: number, extra: RunExitFact[] = []): { lines: string; exitCode: number } => {
+		const skipReason = code === 124 ? "deadline" : signalForExitCode(code) !== null ? "interrupted" : "turn_failed";
+		const resolution = resolveRunExit([...exitFacts(code, seen, state.diagnostic, request), ...extra]);
+		const session = seen.session;
+		const runId = session?.runId ?? seen.receipt?.runId;
+		const envelope: RunResultEnvelopeV2 = {
+			type: "run_end",
+			schemaVersion: RUN_RESULT_SCHEMA_VERSION,
+			mode: request.mode,
+			...(runId !== undefined ? { runId } : {}),
+			...(session?.id !== undefined ? { sessionId: session.id } : {}),
+			...(request.agentId !== undefined ? { agentId: request.agentId } : {}),
+			pid: process.pid,
+			cwd: process.cwd(),
+			clioCoderVersion: readClioVersion(),
+			startedAt,
+			endedAt: new Date().toISOString(),
+			durationMs: Date.now() - started,
+			exitCode: resolution.exitCode,
+			outcome: resolution.outcome,
+			...(resolution.causes[0] !== undefined ? { outcomeDetail: resolution.causes[0].code } : {}),
+			causes: resolution.causes,
+			result: { text: seen.text, artifacts: [] },
+			...(session?.target !== undefined || session?.model !== undefined
+				? {
+						route: {
+							...(session.target !== undefined ? { target: session.target } : {}),
+							...(session.model !== undefined ? { model: session.model } : {}),
+						},
+					}
+				: {}),
+			verify: { requested: request.verify.length, checks: verifyChecksV2(request.verify, seen.verify, skipReason) },
+			dispatch: { runs: seen.receipt !== undefined ? [seen.receipt] : [], live: seen.live, undelivered: seen.undelivered },
+			timings: {},
+		};
+		const pending =
+			request.format === "stream-json" && session === undefined
+				? serializeJsonLine({
+						type: "session",
+						schemaVersion: RUN_RESULT_SCHEMA_VERSION,
+						mode: request.mode,
+						pending: true,
+						timestamp: startedAt,
+						cwd: process.cwd(),
+					})
+				: "";
+		return { lines: pending + serializeJsonLine(envelope), exitCode: resolution.exitCode };
+	};
+	// A coordinated shutdown calls process.exit, which cannot await a flush; the envelope still goes out.
+	const onExit = (exitCode: number): void => {
+		if (written || isStdoutDead()) return;
+		written = true;
+		writeSync(1, envelopeLines(exitCode).lines);
+	};
+	const finish = async (code: number): Promise<number> => {
+		const extra: RunExitFact[] = [];
+		if (outputTarget !== undefined && code === 0) {
+			const temporary = `${outputTarget}.${process.pid}.tmp`;
+			try {
+				writeFileSync(temporary, `${seen.text}\n`);
+				renameSync(temporary, outputTarget);
+			} catch {
+				rmSync(temporary, { force: true });
+				extra.push({ code: "output_write_failed", path: outputTarget });
+			}
+		}
+		const out = envelopeLines(code, extra);
+		if (!written && !isStdoutDead()) {
+			written = true;
+			writeRawStdout(out.lines);
+			await flushRawStdout();
+		}
+		return out.exitCode;
+	};
+	return runFailureState.run(state, async () => {
+		if (request.outputLastMessage !== undefined) {
+			const base = request.cwd !== undefined ? path.resolve(request.cwd) : process.cwd();
+			const resolved = path.resolve(base, request.outputLastMessage);
+			if (!existsSync(path.dirname(resolved))) {
+				writeRunDiagnostic(`clio-coder run: --output-last-message directory does not exist: ${path.dirname(resolved)}\n`);
+				return finish(2);
+			}
+			rmSync(resolved, { force: true });
+			outputTarget = resolved;
+		}
+		setFrameProjector((frame) => projectV1Frame(frame, seen, request.format));
+		process.once("exit", onExit);
+		try {
+			return await finish(await run());
+		} catch (error) {
+			state.diagnostic = redactUrlCredentials(error instanceof Error ? error.message : String(error));
+			await finish(1);
+			throw error;
+		} finally {
+			process.off("exit", onExit);
+			setFrameProjector(null);
 		}
 	});
 }

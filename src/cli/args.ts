@@ -5,10 +5,22 @@ import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { type AutonomyLevel, autonomyFromUserInput } from "../domains/safety/autonomy.js";
 import { globalFlagPositionHint, parseMaxContextTokens } from "./argv.js";
+import type { ErrorSlug } from "./kit/slugs.js";
 
 export interface CliArgDiagnostic {
 	type: "warning" | "error";
 	message: string;
+	/** The C17 slug of an error, when it is more specific than `usage`. */
+	slug?: ErrorSlug;
+}
+
+/** `--output-format`: the schema v2 headless surfaces. Without the flag every v1 surface stays as it was. */
+export type RunOutputFormat = "text" | "json" | "stream-json";
+
+const OUTPUT_FORMATS: ReadonlyArray<RunOutputFormat> = ["text", "json", "stream-json"];
+
+function isRunOutputFormat(value: string): value is RunOutputFormat {
+	return (OUTPUT_FORMATS as ReadonlyArray<string>).includes(value);
 }
 
 export interface RunSamplingArgs {
@@ -65,6 +77,10 @@ export interface RunCliArgs {
 	verifyTimeoutSeconds?: number;
 	/** `--answers`: the file that scripts the author's answers for a headless run. */
 	answersFile?: string;
+	/** `--output-format`: schema v2 output; absent keeps `--json`, `--json-events` and text output unchanged. */
+	outputFormat?: RunOutputFormat;
+	/** `-o/--output-last-message`: the file that receives the final answer when the run exits 0. */
+	outputLastMessage?: string;
 	fileArgs: string[];
 	messages: string[];
 	diagnostics: CliArgDiagnostic[];
@@ -90,6 +106,8 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 	};
 
 	let jsonEventsGiven = false;
+	let jsonGiven = false;
+	let outputFormatGiven = false;
 	for (let i = 0; i < argv.length; i += 1) {
 		const arg = argv[i];
 		const need = (flag: string): string | null => {
@@ -116,7 +134,25 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			continue;
 		}
 		if (arg === "--json") {
+			jsonGiven = true;
 			parsed.json = true;
+			continue;
+		}
+		// Read where it stands, before any other flag is judged, so a run whose other flags fail still frames that
+		// failure in the format it asked for.
+		if (arg === "--output-format" || arg?.startsWith("--output-format=")) {
+			outputFormatGiven = true;
+			const value = arg === "--output-format" ? need(arg) : arg.slice("--output-format=".length);
+			if (value !== null) {
+				if (isRunOutputFormat(value)) parsed.outputFormat = value;
+				else parsed.diagnostics.push({ type: "error", message: "--output-format must be one of: text|json|stream-json" });
+			}
+			continue;
+		}
+		if (arg === "--output-last-message" || arg === "-o" || arg?.startsWith("--output-last-message=")) {
+			const value = arg.startsWith("--output-last-message=") ? arg.slice("--output-last-message=".length) : need(arg);
+			if (value !== null && value.length > 0) parsed.outputLastMessage = value;
+			else if (value !== null) parsed.diagnostics.push({ type: "error", message: `${arg} requires a path` });
 			continue;
 		}
 		if (arg === "--json-events") {
@@ -384,6 +420,14 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		parsed.diagnostics.push({
 			type: "error",
 			message: "--json-events applies to the main agent; use --json with --agent dispatch",
+		});
+	}
+	// The v1 and v2 surfaces are separate contracts; one run speaks one of them.
+	if (outputFormatGiven && (jsonGiven || jsonEventsGiven)) {
+		parsed.diagnostics.push({
+			type: "error",
+			slug: "flag_conflict",
+			message: "--output-format cannot be combined with --json or --json-events",
 		});
 	}
 	return parsed;

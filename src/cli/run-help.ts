@@ -36,6 +36,12 @@ Flags:
   --json-events <mode>      full: progress and final answer in turn_end.message.content
                             terminal: accounting and final answer in turn_end.text
                             implies --json; refused with --agent
+  --output-format <format>  text|json|stream-json: schema v2 output. json writes one {"type":"run_end",
+                            "schemaVersion":2,...} envelope with exitCode, outcome and causes[]; stream-json
+                            writes a v2 session frame, the event frames, then that envelope; refused with
+                            --json and --json-events
+  -o, --output-last-message <path>
+                            with --output-format json|stream-json, write the final answer there on exit 0
   --steer-channel <path>    read live steering lines from a FIFO or appended regular file
   --session <id>            append this turn to an existing session
   --continue                append this turn to the most recent session for this cwd; after a yolo

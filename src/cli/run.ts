@@ -52,7 +52,7 @@ import type { RunJsonAdmissionRefusedFrame, RunJsonAgentFrame } from "./modes/ru
 import { RUN_JSON_SCHEMA_VERSION } from "./modes/run-json-schema.js";
 import { flushRawStdout, handleRunStdoutErrors, restoreStdout, takeOverStdout } from "./output-guard.js";
 import { loadScriptedAnswers } from "./run-answers.js";
-import { startRunOutput, withRunFailureReporting, writeRunDiagnostic } from "./run-failure.js";
+import { startRunOutput, withRunFailureReporting, withRunResultV2, writeRunDiagnostic } from "./run-failure.js";
 import { RUN_HELP as HELP, RUN_USAGE as USAGE } from "./run-help.js";
 import { formatDispatchHumanOutput, verifierVerdict } from "./run-output.js";
 import { setupSteerChannel } from "./steer-channel.js";
@@ -369,20 +369,43 @@ export async function runClioRun(
 	handleRunStdoutErrors((code) => coordinator.shutdown(code));
 	// Nobody attends a headless run, so its commits are autonomous (integrations.git.commitAuthor).
 	setAutonomousCommitProcess(true);
+	const v2Format =
+		parsed.outputFormat === "json" || parsed.outputFormat === "stream-json" ? parsed.outputFormat : undefined;
+	if (v2Format !== undefined) {
+		// Schema v2 runs the v1 JSON machinery as a full stream and reframes it at the writer (run-failure.ts); the
+		// parser already refused --json and --json-events beside --output-format.
+		parsed.json = true;
+		parsed.jsonEvents = "full";
+	}
 	const fullMainStream = parsed.json && parsed.agentId === undefined && parsed.jsonEvents !== "terminal";
-	return withRunFailureReporting(
-		parsed.json,
-		async () => {
-			try {
-				return await executeRunCommand(parsed, options);
-			} catch (error) {
-				if (!(error instanceof FileReferenceError)) throw error;
-				writeRunDiagnostic(`${error.message}\n`);
-				return 2;
-			}
-		},
-		fullMainStream,
-	);
+	const execute = async (): Promise<number> => {
+		try {
+			return await executeRunCommand(parsed, options);
+		} catch (error) {
+			if (!(error instanceof FileReferenceError)) throw error;
+			writeRunDiagnostic(`${error.message}\n`);
+			return 2;
+		}
+	};
+	if (v2Format !== undefined) {
+		return withRunResultV2(
+			{
+				format: v2Format,
+				mode: parsed.agentId !== undefined ? "agent" : "main",
+				...(parsed.agentId !== undefined ? { agentId: parsed.agentId } : {}),
+				verify: parsed.verify,
+				...(parsed.outputLastMessage !== undefined ? { outputLastMessage: parsed.outputLastMessage } : {}),
+				...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
+				...(parsed.timeoutSeconds !== undefined ? { timeoutSeconds: parsed.timeoutSeconds } : {}),
+			},
+			execute,
+		);
+	}
+	if (parsed.outputLastMessage !== undefined) {
+		writeRunDiagnostic("clio-coder run: --output-last-message needs --output-format json or stream-json\n");
+		return 2;
+	}
+	return withRunFailureReporting(parsed.json, execute, fullMainStream);
 }
 
 async function executeRunCommand(
