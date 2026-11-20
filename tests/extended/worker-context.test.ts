@@ -861,6 +861,49 @@ test("a worker past 80% of its window with no change is told once to report, unl
 	}
 });
 
+test("a writer worker reading 40 times with no write is told once, naming the streak, and a later cause adds nothing (X3)", {
+	timeout: 30_000,
+}, async () => {
+	const env = await isolateClioEnv("clio-coder-worker-streak-");
+	try {
+		// Admit an 82% request without a fold, so the context cause holds after read 46 as in the CLI-H3 row above.
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.context.compaction.threshold = 0.95;
+		mkdirSync(join(env.dir, "config"), { recursive: true });
+		writeFileSync(join(env.dir, "config/settings.yaml"), JSON.stringify(settings));
+		// Fifty reads of one new line each: no repeat for the loop guard, nothing already shown.
+		const { requests } = await runFauxWorker(
+			env.dir,
+			(done) => ({
+				call: done < 50 ? { name: "read", arguments: { path: "a.txt", offset: done + 1, limit: 1 } } : null,
+				promptTokens: done < 45 ? 1000 : done === 45 ? 53_000 : 40_000,
+			}),
+			{
+				agentId: "coder",
+				task: "Fix a.txt.",
+				allowedTools: ["write", "read", "context"],
+				contextWindow: 65_536,
+			},
+		);
+		const toolResults = (raw: string) =>
+			((JSON.parse(raw) as { messages?: Array<{ role?: string }> }).messages ?? []).filter((m) => m.role === "tool")
+				.length;
+		const first = requests.find((request) => request.includes("[CLIO Coder] 25 read-only calls"));
+		equal(first !== undefined ? toolResults(first) : -1, 25, "the first note rides the 25th read's result");
+		match(first ?? "", /25 read-only calls in a row with no edit\. .*Then act on it: make the edit\./);
+		ok(!(first ?? "").includes("ask the one question"), "a worker without ask_user is not told to ask");
+		ok(!requests.some((request) => /\[CLIO Coder\] (40|60) read-only/.test(request)), "the second step is no tool note");
+		const nudged = requests.filter((request) => request.includes("Host note:"));
+		equal(nudged[0] !== undefined ? toolResults(nudged[0]) : -1, 40, "the host turn follows the 40th read");
+		match(nudged[0] ?? "", /Host note: this run has made 40 read-only calls in a row without an edit or a plan update/);
+		match(nudged[0] ?? "", /Write the change now/);
+		equal(nudged.at(-1)?.split("Host note:").length, 2, "the context cause after read 46 sends no second host turn");
+		ok(requests.length > 47, "the run reached the requests past 80%");
+	} finally {
+		env.restore();
+	}
+});
+
 test("every role with a result hands back at its context share, whatever tools it holds (M3)", {
 	timeout: 30_000,
 }, async () => {
