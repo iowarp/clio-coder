@@ -56,10 +56,10 @@ import { storeFindings } from "./doctor-store.js";
 import { taskWorktreeFindings } from "./doctor-task-worktrees.js";
 import { pdfAttachmentFinding, toolchainFindings } from "./doctor-toolchain.js";
 import { validationContractFinding } from "./doctor-validation-contract.js";
+import { writeCliFailure } from "./kit/json-out.js";
 import { createLifecyclePresenter } from "./lifecycle-presenter.js";
-import { printError } from "./shared.js";
 
-const HELP = `clio-coder doctor [--fix] [--json] [--verbose] [--deep [--tools-timeout <seconds>]]
+const HELP = `clio-coder doctor [--fix [--yes]] [--json] [--verbose] [--deep [--tools-timeout <seconds>]]
 
 Diagnose CLIO Coder state without creating files. The first row says whether
 chat can run and what to run when it cannot. On a home CLIO Coder has never
@@ -68,7 +68,8 @@ missing directories, missing template files, and credential permissions.
 --fix also removes retired keys and repairs retired enum values and YAML 1.1
 on/off booleans, preserving comments and formatting. It repairs GUI ownership
 and launchers, and rebuilds incomplete source checkouts. Model IDs are corrected
-only after interactive confirmation; sign-ins still require the operator.
+only after confirmation: a terminal asks, and --fix --yes applies them without
+asking; sign-ins still require the operator.
 Plain doctor reports the proposed repairs and running builds that need a restart.
 --fix also records the fleet preflight, which is what admits an SSH node to
 dispatch for the current project root; plain doctor only reports it.
@@ -589,6 +590,7 @@ export function doctorNotice(findings: ReadonlyArray<DoctorFinding>): {
 
 interface DoctorArgs {
 	fix: boolean;
+	yes: boolean;
 	json: boolean;
 	verbose: boolean;
 	deep: boolean;
@@ -596,10 +598,11 @@ interface DoctorArgs {
 }
 
 function parseDoctorArgs(args: ReadonlyArray<string>): DoctorArgs {
-	const parsed: DoctorArgs = { fix: false, json: false, verbose: false, deep: false };
+	const parsed: DoctorArgs = { fix: false, yes: false, json: false, verbose: false, deep: false };
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i];
 		if (arg === "--fix") parsed.fix = true;
+		else if (arg === "--yes" || arg === "-y") parsed.yes = true;
 		else if (arg === "--json") parsed.json = true;
 		else if (arg === "--verbose") parsed.verbose = true;
 		else if (arg === "--deep") parsed.deep = true;
@@ -613,6 +616,7 @@ function parseDoctorArgs(args: ReadonlyArray<string>): DoctorArgs {
 		} else throw new Error(`unknown flag: ${arg}`);
 	}
 	if (parsed.toolsTimeoutMs !== undefined && !parsed.deep) throw new Error("--tools-timeout requires --deep");
+	if (parsed.yes && !parsed.fix) throw new Error("--yes confirms --fix repairs; pass --fix with it");
 	return parsed;
 }
 
@@ -625,16 +629,29 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	try {
 		parsed = parseDoctorArgs(args);
 	} catch (error) {
-		printError(error instanceof Error ? error.message : String(error));
-		process.stderr.write(HELP);
+		const message = error instanceof Error ? error.message : String(error);
+		writeCliFailure({
+			path: ["doctor"],
+			slug: message.startsWith("unknown flag") ? "unknown_flag" : "usage",
+			message,
+			json: args.includes("--json"),
+		});
 		return 2;
 	}
 	const { fix, json } = parsed;
+	// --yes applies the repairs that need a confirmation (model-id corrections)
+	// without asking (C8). A terminal run asks; under --json the question goes to
+	// stderr, because --json never changes whether a command acts. Without a
+	// terminal and without --yes those repairs are still reported and skipped,
+	// with exit codes as before (v1 kept).
+	const confirm: ((question: string) => Promise<boolean>) | undefined = parsed.yes
+		? async () => true
+		: fix && process.stdin.isTTY
+			? (question: string) => createLifecyclePresenter({ json }).confirm(question)
+			: undefined;
 	const all = await collectDoctorFindings({
 		fix,
-		...(fix && !json && process.stdin.isTTY
-			? { confirm: (question: string) => createLifecyclePresenter().confirm(question) }
-			: {}),
+		...(confirm !== undefined ? { confirm } : {}),
 		deep: parsed.deep ? (parsed.toolsTimeoutMs !== undefined ? { toolsTimeoutMs: parsed.toolsTimeoutMs } : {}) : false,
 	});
 	const ok = all.every((f) => f.ok);
