@@ -437,7 +437,16 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		this.files = new CombinedAutocompleteProvider([], basePath, fdPath);
 		this.fileReferences = fileReferenceSource ?? createFileReferenceCompletionSource({ basePath });
 		this.sourceBySlot = sources;
-		this.promptTemplates = promptTemplates ?? (() => []);
+		const templates = promptTemplates ?? (() => []);
+		// Templates come from the disk; a listing that fails (a workspace removed under the
+		// session) leaves the built-in commands, never the keystroke's crash.
+		this.promptTemplates = () => {
+			try {
+				return templates();
+			} catch {
+				return [];
+			}
+		};
 	}
 
 	/**

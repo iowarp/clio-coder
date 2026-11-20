@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
 import { DEFAULT_SETTINGS, outputStyleLabel } from "../core/defaults.js";
@@ -1099,6 +1100,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	let skillCompletions: { cwd: string; at: number; items: CompletionValue[] } | undefined;
 	let playbookCompletions: { cwd: string; at: number; items: CompletionValue[] } | undefined;
 	let pathSource: { cwd: string; source: FileReferenceCompletionSource } | undefined;
+	/** The removed workspace already announced, so the notice shows once and not per keystroke. */
+	let goneCwd: string | undefined;
 	const settingKeys = (record: Readonly<Record<string, unknown>> | undefined, description: string): CompletionValue[] =>
 		Object.keys(record ?? {}).map((key) => ({ id: key, value: key, label: key, description }));
 	const runValues = (finishedOnly: boolean): CompletionValue[] =>
@@ -1118,7 +1121,18 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		commandCounts: () => readHarnessProfile().features,
 		// Completion runs per keystroke and only names templates, so it reads the
 		// committed plugin snapshot; submitting one verifies its tree first.
-		promptTemplates: () => deps.resources?.promptsForDisplay(getCwd()).items ?? [],
+		promptTemplates: () => {
+			const cwd = getCwd();
+			if (goneCwd !== cwd && !existsSync(cwd)) {
+				goneCwd = cwd;
+				notify(
+					"warning",
+					`The workspace directory no longer exists, so completion lists built-in commands only; restart Clio in an existing directory (${cwd}).`,
+					"workspace:missing",
+				);
+			}
+			return deps.resources?.promptsForDisplay(cwd).items ?? [];
+		},
 		...(deps.extensionCommands ? { extensionCommands: deps.extensionCommands } : {}),
 		...(deps.commandUnavailable ? { unavailable: deps.commandUnavailable } : {}),
 		...(deps.commandHidden ? { hidden: deps.commandHidden } : {}),

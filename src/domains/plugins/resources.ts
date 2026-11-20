@@ -10,8 +10,21 @@ import type { InstalledPlugin, PluginResourceKind, PluginResourceRoot, PluginSna
 const snapshots = new Map<string, PluginSnapshot>();
 let generation = 0;
 
+/**
+ * The real path of `cwd`, or its resolved spelling when it has none: a workspace
+ * removed under a running session must degrade a display read, not throw.
+ */
+function canonicalCwd(cwd: string): string {
+	const resolved = path.resolve(cwd);
+	try {
+		return realpathSync(resolved);
+	} catch {
+		return resolved;
+	}
+}
+
 function keyFor(cwd: string): string {
-	return `${path.resolve(clioConfigDir())}\0${realpathSync(path.resolve(cwd))}`;
+	return `${path.resolve(clioConfigDir())}\0${canonicalCwd(cwd)}`;
 }
 
 function freeze<T>(value: T): T {
@@ -23,8 +36,8 @@ function freeze<T>(value: T): T {
 }
 
 export function buildPluginSnapshot(cwd = process.cwd(), snapshotGeneration = 0): PluginSnapshot {
-	const canonicalCwd = realpathSync(path.resolve(cwd));
-	const packages = listInstalledPlugins(canonicalCwd, { all: true });
+	const workspace = canonicalCwd(cwd);
+	const packages = listInstalledPlugins(workspace, { all: true });
 	const resourceRoots: Record<PluginResourceKind, PluginResourceRoot[]> = {
 		skills: [],
 		prompts: [],
@@ -66,7 +79,7 @@ export function buildPluginSnapshot(cwd = process.cwd(), snapshotGeneration = 0)
 	return freeze({
 		version: 1,
 		generation: snapshotGeneration,
-		cwd: canonicalCwd,
+		cwd: workspace,
 		digest: createHash("sha256").update(JSON.stringify(identity)).digest("hex"),
 		packages,
 		resourceRoots,

@@ -262,6 +262,18 @@ test("prompt templates from every resource root complete as namespaced slash com
 		["wtfp:map-project", "wtfp:new-paper"],
 		"reloaded templates appear without rebuilding the provider",
 	);
+
+	const failing = createSlashCommandAutocompleteProvider({
+		fdPath: null,
+		promptTemplates: () => {
+			throw new Error("ENOENT: no such file or directory, lstat '/gone'");
+		},
+	});
+	const builtins = (await failing.getSuggestions(["/hel"], 0, 4, { signal: new AbortController().signal }))?.items;
+	ok(
+		builtins?.some((item) => item.value === "help"),
+		"a template listing that throws leaves the built-in commands",
+	);
 });
 
 test("compact aliases context compact including instructions and the existing handler", async () => {
