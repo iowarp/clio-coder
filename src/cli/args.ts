@@ -179,6 +179,32 @@ function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 	return errors;
 }
 
+/**
+ * The `--trust-task-file` gate (SPEC 6.3, review H06). A task envelope is data a
+ * supervisor may have got from elsewhere; `verify` (host bash outside the agent's
+ * permissions and sandbox), `permissions.autonomy: "yolo"` and `cwd` widen what
+ * the host does. Returns the refusal (exit 2 `task_authority`) when the envelope
+ * carries any of them untrusted, else undefined. The same for a file and stdin.
+ */
+export function taskFileAuthorityRefusal(
+	envelope: Readonly<Record<string, unknown>>,
+	trusted: boolean,
+): string | undefined {
+	if (trusted) return undefined;
+	const permissions = envelope.permissions;
+	const yolo =
+		typeof permissions === "object" &&
+		permissions !== null &&
+		(permissions as Record<string, unknown>).autonomy === "yolo";
+	const widening = [
+		...(envelope.verify !== undefined ? ["verify"] : []),
+		...(yolo ? ["permissions.autonomy yolo"] : []),
+		...(envelope.cwd !== undefined ? ["cwd"] : []),
+	];
+	if (widening.length === 0) return undefined;
+	return `task file carries ${widening.join(", ")}, which widen what the host does; pass --trust-task-file to accept ${widening.length === 1 ? "it" : "them"}`;
+}
+
 export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 	const parsed: RunCliArgs = {
 		help: false,

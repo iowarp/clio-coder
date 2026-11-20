@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, test } from "node:test";
-import { parseRunCliArgs } from "../../src/cli/args.js";
+import { parseRunCliArgs, taskFileAuthorityRefusal } from "../../src/cli/args.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
@@ -134,4 +134,15 @@ describe("--max-cost-usd and parallel dispatches", () => {
 			await bundle.extension.stop?.();
 		}
 	});
+});
+
+test("the --trust-task-file gate refuses verify, yolo and cwd in an untrusted envelope and nothing else", () => {
+	strictEqual(taskFileAuthorityRefusal({ task: "x", model: "m" }, false), undefined);
+	strictEqual(taskFileAuthorityRefusal({ task: "x", permissions: { autonomy: "default" } }, false), undefined);
+	match(taskFileAuthorityRefusal({ task: "x", verify: [] }, false) ?? "", /carries verify,.*--trust-task-file/);
+	match(
+		taskFileAuthorityRefusal({ task: "x", cwd: "/w", permissions: { autonomy: "yolo" } }, false) ?? "",
+		/carries permissions\.autonomy yolo, cwd/,
+	);
+	strictEqual(taskFileAuthorityRefusal({ task: "x", verify: [], cwd: "/w" }, true), undefined);
 });
