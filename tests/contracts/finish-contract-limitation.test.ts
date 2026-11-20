@@ -392,6 +392,35 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		}
 	});
 
+	it("reads a here-document written ahead of its suite run as the change and the check, passed or failed (SF-5)", () => {
+		const command =
+			"cat > tests/x.test.mjs <<'EOF' && npm test\nimport test from 'node:test';\ntest('x', () => {});\nEOF";
+		for (const exitCode of [0, 1]) {
+			const result = {
+				kind: "message",
+				role: "tool_result",
+				turnId: "suite",
+				payload: {
+					toolName: ToolNames.Bash,
+					toolCallId: "suite",
+					isError: exitCode !== 0,
+					result: { kind: exitCode === 0 ? "ok" : "error", details: { outcome: "nonzero", exitCode } },
+				},
+			};
+			const assessment = assessFinishContract({
+				sessionEntries: [
+					userMessage("user-1"),
+					toolCall("suite", ToolNames.Bash, { command }),
+					result,
+					assistantMessage("assistant-1", "Suite run."),
+				],
+				assistantTurnId: "assistant-1",
+			});
+			strictEqual(assessment.reason, exitCode === 0 ? "validation_evidence" : "unvalidated_mutation");
+			deepStrictEqual(assessment.mutatedPaths, ["tests/x.test.mjs"]);
+		}
+	});
+
 	it("credits no bash, verify, operator or declared pass a later edit retired, nor the high-rigor gate (x8-1)", (t) => {
 		const root = mkdtempSync(join(tmpdir(), "finish-retired-"));
 		t.after(() => rmSync(root, { recursive: true, force: true }));

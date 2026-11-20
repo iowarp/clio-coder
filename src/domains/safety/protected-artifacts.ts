@@ -911,6 +911,30 @@ export function withoutHeredocBodies(command: string, keepSubstitutions = false)
 }
 
 /**
+ * The command without its here-document bodies when every one is quoted data that `cat` or `tee` copies into a file no
+ * later step may run, as {@link extractCommandPathWalks} reads it; otherwise the command as written. Such a body is never
+ * commands, so its lines separate nothing (SF-5).
+ */
+export function withoutDataHeredocBodies(command: string): string {
+	const { text, dataOutputs } = removeHeredocBodies(command, false);
+	if (text === command || dataOutputs === null) return command;
+	if (scanShellLike(text).some((token) => token.operator && token.value === "<<")) return command;
+	return mayRunHeredocOutputs(text, dataOutputs) ? command : text;
+}
+
+/**
+ * The write targets a quoted here-document is copied into by `cat` or `tee`. That step writes before any later step
+ * runs, so the write stands even when the call exits nonzero because a later step, such as the suite run on the file,
+ * failed (SF-5).
+ */
+export function heredocDataWriteTargets(command: string): string[] {
+	const { text, dataOutputs } = removeHeredocBodies(command, false);
+	if (text === command || dataOutputs === null) return [];
+	const outputs = new Set(dataOutputs);
+	return extractCommandWriteTargets(command).filter((target) => outputs.has(target));
+}
+
+/**
  * {@link withoutHeredocBodies}, with the files its here-documents are copied
  * into as data ({@link heredocDataOutputs}), or null when any one is not.
  */

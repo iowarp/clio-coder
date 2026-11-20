@@ -22,6 +22,7 @@ import {
 	detectValidationCommand,
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
+	heredocDataWriteTargets,
 	scanShellLike,
 	shellCommandWords,
 	splitSegments,
@@ -175,6 +176,8 @@ interface MutationCandidate {
 	paths: string[];
 	/** Targets the call wrote or created, as opposed to only removed. */
 	writes: string[];
+	/** Writes that stand even when the call exits nonzero ({@link heredocDataWriteTargets}). */
+	settledWrites: string[];
 }
 
 /**
@@ -837,6 +840,14 @@ export function mutatingReceipts(recent: ReadonlyArray<unknown>): { paths: strin
 				for (const path of candidate.paths) pushPath(paths, seen, path);
 				for (const path of candidate.writes) written.add(path);
 			}
+			continue;
+		}
+		// A here-document written ahead of a failing suite run is still on disk (SF-5).
+		const failedId = ranToNonzeroExitResultId(entry);
+		const failed = failedId === null ? undefined : mutationCalls.get(failedId);
+		for (const path of failed?.settledWrites ?? []) {
+			pushPath(paths, seen, path);
+			written.add(path);
 		}
 	}
 
@@ -871,7 +882,12 @@ function mutatingToolCall(entry: unknown): MutationCandidate | null {
 	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);
 	if (toolCallId === null) return null;
 	const command = toolName === ToolNames.Bash && typeof args?.command === "string" ? args.command : null;
-	return { toolCallId, paths, writes: command === null ? paths : extractCommandWriteTargets(command) };
+	return {
+		toolCallId,
+		paths,
+		writes: command === null ? paths : extractCommandWriteTargets(command),
+		settledWrites: command === null ? [] : heredocDataWriteTargets(command),
+	};
 }
 
 /**
@@ -1332,6 +1348,18 @@ function successfulToolResultId(entry: unknown): string | null {
 	const chainAdmission = asRecord(details?.chainAdmission);
 	if (chainAdmission?.outcome === "blocked" || chainAdmission?.outcome === "error") return null;
 	if (typeof details?.exitCode === "number" && details.exitCode !== 0) return null;
+	return stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]);
+}
+
+/** The id of a command that ran and exited nonzero; a refused or blocked call has no exit code. */
+function ranToNonzeroExitResultId(entry: unknown): string | null {
+	const record = asRecord(entry);
+	if (record?.kind !== "message" || record.role !== "tool_result") return null;
+	const payload = asRecord(record.payload);
+	if (payload === null || payload.outcome === "blocked" || typeof payload.blockReason === "string") return null;
+	const details = asRecord(asRecord(payload.result)?.details);
+	if (asRecord(details?.chainAdmission)?.outcome === "blocked") return null;
+	if (typeof details?.exitCode !== "number" || details.exitCode === 0) return null;
 	return stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]);
 }
 
