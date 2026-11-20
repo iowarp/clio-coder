@@ -89,6 +89,11 @@ export interface TaskMemoryModelRequest {
 	userPrompt: MemoryRouteText;
 	maxTokens: number;
 	signal: AbortSignal;
+	/**
+	 * The journaled attempt this request is, set by the routing wrapper that opened it; the side-share governor keys the
+	 * call's hold by it so the call counts until its settlement is in the session journal.
+	 */
+	sideShareAttempt?: { sessionId: string | null; attemptId: string };
 	/** Known usage may arrive even when completion rejects or the policy has been canceled. */
 	onUsage?: (usage: TaskMemoryStepUsage) => void;
 }

@@ -198,44 +198,51 @@ export const SIDE_SHARE_FREE_CALLS = 3;
  */
 export const SIDE_SHARE_EXEMPT: ReadonlySet<MemorySurfaceId> = new Set(["memory.classify", "memory.consolidate"]);
 
-/** True when the governor refuses: past the free calls, and over the share on tokens or, when reported, premium units. */
+/**
+ * True when the governor refuses: past the free calls, and over the share on tokens or, when reported, premium units.
+ * Tokens: a zero main denominator admits only the free calls. Premium units refuse only when memory actually spent some:
+ * a 0x route reports zero units on every call, and zero memory units are never over any share.
+ */
 function sideShareRefuses(facts: SideShareFacts): boolean {
 	if (!(facts.share > 0) || !facts.automatic || facts.automaticCalls < SIDE_SHARE_FREE_CALLS) return false;
-	// A zero main denominator admits only the free calls.
-	const over = (side: number, main: number): boolean => !(main > 0) || side / main > facts.share;
-	return (
-		over(facts.sideOutputTokens, facts.mainOutputTokens) ||
-		(facts.premium !== null && over(facts.premium.side, facts.premium.main))
-	);
+	if (!(facts.mainOutputTokens > 0) || facts.sideOutputTokens / facts.mainOutputTokens > facts.share) return true;
+	const premium = facts.premium;
+	return premium !== null && premium.side > 0 && (!(premium.main > 0) || premium.side / premium.main > facts.share);
 }
 
-/** An admitted memory call this process still holds; its own attempt has not settled. */
+/** An admitted memory call this process holds until the journal shows its attempt settled. */
 export interface SideShareHeld {
 	purpose: MemorySurfaceId;
+	/** The request's own output budget, charged while it is held. */
 	maxTokens: number;
+	/** The journaled attempt it is, when the call was journaled; null for one no journal records. */
+	attemptId: string | null;
 }
 
 /**
  * Fold the governor's counters from the session's own call journal, so a resumed session continues its count, plus the
- * calls this process holds in flight. Only settled attempts are read from the journal: an attempt still open there is
- * either held here, and counted once from `held`, or the call being decided, which never counts itself. A never-sent
- * attempt spent nothing and is not a call. A settled memory attempt without measured output counts `unknownOutputTokens`,
- * the configured memory output budget, never zero.
+ * calls this process holds. Only settled attempts are read from the journal, each once by attempt id: an attempt still
+ * open there is either held here, and counted once from `held`, or the call being decided, which never counts itself. A
+ * held call whose settled attempt the journal already shows is counted from the journal and reported in `covered`. A
+ * never-sent attempt spent nothing and is not a call. A settled memory attempt without measured output counts its own
+ * request budget (`budgetOf`), never zero.
  */
 export function foldSideShare(
 	records: readonly TelemetryRecord[],
 	held: readonly SideShareHeld[],
-	unknownOutputTokens: number,
-): Omit<SideShareFacts, "share" | "automatic"> {
+	budgetOf: (attemptId: string) => number,
+): { facts: Omit<SideShareFacts, "share" | "automatic">; covered: SideShareHeld[] } {
 	const value = (fact: Fact<number> | undefined): number | null =>
 		fact !== undefined && (fact.kind === "measured" || fact.kind === "estimated") ? fact.value : null;
+	// A replayed or forked journal can repeat a settlement; the attempt id names it once.
+	const settled = new Map<string, TelemetryRecord<"call.settled">>();
+	for (const record of records) if (record.k === "call.settled") settled.set(record.data.attemptId, record);
 	const calls = new Set<string>();
 	let sideOutputTokens = 0;
 	let mainOutputTokens = 0;
 	const premium = { side: 0, main: 0 };
 	let premiumReported = false;
-	for (const record of records) {
-		if (record.k !== "call.settled") continue;
+	for (const record of settled.values()) {
 		const role = record.ctx.agent.role;
 		if (role !== "memory" && role !== "main") continue;
 		const data = record.data;
@@ -250,16 +257,19 @@ export function foldSideShare(
 		}
 		// A memory call journaled before purposes existed was automatic; only a named operator purpose is exempt.
 		if (data.purpose === undefined || !SIDE_SHARE_EXEMPT.has(data.purpose as MemorySurfaceId)) calls.add(data.callId);
-		sideOutputTokens += output ?? unknownOutputTokens;
+		sideOutputTokens += output ?? budgetOf(data.attemptId);
 		premium.side += units ?? 0;
 	}
-	for (const call of held) {
-		sideOutputTokens += call.maxTokens;
-	}
+	const covered = held.filter((call) => call.attemptId !== null && settled.has(call.attemptId));
+	const open = held.filter((call) => !covered.includes(call));
+	for (const call of open) sideOutputTokens += call.maxTokens;
 	return {
-		automaticCalls: calls.size + held.filter((call) => !SIDE_SHARE_EXEMPT.has(call.purpose)).length,
-		sideOutputTokens,
-		mainOutputTokens,
-		premium: premiumReported ? premium : null,
+		facts: {
+			automaticCalls: calls.size + open.filter((call) => !SIDE_SHARE_EXEMPT.has(call.purpose)).length,
+			sideOutputTokens,
+			mainOutputTokens,
+			premium: premiumReported ? premium : null,
+		},
+		covered,
 	};
 }
