@@ -1338,10 +1338,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		queueFrame({ type: "run_end", ...runVerdict(terminal, new Date().toISOString()) });
 	};
 
-	// Registered after the composition root's chat drain hook, which disposes
-	// the loop and awaits settlement, so the stats folded below are final by
-	// the time this runs. Queued frames reach stdout before the seal.
-	termination.onDrain(async () => {
+	const sealInterruptedRun = async (): Promise<void> => {
 		await frameChain;
 		const interrupted = interruptedTerminal();
 		writeRunEnd(interrupted);
@@ -1349,6 +1346,14 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		await recordRun(interrupted);
 		// A timeout or signal exits after this hook, so a reader that is behind still gets whole lines and the run_end.
 		await flushRawStdout();
+	};
+	// `run --verify` checks, once started; a shutdown during them seals from a hook behind their own drain (CLI-P8).
+	let verifyRun: Promise<RunJsonVerifyResult[]> | null = null;
+	// Registered after the composition root's chat drain hook, which disposes
+	// the loop and awaits settlement, so the stats folded below are final by
+	// the time this runs. Queued frames reach stdout before the seal.
+	termination.onDrain(async () => {
+		if (verifyRun === null) await sealInterruptedRun();
 	});
 
 	// Fresh sessions acquire their identity during submit, after admission notices
@@ -1392,6 +1397,14 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		jsonHeaderWritten = true;
 		for (const frame of pendingJsonFrames) queueFrame(frame);
 		pendingJsonFrames.length = 0;
+	};
+	// A full stream's one `verify` frame, ahead of run_end on every path; nothing follows run_end (CLI-P8).
+	let verifyFrameWritten = false;
+	const writeVerifyFrame = (checks: RunJsonVerifyResult[] | null): void => {
+		if (checks === null || mode !== "json" || jsonEvents === "terminal" || verifyFrameWritten || runEndWritten) return;
+		verifyFrameWritten = true;
+		writeJsonHeader(true);
+		writeMainFrame({ type: "verify", checks });
 	};
 	if (mode === "json" && options.routeNotice) {
 		writeMainFrame({ type: "notice", level: "info", surface: "transcript", text: options.routeNotice });
@@ -1597,10 +1610,24 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	}
 	// An interrupted turn has nothing to accept, and a shutdown stops the checks. The deadline stays armed
 	// through them: its expiry starts the shutdown, whose drain aborts the check in flight (CLI-P6).
-	const verify =
-		options.verify !== undefined && !termination.isShuttingDown() && result.abortReason === null
-			? await runHeadlessVerifyChecks(options.verify, termination)
-			: null;
+	let verify: RunJsonVerifyResult[] | null = null;
+	if (options.verify !== undefined && !termination.isShuttingDown() && result.abortReason === null) {
+		const onForceExit = termination.onForceExit?.bind(termination);
+		verifyRun = runHeadlessVerifyChecks(options.verify, {
+			onDrain: (hook, drainOptions) => {
+				termination.onDrain(hook, drainOptions);
+				// That drain has stopped the check in flight, so the frame lists the checks that finished, before
+				// run_end (CLI-P8). A drain past its budget leaves the frame out rather than the run_end.
+				termination.onDrain(async () => {
+					const stopped = new Promise<null>((resolve) => setImmediate(() => resolve(null)));
+					writeVerifyFrame(await Promise.race([(verifyRun ?? stopped).catch(() => null), stopped]));
+					await sealInterruptedRun();
+				});
+			},
+			...(onForceExit !== undefined ? { onForceExit } : {}),
+		});
+		verify = await verifyRun;
+	}
 	// The turn, any repair turn and the checks have settled. Nothing between here and the seal yields to a
 	// timer, so a deadline that has not fired by now never will, and one that
 	// did has already put the coordinator into shutdown, which the first branch
@@ -1824,10 +1851,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		writeJsonHeader(true);
 		writeMainFrame({ type: "autonomy", ...autonomy });
 	}
-	if (verify !== null && mode === "json" && jsonEvents !== "terminal") {
-		writeJsonHeader(true);
-		writeMainFrame({ type: "verify", checks: verify });
-	}
+	writeVerifyFrame(verify);
 
 	if (mode === "json" && jsonEvents === "terminal") {
 		writeJsonHeader(true);
@@ -1847,7 +1871,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	}
 
 	await frameChain;
-	await recordRun(terminal, verify);
+	// A shutdown seals no acceptance, whichever of this path and the drain arrives first.
+	await recordRun(terminal, termination.isShuttingDown() ? null : verify);
 
 	if (stderrMessage !== null) {
 		process.stderr.write(`${stderrMessage}\n`);
