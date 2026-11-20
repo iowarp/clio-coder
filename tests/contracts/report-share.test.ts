@@ -15,6 +15,7 @@ import {
 	type SharePlaintext,
 	sealShare,
 	telemetryShareDigest,
+	updateShareReceipt,
 } from "../../src/domains/report/index.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
@@ -221,6 +222,66 @@ test("telemetry share --send seals to the maintainers, posts the pointer discuss
 		clock = new Date(Date.now() + 181 * 86_400_000);
 		strictEqual(await share(["--session", "ses_send", "--out", join(root, "local.tar.gz")]), 0);
 		ok(readShareReceipts(stateDir)[aging]?.deletedAt !== null);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("telemetry share list asks gh nothing; telemetry share sweep deletes the expired gist", async () => {
+	const root = await mkdtemp(join(tmpdir(), "telemetry-share-sweep-"));
+	try {
+		const stateDir = join(root, "state");
+		const shareId = "shr_00112233445566bb";
+		const gistId = "0123456789abcdef0123";
+		updateShareReceipt(stateDir, shareId, {
+			kind: "telemetry-share",
+			gistId,
+			sentAt: "2020-01-01T00:00:00.000Z",
+			consent: "debug",
+			profile: "content-free",
+		});
+		const calls: string[][] = [];
+		const run: ReportCommandRunner = async (_file, args) => {
+			calls.push([...args]);
+			return { exitCode: 0, stdout: "", stderr: "", timedOut: false };
+		};
+		let out = "";
+		let err = "";
+		const share = (argv: string[]) =>
+			runTelemetryShare(argv, {
+				stateDir,
+				env: {},
+				interactive: false,
+				findGh: () => "/usr/bin/gh",
+				run,
+				stdout: (text) => {
+					out += text;
+				},
+				stderr: (text) => {
+					err += text;
+				},
+			});
+
+		strictEqual(await share(["list"]), 0);
+		ok(out.includes(`${shareId}  telemetry-share`) && out.includes("live"), out);
+		deepStrictEqual(calls, []);
+		strictEqual(readShareReceipts(stateDir)[shareId]?.deletedAt, null);
+
+		out = "";
+		strictEqual(await share(["sweep"]), 0);
+		strictEqual(out, `deleted the encrypted share ${shareId} (gist ${gistId})\n`);
+		ok(
+			(calls as string[][]).some((args) => args.includes("DELETE") && args.includes(`gists/${gistId}`)),
+			JSON.stringify(calls),
+		);
+		ok(readShareReceipts(stateDir)[shareId]?.deletedAt !== null);
+
+		out = "";
+		strictEqual(await share(["sweep", "--json"]), 0);
+		deepStrictEqual(JSON.parse(out), { version: 1, shares: [] });
+		strictEqual(await share(["sweep", "--bogus"]), 2);
+		ok(err.includes("clio-coder telemetry share sweep: unknown flag: --bogus\n"), err);
+		ok(err.includes("see: clio-coder telemetry share sweep --help\n"), err);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

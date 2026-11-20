@@ -60,6 +60,8 @@ import {
 	uploadShare,
 } from "../domains/report/index.js";
 import { writeSealedReportBundle } from "../domains/report/transport.js";
+import { parseCommandFlags } from "./kit/flags.js";
+import { jsonDocument, writeCliFailure } from "./kit/json-out.js";
 import {
 	attachBundle,
 	type BundleRequest,
@@ -69,6 +71,7 @@ import {
 	printReportBundle,
 	type ReportBundleIo,
 	runReportSelftest,
+	sweepExpiredShares,
 } from "./report-bundle.js";
 import { canSelect, promptSelect } from "./select.js";
 
@@ -77,9 +80,10 @@ export const REPORT_HELP = `clio-coder report [bug|feature|question] [--title <t
                   [--anonymize-models] [--share]] [--credit] [--dry-run] [--yes] [--json]
                   [--on-duplicate comment|new|stop]
                   [--reply-check]
-clio-coder report status [--json]          clio-coder report show <id> [--bundle]
+clio-coder report status [--refresh] [--json]   clio-coder report show <id> [--bundle]
 clio-coder report send <id> [--share] [--yes] [--reply-check]
 clio-coder report forget <id>
+clio-coder report sweep [--json]
 clio-coder report selftest [--session <id>] [--transcript [N]] [--with-tool-output] [--anonymize-models]
 clio-coder report security
 
@@ -97,7 +101,9 @@ with --yes, --on-duplicate decides (default stop: an unattended script never
 comments on someone's issue or files a regression). --reply-check lets an
 attended session check the filed issue once a day for a maintainer's reply (off
 unless asked).
-status asks GitHub, through your gh, where each open report stands.
+status prints what this machine stored about each report and asks GitHub nothing;
+status --refresh asks GitHub, through your gh, where each open report stands.
+status and show never touch GitHub or delete anything.
 Security problems go to a private advisory: clio-coder report security.
 --bundle mechanics builds a diagnostic bundle of the session's telemetry and needs
 --consent: debug lets the maintainers read it to fix this report; dataset also lets
@@ -110,7 +116,8 @@ also after the report was sent.
 --share uploads the bundle too, encrypted so only the maintainers can open it, as a
 secret gist in your own GitHub account through gh; the report names that gist.
 forget or github.com deletes the gist any time; once it is ${SHARE_RETENTION_DAYS} days old, the next
-report or telemetry share run deletes it. A report shares only when it is
+report you compose or send, or report sweep, deletes it. sweep deletes every expired
+bundle and shared gist now and names them (--json: one object). A report shares only when it is
 sent with --share: composed with it, or saved and then sent with
 report send <id> --share, which shares the bundle saved with it.
 selftest builds that bundle for the newest session here, writes nothing, and
@@ -159,7 +166,7 @@ interface ComposeArgs {
 
 type ReportArgs =
 	| ComposeArgs
-	| { verb: "status"; json: boolean }
+	| { verb: "status"; json: boolean; refresh: boolean }
 	| { verb: "show"; id: string; bundle: boolean }
 	| {
 			verb: "send";
@@ -194,6 +201,7 @@ const BOOLEAN_FLAGS = [
 	"--anonymize-models",
 	"--reply-check",
 	"--share",
+	"--refresh",
 ];
 
 function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
@@ -252,8 +260,14 @@ function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
 	};
 	switch (verb) {
 		case "status":
-			if (rest.length > 0) return "usage: clio-coder report status [--json]";
-			return allow("status", ["--json"]) ?? { verb: "status", json: flags.has("--json") };
+			if (rest.length > 0) return "usage: clio-coder report status [--refresh] [--json]";
+			return (
+				allow("status", ["--json", "--refresh"]) ?? {
+					verb: "status",
+					json: flags.has("--json"),
+					refresh: flags.has("--refresh"),
+				}
+			);
 		case "show": {
 			const id = idOf("show");
 			if (typeof id !== "string") return id.error;
@@ -303,6 +317,7 @@ function parseReport(argv: ReadonlyArray<string>): ReportArgs | string {
 	if (verb !== undefined && !(KINDS as ReadonlyArray<string>).includes(verb))
 		return `unknown report kind or verb: ${verb}`;
 	if (rest.length > 0) return `unexpected argument: ${rest[0]} (quote the title and pass it with --title)`;
+	if (flags.has("--refresh")) return "--refresh applies only to report status";
 	if (values.has("--session") && flags.has("--last")) return "--session and --last cannot be combined";
 	const attach = request(bundle);
 	if (typeof attach === "string") return attach;
@@ -408,6 +423,12 @@ function readBody(io: Io, path: string): string {
 	return readFileSync(path, "utf8");
 }
 
+/** A `--session` selector (an exact id, a unique id prefix or a session name) resolved to one session id. */
+async function resolveSession(io: Io, target: string): Promise<{ id: string } | { miss: string }> {
+	const { resolveSessionSelector } = await import("./telemetry-target.js");
+	return resolveSessionSelector(io.stateDir, target, io.cwd);
+}
+
 async function sessionFor(
 	args: ComposeArgs,
 	io: Io,
@@ -415,9 +436,15 @@ async function sessionFor(
 	if (!args.last && args.session === null) return null;
 	const { listSessionsForCwd } = await import("../domains/session/history.js");
 	const metas = listSessionsForCwd(io.cwd);
-	const meta = args.last ? metas[0] : metas.find((candidate) => candidate.id === args.session);
-	const id = args.last ? meta?.id : (args.session ?? undefined);
+	let id: string | undefined;
+	if (args.last) id = metas[0]?.id;
+	else if (args.session !== null) {
+		const resolved = await resolveSession(io, args.session);
+		if ("miss" in resolved) return resolved.miss;
+		id = resolved.id;
+	}
 	if (id === undefined) return "no session in this directory; start one or pass --session <id>";
+	const meta = metas.find((candidate) => candidate.id === id);
 	const observations = observeSession(io.stateDir, id);
 	if (observations.length === 0 && meta === undefined) return `no session ${id} in this directory`;
 	return { id, observations, facts: meta?.model ? { model: meta.model } : {} };
@@ -845,13 +872,16 @@ function bundleIo(io: Io): ReportBundleIo {
 	};
 }
 
-async function status(io: Io, json: boolean): Promise<number> {
-	const gh = await refreshReportStatus(io.stateDir, {
-		findGh: await loadFindGh(io.deps),
-		...(io.deps.run !== undefined ? { run: io.deps.run } : {}),
-		env: io.env,
-		...(io.deps.now !== undefined ? { now: io.deps.now } : {}),
-	});
+/** `report status`: the state stored on this machine; only `--refresh` asks GitHub first, through gh. */
+async function status(io: Io, json: boolean, refresh: boolean): Promise<number> {
+	const gh = refresh
+		? await refreshReportStatus(io.stateDir, {
+				findGh: await loadFindGh(io.deps),
+				...(io.deps.run !== undefined ? { run: io.deps.run } : {}),
+				env: io.env,
+				...(io.deps.now !== undefined ? { now: io.deps.now } : {}),
+			})
+		: null;
 	const rows = reportRows(io.stateDir);
 	if (json) {
 		io.out(`${JSON.stringify({ reports: rows }, null, 2)}\n`);
@@ -871,8 +901,10 @@ async function status(io: Io, json: boolean): Promise<number> {
 		];
 		io.out(`    ${facts.join(" · ")}\n`);
 	}
-	if (!gh && rows.some((row) => row.state === "sent"))
+	if (gh === false && rows.some((row) => row.state === "sent"))
 		io.out("gh is not on this machine, so this is the state stored when each report was sent.\n");
+	else if (gh === null && rows.some((row) => row.state === "sent"))
+		io.out("this is the state stored on this machine; clio-coder report status --refresh asks GitHub through gh.\n");
 	return 0;
 }
 
@@ -1061,11 +1093,84 @@ function security(io: Io): number {
 	return 0;
 }
 
+/** The expiry sweeps every report that composes, sends or forgets runs first, as the consent text says. */
+async function backgroundSweep(io: Io): Promise<void> {
+	sweepReportBundles(io.stateDir, io.deps.now?.() ?? new Date());
+	await sweepShareGists(io.stateDir, {
+		findGh: await loadFindGh(io.deps),
+		env: io.env,
+		...(io.deps.run !== undefined ? { run: io.deps.run } : {}),
+		...(io.deps.now !== undefined ? { now: io.deps.now() } : {}),
+	});
+}
+
+/** `report sweep [--json]`: run the expiry sweeps now and name what they deleted. */
+async function sweep(io: Io, json: boolean): Promise<number> {
+	const bundles = sweepReportBundles(io.stateDir, io.deps.now?.() ?? new Date());
+	const shares = await sweepExpiredShares(io.stateDir, {
+		findGh: await loadFindGh(io.deps),
+		env: io.env,
+		...(io.deps.run !== undefined ? { run: io.deps.run } : {}),
+		...(io.deps.now !== undefined ? { now: io.deps.now() } : {}),
+	});
+	if (json) {
+		io.out(`${JSON.stringify(jsonDocument({ bundles, shares }))}\n`);
+		return 0;
+	}
+	if (bundles.length === 0 && shares.length === 0) {
+		io.out("nothing deleted: no bundle or shared gist has expired\n");
+		return 0;
+	}
+	for (const id of bundles) io.out(`deleted the diagnostic bundle of ${id}\n`);
+	for (const share of shares) io.out(`deleted the encrypted share ${share.shareId} (gist ${share.gistId})\n`);
+	return 0;
+}
+
+/** `report sweep` parses its own flags: an unknown one is a usage error on the C3 lines, exit 2. */
+async function runSweepVerb(argv: ReadonlyArray<string>, deps: ReportCliDeps): Promise<number> {
+	const out = deps.stdout ?? ((text: string) => void process.stdout.write(text));
+	const err = deps.stderr ?? ((text: string) => void process.stderr.write(text));
+	const parsed = parseCommandFlags(argv, { json: { kind: "boolean" }, help: { kind: "boolean", short: "h" } });
+	const failure = parsed.ok
+		? parsed.positional.length > 0
+			? { slug: "usage" as const, message: `unexpected argument: ${parsed.positional[0]}` }
+			: null
+		: { slug: parsed.slug, message: parsed.message };
+	if (failure !== null) {
+		writeCliFailure(
+			{ path: ["report", "sweep"], ...failure, json: argv.includes("--json") },
+			{ stdout: { write: out }, stderr: { write: err } },
+		);
+		return 2;
+	}
+	if (!parsed.ok) return 2;
+	if (parsed.flags.help === true) {
+		out(REPORT_HELP);
+		return 0;
+	}
+	const io: Io = {
+		out,
+		err,
+		interactive: false,
+		env: deps.env ?? process.env,
+		stateDir: deps.stateDir ?? clioStateDir(),
+		cwd: deps.cwd ?? process.cwd(),
+		deps,
+	};
+	try {
+		return await sweep(io, parsed.flags.json === true);
+	} catch (error) {
+		err(`error: report sweep: ${error instanceof Error ? error.message : String(error)}\n`);
+		return 1;
+	}
+}
+
 /**
  * `clio-coder report`: exit 0 sent, opened, written or previewed; 1 on a send failure; 2 on usage or without --yes;
  * 3 when a likely duplicate stopped it.
  */
 export async function runReport(argv: ReadonlyArray<string>, deps: ReportCliDeps = {}): Promise<number> {
+	if (argv[0] === "sweep") return runSweepVerb(argv.slice(1), deps);
 	const out = deps.stdout ?? ((text: string) => void process.stdout.write(text));
 	const err = deps.stderr ?? ((text: string) => void process.stderr.write(text));
 	const args = parseReport(argv);
@@ -1088,26 +1193,28 @@ export async function runReport(argv: ReadonlyArray<string>, deps: ReportCliDeps
 		deps,
 	};
 	try {
-		sweepReportBundles(io.stateDir, io.deps.now?.() ?? new Date());
-		await sweepShareGists(io.stateDir, {
-			findGh: await loadFindGh(io.deps),
-			env: io.env,
-			...(io.deps.run !== undefined ? { run: io.deps.run } : {}),
-			...(io.deps.now !== undefined ? { now: io.deps.now() } : {}),
-		});
+		// Only the verbs that compose, send or forget sweep; status, show, selftest and security touch no GitHub (C15).
+		if (args.verb === "compose" || args.verb === "send" || args.verb === "forget") await backgroundSweep(io);
 		switch (args.verb) {
 			case "compose":
 				return await compose(args, io);
 			case "status":
-				return await status(io, args.json);
+				return await status(io, args.json, args.refresh);
 			case "show":
 				return await show(io, args.id, args.bundle);
 			case "send":
 				return await sendSaved(io, args);
 			case "forget":
 				return await forget(io, args.id);
-			case "selftest":
-				return await runReportSelftest(bundleIo(io), args);
+			case "selftest": {
+				if (args.session === null) return await runReportSelftest(bundleIo(io), args);
+				const resolved = await resolveSession(io, args.session);
+				if ("miss" in resolved) {
+					fail(io, resolved.miss);
+					return 1;
+				}
+				return await runReportSelftest(bundleIo(io), { ...args, session: resolved.id });
+			}
 			case "security":
 				return security(io);
 		}
