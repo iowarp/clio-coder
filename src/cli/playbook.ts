@@ -17,6 +17,7 @@ import {
 	type PlaybookListing,
 	type PlaybookStep,
 } from "../domains/agents/index.js";
+import { jsonDocument, writeCliFailure } from "./kit/json-out.js";
 import { convertWorkspaceForCommand } from "./workspace-conversion.js";
 
 const HELP = `clio-coder playbook <subcommand>
@@ -24,19 +25,15 @@ const HELP = `clio-coder playbook <subcommand>
 Author and check repo-owned playbooks. The fleet runs them: clio-coder fleet run <playbook>.
 
 Subcommands:
-  list                          list builtin, plugin, user and project playbooks with validation status
-  new <name> --from <builtin>   copy the build-review, build-test, or sdlc playbook into .clio-coder/playbooks/
+  list [--json]                 list builtin, plugin, user and project playbooks with validation status
+  new <name> --from <builtin> [--json]
+                                copy the build-review, build-test, or sdlc playbook into .clio-coder/playbooks/
   validate <name> [--var key=value ...] [--json]
                                 run a playbook's execution preflight without side effects
   graph <name> [--var key=value ...] [--json]
                                 print a playbook's compiled waves, loops, scopes, and write boundaries
-  commands init                 draft a commented playbook command registry from declared project entries
+  commands init [--json]        draft a commented playbook command registry from declared project entries
 `;
-
-function fail(message: string): number {
-	process.stderr.write(`clio-coder playbook: ${message}\n`);
-	return 2;
-}
 
 function renderStep(step: PlaybookStep): string {
 	if (step.kind === "code") return `code:${step.command}[${step.scope}]`;
@@ -63,9 +60,33 @@ function runList(args: ReadonlyArray<string>): number {
 	// `playbook list --bogus` exited 0 with the normal table and `playbook list --json`
 	// printed the human one. Its siblings status, drain, and resume all reject an
 	// unrecognised flag, and so do `agents` and `models`.
-	const unknown = args[0];
-	if (unknown !== undefined) return fail(`list: unknown flag: ${unknown}`);
+	const json = args.includes("--json");
+	const unknown = args.find((arg) => arg !== "--json");
+	if (unknown !== undefined) {
+		writeCliFailure({
+			path: ["playbook", "list"],
+			slug: unknown.startsWith("-") ? "unknown_flag" : "usage",
+			message: unknown.startsWith("-") ? `unknown flag: ${unknown}` : `unexpected argument: ${unknown}`,
+			json,
+		});
+		return 2;
+	}
 	const listings = listPlaybooks(process.cwd());
+	if (json) {
+		const playbooks = listings.map((entry) => ({
+			name: entry.name,
+			source: entry.source,
+			path: entry.path,
+			state: entry.playbook !== null ? "valid" : entry.needsCommands !== null ? "setup" : "invalid",
+			...(entry.playbook !== null
+				? { description: entry.playbook.description, steps: entry.playbook.steps.map(renderStep) }
+				: {}),
+			...(entry.playbook === null && entry.needsCommands !== null ? { needsCommands: [...entry.needsCommands] } : {}),
+			...(entry.playbook === null && entry.needsCommands === null ? { error: entry.error ?? "unknown error" } : {}),
+		}));
+		process.stdout.write(`${JSON.stringify(jsonDocument({ playbooks }))}\n`);
+		return 0;
+	}
 	if (listings.length === 0) {
 		process.stdout.write("no playbooks found (.clio-coder/playbooks/*.md)\n");
 		return 0;
@@ -118,8 +139,18 @@ export async function runPlaybookCommand(args: ReadonlyArray<string>): Promise<n
 		case "commands":
 			return (await import("./playbook-commands.js")).runPlaybookCommands(args.slice(1));
 		default:
-			process.stderr.write(`clio-coder playbook: unknown subcommand '${sub}'\n`);
-			process.stderr.write(HELP);
+			// One diagnostic and a pointer to help, never the whole page (C3).
+			writeCliFailure({
+				path: ["playbook"],
+				slug: sub === "--json" ? "usage" : sub.startsWith("-") ? "unknown_flag" : "unknown_command",
+				message:
+					sub === "--json"
+						? "name a subcommand"
+						: sub.startsWith("-")
+							? `unknown flag: ${sub}`
+							: `unknown subcommand '${sub}'`,
+				json: args.includes("--json"),
+			});
 			return 2;
 	}
 }

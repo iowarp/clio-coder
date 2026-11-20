@@ -21,6 +21,8 @@ import {
 } from "../domains/arena/index.js";
 import { formatColumns, printError } from "./argv.js";
 import { containedYoloRefusal } from "./contained-yolo-gate.js";
+import { writeCliFailure } from "./kit/json-out.js";
+import type { ErrorSlug } from "./kit/slugs.js";
 import { installStopSignals } from "./stop-signals.js";
 
 const HELP = `Usage:
@@ -65,7 +67,14 @@ Elo rating once an identity has 5 or more votes.
 
 Matches live under <project>/.clio-coder/arena/<match-id>/.`;
 
-class UsageError extends Error {}
+class UsageError extends Error {
+	constructor(
+		message: string,
+		readonly slug: ErrorSlug = "usage",
+	) {
+		super(message);
+	}
+}
 
 interface Parsed {
 	positional: string[];
@@ -98,18 +107,25 @@ function parse(
 			parsed.positional.push(...args.slice(i + 1));
 			break;
 		}
-		if (VALUE_FLAGS.has(arg) && allowedValues.includes(arg)) {
-			const value = args[i + 1];
-			if (value === undefined) throw new UsageError(`${arg} needs a value`);
-			parsed.values.set(arg, [...(parsed.values.get(arg) ?? []), value]);
-			i++;
+		// C4: `--flag value` or `--flag=value`, and a value flag never takes the next flag as its value (I-21).
+		const equals = arg.startsWith("--") ? arg.indexOf("=") : -1;
+		const name = equals === -1 ? arg : arg.slice(0, equals);
+		if (VALUE_FLAGS.has(name) && allowedValues.includes(name)) {
+			let value: string | undefined;
+			if (equals !== -1) value = arg.slice(equals + 1);
+			else {
+				value = args[i + 1];
+				if (value === undefined || value.startsWith("--")) throw new UsageError(`${name} requires a value`);
+				i++;
+			}
+			parsed.values.set(name, [...(parsed.values.get(name) ?? []), value]);
 			continue;
 		}
 		if (BOOLEAN_FLAGS.has(arg) && allowedFlags.includes(arg)) {
 			parsed.flags.add(arg);
 			continue;
 		}
-		if (arg.startsWith("-")) throw new UsageError(`unknown option: ${arg}`);
+		if (arg.startsWith("-")) throw new UsageError(`unknown flag: ${name}`, "unknown_flag");
 		parsed.positional.push(arg);
 	}
 	return parsed;
@@ -415,12 +431,20 @@ export async function runArenaCommand(args: string[]): Promise<number> {
 			case "standings":
 				return standingsCommand(rest);
 			default:
-				throw new UsageError(`unknown arena command: ${verb}`);
+				if (verb === "--json") throw new UsageError("name a subcommand");
+				if (verb.startsWith("-")) throw new UsageError(`unknown flag: ${verb}`, "unknown_flag");
+				throw new UsageError(`unknown arena command: ${verb}`, "unknown_command");
 		}
 	} catch (error) {
 		if (error instanceof UsageError) {
-			printError(error.message);
-			process.stderr.write(`${HELP}\n`);
+			// One diagnostic and a pointer to help, never the whole page (C3).
+			const known = ["run", "show", "vote", "list", "standings"].includes(verb);
+			writeCliFailure({
+				path: known ? ["arena", verb] : ["arena"],
+				slug: error.slug,
+				message: error.message,
+				json: options.includes("--json"),
+			});
 			return 2;
 		}
 		printError(error instanceof Error ? error.message : String(error));

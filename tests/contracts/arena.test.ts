@@ -1030,4 +1030,9 @@ describe("prompts that start with a dash", () => {
 			process.stderr.write = errWrite;
 		}
 	});
+
+	it("a value flag never takes the next flag as its value (I-21)", async () => {
+		assert.equal(await runArenaCommand(["run", "--contender", "--timeout", "p"]), 2);
+		assert.equal(await runArenaCommand(["list", "--suite", "--reveal"]), 2);
+	});
 });
