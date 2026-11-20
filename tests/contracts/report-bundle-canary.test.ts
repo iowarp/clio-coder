@@ -31,6 +31,7 @@ import {
 	scrubText,
 	sendReport,
 	sweepReportBundles,
+	transcriptExcerpt,
 	updateOutbox,
 } from "../../src/domains/report/index.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
@@ -615,6 +616,18 @@ test("the transcript tick adds an excerpt with thinking and signatures gone and 
 			'"turns":1,"of":2,"toolOutput":false',
 		])
 			ok(text.includes(present), `${present} is missing from the transcript:\n${text}`);
+		// With tool output, a screenshot's base64 is a placeholder, never its bytes (CLI-14).
+		const image = { type: "image", data: "SU1BR0UtQkFTRTY0LU1BUktFUg==", mimeType: "image/png" };
+		const screenshot = message("r1", "a2", "tool_result", {
+			toolCallId: "call_1",
+			toolName: "read",
+			result: { content: [{ type: "text", text: "TOOL-OUTPUT-MARKER" }, image] },
+			isError: false,
+		});
+		const entries = [...LEDGER.slice(0, 4), screenshot] as unknown as Parameters<typeof transcriptExcerpt>[0];
+		const full = transcriptExcerpt(entries, { turns: 1, toolOutput: true, identity: IDENTITY }).bytes.toString("utf8");
+		ok(full.includes("TOOL-OUTPUT-MARKER") && full.includes("[omitted: image]"), full);
+		ok(!full.includes(image.data), full);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

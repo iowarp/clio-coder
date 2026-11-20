@@ -31,18 +31,21 @@ export interface SealedBundleSource {
  * next to the report's bundle as `<id>.box`, for the reporter to attach by hand. Returns the file's path.
  */
 export function writeSealedReportBundle(stateDir: string, source: SealedBundleSource): string {
-	const envelope = sealShare({
-		format: SHARE_PLAIN_FORMAT,
-		v: 1,
-		kind: "report-bundle",
-		shareId: source.shareId,
-		day: (source.now ?? new Date()).toISOString().slice(0, 10),
-		clio: source.clio,
-		consent: [...source.consent],
-		digest: source.digest,
-		archiveFormat: source.archiveFormat,
-		archive: source.archive.toString("base64"),
-	});
+	const envelope = sealShare(
+		{
+			format: SHARE_PLAIN_FORMAT,
+			v: 1,
+			kind: "report-bundle",
+			shareId: source.shareId,
+			day: (source.now ?? new Date()).toISOString().slice(0, 10),
+			clio: source.clio,
+			consent: [...source.consent],
+			digest: source.digest,
+			archiveFormat: source.archiveFormat,
+			archive: source.archive.toString("base64"),
+		},
+		source.now !== undefined ? { now: source.now } : {},
+	);
 	const path = reportBundlePath(stateDir, source.reportId).replace(/\.tar\.gz$/u, ".box");
 	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 	writeFileSync(path, `${JSON.stringify(envelope)}\n`, { mode: 0o600 });

@@ -4,9 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+	composeReportDraft,
 	type ReportCommandRunner,
 	readOutbox,
+	reportRows,
 	runReplyCheck,
+	saveReportDraft,
 	takeFixedReportNotices,
 	updateOutbox,
 } from "../../src/domains/report/index.js";
@@ -58,4 +61,26 @@ test("report follow-up: the reply check is opt-in and daily, and the thank-you s
 	]);
 	deepStrictEqual(takeFixedReportNotices(stateDir, upgrade, { changelog, env: {} }), []);
 	strictEqual(readOutbox(stateDir)[ID]?.thanked, true);
+});
+
+test("report follow-up: pruning a report closed over a year ago deletes its draft, so it never lists as sendable again", () => {
+	const stateDir = join(mkdtempSync(join(tmpdir(), "report-prune-")), "state");
+	const OLD = "rpt_01JABCDEFGHJKMNPQRSTVWXYZ1";
+	saveReportDraft(stateDir, {
+		...composeReportDraft({ kind: "bug", surface: "tui", title: "fix: an old one", happened: "x" }),
+		id: OLD,
+	});
+	updateOutbox(stateDir, OLD, {
+		kind: "bug",
+		title: "fix: an old one",
+		state: "sent",
+		sentAt: "2020-01-01T00:00:00.000Z",
+		lastSeen: { state: "CLOSED", comments: 0, at: "2020-02-01T00:00:00.000Z" },
+	});
+	updateOutbox(stateDir, ID, { kind: "bug", title: "fix: a new one" });
+	strictEqual(readOutbox(stateDir)[OLD], undefined);
+	deepStrictEqual(
+		reportRows(stateDir).map((row) => row.id),
+		[ID],
+	);
 });

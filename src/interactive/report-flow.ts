@@ -135,14 +135,23 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 	async function review(composed: ReportDraft): Promise<void> {
 		const identity: LocalIdentity = await localIdentity(cwd(), deps.identitySettings?.() ?? {}, { env });
 		const draft = rememberIdentity(composed, identity);
-		// Opened against what is on this machine; who gh is signed in as arrives a moment later and the plan follows.
+		// Opened against what is on this machine. Who gh is signed in as is asked only after `s`, the reporter's consent.
 		const gh = await findGh();
 		let shown: ReportPlanTransport =
 			gh !== null ? { kind: "gh", login: null } : canOpenBrowser(env) ? { kind: "browser" } : { kind: "file" };
 		let detected: ReportTransport | null = null;
-		const detection = (deps.detect ?? ((e) => detectTransport(e, { findGh: () => gh })))(env).catch(
-			(): ReportTransport => ({ kind: "file" }),
-		);
+		let detection: Promise<ReportTransport> | null = null;
+		const prepare = async (): Promise<boolean> => {
+			detection ??= (deps.detect ?? ((e) => detectTransport(e, { findGh: () => gh })))(env).catch(
+				(): ReportTransport => ({ kind: "file" }),
+			);
+			const transport = await detection;
+			const planned = shown.kind;
+			detected = transport;
+			shown = transport;
+			// gh is not signed in, so the report would go another way than the send step said: show that first.
+			return transport.kind === planned;
+		};
 		// The awaits above leave room for an approval to arrive first; it keeps the screen.
 		const refused = refusal(deps.transitions);
 		if (refused !== null) {
@@ -176,11 +185,11 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 			draft,
 			columns: deps.terminal?.columns ?? 80,
 			plan: (current) => planReport(current, { identity, transport: shown, stateDir: deps.stateDir }),
-			ready: () => detected !== null,
+			prepare,
 			edit,
 			...(draft.sessionId !== null ? { bundle } : {}),
 			send: (current, plan, choose, choices) => {
-				if (detected === null) throw new Error("still checking how to send");
+				if (detected === null) throw new Error("the send step did not learn how to send");
 				const kept = choices.bundle !== null ? bundles.get(choices.bundle.sha256) : undefined;
 				if (choices.bundle !== null && kept === undefined) throw new Error("the attached bundle was not built here");
 				if (kept !== undefined) saveBuiltBundle(deps.stateDir, current, kept);
@@ -211,11 +220,6 @@ export function createReportHost(deps: ReportHostDeps): ReportHost {
 			},
 		});
 		deps.transitions.handle = session;
-		void detection.then((transport) => {
-			detected = transport;
-			shown = transport;
-			if (deps.transitions.handle === session) session.review.refresh();
-		});
 	}
 
 	function start(task: () => Promise<void>): void {

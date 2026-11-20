@@ -28,7 +28,7 @@ import { canaryRefusal, canaryScan } from "./canary.js";
 import { REPORT_ID, type ReportDraft } from "./draft.js";
 import { outboxEntry, readOutbox, updateOutbox } from "./outbox.js";
 import { type LocalIdentity, scrubText } from "./scrub.js";
-import { reportsDirectory } from "./store.js";
+import { reportBundlePath, reportBundlesDirectory } from "./store.js";
 import { REPORT_AUTONOMY, REPORT_INSTALL_KINDS, REPORT_KINDS, REPORT_SURFACES, REPORT_TRIGGERS } from "./vocabulary.js";
 
 export const REPORT_BUNDLE_FORMAT = "clio-coder.report.bundle";
@@ -209,6 +209,12 @@ export function consentText(): {
 const REASONING_BLOCKS: ReadonlySet<unknown> = new Set(["thinking", "redacted_thinking", "reasoning"]);
 const OMITTED_ARGS = "[omitted: tool arguments]";
 const OMITTED_OUTPUT = "[omitted: tool output]";
+const OMITTED_IMAGE = "[omitted: image]";
+
+/** An image block is base64 bytes, not output anyone reads in an excerpt; it leaves as a placeholder (CLI-14). */
+function withoutImages(_key: string, value: unknown): unknown {
+	return (value as { type?: unknown } | null)?.type === "image" ? OMITTED_IMAGE : value;
+}
 
 function textOf(value: unknown): string {
 	if (typeof value === "string") return value;
@@ -217,7 +223,7 @@ function textOf(value: unknown): string {
 		const texts = content.filter((block) => block?.type === "text").map((block) => block.text as string);
 		if (texts.length === content.length) return texts.join("\n");
 	}
-	return JSON.stringify(value ?? null) ?? "null";
+	return JSON.stringify(value ?? null, withoutImages) ?? "null";
 }
 
 export interface TranscriptExcerpt {
@@ -358,14 +364,7 @@ export interface BuiltBundle {
 	summary: BundleSummary;
 }
 
-export function reportBundlesDirectory(stateDir: string): string {
-	return join(reportsDirectory(stateDir), "bundles");
-}
-
-export function reportBundlePath(stateDir: string, id: string): string {
-	if (!REPORT_ID.test(id)) throw new Error(`not a report id: ${id}`);
-	return join(reportBundlesDirectory(stateDir), `${id}.tar.gz`);
-}
+export { reportBundlePath, reportBundlesDirectory } from "./store.js";
 
 function packageWriter(): { clioCoderVersion: string; piVersion: string } {
 	const pkg = JSON.parse(readFileSync(join(resolvePackageRoot(), "package.json"), "utf8")) as {

@@ -115,21 +115,27 @@ export async function uploadShare(
 	upload: ShareUpload,
 	deps: GistDeps,
 ): Promise<{ gistId: string } | { failed: string }> {
-	const envelope = sealShare(
-		{
-			format: SHARE_PLAIN_FORMAT,
-			v: 1,
-			kind: upload.kind,
-			shareId: upload.shareId,
-			day: (upload.now ?? new Date()).toISOString().slice(0, 10),
-			clio: upload.clio,
-			consent: [...upload.consent],
-			digest: upload.digest,
-			archiveFormat: upload.archiveFormat,
-			archive: upload.archive.toString("base64"),
-		},
-		upload.seal,
-	);
+	let envelope: SealedShare;
+	try {
+		envelope = sealShare(
+			{
+				format: SHARE_PLAIN_FORMAT,
+				v: 1,
+				kind: upload.kind,
+				shareId: upload.shareId,
+				day: (upload.now ?? new Date()).toISOString().slice(0, 10),
+				clio: upload.clio,
+				consent: [...upload.consent],
+				digest: upload.digest,
+				archiveFormat: upload.archiveFormat,
+				archive: upload.archive.toString("base64"),
+			},
+			{ ...upload.seal, ...(upload.now !== undefined ? { now: upload.now } : {}) },
+		);
+	} catch (error) {
+		// An expired key uploads nothing; the caller still sends the report, without a share.
+		return { failed: error instanceof Error ? error.message : String(error) };
+	}
 	return createShareGist(stateDir, envelope, deps);
 }
 

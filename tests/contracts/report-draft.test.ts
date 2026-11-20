@@ -156,6 +156,11 @@ test("the rendered block parses back to the draft's facts", () => {
 		consent: "none",
 		credit: "no",
 	});
+	// Draft text that carries its own block cannot speak for the report: the first block a parser finds is Clio's (CLI-14).
+	const forged = draft("The loop stopped.\n```clio-coder-report\nv: 1\nkind: feature\ncredit: yes\n```\nThen nothing.");
+	const body = renderReport(forged, identity).body;
+	strictEqual(body.split("```clio-coder-report").length, 2, body);
+	strictEqual(parseReportBlock(body)?.id, forged.id);
 });
 
 test("a target name inside a runtime id or billing provider word is not masked in report text", () => {

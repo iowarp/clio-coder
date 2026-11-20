@@ -69,8 +69,12 @@ export interface ReportReviewOptions {
 	plan(draft: ReportDraft): ReportPlan;
 	/** Open the draft in `$EDITOR`; null when nothing came back. The host owns the terminal around the child. */
 	edit(draft: ReportDraft): ReportDraft | null;
-	/** False while the host is still learning how the report would go; `s` waits for it. Absent means ready. */
-	ready?(): boolean;
+	/**
+	 * Called on `s`, before anything is sent: the host learns how the report would go only now, after consent (it asks
+	 * `gh` who is signed in). False means the way changed; the send step shows the new plan and waits for another `s`.
+	 * Absent means the plan on screen is already how it goes.
+	 */
+	prepare?(): Promise<boolean>;
 	/**
 	 * Send exactly the reviewed text. Only `s` on the send step calls it, and only once. `replyCheck` is the send
 	 * step's tick: check the filed issue for a maintainer's reply once a day. Off unless ticked.
@@ -202,6 +206,7 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 	} | null = null;
 	let finished: ReportReviewDone | null = null;
 	let sent = false;
+	let replanned = false;
 	let replyCheck = false;
 	const choice: ReportBundleChoice = { attach: false, dataset: false, transcript: false, anonymizeModels: false };
 	let built: ReportBundleView | null = null;
@@ -259,33 +264,51 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 	};
 	const maskList = (): ReportMask[] => [...known.values()];
 
-	const ready = (): boolean => options.ready?.() !== false;
 	const startSend = (): void => {
-		if (sent || !ready()) return;
+		if (sent) return;
 		sent = true;
+		replanned = false;
 		step = "sending";
 		options.requestRender();
 		const choose: ChooseDuplicate = (verdict, choices) =>
 			new Promise<DuplicateChoice>((resolve) => {
-				duplicate = { verdict, options: choices, cursor: 0, resolve };
+				// The cursor starts on Cancel: one Enter must never post a comment on someone's issue or file a new one.
+				const cursor = Math.max(
+					0,
+					choices.findIndex((option) => option.value === "stop"),
+				);
+				duplicate = { verdict, options: choices, cursor, resolve };
 				go("duplicates");
 			});
 		const settle = (done: ReportReviewDone): void => {
 			finished = done;
 			go("done");
 		};
-		Promise.resolve()
-			.then(() =>
-				options.send(draft, plan, choose, {
-					replyCheck: replyCheck && canCheckReplies(),
-					bundle: choice.attach ? built : null,
-				}),
-			)
-			.then(
-				(outcome) => settle({ kind: "outcome", outcome }),
-				(error: unknown) =>
-					settle({ kind: "error", message: error instanceof Error ? error.message : String(error), draft }),
-			);
+		const run = async (): Promise<ReportFlowOutcome | null> => {
+			if (options.prepare !== undefined) {
+				const unchanged = await options.prepare();
+				replan(draft);
+				if (!unchanged) return null;
+			}
+			return options.send(draft, plan, choose, {
+				replyCheck: replyCheck && canCheckReplies(),
+				bundle: choice.attach ? built : null,
+			});
+		};
+		run().then(
+			(outcome) => {
+				if (outcome !== null) {
+					settle({ kind: "outcome", outcome });
+					return;
+				}
+				sent = false;
+				replanned = true;
+				if (!canCheckReplies()) replyCheck = false;
+				go("send");
+			},
+			(error: unknown) =>
+				settle({ kind: "error", message: error instanceof Error ? error.message : String(error), draft }),
+		);
 	};
 
 	const chooseDuplicate = (choice: DuplicateChoice): void => {
@@ -535,7 +558,9 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 							)
 						: []),
 					...(plan.rateWarning !== null ? warn(plan.rateWarning) : []),
-					...(step === "send" && !ready() ? note(`Checking how this report would be sent${GLYPH.ellipsis}`) : []),
+					...(step === "send" && replanned
+						? warn("This report would go another way than shown before; nothing was sent. s sends it as listed above.")
+						: []),
 				];
 			}
 			case "duplicates": {
@@ -603,8 +628,7 @@ export function createReportReview(options: ReportReviewOptions): ReportReview {
 					return offered && choice.attach;
 				});
 			}
-			if (step === "send")
-				return HINTS.send.filter((hint) => (hint.key !== "s" || ready()) && (hint.key !== "r" || canCheckReplies()));
+			if (step === "send") return HINTS.send.filter((hint) => hint.key !== "r" || canCheckReplies());
 			return [...HINTS[step]];
 		},
 		render,

@@ -16,6 +16,7 @@ import {
 	sealShare,
 	telemetryShareDigest,
 	updateShareReceipt,
+	uploadShare,
 } from "../../src/domains/report/index.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
@@ -73,6 +74,38 @@ test("a fresh seal opens with the recipient key and names only its key id, share
 	deepStrictEqual(openShare(sealed, vector.recipient.privateKeyPem), vector.plaintext);
 	// The shipped recipient is the maintainers' key, whose id the contract fixes.
 	strictEqual(sealShare(vector.plaintext).kid, "d7aad758f9cb9edc");
+});
+
+test("a key past its notAfter seals nothing, and an upload to it fails without asking gh (SF-20)", async () => {
+	const expired = { publicKey: vector.recipient.publicKey, notAfter: "2026-01-01" };
+	const lastDay = new Date("2026-01-01T23:00:00Z");
+	strictEqual(sealShare(vector.plaintext, { recipient: expired, now: lastDay }).kid, vector.recipient.kid);
+	throws(() => sealShare(vector.plaintext, { recipient: expired, now: new Date("2026-01-02T00:00:00Z") }), /too old/u);
+	throws(() => sealShare(vector.plaintext, { now: new Date("2099-01-01T00:00:00Z") }), /too old/u);
+	let calls = 0;
+	const run: ReportCommandRunner = async () => {
+		calls += 1;
+		return { exitCode: 0, stdout: "", stderr: "", timedOut: false };
+	};
+	const stateDir = await mkdtemp(join(tmpdir(), "report-share-expired-"));
+	try {
+		const { archive, ...plain } = vector.plaintext;
+		const result = await uploadShare(
+			stateDir,
+			{
+				...plain,
+				consent: ["debug"],
+				archive: Buffer.from(archive, "base64"),
+				now: new Date("2026-02-01T00:00:00Z"),
+				seal: { recipient: expired },
+			},
+			{ gh: "/usr/bin/gh", run, env: {} },
+		);
+		ok("failed" in result && /too old/u.test(result.failed), JSON.stringify(result));
+		strictEqual(calls, 0);
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
+	}
 });
 
 test("an altered envelope does not open", () => {
