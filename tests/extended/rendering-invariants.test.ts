@@ -1584,6 +1584,34 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("keeps a URL's scheme when a double-click selects it", async () => {
+		const copies: string[] = [];
+		const terminal = new RenderingTerminal();
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer, undefined, undefined, {
+			copySelection: async (text) => {
+				copies.push(text);
+				return true;
+			},
+		});
+		tui.setLayoutRoot(new ScrollView(new Text("see https://example.com/path now", 0, 0), { primary: true }));
+		tui.start();
+		try {
+			tui.renderNow(true);
+			const screen = tui.getScreenLines().map(stripTerminalSequences);
+			const row = screen.findIndex((line) => line.includes("example")) + 1;
+			const column = (screen[row - 1] ?? "").indexOf("example") + 1;
+			for (let click = 0; click < 2; click++) {
+				terminal.input(`\x1b[<0;${column};${row}M`);
+				terminal.input(`\x1b[<0;${column};${row}m`);
+			}
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			strictEqual(copies.at(-1), "https://example.com/path");
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("keeps one neutral copy flash over SSH however many selections land", async () => {
 		const saved = { SSH_CONNECTION: process.env.SSH_CONNECTION, DISPLAY: process.env.DISPLAY };
 		process.env.SSH_CONNECTION = "client 0 server 0";

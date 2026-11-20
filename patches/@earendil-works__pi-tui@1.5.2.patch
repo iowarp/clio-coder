@@ -165,10 +165,20 @@ index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..afb8bdc52e3ca93cbd00033837c910cd
      private copyTextToClipboard;
      private applySearchTextHighlight;
 diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
-index 3567a4350ab0da56276289d422b58d46e4882949..f60a8e43fe4e88e14dc38782ff9c24a294bfea75 100644
+index 3567a4350ab0da56276289d422b58d46e4882949..3f3a3b1e126d386ddcaae1d7cfc1f24871cc1bb2 100644
 --- a/dist/tui-alt-screen.js
 +++ b/dist/tui-alt-screen.js
-@@ -325,6 +325,13 @@ export class TuiAltScreen extends TuiBase {
+@@ -32,7 +32,8 @@ const COPY_ERROR_FLASH_DURATION_MS = 5000;
+ // Regular mode delegates double-click selection to the terminal emulator. Fullscreen owns mouse selection,
+ // so it uses iTerm2's default "characters considered part of a word" set:
+ // https://github.com/gnachman/iTerm2/blob/7f4ff739721f95d0b93003d8701c4523a7edf261/sources/Settings/iTermPreferences.m#L743
+-const TERMINAL_WORD_SELECTION_JOINERS = new Set(["/", "-", "+", "\\", "~", "_", "."]);
++// Clio adds the colon, so a double-clicked URL keeps its scheme and `path/file.ts:120` selects whole.
++const TERMINAL_WORD_SELECTION_JOINERS = new Set(["/", "-", "+", "\\", "~", "_", ".", ":"]);
+ const wordSegmenter = getWordSegmenter();
+ /** Alternate-screen TUI with a scrollable, application-owned viewport. */
+ export class TuiAltScreen extends TuiBase {
+@@ -325,6 +326,13 @@ export class TuiAltScreen extends TuiBase {
              return;
          }
      }
@@ -182,7 +192,7 @@ index 3567a4350ab0da56276289d422b58d46e4882949..f60a8e43fe4e88e14dc38782ff9c24a2
      toggleSearch() {
          if (this.activeSearch) {
              this.closeSearch();
-@@ -1163,7 +1170,13 @@ export class TuiAltScreen extends TuiBase {
+@@ -1163,7 +1171,13 @@ export class TuiAltScreen extends TuiBase {
          }
          this.stopSelectionAutoScroll();
          this.selectionPressActive = true;
@@ -197,7 +207,7 @@ index 3567a4350ab0da56276289d422b58d46e4882949..f60a8e43fe4e88e14dc38782ff9c24a2
              ? getScrollViewsAt(this.currentLayout, event.x, event.y)[0]
              : undefined;
          const anchor = this.getSelectionPoint(event, scrollView);
-@@ -1222,15 +1235,18 @@ export class TuiAltScreen extends TuiBase {
+@@ -1222,15 +1236,18 @@ export class TuiAltScreen extends TuiBase {
                  return undefined;
              sourceLines = box.scrollContentLines;
          }
