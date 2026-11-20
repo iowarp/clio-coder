@@ -38,6 +38,9 @@ export function toolResultNote(severity: string, message: string): string {
 	return `[middleware:${severity}] ${neutralizeFraming(message)}`;
 }
 
+/** What a queued steer that ended a tool call says in its result, for the model and the transcript (FX-32). */
+export const STEER_ABORT_MARK = "aborted-by-steer";
+
 /** Separator between a tool result's own output and the notes appended to it. */
 export const TOOL_RESULT_NOTES_SEPARATOR = "\n\n";
 

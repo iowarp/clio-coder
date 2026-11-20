@@ -672,6 +672,11 @@ export interface SafetySettings {
 		autonomousMinutes: number;
 		/** Tokens one yolo stretch spends before it pauses; 0 is off. */
 		autonomousTokens: number;
+		/**
+		 * Seconds a main-session foreground bash call may go with no output and no CPU in its process tree before it
+		 * ends as an idle timeout (FX-32); 0 is off.
+		 */
+		bashIdleSeconds: number;
 	};
 	review: ReviewSettings;
 	/**
@@ -916,6 +921,7 @@ export const DEFAULT_SETTINGS = {
 			autonomousToolCalls: 600,
 			autonomousMinutes: 120,
 			autonomousTokens: 5_000_000,
+			bashIdleSeconds: 0,
 		},
 		review: { enabled: false } as ReviewSettings,
 		sandbox: "auto" as SandboxMode,
@@ -1150,6 +1156,9 @@ safety:
     autonomousToolCalls: 600
     autonomousMinutes: 120
     autonomousTokens: 5000000
+    # A foreground bash call with no output and no CPU in its processes for
+    # this many seconds ends as an idle timeout; 0 turns it off.
+    bashIdleSeconds: 0
   review:
     enabled: false
   # OS sandbox for shell commands: auto | required | off. Dispatched workers

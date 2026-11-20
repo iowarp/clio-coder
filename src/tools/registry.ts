@@ -255,6 +255,11 @@ export interface ToolSpec {
 	 */
 	executionMode?: ToolExecutionMode;
 	/**
+	 * True for a tool whose abort only stops a local process or wait it started, leaving nothing half-done: in the
+	 * main session a steer the operator queued while it runs ends the call after a short grace period (FX-32).
+	 */
+	steerInterruptible?: true;
+	/**
 	 * Optional argument normalizer applied before the tool body (and its own
 	 * internal validation). Mirrors pi's `prepareArguments`: lets a tool accept
 	 * the common weak-model argument shapes (legacy top-level fields, a
@@ -503,6 +508,12 @@ export interface RegistryDeps {
 	) => Promise<WorkspaceSnapshotOutcome | null>;
 }
 
+/** The main session's side of a steer interruption; see {@link ToolInvokeOptions.steerInterrupt}. */
+export interface SteerInterruptHost {
+	/** One running interruptible call; `end` when it settles. */
+	begin(toolName: string): { signal: AbortSignal; fired(): boolean; end(): void };
+}
+
 /**
  * Keeps the operator's screen reserved across the rounds of one harness card, so
  * a model question cannot take it between two of them. Created and released by
@@ -559,6 +570,18 @@ export interface ToolInvokeOptions {
 	turnConstraints?: TurnConstraints;
 	/** Why the host ended this run, read once `signal` has fired; the engine's abort carries no reason (#445). */
 	abortCause?: () => string | null;
+	/**
+	 * Host-owned, main session only: lets a queued operator steer end a `steerInterruptible` call (FX-32). The
+	 * agent-tool seam begins one interruption per call and never hands this to the tool.
+	 */
+	steerInterrupt?: SteerInterruptHost;
+	/**
+	 * Set by the agent-tool seam: true when a queued steer alone ended this call, false when the run was cancelled too.
+	 * Read once, when the call settles; the first read decides the stop cause for the tool and the seam alike.
+	 */
+	steerInterrupted?: () => boolean;
+	/** Main session: `safety.limits.bashIdleSeconds` in ms. A foreground bash call idle this long ends as timed out. */
+	bashIdleMs?: number;
 	/** Registry-owned filter bound to the active compiled safety policy. */
 	allowsObservationPath?: (path: string) => boolean;
 	/** Registry-owned write-root check the typed mutation seam repeats right before it publishes (F3). */
