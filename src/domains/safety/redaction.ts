@@ -119,13 +119,22 @@ export function urlUserinfoHoldsSecret(secret: string): boolean {
 function redactUnlessEnvReference(match: string, prefix: string, secret: string): string {
 	return ENV_REFERENCE_RE.test(secret) ? match : `${prefix}[redacted]`;
 }
-// A value no credential takes: all digits, or a short lowercase word or identifier without digits, as in `key=value`,
-// `sort_key=name` or `max_tokens=128`. The name match stays broad, since a missed secret leaks and a false positive only
-// hides a value; only such a value shows (SF-6).
-const PLAIN_ASSIGNMENT_VALUE_RE = /^(?:\d+|[a-z][a-z_]{0,15})$/u;
+// The name match stays broad, since a missed secret leaks and a false positive only hides a value (SF-6). A name holding a
+// password, passphrase, secret, credential, auth or singular token word, glued or not, redacts every value that is not a
+// variable reference, whatever its shape; so does one holding access, api or private. Only a name whose secret word is key
+// or a plural count such as tokens shows a value no credential takes: up to six digits, or a short lowercase word or
+// identifier without digits, as in `key=value`, `sort_key=name` or `max_tokens=128`.
+const STRICT_ASSIGNMENT_NAME_RE = /PASS|PWD|SECRET|CREDENTIAL|AUTH|ACCESS|API|PRIVATE|TOKEN(?!S(?![A-Z]))/iu;
+const SHAPED_ASSIGNMENT_NAME_RE = /KEY|TOKENS/iu;
+const PLAIN_ASSIGNMENT_VALUE_RE = /^(?:\d{1,6}|[a-z][a-z_]{0,15})$/u;
 
 function redactAssignment(match: string, prefix: string, secret: string): string {
-	return PLAIN_ASSIGNMENT_VALUE_RE.test(secret) ? match : redactUnlessEnvReference(match, prefix, secret);
+	const name = prefix.slice(0, -1);
+	const shown =
+		!STRICT_ASSIGNMENT_NAME_RE.test(name) &&
+		SHAPED_ASSIGNMENT_NAME_RE.test(name) &&
+		PLAIN_ASSIGNMENT_VALUE_RE.test(secret);
+	return shown ? match : redactUnlessEnvReference(match, prefix, secret);
 }
 // A credential's own shape, wherever it sits: a git host token, and the value an Authorization header or a bearer scheme
 // names. A bare `bearer <word>` needs a digit to stay out of prose, and `$TOKEN` falls outside the value charset. Each
