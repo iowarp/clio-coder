@@ -140,12 +140,23 @@ test("memory list --json prints each record's review fields, pending and approve
 					approved: true,
 					approval: { by: "guardian", at: "2026-09-22T00:00:00.000Z" },
 				},
+				// FX-42: a record the validator sets aside is reported, not hidden, and listing writes nothing.
+				{ ...base, id: "mem-legacy-1", key: "legacy", lesson: "Legacy lesson.", approved: false },
 			],
 		}),
 	);
+	const stored = readFileSync(memoryStorePath(dataDir), "utf8");
 	const listed = run(["list", "--json"]);
 	strictEqual(listed.status, 0, listed.stdout + listed.stderr);
-	const records = (JSON.parse(listed.stdout) as { records: Record<string, unknown>[] }).records;
+	const envelope = JSON.parse(listed.stdout) as { records: Record<string, unknown>[]; invalid: unknown[] };
+	deepStrictEqual(
+		envelope.invalid.map((item) => (item as { record: { id: string } }).record.id),
+		["mem-legacy-1"],
+	);
+	match(listed.stderr, /1 memory record set aside as invalid: .*records\.json: \$\.records\[3\]\.id: /);
+	strictEqual(readFileSync(memoryStorePath(dataDir), "utf8"), stored);
+	ok(!existsSync(join(dataDir, "memory", "records.invalid.json")));
+	const records = envelope.records;
 	deepStrictEqual(records.map((record) => [record.id, record.approved]).sort(), [
 		["mem-00000000000000b1", false],
 		["mem-00000000000000b2", true],
@@ -186,6 +197,7 @@ test("memory list --json prints each record's review fields, pending and approve
 	const all = run(["list"]);
 	ok(all.stdout.startsWith("3 memory records\n"), all.stdout);
 	ok(all.stderr.includes("1 memory record pending review"), all.stderr);
+	ok(all.stderr.includes("1 memory record set aside as invalid"), all.stderr);
 });
 
 test("propose --from-evidence refuses a run or dispatching session that carries a flow label", async () => {
