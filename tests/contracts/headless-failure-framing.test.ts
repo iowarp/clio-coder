@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { prefixHeadlessFailure, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
+import { createToolCallIdMinter } from "../../src/cli/modes/run-json-schema-v2.js";
 import { completionExitCode, withRunFailureReporting, withRunResultV2 } from "../../src/cli/run-failure.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { CITATION_CHECK_PREFIX } from "../../src/domains/safety/citation-grounding.js";
@@ -586,4 +587,65 @@ test("a v2 run_end lists every child run the main agent dispatched, a steer canc
 	// No children: an empty list, as before.
 	const alone = await writtenCallRun("json", pong);
 	deepStrictEqual((JSON.parse(alone.stdout.trim()) as { dispatch?: { runs?: unknown[] } }).dispatch?.runs, []);
+});
+
+test("v2 stream-json tool frames carry Clio's tc_<turn>_<n> id and the provider's beside it (CLI-8)", async (t) => {
+	const env = await isolateClioEnv("headless-tool-call-ids-");
+	t.after(() => env.restore());
+	const call = (id: string, name: string) => ({ type: "toolCall", id, name, arguments: {} });
+	const asks = (...calls: object[]) => ({ ...answerMessage(""), stopReason: "toolUse", content: calls });
+	const result = { content: [{ type: "text", text: "ok" }], details: {} };
+	const ran = (id: string, toolName: string) => [
+		{ type: "tool_execution_start", toolCallId: id, toolName, args: {} },
+		{ type: "tool_execution_end", toolCallId: id, toolName, result, isError: false },
+	];
+	const first = asks(call("call_B", "read"), call("call_A", "grep"));
+	// The second turn's provider numbers its calls again from the same id.
+	const second = asks(call("call_B", "read"));
+	const before = [
+		{ type: "turn_start" },
+		{ type: "message_end", message: first },
+		// Parallel execution settles out of the message's order; the ids follow the message.
+		...ran("call_A", "grep"),
+		...ran("call_B", "read"),
+		{ type: "message_end", message: { role: "toolResult", toolCallId: "call_B", toolName: "read", content: [] } },
+		{ type: "turn_end", message: first, toolResults: [] },
+		{ type: "turn_start" },
+		{ type: "message_end", message: second },
+		...ran("call_B", "read"),
+	];
+	const pong = answerMessage("pong") as Record<string, unknown>;
+	const v2 = await writtenCallRun("stream-json", pong, undefined, { before });
+	strictEqual(v2.code, 0, v2.stderr);
+	const frames = v2.stdout
+		.trim()
+		.split("\n")
+		.map((line) => JSON.parse(line) as Record<string, unknown> & { message?: Record<string, unknown> });
+	deepStrictEqual(
+		frames
+			.filter((frame) => String(frame.type).startsWith("tool_execution_"))
+			.map((frame) => [frame.type, frame.toolCallId, frame.providerToolCallId]),
+		[
+			["tool_execution_start", "tc_1_2", "call_A"],
+			["tool_execution_end", "tc_1_2", "call_A"],
+			["tool_execution_start", "tc_1_1", "call_B"],
+			["tool_execution_end", "tc_1_1", "call_B"],
+			["tool_execution_start", "tc_2_1", "call_B"],
+			["tool_execution_end", "tc_2_1", "call_B"],
+		],
+	);
+	const toolResult = frames.find((frame) => frame.message?.role === "toolResult")?.message;
+	deepStrictEqual([toolResult?.toolCallId, toolResult?.providerToolCallId], ["tc_1_1", "call_B"]);
+	// The model's own toolCall blocks keep the provider's id as sent.
+	match(v2.stdout, /"type":"toolCall","id":"call_A"/u);
+	// A gateway chain step names its parent by Clio's id; its provider id is the chain call's.
+	const mint = createToolCallIdMinter();
+	mint({ type: "turn_start" });
+	mint({ type: "tool_execution_start", toolCallId: "gw" });
+	deepStrictEqual(mint({ type: "tool_execution_end", toolCallId: "gw:s2", parentToolCallId: "gw" }), {
+		type: "tool_execution_end",
+		toolCallId: "tc_1_1:s2",
+		parentToolCallId: "tc_1_1",
+		providerToolCallId: "gw",
+	});
 });

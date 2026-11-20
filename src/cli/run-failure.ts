@@ -16,6 +16,7 @@ import type {
 	RunJsonVerifyResult,
 } from "./modes/run-json-schema.js";
 import {
+	createToolCallIdMinter,
 	RUN_RESULT_SCHEMA_VERSION,
 	type RunCauseCode,
 	type RunCompletionV2,
@@ -249,6 +250,8 @@ export function noteStructuredV2(note: StructuredNoteV2): void {
 
 let v2Started: number | null = null;
 let v2StreamJson = false;
+/** CLI-8: rewrites a stream-json frame's tool-call ids to Clio's; null outside a stream-json run. */
+let toolCallIds: ((frame: object) => object) | null = null;
 /** Steer frames read before the session frame went out; null once it has. */
 let heldSteer: string[] | null = null;
 let textSummary = false;
@@ -499,7 +502,7 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
 			return null;
 		}
 	}
-	return format === "json" ? null : frame;
+	return format === "json" ? null : (toolCallIds?.(frame) ?? frame);
 }
 
 /**
@@ -590,6 +593,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	const seen: SeenFrames = { text: "", live: [], undelivered: [] };
 	v2Started = performance.now();
 	v2StreamJson = request.format === "stream-json";
+	toolCallIds = v2StreamJson ? createToolCallIdMinter() : null;
 	heldSteer = [];
 	mainRunNote = {};
 	supersededRuns = [];
@@ -737,6 +741,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 			process.off("exit", onExit);
 			setFrameProjector(null);
 			v2StreamJson = false;
+			toolCallIds = null;
 		}
 	});
 }
