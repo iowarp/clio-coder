@@ -620,6 +620,16 @@ export interface ToolInvokeOptions {
 	 * turn at its tool boundary instead of asking the model to re-plan (XR-6).
 	 */
 	observationBudgetRoll?: () => void;
+	/**
+	 * Headless runs only (CLI-P42): the observation pool this call charges after the run's pool rolled; absent or 0 is
+	 * the turn's own pool. `createHeadlessObservationPool` in `observation.ts` sets it with `observationPoolSpent`.
+	 */
+	observationPoolEpoch?: number;
+	/**
+	 * Headless runs only (CLI-P42): told whether the pool refused this call (true) or gave it a slice (false). Present,
+	 * a spent pool rolls at the next tool batch and the refusal tells the model to make the call again there.
+	 */
+	observationPoolSpent?: (spent: boolean) => void;
 	/** Session-effective ceiling for one tool result, read again before every invocation. */
 	toolResultMaxBytes?: number;
 	pendingSkillPolicy?: PendingSkillToolPolicy;

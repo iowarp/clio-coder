@@ -131,7 +131,10 @@ export interface ObservationReservation {
 	template?: string;
 	/** Which bound set `limitBytes` under a template budget, as notice text. */
 	boundNote?: string;
-	/** An exhausted pool in a turn a continuation follows: rolls the turn at its tool boundary (XR-6). */
+	/**
+	 * An exhausted pool in a turn a continuation follows: rolls the turn at its tool boundary (XR-6). In a headless run it
+	 * marks the pool spent, so it rolls at the next tool batch while the turn runs on (CLI-P42).
+	 */
 	roll?: () => void;
 }
 
@@ -209,7 +212,51 @@ function budgetKey(options: ToolInvokeOptions | undefined): string | null {
 	const turnId = options?.turnId?.trim();
 	if (!turnId) return null;
 	const sessionId = options?.sessionId?.trim() || "no-session";
-	return `${sessionId}:${turnId}`;
+	const epoch = options?.observationPoolEpoch ?? 0;
+	return epoch > 0 ? `${sessionId}:${turnId}#${epoch}` : `${sessionId}:${turnId}`;
+}
+
+/**
+ * A headless run's observation pool (CLI-P42). A headless `run` is one operator prompt that no next turn follows, so a
+ * per-turn pool was a hard cap on what the whole run could read. Here a spent pool rolls to a fresh one at the next
+ * tool batch: the refused calls are told to run again there, and the post-tool context guard and compaction still
+ * bound the window. Attended turns never build one, so their per-turn pool is unchanged.
+ */
+export interface HeadlessObservationPool {
+	/** The pool options for one tool call of the model response `batchId` names. */
+	invokeOptions(batchId: string | undefined): Pick<ToolInvokeOptions, "observationPoolEpoch" | "observationPoolSpent">;
+	/** A new operator prompt: nothing pending from an earlier one. */
+	reset(): void;
+	/** Whether the last observation call the pool answered was refused: what the run could not read. */
+	stopped(): boolean;
+}
+
+export function createHeadlessObservationPool(): HeadlessObservationPool {
+	let epoch = 0;
+	// The batch whose calls found the pool spent; the first call of a later batch rolls it.
+	let spentIn: string | null = null;
+	let refused = false;
+	return {
+		invokeOptions(batchId) {
+			const batch = batchId ?? "";
+			if (spentIn !== null && batch !== spentIn) {
+				epoch += 1;
+				spentIn = null;
+			}
+			return {
+				...(epoch > 0 ? { observationPoolEpoch: epoch } : {}),
+				observationPoolSpent: (spent) => {
+					refused = spent;
+					if (spent && spentIn === null) spentIn = batch;
+				},
+			};
+		},
+		reset() {
+			spentIn = null;
+			refused = false;
+		},
+		stopped: () => refused,
+	};
 }
 
 function pruneBudgetMap(): void {
@@ -269,7 +316,13 @@ export function reserveObservation(
 	pruneBudgetMap();
 	const remaining = Math.max(0, limitBytes - state.usedBytes - state.reservedBytes);
 	if (remaining < MIN_BUDGET_SLICE_BYTES) {
-		const roll = options?.turnBudgetContinues === true ? options.observationBudgetRoll : undefined;
+		const spent = options?.observationPoolSpent;
+		const roll =
+			options?.turnBudgetContinues === true
+				? options.observationBudgetRoll
+				: spent === undefined
+					? undefined
+					: () => spent(true);
 		return {
 			key,
 			limitBytes,
@@ -288,6 +341,7 @@ export function reserveObservation(
 	// A call that got a slice is progress, so the exhausted streak starts over.
 	// Only an unbroken run of short-circuits reaches the terminal failure.
 	state.exhaustedStreak = 0;
+	options?.observationPoolSpent?.(false);
 	const callCapBytes = Math.min(askBytes, remaining);
 	return {
 		key,

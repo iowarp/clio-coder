@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { configureGuardrails } from "../../src/core/guardrails.js";
 import type { Observation } from "../../src/tools/observation.js";
+import { createHeadlessObservationPool } from "../../src/tools/observation.js";
 import {
 	READ_LINE_COUNT_BUDGET_BYTES,
 	READ_SCAN_CHUNK_BYTES,
@@ -502,6 +503,27 @@ describe("read windowed reader", () => {
 		match(second.output, /^\[observation budget exhausted for this turn before read reading /);
 		deepStrictEqual(second.details?.file, identity(path));
 		strictEqual((second.details?.observation as Observation).totalCount, null);
+	});
+
+	it("rolls a headless run's spent pool at its next tool batch and keeps the attended turn's refusal (CLI-P42)", async () => {
+		configureGuardrails({ readMaxBytes: 1024, observationTurnBudgetBytes: 1024 });
+		const path = join(scratch.dir, "headless.txt");
+		writeFileSync(path, "alpha\nbeta\n");
+		const turn = { sessionId: "read-headless", turnId: scratch.dir };
+		const pool = createHeadlessObservationPool();
+		const read = async (batch: string) => {
+			const result = await readTool.run({ path }, { ...turn, ...pool.invokeOptions(batch) });
+			return result.kind === "ok" ? result.output : result.message;
+		};
+		strictEqual(await read("batch-1"), "alpha\nbeta\n");
+		match(await read("batch-1"), /did not run\. The turn continues automatically after this batch with a fresh budget/);
+		strictEqual(pool.stopped(), true);
+		strictEqual(await read("batch-2"), "alpha\nbeta\n");
+		strictEqual(pool.stopped(), false);
+		// The same turn without the headless pool still finds its own per-turn pool spent.
+		const attended = await readTool.run({ path }, turn);
+		ok(attended.kind === "ok");
+		match(attended.output, /^\[observation budget exhausted for this turn before read reading /);
 	});
 
 	it("charges parallel reads to the turn pool before any of them awaits", async () => {

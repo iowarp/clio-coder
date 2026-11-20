@@ -162,6 +162,7 @@ import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
 import { ensureDetailLedgerForSession } from "../tools/extension-runtime-tools.js";
 import { scopedCapabilityShapes, scopeShapesDelta } from "../tools/gateway/scope-shapes.js";
 import { isGatewayChain } from "../tools/gateway-display.js";
+import { createHeadlessObservationPool } from "../tools/observation.js";
 import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { effectiveToolCall } from "../tools/surface.js";
 import type { ApprovalRequestView } from "./approval-request-view.js";
@@ -1521,6 +1522,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const retrySettings = (): RetrySettings => normalizeRetrySettings(deps.getSettings().chat.retry);
 
 	const hostRunContext = new AsyncLocalStorage<ToolInvokeOptions["hostRun"]>();
+	// A headless run's observation pool rolls once spent instead of capping the run (CLI-P42); attended turns keep theirs.
+	const headlessObservation = deps.headless === true ? createHeadlessObservationPool() : null;
 	const currentToolInvokeOptions = (toolCallId?: string): Partial<ToolInvokeOptions> => {
 		const options: Partial<ToolInvokeOptions> = {
 			toolResultMaxBytes: deps.getSettings().context.toolResultMaxBytes,
@@ -1540,6 +1543,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			continuations: state.continuation.yoloContinuations,
 		});
 		if (options.turnBudgetContinues) options.observationBudgetRoll = () => requestBudgetRoll("observation");
+		else if (headlessObservation !== null) Object.assign(options, headlessObservation.invokeOptions(batch?.id));
 		// The per-turn budgets follow this route's measured calls per round (CLI-P26).
 		const scale = turnBudgetWidthScale(
 			routeCallsPerRound(state.runtime?.agent.state.messages ?? [], state.runtime?.agent.state.model?.id),
@@ -1615,6 +1619,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitFooterNotice,
 		bus: deps.bus,
 		stepTurnEnd: () => stepTurnEnd(),
+		hostCompletionFacts: () => (headlessObservation?.stopped() === true ? ["observation_budget"] : []),
 	});
 
 	try {
@@ -3519,6 +3524,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (options.requestContinuation !== true) {
 					state.turnCalledWork = false;
 					state.finishRoundSpent = false;
+					headlessObservation?.reset();
 				}
 				state.continuation.beginPrompt({
 					requestContinuation: options.requestContinuation === true,

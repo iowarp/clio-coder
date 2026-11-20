@@ -95,6 +95,7 @@ import { toolResultText } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from "../run-answers.js";
+import { sealedFactsNotVerified } from "../run-output.js";
 
 /** `--on-permission fail` (SPEC 6.4): the approval-required exit a worker's refused ask already uses. */
 const PERMISSION_REQUIRED_EXIT_CODE = 3;
@@ -1903,6 +1904,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		process.stderr.write(`${stderrMessage}\n`);
 	}
 	if (stdoutMessage !== null) {
+		// CLI-P42: a run the observation pool stopped says so after its answer, as `run --agent` prints its limits.
+		const notVerified =
+			mode === "text" && options.outputSchema === undefined ? sealedFactsNotVerified(sealedCompletion.facts) : "";
+		if (notVerified.length > 0) stdoutMessage = `${stdoutMessage}\n${notVerified.replace(/\n$/u, "")}`;
 		// CLI-P22: text mode's `-o` holds exactly these bytes; a v1 or v2 JSON run reads its answer from its frames.
 		if (mode === "text") noteTextAnswer(stdoutMessage);
 		writeRawStdout(`${stdoutMessage}\n`);

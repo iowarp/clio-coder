@@ -14,6 +14,7 @@ import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsContinuation, turnAllowsTool } from "../core/turn-constraints.js";
 import { turnOriginMetadata } from "../core/turn-origin.js";
 import {
+	type CompletionFact,
 	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
 	type MiddlewareContract,
 	type MiddlewareEffect,
@@ -66,6 +67,8 @@ export interface TurnMiddlewareDeps {
 	 * of the earlier turn that opened the step pipeline it continues (bt-12 #4). Null off a step-policy turn.
 	 */
 	stepTurnEnd?: () => { continues: boolean; startTurnId?: string } | null;
+	/** Facts the host itself seals on every ended turn beside the middleware's, such as a headless run's spent observation pool (CLI-P42). */
+	hostCompletionFacts?: () => CompletionFact[];
 }
 
 /** The awaited turn_start phase's answer: the turn's refusal, or the effects an admitted turn applies. */
@@ -548,7 +551,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 
 		async fireTurnEnd(agentRuntime, messages, terminalToolResult): Promise<void> {
 			// Fleet design 4.3: the host seals every ended turn, the claim beside its assessment from the turn's facts.
-			state.turnSealedCompletion = sealCompletion(state.turnCompletion, []);
+			state.turnSealedCompletion = sealCompletion(state.turnCompletion, deps.hostCompletionFacts?.() ?? []);
 			if (!deps.middleware) return;
 			// A turn `finish` ended closes on the reply the model wrote beside it (fleet design 4.3): that text is the
 			// final answer, as a settled stop turn's would be. Any other terminal tool's result stands in for the reply.
@@ -613,7 +616,10 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					? [effect.fact]
 					: [],
 			);
-			state.turnSealedCompletion = sealCompletion(state.turnCompletion, facts);
+			state.turnSealedCompletion = sealCompletion(state.turnCompletion, [
+				...facts,
+				...(deps.hostCompletionFacts?.() ?? []),
+			]);
 			// `finish` is turn-terminal: a declared turn never continues, and what a nudge would have asked is sealed
 			// as a fact above. An undeclared turn keeps today's continuations.
 			const declaredTurn = state.turnCompletion !== null;

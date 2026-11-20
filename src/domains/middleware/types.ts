@@ -37,9 +37,15 @@ export type MiddlewareAnnotationSeverity = (typeof MIDDLEWARE_ANNOTATION_SEVERIT
  * A coordinator obligation still open when a turn ends (fleet design 4.3): an unvalidated mutation, a check whose last
  * outcome since the last change is red, a detached child run not yet collected, an open task-board item. A builtin
  * turn_end producer tags the reminder or continuation it already emits for one; the host lowers a declared `done` over
- * any of them to `partly_done`. Hooks files cannot declare it.
+ * any of them to `partly_done`. Hooks files cannot declare it. `observation_budget` is the host's own: a headless run
+ * whose last observation calls the pool refused, so what they would have read went unseen (CLI-P42).
  */
-export type CompletionFact = "unvalidated_mutation" | "failed_check" | "uncollected_run" | "open_task";
+export type CompletionFact =
+	| "unvalidated_mutation"
+	| "failed_check"
+	| "uncollected_run"
+	| "open_task"
+	| "observation_budget";
 
 export type MiddlewareEffect =
 	/**
