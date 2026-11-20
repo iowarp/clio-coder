@@ -195,6 +195,7 @@ This inventory lists compiled defaults and selected optional settings in the ver
 | `chat.steering.triage.enabled` | `false` | next turn |
 | `chat.steering.triage.target` | `null` | next turn |
 | `chat.steering.triage.model` | `null` | next turn |
+| `chat.steering.triage.thinkingLevel` | `off` | next turn |
 | `chat.steering.triage.minQueued` | `2` | next turn |
 | `chat.steering.triage.timeoutMs` | `8000` | next turn |
 | `chat.steering.triage.autoInterrupt` | `true` | next turn |
@@ -263,6 +264,7 @@ explains worker route selection.
 | `context.memory.enabled` | `true` | next turn |
 | `context.memory.target` | `null` | next session |
 | `context.memory.model` | `null` | next session |
+| `context.memory.thinkingLevel` | `off` | next turn |
 | `context.memory.cadenceToolCalls` | `10` | next turn |
 | `context.memory.trajectorySteps` | `8` | next turn |
 | `context.memory.maxOutputTokens` | `2000` | next turn |

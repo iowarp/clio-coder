@@ -9,6 +9,7 @@
 import { classifyCallFailure } from "../../core/call-failure.js";
 import { codexAccountScope } from "../../core/codex-account.js";
 import type { ClioSettings } from "../../core/config.js";
+import type { ThinkingLevel } from "../../core/defaults.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { resolveMemoryRoute } from "../../core/session-routing.js";
 import type { Fact } from "../../core/telemetry/fact.js";
@@ -116,6 +117,7 @@ export function createBackgroundMemoryModelClient(
 	const configuredTarget = memoryRoute.target?.trim();
 	const configuredModel = memoryRoute.model?.trim();
 	if (!configuredTarget || !configuredModel) return null;
+	const thinkingLevel = settings.context.memory.thinkingLevel;
 	if (memoryRoute.source === "chat") {
 		if (fallbackOnly) return null;
 		return prepareBackgroundMemoryRoute(
@@ -128,6 +130,7 @@ export function createBackgroundMemoryModelClient(
 			settings.targets,
 			admitModelFlow,
 			budget,
+			thinkingLevel,
 		);
 	}
 	const chatTarget = settings.chat.target?.trim();
@@ -147,6 +150,7 @@ export function createBackgroundMemoryModelClient(
 				settings.targets,
 				admitModelFlow,
 				budget,
+				thinkingLevel,
 			);
 		} catch (error) {
 			fallbackReason = `configured route unavailable: ${memoryRouteFailureCause(error)}`;
@@ -168,6 +172,7 @@ export function createBackgroundMemoryModelClient(
 				settings.targets,
 				admitModelFlow,
 				budget,
+				thinkingLevel,
 			),
 			fallbackReason,
 		};
@@ -177,7 +182,12 @@ export function createBackgroundMemoryModelClient(
 	}
 }
 
-export function prepareBackgroundMemoryModel(providers: ProvidersContract, targetId: string, wireModelId: string) {
+export function prepareBackgroundMemoryModel(
+	providers: ProvidersContract,
+	targetId: string,
+	wireModelId: string,
+	thinkingLevel: ThinkingLevel = "off",
+) {
 	const status = providers.list().find((entry) => entry.target.id === targetId);
 	if (status) {
 		if (!status.available) throw new Error(status.reason || "configured target unavailable");
@@ -193,8 +203,9 @@ export function prepareBackgroundMemoryModel(providers: ProvidersContract, targe
 		wireModelId,
 		// Memory reads a trajectory and writes a fixed envelope. Reasoning adds
 		// latency and, on a small local model, routinely consumes the entire
-		// output budget before the envelope is ever written.
-		requestedThinkingLevel: "off",
+		// output budget before the envelope is ever written, so the default is off;
+		// `context.memory.thinkingLevel` resolves like the chat route's level.
+		requestedThinkingLevel: thinkingLevel,
 		use: "orchestrator",
 		requireTools: false,
 		requireOutputBudget: true,
@@ -295,8 +306,9 @@ function prepareBackgroundMemoryRoute(
 	targets: ReadonlyArray<TargetDescriptor>,
 	admitModelFlow?: AdmitBackgroundModelFlow,
 	budget?: BackgroundBudgetInputs,
+	thinkingLevel: ThinkingLevel = "off",
 ): BackgroundMemoryRoute {
-	const initial = prepareBackgroundMemoryModel(providers, targetId, wireModelId);
+	const initial = prepareBackgroundMemoryModel(providers, targetId, wireModelId, thinkingLevel);
 	const { refined } = initial;
 	const gatewayKey = canonicalEndpointKey(refined.target);
 	const endpointKey = backgroundMemoryEndpointKey(providers, refined.target, refined.wireModelId, targets);
@@ -370,7 +382,7 @@ function prepareBackgroundMemoryRoute(
 						throw new TaskMemoryBudgetSkipError(decision.reason, decision.resumeAt);
 					}
 					await prepareBackgroundModelMetadata(providers, targetId, request.signal);
-					const { model, refined } = prepareBackgroundMemoryModel(providers, targetId, wireModelId);
+					const { model, refined } = prepareBackgroundMemoryModel(providers, targetId, wireModelId, thinkingLevel);
 					if (refined.runtimeId !== initial.refined.runtimeId || canonicalEndpointKey(refined.target) !== gatewayKey) {
 						throw new Error("background memory target changed during preparation");
 					}
@@ -449,10 +461,12 @@ function prepareBackgroundMemoryRoute(
 									refined.capabilityDecisions.maxTokens > 0
 										? Math.min(request.maxTokens, refined.capabilityDecisions.maxTokens)
 										: request.maxTokens,
-								// Always off, never the operator's chat thinking level. A model that
-								// reasons anyway still works: `completeEngineText` keeps only text
-								// blocks, and the memory output budget leaves room for the preamble.
-								thinkingLevel: "off",
+								// `context.memory.thinkingLevel`, never the operator's chat level. Off
+								// (the default) asks for no reasoning; another level is the route's
+								// clamped level. A model that reasons anyway still works:
+								// `completeEngineText` keeps only text blocks, and the memory output
+								// budget leaves room for the preamble.
+								thinkingLevel: thinkingLevel === "off" ? "off" : refined.effectiveThinkingLevel,
 								// Memory decides what to keep; the same completed task must get the same answer.
 								// A live Ornith review retained a validator recipe in one run and abstained on
 								// the identical trajectory in the next, at the server's default temperature.

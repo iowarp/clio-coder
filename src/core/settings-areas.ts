@@ -236,6 +236,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "context.memory.enabled":
 		case "context.memory.target":
 		case "context.memory.model":
+		case "context.memory.thinkingLevel":
 		case "context.memory.cadenceToolCalls":
 			return place("context", "Proactive memory");
 		case "context.semantic.enabled":

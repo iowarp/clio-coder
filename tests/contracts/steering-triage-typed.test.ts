@@ -4,7 +4,9 @@ import { test } from "node:test";
 import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
+import { createProvidersBundle } from "../../src/domains/providers/extension.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { RunnerRoute } from "../../src/domains/system-one/runner.js";
 import { createRunner } from "../../src/domains/system-one/runner.js";
 import type {
@@ -26,6 +28,7 @@ import {
 	triageMayInterrupt,
 } from "../../src/session-control/steering-triage.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
 import { readRunJournal } from "../harness/run-journal.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -344,6 +347,81 @@ test("a constrained turn queued while a run streams is triaged, and its pinned c
 		await loop.whenSettled();
 	}
 });
+
+// The route's own mapping: this gateway model resolves to an on-off switch on the side-model route.
+for (const [level, enableThinking] of [
+	["off", false],
+	["low", true],
+] as const) {
+	test(`chat.steering.triage.thinkingLevel ${level} reaches the side-model triage request (cw-1)`, {
+		timeout: 20_000,
+	}, async () => {
+		const env = await isolateClioEnv("triage-thinking-");
+		const fixture = await startGatewayThinkingFixture(undefined, "local/gemma-4-26b-a4b-it", undefined, "{}");
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.chat.prewarm = false;
+		settings.targets = [{ id: "gw", runtime: "litellm", url: fixture.url, defaultModel: fixture.modelId }];
+		settings.chat.target = "gw";
+		settings.chat.model = fixture.modelId;
+		settings.chat.steering.triage = {
+			...settings.chat.steering.triage,
+			enabled: true,
+			target: "gw",
+			model: fixture.modelId,
+			thinkingLevel: level,
+		};
+		const bundle = createProvidersBundle(dispatchStubContext({ settings }));
+		for (const target of settings.targets) bundle.contract.auth.setRuntimeOverrideForTarget(target, litellm, "fixture");
+		await bundle.extension.start();
+		// A live session's route has been probed; the gateway's thinking controls come from that metadata.
+		await bundle.contract.probeTarget("gw", { reasoning: false });
+		let release!: () => void;
+		const turnHeld = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const loop = createChatLoop({
+			getSettings: () => settings,
+			providers: bundle.contract,
+			knownTargets: () => new Set(["gw"]),
+			createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
+				agent: {
+					state: options?.initialState as { messages: AgentMessage[] },
+					subscribe: () => () => {},
+					abort() {},
+					steer() {},
+					followUp() {},
+					clearAllQueues() {},
+					async prompt() {
+						await turnHeld;
+					},
+				},
+			})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+		});
+		try {
+			const turn = loop.submit("fix the cache");
+			for (let i = 0; i < 1000 && !loop.isStreaming(); i++) await new Promise((resolve) => setImmediate(resolve));
+			strictEqual(loop.isStreaming(), true);
+			strictEqual(loop.steer("also add docs"), true);
+			strictEqual(loop.steer("and a test"), true);
+			const completions = () => fixture.paths.filter((path) => path === "/v1/chat/completions").length;
+			for (let i = 0; i < 200 && completions() === 0; i++) await new Promise((resolve) => setTimeout(resolve, 25));
+			const request = fixture.requests[0];
+			ok(request, "the triage side call reached the wire");
+			strictEqual(request.model, fixture.modelId);
+			deepStrictEqual(request.chat_template_kwargs, { enable_thinking: enableThinking });
+			strictEqual(request.reasoning_effort, undefined);
+			release();
+			await turn;
+		} finally {
+			release();
+			loop.dispose();
+			await loop.whenSettled();
+			await bundle.extension.stop?.();
+			await fixture.close();
+			env.restore();
+		}
+	});
+}
 
 test("a steer triage reads as a stop redirects a headless run to answer it; only a real cancel ends it canceled (bt-41)", {
 	timeout: 20_000,
