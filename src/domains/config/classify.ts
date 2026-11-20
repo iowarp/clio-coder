@@ -91,6 +91,8 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	// Reminders read it at each decision point; a running session's `# Memory` section stays as it was compiled, so a
 	// new session (or a resumed one recompiling its prompt) is the first to carry a changed section.
 	"context.memory.surfaces.delivery",
+	// The guardian reads it on every idle step and a settings change wakes it, so the next idle step mines or parks.
+	"context.memory.surfaces.history",
 	"turnControl",
 	// An engine resolves per call; the use that registers consult at startup is restart-required.
 	"systemOne",

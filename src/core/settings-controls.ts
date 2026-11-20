@@ -488,6 +488,7 @@ const MENU_ROWS = new Set([
 	"fleet.worktrees.root",
 	"context.memory.surfaces.observe",
 	"context.memory.surfaces.delivery",
+	"context.memory.surfaces.history",
 	"context.memory.thinkingLevel",
 	"context.semantic.enabled",
 	"context.semantic.target",
@@ -550,6 +551,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"context.memory.thinkingLevel": THINKING_LEVELS,
 	"context.memory.surfaces.observe": ["off", "on"],
 	"context.memory.surfaces.delivery": ["off", "section", "decision", "broadcast"],
+	"context.memory.surfaces.history": ["off", "on"],
 	"fleet.permissions.mode": ["judge", "deny", "escalate", "fail", "main"],
 	"fleet.permissions.escalation.fallback": ["deny", "fail"],
 	"interface.mode": ["regular", "fullscreen"],
@@ -651,6 +653,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"context.memory.surfaces.delivery": [
 		"Lesson delivery",
 		"Where kept lessons reach the model: off, the Memory section only, the section plus reminders at decision points (a failed command, a verification gap, a touched file, the turn's task), or those plus the first-change broadcast. Decision by default; memory_recall works in every mode.",
+	],
+	"context.memory.surfaces.history": [
+		"History mining",
+		"Let the memory model read the repository's earlier sessions while this one is idle and file the lessons it finds. Off by default; clio-coder memory consolidate tidies the store without a model call either way.",
 	],
 	"context.memory.thinkingLevel": [
 		"Memory thinking",

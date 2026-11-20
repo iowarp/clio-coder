@@ -622,6 +622,12 @@ export interface MemorySurfaceSettings {
 	 * store, and `memory_recall` still reaches every layer.
 	 */
 	delivery: MemoryDeliveryMode;
+	/**
+	 * Mining earlier sessions of the repository for new lessons while the session is idle. Off by default as a policy
+	 * choice: archive filings were 36 grounded against 184 ungrounded, from sessions reviewing each other.
+	 * `clio-coder memory consolidate` is the explicit, model-free pass over the store either way.
+	 */
+	history: "off" | "on";
 }
 
 export type MemoryDeliveryMode = "off" | "section" | "decision" | "broadcast";
@@ -892,7 +898,7 @@ export const DEFAULT_SETTINGS = {
 		} as DurableCompactionSettings,
 		memory: {
 			enabled: true,
-			surfaces: { observe: "off", delivery: "decision" },
+			surfaces: { observe: "off", delivery: "decision", history: "off" },
 			target: null as string | null,
 			model: null as string | null,
 			thinkingLevel: "off" as ThinkingLevel,
@@ -1125,6 +1131,7 @@ context:
     surfaces:
       observe: off
       delivery: decision
+      history: off
     target: null
     model: null
     thinkingLevel: off

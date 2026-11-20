@@ -670,6 +670,7 @@ test("the history guardian retains an explicit missing-usage observation in its 
 		enabled: () => true,
 		isForegroundActive: () => false,
 		live: { pendingWork: () => false, stepInFlight: () => false, runIdleStep: async () => "none" },
+		historyMining: () => true,
 		historySource: () => ({
 			repositoryKey: "test-repository",
 			next: () => ({
@@ -742,6 +743,7 @@ test("an ACP host's guardian starts no history review before the first turn, at 
 			return false;
 		},
 		live: { pendingWork: () => false, stepInFlight: () => false, runIdleStep: async () => "none" },
+		historyMining: () => true,
 		historySource: () => null,
 		client: {} as never,
 		settings: () => ({ maxTokens: 2_000, timeoutMs: 1_000 }),
