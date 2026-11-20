@@ -1,3 +1,4 @@
+import { closeSync, openSync, readSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
 import { canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
@@ -199,6 +200,64 @@ export function yoloFloorTrustGrant(command: string): boolean {
 	const texts = [command];
 	if (/<<(?!<)/u.test(command)) texts.push(...withoutDataHeredocBodies(command).split(/\r?\n/u));
 	return texts.some((text) => shellCommandSteps(text).some((step) => stepGrantsTrust(step.executable, step.args)));
+}
+
+/** A script a command runs without naming a shell: a program run by path, or a file `source` or `.` reads. */
+export interface YoloFloorScriptRun {
+	path: string;
+	sourced: boolean;
+}
+
+/** Shells whose scripts the floor's line scan reads. */
+const SCRIPT_SHELLS: ReadonlySet<string> = new Set(["sh", "bash", "dash", "zsh", "ksh", "ash", "mksh"]);
+
+/**
+ * The scripts a command runs by path (`./x.sh`, `/opt/x`) or sources (`source x`, `. x`), in `sh -c` scripts and
+ * substitutions too (CLI-P31). `bash x.sh` is not listed: the shell-script scan already reads it.
+ */
+export function yoloFloorScriptRuns(command: string): YoloFloorScriptRun[] {
+	const runs: YoloFloorScriptRun[] = [];
+	for (const step of shellCommandSteps(command)) {
+		if (step.executable === "source" || step.executable === ".") {
+			const target = step.args[0] === "--" ? step.args[1] : step.args[0];
+			if (target !== undefined && !target.startsWith("-")) runs.push({ path: target, sourced: true });
+		} else if (step.commandPath !== undefined && !SCRIPT_SHELLS.has(step.executable)) {
+			runs.push({ path: step.commandPath, sourced: false });
+		} else if (step.executable === "exec") {
+			// `exec -a name ./x.sh` replaces the shell with the file; `-a` takes a value.
+			let at = 0;
+			while (step.args[at]?.startsWith("-") === true) at += step.args[at] === "-a" ? 2 : 1;
+			const target = step.args[at];
+			if (target?.includes("/") === true) runs.push({ path: target, sourced: false });
+		}
+	}
+	return runs;
+}
+
+/**
+ * Whether a file run by path is shell source, read at decision time: a `#!` line naming a shell (directly or through
+ * `env`), or no `#!` line at all, which the calling shell runs itself. A binary or another interpreter is not.
+ * Null when the file cannot be read.
+ */
+export function yoloFloorShellScript(file: string): boolean | null {
+	let head: string;
+	try {
+		const fd = openSync(file, "r");
+		try {
+			const buffer = Buffer.alloc(256);
+			head = buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, 0)).toString("latin1");
+		} finally {
+			closeSync(fd);
+		}
+	} catch {
+		return null;
+	}
+	if (head.includes("\0")) return false;
+	if (!head.startsWith("#!")) return true;
+	const words = (head.slice(2).split(/\r?\n/u)[0] ?? "").trim().split(/\s+/u);
+	let program = path.basename(words[0] ?? "");
+	if (program === "env") program = path.basename(words.slice(1).find((word) => !word.startsWith("-")) ?? "");
+	return SCRIPT_SHELLS.has(program);
 }
 
 /** Words a raw-text candidate starts at: the floor's executables and the commands that delete, overwrite or archive. */

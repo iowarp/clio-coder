@@ -658,6 +658,18 @@ test("yolo reads a shell script by the floor alone and runs what it cannot read 
 	}
 	const runScript = { tool: ToolNames.RunScript, args: { interpreter: "sh", script: join(outside, "wipe.sh") } };
 	strictEqual(engine.evaluate(runScript, "yolo", OPERATOR_YOLO).kind, "block");
+	// CLI-P31: a script run by path or sourced is read as `bash x.sh` is; another interpreter's file is not shell.
+	writeFileSync(join(outside, "grant.sh"), "#!/usr/bin/env bash\nclio-coder config trust safety\n", { mode: 0o755 });
+	writeFileSync(join(outside, "grant.py"), '#!/usr/bin/env python3\nprint("clio-coder config trust safety")\n', {
+		mode: 0o755,
+	});
+	for (const command of [
+		join(outside, "grant.sh"),
+		`cd ${outside} && ./grant.sh`,
+		`source ${join(outside, "grant.sh")}`,
+	])
+		strictEqual(judged(command).reasonCode, "yolo-floor:trust-authority", command);
+	strictEqual(judged(join(outside, "grant.py")).kind, "allow");
 });
 
 // #421: Python lines are not shell; #407: a shell script at yolo meets only the floor.

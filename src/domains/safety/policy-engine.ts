@@ -166,6 +166,8 @@ import {
 	yoloFloorDeleteHit,
 	yoloFloorExecutableHit,
 	yoloFloorRawCandidates,
+	yoloFloorScriptRuns,
+	yoloFloorShellScript,
 	yoloFloorTrustGrant,
 } from "./yolo-floor.js";
 
@@ -1294,6 +1296,19 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const budget = newScriptBudget();
 			for (const script of shellScriptSources(command) ?? []) {
 				const hit = scriptHit(scanCommandScript(script, line, callCwd, cwds, written, budget));
+				if (hit !== null) return hit;
+			}
+		}
+		// `./x.sh` and `source x.sh` run a file as `bash x.sh` does, so the floor reads it the same way (CLI-P31). A file
+		// the scan cannot read keeps the rails it meets today.
+		const runs = call.tool === ToolNames.Bash && command !== null ? yoloFloorScriptRuns(command) : [];
+		if (command !== null && runs.length > 0) {
+			const cwds = commandMoveBases(command, callCwd);
+			const written = commandWrittenPaths(command, cwds ?? [callCwd], newWrittenPaths());
+			const budget = newScriptBudget();
+			for (const run of runs) {
+				const source = { path: run.path, program: !run.sourced, sourced: run.sourced, stdin: false };
+				const hit = scriptHit(scanCommandScript(source, line, callCwd, cwds, written, budget, !run.sourced));
 				if (hit !== null) return hit;
 			}
 		}
@@ -3849,6 +3864,7 @@ function scanCommandScript(
 	cwds: string[] | null,
 	written: WrittenPaths,
 	budget: ScriptBudget,
+	shellOnly = false,
 ): ScriptHit | null {
 	const operand = script.path;
 	if (/^[<>]\(/u.test(operand)) return null;
@@ -3870,6 +3886,8 @@ function scanCommandScript(
 	const name = operand === "~" || operand.startsWith("~/") ? expandPath(operand) : operand;
 	const names: ScriptNames = script.stdin ? { zero: null, source: null } : { zero: name, source: name };
 	for (const file of files) {
+		// A program run by path is read only when it is shell source; a binary or another interpreter is not (CLI-P31).
+		if (shellOnly && yoloFloorShellScript(file) !== true) continue;
 		const scan = scanNamedScript(file, floorLine, callCwd, cwds, budget, names);
 		if (scan !== null) return scan;
 	}
