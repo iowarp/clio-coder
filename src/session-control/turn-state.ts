@@ -265,6 +265,8 @@ export interface ChatTurnState {
 	activeInterruptByTriage: boolean;
 	/** Whether the autonomy window halted the run at a cap or a judge streak (bt-26 N2d). Written with the reason. */
 	activeInterruptByAutonomy: boolean;
+	/** Whether a scheduled job's own clock ended the run (SC-2), as opposed to a person or the host. Written with the reason. */
+	activeInterruptByJobClock: boolean;
 	/** The provider's nonempty aborted message closes this interrupt without a synthetic second assistant. */
 	interruptedAssistantMessage: AgentMessage | null;
 	/** Accounting for the hollow call carried by the interrupt's closing turn (#430). */
@@ -345,6 +347,7 @@ export type TurnRuntimeState = TurnStateView<
 	| "activeInterruptByOperator"
 	| "activeInterruptByTriage"
 	| "activeInterruptByAutonomy"
+	| "activeInterruptByJobClock"
 	| "activeInterruptReason"
 	| "activeUserTurnId"
 	| "continuation"
@@ -446,6 +449,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		activeInterruptByOperator: false,
 		activeInterruptByTriage: false,
 		activeInterruptByAutonomy: false,
+		activeInterruptByJobClock: false,
 		interruptedAssistantMessage: null,
 		interruptedCall: null,
 		synthesisToolLock: false,
@@ -488,11 +492,16 @@ export function takeInterruptedCall(state: TurnStateView<never, "interruptedCall
 export function clearActiveInterrupt(
 	state: TurnStateView<
 		never,
-		"activeInterruptReason" | "activeInterruptByOperator" | "activeInterruptByTriage" | "activeInterruptByAutonomy"
+		| "activeInterruptReason"
+		| "activeInterruptByOperator"
+		| "activeInterruptByTriage"
+		| "activeInterruptByAutonomy"
+		| "activeInterruptByJobClock"
 	>,
 ): void {
 	state.activeInterruptReason = null;
 	state.activeInterruptByOperator = false;
 	state.activeInterruptByTriage = false;
 	state.activeInterruptByAutonomy = false;
+	state.activeInterruptByJobClock = false;
 }

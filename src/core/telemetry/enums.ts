@@ -52,6 +52,7 @@ export const FailureCause = vocabulary([
 	"route_moved",
 	"triage_stop",
 	"autonomy_stop",
+	"job_clock",
 	"repetition",
 	"generation_guard",
 	"turn_timeout",

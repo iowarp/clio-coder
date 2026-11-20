@@ -210,6 +210,31 @@ it("a cap halt during a tool call lets the call finish and sends no further mode
 	}
 });
 
+it("a scheduled job's clock ending a turn mid-tool names job_clock as the stop, not an internal abort (SC-2)", {
+	timeout: 10_000,
+}, async () => {
+	const f = fixture(1, async (loop, signal) => {
+		loop.cancel({ reason: "Scheduled job occurrence ended.", source: "job_clock", auditReason: "job occurrence ended" });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		ok(signal?.aborted === true);
+	});
+	try {
+		await f.loop.submit("Record the section.");
+		await f.loop.whenSettled();
+		const { turns, calls } = await f.journal();
+		deepStrictEqual(
+			turns.map((turn) => turn.terminal.cause),
+			["job_clock"],
+		);
+		ok(
+			calls.every((call) => call.stop?.failure !== "internal"),
+			JSON.stringify(calls.map((call) => call.stop)),
+		);
+	} finally {
+		await f.close();
+	}
+});
+
 it("a headless --timeout during a tool after a steer settles the turn on shutdown with every call it opened", {
 	timeout: 10_000,
 }, async () => {

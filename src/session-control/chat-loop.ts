@@ -4060,6 +4060,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					recovery.settleOpenForecast();
 					const canceled = state.activeInterruptReason !== null && state.activeInterruptByOperator;
 					const autonomyStopped = state.activeInterruptReason !== null && state.activeInterruptByAutonomy;
+					const jobClockStopped = state.activeInterruptReason !== null && state.activeInterruptByJobClock;
 					// Esc on an interview resolves it as cancelled and the tool ends the turn
 					// itself, so no interrupt is raised and `canceled` stays false. The turn
 					// still ended on the operator's say-so, which the outcome has to show.
@@ -4178,9 +4179,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 									? "operator_cancel"
 									: autonomyStopped
 										? "autonomy_stop"
-										: failure?.stage === "harness" && failure.errorClass === "oversized_tool_result"
-											? "oversized_tool_result"
-											: undefined,
+										: jobClockStopped
+											? "job_clock"
+											: failure?.stage === "harness" && failure.errorClass === "oversized_tool_result"
+												? "oversized_tool_result"
+												: undefined,
 								noAnswer: ending?.kind === "no_answer" ? ending.cause : undefined,
 								runIds: workerRunIds,
 								missing: missingReceipts,
@@ -4381,6 +4384,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.activeInterruptByOperator = (options?.source ?? "stream_cancel") === "stream_cancel";
 				state.activeInterruptByTriage = options?.source === "triage";
 				state.activeInterruptByAutonomy = options?.source === "autonomy";
+				state.activeInterruptByJobClock = options?.source === "job_clock";
 				// An Esc is reported once, by the turn's Cancelled outcome. The footer
 				// carries only an interruption the operator did not ask for.
 				if (!isOperatorCancelReason(state.activeInterruptReason))

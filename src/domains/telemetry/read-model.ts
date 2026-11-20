@@ -3661,6 +3661,7 @@ const HARNESS_STOP_CAUSES: ReadonlySet<string> = new Set([
 	"route_moved",
 	"triage_stop",
 	"autonomy_stop",
+	"job_clock",
 	"repetition",
 	"generation_guard",
 	"turn_timeout",
