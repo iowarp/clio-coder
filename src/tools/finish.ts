@@ -128,9 +128,19 @@ export function finishSiblingRefusal(
 	};
 }
 
-/** Nobody watches the turn: a headless run, a job, or a yolo continuation (fleet design 4.3, ruling 11). */
-function unattendedTurn(turn: { headless: boolean; origin: string | undefined }): boolean {
-	return turn.headless || turn.origin === "job" || turn.origin === "continuation";
+/**
+ * Nobody watches the turn: a headless run, a job, or a yolo continuation (fleet design 4.3, ruling 11) of a prompt
+ * nobody watches. A continuation is judged by the prompt that owns its chain, so a roll of an operator's or a peer's
+ * prompt in an attended session stays attended (CLI-P46); an unknown owner keeps it unattended.
+ */
+function unattendedTurn(turn: {
+	headless: boolean;
+	origin: string | undefined;
+	promptOrigin?: string | null | undefined;
+}): boolean {
+	if (turn.headless) return true;
+	if (turn.origin !== "continuation") return turn.origin === "job";
+	return turn.promptOrigin !== "operator" && turn.promptOrigin !== "peer";
 }
 
 /**
@@ -143,7 +153,7 @@ function unattendedTurn(turn: { headless: boolean; origin: string | undefined })
 export function bareFinishVerdict(
 	toolCall: { name: string; arguments: unknown },
 	assistantMessage: { content: ReadonlyArray<{ type: string; text?: unknown }> },
-	turn: { headless: boolean; origin: string | undefined; refusedThisTurn: boolean },
+	turn: { headless: boolean; origin: string | undefined; promptOrigin?: string | null; refusedThisTurn: boolean },
 ): "refuse" | "admit" | null {
 	if (unattendedTurn(turn)) return null;
 	if (effectiveToolCall(toolCall.name, toolCall.arguments).toolName !== ToolNames.Finish) return null;
@@ -174,12 +184,14 @@ export const FINISH_DECLARATION_REMINDER =
 
 /**
  * Whether a turn that just ended gets the one round pinned to `finish` (fleet design 4.3, ruling 11): only an unattended
- * turn (a headless run, a job, a yolo continuation) that did work and ended without declaring, once per operator
- * prompt, while tools are not locked and `finish` is attached. An attended turn may leave its declaration out.
+ * turn (a headless run, a job, a yolo continuation of a prompt nobody watches) that did work and ended without
+ * declaring, once per operator prompt, while tools are not locked and `finish` is attached. An attended turn may leave
+ * its declaration out.
  */
 export function finishRoundDue(turn: {
 	headless: boolean;
 	origin: string | undefined;
+	promptOrigin?: string | null;
 	declared: boolean;
 	calledWork: boolean;
 	spent: boolean;

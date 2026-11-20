@@ -72,6 +72,8 @@ async function stoppedTurn(dir: string, mode: "undeclared" | "declared" | "hando
 	let prompts = 0;
 	const loop = createChatLoop({
 		middlewareToolChoice: toolChoice,
+		// FX-41's shared finish round needs a chain nobody watches; an operator's chain in a session is attended (CLI-P46).
+		...(mode === "rounds" ? { headless: true } : {}),
 		getSettings: () => settings,
 		getAutonomy: () => "yolo",
 		providers: context.getContract("providers") as ProvidersContract,
@@ -201,9 +203,9 @@ async function stoppedTurn(dir: string, mode: "undeclared" | "declared" | "hando
 					}
 					if (prompts === 2 && mode === "bare") {
 						const finish = { type: "toolCall" as const, id: "call-b", name: "finish", arguments: { state: "done" } };
-						// Nobody watches the continuation, so its bare finish runs.
+						// The continuation rolls the operator's attended prompt, so its bare finish is refused (CLI-P46).
 						await gate(finish);
-						// An operator message handed into the run makes the turn attended.
+						// An operator message handed into the run starts the operator's next user turn and its own refusal.
 						await push({
 							role: "user",
 							content: [{ type: "text", text: "what changed?" }],
@@ -401,13 +403,13 @@ test("a turn declared through finish is never continued: no required-tool round,
 	ok(terminal >= 0 && followUp > terminal, `terminal row ${terminal}, follow-up row ${followUp}`);
 });
 
-test("an attended finish with no reply text is refused once per user turn; a handed-over message is attended (FX-40)", async (t) => {
+test("an attended finish with no reply text is refused once per user turn, a roll of the operator's prompt included (FX-40, CLI-P46)", async (t) => {
 	const scratch = await isolateClioEnv("clio-coder-continuation-bare-");
 	t.after(() => scratch.restore());
 	const { submitted, gates, sealed } = await stoppedTurn(scratch.dir, "bare");
 	strictEqual(submitted[1]?.origin.origin, "continuation");
 	deepStrictEqual(gates, [
-		"ran",
+		"finish did not run: this response has no reply text. Write your reply to the operator, then call finish.",
 		"finish did not run: this response has no reply text. Write your reply to the operator, then call finish.",
 		"ran",
 	]);
@@ -426,8 +428,8 @@ test("yolo continuations of one operator prompt share its finish round and nudge
 		submitted.map((input) => input.origin.origin),
 		["operator", "continuation", "continuation"],
 	);
-	// The first unattended continuation that did work and ended undeclared takes the one finish round; the next
-	// continuation of the same prompt does not take another.
+	// The first continuation of a headless prompt that did work and ended undeclared takes the one finish round; the
+	// next continuation of the same prompt does not take another.
 	deepStrictEqual(decisions, [{ action: "continue" }, undefined]);
 
 	const caps = new ContinuationState();

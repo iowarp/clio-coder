@@ -1374,6 +1374,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const verdict = bareFinishVerdict(toolCall, assistantMessage, {
 					headless: deps.headless === true,
 					origin: state.currentTurnOrigin?.origin,
+					promptOrigin: state.promptOrigin,
 					refusedThisTurn: state.finishReplyRefused,
 				});
 				if (verdict === "admit") bareFinishCalls.add(toolCall.id);
@@ -1867,6 +1868,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					!finishRoundDue({
 						headless: deps.headless === true,
 						origin: state.currentTurnOrigin?.origin,
+						promptOrigin: state.promptOrigin,
 						declared: state.turnCompletion !== null,
 						calledWork: state.turnCalledWork,
 						spent: state.finishRoundSpent,
