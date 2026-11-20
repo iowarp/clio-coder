@@ -386,10 +386,12 @@ export interface DispatchSnapshot {
  * the operator cause so the receipt names where the cancel came from.
  * Admission passes the capacity cause when a renewal finds the run's lease gone
  * from the shared store. A canceled dispatching tool call passes the parent
- * cause, because no operator command reached this run directly (#425).
+ * cause, because no operator command reached this run directly (#425). The
+ * steer tool passes the steer cause: the dispatching session asked for the
+ * cancel, so a headless run does not count the run as undelivered (ns:61).
  */
 export interface AbortReason {
-	cause: "timeout" | "operator" | "budget" | "capacity" | "parent";
+	cause: "timeout" | "operator" | "budget" | "capacity" | "parent" | "steer";
 	detail: string;
 }
 
@@ -570,6 +572,12 @@ export interface DispatchContract {
 	 * cancel; the outcome stays `canceled`.
 	 */
 	abort(runId: string, reason?: AbortReason): void;
+	/**
+	 * Whether this process aborted the run's assignment with the steer cause. A
+	 * cancel during a scheduled retry leaves the last attempt sealed failed, so
+	 * only this marker says the dispatching session canceled it.
+	 */
+	canceledBySteer?(runId: string): boolean;
 
 	/**
 	 * Wait for one member's attempts, queued retries and retry admissions to

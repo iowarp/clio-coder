@@ -1,4 +1,4 @@
-import type { DispatchContract } from "../domains/dispatch/contract.js";
+import type { AbortReason, DispatchContract } from "../domains/dispatch/contract.js";
 import { dispatchOwnerOf, dispatchOwnership, owningSessionPhrase } from "../domains/dispatch/ownership.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
@@ -21,6 +21,9 @@ import { steerToolSurface } from "./steer-surface.js";
  */
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "interrupted", "stale", "dead"]);
+
+/** The dispatching session asked for this cancel, so its run settles canceled, not undelivered (ns:61). */
+const STEER_CANCEL: AbortReason = { cause: "steer", detail: "canceled through steer by the dispatching session" };
 
 export interface SteerToolDeps {
 	dispatch: DispatchContract;
@@ -79,7 +82,7 @@ function cancel(deps: SteerToolDeps, runId: string): ToolResult {
 	if (!run && !assignment) return { kind: "error", message: `steer: unknown run or assignment '${runId}'` };
 	if (assignment?.status === "running") {
 		const assignmentId = assignment.assignmentId;
-		deps.dispatch.abort(assignmentId);
+		deps.dispatch.abort(assignmentId, STEER_CANCEL);
 		return {
 			kind: "ok",
 			output: `cancellation signalled for assignment ${assignmentId}; its current attempt will finalize and no future attempt will start.`,
@@ -92,7 +95,7 @@ function cancel(deps: SteerToolDeps, runId: string): ToolResult {
 			message: `steer: run or assignment '${runId}' already finished (state=${assignment?.status ?? run?.outcome ?? run?.status ?? "unknown"}); nothing to cancel`,
 		};
 	}
-	deps.dispatch.abort(runId);
+	deps.dispatch.abort(runId, STEER_CANCEL);
 	return {
 		kind: "ok",
 		output: `cancellation signalled for run ${runId}; the run finalizes with outcome=canceled and its run record notes the cancellation.`,

@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { setImmediate } from "node:timers/promises";
+import { settleDispatchedRuns } from "../../src/cli/modes/headless-dispatched-runs.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
@@ -158,6 +159,7 @@ describe("steer tool", () => {
 			match(cancelled.output, /cancellation signalled/);
 			strictEqual((await handle.finalPromise).outcome, "canceled");
 			strictEqual(f.workers[0]?.aborts(), 1);
+			strictEqual(f.contract.canceledBySteer?.(handle.runId), true, "the steer cancel carries its typed cause (ns:61)");
 
 			match(
 				errorMessage(await f.call(ToolNames.Steer, { run_id: handle.runId, action: "cancel" })),
@@ -190,6 +192,7 @@ describe("steer tool", () => {
 				}
 				strictEqual(f.contract.getRun(handle.runId)?.lineage?.rootRunId, hosted ? "authoritative-root" : handle.runId);
 				strictEqual(f.contract.assignments?.getStored(handle.runId)?.status, "running");
+				strictEqual(f.contract.canceledBySteer?.(handle.runId), false);
 
 				const cancelled = okResult(await f.call(ToolNames.Steer, { run_id: handle.runId, action: "cancel" }));
 				match(cancelled.output, new RegExp(`cancellation signalled for assignment ${handle.runId}`));
@@ -200,6 +203,16 @@ describe("steer tool", () => {
 					await setImmediate();
 				}
 				strictEqual(f.contract.assignments?.getStored(handle.runId)?.status, "canceled");
+				// ns:61: the last attempt stays sealed failed, yet the headless settlement reads the steer cancel as canceled.
+				if (hosted) {
+					const settlement = await settleDispatchedRuns(f.contract, "authoritative-root", () => false);
+					strictEqual(f.contract.getRun(handle.runId)?.outcome, "failed");
+					deepStrictEqual(settlement.undelivered, []);
+					deepStrictEqual(
+						settlement.canceled.map((run) => [run.id, run.outcome]),
+						[[handle.runId, "canceled"]],
+					);
+				}
 				await new Promise((resolve) => setTimeout(resolve, 700));
 				strictEqual(f.workers.length, 1);
 			} finally {
