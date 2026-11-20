@@ -300,6 +300,11 @@ export interface ToolBudgetExceededPayload {
 	template?: string;
 	/** Present when a template's step policy, not a call count, ended the turn: its step tool. */
 	stepTool?: string;
+	/**
+	 * Present when a continuation follows: the crossing call or batch ran and the turn rolls into a fresh one at its
+	 * tool boundary, with no refusal and no summary request (XR-6).
+	 */
+	rolled?: true;
 }
 
 /**

@@ -185,7 +185,7 @@ function fixture(
 		await loop.whenSettled();
 		await session.close();
 	};
-	return { loop, wire, journal, close };
+	return { loop, wire, journal, close, settings, bus: context.bus };
 }
 
 it("a cap halt during a tool call lets the call finish and sends no further model request", {
@@ -231,6 +231,47 @@ it("a cap halt during a tool call lets the call finish and sends no further mode
 		ok(source);
 		const findings = whyStopped(source).findings;
 		ok(findings.includes("The last turn stopped (aborted) on autonomy_stop at the tool boundary."), findings.join("\n"));
+	} finally {
+		await f.close();
+	}
+});
+
+it("a headless yolo run whose turn budget rolls at the tool boundary exits 0 on the continuation's answer (XR-6)", {
+	timeout: 10_000,
+}, async () => {
+	// The roll's deferred loop-guard stop closes the turn as interrupted; that closing record must not end the run.
+	const f = fixture(1, async () => {
+		f.bus.emit("safety.tool_budget_exceeded", {
+			tool: "read",
+			callsThisTurn: 9,
+			softBudget: 8,
+			hardCeiling: 23,
+			interrupted: false,
+			at: Date.now(),
+			rolled: true,
+		});
+	});
+	f.settings.safety.autonomy = "yolo";
+	const events: ChatLoopEvent[] = [];
+	f.loop.onEvent((event) => {
+		events.push(event);
+	});
+	try {
+		const code = await runHeadlessMainAgent(f.loop, {
+			prompt: "Read the files.",
+			mode: "text",
+			shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
+		});
+		strictEqual(code, 0);
+		strictEqual(f.wire.calls(), 2);
+		const closing = events.find(
+			(event) =>
+				event.type === "notice" &&
+				(event as { key?: string; surface?: string }).key === "turn.interrupted" &&
+				(event as { surface?: string }).surface === "transcript",
+		) as { text?: string; redirect?: true } | undefined;
+		ok(closing?.text?.includes("Turn budget rolled"), JSON.stringify(closing));
+		strictEqual(closing?.redirect, true);
 	} finally {
 		await f.close();
 	}

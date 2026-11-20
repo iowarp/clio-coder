@@ -904,6 +904,12 @@ export interface CreateLoopGuardRegistrationOptions {
 export interface LoopGuardRegistration extends MiddlewareHookRegistration {
 	/** Read-only attempt counter for tests and telemetry. */
 	callCount(): number;
+	/**
+	 * The footer's per-turn meter (FX-30): the guard's own calls for the turn it is judging against that turn's
+	 * effective soft budget (width scale and template included), so a hand-over or a budget roll that starts a fresh
+	 * guard turn shows as one. `settledSinceSubmit` is the autonomy window's count, zero right after a submit.
+	 */
+	turnMeter(settledSinceSubmit: number, fallbackBudget: number): { toolCalls: number; budget: number };
 	/** The turn's parent-workspace mutation epoch, which the registry's denial memory keys on. */
 	mutationEpoch(turnId: string): number;
 	/** One-way worker phase growth admitted before launch for a result-contract revision. */
@@ -987,6 +993,14 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		string,
 		{ batch: string; size: number; spent: number; refused: boolean; announced: boolean }
 	>();
+	/**
+	 * Per turn a continuation follows: the call or parallel batch that crossed the
+	 * soft budget and was admitted as the turn's last, so the chat loop rolls the
+	 * turn at its tool boundary (XR-6).
+	 */
+	const rolledBatchByTurn = new Map<string, string>();
+	/** The turn and effective soft budget the latest budgeted call was judged against, for the footer meter (FX-30). */
+	let latestTurnBudget: { key: string; soft: number } | undefined;
 	/** Per turn under a step policy: its step tool succeeded ("done"), then a second call locked the turn ("locked"). */
 	const stepByTurn = new Map<string, "done" | "locked">();
 	/**
@@ -1454,7 +1468,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		callsThisTurn: number,
 		interrupted: boolean,
 		at: number,
-		bound?: { template?: string; stepTool?: string },
+		bound?: { template?: string; stepTool?: string; rolled?: true },
 	): void => {
 		const payload: ToolBudgetExceededPayload = {
 			tool: input.toolName ?? "unknown",
@@ -1466,6 +1480,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
 			...(bound?.template !== undefined ? { template: bound.template } : {}),
 			...(bound?.stepTool !== undefined ? { stepTool: bound.stepTool } : {}),
+			...(bound?.rolled === true ? { rolled: true as const } : {}),
 		};
 		options.bus?.emit("safety.tool_budget_exceeded", payload);
 	};
@@ -1483,10 +1498,23 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		input: MiddlewareHookInput,
 	): { budget: OrchTurnToolCallBudget; template?: string; source: string } | undefined => {
 		const budgetSource = options.turnToolCallBudget;
-		const operator = typeof budgetSource === "function" ? budgetSource() : budgetSource;
-		if (operator === undefined) return undefined;
+		const configured = typeof budgetSource === "function" ? budgetSource() : budgetSource;
+		if (configured === undefined) return undefined;
+		// A wide-parallel route keeps the same number of rounds: the chat loop measures its calls per round and
+		// passes the multiplier, 1 to 3 (`turn-budget-width.ts`). The ceiling keeps the operator's margin (CLI-P26).
+		const width = input.metadata?.turnBudgetScale;
+		const scale = typeof width === "number" && width > 1 ? width : 1;
+		const scaledSoft = Math.round(configured.soft * scale);
+		const operator =
+			scaledSoft > configured.soft
+				? { soft: scaledSoft, hard: scaledSoft + (configured.hard - configured.soft) }
+				: configured;
+		const widthNote =
+			operator === configured
+				? ""
+				: `, safety.limits.chatToolCallsPerTurn ${configured.soft} scaled x${scale.toFixed(1)} for this route's measured calls per round`;
 		const templateCalls = input.metadata?.templateToolCalls;
-		if (typeof templateCalls !== "number" || !(templateCalls >= 1)) return { budget: operator, source: "" };
+		if (typeof templateCalls !== "number" || !(templateCalls >= 1)) return { budget: operator, source: widthNote };
 		const name = input.metadata?.templateName;
 		const template = typeof name === "string" && name.length > 0 ? name : "unnamed";
 		const ceiling = resolveTemplateCeiling("templateTurnToolCallCeiling");
@@ -1548,7 +1576,12 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		const bound = resolved.template === undefined ? undefined : { template: resolved.template };
 		const source = resolved.source;
 		const turnKey = input.turnId ?? NO_TURN_BUCKET;
-		const refusedBatch = refusedBudgetBatch(input, turnKey, turnBudget.soft);
+		latestTurnBudget = { key: turnKey, soft: turnBudget.soft };
+		// The chat loop says whether a turn this refusal ends continues without
+		// the operator, as its settle path will decide (CLI-H1). Then the budget
+		// rolls the turn instead of refusing a batch, so no whole-batch judgment.
+		const continues = input.metadata?.turnBudgetContinues === true;
+		const refusedBatch = continues ? null : refusedBudgetBatch(input, turnKey, turnBudget.soft);
 		const callsThisTurn = bumpBoundedCounter(callsByTurn, turnKey);
 		let byTool = callsByToolByTurn.get(turnKey);
 		if (byTool === undefined) {
@@ -1569,9 +1602,25 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		// attempts, then attempt hard + 1 ends the turn.
 		const firstRefusal = turnBudget.soft + 1;
 		const stopAttempt = turnBudget.hard + 1;
-		// The chat loop says whether a turn this refusal ends continues without
-		// the operator, as its settle path will decide (CLI-H1).
-		const continues = input.metadata?.turnBudgetContinues === true;
+		if (continues && callsThisTurn >= firstRefusal) {
+			// Silent roll (XR-6): a continuation follows with a fresh budget, so the
+			// call that crosses the budget runs, with every sibling of its parallel
+			// batch, and the chat loop ends the turn at the batch's tool boundary
+			// without asking the model for a progress note nobody reads.
+			const batch = input.correlationId ?? `attempt:${callsThisTurn}`;
+			const rolled = rolledBatchByTurn.get(turnKey);
+			if (rolled === undefined) {
+				while (rolledBatchByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
+					const oldest = rolledBatchByTurn.keys().next().value;
+					if (typeof oldest !== "string") break;
+					rolledBatchByTurn.delete(oldest);
+				}
+				rolledBatchByTurn.set(turnKey, batch);
+				emitBudgetEvent(input, turnBudget, callsThisTurn, false, now, { ...bound, rolled: true });
+				return null;
+			}
+			if (rolled === batch) return null;
+		}
 		if (refusedBatch !== null) {
 			// The whole batch is refused, its siblings included. It counts as the
 			// turn's first refusal attempt and its siblings as nothing more: they
@@ -1912,6 +1961,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		hooks: ["before_tool", "after_tool"],
 		evidence: "count:repeated-call@tool-args",
 		callCount: () => count,
+		turnMeter: (settledSinceSubmit, fallbackBudget) => {
+			// A fresh submit has settled nothing yet and the guard still holds the last turn: show the new turn at zero.
+			if (latestTurnBudget === undefined || settledSinceSubmit === 0) {
+				return { toolCalls: settledSinceSubmit, budget: latestTurnBudget?.soft ?? fallbackBudget };
+			}
+			return { toolCalls: callsByTurn.get(latestTurnBudget.key) ?? 0, budget: latestTurnBudget.soft };
+		},
 		mutationEpoch: (turnId) => mutationEpochByTurn.get(turnId) ?? 0,
 		extendWorkerToolCallPhase(phase): boolean {
 			// A repair may extend a soft work phase, never a sealed loop or hard-cap lock.
