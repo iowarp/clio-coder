@@ -277,6 +277,31 @@ describe("contracts/route readiness reads", () => {
 		strictEqual(routeSettledLabel({ outcome: "failed", outcomeDetail: "exit code 1" }), "failure");
 	});
 
+	it("a sealed run whose journal changed in place is folded again, an unchanged one is not (r5-3)", async () => {
+		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-readiness-journal-"));
+		await ledger(stateDir, [sealed("run-j", true), sealed("run-k", true)]);
+		const { reads, restore } = countLedgerReads(stateDir);
+		after(restore);
+		const fold = createRouteHistoryFold({ stateDir });
+		const verified = () =>
+			Object.fromEntries(
+				fold
+					.read()
+					.runs.map((run) => [run.runId, run.sealVerified])
+					.sort(),
+			);
+		deepStrictEqual(verified(), { "run-j": true, "run-k": true });
+		reads.splice(0);
+
+		// Appended in place: the directory's own stat and the bundle's stay as they were.
+		const journal = join(telemetryRunDirectory(stateDir, "run-j"), "journal.jsonl");
+		fs.appendFileSync(journal, "\n");
+		deepStrictEqual(verified(), { "run-j": false, "run-k": true });
+		deepStrictEqual(reads.splice(0), [join(telemetryRunDirectory(stateDir, "run-j"), "bundle.json")]);
+		verified();
+		deepStrictEqual(reads, [], "an unchanged sealed run is a cache hit");
+	});
+
 	it("a bundle rewritten in place is verified again, never trusted from the cache", async () => {
 		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-readiness-tamper-"));
 		await ledger(stateDir, [sealed("run-t", true)]);

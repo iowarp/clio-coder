@@ -4,9 +4,10 @@
  * Every run that settled under a route decision carries, on its run.settled, the executed route's whole identity,
  * its outcome, priced spend, cache reads, attempt and phase timing. Route policy and readiness read that history from
  * here; nothing else persists it. A run's entry is re-read whenever its bundle, journal segments or objects change
- * identity, so a dispatch reads only changed runs. A sealed run is immutable: once folded, its directory's own stat
- * and its bundle's are its key. The fold covers the newest runs only, by directory time, as adaptive routing reads no
- * older history. No index file exists.
+ * identity, so a dispatch reads only changed runs. Once a sealed run is folded, its key is the stat of its directory,
+ * its bundle and every segment and object the seal covers, at paths listed when it was folded, so a cache hit lists no
+ * directory and a file rewritten in place is folded again (r5-3). The fold covers the newest runs only, by directory
+ * time, as adaptive routing reads no older history. No index file exists.
  */
 
 import { lstatSync, readdirSync, type Stats } from "node:fs";
@@ -198,15 +199,57 @@ function sortEntries(left: RouteHistoryEntry, right: RouteHistoryEntry): number 
 export function createRouteHistoryFold(options: { stateDir: string }): RouteHistoryFold {
 	const cache = new Map<
 		string,
-		{ identity: string; sealedKey: string | null; run: SettledRunFacts | null; entry: RouteHistoryEntry | null }
+		{
+			identity: string;
+			sealed: { paths: string[]; key: string } | null;
+			run: SettledRunFacts | null;
+			entry: RouteHistoryEntry | null;
+		}
 	>();
 	/** Sealed runs outside the bound; a sealed run only ages, so it is never stat'd again while it stays listed. */
 	const retired = new Set<string>();
 	const statKey = (stats: Stats): string => `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}`;
-	/** The directory's stat and its bundle's; null while the run is unsealed. A bundle rewritten in place moves it. */
-	const sealedKeyOf = (directory: string, dir: Stats): string | null => {
+	const isSealed = (directory: string): boolean => statOrNull(telemetryBundlePath(directory))?.isFile() === true;
+	/**
+	 * The stat of the directory, its bundle and each of `paths`; null while the run is unsealed. A write in place to a
+	 * file that already exists moves only that file's stat, never its directory's, so each covered file is stat'd (r5-3).
+	 */
+	const sealedKeyOf = (directory: string, dir: Stats, paths: readonly string[]): string | null => {
 		const bundle = statOrNull(telemetryBundlePath(directory));
-		return bundle?.isFile() === true ? `${statKey(dir)}|${statKey(bundle)}` : null;
+		if (bundle?.isFile() !== true) return null;
+		const parts = [statKey(dir), statKey(bundle)];
+		for (const path of paths) {
+			const stats = statOrNull(path);
+			parts.push(stats === null ? "-" : statKey(stats));
+		}
+		return parts.join("|");
+	};
+	/**
+	 * The files a sealed run's seal covers besides its bundle: its segments, its objects directory and each object. The
+	 * directory stats in the key move with any entry added, removed or renamed, so the listing holds while they match.
+	 */
+	const sealedScopeOf = (directory: string, dir: Stats): { paths: string[]; key: string } | null => {
+		if (!isSealed(directory)) return null;
+		const objects = telemetryObjectsDirectory(directory);
+		const objectsKey = (): string => {
+			const stats = statOrNull(objects);
+			return stats === null ? "-" : statKey(stats);
+		};
+		try {
+			const paths = [...telemetryJournalFiles(readdirSync(directory)).map((name) => join(directory, name)), objects];
+			const listed = objectsKey();
+			if (listed !== "-")
+				paths.push(
+					...readdirSync(objects)
+						.sort()
+						.map((name) => join(objects, name)),
+				);
+			const key = sealedKeyOf(directory, dir, paths);
+			// An object written while it was listed: the next read takes the full identity path instead.
+			return key === null || objectsKey() !== listed ? null : { paths, key };
+		} catch {
+			return null;
+		}
 	};
 	let version = 0;
 	let last: RouteHistoryRead | null = null;
@@ -224,7 +267,7 @@ export function createRouteHistoryFold(options: { stateDir: string }): RouteHist
 		const directory = telemetryRunDirectory(options.stateDir, runId);
 		// Taken before the read: any later change to the scope's entries moves the directory's own stat.
 		const dir = statOrNull(directory);
-		const sealedKey = dir === null ? null : sealedKeyOf(directory, dir);
+		const sealed = dir === null ? null : sealedScopeOf(directory, dir);
 		let run: SettledRunFacts | null = null;
 		try {
 			const record = readRunRecord(options.stateDir, runId);
@@ -233,7 +276,7 @@ export function createRouteHistoryFold(options: { stateDir: string }): RouteHist
 			// An unreadable run scope contributes no history.
 			run = null;
 		}
-		const folded = { identity, sealedKey, run, entry: run === null ? null : routeEntryOf(run) };
+		const folded = { identity, sealed, run, entry: run === null ? null : routeEntryOf(run) };
 		cache.set(runId, folded);
 		return folded;
 	};
@@ -263,8 +306,7 @@ export function createRouteHistoryFold(options: { stateDir: string }): RouteHist
 		scopes.sort((left, right) => right.stats.mtimeMs - left.stats.mtimeMs);
 		const bounded = scopes.filter((scope) => scope.stats.mtimeMs >= oldest).slice(0, HISTORY_MAX_RUNS);
 		const kept = new Set(bounded);
-		for (const scope of scopes)
-			if (!kept.has(scope) && sealedKeyOf(scope.directory, scope.stats) !== null) retired.add(scope.runId);
+		for (const scope of scopes) if (!kept.has(scope) && isSealed(scope.directory)) retired.add(scope.runId);
 		return bounded;
 	};
 	return {
@@ -286,8 +328,12 @@ export function createRouteHistoryFold(options: { stateDir: string }): RouteHist
 			const runs: SettledRunFacts[] = [];
 			for (const { runId, directory, stats } of boundedScopes()) {
 				const cached = cache.get(runId);
-				// A sealed run whose directory and bundle are unchanged is the run already folded.
-				if (cached !== undefined && cached.sealedKey !== null && cached.sealedKey === sealedKeyOf(directory, stats)) {
+				// A sealed run whose directory, bundle, segments and objects are unchanged is the run already folded.
+				if (
+					cached !== undefined &&
+					cached.sealed !== null &&
+					cached.sealed.key === sealedKeyOf(directory, stats, cached.sealed.paths)
+				) {
 					seen.add(runId);
 					if (cached.run !== null) runs.push(cached.run);
 					if (cached.entry !== null) entries.push(cached.entry);
