@@ -20,7 +20,7 @@ import type { SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
 import { isSessionEntry, type SessionEntry } from "./entries.js";
 import { SessionEntriesIndex } from "./entries-index.js";
 import { startSessionHeartbeat } from "./heartbeat.js";
-import { liveSessionOwner, liveSessionRefusal, registeredLiveOwner } from "./live-owner.js";
+import { liveSessionOwner, liveSessionRefusal, registeredLiveOwner, SessionLiveError } from "./live-owner.js";
 import { runMigrations } from "./migrations/index.js";
 
 /**
@@ -102,7 +102,7 @@ export function resumeSessionState(sessionId: string): {
 		// Refuse before migration or reopening can write another process's ledger (#420).
 		// The live registry also names a run that holds the session but has not stamped meta.json (SPEC L3).
 		const owner = liveSessionOwner(persistedMeta) ?? registeredLiveOwner(sessionId);
-		if (owner && owner.pid !== process.pid) throw new Error(liveSessionRefusal(sessionId, owner));
+		if (owner && owner.pid !== process.pid) throw new SessionLiveError(liveSessionRefusal(sessionId, owner));
 		const paths = sessionPaths(persistedMeta);
 		const migration = runMigrations(persistedMeta, paths.meta);
 		const candidate = openSession(sessionId);

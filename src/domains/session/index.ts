@@ -106,7 +106,7 @@ export type {
 export { isSessionEntry, isSessionHeader, SESSION_ENTRY_KINDS } from "./entries.js";
 export type { HeadlessCompactionOutcome, HeadlessCompactionRequest } from "./headless-compact.js";
 export { runHeadlessCompaction } from "./headless-compact.js";
-export { liveSessionOwner } from "./live-owner.js";
+export { liveSessionOwner, SessionLiveError } from "./live-owner.js";
 export { SessionManifest } from "./manifest.js";
 export { observationCheckpoint, observationSourceUnits } from "./memory-source.js";
 export { type MessageProjection, projectMessage } from "./message-projection.js";

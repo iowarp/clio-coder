@@ -1136,6 +1136,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		if (unpriced.length > 0) {
 			writeRunRefusal(
 				`clio-coder run: --require-priced: routes this run can reach have no known pricing: ${unpriced.join(", ")}; declare targets[].pricing for them${delegating ? " or add --no-delegate if only worker routes are listed" : ""}\n`,
+				"not_configured",
 			);
 			return 2;
 		}

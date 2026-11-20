@@ -211,7 +211,7 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<
 > {
 	const messages = parsed.messages.length > 0 ? [parsed.messages.join(" ")] : [];
 	if (parsed.stdin === true && process.stdin.isTTY) {
-		writeRunDiagnostic("clio-coder run: `-` reads the task from stdin, but stdin is a terminal\n");
+		writeRunDiagnostic("clio-coder run: `-` reads the task from stdin, but stdin is a terminal\n", "empty_task");
 		process.stderr.write(USAGE);
 		return 2;
 	}
@@ -257,7 +257,10 @@ async function assemblePrompt(parsed: RunCliArgs): Promise<
 		...(fileRefs.images.length > 0 ? { fileImages: fileRefs.images } : {}),
 	});
 	if (!initial.initialMessage || initial.initialMessage.trim().length === 0) {
-		writeRunDiagnostic('clio-coder run: empty task; give it as text (run "<task>") or pass - to read it from stdin\n');
+		writeRunDiagnostic(
+			'clio-coder run: empty task; give it as text (run "<task>") or pass - to read it from stdin\n',
+			"empty_task",
+		);
 		process.stderr.write(USAGE);
 		return 2;
 	}
@@ -431,14 +434,14 @@ async function executeRunCommand(
 				return 0;
 			}
 			for (const diagnostic of parsed.diagnostics) {
-				writeRunDiagnostic(`clio-coder run: ${diagnostic.message}\n`);
+				writeRunDiagnostic(`clio-coder run: ${diagnostic.message}\n`, diagnostic.slug);
 			}
 			if (parsed.diagnostics.some((diagnostic) => diagnostic.type === "error")) {
 				process.stderr.write(USAGE);
 				return 2;
 			}
 			if (parsed.agentId === undefined && hasDispatchOnlyOptions(parsed)) {
-				writeRunDiagnostic("clio-coder run: fleet dispatch flags require --agent <recipe-id>\n");
+				writeRunDiagnostic("clio-coder run: fleet dispatch flags require --agent <recipe-id>\n", "flag_conflict");
 				process.stderr.write(USAGE);
 				return 2;
 			}
@@ -466,6 +469,7 @@ async function executeRunCommand(
 			if (parsed.constraints && parsed.agentId !== undefined) {
 				writeRunDiagnostic(
 					"clio-coder run: --turn-mode, --allow-tools, --delegate-tools, and --no-delegate apply to the main-agent task\n",
+					"flag_conflict",
 				);
 				return 2;
 			}
@@ -479,6 +483,7 @@ async function executeRunCommand(
 			if ((parsed.sessionId !== undefined || parsed.continueSession) && parsed.agentId !== undefined) {
 				writeRunDiagnostic(
 					"clio-coder run: --resume, --continue, --fork and --name apply to the main agent; a worker has its own transcript\n",
+					"flag_conflict",
 				);
 				process.stderr.write(USAGE);
 				return 2;
@@ -487,17 +492,20 @@ async function executeRunCommand(
 			// failed outcome also feeds retry policy, so the no-op verdict stays a
 			// main-agent contract rather than a flag --agent would silently ignore.
 			if (parsed.failOnNoop && parsed.agentId !== undefined) {
-				writeRunDiagnostic("clio-coder run: --fail-on-noop applies to the main agent, not --agent dispatch\n");
+				writeRunDiagnostic(
+					"clio-coder run: --fail-on-noop applies to the main agent, not --agent dispatch\n",
+					"flag_conflict",
+				);
 				process.stderr.write(USAGE);
 				return 2;
 			}
 			if (parsed.verify.length > 0 && parsed.agentId !== undefined) {
-				writeRunDiagnostic("clio-coder run: --verify applies to the main agent, not --agent dispatch\n");
+				writeRunDiagnostic("clio-coder run: --verify applies to the main agent, not --agent dispatch\n", "flag_conflict");
 				process.stderr.write(USAGE);
 				return 2;
 			}
 			if (parsed.answersFile !== undefined && parsed.agentId !== undefined) {
-				writeRunDiagnostic("clio-coder run: --answers applies to the main agent, not --agent dispatch\n");
+				writeRunDiagnostic("clio-coder run: --answers applies to the main agent, not --agent dispatch\n", "flag_conflict");
 				process.stderr.write(USAGE);
 				return 2;
 			}
@@ -557,7 +565,7 @@ async function executeRunCommand(
 							typeof parsed.outputSchema === "string"
 								? structured.OUTPUT_SCHEMA_REFUSAL_PREFIX
 								: `clio-coder run: task file ${parsed.outputSchema.label}: `;
-						writeRunDiagnostic(`${prefix}${loaded.reason}\n`);
+						writeRunDiagnostic(`${prefix}${loaded.reason}\n`, loaded.slug);
 						return 2;
 					}
 					outputSchema = loaded.schema;
@@ -597,7 +605,7 @@ async function executeRunCommand(
 						// CLI-P16: a run the require-priced preflight would refuse is refused here too, not previewed.
 						const pricing = await dryRunPricingRefusal(parsed, settings);
 						if (pricing !== undefined) {
-							writeRunDiagnostic(pricing);
+							writeRunDiagnostic(pricing.message, pricing.slug);
 							return 2;
 						}
 						const plan = buildRunPlan(parsed, settings, parsed.verifyTimeoutSeconds ?? DEFAULT_VERIFY_TIMEOUT_SECONDS);
@@ -618,6 +626,7 @@ async function executeRunCommand(
 						if (unconfigured) {
 							writeRunDiagnostic(
 								"clio-coder run: not configured: no model target is saved; run `clio-coder configure` or pass --target <id>\n",
+								"not_configured",
 							);
 							return 2;
 						}
@@ -962,7 +971,8 @@ async function runDispatch(
 						)
 					: undefined;
 			if (refusal !== undefined) {
-				writeRunDiagnostic(`clio-coder run: ${refusal}\n`);
+				// SPEC 6.9: declaring the route's pricing is the fix.
+				writeRunDiagnostic(`clio-coder run: ${refusal}\n`, "not_configured");
 				return stopDomains(2);
 			}
 		} catch {

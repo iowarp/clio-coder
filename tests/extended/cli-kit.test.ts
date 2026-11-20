@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
+import { parseRunCliArgs } from "../../src/cli/args.js";
 import { confirmAction } from "../../src/cli/kit/confirm.js";
 import { parseDuration } from "../../src/cli/kit/duration.js";
 import { parseCommandFlags } from "../../src/cli/kit/flags.js";
@@ -167,32 +168,34 @@ test("run exit precedence: the highest applying row sets the exit code and leads
 		);
 	}
 	equal(resolveRunExit([], { displayed: true }).outcome, "displayed");
-	// An exit-2 refusal is named by the diagnostic it wrote; anything else stays not_started.
-	for (const [diagnostics, code] of [
-		[["clio-coder run: --deny-tools removes every tool --allow-tools names (read)"], "flag_conflict"],
-		[["clio-coder run: not configured: no model target is saved; run `clio-coder configure`"], "not_configured"],
-		[
-			[
-				"clio-coder run: failed to resume session 019a: session 019a is open in another process (pid 41 on zbook); end it there first",
-			],
-			"session_live",
-		],
-		[["clio-coder run: failed to resume session 019a: session file is unreadable"], "not_started"],
-		// CLI-P12: the C17 slugs a refusal before boot names.
-		[["clio-coder run: empty task"], "empty_task"],
-		[["clio-coder run: `-` reads the task from stdin, but stdin is a terminal"], "empty_task"],
-		[["clio-coder run: unknown option: --bogus"], "unknown_flag"],
-		[["clio-coder run: unknown option: --json (removed in 0.8.5; use --output-format json|stream-json)"], "unknown_flag"],
-		[["clio-coder run: task file schemaVersion: this release reads version 1, got 2"], "schema_unsupported"],
-		[["clio-coder run: --systemone applies to the main agent, not --agent dispatch"], "flag_conflict"],
-		[
-			[
-				"clio-coder run: --turn-mode, --allow-tools, --deny-tools, --delegate-tools, and --no-delegate apply to the main-agent task",
-			],
-			"flag_conflict",
-		],
-	] as const)
-		equal(startRefusalCause(diagnostics).code, code, diagnostics[0]);
+	// An exit-2 refusal is named by the slug its producer gave it; `usage` or no slug stays not_started.
+	equal(startRefusalCause(undefined).code, "not_started");
+	equal(startRefusalCause({ message: "clio-coder run: failed to resume session 019a: unreadable" }).code, "not_started");
+	equal(
+		startRefusalCause({ slug: "usage", message: "clio-coder run: task file bogus: unknown key" }).code,
+		"not_started",
+	);
+	deepStrictEqual(startRefusalCause({ slug: "session_live", message: "m" }), { code: "session_live", message: "m" });
+	// CLI-P12: the C17 slugs the run parser gives its refusals before boot.
+	for (const [args, code] of [
+		[["--bogus", "x"], "unknown_flag"],
+		[["--no-context-files", "x"], "unknown_flag"],
+		[["--with-panes", "x"], "unknown_flag"],
+		[["--json", "x"], "unknown_flag"],
+		[["--json-events=terminal", "x"], "unknown_flag"],
+		[["--agent", "coder", "--systemone", "off", "x"], "flag_conflict"],
+		[["--agent", "coder", "--turn-mode", "answer", "x"], "flag_conflict"],
+		[["--agent", "coder", "--resume", "a", "x"], "flag_conflict"],
+		[["--agent", "coder", "--autonomy", "yolo", "x"], "flag_conflict"],
+		[["--agent", "coder", "@a.png", "x"], "flag_conflict"],
+		[["--record", "x"], "flag_conflict"],
+		[["--allow-tools", "read", "--deny-tools", "read", "x"], "flag_conflict"],
+		[["--task-file", "t.json", "x"], "task_file_conflict"],
+		[["--resume", "a", "--continue", "x"], "not_started"],
+	] as const) {
+		const refusal = parseRunCliArgs(args).diagnostics.find((diagnostic) => diagnostic.type === "error");
+		equal(startRefusalCause(refusal).code, code, args.join(" "));
+	}
 });
 
 test("a v2 envelope names the parent session of a forked run", async () => {

@@ -14,7 +14,10 @@ export const OUTPUT_SCHEMA_REFUSAL_PREFIX = "clio-coder run: --output-schema: ";
 /** Who enforced the schema: the host alone, or the host behind a provider's response-schema dialect. */
 export type StructuredEnforcement = "host" | "host+provider";
 
-export type OutputSchemaLoad = { ok: true; schema: Record<string, unknown> } | { ok: false; reason: string };
+/** A refused schema is C17 `schema_unsupported` (SPEC 6.8), refused before any model call. */
+export type OutputSchemaLoad =
+	| { ok: true; schema: Record<string, unknown> }
+	| { ok: false; slug: "schema_unsupported"; reason: string };
 
 export type StructuredVerdict =
 	| { ok: true; value: Record<string, unknown>; json: string }
@@ -34,38 +37,64 @@ export async function loadOutputSchema(
 	if (typeof source !== "string") {
 		const size = Buffer.byteLength(JSON.stringify(source.inline) ?? "", "utf8");
 		if (size > RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES)
-			return { ok: false, reason: `${source.label} is larger than ${RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES} bytes` };
+			return {
+				ok: false,
+				slug: "schema_unsupported",
+				reason: `${source.label} is larger than ${RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES} bytes`,
+			};
 		return checkOutputSchema(source.inline);
 	}
 	const file = source;
 	let raw: string;
 	try {
 		if (statSync(file).size > RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES)
-			return { ok: false, reason: `${file} is larger than ${RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES} bytes` };
+			return {
+				ok: false,
+				slug: "schema_unsupported",
+				reason: `${file} is larger than ${RESPONSE_SCHEMA_MAX_SERIALIZED_BYTES} bytes`,
+			};
 		raw = readFileSync(file, "utf8");
 	} catch (error) {
-		return { ok: false, reason: `cannot read ${file}: ${error instanceof Error ? error.message : String(error)}` };
+		return {
+			ok: false,
+			slug: "schema_unsupported",
+			reason: `cannot read ${file}: ${error instanceof Error ? error.message : String(error)}`,
+		};
 	}
 	let value: unknown;
 	try {
 		value = JSON.parse(raw);
 	} catch (error) {
-		return { ok: false, reason: `${file} is not JSON: ${error instanceof Error ? error.message : String(error)}` };
+		return {
+			ok: false,
+			slug: "schema_unsupported",
+			reason: `${file} is not JSON: ${error instanceof Error ? error.message : String(error)}`,
+		};
 	}
 	return checkOutputSchema(value);
 }
 
 async function checkOutputSchema(value: unknown): Promise<OutputSchemaLoad> {
 	if (typeof value !== "object" || value === null || Array.isArray(value))
-		return { ok: false, reason: 'the schema must be a JSON object whose root type is "object"' };
+		return {
+			ok: false,
+			slug: "schema_unsupported",
+			reason: 'the schema must be a JSON object whose root type is "object"',
+		};
 	const root = (value as Record<string, unknown>).type;
 	if (root !== "object")
 		return {
 			ok: false,
+			slug: "schema_unsupported",
 			reason: `the schema root type must be "object" (got ${root === undefined ? "none" : JSON.stringify(root)})`,
 		};
 	const ref = foreignRef(value);
-	if (ref !== null) return { ok: false, reason: `$ref ${JSON.stringify(ref)} is not a #/$defs/ reference in this file` };
+	if (ref !== null)
+		return {
+			ok: false,
+			slug: "schema_unsupported",
+			reason: `$ref ${JSON.stringify(ref)} is not a #/$defs/ reference in this file`,
+		};
 	const schema = value as Record<string, unknown>;
 	try {
 		const { Value } = await import("typebox/value");
@@ -73,6 +102,7 @@ async function checkOutputSchema(value: unknown): Promise<OutputSchemaLoad> {
 	} catch (error) {
 		return {
 			ok: false,
+			slug: "schema_unsupported",
 			reason: `the host validator cannot use this schema: ${error instanceof Error ? error.message : String(error)}`,
 		};
 	}
