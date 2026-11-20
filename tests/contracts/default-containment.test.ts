@@ -431,12 +431,13 @@ test("the judge reads the session's workspace and scratch roots by path, and a d
 		rmSync(outside, { recursive: true, force: true });
 		if (madeParent) rmdirSync(parent);
 	});
-	const scratch = effectiveScratchRoots(DEFAULT_SETTINGS.safety.scratchRoots, cwd);
-	deepStrictEqual(
-		scratch.filter((root) => isSameOrDescendant(outside, root)),
-		[],
-		`${outside} must lie outside every scratch root`,
+	const holder = effectiveScratchRoots(DEFAULT_SETTINGS.safety.scratchRoots, cwd).find((root) =>
+		isSameOrDescendant(outside, root),
 	);
+	if (holder !== undefined) {
+		t.skip(`the checkout lies in scratch root ${holder}, so no escape target outside every scratch root exists`);
+		return;
+	}
 	const prompts: Array<{ system: string; user: string }> = [];
 	const judge = createSafetyJudge({
 		config: () => ({ ...resolveSafetyJudgeConfig(DEFAULT_SETTINGS, cwd), target: "local" }),
