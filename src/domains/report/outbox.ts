@@ -1,9 +1,9 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { REPORT_ID } from "./draft.js";
-import { reportsDirectory } from "./store.js";
+import { deleteReportDraft, reportBundlePath, reportsDirectory } from "./store.js";
 import type { ReportKind } from "./vocabulary.js";
 
 export const OUTBOX_STATES = ["draft", "sending", "sent", "opened", "written", "withdrawn"] as const;
@@ -117,16 +117,26 @@ export function updateOutbox(
 		const document = readDocument(path) ?? { version: 1, reports: {} };
 		const entry: OutboxEntry = { ...defaults(patch.kind, patch.title), ...document.reports[id], ...patch };
 		document.reports[id] = entry;
-		// A report closed and sent over a year ago has nothing left to follow; it is dropped on the next write.
+		// A report closed and sent over a year ago has nothing left to follow; it is dropped on the next write, and with
+		// it the draft and bundle on disk, or the draft would list as unsent and could be filed a second time (CLI-14).
 		const cutoff = Date.now() - 365 * DAY_MS;
+		const pruned: string[] = [];
 		for (const [key, other] of Object.entries(document.reports))
 			if (
 				other.lastSeen?.state.toUpperCase().startsWith("CLOSED") &&
 				other.sentAt !== null &&
 				Date.parse(other.sentAt) < cutoff
-			)
+			) {
 				delete document.reports[key];
+				pruned.push(key);
+			}
 		safeResourceWrite(path, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 });
+		for (const key of pruned) {
+			if (!REPORT_ID.test(key)) continue;
+			deleteReportDraft(stateDir, key);
+			const bundle = reportBundlePath(stateDir, key);
+			for (const file of [bundle, bundle.replace(/\.tar\.gz$/u, ".box")]) rmSync(file, { force: true });
+		}
 		return entry;
 	});
 }

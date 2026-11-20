@@ -61,6 +61,15 @@ export function listReportDrafts(stateDir: string): string[] {
 	}
 }
 
+export function reportBundlesDirectory(stateDir: string): string {
+	return join(reportsDirectory(stateDir), "bundles");
+}
+
+export function reportBundlePath(stateDir: string, id: string): string {
+	if (!REPORT_ID.test(id)) throw new Error(`not a report id: ${id}`);
+	return join(reportBundlesDirectory(stateDir), `${id}.tar.gz`);
+}
+
 export function deleteReportDraft(stateDir: string, id: string): void {
 	for (const path of [reportDraftPath(stateDir, id), reportMarkdownPath(stateDir, id)]) rmSync(path, { force: true });
 }

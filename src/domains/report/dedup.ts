@@ -4,7 +4,7 @@ import { resolvePackageRoot } from "../../core/package-root.js";
 import type { RenderedReport } from "./body.js";
 import { type ReportCommandRunner, runReportCommand } from "./command.js";
 import type { ReportDraft } from "./draft.js";
-import { titleCore } from "./draft.js";
+import { stripHiddenText, titleCore } from "./draft.js";
 import { ghEnvironment, REPORT_GH_TIMEOUT_MS, type ReportTransport } from "./transport.js";
 import { REPORT_REPOSITORY } from "./vocabulary.js";
 
@@ -121,6 +121,13 @@ const MAX_MATCHES = 3;
 const AREA_BONUS = 0.15;
 const AGE_PENALTY = 0.1;
 const AGE_STEP_DAYS = 90;
+/** A match's title is anyone's text: one line, no hidden characters, at most this many characters on screen. */
+const MATCH_TITLE_MAX = 120;
+
+function cleanTitle(raw: string): string {
+	const chars = Array.from(stripHiddenText(raw).replace(/\s+/gu, " ").trim());
+	return chars.length > MATCH_TITLE_MAX ? `${chars.slice(0, MATCH_TITLE_MAX - 1).join("")}…` : chars.join("");
+}
 
 interface SearchItem {
 	number: number;
@@ -142,7 +149,7 @@ function parseItems(stdout: string): SearchItem[] | null {
 			if (typeof item.number !== "number" || typeof item.title !== "string") continue;
 			items.push({
 				number: item.number,
-				title: item.title,
+				title: cleanTitle(item.title),
 				url: `https://github.com/${REPORT_REPOSITORY}/issues/${item.number}`,
 				state: item.state === "closed" ? "closed" : "open",
 				closedAt: typeof item.closed_at === "string" ? item.closed_at : null,

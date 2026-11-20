@@ -36,6 +36,17 @@ function section(heading: string, text: string): string {
 	return `### ${heading}\n\n${text}`;
 }
 
+/** A fence line in free text that opens a `clio-coder-report` block, at any indent, with backticks or tildes. */
+const BLOCK_FENCE = new RegExp(`^([ \\t]*(?:\`{3,}|~{3,})[ \\t]*)${REPORT_BLOCK_TAG}(?![A-Za-z0-9_-])`, "gimu");
+
+/**
+ * Free text keeps its fences but loses the block tag, so the labeler and the credit script, which read the first
+ * block in the body, only ever find the one Clio wrote (CLI-14).
+ */
+function neutralizeBlockFence(text: string): string {
+	return text.replace(BLOCK_FENCE, "$1text");
+}
+
 const TITLE_PREFIX: Readonly<Record<ReportDraft["kind"], string | null>> = {
 	bug: "fix",
 	feature: "feat",
@@ -122,7 +133,7 @@ export function renderReport(
 	const scrub = (text: string) => {
 		const result = scrubText(text, identity, draft.unmasked);
 		lists.push(result.masks);
-		return result.text;
+		return neutralizeBlockFence(result.text);
 	};
 	const prefix = TITLE_PREFIX[draft.kind];
 	const core = scrub(oneLine(titleCore(draft.title)));

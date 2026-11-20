@@ -72,7 +72,13 @@ function github(answers: { fingerprint?: unknown[]; title?: unknown[]; latest?: 
 }
 
 test("a fingerprint found in an open issue comes first with the comment default", async () => {
-	const open = { ...issue445, number: 512, title: "crash in the tui", state: "open", closed_at: null };
+	const open = {
+		...issue445,
+		number: 512,
+		title: "crash in the tui\u202e\u001b[2J\u200b\n",
+		state: "open",
+		closed_at: null,
+	};
 	const canned = github({ fingerprint: [open], title: [issue445] });
 	const result = await findRelated(draft("0.7.1", "fp_0123456789ab"), { title: TITLE }, gh, {
 		run: canned.run,
@@ -80,6 +86,8 @@ test("a fingerprint found in an open issue comes first with the comment default"
 		now,
 	});
 	strictEqual(result.matches[0]?.number, 512);
+	// Anyone can title an issue; control, bidi and zero-width characters never reach a screen (CLI-14).
+	strictEqual(result.matches[0]?.title, "crash in the tui");
 	strictEqual(result.matches[0]?.fingerprintHit, true);
 	strictEqual(result.verdict.kind, "comment");
 	ok(canned.queries.some((q) => q.includes('"fp_0123456789ab" in:body')));
