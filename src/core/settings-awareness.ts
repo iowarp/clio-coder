@@ -8,7 +8,7 @@ import { renderUsdLimit } from "./telemetry/render.js";
 
 export const AUTONOMY_HELP = {
 	default:
-		"Edit the workspace, run recognized checks, and delegate routine work without repeated approval. Ask for unfamiliar commands, reads outside the workspace, declared outward actions, and larger dispatch plans. Safety rules still apply.",
+		"Edit the workspace and scratch roots, read anywhere outside secret paths, run recognized checks, and delegate routine work without repeated approval. Changes outside the workspace and scratch roots, uncontained unfamiliar commands and declared outward actions go to the safety judge, which runs or refuses them against your own messages; larger dispatch plans ask you. Safety rules still apply.",
 	yolo:
 		"Run without ordinary approval prompts, including unfamiliar commands and outward actions. Damage-control rules and hard path protections still apply.",
 } as const;
