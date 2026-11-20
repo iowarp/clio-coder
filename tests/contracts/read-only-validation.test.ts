@@ -1,8 +1,8 @@
-import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, notStrictEqual, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { it } from "node:test";
 import { mapExitCode } from "../../src/cli/run.js";
 import {
@@ -708,13 +708,15 @@ it("a green claim against a red latest verify on the final tree seals fail, as t
 		const recorder = createRunEffectsRecorder(process.cwd());
 		for (const [index, step] of steps.split(" ").entries()) {
 			const id = `call-${index}`;
+			// `sh` and `shred` run the same check through bash as `npm test`, green and red.
+			const bash = step === "sh" || step === "shred";
 			recorder.start(
 				id,
-				step === "edit" ? "edit" : "verify",
-				step === "edit" ? { path: "src/calc.c" } : { check: "test" },
+				step === "edit" ? "edit" : bash ? "bash" : "verify",
+				step === "edit" ? { path: "src/calc.c" } : bash ? { command: "npm test" } : { check: "test" },
 			);
-			recorder.checkOutcome(id, step === "red" ? "error" : "ok");
-			recorder.finish(id, step === "red");
+			recorder.checkOutcome(id, step === "red" || step === "shred" ? "error" : "ok");
+			recorder.finish(id, step === "red" || step === "shred");
 		}
 		return validateResultContract({
 			contract: { kind: "mutation-report" },
@@ -731,6 +733,9 @@ it("a green claim against a red latest verify on the final tree seals fail, as t
 	strictEqual(seal("pass edit red"), "fail");
 	strictEqual(seal("red edit pass"), "pass");
 	strictEqual(seal("edit red pass"), "pass");
+	// A later run of the same check through bash settles a red verify, and a red one settles a green verify (SF-2).
+	strictEqual(seal("edit red sh"), "pass");
+	strictEqual(seal("edit pass shred"), "fail");
 });
 
 it("a check judges only the tree it ran on, sealed per verify call or from a tool's aggregate (bt-27c)", () => {
@@ -928,6 +933,35 @@ it("a check sharing its bash call with a change judges the final tree only when 
 		strictEqual(isOutput("out.txt"), true);
 	} finally {
 		rmSync(repo, { recursive: true, force: true });
+	}
+	// A check's own report, coverage directory or binary is a write judged as its logs are, and a golden update by
+	// environment rewrites the tree (SF-2): a gitignored or new target is output, a tracked or older one is a change.
+	const reports = mkdtempSync(join(tmpdir(), "check-reports-"));
+	try {
+		execFileSync("git", ["init", "-q"], { cwd: reports });
+		writeFileSync(join(reports, ".gitignore"), "coverage/\n");
+		for (const older of ["report.json", "tool", basename(reports)]) writeFileSync(join(reports, older), "older");
+		const outputTarget = checkOutputReader(reports, process.env, [], new Map(), Date.now() + 1);
+		const changes = (command: string) => classifyCall("bash", { command }, { cwd: reports, outputTarget }).changesTree;
+		for (const [command, expected] of [
+			["npx eslint . -o report.json", true],
+			["npx eslint . --output-file=lint.json", false],
+			["npx vitest run --coverage", false],
+			["npx jest --coverage --coverageDirectory=report.json", true],
+			["pytest --cov=src", false],
+			["UPDATE_GOLDEN=1 go test ./...", true],
+			["INSTA_UPDATE=always cargo test", true],
+			["UPDATE_SNAPSHOTS=1 npm test", true],
+			["NO_UPDATE_NOTIFIER=1 npm test", false],
+			["go build", true],
+			["go build ./cmd/tool", true],
+			["go build ./cmd/fresh", false],
+			["go build ./...", false],
+			["go build -o report.json ./cmd/x", true],
+		] as const)
+			strictEqual(changes(command), expected, command);
+	} finally {
+		rmSync(reports, { recursive: true, force: true });
 	}
 	// Shell setup changes no tree, so a standing red stands beside a narrower green (x3-1).
 	for (const setup of ["source .venv/bin/activate", "export CI=1"])
@@ -1131,6 +1165,13 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 		["isort .", "mutation"],
 		["ruff format .", "mutation"],
 		["cargo fmt", "mutation"],
+		// Writer-named nox sessions and tox environments write; `cargo insta test` checks while its accept forms write (SF-2).
+		["nox -s lint_fix", "mutation"],
+		["tox -e format", "mutation"],
+		["nox -s lint", "check"],
+		["cargo insta test", "check"],
+		["cargo insta test --accept", "mutation"],
+		["cargo insta test --unreferenced=delete", "mutation"],
 		// Go and Rust's routine third-party runner and linters (x10-3).
 		["cargo nextest run --workspace", "check"],
 		["golangci-lint run ./...", "check"],
@@ -1305,6 +1346,15 @@ it("a probe importing the workspace's module, `exit 0; npm test` and `cd pkg; np
 		`python3 -c "import textutil, shutil; shutil.rmtree('build')"`,
 	])
 		deepStrictEqual(after(command), [], command);
+	// A program the step reader cannot place ends before the list that runs the check, so the check judges what it left
+	// and earns the pass again (SF-2); a function, a compound or a builtin that sets shell state still hides its status.
+	deepStrictEqual(after("./gen.sh; npm test"), ["./gen.sh; npm test"]);
+	for (const command of [
+		"gen() { :; }; gen; npm test",
+		"if true; then ./gen.sh; fi; npm test",
+		"declare -x A=1; npm test",
+	])
+		deepStrictEqual(after(command), [], command);
 });
 
 it("wrapped and alternate spellings of a check read as that check, and a green after an edit settles the gate", () => {
@@ -1346,6 +1396,15 @@ it("wrapped and alternate spellings of a check read as that check, and a green a
 		"yarn --cwd=web test",
 		"cargo build",
 		"php artisan test",
+		// SF-2: stdbuf, ionice, nohup and valued sudo options are read past; make -C and pnpm or yarn selectors before a bin.
+		"stdbuf -oL npm test",
+		"ionice -c 3 -n 7 npm test",
+		"nohup npm test",
+		"sudo -u ci npm test",
+		"env -u CI npm test",
+		"make -C sub test",
+		"pnpm --filter web vitest run",
+		"yarn workspace web jest",
 	]) {
 		const call = read(command);
 		deepStrictEqual([call.verdict, call.changesTree], ["check", false], command);
@@ -1356,6 +1415,13 @@ it("wrapped and alternate spellings of a check read as that check, and a green a
 	strictEqual(read("timeout 300 npm test").check, "npm test");
 	strictEqual(read("npm --prefix web test").check, "npm --prefix web test");
 	strictEqual(settleCheckCall(read("timeout 300 npm test"), true, "error", true).settled, true);
+	// Transparent wrappers key with the check they run, so respellings settle each other; sudo and env keep their own.
+	for (const command of ["stdbuf -oL npm test", "nohup npm run test", "timeout 300 npm run test"])
+		strictEqual(read(command).identity, read("npm test").identity, command);
+	notStrictEqual(read("sudo -u ci npm test").identity, read("npm test").identity);
+	// A wrapper or directory that moves the check out of the workspace leaves it outside.
+	for (const command of ["env -C /elsewhere npm test", "sudo -D /elsewhere npm test", "make -C ../other test"])
+		strictEqual(read(command).shell?.outsideCwd, true, command);
 	// Writers stay writers through a wrapper or an exec, and a wrapped delete names its target.
 	for (const command of [
 		"timeout 60 npx eslint --fix .",
@@ -1365,6 +1431,8 @@ it("wrapped and alternate spellings of a check read as that check, and a green a
 		"python -m ruff format .",
 		"python -m black src",
 		"timeout 5 rm -rf build",
+		"nohup rm -rf build",
+		"stdbuf -oL make lint:fix",
 	]) {
 		strictEqual(read(command).verdict, "mutation", command);
 		strictEqual(gate(command), "engage/unvalidated_mutation", command);

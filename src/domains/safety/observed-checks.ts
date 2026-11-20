@@ -319,6 +319,8 @@ function foldStanding(
 	const standing = new Map<string, ObservedCheck>();
 	const standingCalls = new Map<string, string>();
 	const sealed = new Map<string, boolean>();
+	// The check each standing name ran, so a later run of it under another spelling re-files it, as the recorder does (SF-2).
+	const identities = new Map<string, string>();
 	const dispatchRuns = new Set<string>();
 	let revision = 0;
 	const settle = (call: TrackedCall, failed: boolean, at: string, key: string): void => {
@@ -330,6 +332,17 @@ function foldStanding(
 			sealed.clear();
 		}
 		if (call.name === null || !call.statusAttributable || !settlement.settled) return;
+		const identity = call.reading.identity ?? call.name;
+		identities.set(call.name, identity);
+		// Earlier spellings of this check still standing take its outcome; one that already agrees keeps its own call, and
+		// one that changes keeps no pass call, since `passCalls` credits a declared check only through the call that ran it.
+		for (const [name, ran] of identities) {
+			const earlier = standing.get(name);
+			if (ran !== identity || name === call.name || earlier === undefined || earlier.passed === !failed) continue;
+			sealed.set(name, !failed);
+			standingCalls.delete(name);
+			standing.set(name, { ...earlier, passed: !failed, observedAt: at });
+		}
 		sealed.set(call.name, !failed);
 		standingCalls.set(call.name, key);
 		standing.set(call.name, {
