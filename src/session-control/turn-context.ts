@@ -32,7 +32,7 @@ import {
 	setEngineSystemPrompt,
 } from "../engine/agent.js";
 import { providerCheckpointCompatibility } from "../engine/ai.js";
-import { prepareInPrefixSummary } from "../engine/in-prefix-summary.js";
+import { inPrefixRequestRefusal, prepareInPrefixSummary } from "../engine/in-prefix-summary.js";
 import { callRepeatsAsRead, effectiveCallIdentity } from "../engine/loop-guard.js";
 import { createContextFold, type FoldDecision, foldCheckpointFor, ledgerHoldsCheckpoint } from "./context-fold.js";
 import { contextOperationAwareness } from "./context-operation-awareness.js";
@@ -3416,6 +3416,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								const ratio = routeTokenRatio(live);
 								return ratio === 1 ? tokens : Math.ceil(tokens * ratio);
 							},
+							// The checks the fold's `livePrefix` port runs before rebuilding the transcript (MD9).
+							livePrefixSummary: () =>
+								summaryOnChatRoute(live, deps.getSettings().context.compaction?.model) &&
+								inPrefixRequestRefusal(
+									live.agent.state.model,
+									state.lastMainRequest?.runtime === live ? state.lastMainRequest.record : undefined,
+									{ free: live.runtimeResolution.pricedBy === "free" },
+								) === null,
 						}
 					: {}),
 				...(sessionPrompt

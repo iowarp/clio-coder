@@ -85,7 +85,7 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 const NEXT_TURN_FIELDS = new Set<string>([
 	// The main prompt is recompiled at the next turn, so its prefix is read again once; a worker reads it per dispatch.
 	"prompts.profile",
-	"context.memory.observations.enabled",
+	"context.memory.surfaces.observe",
 	"turnControl",
 	// An engine resolves per call; the use that registers consult at startup is restart-required.
 	"systemOne",

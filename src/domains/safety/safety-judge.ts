@@ -19,7 +19,13 @@ import { GIT_HOOKS_CHANGED_RULE_ID } from "./hook-drift.js";
 import { TOOL_CALL_RUNGS } from "./reach-ladder.js";
 import { redactSecretString, redactToolArgs } from "./redaction.js";
 import { CLIO_SETTINGS_RULE_ID } from "./routing-settings.js";
-import { asksToLeaveSandbox, operatorMentionsSandbox, operatorNamedOutsideTargets } from "./sandbox-escape.js";
+import {
+	type AskedApproval,
+	askApprovesSandboxEscape,
+	asksToLeaveSandbox,
+	operatorMentionsSandbox,
+	operatorNamedOutsideTargets,
+} from "./sandbox-escape.js";
 import { effectiveScratchRoots } from "./scratch-roots.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "./session-code-consent.js";
 
@@ -39,7 +45,10 @@ import { SESSION_CODE_CONSENT_RULE_ID } from "./session-code-consent.js";
  * the call parks (attended) or is denied (headless) exactly as before.
  */
 
-/** Consecutive blocks in one session after which the next eligible call goes to the operator. */
+/**
+ * Blocks in a row, each under a rule the streak has not blocked under yet, after which the next eligible
+ * call goes to the operator. A repeat of a rule already in the streak still counts toward the total.
+ */
 export const SAFETY_JUDGE_CONSECUTIVE_BLOCKS = 3;
 /** Total blocks in one session after which the next eligible call goes to the operator. */
 export const SAFETY_JUDGE_TOTAL_BLOCKS = 20;
@@ -300,6 +309,7 @@ export interface SafetyJudgeNote {
 	workerRunId?: string;
 	rule?: string;
 	reason: string;
+	/** Blocks in the current streak under distinct rules, the count the pause reads. */
 	consecutiveBlocks: number;
 	totalBlocks: number;
 	turnId?: string;
@@ -319,6 +329,23 @@ export type SafetyJudgeScreen = (request: {
 	signal: AbortSignal;
 }) => Promise<{ source: string } | null> | null;
 
+/**
+ * One operator message for the judge. A string is the operator's own words. An object is an answered
+ * ask_user round: `text` is the line the judge reads (the agent's question, then the answer), `context`
+ * what the options they chose say, and `words` only what the operator typed themselves, empty when they
+ * only chose. The question, labels and descriptions are agent-authored, so no guard that needs the
+ * operator's own words (the sandbox mention, an outside path they spelled) counts them; `asked` lets the
+ * escape backstop read the round as an approval only by `askApprovesSandboxEscape`.
+ */
+export type SafetyJudgeOperatorMessage =
+	| string
+	| {
+			readonly text: string;
+			readonly context: string;
+			readonly words: string;
+			readonly asked: AskedApproval;
+	  };
+
 export interface SafetyJudgeDeps {
 	config: () => SafetyJudgeConfig;
 	complete: SafetyJudgeCompletion;
@@ -328,7 +355,7 @@ export interface SafetyJudgeDeps {
 	 * through the turn the call serves when the call names it. Never assistant
 	 * text or tool output.
 	 */
-	operatorMessages: (call: { turnId?: string }) => ReadonlyArray<string>;
+	operatorMessages: (call: { turnId?: string }) => ReadonlyArray<SafetyJudgeOperatorMessage>;
 	/** The current session, so block counts never carry from one session to another. */
 	session: () => string | null;
 	consequences?: (call: ClassifierCall) => ReadonlyArray<string>;
@@ -360,11 +387,18 @@ export const SAFETY_JUDGE_SCHEMA = {
 
 export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 	const now = deps.now ?? (() => performance.now());
-	let state = { session: null as string | null, consecutive: 0, total: 0, escalated: false };
+	const fresh = (session: string | null) => ({
+		session,
+		consecutive: 0,
+		streakRules: new Set<string>(),
+		total: 0,
+		escalated: false,
+	});
+	let state = fresh(null);
 
 	const stateNow = (): typeof state => {
 		const session = safeRead(deps.session, null);
-		if (state.session !== session) state = { session, consecutive: 0, total: 0, escalated: false };
+		if (state.session !== session) state = fresh(session);
 		return state;
 	};
 
@@ -441,9 +475,13 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 				}
 				const system = safetyJudgeSystemPrompt(config);
 				const turn = subject.turnId !== undefined ? { turnId: subject.turnId } : {};
-				const operatorMessages = boundOperatorMessages(safeRead(() => deps.operatorMessages(turn), []));
+				const {
+					shown: operatorMessages,
+					words: operatorWords,
+					escapeApproved,
+				} = boundOperatorMessages(safeRead(() => deps.operatorMessages(turn), []));
 				prompted = { operatorMessages: operatorMessages.length };
-				const user = safetyJudgeUserPrompt({ operatorMessages, subject, consequences });
+				const user = safetyJudgeUserPrompt({ operatorMessages, operatorWords, subject, consequences });
 
 				const controller = new AbortController();
 				const timeoutMs = deps.timeoutMs ?? SAFETY_JUDGE_TIMEOUT_MS;
@@ -517,16 +555,18 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 				const after = stateNow();
 				if (parsed.verdict === "allow") {
 					after.consecutive = 0;
+					after.streakRules.clear();
 					// The operator naming this action outranks what a page says: it is the one allow the judge read their words for.
 					const source = parsed.rule === OPERATOR_NAMED_RULE ? null : screened.source;
 					// A sandbox escape runs as the operator, with their credentials: a repository file or
 					// the model's own reading cannot grant it, so any other allow goes to the operator.
-					// operator-named stands only when an operator message the judge read speaks of the sandbox.
+					// operator-named stands only when the operator's own words the judge read speak of the sandbox, or they
+					// chose an affirmative option on a question that names leaving it; never the agent's text alone.
 					const citedOperator = parsed.rule === OPERATOR_NAMED_RULE;
 					const unnamedEscape =
 						source === null &&
 						asksToLeaveSandbox(subject.decision) &&
-						!(citedOperator && operatorMentionsSandbox(operatorMessages));
+						!(citedOperator && (escapeApproved || operatorMentionsSandbox(operatorWords)));
 					record({
 						...base,
 						...prompted,
@@ -544,7 +584,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 							kind: "park",
 							cause: "unnamed-escape",
 							gateReason: citedOperator
-								? "Clio's safety judge allowed this sandbox escape as operator-named, but no operator message uses the word sandbox or unconfined, which an escape needs to run on the judge's word; unsandboxed: true runs only when an operator message names the escape or the operator approves it."
+								? "Clio's safety judge allowed this sandbox escape as operator-named, but no operator message uses the word sandbox or unconfined, and the operator approved no question that names leaving the sandbox, which an escape needs to run on the judge's word; unsandboxed: true runs only when an operator message names the escape or the operator approves it."
 								: `Clio's safety judge allowed this sandbox escape under rule ${parsed.rule}, but unsandboxed: true runs only when an operator message names the escape or the operator approves it.`,
 							build,
 							latencyMs,
@@ -559,7 +599,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 					subject.worker === undefined &&
 					!HANDOFF_EXCLUDED_RULES.has(parsed.rule) &&
 					asksToLeaveSandbox(subject.decision)
-						? operatorNamedOutsideTargets(subject, operatorMessages)
+						? operatorNamedOutsideTargets(subject, operatorWords)
 						: [];
 				if (namedTargets.length > 0) {
 					record({ ...base, ...prompted, verdict: "block", rule: parsed.rule, latencyMs, namedTarget: "parked" });
@@ -571,7 +611,10 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 						latencyMs,
 					};
 				}
-				after.consecutive += 1;
+				// Only a rule new to the streak counts toward the pause: one call reworded under the same
+				// rule is the agent probing one boundary, not a run going off course (FX-36).
+				after.streakRules.add(parsed.rule);
+				after.consecutive = after.streakRules.size;
 				after.total += 1;
 				record({ ...base, ...prompted, verdict: "block", rule: parsed.rule, latencyMs });
 				const counts = { consecutiveBlocks: after.consecutive, totalBlocks: after.total };
@@ -603,6 +646,7 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 			if (!current.escalated) return;
 			current.escalated = false;
 			current.consecutive = 0;
+			current.streakRules.clear();
 			current.total = 0;
 		},
 	};
@@ -623,7 +667,7 @@ function judgeBuild(config: SafetyJudgeConfig): string {
 function escalationReason(state: { consecutive: number; total: number }): string {
 	const streak =
 		state.consecutive >= SAFETY_JUDGE_CONSECUTIVE_BLOCKS
-			? `blocked ${state.consecutive} calls in a row`
+			? `blocked calls under ${state.consecutive} different rules in a row`
 			: `blocked ${state.total} calls`;
 	return `Clio's safety judge ${streak} this session, so it hands this call to you; approving a call turns its review back on.`;
 }
@@ -724,27 +768,63 @@ function safetyJudgeRefusal(
 /**
  * The operator text the judge reads, oldest first: the newest message whole
  * (up to a hard ceiling), then older messages while they fit the budget, the
- * first one that does not fit cut to what is left.
+ * first one that does not fit cut to what is left. `words` holds only the
+ * operator's own words among them, and `escapeApproved` is true when a kept
+ * ask_user round approves leaving the sandbox with its question and answer whole.
  */
-function boundOperatorMessages(messages: ReadonlyArray<string>, budgetBytes = SAFETY_JUDGE_OPERATOR_BYTES): string[] {
-	const texts = messages.map((text) => text.trim()).filter((text) => text.length > 0);
+function boundOperatorMessages(
+	messages: ReadonlyArray<SafetyJudgeOperatorMessage>,
+	budgetBytes = SAFETY_JUDGE_OPERATOR_BYTES,
+): { shown: string[]; words: string[]; escapeApproved: boolean } {
+	type Bounded = { shown: string; lead: string; words: string; approves: boolean };
+	const texts = messages.flatMap((message): Bounded[] => {
+		if (typeof message === "string") {
+			const words = message.trim();
+			return words.length === 0 ? [] : [{ shown: words, lead: words, words, approves: false }];
+		}
+		const lead = message.text.trim();
+		if (lead.length === 0) return [];
+		const context = message.context.trim();
+		return [
+			{
+				shown: context.length > 0 ? `${lead}\n${context}` : lead,
+				lead,
+				words: message.words.trim(),
+				approves: askApprovesSandboxEscape(message.asked),
+			},
+		];
+	});
+	// The lead opens what is shown. A typed message cut keeps of its words exactly what the judge read;
+	// an answered round whose question and answer the cut does not keep whole keeps no words and no approval.
+	const cut = (text: Bounded, maxBytes: number): Bounded => {
+		const shown = headBytes(text.shown, maxBytes);
+		if (shown === text.shown) return text;
+		const head = shown.slice(0, -1);
+		if (head.length >= text.lead.length) return { ...text, shown };
+		if (text.words === text.lead) return { ...text, shown, words: `${head}…` };
+		return { ...text, shown, words: "", approves: false };
+	};
 	const newest = texts.at(-1);
-	if (newest === undefined) return [];
-	const kept = [headBytes(newest, NEWEST_MESSAGE_MAX_BYTES)];
-	let used = Buffer.byteLength(kept[0] as string, "utf8");
+	if (newest === undefined) return { shown: [], words: [], escapeApproved: false };
+	const kept = [cut(newest, NEWEST_MESSAGE_MAX_BYTES)];
+	let used = Buffer.byteLength(kept[0]?.shown ?? "", "utf8");
 	for (let index = texts.length - 2; index >= 0 && kept.length < OPERATOR_MESSAGE_LIMIT; index -= 1) {
-		const text = texts[index] as string;
-		const size = Buffer.byteLength(text, "utf8");
+		const text = texts[index] as Bounded;
+		const size = Buffer.byteLength(text.shown, "utf8");
 		if (used + size <= budgetBytes) {
 			kept.unshift(text);
 			used += size;
 			continue;
 		}
 		const left = budgetBytes - used;
-		if (left >= 200) kept.unshift(headBytes(text, left));
+		if (left >= 200) kept.unshift(cut(text, left));
 		break;
 	}
-	return kept;
+	return {
+		shown: kept.map((text) => text.shown),
+		words: kept.flatMap((text) => (text.words.length > 0 ? [text.words] : [])),
+		escapeApproved: kept.some((text) => text.approves),
+	};
 }
 
 function headBytes(text: string, maxBytes: number): string {
@@ -790,6 +870,7 @@ function safetyJudgeSystemPrompt(config: Pick<SafetyJudgeConfig, "environment" |
 		].join("\n"),
 		["Allow:", ...bulletLines(ALLOW_RULES), ...config.allow.map((line) => `- operator-allow: ${line}`)].join("\n"),
 		'Explicit intent clears a block rule only when an operator message names the action itself. "Clean up the repo" does not authorize a force push; "force-push this branch" does. A request about one target does not authorize the same action on another. A plain file whose path an operator message spells out, such as a report or output file the operator asked for, is not shared or system configuration: writing it is operator-named, and Clio lists such a path under operator-named path. If a block rule applies and no operator message names the action, block. If you cannot tell what the call would do, block it with rule unclear. A call with unsandboxed: true runs as the operator with their credentials and files, so allow it only as operator-named, and only when an operator message asks to run it outside the sandbox.',
+		"An operator message that begins with Asked is the operator's answer to a question the agent put to them: the option they chose, with what it says, is their own words, and a command quoted in the question is one example of the action they approved, not the only form it may take. A call inside the script, paths and purpose that the question and the chosen option state is operator-named even when its arguments, environment variables or flags differ from that example, and so is a rerun of it. An action beyond them still needs operator words of its own: another script or tool, a path or target the approval does not state, a broader purpose, or an outward step such as a push, publish, upload or message that the approval does not name.",
 		[
 			"Reach ladder, lowest rung first. Calls on the first two rungs usually serve the task; calls on the last two need an operator message that names them unless an allow rule covers them.",
 			...TOOL_CALL_RUNGS.map((rung) => `- ${rung.label}: ${rung.criteria}`),
@@ -821,6 +902,8 @@ function rootsSection(roots: SafetyJudgeRoots): string {
 /** The dynamic part: the operator's messages, then the call. */
 function safetyJudgeUserPrompt(input: {
 	operatorMessages: ReadonlyArray<string>;
+	/** The operator's own words in those messages, without the context shown beside them. */
+	operatorWords: ReadonlyArray<string>;
 	subject: Pick<SafetyJudgeSubject, "tool" | "args" | "decision" | "worker" | "mcpTool">;
 	consequences: ReadonlyArray<string>;
 }): string {
@@ -855,7 +938,7 @@ function safetyJudgeUserPrompt(input: {
 			? [`MCP tool, trusted with action class ${boundedLine(subject.mcpTool.actionClass, 40)}`]
 			: []),
 		...(askRule !== undefined ? [`rule that asked: ${askRule}`] : []),
-		...operatorNamedOutsideTargets(subject, input.operatorMessages).map(
+		...operatorNamedOutsideTargets(subject, input.operatorWords).map(
 			(target) => `operator-named path: an operator message spells ${boundedLine(target, 200)} verbatim`,
 		),
 	];

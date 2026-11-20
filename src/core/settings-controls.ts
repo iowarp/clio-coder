@@ -486,7 +486,7 @@ const MENU_ROWS = new Set([
 	"chat.loopsUntilStopped",
 	"chat.steering.triage.enabled",
 	"fleet.worktrees.root",
-	"context.memory.observations.enabled",
+	"context.memory.surfaces.observe",
 	"context.memory.thinkingLevel",
 	"context.semantic.enabled",
 	"context.semantic.target",
@@ -546,6 +546,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"fleet.default.thinkingLevel": THINKING_LEVELS,
 	"chat.steering.triage.thinkingLevel": THINKING_LEVELS,
 	"context.memory.thinkingLevel": THINKING_LEVELS,
+	"context.memory.surfaces.observe": ["off", "on"],
 	"fleet.permissions.mode": ["judge", "deny", "escalate", "fail", "main"],
 	"fleet.permissions.escalation.fallback": ["deny", "fail"],
 	"interface.mode": ["regular", "fullscreen"],
@@ -636,9 +637,9 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Artifact inboxes",
 		"Registered source folders. Prefer semantic inbox preview/add/remove for guided changes.",
 	],
-	"context.memory.observations.enabled": [
+	"context.memory.surfaces.observe": [
 		"Continuity preparation",
-		"Let the memory model condense older turns in the background so compaction can reuse that record instead of summarizing them again. Needs proactive memory on; off by default.",
+		"Let the memory model condense older turns in the background so compaction can reuse that record instead of summarizing them again. Starts only near a compaction that would send history to a separate summary request. Needs proactive memory on; off by default.",
 	],
 	"context.memory.thinkingLevel": [
 		"Memory thinking",

@@ -723,10 +723,12 @@ test("the judge host reports its escalation, which a paused yolo window latches 
 	} as unknown as SessionContract;
 	const escalations: SafetyJudgeNote[] = [];
 	const fx = windowFixture({ toolCalls: 0, minutes: 0, tokens: 0 });
+	const rules = ["remote-code", "publish", "unclear", "destroy-data"];
 	const seat = createSafetyJudgeHost({
 		settings: () =>
 			({ ...DEFAULT_SETTINGS, chat: { ...DEFAULT_SETTINGS.chat, target: "local", model: "m" } }) as ClioSettings,
-		complete: async () => ({ text: JSON.stringify({ verdict: "block", rule: "remote-code", reason: "Not asked for." }) }),
+		// The pause counts blocks under distinct rules only (FX-36).
+		complete: async () => ({ text: JSON.stringify({ verdict: "block", rule: rules.shift(), reason: "Not asked for." }) }),
 		session: () => session,
 		safety: undefined,
 		onEscalation: (note) => {

@@ -1413,10 +1413,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			};
 		},
 		usableHistoryTokens: () => liveHistory()?.usable ?? 0,
-		historyPressure: () => {
-			const live = liveHistory();
-			return live === null || live.usable <= 0 ? null : live.used / live.usable;
-		},
+		foldPlanner: () => ({ live: chat, compaction: getCurrentSettings().context.compaction }),
 		client: createBackgroundMemoryRouting(
 			providers,
 			() => effectiveSettingsForDispatch?.(),
@@ -1746,7 +1743,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			autonomyWindow.haltFor(
 				"judge",
 				note.consecutiveBlocks >= SAFETY_JUDGE_CONSECUTIVE_BLOCKS
-					? `${note.consecutiveBlocks} blocks in a row`
+					? `blocks under ${note.consecutiveBlocks} different rules in a row`
 					: `${note.totalBlocks} blocks this session`,
 				note.workerRunId === undefined,
 			);
