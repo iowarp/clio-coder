@@ -59,6 +59,11 @@ export interface BashCommandProgress {
 export interface RunBashCommandOptions {
 	cwd?: string;
 	timeoutMs?: number;
+	/**
+	 * A `performance.now()` instant the command may not outlive: the timeout timer,
+	 * armed after spawn preparation, fires at whichever of it and `timeoutMs` comes first.
+	 */
+	deadlineAt?: number;
 	signal?: AbortSignal;
 	/** Cumulative snapshots, throttled to keep terminal rendering responsive. */
 	onUpdate?: (progress: BashCommandProgress) => void;
@@ -566,10 +571,15 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		}
 
 		if (timeout > 0) {
+			// Measured now, after spawn preparation, so preparation cannot carry the wait past the deadline (XR-12).
+			const delay =
+				options.deadlineAt === undefined
+					? timeout
+					: Math.min(timeout, Math.max(1, Math.ceil(options.deadlineAt - performance.now())));
 			timeoutId = setTimeout(() => {
 				timedOut = true;
 				killChild();
-			}, timeout);
+			}, delay);
 		}
 
 		if (options.signal?.aborted) {

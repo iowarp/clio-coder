@@ -12,7 +12,7 @@ import {
 import { neutralizeFraming, TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-framing.js";
 import { resolveSafeCwd } from "../core/safe-exec.js";
 import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
-import { runDeadlineRemainingMs } from "../core/termination-phase.js";
+import { runDeadlineAt } from "../core/termination-phase.js";
 import { ToolNames } from "../core/tool-names.js";
 import { CumulativeOutputMask } from "../domains/evidence/output-mask.js";
 import { bashObservedLines } from "./bash-observed-lines.js";
@@ -445,7 +445,9 @@ export const bashTool: ToolSpec = {
 		}
 		const requested = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : 300_000;
 		// A headless run's --timeout bounds every wait it starts: no shell wait outlives the run (XR-12).
-		const runLeft = runDeadlineRemainingMs();
+		// The executor arms its timer against the deadline itself, after spawn preparation.
+		const deadlineAt = runDeadlineAt();
+		const runLeft = deadlineAt === null ? null : deadlineAt - performance.now();
 		const timeout = runLeft === null ? requested : Math.min(requested, Math.max(1, Math.ceil(runLeft)));
 		try {
 			// Credentials are masked where output is shaped, by known value and by shape, so model context, the cap result
@@ -457,6 +459,7 @@ export const bashTool: ToolSpec = {
 			const runOptions: Parameters<typeof runBashCommand>[1] = {
 				cwd,
 				timeoutMs: timeout,
+				...(deadlineAt === null ? {} : { deadlineAt }),
 				...(options?.signal === undefined ? {} : { signal: options.signal }),
 				...(options?.shellSandbox === undefined ? {} : { shellSandbox: options.shellSandbox }),
 				// Each piece is masked as it arrives, so a large output is not masked in one stall when the command ends (SC-7).

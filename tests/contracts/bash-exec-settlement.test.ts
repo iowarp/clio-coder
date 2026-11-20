@@ -155,13 +155,16 @@ describe("bash abort settlement (#445)", () => {
 	});
 
 	it("clamps timeout_ms to the run's remaining --timeout (XR-12)", async () => {
-		setRunDeadline(() => 300);
+		setRunDeadline(performance.now() + 300);
 		try {
 			const result = await bashTool.run({ command: "sleep 3", timeout_ms: 604_800_000 }, {});
 			strictEqual(result.kind, "error");
 			if (result.kind !== "error") return;
 			strictEqual(result.details?.outcome, "timeout");
 			match(result.message, /run's --timeout/u);
+			// The executor arms its timer against the deadline itself, after spawn preparation.
+			const raw = await runBashCommand("sleep 3", { timeoutMs: 604_800_000, deadlineAt: performance.now() + 300 });
+			strictEqual(raw.timedOut, true);
 		} finally {
 			setRunDeadline(null);
 		}

@@ -90,9 +90,8 @@ function armRunTimeout(seconds: number): HeadlessRunDeadline {
 		Math.max(0, Math.ceil(endsAt - performance.now())),
 	);
 	timer.unref();
-	const remainingMs = () => Math.max(0, endsAt - performance.now());
-	// Tools clamp their own waits to it, so no shell wait outlives the run (XR-12).
-	setRunDeadline(remainingMs);
+	// Tools arm their own waits against it, so no shell wait outlives the run (XR-12).
+	setRunDeadline(endsAt);
 	return {
 		seconds,
 		expired: () => expired,
@@ -100,7 +99,7 @@ function armRunTimeout(seconds: number): HeadlessRunDeadline {
 			clearTimeout(timer);
 			setRunDeadline(null);
 		},
-		remainingMs,
+		remainingMs: () => Math.max(0, endsAt - performance.now()),
 	};
 }
 
