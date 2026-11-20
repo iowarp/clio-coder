@@ -17,6 +17,7 @@ import { type ClioSettings, readSettings, settingsPath, updateSettings, validate
 import { DEFAULT_SETTINGS } from "../../core/defaults.js";
 import { recordLifecycleReceipt } from "../../core/library-receipts.js";
 import { readClioVersion } from "../../core/package-root.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import {
 	type SafeResourceWriteResult,
 	safeResourceBackupPath,
@@ -550,7 +551,7 @@ function targetRootForFile(entry: ShareArchiveFile, options: ShareImportOptions)
 
 function isInsideOrEqual(candidate: string, root: string): boolean {
 	const relative = path.relative(root, candidate);
-	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+	return relative === "" || !relativePathEscapes(relative);
 }
 
 function pathDiagnostic(entry: ShareArchiveFile): string {
@@ -575,7 +576,7 @@ function validateRealPathContainment(
 		path: entry.relativePath,
 	};
 	const relative = path.relative(containmentRoot, target);
-	if (relative.length === 0 || relative.startsWith("..") || path.isAbsolute(relative)) {
+	if (relative.length === 0 || relativePathEscapes(relative)) {
 		return {
 			type: "error",
 			message: `share archive target escapes import root: ${pathDiagnostic(entry)}`,

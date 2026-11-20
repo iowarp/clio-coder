@@ -674,7 +674,7 @@ describe("harness extension package boundary", () => {
 		strictEqual(readFileSync(join(oldRoot, "marker.txt"), "utf8"), "verified archive bytes\n");
 	});
 
-	it("writes nothing for a share context entry aimed at Git metadata or a prompt that reaches another kind through a link", () => {
+	it("writes nothing for a share context entry aimed at Git metadata or a prompt that reaches another kind through a link, and imports a prompt under a ..-named folder", () => {
 		const craft = (type: string, relativePath: string): string => {
 			const bytes = Buffer.from("planted\n");
 			const entry = {
@@ -719,6 +719,15 @@ describe("harness extension package boundary", () => {
 		});
 		ok(refusedLink.diagnostics.some((diagnostic) => diagnostic.type === "error"));
 		strictEqual(existsSync(join(linked, ".clio-coder", "skills", "foreign.md")), false);
+
+		// A folder whose name only starts with ".." is inside the prompts root.
+		const dotted = scratch();
+		const imported = importShareArchive(craft("prompt", "..notes/draft.md"), { cwd: dotted, scope: "project" });
+		deepStrictEqual(
+			imported.diagnostics.filter((diagnostic) => diagnostic.type === "error"),
+			[],
+		);
+		strictEqual(readFileSync(join(dotted, ".clio-coder", "prompts", "..notes", "draft.md"), "utf8"), "planted\n");
 	});
 
 	it("preserves every payload byte after the command delimiter", () => {
