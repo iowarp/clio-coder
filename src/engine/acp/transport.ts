@@ -9,6 +9,7 @@ import {
 import { incompleteInstallationAcpAdvice } from "../../core/incomplete-installation.js";
 import { buildSafeToolEnv } from "../../core/safe-exec.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
+import { redactSecretString } from "../../domains/safety/redaction.js";
 import {
 	ACP_INTERNAL_ERROR_MESSAGE,
 	ACP_METHOD_NOT_FOUND_MESSAGE,
@@ -111,10 +112,11 @@ export interface AcpBootablePeerTransport extends AcpJsonRpcPeerTransport {
 
 /**
  * What a `transformStdout` hook decides for one stdout line: the line to parse
- * as JSON-RPC, `null` to drop it, or `{ diagnostic }` to hand its text to the
- * stderr handlers instead of the parser.
+ * as JSON-RPC, a `{ frame }` it already parsed, `null` to drop it, or
+ * `{ diagnostic }` to hand its text, redacted and bounded, to the stderr
+ * handlers instead of the parser.
  */
-export type AcpStdoutLineDisposition = string | null | { diagnostic: string };
+export type AcpStdoutLineDisposition = string | null | { diagnostic: string } | { frame: Record<string, unknown> };
 
 export interface StdioTransportOptions {
 	cwd?: string;
@@ -138,20 +140,63 @@ export interface StdioTransportOptions {
 	transformSessionUpdate?: (params: unknown) => unknown;
 }
 
-/**
- * A `transformStdout` for a peer that prints text on stdout: a line that does
- * not open a JSON object goes to the stderr handlers as a diagnostic instead of
- * being dropped unseen, and every other line is parsed as before.
- */
-export function routeNonJsonRpcStdout(line: string): AcpStdoutLineDisposition {
-	return line.trimStart().startsWith("{") ? line : { diagnostic: line };
+function isJsonRpcId(value: unknown): boolean {
+	return typeof value === "string" || (typeof value === "number" && Number.isFinite(value));
 }
 
-/** One shared bound on a tool update's `content`, `rawInput` and `rawOutput`. */
+/** A request, notification or response the dispatcher acts on without failing pending requests. */
+function isJsonRpcFrame(value: unknown): value is Record<string, unknown> {
+	if (!isRecord(value) || value.jsonrpc !== "2.0") return false;
+	if (typeof value.method === "string" && value.method.length > 0) return !("id" in value) || isJsonRpcId(value.id);
+	return "id" in value && (isJsonRpcId(value.id) || value.id === null) && ("result" in value || isRecord(value.error));
+}
+
+/**
+ * A `transformStdout` for a peer that prints text on stdout: only a well-formed
+ * JSON-RPC 2.0 frame reaches the dispatcher, parsed once here; any other line,
+ * plain text, a `{`-prefixed fragment, or a JSON log record, goes to the stderr
+ * handlers as a diagnostic, so no stray line can fail a pending request.
+ */
+export function routeNonJsonRpcStdout(line: string): AcpStdoutLineDisposition {
+	if (!line.trimStart().startsWith("{")) return { diagnostic: line };
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(line);
+	} catch {
+		return { diagnostic: line };
+	}
+	return isJsonRpcFrame(parsed) ? { frame: parsed } : { diagnostic: line };
+}
+
+/** Longest routed diagnostic handed to the stderr handlers, after redaction. */
+const ACP_MAX_DIAGNOSTIC_CHARS = 4096;
+
+/**
+ * OAuth authorization codes, device and user codes, and `state` sit in query
+ * names the shared secret-name rule leaves alone, since in other text they are
+ * ordinary words; on a routed sign-in line they are the credential.
+ */
+const OAUTH_QUERY_VALUE_RE = /([?&#;](?:code|state|[a-z]+_code)=)[^&#;\s"'<>]+/giu;
+
+/** The head of `value` within `chars` code units, never ending on half a surrogate pair. */
+function headWithin(value: string, chars: number): string {
+	const head = value.slice(0, Math.max(0, chars));
+	const last = head.charCodeAt(head.length - 1);
+	return last >= 0xd800 && last <= 0xdbff ? head.slice(0, -1) : head;
+}
+
+function redactedDiagnostic(text: string): string {
+	const redacted = redactSecretString(text).replace(OAUTH_QUERY_VALUE_RE, "$1[redacted]");
+	if (redacted.length <= ACP_MAX_DIAGNOSTIC_CHARS) return redacted;
+	const head = headWithin(redacted, ACP_MAX_DIAGNOSTIC_CHARS);
+	return `${head}[${redacted.length - head.length} chars omitted]`;
+}
+
+/** One shared bound on what a tool update keeps of its `content`, `rawInput` and `rawOutput`. */
 export interface AcpToolPayloadBudget {
-	/** JSON values visited, containers and leaves alike. */
+	/** JSON values kept, containers and leaves alike, markers included. */
 	maxNodes: number;
-	/** UTF-16 code units across every string kept. */
+	/** UTF-16 code units across every string and record key kept, markers included. */
 	maxChars: number;
 }
 
@@ -166,18 +211,33 @@ interface PayloadWalk {
 	nodes: number;
 	chars: number;
 	changed: boolean;
+	/** Root nodes held back for the payload fields the walk has not reached yet. */
+	reservedNodes: number;
 	readonly budget: AcpToolPayloadBudget;
 }
 
-/** An ACP image content block with inline data becomes a text block naming what was removed. */
-function inlineImagePlaceholder(value: Record<string, unknown>): Record<string, unknown> | null {
-	if (value.type !== "image" || typeof value.data !== "string") return null;
-	const mimeType = typeof value.mimeType === "string" ? value.mimeType.slice(0, 64) : "image";
-	return {
-		type: "text",
-		text: `[image omitted: ${mimeType}, ${value.data.length} base64 chars]`,
-		_meta: { [OMITTED_META_KEY]: { kind: "image", mimeType, chars: value.data.length } },
+function nodeRoom(walk: PayloadWalk): number {
+	return walk.budget.maxNodes - walk.reservedNodes - walk.nodes;
+}
+
+function charRoom(walk: PayloadWalk): number {
+	return walk.budget.maxChars - walk.chars;
+}
+
+/**
+ * An ACP image block with inline data keeps its shape with `data` emptied and
+ * the omission typed under `_meta["clio-coder/omitted"]`. It stays an image, so
+ * a consumer that reads text from tool content finds none in it, as before.
+ */
+function strippedInlineImage(value: Record<string, unknown>): Record<string, unknown> | null {
+	if (value.type !== "image" || typeof value.data !== "string" || value.data.length === 0) return null;
+	const meta = isRecord(value._meta) ? value._meta : {};
+	const omitted = {
+		kind: "image",
+		...(typeof value.mimeType === "string" ? { mimeType: headWithin(value.mimeType, 64) } : {}),
+		chars: value.data.length,
 	};
+	return { ...value, data: "", _meta: { ...meta, [OMITTED_META_KEY]: omitted } };
 }
 
 /** A `formatted_output` string that repeats a sibling string field of the same record. */
@@ -189,78 +249,94 @@ function duplicateFormattedOutput(record: Record<string, unknown>, key: string, 
 	);
 }
 
+/**
+ * A string kept whole when it fits; otherwise its head plus a marker that fit
+ * the remaining characters together, or an empty string when even the marker
+ * does not fit.
+ */
 function boundPayloadString(value: string, walk: PayloadWalk): string {
-	const left = walk.budget.maxChars - walk.chars;
-	if (value.length <= left) {
+	const room = charRoom(walk);
+	if (value.length <= room) {
 		walk.chars += value.length;
 		return value;
 	}
 	walk.changed = true;
-	walk.chars = walk.budget.maxChars;
-	let head = value.slice(0, Math.max(0, left));
-	// Never end on the first half of a surrogate pair.
-	const last = head.charCodeAt(head.length - 1);
-	if (last >= 0xd800 && last <= 0xdbff) head = head.slice(0, -1);
-	return `${head}[${value.length - head.length} chars omitted]`;
+	// The marker for the whole string is the longest any cut of it can need.
+	const longestMarker = `[${value.length} chars omitted]`.length;
+	if (room < longestMarker) return "";
+	const head = headWithin(value, room - longestMarker);
+	const kept = `${head}[${value.length - head.length} chars omitted]`;
+	walk.chars += kept.length;
+	return kept;
+}
+
+/** A marker is kept only when its node and characters fit; the update-level flag still records the cut. */
+function fitsMarker(walk: PayloadWalk, chars: number): boolean {
+	if (nodeRoom(walk) < 1 || charRoom(walk) < chars) return false;
+	walk.nodes += 1;
+	walk.chars += chars;
+	return true;
 }
 
 /**
- * Children are visited only while the node budget has room, so a call never
- * starts over budget and recursion depth is bounded by the budget itself.
- * Records are rebuilt with `Object.fromEntries`, which defines a peer's
- * `__proto__` key as data rather than assigning a prototype.
+ * Charges one node for `value`, then visits children only while a node and,
+ * for a record, the key's characters still fit, so recursion depth is bounded
+ * by the budget. Records are rebuilt with `Object.fromEntries`, which defines a
+ * peer's `__proto__` key as data rather than assigning a prototype.
  */
-function boundPayloadNode(value: unknown, walk: PayloadWalk): unknown {
+function boundPayloadNode(input: unknown, walk: PayloadWalk): unknown {
 	walk.nodes += 1;
-	if (typeof value === "string") return boundPayloadString(value, walk);
-	if (Array.isArray(value)) {
+	if (typeof input === "string") return boundPayloadString(input, walk);
+	if (Array.isArray(input)) {
 		const out: unknown[] = [];
-		for (let index = 0; index < value.length; index++) {
-			if (walk.nodes >= walk.budget.maxNodes) {
+		for (let index = 0; index < input.length; index++) {
+			if (nodeRoom(walk) < 1) {
 				walk.changed = true;
-				out.push(`[${value.length - index} items omitted]`);
+				const marker = `[${input.length - index} items omitted]`;
+				if (fitsMarker(walk, marker.length)) out.push(marker);
 				break;
 			}
-			out.push(boundPayloadNode(value[index], walk));
+			out.push(boundPayloadNode(input[index], walk));
 		}
 		return out;
 	}
-	if (!isRecord(value)) return value;
-	const image = inlineImagePlaceholder(value);
-	if (image !== null) {
-		walk.changed = true;
-		return image;
-	}
-	const entries = Object.entries(value).filter(([key, child]) => !duplicateFormattedOutput(value, key, child));
-	if (entries.length !== Object.keys(value).length) walk.changed = true;
+	if (!isRecord(input)) return input;
+	const image = strippedInlineImage(input);
+	if (image !== null) walk.changed = true;
+	const value = image ?? input;
 	const out: Array<[string, unknown]> = [];
-	for (const [index, [key, child]] of entries.entries()) {
-		if (walk.nodes >= walk.budget.maxNodes) {
+	let omitted = 0;
+	for (const [key, child] of Object.entries(value)) {
+		if (duplicateFormattedOutput(value, key, child)) {
 			walk.changed = true;
-			out.push([OMITTED_KEY, `${entries.length - index} fields`]);
-			break;
+			continue;
 		}
+		if (nodeRoom(walk) < 1 || charRoom(walk) < key.length) {
+			omitted += 1;
+			continue;
+		}
+		walk.chars += key.length;
 		out.push([key, boundPayloadNode(child, walk)]);
+	}
+	if (omitted > 0) {
+		walk.changed = true;
+		const marker = `${omitted} fields`;
+		if (fitsMarker(walk, OMITTED_KEY.length + marker.length)) out.push([OMITTED_KEY, marker]);
 	}
 	return Object.fromEntries(out);
 }
 
-/** A field reached after the node budget is spent keeps its JSON kind, so a record stays a record. */
-function omittedPayloadField(value: unknown): unknown {
-	if (Array.isArray(value)) return [`[${value.length} items omitted]`];
-	if (isRecord(value)) return { [OMITTED_KEY]: `${Object.keys(value).length} fields` };
-	if (typeof value === "string") return `[${value.length} chars omitted]`;
-	return null;
-}
-
 /**
  * A `transformSessionUpdate` for a peer whose tool updates carry bulk. On a
- * `tool_call` or `tool_call_update` it replaces inline base64 images in
- * `content`, `rawInput` and `rawOutput` with a text placeholder (typed under
- * `_meta["clio-coder/omitted"]`), removes a `formatted_output` string that
- * repeats a sibling field, and holds what remains to one node count and one
- * character budget; whatever is cut is replaced by a marker that says how much.
- * Other updates, and a payload with nothing to cut, return the same object.
+ * `tool_call` or `tool_call_update` it empties the `data` of inline base64
+ * images in `content`, `rawInput` and `rawOutput` (the block stays an image,
+ * typed under `_meta["clio-coder/omitted"]`), removes a `formatted_output`
+ * string that repeats a sibling field, and keeps of the rest what fits one node
+ * count and one character budget, keys and markers included. A cut leaves a
+ * marker where one fits, and the rewritten update always carries
+ * `_meta["clio-coder/omitted"]` `{ kind: "tool_payload", maxNodes, maxChars }`.
+ * Each present field keeps at least its root, so a record stays a record. Other
+ * updates, and a payload with nothing to cut, return the same object.
  */
 export function boundAcpSessionUpdate(
 	params: unknown,
@@ -269,18 +345,17 @@ export function boundAcpSessionUpdate(
 	if (!isRecord(params) || !isRecord(params.update)) return params;
 	const update = params.update;
 	if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") return params;
-	const walk: PayloadWalk = { nodes: 0, chars: 0, changed: false, budget };
+	const present = TOOL_PAYLOAD_FIELDS.filter((field) => Object.hasOwn(update, field));
+	const walk: PayloadWalk = { nodes: 0, chars: 0, changed: false, reservedNodes: present.length, budget };
 	const bounded: Record<string, unknown> = { ...update };
-	for (const field of TOOL_PAYLOAD_FIELDS) {
-		if (!Object.hasOwn(update, field)) continue;
-		if (walk.nodes >= budget.maxNodes) {
-			walk.changed = true;
-			bounded[field] = omittedPayloadField(update[field]);
-			continue;
-		}
+	for (const field of present) {
+		walk.reservedNodes -= 1;
 		bounded[field] = boundPayloadNode(update[field], walk);
 	}
-	return walk.changed ? { ...params, update: bounded } : params;
+	if (!walk.changed) return params;
+	const meta = isRecord(update._meta) ? update._meta : {};
+	const omitted = { kind: "tool_payload", maxNodes: budget.maxNodes, maxChars: budget.maxChars };
+	return { ...params, update: { ...bounded, _meta: { ...meta, [OMITTED_META_KEY]: omitted } } };
 }
 
 export interface StdioServerTransportOptions {
@@ -563,7 +638,13 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 			}
 			if (disposition === null) return;
 			if (typeof disposition !== "string") {
-				this.emitStderr(`${disposition.diagnostic}\n`);
+				if ("frame" in disposition) {
+					this.dispatchFrame(disposition.frame);
+					return;
+				}
+				// Stdout text never reached a sink before a hook routed it, so it is
+				// redacted and bounded on its way to one.
+				this.emitStderr(`${redactedDiagnostic(disposition.diagnostic)}\n`);
 				return;
 			}
 			line = disposition;
@@ -582,6 +663,10 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 		if (!isRecord(parsed) || parsed.jsonrpc !== "2.0") {
 			return;
 		}
+		this.dispatchFrame(parsed);
+	}
+
+	private dispatchFrame(parsed: Record<string, unknown>): void {
 		if (isSuccess(parsed) || isFailure(parsed)) {
 			this.handleResponse(parsed);
 			return;
