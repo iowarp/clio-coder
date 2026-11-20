@@ -492,10 +492,12 @@ describe("contracts/skills reminder ranking", () => {
 	it("ranks on the operator's task across host continuations, skips an unchanged list and drops loaded skills", () => {
 		const match = (id: string): CapabilityMatch => ({ id, description: `${id} workflow`, score: 1 });
 		const queries: string[] = [];
+		const rejected = new Set(["plotting"]);
 		let allowed: ReadonlyArray<string> | undefined;
 		const reminder = createSkillsReminderRegistration({
 			countModelVisibleSkills: () => 3,
 			modelMayActivateSkills: () => true,
+			verifyRankedSkills: (matches) => matches.filter((candidate) => !rejected.has(candidate.id)),
 			getTurnConstraints: () => (allowed === undefined ? undefined : { allowedTools: allowed }),
 			rankSkills: (query) => {
 				queries.push(query);
@@ -521,9 +523,12 @@ describe("contracts/skills reminder ranking", () => {
 		ok(!reminder.hooks.includes("before_tool"), "the unread before_tool refinement is gone");
 
 		const first = turn("Summarize the columns of data/run.parquet as a table", "operator");
-		ok(first.includes("- science-data") && first.includes("- plotting"), first);
+		ok(first.includes("- science-data") && !first.includes("plotting"), "a rejected skill is not shown");
 		ok(first.includes("Load the one for the current step") && first.includes("another may follow"), first);
-		strictEqual(turn(boilerplate, "continuation"), "", "an unchanged ranking is not re-sent");
+		rejected.clear();
+		const verified = turn(boilerplate, "continuation");
+		ok(verified.includes("- plotting") && !verified.includes("handoff-notes"), "it is offered once it verifies");
+		strictEqual(turn(boilerplate, "continuation"), "", "an unchanged list is not re-sent");
 		ok(!queries.some((query) => query.includes("previous turn stopped")), "host text never becomes the query");
 
 		tool({ toolName: "gateway", metadata: { resultKind: "ok" } });
@@ -539,6 +544,9 @@ describe("contracts/skills reminder ranking", () => {
 		strictEqual(queries.at(-1), "Summarize the columns of data/run.parquet as a table\ncontext data");
 		ok(next.includes("- plotting") && !next.includes("science-data") && !next.includes("handoff-notes"), next);
 		strictEqual(turn(boilerplate, "job"), "", "the list after the drop is not re-sent either");
+		for (let index = 0; index < 5; index++) tool({ toolName: "read", metadata: { resultKind: "ok" } });
+		strictEqual(turn(boilerplate, "continuation"), "");
+		strictEqual(queries.at(-1), "Summarize the columns of data/run.parquet as a table\nread", "five reads push data out");
 
 		allowed = ["read"];
 		strictEqual(turn("Plot the parquet columns as a histogram", "operator"), "", "no context tool, no skills advice");

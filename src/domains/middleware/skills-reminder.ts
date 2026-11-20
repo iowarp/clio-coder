@@ -27,7 +27,7 @@ export function skillsReminderMessage(installed: number, installable = 0, modelA
 export interface SkillsReminderDeps {
 	/** Pre-turn advice from the shared gate; absence preserves the legacy host protocol. */
 	rankSkills?(task: string): ReadonlyArray<CapabilityMatch>;
-	/** The ranked matches still fit to show a model; runs only when a reminder is about to print. */
+	/** The ranked matches still fit to show a model; the unchanged-list check keys on what it returns. */
 	verifyRankedSkills?(matches: ReadonlyArray<CapabilityMatch>): ReadonlyArray<CapabilityMatch>;
 	/** Only admitted gateway-placed capabilities; direct tools already carry their schemas. */
 	rankCapabilities?(task: string): ReadonlyArray<CapabilityMatch>;
@@ -204,7 +204,7 @@ export function isSubstantiveUserTurn(text: string | undefined): boolean {
 	return tokens.some((token) => !GREETING_WORDS.has(token));
 }
 
-/** How many distinct recent tool names join the stored task in the skills query (MD13). */
+/** How many recent tool calls lend their names to the skills query (MD13). */
 const RECENT_TOOLS = 5;
 
 /**
@@ -270,8 +270,8 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 				const tool = input.toolName ?? "";
 				if (!ranked || tool.length === 0) return NO_EFFECTS;
 				// A gateway call is seen again under the capability it ran (nested), which names the step.
-				if (tool !== ToolNames.Gateway)
-					recentTools = [tool, ...recentTools.filter((name) => name !== tool)].slice(0, RECENT_TOOLS);
+				// The window is the last five calls, repeats included, so a run of reads pushes an older tool out.
+				if (tool !== ToolNames.Gateway) recentTools = [...recentTools, tool].slice(-RECENT_TOOLS);
 				if (tool === ToolNames.Context && input.metadata?.resultKind === "ok") {
 					const activation = skillActivationFromToolDetails(input.toolResultDetails);
 					if (activation !== null) loadedSkills.add(activation.name);
@@ -321,7 +321,8 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 				}
 				if (constraints?.mode === "answer" || constraints?.mode === "proposal" || !isSubstantiveUserTurn(task))
 					return NO_EFFECTS;
-				const query = recentTools.length > 0 ? `${task}\n${recentTools.join(" ")}` : task;
+				const window = [...new Set([...recentTools].reverse())];
+				const query = window.length > 0 ? `${task}\n${window.join(" ")}` : task;
 				const matches = suppressed ? [] : (deps.rankSkills?.(query) ?? []).filter((match) => !loadedSkills.has(match.id));
 				const capabilities = turnAllowsTool(constraints, "gateway")
 					? (deps.rankCapabilities?.(task) ?? [])
@@ -329,16 +330,19 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 							.slice(0, 3)
 					: [];
 				const storeTags = storeSignalled(capabilities) ? workspaceStoreTags(deps.cwd?.() ?? process.cwd()) : [];
+				if (matches.length === 0 && capabilities.length === 0) return NO_EFFECTS;
+				// Keyed on what would be displayed: a skill the verifier rejected and later
+				// accepts is a change, and a change among rejected candidates is not.
+				const shown = matches.length === 0 ? [] : (deps.verifyRankedSkills?.(matches) ?? matches);
+				if (shown.length === 0 && capabilities.length === 0) return NO_EFFECTS;
 				const ids = JSON.stringify([
-					matches.map((match) => match.id),
+					shown.slice(0, 5).map((match) => match.id),
 					capabilities.map((match) => match.id),
 					storeTags.slice(0, STORE_TAGS_NAMED),
 					storeTags.length,
 				]);
-				// The last delivered list is still in the conversation; an equal ranking adds nothing.
-				if ((matches.length === 0 && capabilities.length === 0) || ids === deliveredIds) return NO_EFFECTS;
-				const shown = deps.verifyRankedSkills?.(matches) ?? matches;
-				if (shown.length === 0 && capabilities.length === 0) return NO_EFFECTS;
+				// The last delivered list is still in the conversation; an equal one adds nothing.
+				if (ids === deliveredIds) return NO_EFFECTS;
 				deliveredIds = ids;
 				return [
 					{
