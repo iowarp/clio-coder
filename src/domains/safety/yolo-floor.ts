@@ -1,3 +1,4 @@
+import { closeSync, openSync, readSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
 import { canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
@@ -46,6 +47,17 @@ export const YOLO_FLOOR_RULE_IDS = {
 	/** A floor command found in a line read as raw text, or a line whose raw-text pieces hold more than the floor reads. */
 	rawText: "yolo-floor-raw-text",
 } as const;
+
+/** Floor rules that refuse a change only the operator makes: Clio's trust, settings and own trees (CLI-P31). */
+export const YOLO_FLOOR_AUTHORITY_RULE_IDS: ReadonlySet<string> = new Set([
+	YOLO_FLOOR_RULE_IDS.trustAuthority,
+	YOLO_FLOOR_RULE_IDS.settingsAuthority,
+	YOLO_FLOOR_RULE_IDS.clioOwned,
+]);
+
+/** The remedy an authority-class refusal gives: the operator acts, and no script, file or wrapper stands in for them. */
+export const YOLO_FLOOR_AUTHORITY_REMEDY =
+	"only the operator makes this change: ask them to run it themselves; a script, a file or any wrapper that runs it is refused the same way";
 
 /** Every reason code a floor block carries starts with this. */
 export const YOLO_FLOOR_REASON_PREFIX = "yolo-floor:";
@@ -116,6 +128,121 @@ export function yoloFloorExecutableHit(command: string): YoloFloorHit | null {
 		}
 	}
 	return null;
+}
+
+/** Builtins that print their arguments as data: `echo config trust` names the words, it runs nothing. */
+const PRINTING_BUILTINS: ReadonlySet<string> = new Set(["echo", "printf"]);
+
+/** `config` flags whose next word is their value, as `src/cli/config.ts` reads them. */
+const CONFIG_VALUE_FLAGS: ReadonlySet<string> = new Set(["--hash", "--scope"]);
+
+/** True when `args[at]` is `config` and the verb `config` reads after it is `trust`, outside a help request. */
+function configTrustAt(args: ReadonlyArray<string>, at: number): boolean {
+	if (args[at] !== "config") return false;
+	for (let index = at + 1; index < args.length; index += 1) {
+		const word = args[index] as string;
+		if (word === "--") return false;
+		if (CONFIG_VALUE_FLAGS.has(word)) {
+			index += 1;
+			continue;
+		}
+		if (!word.startsWith("-")) return word === "trust";
+	}
+	return false;
+}
+
+/**
+ * One step's argv grants, revokes or pins workspace trust: `config trust` in any program's arguments but a help
+ * request. The program name is not trusted, since a symlink, alias or wrapper can be Clio's launcher by any name.
+ * With `verbOnly`, `config` must be the program's own verb: its first positional, or one after only `--flag value`
+ * pairs, so a quotes-dropped reading does not take a message's words for an argv.
+ */
+function stepGrantsTrust(executable: string, args: ReadonlyArray<string>, verbOnly: boolean): boolean {
+	if (PRINTING_BUILTINS.has(executable)) return false;
+	const end = args.indexOf("--");
+	const options = end === -1 ? args : args.slice(0, end);
+	if (options.includes("--help") || options.includes("-h")) return false;
+	if (!verbOnly) return args.some((_, at) => configTrustAt(args, at));
+	for (let at = 0; at < args.length; at += 1) {
+		const word = args[at] as string;
+		if (word === "config") return configTrustAt(args, at);
+		if (word.startsWith("-")) continue;
+		if (!(args[at - 1] ?? "").startsWith("-")) return false;
+	}
+	return false;
+}
+
+/**
+ * True when a command runs Clio's `config trust` (CLI-P31): a parsed step of any program whose arguments hold
+ * `config` with the verb `trust`, not a help request. Words in a `for` list, a `case` pattern, an `echo` or `printf`
+ * and a quoted argument are data and never match. Steps follow `sh -c` scripts and substitutions; a here-document
+ * that is not data copied to a file is read line by line, since a shell may run it. `rawText` marks a reading with
+ * its quotes dropped, where only `config` as the program's verb counts.
+ */
+export function yoloFloorTrustGrant(command: string, rawText = false): boolean {
+	const texts = [command];
+	if (/<<(?!<)/u.test(command)) texts.push(...withoutDataHeredocBodies(command).split(/\r?\n/u));
+	return texts.some((text) =>
+		shellCommandSteps(text).some((step) => stepGrantsTrust(step.executable, step.args, rawText)),
+	);
+}
+
+/** A script a command runs without naming a shell: a program run by path, or a file `source` or `.` reads. */
+export interface YoloFloorScriptRun {
+	path: string;
+	sourced: boolean;
+}
+
+/** Shells whose scripts the floor's line scan reads. */
+const SCRIPT_SHELLS: ReadonlySet<string> = new Set(["sh", "bash", "dash", "zsh", "ksh", "ash", "mksh"]);
+
+/**
+ * The scripts a command runs by path (`./x.sh`, `/opt/x`) or sources (`source x`, `. x`), in `sh -c` scripts and
+ * substitutions too (CLI-P31). `bash x.sh` is not listed: the shell-script scan already reads it.
+ */
+export function yoloFloorScriptRuns(command: string): YoloFloorScriptRun[] {
+	const runs: YoloFloorScriptRun[] = [];
+	for (const step of shellCommandSteps(command)) {
+		if (step.executable === "source" || step.executable === ".") {
+			const target = step.args[0] === "--" ? step.args[1] : step.args[0];
+			if (target !== undefined && !target.startsWith("-")) runs.push({ path: target, sourced: true });
+		} else if (step.commandPath !== undefined && !SCRIPT_SHELLS.has(step.executable)) {
+			runs.push({ path: step.commandPath, sourced: false });
+		} else if (step.executable === "exec") {
+			// `exec -a name ./x.sh` replaces the shell with the file; `-a` takes a value.
+			let at = 0;
+			while (step.args[at]?.startsWith("-") === true) at += step.args[at] === "-a" ? 2 : 1;
+			const target = step.args[at];
+			if (target?.includes("/") === true) runs.push({ path: target, sourced: false });
+		}
+	}
+	return runs;
+}
+
+/**
+ * Whether a file run by path is shell source, read at decision time: a `#!` line naming a shell (directly or through
+ * `env`), or no `#!` line at all, which the calling shell runs itself. A binary or another interpreter is not.
+ * Null when the file cannot be read.
+ */
+export function yoloFloorShellScript(file: string): boolean | null {
+	let head: string;
+	try {
+		const fd = openSync(file, "r");
+		try {
+			const buffer = Buffer.alloc(256);
+			head = buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, 0)).toString("latin1");
+		} finally {
+			closeSync(fd);
+		}
+	} catch {
+		return null;
+	}
+	if (head.includes("\0")) return false;
+	if (!head.startsWith("#!")) return true;
+	const words = (head.slice(2).split(/\r?\n/u)[0] ?? "").trim().split(/\s+/u);
+	let program = path.basename(words[0] ?? "");
+	if (program === "env") program = path.basename(words.slice(1).find((word) => !word.startsWith("-")) ?? "");
+	return SCRIPT_SHELLS.has(program);
 }
 
 /** Words a raw-text candidate starts at: the floor's executables and the commands that delete, overwrite or archive. */
