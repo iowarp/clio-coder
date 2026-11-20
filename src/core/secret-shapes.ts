@@ -18,7 +18,7 @@ export function eitherCase(source: string): string {
  * The `pass` and `pwd` words of {@link SECRET_KEY_WORDS}. A bare `pass` or `pwd` is prose, the working directory or a word
  * such as `compass`, so each needs a `_` or `-` ahead of it in any case (`DB_PASS`, `db-pass`, `MYSQL_PWD`), or a glued
  * `PASS` written in capitals after a capital or digit (`DBPASS`, `PGPASS`, `MYSQLPASS`), or is `pgpass`. A counter such as
- * `n_pass=3` still takes this name, so display redaction asks these names for a value long enough to be a credential.
+ * `n_pass=3` still takes this name, so display redaction shows a short number or a path under these names and hides the rest.
  */
 export const PASS_KEY_WORDS = [
 	`(?:[_-]|${eitherCase("pg")})${eitherCase("pass")}(?![A-Za-z])`,
