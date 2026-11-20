@@ -272,6 +272,8 @@ async function writtenCallRun(
 		after?: object[];
 		exitCode?: true;
 		declared?: Record<string, unknown>;
+		/** The host's seal, as the chat loop reports it after turn_end. */
+		sealed?: Record<string, unknown>;
 	} = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
 	let handler: (event: unknown) => void = () => {};
@@ -311,6 +313,7 @@ async function writtenCallRun(
 		},
 		whenSettled: async () => {},
 		lastRunSnapshot: () => extra.snapshot ?? null,
+		lastTurnCompletion: () => extra.sealed ?? null,
 		isStreaming: () => false,
 	};
 	const chat = new Proxy(stub, { get: (target, key) => (key in target ? target[key as string] : undefined) });
@@ -473,7 +476,14 @@ test("a declared not_done or partly_done keeps exit 0, rides the envelope, and -
 	strictEqual(completionExitCode(text.code, false), 0);
 	const v2 = await writtenCallRun("json", declining, undefined, { declared: notDone });
 	strictEqual(v2.code, 0, v2.stderr);
-	deepStrictEqual(last(v2.stdout).completion, { state: "not_done", declared: true });
+	deepStrictEqual(last(v2.stdout).completion, {
+		declared: true,
+		claimed: "not_done",
+		assessed: "not_done",
+		state: "not_done",
+		limitations: notDone.limitations,
+		unverified: [],
+	});
 	const mapped = await writtenCallRun("json", declining, undefined, { exitCode: true, declared: notDone });
 	strictEqual(mapped.code, 1, mapped.stderr);
 	strictEqual(last(mapped.stdout).exitCode, 1);
@@ -484,13 +494,34 @@ test("a declared not_done or partly_done keeps exit 0, rides the envelope, and -
 		declared: { state: "partly_done" },
 	});
 	strictEqual(partly.code, 1, partly.stderr);
-	deepStrictEqual(last(partly.stdout).completion, { state: "partly_done", declared: true });
+	strictEqual((last(partly.stdout).completion as { state?: string }).state, "partly_done");
 	const done = await writtenCallRun("json", declining, undefined, { exitCode: true, declared: { state: "done" } });
 	strictEqual(done.code, 0, done.stderr);
+	// The envelope's state is the host's assessment: a done the turn's facts lowered maps to 1.
+	const lowered = { declared: true, claimed: "done", assessed: "partly_done", facts: ["open_task"] };
+	const sealedDone = await writtenCallRun("json", declining, undefined, {
+		exitCode: true,
+		declared: { state: "done" },
+		sealed: { ...lowered, limitations: [], unverified: [] },
+	});
+	strictEqual(sealedDone.code, 1, sealedDone.stderr);
+	deepStrictEqual(last(sealedDone.stdout).completion, {
+		...lowered,
+		state: "partly_done",
+		limitations: [],
+		unverified: [],
+	});
 	// A plain answer declares nothing: declared false, exit 0 with or without the flag. Reply text is never read.
 	const plain = await writtenCallRun("json", answerMessage("Not done.") as Record<string, unknown>, undefined, {
 		exitCode: true,
 	});
 	strictEqual(plain.code, 0, plain.stderr);
-	deepStrictEqual(last(plain.stdout).completion, { state: "unknown", declared: false });
+	deepStrictEqual(last(plain.stdout).completion, {
+		declared: false,
+		claimed: null,
+		assessed: "unknown",
+		state: "unknown",
+		limitations: [],
+		unverified: [],
+	});
 });

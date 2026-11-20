@@ -61,9 +61,6 @@ export function createTaskNudgeRegistration(options: CreateTaskNudgeRegistration
 			// mirroring the finish contract.
 			const stopReason = input.metadata?.stopReason;
 			if (stopReason !== undefined && stopReason !== "stop") return [];
-			// Row 162, fleet design 4.3: a turn that declared through `finish` ended on its own account, which names
-			// what remains; only an undeclared turn is carried onward.
-			if (input.metadata?.completionState !== undefined) return [];
 			const turnToolCalls = input.metadata?.turnToolCalls;
 			if (typeof turnToolCalls !== "number" || turnToolCalls <= 0) return [];
 			// A surface without access to tasks can never update the board, so
@@ -79,7 +76,8 @@ export function createTaskNudgeRegistration(options: CreateTaskNudgeRegistration
 			if (board === null || openTasks(board).length === 0) return [];
 			const message = buildOpenTasksMessage(board);
 			return [
-				{ kind: "request_continuation", message, note: "tasks are still open" },
+				// Row 162, fleet design 4.3: an undeclared turn is carried onward; on a declared one the host seals the fact.
+				{ kind: "request_continuation", message, note: "tasks are still open", fact: "open_task" },
 				{ kind: "inject_reminder", message, severity: "warn" },
 			];
 		},

@@ -288,12 +288,13 @@ export function noteRunCompletion(completion: RunCompletionV2): void {
 }
 
 /**
- * `run --exit-code` (SPEC C19, ruling 7): a run that ended 0 with a declared `partly_done` or `not_done` exits 1;
- * `done` and an undeclared run keep 0. Every other exit is unchanged, and without the flag the exit is the run's own.
+ * `run --exit-code` (SPEC C19, ruling 7): a run that ended 0 whose completion state (the host's assessment) is
+ * `partly_done` or `not_done` exits 1; `done` and an undeclared run keep 0. Every other exit is unchanged, and without
+ * the flag the exit is the run's own.
  */
 export function completionExitCode(code: number, exitCodeFlag: boolean): number {
 	const unfinished = runCompletion?.state === "partly_done" || runCompletion?.state === "not_done";
-	return exitCodeFlag && code === 0 && runCompletion?.declared === true && unfinished ? 1 : code;
+	return exitCodeFlag && code === 0 && unfinished ? 1 : code;
 }
 
 /**
@@ -673,7 +674,8 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 		writeSync(1, out.lines);
 	};
 	const finish = async (code: number): Promise<number> => {
-		const extra = writeOutputTarget(code);
+		// `-o` is written only on success, and `--exit-code` decides success, so the mapping comes first.
+		const extra = writeOutputTarget(completionExitCode(code, request.exitCode === true));
 		const out = envelopeLines(code, extra);
 		if (!written && !isStdoutDead()) {
 			written = true;

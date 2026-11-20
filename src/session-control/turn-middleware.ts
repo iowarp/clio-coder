@@ -35,6 +35,7 @@ import {
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionTrigger, EvictionTrigger, RecallTrigger } from "../domains/session/entries.js";
 import type { AgentMessage } from "../engine/types.js";
+import { sealCompletion } from "../tools/finish.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { extractText, hasStructuredToolCall, toolNamesFromAgentState } from "./chat-loop-messages.js";
 import type { HostInserts } from "./host-inserts.js";
@@ -546,6 +547,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		},
 
 		async fireTurnEnd(agentRuntime, messages, terminalToolResult): Promise<void> {
+			// Fleet design 4.3: the host seals every ended turn, the claim beside its assessment from the turn's facts.
+			state.turnSealedCompletion = sealCompletion(state.turnCompletion, []);
 			if (!deps.middleware) return;
 			// A turn `finish` ended closes on the reply the model wrote beside it (fleet design 4.3): that text is the
 			// final answer, as a settled stop turn's would be. Any other terminal tool's result stands in for the reply.
@@ -604,6 +607,16 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			};
 			const syncEffects = runMiddlewareTurnHook(input);
 			const effects = [...syncEffects, ...(await runMiddlewareTurnHookAsync(input, syncEffects))];
+			// The four coordinator obligations come from the producers that already watch them, as typed tags.
+			const facts = effects.flatMap((effect) =>
+				(effect.kind === "inject_reminder" || effect.kind === "request_continuation") && effect.fact !== undefined
+					? [effect.fact]
+					: [],
+			);
+			state.turnSealedCompletion = sealCompletion(state.turnCompletion, facts);
+			// `finish` is turn-terminal: a declared turn never continues, and what a nudge would have asked is sealed
+			// as a fact above. An undeclared turn keeps today's continuations.
+			const declaredTurn = state.turnCompletion !== null;
 			// Observation is not recovery authority. No reminder or continuation
 			// may restart a failed or operator-canceled foreground turn.
 			if (stopReason === "aborted") {
@@ -629,6 +642,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					);
 					continue;
 				}
+				if (effect.kind === "request_continuation" && declaredTurn) continue;
 				if (effect.kind === "request_continuation" && turnAllowsContinuation(state.currentTurnConstraints)) {
 					// A locked request cannot call the tool a nudge asks for: a plan close
 					// here reasoned over that conflict for 131k tokens until max_tokens.

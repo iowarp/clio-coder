@@ -39,7 +39,7 @@ import type {
 import type { createEngineAgent } from "../engine/agent.js";
 import type { MainRequestRecord } from "../engine/in-prefix-summary.js";
 import type { AgentMessage } from "../engine/types.js";
-import type { CompletionDeclaration } from "../tools/finish.js";
+import type { CompletionDeclaration, SealedCompletion } from "../tools/finish.js";
 import type { AskUserToolPolicy } from "../tools/registry.js";
 import type { ToolMarkupRepromptBudget } from "./chat-loop-messages.js";
 import { RunEvidenceLog } from "./run-evidence.js";
@@ -325,6 +325,8 @@ export interface ChatTurnState {
 	turnCollectedDetachedBatch: boolean;
 	/** The completion this submitted turn declared through `finish`, or null; feeds turn_end metadata (fleet design 4.3). */
 	turnCompletion: CompletionDeclaration | null;
+	/** The host's seal of how the last turn ended: the claim beside its assessment from the turn's facts (fleet design 4.3). */
+	turnSealedCompletion: SealedCompletion | null;
 	/** A tool other than `finish` ran since the operator's prompt; a continuation of that prompt keeps it. */
 	turnCalledWork: boolean;
 	/** The one pinned `finish` round an unattended turn gets is spent; a continuation of that prompt keeps it. */
@@ -403,7 +405,7 @@ export type TurnMiddlewareState = TurnStateView<
 	| "turnCompletion"
 	| "turnToolCalls"
 	| "turnToolNames",
-	"toolProseAbortReason"
+	"toolProseAbortReason" | "turnSealedCompletion"
 >;
 
 /** turn-context: reads the turn for compaction and memory; owns the replayed provider context. */
@@ -493,6 +495,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		turnSharedWorkerNote: false,
 		turnCollectedDetachedBatch: false,
 		turnCompletion: null,
+		turnSealedCompletion: null,
 		turnCalledWork: false,
 		finishRoundSpent: false,
 		currentPendingSkillPolicy: undefined,

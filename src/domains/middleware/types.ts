@@ -33,6 +33,14 @@ export const MIDDLEWARE_ANNOTATION_SEVERITIES = ["info", "warn"] as const;
 
 export type MiddlewareAnnotationSeverity = (typeof MIDDLEWARE_ANNOTATION_SEVERITIES)[number];
 
+/**
+ * A coordinator obligation still open when a turn ends (fleet design 4.3): an unvalidated mutation, a check whose last
+ * outcome since the last change is red, a detached child run not yet collected, an open task-board item. A builtin
+ * turn_end producer tags the reminder or continuation it already emits for one; the host lowers a declared `done` over
+ * any of them to `partly_done`. Hooks files cannot declare it.
+ */
+export type CompletionFact = "unvalidated_mutation" | "failed_check" | "uncollected_run" | "open_task";
+
 export type MiddlewareEffect =
 	/**
 	 * `source` names the subsystem a transcript callout is titled with when the
@@ -48,6 +56,7 @@ export type MiddlewareEffect =
 			severity?: MiddlewareReminderSeverity;
 			source?: "memory";
 			audience?: "model";
+			fact?: CompletionFact;
 	  }
 	| { kind: "annotate_tool_result"; message: string; severity?: MiddlewareAnnotationSeverity }
 	| {
@@ -72,7 +81,15 @@ export type MiddlewareEffect =
 	 * finish gate's own slot instead of the one nudge a prompt shares, so
 	 * another producer's nudge cannot starve a missing check at contained yolo.
 	 */
-	| { kind: "request_continuation"; message: string; note?: string; toolFree?: true; reserved?: "verification" }
+	| {
+			kind: "request_continuation";
+			message: string;
+			note?: string;
+			toolFree?: true;
+			reserved?: "verification";
+			/** On a turn that declared through `finish` the host never continues; it seals this fact instead. */
+			fact?: CompletionFact;
+	  }
 	| { kind: "require_tool"; toolName: string }
 	| { kind: "lock_tools" }
 	/**

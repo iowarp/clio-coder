@@ -301,6 +301,11 @@ function acceptanceScriptChecks(input: FinishContractInput, root: string): Decla
  * Whether a check's last outcome since the run's last change is red, read by the shared classifier's replay as the
  * run-effects recorder seals it, so the notice never says checks passed beside a red the receipt keeps (bt-44).
  */
+/** Whether a check's last outcome is red with no change since it ran: a declared `done` over it is `partly_done`. */
+export function standingFailedCheck(input: FinishContractInput): boolean {
+	return checkFailedSinceLastChange(input, assessmentScope(input));
+}
+
 function checkFailedSinceLastChange(input: FinishContractInput, scope: AssessmentScope): boolean {
 	if (input.workspaceRoot === undefined) return false;
 	// Only a failed result can seal a red, so an all-green window skips the replay's reads.

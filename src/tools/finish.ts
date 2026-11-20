@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
+import type { CompletionFact } from "../domains/middleware/index.js";
 import { StringEnum } from "../engine/ai.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { effectiveToolCall } from "./surface.js";
@@ -48,6 +49,39 @@ function strings(value: unknown): string[] | null {
 		if (trimmed.length > 0 && !out.includes(trimmed)) out.push(trimmed);
 	}
 	return out;
+}
+
+/**
+ * How a turn ended as the host seals it (fleet design 4.3): the claim as given beside the host's assessment.
+ * `assessed` is min(claimed, facts): a `done` claim over any open coordinator obligation is `partly_done`; an
+ * undeclared turn is `unknown`.
+ */
+export interface SealedCompletion {
+	declared: boolean;
+	claimed: CompletionState | null;
+	assessed: CompletionState | "unknown";
+	facts: CompletionFact[];
+	limitations: CompletionDeclaration["limitations"];
+	unverified: string[];
+	remaining?: string[];
+}
+
+export function sealCompletion(
+	declaration: CompletionDeclaration | null,
+	facts: ReadonlyArray<CompletionFact>,
+): SealedCompletion {
+	const unique = [...new Set(facts)];
+	if (declaration === null)
+		return { declared: false, claimed: null, assessed: "unknown", facts: unique, limitations: [], unverified: [] };
+	return {
+		declared: true,
+		claimed: declaration.state,
+		assessed: declaration.state === "done" && unique.length > 0 ? "partly_done" : declaration.state,
+		facts: unique,
+		limitations: declaration.limitations,
+		unverified: declaration.unverified,
+		...(declaration.remaining !== undefined ? { remaining: declaration.remaining } : {}),
+	};
 }
 
 /** The declaration in a `finish` call's arguments or result details, or null when it is not one. */

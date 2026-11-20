@@ -279,10 +279,22 @@ export interface RunDispatchedRunV2 {
 	outcomeDetail?: string;
 }
 
-/** A main run's completion: the declared state, or `unknown` when the agent declared none. */
+/**
+ * A main run's completion as the host sealed it (fleet design 4.3): the claim the agent declared through `finish`, the
+ * host's assessment of it (min(claimed, facts): a `done` over an unvalidated mutation, a standing failed check, an
+ * uncollected child run or an open task-board item is `partly_done`), and `state`, which is the assessment.
+ * Undeclared: `declared: false`, `claimed: null`, state `unknown`.
+ */
 export interface RunCompletionV2 {
-	state: "done" | "partly_done" | "not_done" | "unknown";
 	declared: boolean;
+	claimed: "done" | "partly_done" | "not_done" | null;
+	assessed: "done" | "partly_done" | "not_done" | "unknown";
+	state: "done" | "partly_done" | "not_done" | "unknown";
+	/** The open obligations that lowered a `done` claim. */
+	facts?: Array<"unvalidated_mutation" | "failed_check" | "uncollected_run" | "open_task">;
+	limitations: Array<{ what: string; why: string }>;
+	unverified: string[];
+	remaining?: string[];
 }
 
 export interface RunResultEnvelopeV2 {

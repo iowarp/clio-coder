@@ -89,7 +89,7 @@ import {
 	turnNoAnswerSentence,
 	validateStructuredAnswer,
 } from "../../session-control/chat-loop-messages.js";
-import { type CompletionDeclaration, completionOfToolResult } from "../../tools/finish.js";
+import { type CompletionDeclaration, completionOfToolResult, sealCompletion } from "../../tools/finish.js";
 import { TOOL_PLANES } from "../../tools/policy.js";
 import { toolResultText } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
@@ -1863,13 +1863,19 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		stdoutMessage = null;
 	}
 	const exitCode = terminal.exitCode;
-	// Fleet design 4.3: the envelope carries the typed declaration, never a reading of the answer; `--exit-code` maps
-	// a declared partly_done or not_done on an exit-0 run to 1 (ruling 7).
-	noteRunCompletion(
-		result.completion !== null
-			? { state: result.completion.state, declared: true }
-			: { state: "unknown", declared: false },
-	);
+	// Fleet design 4.3: the envelope carries the host's seal of the typed declaration, never a reading of the answer:
+	// the claim, its assessment from the turn's facts, and state = assessed, which `--exit-code` maps (ruling 7).
+	const sealedCompletion = chat.lastTurnCompletion?.() ?? sealCompletion(result.completion, []);
+	noteRunCompletion({
+		declared: sealedCompletion.declared,
+		claimed: sealedCompletion.claimed,
+		assessed: sealedCompletion.assessed,
+		state: sealedCompletion.assessed,
+		...(sealedCompletion.facts.length > 0 ? { facts: sealedCompletion.facts } : {}),
+		limitations: sealedCompletion.limitations,
+		unverified: sealedCompletion.unverified,
+		...(sealedCompletion.remaining !== undefined ? { remaining: sealedCompletion.remaining } : {}),
+	});
 	if (options.outputSchema !== undefined) {
 		noteStructuredV2({
 			enforcedBy: "host",
@@ -1904,7 +1910,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		observed !== null && mode === "text"
 			? formatHeadlessObservedLine({
 					...observed,
-					...(result.completion !== null ? { completion: result.completion.state } : {}),
+					...(sealedCompletion.assessed !== "unknown" ? { completion: sealedCompletion.assessed } : {}),
 				})
 			: null;
 	if (observedLine !== null) process.stderr.write(`${observedLine}\n`);

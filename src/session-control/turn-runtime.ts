@@ -1781,6 +1781,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			if (!currentRun() || state.activeInterruptReason !== null) return undefined;
 			if (turn.message.stopReason === "error" || turn.message.stopReason === "aborted") return undefined;
+			// `finish` is turn-terminal (fleet design 4.3): a declared turn takes no further round, whatever asked.
+			if (state.turnCompletion !== null) return undefined;
 			if (!state.continuation.requested) {
 				// Fleet design 4.3: an unattended turn that did work and ended undeclared gets one round pinned to finish.
 				if (
