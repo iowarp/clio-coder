@@ -23,11 +23,15 @@ import { filterEntriesToActivePath } from "./tree/active-path.js";
  * goes to the leading segments in request order and the rest is fresh. Totals are measured; the split is estimated.
  *
  * Calls a side agent made for the session (compaction, memory and the like) are charged to the turn they ran in, one
- * row per role: a compaction by the checkpoint's call ids in the ledger, any other by when the call started.
+ * row per role: a compaction by the checkpoint's call ids in the ledger, any other by when the call started. Calls of
+ * the runs the session dispatched are read from the run journals its own records link, and charged as one `worker`
+ * role to the turn open when each started (CLI-7).
  */
 
 /** Agents that run beside a session's own; worker and coordinator calls belong to their runs. */
 export type SideRole = Exclude<AgentRole, "main" | "coordinator" | "worker">;
+/** Roles charged to a turn as one unsplit row: the side agents, and every call of a run the session dispatched. */
+type ChargedRole = SideRole | "worker";
 
 export type TokenSource =
 	| "system-prompt"
@@ -37,7 +41,7 @@ export type TokenSource =
 	| "reminders"
 	| "history"
 	| `tool:${string}`
-	| `role:${SideRole}`;
+	| `role:${ChargedRole}`;
 
 export interface TokenSourceRow {
 	source: TokenSource;
@@ -63,7 +67,7 @@ export interface TokenSourceInput {
 
 /** One agent role's calls inside a span; the span's own figures are their sum. */
 export interface TokenSourceRole {
-	role: "main" | SideRole;
+	role: "main" | ChargedRole;
 	calls: number;
 	unmeasuredCalls: number;
 	input: TokenSourceInput;
@@ -110,7 +114,7 @@ export interface TokenSourcesReportV1 {
 }
 
 export const TOKEN_SOURCES_NOTE =
-	"Input totals are provider-reported per call; the split by source is estimated. Each call's total is apportioned over its request's segments by estimated tokens (chars/4 over the session ledger, the journal's context snapshot for the system side), and its cache read is assigned to the leading segments in request order. Side-agent calls (compaction, memory) are not split: each role is one row of the turn it ran in.";
+	"Input totals are provider-reported per call; the split by source is estimated. Each call's total is apportioned over its request's segments by estimated tokens (chars/4 over the session ledger, the journal's context snapshot for the system side), and its cache read is assigned to the leading segments in request order. Side-agent calls (compaction, memory) and the calls of dispatched workers are not split: each role is one row of the turn it ran in.";
 
 interface Segment {
 	/** Ledger turn the segment came from; null for the system side. */
@@ -402,20 +406,24 @@ function rolesOf(
 		}));
 }
 
-/** A side-agent call waiting for the turn it is charged to. */
+/** A side-agent or worker call waiting for the turn it is charged to. */
 interface SideCharge {
-	role: SideRole;
+	role: ChargedRole;
 	usage: CallUsage | null;
 	invoked: boolean;
 	/** Calls the usage covers: a ledger checkpoint's usage sums its summary streams. */
 	calls: number;
 }
 
-/** Fold a session's ledger entries and its own journal records into the per-turn split. */
+/**
+ * Fold a session's ledger entries, its own journal records and the records of the run journals it links into the
+ * per-turn split.
+ */
 function tokenSourcesReport(
 	sessionId: string,
 	entries: ReadonlyArray<SessionEntry>,
 	records: ReadonlyArray<TelemetryRecord>,
+	runRecords: ReadonlyArray<TelemetryRecord>,
 ): TokenSourcesReportV1 {
 	const settled = new Map<string, TelemetryRecord<"call.settled">>();
 	const sideCalls: TelemetryRecord<"call.settled">[] = [];
@@ -432,6 +440,14 @@ function tokenSourcesReport(
 		} else if (record.k === "call.started") startedAt.set(record.data.attemptId, record.t);
 		else if (record.k === "context.snapshotted") snapshots.push(record);
 		else if (record.k === "prompt.compiled") compiles.push(record);
+	}
+	// Whatever role a record in a dispatched run's journal names, the call belongs to the worker the session dispatched.
+	const workerCalls: TelemetryRecord<"call.settled">[] = [];
+	for (const record of runRecords) {
+		if (record.ctx.sessionId !== undefined && record.ctx.sessionId !== null && record.ctx.sessionId !== sessionId)
+			continue;
+		if (record.k === "call.settled") workerCalls.push(record);
+		else if (record.k === "call.started") startedAt.set(record.data.attemptId, record.t);
 	}
 	const byTime = (a: TelemetryRecord, b: TelemetryRecord) => a.t.localeCompare(b.t);
 	snapshots.sort(byTime);
@@ -617,6 +633,11 @@ function tokenSourcesReport(
 		const turn = [...turns].reverse().find((candidate) => candidate.at <= at) ?? turns[0];
 		if (turn !== undefined) chargeSide(turn, sideCharge(record));
 	}
+	for (const record of workerCalls) {
+		const at = startedAt.get(record.data.attemptId) ?? record.t;
+		const turn = [...turns].reverse().find((candidate) => candidate.at <= at) ?? turns[0];
+		if (turn !== undefined) chargeSide(turn, { ...sideCharge(record), role: "worker" });
+	}
 
 	const sessionRows = new Map<TokenSource, RowAccumulator>();
 	const sessionRoles = new Map<TokenSourceRole["role"], RoleAccumulator>();
@@ -675,7 +696,7 @@ function tokenSourcesReport(
 	};
 }
 
-/** Read a session's ledger and its own journal, then fold them; null when no ledger holds the id. */
+/** Read a session's ledger, its own journal and the run journals it links, then fold them; null when no ledger holds the id. */
 export function loadTokenSourcesReport(stateDir: string, sessionId: string): TokenSourcesReportV1 | null {
 	let path: string;
 	try {
@@ -686,6 +707,7 @@ export function loadTokenSourcesReport(stateDir: string, sessionId: string): Tok
 	}
 	const raw = readSessionFileEntries(path).filter((entry) => !isSessionJsonlHeader(entry));
 	const entries = collectSessionEntries(raw, path);
-	const records = loadSessionTelemetrySource(stateDir, sessionId)?.journal.records ?? [];
-	return tokenSourcesReport(sessionId, entries, records);
+	const source = loadSessionTelemetrySource(stateDir, sessionId);
+	const runRecords = [...(source?.runs.values() ?? [])].flatMap((run) => run.records);
+	return tokenSourcesReport(sessionId, entries, source?.journal.records ?? [], runRecords);
 }

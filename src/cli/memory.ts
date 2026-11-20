@@ -25,9 +25,10 @@ import {
 import { projectDeclaresFlowRules } from "../domains/safety/flow-policy-snapshot.js";
 import { FLOW_RESTRICTION_ENTRY_TYPE } from "../domains/session/history.js";
 import { openSession } from "../engine/session.js";
+import { printNote } from "./argv.js";
 import { printError, printOk } from "./shared.js";
 
-const HELP = `clio-coder memory list [--json]
+const HELP = `clio-coder memory list [--approved-by operator|guardian] [--json]
 clio-coder memory propose --from-evidence <runId> [scope options]
 clio-coder memory propose --from-claim <claim-id-prefix>
 clio-coder memory promote --from-handoff <path> [--entry <id>...] --scope <scope> [scope options]
@@ -50,9 +51,16 @@ always requires an explicit scope and creates unapproved records for review.
 project at the current directory (see clio-coder claims). If a later claim
 with the same pinned conditions disagrees, the record gets a regression and
 leaves the prompt until approved again.
+
+list --approved-by keeps the approved records one approver let into the prompt:
+guardian for lessons the memory gate approved automatically on execution
+evidence, operator for the ones a person approved (a record approved before
+approvals were stamped counts as the operator's, as the prompt reads it).
+The text listing notes on stderr how many records wait for review.
 `;
 
 type MemoryCommand = "list" | "propose" | "promote" | "approve" | "reject" | "prune";
+type MemoryApprover = "operator" | "guardian";
 
 interface ParsedMemoryArgs {
 	command?: MemoryCommand;
@@ -69,6 +77,7 @@ interface ParsedMemoryArgs {
 	stale: boolean;
 	json: boolean;
 	help: boolean;
+	approvedBy?: MemoryApprover;
 }
 
 function parseMemoryArgs(args: ReadonlyArray<string>): ParsedMemoryArgs {
@@ -161,6 +170,13 @@ function parseMemoryArgs(args: ReadonlyArray<string>): ParsedMemoryArgs {
 		}
 		if (parsed.command === "list" && arg === "--json") {
 			parsed.json = true;
+			continue;
+		}
+		if (parsed.command === "list" && arg === "--approved-by") {
+			const value = requireOptionValue(args, index, "--approved-by", "operator or guardian");
+			if (value !== "operator" && value !== "guardian") throw new Error("--approved-by requires operator or guardian");
+			parsed.approvedBy = value;
+			index += 1;
 			continue;
 		}
 		if (parsed.command === "prune") {
@@ -268,13 +284,22 @@ export async function runMemoryCommand(args: ReadonlyArray<string>): Promise<num
 	const dataDir = clioDataDir();
 	try {
 		if (parsed.command === "list") {
-			const records = await loadMemoryRecords(dataDir);
+			const stored = await loadMemoryRecords(dataDir);
+			const { approvedBy } = parsed;
+			const records = approvedBy === undefined ? stored : stored.filter((record) => memoryApprover(record) === approvedBy);
 			const cleared = readClearedMemoryRegressions(dataDir);
 			if (parsed.json)
 				process.stdout.write(
 					`${JSON.stringify({ records: records.map((record) => publicMemoryRecord(record, cleared)) })}\n`,
 				);
-			else renderMemoryList(records, cleared);
+			else {
+				const pending = stored.filter((record) => memoryStatus(record) === "proposed").length;
+				if (pending > 0)
+					printNote(
+						`${pending} memory record${pending === 1 ? "" : "s"} pending review; clio-coder memory approve <id> or reject <id>`,
+					);
+				renderMemoryList(records, cleared);
+			}
 			return 0;
 		}
 		if (parsed.command === "propose" && parsed.claimId !== undefined)
@@ -578,6 +603,15 @@ function renderProposal(record: MemoryRecord, created: boolean): void {
 }
 
 /**
+ * Who let an approved record into the prompt; null for one that is not approved. A record approved before approvals
+ * were stamped was reviewed by a person, the reading `projectKeptLesson` gives it.
+ */
+function memoryApprover(record: MemoryRecord): MemoryApprover | null {
+	if (!record.approved) return null;
+	return record.approval?.by ?? "operator";
+}
+
+/**
  * The fields a reviewer decides on, for `memory list --json`; absent optionals stay absent. Open regressions say why a
  * record is out of the prompt, and the regressions an operator re-approval cleared stay listed (#406), so a reader of
  * the JSON sees a record was once contradicted just as the text listing shows it.
@@ -595,6 +629,7 @@ function publicMemoryRecord(record: MemoryRecord, cleared: ReadonlyArray<Cleared
 		evidenceRefs: record.evidenceRefs,
 		createdAt: record.createdAt,
 		approved: record.approved,
+		...(record.approved && record.approval !== undefined ? { approval: { ...record.approval } } : {}),
 		...(record.rejectedAt !== undefined ? { rejectedAt: record.rejectedAt } : {}),
 		...(record.repository !== undefined ? { repository: record.repository } : {}),
 		...(record.regressions !== undefined && record.regressions.length > 0
@@ -632,6 +667,8 @@ function renderMemoryList(
 		process.stdout.write("\n");
 		process.stdout.write(`  key: ${record.key}\n`);
 		process.stdout.write(`  lesson: ${record.lesson}\n`);
+		if (record.approved && record.approval !== undefined)
+			process.stdout.write(`  approved by ${record.approval.by} at ${record.approval.at}\n`);
 		// A record with a regression is out of the prompt and recall; say why, since approve clears it.
 		for (const regression of record.regressions ?? []) process.stdout.write(`  regression: ${regression}\n`);
 		// Re-approval clears regressions from the record; the clearing is kept so the history stays visible.

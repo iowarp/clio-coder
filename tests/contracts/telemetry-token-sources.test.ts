@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { renderTokenSources } from "../../src/cli/telemetry-tokens.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { makeTelemetryRecord, type TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -17,7 +18,7 @@ import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { loadTokenSourcesReport } from "../../src/domains/session/token-sources.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
-import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { telemetryRunDirectory, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
@@ -407,6 +408,76 @@ it("charges compaction and memory calls to the turn they ran in, by role, inside
 			renderTokenSources(report, false),
 		);
 		ok(renderTokenSources(report, true).includes("output 1795 (compaction 1775)"), renderTokenSources(report, true));
+	} finally {
+		env.restore();
+	}
+});
+
+it("charges a dispatched worker's calls from its linked run journal to the turn they ran in, and heads the table with cache read and prompt (CLI-7)", async () => {
+	const env = await isolateClioEnv("clio-coder-token-sources-worker-");
+	try {
+		const sessionId = "token-sources-worker";
+		const runId = "token-sources-run";
+		const at = (second: number) => `2026-01-01T00:00:${String(second).padStart(2, "0")}.000Z`;
+		const [first] = telemetryCall(sessionId, { at: at(3) });
+		ok(first);
+		const worker = telemetryCall(sessionId, {
+			role: "worker",
+			at: at(3),
+			usage: { input: 700, cacheRead: 300, output: 60 },
+		}).map(
+			(record) => ({ ...record, ctx: { ...record.ctx, runId, agent: { role: "worker", id: runId } } }) as TelemetryRecord,
+		);
+		const linked = makeTelemetryRecord("run.linked", { runId }, first.ctx, { t: at(3), mono: 0 });
+		const header = scanTelemetrySegment(goldenSessionJournal(sessionId)).rows.find((row) => row.kind === "header");
+		ok(header?.kind === "header");
+		for (const [directory, records] of [
+			[telemetrySessionDirectory(clioStateDir(), sessionId), [linked]],
+			[telemetryRunDirectory(clioStateDir(), runId), worker],
+		] as const) {
+			mkdirSync(directory, { recursive: true });
+			writeFileSync(join(directory, "journal.jsonl"), Buffer.concat([header.header, ...records].map(encodeTelemetryLine)));
+		}
+		const message = (turnId: string, second: number, role: string, payload: Record<string, unknown>) => ({
+			kind: "message",
+			turnId,
+			parentTurnId: null,
+			timestamp: at(second),
+			role,
+			payload,
+		});
+		const assistant = (turnId: string, second: number) =>
+			message(turnId, second, "assistant", {
+				role: "assistant",
+				content: [{ type: "text", text: "ok" }],
+				usage: { input: 100, cacheRead: 900, output: 20 },
+			});
+		const lines = [
+			{ type: "session", version: 6, id: sessionId, timestamp: at(0), cwd: env.dir },
+			message("u1", 1, "user", { text: "dispatch it" }),
+			assistant("a1", 2),
+			message("u2", 5, "user", { text: "again" }),
+			assistant("a2", 6),
+		];
+		const directory = join(clioStateDir(), "sessions", "token-sources-repo", sessionId);
+		mkdirSync(directory, { recursive: true });
+		writeFileSync(join(directory, "current.jsonl"), `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+
+		const report = loadTokenSourcesReport(clioStateDir(), sessionId);
+		ok(report, "the session ledger loads");
+		const roles = report.turns.map((turn) => turn.roles.map((role) => `${role.role}:${role.calls}:${role.output}`));
+		strictEqual(roles.join(" / "), "main:1:20,worker:1:60 / main:1:20", JSON.stringify(report.turns));
+		const row = report.turns[0]?.rows.find((item) => item.source === "role:worker");
+		strictEqual(`${row?.label}:${row?.cached}:${row?.fresh}:${row?.total}`, "worker calls:300:700:1000");
+		strictEqual(report.totals.calls, 3);
+		strictEqual(report.totals.input.total, 1000 + 1000 + 1000);
+		const text = renderTokenSources(report, false);
+		ok(text.includes("2 (worker 1)"), text);
+		ok(
+			text.split("\n").some((line) => /^turn\s+at\s+calls\s+cache read\s+fresh\s+prompt\s+output$/u.test(line.trim())),
+			text,
+		);
+		ok(/source\s+cache read\s+fresh\s+total/u.test(renderTokenSources(report, true)), renderTokenSources(report, true));
 	} finally {
 		env.restore();
 	}
