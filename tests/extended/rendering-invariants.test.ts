@@ -1,6 +1,6 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { OutputStyle } from "../../src/core/defaults.js";
+import { DEFAULT_SETTINGS, type OutputStyle } from "../../src/core/defaults.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
@@ -13,9 +13,11 @@ import {
 	WORKER_TOOL_NAME_LIMIT,
 } from "../../src/domains/telemetry/worker-progress.js";
 import {
+	getKeybindings,
 	InstrumentedTuiAltScreen,
 	InstrumentedTuiMainScreen,
 	ScrollView,
+	setKeybindings,
 	stripTerminalSequences,
 	type Terminal,
 	Text,
@@ -44,7 +46,10 @@ import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
 } from "../../src/interactive/interactive-slash-runtime.js";
-import { createKeybindingManagerForTesting } from "../../src/interactive/keybinding-manager.js";
+import {
+	createKeybindingManager,
+	createKeybindingManagerForTesting,
+} from "../../src/interactive/keybinding-manager.js";
 import { buildLayout, releaseRegularDock, returnToLiveEdge } from "../../src/interactive/layout.js";
 import { showClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
 import { openAskUserOverlay } from "../../src/interactive/overlays/ask-user.js";
@@ -4190,6 +4195,54 @@ describe("agent invocations", () => {
 			.join("\n");
 		doesNotMatch(plain, /recognized no test|no check ran/u, plain);
 		match(plain, /python3 -c import calc passed on the worker's own report/u, plain);
+	});
+
+	it("a compact council round says which key shows the answers its one-line rows cut", () => {
+		// The operator's /council admits its dispatch with no tool call id, so its cards carry no parent call.
+		let style: OutputStyle = "compact";
+		const panel = createChatPanel({ getOutputStyle: () => style, now: () => 1_000 });
+		panel.appendUser("/council should retry() own its clock?");
+		const member = (id: string, label: string, round: number, text: string, pending = false) =>
+			card({
+				assignmentId: id,
+				agentId: label.toLowerCase(),
+				origin: "user",
+				council: { group: "g1", label, round },
+				text,
+				pending,
+			});
+		const settle = (state: WorkerEntryState, text: string) => {
+			Object.assign(state, {
+				pending: false,
+				text,
+				result: { outcome: "succeeded", durationMs: 38_000, tokenCount: 18_200, toolCalls: 7 },
+			});
+			panel.applyWorkerState(state);
+		};
+		const headers = () =>
+			plainRender(panel, 80)
+				.split("\n")
+				.filter((row) => row.startsWith(GLYPH.workerHuman));
+		const hinted = (round: number) => `${GLYPH.workerHuman} council · round ${round} · Alt+O shows the answers`;
+		const plain = (round: number) => `${GLYPH.workerHuman} council · round ${round}`;
+		const previous = getKeybindings();
+		createKeybindingManager(DEFAULT_SETTINGS, {});
+		try {
+			panel.applyWorkerState(member("a1", "Architect", 1, "Yes."));
+			panel.applyWorkerState(member("s1", "Skeptic", 1, "No."));
+			panel.applyWorkerState(member("a2", "Architect", 2, "Yes."));
+			const late = member("s2", "Skeptic", 2, "", true);
+			panel.applyWorkerState(late);
+			deepStrictEqual(headers(), [plain(1), plain(2)], "whole answers and a running member need no hint");
+			match(plainRender(panel, 80), /Architect · dynamo\/qwen +✓ done .*Yes\./u, "each member's row shows its answer");
+			// One line of 36 columns, wider than what the aligned row leaves for it at 80 columns.
+			settle(late, "Keep the retry clock inside retry().");
+			deepStrictEqual(headers(), [plain(1), hinted(2)], "the round whose row was cut says so, and only that round");
+			style = "standard";
+			deepStrictEqual(headers(), [plain(1), plain(2)], "Standard previews the answer");
+		} finally {
+			setKeybindings(previous);
+		}
 	});
 
 	it("names a council's sealed report by its size, never by a member's route, whatever the synthesis", () => {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
+import { createContextOperation } from "../../src/core/context-operation.js";
 import { runCommandVector } from "../../src/core/safe-exec.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { loadRecipesFromDir } from "../../src/domains/agents/registry.js";
@@ -191,6 +192,24 @@ it("stage completion stays active; only operation completion closes the dock pro
 	});
 	assert.equal(store.current(301)?.completedAtMs, 300);
 	assert.equal(store.active(10_000), false);
+	store.unsubscribe();
+});
+
+it("a settled /context reset leaves its card as the only receipt; the rail drops it at once", () => {
+	const bus = createTelemetryHub();
+	const store = createContextActivityStore(bus);
+	const emit = (event: Parameters<Parameters<typeof createContextOperation>[1]>[0]) =>
+		bus.emit("context.activity_changed", event);
+	const base = { cwd: process.cwd(), sessionId: null } as const;
+	const reset = createContextOperation({ ...base, kind: "context-clear", origin: "operator", reason: "x" }, emit);
+	reset.progress({ phase: "state", status: "started", message: "clearing" });
+	assert.equal(store.current()?.kind, "context-clear", "the rail shows the reset while it runs");
+	reset.finish("completed", "Context reset finished");
+	assert.equal(store.current(), null, "box, check line, bar and finish line were four receipts for one reset");
+	// Automatic maintenance earns no card, so the settled rail stays its receipt.
+	const refresh = createContextOperation({ ...base, kind: "context-refresh", origin: "automatic", reason: "x" }, emit);
+	refresh.finish("completed", "refreshed");
+	assert.equal(store.current()?.kind, "context-refresh");
 	store.unsubscribe();
 });
 

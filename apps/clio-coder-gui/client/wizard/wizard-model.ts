@@ -114,6 +114,8 @@ export type StepView =
 			note: string | null;
 			connect: Choice | null;
 			later: Choice | null;
+			/** What Connect now does, in the backend's own words: it knows the flow and whether a browser can open there. */
+			lede: string;
 	  })
 	| (Base & {
 			kind: "credential-source";
@@ -122,7 +124,12 @@ export type StepView =
 			options: readonly CredentialOption[];
 	  })
 	| (Base & { kind: "credential-env"; prompt: TextPrompt })
-	| (Base & { kind: "credential-key"; prompt: TextPrompt })
+	| (Base & {
+			kind: "credential-key";
+			prompt: TextPrompt;
+			/** How the backend's platform protects credentials.yaml, from its hint; null when the hint does not say. */
+			protection: "file mode 0600" | "an owner-only ACL" | null;
+	  })
 	| (Base & { kind: "oauth-code"; prompt: TextPrompt })
 	| (Base & { kind: "server"; prompt: TextPrompt; title: string; guidance: readonly string[] })
 	| (Base & { kind: "detected"; prompt: SelectPrompt; served: string; options: readonly Choice[] })
@@ -310,6 +317,7 @@ export function stepFor(prompt: Prompt): StepView {
 					.find((line) => line.startsWith("credential:"))
 					?.slice("credential:".length)
 					.trim() ?? "";
+			const connect = byLabel(prompt, /^Connect now$/u);
 			return {
 				kind: "signin",
 				stage: "connect",
@@ -318,8 +326,9 @@ export function stepFor(prompt: Prompt): StepView {
 				provider: title.slice("Sign in to ".length),
 				status,
 				note: lines.find((line) => /^Sign-in stores credentials/u.test(line)) ?? null,
-				connect: byLabel(prompt, /^Connect now$/u),
+				connect,
 				later: byLabel(prompt, /^Later$/u),
+				lede: connect?.hint ? `CLIO Coder ${connect.hint}.` : "CLIO Coder signs you in through its command-line tool.",
 			};
 		}
 		if (title === "How should Clio get the API key?")
@@ -444,7 +453,12 @@ export function stepFor(prompt: Prompt): StepView {
 	}
 	if (title === "Which environment variable?")
 		return { kind: "credential-env", stage: "connect", scene: "helpers", prompt };
-	if (title === "Paste the API key") return { kind: "credential-key", stage: "connect", scene: "helpers", prompt };
+	if (title === "Paste the API key") {
+		// credentialFileProtection() on the backend: mode 0600 on POSIX, an owner-only ACL on Windows.
+		const stated = /\((mode 0600|owner-only ACL), not encrypted\)/u.exec(prompt.hint)?.[1];
+		const protection = stated === "mode 0600" ? "file mode 0600" : stated === undefined ? null : "an owner-only ACL";
+		return { kind: "credential-key", stage: "connect", scene: "helpers", prompt, protection };
+	}
 	if (/verification code/iu.test(title)) return { kind: "oauth-code", stage: "connect", scene: "helpers", prompt };
 	if (title === "Unverified model id")
 		return { kind: "model-manual", stage: "model", scene: "focus", prompt, warning: rest(prompt)[0] ?? null };
@@ -560,7 +574,7 @@ export function readMessages(messages: readonly string[]): ReadMessages {
 		}
 		if (probe?.text === line) continue;
 		if (
-			/Credentials are stored with mode 0600|reported no context window|did not complete|not stored|saved without a passed test request/iu.test(
+			/stored unencrypted|reported no context window|did not complete|not stored|saved without a passed test request/iu.test(
 				line,
 			)
 		)

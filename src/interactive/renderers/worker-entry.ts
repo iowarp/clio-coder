@@ -42,6 +42,7 @@ import {
 } from "../../session-control/worker-stream.js";
 import { councilLabelText } from "../council-grid.js";
 import type { RouteFirstOutput } from "../footer/silence-note.js";
+import { actionKeyLabel } from "../keybinding-manager.js";
 import {
 	clioTheme,
 	fitUnits,
@@ -224,14 +225,42 @@ function identityUnits(entry: WorkerEntryState, withRunId = true): string[] {
  * in the content column, each under its roster label, so the round reads as
  * one question put to several voices rather than as unrelated cards.
  */
-function councilHeader(entry: WorkerEntryState, width: number): string {
+function councilHeader(entry: WorkerEntryState, width: number, hint: string | null = null): string {
 	const round = entry.council?.round ?? 1;
 	return fitUnits(
 		theme,
 		`${originGlyph(entry)} `,
-		[functionText(theme, "dispatch", "council"), meta(`round ${round}`)],
+		[functionText(theme, "dispatch", "council"), meta(`round ${round}`), ...(hint === null ? [] : [meta(hint)])],
 		width,
 	);
+}
+
+/**
+ * Compact gives each council member one line, so an answer longer than that line was cut with nothing saying so
+ * (FX-14). The round's header names the key that shows the answers whole once a settled member of that round said
+ * more than its first line, or its row cut that line. The row is the one the member renders: aligned beside its
+ * siblings, or, as a lone card, an action line that shows no answer at all.
+ */
+function compactCouncilHint(
+	entry: WorkerEntryState,
+	detail: TranscriptDetailPolicy,
+	width: number,
+	siblings: ReadonlyArray<WorkerEntryState> | undefined,
+): string | null {
+	const council = entry.council;
+	if (detail.style !== "compact" || council === undefined) return null;
+	const round = (siblings ?? [entry]).filter(
+		(member) => member.council?.group === council.group && member.council.round === council.round,
+	);
+	const cut = round.some((member) => {
+		if (isSynthesis(member) || isPending(member)) return false;
+		const text = member.text.trim();
+		if (text.length === 0) return false;
+		if (siblings === undefined) return true;
+		return councilAnswerGist(member.text) !== text || alignedRowCuts(member, width, siblings);
+	});
+	if (!cut) return null;
+	return `${actionKeyLabel("clio-coder.output.cycle") ?? "/view"} shows the answers`;
 }
 
 /** A card's own row starts in the gutter, or, for a council member, in the content column. */
@@ -705,6 +734,25 @@ function alignedHeader(
 	_nowMs: number,
 	siblings?: ReadonlyArray<WorkerEntryState>,
 ): string {
+	const { header, task, taskWidth, elapsed } = alignedParts(entry, width, siblings);
+	if (taskWidth > 0 && task.length > 0) return `${header}  ${theme.fg("body", fitDisplayText(task, taskWidth))}`;
+	if (visibleWidth(header) <= width) return header;
+	// Below the header's minimum width, even its identity yields to elapsed.
+	return meta(truncateToWidth(elapsed, width, "", false));
+}
+
+/** Whether a card's aligned row cuts the task or answer it carries, so the row shows less than the run said. */
+function alignedRowCuts(entry: WorkerEntryState, width: number, siblings?: ReadonlyArray<WorkerEntryState>): boolean {
+	const { task, taskWidth } = alignedParts(entry, width, siblings);
+	return task.length > 0 && (taskWidth <= 0 || fitDisplayText(task, taskWidth) !== task);
+}
+
+/** The aligned row before its task: the header, the task it carries, and the columns left for that task. */
+function alignedParts(
+	entry: WorkerEntryState,
+	width: number,
+	siblings?: ReadonlyArray<WorkerEntryState>,
+): { header: string; task: string; taskWidth: number; elapsed: string } {
 	const elapsed = entry.telemetry?.activity.elapsed.display ?? "—";
 	const timer = meta(elapsed.padStart(TIMER_WIDTH));
 	const pending = isPending(entry);
@@ -750,10 +798,7 @@ function alignedHeader(
 		entry.council !== undefined && !isSynthesis(entry)
 			? councilMemberGist(entry)
 			: displayText(entry, "task", fleetNodeTaskBrief(entry.task ?? ""));
-	if (taskWidth > 0 && task.length > 0) return `${header}  ${theme.fg("body", fitDisplayText(task, taskWidth))}`;
-	if (visibleWidth(header) <= width) return header;
-	// Below the header's minimum width, even its identity yields to elapsed.
-	return meta(truncateToWidth(elapsed, width, "", false));
+	return { header, task, taskWidth, elapsed };
 }
 
 function dispatchHeader(siblings: ReadonlyArray<WorkerEntryState>, width: number): string {
@@ -1020,7 +1065,10 @@ export function renderWorkerEntryLines(
 	if (entry.helper && detail.style !== "detailed" && !workerNeedsInput(entry))
 		return helperRow(entry, safeWidth, detail, options.terminalRows, options.nowMs, options.siblings);
 	// The first card of a council round carries the round's header row.
-	const council = entry.council !== undefined && options.group !== "continues" ? [councilHeader(entry, safeWidth)] : [];
+	const council =
+		entry.council !== undefined && options.group !== "continues"
+			? [councilHeader(entry, safeWidth, compactCouncilHint(entry, detail, safeWidth, options.siblings))]
+			: [];
 	const group =
 		!inspect && detail.style === "detailed" && options.showGroupHeader && (options.siblings?.length ?? 0) > 1
 			? [dispatchHeader(options.siblings ?? [], safeWidth)]

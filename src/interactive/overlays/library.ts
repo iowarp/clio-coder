@@ -64,7 +64,7 @@ export const LIBRARY_TITLE = "Library";
 export const LIBRARY_EMPTY_BROWSE =
 	"No installable packages of this kind. Components that are already loaded are listed under Installed.";
 const LIBRARY_EMPTY_BROWSE_REMEDY =
-	"b shows loaded components in Installed. Register a package with clio-coder library register <path>, or press o to import from another local agent.";
+	"b shows loaded components in Installed. Register a package with clio-coder library register <path>, import one with /library import <path>, or press o to adopt from another local agent.";
 /** @internal exported for contract tests */
 export const LIBRARY_EMPTY_INSTALLED = "Nothing of this kind is installed or loaded in this project or for your user.";
 const LIBRARY_EMPTY_INSTALLED_REMEDY = "b shows installable packages.";
@@ -636,7 +636,10 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			{ key: "b", verb: "browse/installed", short: "view" },
 			{ key: "s", verb: "user/project", short: "scope" },
 			{ key: "n", verb: "notices" },
-			{ key: "o", verb: "import" },
+			// `o` adopts from another local agent; a path is imported only by command, so a footer wide enough to spell
+			// every entry in full names that command too (FX-14). A narrowing footer spells every entry short, and there `o`
+			// takes no more room than the `[o] import` it replaced, so it drops where it always did.
+			{ key: "o", verb: "adopt · /library import <path>", short: "adopt" },
 			{ key: "r", verb: "refresh" },
 		],
 		globalActions: {
@@ -653,10 +656,13 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			},
 			o: () => {
 				if (!deps.openImport) {
-					deps.notice("warn", "Import is unavailable in this session.");
+					deps.notice("warn", "Adopting from other agents is unavailable in this session.");
 					return;
 				}
-				deps.notice("info", "Import reviews another local agent's resources before anything is written.");
+				deps.notice(
+					"info",
+					"Adopt reviews another local agent's resources before anything is written. To import a path, run /library import <path>.",
+				);
 				deps.openImport();
 			},
 			r: () => {
