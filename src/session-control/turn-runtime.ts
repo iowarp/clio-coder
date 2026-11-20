@@ -1139,6 +1139,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let apiCallFirstDeltaAt: number | null = null;
 		// Ends the request in flight on the first-token watchdog's verdict; set per request, cleared when it settles (MD11).
 		let cutStalledRequest: ((reason: string) => void) | null = null;
+		// Each provider request's serial; the cut retires every request built up to it, so their callbacks go unheard (MD11).
+		let requestSerial = 0;
+		let retiredThrough = 0;
 		// Where a request is before `onStreamInvocation`. A watchdog abort while
 		// `apiCallStartedAt` is null names this step, because no request has
 		// reached the provider it would otherwise blame (#423).
@@ -1187,6 +1190,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					currentModel,
 					controlled,
 					(request) => {
+						const serial = ++requestSerial;
 						const retry = invokedAttempt;
 						if (retry && modelCall)
 							modelCall =
@@ -1230,13 +1234,16 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							// A load is this request's own wait, so its report lands on these facts and no other's.
 							[MODEL_ADMISSION]: (event: ModelAdmissionEvent) => applyModelAdmission(facts, event, Date.now()),
 							onResponse: async (...args: Parameters<NonNullable<NonNullable<typeof request.options>["onResponse"]>>) => {
+								// A request the first-token watchdog retired answers no one: its late status and first byte would
+								// otherwise land on the retry's classification and facts (MD11).
+								if (serial <= retiredThrough) return;
 								// Pi can discard HTTP 401 when rendering the body's friendly message (#427).
 								localRuntime.lastProviderStatus = args[0].status;
 								// Pi retries a retryable status inside one attempt; the first byte is the response that
 								// opens the stream. Transports that never report a response leave it unobserved (#434).
 								if (args[0].status >= 200 && args[0].status < 300) {
 									attempt?.mark("firstByte");
-									if (state.modelRequest) state.modelRequest.firstByteAt ??= Date.now();
+									if (state.modelRequest === facts) facts.firstByteAt ??= Date.now();
 									coldAtProbe = null;
 								}
 								await request.options?.onResponse?.(...args);
@@ -1520,6 +1527,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				apiCallStartedAt = performance.now();
 				apiCallFirstDeltaAt = null;
 				modelCall?.stage("send", "start");
+				// The request is out, so its first token is held to the route's first-token limit from now; the run's
+				// timer was armed for the mid-stream window, which a calibrated hosted route undercuts (MD11).
+				const retry = deps.retrySettings();
+				const firstTokenMs = retry.streamStallMs > 0 ? firstTokenLimitMs(retry) : null;
+				if (firstTokenMs !== null && firstTokenMs < retry.streamStallMs) {
+					clearStallTimer();
+					armStallTimer(firstTokenMs);
+				}
 			},
 			authResolvedByHost: true,
 			getApiKey: async () => {
@@ -1622,6 +1637,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			clearTimeout(stallTimer);
 			stallTimer = null;
 		};
+		// The silence the route's first token may keep: adaptive on a calibrated hosted route (MD11).
+		const firstTokenLimitMs = (retry: RetrySettings): number | null =>
+			firstTokenStallLimitMs(
+				retry,
+				deps.providers.getRuntime(localRuntime.runtimeId)?.tier,
+				routeFirstTokenSamples(localRuntime.targetId, localRuntime.wireModelId),
+			);
 		clearCurrentWatchdog = clearStallTimer;
 		callWait = () =>
 			!currentRun() || state.runtime !== localRuntime || localRuntime.agent.signal?.aborted
@@ -1651,18 +1673,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					// it can emit anything, which is minutes of healthy quiet; a stream
 					// that already produced output and stops is a wedged slot.
 					const awaitingFirstToken = apiCallStartedAt !== null && apiCallFirstDeltaAt === null;
-					const firstTokenLimitMs = awaitingFirstToken
-						? firstTokenStallLimitMs(
-								retry,
-								deps.providers.getRuntime(localRuntime.runtimeId)?.tier,
-								routeFirstTokenSamples(localRuntime.targetId, localRuntime.wireModelId),
-							)
-						: null;
-					if (awaitingFirstToken && firstTokenLimitMs === null) {
+					const firstTokenMs = awaitingFirstToken ? firstTokenLimitMs(retry) : null;
+					if (awaitingFirstToken && firstTokenMs === null) {
 						armStallTimer(retry.streamStallMs);
 						return;
 					}
-					const stallMs = firstTokenLimitMs ?? retry.streamStallMs;
+					const stallMs = firstTokenMs ?? retry.streamStallMs;
 					const idleMs = performance.now() - lastActivityAt;
 					if (idleMs < stallMs) {
 						armStallTimer(stallMs - idleMs);
@@ -1672,7 +1688,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					const stallReason = stallAbortReason(localRuntime.targetId, idleMs, state.streamStallStage, awaitingFirstToken);
 					state.streamStallReason = stallReason;
 					// A request that never started is ended here, not by its provider, so nothing it sends later reaches the turn.
-					if (awaitingFirstToken) cutStalledRequest?.(stallReason);
+					if (awaitingFirstToken) {
+						retiredThrough = requestSerial;
+						cutStalledRequest?.(stallReason);
+					}
 					cutStalledRequest = null;
 					localRuntime.agent.abort();
 				},
