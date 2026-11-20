@@ -161,6 +161,7 @@ import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
 import { ensureDetailLedgerForSession } from "../tools/extension-runtime-tools.js";
 import { scopedCapabilityShapes, scopeShapesDelta } from "../tools/gateway/scope-shapes.js";
 import { isGatewayChain } from "../tools/gateway-display.js";
+import { createHeadlessObservationPool } from "../tools/observation.js";
 import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { effectiveToolCall } from "../tools/surface.js";
 import type { ApprovalRequestView } from "./approval-request-view.js";
@@ -1523,6 +1524,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const retrySettings = (): RetrySettings => normalizeRetrySettings(deps.getSettings().chat.retry);
 
 	const hostRunContext = new AsyncLocalStorage<ToolInvokeOptions["hostRun"]>();
+	// A headless run's observation pool rolls once spent instead of capping the run (CLI-P42); attended turns keep theirs.
+	const headlessObservation = deps.headless === true ? createHeadlessObservationPool() : null;
 	const currentToolInvokeOptions = (toolCallId?: string): Partial<ToolInvokeOptions> => {
 		const options: Partial<ToolInvokeOptions> = {
 			toolResultMaxBytes: deps.getSettings().context.toolResultMaxBytes,
@@ -1538,14 +1541,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			options.correlationId = batch.id;
 			options.batchSize = batch.size;
 		}
+		const yolo = (deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) === "yolo";
 		options.turnBudgetContinues = budgetCrossingContinues({
-			yolo: (deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) === "yolo",
+			yolo,
 			machineTurn: machineTurnRunning !== null,
 			failure: state.continuation.stop,
 			locked: state.synthesisToolLock,
 			continuations: state.continuation.yoloContinuations,
 		});
 		if (options.turnBudgetContinues) options.observationBudgetRoll = () => requestBudgetRoll("observation");
+		// Yolo keeps XR-6 exactly, its stops included; the headless roll is never its fallback (CLI-P42).
+		else if (!yolo && headlessObservation !== null) Object.assign(options, headlessObservation.invokeOptions(batch?.id));
 		// The per-turn budgets follow this route's measured calls per round (CLI-P26).
 		const scale = turnBudgetWidthScale(
 			routeCallsPerRound(state.runtime?.agent.state.messages ?? [], state.runtime?.agent.state.model?.id),
@@ -1636,6 +1642,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitFooterNotice,
 		bus: deps.bus,
 		stepTurnEnd: () => stepTurnEnd(),
+		hostCompletionFacts: () => (headlessObservation?.stopped() === true ? ["observation_budget"] : []),
 		suppressFirings: (firingIds) => outcomeCollector.suppressFirings(firingIds),
 	});
 
@@ -3577,6 +3584,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					state.turnCalledWork = false;
 					state.finishRoundSpent = false;
 					state.finishReplyRefused = false;
+					// Per operator prompt: a later submit of the same host run (an --output-schema repair) keeps the pool's fact.
+					if (options.yoloContinuation !== true && options.machineTurn === undefined)
+						headlessObservation?.reset(options.hostRun?.runId);
 				}
 				state.continuation.beginPrompt({
 					requestContinuation: options.requestContinuation === true,

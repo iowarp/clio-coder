@@ -553,6 +553,9 @@ export interface ApprovalCarry {
 	approvedPlanHash?: string;
 }
 
+/** What a headless run's observation pool did with one call (CLI-P42); see `observationPoolEvent`. */
+export type ObservationPoolEvent = "refused" | "drained" | "delivered";
+
 export interface ToolInvokeOptions {
 	/** An invocation the harness runner makes on its own decision; never derived from model arguments. */
 	origin?: "harness";
@@ -643,6 +646,17 @@ export interface ToolInvokeOptions {
 	 * turn at its tool boundary instead of asking the model to re-plan (XR-6).
 	 */
 	observationBudgetRoll?: () => void;
+	/**
+	 * Headless runs only (CLI-P42): the observation pool this call charges after the run's pool rolled; absent or 0 is
+	 * the turn's own pool. `createHeadlessObservationPool` in `observation.ts` sets it with `observationPoolEvent`.
+	 */
+	observationPoolEpoch?: number;
+	/**
+	 * Headless runs only (CLI-P42): what the pool did with this call. `refused` (the pool was spent before it), `drained`
+	 * (it returned and left less than a slice) or `delivered` (it returned its result). Present, a spent pool rolls at
+	 * the next tool batch and a refusal tells the model to make the call again there.
+	 */
+	observationPoolEvent?: (event: ObservationPoolEvent) => void;
 	/** Session-effective ceiling for one tool result, read again before every invocation. */
 	toolResultMaxBytes?: number;
 	pendingSkillPolicy?: PendingSkillToolPolicy;

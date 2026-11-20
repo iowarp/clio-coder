@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { Type } from "typebox";
 import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
+import { sealedFactsNotVerified } from "../../src/cli/run-output.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -24,7 +25,8 @@ import { createEngineAgent } from "../../src/engine/agent.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import type { Model } from "../../src/engine/types.js";
 import { type ChatLoop, type ChatLoopEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
-import { createRegistry } from "../../src/tools/registry.js";
+import { finalizeObservation, observationBudgetExhausted, reserveObservation } from "../../src/tools/observation.js";
+import { createRegistry, type ToolInvokeOptions } from "../../src/tools/registry.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -99,12 +101,19 @@ function transport(toolRounds = 1, reply: string | ReadonlyArray<string> = "PONG
 /** A real engine and session journal over the fixture wire, with `run` standing in for the read tool. */
 function fixture(
 	toolRounds: number,
-	run: (loop: ChatLoop, signal: AbortSignal | undefined, steered: (() => boolean) | undefined) => Promise<void>,
+	run: (
+		loop: ChatLoop,
+		signal: AbortSignal | undefined,
+		steered: (() => boolean) | undefined,
+		options: ToolInvokeOptions | undefined,
+	) => Promise<void>,
 	reply?: string | ReadonlyArray<string>,
 	/** Keep the turn runtime's own stream (tool rounds and tool_choice) and swap only its fetch. */
 	throughToolRounds = false,
 	/** The stand-in tool may be ended by a queued steer after this grace (FX-32). */
 	steerGraceMs?: number,
+	/** Compose the loop as `clio-coder run` does. */
+	headless = false,
 ) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
@@ -128,6 +137,7 @@ function fixture(
 		throw new Error("fixture journal unavailable");
 	});
 	const loop: ChatLoop = createChatLoop({
+		...(headless ? { headless: true } : {}),
 		telemetry: { acquireTelemetrySession: journals.acquire } as unknown as TelemetryContract,
 		getSettings: () => settings,
 		providers: context.getContract("providers") as ProvidersContract,
@@ -169,7 +179,7 @@ function fixture(
 		baseActionClass: "read",
 		...(steerGraceMs === undefined ? {} : { steerInterruptible: true as const }),
 		async run(_args, options) {
-			await run(loop, options?.signal, options?.steerInterrupted);
+			await run(loop, options?.signal, options?.steerInterrupted, options);
 			return { kind: "ok", output: "recorded" };
 		},
 	});
@@ -447,6 +457,50 @@ it("run --output-schema's repair turn goes out text-only with its tool list kept
 		await f.loop.whenSettled();
 		strictEqual(f.wire.calls(), 3);
 		ok(f.wire.requests[2]?.toolChoice !== "none", JSON.stringify(f.wire.requests[2]));
+	} finally {
+		await f.close();
+	}
+});
+
+it("a headless run the observation pool stopped keeps the sealed fact through run --output-schema's repair turn (CLI-P42)", {
+	timeout: 10_000,
+}, async () => {
+	// The run's one tool call spends the pool and is then refused by it, so what it would have read went unseen.
+	const f = fixture(
+		1,
+		async (_loop, _signal, _steered, options) => {
+			const read = reserveObservation(4 * 1024 * 1024, options);
+			finalizeObservation({
+				tool: "read",
+				unit: "lines",
+				output: "x".repeat(read.callCapBytes),
+				shownCount: 1,
+				totalCount: 1,
+				truncated: false,
+				reservation: read,
+			});
+			const refused = reserveObservation(1024, options);
+			ok(refused.exhausted);
+			observationBudgetExhausted({ tool: "read", unit: "lines", reservation: refused, subject: "notes.txt", hint: "" });
+		},
+		["not json", '{"fixed":true}'],
+		false,
+		undefined,
+		true,
+	);
+	try {
+		const code = await runHeadlessMainAgent(f.loop, {
+			prompt: "Is it fixed?",
+			mode: "text",
+			outputSchema: { type: "object", properties: { fixed: { type: "boolean" } }, required: ["fixed"] },
+			shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
+		});
+		strictEqual(code, 0);
+		// The tool round, the answer that failed the schema, and the repair turn.
+		strictEqual(f.wire.calls(), 3);
+		const facts = f.loop.lastTurnCompletion?.()?.facts ?? [];
+		deepStrictEqual(facts, ["observation_budget"]);
+		ok(sealedFactsNotVerified(facts).startsWith("\nNot verified:\n- Observation budget: the per-turn observation pool"));
 	} finally {
 		await f.close();
 	}
