@@ -28,13 +28,11 @@ export function resolveRunRole(input: {
 	return input.readOnly ? "explorer" : "builder";
 }
 
-/** Report kinds whose findings are only as good as what the run observed. */
-const OBSERVED_REPORT_KINDS: ReadonlySet<string> = new Set([
-	"scout-report",
-	"provenance-report",
-	"research-report",
-	"context-handbook",
-]);
+/**
+ * Report kinds whose findings are only as good as what the run observed. Narrowed to the row-97 trigger for M1:
+ * provenance, research and handbook reports owe `answer` until M9 widens this to the full DESIGN 4.8 table.
+ */
+const OBSERVED_REPORT_KINDS: ReadonlySet<string> = new Set(["scout-report"]);
 
 /** The obligation table. An explorer's row is split by its report kind and by whether it was given read roots. */
 const OBLIGATIONS: Record<RunRole, Obligation> = {

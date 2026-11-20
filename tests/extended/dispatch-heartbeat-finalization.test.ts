@@ -255,8 +255,6 @@ it("never rewrites runs.json for a live worker's spend; a heartbeat transition d
 							},
 						};
 					}
-					// A provenance report owes observed evidence (M1), so the run reads once before it reports.
-					yield { type: "clio_coder_tool_finish", payload: { tool: "read", outcome: "ok" } };
 					const content = JSON.stringify({ confirmedFacts: [], missingEvidence: [], nextInspections: [] });
 					yield { type: "message_end", message: { role: "assistant", stopReason: "stop", content } };
 					settle({ exitCode: 0, signal: null });
