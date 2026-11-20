@@ -165,8 +165,9 @@ test("ACP stdio hooks route stray stdout and bound tool updates, and leave every
 		rawOutput: { output: "done", formatted_output: "done", log: "x".repeat(500), items: [1, 2, 3, 4, 5] },
 	};
 	const sent = { sessionId: "s-1", update };
-	// Before each reply the peer sends one heavy tool update; a noisy peer first prints an OAuth
-	// URL, a brace-prefixed fragment and a JSON-RPC-shaped log record that is no frame.
+	// Before each reply the peer sends one heavy tool update. A noisy peer first prints an OAuth URL,
+	// a brace-prefixed fragment, a JSON-RPC-shaped log record, two malformed responses for the pending
+	// id and an overlong line, all of them no frame, then sends its reply behind a BOM.
 	const peer = `
 		const payload = JSON.parse(process.argv[1]);
 		const noisy = process.argv[2] === "noisy";
@@ -181,9 +182,12 @@ test("ACP stdio hooks route stray stdout and bound tool updates, and leave every
 					process.stdout.write("Open https://auth.example/device?code=PRIVATE-CODE&state=abc123 to sign in\\n");
 					process.stdout.write("{oauth} sign in\\n");
 					process.stdout.write('{"jsonrpc":"2.0","level":"info","message":"x"}\\n');
+					process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, error: {} }) + "\\n");
+					process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {}, error: null }) + "\\n");
+					process.stdout.write("z".repeat(10000) + "\\n");
 				}
 				process.stdout.write(JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: payload }) + "\\n");
-				process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { ok: true } }) + "\\n");
+				process.stdout.write((noisy ? "\\uFEFF" : "") + JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { ok: true } }) + "\\n");
 			}
 		});
 	`;
@@ -229,16 +233,20 @@ test("ACP stdio hooks route stray stdout and bound tool updates, and leave every
 			transformStdout: routeNonJsonRpcStdout,
 			transformSessionUpdate: (params) => boundAcpSessionUpdate(params, budget),
 		});
+		// The malformed responses never settle the pending id, and the BOM-prefixed reply still does.
 		assert.deepEqual(hooked.result, { value: { ok: true } });
-		assert.equal(
-			hooked.stderr,
-			[
-				"Open https://auth.example/device?code=[redacted]&state=[redacted] to sign in",
-				"{oauth} sign in",
-				'{"jsonrpc":"2.0","level":"info","message":"x"}',
-				"",
-			].join("\n"),
-		);
+		const routed = hooked.stderr.split("\n");
+		assert.deepEqual(routed.slice(0, 5), [
+			"Open https://auth.example/device?code=[redacted]&state=[redacted] to sign in",
+			"{oauth} sign in",
+			'{"jsonrpc":"2.0","level":"info","message":"x"}',
+			'{"jsonrpc":"2.0","id":1,"error":{}}',
+			'{"jsonrpc":"2.0","id":1,"result":{},"error":null}',
+		]);
+		// The diagnostic cap holds the marker too.
+		assert.match(routed[5] ?? "", /^z+\[\d+ chars omitted\]$/);
+		assert.ok((routed[5] ?? "").length <= 4096);
+		assert.deepEqual(routed.slice(6), [""]);
 		const image = { type: "image", mimeType: "image/png", data: "" };
 		const imageMeta = { "clio-coder/omitted": { kind: "image", mimeType: "image/png", chars: 5_000 } };
 		// Keys, strings and markers share the 200 characters; the image keeps its shape with data emptied.

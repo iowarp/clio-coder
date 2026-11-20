@@ -144,31 +144,46 @@ function isJsonRpcId(value: unknown): boolean {
 	return typeof value === "string" || (typeof value === "number" && Number.isFinite(value));
 }
 
-/** A request, notification or response the dispatcher acts on without failing pending requests. */
+/**
+ * A request, notification or response the dispatcher acts on without failing
+ * pending requests. A method frame keeps today's id handling, `null` included;
+ * a response carries exactly one of `result` and a well-formed `error`.
+ */
 function isJsonRpcFrame(value: unknown): value is Record<string, unknown> {
 	if (!isRecord(value) || value.jsonrpc !== "2.0") return false;
-	if (typeof value.method === "string" && value.method.length > 0) return !("id" in value) || isJsonRpcId(value.id);
-	return "id" in value && (isJsonRpcId(value.id) || value.id === null) && ("result" in value || isRecord(value.error));
+	if (typeof value.method === "string" && value.method.length > 0) {
+		return !("id" in value) || value.id === null || isJsonRpcId(value.id);
+	}
+	if (!("id" in value) || !(value.id === null || isJsonRpcId(value.id))) return false;
+	const hasResult = "result" in value;
+	const hasError = "error" in value;
+	if (hasResult === hasError) return false;
+	if (hasResult) return true;
+	const error = value.error;
+	return isRecord(error) && typeof error.code === "number" && typeof error.message === "string";
 }
 
 /**
  * A `transformStdout` for a peer that prints text on stdout: only a well-formed
- * JSON-RPC 2.0 frame reaches the dispatcher, parsed once here; any other line,
- * plain text, a `{`-prefixed fragment, or a JSON log record, goes to the stderr
- * handlers as a diagnostic, so no stray line can fail a pending request.
+ * JSON-RPC 2.0 frame reaches the dispatcher, parsed once here from the same
+ * trimmed text the unhooked path parses (leading whitespace and BOM removed);
+ * any other line, plain text, a `{`-prefixed fragment, or a JSON log record,
+ * goes to the stderr handlers as a diagnostic, so no stray line can fail a
+ * pending request.
  */
 export function routeNonJsonRpcStdout(line: string): AcpStdoutLineDisposition {
-	if (!line.trimStart().startsWith("{")) return { diagnostic: line };
+	const trimmed = line.trimStart();
+	if (!trimmed.startsWith("{")) return { diagnostic: line };
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(line);
+		parsed = JSON.parse(trimmed);
 	} catch {
 		return { diagnostic: line };
 	}
 	return isJsonRpcFrame(parsed) ? { frame: parsed } : { diagnostic: line };
 }
 
-/** Longest routed diagnostic handed to the stderr handlers, after redaction. */
+/** Longest routed diagnostic handed to the stderr handlers, after redaction and marker included. */
 const ACP_MAX_DIAGNOSTIC_CHARS = 4096;
 
 /**
@@ -188,7 +203,9 @@ function headWithin(value: string, chars: number): string {
 function redactedDiagnostic(text: string): string {
 	const redacted = redactSecretString(text).replace(OAUTH_QUERY_VALUE_RE, "$1[redacted]");
 	if (redacted.length <= ACP_MAX_DIAGNOSTIC_CHARS) return redacted;
-	const head = headWithin(redacted, ACP_MAX_DIAGNOSTIC_CHARS);
+	// The marker for the whole text is the longest any cut of it can need.
+	const longestMarker = `[${redacted.length} chars omitted]`.length;
+	const head = headWithin(redacted, ACP_MAX_DIAGNOSTIC_CHARS - longestMarker);
 	return `${head}[${redacted.length - head.length} chars omitted]`;
 }
 
@@ -639,7 +656,9 @@ class StdioJsonRpcTransport implements AcpJsonRpcTransport {
 			if (disposition === null) return;
 			if (typeof disposition !== "string") {
 				if ("frame" in disposition) {
-					this.dispatchFrame(disposition.frame);
+					// The guard the unhooked path applies: a custom hook cannot inject a non-2.0 frame.
+					const frame: unknown = disposition.frame;
+					if (isRecord(frame) && frame.jsonrpc === "2.0") this.dispatchFrame(frame);
 					return;
 				}
 				// Stdout text never reached a sink before a hook routed it, so it is
