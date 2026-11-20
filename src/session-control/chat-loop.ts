@@ -205,7 +205,11 @@ import {
 	type OperatorMemoryStorePort,
 } from "./operator-memory.js";
 import { resolveFitOutputReserve, turnAdmissionRemedy } from "./output-reserve.js";
-import { REPETITION_REPROMPT_NOTICE_KEY, repetitionRepromptMessages } from "./repetition-detector.js";
+import {
+	REPETITION_REPROMPT_NOTICE_KEY,
+	repetitionRecoveryStage,
+	repetitionRepromptMessages,
+} from "./repetition-detector.js";
 import type { SubmitEvidence } from "./run-evidence.js";
 import { retireActiveUserContextForNextOperator } from "./session-replay-messages.js";
 import { type OutOfTurnRoute, runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./side-question.js";
@@ -3892,34 +3896,54 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							),
 						);
 					}
-					// The repetition check stopped a looping stream. Once per operator
-					// turn the model gets the stopped reply replaced by a nudge and one
-					// more run; an operator's Esc in the same window wins.
-					// The stopped reply already carries the reason (turn-runtime), so a second stop ends the turn on it.
-					if (admissionCurrent() && state.repetitionAbortReason !== null && state.activeInterruptReason === null) {
+					// The repetition check stopped a looping stream. The stopped reply is replaced by a nudge and the model
+					// runs again, at most twice per operator turn (`repetitionRecoveryStage`): a plain nudge that keeps the
+					// request, then, when that run is stopped too, a changed request with a firmer instruction and thinking one
+					// step lower (SC-5). An operator's Esc in the same window wins. The stopped reply already carries the
+					// reason (turn-runtime), so a stop with no recovery left ends the turn on it.
+					for (
+						let stage = repetitionRecoveryStage(state);
+						stage !== null && admissionCurrent();
+						stage = repetitionRecoveryStage(state)
+					) {
 						const turnId = state.activeUserTurnId;
-						if (turnId !== null && state.repetitionRepromptTurnId !== turnId) {
-							state.repetitionRepromptTurnId = turnId;
-							const stoppedFor = state.repetitionAbortReason;
-							state.repetitionAbortReason = null;
-							const last = agentRuntime.agent.state.messages.at(-1);
-							// The looping reply is in the ledger; replaying it would resend the loop.
-							const stopped =
-								last?.role === "assistant" && (last as { stopReason?: unknown }).stopReason === "aborted" ? last : undefined;
-							if (stopped) agentRuntime.agent.state.messages = agentRuntime.agent.state.messages.slice(0, -1);
-							emitNotice(
-								"[CLIO Coder] Asking the model once to act or answer instead of repeating.",
-								"warning",
-								REPETITION_REPROMPT_NOTICE_KEY,
-							);
-							const model = agentRuntime.agent.state.model;
+						const stoppedFor = state.repetitionAbortReason;
+						if (turnId === null || stoppedFor === null) break;
+						state.repetitionRepromptStages = stage;
+						state.repetitionRepromptTurnId = turnId;
+						state.repetitionAbortReason = null;
+						const last = agentRuntime.agent.state.messages.at(-1);
+						// The looping reply is in the ledger; replaying it would resend the loop.
+						const stopped =
+							last?.role === "assistant" && (last as { stopReason?: unknown }).stopReason === "aborted" ? last : undefined;
+						if (stopped) agentRuntime.agent.state.messages = agentRuntime.agent.state.messages.slice(0, -1);
+						const priorLevel = agentRuntime.agent.state.thinkingLevel;
+						const recoveryLevel =
+							stage === 1 ? priorLevel : lowerThinkingLevel(priorLevel, agentRuntime.runtimeResolution.modelRuntime.thinking);
+						emitNotice(
+							stage === 1
+								? "[CLIO Coder] Asking the model to act or answer instead of repeating."
+								: recoveryLevel === priorLevel
+									? "[CLIO Coder] The model repeated itself again; asking once more with a firmer instruction."
+									: // The operator's level, not the route's clamp of it, as the thinking-length recovery says.
+										`[CLIO Coder] The model repeated itself again; asking once more with a firmer instruction, with thinking ${recoveryLevel} instead of ${agentRuntime.runtimeResolution.requestedThinkingLevel}.`,
+							"warning",
+							REPETITION_REPROMPT_NOTICE_KEY,
+						);
+						if (recoveryLevel !== priorLevel && !context.thinkingUsesConfigurationUpdate())
+							context.noteColdReason("thinking_change");
+						const model = agentRuntime.agent.state.model;
+						agentRuntime.agent.state.thinkingLevel = recoveryLevel;
+						try {
 							await agentRuntime.agent.prompt(
 								recordRecovery(
 									"repetition-recovery",
-									repetitionRepromptMessages({ provider: model.provider, api: model.api, model: model.id }, stoppedFor),
+									repetitionRepromptMessages({ provider: model.provider, api: model.api, model: model.id }, stoppedFor, stage),
 									stopped,
 								),
 							);
+						} finally {
+							agentRuntime.agent.state.thinkingLevel = priorLevel;
 						}
 					}
 					// The output cap ran out while the model was still thinking. Once per

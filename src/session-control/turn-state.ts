@@ -291,8 +291,9 @@ export interface ChatTurnState {
 	toolProseAbortReason: string | null;
 	/** Set when the repetition check stopped a looping stream; consumed by the one nudge after it (`repetition-detector.ts`). */
 	repetitionAbortReason: string | null;
-	/** The operator turn that already spent its one repetition nudge. */
+	/** The operator turn that spent repetition recoveries, and how many (`repetitionRecoveryStage`). */
 	repetitionRepromptTurnId: string | null;
+	repetitionRepromptStages: number;
 	/** The operator turn that already spent its one recovery from a thinking-only length stop (`thinking-length-recovery.ts`). */
 	thinkingLengthRecoveryTurnId: string | null;
 	/** Reason the stall watchdog aborted a silent stream. Set just before `agent.abort()` and consumed by `reclassifyStallAbort` once the run settles, which is what separates a watchdog abort from an operator Esc. */
@@ -453,6 +454,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		toolProseAbortReason: null,
 		repetitionAbortReason: null,
 		repetitionRepromptTurnId: null,
+		repetitionRepromptStages: 0,
 		thinkingLengthRecoveryTurnId: null,
 		streamStallReason: null,
 		routeMove: null,

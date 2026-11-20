@@ -293,7 +293,7 @@ function fixture(
 	settings.chat.model = model.id;
 	// "high" on this on/off route runs as "low"; the recovery notice names the level the operator chose (RV-2).
 	settings.chat.thinkingLevel =
-		initialMode === "overthink" ? "high" : initialMode === "overthink-always" ? "low" : "off";
+		initialMode === "overthink" || initialMode === "loop" ? "high" : initialMode === "overthink-always" ? "low" : "off";
 	settings.targets = [{ ...target, defaultModel: model.id }];
 	if (visionCapable && settings.targets[0]) settings.targets[0].capabilities = { vision: true };
 	const runtime: RuntimeDescriptor = {
@@ -710,7 +710,7 @@ it("a tool cancellation persists its result before exactly one closing assistant
 	}
 });
 
-it("a reply the repetition guard stops twice fails the headless run on the guard's reason, naming no route", {
+it("a reply the repetition guard stops after a plain and a changed recovery fails the headless run on its reason (SC-5)", {
 	timeout: 15_000,
 }, async () => {
 	const f = fixture("loop");
@@ -728,7 +728,16 @@ it("a reply the repetition guard stops twice fails the headless run on the guard
 		});
 		process.stderr.write = write;
 		strictEqual(code, 1);
-		strictEqual(f.wire().calls(), 2);
+		strictEqual(f.wire().calls(), 3);
+		// The plain nudge keeps the request; the second recovery changes it: a firmer instruction, thinking one step lower.
+		const [, plain, changed] = f
+			.wire()
+			.requestBodies()
+			.map((body) => JSON.parse(body) as Record<string, unknown>);
+		deepStrictEqual(plain?.chat_template_kwargs, { enable_thinking: true });
+		deepStrictEqual(changed?.chat_template_kwargs, { enable_thinking: false });
+		doesNotMatch(JSON.stringify(plain?.messages), /stopped again/u);
+		match(JSON.stringify(changed?.messages), /stopped again/u);
 		const envelope = [...(readRunJournal(join(env.dir, "state"))?.envelopes.values() ?? [])][0];
 		match(envelope?.outcomeDetail ?? "", /^\[CLIO Coder\] stopped a model response that kept repeating itself/u);
 		doesNotMatch(stderr.join(""), /target 'cancellation-fixture'|Request was aborted/u);

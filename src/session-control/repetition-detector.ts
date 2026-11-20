@@ -160,11 +160,58 @@ export const REPETITION_REPROMPT_TOOL = "clio_repetition_reprompt";
 export const REPETITION_REPROMPT_NOTICE_KEY = "turn.repetition-reprompt";
 
 /**
- * The one nudge after a stopped repetition. A paired synthetic tool exchange,
+ * Recoveries one operator turn may spend on stopped repetition. The first is a plain nudge that keeps the request
+ * and its cached prefix. A plain nudge does not break every model's loop (nemotron loops again, SC-5), so when its
+ * run is stopped too the second changes the request: a firmer instruction, sent with thinking one step lower. A
+ * stop after that ends the turn on its reason.
+ */
+const REPETITION_RECOVERY_STAGES = 2;
+
+export type RepetitionRecoveryStage = 1 | 2;
+
+/** The recovery a stopped repetition gets next in this operator turn, or null when there is none to run. */
+export function repetitionRecoveryStage(state: {
+	readonly repetitionAbortReason: string | null;
+	readonly activeInterruptReason: string | null;
+	readonly activeUserTurnId: string | null;
+	readonly repetitionRepromptTurnId: string | null;
+	readonly repetitionRepromptStages: number;
+}): RepetitionRecoveryStage | null {
+	if (state.repetitionAbortReason === null || state.activeInterruptReason !== null || state.activeUserTurnId === null)
+		return null;
+	const spent = state.repetitionRepromptTurnId === state.activeUserTurnId ? state.repetitionRepromptStages : 0;
+	return spent === 0 ? 1 : spent < REPETITION_RECOVERY_STAGES ? 2 : null;
+}
+
+function repetitionRepromptText(stoppedFor: string, stage: RepetitionRecoveryStage): string {
+	const flood = stoppedFor.startsWith(TOOL_CALL_FLOOD_REASON_PREFIX);
+	const overrun = stoppedFor.startsWith(THINKING_OVERRUN_REASON_PREFIX);
+	if (stage === 2)
+		return flood
+			? "Your response was stopped again for issuing the same tool call over and over, so none of those calls ran. " +
+					"Make exactly ONE tool call with complete arguments and stop there, or answer in plain text if no call is needed."
+			: overrun
+				? "Your reasoning was stopped again after using most of the output limit with no answer or tool call. " +
+					"Keep your reasoning to a few lines, then make one tool call or give your answer in a few sentences."
+				: "Your response was stopped again for repeating the same sentences, so it was discarded. " +
+					"Do not restate your plan. Begin with the one tool call the task needs, or give your answer now in a few sentences.";
+	return flood
+		? "Your last response was stopped because it issued the same tool call again and again, so none of those calls ran. " +
+				"Do not repeat it. Make ONE tool call with complete arguments, read its result, then decide the next step."
+		: overrun
+			? "Your last response was stopped because its reasoning used most of the output limit without an answer or tool call, so it was discarded. " +
+				"Do not re-derive it. Make the next tool call the task needs, or answer now from what you already have."
+			: "Your last response was stopped because it kept repeating the same sentences without acting or answering. " +
+				"Do not repeat it. Make the next tool call the task needs, or answer now from what you already have.";
+}
+
+/**
+ * The nudge after a stopped repetition. A paired synthetic tool exchange,
  * never a user turn, as the locked-synthesis repair is: a late user message
  * re-renders earlier turns on templates keyed off the last user message and
  * invalidates the prompt cache (#55). `stoppedFor` is the stop's reason, which
- * says whether sentences or tool calls repeated.
+ * says whether sentences or tool calls repeated; `stage` 2 is the firmer
+ * wording of the changed second recovery.
  */
 export function repetitionRepromptMessages(
 	origin: {
@@ -173,6 +220,7 @@ export function repetitionRepromptMessages(
 		model: string;
 	},
 	stoppedFor: string,
+	stage: RepetitionRecoveryStage = 1,
 ): ReadonlyArray<AgentMessage> {
 	const id = `clio-repetition-reprompt-${Date.now()}`;
 	const timestamp = Date.now();
@@ -198,19 +246,7 @@ export function repetitionRepromptMessages(
 			role: "toolResult",
 			toolCallId: id,
 			toolName: REPETITION_REPROMPT_TOOL,
-			content: [
-				{
-					type: "text",
-					text: stoppedFor.startsWith(TOOL_CALL_FLOOD_REASON_PREFIX)
-						? "Your last response was stopped because it issued the same tool call again and again, so none of those calls ran. " +
-							"Do not repeat it. Make ONE tool call with complete arguments, read its result, then decide the next step."
-						: stoppedFor.startsWith(THINKING_OVERRUN_REASON_PREFIX)
-							? "Your last response was stopped because its reasoning used most of the output limit without an answer or tool call, so it was discarded. " +
-								"Do not re-derive it. Make the next tool call the task needs, or answer now from what you already have."
-							: "Your last response was stopped because it kept repeating the same sentences without acting or answering. " +
-								"Do not repeat it. Make the next tool call the task needs, or answer now from what you already have.",
-				},
-			],
+			content: [{ type: "text", text: repetitionRepromptText(stoppedFor, stage) }],
 			isError: true,
 			timestamp,
 		},
