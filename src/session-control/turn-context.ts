@@ -656,8 +656,8 @@ function recordContextSnapshot(sessionId: string, snapshot: ContextSnapshot): vo
 }
 
 /**
- * The error name of the post-tool guard's clean stop, when one tool result alone still overflows after compaction.
- * Pi keeps only the message, so the turn runtime reads the name off the throw to journal the harness's own cause.
+ * The error name of the post-tool guard's clean stops: one tool result alone still overflows after compaction, or the
+ * compacted request with its tool results still does not fit the window. Pi keeps only the message, so the turn runtime reads the name off the throw to journal the harness's own cause.
  */
 export const OVERSIZED_RESULT_STOP = "ClioOversizedResultStop";
 
@@ -4034,7 +4034,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (oversize !== null) throw oversizedResultStop(oversize);
 			const after = fitFigures(afterView);
 			if (knownWindow && !requestFits(after.input, after.reserve, afterView.effectiveWindow)) {
-				throw new Error(
+				// The guard's own stop, like the oversized-result one: the harness cause, not a route failure (CLI-3).
+				throw oversizedResultStop(
 					`[CLIO Coder] post-tool context guard stopped continuation before provider call: estimated input ${after.input} plus reserved output ${after.reserve} tokens does not fit context window ${afterView.effectiveWindow}. Use /context compact, narrower reads, or a follow-up turn with smaller observations.`,
 				);
 			}

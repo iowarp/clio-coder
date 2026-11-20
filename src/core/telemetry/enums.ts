@@ -57,7 +57,7 @@ export const FailureCause = vocabulary([
 	"turn_timeout",
 	"output_cap",
 	"loop_guard",
-	// The post-tool context guard ended the turn cleanly: after compaction one tool result alone still overflows.
+	// The post-tool context guard ended the turn cleanly: after compaction the tool results still overflow the window.
 	"oversized_tool_result",
 	"shutdown",
 	"internal",
