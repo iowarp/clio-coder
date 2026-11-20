@@ -347,6 +347,10 @@ test("the default banner claims only automatic edits on a host whose shell runs 
 			match(text, /Default · auto edits · no OS sandbox/u);
 			ok(!text.includes("auto in workspace"), text);
 		}
+		contained = null;
+		const unchecked = live.render(120).map(stripTerminalSequences).join("\n");
+		match(unchecked, /Default · auto edits\s*│/u);
+		ok(!unchecked.includes("auto in workspace") && !unchecked.includes("no OS sandbox"), unchecked);
 		contained = true;
 		match(live.render(120).map(stripTerminalSequences).join("\n"), /Default · auto in workspace/u);
 	} finally {
@@ -382,7 +386,7 @@ test("startup and live tier changes share one bounded welcome policy", () => {
 							ok(!/██|\/help|Awareness/u.test(text));
 						} else if (style === "standard") {
 							ok(lines.length <= 8);
-							match(text, /Default · auto in workspace/u);
+							match(text, /Default · auto edits\s*(?:│|$)/mu);
 							ok(!text.includes("██"));
 						} else ok(text.includes("██"));
 					}
