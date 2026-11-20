@@ -65,6 +65,36 @@ export async function waitForPrefixLeader(
 	return { role: "follower", leaderRunId: group.leaderRunId, heldMs: Math.max(0, now() - startedAt) };
 }
 
+const liveCacheLanes = new Map<string, Set<number>>();
+
+/**
+ * Workers with one stable head share a provider session id on a session-routed backend, so a later one reads the
+ * head an earlier one wrote. The id is a routing affinity, and live conversations that share one get routed away
+ * from their own history more often than conversations with an id each. Measured on gpt-6-luna, 2026-11-20, later
+ * calls that read the worker's whole previous prompt, shared against separate ids: four live workers per id 0.45
+ * against 0.62 in a batch of twelve and 0.47 against 0.52 in a batch of six. So each live worker of a head takes a
+ * lane of its own, the lowest free one, and the lane rides its spec into that id (FL-17). Workers started one after
+ * another all take lane 0, and a batch's lanes are warm for the next batch. Lanes are per process.
+ */
+export function claimCacheLane(key: string): { lane: number; release: () => void } {
+	const live = liveCacheLanes.get(key) ?? new Set<number>();
+	liveCacheLanes.set(key, live);
+	let lane = 0;
+	while (live.has(lane)) lane += 1;
+	live.add(lane);
+	let released = false;
+	return {
+		lane,
+		release: () => {
+			// A second release must not free a lane another worker has taken since.
+			if (released) return;
+			released = true;
+			live.delete(lane);
+			if (live.size === 0 && liveCacheLanes.get(key) === live) liveCacheLanes.delete(key);
+		},
+	};
+}
+
 /** The result a follower reports when it was aborted before its worker existed. */
 const ABORTED_BEFORE_START: SpawnedWorkerResult = { exitCode: null, signal: "SIGTERM" };
 

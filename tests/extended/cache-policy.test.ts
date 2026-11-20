@@ -21,6 +21,7 @@ import {
 } from "../../src/engine/agent.js";
 import { streamSimple } from "../../src/engine/ai.js";
 import { engineMainStreamSimple } from "../../src/engine/api-registry.js";
+import { workerCacheFamilyId } from "../../src/engine/apis/cache-family.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
 
 registerClioApiProviders();
@@ -124,6 +125,34 @@ test("only the main thread defaults Anthropic to the 1h TTL (#422)", async () =>
 		if (previous === undefined) delete process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION;
 		else process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION = previous;
 	}
+});
+
+test("workers with one stable head share a session id only where the backend routes its cache by it (FL-17)", () => {
+	const read = { name: "read", description: "Read a file.", parameters: { type: "object", properties: {} } };
+	const head = {
+		api: "openai-codex-responses",
+		provider: "openai-codex",
+		modelId: "gpt-6-luna",
+		thinkingLevel: "low",
+		systemPrompt: "# Identity",
+		tools: [read],
+		lane: 0,
+	};
+	const family = workerCacheFamilyId(head);
+	ok(family !== undefined && /^clio-coder-w-[a-f0-9]{40}-0$/u.test(family));
+	strictEqual(workerCacheFamilyId({ ...head, tools: [{ ...read }] }), family);
+	for (const other of [
+		{ ...head, systemPrompt: "# Identity\n" },
+		{ ...head, modelId: "gpt-6.1-sol" },
+		{ ...head, thinkingLevel: "high" },
+		{ ...head, lane: 1 },
+		{ ...head, tools: [{ ...read, description: "Read one file." }] },
+		{ ...head, tools: [read, { ...read, name: "grep" }] },
+	])
+		ok(workerCacheFamilyId(other) !== family);
+	// Only a measured session-routed backend takes the shared id; elsewhere a worker keeps an id of its own.
+	for (const api of ["anthropic-messages", "openai-completions", "openai-responses"])
+		strictEqual(workerCacheFamilyId({ ...head, api }), undefined);
 });
 
 test("the main thread's Codex request sends the pinned prompt layer as its own item, the rest right after it", async () => {

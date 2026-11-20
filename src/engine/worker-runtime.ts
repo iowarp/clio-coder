@@ -29,6 +29,7 @@ import { estimateAgentMessageTokens } from "../domains/session/context-accountin
 import { abortReasonCause } from "../domains/telemetry/call-facts.js";
 import { seededWorkerMessages, seedRecallLineage } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
+import { workerCacheFamilyId } from "./apis/cache-family.js";
 import { anchorContextAtInputTokens, requestOutputReserve } from "./apis/output-budget.js";
 import { normalizeContext, resolvedRequestContext } from "./context.js";
 import { disableCopilotConversationResume } from "./copilot/session-fs.js";
@@ -268,6 +269,8 @@ export interface WorkerRunInput {
 	sampling?: "deterministic";
 	/** Epoch ms when exploration ends; later rounds are the terminal handoff only. */
 	synthesisAt?: number;
+	/** The dispatcher's cache lane for this run; absent means the first. */
+	cacheLane?: number;
 	/** Orchestrator-resolved runtime decision carried on the WorkerSpec. */
 	runtimeResolution?: RuntimeTargetSnapshot;
 	/**
@@ -1900,8 +1903,22 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// session headers) from the session ID. Without one every worker call
 	// landed cold: captured Luna workers read 48% of input from cache against
 	// the main agent's 89%. One opaque ID per invocation keeps it out of the
-	// prompt, so prompt and tool attestation hashes are unchanged.
-	options.sessionId = input.sessionId || randomUUID();
+	// prompt, so prompt and tool attestation hashes are unchanged. Where the
+	// backend routes to its cache by that ID, workers with one stable head and
+	// cache lane take the same one, so a later worker reads the head an earlier
+	// one wrote (FL-17).
+	options.sessionId =
+		input.sessionId ||
+		workerCacheFamilyId({
+			api: model.api,
+			provider: model.provider,
+			modelId: model.id,
+			thinkingLevel: effectiveThinkingLevel,
+			systemPrompt: input.systemPrompt,
+			tools,
+			lane: input.cacheLane ?? 0,
+		}) ||
+		randomUUID();
 	// That id may be the parent's: a worker leaves the parent's resumable Copilot conversation alone (bt-10).
 	disableCopilotConversationResume();
 

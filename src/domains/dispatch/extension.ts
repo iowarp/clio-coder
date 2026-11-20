@@ -456,7 +456,7 @@ import {
 import { type PeerInstructions, peerInstructionsStaleMessage, resolvePeerInstructions } from "./peer-instructions.js";
 import { deriveEnvelopePhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
-import { claimSharedPrefix, startAfterPrefixHold, waitForPrefixLeader } from "./prefix-stagger.js";
+import { claimCacheLane, claimSharedPrefix, startAfterPrefixHold, waitForPrefixLeader } from "./prefix-stagger.js";
 import { createRecordingJournal } from "./recording.js";
 import * as recovery from "./recovery-candidates.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
@@ -8380,7 +8380,30 @@ export function createDispatchBundle(
 						reportDispatchDiagnostic(`write peer instructions in task worktree ${req.taskWorktree.runId}`, error);
 					}
 				}
-				return (placement?.spawn ?? spawnWorker)(spec, spawnOptions);
+				// Each live worker of one head takes its own provider session id; the lane frees when this worker ends (FL-17).
+				// The head is the system prompt and tool surface alone: the prompt signature also covers each run's task.
+				const lane =
+					lifecycle.runtimeKind === "http" && lifecycle.systemPrompt.length > 0
+						? claimCacheLane(
+								sha256(
+									JSON.stringify([
+										lifecycle.target.target.id,
+										lifecycle.target.wireModelId,
+										lifecycle.toolSignature,
+										lifecycle.systemPrompt,
+									]),
+								),
+							)
+						: null;
+				if (lane === null) return (placement?.spawn ?? spawnWorker)(spec, spawnOptions);
+				try {
+					const started = (placement?.spawn ?? spawnWorker)({ ...spec, cacheLane: lane.lane }, spawnOptions);
+					void started.promise.then(lane.release, lane.release);
+					return started;
+				} catch (error) {
+					lane.release();
+					throw error;
+				}
 			};
 			if (prefixClaim?.role === "follower") {
 				// The handle returns now; only the worker's start waits for the leader, so a slow leader holds no caller.
