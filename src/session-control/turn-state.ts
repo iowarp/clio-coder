@@ -424,6 +424,7 @@ export type TurnContextState = TurnStateView<
 export type TurnPersistenceState = TurnStateView<
 	"activeInterruptReason" | "runtime",
 	| "activeUserTurnId"
+	| "currentTurnOrigin"
 	| "interruptedAssistantMessage"
 	| "interruptedCall"
 	| "lastTurnId"
