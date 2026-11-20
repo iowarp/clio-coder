@@ -1352,6 +1352,8 @@ export interface RouteReadinessFacts {
 	lastFailure?: TurnSummary["failure"];
 	/** A worker call on this exact route got output this session, which is evidence the model answers. */
 	workerAnswered?: boolean;
+	/** The last probe found the selected model unloaded on its server, so the first request loads it. */
+	notResident?: boolean;
 	/** What the setup status says this route lacks, whose sentence the rail states as the way out. */
 	missing?: Missing;
 }
@@ -1416,6 +1418,14 @@ export function idleReadinessPresentation(
 	// `no request yet` was false once a worker had used the same model; an answered call is an answered call.
 	if (facts.lastStop === null && facts.workerAnswered === true) {
 		return { glyph: GLYPH.ok, ...quiet, label: fit([{ text: "is ready", keep: 9 }]), ...shown() };
+	}
+	// The boot notice says the model is not resident; a ready mark beside it would contradict it.
+	if (facts.lastStop === null && facts.notResident === true && facts.health === "healthy") {
+		const label = fit([
+			{ text: "is not loaded", keep: 9 },
+			{ text: "loads on first request", keep: 5 },
+		]);
+		return { glyph: GLYPH.queued, ...quiet, label, ...shown() };
 	}
 	const server = facts.targetId;
 	const label =

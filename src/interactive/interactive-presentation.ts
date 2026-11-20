@@ -20,7 +20,11 @@ import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { PANES_PRESETS } from "../domains/mux/operations.js";
 import { selectProjectPreload } from "../domains/prompts/preload.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
-import { resolveModelRuntimeCapabilitiesForProviders, thinkingLevelChoiceLabel } from "../domains/providers/index.js";
+import {
+	modelResidencyForStatus,
+	resolveModelRuntimeCapabilitiesForProviders,
+	thinkingLevelChoiceLabel,
+} from "../domains/providers/index.js";
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { effectiveYoloConfinement } from "../domains/safety/autonomy.js";
@@ -929,6 +933,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 				lastStop: onRoute ? last.stopReason : null,
 				workerAnswered:
 					(routeFirstOutput(deps.telemetry.read?.live() ?? null, route.target, route.model, "worker")?.calls ?? 0) > 0,
+				...(route.model && modelResidencyForStatus(target, route.model) === "absent" ? { notResident: true } : {}),
 				...(onRoute && last.failure !== undefined ? { lastFailure: last.failure } : {}),
 			};
 			const missing = missingFromTargetStatus(target);
