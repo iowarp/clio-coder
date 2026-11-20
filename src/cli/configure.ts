@@ -107,7 +107,14 @@ import {
 import { offerCopilotSignIn } from "./copilot-sign-in.js";
 import { createLifecyclePresenter, type LifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
 import { canSelect, promptSelect } from "./select.js";
-import { credentialWriteFailed, printError, printNote, printOk, printPlaintextCredentialWarning } from "./shared.js";
+import {
+	credentialFileProtection,
+	credentialWriteFailed,
+	printError,
+	printNote,
+	printOk,
+	printPlaintextCredentialWarning,
+} from "./shared.js";
 import { terminalColumns, wrapPlain } from "./text-layout.js";
 
 const HELP = `clio-coder configure
@@ -987,7 +994,11 @@ async function runTargetSetupInteractive(
 		if (choice === null) return 0;
 		const normalized = choice.trim().toLowerCase();
 		if (normalized === "stored") {
-			const literal = await rl.text("API key literal (stored in credentials.yaml, mode 0600)", "", true);
+			const literal = await rl.text(
+				`API key literal (stored in credentials.yaml, ${credentialFileProtection()})`,
+				"",
+				true,
+			);
 			if (literal !== null && literal.length > 0) {
 				apiKeyLiteral = literal;
 				apiKeyRef = targetApiKeyRef(targetId, settings.targets);

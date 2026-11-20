@@ -106,7 +106,7 @@ import { inferKeyProvider } from "./key-prefix.js";
 import type { LifecyclePresenter } from "./lifecycle-presenter.js";
 import { createLifecyclePresenter, shortenPath } from "./lifecycle-presenter.js";
 import { canSelect, promptSelect, promptText } from "./select.js";
-import { credentialWriteFailed } from "./shared.js";
+import { credentialFileProtection, credentialWriteFailed } from "./shared.js";
 import { truncate } from "./text-layout.js";
 
 export interface OnboardingStreams {
@@ -479,7 +479,9 @@ const KEY_STEP: Step = {
 			heading: [
 				"",
 				chalk.bold("Paste your API key"),
-				chalk.dim(`Saved to ${shortenPath(authStoragePath())} (mode 0600, not encrypted) when you save.`),
+				chalk.dim(
+					`Saved to ${shortenPath(authStoragePath())} (${credentialFileProtection()}, not encrypted) when you save.`,
+				),
 			],
 			initial: answers.apiKeyEnv !== undefined ? `$${answers.apiKeyEnv}` : "",
 			hint: "or type $NAME to read the key from that environment variable instead",
@@ -1111,7 +1113,7 @@ const CREDENTIAL_STEP: Step = {
 			{
 				value: "stored" as CredentialSource,
 				label: "Store the key",
-				hint: "written to credentials.yaml, mode 0600, not encrypted",
+				hint: `written to credentials.yaml, ${credentialFileProtection()}, not encrypted`,
 			},
 			...(hasStored ? [{ value: "keep" as CredentialSource, label: "Keep what is there", hint: stored }] : []),
 			{
@@ -1562,7 +1564,11 @@ const REVIEW_STEP: Step = {
 				[
 					"Credential handling",
 					...(answers.credential === "stored"
-						? ["Key written only when you save.", "Local storage: mode 0600.", "Storage is not encrypted."]
+						? [
+								"Key written only when you save.",
+								`Local storage: ${credentialFileProtection()}.`,
+								"Storage is not encrypted.",
+							]
 						: answers.credential === "env"
 							? [
 									`Read from $${answers.apiKeyEnv}`,
@@ -1687,7 +1693,7 @@ async function offerKeyForApp(wizard: Wizard, answers: Answers): Promise<StepOut
 		heading: [
 			"",
 			chalk.bold("The desktop app cannot see this shell's key. Store it for the app too?"),
-			`Clio would store ${variable} unencrypted in ${shortenPath(authStoragePath())} (mode 0600).`,
+			`Clio would store ${variable} unencrypted in ${shortenPath(authStoragePath())} (${credentialFileProtection()}).`,
 		],
 		choices: [
 			{ value: false, label: "No", hint: "the app asks for the key itself" },
@@ -2042,8 +2048,8 @@ async function finish(wizard: Wizard, answers: Answers): Promise<number> {
 			// Inside the TUI the flag is not something the operator can type; the credential step's choice is.
 			presenter.warn(
 				wizard.host
-					? "API key stored unencrypted (mode 0600). Any process running as you can read it. Edit the target and choose Environment variable to keep the key off disk."
-					: "API key stored unencrypted (mode 0600). Any process running as you can read it. Use --api-key-env <VAR> to keep the key off disk.",
+					? `API key stored unencrypted (${credentialFileProtection()}). Any process running as you can read it. Edit the target and choose Environment variable to keep the key off disk.`
+					: `API key stored unencrypted (${credentialFileProtection()}). Any process running as you can read it. Use --api-key-env <VAR> to keep the key off disk.`,
 			);
 		}
 
@@ -2066,7 +2072,7 @@ async function finish(wizard: Wizard, answers: Answers): Promise<number> {
 				return 1;
 			}
 			presenter.warn(
-				`${answers.apiKeyEnv} stored unencrypted (mode 0600) for the desktop app. Any process running as you can read it. ${targetId} still reads the variable first.`,
+				`${answers.apiKeyEnv} stored unencrypted (${credentialFileProtection()}) for the desktop app. Any process running as you can read it. ${targetId} still reads the variable first.`,
 			);
 		}
 
