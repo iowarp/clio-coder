@@ -5,6 +5,7 @@
  * layer, for a transient snapshot and for one read from disk.
  */
 import { notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
@@ -57,4 +58,24 @@ it("read-only navigation keeps the object it holds when the tree is unchanged", 
 	const stale = await loadCodewikiForTool(cwd);
 	ok(stale.ok);
 	ok(stale.codewiki.symbols.some((symbol) => symbol.name === "two"));
+});
+
+it("concurrent code_nav loads for one workspace share one reconciliation worker", async () => {
+	// Parallel code_nav calls each started a 1 GiB-heap worker over the same tree.
+	const cwd = isolated.dir;
+	writeFileSync(join(cwd, "a.ts"), "export const one = 1;\n");
+	let workers = 0;
+	const count = (): void => {
+		workers += 1;
+	};
+	subscribe("worker_threads", count);
+	try {
+		const loads = await Promise.all([loadCodewikiForTool(cwd), loadCodewikiForTool(cwd), loadCodewikiForTool(cwd)]);
+		strictEqual(workers, 1);
+		const [first, ...rest] = loads;
+		ok(first?.ok);
+		for (const load of rest) strictEqual(load.ok && load.codewiki, first.codewiki);
+	} finally {
+		unsubscribe("worker_threads", count);
+	}
 });

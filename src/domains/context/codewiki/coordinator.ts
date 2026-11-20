@@ -312,23 +312,28 @@ export function coordinateCodewikiExclusive<T>(
 	);
 }
 
-/** Reconcile a read tool's private snapshot without a writer lease or workspace mutation. */
-export async function reconcileCodewikiCandidate(
+/**
+ * Reconcile a read tool's private snapshot without a writer lease or workspace mutation. It still joins the
+ * workspace queue, so a read reconcile never runs its worker beside a writer's or another reader's for one tree.
+ */
+export function reconcileCodewikiCandidate(
 	request: Extract<CodewikiBuildWorkerRequest, { kind: "ensure" }> & { current: Codewiki | null },
 ): Promise<CodewikiBuildWorkerResult> {
-	if (request.current !== null) {
-		const check = await executeInWorker({
-			kind: "check",
-			cwd: request.cwd,
-			current: artifactRef(request.current),
-			previous: request.previous,
-		});
-		if (!check.changed) return { codewiki: request.current, fingerprint: check.fingerprint, changed: false };
-	}
-	const outcome = await executeInWorker(request);
-	const codewiki = outcome.codewiki ?? request.current;
-	if (!codewiki) throw new Error("codewiki reconciliation returned no artifact");
-	return { codewiki, fingerprint: outcome.fingerprint, changed: outcome.changed };
+	return enqueueWorkspace(resolve(request.cwd), async () => {
+		if (request.current !== null) {
+			const check = await executeInWorker({
+				kind: "check",
+				cwd: request.cwd,
+				current: artifactRef(request.current),
+				previous: request.previous,
+			});
+			if (!check.changed) return { codewiki: request.current, fingerprint: check.fingerprint, changed: false };
+		}
+		const outcome = await executeInWorker(request);
+		const codewiki = outcome.codewiki ?? request.current;
+		if (!codewiki) throw new Error("codewiki reconciliation returned no artifact");
+		return { codewiki, fingerprint: outcome.fingerprint, changed: outcome.changed };
+	});
 }
 
 /** Build a preview candidate in the worker without acquiring a writer lease or touching disk. */

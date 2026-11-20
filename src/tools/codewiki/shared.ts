@@ -30,6 +30,13 @@ const transientCodewikis = new Map<
 
 const codewikiArtifactCache = new Map<string, CodewikiArtifactCacheEntry>();
 
+type CodewikiToolLoad =
+	| { ok: true; codewiki: Codewiki; fingerprint: import("../../domains/context/fingerprint.js").Fingerprint }
+	| { ok: false; message: string };
+
+/** One reconciliation per workspace at a time; every concurrent caller awaits it. Settled loads leave the map. */
+const inflightCodewikis = new Map<string, Promise<CodewikiToolLoad>>();
+
 function codewikiArtifactIdentity(cwd: string): CodewikiArtifactIdentity | null {
 	try {
 		const stats = statSync(codewikiPath(cwd), { bigint: true });
@@ -80,16 +87,33 @@ function readCodewikiForTool(cwd: string): Codewiki | null {
  * The current code map for a tool call, reconciled with the working tree in
  * memory. Nothing is written: the result is held per workspace, keyed to the
  * artifact on disk, so the next call checks freshness from it instead of
- * reindexing.
+ * reindexing. Concurrent calls for one workspace share a single reconciliation
+ * (each one is a worker with its own 1 GiB heap), and a failed load is not
+ * kept, so the next call retries.
  */
-export async function loadCodewikiForTool(
-	cwd: string = process.cwd(),
-): Promise<
-	| { ok: true; codewiki: Codewiki; fingerprint: import("../../domains/context/fingerprint.js").Fingerprint }
-	| { ok: false; message: string }
-> {
+export function loadCodewikiForTool(cwd: string = process.cwd()): Promise<CodewikiToolLoad> {
+	let workspace: string;
 	try {
-		const workspace = resolve(cwd);
+		workspace = resolve(cwd);
+	} catch (err) {
+		return Promise.resolve(codewikiUnavailable(err));
+	}
+	const pending = inflightCodewikis.get(workspace);
+	if (pending) return pending;
+	const load = reconcileCodewikiForTool(workspace).finally(() => {
+		if (inflightCodewikis.get(workspace) === load) inflightCodewikis.delete(workspace);
+	});
+	inflightCodewikis.set(workspace, load);
+	return load;
+}
+
+function codewikiUnavailable(err: unknown): CodewikiToolLoad {
+	const msg = err instanceof Error ? err.message : String(err);
+	return { ok: false, message: `codemap unavailable. run /context refresh to rebuild it. ${msg}` };
+}
+
+async function reconcileCodewikiForTool(workspace: string): Promise<CodewikiToolLoad> {
+	try {
 		const identity = codewikiArtifactIdentity(workspace);
 		const cached = transientCodewikis.get(workspace);
 		const sameDisk =
@@ -115,8 +139,7 @@ export async function loadCodewikiForTool(
 		}
 		return { ok: true, codewiki: result.codewiki, fingerprint: result.fingerprint };
 	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		return { ok: false, message: `codemap unavailable. run /context refresh to rebuild it. ${msg}` };
+		return codewikiUnavailable(err);
 	}
 }
 
