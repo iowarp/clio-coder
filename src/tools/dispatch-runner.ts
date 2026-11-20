@@ -2638,6 +2638,8 @@ async function runCouncil(
 			systemPrompt: COUNCIL_JUDGE_PROMPT,
 			readOnly: true,
 			toolProfile: "council-read-only",
+			// The judge reads in the seats' tree: they carry base.cwd through the spread, the judge has no spread.
+			...(base.cwd !== undefined ? { cwd: base.cwd } : {}),
 			gate: { role: "synthesis", group, cycle: council.rounds, subjects: finalRuns.map((run) => subjectRef(run.receipt)) },
 			council: { group, label: "synthesis", round: council.rounds },
 			...(council.judge?.target ? { target: council.judge.target } : {}),
