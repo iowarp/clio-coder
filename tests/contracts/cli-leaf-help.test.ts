@@ -50,7 +50,7 @@ const CASES: ReadonlyArray<{ args: string[]; usage: RegExp }> = [
 	{ args: ["session", "terminate", "some-session", "--help"], usage: /clio-coder session terminate / },
 	{ args: ["interop", "adopt", "claude-code", "--yes", "--help"], usage: /clio-coder interop <subcommand>/ },
 	{ args: ["verifiers", "inspect", "--help"], usage: /clio-coder verifiers inspect --json/ },
-	{ args: ["version", "--help"], usage: /clio-coder version \[--worker-specs \| --build\]/ },
+	{ args: ["version", "--help"], usage: /clio-coder version \[--worker-specs \| --build \| --json\]/ },
 	{ args: ["arena", "run", "--help"], usage: /clio-coder arena run --contender / },
 	{ args: ["research", "start", "--help"], usage: /clio-coder research start / },
 ];
@@ -91,7 +91,7 @@ describe("config and version refuse what they do not take", { concurrency: 2 }, 
 	for (const [args, refusal] of [
 		[["config", "--jsn"], /error: unknown flag: --jsn\n/],
 		[["config", "inspect", "extra"], /error: unexpected argument: extra\n/],
-		[["version", "--bogus"], /error: unknown flag: --bogus\n/],
+		[["version", "--bogus"], /^clio-coder version: unknown flag: --bogus\nsee: clio-coder version --help\n$/],
 	] as const) {
 		it(`clio-coder ${args.join(" ")} exits 2 naming it`, async () => {
 			const result = await cli(args);
@@ -100,4 +100,45 @@ describe("config and version refuse what they do not take", { concurrency: 2 }, 
 			match(result.stderr, refusal);
 		});
 	}
+});
+
+// Lifecycle leaves (lane L9): one diagnostic and a see: line on stderr, and
+// under --json one failure document on stdout with the slug a script branches on.
+describe("lifecycle leaves refuse with one diagnostic and, under --json, one failure document", {
+	concurrency: 2,
+}, () => {
+	for (const [args, slug] of [
+		[["paths", "--bogus", "--json"], "unknown_flag"],
+		[["version", "--json", "--build"], "flag_conflict"],
+		[["reset", "--state", "--json"], "confirmation_required"],
+		[["uninstall", "--json"], "confirmation_required"],
+		[["doctor", "--yes", "--json"], "usage"],
+		[["tools", "reset-profile", "--json"], "usage"],
+		[["panes", "install", "--bogus", "--json"], "unknown_flag"],
+		[["interop", "adopt", "--json"], "usage"],
+	] as const) {
+		it(`clio-coder ${args.join(" ")} exits 2 with ${slug}`, async () => {
+			const result = await cli(args);
+			equal(result.status, 2, result.stderr);
+			const docs = result.stdout.trim().split("\n");
+			equal(docs.length, 1, result.stdout);
+			equal(JSON.parse(docs[0] as string).error.code, slug);
+			match(result.stderr, /^clio-coder [a-z -]+: .+\n/);
+		});
+	}
+
+	it("clio-coder version --json prints one version document", async () => {
+		const result = await cli(["version", "--json"]);
+		equal(result.status, 0, result.stderr);
+		const doc = JSON.parse(result.stdout) as { version: number; clioVersion: string; workerSpecs: unknown[] };
+		equal(doc.version, 1);
+		ok(doc.clioVersion.length > 0);
+		ok(Array.isArray(doc.workerSpecs));
+	});
+
+	it("clio-coder tools reset-profile names an unknown tool as not_found, exit 1", async () => {
+		const result = await cli(["tools", "reset-profile", "nope", "--json"]);
+		equal(result.status, 1, result.stderr);
+		equal(JSON.parse(result.stdout).error.code, "not_found");
+	});
 });
