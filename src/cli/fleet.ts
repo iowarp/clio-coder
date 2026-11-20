@@ -645,6 +645,8 @@ async function runFleetTracked(
 				};
 			}
 			plan = bindExecutionPlanEndpoints(plan, bindings);
+			// Endpoint bounds are in the hash, and the root record and journal carry the bound plan's.
+			track.planHash = plan.hash;
 		} catch (err) {
 			return exitWith(fail(`route preflight failed: ${err instanceof Error ? err.message : String(err)}`), stopRun);
 		}

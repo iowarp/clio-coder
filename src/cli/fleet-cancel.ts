@@ -37,9 +37,11 @@ import { runStatusForOutcome } from "../domains/dispatch/outcome.js";
 import { type Ledger, openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
-import { writeCliFailure } from "./kit/json-out.js";
+import { jsonDocument, writeCliFailure, writeJson } from "./kit/json-out.js";
+import type { ErrorSlug } from "./kit/slugs.js";
 
 const USAGE = "usage: clio-coder fleet cancel <runId|fleetRootId> [--json] [--reason <text>]";
+const CANCEL_PATH = ["fleet", "cancel"] as const;
 /** Owner ticks run about once a second; this covers a slow finalizer and receipt write. */
 const OWNER_SETTLE_WAIT_MS = 15_000;
 const POLL_MS = 250;
@@ -88,8 +90,9 @@ function parseArgs(args: ReadonlyArray<string>): ParsedArgs | string {
 	return { runId, json, reason };
 }
 
-function refuse(message: string): number {
-	process.stderr.write(`clio-coder fleet cancel: ${message}\n`);
+/** A cancel that cannot produce its report: the C3 line, and under --json the C6 failure document. Exits 1. */
+function refuse(message: string, json: boolean, slug: ErrorSlug = "admission_refused"): number {
+	writeCliFailure({ path: CANCEL_PATH, slug, message, json });
 	return 1;
 }
 
@@ -219,7 +222,7 @@ async function cancelOrphan(
 
 function render(report: CancelReport, json: boolean): void {
 	if (json) {
-		process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+		writeJson(process.stdout, jsonDocument(report));
 		return;
 	}
 	if (report.state === "pending") {
@@ -239,13 +242,20 @@ function render(report: CancelReport, json: boolean): void {
 export async function runFleetCancel(args: ReadonlyArray<string>): Promise<number> {
 	const parsed = parseArgs(args);
 	if (typeof parsed === "string") {
-		process.stderr.write(`clio-coder fleet cancel: ${parsed}\n${USAGE}\n`);
+		const json = args.includes("--json");
+		writeCliFailure({
+			path: CANCEL_PATH,
+			slug: parsed.startsWith("unknown flag") ? "unknown_flag" : "usage",
+			message: parsed,
+			json,
+		});
+		if (!json) process.stderr.write(`${USAGE}\n`);
 		return 2;
 	}
 	const { runId, json, reason } = parsed;
 	// Ids starting `fleet-` name fleet roots; everything else names a run.
 	if (runId.startsWith(FLEET_ROOT_PREFIX)) return cancelRoot(runId, json, reason);
-	if (!isCancelableRunId(runId)) return refuse(`invalid run id '${runId}'`);
+	if (!isCancelableRunId(runId)) return refuse(`invalid run id '${runId}'`, json, "usage");
 	ensureClioState();
 	const ledger = openLedger();
 	const row = ledger.get(runId);
@@ -259,24 +269,24 @@ export async function runFleetCancel(args: ReadonlyArray<string>): Promise<numbe
 		});
 		return 1;
 	}
-	if (row === null) return refuse(`unknown run '${runId}'`);
+	if (row === null) return refuse(`unknown run '${runId}'`, json, "not_found");
 	if (!isOpenRunRow(row)) {
-		return refuse(`run ${runId} is already terminal (${row.outcome ?? row.status})`);
+		return refuse(`run ${runId} is already terminal (${row.outcome ?? row.status})`, json);
 	}
 	// Pids and birth tokens only mean something on the host that recorded them.
 	if (row.identity !== undefined && row.identity.host !== hostname()) {
-		return refuse(`run ${runId} belongs to host ${row.identity.host}; run fleet cancel there`);
+		return refuse(`run ${runId} belongs to host ${row.identity.host}; run fleet cancel there`, json);
 	}
 	const record = assignmentFor(row);
 	const owner = ownerState(record);
 	if (owner === "gone") {
 		try {
 			const result = await cancelOrphan(ledger, row, record, reason);
-			if (typeof result === "string") return refuse(result);
+			if (typeof result === "string") return refuse(result, json);
 			render(result, json);
 			return 0;
 		} catch (error) {
-			return refuse(error instanceof Error ? error.message : String(error));
+			return refuse(error instanceof Error ? error.message : String(error), json, "io");
 		}
 	}
 	// An unknown owner may still be alive, so it gets a request and never a kill.
@@ -300,8 +310,6 @@ export async function runFleetCancel(args: ReadonlyArray<string>): Promise<numbe
 	render(report, json);
 	return sealed === null ? 1 : 0;
 }
-
-const CANCEL_PATH = ["fleet", "cancel"] as const;
 
 interface RootCancelReport {
 	rootId: string;
@@ -334,7 +342,7 @@ function rootReport(
 
 function renderRoot(report: RootCancelReport, json: boolean): void {
 	if (json) {
-		process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+		writeJson(process.stdout, jsonDocument(report));
 		return;
 	}
 	if (report.state === "pending") {
@@ -385,11 +393,12 @@ async function cancelRoot(token: string, json: boolean, reason: string | null): 
 		return 1;
 	}
 	if (record.host !== hostname()) {
-		return refuse(`fleet root ${rootId} belongs to host ${record.host}; run fleet cancel there`);
+		return refuse(`fleet root ${rootId} belongs to host ${record.host}; run fleet cancel there`, json);
 	}
 	if (fleetRootState(record, false) === "orphaned") {
 		return refuse(
 			`fleet root ${rootId}'s owner (pid ${record.pid}) is gone and the root never sealed (owner_gone); cancel its runs by run id`,
+			json,
 		);
 	}
 	writeRootCancelRequest(rootId, reason);

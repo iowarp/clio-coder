@@ -6,7 +6,7 @@
  */
 import { deepStrictEqual, doesNotMatch, equal, match, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, afterEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -329,5 +329,68 @@ describe("fleet detach and wait flags (SPEC L7b)", () => {
 		const result = cli(["fleet", "wait", "fleet-nosuchroot", "--json"]);
 		equal(result.status, 1, result.stderr);
 		match(result.stderr, /no fleet root matches/u);
+	});
+
+	it("fleet_end and fleet wait carry the plan hash the journal and fleet list record", {
+		timeout: 120_000,
+	}, async () => {
+		const scratch = headlessScratch("clio-coder-fleet-plan-hash-");
+		const fixture = await startOpenAICompatFixture("done");
+		try {
+			seedOpenAICompatOrchestrator(scratch.configDir, fixture.url);
+			seedOpenAICompatFleetDefault(scratch.configDir);
+			// An endpoint bound is what route preflight binds into the plan, and so into its hash.
+			const settingsPath = join(scratch.configDir, "settings.yaml");
+			writeFileSync(
+				settingsPath,
+				readFileSync(settingsPath, "utf8").replace(
+					/^ {4}runtime: openai-compat$/m,
+					"    runtime: openai-compat\n    maxConcurrentRequests: 2",
+				),
+			);
+			const project = join(scratch.root, "project");
+			mkdirSync(join(project, ".clio-coder", "playbooks"), { recursive: true });
+			writeFileSync(
+				join(project, ".clio-coder", "playbooks", "probe.md"),
+				[
+					"---",
+					"version: 3",
+					"name: probe",
+					'description: "One read-only step."',
+					"steps:",
+					"  - kind: agent",
+					"    id: look",
+					"    agent: coder",
+					"    scope: readonly",
+					"    dependencies: []",
+					"maxWorkers: 1",
+					"onFailure: stop",
+					"---",
+					"",
+					"Report done.",
+					"",
+				].join("\n"),
+			);
+			const options = { env: scratch.env, cwd: project, timeoutMs: 90_000 };
+			const run = await runCli(["fleet", "run", "probe", "--output-format", "json"], options);
+			const end = JSON.parse(run.stdout.trim().split("\n").at(-1) ?? "{}");
+			equal(end.type, "fleet_end", run.stderr);
+			const list = JSON.parse((await runCli(["fleet", "list", "--json"], options)).stdout);
+			const listed = list.roots.find((root: { rootId: string }) => root.rootId === end.rootId);
+			const eventsRun = await runCli(["fleet", "events", end.rootId, "--json"], options);
+			equal(eventsRun.code, 0, `${eventsRun.stderr} ${JSON.stringify(end)}`);
+			const events = eventsRun.stdout;
+			const started = events
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line))
+				.find((line) => line.type === "fleet_started");
+			const waited = JSON.parse((await runCli(["fleet", "wait", end.rootId, "--json"], options)).stdout);
+			ok(typeof end.planHash === "string" && end.planHash.length > 0, run.stdout);
+			deepStrictEqual([listed?.planHash, started?.planHash, waited.planHash], [end.planHash, end.planHash, end.planHash]);
+		} finally {
+			await closeServer(fixture.server);
+			scratch.cleanup();
+		}
 	});
 });

@@ -1,4 +1,4 @@
-import { strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -87,11 +87,24 @@ describe("fleet cancel requests", () => {
 		for (let i = 0; i < 2; i++) {
 			const { code, out } = await cancel(["fleet-aa0001", "--json"]);
 			strictEqual(code, 0);
-			strictEqual(JSON.parse(out).action, "already_sealed");
+			// C6: one compact object with version 1.
+			strictEqual(out.trimEnd().includes("\n"), false);
+			const report = JSON.parse(out);
+			strictEqual(report.version, 1);
+			strictEqual(report.action, "already_sealed");
+			strictEqual(report.exitCode, 0);
 		}
 		strictEqual(readRootCancelRequest("fleet-aa0001"), null);
-		strictEqual((await cancel(["fleet-zz9999", "--json"])).code, 1);
-		strictEqual((await cancel(["fleet-aa", "--json"])).code, 1);
+		for (const [token, slug] of [
+			["fleet-zz9999", "not_found"],
+			["fleet-aa", "ambiguous"],
+			["run-unknown", "not_found"],
+		] as const) {
+			const { code, out } = await cancel([token, "--json"]);
+			strictEqual(code, 1);
+			const failure = JSON.parse(out);
+			deepStrictEqual([failure.version, failure.ok, failure.error.code], [1, false, slug]);
+		}
 	});
 
 	// A hosted worker publishes the main run as its lineage root, and a running attempt is not yet among the
@@ -146,6 +159,7 @@ describe("fleet cancel requests", () => {
 			}
 			const report = JSON.parse(written.join(""));
 			strictEqual(code, 0);
+			strictEqual(report.version, 1);
 			strictEqual(report.owner, "gone");
 			strictEqual(report.action, "sealed_orphan");
 			strictEqual(getStoredAssignment(first.id)?.status, "canceled");
