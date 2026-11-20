@@ -3,7 +3,7 @@ import { readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioDataDir } from "../../core/xdg.js";
-import { recordClaimRegressions } from "../memory/index.js";
+import { loadMemoryRecords, recordClaimRegressions } from "../memory/index.js";
 import type { MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 import { claimFromVerifyResult, claimsFromHostVerification, type SealedHostCheck } from "./capture.js";
 import {
@@ -23,6 +23,7 @@ import {
 	appendHypothesisTests,
 	captureWorktree,
 	claimsCaptureCheckout,
+	evictClaimsPastCap,
 	inferredFlag,
 	readClaims,
 } from "./store.js";
@@ -377,7 +378,37 @@ export async function recordHostVerificationClaims(input: {
  * cite (a flip back to agreement, or a pass already superseded), so it is never evaluated again.
  */
 export async function recordClaims(claims: ReadonlyArray<ClaimRecord>, now: Date): Promise<void> {
-	const { pending } = await appendClaimsIndexed(claims);
+	const { pending, overCap } = await appendClaimsIndexed(claims);
+	await recordRegressions(pending, now);
+	if (overCap.length === 0) return;
+	let cited: Set<string>;
+	try {
+		cited = await memoryCitedClaimIds();
+	} catch {
+		// Without memory's citations an eviction could orphan a record's evidence, so the log stays over the cap until a
+		// later step past it.
+		return;
+	}
+	for (const project of overCap) {
+		try {
+			await evictClaimsPastCap(project, cited);
+		} catch {
+			// The claims landed; eviction tries again at the next step past the cap.
+		}
+	}
+}
+
+/** Claim ids a memory record cites as evidence (`claim:<id>`); such a claim is never pruned or evicted. */
+export async function memoryCitedClaimIds(): Promise<Set<string>> {
+	const records = await loadMemoryRecords(clioDataDir());
+	return new Set(
+		records.flatMap((record) =>
+			record.evidenceRefs.filter((ref) => ref.startsWith("claim:")).map((ref) => ref.slice("claim:".length)),
+		),
+	);
+}
+
+async function recordRegressions(pending: ReadonlyMap<string, string[]>, now: Date): Promise<void> {
 	for (const [project, edgeIds] of pending) {
 		if (edgeIds.length === 0) continue;
 		const waiting = new Set(edgeIds);

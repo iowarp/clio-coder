@@ -116,6 +116,51 @@ function withinLineBound(line: string): boolean {
 }
 
 /**
+ * The most claims one project's log holds before recording evicts (MEM-3). A claim is never refused, and a live claim,
+ * one a regression, hypothesis test or contradiction names, or one a memory record cites is never evicted: only
+ * superseded claims nothing names go, oldest first, down to `CLAIMS_LOG_EVICT_TO`, with the edges pointing at them. Evicted
+ * lines move to `<digest>.evicted.jsonl`; nothing is deleted. A log that cannot get under the cap tries again each
+ * `CLAIMS_LOG_EVICT_STEP` claims past it, so an append never pays a rewrite every time.
+ */
+export const CLAIMS_LOG_MAX_CLAIMS = 4096;
+const CLAIMS_LOG_EVICT_TO = 3072;
+const CLAIMS_LOG_EVICT_STEP = 1024;
+
+/** Whether an append taking the log from `before` to `after` claims crosses the cap, or another step past it. */
+function crossesClaimsCap(before: number, after: number): boolean {
+	const step = (count: number) =>
+		count <= CLAIMS_LOG_MAX_CLAIMS ? -1 : Math.floor((count - CLAIMS_LOG_MAX_CLAIMS - 1) / CLAIMS_LOG_EVICT_STEP);
+	return step(after) > step(before);
+}
+
+/** Where claims evicted past the cap are kept, beside the log. */
+function claimsEvictedPath(projectRoot: string): string {
+	return siblingPath(claimsLogPath(projectRoot), "evicted.jsonl");
+}
+
+/** How many claims the cap evicted from a project's log, and where they are kept; null when none was. */
+export function claimsEvicted(projectRoot: string): { claims: number; path: string } | null {
+	const path = claimsEvictedPath(projectRoot);
+	let text: string;
+	try {
+		text = readFileSync(path, "utf8");
+	} catch {
+		return null;
+	}
+	let claims = 0;
+	for (const line of text.split("\n")) {
+		if (!withinLineBound(line)) continue;
+		try {
+			const value: unknown = JSON.parse(line);
+			if (isObject(value) && value.type === "claim") claims += 1;
+		} catch {
+			// An empty or torn line counts for nothing.
+		}
+	}
+	return claims > 0 ? { claims, path } : null;
+}
+
+/**
  * The append path's index (#406): `<digest>.index.json` beside the log, a cache of exactly what appending needs, so an
  * append reads the index and the lines written since it, never the whole log.
  *
@@ -142,6 +187,8 @@ interface ClaimsIndexFile {
 	project: string;
 	logBytes: number;
 	tail: string;
+	/** Claim lines in the log, for the count cap; repeats count until a rewrite drops them. */
+	claims: number;
 	subjects: ClaimEdgeSubject[];
 	superseded: string[];
 	layouts: Array<[string, SweepRunLayout | null]>;
@@ -152,6 +199,7 @@ interface ClaimsIndexFile {
 }
 
 interface ClaimsIndex {
+	claims: number;
 	edges: ClaimEdgeState;
 	recent: string[];
 	pending: Set<string>;
@@ -161,6 +209,7 @@ interface ClaimsIndex {
 
 function emptyIndex(): ClaimsIndex {
 	return {
+		claims: 0,
 		edges: { subjects: [], superseded: new Set(), layouts: new Map(), known: new Set() },
 		recent: [],
 		pending: new Set(),
@@ -194,7 +243,9 @@ function foldIndexLine(index: ClaimsIndex, project: string, value: Record<string
 	if (value.v !== CLAIM_RECORD_VERSION || value.project !== project || typeof value.id !== "string") return;
 	if (isClaimRecord(value)) {
 		const claim = value as unknown as ClaimRecord;
-		if (claim.evidence !== "grounded" || !isCheckSource(claim.source) || claimRecordId(claim) !== claim.id) return;
+		if (claimRecordId(claim) !== claim.id) return;
+		index.claims += 1;
+		if (claim.evidence !== "grounded" || !isCheckSource(claim.source)) return;
 		foldSweepRunLayout(index.edges.layouts, claim);
 		if (index.edges.known.has(claim.id)) return;
 		index.edges.subjects.push(claimEdgeSubject(claim));
@@ -253,6 +304,7 @@ function foldIndexText(index: ClaimsIndex, project: string, text: string): void 
 
 function indexFromRead(read: ClaimsLogRead): ClaimsIndex {
 	const index = emptyIndex();
+	index.claims = read.records.length;
 	for (const claim of read.records) {
 		foldSweepRunLayout(index.edges.layouts, claim);
 		index.edges.subjects.push(claimEdgeSubject(claim));
@@ -337,6 +389,7 @@ function loadIndex(project: string, fd: number, size: number): ClaimsIndex | nul
 		file.project !== project ||
 		typeof file.logBytes !== "number" ||
 		file.logBytes > size ||
+		typeof file.claims !== "number" ||
 		!Array.isArray(file.subjects) ||
 		!Array.isArray(file.superseded) ||
 		!Array.isArray(file.layouts) ||
@@ -348,6 +401,7 @@ function loadIndex(project: string, fd: number, size: number): ClaimsIndex | nul
 	)
 		return null;
 	const index: ClaimsIndex = {
+		claims: file.claims,
 		edges: {
 			subjects: file.subjects,
 			superseded: new Set(file.superseded),
@@ -371,6 +425,7 @@ function writeIndex(project: string, index: ClaimsIndex, fd: number, size: numbe
 		project,
 		logBytes: size,
 		tail: tailDigest(fd, size),
+		claims: index.claims,
 		subjects: index.edges.subjects,
 		superseded: [...index.edges.superseded],
 		layouts: [...index.edges.layouts],
@@ -442,17 +497,21 @@ async function appendLines(project: string, lines: (context: AppendContext) => s
 /**
  * Append claims to their project's log, each followed by the edges it adds against the log (#406). Records for several
  * projects are grouped per log. Edges are derived from the log's index, so an append costs the claims of the check it
- * touches, not the log. Returns the edges written and, per project, the contradictions still awaiting a regression.
+ * touches, not the log. Returns the edges written, per project the contradictions still awaiting a regression, and
+ * the projects whose log this append took past the claim cap (`evictClaimsPastCap`).
  */
 async function appendClaimsIndexed(
 	records: ReadonlyArray<ClaimRecord>,
-): Promise<{ edges: ClaimEdgeRecord[]; pending: Map<string, string[]> }> {
+): Promise<{ edges: ClaimEdgeRecord[]; pending: Map<string, string[]>; overCap: string[] }> {
 	const byProject = new Map<string, ClaimRecord[]>();
 	for (const record of records) byProject.set(record.project, [...(byProject.get(record.project) ?? []), record]);
 	const written: ClaimEdgeRecord[] = [];
 	const pending = new Map<string, string[]>();
+	const overCap: string[] = [];
 	for (const [project, group] of byProject) {
+		let claimsBefore = 0;
 		const index = await appendLines(project, ({ index }) => {
+			claimsBefore = index.claims;
 			const lines: string[] = [];
 			for (const claim of group) {
 				// Checked here, not only in appendLines, so an unwritten claim derives no edges.
@@ -464,8 +523,24 @@ async function appendClaimsIndexed(
 			return lines;
 		});
 		pending.set(project, [...index.pending]);
+		if (crossesClaimsCap(claimsBefore, index.claims)) overCap.push(project);
 	}
-	return { edges: written, pending };
+	return { edges: written, pending, overCap };
+}
+
+/**
+ * Evict, under the log's lock, the oldest superseded claims nothing names down to `CLAIMS_LOG_EVICT_TO` (MEM-3).
+ * `cited` holds the claim ids memory records cite, which stay like any claim the log itself names; the caller reads
+ * memory, so a caller that cannot must not evict. Returns how many claims were evicted.
+ */
+export async function evictClaimsPastCap(project: string, cited: ReadonlySet<string>): Promise<number> {
+	const path = claimsLogPath(project);
+	if (!existsSync(path)) return 0;
+	let evicted = 0;
+	await withStateFileLock(path, () => {
+		evicted = rewriteLogLocked(project, { cited }, emptyCompaction(path, false), CLAIMS_LOG_EVICT_TO);
+	});
+	return evicted;
 }
 
 export async function appendClaims(records: ReadonlyArray<ClaimRecord>): Promise<ClaimEdgeRecord[]> {
@@ -1107,12 +1182,24 @@ export interface ClaimsCompaction {
  * build's records. The new generation is written beside the log and renamed over it, so a reader without the lock sees
  * one generation or the other; the previous generation stays as `<digest>.prev.jsonl` until the next compaction.
  */
-export async function compactClaimsLog(
-	project: string,
-	options: { pruneSupersededBefore?: Date; cited?: ReadonlySet<string>; dryRun?: boolean } = {},
-): Promise<ClaimsCompaction> {
+export async function compactClaimsLog(project: string, options: CompactOptions = {}): Promise<ClaimsCompaction> {
 	const path = claimsLogPath(project);
-	const result: ClaimsCompaction = {
+	const result = emptyCompaction(path, options.dryRun === true);
+	if (!existsSync(path)) return result;
+	await withStateFileLock(path, () => {
+		rewriteLogLocked(project, options, result);
+	});
+	return result;
+}
+
+interface CompactOptions {
+	pruneSupersededBefore?: Date;
+	cited?: ReadonlySet<string>;
+	dryRun?: boolean;
+}
+
+function emptyCompaction(path: string, dryRun: boolean): ClaimsCompaction {
+	return {
 		path,
 		bytesBefore: 0,
 		bytesAfter: 0,
@@ -1123,108 +1210,136 @@ export async function compactClaimsLog(
 		quarantined: 0,
 		prunedClaims: 0,
 		prunedEdges: 0,
-		dryRun: options.dryRun === true,
+		dryRun,
 	};
-	if (!existsSync(path)) return result;
-	await withStateFileLock(path, () => {
-		const text = readFileSync(path, "utf8");
-		result.bytesBefore = Buffer.byteLength(text, "utf8");
-		const read = parseClaimsLog(text, project);
-		const admitted = new Set<string>([
-			...read.records.map(({ id }) => id),
-			...read.edges.map(({ id }) => id),
-			...read.regressions.map(({ id }) => id),
-			...read.hypotheses.map(({ id }) => id),
-			...read.checkStarts.filter((start) => start.hypotheses.length > 0).map(({ id }) => id),
-			...read.hypothesisTests.map(({ id }) => id),
-			...read.disputes.map(({ id }) => id),
-			...read.imports.map(({ id }) => id),
+}
+
+/**
+ * The compaction rewrite, with the log's lock held. With `evictTo`, superseded claims nothing names are also evicted,
+ * oldest first, until at most that many claims remain or none is left to evict (MEM-3); they and the edges pointing at
+ * them are appended to `<digest>.evicted.jsonl`, not deleted.
+ */
+function rewriteLogLocked(
+	project: string,
+	options: CompactOptions,
+	result: ClaimsCompaction,
+	evictTo?: number,
+): number {
+	const path = result.path;
+	const text = readFileSync(path, "utf8");
+	result.bytesBefore = Buffer.byteLength(text, "utf8");
+	const read = parseClaimsLog(text, project);
+	const admitted = new Set<string>([
+		...read.records.map(({ id }) => id),
+		...read.edges.map(({ id }) => id),
+		...read.regressions.map(({ id }) => id),
+		...read.hypotheses.map(({ id }) => id),
+		...read.checkStarts.filter((start) => start.hypotheses.length > 0).map(({ id }) => id),
+		...read.hypothesisTests.map(({ id }) => id),
+		...read.disputes.map(({ id }) => id),
+		...read.imports.map(({ id }) => id),
+	]);
+	const emptyStarts = new Set(read.checkStarts.filter((start) => start.hypotheses.length === 0).map(({ id }) => id));
+	const pruned = new Set<string>();
+	const evicted = new Set<string>();
+	if (options.pruneSupersededBefore !== undefined || evictTo !== undefined) {
+		const before = options.pruneSupersededBefore?.getTime();
+		const superseded = new Set(read.edges.filter((edge) => edge.kind === "supersedes").map((edge) => edge.to));
+		const kept = new Set<string>([
+			...read.regressions.flatMap((regression) => [regression.from, ...regression.backing]),
+			...read.hypothesisTests.flatMap((test) => (test.claim === undefined ? [] : [test.claim])),
+			...read.edges.filter((edge) => edge.kind === "contradicts").flatMap((edge) => [edge.from, edge.to]),
+			...(options.cited ?? []),
 		]);
-		const emptyStarts = new Set(read.checkStarts.filter((start) => start.hypotheses.length === 0).map(({ id }) => id));
-		const pruned = new Set<string>();
-		if (options.pruneSupersededBefore !== undefined) {
-			const before = options.pruneSupersededBefore.getTime();
-			const superseded = new Set(read.edges.filter((edge) => edge.kind === "supersedes").map((edge) => edge.to));
-			const kept = new Set<string>([
-				...read.regressions.flatMap((regression) => [regression.from, ...regression.backing]),
-				...read.hypothesisTests.flatMap((test) => (test.claim === undefined ? [] : [test.claim])),
-				...read.edges.filter((edge) => edge.kind === "contradicts").flatMap((edge) => [edge.from, edge.to]),
-				...(options.cited ?? []),
-			]);
-			for (const claim of read.records)
-				if (superseded.has(claim.id) && !kept.has(claim.id) && Date.parse(claim.at) < before) pruned.add(claim.id);
-		}
-		const keptLines: string[] = [];
-		const quarantine: string[] = [];
-		const written = new Set<string>();
-		for (const line of text.split("\n")) {
-			if (line.trim().length === 0) continue;
-			result.linesBefore += 1;
-			let value: unknown;
-			try {
-				value = withinLineBound(line) ? JSON.parse(line) : undefined;
-			} catch {
-				value = undefined;
+		const candidates = read.records.filter((claim) => superseded.has(claim.id) && !kept.has(claim.id));
+		if (before !== undefined) for (const claim of candidates) if (Date.parse(claim.at) < before) pruned.add(claim.id);
+		if (evictTo !== undefined)
+			for (const claim of candidates) {
+				if (read.records.length - pruned.size - evicted.size <= evictTo) break;
+				if (!pruned.has(claim.id)) evicted.add(claim.id);
 			}
-			if (!isObject(value)) {
-				quarantine.push(line);
-				continue;
-			}
-			const id = typeof value.id === "string" ? value.id : undefined;
-			const known =
-				value.v === CLAIM_RECORD_VERSION &&
-				["claim", "edge", "regression", "hypothesis", "check-start", "hypothesis-test", "dispute", "import"].includes(
-					String(value.type),
-				);
-			// Another version or type: a newer build's record, kept verbatim.
-			if (!known || id === undefined) {
-				keptLines.push(line);
-				continue;
-			}
-			if (emptyStarts.has(id)) {
-				result.droppedStarts += 1;
-				continue;
-			}
-			if (pruned.has(id)) {
-				result.prunedClaims += 1;
-				continue;
-			}
-			if (value.type === "edge" && (pruned.has(String(value.from)) || pruned.has(String(value.to)))) {
-				result.prunedEdges += 1;
-				continue;
-			}
-			if (written.has(id)) {
-				result.duplicates += 1;
-				continue;
-			}
-			if (!admitted.has(id)) {
-				quarantine.push(line);
-				continue;
-			}
-			written.add(id);
-			keptLines.push(line);
-		}
-		result.quarantined = quarantine.length;
-		result.linesAfter = keptLines.length;
-		const next = keptLines.length === 0 ? "" : `${keptLines.join("\n")}\n`;
-		result.bytesAfter = Buffer.byteLength(next, "utf8");
-		if (options.dryRun === true) return;
-		if (quarantine.length > 0) writeFileLines(siblingPath(path, "quarantine.jsonl"), quarantine);
-		copyFileSync(path, siblingPath(path, "prev.jsonl"));
-		const temporary = siblingPath(path, `compact-${process.pid}.tmp`);
-		const fd = openSync(temporary, "w", 0o600);
+	}
+	const keptLines: string[] = [];
+	const quarantine: string[] = [];
+	const evictedLines: string[] = [];
+	const written = new Set<string>();
+	for (const line of text.split("\n")) {
+		if (line.trim().length === 0) continue;
+		result.linesBefore += 1;
+		let value: unknown;
 		try {
-			writeSync(fd, next);
-			fsyncSync(fd);
-		} finally {
-			closeSync(fd);
+			value = withinLineBound(line) ? JSON.parse(line) : undefined;
+		} catch {
+			value = undefined;
 		}
-		renameSync(temporary, path);
-		fsyncDirectory(dirname(path));
-		// The index described the old generation; the next append rebuilds it from this one.
-		rmSync(claimsIndexPath(project), { force: true });
-	});
-	return result;
+		if (!isObject(value)) {
+			quarantine.push(line);
+			continue;
+		}
+		const id = typeof value.id === "string" ? value.id : undefined;
+		const known =
+			value.v === CLAIM_RECORD_VERSION &&
+			["claim", "edge", "regression", "hypothesis", "check-start", "hypothesis-test", "dispute", "import"].includes(
+				String(value.type),
+			);
+		// Another version or type: a newer build's record, kept verbatim.
+		if (!known || id === undefined) {
+			keptLines.push(line);
+			continue;
+		}
+		if (emptyStarts.has(id)) {
+			result.droppedStarts += 1;
+			continue;
+		}
+		if (pruned.has(id)) {
+			result.prunedClaims += 1;
+			continue;
+		}
+		if (value.type === "edge" && (pruned.has(String(value.from)) || pruned.has(String(value.to)))) {
+			result.prunedEdges += 1;
+			continue;
+		}
+		// An edge leaves with the claim it points at: a kept claim keeps the edge saying what superseded it, even when that
+		// later claim is evicted, so eviction never makes an old verdict read as current.
+		if (evicted.has(id) || (value.type === "edge" && evicted.has(String(value.to)))) {
+			if (!written.has(id)) evictedLines.push(line);
+			written.add(id);
+			continue;
+		}
+		if (written.has(id)) {
+			result.duplicates += 1;
+			continue;
+		}
+		if (!admitted.has(id)) {
+			quarantine.push(line);
+			continue;
+		}
+		written.add(id);
+		keptLines.push(line);
+	}
+	result.quarantined = quarantine.length;
+	result.linesAfter = keptLines.length;
+	const next = keptLines.length === 0 ? "" : `${keptLines.join("\n")}\n`;
+	result.bytesAfter = Buffer.byteLength(next, "utf8");
+	if (options.dryRun === true) return 0;
+	// Eviction with nothing to evict rewrites nothing: an unasked compaction would only churn the previous generation.
+	if (evictTo !== undefined && evicted.size === 0) return 0;
+	if (quarantine.length > 0) writeFileLines(siblingPath(path, "quarantine.jsonl"), quarantine);
+	if (evictedLines.length > 0) writeFileLines(claimsEvictedPath(project), evictedLines);
+	copyFileSync(path, siblingPath(path, "prev.jsonl"));
+	const temporary = siblingPath(path, `compact-${process.pid}.tmp`);
+	const fd = openSync(temporary, "w", 0o600);
+	try {
+		writeSync(fd, next);
+		fsyncSync(fd);
+	} finally {
+		closeSync(fd);
+	}
+	renameSync(temporary, path);
+	fsyncDirectory(dirname(path));
+	// The index described the old generation; the next append rebuilds it from this one.
+	rmSync(claimsIndexPath(project), { force: true });
+	return evicted.size;
 }
 
 /** Append lines to an audit file beside the log, created 0600. */
