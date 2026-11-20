@@ -531,6 +531,43 @@ test("ACP adapter fails before prompting when the peer keeps another thinking le
 	strictEqual(result.failureMessage?.includes("kept thinking level 'medium' after Clio selected 'high'"), true);
 });
 
+test("ACP adapter splits agy legacy <model>-<level> ids and names the offered choices when one is refused", {
+	skip: process.platform === "win32",
+}, async () => {
+	const scratch = await mkdtemp(join(tmpdir(), "clio-agy-levels-"));
+	const agy = join(scratch, "agy");
+	const fixture = fileURLToPath(new URL("../fixtures/acp-error-peer.mjs", import.meta.url));
+	await writeFile(agy, `#!/bin/sh\nexec "${process.execPath}" "${fixture}" agy-levels\n`, { mode: 0o755 });
+	const cwd = process.cwd();
+	const agent = { id: "antigravity", command: agy, args: ["acp"], env: { HOME: scratch }, connectTimeoutMs: 5_000 };
+	const run = (model: string, thinkingLevel?: string) =>
+		startAcpDelegationRun({
+			agent,
+			task: "report version",
+			model,
+			...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
+			cwd,
+			safety: createWorkerSafety({ cwd }),
+		}).promise;
+	try {
+		// xhigh is offered only once the model is pro, so the level is checked against the switched model's list.
+		const split = await run("gemini-3.8-pro-xhigh");
+		strictEqual(split.exitCode, 0, split.failureMessage);
+		strictEqual(split.delegation.selectedModelId, "gemini-3.8-pro");
+		for (const [model, thinkingLevel, failure] of [
+			["gemini-3.8-pro-medium", undefined, "thinking level 'medium'; offered: low, high, xhigh"],
+			["gemini-9-ultra", undefined, "model 'gemini-9-ultra'; offered: gemini-3.8-flash, gemini-3.8-pro"],
+			["gemini-3.8-pro-high", "low", "model 'gemini-3.8-pro-high' with thinking level 'low'"],
+		] as const) {
+			const refused = await run(model, thinkingLevel);
+			strictEqual(refused.exitCode, 1);
+			ok(refused.failureMessage?.includes(`ACP peer does not offer requested ${failure}`), refused.failureMessage);
+		}
+	} finally {
+		await rm(scratch, { recursive: true, force: true });
+	}
+});
+
 test("ACP adapter selects models only through the stable config option, never session/set_model", async () => {
 	const cwd = process.cwd();
 	// A peer that offers only the unstable `models` field has no stable model

@@ -7,7 +7,10 @@ const thoughtOption = mode === "thought-option" || mode === "thought-refuse";
 const targetFirst = mode === "target-first";
 const modelPin = mode === "model-pin" || mode === "model-variants" || targetFirst || thoughtOption;
 const legacyModels = mode === "legacy-models";
-let selectedModel = thoughtOption ? "gpt-6-astra" : "gpt-6-astra[medium]";
+// agy-like: model families in `model`, and a `thought_level` option whose levels depend on the selected model.
+const agyLevels = mode === "agy-levels";
+const AGY_LEVELS = { "gemini-3.8-flash": ["low", "medium", "high"], "gemini-3.8-pro": ["low", "high", "xhigh"] };
+let selectedModel = agyLevels ? "gemini-3.8-flash" : thoughtOption ? "gpt-6-astra" : "gpt-6-astra[medium]";
 let selectedThought = "medium";
 let setModelCalled = false;
 
@@ -25,6 +28,26 @@ function modelValue(value) {
  * unrelated option first so the client must pick by category, not position.
  */
 function configOptions() {
+	if (agyLevels) {
+		return [
+			{
+				id: "model",
+				name: "Model",
+				category: "model",
+				type: "select",
+				currentValue: selectedModel,
+				options: Object.keys(AGY_LEVELS).map(modelValue),
+			},
+			{
+				id: "thought_level",
+				name: "Thinking level",
+				category: "thought_level",
+				type: "select",
+				currentValue: selectedThought,
+				options: AGY_LEVELS[selectedModel].map(modelValue),
+			},
+		];
+	}
 	const values = thoughtOption
 		? [modelValue("gpt-6-astra"), modelValue("gpt-6-luna")]
 		: [
@@ -245,7 +268,7 @@ for await (const line of createInterface({ input: process.stdin })) {
 			id: request.id,
 			result: {
 				sessionId: "error-session",
-				...(modelPin ? { configOptions: configOptions() } : {}),
+				...(modelPin || agyLevels ? { configOptions: configOptions() } : {}),
 				// The unstable `models` field is not in the v1 schema; a client
 				// that still reads it would pick a model here.
 				...(legacyModels
@@ -264,6 +287,20 @@ for await (const line of createInterface({ input: process.stdin })) {
 			send({ jsonrpc: "2.0", id: request.id, error: { code: -32602, message: "unknown config option" } });
 			continue;
 		}
+		if (agyLevels) {
+			if (option.category === "model") {
+				selectedModel = request.params.value;
+				// Like agy, a model switch falls back to medium, else the lowest level, when the old one is not offered.
+				const levels = AGY_LEVELS[selectedModel] ?? [];
+				if (!levels.includes(selectedThought)) selectedThought = levels.includes("medium") ? "medium" : levels[0];
+			} else if (!AGY_LEVELS[selectedModel].includes(request.params.value)) {
+				const message = `Thinking level "${request.params.value}" is not offered for model "${selectedModel}"`;
+				send({ jsonrpc: "2.0", id: request.id, error: { code: -32602, message } });
+				continue;
+			} else selectedThought = request.params.value;
+			send({ jsonrpc: "2.0", id: request.id, result: { configOptions: configOptions() } });
+			continue;
+		}
 		if (option.category === "model") selectedModel = request.params.value;
 		else if (option.category === "thought_level" && mode !== "thought-refuse") selectedThought = request.params.value;
 		send({ jsonrpc: "2.0", id: request.id, result: { configOptions: configOptions() } });
@@ -273,6 +310,11 @@ for await (const line of createInterface({ input: process.stdin })) {
 	} else if (request.method === "session/prompt") {
 		if (setModelCalled) {
 			send({ jsonrpc: "2.0", id: request.id, result: { stopReason: "refusal" } });
+			continue;
+		}
+		if (agyLevels) {
+			const stopReason = `${selectedModel}/${selectedThought}` === "gemini-3.8-pro/xhigh" ? "end_turn" : "refusal";
+			send({ jsonrpc: "2.0", id: request.id, result: { stopReason } });
 			continue;
 		}
 		if (modelPin) {
