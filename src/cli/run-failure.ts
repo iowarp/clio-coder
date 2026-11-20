@@ -31,6 +31,8 @@ import { flushRawStdout, isStdoutDead, writeRawStdout } from "./output-guard.js"
 interface RunFailureState {
 	pending: boolean;
 	diagnostic?: string;
+	/** Every diagnostic written before output started, in order; the last one is `diagnostic`. */
+	diagnostics?: string[];
 }
 
 const runFailureState = new AsyncLocalStorage<RunFailureState>();
@@ -46,8 +48,26 @@ export function writeRunDiagnostic(text: string): void {
 	// A diagnostic can quote a failure's message, and it reaches stderr and a turn_end frame's error alike (#446).
 	const shown = redactUrlCredentials(text);
 	const state = runFailureState.getStore();
-	if (state?.pending) state.diagnostic = shown.trim();
+	if (state?.pending) {
+		state.diagnostic = shown.trim();
+		state.diagnostics = [...(state.diagnostics ?? []), state.diagnostic];
+	}
 	process.stderr.write(shown);
+}
+
+/** Pre-work refusals that carry a narrower cause than `not_started`, known by the diagnostic each one writes. */
+const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
+	[/--output-format cannot be combined with --json or --json-events/u, "flag_conflict"],
+	[/^clio-coder run: not configured: /u, "not_configured"],
+];
+
+/** The cause of an exit-2 refusal before any work, from the diagnostics it wrote: the first that names one wins. */
+export function startRefusalCause(diagnostics: ReadonlyArray<string>): { code: RunCauseCode; message?: string } {
+	for (const diagnostic of diagnostics) {
+		const row = START_REFUSALS.find(([pattern]) => pattern.test(diagnostic));
+		if (row !== undefined) return { code: row[1], message: diagnostic };
+	}
+	return { code: "not_started" };
 }
 
 export function startRunOutput(): void {
@@ -165,11 +185,9 @@ export function noteMainRunV2(note: { runId?: string; usage?: RunUsageV2; sessio
 }
 
 /** One steer frame per channel line the reader took, written only under `--output-format stream-json`. */
-export function noteSteerV2(line: number, accepted: boolean): void {
+export function noteSteerV2(line: number, status: RunSteerFrameV2["status"], reason?: string): void {
 	if (!v2StreamJson || isStdoutDead()) return;
-	const frame: RunSteerFrameV2 = accepted
-		? { type: "steer", line, status: "accepted" }
-		: { type: "steer", line, status: "refused", reason: "no turn was streaming to take the line" };
+	const frame: RunSteerFrameV2 = { type: "steer", line, status, ...(reason !== undefined ? { reason } : {}) };
 	// The session frame is always first: a line read before it waits for it.
 	if (heldSteer !== null) heldSteer.push(serializeJsonLine(frame));
 	else writeRawStdout(serializeJsonLine(frame));
@@ -243,11 +261,13 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
 			const rewritten: Record<string, unknown> = { ...frame, schemaVersion: RUN_RESULT_SCHEMA_VERSION };
 			for (const [key, value] of Object.entries(rewritten)) if (value === null) delete rewritten[key];
 			const held = heldSteer;
-			heldSteer = null;
-			// writeFrame writes the returned session frame synchronously; held steer frames follow it.
-			if (held !== null && held.length > 0)
+			// writeFrame writes the returned session frame synchronously; held steer frames follow it, and a frame noted
+			// before they go out joins them, so a line's frames keep their order.
+			if (held !== null)
 				queueMicrotask(() => {
-					if (!isStdoutDead()) writeRawStdout(held.join(""));
+					if (heldSteer !== held) return;
+					heldSteer = null;
+					if (held.length > 0 && !isStdoutDead()) writeRawStdout(held.join(""));
 				});
 			return rewritten;
 		}
@@ -284,12 +304,8 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
  * The facts behind a run's exit, read from the exit code the run returned and the frames it wrote. Under v2 a
  * `--agent` worker that started (a receipt exists) and exited 2 is a failed run, not a refused one.
  */
-function exitFacts(
-	code: number,
-	seen: SeenFrames,
-	diagnostic: string | undefined,
-	request: RunResultV2Request,
-): RunExitFact[] {
+function exitFacts(code: number, seen: SeenFrames, state: RunFailureState, request: RunResultV2Request): RunExitFact[] {
+	const diagnostic = state.diagnostic;
 	const text = seen.runEnd?.error ?? diagnostic;
 	const message = text !== undefined && text.length > 0 ? { message: text } : {};
 	const detail = seen.runEnd?.outcomeDetail ?? seen.receipt?.outcomeDetail ?? undefined;
@@ -313,10 +329,12 @@ function exitFacts(
 			];
 		case 141:
 			return [{ code: "reader_closed" }];
-		case 2:
+		case 2: {
 			if (request.mode === "agent" && seen.receipt !== undefined)
 				return [{ code: "worker_failed", exitCode: 2, ...message }];
-			return [{ code: "not_started", ...message }];
+			const refusal = startRefusalCause(state.diagnostics ?? []);
+			return [{ code: refusal.code, ...(refusal.message !== undefined ? { message: refusal.message } : message) }];
+		}
 		case 5:
 			return [{ code: "unscripted", ...message }];
 		case 3:
@@ -360,7 +378,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	let outputTarget: string | undefined;
 	const envelopeLines = (code: number, extra: RunExitFact[] = []): { lines: string; exitCode: number } => {
 		const skipReason = code === 124 ? "deadline" : signalForExitCode(code) !== null ? "interrupted" : "turn_failed";
-		const resolution = resolveRunExit([...exitFacts(code, seen, state.diagnostic, request), ...extra]);
+		const resolution = resolveRunExit([...exitFacts(code, seen, state, request), ...extra]);
 		const session = seen.session;
 		const runId = session?.runId ?? mainRunNote.runId ?? seen.receipt?.runId;
 		const usage = mainRunNote.usage;
@@ -413,24 +431,33 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 				: "";
 		return { lines: pending + (heldSteer ?? []).join("") + serializeJsonLine(envelope), exitCode: resolution.exitCode };
 	};
-	// A coordinated shutdown calls process.exit, which cannot await a flush; the envelope still goes out.
+	// `-o` is written once, by temp file and rename, only for a run that ends exit 0; any other end leaves no file.
+	let outputSettled = false;
+	const writeOutputTarget = (code: number): RunExitFact[] => {
+		if (outputTarget === undefined || outputSettled || code !== 0) return [];
+		outputSettled = true;
+		const temporary = `${outputTarget}.${process.pid}.tmp`;
+		try {
+			writeFileSync(temporary, `${seen.text}\n`);
+			renameSync(temporary, outputTarget);
+			return [];
+		} catch {
+			rmSync(temporary, { force: true });
+			return [{ code: "output_write_failed", path: outputTarget }];
+		}
+	};
+	// A coordinated shutdown calls process.exit, which cannot await a flush or reach finish(): a successful run that
+	// ends that way still writes `-o` here, and a failed write still moves the exit code to the envelope's.
 	const onExit = (exitCode: number): void => {
+		const extra = writeOutputTarget(exitCode);
+		const out = envelopeLines(exitCode, extra);
+		if (extra.length > 0) process.exitCode = out.exitCode;
 		if (written || isStdoutDead()) return;
 		written = true;
-		writeSync(1, envelopeLines(exitCode).lines);
+		writeSync(1, out.lines);
 	};
 	const finish = async (code: number): Promise<number> => {
-		const extra: RunExitFact[] = [];
-		if (outputTarget !== undefined && code === 0) {
-			const temporary = `${outputTarget}.${process.pid}.tmp`;
-			try {
-				writeFileSync(temporary, `${seen.text}\n`);
-				renameSync(temporary, outputTarget);
-			} catch {
-				rmSync(temporary, { force: true });
-				extra.push({ code: "output_write_failed", path: outputTarget });
-			}
-		}
+		const extra = writeOutputTarget(code);
 		const out = envelopeLines(code, extra);
 		if (!written && !isStdoutDead()) {
 			written = true;

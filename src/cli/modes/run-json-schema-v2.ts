@@ -17,12 +17,15 @@ export const RUN_RESULT_SCHEMA_VERSION = 2;
 /**
  * Every cause code, in precedence order. The first fact present sets the exit code; `causes[]` lists every fact,
  * winner first. `not_started` covers a request refused before any work (usage, configuration, admission), and
- * `run_failed` a failure no narrower code names.
+ * `run_failed` a failure no narrower code names. `flag_conflict` and `not_configured` are the two pre-work refusals
+ * with a narrower name of their own.
  */
 const CAUSE_ORDER = [
 	"interrupted",
 	"deadline",
 	"reader_closed",
+	"flag_conflict",
+	"not_configured",
 	"not_started",
 	"unscripted",
 	"permission_required",
@@ -90,6 +93,8 @@ function exitCodeFor(cause: RunCause): number {
 			return EXIT_CODES.deadline;
 		case "reader_closed":
 			return EXIT_CODES.readerClosed;
+		case "flag_conflict":
+		case "not_configured":
 		case "not_started":
 			return EXIT_CODES.notStarted;
 		case "unscripted":
@@ -176,11 +181,15 @@ export function verifyChecksV2(
 	});
 }
 
-/** `stream-json` only: one frame per steer-channel line read before the turn settled. */
+/**
+ * `stream-json` only: one frame per steer-channel line the reader took. `accepted` and `refused` are final; a line
+ * read before the first turn streamed is `queued`, and gets one more frame, `accepted` once that turn takes it or
+ * `refused` when the run settles first.
+ */
 export interface RunSteerFrameV2 {
 	type: "steer";
 	line: number;
-	status: "accepted" | "refused";
+	status: "accepted" | "queued" | "refused";
 	reason?: string;
 }
 

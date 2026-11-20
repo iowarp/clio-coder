@@ -113,3 +113,63 @@ export function setupSteerChannel(filePath: string, onLine: (line: string, lineN
 
 	return cleanup;
 }
+
+export type SteerLineStatus = "accepted" | "queued" | "refused";
+
+/** What a steer intake needs from the chat it steers. */
+interface SteerTarget {
+	steer(text: string): boolean;
+	onEvent(handler: (event: { type: string }) => void): () => void;
+}
+
+const NO_TURN = "no turn was streaming to take the line";
+const SETTLED = "the run settled before a turn took the line";
+
+/**
+ * Hands channel lines to the chat. A caller may write its first line at once: a line read before the first turn
+ * streams is held, noted `queued`, and handed over in channel order as soon as that turn can take it. Once a turn
+ * has streamed, a line no turn takes is refused. `close` refuses whatever is still held.
+ */
+export function createSteerIntake(
+	target: SteerTarget,
+	note: (lineNumber: number, status: SteerLineStatus, reason?: string) => void,
+): { take: (line: string, lineNumber: number) => void; close: () => void } {
+	const held: Array<{ line: string; lineNumber: number }> = [];
+	let streamed = false;
+	let closed = false;
+	const flush = (): void => {
+		while (!closed && held[0] !== undefined && target.steer(held[0].line)) {
+			const taken = held.shift();
+			streamed = true;
+			if (taken !== undefined) note(taken.lineNumber, "accepted");
+		}
+	};
+	const unsubscribe = target.onEvent((event) => {
+		if (event.type === "agent_start") streamed = true;
+		// Hand held lines over after the event's own listeners ran, never from inside the emit.
+		if (held.length > 0) queueMicrotask(flush);
+	});
+	return {
+		take(line, lineNumber) {
+			if (closed) return;
+			if (held.length === 0 && target.steer(line)) {
+				streamed = true;
+				note(lineNumber, "accepted");
+				return;
+			}
+			// A held line keeps its place: later lines wait behind it.
+			if (!streamed || held.length > 0) {
+				held.push({ line, lineNumber });
+				note(lineNumber, "queued");
+				return;
+			}
+			note(lineNumber, "refused", NO_TURN);
+		},
+		close() {
+			if (closed) return;
+			closed = true;
+			unsubscribe();
+			for (const left of held.splice(0)) note(left.lineNumber, "refused", SETTLED);
+		},
+	};
+}

@@ -8,6 +8,7 @@ import { parseCommandFlags } from "../../src/cli/kit/flags.js";
 import { defineCommandSpec, helpRequested } from "../../src/cli/kit/help.js";
 import { jsonDocument, writeCliFailure } from "../../src/cli/kit/json-out.js";
 import { type RunExitFact, resolveRunExit } from "../../src/cli/modes/run-json-schema-v2.js";
+import { startRefusalCause } from "../../src/cli/run-failure.js";
 import { COMMAND_SPECS } from "../../src/cli/specs/table.js";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -144,6 +145,13 @@ test("run exit precedence: the highest applying row sets the exit code and leads
 			["provider_error", "no_answer", "output_write_failed"],
 		],
 		["worker exit 2 is a failed run", [{ code: "worker_failed", exitCode: 2 }], 1, "failed", ["worker_failed"]],
+		[
+			"named refusals before work",
+			[{ code: "not_configured" }, { code: "flag_conflict" }],
+			2,
+			"failed",
+			["flag_conflict", "not_configured"],
+		],
 	];
 	for (const [name, facts, exitCode, outcome, codes] of rows) {
 		const resolved = resolveRunExit(facts);
@@ -156,6 +164,13 @@ test("run exit precedence: the highest applying row sets the exit code and leads
 		);
 	}
 	equal(resolveRunExit([], { displayed: true }).outcome, "displayed");
+	// An exit-2 refusal is named by the diagnostic it wrote; anything else stays not_started.
+	for (const [diagnostics, code] of [
+		[["clio-coder run: --output-format cannot be combined with --json or --json-events"], "flag_conflict"],
+		[["clio-coder run: not configured: no model target is saved; run `clio-coder configure`"], "not_configured"],
+		[["clio-coder run: empty task"], "not_started"],
+	] as const)
+		equal(startRefusalCause(diagnostics).code, code, diagnostics[0]);
 });
 
 test("json-out writes the C6 failure document and the C3 diagnostic", () => {

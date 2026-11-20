@@ -94,7 +94,7 @@ import {
 	runResultV2Active,
 	runTextSummaryRequested,
 } from "../run-failure.js";
-import { setupSteerChannel } from "../steer-channel.js";
+import { createSteerIntake, setupSteerChannel } from "../steer-channel.js";
 import {
 	type DispatchedRunsSettlement,
 	describeRuns,
@@ -1432,9 +1432,13 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	);
 	let cleanupSteer: (() => void) | undefined;
 	if (options.steerChannel) {
-		cleanupSteer = setupSteerChannel(options.steerChannel, (line, lineNumber) => {
-			noteSteerV2(lineNumber, chat.steer(line));
-		});
+		// A line written before the first turn streams waits for that turn instead of being refused.
+		const intake = createSteerIntake(chat, noteSteerV2);
+		const closeChannel = setupSteerChannel(options.steerChannel, intake.take);
+		cleanupSteer = () => {
+			closeChannel();
+			intake.close();
+		};
 	}
 	try {
 		if (mode === "json" && jsonEvents === "terminal") writeTerminalTurnStart();
