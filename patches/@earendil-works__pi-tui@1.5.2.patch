@@ -260,7 +260,7 @@ index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..afb8bdc52e3ca93cbd00033837c910cd
      private copyTextToClipboard;
      private applySearchTextHighlight;
 diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
-index 3567a4350ab0da56276289d422b58d46e4882949..f9af5ef03c061dc1be5290c171a700c1179a2d20 100644
+index 3567a4350ab0da56276289d422b58d46e4882949..574306cebdf4f1e45f7e8e9c3ac96b78d4654155 100644
 --- a/dist/tui-alt-screen.js
 +++ b/dist/tui-alt-screen.js
 @@ -32,7 +32,8 @@ const COPY_ERROR_FLASH_DURATION_MS = 5000;
@@ -273,7 +273,16 @@ index 3567a4350ab0da56276289d422b58d46e4882949..f9af5ef03c061dc1be5290c171a700c1
  const wordSegmenter = getWordSegmenter();
  /** Alternate-screen TUI with a scrollable, application-owned viewport. */
  export class TuiAltScreen extends TuiBase {
-@@ -325,6 +326,13 @@ export class TuiAltScreen extends TuiBase {
+@@ -42,6 +43,8 @@ export class TuiAltScreen extends TuiBase {
+     lastDocument = [];
+     previousScreenWidth = 0;
+     previousScreenHeight = 0;
++    /** The primary scroll view, its scroll offset and its visible rows at the last frame, for `scrollRegionShift`. */
++    previousPrimaryScroll;
+     layoutRoot;
+     currentLayout;
+     implicitDocument;
+@@ -325,6 +328,13 @@ export class TuiAltScreen extends TuiBase {
              return;
          }
      }
@@ -287,7 +296,7 @@ index 3567a4350ab0da56276289d422b58d46e4882949..f9af5ef03c061dc1be5290c171a700c1
      toggleSearch() {
          if (this.activeSearch) {
              this.closeSearch();
-@@ -1063,7 +1071,11 @@ export class TuiAltScreen extends TuiBase {
+@@ -1063,7 +1073,11 @@ export class TuiAltScreen extends TuiBase {
          const visibleTop = Math.max(0, box.rect.y, box.clip.y);
          const visibleBottom = Math.min(this.terminal.rows - 1, box.rect.y + box.rect.height - 1, box.clip.y + box.clip.height - 1);
          this.selectionDragPointer = { x: event.x, y: event.y };
@@ -300,7 +309,7 @@ index 3567a4350ab0da56276289d422b58d46e4882949..f9af5ef03c061dc1be5290c171a700c1
          if (this.selectionAutoScrollDirection === 0) {
              this.stopSelectionAutoScroll();
              return;
-@@ -1163,7 +1175,13 @@ export class TuiAltScreen extends TuiBase {
+@@ -1163,7 +1177,13 @@ export class TuiAltScreen extends TuiBase {
          }
          this.stopSelectionAutoScroll();
          this.selectionPressActive = true;
@@ -315,7 +324,7 @@ index 3567a4350ab0da56276289d422b58d46e4882949..f9af5ef03c061dc1be5290c171a700c1
              ? getScrollViewsAt(this.currentLayout, event.x, event.y)[0]
              : undefined;
          const anchor = this.getSelectionPoint(event, scrollView);
-@@ -1222,15 +1240,18 @@ export class TuiAltScreen extends TuiBase {
+@@ -1222,15 +1242,18 @@ export class TuiAltScreen extends TuiBase {
                  return undefined;
              sourceLines = box.scrollContentLines;
          }
@@ -337,7 +346,7 @@ index 3567a4350ab0da56276289d422b58d46e4882949..f9af5ef03c061dc1be5290c171a700c1
      async copySelectionToClipboard() {
          const text = this.getActiveSelectionText();
          if (!text)
-@@ -1373,6 +1394,10 @@ export class TuiAltScreen extends TuiBase {
+@@ -1373,6 +1396,10 @@ export class TuiAltScreen extends TuiBase {
              maxRow = Math.min(screen.length - 1, box.rect.y + box.rect.height - 1, box.clip.y + box.clip.height - 1);
              minColumn = Math.max(0, box.rect.x, box.clip.x);
              maxColumn = Math.min(this.terminal.columns, box.rect.x + box.rect.width, box.clip.x + box.clip.width);
@@ -348,6 +357,76 @@ index 3567a4350ab0da56276289d422b58d46e4882949..f9af5ef03c061dc1be5290c171a700c1
              screenSelection = {
                  start: {
                      ...selection.start,
+@@ -1450,6 +1477,49 @@ export class TuiAltScreen extends TuiBase {
+         }
+         return result;
+     }
++    /**
++     * When the primary scroll view moved by k rows since the last frame, scroll its visible rows on the terminal
++     * (a scroll region, then SU or SD) and return what every row shows after that, so the diff repaints only the
++     * exposed rows and rows that still differ: an overlay, a selection or a scrollbar cell over the view. Frames
++     * with an image row on either screen, full redraws and shifts that would reuse fewer than two rows keep the
++     * row-by-row diff.
++     */
++    scrollRegionShift(screen, layout, redrawAll) {
++        const previous = this.previousPrimaryScroll;
++        const scrollView = layout.primaryScrollView;
++        const box = scrollView ? getScrollViewBox(layout, scrollView) : undefined;
++        this.previousPrimaryScroll = box
++            ? { scrollView, scrollTop: scrollView.scrollTop, top: box.clip.y, height: box.clip.height }
++            : undefined;
++        if (redrawAll || !previous || !box || previous.scrollView !== scrollView)
++            return undefined;
++        const top = box.clip.y;
++        const height = box.clip.height;
++        const shift = scrollView.scrollTop - previous.scrollTop;
++        if (previous.top !== top ||
++            previous.height !== height ||
++            height < 2 ||
++            top < 0 ||
++            top + height > screen.length ||
++            shift === 0 ||
++            Math.abs(shift) >= height)
++            return undefined;
++        if (screen.some(isImageLine) || this.previousScreen.some(isImageLine))
++            return undefined;
++        const baseline = this.previousScreen.slice();
++        let reused = 0;
++        for (let row = top; row < top + height; row++) {
++            const source = row + shift;
++            baseline[row] = source >= top && source < top + height ? (this.previousScreen[source] ?? "") : "";
++            if (screen[row] === baseline[row] && screen[row] !== this.previousScreen[row])
++                reused++;
++        }
++        if (reused < 2)
++            return undefined;
++        const scroll = shift > 0 ? `\x1b[${shift}S` : `\x1b[${-shift}T`;
++        // The reset keeps the current style off the blank rows the scroll exposes.
++        return { sequence: `\x1b[0m\x1b[${top + 1};${top + height}r${scroll}\x1b[r`, baseline };
++    }
+     doRender() {
+         if (this.stopped || !this.altScreenActive)
+             return;
+@@ -1517,6 +1587,10 @@ export class TuiAltScreen extends TuiBase {
+         // and text write so nothing later intersects them. Terminals that keep images on a separate layer
+         // (Kitty, Ghostty) render the same result; text-only frames keep the interleaved output.
+         const drawKittyImagesLast = redrawImages && this.imageProtocol === "kitty" && screen.some(isImageLine);
++        const scrolled = this.scrollRegionShift(screen, nextLayout, fullRedraw || imagesNeedRedraw);
++        if (scrolled)
++            buffer += scrolled.sequence;
++        const baseline = scrolled?.baseline ?? this.previousScreen;
+         if (drawKittyImagesLast) {
+             for (let row = 0; row < height; row++) {
+                 if (!fullRedraw && !imagesNeedRedraw && screen[row] === this.previousScreen[row])
+@@ -1540,7 +1614,7 @@ export class TuiAltScreen extends TuiBase {
+         }
+         else {
+             for (let row = 0; row < height; row++) {
+-                if (!fullRedraw && !imagesNeedRedraw && screen[row] === this.previousScreen[row])
++                if (!fullRedraw && !imagesNeedRedraw && screen[row] === baseline[row])
+                     continue;
+                 buffer += `\x1b[${row + 1};1H\x1b[2K${preparedKittyScreen.lines[row] ?? ""}`;
+             }
 diff --git a/dist/tui-main-screen.d.ts b/dist/tui-main-screen.d.ts
 index 6ab7f63586dfa034ec6c30a40d475909d2d950e2..e7141bd93604bab7db31fcd7dfd0a4603ef9f34d 100644
 --- a/dist/tui-main-screen.d.ts
