@@ -198,7 +198,7 @@ describe("clio-coder run --timeout", () => {
 		for (const value of ["0", "-3", "abc", "Infinity"]) {
 			const turn = await runCli(["run", "--timeout", value, "task"], { env: scratch.env, cwd: scratch.root });
 			strictEqual(turn.code, 2, `${value}: ${turn.stderr}`);
-			match(turn.stderr, /--timeout must be a positive number of seconds/);
+			match(turn.stderr, /--timeout: (duration must be greater than zero|expected a duration such as)/);
 		}
 		const missing = await runCli(["run", "--timeout"], { env: scratch.env, cwd: scratch.root });
 		strictEqual(missing.code, 2, missing.stderr);

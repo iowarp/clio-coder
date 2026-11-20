@@ -117,6 +117,12 @@ export interface TurnConstraints {
 	 * dispatch entirely (D8c). Absent means the parent's own set is the ceiling.
 	 */
 	readonly delegatedTools?: readonly string[];
+	/**
+	 * `--deny-tools`: capabilities removed from the tool set whatever else admits
+	 * them. They leave the parent's own set and the delegation ceiling that falls
+	 * back to it; an explicit `delegatedTools` list stays the worker ceiling.
+	 */
+	readonly deniedTools?: readonly string[];
 	readonly skills?: "allowed" | "disabled";
 	/**
 	 * Enforced read-only ceiling, as a read-only dispatch has: admission admits
@@ -215,6 +221,7 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 		(value.readOnly !== undefined && value.readOnly !== true) ||
 		!isToolNameList(value.allowedTools) ||
 		!isToolNameList(value.delegatedTools) ||
+		!isToolNameList(value.deniedTools) ||
 		!isSurfaceSources(value.toolSurfaceSources) ||
 		!isSurfaceSources(value.delegatedToolSurfaceSources) ||
 		!isTurnBudget(value.budget) ||
@@ -238,6 +245,7 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 		...(value.delegatedTools === undefined
 			? {}
 			: { delegatedTools: Object.freeze([...new Set(value.delegatedTools)].sort()) }),
+		...(value.deniedTools === undefined ? {} : { deniedTools: Object.freeze([...new Set(value.deniedTools)].sort()) }),
 		...(value.budget === undefined ? {} : { budget: Object.freeze({ ...value.budget }) }),
 		...(value.turnPolicy === undefined ? {} : { turnPolicy: snapshotStepPolicy(value.turnPolicy) }),
 		...(value.dormantTurnPolicy === undefined ? {} : { dormantTurnPolicy: snapshotStepPolicy(value.dormantTurnPolicy) }),
@@ -333,6 +341,11 @@ export function narrowTurnConstraints(
 		session.delegatedTools === undefined && turn.delegatedTools === undefined
 			? undefined
 			: intersectLists(session.delegatedTools ?? session.allowedTools, turn.delegatedTools ?? turn.allowedTools);
+	// A denial at any layer holds at every narrower one.
+	const deniedTools =
+		session.deniedTools === undefined && turn.deniedTools === undefined
+			? undefined
+			: [...new Set([...(session.deniedTools ?? []), ...(turn.deniedTools ?? [])])];
 	const delegation = session.delegation === "forbidden" ? "forbidden" : turn.delegation;
 	const skills = session.skills === "disabled" ? "disabled" : turn.skills;
 	// Once any layer is read-only every narrower one is too (Z1).
@@ -349,6 +362,7 @@ export function narrowTurnConstraints(
 		...(delegation === undefined ? {} : { delegation }),
 		...(skills === undefined ? {} : { skills }),
 		...(readOnly ? { readOnly: true as const } : {}),
+		...(deniedTools === undefined ? {} : { deniedTools }),
 		...(allowedTools === undefined
 			? {}
 			: {
@@ -446,6 +460,8 @@ export function turnScopeGuidance(constraints: TurnConstraints | undefined): str
 				: "Delegated workers may use no tools for this turn.",
 		);
 	}
+	if (constraints.deniedTools !== undefined && constraints.deniedTools.length > 0)
+		lines.push(`Denied capabilities for this task: ${[...new Set(constraints.deniedTools)].sort().join(", ")}.`);
 	const budget = constraints.budget;
 	if (budget?.toolCalls !== undefined || budget?.observationBytes !== undefined) {
 		// The limits the turn actually gets: a value above the operator's applies only up to its template ceiling.
@@ -490,11 +506,14 @@ export function turnScopeGuidance(constraints: TurnConstraints | undefined): str
 
 export function turnAllowsTool(constraints: TurnConstraints | undefined, capability: string): boolean {
 	if (constraints?.delegation === "forbidden" && capability === ToolNames.Dispatch) return false;
+	if (constraints?.deniedTools?.includes(capability) === true) return false;
 	return listAllowsTool(constraints?.allowedTools, capability);
 }
 
 /** Whether a dispatched worker may hold a tool under the parent's delegation ceiling. */
 export function turnDelegatesTool(constraints: TurnConstraints | undefined, capability: string): boolean {
+	// Without its own ceiling a worker's falls back to the parent's set, which the denial already narrowed.
+	if (constraints?.delegatedTools === undefined && constraints?.deniedTools?.includes(capability) === true) return false;
 	return listAllowsTool(constraints?.delegatedTools ?? constraints?.allowedTools, capability);
 }
 
@@ -511,12 +530,16 @@ export function workerTurnConstraints(constraints: TurnConstraints): TurnConstra
 		budget: _budget,
 		turnPolicy: _turnPolicy,
 		dormantTurnPolicy: _dormantTurnPolicy,
+		deniedTools,
 		...rest
 	} = constraints;
 	return Object.freeze({
 		...rest,
+		// An explicit delegation ceiling replaces the parent's set, denial included; without one the worker keeps the denial.
 		...(delegatedTools === undefined
-			? {}
+			? deniedTools === undefined
+				? {}
+				: { deniedTools }
 			: { allowedTools: delegatedTools, toolSurfaceSources: toolSurfaceSources(constraints, true) }),
 	});
 }

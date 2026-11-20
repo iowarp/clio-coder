@@ -1,10 +1,11 @@
 import { THINKING_LEVELS } from "../core/defaults.js";
 import { MAX_TIMER_DELAY_MS } from "../core/timers.js";
-import { parseToolLimitList, toolLimitConstraints } from "../core/tool-limit-flags.js";
+import { parseToolLimitList, toolLimitConflict, toolLimitConstraints } from "../core/tool-limit-flags.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { type AutonomyLevel, autonomyFromUserInput } from "../domains/safety/autonomy.js";
 import { globalFlagPositionHint, parseMaxContextTokens } from "./argv.js";
+import { parseDuration } from "./kit/duration.js";
 import type { ErrorSlug } from "./kit/slugs.js";
 
 export interface CliArgDiagnostic {
@@ -131,7 +132,9 @@ function runModeMatrixErrors(parsed: RunCliArgs): string[] {
 		return errors;
 	}
 	if (parsed.constraints) {
-		errors.push("--turn-mode, --allow-tools, --delegate-tools, and --no-delegate apply to the main-agent task");
+		errors.push(
+			"--turn-mode, --allow-tools, --deny-tools, --delegate-tools, and --no-delegate apply to the main-agent task",
+		);
 	}
 	if (
 		parsed.sessionId !== undefined ||
@@ -357,7 +360,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			parsed.constraints = { ...parsed.constraints, delegation: "forbidden" };
 			continue;
 		}
-		if (arg === "--allow-tools" || arg === "--delegate-tools") {
+		if (arg === "--allow-tools" || arg === "--delegate-tools" || arg === "--deny-tools") {
 			const value = need(arg);
 			if (value !== null) {
 				const names = parseToolLimitList(arg, value);
@@ -418,18 +421,11 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			}
 			continue;
 		}
-		if (arg === "--timeout") {
-			const value = need(arg);
+		if (arg === "--timeout" || arg?.startsWith("--timeout=")) {
+			const value = arg === "--timeout" ? need(arg) : arg.slice("--timeout=".length);
 			if (value !== null) {
-				const seconds = Number(value);
-				if (Number.isFinite(seconds) && seconds > 0 && seconds * 1000 <= MAX_TIMER_DELAY_MS) {
-					parsed.timeoutSeconds = seconds;
-				} else {
-					parsed.diagnostics.push({
-						type: "error",
-						message: `--timeout must be a positive number of seconds no greater than ${Math.floor(MAX_TIMER_DELAY_MS / 1000)}`,
-					});
-				}
+				const seconds = durationSeconds("--timeout", value, parsed);
+				if (seconds !== null) parsed.timeoutSeconds = seconds;
 			}
 			continue;
 		}
@@ -444,18 +440,11 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			}
 			continue;
 		}
-		if (arg === "--verify-timeout") {
-			const value = need(arg);
+		if (arg === "--verify-timeout" || arg?.startsWith("--verify-timeout=")) {
+			const value = arg === "--verify-timeout" ? need(arg) : arg.slice("--verify-timeout=".length);
 			if (value !== null) {
-				const seconds = Number(value);
-				if (Number.isFinite(seconds) && seconds > 0 && seconds * 1000 <= MAX_TIMER_DELAY_MS) {
-					parsed.verifyTimeoutSeconds = seconds;
-				} else {
-					parsed.diagnostics.push({
-						type: "error",
-						message: `--verify-timeout must be a positive number of seconds no greater than ${Math.floor(MAX_TIMER_DELAY_MS / 1000)}`,
-					});
-				}
+				const seconds = durationSeconds("--verify-timeout", value, parsed);
+				if (seconds !== null) parsed.verifyTimeoutSeconds = seconds;
 			}
 			continue;
 		}
@@ -520,7 +509,26 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			message: "--output-format cannot be combined with --json or --json-events",
 		});
 	}
+	const toolConflict = parsed.constraints === undefined ? undefined : toolLimitConflict(parsed.constraints);
+	if (toolConflict !== undefined)
+		parsed.diagnostics.push({ type: "error", slug: "flag_conflict", message: toolConflict });
 	return parsed;
+}
+
+/**
+ * A `--timeout`-style value (C11): `90`, `90s`, `15m`, `2h` or `500ms`; a bare number stays seconds. The run's
+ * timers cap what a value may be, so a larger one is refused rather than clamped.
+ */
+function durationSeconds(flag: string, value: string, parsed: RunCliArgs): number | null {
+	const duration = parseDuration(value, { bareUnit: "s" });
+	if (duration.ok && duration.ms <= MAX_TIMER_DELAY_MS) return duration.ms / 1000;
+	parsed.diagnostics.push({
+		type: "error",
+		message: duration.ok
+			? `${flag} must be no longer than ${Math.floor(MAX_TIMER_DELAY_MS / 1000)} seconds`
+			: `${flag}: ${duration.message}`,
+	});
+	return null;
 }
 
 function setNumberOption(

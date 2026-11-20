@@ -1,7 +1,7 @@
 import { parseRunCliArgs } from "./args.js";
 
 export const RUN_USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--resume <id|prefix|name>|--continue] [--fork] [--name <text>] [--fail-on-noop] [--timeout <seconds>] [--verify "<cmd>" [--verify-timeout <seconds>]] [--max-cost-usd <N>] [--answers <file.yaml>] [--agent <recipe-id>] [--] "<task>"\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--systemone <engine|off>] [--read-only] [--record] [--json] [--json-events full|terminal] [--resume <id|prefix|name>|--continue] [--fork] [--name <text>] [--fail-on-noop] [--timeout <duration>] [--verify "<cmd>" [--verify-timeout <duration>]] [--max-cost-usd <N>] [--answers <file.yaml>] [--agent <recipe-id>] [--] "<task>"\n';
 
 export const RUN_HELP = `clio-coder run [flags] [--] "<task>"
 
@@ -20,6 +20,8 @@ Flags:
   --record                  save a bounded redacted display asciicast for --agent dispatch
   --turn-mode <mode>        main-agent workflow: answer|proposal|change; not an authorization grant
   --allow-tools <names>     main-agent capability allowlist, comma-separated; none disables all tools
+  --deny-tools <names>      remove these capabilities from the main agent's tools, comma-separated; a name may
+                            not also be in --allow-tools; without --delegate-tools workers lose them too
   --no-delegate             forbid main-agent dispatch for this task and its continuations
   --delegate-tools <names>  tools dispatched workers may hold, independent of --allow-tools; none gives workers no tools
   --temperature <N>         one-run sampler override for supported local/OpenAI-compatible runtimes
@@ -52,10 +54,12 @@ Flags:
   --name <text>             name this run's session (the new, resumed or forked one)
   --fail-on-noop            also exit 1 when tools ran and none succeeded; a text-only answer or an answer/proposal
                             turn is not a no-op (see below)
-  --timeout <seconds>       wall-clock limit for the whole run; exit 124 on expiry
+  --timeout <duration>      wall-clock limit for the whole run: 90, 90s, 15m, 2h or 500ms (a bare number is
+                            seconds); exit 124 on expiry
   --verify "<cmd>"          an acceptance check for this run only, repeatable: bash runs it in the run's cwd after
                             the turn, and the finish gate counts the agent's own run of it (see below)
-  --verify-timeout <secs>   limit for each --verify check (default 300); a check that runs over fails
+  --verify-timeout <dur>    limit for each --verify check (default 300s), a duration as --timeout; a check that
+                            runs over fails
   --max-cost-usd <N>        priced spend this run may add: main agent, compaction and dispatched workers are each
                             admitted only while under it, and running workers are stopped when it is reached; exit 4
                             when it stops the run. Spend can pass it by the model calls already in flight then: one per

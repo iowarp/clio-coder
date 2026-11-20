@@ -28,13 +28,15 @@ export interface SessionToolLimits {
 	toolSurfaceSources?: readonly ToolSurfaceSource[];
 	delegatedToolSurfaceSources?: readonly ToolSurfaceSource[];
 	delegatedTools?: readonly string[];
+	deniedTools?: readonly string[];
 	readOnly?: true;
 }
 
 export function toolLimitConstraints(
-	flag: "--allow-tools" | "--delegate-tools",
+	flag: "--allow-tools" | "--delegate-tools" | "--deny-tools",
 	tools: readonly string[],
 ): SessionToolLimits {
+	if (flag === "--deny-tools") return { deniedTools: tools };
 	const sources: ToolSurfaceSource[] = [
 		{
 			tools,
@@ -45,4 +47,18 @@ export function toolLimitConstraints(
 	return flag === "--allow-tools"
 		? { allowedTools: tools, toolSurfaceSources: sources }
 		: { delegatedTools: tools, delegatedToolSurfaceSources: sources };
+}
+
+/**
+ * A name both allowed and denied is a contradiction, never a silent win for
+ * either side (SPEC 6.4): the caller refuses it as a usage error.
+ */
+export function toolLimitConflict(limits: {
+	readonly allowedTools?: readonly string[];
+	readonly deniedTools?: readonly string[];
+}): string | undefined {
+	const both = (limits.allowedTools ?? []).filter((name) => limits.deniedTools?.includes(name) === true);
+	return both.length > 0
+		? `--allow-tools and --deny-tools both name ${both.join(", ")}; pass each tool in one of them`
+		: undefined;
 }

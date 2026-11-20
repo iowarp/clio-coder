@@ -4,7 +4,7 @@ import { extractGlobalFlags } from "../../src/cli/argv.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { SessionToolLimits } from "../../src/core/tool-limit-flags.js";
-import { turnDelegatesTool } from "../../src/core/turn-constraints.js";
+import { narrowTurnConstraints, turnAllowsTool, turnDelegatesTool } from "../../src/core/turn-constraints.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
@@ -76,6 +76,17 @@ test("an interactive or ACP session's tool limits bound every turn, before and a
 		loop.dispose();
 		await loop.whenSettled();
 	}
+});
+
+test("--deny-tools removes a tool from the session, every scoped turn and a worker ceiling that falls back to it", () => {
+	const limits = extractGlobalFlags(["--deny-tools", "bash"]).toolLimits;
+	assert.deepEqual(limits?.deniedTools, ["bash"]);
+	const turn = narrowTurnConstraints(limits, { allowedTools: ["read", "bash"] });
+	assert.equal(turnAllowsTool(turn, "bash"), false);
+	assert.equal(turnAllowsTool(turn, "read"), true);
+	assert.equal(turnDelegatesTool(turn, "bash"), false);
+	assert.equal(turnDelegatesTool({ ...turn, delegatedTools: ["bash"] }, "bash"), true);
+	assert.match(extractGlobalFlags(["--allow-tools", "read", "--deny-tools", "read"]).error ?? "", /both name read/);
 });
 
 test("a TUI /run to an external agent under --delegate-tools read dispatches a worker limited to read", async () => {

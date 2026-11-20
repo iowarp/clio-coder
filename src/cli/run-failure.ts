@@ -58,6 +58,7 @@ export function writeRunDiagnostic(text: string): void {
 /** Pre-work refusals that carry a narrower cause than `not_started`, known by the diagnostic each one writes. */
 const START_REFUSALS: ReadonlyArray<readonly [RegExp, RunCauseCode]> = [
 	[/--output-format cannot be combined with --json or --json-events/u, "flag_conflict"],
+	[/--allow-tools and --deny-tools both name /u, "flag_conflict"],
 	[/^clio-coder run: not configured: /u, "not_configured"],
 	// The orchestrator's resume refusal when another process holds the session (SPEC L3, 6.7; liveSessionRefusal).
 	[/^clio-coder run: failed to resume session \S+: session \S+ is open in another process /u, "session_live"],
