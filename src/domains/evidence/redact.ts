@@ -37,6 +37,15 @@ interface SecretPattern {
  * key-name-based redaction at write time; this pass catches values that
  * escaped into free text, command output, or tool arguments.
  */
+/**
+ * The secret words a key name holds, shared by the assignment pattern and the JSON property-name pattern so the two
+ * hide the same keys. A bare `pass` or `pwd` is prose, the working directory or a word such as `compass`, so each needs
+ * a `_` or `-` ahead of it (`DB_PASS`, `db-pass`, `MYSQL_PWD`) or is one of the named glued forms (`PGPASS`, and
+ * `passwd`, `password` and `passphrase` anywhere); `PWD=/home/a`, `first pass: lint`, `tests_passed` and
+ * `compass=northwest` keep their values.
+ */
+const SECRET_KEY_WORDS = String.raw`api[_-]?key|apikey|(?:account|access)[_-]?key|secret|token|pass(?:wd|word|phrase)|(?:[_-]|pg)pass(?![a-z])|[_-]pwd(?![a-z])|credential`;
+
 const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 	// Shares its patterns with display redaction so the two hide the same text (#446, #448). They run first because the
 	// assignment value below would swallow the `@` and host of `https://u:token=abcdefgh@h`.
@@ -102,9 +111,10 @@ const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 		// start a match and the secret word need only be found once. Two stars around the word took 7.6 s on 8 KB of
 		// `token-`, and `\\s*["']?\\s*` split a run of spaces every possible way.
 		//
-		// A bare `pass` or `pwd` is prose or the working directory (`first pass: lint`, `PWD=/home/a`), so each needs a
-		// qualifier: `DB_PASS`, `PGPASS` and `MYSQL_PWD` hide their values as display redaction does, `tests_passed` keeps its.
-		re: /\b(?<=(?:^|[^A-Za-z0-9_-])-*)(?=[A-Za-z0-9_-]*?(?:api[_-]?key|apikey|(?:account|access)[_-]?key|secret|token|pass(?:wd|word|phrase)|[A-Za-z0-9][_-]?pass(?![a-z])|[_-]pwd(?![a-z])|credential))([A-Za-z0-9_-]*\s*(?:["']\s*)?[:=]\s*["']?)(?![A-Za-z_][\w.]*\((?:[\s"'{[)]|$))([^\s"'`;,&|<>]{8,})/gi,
+		re: new RegExp(
+			String.raw`\b(?<=(?:^|[^A-Za-z0-9_-])-*)(?=[A-Za-z0-9_-]*?(?:${SECRET_KEY_WORDS}))([A-Za-z0-9_-]*\s*(?:["']\s*)?[:=]\s*["']?)(?![A-Za-z_][\w.]*\((?:[\s"'{[)]|$))([^\s"'\x60;,&|<>]{8,})`,
+			"gi",
+		),
 	},
 ];
 
@@ -139,8 +149,10 @@ function secretShapeHolds(kind: string, value: string): boolean {
 }
 
 /** The assignment pattern's key half, for a key that arrives as a JSON property name. */
-const SECRET_PROPERTY_NAME =
-	/(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*$)[A-Za-z0-9_-]*?(?:api[_-]?key|apikey|(?:account|access)[_-]?key|secret|token|pass(?:wd|word|phrase)|[A-Za-z0-9][_-]?pass(?![a-z])|[_-]pwd(?![a-z])|credential)/i;
+const SECRET_PROPERTY_NAME = new RegExp(
+	String.raw`(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*$)[A-Za-z0-9_-]*?(?:${SECRET_KEY_WORDS})`,
+	"i",
+);
 
 /**
  * A known value shorter than this is too likely to be ordinary text (a word,

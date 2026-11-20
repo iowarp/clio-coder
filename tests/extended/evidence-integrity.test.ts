@@ -283,6 +283,7 @@ describe("evidence integrity boundary", () => {
 			"OLDPWD=/home/operator/other",
 			"first pass: typecheck",
 			"tests_passed=12345678",
+			"compass=northwest",
 		];
 		const tally = createRedactionTally();
 		const redacted = redactSecretsDeep([...hidden, ...kept], tally);
@@ -290,12 +291,16 @@ describe("evidence integrity boundary", () => {
 		deepStrictEqual(redacted.slice(hidden.length), kept);
 		strictEqual(tally.count, hidden.length);
 		const properties = JSON.parse(
-			JSON.stringify({ DB_PASS: value, mysql_pwd: value, AccountKey: value }, secretRedactingReplacer(tally)),
+			JSON.stringify(
+				{ DB_PASS: value, mysql_pwd: value, AccountKey: value, compass: "northwest" },
+				secretRedactingReplacer(tally),
+			),
 		) as Record<string, string>;
 		deepStrictEqual(
 			Object.values(properties).filter((item) => item === value),
 			[],
 		);
+		strictEqual(properties.compass, "northwest");
 	});
 
 	it("redacts secrets deeply and accounts for every replacement", () => {
