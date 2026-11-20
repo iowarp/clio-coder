@@ -17,11 +17,19 @@ import {
  * in a gist. Only the holder of the maintainers' private key can open it; nothing here ever sees that key.
  */
 
-/** The maintainers' intake key. `kid` is the first 16 hex of sha256 over the raw public key. */
+/**
+ * The maintainers' intake key. `kid` is the first 16 hex of sha256 over the raw public key. After `notAfter` (a UTC
+ * day, inclusive) this build seals nothing to it: the key is rotated yearly by shipping a new one with a new id, so an
+ * old client can never encrypt to a retired key (SF-20, R-18).
+ */
 export const SHARE_RECIPIENT = {
 	kid: "d7aad758f9cb9edc",
 	publicKey: "HrgavsjtbzwR5utXQfKg9FzZ62qLykC6kJlqvOC8MS0=",
+	notAfter: "2027-12-31",
 } as const;
+
+export const SHARE_KEY_EXPIRED =
+	"this Clio Coder is too old to share a bundle: the maintainers' key it carries has expired; upgrade, or send the report without one";
 
 export const SHARE_PLAIN_FORMAT = "clio-coder.share.plain";
 export const SHARE_SEALED_FORMAT = "clio-coder.share.sealed";
@@ -93,8 +101,10 @@ function deriveKey(privateKey: KeyObject, publicKey: KeyObject, ephemeralRaw: Bu
 }
 
 export interface SealOptions {
-	/** Defaults to {@link SHARE_RECIPIENT}. */
-	recipient?: { publicKey: string };
+	/** Defaults to {@link SHARE_RECIPIENT}. A recipient without `notAfter` never expires. */
+	recipient?: { publicKey: string; notAfter?: string };
+	/** The clock the key's expiry is read against; now when absent. */
+	now?: Date;
 	/** Test seams: a fixed ephemeral private key (raw 32 bytes) and nonce make the envelope deterministic. */
 	ephemeralPrivateKey?: Buffer;
 	nonce?: Buffer;
@@ -103,6 +113,12 @@ export interface SealOptions {
 /** Encrypt a share's plaintext to the maintainers. The envelope names only the key id, the share id and its kind. */
 export function sealShare(plain: SharePlaintext, options: SealOptions = {}): SealedShare {
 	if (!SHARE_ID.test(plain.shareId)) throw new Error(`not a share id: ${plain.shareId}`);
+	const notAfter = options.recipient !== undefined ? options.recipient.notAfter : SHARE_RECIPIENT.notAfter;
+	if (notAfter !== undefined) {
+		const end = Date.parse(`${notAfter}T23:59:59.999Z`);
+		// An unreadable date fails closed, like a passed one.
+		if (!(end >= (options.now ?? new Date()).getTime())) throw new Error(SHARE_KEY_EXPIRED);
+	}
 	const recipientRaw = Buffer.from(options.recipient?.publicKey ?? SHARE_RECIPIENT.publicKey, "base64");
 	const recipient = publicKeyFromRaw(recipientRaw);
 	const kid = shareKid(recipientRaw);
