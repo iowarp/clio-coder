@@ -107,7 +107,8 @@ export function runEvidence(
 				: {
 						toolCalls: settled.toolCalls,
 						toolErrors: tools.reduce((total, stat) => total + stat.errors, 0),
-						blockedToolCalls: tools.reduce((total, stat) => total + stat.blocked, 0),
+						// A refused ask is a call that did not run, as the run line and `toolActivity` count it (FX-3).
+						blockedToolCalls: tools.reduce((total, stat) => total + stat.blocked + (stat.asked ?? 0), 0),
 						// The folded quantities keep a partially measured run's known subtotal and its coverage (#434).
 						tokens: record.row.tokens,
 						usd: record.row.usd,

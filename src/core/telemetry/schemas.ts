@@ -1031,10 +1031,18 @@ export const RunSettledSchema = Type.Object(
 		apiCalls: factSchema(count),
 		pricing: PricingSchema,
 		toolCalls: count,
-		/** Calls per tool and how they ended, by tool name; a tool's arguments and results are never kept here. */
-		tools: Type.Array(Type.Object({ tool: ExistingId, calls: count, ok: count, errors: count, blocked: count }, closed), {
-			maxItems: 256,
-		}),
+		/**
+		 * Calls per tool and how they ended, by tool name; a tool's arguments and results are never kept here. `asked`
+		 * counts the permission asks that were refused without an answer, apart from `blocked`, so a row sums; absent when
+		 * there were none.
+		 */
+		tools: Type.Array(
+			Type.Object(
+				{ tool: ExistingId, calls: count, ok: count, errors: count, blocked: count, asked: Type.Optional(count) },
+				closed,
+			),
+			{ maxItems: 256 },
+		),
 		/** The skills the run loaded, in activation order, and who asked for each; never a skill's path or body. */
 		skills: Type.Array(
 			Type.Object({ name: ExistingId, requestSource: nullable(vocabulary(["recipe", "model", "operator"])) }, closed),
@@ -1051,6 +1059,8 @@ export const RunSettledSchema = Type.Object(
 					mutatingSucceeded: Type.Boolean(),
 					/** The worker wrote at least one blob into a granted store tag; absent when it wrote none. */
 					storeWritten: Type.Optional(Type.Boolean()),
+					/** Calls that started and never finished, so a sealed reader shows them too (FL-6); absent when none. */
+					unfinished: Type.Optional(count),
 				},
 				closed,
 			),
@@ -1189,6 +1199,11 @@ export const RunSettledSchema = Type.Object(
 		unclassifiedAfterLastCheck: Type.Optional(
 			Type.Object({ count, commands: Type.Array(diagnostic, { maxItems: 5 }) }, closed),
 		),
+		/**
+		 * The warnings dispatch resolved the run's route with, such as a thinking level the model could not run, so a
+		 * sealed reader names them as the dispatch result did (FL-6). Absent when there were none and in older journals.
+		 */
+		routeWarnings: Type.Optional(Type.Array(diagnostic, { maxItems: 16 })),
 		/** The isolated writer checkout's verdict; its path, branch and changed paths are in the result object. */
 		worktree: nullable(
 			Type.Object(

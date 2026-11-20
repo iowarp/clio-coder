@@ -197,9 +197,8 @@ import {
 	outsideWorkspaceHint,
 	WORKER_REFUSAL_LIMIT,
 	WORKER_REFUSAL_REPORT_BLOCK,
-	WORKER_REFUSAL_REPORT_DIRECTIVE,
-	workerRefusalHelperDirective,
 	workerRefusalLimitReason,
+	workerRefusalReportDirective,
 } from "./worker-refusals.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
 
@@ -2410,9 +2409,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		permissionFailure = true;
 		refusalReportRound = workerModelRound + 1;
 		if (helperForcedChoiceAvailable) helperTerminalPhase = true;
-		const directive = helperToolAvailable
-			? workerRefusalHelperDirective(INTERNAL_HELPER_RESULT_TOOL)
-			: WORKER_REFUSAL_REPORT_DIRECTIVE;
+		const directive = workerRefusalReportDirective(helperForcedChoiceAvailable ? INTERNAL_HELPER_RESULT_TOOL : null);
 		registry.cancelParkedCalls(`${reason}\n${directive}`);
 		process.stderr.write(`[worker] ${reason}\n`);
 	};

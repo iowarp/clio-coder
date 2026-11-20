@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
+import { inspectRunEvidence } from "../../src/domains/evidence/run-evidence.js";
 import { runCli, sealedReceipt } from "../harness/headless-run.js";
 import {
 	closeServer,
@@ -108,4 +109,8 @@ test("a headless run reports an ask it could not put to anyone as a permission r
 		[safety.permissionRequestedAttempts?.[0]?.tool],
 	);
 	strictEqual(receipt.settled.tools.find((row) => row.tool === "bash")?.blocked, 0);
+	// FX-3: the row still sums, and evidence counts the refused ask as a call that did not run, as the run line does.
+	strictEqual(receipt.settled.tools.find((row) => row.tool === "bash")?.asked, 1);
+	const evidence = await inspectRunEvidence(join(dir, "state"), receipt.row.runId);
+	strictEqual(evidence.totals?.blockedToolCalls, 1);
 });

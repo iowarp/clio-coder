@@ -121,9 +121,13 @@ interface CollectedRunRow extends CollectRow {
 }
 
 function collectRunLine(row: CollectedRunRow): string[] {
+	// The route warnings the dispatch result printed, read back from the sealed record (FL-6).
+	const routeWarnings = (row.evidence.run?.facts.routeWarnings ?? []).map(
+		(message) => `  route_warning ${row.runId}: ${message}`,
+	);
 	if (row.evidence.run !== null) {
 		const helperLines = compactHelperResultLines(row.evidence.run, row.evidence.integrity, COMPACT_ANSWER_BYTES);
-		if (helperLines !== null) return helperLines;
+		if (helperLines !== null) return [...helperLines, ...routeWarnings];
 	}
 	const run = row.run;
 	const lines = run
@@ -148,6 +152,7 @@ function collectRunLine(row: CollectedRunRow): string[] {
 		);
 	}
 	if (row.evidence.integrityNote) lines.push(`  ${row.evidence.integrityNote}`);
+	lines.push(...routeWarnings);
 	lines.push(`  ${workerTextLabel(row.evidence.trustStatus, row.evidence.run)}`);
 	const output = row.evidence.run?.delivered?.output ?? null;
 	if (output) {

@@ -229,7 +229,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 			...keep("posture", "maxCostUsd", "deadlineMs", "minimumQuality", "locality", "failover"),
 			requiredCapabilities: "token",
 		},
-		tools: { ...keep("calls", "ok", "errors", "blocked"), tool: "tool" },
+		tools: { ...keep("calls", "ok", "errors", "blocked", "asked"), tool: "tool" },
 		skills: { requestSource: "keep", name: "name" },
 		capabilityMismatch: { agentId: "name", suggestedAgentId: "name", capabilityClass: "token", taskType: "token" },
 		context: { ...keep("briefingBytes", "worker"), project: { ...keep("tier", "chars"), sections: "token" } },
@@ -256,6 +256,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		},
 		validationGrounding: { claimed: "keep", grounded: "keep", ungrounded: "withhold", basis: "keep" },
 		unclassifiedAfterLastCheck: { count: "keep", commands: "withhold" },
+		routeWarnings: "withhold",
 		stepPipeline: STEP_PIPELINE,
 	},
 	"run.feed_appended": {
