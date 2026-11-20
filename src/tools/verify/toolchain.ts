@@ -279,6 +279,12 @@ export function resolveCleanRunArgv(command: ReadonlyArray<string>, workspaceRoo
 	return { ok: true, argv: [interpreter, ...rest], interpreter };
 }
 
+/**
+ * Tags a runner that builds its own environments before running a suite (tox, nox). It still owns `test`, but
+ * a family word that also names a direct runner resolves to the direct one (FL-2).
+ */
+export const ENVIRONMENT_RUNNER_TAG = "environments";
+
 const PYTEST_REQUIREMENT_RE = /^\s*pytest(?![\w.-])/u;
 
 /** Whether any dependency list pyproject.toml declares names pytest itself. */
@@ -369,8 +375,22 @@ export function pythonProposals(workspaceRoot: string, diagnostics: string[]): R
 					"Run the declared pytest suite",
 					["python", "test"],
 				],
-				[["tool", "tox"], "tool.tox", "tox", "python-tox", "Run the declared tox environments", ["python", "test"]],
-				[["tool", "nox"], "tool.nox", "nox", "python-nox", "Run the declared nox sessions", ["python", "test"]],
+				[
+					["tool", "tox"],
+					"tool.tox",
+					"tox",
+					"python-tox",
+					"Run the declared tox environments",
+					["python", "test", ENVIRONMENT_RUNNER_TAG],
+				],
+				[
+					["tool", "nox"],
+					"tool.nox",
+					"nox",
+					"python-nox",
+					"Run the declared nox sessions",
+					["python", "test", ENVIRONMENT_RUNNER_TAG],
+				],
 			] as const) {
 				if (tomlTableAt(document, path) === null) continue;
 				proposals.push({
@@ -416,11 +436,32 @@ export function pythonProposals(workspaceRoot: string, diagnostics: string[]): R
 		}
 	}
 
-	for (const [relative, marker, module, id, description] of [
-		["pytest.ini", null, "pytest", "python-pytest", "Run the declared pytest suite"],
-		["tox.ini", null, "tox", "python-tox", "Run the declared tox environments"],
-		["noxfile.py", null, "nox", "python-nox", "Run the declared nox sessions"],
-		["setup.cfg", /^\s*\[tool:pytest\]/mu, "pytest", "python-pytest", "Run the declared pytest suite"],
+	for (const [relative, marker, module, id, description, tags] of [
+		["pytest.ini", null, "pytest", "python-pytest", "Run the declared pytest suite", ["python", "test"]],
+		[
+			"tox.ini",
+			null,
+			"tox",
+			"python-tox",
+			"Run the declared tox environments",
+			["python", "test", ENVIRONMENT_RUNNER_TAG],
+		],
+		[
+			"noxfile.py",
+			null,
+			"nox",
+			"python-nox",
+			"Run the declared nox sessions",
+			["python", "test", ENVIRONMENT_RUNNER_TAG],
+		],
+		[
+			"setup.cfg",
+			/^\s*\[tool:pytest\]/mu,
+			"pytest",
+			"python-pytest",
+			"Run the declared pytest suite",
+			["python", "test"],
+		],
 	] as const) {
 		const text = regularFileText(path.join(workspaceRoot, relative), workspaceRoot);
 		if (text === null) continue;
@@ -435,7 +476,7 @@ export function pythonProposals(workspaceRoot: string, diagnostics: string[]): R
 			command: [...launcher, interpreter, "-m", module],
 			cwd: ".",
 			timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
-			tags: ["python", "test"],
+			tags: [...tags],
 			provenance: {
 				kind: "python-runner",
 				path: relative,

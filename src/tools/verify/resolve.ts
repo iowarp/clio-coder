@@ -12,7 +12,7 @@ import {
 	taskGatesConfined,
 	taskGatesContainable,
 } from "./task-gates.js";
-import { resolveCleanRunArgv } from "./toolchain.js";
+import { ENVIRONMENT_RUNNER_TAG, resolveCleanRunArgv } from "./toolchain.js";
 import {
 	discoverToolchainChecks,
 	NO_CHECKS_DECLARED_NOTE,
@@ -41,6 +41,24 @@ export type VerifyResolution =
 	| { kind: "unresolved"; message: string; noChecksDeclared?: true };
 
 const FAMILY_WORDS = new Set(["test", "lint", "check", "typecheck", "format", "build", "ci"]);
+
+/**
+ * The checks a family word names. When several own it, the ones that can run win, then a direct runner wins over
+ * one that builds its own environments: `test` in a project declaring pytest and tox runs pytest instead of
+ * refusing as ambiguous (FL-2). Several left still need a name.
+ */
+function familyOwners(derived: ReadonlyArray<ToolchainCheck>, word: string): ToolchainCheck[] {
+	if (!FAMILY_WORDS.has(word)) return [];
+	let owners = derived.filter((candidate) => candidate.tags.includes(word));
+	for (const prefer of [
+		(candidate: ToolchainCheck) => candidate.availability === undefined,
+		(candidate: ToolchainCheck) => !candidate.tags.includes(ENVIRONMENT_RUNNER_TAG),
+	]) {
+		const narrowed = owners.filter(prefer);
+		if (narrowed.length > 0) owners = narrowed;
+	}
+	return owners;
+}
 
 function extraArgs(args: Record<string, unknown>): string[] {
 	return Array.isArray(args.args) ? args.args.filter((entry): entry is string => typeof entry === "string") : [];
@@ -273,7 +291,7 @@ function resolveWithDiscovery(
 
 	const derived = cache?.derived(declared) ?? availableToolchainChecks(workspaceRoot, declared);
 	const exact = derived.find((candidate) => candidate.id === check);
-	const owners = FAMILY_WORDS.has(check) ? derived.filter((candidate) => candidate.tags.includes(check)) : [];
+	const owners = familyOwners(derived, check);
 	const chosen = exact ?? (owners.length === 1 ? owners[0] : undefined);
 	if (chosen !== undefined) {
 		if (chosen.availability) return { kind: "unavailable", check: chosen };

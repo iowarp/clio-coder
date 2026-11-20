@@ -75,7 +75,10 @@ describe("verify in repositories without package.json", () => {
 	});
 
 	it("resolves python3 once on the worker PATH and refuses provisioning before execution", async () => {
-		const root = workspace({ "pyproject.toml": "[tool.pytest.ini_options]\n", "bin/python3": "#!/bin/sh\necho ran\n" });
+		const root = workspace({
+			"pyproject.toml": "[tool.pytest.ini_options]\n[tool.tox]\n",
+			"bin/python3": "#!/bin/sh\necho ran\n",
+		});
 		chmodSync(join(root, "bin/python3"), 0o755);
 		const previousPath = process.env.PATH;
 		const previousVenv = process.env.VIRTUAL_ENV;
@@ -88,6 +91,9 @@ describe("verify in repositories without package.json", () => {
 			strictEqual(entry?.provenance.interpreter, "python3");
 			deepStrictEqual(discoverToolchainChecks(root)[0], entry);
 			strictEqual((await verifyTool.run({ check: "python-pytest" })).kind, "ok");
+			// FL-2: the family word picks the direct runner over tox instead of refusing as ambiguous.
+			const family = await verifyTool.run({ check: "test" });
+			strictEqual(family.details?.check, "python-pytest", textOf(family));
 			writeFileSync(join(root, "uv.lock"), "version = 1\n");
 			const listed = await verifyTool.run({});
 			match(textOf(listed), /needs-provisioning.*uv sync/u);
@@ -100,6 +106,7 @@ describe("verify in repositories without package.json", () => {
 			});
 			match(textOf(refused), /other arguments or cwd cannot help/u);
 			strictEqual(refused.details?.exitCode, undefined, "uv was never spawned");
+			strictEqual(refused.details?.unresolved, true, "an unavailable runner ran nothing, so no receipt seals it failed");
 			mkdirSync(join(root, ".venv"));
 			deepStrictEqual(commandOf(root, "python-pytest"), ["uv", "run", "--no-sync", "python", "-m", "pytest"]);
 		} finally {

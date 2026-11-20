@@ -271,6 +271,7 @@ function unresolvedCause(reason: string | undefined): string {
 	if (reason === undefined) return "nothing to run";
 	if (/is not a declared check/u.test(reason)) return "unknown check";
 	if (/matches several checks/u.test(reason)) return "ambiguous check";
+	if (/^verify: unavailable '/u.test(reason)) return "runner unavailable";
 	if (/no declared or derivable verification checks/u.test(reason)) return "no checks declared";
 	return "nothing to run";
 }
