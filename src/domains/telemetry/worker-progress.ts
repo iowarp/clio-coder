@@ -250,6 +250,15 @@ export function workerTextDelta(event: unknown): string {
 	return typeof event.text === "string" ? event.text : "";
 }
 
+/**
+ * Whether worker prose is a structured answer rather than words: it opens a JSON object or array, a fenced JSON
+ * block, or a JSON member line from inside one. A one-line activity surface shows nothing of it, since the worker is
+ * writing its report and the first line of that report reads as raw JSON (bt-48-16).
+ */
+export function isStructuredAnswerText(text: string): boolean {
+	return /^\s*(?:\{|\[\s*(?:[{["\]\d-]|$)|```(?:json)?[ \t]*(?:\n|$)|"[^"\n]*"\s*:)/iu.test(text);
+}
+
 /** Characters one streamed delta carries, of any kind; the content itself is not kept. */
 function streamedDeltaChars(event: Record<string, unknown>): number {
 	const inner =

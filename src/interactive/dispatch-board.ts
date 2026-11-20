@@ -22,7 +22,11 @@ import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains
 import { redactStreamingSecretString } from "../domains/safety/redaction.js";
 import type { TelemetryContract, TelemetryRunSummary, TelemetryView } from "../domains/telemetry/contract.js";
 import type { TelemetrySnapshot } from "../domains/telemetry/index.js";
-import type { WorkerAction, WorkerProgressSnapshot } from "../domains/telemetry/worker-progress.js";
+import {
+	isStructuredAnswerText,
+	type WorkerAction,
+	type WorkerProgressSnapshot,
+} from "../domains/telemetry/worker-progress.js";
 import type { Component } from "../engine/tui.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { COUNCIL_SYNTHESIS_LABEL } from "../session-control/council.js";
@@ -1791,10 +1795,12 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number, r
 				}
 				if (progress.currentAction) return { text: theme.base("body", actionPhrase(progress.currentAction, "running")) };
 				const words = sanitizeCallTargetText(workerActivityWords(progress, { history: row.routeFirstOutput ?? null }));
-				const tail =
+				const line =
 					progress.phase === "writing"
 						? firstLine(redactStreamingSecretString(progress.tailText, progress.completed === true))
 						: "";
+				// A worker writing its JSON report says it is writing; the report's first line is not prose.
+				const tail = isStructuredAnswerText(line) ? "" : line;
 				return { text: `${theme.fg("dispatchAction", words)}${tail ? ` ${theme.fg("assistantProse", tail)}` : ""}` };
 			}
 			if (row.currentTool) return { text: `${sanitizeCallTargetText(row.currentTool)} running` };

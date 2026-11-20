@@ -1,8 +1,8 @@
-import { doesNotMatch, match } from "node:assert/strict";
+import { doesNotMatch, match, ok } from "node:assert/strict";
 import { test } from "node:test";
-import type { WorkerProgressSnapshot } from "../../src/domains/telemetry/worker-progress.js";
+import { isStructuredAnswerText, type WorkerProgressSnapshot } from "../../src/domains/telemetry/worker-progress.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
-import { type DispatchBoardRow, formatTaskIslandLines } from "../../src/interactive/dispatch-board.js";
+import { type DispatchBoardRow, formatTaskIslandLines, runTableRows } from "../../src/interactive/dispatch-board.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import type { WorkerEntryState } from "../../src/session-control/worker-stream.js";
 
@@ -21,8 +21,8 @@ function progress(overrides: Partial<WorkerProgressSnapshot>): WorkerProgressSna
 	} as WorkerProgressSnapshot;
 }
 
-function islandRow(snapshot: WorkerProgressSnapshot): string {
-	const row = {
+function boardRow(snapshot: WorkerProgressSnapshot): DispatchBoardRow {
+	return {
 		runId: "run-1",
 		agentId: "coder",
 		origin: "user",
@@ -36,7 +36,10 @@ function islandRow(snapshot: WorkerProgressSnapshot): string {
 		usage: { kind: "pending" },
 		progress: snapshot,
 	} as unknown as DispatchBoardRow;
-	return stripTerminalSequences(formatTaskIslandLines([row])[1] ?? "");
+}
+
+function islandRow(snapshot: WorkerProgressSnapshot): string {
+	return stripTerminalSequences(formatTaskIslandLines([boardRow(snapshot)])[1] ?? "");
 }
 
 function cardLines(snapshot: WorkerProgressSnapshot): string {
@@ -80,3 +83,20 @@ for (const [when, snapshot, words] of cases) {
 		match(cardLines(snapshot), words);
 	});
 }
+
+// bt-48-16: a worker streaming its result-contract report showed `◑ {"mutatedPaths":["tests/test_key_val…` on the
+// dock. The run table and the workers board both drop a structured tail and say only that the worker is writing.
+test("a worker writing its JSON report reads as writing, never as the report's first line", () => {
+	const report = '{"mutatedPaths":["tests/test_key_value.py"],"checks":[]}';
+	const table = (tailText: string) =>
+		runTableRows([{ kind: "run", row: boardRow(progress({ phase: "writing", tailText })) }], 160, { now: 20_000 })
+			.map(stripTerminalSequences)
+			.join("\n");
+	match(table(report), /writing/u);
+	doesNotMatch(table(report), /mutatedPaths|\{/u);
+	match(table("Reading the parser first."), /writing Reading the parser first\./u);
+	for (const text of [report, "```json\n{", '[\n  {"path": "a"}', '  "mutatedPaths": ["a"],'])
+		ok(isStructuredAnswerText(text), text);
+	for (const text of ["Reading the parser first.", "[CLIO Coder] note", "[the plan](plan.md) is ready"])
+		ok(!isStructuredAnswerText(text), text);
+});

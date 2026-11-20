@@ -3,6 +3,7 @@ import { factKnownValue } from "../core/telemetry/known.js";
 import { loadRunTelemetrySource, runTelemetryJournalStamp } from "../domains/session/telemetry-source.js";
 import { sizeCallJournalCache } from "../domains/telemetry/call-journal.js";
 import { runTelemetry } from "../domains/telemetry/read-model.js";
+import { isStructuredAnswerText } from "../domains/telemetry/worker-progress.js";
 /**
  * The workers dashboard's model: which workers the board shows and what each
  * one is doing, read from durable state only.
@@ -593,7 +594,9 @@ function toolCapOf(run: RunEnvelope): number | undefined {
 function lastProse(fold: RunFold): string | undefined {
 	for (let index = fold.rows.length - 1; index >= 0; index -= 1) {
 		const row = fold.rows[index];
-		if (row?.kind === "text" && row.text.trim().length > 0) return row.text;
+		// A result-contract report is not prose: the card says the worker is writing, not its first JSON line.
+		if (row?.kind === "text" && row.text.trim().length > 0)
+			return isStructuredAnswerText(row.text) ? undefined : row.text;
 		if (row?.kind === "tool") return undefined;
 	}
 	return undefined;
