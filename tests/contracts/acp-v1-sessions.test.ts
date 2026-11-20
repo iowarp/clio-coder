@@ -780,6 +780,48 @@ test("ACP replay marks a persisted request without a terminal outcome as an erro
 	}
 });
 
+test("ACP replay settles a call the output limit cut off as not run, not failed (ACP-1)", async () => {
+	const entry = (
+		role: "user" | "assistant" | "tool_call" | "tool_result",
+		turnId: string,
+		parentTurnId: string | null,
+		payload: unknown,
+	) => ({
+		kind: "message" as const,
+		role,
+		turnId,
+		parentTurnId,
+		timestamp: "2026-09-25T12:00:00.000Z",
+		payload,
+	});
+	const cutCall = { type: "toolCall", id: "write-1", name: "write", arguments: { path: "a.txt" } };
+	const peer = fixture([
+		entry("user", "u", null, "write it"),
+		entry("assistant", "a1", "u", { stopReason: "toolUse", content: [] }),
+		entry("tool_call", "c1", "a1", { name: "read", toolCallId: "read-1", args: { path: "b.txt" } }),
+		entry("tool_result", "r1", "c1", { toolCallId: "read-1", toolName: "read", result: "ENOENT", isError: true }),
+		entry("assistant", "a2", "r1", { stopReason: "length", content: [cutCall] }),
+		entry("tool_call", "c2", "a2", { name: "write", toolCallId: "write-1", args: { path: "a.txt" } }),
+		entry("tool_result", "r2", "c2", { toolCallId: "write-1", toolName: "write", result: "not executed", isError: true }),
+	]);
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
+		deepStrictEqual(
+			peer.updates
+				.map((params) => params.update as Record<string, unknown>)
+				.filter((update) => update.sessionUpdate === "tool_call_update")
+				.map((update) => [update.status, (update.rawOutput as Record<string, unknown>).notRun]),
+			[
+				["failed", undefined],
+				["completed", "output_limit"],
+			],
+		);
+	} finally {
+		await peer.stop();
+	}
+});
+
 test("ACP replay keeps a crashed middleware continuation from reading as Done", async () => {
 	const turn = (role: "user" | "assistant", turnId: string, parentTurnId: string | null, payload: unknown) => ({
 		kind: "message" as const,

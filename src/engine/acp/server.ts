@@ -1,3 +1,4 @@
+import { outputLimitCutOffToolCallIds } from "../../core/assistant-output.js";
 import type { ContextOperationStatus } from "../../core/context-operation.js";
 import {
 	ACP_CONTEXT_STATUS_METHOD,
@@ -1663,7 +1664,16 @@ function outputText(value: unknown): string {
 }
 
 function toolStatus(event: AcpEventRecord): string {
-	return event.isError === true ? "failed" : "completed";
+	return toolFailed(event) ? "failed" : "completed";
+}
+
+/** The output limit cut the call off before it ran: no error, and the client is told it never ran (bt-39 a). */
+function toolNotRun(event: AcpEventRecord): string | undefined {
+	return typeof event.notRun === "string" ? event.notRun : undefined;
+}
+
+function toolFailed(event: AcpEventRecord): boolean {
+	return event.isError === true && toolNotRun(event) === undefined;
 }
 
 function eventString(event: AcpEventRecord, ...keys: string[]): string | undefined {
@@ -2140,7 +2150,11 @@ function handleChatEvent(
 				kind: started?.kind ?? toolKind(toolName),
 				status: toolStatus(event),
 				...(output.length > 0 ? { content: toolCallContent(output) } : {}),
-				rawOutput: boundRawRecord({ result: event.result, isError: event.isError === true }),
+				rawOutput: boundRawRecord({
+					result: event.result,
+					isError: toolFailed(event),
+					...(toolNotRun(event) !== undefined ? { notRun: toolNotRun(event) } : {}),
+				}),
 			},
 			withToolTiming(toolCallUpdateMeta(active.toolCallSnapshots.get(toolCallId)), event.durationMs),
 		);
@@ -2560,6 +2574,7 @@ function prepareAcpReplay(
 	const turns: AcpReplayTurn[] = [];
 	const ids = createActivePromptState();
 	let current: AcpReplayTurn | null = null;
+	const cutOffToolCalls = new Set<string>();
 	const runs: Array<{ runId: string; agentId: string }> = [];
 	for (const entry of branch) {
 		if (entry.kind === "workerRun") {
@@ -2644,6 +2659,8 @@ function prepareAcpReplay(
 		}
 		if (current === null) continue;
 		if (entry.role === "assistant") {
+			// The ledger keeps a cut-off call's error result; the reply before it names the calls that never ran.
+			for (const id of outputLimitCutOffToolCallIds(payload)) cutOffToolCalls.add(id);
 			current.stopReason = payload?.stopReason === "toolUse" ? "error" : mapAcpStopReason(payload?.stopReason);
 			const model = safeStoredIdentifier(payload?.model, ACP_MAX_MODEL_ID_BYTES);
 			if (model) current.model = model;
@@ -2684,7 +2701,10 @@ function prepareAcpReplay(
 			if (toolCallId === null || ids.terminalToolCalls.has(toolCallId)) continue;
 			ids.openToolCalls.delete(toolCallId);
 			ids.terminalToolCalls.add(toolCallId);
-			const failed = payload?.isError === true || payload?.outcome === "error" || payload?.outcome === "blocked";
+			const notRun = typeof engineId === "string" && cutOffToolCalls.has(engineId) ? "output_limit" : undefined;
+			const failed =
+				notRun === undefined &&
+				(payload?.isError === true || payload?.outcome === "error" || payload?.outcome === "blocked");
 			const output = boundString(redactUrlCredentials(outputText(payload?.result)), ACP_MAX_CHUNK_BYTES);
 			const name = safeStoredString(payload?.toolName, 64, "tool") || "tool";
 			current.frames.push({
@@ -2695,7 +2715,11 @@ function prepareAcpReplay(
 					kind: toolKind(name),
 					status: (failed ? "failed" : "completed") satisfies AcpToolCallStatus,
 					...(output.length > 0 ? { content: toolCallContent(output) } : {}),
-					rawOutput: boundRawRecord({ result: payload?.result, isError: failed }),
+					rawOutput: boundRawRecord({
+						result: payload?.result,
+						isError: failed,
+						...(notRun !== undefined ? { notRun } : {}),
+					}),
 				},
 				...(typeof payload?.durationMs === "number" && Number.isFinite(payload.durationMs) && payload.durationMs >= 0
 					? { meta: { [ACP_TOOL_TIMING_META_KEY]: { durationMs: Math.round(payload.durationMs) } } }

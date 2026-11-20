@@ -1,5 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { createTurnObservations, observeChatTurns } from "../../src/domains/extensions/bus-observations.js";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import {
 	ACP_MAX_CHUNK_BYTES,
@@ -319,6 +320,70 @@ it("keeps compaction failure lines in the reply, where context status does not g
 		failures.map((notice) => `${notice.text}\n`),
 	);
 	strictEqual(turn.updates.filter((update) => update.sessionUpdate === "session_info_update").length, 1);
+});
+
+it("settles a call the output limit cut off as not run, not failed, on the wire and on the extension bus (ACP-1)", async () => {
+	const cutOff = {
+		type: "tool_execution_end",
+		toolCallId: "call-cut",
+		toolName: "write",
+		result: { output: "Tool not executed: the response hit the output limit" },
+		isError: true,
+		notRun: "output_limit",
+	};
+	const broken = { ...TOOL_END, toolCallId: "call-err", result: { output: "make: *** Error 2" }, isError: true };
+	const events = [
+		{ ...TOOL_START, toolCallId: "call-err" },
+		broken,
+		{ ...TOOL_START, toolCallId: "call-cut", toolName: "write" },
+		cutOff,
+	];
+	const peer = stdioPeer();
+	const served = serveClioAcpAgent({
+		transport: peer.transport,
+		chat: scriptedChat(
+			({ emit }) => {
+				for (const event of events) emit(event);
+			},
+			() => {},
+		),
+		cwd: process.cwd(),
+	});
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const session = (await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
+		await peer.call("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text: "build" }] });
+	} finally {
+		peer.close();
+	}
+	strictEqual(await served, 0);
+	const ends = peer
+		.updates()
+		.map((frame) => frame.update)
+		.filter((update) => update.sessionUpdate === "tool_call_update" && update.status !== "in_progress");
+	deepStrictEqual(
+		ends.map((update) => [update.status, (update.rawOutput as Record<string, unknown>).notRun]),
+		[
+			["failed", undefined],
+			["completed", "output_limit"],
+		],
+	);
+	// The bus that headless and ACP hosts feed extensions reads the same events.
+	const observed: unknown[] = [];
+	let handler: (event: unknown) => void = () => {};
+	observeChatTurns(
+		(next) => {
+			handler = next;
+			return () => {};
+		},
+		createTurnObservations((observation) => observed.push(observation)),
+		() => "target",
+	);
+	for (const event of events) handler(event);
+	deepStrictEqual(
+		observed.map((observation) => (observation as { outcome: string }).outcome),
+		["error", "ok"],
+	);
 });
 
 it("projects transcript notices for plain ACP clients while keeping footer state and context status off the reply", async () => {

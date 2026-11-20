@@ -210,7 +210,13 @@ export function observeChatTurns(
 		if (event.type === "tool_execution_start" && typeof event.toolCallId === "string") {
 			turns.toolStart(event.toolCallId);
 		} else if (event.type === "tool_execution_end" && typeof event.toolCallId === "string") {
-			turns.toolEnd(typeof event.toolName === "string" ? event.toolName : "", event.toolCallId, event.isError === true);
+			// A call the output limit cut off never ran and is no error, as the terminal's projection reads it (bt-39 a).
+			const notRun = (raw as { notRun?: unknown }).notRun !== undefined;
+			turns.toolEnd(
+				typeof event.toolName === "string" ? event.toolName : "",
+				event.toolCallId,
+				event.isError === true && !notRun,
+			);
 		} else if (event.type === "agent_end") {
 			turns.turnEnd({ ...usage.current(), targetId: targetId() });
 		}
