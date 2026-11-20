@@ -45,6 +45,37 @@ function run(args: string[], env: Record<string, string> = {}) {
 }
 
 describe("contracts/install-script", () => {
+	it("the hosted bootstrap writes its downloads only inside its own private directory, never beside it", () => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-coder-bootstrap-"));
+		try {
+			const bin = join(scratch, "bin");
+			const temp = join(scratch, "tmp");
+			mkdirSync(bin);
+			mkdirSync(temp);
+			const victim = join(scratch, "victim");
+			writeFileSync(victim, "untouched\n");
+			// Another local user who can list the temp directory plants a link at every name derived from the mktemp name.
+			writeFileSync(
+				join(bin, "mktemp"),
+				`#!/bin/sh\nname=$(/usr/bin/mktemp "$@") || exit 1\nln -s "${victim}" "$name.channel"\nprintf '%s\\n' "$name"\n`,
+			);
+			writeFileSync(
+				join(bin, "curl"),
+				'#!/bin/sh\nwhile [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift ;; *) url=$1 ;; esac; shift; done\ncase "$url" in *registry.npmjs.org*) echo \'{"version":"0.8.4"}\' > "$out" ;; *) echo "exit 0" > "$out" ;; esac\n',
+			);
+			chmodSync(join(bin, "mktemp"), 0o755);
+			chmodSync(join(bin, "curl"), 0o755);
+			const result = spawnSync("sh", [join(ROOT, "scripts", "installer-bootstrap", "install.sh"), "--channel", "beta"], {
+				env: { HOME: scratch, PATH: `${bin}:/usr/bin:/bin`, TMPDIR: temp, LANG: "C" },
+				encoding: "utf8",
+			});
+			strictEqual(result.status, 0, result.stderr);
+			strictEqual(readFileSync(victim, "utf8"), "untouched\n");
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
+	});
+
 	it("pins the same Node floor as package.json engines.node", () => {
 		const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { engines?: { node?: string } };
 		const floor = /^>=\s*(\d+\.\d+\.\d+)$/u.exec(pkg.engines?.node ?? "")?.[1];

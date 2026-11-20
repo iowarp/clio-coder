@@ -19,6 +19,7 @@
  */
 
 import type { ActionClass } from "../safety/action-classifier.js";
+import type { Obligation } from "./obligation.js";
 import type { ToolActivitySummary, ToolCallStat } from "./types.js";
 
 export interface ToolFinishPayload {
@@ -295,23 +296,18 @@ export function workerNoWorkDetail(input: {
 }
 
 /**
- * A read-scoped worker (a read-only run with a scout report or declared read roots) that settled without executing
- * one tool read nothing, so its report rests on no evidence. Its clean exit sealed `succeeded`, quality=unmeasured
- * and failed=0 (FX-19). The result-report call is not a tool here: summarizeToolActivity already leaves it out.
- * Null for an edit-capable recipe, a run without read scope, and a CLI subprocess whose tool lane Clio cannot see.
+ * A run that owes `observed-evidence` and settled without executing one tool read nothing, so its report rests on
+ * no evidence. Its clean exit sealed `succeeded`, quality=unmeasured and failed=0 (FX-19). The result-report call is
+ * not a tool here: summarizeToolActivity already leaves it out. Null for any other obligation, and for a CLI
+ * subprocess whose tool lane Clio cannot see.
  */
 export function readScopedNoToolsReason(input: {
 	activity: Pick<ToolActivitySummary, "calls">;
-	readOnly: boolean;
-	capabilityClass: string | null;
-	contractKind: string | null;
-	readRoots: ReadonlyArray<string>;
+	obligation: Obligation;
 	toolLaneObserved: boolean;
 }): string | null {
-	if (!input.readOnly || !input.toolLaneObserved || input.activity.calls > 0) return null;
-	if (input.capabilityClass === "workspace-edit" || input.capabilityClass === "artifact-write") return null;
-	if (input.contractKind !== "scout-report" && input.readRoots.length === 0) return null;
-	return "no tools executed: the read-scoped worker reported without reading anything, so its findings are unaudited";
+	if (input.obligation !== "observed-evidence" || !input.toolLaneObserved || input.activity.calls > 0) return null;
+	return "obligation observed-evidence unmet: no tools executed, so the worker reported without reading anything and its findings are unaudited";
 }
 
 export function blockedWriteDetail(attempted: number): string {

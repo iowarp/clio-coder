@@ -2259,7 +2259,7 @@ describe("production compaction controls", () => {
 			strictEqual(call?.data.stop.failure, failure);
 		});
 	}
-	it("reports a caller abort as aborted while the stall watchdog is armed, and 0 leaves the stream unbounded (CLI-P9)", async () => {
+	it("reports a caller abort as aborted while the stall watchdog is armed, and 0 leaves the stream unbounded (CLI-P9)", async (t) => {
 		for (const streamStallMs of [60_000, 0]) {
 			const f = fixture(true, true, true);
 			f.settings.chat.retry.streamStallMs = streamStallMs;
@@ -2267,11 +2267,24 @@ describe("production compaction controls", () => {
 			stallingSummary(f, [], true);
 			const controller = new AbortController();
 			let settled = false;
+			// The watchdog's timer and clock are fake, and the wait is on the summary call itself: a real sleep under load
+			// ended before the call began, and the orphaned run then answered the next test's provider.
+			let nowMs = 0;
+			const clock = t.mock.method(performance, "now", () => nowMs);
+			t.mock.timers.enable({ apis: ["setTimeout"] });
+			const called = new Promise<void>((resolve) => {
+				f.response.beforeReturn = resolve;
+			});
 			const run = f.run(undefined, undefined, { signal: controller.signal }).finally(() => {
 				settled = true;
 			});
+			await called;
 			// Several 40 ms first-token windows pass; with the stall watchdog off nothing ends the call.
-			await new Promise((resolve) => setTimeout(resolve, 200));
+			nowMs += 200;
+			t.mock.timers.tick(200);
+			for (let turn = 0; turn < 3; turn++) await new Promise((resolve) => setImmediate(resolve));
+			t.mock.timers.reset();
+			clock.mock.restore();
 			strictEqual(settled, false, `streamStallMs ${streamStallMs} keeps waiting on a silent summary`);
 			strictEqual(f.calls.length, 1);
 			controller.abort();

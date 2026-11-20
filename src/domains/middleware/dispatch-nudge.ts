@@ -62,7 +62,7 @@ function isNonRepositoryContextCall(input: MiddlewareHookInput): boolean {
 	return scope !== null && scope !== "workspace";
 }
 
-function isReadOnlyExplorationCall(input: MiddlewareHookInput, workspaceRoot: string): boolean {
+export function isReadOnlyExplorationCall(input: MiddlewareHookInput, workspaceRoot: string): boolean {
 	if (isNonRepositoryContextCall(input) || !isReadOnlyCall(input.toolName ?? "", input.toolArgs)) return false;
 	// A shell command can read several roots and hide them behind variables.
 	// Count only tools whose repository scope can be established (#431).
@@ -71,16 +71,21 @@ function isReadOnlyExplorationCall(input: MiddlewareHookInput, workspaceRoot: st
 }
 
 function isWorkspaceCall(input: MiddlewareHookInput, workspaceRoot: string): boolean {
+	return workspaceRelativeTarget(input, workspaceRoot) !== null;
+}
+
+/** The call's `path` (under its `cwd`) relative to the workspace root; null outside the workspace or unresolvable. */
+export function workspaceRelativeTarget(input: MiddlewareHookInput, workspaceRoot: string): string | null {
 	const raw = input.toolArgs?.path ?? ".";
 	const cwd = input.toolArgs?.cwd ?? workspaceRoot;
-	if (typeof raw !== "string" || typeof cwd !== "string") return false;
+	if (typeof raw !== "string" || typeof cwd !== "string") return null;
 	const root = canonicalizeRawPath(workspaceRoot, process.cwd());
 	const base = canonicalizeRawPath(expandPath(cwd), workspaceRoot);
-	if (root === null || base === null) return false;
+	if (root === null || base === null) return null;
 	const target = canonicalizeRawPath(expandPath(raw), base);
-	if (target === null) return false;
+	if (target === null) return null;
 	const within = relative(root, target);
-	return within === "" || (!isAbsolute(within) && within !== ".." && !within.startsWith(`..${sep}`));
+	return within === "" || (!isAbsolute(within) && within !== ".." && !within.startsWith(`..${sep}`)) ? within : null;
 }
 
 function hasActiveTool(input: MiddlewareHookInput, toolName: string): boolean {

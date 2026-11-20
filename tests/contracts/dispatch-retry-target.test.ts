@@ -1,8 +1,12 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
-import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
+import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
+import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -28,10 +32,23 @@ async function retryFleet(
 	targetIds: ReadonlyArray<string>,
 	failing: ReadonlySet<string>,
 	vision: ReadonlySet<string>,
-	options: { failure?: string; windows?: Readonly<Record<string, number>>; maxRetries?: number } = {},
+	options: {
+		failure?: string;
+		windows?: Readonly<Record<string, number>>;
+		maxRetries?: number;
+		report?: object;
+		models?: ReadonlyArray<string>;
+		onSpawn?: (spec: WorkerSpec) => void;
+	} = {},
 ) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
-	settings.targets = targetIds.map((id) => ({ id, runtime: "openai", defaultModel: "gpt-4o" }));
+	settings.safety.sandbox = "off";
+	settings.targets = targetIds.map((id) => ({
+		id,
+		runtime: "openai",
+		defaultModel: "gpt-4o",
+		...(options.models !== undefined ? { wireModels: [...options.models] } : {}),
+	}));
 	settings.fleet.default.target = "default";
 	settings.fleet.default.model = "gpt-4o";
 	settings.fleet.retry.maxRetries = options.maxRetries ?? 1;
@@ -47,6 +64,7 @@ async function retryFleet(
 		heartbeatIntervalMs: 3_600_000,
 		spawnWorker: (spec) => {
 			spawned.push(spec.target.id);
+			options.onSpawn?.(spec);
 			const result: SpawnedWorkerResult = failing.has(spec.target.id)
 				? { exitCode: 1, signal: null, stderrTail: options.failure ?? HTTP_503 }
 				: { exitCode: 0, signal: null };
@@ -63,7 +81,7 @@ async function retryFleet(
 							message: {
 								role: "assistant",
 								stopReason: "stop",
-								content: JSON.stringify({ confirmedFacts: [], missingEvidence: [], nextInspections: [] }),
+								content: JSON.stringify(options.report ?? { confirmedFacts: [], missingEvidence: [], nextInspections: [] }),
 							},
 						};
 				})(),
@@ -127,6 +145,85 @@ describe("retry target selection", () => {
 			const first = await fleet.bundle.contract.dispatch({ ...REQUEST, cwd: scratch.dir });
 			await fleet.bundle.contract.assignments?.get(first.runId)?.terminal;
 			deepStrictEqual(fleet.spawned, ["default", "second", "third"]);
+		} finally {
+			await fleet.bundle.extension.stop?.();
+		}
+	});
+
+	it("does not rerun the model that left its obligation unmet when no other model is eligible (ruling 5)", async () => {
+		// Two targets serving one model: another target is not another model.
+		const fleet = await retryFleet(["default", "other"], new Set(), new Set());
+		try {
+			const scope = declaredScopeIntent({ readRoots: ["src/"] });
+			ok(scope.ok);
+			const settle = async (request: Partial<DispatchRequest>) => {
+				const first = await fleet.bundle.contract.dispatch({
+					...REQUEST,
+					cwd: scratch.dir,
+					intent: scope.intent,
+					...request,
+				});
+				await fleet.bundle.contract.assignments?.get(first.runId)?.terminal;
+				return fleet.bundle.contract.assignments?.get(first.runId);
+			};
+			const pinned = await settle({ target: "default" });
+			deepStrictEqual(fleet.spawned, ["default"]);
+			strictEqual(pinned?.status, "failed");
+			match(pinned?.outcomeDetail ?? "", /^obligation observed-evidence unmet, not retried because failover is none/u);
+			const automatic = await settle({});
+			deepStrictEqual(fleet.spawned, ["default", "default"], "one attempt, no second spawn");
+			strictEqual(automatic?.status, "failed");
+			strictEqual(
+				automatic?.outcomeDetail,
+				"obligation observed-evidence unmet, not retried because no other eligible model can take it, and default/gpt-4o left it unmet",
+			);
+		} finally {
+			await fleet.bundle.extension.stop?.();
+		}
+	});
+
+	it("retries an idle builder's unmet obligation on another model in its kept task worktree", async () => {
+		const repo = join(scratch.dir, "repo");
+		mkdirSync(repo);
+		const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "pipe" });
+		git("init", "-q");
+		git("config", "user.name", "Contract");
+		git("config", "user.email", "contract@example.invalid");
+		writeFileSync(join(repo, "base.txt"), "base");
+		git("add", ".");
+		git("commit", "-qm", "base");
+		const trees: Array<{ path: string | undefined; present: boolean; model: string }> = [];
+		const fleet = await retryFleet(["default"], new Set(), new Set(), {
+			report: { mutatedPaths: [], validations: [], summary: "nothing to change" },
+			models: ["gpt-4o-mini"],
+			onSpawn: (spec) => {
+				const path = spec.taskWorktree?.path;
+				trees.push({ path, present: path !== undefined && existsSync(path), model: spec.wireModelId });
+			},
+		});
+		try {
+			const first = await fleet.bundle.contract.dispatch({
+				agentId: "coder",
+				executionRole: "builder",
+				task: "Fix base.txt.",
+				requestOrigin: "internal",
+				cwd: repo,
+				worktree: true,
+			});
+			await fleet.bundle.contract.assignments?.get(first.runId)?.terminal;
+			strictEqual(trees.length, 2, "the unmet obligation retries once");
+			ok(trees[0]?.path !== undefined);
+			deepStrictEqual(
+				trees.map((tree) => tree.model),
+				["gpt-4o", "gpt-4o-mini"],
+				"the retry runs on the other model",
+			);
+			deepStrictEqual(
+				trees[1],
+				{ path: trees[0]?.path, present: true, model: "gpt-4o-mini" },
+				"the retry runs in the kept worktree",
+			);
+			strictEqual(existsSync(trees[0].path), false, "the idle worktree goes once no retry remains");
 		} finally {
 			await fleet.bundle.extension.stop?.();
 		}

@@ -854,6 +854,19 @@ export interface PermissionRequiredMeta {
 	gateReason?: string;
 	/** The build that gave `gateReason`, which the card drops from a reason that repeats it. */
 	gateBuild?: string;
+	/**
+	 * Set on an external read-root ask raised for a dispatch call: the dispatched task that will read the
+	 * root, its 1-based position and the call's task count. Model-authored; a card attributes it to the
+	 * dispatch, never to the operator (CLI-P35).
+	 */
+	dispatchTask?: DispatchReadRootTask;
+}
+
+/** The dispatched task an external read-root approval serves. */
+export interface DispatchReadRootTask {
+	text: string;
+	position: number;
+	count: number;
 }
 
 /** One host command a tool runs on its caller's behalf, as the direct call it stands for. */
@@ -868,6 +881,7 @@ export interface ToolRegistry {
 	requestReadRootApproval?(
 		root: string,
 		options?: ToolInvokeOptions,
+		task?: DispatchReadRootTask,
 	): Promise<{ requestId: string; requestedBy: string } | null>;
 	register(spec: ToolSpec): void;
 	/** Remove a session scoped dynamic capability after its owner closes. */
@@ -2680,7 +2694,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				return verdict;
 			});
 		},
-		async requestReadRootApproval(root, options) {
+		async requestReadRootApproval(root, options, task) {
 			return withToolTelemetryContext(options ?? {}, async () => {
 				// Contained yolo never waits for a person, so the Scout run reports the approval it needed instead.
 				if (
@@ -2723,6 +2737,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
 					...(options?.turnId !== undefined ? { turnId: options.turnId } : {}),
 					...(options?.toolCallId !== undefined ? { toolCallId: options.toolCallId } : {}),
+					...(task !== undefined ? { dispatchTask: { ...task } } : {}),
 				};
 				return await new Promise((resolve) => {
 					const started = performance.now();
