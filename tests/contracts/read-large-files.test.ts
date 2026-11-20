@@ -4,6 +4,10 @@ import { appendFileSync, closeSync, openSync, statSync, truncateSync, writeFileS
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { configureGuardrails } from "../../src/core/guardrails.js";
+import { createConsultTool } from "../../src/tools/consult.js";
+import { createContextTool } from "../../src/tools/context/index.js";
+import { runGatewayChain } from "../../src/tools/gateway/chain.js";
+import { createDataTool } from "../../src/tools/gateway/data-tool.js";
 import type { Observation } from "../../src/tools/observation.js";
 import { createHeadlessObservationPool } from "../../src/tools/observation.js";
 import {
@@ -533,6 +537,60 @@ describe("read windowed reader", () => {
 		const attended = await readTool.run({ path }, turn);
 		ok(attended.kind === "ok");
 		match(attended.output, /^\[observation budget exhausted for this turn before read reading /);
+
+		// Each case below drains a fresh run's pool with one read in batch-1, then probes the stop fact.
+		const drained = async (turnId: string) => {
+			const run = createHeadlessObservationPool();
+			const options = (batch: string) => ({ sessionId: "read-headless", turnId, ...run.invokeOptions(batch) });
+			const first = await readTool.run({ path }, options("batch-1"));
+			ok(first.kind === "ok" && first.output === "alpha\nbeta\n");
+			return { run, options };
+		};
+		// consult refunds its evidence reservation, yet a clean retry after a refusal still clears the stop.
+		const consult = createConsultTool({ systemOne: { ask: async () => null, routes: () => [] }, cwd: () => scratch.dir });
+		const question = { id: "q", kind: "yesNo", question: "Is it?", whenTrue: "it is", whenFalse: "it is not" };
+		const consulted = await drained(`${scratch.dir}#consult`);
+		const consultIn = (batch: string) =>
+			consult.run({ questions: [question], paths: ["headless.txt"] }, consulted.options(batch));
+		match(JSON.stringify(await consultIn("batch-1")), /did not run/);
+		strictEqual(consulted.run.stopped(), true);
+		const retried = await consultIn("batch-2");
+		ok(retried.kind === "ok" && retried.output.includes('"filesRead":["headless.txt"]'), JSON.stringify(retried));
+		strictEqual(consulted.run.stopped(), false);
+		// data and context refuse an invalid call for its own reason before the pool can count it.
+		const invalid = await drained(`${scratch.dir}#invalid`);
+		const data = await createDataTool({ getCwd: () => scratch.dir }).run(
+			{ op: "inspect", path: "missing.csv" },
+			invalid.options("batch-1"),
+		);
+		ok(data.kind === "error" && /not-found/.test(data.message), JSON.stringify(data));
+		const settings = await createContextTool().run({ scope: "settings" }, invalid.options("batch-1"));
+		ok(settings.kind === "error" && /settings snapshot is unavailable/.test(settings.message), JSON.stringify(settings));
+		strictEqual(invalid.run.stopped(), false);
+		// A gateway chain's sequential steps share their call's tracker, so its fourth refusal fails and ends the chain.
+		const chained = await drained(`${scratch.dir}#chain`);
+		const kinds: string[] = [];
+		await runGatewayChain(
+			Array.from({ length: 6 }, (_, n) => ({ id: `s${n}`, capability: "read", args: { path } })),
+			{
+				getSpec: () => undefined,
+				call: async (_name, args, options) => {
+					const result = await readTool.run(args, options);
+					kinds.push(result.kind);
+					return result;
+				},
+			},
+			chained.options("batch-1"),
+		);
+		deepStrictEqual(kinds, ["ok", "ok", "ok", "error"]);
+		// A steer or triage submit names no host run; the run's later --output-schema repair turn keeps its fact.
+		const steered = await drained(`${scratch.dir}#steer`);
+		steered.run.reset("run_1");
+		steered.run.reset(undefined);
+		match(JSON.stringify(await readTool.run({ path }, steered.options("batch-2"))), /did not run/);
+		strictEqual(steered.run.stopped(), true);
+		steered.run.reset("run_1");
+		strictEqual(steered.run.stopped(), true);
 	});
 
 	it("charges parallel reads to the turn pool before any of them awaits", async () => {

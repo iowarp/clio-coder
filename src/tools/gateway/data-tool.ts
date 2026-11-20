@@ -10,6 +10,7 @@ import {
 	type SelectDataResult,
 	type StatsDataOptions,
 	selectData,
+	statDataPath,
 	statsData,
 	type ValidateDataOptions,
 	type ValidateDataResult,
@@ -133,6 +134,9 @@ export function createDataTool(deps: DataToolDeps = {}): ToolSpec {
 				return { kind: "error", message: "data: path is required" };
 			}
 			const target = resolveToCwd(args.path.trim(), getCwd());
+			// A path no reader could open fails as it would after reserving, before it can count as a pool refusal (CLI-P42).
+			const stat = statDataPath(target);
+			if (isDataRefusal(stat)) return refusalResult(op, stat);
 			const reservation = reserveObservation(DATA_OBSERVATION_SELF_CAP_BYTES, options);
 			if (reservation.exhausted) {
 				return observationBudgetExhausted({
