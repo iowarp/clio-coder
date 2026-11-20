@@ -49,6 +49,8 @@ export interface CampaignInput {
 	 * copilot-sdk and claude-sdk from it, read-only, since their own data roots start empty.
 	 */
 	operatorComponents: string;
+	/** The operator's toolchain root (`<data>/tools`). Entries resolve vendored tool binaries from it, read-only. */
+	operatorTools: string;
 	/** How to start this same Clio Coder: the executable and the arguments before the subcommand. */
 	clio: { file: string; args: ReadonlyArray<string> };
 	env: Record<string, string>;
@@ -209,7 +211,7 @@ async function probeDesk(
 async function runEntry(input: CampaignInput, entry: RosterEntry, index: number): Promise<CampaignEntryResult> {
 	const dir = join(input.out, entryDirName(index, entry.label));
 	const project = join(dir, "project");
-	const roots = entryRoots(join(dir, "home"), input.operatorConfig, input.operatorComponents);
+	const roots = entryRoots(join(dir, "home"), input.operatorConfig, input.operatorComponents, input.operatorTools);
 	const result: CampaignEntryResult = {
 		schemaVersion: CAMPAIGN_SCHEMA_VERSION,
 		index,

@@ -1,5 +1,5 @@
 import { type Stats, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { clioDataDir, resolveClioDirs } from "../../core/xdg.js";
 
 /**
@@ -27,6 +27,32 @@ export function toolVersionDir(id: string, version: string): string {
 /** `<data>/tools/<id>/<version>/<binary>`, without creating it. */
 export function vendoredBinaryPath(id: string, version: string, binary: string): string {
 	return join(toolVersionDir(id, version), process.platform === "win32" ? `${binary}.exe` : binary);
+}
+
+/**
+ * The operator's toolchain root, set by `campaign run` for each entry. A vendored tool is an installation artifact,
+ * not session data, so an entry whose own data root is empty and thrown away resolves the operator's vendored tools
+ * from here, read-only: nothing installs into it.
+ */
+export const OPERATOR_TOOLS_ENV = "CLIO_CODER_OPERATOR_TOOLS_DIR";
+
+function borrowedToolchainRoot(): string | null {
+	const dir = process.env[OPERATOR_TOOLS_ENV];
+	return dir && isAbsolute(dir) ? dir : null;
+}
+
+/** The toolchain root the operator's `clio-coder tools install` fills. */
+export function operatorToolchainRoot(): string {
+	return borrowedToolchainRoot() ?? toolchainRoot();
+}
+
+/** Every place a vendored binary at this pin may already be: this process's own `<data>/tools`, then the operator's. */
+export function vendoredBinaryCandidates(id: string, version: string, binary: string): string[] {
+	const own = vendoredBinaryPath(id, version, binary);
+	const root = borrowedToolchainRoot();
+	if (root === null) return [own];
+	const operator = join(root, id, version, process.platform === "win32" ? `${binary}.exe` : binary);
+	return operator === own ? [own] : [own, operator];
 }
 
 /** `<data>/tools`, creating the data root the way every other writer does. */

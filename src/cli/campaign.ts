@@ -11,6 +11,7 @@ import {
 	validateCampaignInput,
 } from "../domains/campaign/index.js";
 import { operatorComponentsDir } from "../domains/lifecycle/components.js";
+import { operatorToolchainRoot } from "../domains/toolchain/paths.js";
 import { formatColumns, printError } from "./argv.js";
 import { containedYoloRefusal } from "./contained-yolo-gate.js";
 import { loadScriptedAnswers } from "./run-answers.js";
@@ -217,6 +218,7 @@ async function runCommand(args: ReadonlyArray<string>): Promise<number> {
 		probe,
 		operatorConfig: clioConfigDir(),
 		operatorComponents: operatorComponentsDir(),
+		operatorTools: operatorToolchainRoot(),
 		clio: { file: process.execPath, args: [...process.execArgv, entry] },
 		env: parentEnv(),
 		envPolicy: { targets: settings.targets, passEnv: settings.safety.sandboxPassEnv },

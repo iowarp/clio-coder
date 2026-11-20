@@ -1,5 +1,5 @@
 import { delimiter, join } from "node:path";
-import { statOrNull, toolVersionDir, vendoredBinaryPath } from "./paths.js";
+import { statOrNull, toolVersionDir, vendoredBinaryCandidates } from "./paths.js";
 import { currentToolPlatform, findPinnedTool, findPinnedToolByBinary, PINNED_TOOLS } from "./registry.js";
 import { installedToolVersions } from "./remove.js";
 import type { PinnedTool, ToolPathCandidate, ToolResolution, ToolStatus } from "./types.js";
@@ -61,12 +61,15 @@ export function resolveToolBinary(name: string): ToolResolution {
 	return resolveEntryBinary(entry, binary);
 }
 
+/** The first vendored copy of `binary` at this pin, this process's own before the operator's; null when none is. */
+function findVendoredBinary(id: string, version: string, binary: string): string | null {
+	return vendoredBinaryCandidates(id, version, binary).find((path) => statOrNull(path)?.isFile() === true) ?? null;
+}
+
 /** The ladder for a known registry row and one of its binaries. */
 export function resolveEntryBinary(entry: PinnedTool, binary: string): ToolResolution {
 	const pathCandidate = probePathCandidate(entry, binary);
-	const vendored = vendoredBinaryPath(entry.id, entry.version, binary);
-	const vendoredStat = statOrNull(vendored);
-	const vendoredPath = vendoredStat?.isFile() ? vendored : null;
+	const vendoredPath = findVendoredBinary(entry.id, entry.version, binary);
 
 	if (pathCandidate?.satisfiesMinimum) {
 		return {
@@ -102,8 +105,8 @@ export function resolveEntryBinary(entry: PinnedTool, binary: string): ToolResol
 export function resolveVendoredBinary(id: string): { binaryPath: string; version: string } | null {
 	const entry = findPinnedTool(id);
 	if (entry === null) return null;
-	const path = vendoredBinaryPath(entry.id, entry.version, entry.primaryBinary);
-	return statOrNull(path)?.isFile() ? { binaryPath: path, version: entry.version } : null;
+	const path = findVendoredBinary(entry.id, entry.version, entry.primaryBinary);
+	return path !== null ? { binaryPath: path, version: entry.version } : null;
 }
 
 /** Whether this platform has a pinned build of `id` that this home has not installed, the gap its install command closes. */
