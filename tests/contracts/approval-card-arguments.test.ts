@@ -124,12 +124,22 @@ describe("approval card arguments of an uncurated tool", () => {
 		}
 	});
 
-	it("keeps a plain key=value and counts one quoted assignment once (SF-6)", () => {
-		for (const plain of ["key=value", "sort_key=name", "monkey=banana", "max_tokens=128"]) {
-			strictEqual(redactSecretString(plain), plain);
-		}
-		for (const secret of ["API_KEY=x", "OPENAI_KEY=x", "PGPASSWORD=x", "authToken=x"]) {
-			ok(redactSecretString(secret).endsWith("=[redacted]"), secret);
+	it("shows an assignment's value only when no credential takes it, and counts one quoted assignment once (SF-6)", () => {
+		const value = "Zx81kQ9vLm2PqR7sT4uV";
+		for (const [text, shown] of [
+			[`openai_key=${value}`, false],
+			[`openai_key=sk-proj-${value}aa`, false],
+			[`stripe_key=${value}`, false],
+			[`signing_key=${value}`, false],
+			["CREDENTIALS=hunter2hunter2xyz", false],
+			[`GH_AUTH=${value}`, false],
+			[`SECRETS=${value}`, false],
+			["key=value", true],
+			["sort_key=name", true],
+			["max_tokens=128", true],
+		] as const) {
+			const name = text.slice(0, text.indexOf("=") + 1);
+			strictEqual(redactSecretString(text), shown ? text : `${name}[redacted]`, text);
 		}
 		const tally = createRedactionTally();
 		redactSecretsText('TOKEN="abcdefghijkl"', tally);

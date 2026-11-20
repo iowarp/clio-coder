@@ -84,7 +84,6 @@ const SECRET_URL_PARAM_VALUE_RE = new RegExp(`"?${stringRun(String.raw`[^&#\s"]`
 const SECRET_URL_SEMICOLON_VALUE_RE = new RegExp(`"?${stringRun(String.raw`[^;\s"]`)}`, "uy");
 // A name's run must reach the `=`, so only the run's start can match and the secret word need only be found once. Two
 // stars around the word retried at every occurrence: `api_key_` repeated took 9 s at 320 KB, on a path a frame can wait on.
-// The lookahead only narrows the scan; isSecretAssignmentName decides each match.
 const SECRET_ASSIGNMENT_RE =
 	/(?<![A-Z0-9_])(?=[A-Z0-9_]*?(?:ACCESS|API|AUTH|CREDENTIAL|KEY|PASS|PRIVATE|SECRET|TOKEN))([A-Z0-9_]*=)([^\s;&|]+)/giu;
 // `:_authToken=${NPM_TOKEN}` or `--token "$TOKEN"` names a variable instead of
@@ -119,6 +118,14 @@ export function urlUserinfoHoldsSecret(secret: string): boolean {
 
 function redactUnlessEnvReference(match: string, prefix: string, secret: string): string {
 	return ENV_REFERENCE_RE.test(secret) ? match : `${prefix}[redacted]`;
+}
+// A value no credential takes: all digits, or a short lowercase word or identifier without digits, as in `key=value`,
+// `sort_key=name` or `max_tokens=128`. The name match stays broad, since a missed secret leaks and a false positive only
+// hides a value; only such a value shows (SF-6).
+const PLAIN_ASSIGNMENT_VALUE_RE = /^(?:\d+|[a-z][a-z_]{0,15})$/u;
+
+function redactAssignment(match: string, prefix: string, secret: string): string {
+	return PLAIN_ASSIGNMENT_VALUE_RE.test(secret) ? match : redactUnlessEnvReference(match, prefix, secret);
 }
 // A credential's own shape, wherever it sits: a git host token, and the value an Authorization header or a bearer scheme
 // names. A bare `bearer <word>` needs a digit to stay out of prose, and `$TOKEN` falls outside the value charset. Each
@@ -191,28 +198,9 @@ function redactSecretFlags(value: string): string {
 	return out.join("");
 }
 
-function nameWords(name: string): string[] {
-	const words = name.replace(URL_PARAM_WORD_BREAK_RE, "_").toLowerCase().split(URL_PARAM_WORD_SEPARATOR_RE);
-	return words.filter((word) => word.length > 0);
-}
-
 function isSecretUrlParamName(name: string): boolean {
-	return SECRET_URL_PARAM_NAME_RE.test(nameWords(name).join("_"));
-}
-
-const GLUED_SECRET_WORD_RE = /(?:passw(?:or)?d|token|secret)$/u;
-
-/**
- * Whether an unquoted `NAME=value` names a credential. The secret word has to be a whole word, as in a URL parameter, so
- * `key=value`, `sort_key=name`, `monkey=banana`, `max_tokens=128` and `API_URL=…` keep their values (SF-6). Two
- * environment shapes count beyond that rule: a glued word such as `PGPASSWORD` or `GITHUBTOKEN`, and an all-caps
- * `<VENDOR>_KEY` such as `OPENAI_KEY`.
- */
-function isSecretAssignmentName(name: string): boolean {
-	if (isSecretUrlParamName(name)) return true;
-	const words = nameWords(name);
-	if (words.some((word) => GLUED_SECRET_WORD_RE.test(word))) return true;
-	return name === name.toUpperCase() && words.length > 1 && words[words.length - 1] === "key";
+	const words = name.replace(URL_PARAM_WORD_BREAK_RE, "_").toLowerCase().split(URL_PARAM_WORD_SEPARATOR_RE);
+	return SECRET_URL_PARAM_NAME_RE.test(words.filter((word) => word.length > 0).join("_"));
 }
 
 /** The value spans of `?token=value` and of `;password=value` inside a URL. */
@@ -454,8 +442,7 @@ function redactPlainSecretString(value: string): string {
 		redactSecretFlags(
 			redactUrlCredentials(redactQuotedSecrets(value)).replace(
 				SECRET_ASSIGNMENT_RE,
-				(match, prefix: string, secret: string) =>
-					isSecretAssignmentName(prefix.slice(0, -1)) ? redactUnlessEnvReference(match, prefix, secret) : match,
+				(match, prefix: string, secret: string) => redactAssignment(match, prefix, secret),
 			),
 		),
 	);
