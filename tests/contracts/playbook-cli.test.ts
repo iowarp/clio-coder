@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
@@ -13,12 +13,15 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { runPlaybookGraph } from "../../src/cli/playbook-graph.js";
 import { runPlaybookValidate } from "../../src/cli/playbook-validate.js";
 import { updateSettings } from "../../src/core/config.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
+
+const CLI_ENTRY = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
 
 /** Run a synchronous CLI entry with its output captured. */
 function captured(run: () => number): { code: number; stdout: string; stderr: string } {
@@ -202,5 +205,59 @@ describe("playbook CLI variables", () => {
 		strictEqual(await runFleetCommand(["run", "stage", "--var", "fixture=r7"]), 2);
 		const runs = join(clioStateDir(), "fleet-runs");
 		deepStrictEqual(existsSync(runs) ? readdirSync(runs) : [], []);
+	});
+
+	it("answers a fleet run a drained admission gate denied with a refused result, not a completed one", () => {
+		writeFileSync(
+			join(root, ".clio-coder", "playbooks", "one.md"),
+			[
+				"---",
+				"version: 3",
+				"name: one",
+				'description: "One agent step."',
+				"steps:",
+				"  - kind: agent",
+				"    id: one",
+				"    agent: coder",
+				"    scope: readonly",
+				"    dependencies: []",
+				"maxWorkers: 1",
+				"onFailure: stop",
+				"---",
+				"",
+				"Do one thing.",
+				"",
+			].join("\n"),
+		);
+		process.env.HOME = env.dir;
+		updateSettings((settings) => {
+			settings.targets.push({
+				id: "fixture",
+				runtime: "openai-compat",
+				url: "http://127.0.0.1:1/v1",
+				defaultModel: "fixture",
+			});
+			settings.fleet.default.target = "fixture";
+			settings.fleet.default.model = "fixture";
+		});
+		const cli = (args: ReadonlyArray<string>) =>
+			spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), CLI_ENTRY, ...args], {
+				cwd: root,
+				env: { ...process.env, NO_COLOR: "1" },
+				encoding: "utf8",
+			});
+		const drain = cli(["fleet", "admission", "drain"]);
+		strictEqual(drain.status, 0, drain.stderr);
+		const run = cli(["fleet", "run", "one", "--output-format", "json"]);
+		strictEqual(run.status, 2, run.stderr);
+		const result = JSON.parse(run.stdout) as {
+			exitCode: number;
+			completion: unknown;
+			causes: Array<{ code: string; message?: string }>;
+		};
+		strictEqual(result.exitCode, 2);
+		deepStrictEqual(result.completion, { state: "refused", stopReason: null });
+		strictEqual(result.causes[0]?.code, "not_started", run.stdout);
+		match(result.causes[0]?.message ?? "", /capacity is draining/);
 	});
 });
