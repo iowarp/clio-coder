@@ -261,7 +261,7 @@ import {
 	pruneWorkspaceSnapshots,
 	workspaceSnapshotRepositoryPresent,
 } from "../domains/workspace-snapshots/index.js";
-import { type AcpHostReport, acpCommandControl } from "../engine/acp/commands.js";
+import type { AcpHostReport } from "../engine/acp/commands.js";
 import {
 	bindBoardActions,
 	createAcpInterviewChannel,
@@ -270,7 +270,7 @@ import {
 	oracleBriefingFromEntries,
 	runHostDispatch,
 } from "../engine/acp/host-members.js";
-import { type AcpHandoffControl, serveClioAcpAgent } from "../engine/acp/server.js";
+import type { AcpHandoffControl } from "../engine/acp/server.js";
 import { createStdioServerTransport } from "../engine/acp/transport.js";
 import {
 	declareRuntimeNoticeProducer,
@@ -3116,6 +3116,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// is refused while one runs, as the terminal's /fleet run refuses it, since
 		// two fleets would race over one workspace.
 		let acpFleetInFlight: { name: string; fleetRootId: string } | null = null;
+		const [{ acpCommandControl }, { serveClioAcpAgent }] = await Promise.all([
+			import("../engine/acp/commands.js"),
+			import("../engine/acp/server.js"),
+		]);
 		try {
 			const transport = options.acp.transport ?? createStdioServerTransport(options.acp.transportOptions);
 			const code = await serveClioAcpAgent({

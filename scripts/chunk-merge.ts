@@ -125,6 +125,12 @@ const EXACT_PATHS: ReadonlyArray<readonly [name: string, roots: ReadonlyArray<st
 		],
 	],
 	["worker", ["src/worker/entry.ts"]],
+	// A headless run up to its last pre-boot refusal; run.ts imports clio.ts, and so the orchestrator, only after it.
+	// version.ts rides along so the split this path makes never adds a file to `--version`.
+	[
+		"headlessPreboot",
+		["src/cli/index.ts", "src/cli/run-help.ts", "src/core/compile-cache.ts", "src/cli/run.ts", "src/cli/version.ts"],
+	],
 	["runHelp", ["src/cli/index.ts", "src/cli/run-help.ts"]],
 	["help", ["src/cli/index.ts", "src/cli/help-command.ts"]],
 ];
