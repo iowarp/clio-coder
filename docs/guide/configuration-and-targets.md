@@ -699,7 +699,7 @@ for it (`src/engine/apis/openai-completions.ts`).
 
 ## Thinking levels for out-of-turn model calls
 
-CLIO Coder supplies a thinking choice for model calls outside the main conversation instead of inferring one from whether the model supports reasoning. Memory retention requests `off`, independently of `chat.thinkingLevel` (whose default is `low`). Compaction also requests thinking off through the simple stream path. These choices bound auxiliary work without changing the session's saved thinking level. A model may still produce reasoning despite an off request; memory keeps text blocks from the response and accounts for reported usage. See [ai.ts](../../src/engine/ai.ts), the [memory caller](../../src/entry/orchestrator.ts) and [compaction](../../src/domains/session/compaction/compact.ts).
+CLIO Coder supplies a thinking choice for model calls outside the main conversation instead of inferring one from whether the model supports reasoning. Memory retention requests `context.memory.thinkingLevel` and steering triage requests `chat.steering.triage.thinkingLevel`, both default `off` and independent of `chat.thinkingLevel` (whose default is `low`). Compaction also requests thinking off through the simple stream path. These choices bound auxiliary work without changing the session's saved thinking level. A model may still produce reasoning despite an off request; memory keeps text blocks from the response and accounts for reported usage. See [ai.ts](../../src/engine/ai.ts), the [memory caller](../../src/entry/orchestrator.ts) and [compaction](../../src/domains/session/compaction/compact.ts).
 
 ## Built-in runtimes
 

@@ -1022,7 +1022,7 @@ const EXCLUDE_LAST_TURNS_RETIRED =
 
 export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	identity: "it was accepted and ignored; no behavior is lost",
-	"background.thinkingLevel": "proactive memory always resolves thinking off",
+	"background.thinkingLevel": "proactive memory now follows context.memory.thinkingLevel, default off",
 	theme: "the only registered theme was not read by runtime rendering",
 	"compaction.excludeLastTurns": EXCLUDE_LAST_TURNS_RETIRED,
 	"delegation.agents[].permissionTimeoutMs": EXTERNAL_AGENT_PERMISSION_TIMEOUT_RETIRED,

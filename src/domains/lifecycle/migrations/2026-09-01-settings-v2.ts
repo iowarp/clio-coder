@@ -304,7 +304,11 @@ export function migrateSettingsV1Document(raw: unknown): SettingsV2DocumentTrans
 	for (const [from, to, valueTransform] of moves) move(transform, from, to, valueTransform);
 
 	drop(transform, "identity", "accepted and ignored; no behavior was lost");
-	drop(transform, "background.thinkingLevel", "unused; proactive memory always resolves thinking off");
+	drop(
+		transform,
+		"background.thinkingLevel",
+		"unused; proactive memory now follows context.memory.thinkingLevel, default off",
+	);
 	drop(transform, "theme", "inactive; runtime rendering did not read it");
 	drop(transform, "compaction.excludeLastTurns", "legacy-mask only; context.workingSet.protectLastTurns remains");
 	// The keys v0.4.0 shipped moved above; what can remain under `panes` is the
