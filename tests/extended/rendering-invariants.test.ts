@@ -4152,27 +4152,48 @@ describe("agent invocations", () => {
 	});
 
 	it("a compact council round says which key shows the answers its one-line rows cut", () => {
-		const member = (text: string) =>
+		// The operator's /council admits its dispatch with no tool call id, so its cards carry no parent call.
+		let style: OutputStyle = "compact";
+		const panel = createChatPanel({ getOutputStyle: () => style, now: () => 1_000 });
+		panel.appendUser("/council should retry() own its clock?");
+		const member = (id: string, label: string, round: number, text: string, pending = false) =>
 			card({
-				assignmentId: "m1",
-				agentId: "scout",
+				assignmentId: id,
+				agentId: label.toLowerCase(),
 				origin: "user",
-				council: { group: "g1", label: "fast", round: 1 },
+				council: { group: "g1", label, round },
 				text,
+				pending,
 			});
-		const header = (text: string, style: "compact" | "standard") => {
-			const entry = member(text);
-			return stripTerminalSequences(
-				renderWorkerEntryLines(entry, 120, { detail: transcriptDetail(style), siblings: [entry] })[0] ?? "",
-			);
+		const settle = (state: WorkerEntryState, text: string) => {
+			Object.assign(state, {
+				pending: false,
+				text,
+				result: { outcome: "succeeded", durationMs: 38_000, tokenCount: 18_200, toolCalls: 7 },
+			});
+			panel.applyWorkerState(state);
 		};
-		const long = "Keep the clock in retry().\nThe caller cannot see the backoff, and tests stub it there.";
+		const headers = () =>
+			plainRender(panel, 80)
+				.split("\n")
+				.filter((row) => row.startsWith(GLYPH.workerHuman));
+		const hinted = (round: number) => `${GLYPH.workerHuman} council · round ${round} · Alt+O shows the answers`;
+		const plain = (round: number) => `${GLYPH.workerHuman} council · round ${round}`;
 		const previous = getKeybindings();
 		createKeybindingManager(DEFAULT_SETTINGS, {});
 		try {
-			match(header(long, "compact"), /council · round 1 · Alt\+O shows the answers$/u);
-			strictEqual(header("Yes.", "compact"), `${GLYPH.workerHuman} council · round 1`, "a whole answer needs no hint");
-			strictEqual(header(long, "standard"), `${GLYPH.workerHuman} council · round 1`, "Standard previews the answer");
+			panel.applyWorkerState(member("a1", "Architect", 1, "Yes."));
+			panel.applyWorkerState(member("s1", "Skeptic", 1, "No."));
+			panel.applyWorkerState(member("a2", "Architect", 2, "Yes."));
+			const late = member("s2", "Skeptic", 2, "", true);
+			panel.applyWorkerState(late);
+			deepStrictEqual(headers(), [plain(1), plain(2)], "whole answers and a running member need no hint");
+			match(plainRender(panel, 80), /Architect · dynamo\/qwen +✓ done .*Yes\./u, "each member's row shows its answer");
+			// One line of 36 columns, wider than what the aligned row leaves for it at 80 columns.
+			settle(late, "Keep the retry clock inside retry().");
+			deepStrictEqual(headers(), [plain(1), hinted(2)], "the round whose row was cut says so, and only that round");
+			style = "standard";
+			deepStrictEqual(headers(), [plain(1), plain(2)], "Standard previews the answer");
 		} finally {
 			setKeybindings(previous);
 		}
