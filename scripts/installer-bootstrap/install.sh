@@ -24,6 +24,10 @@ main() {
 	# --package, --node-tarball and --install-dir paths mean what the caller meant. Between mktemp and cd another user who
 	# can write the temp directory could swap the entry, so the directory reached must be this user's, closed to others
 	# and empty, as a fresh mktemp directory is (a link to one of this user's own private directories is not).
+	# The downloader is resolved here, in the caller's directory, because a relative PATH entry such as ./bin names it
+	# only from there; command -v may print that relative path, so it is made absolute before the cd below.
+	downloader=$(command -v curl 2>/dev/null) || downloader=$(command -v wget 2>/dev/null) || downloader=
+	case $downloader in /*) ;; ?*) downloader=$PWD/$downloader ;; *) downloader=wget ;; esac
 	dir=$(mktemp -d "${TMPDIR:-/tmp}/clio-coder-install.XXXXXXXX")
 	trap 'rm -rf "$dir"' EXIT HUP INT TERM
 	cd -P "$dir"
@@ -36,7 +40,7 @@ main() {
 		exit 1
 	fi
 	get() {
-		if command -v curl >/dev/null 2>&1; then curl -fsSL "$1" -o "$2"; else wget -q "$1" -O "$2"; fi
+		case $downloader in */curl) "$downloader" -fsSL "$1" -o "$2" ;; *) "$downloader" -q "$1" -O "$2" ;; esac
 	}
 	url=https://github.com/iowarp/clio-coder/releases/latest/download/install.sh
 	case "$channel" in
