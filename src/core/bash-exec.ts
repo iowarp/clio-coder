@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
 import type { Socket } from "node:net";
+import { performance } from "node:perf_hooks";
 import { StringDecoder } from "node:string_decoder";
 import { holdUnresolvedUserinfo, isSecretArgKey } from "../domains/safety/redaction.js";
 import { AI_AGENT_NAME } from "./agent-environment.js";
@@ -54,7 +56,8 @@ export interface BashCommandResult extends Partial<BashStreamByteCounts> {
 }
 
 export interface BashTimeoutLimit {
-	by: "run-deadline" | "timeout";
+	/** `idle`: the command went `ms` with no output and no CPU in its process tree (`idleMs`, FX-32). */
+	by: "run-deadline" | "timeout" | "idle";
 	ms: number;
 }
 
@@ -85,6 +88,11 @@ export interface RunBashCommandOptions {
 	shellSandbox?: MainSandboxPolicy;
 	/** Called with the shell's pid once it is spawned; off Windows the pid is also its process group id. */
 	onSpawn?: (pid: number) => void;
+	/**
+	 * Stop the command as timed out (`timeoutLimit.by` "idle") once it has gone this long with no output and, where
+	 * `/proc` shows it, no CPU in the shell's process tree. Absent or 0 is off (FX-32).
+	 */
+	idleMs?: number;
 }
 
 type BashOutputListener = (target: "stdout" | "stderr", text: string) => void;
@@ -496,6 +504,69 @@ function armedTimeoutLimit(timeout: number, deadlineAt: number | undefined): Bas
 /** Process groups of commands this process started that may still hold members, keyed by leader pid. */
 const liveCommandGroups = new Set<number>();
 
+/** What the idle watchdog read of a command's processes: their summed CPU ticks and how many were still live. */
+interface CommandCpuSample {
+	ticks: number;
+	members: number;
+}
+
+/**
+ * CPU clock ticks spent so far by a command's processes, read from `/proc`; null where `/proc` is not available. The
+ * members are the root and its descendants by parent pid (a sandboxed payload runs in its own session), every process
+ * in the command's group (a backgrounded child outlives the shell and is reparented away from it), the descendants of
+ * both, and every process seen in an earlier sample that is still the same process (`known`, pid to start time; it
+ * keeps a `setsid` descendant found while the shell lived). `known` is updated to this sample's members.
+ */
+function commandCpuSample(rootPid: number, groupId: number, known: Map<number, string>): CommandCpuSample | null {
+	let names: string[];
+	try {
+		names = readdirSync("/proc");
+	} catch {
+		return null;
+	}
+	const children = new Map<number, number[]>();
+	const ticks = new Map<number, number>();
+	const started = new Map<number, string>();
+	const seeds: number[] = [];
+	for (const name of names) {
+		if (!/^\d+$/u.test(name)) continue;
+		let stat: string;
+		try {
+			stat = readFileSync(`/proc/${name}/stat`, "utf8");
+		} catch {
+			continue;
+		}
+		// The command name sits in parentheses and may hold spaces; the fields after it are fixed.
+		const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+		const pid = Number(name);
+		const ppid = Number(fields[1]);
+		const list = children.get(ppid);
+		if (list === undefined) children.set(ppid, [pid]);
+		else list.push(pid);
+		// utime, stime, cutime, cstime.
+		ticks.set(
+			pid,
+			[11, 12, 13, 14].reduce((sum, index) => sum + (Number(fields[index]) || 0), 0),
+		);
+		const start = fields[19] ?? "";
+		started.set(pid, start);
+		// A zombie spends no more CPU and is not a live member.
+		if (fields[0] === "Z") continue;
+		if (pid === rootPid || Number(fields[2]) === groupId || known.get(pid) === start) seeds.push(pid);
+	}
+	let total = 0;
+	const seen = new Set<number>();
+	for (let pid = seeds.pop(); pid !== undefined; pid = seeds.pop()) {
+		if (seen.has(pid)) continue;
+		seen.add(pid);
+		total += ticks.get(pid) ?? 0;
+		seeds.push(...(children.get(pid) ?? []));
+	}
+	known.clear();
+	for (const pid of seen) known.set(pid, started.get(pid) ?? "");
+	return { ticks: total, members: seen.size };
+}
+
 /**
  * SIGKILL every command group this process started. A dispatched worker calls it when cancelled: each command runs in
  * its own group, so the parent's kill of the worker's group misses it, and the 5 s escalation timer below dies with
@@ -551,8 +622,10 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		const timeout = clampTimerDelayMs(options.timeoutMs ?? 300_000);
 		let aborted = false;
 		let timedOut = false;
+		let idledOut = false;
 		let settled = false;
 		let timeoutId: ReturnType<typeof setTimeout> | null = null;
+		let idleTimer: ReturnType<typeof setInterval> | null = null;
 		let killGraceTimer: ReturnType<typeof setTimeout> | null = null;
 		let drainTimer: ReturnType<typeof setTimeout> | null = null;
 		let killSent = false;
@@ -671,6 +744,40 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			}, limit.ms);
 		}
 		const limitField = limit === null ? {} : { timeoutLimit: limit };
+		// The idle stop names itself as the limit that ended the command; otherwise the armed limit stands.
+		const idleMs = clampTimerDelayMs(options.idleMs ?? 0);
+		const stopLimitField = (): { timeoutLimit?: BashTimeoutLimit } =>
+			idledOut ? { timeoutLimit: { by: "idle", ms: idleMs } } : limitField;
+		let lastActivity = performance.now();
+		if (idleMs > 0 && child.pid !== undefined) {
+			const pid = child.pid;
+			const known = new Map<number, string>();
+			let lastTicks: number | null = null;
+			idleTimer = setInterval(
+				() => {
+					if (settled || killSent) return;
+					// Off Linux (no /proc) only output counts. With /proc, the command's processes are sampled by group and by
+					// descent, so a busy child the shell left behind still counts after the shell is reaped.
+					const sample = commandCpuSample(pid, groupId ?? pid, known);
+					if (sample !== null && sample.members > 0 && sample.ticks !== lastTicks) {
+						lastTicks = sample.ticks;
+						lastActivity = performance.now();
+					}
+					if (performance.now() - lastActivity < idleMs) return;
+					// Nothing could be sampled, yet the command's group still has a member: not proof of idleness.
+					if (sample !== null && sample.members === 0 && hasOwnedProcesses()) return;
+					idledOut = true;
+					timedOut = true;
+					killChild();
+				},
+				Math.max(50, Math.min(5000, Math.floor(idleMs / 4))),
+			);
+			idleTimer.unref?.();
+		}
+		const clearIdleTimer = (): void => {
+			if (idleTimer !== null) clearInterval(idleTimer);
+			idleTimer = null;
+		};
 
 		if (options.signal?.aborted) {
 			onAbort();
@@ -679,6 +786,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		}
 
 		const appendChunk = (target: "stdout" | "stderr", chunk: Buffer): void => {
+			lastActivity = performance.now();
 			if (output.append(target, chunk)) killChild();
 		};
 
@@ -688,6 +796,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			if (settled) return;
 			settled = true;
 			if (timeoutId) clearTimeout(timeoutId);
+			clearIdleTimer();
 			if (drainTimer) clearTimeout(drainTimer);
 			const finalOutput = output.settle();
 			options.signal?.removeEventListener("abort", onAbort);
@@ -699,7 +808,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 				signal: null,
 				aborted,
 				timedOut,
-				...limitField,
+				...stopLimitField(),
 			});
 		});
 		child.on("close", (code, signalName) => {
@@ -707,6 +816,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			if (settled) return;
 			settled = true;
 			if (timeoutId) clearTimeout(timeoutId);
+			clearIdleTimer();
 			if (drainTimer) clearTimeout(drainTimer);
 			const finalOutput = output.settle();
 			options.signal?.removeEventListener("abort", onAbort);
@@ -727,7 +837,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 				signal: signalName,
 				aborted,
 				timedOut,
-				...limitField,
+				...stopLimitField(),
 			});
 		});
 	});

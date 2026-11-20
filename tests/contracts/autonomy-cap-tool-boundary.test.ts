@@ -58,14 +58,15 @@ afterEach(() => {
  */
 function transport(toolRounds = 1, reply: string | ReadonlyArray<string> = "PONG") {
 	let calls = 0;
-	const requests: Array<{ tools: number; toolChoice: unknown }> = [];
+	const requests: Array<{ tools: number; toolChoice: unknown; messages: unknown[] }> = [];
 	const fetch: typeof globalThis.fetch = async (_input, init) => {
 		calls += 1;
 		const sent = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as {
 			tools?: unknown[];
 			tool_choice?: unknown;
+			messages?: unknown[];
 		};
-		requests.push({ tools: sent.tools?.length ?? 0, toolChoice: sent.tool_choice });
+		requests.push({ tools: sent.tools?.length ?? 0, toolChoice: sent.tool_choice, messages: sent.messages ?? [] });
 		const text = typeof reply === "string" ? reply : (reply[Math.min(calls - toolRounds - 1, reply.length - 1)] ?? "");
 		const encoder = new TextEncoder();
 		const chunk = (delta: Record<string, unknown>, finish_reason: string | null = null) =>
@@ -100,10 +101,17 @@ function transport(toolRounds = 1, reply: string | ReadonlyArray<string> = "PONG
 /** A real engine and session journal over the fixture wire, with `run` standing in for the read tool. */
 function fixture(
 	toolRounds: number,
-	run: (loop: ChatLoop, signal: AbortSignal | undefined, options: ToolInvokeOptions | undefined) => Promise<void>,
+	run: (
+		loop: ChatLoop,
+		signal: AbortSignal | undefined,
+		steered: (() => boolean) | undefined,
+		options: ToolInvokeOptions | undefined,
+	) => Promise<void>,
 	reply?: string | ReadonlyArray<string>,
 	/** Keep the turn runtime's own stream (tool rounds and tool_choice) and swap only its fetch. */
 	throughToolRounds = false,
+	/** The stand-in tool may be ended by a queued steer after this grace (FX-32). */
+	steerGraceMs?: number,
 	/** Compose the loop as `clio-coder run` does. */
 	headless = false,
 ) {
@@ -138,6 +146,7 @@ function fixture(
 		readSessionEntries: () => session.readEntries(),
 		toolRegistry: registry,
 		bus: context.bus,
+		...(steerGraceMs === undefined ? {} : { steerInterruptGraceMs: steerGraceMs }),
 		createAgent: (options) =>
 			createEngineAgent(
 				throughToolRounds && options?.transcriptStreamFn !== undefined
@@ -168,8 +177,9 @@ function fixture(
 		description: "Stands in for an extension record write or a bash command a stop lands during",
 		parameters: Type.Object({}),
 		baseActionClass: "read",
+		...(steerGraceMs === undefined ? {} : { steerInterruptible: true as const }),
 		async run(_args, options) {
-			await run(loop, options?.signal, options);
+			await run(loop, options?.signal, options?.steerInterrupted, options);
 			return { kind: "ok", output: "recorded" };
 		},
 	});
@@ -347,6 +357,81 @@ it("a headless --timeout during a tool after a steer settles the turn on shutdow
 	}
 });
 
+it("a steer queued during an interruptible tool ends the call after its grace; the model gets the partial result marked, then the steer (FX-32)", {
+	timeout: 10_000,
+}, async () => {
+	const tool = { sawAbort: false };
+	const f = fixture(
+		1,
+		async (loop, signal) => {
+			ok(loop.steer("Stop waiting; read the log instead."));
+			// A hung command: it ends only when its signal fires (5 s stands in for forever).
+			await new Promise<void>((resolve) => {
+				const fallback = setTimeout(resolve, 5_000);
+				signal?.addEventListener("abort", () => {
+					clearTimeout(fallback);
+					resolve();
+				});
+			});
+			tool.sawAbort = signal?.aborted === true;
+		},
+		"PONG",
+		false,
+		50,
+	);
+	const events: ChatLoopEvent[] = [];
+	f.loop.onEvent((event) => {
+		events.push(event);
+	});
+	try {
+		await f.loop.submit("Record the section.");
+		await f.loop.whenSettled();
+		ok(tool.sawAbort, "the steer never ended the call");
+		strictEqual(f.wire.calls(), 2, "the run goes on after the interrupted call");
+		const texts = (f.wire.requests[1]?.messages ?? []).map((message) => {
+			const { role, content } = message as { role: string; content: unknown };
+			return { role, text: typeof content === "string" ? content : JSON.stringify(content) };
+		});
+		const toolIndex = texts.findIndex((message) => message.role === "tool");
+		ok(toolIndex >= 0 && texts[toolIndex]?.text.includes("aborted-by-steer"), JSON.stringify(texts));
+		ok(
+			texts.slice(toolIndex + 1).some((m) => m.role === "user" && m.text.includes("Stop waiting; read the log instead.")),
+			JSON.stringify(texts),
+		);
+		ok(
+			events.some(
+				(event) => event.type === "notice" && (event as { text?: string }).text?.includes("a queued steer ended"),
+			),
+		);
+	} finally {
+		await f.close();
+	}
+	// The operator cancels the run after the steer fired, while the call is still stopping (bash's TERM-to-KILL grace):
+	// the cancel wins, so the call does not read as aborted-by-steer and nothing says the run goes on.
+	const late = { steered: true as boolean | undefined };
+	const cancelled = fixture(
+		1,
+		async (loop, signal, steered) => {
+			ok(loop.steer("Stop waiting; read the log instead."));
+			await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+			loop.cancel();
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			late.steered = steered?.();
+		},
+		"PONG",
+		false,
+		50,
+	);
+	try {
+		await cancelled.loop.submit("Record the section.");
+		await cancelled.loop.whenSettled();
+		strictEqual(late.steered, false, "a run cancelled after the steer fired still reported aborted-by-steer");
+		strictEqual(cancelled.wire.calls(), 1, "a cancelled run sent another model request");
+	} finally {
+		await cancelled.close();
+	}
+});
+
 it("run --output-schema's repair turn goes out text-only with its tool list kept; an answer turn with tools does not", {
 	timeout: 10_000,
 }, async () => {
@@ -383,7 +468,7 @@ it("a headless run the observation pool stopped keeps the sealed fact through ru
 	// The run's one tool call spends the pool and is then refused by it, so what it would have read went unseen.
 	const f = fixture(
 		1,
-		async (_loop, _signal, options) => {
+		async (_loop, _signal, _steered, options) => {
 			const read = reserveObservation(4 * 1024 * 1024, options);
 			finalizeObservation({
 				tool: "read",
@@ -400,6 +485,7 @@ it("a headless run the observation pool stopped keeps the sealed fact through ru
 		},
 		["not json", '{"fixed":true}'],
 		false,
+		undefined,
 		true,
 	);
 	try {

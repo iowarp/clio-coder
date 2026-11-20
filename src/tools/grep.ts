@@ -575,6 +575,7 @@ export const grepTool: ToolSpec = {
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
+	steerInterruptible: true,
 	async run(args, options): Promise<ToolResult> {
 		const pattern = typeof args.pattern === "string" && args.pattern.length > 0 ? args.pattern : null;
 		if (!pattern) return { kind: "error", message: "grep: missing pattern argument" };

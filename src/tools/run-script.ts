@@ -850,6 +850,7 @@ export const runScriptToolSurface: ToolSurface = {
 	}),
 	baseActionClass: "execute",
 	executionMode: "sequential",
+	steerInterruptible: true,
 	prepareArguments: prepareRunScriptArguments,
 	safetyCall(args) {
 		const projection = runScriptSafetyProjection(args);

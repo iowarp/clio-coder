@@ -222,6 +222,7 @@ import type { SubmitEvidence } from "./run-evidence.js";
 import { retireActiveUserContextForNextOperator } from "./session-replay-messages.js";
 import { type OutOfTurnRoute, runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./side-question.js";
 import type { AgentStatusEvent, ModelRequestFacts } from "./status-types.js";
+import { createSteerInterrupter } from "./steer-interrupt.js";
 import {
 	parseTriageAnswer,
 	runTriageRound,
@@ -912,6 +913,8 @@ export interface CreateChatLoopDeps {
 	headless?: boolean;
 	/** False when no operator message can arrive mid-run (a headless run without a steer channel). */
 	liveSteering?: boolean;
+	/** How long a queued steer lets an interruptible tool call run before it ends it (FX-32); contracts shorten it. */
+	steerInterruptGraceMs?: number;
 	/** This host's sandbox backend; absent, the session prompt claims no sandbox. */
 	sandboxAvailability?: () => SandboxAvailability;
 	scheduling?: SchedulingContract;
@@ -1528,6 +1531,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const options: Partial<ToolInvokeOptions> = {
 			toolResultMaxBytes: deps.getSettings().context.toolResultMaxBytes,
 			abortCause: () => state.activeInterruptReason ?? state.toolProseAbortReason,
+			steerInterrupt: steerInterrupter,
+			...(deps.getSettings().safety.limits.bashIdleSeconds > 0
+				? { bashIdleMs: deps.getSettings().safety.limits.bashIdleSeconds * 1000 }
+				: {}),
 			...observedToolCallOrigin(state.runtime?.agent.state.messages ?? [], toolCallId),
 		};
 		const batch = toolCallBatch(state.runtime?.agent.state.messages ?? [], toolCallId);
@@ -1572,6 +1579,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		sessionId: () => deps.session?.current()?.id ?? null,
 		turnId: () => state.activeUserTurnId ?? state.lastTurnId ?? null,
 	});
+	const steerInterrupter = createSteerInterrupter({
+		pendingSteerSince: () => {
+			const waiting = queues
+				.entries()
+				.filter((entry) => entry.kind === "steer" && entry.constraints === undefined)
+				.map((entry) => entry.enqueuedAt);
+			return waiting.length === 0 ? null : Math.min(...waiting);
+		},
+		onInterrupt: (toolName, graceMs) =>
+			emitNotice(
+				`[CLIO Coder] a queued steer ended the running ${toolName} call after ${Math.round(graceMs / 1000)}s; the model gets its partial output, then the steer.`,
+			),
+		...(deps.steerInterruptGraceMs !== undefined ? { graceMs: deps.steerInterruptGraceMs } : {}),
+	});
 	const queues = createTurnQueues({
 		state,
 		emitQueueUpdateEvent: (messages) => emit({ type: "queue_update", messages }),
@@ -1601,6 +1622,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		onEvent: (event) => {
 			if (event.type === "delivered") operatorSpokeAt = Date.now();
 			messagePath.queueEvent(event);
+			steerInterrupter.poke();
 		},
 	});
 
@@ -4854,6 +4876,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		dispose(): void {
 			disposed = true;
+			steerInterrupter.dispose();
 			submitOwner?.abort();
 			pendingPreTurnRead?.abort();
 			machineHostDisposed = true;

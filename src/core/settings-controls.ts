@@ -496,6 +496,7 @@ const MENU_ROWS = new Set([
 	"safety.limits.autonomousToolCalls",
 	"safety.limits.autonomousMinutes",
 	"safety.limits.autonomousTokens",
+	"safety.limits.bashIdleSeconds",
 	"safety.sandbox",
 	"safety.sandboxNetwork",
 	"safety.scratchRoots",
@@ -612,6 +613,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"safety.limits.autonomousTokens": [
 		"Yolo stretch tokens",
 		"Tokens one yolo stretch spends before it pauses for you to resume; 0 turns this cap off.",
+	],
+	"safety.limits.bashIdleSeconds": [
+		"Bash idle timeout",
+		"Seconds a foreground bash command may run with no output and no CPU use before it is stopped as idle; 0 turns this off.",
 	],
 	"context.semantic.enabled": [
 		"Semantic search",
