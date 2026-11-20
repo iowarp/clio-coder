@@ -102,8 +102,8 @@ export const MEMORY_GATE_MIN_TERMS = 2;
 /** What a record the model kept leaving unused must share instead. */
 export const MEMORY_GATE_DEMOTED_MIN_TERMS = 4;
 
-/** Distinctive subject terms, plural folded, generic coding words dropped; shared with recall-use detection. */
-export function memoryGateTerms(value: string): Set<string> {
+/** Distinctive subject terms, plural folded, generic coding words dropped. */
+function memoryGateTerms(value: string): Set<string> {
 	return new Set(
 		subjectTerms(value)
 			.map((term) => (term.length > 4 && term.endsWith("s") && !term.endsWith("ss") ? term.slice(0, -1) : term))
