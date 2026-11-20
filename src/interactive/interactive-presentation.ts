@@ -989,12 +989,13 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		getThinking: () => {
 			const current = deps.getSettings?.();
-			const thinking = resolveModelRuntimeCapabilitiesForProviders(
+			const runtime = resolveModelRuntimeCapabilitiesForProviders(
 				deps.providers,
 				current?.chat?.target,
 				current?.chat?.model,
 				current?.chat?.thinkingLevel ?? "off",
-			)?.thinking;
+			);
+			const thinking = runtime?.thinking;
 			// A route with no thinking control can still send reasoning, and what it sent outranks what its catalog row says.
 			if (thinking?.mechanism === "none" && reasoningRoutes.has(routeKey(current?.chat?.target, current?.chat?.model))) {
 				// `think off (model reasons anyway)` read as a contradiction; what the model does is the label.
@@ -1011,7 +1012,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			}
 			// The rail states what the model will do, in the picker's word for it. A setting the model cannot honor
 			// says so in words, where `low → on` left the reader to decode the arrow (F13, bt-11).
-			const note = thinking ? thinkingNoteWords(thinking) : null;
+			const note = thinking ? thinkingNoteWords({ ...thinking, model: runtime.modelId }) : null;
 			return {
 				label:
 					note !== null && thinking

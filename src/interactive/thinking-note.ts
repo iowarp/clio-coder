@@ -10,5 +10,12 @@ export function thinkingNoteWords(thinking: Parameters<typeof thinkingEffectNote
 	if (thinking.mechanism === "on-off") return "this model has no levels";
 	if (thinking.mechanism === "always-on") return "this model always thinks";
 	if (thinking.mechanism === "none") return note;
+	if (
+		thinking.configuredLevel === "high" &&
+		thinking.effectiveLevel === "xhigh" &&
+		!thinking.supportedLevels?.includes("high")
+	) {
+		return note;
+	}
 	return `${thinking.configuredLevel} not offered`;
 }

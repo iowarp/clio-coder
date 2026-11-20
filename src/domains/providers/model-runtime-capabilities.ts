@@ -768,8 +768,18 @@ export function thinkingEffectNote(thinking: {
 	configuredLevel: ThinkingLevel;
 	effectiveLevel: ThinkingLevel;
 	display: string;
+	supportedLevels?: ReadonlyArray<ThinkingLevel>;
+	model?: string;
 }): string | null {
 	if (thinking.configuredLevel === thinking.effectiveLevel) return null;
+	if (
+		thinking.configuredLevel === "high" &&
+		thinking.effectiveLevel === "xhigh" &&
+		!thinking.supportedLevels?.includes("high")
+	) {
+		const model = thinking.model?.trim();
+		return model ? `high isn't offered by ${model}; using xhigh` : "high isn't offered by this model; using xhigh";
+	}
 	return thinking.mechanism === "none"
 		? "no thinking control"
 		: `${thinking.configuredLevel} runs as ${thinking.display}`;
