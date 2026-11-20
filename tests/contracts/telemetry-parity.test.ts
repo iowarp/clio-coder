@@ -8,6 +8,7 @@
  * surfaces read passes the §13.1 lie detectors.
  */
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +16,7 @@ import { after, before, test } from "node:test";
 import type { Quantity } from "../../src/core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { renderCompactCount } from "../../src/core/telemetry/render.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import { loadRepoTelemetrySources } from "../../src/domains/session/telemetry-source.js";
 import type { TelemetryView } from "../../src/domains/telemetry/contract.js";
@@ -34,6 +36,7 @@ import { exitSpend } from "../../src/interactive/exit-summary-collector.js";
 import { footerTelemetry } from "../../src/interactive/footer/spend.js";
 import { openUsageOverlay } from "../../src/interactive/usage-overlay.js";
 import { usageFigure, usageLineFigure } from "../../src/interactive/usage-words.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 import { dtoLies } from "../harness/telemetry-lies.js";
 import {
 	coldParityDtos,
@@ -198,6 +201,41 @@ test("ACP's live totals and its telemetry methods carry the same value and prove
 		timeless(await handlers[method]?.({ sessionId: PARITY_SESSION, ...params }));
 	deepStrictEqual(await served(ACP_TELEMETRY_METHODS.session), timeless(cold.session));
 	deepStrictEqual(await served(ACP_TELEMETRY_METHODS.cost, { groupBy: "model" }), timeless(cold.costByModel));
+});
+
+test("the CLI's telemetry runs, quota and health print the DTOs ACP's request/reply methods return", async () => {
+	const env = await isolateClioEnv("clio-coder-telemetry-snapshot-");
+	let acp: LiveTelemetryModel | undefined;
+	try {
+		// Taken once, so an ACP seed landing after restore cannot resolve the real state directory.
+		const scratch = clioStateDir();
+		acp = createLiveTelemetryModel({ stateDir: () => scratch });
+		await seedParitySession(scratch);
+		const handlers = telemetryRequestHandlers({
+			model: acp,
+			params: (params) => params as Record<string, unknown>,
+			session: (request) => ({ id: request.sessionId as string }),
+		});
+		// A child process with the isolated environment, so no stream is swapped across an await.
+		const module = JSON.stringify(new URL("../../src/cli/telemetry.ts", import.meta.url).href);
+		const cli = async (argv: string[]) => {
+			const script = `const { runTelemetryCommand } = await import(${module}); process.exitCode = await runTelemetryCommand(${JSON.stringify(argv)});`;
+			const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+				encoding: "utf8",
+				env: process.env,
+			});
+			strictEqual(result.status, 0, `${argv.join(" ")}: ${result.stderr}`);
+			return timeless(JSON.parse(result.stdout));
+		};
+		const runs = await cli(["runs", PARITY_SESSION, "--json"]);
+		ok(Array.isArray(runs) && runs.some((row: { runId: string }) => row.runId === PARITY_RUN));
+		deepStrictEqual(runs, timeless(await handlers[ACP_TELEMETRY_METHODS.runs]?.({ sessionId: PARITY_SESSION })));
+		deepStrictEqual(await cli(["quota", "--json"]), timeless(await handlers[ACP_TELEMETRY_METHODS.quota]?.({})));
+		deepStrictEqual(await cli(["health", "--json"]), timeless(await handlers[ACP_TELEMETRY_METHODS.health]?.({})));
+	} finally {
+		acp?.stop();
+		env.restore();
+	}
 });
 
 test("ACP's prompt usage block words the prompt's operator turn as the read model's turn report does", () => {
