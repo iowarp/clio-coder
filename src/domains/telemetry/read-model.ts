@@ -4183,6 +4183,8 @@ export interface SurfaceLedgerRow {
 	outcomes: Partial<Record<SurfaceOutcome, number>>;
 	/** Settling firings with no settlement in these records: still open, or a session that never closed. */
 	unsettled: number;
+	/** Settling firings a worker drew under its run: no outcome ledger runs in a worker, so they never settle. */
+	unledgered: number;
 	/** Settlements beyond the first for one firing; any is a ledger defect, since each firing settles once. */
 	duplicates: number;
 }
@@ -4193,7 +4195,7 @@ function foldSurfaceLedger(records: readonly TelemetryRecord[]): SurfaceLedgerRo
 	const row = (surface: string): SurfaceLedgerRow => {
 		let found = rows.get(surface);
 		if (found === undefined) {
-			found = { surface, fired: 0, settling: 0, admitted: 0, outcomes: {}, unsettled: 0, duplicates: 0 };
+			found = { surface, fired: 0, settling: 0, admitted: 0, outcomes: {}, unsettled: 0, unledgered: 0, duplicates: 0 };
 			rows.set(surface, found);
 		}
 		return found;
@@ -4206,7 +4208,10 @@ function foldSurfaceLedger(records: readonly TelemetryRecord[]): SurfaceLedgerRo
 			target.fired += 1;
 			if (record.data.firingId === undefined) continue;
 			target.settling += 1;
-			firings.set(`${telemetryOwner(record.ctx)}/${record.data.firingId}`, record.data.ruleId);
+			const owner = telemetryOwner(record.ctx);
+			// A worker's firing is labelled, never counted as a session firing left open.
+			if (owner.startsWith("run:")) target.unledgered += 1;
+			else firings.set(`${owner}/${record.data.firingId}`, record.data.ruleId);
 		}
 	}
 	for (const record of records) {

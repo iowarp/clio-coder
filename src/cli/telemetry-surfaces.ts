@@ -19,15 +19,17 @@ never reached a model prints unexercised, never a pass. Below it, every
 middleware rule and host surface that fired: firings, those that settle, how
 many a request carried, and the outcomes they settled with (acted, recovered,
 ignored, moot, suppressed, exhausted, expired and the rest). A rule that only
-reminds or notifies is count only. Without --session it folds every session
-journal in the state directory. It reads structure only, never content. --json
-emits the fold verbatim.
+reminds or notifies is count only; a firing drawn inside a worker run is shown
+as in workers, no ledger, since only a session settles its firings. Without
+--session it folds every session journal in the state directory. It reads
+structure only, never content. --json emits the fold verbatim.
 `;
 
 function outcomesCell(row: SurfaceLedgerRow): string {
 	if (row.settling === 0) return "count only";
 	const parts = Object.entries(row.outcomes).map(([outcome, count]) => `${outcome} ${count}`);
 	if (row.unsettled > 0) parts.push(`unsettled ${row.unsettled}`);
+	if (row.unledgered > 0) parts.push(`in workers, no ledger ${row.unledgered}`);
 	if (row.duplicates > 0) parts.push(`duplicate settlements ${row.duplicates}`);
 	return parts.join(", ");
 }
