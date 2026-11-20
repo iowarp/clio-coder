@@ -164,6 +164,7 @@ import {
 	yoloFloorDeleteHit,
 	yoloFloorExecutableHit,
 	yoloFloorRawCandidates,
+	yoloFloorTrustGrant,
 } from "./yolo-floor.js";
 
 export type SafetyPolicySource =
@@ -6017,14 +6018,9 @@ function rulePackHash(rules: ReadonlyArray<DamageControlRule>): string {
 
 function invokesTrustMutation(command: string): boolean {
 	// Wrappers, package launchers, quoted argv and source-tree CLI invocations
-	// must not turn an operator-only grant into model authority.
-	const words = scanShellLikeDeep(command)
-		.filter((token) => !token.operator)
-		.map((token) => token.value);
-	return (
-		words.some((word, index) => word === "config" && words[index + 1] === "trust") ||
-		/\bconfig\s+trust\b/.test(inlineShellScript(command) ?? "")
-	);
+	// must not turn an operator-only grant into model authority; a loop list,
+	// a help request or quoted data is not a grant (CLI-P31).
+	return yoloFloorTrustGrant(command);
 }
 
 function projectScriptPreview(command: string, cwd: string): string {

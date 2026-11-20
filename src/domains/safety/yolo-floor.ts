@@ -118,6 +118,78 @@ export function yoloFloorExecutableHit(command: string): YoloFloorHit | null {
 	return null;
 }
 
+/** Runtimes and package runners that start Clio's CLI from an operand: `node dist/cli/index.js`, `npx @iowarp/clio-coder`. */
+const CLIO_RUNNERS: ReadonlySet<string> = new Set([
+	"node",
+	"nodejs",
+	"tsx",
+	"ts-node",
+	"bun",
+	"bunx",
+	"deno",
+	"npx",
+	"pnpx",
+	"npm",
+	"pnpm",
+	"yarn",
+	"corepack",
+]);
+
+/** `config` flags whose next word is their value, as `src/cli/config.ts` reads them. */
+const CONFIG_VALUE_FLAGS: ReadonlySet<string> = new Set(["--hash", "--scope"]);
+
+/** A command word that is Clio's launcher by name, a script entry, or a program named only at run time. */
+function clioLauncherWord(word: string): boolean {
+	if (/[$`]/u.test(word)) return true;
+	if (/^@iowarp\/clio-coder(?:@\S*)?$/u.test(word)) return true;
+	const base = word.slice(word.lastIndexOf("/") + 1).toLowerCase();
+	return base === "clio-coder" || base === "clio-coder.cjs" || /\.[cm]?[jt]s$/u.test(base);
+}
+
+/** True when `args[at]` is `config` and the verb `config` reads after it is `trust`, outside a help request. */
+function configTrustAt(args: ReadonlyArray<string>, at: number): boolean {
+	if (args[at] !== "config") return false;
+	for (let index = at + 1; index < args.length; index += 1) {
+		const word = args[index] as string;
+		if (word === "--") return false;
+		if (CONFIG_VALUE_FLAGS.has(word)) {
+			index += 1;
+			continue;
+		}
+		if (!word.startsWith("-")) return word === "trust";
+	}
+	return false;
+}
+
+/** The launcher arguments of one step grant, revoke or pin workspace trust: every `config trust` form but help. */
+function stepGrantsTrust(executable: string, args: ReadonlyArray<string>): boolean {
+	const end = args.indexOf("--");
+	const options = end === -1 ? args : args.slice(0, end);
+	if (options.includes("--help") || options.includes("-h")) return false;
+	if (CLIO_RUNNERS.has(executable)) return args.some((_, at) => configTrustAt(args, at));
+	if (!clioLauncherWord(executable)) return false;
+	// The launcher's own verb: `config` is its first positional, or follows only `--flag value` pairs.
+	for (let at = 0; at < args.length; at += 1) {
+		const word = args[at] as string;
+		if (word === "config") return configTrustAt(args, at);
+		if (word.startsWith("-")) continue;
+		if (!(args[at - 1] ?? "").startsWith("-")) return false;
+	}
+	return false;
+}
+
+/**
+ * True when a command runs Clio's `config trust` (CLI-P31): a parsed step whose program is Clio's launcher, a script
+ * entry or a runtime that starts one, and whose CLI verb is `config trust`, not a help request. Words in a `for` list,
+ * a `case` pattern, an `echo` or a quoted argument are data and never match. Steps follow `sh -c` scripts and
+ * substitutions; a here-document that is not data copied to a file is read line by line, since a shell may run it.
+ */
+export function yoloFloorTrustGrant(command: string): boolean {
+	const texts = [command];
+	if (/<<(?!<)/u.test(command)) texts.push(...withoutDataHeredocBodies(command).split(/\r?\n/u));
+	return texts.some((text) => shellCommandSteps(text).some((step) => stepGrantsTrust(step.executable, step.args)));
+}
+
 /** Words a raw-text candidate starts at: the floor's executables and the commands that delete, overwrite or archive. */
 const RAW_TEXT_START_WORD =
 	/^(?:rm|rmdir|unlink|shred|find|rsync|dd|tee|tar|cp|mv|ln|install|truncate|wipefs|mkfs(?:\.[\w.-]+)?|mke2fs|newfs(?:_\w+)?)$/u;

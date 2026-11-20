@@ -387,6 +387,19 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		strictEqual(decision.kind, "block", command);
 		strictEqual(decision.reasonCode, `yolo-floor:${ruleId}`, command);
 	}
+	// CLI-P31: only a parsed `config trust` argv is a grant; a loop list, a help request and quoted data are not.
+	for (const command of [
+		"node dist/cli/index.js config trust settings",
+		"corepack pnpm exec tsx src/cli/index.ts config --scope project trust safety",
+		"bash <<EOF\nclio-coder config trust safety\nEOF",
+	])
+		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).reasonCode, "yolo-floor:trust-authority", command);
+	for (const command of [
+		'H=$(mktemp -d); for a in config get --help "config trust --help"; do HOME=$H node dist/cli/index.js $a; done',
+		"clio-coder config trust safety --help",
+		'git commit -m "$(date) config trust fix"',
+	])
+		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).kind, "allow", command);
 	const edit = { tool: ToolNames.Write, args: { path: join(home.dir, "config", "runtimes", "local.js"), content: "x" } };
 	strictEqual(engine.evaluate(edit, "yolo", OPERATOR_YOLO).reasonCode, "yolo-floor:clio-owned-state");
 	// CLI-H4: a Clio variable pinned to a scratch home is judged by that path; every route back to the real one blocks.
