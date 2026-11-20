@@ -2,6 +2,7 @@ import { type ClioSettings, formatSettingsFailure } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { configureGitCommitAttribution } from "../../core/git-commit-attribution.js";
+import { pinRunSettings } from "../../core/run-overrides.js";
 import { formatSettingsLayerWarning } from "../../core/settings-layer-diagnostics.js";
 import {
 	readLayeredSettings,
@@ -44,7 +45,8 @@ export function createConfigBundle(
 		for (const target of sessionTargets.values()) {
 			if (!settings.targets.some((saved) => saved.id === target.id)) settings.targets.push(target);
 		}
-		return settings;
+		// `run --sandbox required` holds for the run's snapshot across reloads and saves.
+		return pinRunSettings(settings);
 	}
 	let sourcesFor: { snapshot: ClioSettings; sources: Record<string, SettingsOrigin> } | null = null;
 	const listeners = new Map<ChangeKind, Set<ChangeListener>>([
@@ -137,19 +139,19 @@ export function createConfigBundle(
 		snapshot = retainSessionTargets(next);
 		configureGitCommitAttribution(next.integrations.git);
 		if (!prev) return;
-		dispatchChange(prev, next, "file");
+		dispatchChange(prev, snapshot, "file");
 	}
 
 	const extension: DomainExtension = {
 		async start() {
 			if (initialSettings) {
-				snapshot = structuredClone(initialSettings);
+				snapshot = pinRunSettings(structuredClone(initialSettings) as ClioSettings);
 				projectWarning = formatSettingsLayerWarning(readLayeredSettings(process.cwd()));
 			} else {
 				const layered = readStrictLayeredSettings(process.cwd());
 				projectWarning = formatSettingsLayerWarning(layered);
 				if (projectWarning !== null) writeDiagnostic(projectWarning);
-				snapshot = layered.settings;
+				snapshot = pinRunSettings(layered.settings);
 			}
 			configureGitCommitAttribution(snapshot.integrations.git);
 			watcher = startConfigWatcher(() => onWatcherFire());

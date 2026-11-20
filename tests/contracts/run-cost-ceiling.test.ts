@@ -1,8 +1,14 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, test } from "node:test";
-import { parseRunCliArgs, requestedRunLimits, taskFileAuthorityRefusal } from "../../src/cli/args.js";
+import {
+	parseRunCliArgs,
+	requestedRunLimits,
+	sandboxRequiredRefusal,
+	taskFileAuthorityRefusal,
+} from "../../src/cli/args.js";
 import { runLimitsV2 } from "../../src/cli/run-failure.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { pinRunSettings, RUN_OVERRIDES_ENV } from "../../src/core/run-overrides.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { factKnownValue } from "../../src/core/telemetry/known.js";
@@ -156,4 +162,23 @@ test("--agent --max-cost-usd 0.01 is a requested, enforced limit whose overshoot
 		cost: { overshootPossible: true, unpricedCalls: 0, unpricedRoutes: [] },
 	});
 	strictEqual(runLimitsV2(requestedRunLimits(parseRunCliArgs(["x"]))), undefined);
+});
+
+test("--sandbox required: only required parses, it pins safety.sandbox, and a host without a sandbox is refused", () => {
+	strictEqual(parseRunCliArgs(["--sandbox", "required", "x"]).sandboxRequired, true);
+	match(parseRunCliArgs(["--sandbox", "off", "x"]).diagnostics[0]?.message ?? "", /accepts only required/);
+	const pinned = { [RUN_OVERRIDES_ENV]: JSON.stringify({ sandbox: "required" }) };
+	for (const mode of ["off", "auto", "required"] as const) {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.safety.sandbox = mode;
+		strictEqual(pinRunSettings(settings, pinned).safety.sandbox, "required");
+	}
+	const untouched = structuredClone(DEFAULT_SETTINGS);
+	untouched.safety.sandbox = "off";
+	strictEqual(pinRunSettings(untouched, {}).safety.sandbox, "off");
+	strictEqual(sandboxRequiredRefusal({ available: true, reason: null }), undefined);
+	match(
+		sandboxRequiredRefusal({ available: false, reason: "bubblewrap (bwrap) is not installed" }) ?? "",
+		/--sandbox required, but no OS sandbox .*bwrap/,
+	);
 });

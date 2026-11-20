@@ -85,6 +85,8 @@ export interface RunCliArgs {
 	maxCostUsd?: number;
 	/** `--max-requests`: main-loop provider requests this run may send. */
 	maxRequests?: number;
+	/** `--sandbox required`: tighten-only one-run `safety.sandbox` (main and `--agent`). */
+	sandboxRequired?: true;
 	/** `--max-tool-calls`: tool calls the main agent may make or have refused in this run. */
 	maxToolCalls?: number;
 	/** `--worktree` (`--agent` only): run the worker in a task worktree kept for review. */
@@ -204,6 +206,15 @@ export function taskFileAuthorityRefusal(
 	];
 	if (widening.length === 0) return undefined;
 	return `task file carries ${widening.join(", ")}, which widen what the host does; pass --trust-task-file to accept ${widening.length === 1 ? "it" : "them"}`;
+}
+
+/** `--sandbox required` on a host with no OS sandbox: the exit-2 refusal before boot, else undefined. */
+export function sandboxRequiredRefusal(availability: {
+	available: boolean;
+	reason: string | null;
+}): string | undefined {
+	if (availability.available) return undefined;
+	return `--sandbox required, but no OS sandbox is available on this host (${availability.reason ?? "no backend"}); install bubblewrap or drop --sandbox required`;
 }
 
 /** SPEC 6.9: the limits this run was given, as the v2 envelope and `--dry-run` list them under `limits.requested`. */
@@ -523,6 +534,16 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--dry-run") {
 			parsed.dryRun = true;
+			continue;
+		}
+		if (arg === "--sandbox") {
+			const value = need(arg);
+			if (value === "required") parsed.sandboxRequired = true;
+			else if (value !== null)
+				parsed.diagnostics.push({
+					type: "error",
+					message: `--sandbox accepts only required (a one-run tightening of safety.sandbox), not ${value}`,
+				});
 			continue;
 		}
 		if (arg === "--max-requests" || arg === "--max-tool-calls") {

@@ -13,6 +13,8 @@
  * another `CLIO_CODER_*` variable with its own ad-hoc parse/save/restore code.
  */
 
+import type { ClioSettings } from "./config.js";
+
 export const RUN_OVERRIDES_ENV = "CLIO_CODER_RUN_OVERRIDES";
 
 export interface RunOverrides {
@@ -24,6 +26,11 @@ export interface RunOverrides {
 	 * engine/apis/sampling-overrides.ts narrows it to the known keys.
 	 */
 	sampling?: Record<string, number | undefined>;
+	/**
+	 * `run --sandbox required`: tighten-only one-run `safety.sandbox`. Only
+	 * `required` exists, the strictest mode, so the override never loosens.
+	 */
+	sandbox?: "required";
 }
 
 /** Parse the current overrides. Malformed JSON or fields are dropped, never thrown. */
@@ -51,7 +58,19 @@ export function runOverrides(env: NodeJS.ProcessEnv = process.env): RunOverrides
 		}
 		if (Object.keys(numeric).length > 0) out.sampling = numeric;
 	}
+	if (record.sandbox === "required") out.sandbox = "required";
 	return out;
+}
+
+/**
+ * The settings view a run sees under its overrides: `--sandbox required` pins
+ * `safety.sandbox` whatever the files say, including after a reload. Mutates and
+ * returns `settings`; the config domain applies it to its snapshot only, never to
+ * a document it writes.
+ */
+export function pinRunSettings(settings: ClioSettings, env?: NodeJS.ProcessEnv): ClioSettings {
+	if (runOverrides(env).sandbox === "required") settings.safety.sandbox = "required";
+	return settings;
 }
 
 /**

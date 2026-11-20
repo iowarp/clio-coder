@@ -43,7 +43,7 @@ import type { HeadlessRunDeadline } from "../entry/boot-options.js";
 import { assistantTextFromEvent } from "../tools/dispatch-event-text.js";
 import { isToolProfileName } from "../tools/profiles.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../worker/spec-contract.js";
-import { parseRunCliArgs, type RunCliArgs, requestedRunLimits } from "./args.js";
+import { parseRunCliArgs, type RunCliArgs, requestedRunLimits, sandboxRequiredRefusal } from "./args.js";
 import { runClioCommand } from "./clio.js";
 import { classifyDefaultTarget } from "./default-target.js";
 import { buildInitialMessage, readPipedStdin } from "./initial-message.js";
@@ -443,6 +443,8 @@ async function executeRunCommand(
 		{
 			...(parsed.maxContextTokens !== undefined ? { maxContextTokens: parsed.maxContextTokens } : {}),
 			...(parsed.agentId !== undefined && parsed.sampling !== undefined ? { sampling: { ...parsed.sampling } } : {}),
+			// Tighten-only; workers inherit it with the rest of the transport.
+			...(parsed.sandboxRequired === true ? { sandbox: "required" as const } : {}),
 		},
 		async () => {
 			if (parsed.help) {
@@ -460,6 +462,15 @@ async function executeRunCommand(
 				writeRunDiagnostic("clio-coder run: fleet dispatch flags require --agent <recipe-id>\n");
 				process.stderr.write(USAGE);
 				return 2;
+			}
+			if (parsed.sandboxRequired === true) {
+				// Decided before boot: a required sandbox the host lacks is a usage error, not a run that refuses every command.
+				const { sandboxAvailability } = await import("../core/sandbox/availability.js");
+				const refusal = sandboxRequiredRefusal(sandboxAvailability());
+				if (refusal !== undefined) {
+					writeRunDiagnostic(`clio-coder run: ${refusal}\n`);
+					return 2;
+				}
 			}
 			// Without --agent, --read-only is the main agent's enforced ceiling,
 			// carried in the task scope so every continuation keeps it.

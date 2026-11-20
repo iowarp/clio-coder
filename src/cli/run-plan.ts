@@ -57,7 +57,7 @@ export function buildRunPlan(
 		tools: ALL_TOOL_NAMES.filter((name) => turnAllowsTool(constraints, name)),
 		delegatedTools: forbidden ? [] : ALL_TOOL_NAMES.filter((name) => turnDelegatesTool(constraints, name)),
 		sandbox: {
-			mode: settings.safety.sandbox,
+			mode: parsed.sandboxRequired === true ? "required" : settings.safety.sandbox,
 			available: sandbox.available,
 			backend: sandbox.backend,
 			reason: sandbox.reason,
