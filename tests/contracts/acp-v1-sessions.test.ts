@@ -20,6 +20,7 @@ import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import type { AcpUsageMeta } from "../../src/engine/acp/types.js";
 import { budgetAlertNotice } from "../../src/interactive/bus-notices.js";
+import { stdioPeer } from "../harness/acp-fake-transport.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -280,32 +281,18 @@ test("ACP re-sends the thinking option once the live probe finds the reasoning a
 	await new Promise<void>((resolve) => stub.listen(0, "127.0.0.1", resolve));
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	const url = `http://127.0.0.1:${(stub.address() as AddressInfo).port}`;
-	settings.targets = [{ id: "litellm", runtime: "litellm", url, defaultModel: "fake/m" }];
+	// A second target on the same endpoint keeps its own cold cache until something probes it.
+	settings.targets = [
+		{ id: "litellm", runtime: "litellm", url, defaultModel: "fake/m" },
+		{ id: "litellm-b", runtime: "litellm", url, defaultModel: "fake/m" },
+	];
 	settings.chat = { ...settings.chat, target: "litellm", model: "fake/m", thinkingLevel: "low" };
 	const providers = createProvidersBundle(dispatchStubContext({ settings }), { getSettings: () => settings });
 	await providers.extension.start();
-	const requests = new Map<string, (params: unknown) => unknown>();
-	const updates: Array<{ sessionUpdate: string; configOptions?: Array<Record<string, unknown>> }> = [];
-	let close: () => void = () => {};
+	const peer = stdioPeer();
 	const cwd = process.cwd();
 	const done = serveClioAcpAgent({
-		transport: {
-			closed: false,
-			request: async () => ({}) as never,
-			notify: (method, params) => {
-				if (method === "session/update") updates.push((params as { update: (typeof updates)[number] }).update);
-			},
-			onRequest: (method, handler) => {
-				requests.set(method, handler);
-				return () => requests.delete(method);
-			},
-			onNotification: () => () => {},
-			onClose: (handler) => {
-				close = handler;
-				return () => {};
-			},
-			close: () => close(),
-		},
+		transport: peer.transport,
 		session: {
 			current: () => null,
 			create: () => ({ id: "acp-probe", cwd, cwdHash: "hash", createdAt: "2026-10-16T00:00:00.000Z", endedAt: null }),
@@ -322,6 +309,7 @@ test("ACP re-sends the thinking option once the live probe finds the reasoning a
 			},
 		},
 		routing: () => ({ target: "litellm", model: "fake/m" }),
+		setSessionRouting: () => {},
 		chat: {
 			submit: async () => {},
 			cancel: () => {},
@@ -332,24 +320,40 @@ test("ACP re-sends the thinking option once the live probe finds the reasoning a
 		readSessionEntries: () => [],
 		buildReplayMessages: () => [],
 	});
-	const thinkingOption = (rows: Array<Record<string, unknown>> | undefined) =>
-		rows?.find((row) => row.id === "thinkingLevel") as { currentValue: string; notice?: string } | undefined;
+	const thinkingOption = (rows: unknown) =>
+		(rows as Array<Record<string, unknown>> | undefined)?.find((row) => row.id === "thinkingLevel") as
+			| { currentValue: string; notice?: string }
+			| undefined;
+	const configUpdates = () => peer.updates().filter((frame) => frame.update.sessionUpdate === "config_option_update");
+	const nextConfigUpdate = async (seen: number) => {
+		const deadline = Date.now() + 5_000;
+		while (configUpdates().length <= seen && Date.now() < deadline)
+			await new Promise((resolve) => setTimeout(resolve, 20));
+		return configUpdates()[seen];
+	};
 	try {
-		await requests.get("initialize")?.({ protocolVersion: 1 });
-		const opened = (await requests.get("session/new")?.({ cwd, mcpServers: [] })) as {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const opened = (await peer.call("session/new", { cwd, mcpServers: [] })) as {
 			configOptions: Array<Record<string, unknown>>;
 		};
 		strictEqual(thinkingOption(opened.configOptions)?.notice, "low was ignored because thinking is unsupported");
-		const deadline = Date.now() + 5_000;
-		while (!updates.some((update) => update.sessionUpdate === "config_option_update") && Date.now() < deadline)
-			await new Promise((resolve) => setTimeout(resolve, 20));
-		const refreshed = thinkingOption(
-			updates.find((update) => update.sessionUpdate === "config_option_update")?.configOptions,
-		);
+		const refreshed = thinkingOption((await nextConfigUpdate(0))?.update.configOptions);
 		strictEqual(refreshed?.currentValue, "low");
 		strictEqual(refreshed?.notice, undefined);
+		// A target switch resolves thinking from the new target's cold cache, so it probes as an opener does (ACP-4).
+		const seen = configUpdates().length;
+		const switched = (await peer.call("session/set_config_option", {
+			sessionId: "acp-probe",
+			configId: "target",
+			value: "litellm-b",
+		})) as { configOptions: Array<Record<string, unknown>> };
+		strictEqual(thinkingOption(switched.configOptions)?.notice, "low was ignored because thinking is unsupported");
+		const probed = await nextConfigUpdate(seen + 1);
+		strictEqual(probed?._meta?.["clio-coder/session"] !== undefined, true);
+		strictEqual(thinkingOption(probed?.update.configOptions)?.currentValue, "low");
+		strictEqual(thinkingOption(probed?.update.configOptions)?.notice, undefined);
 	} finally {
-		close();
+		peer.close();
 		await done;
 		await providers.extension.stop?.();
 		await new Promise((resolve) => stub.close(resolve));

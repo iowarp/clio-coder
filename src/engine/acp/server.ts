@@ -7054,6 +7054,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					});
 				}
 				notifyConfigOptions(session);
+				// The new route's thinking resolves from a cache that may be cold, so it probes as an opener does.
+				refreshThinkingOption(session);
 				break;
 			}
 			case "thinkingLevel": {
