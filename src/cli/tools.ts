@@ -88,7 +88,7 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 
 	switch (parsed.command) {
 		case "list":
-			if (parsed.resetProfile) return invalidResetProfile();
+			if (parsed.resetProfile) return invalidResetProfile("list", parsed.json);
 			return listTools(parsed.json);
 		case "status":
 			if (parsed.resetProfile)
@@ -100,13 +100,15 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 			}
 			return resetProfile(parsed.positional, parsed.json);
 		case "install":
-			if (parsed.resetProfile) return invalidResetProfile();
+			if (parsed.resetProfile) return invalidResetProfile("install", parsed.json);
 			if (parsed.positional[0] === "claude-sdk") {
 				if (parsed.force || parsed.positional.length !== 1) {
-					printError(
+					return usageFailure(
+						"install",
+						"usage",
 						"claude-sdk installation accepts no extra arguments or --force; pinned versions have separate locations.",
+						parsed.json,
 					);
-					return 2;
 				}
 				try {
 					const path = await installClaudeAgentSdk();
@@ -120,10 +122,12 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 			}
 			if (parsed.positional[0] === "copilot-sdk") {
 				if (parsed.force || parsed.positional.length !== 1) {
-					printError(
+					return usageFailure(
+						"install",
+						"usage",
 						"copilot-sdk installation accepts no extra arguments or --force; pinned versions have separate locations.",
+						parsed.json,
 					);
-					return 2;
 				}
 				try {
 					const path = await installCopilotSdk();
@@ -137,7 +141,7 @@ export async function runToolsCommand(argv: ReadonlyArray<string> = []): Promise
 			}
 			return installOne(parsed.positional[0], parsed.force, parsed.json);
 		case "remove":
-			if (parsed.resetProfile) return invalidResetProfile();
+			if (parsed.resetProfile) return invalidResetProfile("remove", parsed.json);
 			return parsed.all ? removeAll(parsed.positional[0], parsed.json) : removeOne(parsed.positional[0], parsed.json);
 		default:
 			return usageFailure(undefined, "unknown_command", `unknown command: ${parsed.command}`, parsed.json);
@@ -225,9 +229,13 @@ function listTools(json: boolean): number {
 	return 0;
 }
 
-function invalidResetProfile(): number {
-	printError("--reset-profile is only valid with `tools status yazi`; use `tools reset-profile yazi`");
-	return 2;
+function invalidResetProfile(command: string, json: boolean): number {
+	return usageFailure(
+		command,
+		"usage",
+		"--reset-profile is only valid with `tools status yazi`; use `tools reset-profile yazi`",
+		json,
+	);
 }
 
 /**
@@ -235,23 +243,27 @@ function invalidResetProfile(): number {
  *
  * It names the tools that do exist, because the whole error an operator makes
  * here is a name: `tools remove herd` and `tools remove tmux` want different
- * answers, and the registry list gives both of them one.
+ * answers, and the registry list gives both of them one. The slug is
+ * not_found, but the existing verbs keep exit 2 (v1 kept; C7's exit 1 needs a
+ * versioned opt-in).
  */
-function unknownTool(id: string): number {
-	printError(`unknown tool: ${id} (known: ${PINNED_TOOLS.map((row) => row.id).join(", ")})`);
+function unknownTool(command: string, id: string, json: boolean): number {
+	writeCliFailure({
+		path: ["tools", command],
+		slug: "not_found",
+		message: `unknown tool: ${id} (known: ${PINNED_TOOLS.map((row) => row.id).join(", ")})`,
+		json,
+	});
 	return 2;
 }
 
 function statusTool(id: string | undefined, json: boolean, resetProfile: boolean): number {
-	if (id === undefined) {
-		printError("usage: clio-coder tools status <id>");
-		return 2;
-	}
+	if (id === undefined) return usageFailure("status", "usage", "name a tool: tools status <id>", json);
 	const entry = findPinnedTool(id);
 	if (entry === null) {
-		return unknownTool(id);
+		return unknownTool("status", id, json);
 	}
-	if (resetProfile && id !== "yazi") return invalidResetProfile();
+	if (resetProfile && id !== "yazi") return invalidResetProfile("status", json);
 	if (resetProfile) resetYaziProfile();
 	const status = toolStatus(entry);
 	const profile = id === "yazi" ? inspectCurrentYaziProfile() : null;
@@ -294,12 +306,9 @@ function statusTool(id: string | undefined, json: boolean, resetProfile: boolean
 }
 
 async function installOne(id: string | undefined, force: boolean, json: boolean): Promise<number> {
-	if (id === undefined) {
-		printError("usage: clio-coder tools install <id>");
-		return 2;
-	}
+	if (id === undefined) return usageFailure("install", "usage", "name a tool: tools install <id>", json);
 	if (findPinnedTool(id) === null) {
-		return unknownTool(id);
+		return unknownTool("install", id, json);
 	}
 	const result = await installTool(id, {
 		force,
@@ -327,11 +336,8 @@ async function installOne(id: string | undefined, force: boolean, json: boolean)
  * because that is the one case where nothing was inspected at all.
  */
 function removeOne(id: string | undefined, json: boolean): number {
-	if (id === undefined) {
-		printError("usage: clio-coder tools remove <id>");
-		return 2;
-	}
-	if (findPinnedTool(id) === null) return unknownTool(id);
+	if (id === undefined) return usageFailure("remove", "usage", "name a tool: tools remove <id>, or --all", json);
+	if (findPinnedTool(id) === null) return unknownTool("remove", id, json);
 	const result = removeTool(id);
 	if (json) {
 		process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -359,8 +365,12 @@ function removeOne(id: string | undefined, json: boolean): number {
  */
 function removeAll(id: string | undefined, json: boolean): number {
 	if (id !== undefined) {
-		printError("`tools remove --all` takes no tool id; drop the id or drop --all");
-		return 2;
+		return usageFailure(
+			"remove",
+			"flag_conflict",
+			"`tools remove --all` takes no tool id; drop the id or drop --all",
+			json,
+		);
 	}
 	const results = PINNED_TOOLS.map((entry) => removeTool(entry.id));
 	if (json) {
