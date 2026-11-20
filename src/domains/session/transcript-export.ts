@@ -10,8 +10,9 @@
  * carries no script and loads nothing.
  */
 
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { assistantModelLabel } from "../../core/assistant-model.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { ensureProjectIgnore } from "../../core/project-root.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { displayToolCall } from "../../tools/gateway-display.js";
@@ -312,7 +313,7 @@ export function writeTranscriptExport(input: {
 	return {
 		level: "success",
 		text: `wrote ${rendered.turns} ${rendered.turns === 1 ? "request" : "requests"} to ${
-			shown.startsWith("..") || isAbsolute(shown) ? target : shown
+			relativePathEscapes(shown) ? target : shown
 		}`,
 	};
 }

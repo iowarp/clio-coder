@@ -22,6 +22,7 @@
  */
 
 import { isAbsolute, normalize, relative, resolve } from "node:path";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { effectiveToolCall, expandChainMessages } from "../../tools/surface.js";
 import { decisionRationale } from "./decision-board.js";
 import type { DecisionLedgerEntry, SessionEntry } from "./entries.js";
@@ -352,7 +353,7 @@ function normalizeHandoffPath(value: string, cwd: string | null): string {
 	if (cwd === null) return absolute;
 	const rel = relative(cwd, absolute);
 	if (rel.length === 0) return ".";
-	return rel.startsWith("..") || isAbsolute(rel) ? absolute : rel;
+	return relativePathEscapes(rel) ? absolute : rel;
 }
 
 function usableCwd(cwd: string | null | undefined): string | null {

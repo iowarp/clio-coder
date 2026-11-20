@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { classifyCHeaderLanguage, isAmbiguousHeaderPath } from "../../../core/c-header-language.js";
+import { relativePathEscapes } from "../../../core/path-containment.js";
 import { enumerateWorkspaceFilesAsync, filterWorkspaceFileCandidates } from "../../../core/workspace-files.js";
 import type { ProjectType } from "../../session/workspace/project-type.js";
 import { EXCLUDED_DIRS } from "../excluded-dirs.js";
@@ -898,7 +899,7 @@ function candidatePathsForImport(cwd: string, fromRel: string, specifier: string
 		for (const ext of [".ts", ".tsx", ".mts", ".cts"]) candidates.push(`${stripped}${ext}`);
 	}
 	return uniqueSorted(
-		candidates.map((candidate) => normalizeRel(cwd, candidate)).filter((candidate) => !candidate.startsWith("..")),
+		candidates.map((candidate) => normalizeRel(cwd, candidate)).filter((candidate) => !relativePathEscapes(candidate)),
 	);
 }
 
@@ -939,7 +940,7 @@ function createImportResolver(cwd: string): {
 					// __init__.py evidence, the workspace bounds namespace packages.
 					const root = resolve(cwd, packageRoot === fromDir ? "." : packageRoot);
 					const insidePackage = parent !== root || (root === resolve(cwd) && isFile("__init__.py"));
-					bases = insidePackage && !relative(root, parent).startsWith("..") ? [join(parent, modulePath)] : [];
+					bases = insidePackage && !relativePathEscapes(relative(root, parent)) ? [join(parent, modulePath)] : [];
 				} else {
 					bases = [resolve(cwd, modulePath)];
 					if (packageRoot !== fromDir && packageRoot !== ".") bases.push(resolve(cwd, packageRoot, modulePath));
@@ -1099,7 +1100,7 @@ function inspectCodewikiPaths(
 	options: CodewikiBuildOptions,
 ) {
 	const normalizedPaths = uniqueSorted(
-		paths.map(normalizeInputPath).filter((path) => path.length > 0 && !path.startsWith("..")),
+		paths.map(normalizeInputPath).filter((path) => path.length > 0 && !relativePathEscapes(path)),
 	);
 	if (normalizedPaths.length === 0)
 		return {

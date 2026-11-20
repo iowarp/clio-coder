@@ -1,6 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import { readClioVersion, resolvePackageRoot } from "../../core/package-root.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { reportFingerprint } from "./fingerprint.js";
 
@@ -65,7 +66,7 @@ function crashRecordFrames(stack: string, packageRoot: string, limit = FRAME_LIM
 			if (dependency !== null) location = dependency;
 			else {
 				const rel = relative(packageRoot, location).split("\\").join("/");
-				location = rel.startsWith("..") || isAbsolute(rel) ? "external" : rel;
+				location = relativePathEscapes(rel) ? "external" : rel;
 			}
 		} else location = "external";
 		frames.push({ fn, module: location });

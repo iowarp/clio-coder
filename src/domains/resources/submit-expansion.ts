@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { expandInlineFileReferencesAsync } from "../../core/file-references.js";
 import { PLUGIN_RESOURCE_USE, recordPackageActivity } from "../../core/package-activity.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import type { PendingSkillRequest } from "../../core/skill-activation.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { templateTurnConstraints } from "../../core/turn-constraints.js";
@@ -52,8 +53,7 @@ function shortAttachmentPath(filePath: string, cwd: string): string {
 		[path.resolve(homedir()), "~/"],
 	] as const) {
 		const rel = path.relative(root, filePath);
-		if (rel.length > 0 && !rel.startsWith("..") && !path.isAbsolute(rel))
-			return `${prefix}${rel.split(path.sep).join("/")}`;
+		if (rel.length > 0 && !relativePathEscapes(rel)) return `${prefix}${rel.split(path.sep).join("/")}`;
 	}
 	return filePath;
 }

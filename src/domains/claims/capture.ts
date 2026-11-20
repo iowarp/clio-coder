@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, posix, relative } from "node:path";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { containsInstructionMarkers } from "../../core/untrusted-content.js";
 import type { NumericCompareReport, NumericFailureReason } from "../../tools/verify/numeric.js";
 import type { ReproduceReport } from "../../tools/verify/reproduce.js";
@@ -50,7 +51,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function projectPath(project: string, path: string): string {
 	if (!isAbsolute(path)) return path;
 	const inside = relative(project, path);
-	return inside.length > 0 && !inside.startsWith("..") && !isAbsolute(inside) ? inside : path;
+	return inside.length > 0 && !relativePathEscapes(inside) ? inside : path;
 }
 
 function digestRef(

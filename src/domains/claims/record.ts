@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioDataDir } from "../../core/xdg.js";
 import { loadMemoryRecords, recordClaimRegressions } from "../memory/index.js";
@@ -280,7 +281,7 @@ export function snapshotAcceptedWorkerSlates(input: {
 		.filter((absolute) => {
 			if (!isAbsolute(absolute) || !absolute.endsWith(".json")) return false;
 			const inside = relative(project, absolute);
-			return inside.length > 0 && !inside.startsWith("..") && !isAbsolute(inside);
+			return inside.length > 0 && !relativePathEscapes(inside);
 		})
 		.slice(0, WORKER_SLATE_PATHS_MAX);
 	const slates: SlateSnapshot[] = [];

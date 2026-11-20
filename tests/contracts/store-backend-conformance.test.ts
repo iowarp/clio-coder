@@ -1,10 +1,11 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
-import { lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { storeProjectDir, storeTagDir } from "../../src/core/store-paths.js";
 import type { StoreBackend } from "../../src/domains/store/backend.js";
 import { createClioCoreStoreBackend } from "../../src/domains/store/backends/clio-core.js";
+import type { CoreHost, CoreHostCallOptions } from "../../src/domains/store/core-host/supervisor.js";
 import { openStoreBackend } from "../../src/domains/store/index.js";
 import { StoreRefusal } from "../../src/domains/store/types.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -251,6 +252,36 @@ test("local: every store directory is 0700 and every file 0600 under umask 022",
 		strictEqual(lstatSync(storeProjectDir(cwd)).mode & 0o777, 0o700);
 	} finally {
 		process.umask(umask);
+		env.restore();
+	}
+});
+
+test("clio-core: a host copy named ..data inside the get directory is handed back, not refused as outside", async () => {
+	const env = await isolateClioEnv("clio-coder-store-dotdot-");
+	try {
+		const cwd = join(env.dir, "workspace");
+		mkdirSync(cwd, { recursive: true });
+		const inner = memoryHost();
+		const host: CoreHost = {
+			...inner,
+			call: (async (op: string, args: never, options?: CoreHostCallOptions) => {
+				const got = (await inner.call(op as never, args, options)) as { path: string; copied: boolean };
+				if (op !== "getBlobAsPath") return got;
+				const moved = join(dirname(got.path), "..data");
+				renameSync(got.path, moved);
+				return { ...got, path: moved };
+			}) as CoreHost["call"],
+		};
+		const backend = await createClioCoreStoreBackend(cwd, host, { cacheRoot: join(env.dir, "cache") });
+		const source = join(env.dir, "source.bin");
+		writeFileSync(source, "stored");
+		await backend.getOrCreateTag("t");
+		await backend.putBlobFromFile("t", "b", source);
+		const got = await backend.getBlobAsPath("t", "b");
+		// The backend accepts the copy, then publishes it under the blob name.
+		strictEqual(basename(got.path), "b");
+		strictEqual(readFileSync(got.path, "utf8"), "stored");
+	} finally {
 		env.restore();
 	}
 });

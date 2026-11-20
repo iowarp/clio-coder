@@ -13,6 +13,7 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { writeRootsCover } from "../../core/path-boundary.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { type CompiledHandbook, compileHandbook, type HandbookAudience } from "../context/handbook-units.js";
 import { type HandbookLedgerEntry, judgeInstructionFiles } from "../context/index.js";
@@ -68,7 +69,7 @@ function findPeerInstructionFiles(cwd: string, declared: RepositoryInstructionFi
 	const root = repositoryRoot(cwd);
 	const below = relative(root, resolve(cwd));
 	const directories = [root];
-	if (below.length > 0 && !below.startsWith("..")) {
+	if (below.length > 0 && !relativePathEscapes(below)) {
 		for (const part of below.split(sep)) directories.push(join(directories.at(-1) ?? root, part));
 	}
 	const found: PeerFile[] = [];

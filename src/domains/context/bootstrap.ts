@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute, join, parse, posix, relative, resolve, s
 import { isReleaseOnlyWorkflow, readCiFileRuns } from "../../core/ci-commands.js";
 import type { ContextOperationFact } from "../../core/context-operation.js";
 import { internalGitArgv } from "../../core/internal-git.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { ensureProjectIgnore } from "../../core/project-root.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
@@ -3164,7 +3165,7 @@ function proposalTarget(cwd: string, named: unknown): string | null {
 	if (typeof named !== "string") return null;
 	const target = resolve(named);
 	const inside = relative(resolve(cwd), target);
-	if (inside.startsWith("..") || isAbsolute(inside) || !PROPOSAL_TARGETS.has(basename(target))) return null;
+	if (relativePathEscapes(inside) || !PROPOSAL_TARGETS.has(basename(target))) return null;
 	return target;
 }
 

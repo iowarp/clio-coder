@@ -19,6 +19,7 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, join, normalize, relative } from "node:path";
 import { parse } from "yaml";
+import { relativePathEscapes } from "../../../core/path-containment.js";
 
 export interface WikiPageMetadata {
 	/** Display name; the page's H1 is kept in sync with it. */
@@ -111,7 +112,7 @@ function summaryFromBody(body: string): string {
 
 function isWithin(root: string, candidate: string): boolean {
 	const rel = relative(root, candidate);
-	return rel.length === 0 || (!rel.startsWith("..") && !isAbsolute(rel));
+	return rel.length === 0 || !relativePathEscapes(rel);
 }
 
 /**

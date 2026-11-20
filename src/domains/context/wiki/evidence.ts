@@ -7,6 +7,7 @@ import { basename, dirname, isAbsolute, posix, relative, resolve } from "node:pa
 import type { Tokens } from "marked";
 import { parse } from "yaml";
 import { internalGitArgv } from "../../../core/internal-git.js";
+import { relativePathEscapes } from "../../../core/path-containment.js";
 import { enumerateWorkspaceFiles } from "../../../core/workspace-files.js";
 import { readWikiPage, resolveSourcePath, stripFrontmatter } from "./frontmatter.js";
 import { isGeneratedWikiFile, WIKI_INDEX, WIKI_QUICKSTART, wikiMarkdownFilesInDir } from "./layout.js";
@@ -163,7 +164,7 @@ export function repairWikiLinks(
 		const fromDir = posix.dirname(pagePath);
 		// A leading slash names the wiki root. Joining it onto fromDir would certify a same-directory sibling.
 		const target = posix.normalize(posix.isAbsolute(href) ? href.slice(1) : posix.join(fromDir, href));
-		if (!target.startsWith("..") && targets.has(target)) return destination;
+		if (!relativePathEscapes(target, posix) && targets.has(target)) return destination;
 		let replacement: string | undefined;
 		const rootPath = posix.normalize(href);
 		if (!posix.isAbsolute(href) && !unavailable.has(target) && !unavailable.has(rootPath)) {

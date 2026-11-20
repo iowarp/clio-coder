@@ -1,7 +1,7 @@
 import { open, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, sep } from "node:path";
 import type { FilePreview } from "../../contracts/sessions.js";
-import { WORKSPACE_SECRET_PATHS } from "../clio/http-shims.js";
+import { relativePathEscapes, WORKSPACE_SECRET_PATHS } from "../clio/http-shims.js";
 
 /** The most a preview reads. A longer file shows its start and says it stopped. */
 export const PREVIEW_MAX_BYTES = 256 * 1024;
@@ -43,7 +43,7 @@ export function workspaceRelative(root: string, input: string): string | null {
 
 function insideRoot(root: string, target: string): string | null {
 	const within = relative(root, target);
-	if (within === "" || within.startsWith("..") || isAbsolute(within)) return null;
+	if (within === "" || relativePathEscapes(within)) return null;
 	return within.split(sep).join("/");
 }
 

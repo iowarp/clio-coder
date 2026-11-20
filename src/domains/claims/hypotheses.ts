@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, relative } from "node:path";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { containsInstructionMarkers } from "../../core/untrusted-content.js";
 import { canonicalClaimJson } from "./capture.js";
 import { claimLogRecordId } from "./edges.js";
@@ -43,7 +44,7 @@ function text(value: unknown): string | null {
 function projectPath(project: string, path: string): string {
 	if (!isAbsolute(path)) return path;
 	const inside = relative(project, path);
-	return inside.length > 0 && !inside.startsWith("..") && !isAbsolute(inside) ? inside : path;
+	return inside.length > 0 && !relativePathEscapes(inside) ? inside : path;
 }
 
 /** A hypothesis record before the log decides whether it revises an earlier one; its id is set then. */

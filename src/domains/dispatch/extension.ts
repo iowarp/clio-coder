@@ -66,6 +66,7 @@ import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../../core/guardrails.js";
 import { readClioVersion } from "../../core/package-root.js";
 import { asDirectoryPathBoundary } from "../../core/path-boundary.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { protectedResidencyModels } from "../../core/residency-protection.js";
 import { differingResponseModelId, responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
 import {
@@ -9580,7 +9581,7 @@ export function createDispatchBundle(
 							getProtectedArtifactState().artifacts.map((artifact) => {
 								const root = remoteReturn.worktree.root;
 								const rel = relative(root, artifact.path);
-								return rel.startsWith("..") || isAbsolute(rel) ? artifact.path : resolvePath(remoteReturn.worktree.path, rel);
+								return relativePathEscapes(rel) ? artifact.path : resolvePath(remoteReturn.worktree.path, rel);
 							}),
 						);
 					} catch (error) {

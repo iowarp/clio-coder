@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, relative } from "node:path";
+import { relativePathEscapes } from "../../core/path-containment.js";
 
 /** `major.minor` of a version, so a patch release keeps the same fingerprint. */
 export function minorVersion(version: string): string {
@@ -21,7 +22,7 @@ export function crashFrames(stack: string, packageRoot: string, limit = 5): stri
 		if (location.startsWith("node:")) location = location.replace(/:\d+(?::\d+)?$/u, "");
 		else if (isAbsolute(location)) {
 			const rel = relative(packageRoot, location);
-			location = rel.startsWith("..") || isAbsolute(rel) ? "external" : rel.split("\\").join("/");
+			location = relativePathEscapes(rel) ? "external" : rel.split("\\").join("/");
 		} else location = "external";
 		frames.push(`${fn}@${location}`);
 		if (frames.length >= limit) break;

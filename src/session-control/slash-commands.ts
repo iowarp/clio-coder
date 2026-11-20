@@ -4,6 +4,7 @@ import { mcpCommandOutput } from "../cli/mcp.js";
 import { type BundleRequest, bundleRequest } from "../cli/report-bundle.js";
 import { acceptanceFromTaskFlags } from "../cli/tasks.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
+import { relativePathEscapes } from "../core/path-containment.js";
 import type { SettingsAreaId } from "../core/settings-areas.js";
 import { resolveSettingsArea, SETTINGS_AREAS } from "../core/settings-areas.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
@@ -4167,7 +4168,7 @@ function plainExtensionError(raw: string, owner: string, cwd: string = process.c
 	if (!match) return raw;
 	const [, code, target = ""] = match;
 	const relative = path.isAbsolute(target) ? path.relative(cwd, target) : target;
-	const shown = relative && !relative.startsWith("..") ? relative : target;
+	const shown = relative && !relativePathEscapes(relative) ? relative : target;
 	switch (code) {
 		case "ENOENT":
 			return `${owner} could not find ${shown}`;

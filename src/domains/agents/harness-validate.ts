@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { readSettings } from "../../core/config.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { clioProjectRoot } from "../../core/project-root.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
 import {
@@ -116,7 +117,7 @@ function listOf(values: Iterable<string>, limit = 8): string {
 
 function displayPath(workspaceRoot: string, filepath: string): string {
 	const relative = path.relative(workspaceRoot, filepath);
-	return relative === "" || relative.startsWith("..") || path.isAbsolute(relative) ? filepath : relative;
+	return relative === "" || relativePathEscapes(relative) ? filepath : relative;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -352,7 +353,7 @@ function recipeIssues(file: HarnessRecipeFile, input: HarnessInput): HarnessIssu
 function isUnder(filePath: string, roots: ReadonlyArray<string>): boolean {
 	return roots.some((root) => {
 		const relative = path.relative(root, filePath);
-		return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+		return relative !== "" && !relativePathEscapes(relative);
 	});
 }
 

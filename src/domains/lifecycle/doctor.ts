@@ -1,11 +1,12 @@
 import { accessSync, chmodSync, constants, type Dirent, existsSync, readdirSync, type Stats, statSync } from "node:fs";
-import { isAbsolute, join, relative as relativePath } from "node:path";
+import { join, relative as relativePath } from "node:path";
 import { isDevVersion, readClioVersionLabel } from "../../core/build-info.js";
 import type { SettingsScalarRepair } from "../../core/config.js";
 import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
 import { copilotKeychainOnlyDetail } from "../../core/copilot-keychain.js";
 import { detectNewerHome, initializeClioHome } from "../../core/init.js";
 import { readClioVersion } from "../../core/package-root.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
 import { repairSettingsCoercions, type SettingsRepairResult } from "../../core/settings-repair.js";
 import { shellQuote } from "../../core/shell-quote.js";
@@ -1622,7 +1623,7 @@ function harnessFindings(workspaceRoot: string): DoctorFinding[] {
 	const ownedSkills = input.skills.items.filter((skill) =>
 		input.ownedSkillRoots.some((root) => {
 			const relative = relativePath(root, skill.filePath);
-			return relative !== "" && !relative.startsWith("..") && !isAbsolute(relative);
+			return relative !== "" && !relativePathEscapes(relative);
 		}),
 	).length;
 	const artifacts = input.recipes.length + ownedSkills + (input.localSettings === null ? 0 : 1);

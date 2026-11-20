@@ -435,7 +435,8 @@ describe("coordinator discovery and dependency composition", () => {
 
 	it("preserves successful receipts after a later failure through the actual agent adapter", async () => {
 		const source = join(env.dir, "input.txt");
-		const target = join(env.dir, "output.txt");
+		// A folder whose name only starts with ".." is inside the workspace.
+		const target = join(env.dir, "..out", "output.txt");
 		writeFileSync(source, "evidence");
 		const fail = register("late_failure", async () => ({ kind: "error", message: "unavailable" }), false);
 		const gateway = resolveAgentTools({ registry }).find((tool) => tool.name === "gateway");
@@ -469,7 +470,7 @@ describe("coordinator discovery and dependency composition", () => {
 			},
 			entry,
 		];
-		deepStrictEqual([...buildHandoffReadLedger(entries, { cwd: env.dir })], ["input.txt", "output.txt"]);
+		deepStrictEqual([...buildHandoffReadLedger(entries, { cwd: env.dir })], ["input.txt", "..out/output.txt"]);
 		deepStrictEqual(
 			foldSessionArtifacts(entries, { workspace: env.dir }).map((artifact) => artifact.path),
 			[target],

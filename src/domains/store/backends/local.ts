@@ -19,6 +19,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
+import { relativePathEscapes } from "../../../core/path-containment.js";
 import { fsyncDirectoryAsync, safeResourceWriteAsync } from "../../../core/safe-resource-write.js";
 import {
 	decodeTagSegment,
@@ -532,7 +533,7 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 				const resolved = await realpath(root).catch(() => null);
 				if (resolved === null) return null;
 				const relative = path.relative(resolved, realPath);
-				if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) return null;
+				if (relative === "" || relativePathEscapes(relative)) return null;
 				return relative.split(path.sep);
 			};
 			const stored = await segmentsUnder(projectDir);

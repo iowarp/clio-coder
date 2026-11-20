@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { internalGitArgv } from "../../core/internal-git.js";
+import { relativePathEscapes } from "../../core/path-containment.js";
 
 /** One node_modules link in a base archive: `target` is linked at `relativePath` under the base root. */
 export interface BaseModulesLink {
@@ -32,7 +33,7 @@ function nearestNodeModules(start: string, bound: string): string | null {
 		if (dir === limit) return null;
 		const parent = dirname(dir);
 		const within = relative(limit, parent);
-		if (parent === dir || within.startsWith("..")) return null;
+		if (parent === dir || relativePathEscapes(within)) return null;
 		dir = parent;
 	}
 }

@@ -7,6 +7,7 @@
 import { existsSync, lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { minimatch } from "minimatch";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import type { MainSandboxPolicy } from "../../core/sandbox/main-session.js";
 import type { ToolResult } from "../../tools/registry.js";
@@ -113,7 +114,7 @@ export async function runGateIn(
 /** `target` as a repository-relative posix path under `rootReal`, or null when it lies outside. */
 function insideRoot(rootReal: string, target: string): string | null {
 	const rel = relative(rootReal, target);
-	if (rel.startsWith("..") || isAbsolute(rel)) return null;
+	if (relativePathEscapes(rel)) return null;
 	return rel.split(sep).join("/");
 }
 

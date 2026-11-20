@@ -47,8 +47,9 @@ import {
 	writeSync,
 } from "node:fs";
 import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, unlink } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
+import { join, relative, resolve as resolvePath, sep } from "node:path";
 import type { SessionFsConfig, SessionFsProvider } from "@github/copilot-sdk";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { clioCacheDir } from "../../core/xdg.js";
 
 /** Directories below the trusted cache root that lead to every session directory. */
@@ -453,7 +454,7 @@ export function createCopilotSessionFs(sessionId: string): SessionFsProvider {
 		const absolute = resolvePath(path);
 		const inside = relative(base, absolute);
 		if (inside === "") return { state: true, inside: [] };
-		if (!inside.startsWith("..") && !isAbsolute(inside)) return { state: true, inside: inside.split(sep) };
+		if (!relativePathEscapes(inside)) return { state: true, inside: inside.split(sep) };
 		return { state: false, real: absolute };
 	};
 	/**

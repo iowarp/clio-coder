@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
-import { isAbsolute, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
+import { relativePathEscapes } from "../core/path-containment.js";
 import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
@@ -110,7 +111,7 @@ export interface ExitSummarySnapshot {
 /** A path inside the workspace by its workspace path, any other as given. */
 function workspacePath(file: string): string {
 	const local = relative(process.cwd(), file);
-	return local.startsWith("..") || isAbsolute(local) ? file : local;
+	return relativePathEscapes(local) ? file : local;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -409,7 +410,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			const expanded = path.startsWith("~/") ? resolve(homedir(), path.slice(2)) : path;
 			const abs = resolve(cwd, expanded);
 			const local = relative(process.cwd(), abs);
-			const name = local.startsWith("..") || isAbsolute(local) ? abs : local || ".";
+			const name = relativePathEscapes(local) ? abs : local || ".";
 			if (seen?.has(name)) continue;
 			seen?.add(name);
 			files.set(name, (files.get(name) ?? 0) + 1);

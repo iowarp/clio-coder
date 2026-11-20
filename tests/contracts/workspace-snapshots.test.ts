@@ -81,20 +81,21 @@ describe("workspace snapshots", () => {
 		ok((await snapshots.snapshot({ reason: "turn-start" })).kind === "taken");
 		writeFileSync(path.join(repo, "a.txt"), "edited\n");
 		rmSync(path.join(repo, "u.txt"));
-		mkdirSync(path.join(repo, "src"));
-		writeFileSync(path.join(repo, "src", "new.txt"), "new\n");
+		// A directory whose name only starts with ".." is still inside the work tree.
+		mkdirSync(path.join(repo, "..src"));
+		writeFileSync(path.join(repo, "..src", "new.txt"), "new\n");
 		writeFileSync(path.join(repo, "z.log"), "ignored, edited\n");
 
 		const preview = await snapshots.preview(1);
 		ok(preview.kind === "plan", JSON.stringify(preview));
-		deepStrictEqual([preview.plan.restore, preview.plan.remove], [["a.txt", "u.txt"], ["src/new.txt"]]);
+		deepStrictEqual([preview.plan.restore, preview.plan.remove], [["a.txt", "u.txt"], ["..src/new.txt"]]);
 
 		const outcome = await snapshots.restore(1);
 		ok(outcome.kind === "restored", JSON.stringify(outcome));
 		strictEqual(outcome.preRewind.n, 2);
 		strictEqual(readFileSync(path.join(repo, "a.txt"), "utf8"), "tracked\n");
 		strictEqual(readFileSync(path.join(repo, "u.txt"), "utf8"), "untracked\n");
-		strictEqual(existsSync(path.join(repo, "src")), false);
+		strictEqual(existsSync(path.join(repo, "..src")), false);
 		strictEqual(readFileSync(path.join(repo, "z.log"), "utf8"), "ignored, edited\n");
 		strictEqual(existsSync(path.join(repo, "big.bin")), true);
 		deepStrictEqual(operatorIndex(), index);
@@ -102,7 +103,7 @@ describe("workspace snapshots", () => {
 		// The pre-rewind snapshot makes the rewind itself undoable.
 		ok((await snapshots.restore(2)).kind === "restored");
 		strictEqual(readFileSync(path.join(repo, "a.txt"), "utf8"), "edited\n");
-		strictEqual(readFileSync(path.join(repo, "src", "new.txt"), "utf8"), "new\n");
+		strictEqual(readFileSync(path.join(repo, "..src", "new.txt"), "utf8"), "new\n");
 		strictEqual(existsSync(path.join(repo, "u.txt")), false);
 	});
 

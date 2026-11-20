@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { relative } from "node:path";
 import { uncachedPrefillTokens } from "../core/cache-telemetry.js";
+import { relativePathEscapes } from "../core/path-containment.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import type { WorkingSetView } from "../domains/context/working-set/contract.js";
@@ -66,7 +67,7 @@ function contextWindowProvenanceLabel(source: ContextLedger["contextWindowSource
  * the file sits under the current directory, `~`-shortened otherwise. */
 function displayHandbookPath(filePath: string): string {
 	const rel = relative(process.cwd(), filePath);
-	if (rel.length > 0 && !rel.startsWith("..")) return rel;
+	if (rel.length > 0 && !relativePathEscapes(rel)) return rel;
 	const home = homedir();
 	return home.length > 0 && filePath.startsWith(`${home}/`) ? `~${filePath.slice(home.length)}` : filePath;
 }

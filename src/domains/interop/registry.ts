@@ -1,4 +1,5 @@
 import path from "node:path";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { explicitAgentHome, interopUserHome } from "../../core/xdg.js";
 import type { InteropAgentId, InteropAgentKind, InteropInventoryLayout } from "./types.js";
 
@@ -318,7 +319,7 @@ export function interopUserRoot(
 	if (layout !== undefined && agentDir !== undefined && userHome !== null) {
 		const root = path.resolve(agentDir);
 		const inner = path.relative(layout.userRoot, relative);
-		if (root !== path.resolve(userHome, layout.userRoot) && !inner.startsWith("..") && !path.isAbsolute(inner))
+		if (root !== path.resolve(userHome, layout.userRoot) && !relativePathEscapes(inner))
 			return { path: path.join(root, inner), containment: root };
 	}
 	return userHome === null ? null : { path: path.join(userHome, relative), containment: userHome };
