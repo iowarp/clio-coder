@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { mock, test } from "node:test";
@@ -424,6 +434,24 @@ test("a fresh home records every registered migration and doctor reports none pe
 	assert.equal(row?.ok, true);
 	assert.equal(row?.level, undefined);
 	assert.equal(row?.detail, `${registered.length} registered, all recorded`);
+});
+
+test("init closes memory directories an older build left group or world readable", {
+	skip: process.platform === "win32",
+}, async (t) => {
+	const home = await isolateClioEnv("clio-private-memory-");
+	t.after(() => home.restore());
+	const open = [
+		join(home.dir, "state", "memory"),
+		join(home.dir, "data", "memory"),
+		join(home.dir, "state", "sessions"),
+	];
+	for (const dir of open) {
+		mkdirSync(dir, { recursive: true });
+		chmodSync(dir, 0o755);
+	}
+	initializeClioHome();
+	for (const dir of open) assert.equal(statSync(dir).mode & 0o777, 0o700, dir);
 });
 
 test("a retired migration id in the manifest is not evidence of a newer Clio", async (t) => {
