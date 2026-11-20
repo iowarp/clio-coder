@@ -22,15 +22,24 @@ import {
 	cancelDetail,
 	clearRunCancelRequest,
 	isCancelableRunId,
+	writeRootCancelRequest,
 	writeRunCancelRequest,
 } from "../domains/dispatch/cancel-requests.js";
+import {
+	FLEET_ROOT_PREFIX,
+	fleetRootState,
+	matchFleetRootIds,
+	readFleetResult,
+	readFleetRootRecord,
+} from "../domains/dispatch/fleet-root-record.js";
 import { isOpenRunRow, sealRowFromSettledRun } from "../domains/dispatch/orphan-recovery.js";
 import { runStatusForOutcome } from "../domains/dispatch/outcome.js";
 import { type Ledger, openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
+import { writeCliFailure } from "./kit/json-out.js";
 
-const USAGE = "usage: clio-coder fleet cancel <runId> [--json] [--reason <text>]";
+const USAGE = "usage: clio-coder fleet cancel <runId|fleetRootId> [--json] [--reason <text>]";
 /** Owner ticks run about once a second; this covers a slow finalizer and receipt write. */
 const OWNER_SETTLE_WAIT_MS = 15_000;
 const POLL_MS = 250;
@@ -234,10 +243,22 @@ export async function runFleetCancel(args: ReadonlyArray<string>): Promise<numbe
 		return 2;
 	}
 	const { runId, json, reason } = parsed;
+	// Ids starting `fleet-` name fleet roots; everything else names a run.
+	if (runId.startsWith(FLEET_ROOT_PREFIX)) return cancelRoot(runId, json, reason);
 	if (!isCancelableRunId(runId)) return refuse(`invalid run id '${runId}'`);
 	ensureClioState();
 	const ledger = openLedger();
 	const row = ledger.get(runId);
+	// A token short of `fleet-` can name a run and also prefix fleet roots: neither is chosen for the caller.
+	if (row !== null && FLEET_ROOT_PREFIX.startsWith(runId) && matchFleetRootIds(runId).length > 0) {
+		writeCliFailure({
+			path: CANCEL_PATH,
+			slug: "ambiguous",
+			message: `'${runId}' names a run and prefixes fleet roots; give the full id`,
+			json,
+		});
+		return 1;
+	}
 	if (row === null) return refuse(`unknown run '${runId}'`);
 	if (!isOpenRunRow(row)) {
 		return refuse(`run ${runId} is already terminal (${row.outcome ?? row.status})`);
@@ -278,4 +299,109 @@ export async function runFleetCancel(args: ReadonlyArray<string>): Promise<numbe
 	if (sealed !== null) clearRunCancelRequest(runId);
 	render(report, json);
 	return sealed === null ? 1 : 0;
+}
+
+const CANCEL_PATH = ["fleet", "cancel"] as const;
+
+interface RootCancelReport {
+	rootId: string;
+	action: "requested" | "already_sealed";
+	state: "sealed" | "pending";
+	ownerPid: number | null;
+	/** From the persisted fleet result: `completion.state`, its stop reason, and the exit code the root returned. */
+	outcome: string | null;
+	stopReason: string | null;
+	exitCode: number | null;
+}
+
+function rootReport(
+	rootId: string,
+	action: RootCancelReport["action"],
+	ownerPid: number | null,
+	result: Record<string, unknown> | null,
+): RootCancelReport {
+	const completion = result?.completion as { state?: unknown; stopReason?: unknown } | undefined;
+	return {
+		rootId,
+		action,
+		state: result === null ? "pending" : "sealed",
+		ownerPid,
+		outcome: typeof completion?.state === "string" ? completion.state : null,
+		stopReason: typeof completion?.stopReason === "string" ? completion.stopReason : null,
+		exitCode: typeof result?.exitCode === "number" ? result.exitCode : null,
+	};
+}
+
+function renderRoot(report: RootCancelReport, json: boolean): void {
+	if (json) {
+		process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+		return;
+	}
+	if (report.state === "pending") {
+		process.stdout.write(
+			`cancel requested for fleet root ${report.rootId}; owner pid ${report.ownerPid ?? "unknown"} has not sealed it yet. No further step starts; the request stays until the root seals.\n`,
+		);
+		return;
+	}
+	process.stdout.write(
+		`fleet root ${report.rootId} ${report.action === "already_sealed" ? "had already sealed" : "sealed"} ${report.outcome ?? "unknown"}${report.stopReason !== null ? ` (${report.stopReason})` : ""} exit=${report.exitCode ?? "unknown"}\n`,
+	);
+}
+
+/**
+ * Cancel a fleet root: a durable request its owner checks before every step admission and between waves, and fans out
+ * to the steps it is running. Idempotent: a root that already sealed exits 0 with its recorded outcome.
+ */
+async function cancelRoot(token: string, json: boolean, reason: string | null): Promise<number> {
+	ensureClioState();
+	const matches = matchFleetRootIds(token);
+	if (matches.length > 1) {
+		writeCliFailure({
+			path: CANCEL_PATH,
+			slug: "ambiguous",
+			message: `'${token}' matches ${matches.length} fleet roots: ${matches.slice(0, 5).join(", ")}`,
+			json,
+		});
+		return 1;
+	}
+	const rootId = matches[0];
+	if (rootId === undefined) {
+		writeCliFailure({ path: CANCEL_PATH, slug: "not_found", message: `no fleet root matches '${token}'`, json });
+		return 1;
+	}
+	const prior = readFleetResult(rootId);
+	const record = readFleetRootRecord(rootId);
+	if (prior !== null) {
+		renderRoot(rootReport(rootId, "already_sealed", record?.pid ?? null, prior), json);
+		return 0;
+	}
+	if (record === null) {
+		writeCliFailure({
+			path: CANCEL_PATH,
+			slug: "not_found",
+			message: `fleet root ${rootId} has no root record to cancel; it was started by an earlier release`,
+			json,
+		});
+		return 1;
+	}
+	if (record.host !== hostname()) {
+		return refuse(`fleet root ${rootId} belongs to host ${record.host}; run fleet cancel there`);
+	}
+	if (fleetRootState(record, false) === "orphaned") {
+		return refuse(
+			`fleet root ${rootId}'s owner (pid ${record.pid}) is gone and the root never sealed (owner_gone); cancel its runs by run id`,
+		);
+	}
+	writeRootCancelRequest(rootId, reason);
+	const deadline = Date.now() + OWNER_SETTLE_WAIT_MS;
+	let result: Record<string, unknown> | null = null;
+	for (;;) {
+		result = readFleetResult(rootId);
+		if (result !== null || Date.now() >= deadline) break;
+		const current = readFleetRootRecord(rootId);
+		if (current !== null && fleetRootState(current, false) === "orphaned") break;
+		await sleep(POLL_MS);
+	}
+	renderRoot(rootReport(rootId, "requested", record.pid, result), json);
+	return result === null ? 1 : 0;
 }

@@ -79,6 +79,63 @@ export function clearRunCancelRequest(runId: string): void {
 	rmSync(requestPath(runId), { force: true });
 }
 
+/**
+ * A fleet root's cancel request. Unlike a run's it is never consumed: the owner checks it before every step admission
+ * and between waves for the rest of the root's life, so no later wave starts, and removes it only when it seals. It
+ * lives in its own subdirectory so the per-run reconciler, which takes requests by run id, never takes it.
+ */
+export interface RootCancelRequest {
+	version: 1;
+	rootId: string;
+	requestedAt: string;
+	requestedByPid: number;
+	reason: string | null;
+}
+
+function rootRequestPath(rootId: string): string {
+	if (!isCancelableRunId(rootId)) throw new Error(`invalid fleet root id '${rootId}'`);
+	return join(clioStateDir(), "cancel-requests", "roots", `${rootId}.json`);
+}
+
+/** Idempotent: a second request for the same root keeps the first one's time and reason. */
+export function writeRootCancelRequest(rootId: string, reason: string | null): RootCancelRequest {
+	const existing = readRootCancelRequest(rootId);
+	if (existing !== null) return existing;
+	const request: RootCancelRequest = {
+		version: 1,
+		rootId,
+		requestedAt: new Date().toISOString(),
+		requestedByPid: process.pid,
+		reason: reason === null ? null : reason.slice(0, MAX_REASON_CHARS),
+	};
+	safeResourceWrite(rootRequestPath(rootId), `${JSON.stringify(request, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+	return request;
+}
+
+/** The pending request for `rootId`, left in place. A malformed file still counts, as a run's does. */
+export function readRootCancelRequest(rootId: string): RootCancelRequest | null {
+	if (!isCancelableRunId(rootId)) return null;
+	const path = rootRequestPath(rootId);
+	if (!existsSync(path)) return null;
+	const request: RootCancelRequest = { version: 1, rootId, requestedAt: "", requestedByPid: 0, reason: null };
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<RootCancelRequest>;
+		return {
+			...request,
+			...(typeof parsed.requestedAt === "string" ? { requestedAt: parsed.requestedAt } : {}),
+			...(typeof parsed.requestedByPid === "number" ? { requestedByPid: parsed.requestedByPid } : {}),
+			...(typeof parsed.reason === "string" ? { reason: parsed.reason.slice(0, MAX_REASON_CHARS) } : {}),
+		};
+	} catch {
+		return request;
+	}
+}
+
+export function clearRootCancelRequest(rootId: string): void {
+	if (!isCancelableRunId(rootId)) return;
+	rmSync(rootRequestPath(rootId), { force: true });
+}
+
 export function cancelDetail(base: string, reason: string | null): string {
 	return reason === null || reason.trim().length === 0 ? base : `${base}: ${reason.trim()}`;
 }
