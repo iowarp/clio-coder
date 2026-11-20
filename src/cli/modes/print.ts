@@ -241,7 +241,10 @@ export interface HeadlessMainAgentOptions {
 interface HeadlessMainAgentResult {
 	/** Latest assistant stop, superseded by subsequent continuation messages. */
 	outputExhausted: boolean;
+	/** The final user turn's replies (CLI-P43); never narration. Every output reads `printedAnswer`, not this. */
 	text: string;
+	/** Text the turn wrote beside a tool call, kept only for the ended-quietly diagnostic on stderr. */
+	narration: string;
 	/** The final user turn's settled assistant messages and citation checks, from which `text` is read (CLI-P43). */
 	answerEntries: TurnAnswerEntry[];
 	/** The terminating tool was `finish`, which closes the turn's replies instead of replacing them. */
@@ -384,11 +387,13 @@ export function recordBlockedAttempt(
 }
 
 /**
- * What text mode prints and `--output-schema` judges. An artifact's terminating result is the whole answer, so chatter
- * before it is not; `finish` closes the turn's replies, which stand, and its own result stands only for a turn that
- * wrote nothing (CLI-P43).
+ * The run's one answer: what text mode prints, `-o` holds, `--output-schema` judges and the v2 envelope's `result.text`
+ * carries (CLI-P43). A turn that ended quietly has none. An artifact's terminating result is the whole answer, so
+ * chatter before it is not; `finish` closes the turn's replies, which stand, and its own result stands only for a
+ * turn that wrote no reply.
  */
 function printedAnswer(result: HeadlessMainAgentResult): string {
+	if (result.endedQuietly && !result.sawTerminatingToolResult) return "";
 	if (!result.sawTerminatingToolResult) return result.text;
 	if (result.terminatedByFinish && result.text.length > 0) return result.text;
 	return result.terminatingToolText.length > 0 ? result.terminatingToolText : result.text;
@@ -491,6 +496,7 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 			...current,
 			// The written calls are stated on stderr; the answer already holds only the prose before them.
 			text: answer.text,
+			narration: answer.narration,
 			noAnswer: ending?.kind === "no_answer" ? turnNoAnswerSentence(ending) : null,
 			endedQuietly: ending?.kind === "quiet" && !answer.replied,
 			callsNotRun: ending?.kind === "call_not_run" ? turnCallsNotRunSentence(ending) : null,
@@ -525,12 +531,13 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 	return withAnswerEntries({ ...current, error: assistantError(message) }, entries);
 }
 
-/** The turn's answer entries and the answer they give; `text` is never written any other way (CLI-P43). */
+/** The turn's answer entries and the replies and narration they give; neither is written any other way (CLI-P43). */
 function withAnswerEntries(
 	current: HeadlessMainAgentResult,
 	answerEntries: TurnAnswerEntry[],
 ): HeadlessMainAgentResult {
-	return { ...current, answerEntries, text: turnAnswer(answerEntries).text };
+	const answer = turnAnswer(answerEntries);
+	return { ...current, answerEntries, text: answer.text, narration: answer.narration };
 }
 
 function blankToolStat(tool: string): ToolCallStat {
@@ -1161,6 +1168,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	let result: HeadlessMainAgentResult = {
 		outputExhausted: false,
 		text: "",
+		narration: "",
 		answerEntries: [],
 		terminatedByFinish: false,
 		error: null,
@@ -1178,13 +1186,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		thinkingOnlyLength: false,
 		citationCheckedAnswer: null,
 	};
-	// Schema v2's `result.text` and `-o` are the same answer, from the same entries, as text mode's (CLI-P43).
+	// Schema v2's `result.text` and `-o` read the one printed answer text mode prints (CLI-P43).
 	noteMainRunV2({
 		answer: () =>
-			redactFinalUrlCredentials(
-				turnAnswer(result.answerEntries).text,
-				result.sawTerminatingToolResult || !result.outputExhausted,
-			),
+			redactFinalUrlCredentials(printedAnswer(result), result.sawTerminatingToolResult || !result.outputExhausted),
 	});
 	const runStats: HeadlessMainAgentRunStats = {
 		toolRounds: [],
@@ -1709,24 +1714,23 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		// Text mode printed the chat loop's notice for a thinking-only stop as it arrived.
 		stderrMessage = mode === "text" && result.thinkingOnlyLength ? null : failureMessage;
-		if (mode === "text" && result.text.length > 0) stdoutMessage = settledAnswer(result.text);
+		if (mode === "text" && printedAnswer(result).length > 0) stdoutMessage = settledAnswer(printedAnswer(result));
 	} else if (result.noAnswer !== null) {
 		// Earlier chatter or a line of markup is not the answer the caller asked for, whatever it reads like.
 		const failureMessage = `clio-coder run: the turn ended without an answer. ${result.noAnswer}`;
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		stderrMessage = failureMessage;
 	} else if (result.endedQuietly && !result.sawTerminatingToolResult) {
-		// The classifier saw an empty closing message, so any text still held is narration written beside a tool call
-		// ("Let me read notes.txt first"), not the answer. It goes to stderr for a reader of the log, never stdout.
+		// The classifier saw an empty closing message and the turn has no reply, so the answer is empty; the narration
+		// written beside a tool call ("Let me read notes.txt first") goes to stderr for a reader of the log, never stdout.
 		const failureMessage =
 			"clio-coder run: the turn's tools ran but the model wrote no closing message, so there is no answer to print";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
-		const narration = Array.from(settledAnswer(result.text));
+		const narration = Array.from(settledAnswer(result.narration));
 		stderrMessage =
 			narration.length > 0
 				? `${failureMessage}\nclio-coder run: last text before the tools ran: ${narration.length > 400 ? `${narration.slice(0, 399).join("")}…` : narration.join("")}`
 				: failureMessage;
-		result = { ...result, text: "" };
 	} else if (result.text.length === 0 && !result.sawTerminatingToolResult) {
 		const failureMessage = "clio-coder run: provider stream ended without an assistant response or terminal tool result";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };

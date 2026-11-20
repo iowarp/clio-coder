@@ -5,7 +5,8 @@ import { ToolNames } from "../../core/tool-names.js";
  * A headless run's answer is every reply of its final user turn, in order (CLI-P43): a reply is the text of an
  * assistant message that carries no typed tool call other than `finish`. One pure function, {@link turnAnswer}, reads
  * the turn's settled assistant messages and gives the answer to every output: text stdout, `-o`, and the v2 envelope's
- * `result.text`. Read from the messages' typed blocks only; nothing here reads what the prose says.
+ * `result.text`, through the headless main agent's printed answer. Read from the messages' typed blocks only; nothing
+ * here reads what the prose says.
  */
 const ANSWER_SEGMENT_SEPARATOR = "\n\n";
 
@@ -97,23 +98,29 @@ export type TurnAnswerEntry =
 	| { kind: "citation_check" };
 
 export interface TurnAnswer {
+	/** The replies, and only the replies: empty for a turn that wrote none. */
 	text: string;
 	/** The turn has a reply (or a checked answer), so a quiet closing round leaves it standing. */
 	replied: boolean;
+	/**
+	 * The last text the turn wrote beside a tool call (or as a written-out call), never part of the answer; a failed
+	 * message or a citation check clears it. A caller may show it as a diagnostic for a turn that has no reply.
+	 */
+	narration: string;
 }
 
 /**
  * The final user turn's answer: its replies joined in order. Narration (text beside a tool call) and a written-out
- * call never replace a reply; only a turn with no reply at all falls back to its last text, as before CLI-P43, and a
- * failed message clears that text. A citation check takes the answer so far as the checked answer, and the replies
- * after it are merged with it once by {@link answerAfterCitationCheck}.
+ * call are never the answer, even in a turn with no reply; they ride in `narration` only. A citation check takes the
+ * answer so far as the checked answer, and the replies after it are merged with it once by
+ * {@link answerAfterCitationCheck}.
  */
 export function turnAnswer(entries: ReadonlyArray<TurnAnswerEntry>): TurnAnswer {
 	let replies: string[] = [];
 	let narration = "";
 	let checked: string | null = null;
 	const settle = (): string => {
-		const own = replies.length > 0 ? replies.join(ANSWER_SEGMENT_SEPARATOR) : checked === null ? narration : "";
+		const own = replies.join(ANSWER_SEGMENT_SEPARATOR);
 		if (checked === null) return own;
 		return own.length === 0 ? checked : answerAfterCitationCheck(checked, own);
 	};
@@ -131,5 +138,5 @@ export function turnAnswer(entries: ReadonlyArray<TurnAnswerEntry>): TurnAnswer 
 		else if (reading.reply !== null) replies.push(reading.reply);
 		else if (reading.wrote) narration = reading.text;
 	}
-	return { text: settle(), replied: replies.length > 0 || checked !== null };
+	return { text: settle(), replied: replies.length > 0 || checked !== null, narration };
 }

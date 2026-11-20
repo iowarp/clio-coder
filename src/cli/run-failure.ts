@@ -218,11 +218,14 @@ function writeOutputFile(resolved: string, bytes: string): boolean {
 }
 
 /**
- * The run's answer, from the final user turn's replies (CLI-P43): the headless main agent's own entries, whose stream
- * frames carry the citation merge already, else the `turn_end` frames a `--agent` worker streamed.
+ * The run's answer (CLI-P43): the headless main agent's printed answer, else, for a `--agent` worker, the replies of
+ * the `turn_end` frames it streamed. A `--agent` turn with no reply keeps its last text, which its text mode prints.
  */
 function settledAnswer(seen: SeenFrames): string {
-	return mainRunNote.answer?.() ?? turnAnswer(seen.answerEntries).text;
+	const main = mainRunNote.answer?.();
+	if (main !== undefined) return main;
+	const answer = turnAnswer(seen.answerEntries);
+	return answer.text.length > 0 ? answer.text : answer.narration;
 }
 
 /** What the headless main agent tells a v2 writer directly: facts no v1 frame carries. */

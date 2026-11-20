@@ -1,5 +1,5 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { prefixHeadlessFailure, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
@@ -279,6 +279,10 @@ async function writtenCallRun(
 		children?: { runs: (rootRunId: string) => object[]; steered?: ReadonlySet<string> };
 		/** Events the turn emits before its reply's message_end. */
 		before?: object[];
+		/** A terminating tool other than finish that runs after the reply, with the text its result carries. */
+		terminating?: { toolName: string; text: string };
+		/** The run's messages as agent_end carries them, when more than the reply. */
+		ended?: object[];
 	} = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
 	let handler: (event: unknown) => void = () => {};
@@ -315,8 +319,20 @@ async function writtenCallRun(
 					},
 				});
 			}
+			const terminating = extra.terminating;
+			if (terminating !== undefined) {
+				handler({ type: "tool_execution_start", toolCallId: "t1", toolName: terminating.toolName, args: {} });
+				handler({
+					type: "tool_execution_end",
+					toolCallId: "t1",
+					toolName: terminating.toolName,
+					isError: false,
+					outcome: "ok",
+					result: { terminate: true, content: [{ type: "text", text: terminating.text }], details: {} },
+				});
+			}
 			handler({ type: "turn_end", message: reply, toolResults: [] });
-			handler({ type: "agent_end", messages: [reply] });
+			handler({ type: "agent_end", messages: extra.ended ?? [reply] });
 			for (const event of extra.after ?? []) handler(event);
 		},
 		whenSettled: async () => {},
@@ -679,7 +695,15 @@ test("every reply of the final user turn reaches stdout, -o and the v2 answer in
 	};
 	const silentFinish = assistant("toolUse", [finishCall]);
 	const besideFinish = assistant("toolUse", [{ type: "text", text: closing }, finishCall]);
-	const scenarios = [
+	const declared = { state: "partly_done" };
+	const plan = "wrote plan artifact (42B) to PLAN.md";
+	const scenarios: Array<{
+		name: string;
+		before: object[];
+		last: Record<string, unknown>;
+		expected: string;
+		extra?: { declared?: Record<string, unknown>; terminating?: { toolName: string; text: string } };
+	}> = [
 		{
 			name: "reply, narration beside a read, silent finish",
 			before: [...round(answerMessage(review)), ...round(narration)],
@@ -703,17 +727,52 @@ test("every reply of the final user turn reaches stdout, -o and the v2 answer in
 			last: besideFinish,
 			expected: `${review}\n\n${closing}`,
 		},
-		// No reply at all: the narration stands as the answer, as before.
-		{ name: "narration only, silent finish", before: round(narration), last: silentFinish, expected: note },
+		// No reply at all: narration is never the answer; the silent finish's own result is.
+		{
+			name: "narration only, silent finish",
+			before: round(narration),
+			last: silentFinish,
+			expected: "completion declared",
+		},
+		{
+			name: "a read with no text, silent finish",
+			before: round(assistant("toolUse", [{ type: "toolCall", id: "r1", name: "read", arguments: {} }])),
+			last: silentFinish,
+			expected: "completion declared",
+		},
+		// An artifact's terminating result is the whole answer, in every output.
+		{
+			name: "reply, prose beside an artifact",
+			before: round(answerMessage(review)),
+			last: assistant("toolUse", [
+				{ type: "text", text: "Writing the plan now." },
+				{ type: "toolCall", id: "t1", name: "artifact", arguments: {} },
+			]),
+			expected: plan,
+			extra: { terminating: { toolName: "artifact", text: plan } },
+		},
 	];
-	for (const { name, before, last, expected } of scenarios) {
-		const declared = { state: "partly_done" };
-		const text = await writtenCallRun(undefined, last, { path: "out.txt", cwd: env.dir }, { before, declared });
+	for (const { name, before, last, expected, extra = { declared } } of scenarios) {
+		const text = await writtenCallRun(undefined, last, { path: "out.txt", cwd: env.dir }, { before, ...extra });
 		strictEqual(text.code, 0, `${name}: ${text.stderr}`);
 		strictEqual(text.stdout, `${expected}\n`, name);
 		strictEqual(readFileSync(join(env.dir, "out.txt"), "utf8"), `${expected}\n`, name);
-		const v2 = await writtenCallRun("json", last, undefined, { before, declared });
+		const v2 = await writtenCallRun("json", last, undefined, { before, ...extra });
 		const envelope = JSON.parse(v2.stdout.trim().split("\n").at(-1) ?? "{}") as { result?: { text?: string } };
 		strictEqual(envelope.result?.text, expected, `${name}: ${v2.stdout}`);
 	}
+	// Tools ran and the closing message is empty: no answer anywhere, and the narration reaches only stderr.
+	const closingEmpty = assistant("stop", []);
+	const ran = { role: "toolResult", toolCallId: "r1", toolName: "read", isError: false, content: [] };
+	const quiet = { before: round(narration), ended: [narration, ran, closingEmpty] };
+	rmSync(join(env.dir, "out.txt"), { force: true });
+	const text = await writtenCallRun(undefined, closingEmpty, { path: "out.txt", cwd: env.dir }, quiet);
+	strictEqual(text.code, 1, text.stderr);
+	strictEqual(text.stdout, "");
+	ok(text.stderr.includes(`last text before the tools ran: ${note}`), text.stderr);
+	ok(!existsSync(join(env.dir, "out.txt")));
+	const v2 = await writtenCallRun("json", closingEmpty, undefined, quiet);
+	strictEqual(v2.code, 1, v2.stderr);
+	const envelope = JSON.parse(v2.stdout.trim().split("\n").at(-1) ?? "{}") as { result?: { text?: string } };
+	strictEqual(envelope.result?.text, "", v2.stdout);
 });
