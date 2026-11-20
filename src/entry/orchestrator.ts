@@ -8,7 +8,7 @@ import { runHeadlessMainAgent } from "../cli/modes/print.js";
 import type { RunJsonMainSessionFrame } from "../cli/modes/run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "../cli/modes/run-json-schema.js";
 import { noteMainRunV2, startRunOutput, writeRunDiagnostic } from "../cli/run-failure.js";
-import { setToolEnvAutonomy } from "../core/bash-exec.js";
+import { setToolEnvAutonomy, startLoginEnvCapture } from "../core/bash-exec.js";
 import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
 import {
@@ -2155,6 +2155,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		clampThinkingLevel,
 	});
 	effectiveSettingsForDispatch = getCurrentSettings;
+	void startLoginEnvCapture(); // after getCurrentSettings: building the capture's env reads unattendedYolo
 	startSessionSettings((hook) => termination.onDrain(hook));
 	// System One: one instance for the process, fixed at startup in what it binds.
 	const currentSessionId = (): string | null => session?.current()?.id ?? null;

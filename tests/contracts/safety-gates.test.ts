@@ -41,33 +41,58 @@ import { createRegistry, type PermissionRequiredMeta } from "../../src/tools/reg
 import { writeTool } from "../../src/tools/write.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
-// First in the file on purpose: the login capture settles once per process, and the
-// describe below settles it before its own rg cases.
+// The login capture runs once per process, so each case judges its first rg in a fresh process whose login profile
+// exports the ripgrep config variable or leaves it unset.
 describe("rg recognition before the login environment is captured", () => {
-	it("asks until the capture settles, then follows what the environment holds", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "clio-coder-safety-pending-"));
-		const saved = process.env.RIPGREP_CONFIG_PATH;
-		delete process.env.RIPGREP_CONFIG_PATH;
-		try {
-			writeFileSync(join(dir, "a.txt"), "x\n");
-			const policy = createSafetyPolicyEngine({ cwd: dir, projectPolicy: loadProjectSafetyPolicy(dir) });
-			const evaluate = () => policy.evaluate({ tool: ToolNames.Bash, args: { command: "rg x a.txt" } });
-			const pending = evaluate();
-			strictEqual(pending.execRecognition !== "recognized", true, "an uncaptured login profile may export the variable");
-			strictEqual(
-				pending.reasons?.some((reason) => reason.includes("not been captured")),
-				true,
-			);
-			await runBashCommand("true", { cwd: dir });
-			strictEqual(
-				evaluate().reasons?.some((reason) => reason.includes("not been captured")),
-				false,
-			);
-		} finally {
-			if (saved !== undefined) process.env.RIPGREP_CONFIG_PATH = saved;
-			rmSync(dir, { recursive: true, force: true });
-		}
-	});
+	for (const exported of [true, false]) {
+		it(`is not recognized while the capture is pending, then follows a profile that ${exported ? "sets" : "leaves unset"} RIPGREP_CONFIG_PATH`, {
+			skip: process.platform === "win32" ? "the login capture does not run on win32" : false,
+		}, () => {
+			const dir = mkdtempSync(join(tmpdir(), "clio-coder-safety-pending-"));
+			try {
+				const home = join(dir, "home");
+				const cwd = join(dir, "cwd");
+				mkdirSync(home);
+				mkdirSync(cwd);
+				writeFileSync(join(cwd, "a.txt"), "x\n");
+				writeFileSync(
+					join(home, ".bash_profile"),
+					exported ? `export RIPGREP_CONFIG_PATH=${join(home, "rgrc")}\n` : "true\n",
+				);
+				const root = process.cwd();
+				const source = (module: string) => JSON.stringify(join(root, module));
+				const probe = join(dir, "probe.mts");
+				writeFileSync(
+					probe,
+					[
+						`import { runBashCommand } from ${source("src/core/bash-exec.ts")};`,
+						`import { createSafetyPolicyEngine } from ${source("src/domains/safety/policy-engine.ts")};`,
+						`import { loadProjectSafetyPolicy } from ${source("src/domains/safety/project-policy.ts")};`,
+						`const cwd = ${JSON.stringify(cwd)};`,
+						"const engine = createSafetyPolicyEngine({ cwd, projectPolicy: loadProjectSafetyPolicy(cwd) });",
+						"const judge = () => {",
+						'\tconst decision = engine.evaluate({ tool: "bash", args: { command: "rg x a.txt" } });',
+						"\tconst says = (text) => decision.reasons.some((reason) => reason.includes(text));",
+						'\treturn [decision.execRecognition, says("still being captured"), says("with it set")];',
+						"};",
+						"const first = judge();",
+						"await runBashCommand('true', { cwd });",
+						"process.stdout.write(JSON.stringify([first, judge()]));",
+					].join("\n"),
+				);
+				const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
+				delete env.RIPGREP_CONFIG_PATH;
+				const run = spawnSync(process.execPath, ["--import", "tsx", probe], { cwd: root, env, encoding: "utf8" });
+				strictEqual(run.status, 0, run.stderr);
+				deepStrictEqual(JSON.parse(run.stdout), [
+					["unrecognized", true, false],
+					exported ? ["unrecognized", false, true] : ["recognized", false, false],
+				]);
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+	}
 });
 
 describe("safety gate boundary", () => {
