@@ -55,10 +55,15 @@ function semanticVerb(name: string): (words: ReadonlyArray<string>) => boolean {
 	return (words) => words[0] === "semantic" && words[1] === name;
 }
 
-const pending = (old: string, replacement: string, lane: string): DeprecatedSpelling => ({
+const pending = (
+	old: string,
+	replacement: string,
+	lane: string,
+	kind: DeprecationClass = "identical",
+): DeprecatedSpelling => ({
 	old,
 	replacement,
-	class: "identical",
+	class: kind,
 	notice: "pending",
 	where: lane,
 });
@@ -67,7 +72,8 @@ const viaDispatcher = (
 	old: string,
 	replacement: string,
 	matches: (words: ReadonlyArray<string>) => boolean,
-): DeprecatedSpelling => ({ old, replacement, class: "identical", notice: "dispatcher", matches });
+	kind: DeprecationClass = "identical",
+): DeprecatedSpelling => ({ old, replacement, class: kind, notice: "dispatcher", matches });
 
 const viaModule = (old: string, replacement: string, where: string, kind: DeprecationClass): DeprecatedSpelling => ({
 	old,
@@ -87,14 +93,17 @@ export const DEPRECATED_SPELLINGS: ReadonlyArray<DeprecatedSpelling> = [
 	viaModule("run --session <id>", "run --resume <id>", "src/cli/args.ts", "identical"),
 	viaModule("run <task> with piped stdin and no -", "run <task> -", "src/cli/initial-message.ts", "identical"),
 	viaModule("fleet run --json", "fleet run --output-format stream-json", "src/cli/fleet.ts", "migration"),
-	viaDispatcher("fleet drain", "fleet admission drain", verb("fleet", ["drain"])),
-	viaDispatcher("fleet resume", "fleet admission open", verb("fleet", ["resume"])),
+	// Text matches; under --json the old spellings keep their pretty `{ "admission" }` without `version`.
+	viaDispatcher("fleet drain", "fleet admission drain", verb("fleet", ["drain"]), "migration"),
+	viaDispatcher("fleet resume", "fleet admission open", verb("fleet", ["resume"]), "migration"),
 	viaDispatcher("ext", "extensions", topLevel("ext")),
-	pending("extensions list", "library list --kind extension", "L10"),
-	pending("extensions install", "library install --kind extension", "L10"),
-	pending("extensions enable", "library enable --kind extension", "L10"),
-	pending("extensions disable", "library disable --kind extension", "L10"),
-	pending("extensions remove", "library remove --kind extension", "L10"),
+	// The extensions verbs keep their own documents: `list` shows installed extensions, not catalog entries,
+	// and `--json` failures carry `diagnostics` where library prints `{ok, error}`.
+	pending("extensions list", "library list --kind extension", "L10", "migration"),
+	pending("extensions install", "library install --kind extension", "L10", "migration"),
+	pending("extensions enable", "library enable --kind extension", "L10", "migration"),
+	pending("extensions disable", "library disable --kind extension", "L10", "migration"),
+	pending("extensions remove", "library remove --kind extension", "L10", "migration"),
 	viaDispatcher("export", "share export", topLevel("export")),
 	viaDispatcher("import", "share import", topLevel("import")),
 	viaDispatcher("targets add", "configure", verb("targets", ["add"])),
@@ -107,7 +116,8 @@ export const DEPRECATED_SPELLINGS: ReadonlyArray<DeprecatedSpelling> = [
 	pending("configure --set-background", "configure --set-memory", "L8"),
 	viaModule("reset --force", "reset --yes", "src/cli/reset.ts", "identical"),
 	viaModule("uninstall --force", "uninstall --yes", "src/cli/uninstall.ts", "identical"),
-	viaModule("tools status --reset-profile", "tools reset-profile <id>", "src/cli/tools.ts", "identical"),
+	// The old spelling resets, then prints the status page; the replacement prints one `ok:` line.
+	viaModule("tools status --reset-profile", "tools reset-profile <id>", "src/cli/tools.ts", "migration"),
 	pending("context init --preview", "context init --dry-run", "L10"),
 	viaModule("verifiers --cwd", "verifiers --check-cwd", "src/cli/verifiers.ts", "identical"),
 	pending("acp --permission-timeout <bare number>", "acp --permission-timeout <duration>", "L4"),
