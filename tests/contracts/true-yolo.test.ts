@@ -41,7 +41,11 @@ import { compileWorker } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
-import { effectiveYoloConfinement, YOLO_CONFINEMENT_PIN_ENV } from "../../src/domains/safety/autonomy.js";
+import {
+	admissionAutonomy,
+	effectiveYoloConfinement,
+	YOLO_CONFINEMENT_PIN_ENV,
+} from "../../src/domains/safety/autonomy.js";
 import { type OutwardPlaces, outwardLineLeaves } from "../../src/domains/safety/containment.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { denialLines } from "../../src/domains/safety/denial.js";
@@ -758,6 +762,31 @@ test("a bare sourced name resolves on the PATH bash commands run with, from the 
 		...commands.map(() => "yolo-floor:trust-authority"),
 	]);
 	strictEqual(readFileSync(join(home, "captures"), "utf8"), "x\n");
+});
+
+// Fix queue row 215: a scanned script's child the floor cannot place or read goes to the safety judge, never refused.
+test("a script child the floor cannot place or read is judged at contained yolo and runs at unconfined yolo", () => {
+	const cwd = workspace("clio-yolo-script-unplaced-");
+	writeFileSync(join(cwd, "env.sh"), 'source "$NVM_DIR/nvm.sh"\nnvm use 22\n');
+	writeFileSync(join(cwd, "lib.sh"), "echo ok\n");
+	writeFileSync(join(cwd, "plain.sh"), "source ./lib.sh\n");
+	const engine = engineFor(cwd);
+	// Contained yolo, the default confinement, admits at default with the operator's scope; its asks go to the judge.
+	const level = admissionAutonomy("yolo", "contained");
+	strictEqual(level, "default");
+	const contained = { level, scratchRoots: [], sandbox: true, snapshots: true } as const;
+	const bash = (command: string) => ({ tool: ToolNames.Bash, args: { command } });
+	for (const [command, unplaced] of [
+		["bash env.sh", /\$NVM_DIR\/nvm\.sh.*env\.sh line 1/u],
+		['cd "$WORK" && bash plain.sh', /plain\.sh/u],
+	] as const) {
+		const judged = engine.evaluate(bash(command), level, contained);
+		deepStrictEqual([judged.kind, judged.reasonCode], ["ask", "script-unplaceable"], command);
+		match(judged.reasons.join("\n"), unplaced, command);
+		// Unconfined yolo has no judge, and the ruling allows no outright refusal, so the call runs as before.
+		strictEqual(engine.evaluate(bash(command), "yolo", OPERATOR_YOLO).kind, "allow", command);
+	}
+	strictEqual(engine.evaluate(bash("bash plain.sh"), level, contained).kind, "allow");
 });
 
 // #421: Python lines are not shell; #407: a shell script at yolo meets only the floor.

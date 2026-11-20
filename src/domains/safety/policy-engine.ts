@@ -1307,7 +1307,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			}
 		}
 		// `./x.sh` and `source x.sh` run a file as `bash x.sh` does, so the floor reads it the same way (CLI-P31). A file
-		// the scan cannot read keeps the rails it meets today.
+		// the scan cannot place or read goes to the safety judge (row 215).
 		const runs = call.tool === ToolNames.Bash && command !== null ? yoloFloorScriptRuns(command) : [];
 		if (command !== null && runs.length > 0) {
 			const cwds = commandMoveBases(command, callCwd);
@@ -1325,6 +1325,16 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				ruleId: LOGIN_PATH_PENDING_RULE_ID,
 				reasonCode: LOGIN_PATH_PENDING_RULE_ID,
 				reasons: [LOGIN_PATH_PENDING_REASON],
+				policySource: "builtin-classifier",
+			};
+		}
+		// No script the scan read refuses, but one it runs could not be placed or read: the judge decides it (row 215).
+		const unplaced = [...new Set(budgets.flatMap((budget) => budget.unplaced))];
+		if (unplaced.length > 0) {
+			return {
+				ruleId: SCRIPT_UNPLACEABLE_RULE_ID,
+				reasonCode: SCRIPT_UNPLACEABLE_RULE_ID,
+				reasons: [scriptUnplaceableReason(unplaced)],
 				policySource: "builtin-classifier",
 			};
 		}
@@ -1976,7 +1986,10 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const call = normalizeCallPaths(rawCall);
 		const { callCwd, judgedCommand } = commandUnderJudgment(call);
 		const base = baseDecision(call, classify(call), callCwd, posture, judgedCommand);
-		const floor = floorBlock(call, callCwd, judgedCommand);
+		const scanned = floorBlock(call, callCwd, judgedCommand);
+		// Unconfined yolo has no judge, and a script the floor cannot place or read is never refused outright (row 215), so
+		// it runs as it did before.
+		const floor = scanned?.ruleId === SCRIPT_UNPLACEABLE_RULE_ID ? null : scanned;
 		// Unconfined yolo has no judge and admits every ask, so a call whose sourced file is unknown yet is held instead.
 		if (floor?.ruleId === LOGIN_PATH_PENDING_RULE_ID)
 			return gateDecision("block", base, { ...floor, reasons: [...floor.reasons, LOGIN_PATH_PENDING_YOLO_HOLD] });
@@ -2038,7 +2051,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const classification = classify(call);
 		const { callCwd, judgedCommand } = commandUnderJudgment(call);
 		const floor = floorBlock(call, callCwd, judgedCommand);
-		const pending = floor?.ruleId === LOGIN_PATH_PENDING_RULE_ID ? floor : null;
+		const pending =
+			floor?.ruleId === LOGIN_PATH_PENDING_RULE_ID || floor?.ruleId === SCRIPT_UNPLACEABLE_RULE_ID ? floor : null;
 		if (floor !== null && pending === null)
 			return gateDecision("block", baseDecision(call, classification, callCwd, posture, judgedCommand), floor);
 		const leavesSandbox = scope.sandbox && call.args?.unsandboxed === true && runsProjectCommand(call, judgedCommand);
@@ -2049,8 +2063,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			...(scope.readOnly === true ? { readOnly: true as const } : {}),
 			...(leavesSandbox ? { leavesSandbox: true as const } : {}),
 		});
-		// The floor could not place the sourced file yet: whatever the net would block stays blocked, and the rest asks, so
-		// the safety judge decides it rather than the launching PATH. A contained call stays contained if it runs.
+		// The floor could not place the sourced file yet, or could not place or read a script the call runs: whatever the net
+		// would block stays blocked, and the rest asks, so the safety judge decides it rather than the launching PATH or an
+		// unread script. A contained call stays contained if it runs.
 		if (pending === null || normal.kind === "block") return normal;
 		const { rejection: _rejection, match: _match, ...rest } = normal;
 		return gateDecision("ask", rest, {
@@ -3833,10 +3848,36 @@ interface ScriptBudget {
 	remaining: number;
 	/** Set when a sourced name with no slash was looked up while the bash tool's PATH was still being captured. */
 	pathPending: boolean;
+	/** The scripts the call runs that the scan could not place or read, each with where it is run. */
+	unplaced: string[];
 }
 
 function newScriptBudget(): ScriptBudget {
-	return { remaining: FLOOR_SCRIPT_SCAN_BYTES, pathPending: false };
+	return { remaining: FLOOR_SCRIPT_SCAN_BYTES, pathPending: false, unplaced: [] };
+}
+
+/** Rule id of a call the floor could not finish reading because a script it runs cannot be placed or read (row 215). */
+const SCRIPT_UNPLACEABLE_RULE_ID = "script-unplaceable";
+
+/** Most unplaced scripts the reason names before it counts the rest. */
+const SCRIPT_UNPLACEABLE_NAMED = 3;
+
+function scriptUnplaceableReason(unplaced: ReadonlyArray<string>): string {
+	const named = unplaced.slice(0, SCRIPT_UNPLACEABLE_NAMED).join("; ");
+	const more =
+		unplaced.length > SCRIPT_UNPLACEABLE_NAMED ? `; and ${unplaced.length - SCRIPT_UNPLACEABLE_NAMED} more` : "";
+	return `the floor could not place or read a script this call runs, so the call is judged instead of running past the floor unread: ${named}${more}`;
+}
+
+/** Why the scan could not place a script operand: a name the shell builds at run time, or a relative name from an unknown directory. */
+function unplacedOperand(operand: string, where: string): string {
+	const dynamic = /[$`*?[{]/u.test(operand) || /^[<>]\(/u.test(operand);
+	return `${operand} (${dynamic ? "named at run time" : "from a directory the scan cannot place"}), ${where}`;
+}
+
+/** Records a script operand the scan could not place, once per call. */
+function recordUnplaced(budget: ScriptBudget, entry: string): void {
+	if (!budget.unplaced.includes(entry)) budget.unplaced.push(entry);
 }
 
 /** Rule id of a call the floor could not place because a bare `source name` waits on the login capture. */
@@ -3911,9 +3952,16 @@ function scanCommandScript(
 	shellOnly = false,
 ): ScriptHit | null {
 	const operand = script.path;
-	if (/^[<>]\(/u.test(operand)) return null;
+	const where = script.sourced ? "sourced by the command" : "run by the command";
+	if (/^[<>]\(/u.test(operand)) {
+		recordUnplaced(budget, unplacedOperand(operand, where));
+		return null;
+	}
 	const candidates = scriptCandidates(operand, cwds, budget, script.sourced);
-	if (candidates.includes(null)) return null;
+	if (candidates.includes(null)) {
+		recordUnplaced(budget, unplacedOperand(operand, where));
+		return null;
+	}
 	// Each candidate is skipped on its own: rewriting one copy leaves another that bash may load (CLI-P31).
 	const files = (candidates as string[]).filter((file) => !isWrittenFirst(file, written) && regularFile(file));
 	// `bash x.sh` runs with `$0` as written; on standard input `$0` names the shell.
@@ -3966,10 +4014,12 @@ function scanNamedScript(
  * from every directory the script can be in by then, with the literal
  * variables assigned before it substituted, and the scan follows the scripts
  * its lines `source`, run through a shell or `exec` by literal path. What the
- * scan cannot read or follow (an unreadable or binary file, one over the cap,
- * a script named at run time or written first, a nesting deeper than the
- * limit) is skipped, never a reason to stop, so a script nothing on the floor
- * touches runs. Backslash continuations join before matching.
+ * scan cannot follow (a binary file, a script written first, a nesting deeper
+ * than the limit) is skipped, and what it cannot place or read (a name built
+ * at run time, a relative name from an unknown directory, an unreadable file,
+ * one over the byte budget) is recorded on the budget for the safety judge;
+ * neither stops the scan, so a script nothing on the floor touches runs.
+ * Backslash continuations join before matching.
  */
 function scanScript(
 	file: string | null,
@@ -3982,11 +4032,17 @@ function scanScript(
 	let text: string;
 	try {
 		const info = statSync(file);
-		if (!info.isFile() || info.size > scan.budget.remaining) return null;
+		if (!info.isFile()) return null;
+		if (info.size > scan.budget.remaining) {
+			recordUnplaced(scan.budget, `${file} (past the floor's ${FLOOR_SCRIPT_SCAN_BYTES}-byte script budget)`);
+			return null;
+		}
 		scan.budget.remaining -= info.size;
 		text = readFileSync(file, "utf8");
-	} catch {
-		// An unreadable script runs unscanned, like any interpreter's file.
+	} catch (error) {
+		// A missing script fails to run; one the scan cannot read is judged instead of run unread (row 215).
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code !== "ENOENT" && code !== "ENOTDIR") recordUnplaced(scan.budget, `${file} (unreadable)`);
 		return null;
 	}
 	// A binary `exec` target is a program, not a script to read.
@@ -4006,7 +4062,11 @@ function scanScript(
 		if (read.data) continue;
 		advanceScriptShell(reader, shell, logical, read);
 		const sources = scriptLineSources(read.expanded);
-		if (sources === null) continue;
+		const where = `in ${file} line ${start + 1}`;
+		if (sources === null) {
+			recordUnplaced(scan.budget, `a script the line runs without naming it, ${where}`);
+			continue;
+		}
 		const cwds = read.context === "function" ? null : shell.cwds;
 		commandWrittenPaths(read.expanded, cwds ?? [scan.callCwd], scan.written);
 		if (depth >= FLOOR_SCRIPT_NEST_DEPTH) continue;
@@ -4015,6 +4075,7 @@ function scanScript(
 			// loads the first one not written first, so the script continues from that copy alone (CLI-P31).
 			let loaded: { shell: ScriptShell; written: WrittenPaths } | null = null;
 			for (const candidate of scriptCandidates(source.path, cwds, scan.budget, source.sourced)) {
+				if (candidate === null) recordUnplaced(scan.budget, unplacedOperand(source.path, where));
 				if (candidate === null || isWrittenFirst(candidate, scan.written) || !regularFile(candidate)) continue;
 				const branch: ScriptScan = { ...scan, written: copyWrittenPaths(scan.written) };
 				// `source` runs in this shell; `bash`, `sh` and `exec` start a child that changes nothing here.
