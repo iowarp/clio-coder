@@ -397,7 +397,9 @@ async function runExport(operands: string[], json: boolean): Promise<number> {
 	if (check === null || out === null || operands.length > 0)
 		return usageError(
 			["export"],
-			operands[0] !== undefined ? unexpected(operands[0]) : "usage: clio-coder claims export [--check <id>] [--out <file>]",
+			operands[0] !== undefined
+				? unexpected(operands[0])
+				: "usage: clio-coder claims export [--check <id>] [--out <file>]",
 			json,
 		);
 	const bundle = exportClaims(claimsProjectRoot(process.cwd()), check !== undefined ? { check } : {});

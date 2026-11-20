@@ -844,6 +844,7 @@ async function executeStore(sub: string, args: ParsedArgs, cwd: string, signal: 
 		case "backend":
 			return storeBackendCommand(cwd, first, args);
 		default:
+			if (sub === "") throw new UsageError("name a subcommand");
 			throw new UsageError(`unknown store command '${sub}'`);
 	}
 }

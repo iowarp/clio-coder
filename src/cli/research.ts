@@ -21,8 +21,8 @@ import {
 	summarizeCampaign,
 } from "../domains/research/index.js";
 import { printError } from "./argv.js";
-import { writeCliFailure } from "./kit/json-out.js";
 import { containedYoloRefusal } from "./contained-yolo-gate.js";
+import { writeCliFailure } from "./kit/json-out.js";
 import { installStopSignals, type StopSignals } from "./stop-signals.js";
 
 const HELP = `Usage:
@@ -122,6 +122,23 @@ interface StartFlags {
 	keep: boolean;
 }
 
+const START_VALUE_FLAGS = new Set([
+	"--check",
+	"--metric",
+	"--direction",
+	"--goal",
+	"--scope",
+	"--gate",
+	"--target",
+	"--model",
+	"--autonomy",
+	"--max-iterations",
+	"--trials",
+	"--min-improvement",
+	"--max-wall-minutes",
+	"--max-cost-usd",
+]);
+
 function parseStart(args: ReadonlyArray<string>): StartFlags | string {
 	const flags: StartFlags = {
 		minImprovement: RESEARCH_DEFAULT_MIN_IMPROVEMENT,
@@ -145,6 +162,7 @@ function parseStart(args: ReadonlyArray<string>): StartFlags | string {
 		else if (arg === "--allow-noisy") flags.allowNoisy = true;
 		else if (arg === "--keep") flags.keep = true;
 		else if (arg.startsWith("--")) {
+			if (!START_VALUE_FLAGS.has(arg)) return `unknown flag: ${arg}`;
 			const value = args[index + 1];
 			if (value === undefined || value.startsWith("--")) return `${arg} needs a value`;
 			index += 1;
@@ -415,11 +433,7 @@ export async function runResearchCommand(args: string[]): Promise<number> {
 	}
 	if (action === "status" || action === "report") {
 		if (operands.length > 1 || (action === "report" && operands.length === 0))
-			return usageError(
-				[action],
-				`name ${action === "report" ? "one campaign id" : "at most one campaign id"}`,
-				json,
-			);
+			return usageError([action], `name ${action === "report" ? "one campaign id" : "at most one campaign id"}`, json);
 		let id = operands[0];
 		if (id === undefined) {
 			const views = listCampaigns(project).filter((view) => !("error" in view));
