@@ -916,7 +916,9 @@ export class ClioEditor extends Editor {
 		const contentWidth = Math.max(1, width - gutter * 2);
 		const adaptive = entry.adaptive === true;
 		const grows = adaptive || entry.frame.dockWantsGrowth?.() === true;
-		const bodyRows = grows ? dockGrowthRows(this.dockHost) : dockBodyRows(this.dockHost);
+		// An adaptive surface waiting on the operator's answer (the interview) may fill the screen, so its question reads whole.
+		const fill = adaptive && entry.frame.dockAwaitingInput?.() === true;
+		const bodyRows = grows ? dockGrowthRows(this.dockHost, fill) : dockBodyRows(this.dockHost);
 		// The body learns the rail's room first, so a list can draw in its own
 		// rows every key the rail below will have to drop. The rail is the keys'
 		// alone: thinking and context describe the composer, which is not open (F07).
@@ -929,7 +931,7 @@ export class ClioEditor extends Editor {
 		while (used > 1 && stripTerminalSequences(body[used - 1] ?? "").trim() === "") used -= 1;
 		entry.rowsUsed = Math.max(entry.rowsUsed ?? 0, used);
 		// A body that stops asking to grow returns to the shared height, so the slice is also capped at what it was given.
-		body = body.slice(0, adaptive ? dockAdaptiveRows(this.dockHost, used) : Math.min(entry.rowsUsed, bodyRows));
+		body = body.slice(0, adaptive ? dockAdaptiveRows(this.dockHost, used, fill) : Math.min(entry.rowsUsed, bodyRows));
 		const pad = " ".repeat(gutter);
 		// A title that can shorten itself is told the rail's room, the way an approval's title is.
 		const plainTitle = entry.frame.dockTitle({ room, actor: "" });

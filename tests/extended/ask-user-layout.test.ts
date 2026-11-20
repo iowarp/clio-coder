@@ -3,6 +3,7 @@ import { getEventListeners } from "node:events";
 import { test } from "node:test";
 import type { TUI } from "../../src/engine/tui.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
+import { dockGrowthRows } from "../../src/interactive/dock.js";
 import { createOverlayAskUserLifecycle } from "../../src/interactive/overlay-ask-user-lifecycle.js";
 import { createOverlayTransitions } from "../../src/interactive/overlay-transitions.js";
 import {
@@ -10,6 +11,7 @@ import {
 	formatAskUserQuestion,
 	optionAsksForText,
 } from "../../src/interactive/overlays/ask-user.js";
+import { GLYPH } from "../../src/interactive/theme/index.js";
 import type { UnattendedTimers } from "../../src/interactive/unattended-countdown.js";
 import type { AskUserQuestion, AskUserResult } from "../../src/tools/ask-user.js";
 import { createHarnessHold } from "../../src/tools/registry.js";
@@ -495,6 +497,80 @@ test("an unanswered round shows its countdown and closes as timed out; any key h
 	doesNotMatch(plain(waits.render(100)).join("\n"), /No answer in/, "a round with no window waits as before");
 	waits.handleInput(ENTER);
 	deepStrictEqual((await waitsPending).answers[0]?.options, ["Merge"]);
+});
+
+test("a pending interview fills a quarter-screen pane, reads its question first, pages by the visible height and settles whether it scrolls", () => {
+	const quarter = { terminal: { rows: 45 } };
+	strictEqual(dockGrowthRows(quarter), 22, "an ordinary adaptive surface stops at half the pane");
+	strictEqual(
+		dockGrowthRows(quarter, true),
+		38,
+		"a decision takes every row the rails, footer and transcript sliver leave",
+	);
+	const pane = { terminal: { rows: 30 } };
+	strictEqual(dockGrowthRows(pane, true), 23);
+	const clock = manualTimers();
+	const view = createAskUserViewForTesting({ rows: dockGrowthRows(pane, true) + 4 });
+	const lines = Array.from({ length: 30 }, (_, index) => `Fact ${index + 1} the options depend on.`);
+	void view.ask(
+		[
+			{
+				question: lines.join("\n"),
+				options: [{ label: "Adapter only (Recommended)", description: "One file." }, { label: "Adapter and transport" }],
+			},
+		],
+		undefined,
+		{ unattended: { windowMs: 270_000, timers: clock.timers } },
+	);
+	const first = plain(view.render(innerWidth(64)));
+	strictEqual(first.length, 23);
+	match(first.join("\n"), /No answer in 4:30/, "the timer row stays");
+	ok(
+		first.some((row) => row.includes("Adapter and transport")),
+		"every option stays listed",
+	);
+	const shown = first.filter((row) => row.startsWith("Fact ")).length;
+	ok(shown >= 12, `the question keeps two thirds of the free rows, not three: ${shown}`);
+	view.handleInput(PAGE_DOWN);
+	const paged = plain(view.render(innerWidth(64)));
+	// The countdown held on the key and gave its row back, so the page is the region the operator was reading.
+	ok(
+		paged.some((row) => row.startsWith(`${GLYPH.up} ${shown} more`)),
+		`one PgDn moves a whole page: ${paged.join("|")}`,
+	);
+	ok(paged.some((row) => row.startsWith(`Fact ${shown + 1} `)));
+
+	// The layout settles whether the question overflows: the legend is drawn for the state the rail is drawn from, and
+	// two frames agree. Blank option spacing no longer costs a question its rows, and a windowed list whose scroll-key
+	// legend row frees enough rows for the question holds the scroll rather than flipping back.
+	const keys = (text: string): string[] => text.match(/\[[^\]]+\]/g) ?? [];
+	const settles = (rows: number, lineCount: number, options: NonNullable<AskUserQuestion["options"]>) => {
+		const card = createAskUserViewForTesting({ rows });
+		const facts = Array.from({ length: lineCount }, (_, index) => `Fact ${index + 1} the options depend on.`);
+		void card.ask([{ question: facts.join("\n"), options }]);
+		const frame = card.renderDocked(innerWidth(76), 70);
+		const again = card.renderDocked(innerWidth(76), 70);
+		deepStrictEqual([again.body, again.rail], [frame.body, frame.rail], "the next frame draws the same card");
+		const body = plain(frame.body);
+		const rail = plain([frame.rail])[0] ?? "";
+		deepStrictEqual(
+			keys(body.join(" ")).filter((key) => keys(rail).includes(key)),
+			[],
+			`no key on both the rail and the legend: ${rail} | ${body.join("|")}`,
+		);
+		return { card, body, rail };
+	};
+	const spaced = settles(25, 13, [{ label: "Keep" }, { label: "Drop" }]);
+	strictEqual(spaced.body.filter((row) => row.startsWith("Fact ")).length, 13, "the question reads whole");
+	doesNotMatch(spaced.rail, /PgUp/);
+	const windowed = settles(18, 9, [
+		{ label: "Keep", description: "keeps it" },
+		{ label: "Drop", description: "drops it" },
+	]);
+	match(windowed.rail, /\[PgUp\/PgDn\] scroll/);
+	ok(windowed.body.some((row) => row.startsWith(`${GLYPH.down} 1 more`)));
+	windowed.card.handleInput(PAGE_DOWN);
+	ok(plain(windowed.card.renderDocked(innerWidth(76), 70).body).some((row) => row.startsWith("Fact 9 ")));
 });
 
 test("a round whose recommended option leaves the workspace says the timeout declines it (bt-21)", () => {
