@@ -143,7 +143,7 @@ describe("dispatch schema composition", () => {
 		assert.ok(renderAgentCatalogSectionsFromSpecs([]).stable.startsWith(DISPATCH_JOB_TABLE_TEXT));
 		assert.match(
 			DISPATCH_JOB_TABLE_TEXT,
-			/^Job table[^:]*: inspect: scout; review a diff: reviewer; run checks: verifier; diagnose a failure: debugger; add tests: tester; implement: coder;/u,
+			/^Job table \([^)]*\): inspect=scout; review a diff=reviewer; run checks=verifier; diagnose a failure=debugger; add tests=tester; implement=coder;/u,
 		);
 		// The ruled reviewer: read-only by class, verify required, its verdict in the review gate's shape.
 		const reviewer = discoverAgentRecipes(process.cwd()).find((recipe) => recipe.id === "reviewer");

@@ -402,7 +402,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 						agent: Type.Optional(
 							Type.String({
 								description:
-									"Recipe id for this task: set scout/documenter explicitly in a mixed pipeline; names in task text do not select recipes, and omission inherits the batch recipe, else the job's.",
+									"Recipe id for this task: set scout/documenter explicitly in a mixed pipeline; names in task text do not select recipes, and omission inherits the batch's, else the job's.",
 							}),
 						),
 						budget: Type.Optional(DispatchBudgetSchema),
@@ -499,8 +499,8 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 		agent: Type.Optional(
 			Type.String({
 				description: composition.council
-					? "Recipe or configured ACP peer ID; omitted, resolved from the job (scout for council)."
-					: "Recipe or configured ACP peer ID; omitted, resolved from the job.",
+					? "Recipe or configured ACP peer ID; omitted: the job's (council: scout)."
+					: "Recipe or configured ACP peer ID; omitted: the job's.",
 			}),
 		),
 		context: Type.Optional(WorkerContextSchema),

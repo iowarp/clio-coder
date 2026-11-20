@@ -35,7 +35,7 @@ const DISPATCH_JOBS: ReadonlyArray<DispatchJobRow> = [
 	{ job: "diagnose", label: "diagnose a failure", recipe: "debugger", writes: false },
 	{ job: "add-tests", label: "add tests", recipe: "tester", writes: true },
 	{ job: "implement", label: "implement", recipe: "coder", writes: true },
-	{ job: "docs", label: "write docs", recipe: "documenter", writes: true },
+	{ job: "docs", label: "docs", recipe: "documenter", writes: true },
 	{ job: "research", label: "supplied sources", recipe: "researcher", writes: false },
 	{ job: "open-world", label: "open-world survey", recipe: "world-knowledge", writes: false },
 	{ job: "run-records", label: "run records", recipe: "provenance", writes: false },
@@ -56,6 +56,6 @@ export function dispatchJobWrites(job: DispatchJob): boolean {
 }
 
 /** The table as one line, rendered identically in the list text and the tool description. */
-export const DISPATCH_JOB_TABLE_TEXT = `Job table; an omitted agent resolves from the job: ${DISPATCH_JOBS.map(
-	(row) => `${row.label}: ${row.recipe}`,
+export const DISPATCH_JOB_TABLE_TEXT = `Job table (omitted agent: the job's recipe): ${DISPATCH_JOBS.map(
+	(row) => `${row.label}=${row.recipe}`,
 ).join("; ")}.`;

@@ -141,7 +141,7 @@ import {
 	saveTaskBankSnapshot,
 } from "../domains/memory/task-bank-store.js";
 import { createHistoryReviewActivity, projectTaskMemoryActivity } from "../domains/memory/task-memory-status.js";
-import { type CapabilityMatch, createCapabilityGate } from "../domains/middleware/capability-gate.js";
+import { type CapabilityMatch, capabilityCorpus, createCapabilityGate } from "../domains/middleware/capability-gate.js";
 import {
 	createDetachedDispatchNudgeRegistration,
 	createUnbackedWorkerClaimRegistration,
@@ -1605,10 +1605,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				kind: "capabilities",
 				task,
 				limit: 3,
-				candidates: toolRegistry
-					.listGateway()
-					.filter((spec) => surface.has(spec.name) && surfaceSpecPlacement(spec, surface) === "gateway")
-					.map((spec) => ({ id: spec.name, description: spec.description })),
+				...capabilityCorpus(
+					toolRegistry.listAll().filter((spec) => surface.has(spec.name)),
+					(spec) => surfaceSpecPlacement(spec, surface) === "gateway",
+				),
 			});
 		};
 		const rankReminderSkills = (task: string): ReadonlyArray<CapabilityMatch> => {
