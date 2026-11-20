@@ -2676,6 +2676,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					...stageRoute,
 					settings: { ...settings, context: { ...settings.context, workingSet } },
 					requiredFit: true,
+					summaryFailed: true,
 					structural: true,
 					superseded: false,
 				}).fit;

@@ -66,6 +66,26 @@ export function evictionPressure(input: EvictionPressureInput): { threshold: num
 	return { threshold, target: prefix + ratio * (threshold - prefix) };
 }
 
+/** XR-40: seven main calls was the median interval between overflow evictions on the reseeding route. */
+const EXPECTED_CALLS_BEFORE_NEXT_OVERFLOW = 7;
+
+/**
+ * The greatest projected input worth committing before an overflow summary. Leave a tenth of the physical window
+ * free beyond the admission reserve. On a full reseed, charge the whole retained request as an upper bound on the
+ * prefix rewrite: (before - after) × calls must be strictly greater than after.
+ */
+export function overflowEvictionInputLimit(input: {
+	window: number;
+	reserve: number;
+	tokens: number;
+	fullReseed: boolean;
+}): number {
+	const headroomLimit = input.window - input.reserve - Math.ceil(input.window / 10);
+	if (!input.fullReseed) return headroomLimit;
+	const calls = EXPECTED_CALLS_BEFORE_NEXT_OVERFLOW;
+	return Math.min(headroomLimit, Math.ceil((input.tokens * calls) / (calls + 1)) - 1);
+}
+
 export interface FitOutputReserveInput {
 	/** The route's real context window; zero or less when it reports none. */
 	window: number;

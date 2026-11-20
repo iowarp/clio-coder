@@ -6,6 +6,7 @@ import { afterEach, beforeEach, it } from "node:test";
 import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { ContextFoldPayload } from "../../src/core/telemetry/live-events.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioStateDir, resolveClioDirs } from "../../src/core/xdg.js";
 import type { BudgetInspection } from "../../src/domains/context/budget/inspection.js";
@@ -273,6 +274,10 @@ function harness(
 			},
 		});
 	const events: ChatLoopEvent[] = [];
+	const folds: ContextFoldPayload[] = [];
+	context.bus.subscribe("context.fold", (fold) => {
+		folds.push(fold);
+	});
 	const piCounts: number[] = [];
 	const published: Array<number | null> = [];
 	let publishedInput: () => number | null = () => null;
@@ -349,6 +354,7 @@ function harness(
 		close,
 		piCounts,
 		published,
+		folds,
 		summaries: () => summaries,
 		settledTurns,
 	};
@@ -388,7 +394,7 @@ function assertAdmitted(
 }
 
 /**
- * S1 and then the one requireFit summary clear the manual's overflow (no protected read is cut, maintainer ruling),
+ * One requireFit summary clears the manual's overflow without cutting a protected read,
  * and the request after it carries the manual in full.
  */
 function assertSummaryFit(live: ReturnType<typeof harness>, wire: ReturnType<typeof transport>): void {
@@ -409,7 +415,18 @@ it("drv-cf3a D-A: an overflow fit admits the next request on the figure it fitte
 		await live.loop.submit(A1_ASK);
 		await live.loop.whenSettled();
 		deepStrictEqual(refusals(live.notices()), [], "no refusal and no retry");
-		ok(live.notices().some((text) => /working set: \d+ items evicted/.test(text)));
+		deepStrictEqual(
+			live.folds
+				.filter((fold) => fold.checkpoint === "overflow")
+				.map((fold) => fold.stages.map(({ stage, outcome, reason }) => [stage, outcome, reason])),
+			[
+				[
+					["working_set", "held", "no_gain"],
+					["llm_summary", "committed", "summarized"],
+				],
+			],
+			"a low-yield plan writes no eviction and the same overflow checkpoint commits a summary",
+		);
 		assertSummaryFit(live, wire);
 		strictEqual(wire.requests.length, READS.length + 1);
 		assertAdmitted(wire, live.piCounts, live.published);
