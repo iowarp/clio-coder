@@ -11,6 +11,7 @@ import type { TelemetryCall } from "../core/telemetry/producer.js";
 import { beginCall, telemetryCaptures } from "../core/telemetry/producer.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
+import { ToolNames } from "../core/tool-names.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { endpointCapacityHolders } from "../domains/dispatch/index.js";
 import { observationTracing, traceObservation } from "../domains/memory/observation-events.js";
@@ -87,7 +88,7 @@ import {
 } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, CodexConfiguration, EngineModel, Usage } from "../engine/types.js";
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
-import { effectiveToolCall } from "../tools/surface.js";
+import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 import type { ChatNoticeEvent } from "./chat-loop.js";
 import {
 	type AssistantCallTiming,
@@ -412,6 +413,20 @@ export interface TurnRuntime {
 	toolTelemetry: ToolTelemetry;
 	/** The journaled main calls whose lease was taken for this user turn, in settle order (#434). */
 	takeSettledCalls(userTurnId: string): CallSettled[];
+}
+
+function isCollectedBatchResult(toolName: string, result: unknown): boolean {
+	const details = (result as { details?: unknown } | undefined)?.details as
+		| { mode?: unknown; batchId?: unknown; complete?: unknown; collected?: unknown }
+		| undefined;
+	return (
+		effectiveToolCall(toolName, undefined, details).toolName === ToolNames.Monitor &&
+		details?.mode === "collect" &&
+		typeof details.batchId === "string" &&
+		details.batchId.length > 0 &&
+		details.complete === true &&
+		details.collected === true
+	);
 }
 
 export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
@@ -1774,6 +1789,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			state.toolMarkupReprompt = rebaseToolMarkupReprompt(state.toolMarkupReprompt);
 			state.turnToolNames = [];
 			state.turnCallsDone = [];
+			state.turnCollectedDetachedBatch = false;
 			middlewareToolChoice.reset();
 			let block: string | null = null;
 			try {
@@ -1877,6 +1893,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const callLabel = startedCallLabels.get(event.toolCallId);
 				startedCallLabels.delete(event.toolCallId);
 				if (callLabel !== undefined && !notRun && !event.isError) state.turnCallsDone.push(callLabel);
+				if (
+					(!event.isError && isCollectedBatchResult(event.toolName, event.result)) ||
+					gatewayChainReceipts(event.toolName, event.result).some(
+						(step) => step.admission.outcome === "ok" && isCollectedBatchResult(step.capability, step.result),
+					)
+				)
+					state.turnCollectedDetachedBatch = true;
 				// The registry's own span is the one that means "how long the tool
 				// took": the engine's start-to-end frame also covers the operator,
 				// because a call awaiting a permission decision is parked between

@@ -4,6 +4,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { factKnownValue } from "../../src/core/telemetry/known.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
+import { createUnbackedWorkerClaimRegistration } from "../../src/domains/middleware/dispatch-nudge.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
@@ -203,6 +204,106 @@ for (const continuation of [false, true])
 			}
 		},
 	);
+
+it("the worker honesty rail exempts detached collection but still warns on ordinary turns", async () => {
+	const scratch = await isolateClioEnv("clio-coder-collection-rail-");
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.prewarm = false;
+	const context = dispatchStubContext({ settings });
+	const target = settings.targets[0];
+	ok(target);
+	settings.chat.target = target.id;
+	settings.chat.model = target.defaultModel ?? "gpt-4o";
+	let source: "injected" | "monitor" | "pending" | "ordinary" = "injected";
+	const warnings: string[] = [];
+	const loop = createChatLoop({
+		getSettings: () => settings,
+		providers: context.getContract("providers") as ProvidersContract,
+		knownTargets: () => new Set([target.id]),
+		middleware: createMiddlewareBundle({ registrations: [createUnbackedWorkerClaimRegistration()] }).contract,
+		turnControl: {
+			async run({ userTurnId }) {
+				const block = source === "injected" ? "[Collected]\nThe scout found the fixture." : null;
+				return {
+					block,
+					record: {
+						version: 1,
+						turnId: userTurnId,
+						factsDigest: "fixture",
+						decision:
+							block === null ? { kind: "none", reason: "nothing-finished" } : { kind: "collect", batchIds: ["fixture"] },
+						decisionHash: "fixture",
+						executed: block === null ? null : { runIds: ["scout"], blockChars: block.length, durationMs: 1 },
+					},
+				};
+			},
+		},
+		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
+			let listener: (event: AgentEvent) => unknown = () => {};
+			const state = { ...options?.initialState, messages: [] as AgentMessage[] };
+			return {
+				requestCorrelationId: () => undefined,
+				agent: {
+					state,
+					subscribe: (next: typeof listener) => {
+						listener = next;
+						return () => {};
+					},
+					abort() {},
+					async prompt() {
+						state.tools = [{ name: "dispatch" }] as NonNullable<typeof state.tools>;
+						await listener({ type: "agent_start" });
+						await listener({ type: "turn_start" });
+						if (source === "monitor" || source === "pending") {
+							const args = { op: "call", capability: "monitor", args: { mode: "collect", batch_id: "fixture" } };
+							await listener({ type: "tool_execution_start", toolName: "gateway", toolCallId: "collect", args });
+							await listener({
+								type: "tool_execution_end",
+								toolName: "gateway",
+								toolCallId: "collect",
+								isError: false,
+								result: {
+									content: [],
+									details: {
+										capability: "monitor",
+										mode: "collect",
+										batchId: "fixture",
+										complete: source === "monitor",
+										collected: source === "monitor",
+									},
+								},
+							});
+						}
+						const message = {
+							role: "assistant",
+							content: [{ type: "text", text: "The scout found the fixture." }],
+							stopReason: "stop",
+							timestamp: Date.now(),
+						} as AgentMessage;
+						state.messages.push(message);
+						await listener({ type: "message_end", message });
+						await listener({ type: "agent_end", messages: [message] });
+					},
+				},
+			};
+		}) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+	});
+	loop.onEvent((event) => {
+		if (event.type === "notice" && event.text.includes("No dispatch ran this turn")) warnings.push(event.text);
+	});
+	try {
+		for (const mode of ["injected", "monitor", "pending", "ordinary"] as const) {
+			source = mode;
+			warnings.length = 0;
+			await loop.submit("Summarize the fixture.");
+			strictEqual(warnings.length, mode === "pending" || mode === "ordinary" ? 1 : 0, mode);
+		}
+	} finally {
+		loop.dispose();
+		await loop.whenSettled();
+		scratch.restore();
+	}
+});
 
 interface CancelledRun {
 	entries: SessionEntry[];

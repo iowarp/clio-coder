@@ -525,6 +525,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				turnToolCalls: state.turnToolCalls,
 				turnToolNames: state.turnToolNames.join(","),
 				sharedWorkerNote: state.turnSharedWorkerNote,
+				collectedDetachedBatch: state.turnCollectedDetachedBatch,
 				turnMode: state.currentTurnConstraints?.mode ?? "",
 				toolsLocked: state.synthesisToolLock || state.toolBudgetLock,
 				...turnOriginMetadata(state.currentTurnOrigin),
