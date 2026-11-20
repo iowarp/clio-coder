@@ -13,7 +13,12 @@ export interface InitialMessageResult {
 	remainingMessages: string[];
 }
 
-export async function readPipedStdin(hasPromptSource = false): Promise<string | undefined> {
+/**
+ * Reads a non-TTY stdin. `explicit` is a bare `-` on the command line: the caller asked for stdin, so the read
+ * waits for its end. Without it, a prompt source beside an open pipe that sends nothing gives up after 2 s, and
+ * bytes that do arrive are still used (0.8.x) with a note that `-` is the spelling that will keep them.
+ */
+export async function readPipedStdin(hasPromptSource = false, explicit = false): Promise<string | undefined> {
 	if (process.stdin.isTTY || process.stdin.readableEnded || process.stdin.destroyed) return undefined;
 	return new Promise((resolve, reject) => {
 		const chunks: Buffer[] = [];
@@ -31,19 +36,25 @@ export async function readPipedStdin(hasPromptSource = false): Promise<string | 
 		};
 		const onEnd = (): void => {
 			cleanup();
+			if (chunks.length > 0 && hasPromptSource && !explicit) {
+				process.stderr.write(
+					"clio-coder run: reading stdin beside a prompt without `-` is deprecated; pass `-` to include it\n",
+				);
+			}
 			resolve(chunks.length > 0 ? Buffer.concat(chunks).toString("utf8") : undefined);
 		};
 		const onError = (error: Error): void => {
 			cleanup();
 			reject(error);
 		};
-		const firstByteTimeout = hasPromptSource
-			? setTimeout(() => {
-					cleanup();
-					process.stderr.write("clio-coder run: no data on stdin after 2s; ignoring it (redirect </dev/null to skip)\n");
-					resolve(undefined);
-				}, 2000)
-			: undefined;
+		const firstByteTimeout =
+			hasPromptSource && !explicit
+				? setTimeout(() => {
+						cleanup();
+						process.stderr.write("clio-coder run: no data on stdin after 2s; ignoring it (redirect </dev/null to skip)\n");
+						resolve(undefined);
+					}, 2000)
+				: undefined;
 		process.stdin.on("data", onData);
 		process.stdin.once("end", onEnd);
 		process.stdin.once("error", onError);

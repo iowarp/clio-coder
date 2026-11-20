@@ -17,11 +17,31 @@ try {
  * an unhandled EPIPE stack trace. Without a listener the same error would crash the process anyway, so this
  * changes only how it ends. `acp` and `worker` own their stdout errors; `run` handles them in `runClioRun`
  * (`handleRunStdoutErrors`), which cancels the turn and settles the session before exiting the same way.
+ * `fleet run` alone among the fleet leaves guards its own pipe (`createFleetReporter`) so it can seal the run.
  */
-const OWNS_STDOUT_ERRORS: ReadonlySet<string> = new Set(["acp", "worker", "run"]);
+function ownsStdoutErrors(command: string, subArgs: ReadonlyArray<string>): boolean {
+	if (command === "acp" || command === "worker" || command === "run") return true;
+	return command === "fleet" && subArgs.find((arg) => !arg.startsWith("-")) === "run";
+}
 
-function installHumanStdoutHandler(command: string): void {
-	if (OWNS_STDOUT_ERRORS.has(command)) return;
+/**
+ * The run output format from a lexical argv scan, read before any parser loads: a v1 `--json`/`--json-events`
+ * or a v2 `--output-format json|stream-json` makes the run's failures JSON documents, so their usage errors stay
+ * with run.js. Words after `--` are task text.
+ */
+function runWantsJsonOutput(args: ReadonlyArray<string>): boolean {
+	for (let i = 0; i < args.length; i += 1) {
+		const arg = args[i] ?? "";
+		if (arg === "--") return false;
+		if (arg === "--json" || arg === "--json-events" || arg.startsWith("--json-events=")) return true;
+		const format = arg === "--output-format" ? args[i + 1] : arg.startsWith("--output-format=") ? arg.slice(16) : null;
+		if (format === "json" || format === "stream-json") return true;
+	}
+	return false;
+}
+
+function installHumanStdoutHandler(command: string, subArgs: ReadonlyArray<string>): void {
+	if (ownsStdoutErrors(command, subArgs)) return;
 	process.stdout.on("error", (error: NodeJS.ErrnoException) => {
 		if (error.code === "EPIPE") process.exit(141);
 		throw error;
@@ -438,8 +458,20 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	[
 		"run",
 		async (subArgs, bootOptions) => {
-			const help = (await import("./run-help.js")).answerRunHelp(subArgs);
+			const runHelp = await import("./run-help.js");
+			const help = runHelp.answerRunHelp(subArgs);
 			if (help !== null) return help;
+			if (!runWantsJsonOutput(subArgs)) {
+				// Text mode refuses usage errors here, from the light parser, before run.js and its graph load.
+				// JSON modes go on to run.js, whose writer frames the same refusal as a result document.
+				const { parseRunCliArgs } = await import("./args.js");
+				const { diagnostics } = parseRunCliArgs(subArgs);
+				if (diagnostics.some((diagnostic) => diagnostic.type === "error")) {
+					for (const diagnostic of diagnostics) process.stderr.write(`clio-coder run: ${diagnostic.message}\n`);
+					process.stderr.write(runHelp.RUN_USAGE);
+					return 2;
+				}
+			}
 			await enableBootCompileCache(subArgs);
 			return (await import("./run.js")).runClioRun(subArgs, bootOptions);
 		},
@@ -503,7 +535,7 @@ function isCommandToken(token: string): boolean {
 async function dispatch(subcommand: string, subArgs: string[], bootOptions: CliBootOptions): Promise<number> {
 	const handler = COMMAND_HANDLERS.get(subcommand);
 	if (handler) {
-		installHumanStdoutHandler(subcommand);
+		installHumanStdoutHandler(subcommand, subArgs);
 		try {
 			return await handler(subArgs, bootOptions);
 		} catch (err) {
@@ -513,7 +545,13 @@ async function dispatch(subcommand: string, subArgs: string[], bootOptions: CliB
 			return 1;
 		}
 	}
-	printError(`unknown subcommand: ${subcommand}`);
+	// Task text where a command belongs (`clio-coder "fix the bug"`) is the common bare-text mistake.
+	const bareText = /\s/.test(subcommand.trim());
+	printError(
+		bareText
+			? `unknown subcommand: ${subcommand}; for one headless task use clio-coder run "<task>"`
+			: `unknown subcommand: ${subcommand}`,
+	);
 	// The usage that explains a rejection belongs with the rejection on stderr.
 	// Writing it to stdout meant a mistyped command still produced a full page on
 	// the stream the caller was capturing for output, next to an error on the one
