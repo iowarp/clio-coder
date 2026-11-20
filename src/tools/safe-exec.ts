@@ -35,6 +35,10 @@ function cwdArg(args: Record<string, unknown>): string | undefined {
 	return typeof args.cwd === "string" && args.cwd.length > 0 ? args.cwd : undefined;
 }
 
+function formatTimeoutSeconds(timeoutMs: number): string {
+	return `${Number((timeoutMs / 1000).toFixed(3))} s`;
+}
+
 export function maxOutputArg(args: Record<string, unknown>): number {
 	return typeof args.max_output_bytes === "number" && args.max_output_bytes > 0
 		? Math.floor(args.max_output_bytes)
@@ -102,8 +106,15 @@ export async function runVectorTool(
 		const details = resultDetails(result);
 		if (result.aborted) return { kind: "error", message: `${action}: aborted`, details };
 		if (result.timedOut) {
-			const status = `${action}: timed out after ${timeoutMs}ms`;
-			return { kind: "error", message: output.trim().length > 0 ? `${status}\n\n${output.trim()}` : status, details };
+			const status =
+				action === "verify"
+					? `${action}: timed out after ${formatTimeoutSeconds(timeoutMs)}`
+					: `${action}: timed out after ${timeoutMs}ms`;
+			return {
+				kind: "error",
+				message: output.trim().length > 0 ? `${status}\n\n${output.trim()}` : status,
+				details: { ...details, timeoutMs },
+			};
 		}
 		if (result.outputCapped)
 			return {

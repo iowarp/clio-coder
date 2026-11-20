@@ -609,13 +609,26 @@ export function parseProjectVerifierCatalogText(
 	return { ok: true, source: { ...sourceRef, checks } };
 }
 
+/** Default deadline for build checks: 300 s instead of safe-exec's 120 s global default (CLI-P28). */
+const VERIFY_BUILD_DEFAULT_TIMEOUT_MS = 300_000;
+
+function isBuildVerifyCheck(id: string, command?: readonly string[]): boolean {
+	if (id === "build" || id.startsWith("build:") || id.startsWith("build-")) return true;
+	if (command === undefined) return false;
+	return command.some((token) => token === "build" || token === "--build" || token.startsWith("build:"));
+}
+
+export function defaultVerifyTimeoutMs(id: string, command?: readonly string[]): number {
+	return isBuildVerifyCheck(id, command) ? VERIFY_BUILD_DEFAULT_TIMEOUT_MS : SAFE_EXEC_DEFAULT_TIMEOUT_MS;
+}
+
 export function packageDeclaredCheck(id: string, packagePath: string, cwd: string, tags: string[]): DeclaredCheck {
 	return {
 		id,
 		description: `Run package.json script '${id}'.`,
 		command: ["npm", "run", id],
 		cwd,
-		timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
+		timeoutMs: defaultVerifyTimeoutMs(id),
 		tags,
 		source: { kind: "package.json", path: packagePath },
 		kind: "command",

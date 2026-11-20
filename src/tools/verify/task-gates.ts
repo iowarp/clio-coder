@@ -1,6 +1,6 @@
 import { SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES, SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../core/safe-exec.js";
 import { shellLikeArgv } from "../../core/shell-argv.js";
-import type { DeclaredCheck } from "./catalog.js";
+import { type DeclaredCheck, defaultVerifyTimeoutMs } from "./catalog.js";
 
 /**
  * Gate commands a verifier's dispatched task names, run through verify. A
@@ -219,7 +219,7 @@ export function taskGateCheck(gate: TaskGate): DeclaredCheck {
 		description: `declared by the dispatched task: ${gate.text}`,
 		command: [...gate.command],
 		cwd: ".",
-		timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
+		timeoutMs: defaultVerifyTimeoutMs(gate.id, gate.command),
 		tags: ["task"],
 		source: { kind: "task", path: "dispatched task" },
 		kind: "command",
@@ -231,11 +231,14 @@ export function taskGateCheck(gate: TaskGate): DeclaredCheck {
  * the gate ceiling), while max_output_bytes bounds only the returned text and
  * leaves the child under SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES.
  */
-export function taskGateBounds(args: Record<string, unknown>): { timeout_ms: number; max_output_bytes: number } {
+export function taskGateBounds(
+	args: Record<string, unknown>,
+	defaultTimeoutMs = SAFE_EXEC_DEFAULT_TIMEOUT_MS,
+): { timeout_ms: number; max_output_bytes: number } {
 	const timeout =
 		typeof args.timeout_ms === "number" && args.timeout_ms > 0
 			? Math.min(Math.floor(args.timeout_ms), TASK_GATE_MAX_TIMEOUT_MS)
-			: SAFE_EXEC_DEFAULT_TIMEOUT_MS;
+			: defaultTimeoutMs;
 	const output =
 		typeof args.max_output_bytes === "number" && args.max_output_bytes > 0
 			? Math.min(Math.floor(args.max_output_bytes), SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES)

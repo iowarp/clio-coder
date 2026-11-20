@@ -307,16 +307,25 @@ function optionalCompactMs(durationMs: number | undefined): string | null {
 const COMMAND_STATUS_LINE =
 	/^(?:bash: command failed \(exit (?<exit>[^)]+)\)(?:: (?<message>.+))?|Command exited with code (?<code>[0-9?]+)|bash: command (?<timeout>timed out) after \d+ms|bash: this command ran past its own .+ (?<newTimeout>timeout) and was stopped\..*|bash: command (?<aborted>aborted)(?: after \d+s of its \S+ time limit\. The host ended the run(?:: (?<cause>.+)| and recorded no cause\.))?)$/u;
 
+const VERIFY_TIMEOUT_LINE =
+	/^verify: (?:run \d+\/\d+: )?timed out after (?:(?<seconds>\d+(?:\.\d+)?) s|(?<ms>\d+)ms)$/u;
+
 interface CommandStatus {
 	/** Index of the status line in the result text's lines. */
 	index: number;
 	exit: string | null;
 	timedOut: boolean;
+	/** Explicit timeout wording from a verify timeout line (`<N> s`), when present. */
+	timeoutSeconds: string | null;
 	aborted: boolean;
 	/** Text the status line carried beyond the status itself. */
 	message: string | null;
 	/** Why the run ended under an aborted command, as the host recorded it. */
 	cause: string | null;
+}
+
+function formatVerifyTimeoutSeconds(timeoutMs: number): string {
+	return `${Number((timeoutMs / 1000).toFixed(3))} s`;
 }
 
 function commandStatusLine(result: unknown): CommandStatus | null {
@@ -327,17 +336,39 @@ function commandStatusLine(result: unknown): CommandStatus | null {
 		const line = (lines[index] ?? "").trim();
 		if (line.length === 0) continue;
 		const match = COMMAND_STATUS_LINE.exec(line);
-		if (match?.groups === undefined) return null;
+		if (match?.groups === undefined) break;
 		const exit = match.groups.exit ?? match.groups.code ?? null;
 		const message = match.groups.message ?? null;
 		return {
 			index,
 			exit,
 			timedOut: match.groups.timeout !== undefined || match.groups.newTimeout !== undefined,
+			timeoutSeconds: null,
 			aborted: match.groups.aborted !== undefined,
 			// `command exited with code 3` after `(exit 3)` restates the row's own fact, so it is no diagnosis.
 			message: message !== null && message.trim().toLowerCase() === `command exited with code ${exit}` ? null : message,
 			cause: match.groups.cause ?? null,
+		};
+	}
+	for (let index = 0; index < lines.length; index += 1) {
+		const line = (lines[index] ?? "").trim();
+		if (line.length === 0) continue;
+		const match = VERIFY_TIMEOUT_LINE.exec(line);
+		if (match?.groups === undefined) return null;
+		const timeoutSeconds =
+			match.groups.seconds !== undefined
+				? `${match.groups.seconds} s`
+				: match.groups.ms !== undefined
+					? formatVerifyTimeoutSeconds(Number(match.groups.ms))
+					: null;
+		return {
+			index,
+			exit: null,
+			timedOut: true,
+			timeoutSeconds,
+			aborted: false,
+			message: null,
+			cause: null,
 		};
 	}
 	return null;
@@ -350,7 +381,12 @@ function withoutCommandStatus(result: unknown): unknown {
 	if (status === null || typeof text !== "string") return result;
 	const lines = text.split("\n");
 	if (status.message !== null) lines[status.index] = status.message;
-	else lines.splice(status.index, 1);
+	else {
+		lines.splice(status.index, 1);
+		if (status.index === 0) {
+			while (lines[0] !== undefined && lines[0].trim().length === 0) lines.shift();
+		}
+	}
 	return lines.join("\n").replace(/\n+$/u, "");
 }
 
@@ -779,7 +815,24 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
 		const status = row.spec.class === "execute" && finished.isError ? commandStatusLine(finished.result) : null;
 		if (details?.timedOut === true || status?.timedOut === true) {
 			// The row does not state a timeout the command stayed under; one it hit is the fact.
-			const limit = typeof row.args.timeout_ms === "number" ? optionalCompactMs(row.args.timeout_ms) : null;
+			let limit: string | null;
+			if (row.toolName === "verify") {
+				if (status?.timeoutSeconds !== null && status?.timeoutSeconds !== undefined) {
+					limit = status.timeoutSeconds;
+				} else {
+					const ms =
+						typeof details?.timeoutMs === "number" && details.timeoutMs > 0
+							? details.timeoutMs
+							: typeof details?.declaredTimeoutMs === "number" && details.declaredTimeoutMs > 0
+								? details.declaredTimeoutMs
+								: typeof row.args.timeout_ms === "number" && row.args.timeout_ms > 0
+									? row.args.timeout_ms
+									: null;
+					limit = ms === null ? null : formatVerifyTimeoutSeconds(ms);
+				}
+			} else {
+				limit = typeof row.args.timeout_ms === "number" ? optionalCompactMs(row.args.timeout_ms) : null;
+			}
 			parts.push(limit === null ? "timed out" : `timed out after ${limit}`);
 		}
 		if (status?.aborted === true) parts.push(abortedFact(status.cause, details));
