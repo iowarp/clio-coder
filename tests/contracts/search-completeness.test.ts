@@ -130,8 +130,18 @@ test("rg distinguishes complete empty searches, skipped-only searches, and inval
 	result = await grepTool.run({ path: root, pattern: "needle" });
 	assert.equal(search(result).reason, "errors");
 	assert.doesNotMatch(ok(result).output, /No matches found/);
-	binary("rg", "console.error('regex parse error: unclosed group'); process.exitCode=2;");
-	assert.equal((await grepTool.run({ path: root, pattern: "(" })).kind, "error");
+	binary(
+		"rg",
+		`console.error(${JSON.stringify(`${root}/secret: Permission denied (os error 13)`)}); console.error('regex parse error: unclosed group'); process.exitCode=2;`,
+	);
+	const rejected = await grepTool.run({ path: root, pattern: "(" });
+	assert.equal(rejected.kind, "error");
+	// TL-1: rg's own reason reaches the error, a path diagnostic does not.
+	assert.match(
+		rejected.kind === "error" ? rejected.message : "",
+		/exit code 2\)[\s\S]*regex parse error: unclosed group/,
+	);
+	assert.doesNotMatch(rejected.kind === "error" ? rejected.message : "", /secret/);
 });
 
 test("native searches retain matches on timeout and name the shown count", { timeout: 5_000 }, async () => {

@@ -132,12 +132,33 @@ function searchDiagnosticPath(line: string): string | null {
 	return match?.[1] ?? null;
 }
 
+/** Bounds on the stderr a rejected search quotes back; path diagnostics are never quoted. */
+const REJECTION_DETAIL_MAX_LINES = 12;
+const REJECTION_DETAIL_MAX_CHARS = 1000;
+
 export function createSearchDiagnostics(search: SearchCompleteness, allows: (path: string) => boolean) {
 	let continuation = false;
 	let realError = false;
+	const detail: string[] = [];
+	let detailChars = 0;
+	let detailCut = false;
+	const keepDetail = (line: string): void => {
+		const text = line.replace(/\r$/, "");
+		if (detail.length >= REJECTION_DETAIL_MAX_LINES || detailChars + text.length > REJECTION_DETAIL_MAX_CHARS) {
+			detailCut = true;
+			return;
+		}
+		detail.push(text);
+		detailChars += text.length;
+	};
 	return {
 		get realError() {
 			return realError;
+		},
+		/** The stderr lines not attributed to a skipped path, bounded, for a rejection error; "" when none. */
+		get rejectionDetail(): string {
+			if (detail.length === 0) return "";
+			return `${detail.join("\n")}${detailCut ? "\n[...]" : ""}`;
 		},
 		onLine(line: string, truncated = false): void {
 			if (truncated) {
@@ -155,6 +176,7 @@ export function createSearchDiagnostics(search: SearchCompleteness, allows: (pat
 			}
 			if (continuation && /\(os error \d+\)/.test(line)) return;
 			continuation = false;
+			keepDetail(line);
 			if (
 				/^(?:rg: |\[fd error\]:? )?(?:regex parse error|error parsing (?:glob|regex)|invalid (?:glob|regex)|error:|Usage:)/i.test(
 					line,
@@ -166,6 +188,11 @@ export function createSearchDiagnostics(search: SearchCompleteness, allows: (pat
 			search.reason ??= "errors";
 		},
 	};
+}
+
+/** The searcher's own words after a rejection message, or nothing when it printed none. */
+export function rejectionSuffix(detail: string): string {
+	return detail ? `\nThe searcher reported:\n${detail}` : "";
 }
 
 export function finishSearch(search: SearchCompleteness, result: LineStreamResult): void {
