@@ -1,7 +1,7 @@
 id: __EXTENSION_ID__
 name: __EXTENSION_ID__
 version: 0.1.0
-description: A tool extension for Clio Coder.
+description: A tool extension for CLIO Coder.
 runtime:
   api: 2
   entrypoint: runtime/extension.ts

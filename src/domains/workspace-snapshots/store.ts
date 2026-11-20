@@ -57,9 +57,9 @@ const SNAPSHOT_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 const LOG_FILE = "log.json";
 /** A fixed identity, so a snapshot needs no Git identity from the operator. */
 const SNAPSHOT_IDENTITY: Readonly<Record<string, string>> = {
-	GIT_AUTHOR_NAME: "Clio Coder snapshot",
+	GIT_AUTHOR_NAME: "CLIO Coder snapshot",
 	GIT_AUTHOR_EMAIL: "snapshot@clio-coder.invalid",
-	GIT_COMMITTER_NAME: "Clio Coder snapshot",
+	GIT_COMMITTER_NAME: "CLIO Coder snapshot",
 	GIT_COMMITTER_EMAIL: "snapshot@clio-coder.invalid",
 };
 
@@ -586,7 +586,7 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 		// A private snapshot pins nothing, so every ref the call puts at risk is reported unheld.
 		const heldState = isPrivate ? null : refs.state;
 		const privateNote = isPrivate
-			? "refs not pinned: the repository cannot be written here, so the snapshot is kept in Clio Coder's state"
+			? "refs not pinned: the repository cannot be written here, so the snapshot is kept in CLIO Coder's state"
 			: null;
 		const last = log?.snapshots.at(-1);
 		// The same tree is reused only while it already pins every ref as it
@@ -611,7 +611,7 @@ export function createWorkspaceSnapshots(options: WorkspaceSnapshotsOptions): Wo
 				return taken === null ? max : Math.max(max, Number(taken[1]) + 1);
 			}, 1);
 		const message = [
-			`Clio Coder snapshot ${n} (${request.reason})`,
+			`CLIO Coder snapshot ${n} (${request.reason})`,
 			"",
 			`Session: ${sessionId}`,
 			...(request.tool !== undefined ? [`Tool: ${request.tool}`] : []),
