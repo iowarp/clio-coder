@@ -3,8 +3,10 @@ import { existsSync, renameSync, rmSync, writeFileSync, writeSync } from "node:f
 import path from "node:path";
 import { readClioVersion } from "../core/package-root.js";
 import type { RunResult } from "../domains/dispatch/types.js";
+import { CITATION_CHECK_PREFIX } from "../domains/safety/citation-grounding.js";
 import { redactUrlCredentials } from "../domains/safety/redaction.js";
 import type { ErrorSlug } from "./kit/slugs.js";
+import { ANSWER_SEGMENT_SEPARATOR, replySegment } from "./modes/answer-segments.js";
 import { serializeJsonLine, setFrameProjector } from "./modes/jsonl.js";
 import type {
 	RunJsonDispatchedRunOutcome,
@@ -393,6 +395,8 @@ export interface RunResultV2Request {
 interface SeenFrames {
 	session?: { id?: string; target?: string; model?: string; runId?: string };
 	text: string;
+	/** The replies of the current user turn, in order, which `text` joins (CLI-P43). */
+	replies: string[];
 	runEnd?: RunJsonRunEndFrame;
 	verify?: RunJsonVerifyResult[];
 	live: RunJsonDispatchedRunOutcome[];
@@ -466,8 +470,24 @@ function projectV1Frame(frame: RunJsonFrame, seen: SeenFrames, format: RunResult
 			return rewritten;
 		}
 		case "turn_end": {
+			// Every reply of the user turn, in order, as text mode prints them; narration beside a call replaces as before.
+			const reply = replySegment((frame as { message?: unknown }).message);
+			if (reply !== null) {
+				seen.replies.push(reply);
+				seen.text = seen.replies.join(ANSWER_SEGMENT_SEPARATOR);
+				break;
+			}
 			const text = turnAnswer(frame);
 			if (text !== null) seen.text = text;
+			break;
+		}
+		case "agent_start":
+			seen.replies = [];
+			break;
+		case "notice": {
+			// The reply to a citation check carries the checked answer itself (print.ts), so it starts the replies over.
+			const text = (frame as { text?: unknown }).text;
+			if (typeof text === "string" && text.startsWith(CITATION_CHECK_PREFIX)) seen.replies = [];
 			break;
 		}
 		case "verify":
@@ -590,7 +610,7 @@ export async function withRunResultV2(request: RunResultV2Request, run: () => Pr
 	const state: RunFailureState = { pending: true };
 	const started = Date.now();
 	const startedAt = new Date(started).toISOString();
-	const seen: SeenFrames = { text: "", live: [], undelivered: [] };
+	const seen: SeenFrames = { text: "", replies: [], live: [], undelivered: [] };
 	v2Started = performance.now();
 	v2StreamJson = request.format === "stream-json";
 	toolCallIds = v2StreamJson ? createToolCallIdMinter() : null;

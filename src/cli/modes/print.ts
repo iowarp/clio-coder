@@ -95,6 +95,7 @@ import { toolResultText } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from "../run-answers.js";
+import { ANSWER_SEGMENT_SEPARATOR, replySegment } from "./answer-segments.js";
 
 /** `--on-permission fail` (SPEC 6.4): the approval-required exit a worker's refused ask already uses. */
 const PERMISSION_REQUIRED_EXIT_CODE = 3;
@@ -242,6 +243,8 @@ interface HeadlessMainAgentResult {
 	/** Latest assistant stop, superseded by subsequent continuation messages. */
 	outputExhausted: boolean;
 	text: string;
+	/** The replies of the current user turn, in order: `text` joins them unless narration or an error replaced it. */
+	replies: string[];
 	error: string | null;
 	/**
 	 * True when the most recent tool result ended the turn via
@@ -508,20 +511,25 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 				: { ...current, lastNotice: text, abortReason: text };
 		}
 		if (event.text.startsWith(CITATION_CHECK_PREFIX) && current.text.length > 0) {
-			return { ...current, lastNotice: text, citationCheckedAnswer: current.text };
+			return { ...current, lastNotice: text, citationCheckedAnswer: current.text, replies: [] };
 		}
 		if (event.key === CONTEXT_OVERFLOW_STOP_NOTICE_KEY)
 			return { ...current, lastNotice: text, contextOverflow: "recovery" };
 		return { ...current, lastNotice: text };
 	}
+	// Each run of the loop starts a user turn: the operator's prompt, a redirect, or the schema repair (CLI-P43).
+	if (event.type === "agent_start") return { ...current, replies: [] };
 	if (event.type === "agent_end") {
 		const messages = Array.isArray(event.messages) ? event.messages : [];
 		const ending = classifyTurnEnding(messages);
 		const last = [...messages].reverse().find((message) => message?.role === "assistant");
+		// A round the host forced after a reply (the finish round) that wrote nothing leaves the reply as the answer.
+		const quietAfterReply = ending?.kind === "quiet" && current.replies.length > 0;
 		return {
 			...current,
 			noAnswer: ending?.kind === "no_answer" ? turnNoAnswerSentence(ending) : null,
-			endedQuietly: ending?.kind === "quiet",
+			endedQuietly: ending?.kind === "quiet" && !quietAfterReply,
+			...(quietAfterReply ? { text: current.replies.join(ANSWER_SEGMENT_SEPARATOR) } : {}),
 			// The written calls are stated on stderr, so the printed answer is the prose before them, as the TUI shows it.
 			...(ending?.kind === "call_not_run"
 				? { callsNotRun: turnCallsNotRunSentence(ending), text: proseBeforeWrittenCalls(last, current.text).trimEnd() }
@@ -545,6 +553,12 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 	};
 	const error = assistantError(message);
 	if (error) return { ...current, text: "", error };
+	// A reply joins the turn's earlier replies; text written beside a tool call stays narration, as before (CLI-P43).
+	const reply = replySegment(message);
+	if (reply !== null) {
+		const replies = [...current.replies, reply];
+		return { ...current, replies, text: replies.join(ANSWER_SEGMENT_SEPARATOR), error: null };
+	}
 	const text = assistantText(message).trimEnd();
 	// A successful retry may contain only tool calls. It supersedes the prior
 	// provider error even without prose; the terminal tool/answer checks still
@@ -1181,6 +1195,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	let result: HeadlessMainAgentResult = {
 		outputExhausted: false,
 		text: "",
+		replies: [],
 		error: null,
 		sawTerminatingToolResult: false,
 		completion: null,

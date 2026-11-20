@@ -649,3 +649,40 @@ test("v2 stream-json tool frames carry Clio's tc_<turn>_<n> id and the provider'
 		providerToolCallId: "gw",
 	});
 });
+
+test("every reply of the final user turn reaches stdout, -o and the v2 answer in order; narration does not (CLI-P43)", async (t) => {
+	const env = await isolateClioEnv("headless-reply-segments-");
+	t.after(() => env.restore());
+	const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } };
+	const review = "Findings:\n1. [blocker] the collector drops a settling firing.";
+	const closing = "VERDICT: BOUNCE on the blocker reported above.";
+	// The review, a round whose text sits beside a call, and the host's finish round, which made only a call.
+	const narration = {
+		role: "assistant",
+		stopReason: "toolUse",
+		content: [
+			{ type: "text", text: "Let me check one more file." },
+			{ type: "toolCall", id: "r1", name: "read", arguments: { path: "a.ts" } },
+		],
+		usage,
+	};
+	const finishRound = {
+		role: "assistant",
+		stopReason: "toolUse",
+		content: [{ type: "toolCall", id: "f1", name: "finish", arguments: { state: "partly_done" } }],
+		usage,
+	};
+	const before = [answerMessage(review), narration, finishRound].flatMap((message) => [
+		{ type: "message_end", message },
+		{ type: "turn_end", message, toolResults: [] },
+	]);
+	const expected = `${review}\n\n${closing}`;
+	const reply = answerMessage(closing) as Record<string, unknown>;
+	const text = await writtenCallRun(undefined, reply, { path: "out.txt", cwd: env.dir }, { before });
+	strictEqual(text.code, 0, text.stderr);
+	strictEqual(text.stdout, `${expected}\n`);
+	strictEqual(readFileSync(join(env.dir, "out.txt"), "utf8"), `${expected}\n`);
+	const v2 = await writtenCallRun("json", reply, undefined, { before });
+	const envelope = JSON.parse(v2.stdout.trim().split("\n").at(-1) ?? "{}") as { result?: { text?: string } };
+	strictEqual(envelope.result?.text, expected, v2.stdout);
+});
