@@ -184,7 +184,12 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 	if (subcommand === "add") return runConfigureCommand(args.slice(1));
 	if (subcommand === "use") return runUse(args.slice(1));
 	if (subcommand === "fleet" || subcommand === "workers") return runFleet(args.slice(1));
-	if (subcommand === "profile" || subcommand === "worker") return runProfile(args.slice(1));
+	if (subcommand === "profile") return runProfile(args.slice(1));
+	if (subcommand === "worker") {
+		// Deprecated spelling of the whole profile namespace; removed in 0.9.0.
+		process.stderr.write("clio-coder targets: 'targets worker' is deprecated; use 'targets profile'\n");
+		return runProfile(args.slice(1));
+	}
 	if (subcommand === "remove") return runRemove(args.slice(1));
 	if (subcommand === "rename") return runRename(args.slice(1));
 	if (subcommand === "convert") return runConvert(args.slice(1));
