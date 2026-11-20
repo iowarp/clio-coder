@@ -397,6 +397,7 @@ export const EVENTS = {
 	}),
 	"hook.ran": journal(S.HookRanSchema, { tier: "operational", cc: "structural", scope: "session" }),
 	"library.installed": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", scope: "process" }),
+	"skill.offer": journal(S.SkillOfferSchema, { tier: "operational", cc: "structural" }),
 	"library.updated": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", scope: "process" }),
 	"library.enabled": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", scope: "process" }),
 	"library.disabled": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", scope: "process" }),

@@ -3,17 +3,20 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { Value } from "typebox/value";
 import {
 	SKILL_INSTALL_OFFER_OPTION_NEVER,
 	SKILL_INSTALL_OFFER_OPTION_NOT_NOW,
 	SKILL_INSTALL_OFFER_OPTION_PROJECT,
 	SKILL_INSTALL_OFFER_OPTION_USER,
 } from "../../src/core/skill-activation.js";
+import { SkillOfferSchema } from "../../src/core/telemetry/schemas.js";
 import {
 	createMarketplaceOfferRegistration,
 	MARKETPLACE_OFFER_REGISTRATION_ID,
 	type MarketplaceOfferDeps,
 	offerBindingTag,
+	type SkillOfferRecord,
 } from "../../src/domains/middleware/marketplace-offer.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import { discoverMarketplaceSkills, type MarketplaceSkill } from "../../src/domains/resources/skills/marketplace.js";
@@ -102,7 +105,8 @@ describe("contracts/marketplace-offer matcher", () => {
 			"resolve merge conflict semantic",
 			"resolve merge conflict semantic verification safely",
 		]) {
-			const fallback = entry({ name: "a-fallback", description, triggers: [] });
+			// The fallback's own name is in the request, so it passes the domain gate on token overlap alone.
+			const fallback = entry({ name: "semantic-verification", description, triggers: [] });
 			const matches = matchMarketplaceSkills(
 				"resolve this merge conflict with semantic verification safely",
 				[fallback, trigger],
@@ -110,7 +114,7 @@ describe("contracts/marketplace-offer matcher", () => {
 			);
 			deepStrictEqual(
 				matches.map((result) => result.entry.name),
-				["z-trigger", "a-fallback"],
+				["z-trigger", "semantic-verification"],
 			);
 			ok((matches[1]?.score ?? 0) >= (matches[0]?.score ?? 0));
 		}
@@ -118,9 +122,30 @@ describe("contracts/marketplace-offer matcher", () => {
 
 	it("routes the retained orientation prompt to the shipped context-prime trigger", () => {
 		const matches = matchMarketplaceSkills(ORIENTATION_PROMPT, shippedCatalog(), new Set());
-		strictEqual(matches[0]?.entry.name, "context-prime");
-		strictEqual(matches[0]?.matchedTrigger, "prime this repository");
-		ok(matches.some((result) => result.entry.name === "context-handoff" && result.matchedTrigger === undefined));
+		// FX-28: description overlap alone (context-handoff, architecture) no longer names a skill's domain.
+		deepStrictEqual(
+			matches.map((result) => [result.entry.name, result.matchedTrigger]),
+			[["context-prime", "prime this repository"]],
+		);
+	});
+
+	it("offers only when the request names the skill's domain (FX-28)", () => {
+		const catalog = shippedCatalog();
+		for (const lanePrompt of [
+			"Add the catalog price row for the mercury model and correct the cache-read rate; contract row in the pricing test file; commit; write the lane report.",
+			"Fix the refusal wording the safety judge prints for a denied push so it names the rule; add the test rows; commit with the issue number.",
+			"Resolve conflicting decisions with semantic verification of each candidate and its resolution.",
+		])
+			deepStrictEqual(matchMarketplaceSkills(lanePrompt, catalog, new Set()), []);
+		const named = matchMarketplaceSkills(
+			"submit this batch script to slurm as a job array over 16 seeds",
+			catalog,
+			new Set(),
+		);
+		deepStrictEqual(
+			named.map((result) => [result.entry.name, result.matchedTrigger]),
+			[["slurm-jobs", undefined]],
+		);
 	});
 });
 
@@ -521,5 +546,48 @@ describe("contracts/marketplace-offer registration", () => {
 		strictEqual(nevers.length, 0);
 		// A cancel records no persistent decline, so a fresh session offers again.
 		strictEqual(registration.evaluate(turnStart("resolve this merge conflict", "s-fresh")).length, 1);
+	});
+
+	it("makes no offer and records nothing under yolo (FX-28)", () => {
+		const records: SkillOfferRecord[] = [];
+		const { deps } = makeDeps({ askAllowed: () => false, record: (r) => records.push(r) });
+		const registration = createMarketplaceOfferRegistration(deps);
+		deepStrictEqual(registration.evaluate(turnStart("resolve this merge conflict")), []);
+		deepStrictEqual(records, []);
+	});
+
+	it("stays silent when an installed skill already serves the request, using the catalog's triggers (FX-28)", () => {
+		const { deps } = makeDeps({
+			listMarketplaceEntries: () => [entry(), entry({ name: "git-surgeon", triggers: ["rewrite history"] })],
+			listInstalledSkillNames: () => ["git-surgeon"],
+			listInstalledSkills: () => [{ name: "git-surgeon", description: "Edits commits." }],
+		});
+		const registration = createMarketplaceOfferRegistration(deps);
+		deepStrictEqual(registration.evaluate(turnStart("rewrite history to fix this merge conflict")), []);
+		strictEqual(registration.evaluate(turnStart("resolve this merge conflict")).length, 1);
+	});
+
+	it("journals each offer and its outcome as a typed skill.offer record (FX-28)", () => {
+		const records: SkillOfferRecord[] = [];
+		const { deps } = makeDeps({ record: (r) => records.push(r) });
+		const registration = createMarketplaceOfferRegistration(deps);
+		registration.evaluate(turnStart("resolve this merge conflict"));
+		registration.evaluate({ hook: "turn_end", sessionId: "s1" });
+		registration.evaluate({ hook: "turn_end", sessionId: "s1" });
+		registration.evaluate(askUserAnswer(SKILL_INSTALL_OFFER_OPTION_NOT_NOW));
+		const accepted = createMarketplaceOfferRegistration(deps);
+		accepted.evaluate(turnStart("resolve this merge conflict", "s2"));
+		accepted.evaluate(askUserAnswer(SKILL_INSTALL_OFFER_OPTION_USER, "s2"));
+		deepStrictEqual(
+			records.map((r) => [r.offerId, r.outcome, r.mode, r.basis, r.choice, r.scope, r.installed]),
+			[
+				[TEST_OFFER_TAG, "offered", "ask", "trigger", undefined, undefined, undefined],
+				[TEST_OFFER_TAG, "ignored", "ask", "trigger", undefined, undefined, undefined],
+				[TEST_OFFER_TAG, "declined", "ask", "trigger", "not_now", undefined, undefined],
+				[TEST_OFFER_TAG, "offered", "ask", "trigger", undefined, undefined, undefined],
+				[TEST_OFFER_TAG, "accepted", "ask", "trigger", undefined, "user", true],
+			],
+		);
+		for (const record of records) ok(Value.Check(SkillOfferSchema, record), JSON.stringify(record));
 	});
 });
