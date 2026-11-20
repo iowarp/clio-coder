@@ -2272,10 +2272,10 @@ function evaluateBashZeroAccessRead(
 	// decision cannot change within one evaluation, so each is judged once.
 	const memo = createPathWalkMemo();
 	const judged = new Set<string>();
-	for (const token of roles.reads) {
 	// A glob entry such as `*.key` names a file by its suffix alone, so it holds a word only in a path position or one
 	// that names a file on disk: `event.key` in a sed script, a heredoc or an echo is a field, not a key file (FX-7).
 	let literalPolicy: CompiledPathPolicy | null = null;
+	for (const token of roles.reads) {
 		if (judged.has(token)) continue;
 		judged.add(token);
 		let decision = evaluatePathPolicy(zeroAccessPolicy, "read", token, callCwd, memo);
@@ -2376,13 +2376,13 @@ interface RecursiveSearch {
 interface BashOperandRoles {
 	/** Words judged as reads: everything that is not a write destination, a search pattern or an exclusion. */
 	reads: string[];
-	writes: BashWriteOperand[];
 	/**
 	 * The reads in a path position: an input redirect operand, a file operand of a known reader, a copy source or a
 	 * search operand, and any word the shell expands (`$`, a backtick, an unquoted glob). Only these, and words naming
 	 * a file that exists, meet glob entries such as `*.key`.
 	 */
 	pathOperands: Set<string>;
+	writes: BashWriteOperand[];
 	searches: RecursiveSearch[];
 }
 
@@ -2416,8 +2416,8 @@ function bashOperandRoles(command: string): BashOperandRoles {
 	if (inner !== null && inner !== command) {
 		const nested = bashOperandRoles(inner);
 		roles.reads.push(...nested.reads);
-		roles.writes.push(...nested.writes);
 		for (const operand of nested.pathOperands) roles.pathOperands.add(operand);
+		roles.writes.push(...nested.writes);
 		roles.searches.push(...nested.searches);
 	}
 	let segment: ShellToken[] = [];
@@ -2438,8 +2438,8 @@ function pushReadCandidate(token: string, reads: string[], pathOperands: Set<str
 	if (/\s/.test(token) && !token.includes("/")) return;
 	if (token.startsWith("-") && !token.includes("/") && !token.includes("=")) return;
 	reads.push(token);
-	const eq = token.indexOf("=");
 	pathOperands?.add(token);
+	const eq = token.indexOf("=");
 	if (eq > 0 && eq < token.length - 1) {
 		reads.push(token.slice(eq + 1));
 		pathOperands?.add(token.slice(eq + 1));
@@ -2523,8 +2523,8 @@ function shellExpandsWord(token: ShellToken): boolean {
 
 function segmentOperandRoles(tokens: ReadonlyArray<ShellToken>, roles: BashOperandRoles): void {
 	const skipped = new Set<ShellToken>();
-	const words: ShellToken[] = [];
 	const inputs: ShellToken[] = [];
+	const words: ShellToken[] = [];
 	for (let index = 0; index < tokens.length; index += 1) {
 		const token = tokens[index];
 		if (token === undefined) continue;
@@ -2560,8 +2560,8 @@ function segmentOperandRoles(tokens: ReadonlyArray<ShellToken>, roles: BashOpera
 			at += 1;
 		} else break;
 	}
-	const head = words[at];
 	const positioned = new Set<ShellToken>(inputs);
+	const head = words[at];
 	if (head !== undefined) {
 		const name = path.basename(head.value);
 		const args = words.slice(at + 1);
@@ -2956,8 +2956,8 @@ function searchOperandRoles(
 		excludeDirs,
 		trackedOnly: tool === "git grep" && !parsed.flags.includes("--untracked") && !parsed.flags.includes("--no-index"),
 	});
-}
 	return true;
+}
 
 function globExpression(glob: string): RegExp {
 	let source = "";
