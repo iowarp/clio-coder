@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -120,6 +120,46 @@ test("a CLIO_CODER_HOME data or cache root that already held the operator's file
 	await writeFile(join(home, "cache", "operator.bin"), "x");
 	match(removableClioRootProblem("data", join(home, "data")) ?? "", /holds experiment-42/u);
 	match(removableClioRootProblem("cache", join(home, "cache")) ?? "", /holds operator\.bin/u);
+});
+
+test("an unmarked CLIO_CODER_HOME data root is kept when a name Clio uses holds content Clio does not write", async (t) => {
+	const home = await mkdtemp(join(tmpdir(), "clio-home-shape-"));
+	const names = ["CLIO_CODER_HOME", "CLIO_CODER_DATA_DIR"] as const;
+	const saved = names.map((name) => process.env[name]);
+	t.after(async () => {
+		names.forEach((name, index) => {
+			const value = saved[index];
+			if (value === undefined) delete process.env[name];
+			else process.env[name] = value;
+		});
+		await import("node:fs/promises").then(({ rm }) => rm(home, { recursive: true, force: true }));
+	});
+	process.env.CLIO_CODER_HOME = home;
+	delete process.env.CLIO_CODER_DATA_DIR;
+	await mkdir(join(home, "state"));
+	await writeFile(join(home, "state", "home.json"), "{}\n");
+	const data = join(home, "data");
+	// What Clio writes under each name it uses in a data root.
+	await mkdir(join(data, "memory"), { recursive: true });
+	await writeFile(join(data, "memory", "records.json"), "[]\n");
+	await writeFile(join(data, "memory", "records.json.lock"), "");
+	await mkdir(join(data, "tools", "rg", "14.1.1"), { recursive: true });
+	await mkdir(join(data, "components", "claude-agent-sdk", "0.2.0"), { recursive: true });
+	await mkdir(join(data, "store", "projects", "0123456789abcdef", "tags"), { recursive: true });
+	await mkdir(join(data, "evidence", "run-1"), { recursive: true });
+	await writeFile(join(data, "evidence", "run-1", "overview.json"), "{}\n");
+	await mkdir(join(data, "evals", "skills-eval"), { recursive: true });
+	await writeFile(join(data, "evals", "e-1.json"), `${JSON.stringify({ version: 4, evalId: "e-1" }, null, 2)}\n`);
+	strictEqual(removableClioRootProblem("data", data), null);
+	// An operator's own analysis kept under the same names.
+	await writeFile(join(data, "tools", "my-analysis.py"), "print(1)\n");
+	match(removableClioRootProblem("data", data) ?? "", /tools\/my-analysis\.py/u);
+	await rm(join(data, "tools", "my-analysis.py"));
+	await writeFile(join(data, "evals", "run1.json"), '{"accuracy":0.91}\n');
+	match(removableClioRootProblem("data", data) ?? "", /evals\/run1\.json/u);
+	await rm(join(data, "evals", "run1.json"));
+	await writeFile(join(data, "memory", "notes.md"), "mine\n");
+	match(removableClioRootProblem("data", data) ?? "", /memory\/notes\.md/u);
 });
 
 test("an empty or relative XDG base directory reads as unset", () => {
