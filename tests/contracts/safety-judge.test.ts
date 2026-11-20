@@ -315,6 +315,13 @@ test("a refused compound names the sub-command Clio flags alone when the reason 
 	match(unsingled.refusal, /Run each sub-command as its own call/u);
 });
 
+test("a judge block reports rule-unclear under the canonical unclear code", async () => {
+	const { registry } = judgedRegistry(() => answer("block", "Rule Unclear", "Not enough context."));
+	const verdict = await registry.invoke({ tool: ToolNames.Bash, args: { command: UNRECOGNIZED } });
+	strictEqual(verdict.kind, "blocked");
+	if (verdict.kind === "blocked") strictEqual(verdict.denial?.code, "safety-judge:unclear");
+});
+
 test("no verdict parks for the operator with the judge's reason, or is denied headless", async () => {
 	const { registry, parks, ran } = judgedRegistry(() => "I am not sure.");
 	const pending = registry.invoke({ tool: ToolNames.Bash, args: { command: UNRECOGNIZED } });

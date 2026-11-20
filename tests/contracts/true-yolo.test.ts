@@ -441,6 +441,40 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		for (const mode of [undefined, "default", "yolo"] as const)
 			strictEqual(verdict(spelled, mode), verdict(literal, mode), `${spelled} at ${mode ?? "bare"}`);
 	}
+	// XR-43: each scratch cleanup reaches the ordinary yolo shell admission, not the delete judge.
+	for (const command of [
+		'B=$TMPDIR/base; mkdir -p "$B"; rm -rf "$B"',
+		`M="\${TMPDIR}/measure"; d=$M/tpl/rows; rm -rf "\${d}"`,
+		'H=$(mktemp -d "$TMPDIR/probe-XXXXXX"); rm -rf "$H"',
+		'H=$(mktemp -d); rm -rf "$H"',
+		'cd "$TMPDIR" && mkdir -p probe-rows; rm -rf probe-rows',
+	]) {
+		const decision = engine.evaluate(bash(command), "default", {
+			...atDefault,
+			snapshots: command.startsWith("cd "),
+		});
+		strictEqual(decision.kind, "allow", `${command}: ${decision.reasonCode} ${decision.reasons.join("; ")}`);
+		strictEqual(verdict(command, "yolo").startsWith("allow/yolo-admitted:"), false, command);
+	}
+	// XR-43: a link into the workspace, planted in the same call or an earlier one, keeps the delete review.
+	const linkDir = mkdtempSync(join(temp, "xr43-"));
+	t.after(() => rmSync(linkDir, { recursive: true, force: true }));
+	writeFileSync(join(cwd, "fixture.txt"), "x\n");
+	symlinkSync(cwd, join(linkDir, "prior"));
+	const rel = basename(linkDir);
+	for (const command of [
+		`B=$TMPDIR/${rel}/alias; ln -s ${cwd} "$TMPDIR/${rel}/alias"; rm -f "$B/fixture.txt"`,
+		`B=$TMPDIR/${rel}/prior; rm -f "$B/x"`,
+	]) {
+		const decision = engine.evaluate(bash(command), "default", { ...atDefault, snapshots: false });
+		strictEqual(
+			`${decision.kind}/${decision.reasonCode}`,
+			"ask/damage-control:delete-outside-workspace",
+			`${command}: ${decision.reasons.join("; ")}`,
+		);
+		match(decision.reasons.join("; "), /delete-path-unresolved: \$B\/.*with no workspace snapshot/u, command);
+		strictEqual(verdict(command, "yolo"), "allow/yolo-admitted:damage-control:delete-outside-workspace", command);
+	}
 	// A command that can reassign TMPDIR keeps it named at run time, so the delete-outside signal stays.
 	for (const command of [
 		`TMPDIR=${homedir()}; rm -rf "$TMPDIR/project"`,
@@ -448,6 +482,15 @@ test("the yolo floor blocks every family it names, and only at the operator's yo
 		`TMPDIR=${process.cwd()}/.. rm -rf "$TMPDIR/x"`,
 		'read TMPDIR < /dev/null; rm -rf "$TMPDIR/x"',
 		`rm -rf "\${TMPDIR:=/}/etc"`,
+		'B=$TMPDIR/base; B=/etc; rm -rf "$B"',
+		'B=$TMPDIR/base; false && B=/etc; rm -rf "$B"',
+		'B=$TMPDIR/base; read B < /dev/null; rm -rf "$B"',
+		"B='$TMPDIR/base'; rm -rf \"$B\"",
+		'H=$(mktemp -d "$TMPDIR/probe-XXXXXX"); rm -rf "$H/etc"',
+		// The shell rewrites PWD and OLDPWD on cd, and a later cd drops every pin.
+		`PWD=$TMPDIR; cd ${process.cwd()}; rm -f "$PWD/fixture.txt"`,
+		`OLDPWD=$TMPDIR; cd ${process.cwd()}; rm -f "$OLDPWD/fixture.txt"`,
+		`B=$TMPDIR/base; cd ${process.cwd()}; rm -rf "$B"`,
 	]) {
 		strictEqual(verdict(command), "block/damage-control:delete-outside-workspace", command);
 		strictEqual(verdict(command, "yolo"), "allow/yolo-admitted:damage-control:delete-outside-workspace", command);
