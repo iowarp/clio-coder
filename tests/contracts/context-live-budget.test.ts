@@ -565,6 +565,33 @@ describe("live budget adapter", () => {
 		check("emptied");
 	});
 
+	it("decides the post-tool guard on one history walk, with the figures a fresh observation publishes", async () => {
+		const f = reconciledFixture();
+		let reads = 0;
+		const counted = toolResult("an older result");
+		const content = counted.content;
+		Object.defineProperty(counted, "content", {
+			enumerable: true,
+			get: () => {
+				// Only the fold's in-place-edit walk counts; pricing the unanchored tail reads the message too.
+				if (new Error().stack?.includes("matchesTrace")) reads += 1;
+				return content;
+			},
+		});
+		f.runtime.agent.state.messages.push(assistant("read it"), counted, assistant("and the next"));
+		f.context.refreshLiveBudget();
+		f.runtime.agent.state.messages.push(toolResult("the batch result"));
+		reads = 0;
+		strictEqual(await f.context.postToolContinuationGuard(f.runtime), undefined, "the tail fits, so nothing changes");
+		const guardReads = reads;
+		const guarded = f.context.contextUsage();
+		reads = 0;
+		f.context.refreshLiveBudget();
+		strictEqual(guardReads, 1, "the guard walks the history once, like one publication");
+		strictEqual(reads, 1);
+		deepStrictEqual(guarded, f.context.contextUsage(), "and publishes what a fresh observation does");
+	});
+
 	it("drops the anchor when the target or the message projection changes", () => {
 		for (const change of ["target", "projection"] as const) {
 			const f = reconciledFixture();
