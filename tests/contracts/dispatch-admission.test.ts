@@ -239,10 +239,22 @@ describe("dispatch admission boundary", () => {
 	beforeEach(async () => isolateDispatchState());
 	afterEach(() => restoreDispatchState());
 
-	it("states each run's bounds on the plan card: a priced estimate at the output bound, else wall clock and tool ceiling (M6)", async () => {
-		const planText = async (runtime: RuntimeDescriptor, model: string, maxOutputTokens = 0) => {
+	it("states each run's bounds on the plan card: a priced estimate at the output bound, else only the timers and tool ceiling it has (M6)", async () => {
+		const planText = async (
+			runtime: RuntimeDescriptor,
+			model: string,
+			maxOutputTokens = 0,
+			extra: Record<string, unknown> = {},
+		) => {
 			const settings = structuredClone(DEFAULT_SETTINGS);
-			settings.targets = [{ id: "api", runtime: runtime.id, defaultModel: model }];
+			settings.targets = [
+				{
+					id: "api",
+					runtime: runtime.id,
+					defaultModel: model,
+					...(runtime.kind === "subprocess" ? { trustedUnmediated: true } : {}),
+				},
+			];
 			settings.fleet.default = { ...settings.fleet.default, target: "api", model };
 			settings.chat.maxOutputTokens = maxOutputTokens;
 			const context = dispatchStubContext({ settings, runtime });
@@ -259,6 +271,7 @@ describe("dispatch admission boundary", () => {
 					mode: "sequential",
 					budget: { toolCalls: 1000, readReserve: 0 },
 					tasks: [{ task: "Rename the helper." }, { task: "Update its callers." }],
+					...extra,
 				});
 				ok(prepared);
 				strictEqual(prepared[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT], undefined);
@@ -269,12 +282,20 @@ describe("dispatch admission boundary", () => {
 				await bundle.extension.stop?.();
 			}
 		};
-		// A Copilot subscription route has no rates: its card names the bounds that do stop it.
+		// A Copilot subscription route has no rates: its card names only the bounds that do stop it.
 		const unpriced = await planText(copilotSdkRuntime, "gpt-6-luna");
 		match(
 			unpriced,
-			/limits: unpriced route, bounded by wall clock and the tool ceiling: each response stops at 600 s and the run only at the call's timeout_ms; Clio stops it at 300 tool calls/u,
+			/limits: unpriced route: each response stops at 600 s, and the run has no wall-clock bound unless timeout_ms is set; Clio stops it at 300 tool calls/u,
 		);
+		match(
+			await planText(copilotSdkRuntime, "gpt-6-luna", 0, { timeout_ms: 120000 }),
+			/limits: unpriced route: each response stops at 600 s, and the call's timeout_ms stops the run within 120000 ms; Clio stops it at 300 tool calls/u,
+		);
+		// An external one-shot worker's tool calls are not counted, so no tool ceiling is promised.
+		const external = await planText(claudeCodeRuntime, "claude-haiku-5-5");
+		match(external, /limits: .*one launch whose tool calls Clio cannot count, so no tool ceiling applies/u);
+		ok(!/Clio stops it at/u.test(external), external);
 		const priced = (maxOutputTokens: number) => planText(anthropic, "claude-haiku-5-5", maxOutputTokens);
 		const estimate = (text: string) => /limits: cost (~\S+ est) per model call at a (\d+)-token output bound/u.exec(text);
 		const [small, large] = [estimate(await priced(100)), estimate(await priced(4000))];

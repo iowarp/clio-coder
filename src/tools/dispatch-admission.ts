@@ -30,6 +30,7 @@ import {
 } from "../domains/dispatch/parallel-writers.js";
 import { approvedRouteCandidates } from "../domains/dispatch/route-approval.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
+import { planCardLimitsUnderTimeout } from "../domains/dispatch/run-limits.js";
 import type { DispatchFailoverMode } from "../domains/dispatch/validation.js";
 import {
 	dispatchRequestsFromArgs,
@@ -1059,6 +1060,11 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				for (const [index, request] of parsed.requests.entries())
 					tasks.push(resolveTask(request, "task", parsed.positions[index] ?? index + 1));
 			}
+			// The preview cannot see the call's timeout_ms, the only timer that stops a whole run (M6).
+			const callTimeoutMs = timeoutMsArg(args);
+			if (callTimeoutMs !== undefined)
+				for (const task of tasks)
+					if (task.limits !== undefined) task.limits = planCardLimitsUnderTimeout(task.limits, callTimeoutMs);
 
 			// Scope has already been resolved on tasks. Rendering the raw call here
 			// would discard its typed intent and run legacy prose inference again.
