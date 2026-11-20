@@ -942,7 +942,12 @@ for (const [count, recalls, window] of [
 								entry.role === "tool_result" &&
 								String((entry.payload as { toolCallId?: string }).toolCallId).startsWith("recall_"),
 						);
-				ok(!entries.slice(last).some((entry) => entry.kind === "compactionSummary"), "the admitted recalls fit");
+				// An automatic pass may follow once the trigger prices the bodies at the route's measured rate (CTX-1); an
+				// overflow pass would mean a recall was readmitted past the fit line.
+				ok(
+					!entries.slice(last).some((entry) => entry.kind === "compactionSummary" && entry.trigger === "overflow"),
+					"the admitted recalls fit",
+				);
 				const sent = (
 					JSON.parse(wire.requests.at(-1)?.body ?? "{}") as {
 						messages: Array<{ role: string; tool_call_id?: string; content?: unknown }>;

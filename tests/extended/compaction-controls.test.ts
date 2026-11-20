@@ -394,6 +394,22 @@ describe("production compaction controls", () => {
 		});
 	}
 
+	it("discards a checkpoint whose figures on the live estimate are not smaller than the history it replaces (CLI-P4)", async () => {
+		const f = fixture(true, true, true);
+		const before = f.entries();
+		// Live: 17 entries at 6934 became 7895 and the ledger still took the checkpoint.
+		const result = await f.run(undefined, "force", {
+			keepRecentTokens: 100,
+			checkpointTokenFigures: () => ({ tokensBefore: 6934, tokensAfter: 7895 }),
+		});
+		strictEqual(result?.noGain, true);
+		deepStrictEqual(f.entries(), before);
+		deepStrictEqual(
+			ledgerUsageCalls(f.entries(), await f.journal()).map((call) => call.compactionOutcome),
+			["discarded"],
+		);
+	});
+
 	for (const expanding of [true, false]) {
 		it(`${expanding ? "rejects an expanding" : "accepts a shrinking"} replacement checkpoint on the current replay basis (#422)`, async () => {
 			const f = fixture(true, true, true);
